@@ -18,7 +18,7 @@ use crate::editor::text::TextEditSet;
 use crate::language::lsp::ApplyEditReply;
 use crate::language::lsp::EditContext;
 use crate::language::lsp::LspDocumentEdit;
-use crate::language::lsp::LspService;
+use crate::language::lsp::LspClient;
 use crate::language::lsp::LspTextEdit;
 use crate::language::lsp::LspWorkspaceEdit;
 use crate::language::lsp::OwnedLspEvent;
@@ -106,7 +106,7 @@ impl LspEditSources {
     pub(in crate::app) fn install_offered_actions(
         &mut self,
         first: Option<&str>,
-        service: &LspService,
+        service: &LspClient,
         maximum: usize,
     ) -> Result<Vec<CodeActionChoice>, String> {
         let mut offered = std::mem::take(&mut self.offered);
@@ -116,7 +116,7 @@ impl LspEditSources {
     pub(in crate::app) fn install_actions(
         &mut self,
         mut actions: Vec<OfferedAction>,
-        service: &LspService,
+        service: &LspClient,
         maximum: usize,
     ) -> Result<Vec<CodeActionChoice>, String> {
         let offered = actions.len();
@@ -164,7 +164,7 @@ impl LspEditSources {
     pub(in crate::app) fn take_action(
         &mut self,
         key: &CodeActionKey,
-        service: &LspService,
+        service: &LspClient,
         current: &[EditDocument<'_>],
     ) -> Result<OfferedAction, String> {
         let set = self.actions.as_ref().ok_or("code actions closed")?;
@@ -199,7 +199,7 @@ impl LspEditSources {
     // Keep draining while replies await acknowledgement: event backpressure must
     // not stop the worker from reading those replies. Each server already limits
     // its outstanding applyEdit requests in the protocol handler.
-    pub(in crate::app) fn poll_event(&self, service: &LspService) -> Option<OwnedLspEvent> {
+    pub(in crate::app) fn poll_event(&self, service: &LspClient) -> Option<OwnedLspEvent> {
         service.try_owned_event()
     }
     pub(in crate::app) fn flush(&mut self) -> Vec<String> {
@@ -231,7 +231,7 @@ impl LspEditSources {
         context: Option<EditContext>,
         reply: Option<ApplyEditReply>,
         current: &[EditDocument<'_>],
-        service: &LspService,
+        service: &LspClient,
     ) -> Result<SourcePlan, String> {
         let context = reply.as_ref().map(|r| r.context().clone()).or(context);
         let encoding = context.as_ref().map_or(encoding, EditContext::encoding);
@@ -351,7 +351,7 @@ impl LspEditSources {
         context: Option<&EditContext>,
         paths: &[(String, PathBuf)],
         current: &[EditDocument<'_>],
-        service: &LspService,
+        service: &LspClient,
     ) -> Result<(), String> {
         let Some(context) = context else {
             return Ok(());
@@ -384,7 +384,7 @@ impl LspEditSources {
         &self,
         key: &OriginKey,
         current: &[EditDocument<'_>],
-        service: &LspService,
+        service: &LspClient,
     ) -> Result<(), String> {
         let request = self
             .active
@@ -621,7 +621,7 @@ mod tests {
             .open_text(TextBuffer::from_text("old"), Some(path.clone()))
             .unwrap();
         let uri = crate::language::lsp::file_uri(&path);
-        let mut service = LspService::new();
+        let mut service = LspClient::new();
         let mut endpoint = service.replace_edit_source_fixture(
             uri.clone(),
             (buffer, editor.buffers[buffer].text.source_version()),
@@ -668,9 +668,9 @@ mod tests {
     #[test]
     fn untracked_clean_buffers_are_checked_against_disk_for_workspace_edits() {
         use crate::app::documents::DocumentEvent;
-        use crate::app::documents::DocumentSession;
+        use crate::app::documents::Documents;
         use crate::app::startup::StartupTarget;
-        use crate::app::workspace::edits::WorkspaceEditSession;
+        use crate::app::workspace::edits::WorkspaceEdits;
         use crate::files::VfsWorker;
         for (disk, dirty, succeeds) in [
             ("abc", false, true),
@@ -691,7 +691,7 @@ mod tests {
                 .open_text(TextBuffer::from_text("abc"), Some(path.clone()))
                 .unwrap();
             editor.set_buffer_dirty(buffer, dirty);
-            let mut service = LspService::new();
+            let mut service = LspClient::new();
             let mut endpoint = service.replace_edit_source_fixture(
                 crate::language::lsp::file_uri(&root.path().join("origin.rs")),
                 (origin, editor.buffers[origin].text.source_version()),
@@ -739,7 +739,7 @@ mod tests {
                 [("root".into(), RootIdentity::capture(root.path()).unwrap())],
             )
             .unwrap();
-            let workspace = crate::app::workspace::WorkspaceSession::new(
+            let workspace = crate::app::workspace::Workspace::new(
                 scope.clone(),
                 root.path().join("trust.json"),
                 1,
@@ -748,7 +748,7 @@ mod tests {
                 1,
             );
             let version = workspace.version();
-            let mut owner = WorkspaceEditSession::default();
+            let mut owner = WorkspaceEdits::default();
             let ticket = owner
                 .begin(version.clone(), 1, editor.workspace_edit_sources().unwrap())
                 .unwrap();
@@ -762,7 +762,7 @@ mod tests {
                     (vec![root.path().into()], 1024),
                 )
                 .unwrap();
-            let mut worker = DocumentSession::new(
+            let mut worker = Documents::new(
                 VfsWorker::start(2),
                 &StartupTarget::Dashboard {
                     root: root.path().into(),
@@ -917,7 +917,7 @@ mod tests {
                 None,
                 None,
                 &[],
-                &LspService::new(),
+                &LspClient::new(),
             )
             .unwrap();
         assert_eq!(plan.files.len(), 1);
@@ -929,7 +929,7 @@ mod tests {
         let (buffer, _) = editor
             .open_text(TextBuffer::from_text("abc"), None)
             .unwrap();
-        let mut service = LspService::new();
+        let mut service = LspClient::new();
         let uri = "file:///source.rs";
         let mut endpoint = service.replace_edit_source_fixture(
             uri.into(),
@@ -972,7 +972,7 @@ mod tests {
         let (buffer, _) = editor
             .open_text(TextBuffer::from_text("source"), None)
             .unwrap();
-        let mut service = LspService::new();
+        let mut service = LspClient::new();
         let uri = "file:///workspace/source.rs";
         let mut endpoint = service.replace_edit_source_fixture_for(
             "fixture",
@@ -1053,7 +1053,7 @@ mod tests {
             }],
             resources: Vec::new(),
         };
-        let mut service = LspService::new();
+        let mut service = LspClient::new();
         let mut endpoint = service.replace_edit_source_fixture(
             uri.clone(),
             (buffer, editor.buffers[buffer].text.source_version()),
@@ -1082,7 +1082,7 @@ mod tests {
             [("root".into(), RootIdentity::capture(root.path()).unwrap())],
         )
         .unwrap();
-        let workspace = crate::app::workspace::WorkspaceSession::new(
+        let workspace = crate::app::workspace::Workspace::new(
             scope.clone(),
             root.path().join("trust.json"),
             1,
@@ -1091,7 +1091,7 @@ mod tests {
             1,
         );
         let version = workspace.version();
-        let mut owner = crate::app::workspace::edits::WorkspaceEditSession::default();
+        let mut owner = crate::app::workspace::edits::WorkspaceEdits::default();
         let ticket = owner
             .begin(version.clone(), 1, editor.workspace_edit_sources().unwrap())
             .unwrap();
@@ -1327,7 +1327,7 @@ impl LspEditSources {
     // Protocol conversion stays with the LSP source, not the canonical store.
     pub(in crate::app) fn diagnostic_batch(
         context: &EditContext,
-        service: &LspService,
+        service: &LspClient,
         editor: &crate::editor::EditorState,
         publication: (&str, Option<u64>, Vec<crate::language::lsp::LspDiagnostic>),
         pull: bool,
@@ -1491,7 +1491,7 @@ impl LspEditSources {
 
 #[cfg(test)]
 mod diagnostic_tests {
-    use crate::app::diagnostics::DiagnosticSession;
+    use crate::app::diagnostics::Diagnostics;
     use crate::app::diagnostics::DiagnosticValidity;
     use crate::app::language::edits::*;
     use crate::editor::EditorState;
@@ -1509,7 +1509,7 @@ mod diagnostic_tests {
         let (buffer, _) = editor
             .open_text(TextBuffer::from_text("abc"), Some(path))
             .unwrap();
-        let mut service = LspService::new();
+        let mut service = LspClient::new();
         let endpoint = service.replace_edit_source_fixture(
             uri.clone(),
             (buffer, editor.buffers[buffer].text.source_version()),
@@ -1590,7 +1590,7 @@ mod diagnostic_tests {
         let (buffer, _) = editor
             .open_text(TextBuffer::from_text("éab"), Some(path))
             .unwrap();
-        let mut service = LspService::new();
+        let mut service = LspClient::new();
         let mut endpoint = service.replace_edit_source_fixture(
             uri.clone(),
             (buffer, editor.buffers[buffer].text.source_version()),
@@ -1637,7 +1637,7 @@ mod diagnostic_tests {
                 data: None,
             }]
         };
-        let mut owner = DiagnosticSession::new(10, 10);
+        let mut owner = Diagnostics::new(10, 10);
         endpoint.publish_diagnostics(&uri, Some(0), raw(), &lineage);
         let event = service.try_owned_event().unwrap();
         let LspEvent::Diagnostics {

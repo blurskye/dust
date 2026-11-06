@@ -1,3 +1,5 @@
+//! Command registration and execution for language-server requests and editor results.
+
 use crate::app::App;
 use crate::app::commands::AppEffect;
 use crate::language::lsp::LspFeature;

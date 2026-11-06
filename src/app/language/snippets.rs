@@ -1,4 +1,6 @@
-use crate::app::input::InputSession;
+//! Snippet fields, navigation and mirrored edits.
+
+use crate::app::input::InputState;
 use crate::editor::BufferId;
 use crate::editor::EditorOperation;
 use crate::editor::EditorTransaction;
@@ -24,7 +26,7 @@ pub(in crate::app) struct SnippetDocument<'a> {
     pub view: Option<ViewId>,
 }
 #[derive(Clone)]
-pub(in crate::app) struct SnippetSession {
+pub(in crate::app) struct SnippetExpansion {
     identity: Arc<()>,
     editor: EditorWindowVersion,
     buffer: BufferId,
@@ -33,7 +35,7 @@ pub(in crate::app) struct SnippetSession {
     transforms: Vec<SnippetTransform>,
     current: usize,
 }
-impl SnippetSession {
+impl SnippetExpansion {
     pub(in crate::app) fn matches(&self, document: &SnippetDocument<'_>) -> bool {
         self.editor.same_editor(document.editor)
             && self.buffer == document.buffer
@@ -83,7 +85,7 @@ pub(in crate::app) fn merge_edits(
 /// holds. Returns the moved copies and the edits that rewrite them, keyed for `merge_edits`,
 /// and moves `groups` past the rewritten copies.
 pub(in crate::app) fn follow_transforms(
-    session: &SnippetSession,
+    session: &SnippetExpansion,
     text: &TextBuffer,
     copies: &[(TextEdit, (usize, usize))],
     edits: &TextEditSet,
@@ -185,7 +187,7 @@ pub(in crate::app) fn follow_transforms(
     Some((transforms, rewrites))
 }
 
-impl InputSession {
+impl InputState {
     pub(in crate::app) fn snippet_buffer(&self) -> Option<BufferId> {
         self.snippet.as_ref().map(|s| s.buffer)
     }
@@ -219,7 +221,7 @@ impl InputSession {
         }
         let mut groups = grouped.into_iter().collect::<Vec<_>>();
         groups.sort_by_key(|(index, _)| (*index == 0, *index));
-        self.snippet = (!groups.is_empty()).then(|| SnippetSession {
+        self.snippet = (!groups.is_empty()).then(|| SnippetExpansion {
             identity: Arc::new(()),
             editor: document.editor.clone(),
             buffer: document.buffer,
@@ -574,10 +576,10 @@ mod tests {
     use crate::app::language::snippets::*;
     use crate::editor::EditorState;
     use crate::editor::TransactionId;
-    pub(in crate::app) fn fixture() -> (EditorState, BufferId, InputSession) {
+    pub(in crate::app) fn fixture() -> (EditorState, BufferId, InputState) {
         let mut state = EditorState::new("/workspace".into());
         let (buffer, _) = state.open_text(TextBuffer::from_text("x x"), None).unwrap();
-        (state, buffer, InputSession::new(100))
+        (state, buffer, InputState::new(100))
     }
     fn document<'a>(
         state: &'a EditorState,
@@ -596,7 +598,7 @@ mod tests {
             .unwrap()
             .tabstops
     }
-    fn ranges(input: &InputSession, group: usize) -> Vec<ByteRange> {
+    fn ranges(input: &InputState, group: usize) -> Vec<ByteRange> {
         input.snippet.as_ref().unwrap().groups[group]
             .iter()
             .map(SnippetTabstop::range)
@@ -605,7 +607,7 @@ mod tests {
     fn edit_snippet(
         state: &mut EditorState,
         buffer: BufferId,
-        input: &mut InputSession,
+        input: &mut InputState,
         start: usize,
         end: usize,
         text: &str,
@@ -629,13 +631,13 @@ mod tests {
         let source = state.window_version();
         assert!(input.accept_snippet_edit(update, Some(document(state, buffer, &source))));
     }
-    pub(in crate::app) fn install(source: &str) -> (EditorState, BufferId, InputSession) {
+    pub(in crate::app) fn install(source: &str) -> (EditorState, BufferId, InputState) {
         let parsed = crate::language::lsp::parse_snippet(source, 1024).unwrap();
         let mut state = EditorState::new("/workspace".into());
         let (buffer, _) = state
             .open_text(TextBuffer::from_text(&parsed.text), None)
             .unwrap();
-        let mut input = InputSession::new(100);
+        let mut input = InputState::new(100);
         let version = state.window_version();
         input.install_snippet(
             document(&state, buffer, &version),
@@ -645,7 +647,7 @@ mod tests {
         input.install_snippet_transforms(ByteOffset(0), parsed.transforms);
         (state, buffer, input)
     }
-    fn transform_ranges(input: &InputSession) -> Vec<ByteRange> {
+    fn transform_ranges(input: &InputState) -> Vec<ByteRange> {
         input
             .snippet
             .as_ref()
@@ -690,7 +692,7 @@ mod tests {
             .open_text(TextBuffer::from_text(&parsed.text), None)
             .unwrap();
         state.views[view].mode = crate::editor::EditorMode::Insert;
-        let mut input = InputSession::new(100);
+        let mut input = InputState::new(100);
         let source = state.window_version();
         input.install_snippet(
             document(&state, buffer, &source),
@@ -777,7 +779,7 @@ mod tests {
         for at in [0, 1] {
             let mut state = EditorState::new("/workspace".into());
             let (buffer, _) = state.open_text(TextBuffer::from_text("aa"), None).unwrap();
-            let mut input = InputSession::new(100);
+            let mut input = InputState::new(100);
             let source = state.window_version();
             input.install_snippet(
                 document(&state, buffer, &source),
@@ -804,7 +806,7 @@ mod tests {
         let (buffer, _) = state
             .open_text(TextBuffer::from_text(&parsed.text), None)
             .unwrap();
-        let mut input = InputSession::new(100);
+        let mut input = InputState::new(100);
         let source = state.window_version();
         input.install_snippet(
             document(&state, buffer, &source),
@@ -825,7 +827,7 @@ mod tests {
             let (buffer, _) = state
                 .open_text(TextBuffer::from_text(&parsed.text), None)
                 .unwrap();
-            let mut input = InputSession::new(100);
+            let mut input = InputState::new(100);
             let source = state.window_version();
             input.install_snippet(
                 document(&state, buffer, &source),
@@ -846,7 +848,7 @@ mod tests {
             .open_text(TextBuffer::from_text(&parsed.text), None)
             .unwrap();
         state.views[view].mode = crate::editor::EditorMode::Insert;
-        let mut input = InputSession::new(100);
+        let mut input = InputState::new(100);
         let source = state.window_version();
         input.install_snippet(
             document(&state, buffer, &source),
@@ -882,7 +884,7 @@ mod tests {
     fn replacing_a_parent_removes_its_empty_stop_at_the_end() {
         let mut state = EditorState::new("/workspace".into());
         let (buffer, _) = state.open_text(TextBuffer::from_text("abc"), None).unwrap();
-        let mut input = InputSession::new(100);
+        let mut input = InputState::new(100);
         let source = state.window_version();
         input.install_snippet(
             document(&state, buffer, &source),
@@ -899,7 +901,7 @@ mod tests {
         let (buffer, _) = state
             .open_text(TextBuffer::from_text("foo = foo"), None)
             .unwrap();
-        let mut input = InputSession::new(100);
+        let mut input = InputState::new(100);
         let source = state.window_version();
         input.install_snippet(
             document(&state, buffer, &source),
@@ -930,7 +932,7 @@ mod tests {
             let (buffer, _) = state
                 .open_text(TextBuffer::from_text(initial), None)
                 .unwrap();
-            let mut input = InputSession::new(100);
+            let mut input = InputState::new(100);
             let source = state.window_version();
             input.install_snippet(
                 document(&state, buffer, &source),
@@ -950,7 +952,7 @@ mod tests {
     fn coincident_snippet_stops_follow_source_order_not_tabstop_numbers() {
         let mut state = EditorState::new("/workspace".into());
         let (buffer, _) = state.open_text(TextBuffer::from_text(""), None).unwrap();
-        let mut input = InputSession::new(100);
+        let mut input = InputState::new(100);
         let source = state.window_version();
         input.install_snippet(
             document(&state, buffer, &source),
@@ -967,7 +969,7 @@ mod tests {
             .open_text(TextBuffer::from_text("foo foo"), None)
             .unwrap();
         state.views[view].mode = crate::editor::EditorMode::Insert;
-        let mut input = InputSession::new(100);
+        let mut input = InputState::new(100);
         let source = state.window_version();
         input.install_snippet(
             document(&state, buffer, &source),
@@ -986,7 +988,7 @@ mod tests {
         let (buffer, _) = state
             .open_text(TextBuffer::from_text("f(abc)"), None)
             .unwrap();
-        let mut input = InputSession::new(100);
+        let mut input = InputState::new(100);
         let source = state.window_version();
         input.install_snippet(
             document(&state, buffer, &source),
@@ -1019,7 +1021,7 @@ mod tests {
     fn editing_a_later_empty_snippet_stop_keeps_the_earlier_one_before_it() {
         let mut state = EditorState::new("/workspace".into());
         let (buffer, _) = state.open_text(TextBuffer::from_text(""), None).unwrap();
-        let mut input = InputSession::new(100);
+        let mut input = InputState::new(100);
         let source = state.window_version();
         input.install_snippet(
             document(&state, buffer, &source),
@@ -1048,7 +1050,7 @@ mod tests {
         let (buffer, _) = state
             .open_text(TextBuffer::from_text("fn () {}"), None)
             .unwrap();
-        let mut input = InputSession::new(100);
+        let mut input = InputState::new(100);
         let source = state.window_version();
         input.install_snippet(
             document(&state, buffer, &source),
@@ -1177,7 +1179,7 @@ mod tests {
     fn adjacent_empty_placeholder_does_not_expand_the_previous_one() {
         let mut state = EditorState::new("/workspace".into());
         let (buffer, _) = state.open_text(TextBuffer::from_text("a"), None).unwrap();
-        let mut input = InputSession::new(100);
+        let mut input = InputState::new(100);
         let source = state.window_version();
         input.install_snippet(
             document(&state, buffer, &source),
@@ -1210,7 +1212,7 @@ mod tests {
     fn coincident_empty_mirrors_insert_once_per_occurrence() {
         let mut state = EditorState::new("/workspace".into());
         let (buffer, _) = state.open_text(TextBuffer::from_text("[]"), None).unwrap();
-        let mut input = InputSession::new(100);
+        let mut input = InputState::new(100);
         let source = state.window_version();
         input.install_snippet(
             document(&state, buffer, &source),

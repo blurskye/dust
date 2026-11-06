@@ -3,7 +3,7 @@ use crate::app::language::LspLaunch;
 use crate::app::language::LspSession;
 use crate::app::workspace::ExecutionLane;
 use crate::app::workspace::ExecutionReady;
-use crate::app::workspace::WorkspaceSession;
+use crate::app::workspace::Workspace;
 use crate::app::workspace::WorkspaceVersion;
 use crate::editor::EditorState;
 use crate::editor::EditorWindowVersion;
@@ -13,7 +13,7 @@ use crate::language::lsp::LspDocument;
 use crate::language::lsp::LspSessionKey;
 use crate::process::ExecutionPreflightRequest;
 use crate::process::PreflightId;
-use crate::tools::NixWorkspaceService;
+use crate::tools::NixWorkspaceWorker;
 use crate::tools::ToolDefinition;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -124,7 +124,7 @@ struct Preflight {
 pub(super) struct Preparation {
     root: Option<(u64, Pending<PendingLspProjectRoot>)>,
     nix: Option<(u64, Pending<PendingNixLspWorkspace>)>,
-    worker: NixWorkspaceService,
+    worker: NixWorkspaceWorker,
     preflights: HashMap<PreflightId, Preflight>,
     missing_roots: Vec<(String, PathBuf, WorkspaceVersion, u64)>,
 }
@@ -541,7 +541,7 @@ impl LspSession {
         &mut self,
         ready: ExecutionReady,
         editor: &EditorState,
-        workspace: &WorkspaceSession,
+        workspace: &Workspace,
         configuration: u64,
         settings: &crate::config::LspConfig,
     ) -> Result<Option<String>, String> {
@@ -651,7 +651,7 @@ mod tests {
         )
         .unwrap();
         let mut workspace =
-            WorkspaceSession::new(state, root.path().join("trust"), 1, false, false, 1);
+            Workspace::new(state, root.path().join("trust"), 1, false, false, 1);
         let identity = workspace.roots()[0].identity.clone();
         workspace
             .fixture_identity(crate::workspace::RootId(1), identity.clone())
@@ -825,13 +825,13 @@ mod tests {
         )
         .unwrap();
         let workspace =
-            WorkspaceSession::new(state, root.path().join("trust.json"), 1, false, false, 1);
+            Workspace::new(state, root.path().join("trust.json"), 1, false, false, 1);
         let mut editor = EditorState::new(root.path().into());
         let path = root.path().join("source.rs");
         let (buffer, _) = editor
             .open_text(TextBuffer::from_text("old"), Some(path.clone()))
             .unwrap();
-        fn context<'a>(editor: &'a EditorState, workspace: &WorkspaceSession) -> LaunchContext<'a> {
+        fn context<'a>(editor: &'a EditorState, workspace: &Workspace) -> LaunchContext<'a> {
             LaunchContext {
                 editor,
                 workspace: workspace.version(),
@@ -871,7 +871,7 @@ mod tests {
             [("root".into(), identity)],
         )
         .unwrap();
-        let workspace = WorkspaceSession::new(state, root.path().join("trust"), 1, false, false, 1);
+        let workspace = Workspace::new(state, root.path().join("trust"), 1, false, false, 1);
         let mut editor = EditorState::new(root.path().into());
         let path = root.path().join("source.rs");
         let (buffer, _) = editor
