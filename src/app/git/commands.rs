@@ -1,3 +1,5 @@
+//! Command registration and execution for git actions and accepted repository results.
+
 use crate::app::commands::AppEffect;
 use crate::app::commands::optional_string_arg;
 use crate::app::commands::register;
