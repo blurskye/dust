@@ -48,7 +48,7 @@ impl Plugins {
         self.virtual_documents.install(&index).map_err(|e| e.detail)
     }
     pub(in crate::app) fn remove_contribution(&mut self, plugin: &str, load: PluginLoadId) -> bool {
-        self.plugin_contributions.remove_generation(plugin, load.0)
+        self.plugin_contributions.remove_load(plugin, load.0)
     }
     pub(in crate::app) fn take_rejected(&mut self, plugin: &str, load: PluginLoadId) -> bool {
         self.rejected_plugin_loads.remove(&(plugin.into(), load))
@@ -118,7 +118,7 @@ impl Plugins {
             .into_iter()
             .map(|(plugin, (load, _))| {
                 self.reject_index(plugin.clone(), load);
-                let _ = self.manager.disable_generation(&plugin, load);
+                let _ = self.manager.disable_load(&plugin, load);
                 self.abort_prepared(&plugin, load);
                 (plugin, load)
             })
@@ -150,7 +150,7 @@ impl Plugins {
             self.package_startup_rollback_attempted = false;
         }
         if let PackageOperation::Abort { token } = operation {
-            // Keep rejected aborts for the next poll; admission transfers the token to the worker.
+            // Keep rejected aborts for the next poll; enqueueing transfers the token to the worker.
             self.package_aborts.insert(token);
             let id = self.packages.request(PackageOperation::Abort { token })?;
             self.package_aborts.remove(&token);
@@ -180,7 +180,7 @@ impl Plugins {
         Ok(())
     }
     fn accept_registry(&mut self, event: RegistryEvent) -> Option<RegistryUpdate> {
-        // A retired workspace/request must not turn a late artifact into a new install.
+        // A stale workspace/request must not turn a late artifact into a new install.
         let (install, picker) = self.registry_intents.remove(&event.id)?;
         Some(match event.result {
             Ok(RegistryResult::Show(metadata)) if install => match self.request_registry(
@@ -276,7 +276,7 @@ impl Plugins {
                 Ok(())
             }
             Err(error) => {
-                let _ = self.manager.disable_generation(&plugin, load);
+                let _ = self.manager.disable_load(&plugin, load);
                 self.abort_token(token);
                 Err(error)
             }
@@ -304,7 +304,7 @@ impl Plugins {
     fn unload_managed(&mut self, updates: &mut Vec<ExtensionUpdate>) {
         let mut failed = HashMap::new();
         for (plugin, load) in std::mem::take(&mut self.package_managed_plugins) {
-            match self.manager.unload_generation(&plugin, load) {
+            match self.manager.unload_load(&plugin, load) {
                 Ok(()) => updates.push(ExtensionUpdate::Remove(plugin, load)),
                 Err(error) => {
                     failed.insert(plugin, load);
@@ -341,18 +341,18 @@ impl Plugins {
         }
         updates
     }
-    pub(in crate::app) fn retire_packages(&mut self) -> Vec<(String, PluginLoadId)> {
+    pub(in crate::app) fn cancel_pending_packages(&mut self) -> Vec<(String, PluginLoadId)> {
         self.registry_intents.clear();
         self.pending_registry_artifact = None;
         self.package_preparing.clear();
         let mut removed = Vec::new();
         for (plugin, (load, token)) in std::mem::take(&mut self.package_prepared) {
-            let _ = self.manager.unload_generation(&plugin, load);
+            let _ = self.manager.unload_load(&plugin, load);
             self.abort_token(token);
             removed.push((plugin, load));
         }
         for (plugin, load) in self.package_commits.values() {
-            let _ = self.manager.unload_generation(plugin, *load);
+            let _ = self.manager.unload_load(plugin, *load);
             removed.push((plugin.clone(), *load));
         }
         removed
@@ -404,7 +404,7 @@ impl Plugins {
                 return updates;
             }
             // The installed lock retains the previous version until Commit succeeds.
-            if let Err(error) = self.manager.unload_generation(&plugin, load) {
+            if let Err(error) = self.manager.unload_load(&plugin, load) {
                 self.abort_token(token);
                 updates.push(ExtensionUpdate::Error(error.to_string()));
                 return updates;
@@ -449,7 +449,7 @@ impl Plugins {
         }
         for (manifest, path, object_lock) in activations {
             let plugin = manifest.id.clone();
-            // A failed load may disable a generation too; only explicit disablement persists.
+            // A failed load may disable a load too; only explicit disablement persists.
             if config
                 .entries
                 .get(&plugin)
@@ -593,7 +593,7 @@ impl Plugins {
                         if self.package_managed_plugins.get(&plugin) == Some(&load) {
                             self.package_managed_plugins.remove(&plugin);
                         }
-                        let _ = self.manager.disable_generation(&plugin, load);
+                        let _ = self.manager.disable_load(&plugin, load);
                         updates.push(ExtensionUpdate::Remove(plugin, load));
                         self.package_startup_request =
                             self.packages.request(PackageOperation::Activations).ok();
@@ -887,14 +887,14 @@ impl App {
         for plugin in unregister {
             self.commands.unregister_plugin(&plugin);
         }
-        let owned_generations = self
+        let owned_loads = self
             .extension
             .contributions()
             .ordered()
-            .map(|index| (index.owner.clone(), PluginLoadId(index.generation)))
+            .map(|index| (index.owner.clone(), PluginLoadId(index.plugin_load)))
             .collect::<Vec<_>>();
-        for (plugin, load) in owned_generations {
-            self.remove_plugin_contribution_generation(&plugin, load);
+        for (plugin, load) in owned_loads {
+            self.remove_plugin_contributions(&plugin, load);
         }
         self.extension.clear_contributions();
         if let Ok(candidate) = self.configuration.prepare_base_bindings(
@@ -1037,10 +1037,10 @@ impl App {
         let (rules, catalog) = self.extension.prepare_window_rules(&candidate)?;
         self.window_session
             .accept_current(windows, &self.state.window_version())?;
-        let receipt = self
+        let accepted = self
             .configuration
             .commit_contributions(candidate, catalog)?;
-        rules.finish(receipt)?;
+        rules.finish(accepted)?;
         self.cancel_pending_mapping();
         self.reconcile_editor_windows();
         Ok(())
@@ -1048,11 +1048,7 @@ impl App {
 }
 
 impl App {
-    pub(in crate::app) fn remove_plugin_contribution_generation(
-        &mut self,
-        plugin: &str,
-        load: PluginLoadId,
-    ) {
+    pub(in crate::app) fn remove_plugin_contributions(&mut self, plugin: &str, load: PluginLoadId) {
         match self
             .window_session
             .remove_plugin_generation(plugin, load.0)
@@ -1070,7 +1066,7 @@ impl App {
                 return;
             }
         }
-        let removed_active_confirmation = self.extension.remove_generation(plugin, load);
+        let removed_active_confirmation = self.extension.remove_load(plugin, load);
         if removed_active_confirmation
             && self
                 .input
@@ -1094,7 +1090,7 @@ impl App {
         };
         let result = self
             .extension
-            .retire_virtual(
+            .remove_virtual_documents(
                 plugin,
                 load,
                 VirtualContext {
@@ -1122,7 +1118,7 @@ impl App {
             Ok(None) => {}
             Err(error) => self.show_error(error),
         }
-        if self.extension.retire_provider_generation(plugin, load) {
+        if self.extension.remove_provider_load(plugin, load) {
             self.close_picker();
         }
 
@@ -1149,7 +1145,7 @@ impl App {
 impl App {
     pub(in crate::app) fn abort_pending_index_batch(&mut self, diagnostic: impl std::fmt::Display) {
         for (owner, load) in self.extension.abort_indexes() {
-            self.remove_plugin_contribution_generation(&owner, load);
+            self.remove_plugin_contributions(&owner, load);
             self.commands.unregister_plugin(&owner);
         }
         let candidate = self
@@ -1261,7 +1257,7 @@ impl App {
         if self.persistence.restoring() {
             return;
         }
-        if self.extension.retire_stale_confirmations(
+        if self.extension.invalidate_stale_confirmations(
             &self.state,
             &self.workspace.version(),
             self.configuration.binding_revision(),
@@ -1280,11 +1276,11 @@ impl App {
             self.configuration.binding_revision(),
         );
         self.present_next_plugin_confirmation();
-        self.retire_plugin_edit_sources();
+        self.discard_stale_plugin_edits();
         let events = match self.extension.poll_owned() {
             Ok(events) => events,
             Err(error) => {
-                self.retire_plugin_edit_sources();
+                self.discard_stale_plugin_edits();
                 self.handle_plugin_worker_stopped(error);
                 return;
             }
@@ -1305,7 +1301,7 @@ impl App {
                     index,
                 } => {
                     if self.extension.take_rejected(&plugin, load) {
-                        let _ = self.extension.disable_generation(&plugin, load);
+                        let _ = self.extension.disable_load(&plugin, load);
                         continue;
                     }
                     let checksum = index.checksum.clone();
@@ -1341,10 +1337,8 @@ impl App {
                             load,
                         )
                     {
-                        self.remove_plugin_contribution_generation(&failed_plugin, failed_load);
-                        let _ = self
-                            .extension
-                            .disable_generation(&failed_plugin, failed_load);
+                        self.remove_plugin_contributions(&failed_plugin, failed_load);
+                        let _ = self.extension.disable_load(&failed_plugin, failed_load);
                         self.extension.abort_prepared(&failed_plugin, failed_load);
                         self.abort_pending_index_batch(error);
                         continue;
@@ -1364,14 +1358,14 @@ impl App {
                 PluginEvent::Loaded { load, component } => {
                     let plugin = component.manifest.id.clone();
                     if self.extension.take_rejected(&plugin, load) {
-                        let _ = self.extension.disable_generation(&plugin, load);
+                        let _ = self.extension.disable_load(&plugin, load);
                         continue;
                     }
                     if let Some(index) = self
                         .extension
                         .contributions()
                         .get(&plugin)
-                        .filter(|index| index.generation == load.0)
+                        .filter(|index| index.plugin_load == load.0)
                     {
                         let declared = index.commands.keys().cloned().collect::<BTreeSet<_>>();
                         let activated = component
@@ -1382,8 +1376,8 @@ impl App {
                         if declared != activated {
                             let updates = self.extension.failed_package_load(&plugin, load);
                             self.apply_extension_updates(updates);
-                            self.remove_plugin_contribution_generation(&plugin, load);
-                            let _ = self.extension.disable_generation(&plugin, load);
+                            self.remove_plugin_contributions(&plugin, load);
+                            let _ = self.extension.disable_load(&plugin, load);
                             self.show_error(crate::plugins::PluginError::UndeclaredCommand);
                             continue;
                         }
@@ -1404,7 +1398,7 @@ impl App {
                         && let Err(error) =
                             self.extension.commit_package(plugin.clone(), load, token)
                     {
-                        self.remove_plugin_contribution_generation(&plugin, load);
+                        self.remove_plugin_contributions(&plugin, load);
                         self.show_error(error);
                     }
                     self.health.record(
@@ -1430,7 +1424,7 @@ impl App {
                         continue;
                     }
                     if self.configuration.deferred_plugin_keymaps()
-                        && !self.extension.is_active_generation(&plugin, load)
+                        && !self.extension.is_active_load(&plugin, load)
                         && self
                             .configuration
                             .expected_plugin_indexes()
@@ -1446,7 +1440,7 @@ impl App {
                     }
                     let updates = self.extension.failed_package_load(&plugin, load);
                     self.apply_extension_updates(updates);
-                    self.remove_plugin_contribution_generation(&plugin, load);
+                    self.remove_plugin_contributions(&plugin, load);
                     self.commands.unregister_plugin(&plugin);
                     failure_diagnostic = Some(format!("Plugin {plugin}: {error}"));
                     self.health.record(
@@ -1461,7 +1455,7 @@ impl App {
                 }
             }
         }
-        self.retire_plugin_edit_sources();
+        self.discard_stale_plugin_edits();
         let _ = self.extension.dispatch_confirmation_results(
             &self.state,
             &self.workspace.version(),
@@ -1490,12 +1484,12 @@ impl App {
         ) {
             WindowUpdate::Ready(event) => event,
             WindowUpdate::Publish(source, transition) => {
-                let receipt = self.window_session.accept_plugin_transition(
+                let accepted = self.window_session.accept_plugin_transition(
                     *transition,
                     &self.state.window_version(),
                     source.catalog(),
                 );
-                source.finish(receipt, self.window_session.graph().revision())
+                source.finish(accepted, self.window_session.graph().revision())
             }
         }
     }
@@ -1564,14 +1558,14 @@ impl App {
             }
         }
         let mut provider_continuations = Vec::new();
-        if self.extension.is_active_generation(&plugin, load) {
+        if self.extension.is_active_load(&plugin, load) {
             self.extension
                 .acknowledge(&plugin, load, &execution.host_event_acknowledgements);
             if let Some(policy) = self
                 .extension
                 .contributions()
                 .get(&plugin)
-                .filter(|index| index.generation == load.0)
+                .filter(|index| index.plugin_load == load.0)
                 .and_then(|index| index.storage.clone())
             {
                 self.extension.request_storage(
@@ -1646,12 +1640,12 @@ impl App {
             });
         }
         if !execution.ui_requests.is_empty()
-            && self.extension.is_active_generation(&plugin, load)
+            && self.extension.is_active_load(&plugin, load)
             && let Some(index) = self
                 .extension
                 .contributions()
                 .get(&plugin)
-                .filter(|index| index.generation == load.0)
+                .filter(|index| index.plugin_load == load.0)
                 .cloned()
         {
             let requests = std::mem::take(&mut execution.ui_requests);
@@ -1682,22 +1676,22 @@ impl App {
             BTreeMap::from([
                 ("plugin".into(), execution.plugin),
                 ("command".into(), execution.command),
-                ("generation".into(), execution.generation.to_string()),
+                ("request_id".into(), execution.request_id.to_string()),
             ]),
         );
     }
 }
 
 impl App {
-    pub(in crate::app) fn retire_plugin_edit_sources(&mut self) {
-        let (retired, key) = self.extension.retire_edits(
+    pub(in crate::app) fn discard_stale_plugin_edits(&mut self) {
+        let (discarded, key) = self.extension.discard_stale_edits(
             &self.state,
             &self.workspace.version(),
             self.configuration.binding_revision(),
         );
-        if retired != 0 {
+        if discarded != 0 {
             self.show_error(format!(
-                "{retired} plugin invocations retired before their results were accepted"
+                "{discarded} plugin invocations discarded before their results were accepted"
             ));
         }
         if let Some(key) = key {
@@ -1706,7 +1700,7 @@ impl App {
                 .origin()
                 .is_some_and(|origin| origin.same(&key))
             {
-                self.abort_workspace_edit("plugin proposal source retired".into());
+                self.abort_workspace_edit("plugin proposal source changed".into());
             } else {
                 let _ = self.extension.finish_edit(&key);
             }
@@ -2357,7 +2351,7 @@ mod tests {
     }
 
     #[test]
-    fn retired_registry_and_replacement_package_obligations_are_not_adopted() {
+    fn cancelled_registry_and_replacement_package_requests_are_not_adopted() {
         let root = tempfile::tempdir().unwrap();
         let registry =
             RegistryWorker::start(Default::default(), root.path().join("cache")).unwrap();
@@ -2421,7 +2415,7 @@ mod tests {
         ));
         assert_eq!(owner.pending_registry_artifact.as_ref().unwrap().1, vec![2]);
         owner.registry_intents.insert(4, (true, None));
-        owner.retire_packages();
+        owner.cancel_pending_packages();
         assert!(owner.accept_registry(event(4, vec![4])).is_none());
         assert!(owner.pending_registry_artifact.is_none());
         owner
@@ -2476,7 +2470,7 @@ mod tests {
     }
 
     #[test]
-    fn prepared_updates_replace_only_managed_generations_and_ignore_retired_requests() {
+    fn prepared_updates_replace_only_managed_loads_and_ignore_cancelled_requests() {
         let root = tempfile::tempdir().unwrap();
         let registry =
             RegistryWorker::start(Default::default(), root.path().join("cache")).unwrap();
@@ -2518,7 +2512,7 @@ mod tests {
         );
         assert_eq!(owner.manager.load_id("demo"), Some(PluginLoadId(1)));
         owner.package_preparing.insert(42);
-        owner.retire_packages();
+        owner.cancel_pending_packages();
         assert!(
             owner
                 .load_prepared(42, prepared.clone(), &PluginLimits::default())

@@ -243,7 +243,7 @@ pub struct PluginStorageContribution {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PluginContributionProvenance {
     pub owner: String,
-    pub generation: u64,
+    pub plugin_load: u64,
     pub source: String,
     pub declaration: usize,
     pub span: Option<std::ops::Range<usize>>,
@@ -281,7 +281,7 @@ pub struct PluginContributionIndex {
     pub owner: String,
     pub version: String,
     pub checksum: String,
-    pub generation: u64,
+    pub plugin_load: u64,
     pub source: String,
     pub commands: BTreeMap<String, PluginCommandDeclaration>,
     pub contexts: Vec<PluginInputContextContribution>,
@@ -332,11 +332,11 @@ impl PluginContributionCatalog {
         Ok(())
     }
 
-    pub fn remove_generation(&mut self, owner: &str, generation: u64) -> bool {
+    pub fn remove_load(&mut self, owner: &str, plugin_load: u64) -> bool {
         if self
             .indexes
             .get(owner)
-            .is_some_and(|index| index.generation == generation)
+            .is_some_and(|index| index.plugin_load == plugin_load)
         {
             self.indexes.remove(owner);
             self.version = PluginCatalogVersion::default();
@@ -371,7 +371,7 @@ impl PluginContributionCatalog {
                         local,
                         &context.title,
                         context.parent_surface.clone(),
-                        index.generation,
+                        index.plugin_load,
                         index.source.clone(),
                     )
                     .map_err(|_| PluginError::InvalidManifest)?;

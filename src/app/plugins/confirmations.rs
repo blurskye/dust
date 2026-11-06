@@ -150,7 +150,7 @@ impl PluginConfirmations {
             return Err("plugin confirmation source is stale".into());
         }
         if requests.len() > 1 {
-            return Err("plugin execution exceeded its confirmation request ceiling".into());
+            return Err("plugin execution exceeded its confirmation request limit".into());
         }
         let reservation = self
             .reservations
@@ -200,7 +200,7 @@ impl PluginConfirmations {
         AnsweredConfirmation {
             pending,
             outcome: PluginConfirmationOutcome::Failed(PluginConfirmationError::new(
-                PluginConfirmationErrorCode::SourceRetired,
+                PluginConfirmationErrorCode::StaleSource,
                 detail,
             )),
         }
@@ -278,17 +278,17 @@ impl PluginConfirmations {
                 .current(manager, editor, workspace, configuration)
         {
             answered.outcome = PluginConfirmationOutcome::Failed(PluginConfirmationError::new(
-                PluginConfirmationErrorCode::SourceRetired,
-                "confirmation source changed before result admission",
+                PluginConfirmationErrorCode::StaleSource,
+                "confirmation source changed before result delivery",
             ));
         }
-        let admission = manager
+        let reservation = manager
             .prepare_execution(&answered.pending.plugin, &answered.pending.command)
             .map_err(|error| error.to_string())?;
-        if admission.origin().load() != answered.pending.load {
-            return Err("plugin confirmation load changed before result admission".into());
+        if reservation.origin().load() != answered.pending.load {
+            return Err("plugin confirmation load changed before result delivery".into());
         }
-        let origin = admission.origin().clone();
+        let origin = reservation.origin().clone();
         let ui_events = ui
             .remove(&(answered.pending.plugin.clone(), answered.pending.load))
             .unwrap_or_default();
@@ -310,9 +310,9 @@ impl PluginConfirmations {
             storage_results: Vec::new(),
             provider_requests: Vec::new(),
             virtual_document_requests: Vec::new(),
-            generation: answered.pending.request.token,
+            request_id: answered.pending.request.token,
         };
-        admission
+        reservation
             .submit(request)
             .map_err(|error| error.to_string())?;
         let answered = self.answered.pop_front().expect("checked answer");
@@ -353,13 +353,13 @@ impl PluginConfirmations {
             || !execution.proposals.is_empty()
         {
             return Err(
-                "plugin confirmation result source retired or proposed an unrelated edit".into(),
+                "plugin confirmation result source changed or proposed an unrelated edit".into(),
             );
         }
         Ok((execution, delivery.pending.source))
     }
 
-    pub(in crate::app) fn retire_stale(&mut self, context: ConfirmationContext<'_>) -> bool {
+    pub(in crate::app) fn invalidate_stale(&mut self, context: ConfirmationContext<'_>) -> bool {
         let active_stale = self.active.as_ref().is_some_and(|pending| {
             pending.source.manager_current(context.manager)
                 && !pending.source.current(
@@ -407,7 +407,7 @@ impl PluginConfirmations {
         active_stale
     }
 
-    pub(in crate::app) fn remove_generation(&mut self, plugin: &str, load: PluginLoadId) -> bool {
+    pub(in crate::app) fn remove_load(&mut self, plugin: &str, load: PluginLoadId) -> bool {
         let active = self
             .active
             .as_ref()
@@ -445,9 +445,9 @@ mod tests {
     #[test]
     fn reservation_loan_releases_only_failed_enqueue_and_allows_retry() {
         let (mut manager, _fixture) = crate::plugins::ExecutionFixture::new(2);
-        let admission = manager.prepare_execution("demo", "run").unwrap();
-        let origin = admission.origin().clone();
-        drop(admission);
+        let reservation = manager.prepare_execution("demo", "run").unwrap();
+        let origin = reservation.origin().clone();
+        drop(reservation);
         let mut confirmations = PluginConfirmations::default();
 
         let loan = confirmations.reserve(&origin);

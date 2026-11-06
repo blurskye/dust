@@ -45,7 +45,7 @@ pub enum PluginStorageErrorCode {
     QuotaExceeded,
     Unavailable,
     Corrupt,
-    GenerationLost,
+    LoadUnavailable,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -194,7 +194,7 @@ struct Work {
 pub struct PluginStorageWorker {
     sender: SyncSender<Work>,
     receiver: Receiver<(u64, PluginStorageResult)>,
-    generations: Arc<Mutex<BTreeMap<String, (PluginLoadId, u64)>>>,
+    loads: Arc<Mutex<BTreeMap<String, (PluginLoadId, u64)>>>,
     stopped: bool,
 }
 
@@ -204,14 +204,14 @@ impl PluginStorageWorker {
         let capacity = capacity.clamp(1, STORAGE_REQUEST_LIMIT);
         let (sender, requests) = mpsc::sync_channel::<Work>(capacity);
         let (results, receiver) = mpsc::sync_channel::<(u64, PluginStorageResult)>(capacity);
-        let generations = Arc::new(Mutex::new(BTreeMap::new()));
-        let worker_generations = Arc::clone(&generations);
+        let loads = Arc::new(Mutex::new(BTreeMap::new()));
+        let worker_loads = Arc::clone(&loads);
         thread::Builder::new()
             .name("dust-plugin-storage".into())
             .spawn(move || {
                 let mut temporary = 1_u64;
                 while let Ok(work) = requests.recv() {
-                    let current = worker_generations
+                    let current = worker_loads
                         .lock()
                         .ok()
                         .and_then(|owners| owners.get(&work.plugin).copied());
@@ -222,12 +222,12 @@ impl PluginStorageWorker {
                             work.load,
                             work.request.token,
                             PluginStorageError::new(
-                                PluginStorageErrorCode::GenerationLost,
-                                "storage generation is no longer current",
+                                PluginStorageErrorCode::LoadUnavailable,
+                                "storage load is no longer current",
                             ),
                         )
                     } else {
-                        process(&root, work, &mut temporary, &worker_generations)
+                        process(&root, work, &mut temporary, &worker_loads)
                     };
                     if results.send((epoch, result)).is_err() {
                         break;
@@ -238,36 +238,36 @@ impl PluginStorageWorker {
         Self {
             sender,
             receiver,
-            generations,
+            loads,
             stopped: false,
         }
     }
 
-    pub fn install_generation(&mut self, plugin: &str, load: PluginLoadId) {
-        if let Ok(mut generations) = self.generations.lock() {
-            let epoch = generations
+    pub fn install_load(&mut self, plugin: &str, load: PluginLoadId) {
+        if let Ok(mut loads) = self.loads.lock() {
+            let epoch = loads
                 .get(plugin)
                 .map_or(1, |(_, epoch)| epoch.saturating_add(1).max(1));
-            generations.insert(plugin.to_owned(), (load, epoch));
+            loads.insert(plugin.to_owned(), (load, epoch));
         }
     }
 
-    pub fn reset_generation(&mut self, plugin: &str, load: PluginLoadId) {
-        if let Ok(mut generations) = self.generations.lock()
-            && let Some((current, epoch)) = generations.get_mut(plugin)
+    pub fn reset_load(&mut self, plugin: &str, load: PluginLoadId) {
+        if let Ok(mut loads) = self.loads.lock()
+            && let Some((current, epoch)) = loads.get_mut(plugin)
             && *current == load
         {
             *epoch = epoch.saturating_add(1).max(1);
         }
     }
 
-    pub fn remove_generation(&mut self, plugin: &str, load: PluginLoadId) {
-        if let Ok(mut generations) = self.generations.lock()
-            && generations
+    pub fn remove_load(&mut self, plugin: &str, load: PluginLoadId) {
+        if let Ok(mut loads) = self.loads.lock()
+            && loads
                 .get(plugin)
                 .is_some_and(|(current, _)| *current == load)
         {
-            generations.remove(plugin);
+            loads.remove(plugin);
         }
     }
 
@@ -286,7 +286,7 @@ impl PluginStorageWorker {
         }
         validate_request(&request, &policy)?;
         let epoch = self
-            .generations
+            .loads
             .lock()
             .ok()
             .and_then(|owners| owners.get(&plugin).copied())
@@ -294,8 +294,8 @@ impl PluginStorageWorker {
             .map(|(_, epoch)| epoch)
             .ok_or_else(|| {
                 PluginStorageError::new(
-                    PluginStorageErrorCode::GenerationLost,
-                    "storage generation is no longer current",
+                    PluginStorageErrorCode::LoadUnavailable,
+                    "storage load is no longer current",
                 )
             })?;
         match self.sender.try_send(Work {
@@ -329,7 +329,7 @@ impl PluginStorageWorker {
             match self.receiver.try_recv() {
                 Ok((epoch, result)) => {
                     if self
-                        .generations
+                        .loads
                         .lock()
                         .ok()
                         .and_then(|owners| owners.get(&result.plugin).copied())
@@ -427,7 +427,7 @@ fn process(
     root: &Path,
     work: Work,
     temporary: &mut u64,
-    generations: &Arc<Mutex<BTreeMap<String, (PluginLoadId, u64)>>>,
+    loads: &Arc<Mutex<BTreeMap<String, (PluginLoadId, u64)>>>,
 ) -> PluginStorageResult {
     let token = work.request.token;
     let plugin = work.plugin;
@@ -503,7 +503,7 @@ fn process(
                     plugin: &plugin,
                     load,
                     epoch: work.epoch,
-                    generations,
+                    loads,
                 })?;
                 Ok(PluginStorageResult {
                     plugin: plugin.clone(),
@@ -538,7 +538,7 @@ fn process(
                     plugin: &plugin,
                     load,
                     epoch: work.epoch,
-                    generations,
+                    loads,
                 })?;
                 Ok(PluginStorageResult {
                     plugin: plugin.clone(),
@@ -711,7 +711,7 @@ struct PersistContext<'a> {
     plugin: &'a str,
     load: PluginLoadId,
     epoch: u64,
-    generations: &'a Arc<Mutex<BTreeMap<String, (PluginLoadId, u64)>>>,
+    loads: &'a Arc<Mutex<BTreeMap<String, (PluginLoadId, u64)>>>,
 }
 
 fn persist(context: PersistContext<'_>) -> Result<(), PluginStorageError> {
@@ -723,7 +723,7 @@ fn persist(context: PersistContext<'_>) -> Result<(), PluginStorageError> {
         plugin,
         load,
         epoch,
-        generations,
+        loads,
     } = context;
     fs::create_dir_all(root)
         .map_err(|error| PluginStorageError::new(PluginStorageErrorCode::Unavailable, error))?;
@@ -786,14 +786,14 @@ fn persist(context: PersistContext<'_>) -> Result<(), PluginStorageError> {
         file.write_all(&bytes)?;
         file.flush()?;
         file.sync_all()?;
-        let owners = generations
+        let owners = loads
             .lock()
-            .map_err(|_| std::io::Error::other("storage generation lock poisoned"))?;
+            .map_err(|_| std::io::Error::other("storage load lock poisoned"))?;
         if owners.get(plugin).copied() != Some((load, epoch)) {
             cancelled = true;
             return Err(std::io::Error::new(
                 std::io::ErrorKind::Interrupted,
-                "storage generation was cancelled",
+                "storage load was cancelled",
             ));
         }
         fs::rename(&temp, path)?;
@@ -805,7 +805,7 @@ fn persist(context: PersistContext<'_>) -> Result<(), PluginStorageError> {
         let _ = fs::remove_file(&temp);
         return Err(PluginStorageError::new(
             if cancelled {
-                PluginStorageErrorCode::GenerationLost
+                PluginStorageErrorCode::LoadUnavailable
             } else {
                 PluginStorageErrorCode::Unavailable
             },
@@ -857,11 +857,11 @@ mod tests {
     }
 
     #[test]
-    fn storage_is_atomic_revisioned_persistent_and_generation_owned() {
+    fn storage_is_atomic_revisioned_persistent_and_load_owned() {
         use std::os::unix::fs::PermissionsExt;
         let root = tempfile::tempdir().expect("root");
         let mut service = PluginStorageWorker::start(root.path().join("data"), 8);
-        service.install_generation("demo", PluginLoadId(7));
+        service.install_load("demo", PluginLoadId(7));
         service
             .request(
                 "demo".into(),
@@ -924,8 +924,8 @@ mod tests {
             wait(&mut service).value.as_deref(),
             Some(b"value".as_slice())
         );
-        service.remove_generation("demo", PluginLoadId(6));
-        service.install_generation("demo", PluginLoadId(8));
+        service.remove_load("demo", PluginLoadId(6));
+        service.install_load("demo", PluginLoadId(8));
         assert_eq!(
             service
                 .request(
@@ -941,7 +941,7 @@ mod tests {
                 )
                 .unwrap_err()
                 .code,
-            PluginStorageErrorCode::GenerationLost
+            PluginStorageErrorCode::LoadUnavailable
         );
         service
             .request(
@@ -973,7 +973,7 @@ mod tests {
         let root = tempfile::tempdir().expect("root");
         let data = root.path().join("data");
         let mut service = PluginStorageWorker::start(data.clone(), 8);
-        service.install_generation("demo", PluginLoadId(1));
+        service.install_load("demo", PluginLoadId(1));
         assert_eq!(
             service
                 .request(
@@ -1020,7 +1020,7 @@ mod tests {
     fn item_and_total_quota_rejection_preserves_the_previous_map() {
         let root = tempfile::tempdir().expect("root");
         let mut service = PluginStorageWorker::start(root.path().join("data"), 8);
-        service.install_generation("demo", PluginLoadId(1));
+        service.install_load("demo", PluginLoadId(1));
         let policy = PluginStorageContribution {
             maximum_items: 1,
             maximum_value_bytes: 4,
@@ -1104,7 +1104,7 @@ mod tests {
         };
         let duplicate_bytes = write_payload(&path, duplicate);
         let mut service = PluginStorageWorker::start(data.clone(), 4);
-        service.install_generation("demo", PluginLoadId(1));
+        service.install_load("demo", PluginLoadId(1));
         service
             .request(
                 "demo".into(),
@@ -1163,7 +1163,7 @@ mod tests {
         let root = tempfile::tempdir().expect("root");
         let data = root.path().join("data");
         let mut service = PluginStorageWorker::start(data.clone(), 4);
-        service.install_generation("demo", PluginLoadId(1));
+        service.install_load("demo", PluginLoadId(1));
         service
             .request(
                 "demo".into(),
@@ -1229,7 +1229,7 @@ mod tests {
         )
         .unwrap();
         let mut service = PluginStorageWorker::start(data, 4);
-        service.install_generation("demo", PluginLoadId(1));
+        service.install_load("demo", PluginLoadId(1));
         service
             .request(
                 "demo".into(),
@@ -1267,8 +1267,8 @@ mod tests {
         let mut first = PluginStorageWorker::start(root.path().into(), 8);
         let mut second = PluginStorageWorker::start(root.path().into(), 8);
         let load = PluginLoadId(1);
-        first.install_generation("demo", load);
-        second.install_generation("demo", load);
+        first.install_load("demo", load);
+        second.install_load("demo", load);
         let policy = PluginStorageContribution {
             maximum_items: 4,
             maximum_value_bytes: 8,
@@ -1356,7 +1356,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let mut service = PluginStorageWorker::start(root.path().into(), 8);
         let load = PluginLoadId(1);
-        service.install_generation("demo", load);
+        service.install_load("demo", load);
         service
             .request(
                 "demo".into(),
@@ -1376,7 +1376,7 @@ mod tests {
             .receiver
             .recv_timeout(Duration::from_secs(5))
             .unwrap();
-        service.reset_generation("demo", load);
+        service.reset_load("demo", load);
         let (sender, receiver) = mpsc::sync_channel(1);
         sender.send(completion).unwrap();
         service.receiver = receiver;
@@ -1388,7 +1388,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let mut service = PluginStorageWorker::start(root.path().into(), 8);
         let load = PluginLoadId(1);
-        service.install_generation("demo", load);
+        service.install_load("demo", load);
         let lock_path = root
             .path()
             .join(format!("{:x}.lock", Sha256::digest(b"demo")));
@@ -1413,7 +1413,7 @@ mod tests {
                 ),
             )
             .unwrap();
-        service.reset_generation("demo", load);
+        service.reset_load("demo", load);
         drop(lock);
         let (_, result) = service
             .receiver
@@ -1421,7 +1421,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             result.error.unwrap().code,
-            PluginStorageErrorCode::GenerationLost
+            PluginStorageErrorCode::LoadUnavailable
         );
         assert!(
             !root

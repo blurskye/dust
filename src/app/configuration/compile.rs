@@ -666,7 +666,7 @@ pub fn compile_keymaps_with_plugin_catalog(
             entry_origins.push(KeymapContributionOrigin {
                 layer: InputContextLayer::Plugin,
                 owner: Some(index.owner.clone()),
-                plugin_load: index.generation,
+                plugin_load: index.plugin_load,
                 source: format!("{}:plugin-keymap {}", index.source, offset + 1),
                 declaration: offset + 1,
             });
@@ -703,7 +703,7 @@ pub fn compile_keymaps_with_plugin_catalog(
             group_origins.push(KeymapContributionOrigin {
                 layer: InputContextLayer::Plugin,
                 owner: Some(index.owner.clone()),
-                plugin_load: index.generation,
+                plugin_load: index.plugin_load,
                 source: format!("{}:plugin-key-group {}", index.source, offset + 1),
                 declaration: offset + 1,
             });

@@ -41,11 +41,11 @@ impl WindowPublication<'_> {
     }
     pub(in crate::app) fn finish(
         mut self,
-        receipt: Result<PluginWindowReceipt, String>,
+        accepted: Result<PluginWindowReceipt, String>,
         revision: Option<u64>,
     ) -> PluginUiEvent {
-        let result = receipt.and_then(|receipt| {
-            receipt
+        let result = accepted.and_then(|accepted| {
+            accepted
                 .matches(&self.key)
                 .then_some(())
                 .ok_or_else(|| "foreign plugin window publication".into())
@@ -117,12 +117,12 @@ impl Plugins {
             .plugin_contributions
             .get(&index.owner)
             .filter(|current| {
-                current.generation == index.generation && current.checksum == index.checksum
+                current.plugin_load == index.plugin_load && current.checksum == index.checksum
             })
         else {
             return rejected(
-                PluginUiErrorCode::GenerationLost,
-                "plugin UI request belongs to a retired catalog load".into(),
+                PluginUiErrorCode::LoadUnavailable,
+                "plugin UI request belongs to a unavailable catalog load".into(),
             );
         };
         if let Err(detail) = windows.require_editor_source(&editor.window_version()) {
@@ -144,7 +144,7 @@ impl Plugins {
         let catalog = self.plugin_contributions.version();
         let mut draft = match windows.begin_plugin(
             &index.owner,
-            index.generation,
+            index.plugin_load,
             (&editor.window_version(), &catalog),
         ) {
             Ok(draft) => draft,
@@ -167,11 +167,11 @@ impl Plugins {
             Box::new(transition),
         )
     }
-    pub(in crate::app) fn window_generations(&self) -> Vec<(String, u64)> {
-        self.windows.generations()
+    pub(in crate::app) fn window_loads(&self) -> Vec<(String, u64)> {
+        self.windows.loads()
     }
     pub(in crate::app) fn remove_windows(&mut self, plugin: &str, load: u64) -> bool {
-        self.windows.remove_generation(plugin, load)
+        self.windows.remove_load(plugin, load)
     }
     pub(in crate::app) fn window_context(&self, window: WindowId) -> Option<String> {
         self.windows

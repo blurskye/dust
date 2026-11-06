@@ -28,17 +28,17 @@ pub(in crate::app) struct VirtualDocumentEditorEntry {
 impl VirtualDocumentEditorEntry {
     pub(in crate::app) fn matches(&self, state: crate::editor::EditorTopology<'_>) -> bool {
         state.buffers().get(self.buffer).is_some_and(|buffer| buffer.text.source_version() == self.text && matches!(&buffer.origin,
-            crate::editor::BufferOrigin::VirtualReadOnly { owner, generation, document, revision }
-                if owner == &self.plugin && *generation == self.load.0 && *document == self.document && *revision == self.revision))
+            crate::editor::BufferOrigin::VirtualReadOnly { owner, generation: plugin_load, document, revision }
+                if owner == &self.plugin && *plugin_load == self.load.0 && *document == self.document && *revision == self.revision))
     }
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(in crate::app) enum VirtualDocumentEditorError {
     InvalidInitial,
     StaleRevision,
-    Ceiling,
+    DocumentLimit,
     Layout(&'static str),
-    GenerationMismatch,
+    SourceMismatch,
 }
 #[derive(Clone, Debug, Default)]
 pub(in crate::app) struct VirtualDocumentEditorBridge {
@@ -53,7 +53,7 @@ impl VirtualDocumentEditorBridge {
         let key = (snapshot.plugin.clone(), snapshot.load, snapshot.document);
         if let Some(entry) = self.entries.get_mut(&key) {
             if !entry.matches(state.topology()) {
-                return Err(VirtualDocumentEditorError::GenerationMismatch);
+                return Err(VirtualDocumentEditorError::SourceMismatch);
             }
             if snapshot.revision
                 != entry
@@ -103,7 +103,7 @@ impl VirtualDocumentEditorBridge {
             return Err(VirtualDocumentEditorError::InvalidInitial);
         }
         if self.entries.len() >= MAXIMUM_VIRTUAL_EDITOR_DOCUMENTS {
-            return Err(VirtualDocumentEditorError::Ceiling);
+            return Err(VirtualDocumentEditorError::DocumentLimit);
         }
         if self.entries.values().any(|e| {
             e.plugin == snapshot.plugin
@@ -111,7 +111,7 @@ impl VirtualDocumentEditorBridge {
                 && e.source == snapshot.source
                 && e.key == snapshot.key
         }) {
-            return Err(VirtualDocumentEditorError::GenerationMismatch);
+            return Err(VirtualDocumentEditorError::SourceMismatch);
         }
         let (buffer, _) = state
             .open_virtual_read_only(
@@ -149,12 +149,12 @@ impl VirtualDocumentEditorBridge {
             .values()
             .find(|e| e.plugin == plugin && e.load == load && e.source == source && e.key == key)
     }
-    pub(in crate::app) fn has_generation(&self, plugin: &str, load: PluginLoadId) -> bool {
+    pub(in crate::app) fn has_load(&self, plugin: &str, load: PluginLoadId) -> bool {
         self.entries
             .keys()
-            .any(|(owner, generation, _)| owner == plugin && *generation == load)
+            .any(|(owner, plugin_load, _)| owner == plugin && *plugin_load == load)
     }
-    pub(in crate::app) fn remove_generation(
+    pub(in crate::app) fn remove_load(
         &mut self,
         state: &mut EditorDraft,
         plugin: &str,
@@ -163,7 +163,7 @@ impl VirtualDocumentEditorBridge {
         let keys = self
             .entries
             .keys()
-            .filter(|(owner, generation, _)| owner == plugin && *generation == load)
+            .filter(|(owner, plugin_load, _)| owner == plugin && *plugin_load == load)
             .cloned()
             .collect::<Vec<_>>();
         let count = keys.len();
@@ -200,7 +200,7 @@ impl VirtualDocumentEditorBridge {
         self.entries.values().find(|e| e.buffer == buffer)
     }
 
-    /// Semantic provider coordinates only. Load generations, document handles,
+    /// Semantic provider coordinates only. Plugin loads, document handles,
     /// revisions, and retained content are deliberately not exposed to persistence.
     pub(in crate::app) fn descriptor_sources(&self) -> Vec<(BufferId, String, String, String)> {
         self.entries
@@ -253,7 +253,7 @@ mod tests {
         Ok(buffer)
     }
     #[test]
-    fn publish_refresh_is_identity_preserving_stale_atomic_and_generation_owned() {
+    fn publish_refresh_preserves_identity_and_rejects_stale_or_foreign_sources() {
         let mut state = EditorState::new(PathBuf::from("/tmp"));
         let mut bridge = VirtualDocumentEditorBridge::default();
         let b = publish(&mut bridge, &mut state, &snap(1, "héllo")).unwrap();
@@ -288,7 +288,7 @@ mod tests {
         state.buffers[b].text = TextBuffer::from_text(&before);
         assert_eq!(
             publish(&mut bridge, &mut state, &snap(3, "foreign incarnation")),
-            Err(VirtualDocumentEditorError::GenerationMismatch)
+            Err(VirtualDocumentEditorError::SourceMismatch)
         );
         state.buffers[b].text = original;
         for _ in 0..256 {
@@ -309,13 +309,13 @@ mod tests {
         let mut draft = state.draft();
         assert_eq!(
             bridge
-                .remove_generation(&mut draft, "demo", PluginLoadId(8))
+                .remove_load(&mut draft, "demo", PluginLoadId(8))
                 .unwrap(),
             0
         );
         assert_eq!(
             bridge
-                .remove_generation(&mut draft, "demo", PluginLoadId(7))
+                .remove_load(&mut draft, "demo", PluginLoadId(7))
                 .unwrap(),
             1
         );

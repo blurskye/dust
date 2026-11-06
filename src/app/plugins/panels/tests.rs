@@ -9,12 +9,12 @@ use crate::plugins::PluginPresenterKind;
 use crate::plugins::PluginPrivateCellPolicy;
 use crate::windows::ContentLifecycle;
 
-fn index(owner: &str, generation: u64) -> PluginContributionIndex {
+fn index(owner: &str, plugin_load: u64) -> PluginContributionIndex {
     PluginContributionIndex {
         owner: owner.into(),
         version: "1.0.0".into(),
-        checksum: format!("{generation:064x}"),
-        generation,
+        checksum: format!("{plugin_load:064x}"),
+        plugin_load,
         source: "manifest.toml:bytes 0..1".into(),
         commands: [(
             "open".into(),
@@ -57,8 +57,8 @@ fn index(owner: &str, generation: u64) -> PluginContributionIndex {
     }
 }
 
-fn private_index(owner: &str, generation: u64) -> PluginContributionIndex {
-    let mut index = index(owner, generation);
+fn private_index(owner: &str, plugin_load: u64) -> PluginContributionIndex {
+    let mut index = index(owner, plugin_load);
     let content = &mut index.content_types[0];
     content.presenter = PluginPresenterKind::PrivateCells;
     content.private_cells = Some(PluginPrivateCellPolicy {
@@ -347,7 +347,7 @@ fn private_cells_use_the_renderers_ambiguous_width_policy() {
 }
 
 #[test]
-fn private_cells_are_local_revisioned_atomic_and_generation_owned() {
+fn private_cells_are_local_revisioned_atomic_and_load_owned() {
     let mut graph = WindowGraph::default();
     let tab = graph.create_workspace_tab("builtin.test", 1).expect("tab");
     let index = private_index("demo", 9);
@@ -691,7 +691,7 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
             storage_results: Vec::new(),
             provider_requests: Vec::new(),
             virtual_document_requests: Vec::new(),
-            generation: 44,
+            request_id: 44,
         },
         &mut outcome.runtime,
     )
@@ -719,7 +719,7 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
             storage_results: Vec::new(),
             provider_requests: Vec::new(),
             virtual_document_requests: Vec::new(),
-            generation: 45,
+            request_id: 45,
         },
         &mut outcome.runtime,
     )
@@ -752,7 +752,7 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
             storage_results: Vec::new(),
             provider_requests: Vec::new(),
             virtual_document_requests: Vec::new(),
-            generation: 46,
+            request_id: 46,
         },
         &mut outcome.runtime,
     )
@@ -776,7 +776,7 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
             storage_results: Vec::new(),
             provider_requests: Vec::new(),
             virtual_document_requests: Vec::new(),
-            generation: 46,
+            request_id: 46,
         },
         &mut outcome.runtime,
     )
@@ -825,7 +825,7 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
                 storage_results: Vec::new(),
                 provider_requests: Vec::new(),
                 virtual_document_requests: Vec::new(),
-                generation: 46,
+                request_id: 46,
             },
             &mut outcome.runtime,
         )
@@ -844,7 +844,7 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
 
     let mut storage =
         crate::plugins::PluginStorageWorker::start(store.path().join("plugin-data"), 8);
-    storage.install_generation("demo", crate::plugins::PluginLoadId(44));
+    storage.install_load("demo", crate::plugins::PluginLoadId(44));
     let policy = manifest
         .contributions
         .storage
@@ -868,7 +868,7 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
                 storage_results,
                 provider_requests: Vec::new(),
                 virtual_document_requests: Vec::new(),
-                generation: 44,
+                request_id: 44,
             },
             &mut outcome.runtime,
         )
@@ -947,7 +947,7 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
                 storage_results: Vec::new(),
                 provider_requests: requests,
                 virtual_document_requests: Vec::new(),
-                generation: 44,
+                request_id: 44,
             },
             &mut outcome.runtime,
         )
@@ -989,7 +989,7 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
             storage_results: Vec::new(),
             provider_requests: vec![last_envelope.expect("delivered provider request")],
             virtual_document_requests: Vec::new(),
-            generation: 44,
+            request_id: 44,
         },
         &mut outcome.runtime,
     )
@@ -1042,7 +1042,7 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
                 storage_results: Vec::new(),
                 provider_requests: Vec::new(),
                 virtual_document_requests: requests,
-                generation: 44,
+                request_id: 44,
             },
             &mut outcome.runtime,
         )
@@ -1098,7 +1098,7 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
                 workspace_revision: Some(3),
                 buffer_revision: Some(9),
                 deadline_milliseconds: 1_000,
-                cancellation_generation: 1,
+                cancellation_id: 1,
                 maximum_items: 16,
                 maximum_bytes: 8_192,
             }],
@@ -1110,13 +1110,13 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
                 kind: crate::plugins::PluginVirtualDocumentRequestKind::Open,
                 current_revision: None,
                 deadline_milliseconds: 1_000,
-                cancellation_generation: 1,
+                cancellation_id: 1,
                 maximum_document_bytes: 4096,
                 maximum_document_lines: 128,
                 maximum_patch_bytes: 256,
                 maximum_patches: 8,
             }],
-            generation: 45,
+            request_id: 45,
         },
         &mut trapped_outcome.runtime,
     );
@@ -1166,13 +1166,13 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
                 kind: crate::plugins::PluginVirtualDocumentRequestKind::Open,
                 current_revision: None,
                 deadline_milliseconds: 1_000,
-                cancellation_generation: 1,
+                cancellation_id: 1,
                 maximum_document_bytes: 4096,
                 maximum_document_lines: 128,
                 maximum_patch_bytes: 256,
                 maximum_patches: 8,
             }],
-            generation: 46,
+            request_id: 46,
         },
         &mut deadline_outcome.runtime,
     );
@@ -1211,7 +1211,7 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
                 storage_results: Vec::new(),
                 provider_requests: Vec::new(),
                 virtual_document_requests: Vec::new(),
-                generation: 44,
+                request_id: 44,
             },
             &mut outcome.runtime,
         )
@@ -1254,7 +1254,7 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
             storage_results: Vec::new(),
             provider_requests: Vec::new(),
             virtual_document_requests: Vec::new(),
-            generation: 44,
+            request_id: 44,
         },
         &mut outcome.runtime,
     )
@@ -1306,7 +1306,7 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
             storage_results: Vec::new(),
             provider_requests: Vec::new(),
             virtual_document_requests: Vec::new(),
-            generation: 44,
+            request_id: 44,
         },
         &mut outcome.runtime,
     )
@@ -1340,7 +1340,7 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
             storage_results: Vec::new(),
             provider_requests: Vec::new(),
             virtual_document_requests: Vec::new(),
-            generation: 44,
+            request_id: 44,
         },
         &mut outcome.runtime,
     )
@@ -1381,7 +1381,7 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
             storage_results: Vec::new(),
             provider_requests: Vec::new(),
             virtual_document_requests: Vec::new(),
-            generation: 44,
+            request_id: 44,
         },
         &mut outcome.runtime,
     )
@@ -1401,7 +1401,7 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
     assert_eq!(close_event.handle, Some(private_handle));
     assert!(host.private_snapshots(&graph).is_empty());
 
-    // A restored session retires the earlier, deliberately undelivered receipts.
+    // A restored session discards the earlier, deliberately undelivered results.
     let flood = crate::plugins::execute_component(
         crate::plugins::PluginExecutionRequest {
             runtime_epoch: 1,
@@ -1418,7 +1418,7 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
             storage_results: Vec::new(),
             provider_requests: Vec::new(),
             virtual_document_requests: Vec::new(),
-            generation: 44,
+            request_id: 44,
         },
         &mut outcome.runtime,
     )
@@ -1431,7 +1431,7 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
 }
 
 #[test]
-fn generation_owned_retained_window_lifecycle_is_revision_checked() {
+fn load_owned_retained_window_lifecycle_is_revision_checked() {
     let mut graph = WindowGraph::default();
     graph.create_workspace_tab("builtin.test", 1).expect("tab");
     let mut host = PluginWindowHost::default();
@@ -1504,7 +1504,7 @@ fn generation_owned_retained_window_lifecycle_is_revision_checked() {
     );
     assert_eq!(
         duplicate.error.as_ref().map(|error| error.code),
-        Some(PluginUiErrorCode::InstanceCeiling)
+        Some(PluginUiErrorCode::InstanceLimit)
     );
     assert_eq!(graph, graph_after_open);
 
@@ -1652,7 +1652,7 @@ fn generation_owned_retained_window_lifecycle_is_revision_checked() {
     );
     assert_eq!(
         foreign_event.error.as_ref().map(|error| error.code),
-        Some(PluginUiErrorCode::ForeignGeneration)
+        Some(PluginUiErrorCode::ForeignLoad)
     );
 
     assert!(remove_fixture(&mut host, &mut graph, "demo", 7).expect("cleanup"));
@@ -1844,7 +1844,7 @@ fn process_fixture(
     request: PluginUiRequest,
 ) -> PluginUiEvent {
     let mut windows = crate::app::windows::Windows::from_test_graph(graph.clone());
-    let mut draft = windows.begin_plugin_fixture(&index.owner, index.generation);
+    let mut draft = windows.begin_plugin_fixture(&index.owner, index.plugin_load);
     let mut candidate = host.clone();
     let event = candidate.process(&mut draft, index, request);
     if event.error.is_none() {
@@ -1865,7 +1865,7 @@ fn remove_fixture(
     let mut windows = crate::app::windows::Windows::from_test_graph(graph.clone());
     windows.remove_plugin_generation(plugin, load)?;
     *graph = windows.graph().clone();
-    Ok(host.remove_generation(plugin, load))
+    Ok(host.remove_load(plugin, load))
 }
 
 #[test]
@@ -1997,9 +1997,6 @@ use crate::plugins::PluginUiRequest;
 use crate::plugins::PluginUiRequestKind;
 use crate::plugins::PluginUiStyle;
 use crate::plugins::PluginWindowPlacementKind;
-use crate::windows::ContentAdapterKind;
-use crate::windows::ContentTypeId;
 use crate::windows::WindowGraph;
-use crate::windows::WindowPlacement;
 
 use crate::windows::WindowRect;

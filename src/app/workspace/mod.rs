@@ -1170,8 +1170,8 @@ impl App {
             self.sync_ui_diagnostics();
         }
         self.language.retire_launches();
-        for (plugin, load) in self.extension.retire_packages() {
-            self.remove_plugin_contribution_generation(&plugin, load);
+        for (plugin, load) in self.extension.cancel_pending_packages() {
+            self.remove_plugin_contributions(&plugin, load);
         }
         self.debugger_session.reset();
         self.input.clear_snippet();
@@ -1187,7 +1187,7 @@ impl App {
             self.reject_workspace_proposal();
         }
         self.retire_workspace_resources("workspace changed");
-        self.retire_plugin_edit_sources();
+        self.discard_stale_plugin_edits();
         self.retire_explorer_intents();
         self.explorer
             .reset_roots(self.workspace.roots(), self.workspace.root_revision());

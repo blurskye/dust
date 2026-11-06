@@ -1,4 +1,4 @@
-//! Generation-scoped extension delivery and storage runtime.
+//! Plugin delivery, storage and load ownership.
 use crate::app::plugins::edits::PluginEditSources;
 use crate::app::plugins::edits::PreparedPluginEdit;
 use crate::app::plugins::edits::SourceExecution;
@@ -53,7 +53,7 @@ pub(in crate::app) struct InvocationContext<'a> {
     pub editor: &'a EditorState,
     pub workspace: &'a Workspace,
     pub configuration: &'a u64,
-    pub generation: u64,
+    pub request_id: u64,
     pub ui_revision: Option<u64>,
     pub input_capture: std::sync::Arc<()>,
     pub navigation: crate::app::windows::NavigationStamp,
@@ -155,8 +155,8 @@ impl Plugins {
     pub(in crate::app) fn load_id(&self, id: &str) -> Option<PluginLoadId> {
         self.manager.load_id(id)
     }
-    pub(in crate::app) fn is_active_generation(&self, id: &str, load: PluginLoadId) -> bool {
-        self.manager.is_active_generation(id, load)
+    pub(in crate::app) fn is_active_load(&self, id: &str, load: PluginLoadId) -> bool {
+        self.manager.is_active_load(id, load)
     }
     pub(in crate::app) fn index_from_store(
         &mut self,
@@ -173,7 +173,7 @@ impl Plugins {
         let load = self.manager.load_id(plugin);
         self.manager.disable(plugin)?;
         self.disabled_plugins.insert(plugin.into());
-        // The manager discards late events for disabled generations, so they cannot
+        // The manager discards late events for disabled loads, so they cannot
         // finish a pending activation or release its prepared package token.
         if let Some(load) = load {
             if self.package_startup_pending.get(plugin) == Some(&load) {
@@ -183,12 +183,12 @@ impl Plugins {
         }
         Ok(())
     }
-    pub(in crate::app) fn disable_generation(
+    pub(in crate::app) fn disable_load(
         &mut self,
         plugin: &str,
         load: PluginLoadId,
     ) -> Result<(), PluginError> {
-        self.manager.disable_generation(plugin, load)
+        self.manager.disable_load(plugin, load)
     }
     pub(in crate::app) fn poll_owned(&mut self) -> Result<Vec<OwnedPluginEvent>, PluginError> {
         self.manager.poll_owned()
@@ -203,7 +203,7 @@ impl Plugins {
             .manager
             .load_id(plugin)
             .ok_or_else(|| PluginError::NotActive.to_string())?;
-        if !self.manager.is_active_generation(plugin, load) {
+        if !self.manager.is_active_load(plugin, load) {
             return Err(PluginError::NotActive.to_string());
         }
         let loan = self.edits.prepare_interactive(
@@ -237,12 +237,12 @@ impl Plugins {
             storage_results: Vec::new(),
             provider_requests: Vec::new(),
             virtual_document_requests: Vec::new(),
-            generation: context.generation,
+            request_id: context.request_id,
         };
         PluginHost::validate_invocation(&request).map_err(|error| error.to_string())?;
         let mut virtual_requests: crate::plugins::PluginVirtualRequestLane<'_> =
             self.virtual_documents.request_lane();
-        // Validate before consuming deliveries; real queue admission stays reserved
+        // Validate before consuming deliveries; queue capacity stays reserved
         // while the remaining payloads are built and queued.
         reservation.enqueue(|| {
             request.ui_events = self.ui.remove(&(plugin.into(), load)).unwrap_or_default();
@@ -337,7 +337,7 @@ impl Plugins {
             self.runtime_epoch,
         )
     }
-    pub(in crate::app) fn retire_stale_confirmations(
+    pub(in crate::app) fn invalidate_stale_confirmations(
         &mut self,
         editor: &EditorState,
         workspace: &WorkspaceVersion,
@@ -346,7 +346,7 @@ impl Plugins {
         windows: &crate::app::windows::Windows,
     ) -> bool {
         self.confirmations
-            .retire_stale(confirmations::ConfirmationContext {
+            .invalidate_stale(confirmations::ConfirmationContext {
                 manager: &self.manager,
                 editor,
                 workspace,
@@ -381,14 +381,14 @@ impl Plugins {
     pub(in crate::app) fn finish_edit(&mut self, key: &OriginKey) -> Result<(), String> {
         self.edits.finish(key)
     }
-    pub(in crate::app) fn retire_edits(
+    pub(in crate::app) fn discard_stale_edits(
         &mut self,
         editor: &EditorState,
         workspace: &WorkspaceVersion,
         configuration: u64,
     ) -> (usize, Option<OriginKey>) {
         self.edits
-            .retire(&self.manager, editor, workspace, configuration)
+            .discard_stale(&self.manager, editor, workspace, configuration)
     }
     pub(in crate::app) fn close_edits(&mut self) -> usize {
         self.edits.close()
@@ -451,7 +451,7 @@ impl Plugins {
         self.events.install(index)
     }
     pub(in crate::app) fn install_storage(&mut self, plugin: &str, load: PluginLoadId) {
-        self.storage.install_generation(plugin, load);
+        self.storage.install_load(plugin, load);
     }
     pub(in crate::app) fn reset_observation(&mut self) {
         self.observation = None;
@@ -460,12 +460,12 @@ impl Plugins {
         self.events = PluginHostEventQueue::default();
         self.observation = None;
     }
-    pub(in crate::app) fn remove_generation(&mut self, plugin: &str, load: PluginLoadId) -> bool {
-        let active_confirmation = self.confirmations.remove_generation(plugin, load);
+    pub(in crate::app) fn remove_load(&mut self, plugin: &str, load: PluginLoadId) -> bool {
+        let active_confirmation = self.confirmations.remove_load(plugin, load);
         self.ui.remove(&(plugin.into(), load));
         self.results.remove(&(plugin.into(), load));
-        self.events.remove_generation(plugin, load);
-        self.storage.remove_generation(plugin, load);
+        self.events.remove_load(plugin, load);
+        self.storage.remove_load(plugin, load);
         self.observation = None;
         active_confirmation
     }
@@ -490,7 +490,7 @@ impl Plugins {
             .filter(|index| index.storage.is_some())
         {
             self.storage
-                .reset_generation(&index.owner, PluginLoadId(index.generation));
+                .reset_load(&index.owner, PluginLoadId(index.plugin_load));
         }
         active_confirmation
     }
@@ -526,9 +526,7 @@ impl Plugins {
     pub(in crate::app) fn poll_storage(&mut self) {
         for result in self.storage.poll() {
             if self.manager.load_id(&result.plugin) == Some(result.load)
-                && self
-                    .manager
-                    .is_active_generation(&result.plugin, result.load)
+                && self.manager.is_active_load(&result.plugin, result.load)
             {
                 self.queue_storage(result);
             }
@@ -548,7 +546,7 @@ impl Plugins {
         }
         for index in self.plugin_contributions.ordered() {
             let plugin = &index.owner;
-            let load = PluginLoadId(index.generation);
+            let load = PluginLoadId(index.plugin_load);
             let _ = self.events.observe(
                 plugin,
                 load,
@@ -807,12 +805,12 @@ impl App {
             self.show_error(crate::plugins::PluginError::NotActive);
             return false;
         };
-        if !self.extension.is_active_generation(&plugin, load) {
+        if !self.extension.is_active_load(&plugin, load) {
             self.show_error(crate::plugins::PluginError::NotActive);
             return false;
         }
         self.refresh_plugin_host_events();
-        self.retire_plugin_edit_sources();
+        self.discard_stale_plugin_edits();
         let maximum = SEARCH_MAXIMUM_FILE_BYTES;
         let input_capture = self.input.capture_epoch();
         let interaction_available = self.input.prompt().is_none()
@@ -832,7 +830,7 @@ impl App {
                 editor: &self.state,
                 workspace: &self.workspace,
                 configuration: self.configuration.binding_revision_ref(),
-                generation: self.configuration.reload_id(),
+                request_id: self.configuration.reload_id(),
                 ui_revision: self.window_session.graph().revision(),
                 input_capture,
                 navigation,

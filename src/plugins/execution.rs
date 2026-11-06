@@ -72,7 +72,7 @@ pub struct PluginExecutionRequest {
     pub storage_results: Vec<PluginStorageResult>,
     pub provider_requests: Vec<PluginPickerRequestEnvelope>,
     pub virtual_document_requests: Vec<PluginVirtualDocumentRequest>,
-    pub generation: u64,
+    pub request_id: u64,
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PluginConfirmationAnswer {
@@ -85,8 +85,8 @@ pub enum PluginConfirmationAnswer {
 pub enum PluginConfirmationErrorCode {
     QueueFull,
     InvalidRequest,
-    GenerationLost,
-    SourceRetired,
+    LoadUnavailable,
+    StaleSource,
     Unavailable,
 }
 
@@ -314,18 +314,18 @@ pub enum PluginUiErrorCode {
     StaleGraph,
     StaleTree,
     StaleHandle,
-    ForeignGeneration,
+    ForeignLoad,
     UndeclaredContent,
     UndeclaredAction,
     DisallowedPlacement,
     HiddenFocus,
     CrossTab,
-    InstanceCeiling,
-    GraphCeiling,
+    InstanceLimit,
+    GraphLimit,
     InvalidTree,
     InvalidPlacement,
     CloseOrder,
-    GenerationLost,
+    LoadUnavailable,
     InternalRejected,
     WrongPresenter,
     StaleSurface,
@@ -337,7 +337,7 @@ pub enum PluginUiErrorCode {
     InvalidStyle,
     InvalidCursor,
     InvalidHitRegion,
-    PatchCeiling,
+    PatchLimit,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -423,7 +423,7 @@ impl PluginHostEventQueue {
         if index.subscriptions.is_empty() {
             return Ok(());
         }
-        let key = (index.owner.clone(), PluginLoadId(index.generation));
+        let key = (index.owner.clone(), PluginLoadId(index.plugin_load));
         if self.registrations.contains_key(&key) {
             return Err(PluginError::AlreadyActive);
         }
@@ -589,7 +589,7 @@ impl PluginHostEventQueue {
         }
     }
 
-    pub fn remove_generation(&mut self, plugin: &str, load: PluginLoadId) -> bool {
+    pub fn remove_load(&mut self, plugin: &str, load: PluginLoadId) -> bool {
         self.registrations
             .remove(&(plugin.to_string(), load))
             .is_some()
@@ -615,7 +615,7 @@ impl PluginHostEventQueue {
 pub struct PluginExecution {
     pub plugin: String,
     pub command: String,
-    pub generation: u64,
+    pub request_id: u64,
     pub result: String,
     pub messages: Vec<String>,
     pub proposals: Vec<PluginEditProposal>,

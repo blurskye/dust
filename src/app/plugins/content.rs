@@ -84,14 +84,14 @@ impl Plugins {
                 .map(|declaration| {
                     (
                         index.owner.clone(),
-                        PluginLoadId(index.generation),
+                        PluginLoadId(index.plugin_load),
                         declaration.command.clone(),
                     )
                 })
         }) else {
             return Err("plugin picker provider is not statically declared".into());
         };
-        if !self.manager.is_active_generation(&plugin, load) {
+        if !self.manager.is_active_load(&plugin, load) {
             return Err(crate::plugins::PluginError::NotActive.to_string());
         }
         let command = command
@@ -206,7 +206,7 @@ impl Plugins {
             return None;
         }
         if !self.provider_visible(request)
-            || !self.manager.is_active_generation(plugin, load)
+            || !self.manager.is_active_load(plugin, load)
             || !self
                 .providers
                 .owns_selection(plugin, load, request, item, command)
@@ -252,13 +252,13 @@ impl Plugins {
                     .map(|declaration| {
                         (
                             index.owner.clone(),
-                            PluginLoadId(index.generation),
+                            PluginLoadId(index.plugin_load),
                             declaration.command.clone(),
                         )
                     })
             })
             .ok_or("unknown virtual document source")?;
-        if !self.manager.is_active_generation(&plugin, load) {
+        if !self.manager.is_active_load(&plugin, load) {
             return Err(crate::plugins::PluginError::NotActive.to_string());
         }
         if let Some(entry) = self.virtual_editor.find(&plugin, load, source, &key) {
@@ -303,7 +303,7 @@ impl Plugins {
         let command = self
             .plugin_contributions
             .get(&entry.plugin)
-            .filter(|index| index.generation == entry.load.0)
+            .filter(|index| index.plugin_load == entry.load.0)
             .and_then(|index| {
                 index
                     .virtual_documents
@@ -315,7 +315,7 @@ impl Plugins {
             .strip_prefix(&format!("plugin.{}.", entry.plugin))
             .ok_or("invalid virtual document command")?
             .to_owned();
-        if !self.manager.is_active_generation(&entry.plugin, entry.load) {
+        if !self.manager.is_active_load(&entry.plugin, entry.load) {
             return Err(crate::plugins::PluginError::NotActive.to_string());
         }
         self.virtual_documents
@@ -511,17 +511,17 @@ impl Plugins {
         }
         self.virtual_publication(context, draft, bridge, None, None)
     }
-    pub(in crate::app) fn retire_virtual<'a>(
+    pub(in crate::app) fn remove_virtual_documents<'a>(
         &'a mut self,
         plugin: &str,
         load: PluginLoadId,
         context: VirtualContext<'_>,
         mut descriptions: NativeDescriptions<'_>,
     ) -> Result<Option<(VirtualPublication<'a>, EditorWindowCandidate)>, String> {
-        // Retirement revokes requests even if the window graph cannot remove the
+        // Remove requests even if the window graph cannot remove the
         // retained read-only presentation. It is not publication rollback.
-        self.virtual_documents.remove_generation(plugin, load);
-        if !self.virtual_editor.has_generation(plugin, load) {
+        self.virtual_documents.remove_load(plugin, load);
+        if !self.virtual_editor.has_load(plugin, load) {
             return Ok(None);
         }
         context
@@ -529,17 +529,17 @@ impl Plugins {
             .check_editor_admission(&context.editor.into())?;
         let mut draft = context.editor.draft();
         let mut bridge = self.virtual_editor.clone();
-        bridge.remove_generation(&mut draft, plugin, load)?;
+        bridge.remove_load(&mut draft, plugin, load)?;
         descriptions.signature.dashboard_visible |= draft.topology().active_tab().is_none();
         self.virtual_publication(context, draft, bridge, None, Some(descriptions))
             .map(Some)
     }
-    pub(in crate::app) fn retire_provider_generation(
+    pub(in crate::app) fn remove_provider_load(
         &mut self,
         plugin: &str,
         load: PluginLoadId,
     ) -> bool {
-        self.providers.remove_generation(plugin, load);
+        self.providers.remove_load(plugin, load);
         self.provider_sources
             .retain(|request, _| self.providers.presentable(*request));
         if self
@@ -580,7 +580,7 @@ impl Plugins {
         index: &crate::plugins::PluginContributionIndex,
     ) -> crate::plugins::PluginVirtualDocumentRequest {
         let declaration = &index.virtual_documents[0];
-        let load = PluginLoadId(index.generation);
+        let load = PluginLoadId(index.plugin_load);
         self.virtual_documents.install(index).unwrap();
         self.virtual_documents
             .start(&index.owner, load, &declaration.id, "help".into())

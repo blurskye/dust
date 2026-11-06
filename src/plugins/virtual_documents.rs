@@ -22,7 +22,7 @@ pub enum PluginVirtualDocumentErrorCode {
     UnknownSource,
     UnknownRequest,
     UnknownDocument,
-    StaleGeneration,
+    StaleLoad,
     StaleRevision,
     Cancelled,
     Expired,
@@ -30,9 +30,9 @@ pub enum PluginVirtualDocumentErrorCode {
     InvalidLanguage,
     InvalidUtf8Range,
     InvalidControl,
-    ByteCeiling,
-    LineCeiling,
-    PatchCeiling,
+    ByteLimit,
+    LineLimit,
+    PatchLimit,
     ReadOnly,
     Malformed,
     Internal,
@@ -71,7 +71,7 @@ pub struct PluginVirtualDocumentRequest {
     pub kind: PluginVirtualDocumentRequestKind,
     pub current_revision: Option<u64>,
     pub deadline_milliseconds: u32,
-    pub cancellation_generation: u64,
+    pub cancellation_id: u64,
     pub maximum_document_bytes: u32,
     pub maximum_document_lines: u32,
     pub maximum_patch_bytes: u32,
@@ -108,7 +108,7 @@ pub enum PluginVirtualDocumentProposalKind {
 pub struct PluginVirtualDocumentProposal {
     pub request: u64,
     pub document: u64,
-    pub cancellation_generation: u64,
+    pub cancellation_id: u64,
     pub kind: PluginVirtualDocumentProposalKind,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -139,7 +139,7 @@ struct Document {
     language: String,
     text: String,
     revision: u64,
-    cancellation_generation: u64,
+    cancellation_id: u64,
     pending_request: Option<u64>,
     closed: bool,
 }
@@ -152,7 +152,7 @@ struct Pending {
     kind: PluginVirtualDocumentRequestKind,
     deadline: Instant,
     deadline_milliseconds: u32,
-    cancellation_generation: u64,
+    cancellation_id: u64,
     delivered: bool,
 }
 #[derive(Clone, Debug, Default)]
@@ -191,7 +191,7 @@ impl PluginVirtualDocumentBroker {
         for declaration in &index.virtual_documents {
             let key = (
                 index.owner.clone(),
-                PluginLoadId(index.generation),
+                PluginLoadId(index.plugin_load),
                 declaration.id.clone(),
             );
             if self
@@ -206,7 +206,7 @@ impl PluginVirtualDocumentBroker {
             {
                 return Err(err(
                     PluginVirtualDocumentErrorCode::UnknownSource,
-                    "virtual document generation already installed",
+                    "virtual document load already installed",
                 ));
             }
         }
@@ -241,7 +241,7 @@ impl PluginVirtualDocumentBroker {
             .ok_or_else(|| {
                 err(
                     PluginVirtualDocumentErrorCode::UnknownSource,
-                    "source is not owned by this generation",
+                    "source is not owned by this plugin load",
                 )
             })?
             .clone();
@@ -264,7 +264,7 @@ impl PluginVirtualDocumentBroker {
         if active >= usize::from(owner.declaration.maximum_concurrent_documents) {
             return Err(err(
                 PluginVirtualDocumentErrorCode::QueueFull,
-                "concurrent document ceiling reached",
+                "concurrent document limit reached",
             ));
         }
         let document = self.alloc_document()?;
@@ -280,7 +280,7 @@ impl PluginVirtualDocumentBroker {
                 language: String::new(),
                 text: String::new(),
                 revision: 0,
-                cancellation_generation: cancellation,
+                cancellation_id: cancellation,
                 pending_request: None,
                 closed: false,
             },
@@ -361,8 +361,8 @@ impl PluginVirtualDocumentBroker {
         })?;
         if doc.plugin != plugin || doc.load != load {
             return Err(err(
-                PluginVirtualDocumentErrorCode::StaleGeneration,
-                "foreign document generation",
+                PluginVirtualDocumentErrorCode::StaleLoad,
+                "foreign document load",
             ));
         }
         if doc.pending_request.is_some() {
@@ -377,7 +377,7 @@ impl PluginVirtualDocumentBroker {
             .ok_or_else(|| {
                 err(
                     PluginVirtualDocumentErrorCode::UnknownSource,
-                    "source generation unavailable",
+                    "source load unavailable",
                 )
             })?
             .declaration
@@ -415,7 +415,7 @@ impl PluginVirtualDocumentBroker {
                 kind,
                 deadline: now + Duration::from_millis(u64::from(deadline_ms)),
                 deadline_milliseconds: deadline_ms,
-                cancellation_generation: d.cancellation_generation,
+                cancellation_id: d.cancellation_id,
                 delivered: false,
             },
         );
@@ -460,7 +460,7 @@ impl PluginVirtualDocumentBroker {
                     kind: p.kind,
                     current_revision: (d.revision > 0).then_some(d.revision),
                     deadline_milliseconds: p.deadline_milliseconds,
-                    cancellation_generation: p.cancellation_generation,
+                    cancellation_id: p.cancellation_id,
                     maximum_document_bytes: o.maximum_document_bytes,
                     maximum_document_lines: o.maximum_document_lines,
                     maximum_patch_bytes: o.maximum_patch_bytes,
@@ -484,8 +484,8 @@ impl PluginVirtualDocumentBroker {
         })?;
         if pending.plugin != plugin || pending.load != load {
             return Err(err(
-                PluginVirtualDocumentErrorCode::StaleGeneration,
-                "foreign request generation",
+                PluginVirtualDocumentErrorCode::StaleLoad,
+                "foreign request load",
             ));
         }
         if !pending.delivered {
@@ -500,10 +500,10 @@ impl PluginVirtualDocumentBroker {
                 "request/document mismatch",
             ));
         }
-        if pending.cancellation_generation != proposal.cancellation_generation {
+        if pending.cancellation_id != proposal.cancellation_id {
             return Err(err(
                 PluginVirtualDocumentErrorCode::Cancelled,
-                "stale cancellation generation",
+                "stale cancellation ID",
             ));
         }
         if pending.deadline < crate::clock::monotonic() {
@@ -518,7 +518,7 @@ impl PluginVirtualDocumentBroker {
         {
             return Err(err(
                 PluginVirtualDocumentErrorCode::UnknownSource,
-                "source generation unavailable",
+                "source load unavailable",
             ));
         }
         let document = self.documents.get(&proposal.document).ok_or_else(|| {
@@ -562,7 +562,7 @@ impl PluginVirtualDocumentBroker {
             .ok_or_else(|| {
                 err(
                     PluginVirtualDocumentErrorCode::UnknownSource,
-                    "source generation unavailable",
+                    "source load unavailable",
                 )
             })?
             .declaration;
@@ -643,7 +643,7 @@ impl PluginVirtualDocumentBroker {
                     || set.patches.len() > usize::from(owner.maximum_patches_per_request)
                 {
                     return Err(err(
-                        PluginVirtualDocumentErrorCode::PatchCeiling,
+                        PluginVirtualDocumentErrorCode::PatchLimit,
                         "patch count invalid",
                     ));
                 }
@@ -669,7 +669,7 @@ impl PluginVirtualDocumentBroker {
                             .checked_add(p.replacement.len())
                             .ok_or_else(|| {
                                 err(
-                                    PluginVirtualDocumentErrorCode::PatchCeiling,
+                                    PluginVirtualDocumentErrorCode::PatchLimit,
                                     "patch bytes overflow",
                                 )
                             })?;
@@ -677,7 +677,7 @@ impl PluginVirtualDocumentBroker {
                 }
                 if patch_bytes > owner.maximum_patch_bytes as usize {
                     return Err(err(
-                        PluginVirtualDocumentErrorCode::PatchCeiling,
+                        PluginVirtualDocumentErrorCode::PatchLimit,
                         "aggregate patch bytes exceeded",
                     ));
                 }
@@ -779,7 +779,7 @@ impl PluginVirtualDocumentBroker {
             closed: d.closed,
         })
     }
-    pub fn remove_generation(&mut self, plugin: &str, load: PluginLoadId) -> bool {
+    pub fn remove_load(&mut self, plugin: &str, load: PluginLoadId) -> bool {
         let keys = self
             .owners
             .keys()
@@ -847,8 +847,8 @@ fn validate_text(
 ) -> Result<(), PluginVirtualDocumentError> {
     if value.len() > maximum {
         return Err(err(
-            PluginVirtualDocumentErrorCode::ByteCeiling,
-            "text byte ceiling exceeded",
+            PluginVirtualDocumentErrorCode::ByteLimit,
+            "text byte limit exceeded",
         ));
     }
     if value
@@ -875,8 +875,8 @@ fn validate_document(
         > o.maximum_document_lines as usize
     {
         return Err(err(
-            PluginVirtualDocumentErrorCode::LineCeiling,
-            "document line ceiling exceeded",
+            PluginVirtualDocumentErrorCode::LineLimit,
+            "document line limit exceeded",
         ));
     }
     Ok(())
@@ -892,7 +892,7 @@ mod tests {
             owner: "demo".into(),
             version: "1".into(),
             checksum: "0".repeat(64),
-            generation: 7,
+            plugin_load: 7,
             source: "manifest".into(),
             commands: BTreeMap::new(),
             contexts: vec![],
@@ -920,7 +920,7 @@ mod tests {
         }
     }
     #[test]
-    fn full_patch_cancellation_generation_and_idle_are_atomic() {
+    fn full_patch_cancellation_id_and_idle_are_atomic() {
         let mut b = PluginVirtualDocumentBroker::default();
         b.install(&index()).unwrap();
         let d = b
@@ -947,7 +947,7 @@ mod tests {
                 PluginVirtualDocumentProposal {
                     request: r.request,
                     document: d,
-                    cancellation_generation: r.cancellation_generation,
+                    cancellation_id: r.cancellation_id,
                     kind: PluginVirtualDocumentProposalKind::Full(PluginVirtualDocumentFull {
                         expected_revision: None,
                         revision: 1,
@@ -965,7 +965,7 @@ mod tests {
         let bad = PluginVirtualDocumentProposal {
             request: r.request,
             document: d,
-            cancellation_generation: r.cancellation_generation,
+            cancellation_id: r.cancellation_id,
             kind: PluginVirtualDocumentProposalKind::Patches(PluginVirtualDocumentPatchSet {
                 expected_revision: 1,
                 revision: 2,
@@ -984,7 +984,7 @@ mod tests {
         let good = PluginVirtualDocumentProposal {
             request: r.request,
             document: d,
-            cancellation_generation: r.cancellation_generation,
+            cancellation_id: r.cancellation_id,
             kind: PluginVirtualDocumentProposalKind::Patches(PluginVirtualDocumentPatchSet {
                 expected_revision: 1,
                 revision: 2,
@@ -1012,7 +1012,7 @@ mod tests {
                 PluginVirtualDocumentProposal {
                     request: late.request,
                     document: d,
-                    cancellation_generation: late.cancellation_generation,
+                    cancellation_id: late.cancellation_id,
                     kind: PluginVirtualDocumentProposalKind::CloseAcknowledged
                 }
             )
@@ -1046,7 +1046,7 @@ mod tests {
             .is_ok()
         );
         let mut eight = index();
-        eight.generation = 8;
+        eight.plugin_load = 8;
         b.install(&eight).unwrap();
         let replacement = b
             .start(
@@ -1056,7 +1056,7 @@ mod tests {
                 "new".into(),
             )
             .unwrap();
-        assert!(b.remove_generation("demo", PluginLoadId(7)));
+        assert!(b.remove_load("demo", PluginLoadId(7)));
         assert!(b.snapshot(replacement).is_some());
         assert_eq!(
             b.command_for_document("demo", PluginLoadId(8), replacement),
@@ -1065,7 +1065,7 @@ mod tests {
     }
 
     #[test]
-    fn hostile_ownership_ceilings_and_cleanup() {
+    fn hostile_ownership_limits_and_cleanup() {
         let mut b = PluginVirtualDocumentBroker::default();
         b.install(&index()).unwrap();
         assert_eq!(
@@ -1126,7 +1126,7 @@ mod tests {
                     PluginVirtualDocumentProposal {
                         request: r.request,
                         document: d,
-                        cancellation_generation: r.cancellation_generation,
+                        cancellation_id: r.cancellation_id,
                         kind: PluginVirtualDocumentProposalKind::Full(PluginVirtualDocumentFull {
                             expected_revision: None,
                             revision: 1,
@@ -1139,8 +1139,8 @@ mod tests {
                 .unwrap_err();
             assert_eq!(e.code, code);
         }
-        assert!(!b.remove_generation("demo", PluginLoadId(8)));
-        assert!(b.remove_generation("demo", PluginLoadId(7)));
+        assert!(!b.remove_load("demo", PluginLoadId(8)));
+        assert!(b.remove_load("demo", PluginLoadId(7)));
         assert!(b.snapshot(d).is_none());
     }
 
@@ -1167,7 +1167,7 @@ mod tests {
                 PluginVirtualDocumentProposal {
                     request: request.request,
                     document,
-                    cancellation_generation: request.cancellation_generation,
+                    cancellation_id: request.cancellation_id,
                     kind: PluginVirtualDocumentProposalKind::Full(PluginVirtualDocumentFull {
                         expected_revision: None,
                         revision: 1,
@@ -1192,7 +1192,7 @@ mod tests {
                     PluginVirtualDocumentProposal {
                         request: request.request,
                         document,
-                        cancellation_generation: request.cancellation_generation,
+                        cancellation_id: request.cancellation_id,
                         kind: PluginVirtualDocumentProposalKind::Error(error.clone())
                     }
                 )
@@ -1215,7 +1215,7 @@ mod tests {
         let proposal = PluginVirtualDocumentProposal {
             request: close.request,
             document,
-            cancellation_generation: close.cancellation_generation,
+            cancellation_id: close.cancellation_id,
             kind: PluginVirtualDocumentProposalKind::Full(PluginVirtualDocumentFull {
                 expected_revision: Some(1),
                 revision: 2,
@@ -1254,7 +1254,7 @@ mod tests {
     }
 
     #[test]
-    fn failed_virtual_request_admission_does_not_leave_a_document() {
+    fn failed_virtual_request_reservation_does_not_leave_a_document() {
         let mut broker = PluginVirtualDocumentBroker::default();
         let mut index = index();
         index.virtual_documents[0].maximum_concurrent_documents = 100;

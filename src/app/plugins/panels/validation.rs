@@ -71,7 +71,7 @@ pub(in crate::app) fn map_graph_error(error: WindowError) -> PluginUiError {
         | WindowError::MultipleFullscreenWindows
         | WindowError::TiledLayoutTooDeep
         | WindowError::RevisionExhausted
-        | WindowError::IdentifierExhausted => PluginUiErrorCode::GraphCeiling,
+        | WindowError::IdentifierExhausted => PluginUiErrorCode::GraphLimit,
         WindowError::WindowOutsideActiveTab | WindowError::FocusOutsideActiveTab => {
             PluginUiErrorCode::CrossTab
         }
@@ -286,7 +286,7 @@ pub(in crate::app) fn validate_private_snapshot(
         || snapshot.hit_regions.len() > usize::from(policy.maximum_hit_regions)
     {
         return Err(ui_error(
-            PluginUiErrorCode::PatchCeiling,
+            PluginUiErrorCode::PatchLimit,
             "private snapshot exceeds its declaration",
         ));
     }
@@ -300,19 +300,13 @@ pub(in crate::app) fn validate_private_snapshot(
             ));
         }
         bytes = bytes.checked_add(8).ok_or_else(|| {
-            ui_error(
-                PluginUiErrorCode::PatchCeiling,
-                "private byte count overflow",
-            )
+            ui_error(PluginUiErrorCode::PatchLimit, "private byte count overflow")
         })?;
     }
     let mut cells = BTreeMap::new();
     for cell in &snapshot.cells {
         bytes = bytes.checked_add(cell.grapheme.len()).ok_or_else(|| {
-            ui_error(
-                PluginUiErrorCode::PatchCeiling,
-                "private byte count overflow",
-            )
+            ui_error(PluginUiErrorCode::PatchLimit, "private byte count overflow")
         })?;
         if cell.x >= width || cell.y >= height {
             return Err(ui_error(
@@ -399,10 +393,7 @@ pub(in crate::app) fn validate_private_snapshot(
             height: hit.height,
         };
         bytes = bytes.checked_add(hit.action.len()).ok_or_else(|| {
-            ui_error(
-                PluginUiErrorCode::PatchCeiling,
-                "private byte count overflow",
-            )
+            ui_error(PluginUiErrorCode::PatchLimit, "private byte count overflow")
         })?;
         if !rect_in_bounds(rect, width, height)
             || hit.action != declaration.command
@@ -419,8 +410,8 @@ pub(in crate::app) fn validate_private_snapshot(
     }
     if bytes > usize::try_from(policy.maximum_bytes).unwrap_or(usize::MAX) {
         return Err(ui_error(
-            PluginUiErrorCode::PatchCeiling,
-            "private snapshot byte ceiling exceeded",
+            PluginUiErrorCode::PatchLimit,
+            "private snapshot byte limit exceeded",
         ));
     }
     Ok(())
@@ -463,7 +454,7 @@ pub(in crate::app) fn apply_private_patch(
         || patch.dirty.len() > usize::from(policy.maximum_dirty_rectangles)
     {
         return Err(ui_error(
-            PluginUiErrorCode::PatchCeiling,
+            PluginUiErrorCode::PatchLimit,
             "private patch exceeds its declaration",
         ));
     }
@@ -597,7 +588,7 @@ pub(in crate::app) fn validate_tree(
     if text_bytes > MAXIMUM_PLUGIN_UI_TEXT_BYTES || child_count > MAXIMUM_PLUGIN_UI_CHILDREN {
         return Err(ui_error(
             PluginUiErrorCode::InvalidTree,
-            "retained UI aggregate ceiling exceeded",
+            "retained UI aggregate limit exceeded",
         ));
     }
     let mut visited = BTreeSet::new();

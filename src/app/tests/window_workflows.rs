@@ -843,7 +843,10 @@ fn plugin_admission_counts_all_graph_and_host_copies_in_invalid_unchanged_valid_
             },
         },
     );
-    assert_eq!(stale.error.unwrap().code, PluginUiErrorCode::GenerationLost);
+    assert_eq!(
+        stale.error.unwrap().code,
+        PluginUiErrorCode::LoadUnavailable
+    );
     assert_eq!(session.copy_counts(), idle);
     eprintln!(
         "admission copies (graph, host): invalid=(0,0), unchanged=(0,0), valid-open={valid_copies:?}, valid-retained=(0,0); 256 idle reconciliations=(0,0), content builds=0"

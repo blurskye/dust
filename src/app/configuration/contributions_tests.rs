@@ -107,7 +107,7 @@ pub(in crate::app) fn indexed_plugin_defaults_install_before_activation_and_roll
         .expect("indexed binding");
     assert_eq!(indexed.contribution_owner.as_deref(), Some("demo"));
     assert_eq!(indexed.plugin_load, load.0);
-    assert!(!app.extension.is_active_generation("demo", load));
+    assert!(!app.extension.is_active_load("demo", load));
     let previous = app.extension.load_id("demo");
     app.invoke_mapped(
         crate::editor::CommandInvocation::new("plugin.demo.run", InvocationSource::Test)

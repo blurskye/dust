@@ -191,7 +191,7 @@ impl component_api::dust::plugin::host::Host for ComponentHostState {
             return Err("capability denied".into());
         }
         if edits.len() > 4096 {
-            return Err("edit ceiling exceeded".into());
+            return Err("edit limit exceeded".into());
         }
         if edits
             .iter()
@@ -218,7 +218,7 @@ impl component_api::dust::plugin::host::Host for ComponentHostState {
                 })
                 .is_none_or(|bytes| bytes > 1024 * 1024)
         {
-            return Err("edit proposal batch ceiling exceeded".into());
+            return Err("edit proposal batch limit exceeded".into());
         }
         self.proposals.push((buffer, revision, edits));
         Ok(self.proposals.len() as u64)
@@ -276,7 +276,7 @@ impl component_api::dust::plugin::host::Host for ComponentHostState {
         if self.pending_ui_tokens.len() >= 64 {
             return Err(component_ui_error(PluginUiError::new(
                 PluginUiErrorCode::QueueFull,
-                "UI request ceiling exceeded",
+                "UI request limit exceeded",
             )));
         }
         let token = self.next_ui_token;
@@ -298,7 +298,7 @@ impl component_api::dust::plugin::host::Host for ComponentHostState {
         {
             return Err(component_ui_error(PluginUiError::new(
                 PluginUiErrorCode::QueueFull,
-                "UI request byte ceiling exceeded",
+                "UI request byte limit exceeded",
             )));
         }
         self.pending_ui_tokens.insert(token);
@@ -385,7 +385,7 @@ impl component_api::dust::plugin::host::Host for ComponentHostState {
             return Err("capability denied".into());
         }
         if ids.len() > 64 {
-            return Err("host event acknowledgement ceiling exceeded".into());
+            return Err("host event acknowledgement limit exceeded".into());
         }
         let mut unique = BTreeSet::new();
         for id in ids {
@@ -395,7 +395,7 @@ impl component_api::dust::plugin::host::Host for ComponentHostState {
         }
         unique.extend(self.host_event_acknowledgements.iter().copied());
         if unique.len() > 64 {
-            return Err("host event acknowledgement ceiling exceeded".into());
+            return Err("host event acknowledgement limit exceeded".into());
         }
         self.host_event_acknowledgements = unique.into_iter().collect();
         Ok(())
@@ -420,7 +420,7 @@ impl component_api::dust::plugin::host::Host for ComponentHostState {
         if self.storage_requests.len() >= STORAGE_REQUEST_LIMIT {
             return Err(component_storage_error(PluginStorageError::new(
                 PluginStorageErrorCode::QueueFull,
-                "storage request ceiling exceeded",
+                "storage request limit exceeded",
             )));
         }
         let token = self.next_storage_token;
@@ -539,8 +539,8 @@ impl component_api::dust::plugin::host::Host for ComponentHostState {
             .is_none_or(|bytes| bytes > MAXIMUM_PROVIDER_BYTES as usize)
         {
             return Err(component_provider_error(PluginProviderError::new(
-                PluginProviderErrorCode::ByteCeiling,
-                "provider chunk queue byte ceiling exceeded",
+                PluginProviderErrorCode::ByteLimit,
+                "provider chunk queue byte limit exceeded",
             )));
         }
         self.provider_chunks.push(chunk);
@@ -614,8 +614,8 @@ impl component_api::dust::plugin::host::Host for ComponentHostState {
         {
             return Err(component_virtual_document_error(
                 PluginVirtualDocumentError::new(
-                    PluginVirtualDocumentErrorCode::ByteCeiling,
-                    "virtual document proposal queue byte ceiling exceeded",
+                    PluginVirtualDocumentErrorCode::ByteLimit,
+                    "virtual document proposal queue byte limit exceeded",
                 ),
             ));
         }
@@ -686,8 +686,8 @@ pub(super) fn component_confirmation_error(
         code: match error.code {
             PluginConfirmationErrorCode::QueueFull => C::QueueFull,
             PluginConfirmationErrorCode::InvalidRequest => C::InvalidRequest,
-            PluginConfirmationErrorCode::GenerationLost => C::GenerationLost,
-            PluginConfirmationErrorCode::SourceRetired => C::SourceRetired,
+            PluginConfirmationErrorCode::LoadUnavailable => C::GenerationLost,
+            PluginConfirmationErrorCode::StaleSource => C::SourceRetired,
             PluginConfirmationErrorCode::Unavailable => C::Unavailable,
         },
         detail: error.detail,
@@ -727,7 +727,7 @@ pub(super) fn component_virtual_document_request(
         },
         current_revision: request.current_revision,
         deadline_milliseconds: request.deadline_milliseconds,
-        cancellation_generation: request.cancellation_generation,
+        cancellation_generation: request.cancellation_id,
         maximum_document_bytes: request.maximum_document_bytes,
         maximum_document_lines: request.maximum_document_lines,
         maximum_patch_bytes: request.maximum_patch_bytes,
@@ -745,8 +745,8 @@ pub(super) fn convert_component_virtual_document_proposal(
                 || f.text.len() > MAXIMUM_VIRTUAL_DOCUMENT_BYTES as usize
             {
                 return Err(PluginVirtualDocumentError::new(
-                    PluginVirtualDocumentErrorCode::ByteCeiling,
-                    "virtual document full proposal exceeds absolute ceiling",
+                    PluginVirtualDocumentErrorCode::ByteLimit,
+                    "virtual document full proposal exceeds absolute limit",
                 ));
             }
             PluginVirtualDocumentProposalKind::Full(PluginVirtualDocumentFull {
@@ -760,8 +760,8 @@ pub(super) fn convert_component_virtual_document_proposal(
         K::Patches(s) => {
             if s.patches.len() > 256 {
                 return Err(PluginVirtualDocumentError::new(
-                    PluginVirtualDocumentErrorCode::PatchCeiling,
-                    "virtual document patch count exceeds absolute ceiling",
+                    PluginVirtualDocumentErrorCode::PatchLimit,
+                    "virtual document patch count exceeds absolute limit",
                 ));
             }
             let mut bytes = 0usize;
@@ -769,14 +769,14 @@ pub(super) fn convert_component_virtual_document_proposal(
             for p in s.patches {
                 bytes = bytes.checked_add(p.replacement.len()).ok_or_else(|| {
                     PluginVirtualDocumentError::new(
-                        PluginVirtualDocumentErrorCode::PatchCeiling,
+                        PluginVirtualDocumentErrorCode::PatchLimit,
                         "patch byte overflow",
                     )
                 })?;
                 if bytes > MAXIMUM_VIRTUAL_PATCH_BYTES as usize {
                     return Err(PluginVirtualDocumentError::new(
-                        PluginVirtualDocumentErrorCode::PatchCeiling,
-                        "patch bytes exceed absolute ceiling",
+                        PluginVirtualDocumentErrorCode::PatchLimit,
+                        "patch bytes exceed absolute limit",
                     ));
                 }
                 patches.push(PluginVirtualDocumentPatch {
@@ -797,7 +797,7 @@ pub(super) fn convert_component_virtual_document_proposal(
     Ok(PluginVirtualDocumentProposal {
         request: p.request,
         document: p.document,
-        cancellation_generation: p.cancellation_generation,
+        cancellation_id: p.cancellation_generation,
         kind,
     })
 }
@@ -811,7 +811,7 @@ pub(super) fn internal_virtual_document_error(
             C::UnknownSource => PluginVirtualDocumentErrorCode::UnknownSource,
             C::UnknownRequest => PluginVirtualDocumentErrorCode::UnknownRequest,
             C::UnknownDocument => PluginVirtualDocumentErrorCode::UnknownDocument,
-            C::StaleGeneration => PluginVirtualDocumentErrorCode::StaleGeneration,
+            C::StaleGeneration => PluginVirtualDocumentErrorCode::StaleLoad,
             C::StaleRevision => PluginVirtualDocumentErrorCode::StaleRevision,
             C::Cancelled => PluginVirtualDocumentErrorCode::Cancelled,
             C::Expired => PluginVirtualDocumentErrorCode::Expired,
@@ -819,9 +819,9 @@ pub(super) fn internal_virtual_document_error(
             C::InvalidLanguage => PluginVirtualDocumentErrorCode::InvalidLanguage,
             C::InvalidUtf8Range => PluginVirtualDocumentErrorCode::InvalidUtf8Range,
             C::InvalidControl => PluginVirtualDocumentErrorCode::InvalidControl,
-            C::ByteCeiling => PluginVirtualDocumentErrorCode::ByteCeiling,
-            C::LineCeiling => PluginVirtualDocumentErrorCode::LineCeiling,
-            C::PatchCeiling => PluginVirtualDocumentErrorCode::PatchCeiling,
+            C::ByteCeiling => PluginVirtualDocumentErrorCode::ByteLimit,
+            C::LineCeiling => PluginVirtualDocumentErrorCode::LineLimit,
+            C::PatchCeiling => PluginVirtualDocumentErrorCode::PatchLimit,
             C::ReadOnly => PluginVirtualDocumentErrorCode::ReadOnly,
             C::Malformed => PluginVirtualDocumentErrorCode::Malformed,
             C::Internal => PluginVirtualDocumentErrorCode::Internal,
@@ -839,7 +839,7 @@ pub(super) fn component_virtual_document_error(
             PluginVirtualDocumentErrorCode::UnknownSource => C::UnknownSource,
             PluginVirtualDocumentErrorCode::UnknownRequest => C::UnknownRequest,
             PluginVirtualDocumentErrorCode::UnknownDocument => C::UnknownDocument,
-            PluginVirtualDocumentErrorCode::StaleGeneration => C::StaleGeneration,
+            PluginVirtualDocumentErrorCode::StaleLoad => C::StaleGeneration,
             PluginVirtualDocumentErrorCode::StaleRevision => C::StaleRevision,
             PluginVirtualDocumentErrorCode::Cancelled => C::Cancelled,
             PluginVirtualDocumentErrorCode::Expired => C::Expired,
@@ -847,9 +847,9 @@ pub(super) fn component_virtual_document_error(
             PluginVirtualDocumentErrorCode::InvalidLanguage => C::InvalidLanguage,
             PluginVirtualDocumentErrorCode::InvalidUtf8Range => C::InvalidUtf8Range,
             PluginVirtualDocumentErrorCode::InvalidControl => C::InvalidControl,
-            PluginVirtualDocumentErrorCode::ByteCeiling => C::ByteCeiling,
-            PluginVirtualDocumentErrorCode::LineCeiling => C::LineCeiling,
-            PluginVirtualDocumentErrorCode::PatchCeiling => C::PatchCeiling,
+            PluginVirtualDocumentErrorCode::ByteLimit => C::ByteCeiling,
+            PluginVirtualDocumentErrorCode::LineLimit => C::LineCeiling,
+            PluginVirtualDocumentErrorCode::PatchLimit => C::PatchCeiling,
             PluginVirtualDocumentErrorCode::ReadOnly => C::ReadOnly,
             PluginVirtualDocumentErrorCode::Malformed => C::Malformed,
             PluginVirtualDocumentErrorCode::Internal => C::Internal,
@@ -869,7 +869,7 @@ pub(super) fn component_provider_request(
         workspace_revision: request.workspace_revision,
         buffer_revision: request.buffer_revision,
         deadline_milliseconds: request.deadline_milliseconds,
-        cancellation_generation: request.cancellation_generation,
+        cancellation_generation: request.cancellation_id,
         maximum_items: request.maximum_items,
         maximum_bytes: request.maximum_bytes,
     }
@@ -922,14 +922,14 @@ pub(super) fn internal_provider_error(
             ProviderErrorCode::QueueFull => PluginProviderErrorCode::QueueFull,
             ProviderErrorCode::UnknownRequest => PluginProviderErrorCode::UnknownRequest,
             ProviderErrorCode::UnknownProvider => PluginProviderErrorCode::UnknownProvider,
-            ProviderErrorCode::StaleGeneration => PluginProviderErrorCode::StaleGeneration,
+            ProviderErrorCode::StaleGeneration => PluginProviderErrorCode::StaleLoad,
             ProviderErrorCode::StaleRevision => PluginProviderErrorCode::StaleRevision,
             ProviderErrorCode::Cancelled => PluginProviderErrorCode::Cancelled,
             ProviderErrorCode::Expired => PluginProviderErrorCode::Expired,
             ProviderErrorCode::InvalidSequence => PluginProviderErrorCode::InvalidSequence,
             ProviderErrorCode::DuplicateItem => PluginProviderErrorCode::DuplicateItem,
-            ProviderErrorCode::ItemCeiling => PluginProviderErrorCode::ItemCeiling,
-            ProviderErrorCode::ByteCeiling => PluginProviderErrorCode::ByteCeiling,
+            ProviderErrorCode::ItemCeiling => PluginProviderErrorCode::ItemLimit,
+            ProviderErrorCode::ByteCeiling => PluginProviderErrorCode::ByteLimit,
             ProviderErrorCode::Malformed => PluginProviderErrorCode::Malformed,
             ProviderErrorCode::Unavailable => PluginProviderErrorCode::Unavailable,
             ProviderErrorCode::Internal => PluginProviderErrorCode::Internal,
@@ -947,14 +947,14 @@ pub(super) fn component_provider_error(
             PluginProviderErrorCode::QueueFull => ProviderErrorCode::QueueFull,
             PluginProviderErrorCode::UnknownRequest => ProviderErrorCode::UnknownRequest,
             PluginProviderErrorCode::UnknownProvider => ProviderErrorCode::UnknownProvider,
-            PluginProviderErrorCode::StaleGeneration => ProviderErrorCode::StaleGeneration,
+            PluginProviderErrorCode::StaleLoad => ProviderErrorCode::StaleGeneration,
             PluginProviderErrorCode::StaleRevision => ProviderErrorCode::StaleRevision,
             PluginProviderErrorCode::Cancelled => ProviderErrorCode::Cancelled,
             PluginProviderErrorCode::Expired => ProviderErrorCode::Expired,
             PluginProviderErrorCode::InvalidSequence => ProviderErrorCode::InvalidSequence,
             PluginProviderErrorCode::DuplicateItem => ProviderErrorCode::DuplicateItem,
-            PluginProviderErrorCode::ItemCeiling => ProviderErrorCode::ItemCeiling,
-            PluginProviderErrorCode::ByteCeiling => ProviderErrorCode::ByteCeiling,
+            PluginProviderErrorCode::ItemLimit => ProviderErrorCode::ItemCeiling,
+            PluginProviderErrorCode::ByteLimit => ProviderErrorCode::ByteCeiling,
             PluginProviderErrorCode::Malformed => ProviderErrorCode::Malformed,
             PluginProviderErrorCode::Unavailable => ProviderErrorCode::Unavailable,
             PluginProviderErrorCode::Internal => ProviderErrorCode::Internal,
@@ -998,7 +998,7 @@ pub(super) fn component_storage_error(
             PluginStorageErrorCode::QuotaExceeded => StorageErrorCode::QuotaExceeded,
             PluginStorageErrorCode::Unavailable => StorageErrorCode::Unavailable,
             PluginStorageErrorCode::Corrupt => StorageErrorCode::Corrupt,
-            PluginStorageErrorCode::GenerationLost => StorageErrorCode::GenerationLost,
+            PluginStorageErrorCode::LoadUnavailable => StorageErrorCode::GenerationLost,
         },
         detail: error.detail,
     }
@@ -1034,18 +1034,18 @@ pub(super) fn component_ui_error(
         PluginUiErrorCode::StaleGraph => UiErrorCode::StaleGraph,
         PluginUiErrorCode::StaleTree => UiErrorCode::StaleTree,
         PluginUiErrorCode::StaleHandle => UiErrorCode::StaleHandle,
-        PluginUiErrorCode::ForeignGeneration => UiErrorCode::ForeignGeneration,
+        PluginUiErrorCode::ForeignLoad => UiErrorCode::ForeignGeneration,
         PluginUiErrorCode::UndeclaredContent => UiErrorCode::UndeclaredContent,
         PluginUiErrorCode::UndeclaredAction => UiErrorCode::UndeclaredAction,
         PluginUiErrorCode::DisallowedPlacement => UiErrorCode::DisallowedPlacement,
         PluginUiErrorCode::HiddenFocus => UiErrorCode::HiddenFocus,
         PluginUiErrorCode::CrossTab => UiErrorCode::CrossTab,
-        PluginUiErrorCode::InstanceCeiling => UiErrorCode::InstanceCeiling,
-        PluginUiErrorCode::GraphCeiling => UiErrorCode::GraphCeiling,
+        PluginUiErrorCode::InstanceLimit => UiErrorCode::InstanceCeiling,
+        PluginUiErrorCode::GraphLimit => UiErrorCode::GraphCeiling,
         PluginUiErrorCode::InvalidTree => UiErrorCode::InvalidTree,
         PluginUiErrorCode::InvalidPlacement => UiErrorCode::InvalidPlacement,
         PluginUiErrorCode::CloseOrder => UiErrorCode::CloseOrder,
-        PluginUiErrorCode::GenerationLost => UiErrorCode::GenerationLost,
+        PluginUiErrorCode::LoadUnavailable => UiErrorCode::GenerationLost,
         PluginUiErrorCode::InternalRejected => UiErrorCode::InternalRejected,
         PluginUiErrorCode::WrongPresenter => UiErrorCode::WrongPresenter,
         PluginUiErrorCode::StaleSurface => UiErrorCode::StaleSurface,
@@ -1057,7 +1057,7 @@ pub(super) fn component_ui_error(
         PluginUiErrorCode::InvalidStyle => UiErrorCode::InvalidStyle,
         PluginUiErrorCode::InvalidCursor => UiErrorCode::InvalidCursor,
         PluginUiErrorCode::InvalidHitRegion => UiErrorCode::InvalidHitRegion,
-        PluginUiErrorCode::PatchCeiling => UiErrorCode::PatchCeiling,
+        PluginUiErrorCode::PatchLimit => UiErrorCode::PatchCeiling,
     };
     component_api::dust::plugin::host::UiError {
         code,
@@ -1137,7 +1137,7 @@ pub(super) fn convert_component_tree(
     {
         return Err(PluginUiError::new(
             PluginUiErrorCode::InvalidTree,
-            "retained UI node ceiling exceeded",
+            "retained UI node limit exceeded",
         ));
     }
     let nodes = tree
@@ -1321,7 +1321,7 @@ pub(super) fn convert_component_ui_request(
             if crate::windows::validate_title(&request.title).is_err() {
                 return Err(PluginUiError::new(
                     PluginUiErrorCode::InvalidTree,
-                    "window title ceiling exceeded",
+                    "window title limit exceeded",
                 ));
             }
             PluginUiRequestKind::OpenWindow {
@@ -1384,8 +1384,8 @@ pub(super) fn convert_component_ui_request(
                     .is_none_or(|bytes| bytes > MAXIMUM_PRIVATE_BYTES as usize)
             {
                 return Err(PluginUiError::new(
-                    PluginUiErrorCode::PatchCeiling,
-                    "private snapshot exceeds absolute host ceilings",
+                    PluginUiErrorCode::PatchLimit,
+                    "private snapshot exceeds absolute host limits",
                 ));
             }
             PluginUiRequestKind::ReplacePrivate {
@@ -1408,8 +1408,8 @@ pub(super) fn convert_component_ui_request(
                     .is_none_or(|bytes| bytes > MAXIMUM_PRIVATE_BYTES as usize)
             {
                 return Err(PluginUiError::new(
-                    PluginUiErrorCode::PatchCeiling,
-                    "private patch exceeds absolute host ceilings",
+                    PluginUiErrorCode::PatchLimit,
+                    "private patch exceeds absolute host limits",
                 ));
             }
             PluginUiRequestKind::PatchPrivate {

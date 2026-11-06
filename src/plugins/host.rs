@@ -145,7 +145,7 @@ impl PluginInvocationOrigin {
     }
     pub(crate) fn current(&self, manager: &PluginHost) -> bool {
         std::sync::Arc::ptr_eq(&self.manager, &manager.owner)
-            && manager.is_active_generation(&self.plugin, self.load)
+            && manager.is_active_load(&self.plugin, self.load)
     }
     pub(crate) fn load(&self) -> PluginLoadId {
         self.load
@@ -460,7 +460,7 @@ impl PluginHost {
                         }
                     };
                     if let WorkerEvent::Failed { plugin, load, .. } = &event {
-                        // Failure releases the generation before foreground ownership
+                        // Failure releases the load before foreground ownership
                         // is removed, including execution attempted before activation.
                         indexed.remove(&(plugin.clone(), *load));
                     }
@@ -709,7 +709,7 @@ impl PluginHost {
     ) -> Result<PluginInvocation<'_>, PluginError> {
         self.require_disable_order()?;
         let load = self.load_id(plugin).ok_or(PluginError::NotActive)?;
-        if !self.is_active_generation(plugin, load) {
+        if !self.is_active_load(plugin, load) {
             return Err(PluginError::NotActive);
         }
         if !matches!(self.statuses.get(plugin), Some(PluginStatus::Active(commands)) if commands.iter().any(|c| c == command))
@@ -856,11 +856,11 @@ impl PluginHost {
         self.loads.get(id).copied()
     }
     #[must_use]
-    pub fn is_active_generation(&self, id: &str, load: PluginLoadId) -> bool {
+    pub fn is_active_load(&self, id: &str, load: PluginLoadId) -> bool {
         self.loads.get(id) == Some(&load)
             && matches!(self.statuses.get(id), Some(PluginStatus::Active(_)))
     }
-    pub fn unload_generation(&mut self, id: &str, load: PluginLoadId) -> Result<(), PluginError> {
+    pub fn unload_load(&mut self, id: &str, load: PluginLoadId) -> Result<(), PluginError> {
         if self.loads.get(id) != Some(&load) {
             return Ok(());
         }
@@ -870,7 +870,7 @@ impl PluginHost {
         self.flush_pending_disables();
         Ok(())
     }
-    pub fn disable_generation(&mut self, id: &str, load: PluginLoadId) -> Result<(), PluginError> {
+    pub fn disable_load(&mut self, id: &str, load: PluginLoadId) -> Result<(), PluginError> {
         if self.loads.get(id) != Some(&load) {
             return Ok(());
         }
