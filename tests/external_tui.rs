@@ -1,11 +1,11 @@
 use dust::process::ExecutionPreflightEvent;
 use dust::process::ExecutionPreflightRequest;
-use dust::process::ExecutionPreflightService;
+use dust::process::ExecutionPreflightWorker;
 use dust::process::PtyEvent;
 use dust::process::PtyId;
 use dust::process::PtyPolicy;
 use dust::process::PtyRequest;
-use dust::process::PtyService;
+use dust::process::PtyWorker;
 use dust::ui::PtyInputKey;
 use dust::ui::PtyScreen;
 use dust::ui::encode_key;
@@ -25,10 +25,10 @@ use std::thread;
 use std::time::Duration;
 use std::time::Instant;
 
-// PtyService owns nonblocking cancellation on drop, including assertion unwinds.
+// PtyWorker owns nonblocking cancellation on drop, including assertion unwinds.
 
 fn wait_for_preflight(
-    preflight: &ExecutionPreflightService,
+    preflight: &ExecutionPreflightWorker,
     deadline: Instant,
 ) -> dust::process::ExecutionPreflightResult {
     loop {
@@ -49,7 +49,7 @@ fn lazygit_version_uses_canonical_preflight_and_portable_pty_without_shell() {
     let executable = PathBuf::from("/run/current-system/sw/bin/lazygit");
     let cwd = std::env::temp_dir().canonicalize().unwrap();
     let deadline = Instant::now() + Duration::from_secs(5);
-    let mut preflight = ExecutionPreflightService::start(2);
+    let mut preflight = ExecutionPreflightWorker::start(2);
     preflight
         .request(ExecutionPreflightRequest {
             executable,
@@ -59,7 +59,7 @@ fn lazygit_version_uses_canonical_preflight_and_portable_pty_without_shell() {
         })
         .unwrap();
     let ready = wait_for_preflight(&preflight, deadline);
-    let mut ptys = PtyService::start(8);
+    let mut ptys = PtyWorker::start(8);
     let id = ptys
         .open(PtyRequest {
             program: ready.executable,
@@ -134,7 +134,7 @@ fn lazygit_launch_resize_and_quit_uses_preflight_pty() {
     let executable = PathBuf::from("/run/current-system/sw/bin/lazygit");
     let cwd = dir.path().canonicalize().unwrap();
     let deadline = Instant::now() + Duration::from_secs(5);
-    let mut preflight = ExecutionPreflightService::start(2);
+    let mut preflight = ExecutionPreflightWorker::start(2);
     preflight
         .request(ExecutionPreflightRequest {
             executable,
@@ -146,7 +146,7 @@ fn lazygit_launch_resize_and_quit_uses_preflight_pty() {
     let ready = wait_for_preflight(&preflight, deadline);
     let mut env = BTreeMap::new();
     env.insert("TERM".into(), "xterm-256color".into());
-    let mut ptys = PtyService::start(32);
+    let mut ptys = PtyWorker::start(32);
     let id = ptys
         .open(PtyRequest {
             program: ready.executable,
@@ -274,7 +274,7 @@ fn production_binary_ignores_external_tui_fixture_environment() {
 fn canonical_preflight_portable_pty_drives_external_tui_fixture_without_shell() {
     let executable = std::env::current_exe().unwrap().canonicalize().unwrap();
     let cwd = std::env::temp_dir().canonicalize().unwrap();
-    let mut preflight = ExecutionPreflightService::start(2);
+    let mut preflight = ExecutionPreflightWorker::start(2);
     preflight
         .request(ExecutionPreflightRequest {
             executable: executable.clone(),
@@ -288,7 +288,7 @@ fn canonical_preflight_portable_pty_drives_external_tui_fixture_without_shell() 
     let mut environment = BTreeMap::new();
     environment.insert("DUST_TEST_EXTERNAL_TUI_FIXTURE".into(), "1".into());
     environment.insert("TERM".into(), "xterm-256color".into());
-    let mut ptys = PtyService::start(16);
+    let mut ptys = PtyWorker::start(16);
     let id = ptys
         .open(PtyRequest {
             program: ready.executable,
@@ -470,3 +470,81 @@ fn canonical_preflight_portable_pty_drives_external_tui_fixture_without_shell() 
     assert!(!screen.alternate_active());
     assert!(!screen.bracketed_paste());
 }
+
+#[cfg(unix)]
+#[test]
+fn pty_resize_ack_precedes_the_childs_resize_output() {
+    let root = tempfile::tempdir().unwrap();
+    let mut service = PtyWorker::start(1);
+    let script = root.path().join("resize.py");
+    std::fs::write(&script, "import os,signal,time\ndef resized(*_): os.write(1, b'\\x1b[1;999HX')\nsignal.signal(signal.SIGWINCH, resized)\nos.write(1, b'\\x1b[?1049hREADY')\ntime.sleep(30)\n").unwrap();
+    let mut request = PtyRequest {
+        program: "/bin/sh".into(),
+        argv0: None,
+        arguments: Vec::new(),
+        cwd: root.path().into(),
+        environment: Default::default(),
+        columns: 80,
+        rows: 8,
+        root_revision: 3,
+        policy: PtyPolicy {
+            event_capacity: 1,
+            ..Default::default()
+        },
+    };
+    request.program =
+        dust::tools::discover_executable("python3").expect("PTY resize fixture needs Python 3");
+    request.arguments = vec![script.as_os_str().to_owned()];
+    let id = service.open(request).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(4);
+    let mut screen = dust::ui::PtyScreen::new(80, 8, 8);
+    while !screen.lines().iter().any(|line| line.contains("READY")) {
+        for event in service.poll().unwrap() {
+            if let PtyEvent::Output { bytes, .. } = event {
+                screen.feed_bytes(&bytes);
+            }
+        }
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(2));
+    }
+    service.resize(id, 40, 8).unwrap();
+    let mut acknowledged = false;
+    loop {
+        for event in service.poll().unwrap() {
+            match event {
+                PtyEvent::Resized { columns, rows, .. } => {
+                    acknowledged = true;
+                    screen.resize(columns, rows);
+                }
+                PtyEvent::Output { bytes, .. } => {
+                    assert!(acknowledged, "resize output overtook the acknowledgement");
+                    screen.feed_bytes(&bytes);
+                }
+                _ => {}
+            }
+        }
+        if screen.history_row(0).unwrap()[39].text == "X" {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "missing resize frame: {:?}",
+            screen.lines()
+        );
+        thread::sleep(Duration::from_millis(2));
+    }
+    service.close(id).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(4);
+    loop {
+        let batch = service.poll().unwrap();
+        if batch.iter().any(|event| matches!(event,
+            PtyEvent::IoComplete { id: source, .. }
+            | PtyEvent::Failed { id: source, .. }
+            | PtyEvent::Unknown { id: source, .. } if *source == id)) {
+            break;
+        }
+        assert!(Instant::now() < deadline, "PTY did not close: {batch:?}");
+        thread::sleep(Duration::from_millis(1));
+    }
+}
+
