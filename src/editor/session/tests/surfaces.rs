@@ -1,5 +1,5 @@
 use super::*;
-use crate::editor::{EditorOperation, EditorState, EditorTransaction, TransactionId};
+use crate::editor::{AgentCommand, EditorOperation, EditorState, EditorTransaction, TransactionId};
 use crate::ui::render::overlays::{CUSTOM_ICON, SCRATCH_ICON, VIRTUAL_ICON};
 
 #[test]
@@ -5740,13 +5740,13 @@ fn ordinary_terminal_profile_names_do_not_make_agent_terminals() {
     assert!(!app.agent_terminal(shell));
     assert!(!app.terminal_session.side(shell));
     app.process_effect(AppEffect::TerminalUnfocus);
-    app.process_effect(AppEffect::AgentAsk);
+    app.process_effect(AppEffect::Agent(crate::editor::AgentCommand::Ask));
     let agent = app.terminal_session.selected().unwrap();
     assert_ne!(shell, agent, "an ordinary shell is not reused as an agent");
     assert!(app.agent_terminal(agent));
     assert!(app.terminal_session.side(agent));
     app.process_effect(AppEffect::TerminalUnfocus);
-    app.process_effect(AppEffect::AgentAsk);
+    app.process_effect(AppEffect::Agent(crate::editor::AgentCommand::Ask));
     assert_eq!(app.terminal_session.selected(), Some(agent));
     assert_eq!(app.terminal_session.descriptions().len(), 2);
 }
@@ -5791,7 +5791,7 @@ fn a_terminal_profile_named_like_an_agent_is_not_reused_as_that_agent() {
     assert!(!driver.application_mut().agent_terminal(shell));
     driver
         .application_mut()
-        .process_effect(crate::editor::AppEffect::AgentAsk);
+        .process_effect(AppEffect::Agent(AgentCommand::Ask));
     while !driver
         .terminal_lines()
         .iter()
@@ -5822,7 +5822,7 @@ fn a_terminal_agent_accepts_selections_from_normal_mode_and_preserves_rejected_o
     driver.trust_owned_terminal_fixture();
     driver
         .application_mut()
-        .process_effect(crate::editor::AppEffect::AgentAsk);
+        .process_effect(AppEffect::Agent(AgentCommand::Ask));
     let deadline = Instant::now() + Duration::from_secs(5);
     while !driver
         .terminal_lines()
@@ -5847,7 +5847,7 @@ fn a_terminal_agent_accepts_selections_from_normal_mode_and_preserves_rejected_o
         head: crate::editor::text::ByteOffset(13),
         kind: crate::editor::SelectionKind::Character,
     });
-    app.process_effect(crate::editor::AppEffect::AgentAsk);
+    app.process_effect(AppEffect::Agent(AgentCommand::Ask));
     assert!(app.state.views[view].selection.is_none());
     assert_eq!(
         app.terminal_session.mode(agent),
@@ -5886,7 +5886,7 @@ fn a_terminal_agent_accepts_selections_from_normal_mode_and_preserves_rejected_o
         kind: crate::editor::SelectionKind::Character,
     };
     app.state.views[view].selection = Some(selection);
-    app.process_effect(crate::editor::AppEffect::AgentAsk);
+    app.process_effect(AppEffect::Agent(AgentCommand::Ask));
     assert!(app.state.views[view].selection.is_some());
     assert_eq!(app.terminal_session.descriptions().len(), 1);
 }
@@ -5908,7 +5908,7 @@ fn a_terminal_agent_opens_on_the_right_where_the_agent_panel_goes() {
     driver.new_buffer();
     driver.trust_owned_terminal_fixture();
     let app = driver.application_mut();
-    app.process_effect(crate::editor::AppEffect::AgentAsk);
+    app.process_effect(AppEffect::Agent(AgentCommand::Ask));
     let deadline = Instant::now() + Duration::from_secs(4);
     while !driver
         .terminal_lines()
@@ -5941,13 +5941,13 @@ fn a_terminal_agent_opens_on_the_right_where_the_agent_panel_goes() {
         );
     }
     let app = driver.application_mut();
-    app.process_effect(crate::editor::AppEffect::AgentToggle);
+    app.process_effect(AppEffect::Agent(AgentCommand::Toggle));
     assert!(app.terminal_window_rect().is_none());
-    app.process_effect(crate::editor::AppEffect::AgentToggle);
+    app.process_effect(AppEffect::Agent(AgentCommand::Toggle));
     assert_eq!(app.terminal_window_rect(), Some(rect));
     // From the code beside it, the toggle hides it too.
     app.process_effect(crate::editor::AppEffect::TerminalUnfocus);
-    app.process_effect(crate::editor::AppEffect::AgentToggle);
+    app.process_effect(AppEffect::Agent(AgentCommand::Toggle));
     assert!(app.terminal_window_rect().is_none());
     assert_eq!(app.terminal_session.descriptions().len(), 1);
 }
@@ -5967,7 +5967,7 @@ fn the_dashboard_cursor_runs_items_and_ctrl_h_l_reach_an_agent_beside_it() {
     driver.trust_owned_terminal_fixture();
     driver
         .application_mut()
-        .process_effect(crate::editor::AppEffect::AgentAsk);
+        .process_effect(AppEffect::Agent(AgentCommand::Ask));
     let deadline = Instant::now() + Duration::from_secs(4);
     while !driver
         .terminal_lines()
@@ -6044,7 +6044,7 @@ fn ctrl_slash_beside_a_terminal_agent_opens_a_shell_and_both_keep_their_windows_
     };
     driver
         .application_mut()
-        .process_effect(crate::editor::AppEffect::AgentAsk);
+        .process_effect(AppEffect::Agent(AgentCommand::Ask));
     wait(&mut driver, &|driver| {
         driver
             .terminal_lines()
@@ -6169,7 +6169,7 @@ fn ctrl_h_from_an_agent_beside_the_dashboard_returns_to_it_and_it_stays_beside_t
     let deadline = Instant::now() + Duration::from_secs(6);
     driver
         .application_mut()
-        .process_effect(crate::editor::AppEffect::AgentAsk);
+        .process_effect(AppEffect::Agent(AgentCommand::Ask));
     while !driver
         .terminal_lines()
         .iter()
@@ -6235,7 +6235,7 @@ fn ctrl_arrows_in_a_lone_editor_resize_the_agent_docked_beside_it() {
     let deadline = Instant::now() + Duration::from_secs(6);
     driver
         .application_mut()
-        .process_effect(crate::editor::AppEffect::AgentAsk);
+        .process_effect(AppEffect::Agent(AgentCommand::Ask));
     while !driver
         .terminal_lines()
         .iter()

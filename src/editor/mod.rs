@@ -16,8 +16,8 @@ pub use command::{
 pub(crate) use launch::new_file_path;
 pub use launch::{StartupError, StartupTarget, resolve_startup};
 pub use session::{
-    AppEffect, ConfigurationSources, InteractiveError, KeymapInspection, LayoutAction, PickerKind,
-    PromptMove, ResolvedConfiguration, ResolvedKeymaps, compile_keymaps,
+    AgentCommand, AppEffect, ConfigurationSources, InteractiveError, KeymapInspection,
+    LayoutAction, PickerKind, PromptMove, ResolvedConfiguration, ResolvedKeymaps, compile_keymaps,
     compile_keymaps_with_plugin_catalog, compile_keymaps_with_plugin_index, register_app_commands,
     reload_keymaps, run_interactive, validate_loaded_configuration,
 };

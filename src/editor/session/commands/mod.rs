@@ -1,4 +1,3 @@
-mod agent;
 mod configuration;
 mod debugger;
 mod editing;
@@ -64,26 +63,8 @@ pub enum AppEffect {
     },
     FlashBegin,
     TodoSearch,
-    AgentAsk,
-    AgentToggle,
-    AgentAddFile,
-    AgentAddDiagnostics,
-    AgentNew,
-    AgentSessions,
-    AgentNextSession,
-    AgentPreviousSession,
-    AgentCloseSession,
-    AgentResume,
-    AgentCancel,
-    AgentModel,
-    AgentMode,
-    AgentThinking,
-    AgentOptions,
-    AgentInput(String),
-    AgentEdit(String),
-    AgentScroll(i64),
-    AgentEscape,
-    AgentNewTab,
+    /// An agent command; `dispatch/agent/commands.rs` names and runs them.
+    Agent(super::agent::commands::AgentCommand),
     NewTab,
     PullRequestList,
     PullRequestComments,
@@ -643,7 +624,7 @@ pub fn register_app_commands(
     workspace::register_commands(registry)?;
     configuration::register_commands(registry)?;
     editing::register_commands(registry)?;
-    agent::register_commands(registry)?;
+    super::agent::commands::register_commands(registry)?;
     Ok(())
 }
 
@@ -826,7 +807,7 @@ fn register_grammar_commands(
     Ok(())
 }
 
-fn register<F, R>(
+pub(super) fn register<F, R>(
     registry: &mut CommandRegistry<AppEffect>,
     id: &str,
     title: &str,
@@ -849,7 +830,7 @@ where
     })
 }
 
-trait IntoEffectResult {
+pub(super) trait IntoEffectResult {
     fn into_effect_result(self) -> Result<AppEffect, CommandError>;
 }
 
@@ -865,7 +846,7 @@ impl IntoEffectResult for Result<AppEffect, CommandError> {
     }
 }
 
-fn string_arg<'a>(
+pub(super) fn string_arg<'a>(
     invocation: &'a crate::editor::CommandInvocation,
     name: &str,
 ) -> Result<&'a str, CommandError> {
@@ -923,7 +904,7 @@ fn optional_integer_arg(invocation: &crate::editor::CommandInvocation, name: &st
     }
 }
 
-fn integer_arg(
+pub(super) fn integer_arg(
     invocation: &crate::editor::CommandInvocation,
     name: &str,
 ) -> Result<i64, CommandError> {

@@ -68,6 +68,7 @@ pub use configuration::{
     compile_keymaps, compile_keymaps_with_plugin_catalog, compile_keymaps_with_plugin_index,
     reload_keymaps, validate_loaded_configuration,
 };
+pub use dispatch::agent::commands::AgentCommand;
 pub use dispatch::commands::{
     AppEffect, LayoutAction, PickerKind, PromptMove, register_app_commands,
 };
