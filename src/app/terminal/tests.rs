@@ -1,30 +1,30 @@
 //! Terminal behavior and application integration tests.
 
-use crate::app::tests::*;
-use crate::app::workspace::tests::wait_root_operation;
 use crate::app::App;
 use crate::app::AppEffect;
+use crate::app::agent::commands::AgentCommand;
+use crate::app::configuration::compile_keymaps;
 use crate::app::startup::StartupTarget;
+use crate::app::tests::*;
+use crate::app::workspace::tests::wait_root_operation;
+use crate::editor::CommandValue;
 use crate::editor::InvocationSource;
 use crate::editor::input::KeyEvent;
 use crate::editor::text::TextBuffer;
+use crate::persistence::PersistedWindowPlacement;
+use crate::persistence::PersistedWindowRule;
 use crate::process::PtyId;
+use crate::ui::ContentTabKind;
 use crate::ui::PtyScreen;
+use crate::ui::UiEvent;
+use crate::windows::DockEdge;
+use crate::windows::WindowPlacement;
+use crate::windows::WindowRect;
 use std::fs;
 use std::thread;
 use std::time::Duration;
 use std::time::Instant;
 use tempfile::tempdir;
-use crate::app::agent::commands::AgentCommand;
-use crate::app::configuration::compile_keymaps;
-use crate::editor::CommandValue;
-use crate::persistence::PersistedWindowPlacement;
-use crate::persistence::PersistedWindowRule;
-use crate::ui::ContentTabKind;
-use crate::ui::UiEvent;
-use crate::windows::DockEdge;
-use crate::windows::WindowPlacement;
-use crate::windows::WindowRect;
 
 #[test]
 fn a_pending_root_switch_rechecks_new_edits_and_terminals() {
@@ -646,8 +646,7 @@ fn terminal_panel_focus_cycle_resize_and_close_preserve_independent_sessions() {
             .is_err()
     );
     assert_eq!(app.terminal_session.fixture_dimensions(PtyId(1)), (80, 8));
-    let mut foreign =
-        crate::app::terminal::Terminals::new(&app.configuration.settings().terminals);
+    let mut foreign = crate::app::terminal::Terminals::new(&app.configuration.settings().terminals);
     foreign.fixture(
         PtyId(1),
         crate::app::terminal::TerminalFixture {
@@ -1260,8 +1259,7 @@ fn a_terminal_profile_named_like_an_agent_is_not_reused_as_that_agent() {
 
 #[cfg(unix)]
 #[test]
-fn a_terminal_agent_accepts_selections_from_normal_mode_and_preserves_rejected_ones()
- {
+fn a_terminal_agent_accepts_selections_from_normal_mode_and_preserves_rejected_ones() {
     use crate::app::tests::driver::TestSession;
     let mut loaded = crate::config::load_bundled_config();
     loaded.config.agents.connection = crate::config::AgentConnection::Terminal;
@@ -1405,8 +1403,7 @@ fn a_terminal_agent_opens_on_the_right_where_the_agent_panel_goes() {
 
 #[cfg(unix)]
 #[test]
-fn ctrl_slash_beside_a_terminal_agent_opens_a_shell_and_both_keep_their_windows_and_sizes()
- {
+fn ctrl_slash_beside_a_terminal_agent_opens_a_shell_and_both_keep_their_windows_and_sizes() {
     use crate::app::tests::driver::TestSession;
     let mut loaded = crate::config::load_bundled_config();
     loaded.config.terminals.profiles.insert(
@@ -1991,8 +1988,7 @@ fn terminal_preflight_close_and_capture_keep_original_pty_and_geometry() {
 
 #[cfg(unix)]
 #[test]
-fn debugger_terminal_displays_without_focus_and_its_exit_keeps_another_terminal_focused()
- {
+fn debugger_terminal_displays_without_focus_and_its_exit_keeps_another_terminal_focused() {
     use crate::app::tests::driver::TestSession;
     let mut loaded = crate::config::load_bundled_config();
     let mut program = loaded.config.terminals.profiles["shell"].clone();
@@ -2532,4 +2528,533 @@ fn real_pty_reports_nonzero_exit_and_shared_deadline_unknown_distinctly() {
         message.contains("outcome is Unknown")
             && message.contains("shared shutdown deadline expired")
     }));
+}
+
+use crate::app::terminal::*;
+
+pub(in crate::app) fn fixture() -> (tempfile::TempDir, Workspace, Terminals) {
+    let root = tempfile::tempdir().unwrap();
+    let state = crate::workspace::WorkspaceState::new(
+        crate::workspace::WorkspaceId(1),
+        [(
+            "root".into(),
+            crate::files::RootIdentity::capture(root.path()).unwrap(),
+        )],
+    )
+    .unwrap();
+    let workspace = Workspace::new(state, root.path().join("trust"), 1, false, false, 1);
+    let mut session = Terminals::new(&TerminalsConfig::default());
+    session.fixture(
+        PtyId(1),
+        TerminalFixture {
+            profile: "shell".into(),
+            screen: PtyScreen::new(10, 4, 100),
+            running: false,
+            exit_code: None,
+            truncated: false,
+        },
+        workspace.version(),
+    );
+    session.fixture_cwd(PtyId(1), root.path().to_path_buf());
+    (root, workspace, session)
+}
+
+#[cfg(unix)]
+fn launch_shell(root: &std::path::Path, workspace: &Workspace, session: &mut Terminals) {
+    let mut config = TerminalsConfig::default().profiles["shell"].clone();
+    config.arguments = vec!["-c".into(), "read value; exit 0".into()];
+    session.tabs.get_mut(&PtyId(1)).unwrap().pending = Some(Open {
+        request: ExecutionPreflightRequest {
+            executable: "/bin/sh".into(),
+            cwd: root.into(),
+            roots: vec![root.into()],
+            root_revision: workspace.root_revision(),
+        },
+        arguments: config.arguments.iter().map(Into::into).collect(),
+        config,
+    });
+    let ready = ExecutionReady::fixture(
+        workspace,
+        crate::process::ExecutionPreflightResult {
+            id: crate::process::PreflightId(1),
+            executable: "/bin/sh".into(),
+            cwd: root.into(),
+            root: root.into(),
+            root_revision: workspace.root_revision(),
+        },
+    );
+    session
+        .launch(session.key(PtyId(1)).unwrap(), ready, workspace)
+        .unwrap();
+}
+
+#[test]
+fn relative_terminal_programs_use_the_requested_working_directory() {
+    let (root, workspace, mut session) = fixture();
+    let editor = crate::editor::EditorState::new(root.path().into());
+    let windows = crate::app::windows::Windows::new(false, 8);
+    let mut config = TerminalsConfig::default().profiles["shell"].clone();
+    config.program = "./app".into();
+    config.cwd = Some("build".into());
+    session
+        .open_program(
+            "debug",
+            config,
+            &workspace,
+            windows.navigation_stamp(editor.window_version(), None),
+            Arc::new(()),
+            false,
+        )
+        .unwrap();
+    let request = &session.intent.as_ref().unwrap().open.request;
+    assert_eq!(request.cwd, root.path().join("build"));
+    assert_eq!(request.executable, root.path().join("build/./app"));
+}
+
+#[cfg(unix)]
+#[test]
+fn terminal_lifecycle_revisions_include_launch_and_exit_and_starting_counts_as_running() {
+    let (root, workspace, mut session) = fixture();
+    let before = session.revision();
+    launch_shell(root.path(), &workspace, &mut session);
+    assert!(session.revision() > before);
+    assert_eq!(session.descriptions()[0].2, ContentLifecycle::Starting);
+    assert_eq!(session.running_in_root(root.path()), 1);
+    assert!(!session.tabs[&PtyId(1)].running);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while !session.tabs[&PtyId(1)].running {
+        session.drain(&workspace, |_| None);
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    let running_revision = session.revision();
+    let pty = session.tabs[&PtyId(1)].pty.unwrap();
+    session
+        .service
+        .input(pty, b"done\n".to_vec(), TERMINAL_MAXIMUM_INPUT_BYTES)
+        .unwrap();
+    while !session.tabs[&PtyId(1)].io_complete {
+        session.drain(&workspace, |_| None);
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    assert!(session.revision() > running_revision);
+    assert_eq!(session.descriptions()[0].2, ContentLifecycle::Exited);
+    assert_eq!(session.running_in_root(root.path()), 0);
+}
+
+#[cfg(unix)]
+#[test]
+fn real_pty_stream_failure_reports_incomplete_output_instead_of_exit_status_or_unknown() {
+    let (root, workspace, mut session) = fixture();
+    let pty = session
+        .service
+        .open(PtyRequest {
+            program: "/bin/sh".into(),
+            argv0: None,
+            arguments: vec!["-c".into(), "printf 123456789".into()],
+            cwd: root.path().into(),
+            environment: BTreeMap::new(),
+            columns: 10,
+            rows: 4,
+            root_revision: workspace.root_revision(),
+            policy: PtyPolicy {
+                maximum_output_bytes: 4,
+                ..PtyPolicy::default()
+            },
+        })
+        .unwrap();
+    session.tabs.get_mut(&PtyId(1)).unwrap().pty = Some(pty);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let mut updates = Vec::new();
+    while !session.tabs[&PtyId(1)].io_complete {
+        updates.extend(session.drain(&workspace, |_| None));
+        assert!(std::time::Instant::now() < deadline, "{updates:?}");
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    let message = "PTY output limit exceeded; stream is incomplete";
+    assert!(updates.contains(&TerminalUpdate::IoComplete(PtyId(1))));
+    assert!(updates.contains(&TerminalUpdate::Failed(PtyId(1), message.into())));
+    let tab = &session.tabs[&PtyId(1)];
+    assert_eq!(tab.failure.as_deref(), Some(message));
+    assert!(tab.exited);
+    assert!(tab.unknown.is_none());
+    let panel = session.projection(PtyId(1), true, 4).unwrap();
+    assert!(panel.truncated);
+    assert_eq!(panel.tabs[0].phase, crate::ui::TerminalPhase::Failed);
+    assert_eq!(session.descriptions()[0].2, ContentLifecycle::Failed);
+}
+
+#[cfg(unix)]
+#[test]
+fn terminal_replies_wait_for_input_capacity_and_retry_failed_submissions() {
+    let (root, workspace, mut session) = fixture();
+    launch_shell(root.path(), &workspace, &mut session);
+    let pty = session.tabs[&PtyId(1)].pty.unwrap();
+    let admissions = (0..TERMINAL_QUEUE_CAPACITY)
+        .map(|_| session.service.reserve_input(pty).unwrap())
+        .collect::<Vec<_>>();
+    let tab = session.tabs.get_mut(&PtyId(1)).unwrap();
+    tab.feed_bytes(b"\x1b[6n");
+    let replies = tab.pending_replies.clone();
+    assert_eq!(replies, b"\x1b[1;1R");
+    tab.flush_replies(&session.service);
+    assert_eq!(tab.pending_replies, replies);
+    drop(admissions);
+    tab.flush_replies(&session.service);
+    assert!(tab.pending_replies.is_empty());
+    tab.feed_bytes(b"\x1b[6n");
+    session.service.close(pty).unwrap();
+    tab.flush_replies(&session.service);
+    assert_eq!(tab.pending_replies, replies);
+}
+
+#[test]
+fn one_column_terminal_geometry_settles_at_the_screen_minimum() {
+    let (_root, workspace, mut session) = fixture();
+    let source = TerminalGeometrySource::fixture(1);
+    session
+        .resize(PtyId(1), 1, 4, source.clone(), &workspace)
+        .unwrap();
+    assert_eq!(session.tabs[&PtyId(1)].requested_size, (2, 4));
+    assert_eq!(session.tabs[&PtyId(1)].screen.dimensions(), (2, 4));
+    session.resize(PtyId(1), 1, 4, source, &workspace).unwrap();
+    assert!(session.tabs[&PtyId(1)].pending_resizes.is_empty());
+}
+
+#[test]
+fn terminal_resize_keeps_visual_text_through_wrapping() {
+    let (_root, workspace, mut session) = fixture();
+    let tab = session.tabs.get_mut(&PtyId(1)).unwrap();
+    tab.screen.feed_bytes(b"0123456789abc\r\n$ ");
+    tab.mode = TerminalPanelMode::Visual;
+    tab.normal_cursor = Some((0, 8));
+    tab.visual_anchor = Some((0, 7));
+    let source = TerminalGeometrySource::fixture(1);
+    session
+        .resize(PtyId(1), 5, 6, source.clone(), &workspace)
+        .unwrap();
+    assert_eq!(session.tabs[&PtyId(1)].normal_cursor, Some((1, 3)));
+    assert_eq!(session.tabs[&PtyId(1)].visual_anchor, Some((1, 2)));
+    assert_eq!(
+        session.yank_terminal_text(PtyId(1), false),
+        Some(("78".into(), false))
+    );
+    session.start_terminal_visual(PtyId(1), false);
+    session
+        .move_terminal_normal_cursor(PtyId(1), "left")
+        .unwrap();
+    session.resize(PtyId(1), 20, 4, source, &workspace).unwrap();
+    assert_eq!(session.tabs[&PtyId(1)].normal_cursor, Some((0, 7)));
+    assert_eq!(session.tabs[&PtyId(1)].visual_anchor, Some((0, 8)));
+    assert_eq!(
+        session.yank_terminal_text(PtyId(1), false),
+        Some(("78".into(), false))
+    );
+}
+
+#[test]
+fn terminal_placeholders_expand_only_original_tokens() {
+    let mut config = TerminalsConfig::default().profiles["shell"].clone();
+    config.arguments = vec!["--file={file}:{line}".into(), "{root}/{dir}".into()];
+    config.cwd = Some("{dir}".into());
+    let (expanded, arguments) = expand_placeholders(
+        &config,
+        std::path::Path::new("/root/{line}"),
+        Some((std::path::Path::new("/root/{line}/a{line}.rs"), 7)),
+    )
+    .unwrap();
+    assert_eq!(arguments[0], "--file=/root/{line}/a{line}.rs:7");
+    assert_eq!(arguments[1], "/root/{line}//root/{line}");
+    assert_eq!(expanded.cwd.unwrap(), std::path::Path::new("/root/{line}"));
+    config.arguments = vec!["{root}".into()];
+    config.cwd = None;
+    assert!(expand_placeholders(&config, std::path::Path::new("/root/{file}"), None).is_ok());
+}
+
+#[cfg(unix)]
+#[test]
+fn terminal_placeholders_preserve_native_path_bytes() {
+    use std::os::unix::ffi::OsStringExt;
+    let root = std::path::PathBuf::from(std::ffi::OsString::from_vec(b"/root/\xff".to_vec()));
+    let file = root.join(std::ffi::OsString::from_vec(b"a\xfe{line}.rs".to_vec()));
+    let mut config = TerminalsConfig::default().profiles["shell"].clone();
+    config.arguments = vec!["{root}".into(), "prefix:{file}".into(), "{dir}".into()];
+    config.cwd = Some(root.join("{line}"));
+    let (expanded, arguments) = expand_placeholders(&config, &root, Some((&file, 9))).unwrap();
+    assert_eq!(arguments[0], root.as_os_str());
+    let mut expected = std::ffi::OsString::from("prefix:");
+    expected.push(&file);
+    assert_eq!(arguments[1], expected);
+    assert_eq!(arguments[2], root.as_os_str());
+    assert_eq!(expanded.cwd.unwrap(), root.join("9"));
+}
+
+#[test]
+fn terminal_normal_motions_and_yanks_skip_wide_continuations() {
+    let root = tempfile::tempdir().unwrap();
+    let state = crate::workspace::WorkspaceState::new(
+        crate::workspace::WorkspaceId(1),
+        [(
+            "test".into(),
+            crate::files::RootIdentity::capture(root.path()).unwrap(),
+        )],
+    )
+    .unwrap();
+    let workspace = Workspace::new(state, root.path().join("state"), 1, false, false, 1);
+    let mut session = Terminals::new(&TerminalsConfig::default());
+    let mut screen = PtyScreen::new(10, 2, 4);
+    screen.feed_bytes("中X".as_bytes());
+    let id = PtyId(1);
+    session.fixture(
+        id,
+        TerminalFixture {
+            profile: "shell".into(),
+            screen,
+            running: false,
+            exit_code: Some(0),
+            truncated: false,
+        },
+        workspace.version(),
+    );
+    session.enter_terminal_normal_mode(id);
+    session
+        .move_terminal_normal_cursor(id, "line_start")
+        .unwrap();
+    session.move_terminal_normal_cursor(id, "right").unwrap();
+    assert_eq!(session.tabs[&id].normal_cursor, Some((0, 2)));
+    session.start_terminal_visual(id, false);
+    assert_eq!(
+        session.yank_terminal_text(id, false),
+        Some(("X".into(), false))
+    );
+    session.move_terminal_normal_cursor(id, "left").unwrap();
+    assert_eq!(session.tabs[&id].normal_cursor, Some((0, 0)));
+    session.start_terminal_visual(id, false);
+    assert_eq!(
+        session.yank_terminal_text(id, false),
+        Some(("中".into(), false))
+    );
+}
+
+#[test]
+fn disabled_focus_reports_do_not_require_a_live_terminal() {
+    let root = tempfile::tempdir().unwrap();
+    let state = crate::workspace::WorkspaceState::new(
+        crate::workspace::WorkspaceId(1),
+        [(
+            "test".into(),
+            crate::files::RootIdentity::capture(root.path()).unwrap(),
+        )],
+    )
+    .unwrap();
+    let workspace = Workspace::new(state, root.path().join("state"), 1, false, false, 1);
+    let mut session = Terminals::new(&TerminalsConfig::default());
+    let id = PtyId(1);
+    session.fixture(
+        id,
+        TerminalFixture {
+            profile: "shell".into(),
+            screen: PtyScreen::new(10, 2, 4),
+            running: false,
+            exit_code: Some(0),
+            truncated: false,
+        },
+        workspace.version(),
+    );
+    for focused in [true, false] {
+        assert!(
+            !session
+                .send(id, TerminalInput::Focus(focused), &workspace)
+                .unwrap()
+        );
+    }
+    session
+        .tabs
+        .get_mut(&id)
+        .unwrap()
+        .screen
+        .feed_bytes(b"\x1b[?1004h");
+    assert_eq!(
+        session.send(id, TerminalInput::Focus(true), &workspace),
+        Err("terminal has not started".into())
+    );
+    assert!(
+        session
+            .send(id, TerminalInput::Text("x"), &workspace)
+            .is_err()
+    );
+}
+
+#[test]
+fn workspace_changes_keep_running_terminals_and_retire_unlaunched_tabs() {
+    let root = tempfile::tempdir().unwrap();
+    let state = crate::workspace::WorkspaceState::new(
+        crate::workspace::WorkspaceId(1),
+        [(
+            "root".into(),
+            crate::files::RootIdentity::capture(root.path()).unwrap(),
+        )],
+    )
+    .unwrap();
+    let workspace = Workspace::new(state, root.path().join("trust"), 1, false, false, 1);
+    let policy = crate::config::load_bundled_config().config.terminals;
+    let mut terminals = Terminals::new(&policy);
+    for (id, running) in [(PtyId(1), true), (PtyId(2), false)] {
+        terminals.fixture(
+            id,
+            TerminalFixture {
+                profile: "shell".into(),
+                screen: PtyScreen::new(80, 24, 100),
+                running,
+                exit_code: None,
+                truncated: false,
+            },
+            workspace.version(),
+        );
+    }
+    terminals.tabs.get_mut(&PtyId(2)).unwrap().pending = Some(Open {
+        config: policy.profiles["shell"].clone(),
+        arguments: Vec::new(),
+        request: ExecutionPreflightRequest {
+            executable: "sh".into(),
+            cwd: root.path().into(),
+            roots: vec![root.path().into()],
+            root_revision: workspace.root_revision(),
+        },
+    });
+    terminals.retain_workspace(&workspace);
+    assert!(terminals.contains(PtyId(1)));
+    assert!(!terminals.contains(PtyId(2)));
+}
+
+#[test]
+fn resize_acknowledgements_are_ordered_exact_and_one_shot() {
+    let terminal = PtyId(2);
+    let pty = PtyId(12);
+    let source = TerminalGeometrySource::fixture(42);
+    let replacement = TerminalGeometrySource::fixture(43);
+    let pending_resize = |source: &TerminalGeometrySource, sequence, columns, rows| PendingResize {
+        terminal,
+        pty,
+        source: source.clone(),
+        sequence,
+        columns,
+        rows,
+    };
+    let receipt = |sequence, columns, rows| ResizeReceipt {
+        terminal,
+        pty,
+        sequence,
+        columns,
+        rows,
+    };
+    let mut pending = VecDeque::from([
+        pending_resize(&source, 7, 40, 10),
+        pending_resize(&source, 8, 60, 20),
+    ]);
+    let mut screen = PtyScreen::new(20, 5, 20);
+    screen.feed_bytes(b"0123456789abcdefghijAB");
+    let mut cursor = Some((1, 1));
+    let mut anchor = Some((0, 18));
+    let mut offset = 0;
+    assert!(!acknowledge_resize(
+        &mut pending,
+        &mut screen,
+        receipt(8, 60, 20),
+        Some(&source),
+        &mut None,
+        &mut None,
+        &mut 0,
+    ));
+    assert!(!acknowledge_resize(
+        &mut pending,
+        &mut screen,
+        ResizeReceipt {
+            terminal: PtyId(3),
+            ..receipt(7, 40, 10)
+        },
+        Some(&source),
+        &mut None,
+        &mut None,
+        &mut 0,
+    ));
+    assert_eq!(pending.len(), 2);
+    assert!(acknowledge_resize(
+        &mut pending,
+        &mut screen,
+        receipt(7, 40, 10),
+        Some(&source),
+        &mut cursor,
+        &mut anchor,
+        &mut offset,
+    ));
+    assert_eq!(screen.dimensions(), (40, 10));
+    assert_eq!(cursor, Some((0, 21)));
+    assert_eq!(anchor, Some((0, 18)));
+    assert_eq!(pending.len(), 1, "intermediate ACK was applied");
+    screen.feed_bytes(b"\x1b[?1049h\x1b[1;999HX");
+    assert!(!acknowledge_resize(
+        &mut pending,
+        &mut screen,
+        receipt(7, 40, 10),
+        Some(&source),
+        &mut None,
+        &mut None,
+        &mut 0,
+    ));
+    assert!(acknowledge_resize(
+        &mut pending,
+        &mut screen,
+        receipt(8, 60, 20),
+        Some(&source),
+        &mut None,
+        &mut None,
+        &mut 0,
+    ));
+    assert_eq!(screen.dimensions(), (60, 20));
+    assert_eq!(screen.history_row(0).unwrap()[39].text, "X");
+    assert!(!acknowledge_resize(
+        &mut pending,
+        &mut screen,
+        receipt(8, 60, 20),
+        Some(&source),
+        &mut None,
+        &mut None,
+        &mut 0,
+    ));
+
+    pending.push_back(pending_resize(&source, 9, 40, 10));
+    assert!(!acknowledge_resize(
+        &mut pending,
+        &mut screen,
+        receipt(9, 40, 10),
+        Some(&replacement),
+        &mut None,
+        &mut None,
+        &mut 0,
+    ));
+    assert!(pending.is_empty(), "stale window receipt was retired");
+    assert_eq!(screen.dimensions(), (40, 10));
+    pending.push_back(pending_resize(&replacement, 10, 40, 10));
+    assert!(!acknowledge_resize(
+        &mut pending,
+        &mut screen,
+        receipt(9, 40, 10),
+        Some(&replacement),
+        &mut None,
+        &mut None,
+        &mut 0,
+    ));
+    assert!(acknowledge_resize(
+        &mut pending,
+        &mut screen,
+        receipt(10, 40, 10),
+        Some(&replacement),
+        &mut None,
+        &mut None,
+        &mut 0,
+    ));
+    assert!(pending.is_empty());
+    assert_eq!(screen.dimensions(), (40, 10));
 }
