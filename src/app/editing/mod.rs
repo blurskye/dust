@@ -5,12 +5,10 @@ pub(in crate::app) mod flash;
 pub(in crate::app) mod replay;
 pub(in crate::app) mod substitute;
 
-
 pub(in crate::app) mod commands;
 
 #[cfg(test)]
 mod clipboard_tests;
-
 
 use crate::app::App;
 use crate::app::FULL_PAGE_PERCENT;

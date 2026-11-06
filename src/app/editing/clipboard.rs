@@ -509,11 +509,8 @@ mod tests {
         registers.set('"', value("old"), true, false);
         let invocation =
             CommandInvocation::new("edit.put", crate::editor::InvocationSource::Test).unwrap();
-        let (mut session, sender) = Clipboard::pending_read_fixture(
-            invocation,
-            version.clone(),
-            registers.generation(),
-        );
+        let (mut session, sender) =
+            Clipboard::pending_read_fixture(invocation, version.clone(), registers.generation());
         sender.send(None).unwrap();
         assert!(session.finish_pull(&mut registers, true, &version).is_err());
         assert_eq!(registers.get('"').unwrap().text, "old");
@@ -528,11 +525,8 @@ mod tests {
         let mut registers = RegisterStore::default();
         let invocation =
             CommandInvocation::new("edit.put", crate::editor::InvocationSource::Test).unwrap();
-        let (mut session, sender) = Clipboard::pending_read_fixture(
-            invocation,
-            version.clone(),
-            registers.generation(),
-        );
+        let (mut session, sender) =
+            Clipboard::pending_read_fixture(invocation, version.clone(), registers.generation());
         drop(sender);
         assert!(session.finish_pull(&mut registers, true, &version).is_err());
         assert!(!session.waiting());

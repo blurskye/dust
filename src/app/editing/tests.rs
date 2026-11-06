@@ -1,10 +1,10 @@
 //! Editing behavior and application integration tests.
 
-use crate::app::tests::*;
 use crate::app::App;
 use crate::app::AppEffect;
 use crate::app::configuration::compile_keymaps;
 use crate::app::startup::StartupTarget;
+use crate::app::tests::*;
 use crate::editor::CommandValue;
 use crate::editor::InvocationSource;
 use crate::editor::input::KeyEvent;
@@ -1460,8 +1460,7 @@ fn timeout_executes_an_earlier_exact_mapping_and_replays_its_suffix() {
 }
 
 #[test]
-fn delayed_open_preserves_newer_unsaved_canonical_buffer_and_closed_reload_cannot_reopen_it()
- {
+fn delayed_open_preserves_newer_unsaved_canonical_buffer_and_closed_reload_cannot_reopen_it() {
     let (_app_dirs, mut app) = app();
     let root = app.state.workspace_root.clone();
     let state_directory = app.workspace.state_path().parent().unwrap().to_path_buf();
@@ -1971,8 +1970,7 @@ fn dot_stops_before_inserting_after_a_failed_search_operator() {
 }
 
 #[test]
-fn word_search_projects_its_boundary_policy_until_an_ordinary_search_replaces_it()
- {
+fn word_search_projects_its_boundary_policy_until_an_ordinary_search_replaces_it() {
     let (_app_dirs, mut app) = app();
     app.state
         .open_text(TextBuffer::from_text("foo foobar foo"), None)
@@ -1989,8 +1987,7 @@ fn word_search_projects_its_boundary_policy_until_an_ordinary_search_replaces_it
 }
 
 #[test]
-fn cgn_repeats_with_dot_substitute_confirms_each_match_and_global_deletes_lines()
-{
+fn cgn_repeats_with_dot_substitute_confirms_each_match_and_global_deletes_lines() {
     let (_app_dirs, mut app) = app();
     let (_, view) = app
         .state
@@ -2878,8 +2875,7 @@ fn recovery_missing_parent_does_not_bind_an_unvalidated_destination() {
 
 #[cfg(unix)]
 #[test]
-fn recovery_rejected_paths_and_missing_files_under_outside_symlinks_become_scratch()
- {
+fn recovery_rejected_paths_and_missing_files_under_outside_symlinks_become_scratch() {
     for exists in [true, false] {
         let (_app_dirs, mut app) = app();
         let outside = tempdir().unwrap();
@@ -3317,8 +3313,7 @@ fn empty_substitution_selection_positions_the_cursor_without_selecting_text() {
 }
 
 #[test]
-fn word_search_keeps_combining_marks_and_search_selection_keeps_word_boundaries()
-{
+fn word_search_keeps_combining_marks_and_search_selection_keeps_word_boundaries() {
     let (_app_dirs, mut app) = app();
     let (_, view) = app
         .state
