@@ -537,14 +537,15 @@ fn pty_resize_ack_precedes_the_childs_resize_output() {
     let deadline = Instant::now() + Duration::from_secs(4);
     loop {
         let batch = service.poll().unwrap();
-        if batch.iter().any(|event| matches!(event,
+        if batch.iter().any(|event| {
+            matches!(event,
             PtyEvent::IoComplete { id: source, .. }
             | PtyEvent::Failed { id: source, .. }
-            | PtyEvent::Unknown { id: source, .. } if *source == id)) {
+            | PtyEvent::Unknown { id: source, .. } if *source == id)
+        }) {
             break;
         }
         assert!(Instant::now() < deadline, "PTY did not close: {batch:?}");
         thread::sleep(Duration::from_millis(1));
     }
 }
-
