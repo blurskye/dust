@@ -64,10 +64,10 @@ impl Default for ExplorerWatchPolicy {
     }
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct ExplorerWatchGeneration(pub u64);
+pub struct ExplorerWatchId(pub u64);
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ExplorerWatchBatch {
-    pub generation: ExplorerWatchGeneration,
+    pub stream_id: ExplorerWatchId,
     pub root_revision: u64,
     pub directories: Vec<PathBuf>,
 }
@@ -75,7 +75,7 @@ pub struct ExplorerWatchBatch {
 pub enum ExplorerWatchEvent {
     Batch(ExplorerWatchBatch),
     Failed {
-        generation: ExplorerWatchGeneration,
+        stream_id: ExplorerWatchId,
         root_revision: u64,
     },
 }
@@ -91,14 +91,14 @@ pub enum ExplorerWatchError {
 
 pub(super) enum ExplorerWatchCommand {
     Reconcile {
-        generation: ExplorerWatchGeneration,
+        stream_id: ExplorerWatchId,
         root_revision: u64,
         roots: Vec<PathBuf>,
         directories: Vec<PathBuf>,
     },
 }
 pub(super) struct ExplorerWatchSet {
-    generation: ExplorerWatchGeneration,
+    stream_id: ExplorerWatchId,
     root_revision: u64,
     roots: Vec<PathBuf>,
     directories: Vec<PathBuf>,
@@ -141,7 +141,7 @@ impl ExplorerWatchSet {
             .collect::<Vec<_>>();
         if events
             .try_send(ExplorerWatchEvent::Batch(ExplorerWatchBatch {
-                generation: self.generation,
+                stream_id: self.stream_id,
                 root_revision: self.root_revision,
                 directories: directories.clone(),
             }))
@@ -231,7 +231,7 @@ pub fn explorer_directory_fingerprint(
                 path: path.clone(),
                 source,
             })
-            .and_then(|target| crate::files::vfs::read_file_with_ceiling(&target, 512 * 1024));
+            .and_then(|target| crate::files::vfs::read_file_bounded(&target, 512 * 1024));
         match contents {
             Ok(bytes) => {
                 ignore_rules.update(watch_name_bytes(path.as_os_str()));
@@ -297,9 +297,9 @@ pub struct ExplorerWatchWorker {
     policy: ExplorerWatchPolicy,
     sender: Option<SyncSender<ExplorerWatchCommand>>,
     receiver: Option<Receiver<ExplorerWatchEvent>>,
-    generation: u64,
+    stream_id: u64,
     reconcile_count: u64,
-    active: Option<(ExplorerWatchGeneration, u64, Vec<PathBuf>)>,
+    active: Option<(ExplorerWatchId, u64, Vec<PathBuf>)>,
     cancelled_through: Arc<AtomicU64>,
 }
 impl ExplorerWatchWorker {
@@ -318,7 +318,7 @@ impl ExplorerWatchWorker {
                 policy,
                 sender: None,
                 receiver: None,
-                generation: 0,
+                stream_id: 0,
                 reconcile_count: 0,
                 active: None,
                 cancelled_through: Arc::new(AtomicU64::new(0)),
@@ -337,7 +337,7 @@ impl ExplorerWatchWorker {
             policy,
             sender: Some(sender),
             receiver: Some(receiver),
-            generation: 0,
+            stream_id: 0,
             reconcile_count: 0,
             active: None,
             cancelled_through,
@@ -348,7 +348,7 @@ impl ExplorerWatchWorker {
         root_revision: u64,
         roots: Vec<PathBuf>,
         mut directories: Vec<PathBuf>,
-    ) -> Result<Option<ExplorerWatchGeneration>, ExplorerWatchError> {
+    ) -> Result<Option<ExplorerWatchId>, ExplorerWatchError> {
         if !self.policy.enabled {
             return Ok(None);
         }
@@ -363,29 +363,29 @@ impl ExplorerWatchWorker {
         {
             return Err(ExplorerWatchError::Limit);
         }
-        self.generation = self
-            .generation
+        self.stream_id = self
+            .stream_id
             .checked_add(1)
             .ok_or(ExplorerWatchError::Limit)?;
-        let generation = ExplorerWatchGeneration(self.generation);
+        let stream_id = ExplorerWatchId(self.stream_id);
         self.sender
             .as_ref()
             .ok_or(ExplorerWatchError::WorkerUnavailable)?
             .try_send(ExplorerWatchCommand::Reconcile {
-                generation,
+                stream_id,
                 root_revision,
                 roots,
                 directories: directories.clone(),
             })
             .map_err(|_| ExplorerWatchError::WorkerUnavailable)?;
-        self.active = Some((generation, root_revision, directories));
+        self.active = Some((stream_id, root_revision, directories));
         self.reconcile_count = self.reconcile_count.saturating_add(1);
-        Ok(Some(generation))
+        Ok(Some(stream_id))
     }
     pub fn cancel(&mut self) {
-        self.generation = self.generation.saturating_add(1);
+        self.stream_id = self.stream_id.saturating_add(1);
         self.cancelled_through
-            .store(self.generation, Ordering::Relaxed);
+            .store(self.stream_id, Ordering::Relaxed);
         self.active = None;
         self.reconcile_count = self.reconcile_count.saturating_add(1);
     }
@@ -397,11 +397,11 @@ impl ExplorerWatchWorker {
         while events.len() < self.policy.maximum_events {
             match receiver.try_recv() {
                 Ok(ExplorerWatchEvent::Batch(mut batch)) => {
-                    let Some((generation, root_revision, directories)) = &self.active else {
+                    let Some((stream_id, root_revision, directories)) = &self.active else {
                         continue;
                     };
                     if batch.root_revision != *root_revision
-                        || batch.generation.0 <= self.cancelled_through.load(Ordering::Relaxed)
+                        || batch.stream_id.0 <= self.cancelled_through.load(Ordering::Relaxed)
                     {
                         continue;
                     }
@@ -409,7 +409,7 @@ impl ExplorerWatchWorker {
                     if !batch.directories.is_empty() {
                         // Queued changes remain valid for directories retained by
                         // a newer reconciliation, even after their old set published them.
-                        batch.generation = *generation;
+                        batch.stream_id = *stream_id;
                         events.push(ExplorerWatchEvent::Batch(batch));
                     }
                 }
@@ -432,21 +432,21 @@ pub(super) fn explorer_watch_worker(
     cancelled_through: Arc<AtomicU64>,
 ) {
     let mut active: Option<ExplorerWatchSet> = None;
-    let mut failure: Option<(ExplorerWatchGeneration, u64)> = None;
+    let mut failure: Option<(ExplorerWatchId, u64)> = None;
     loop {
         let cancelled = cancelled_through.load(Ordering::Relaxed);
         if active
             .as_ref()
-            .is_some_and(|set| set.generation.0 <= cancelled)
+            .is_some_and(|set| set.stream_id.0 <= cancelled)
         {
             active = None;
         }
-        if let Some((generation, root_revision)) = failure {
-            if generation.0 <= cancelled {
+        if let Some((stream_id, root_revision)) = failure {
+            if stream_id.0 <= cancelled {
                 failure = None;
             } else {
                 match events.try_send(ExplorerWatchEvent::Failed {
-                    generation,
+                    stream_id,
                     root_revision,
                 }) {
                     Ok(()) => failure = None,
@@ -457,12 +457,12 @@ pub(super) fn explorer_watch_worker(
         }
         match commands.recv_timeout(policy.poll_interval) {
             Ok(ExplorerWatchCommand::Reconcile {
-                generation,
+                stream_id,
                 root_revision,
                 roots,
                 directories,
             }) => {
-                if generation.0 <= cancelled_through.load(Ordering::Relaxed) {
+                if stream_id.0 <= cancelled_through.load(Ordering::Relaxed) {
                     continue;
                 }
                 failure = None;
@@ -481,7 +481,7 @@ pub(super) fn explorer_watch_worker(
                 match fingerprints {
                     Ok(fingerprints) => {
                         let mut next = ExplorerWatchSet {
-                            generation,
+                            stream_id,
                             root_revision,
                             roots,
                             // Refresh new watches after their baseline is established:
@@ -497,7 +497,7 @@ pub(super) fn explorer_watch_worker(
                         active = Some(next);
                     }
                     Err(_) => {
-                        failure = Some((generation, root_revision));
+                        failure = Some((stream_id, root_revision));
                         active = None
                     }
                 }
@@ -505,13 +505,13 @@ pub(super) fn explorer_watch_worker(
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
             Err(mpsc::RecvTimeoutError::Timeout) => {
                 let Some(set) = active.as_mut() else { continue };
-                if set.generation.0 <= cancelled_through.load(Ordering::Relaxed) {
+                if set.stream_id.0 <= cancelled_through.load(Ordering::Relaxed) {
                     active = None;
                     continue;
                 }
                 let current = collect_explorer_fingerprints(&set.directories, &set.roots, &policy);
                 let Ok(current) = current else {
-                    failure = Some((set.generation, set.root_revision));
+                    failure = Some((set.stream_id, set.root_revision));
                     active = None;
                     continue;
                 };
@@ -532,7 +532,7 @@ pub(super) fn explorer_watch_worker(
                         }
                     }
                     Err(_) => {
-                        failure = Some((set.generation, set.root_revision));
+                        failure = Some((set.stream_id, set.root_revision));
                         active = None;
                     }
                 }
@@ -545,9 +545,9 @@ pub(super) fn explorer_watch_worker(
 mod tests {
     use crate::files::watch::*;
 
-    fn watch_set(generation: u64, directories: Vec<PathBuf>) -> ExplorerWatchSet {
+    fn watch_set(stream_id: u64, directories: Vec<PathBuf>) -> ExplorerWatchSet {
         ExplorerWatchSet {
-            generation: ExplorerWatchGeneration(generation),
+            stream_id: ExplorerWatchId(stream_id),
             root_revision: 1,
             roots: directories.clone(),
             directories,
@@ -569,7 +569,7 @@ mod tests {
                 policy: ExplorerWatchPolicy::default(),
                 sender: Some(sender),
                 receiver: Some(receiver),
-                generation: 0,
+                stream_id: 0,
                 reconcile_count: 0,
                 active: None,
                 cancelled_through: Arc::new(AtomicU64::new(0)),
@@ -590,7 +590,7 @@ mod tests {
             .unwrap();
         events
             .send(ExplorerWatchEvent::Batch(ExplorerWatchBatch {
-                generation: first,
+                stream_id: first,
                 root_revision: 1,
                 directories: vec![a.clone(), b],
             }))
@@ -602,7 +602,7 @@ mod tests {
         assert_eq!(
             service.poll(),
             vec![ExplorerWatchEvent::Batch(ExplorerWatchBatch {
-                generation: second,
+                stream_id: second,
                 root_revision: 1,
                 directories: vec![a],
             })]
@@ -638,7 +638,7 @@ mod tests {
             .as_ref()
             .unwrap()
             .send(ExplorerWatchCommand::Reconcile {
-                generation: ExplorerWatchGeneration(4),
+                stream_id: ExplorerWatchId(4),
                 root_revision: 1,
                 roots: vec![],
                 directories: vec![PathBuf::from("missing")],
@@ -652,7 +652,7 @@ mod tests {
                 .recv_timeout(Duration::from_secs(2))
                 .unwrap(),
             ExplorerWatchEvent::Failed {
-                generation: ExplorerWatchGeneration(4),
+                stream_id: ExplorerWatchId(4),
                 root_revision: 1
             }
         );
@@ -665,7 +665,7 @@ mod tests {
         let (sender, commands) = mpsc::sync_channel(1);
         let (events, receiver) = mpsc::sync_channel(1);
         let stale = ExplorerWatchEvent::Failed {
-            generation: ExplorerWatchGeneration(1),
+            stream_id: ExplorerWatchId(1),
             root_revision: 1,
         };
         events.send(stale.clone()).unwrap();
@@ -682,7 +682,7 @@ mod tests {
         });
         sender
             .send(ExplorerWatchCommand::Reconcile {
-                generation: ExplorerWatchGeneration(2),
+                stream_id: ExplorerWatchId(2),
                 root_revision: 1,
                 roots: vec![],
                 directories: vec![PathBuf::from("missing")],
@@ -693,7 +693,7 @@ mod tests {
         assert_eq!(
             receiver.recv_timeout(Duration::from_secs(2)).unwrap(),
             ExplorerWatchEvent::Failed {
-                generation: ExplorerWatchGeneration(2),
+                stream_id: ExplorerWatchId(2),
                 root_revision: 1
             }
         );
@@ -768,7 +768,7 @@ mod tests {
             ..ExplorerWatchPolicy::default()
         })
         .unwrap();
-        let generation = service
+        let stream_id = service
             .reconcile(1, vec![root_path.clone()], vec![root_path.clone()])
             .unwrap()
             .unwrap();
@@ -780,7 +780,7 @@ mod tests {
                 .recv_timeout(Duration::from_secs(2))
                 .unwrap(),
             ExplorerWatchEvent::Batch(ExplorerWatchBatch {
-                generation,
+                stream_id,
                 root_revision: 1,
                 directories: vec![root_path.clone()],
             })
@@ -828,7 +828,7 @@ mod tests {
         assert_eq!(
             receive.recv().unwrap(),
             ExplorerWatchEvent::Batch(ExplorerWatchBatch {
-                generation: ExplorerWatchGeneration(2),
+                stream_id: ExplorerWatchId(2),
                 root_revision: 1,
                 directories: vec![directory],
             })
@@ -844,7 +844,7 @@ mod tests {
         set.changed_at = Some(std::time::Instant::now());
         let (send, receive) = mpsc::sync_channel(1);
         send.try_send(ExplorerWatchEvent::Failed {
-            generation: ExplorerWatchGeneration(1),
+            stream_id: ExplorerWatchId(1),
             root_revision: 1,
         })
         .unwrap();

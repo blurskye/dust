@@ -35,7 +35,7 @@ pub enum VfsError {
     OutsideScope(PathBuf),
     #[error("invalid recovery journal `{}`: {reason}", path.display())]
     Recovery { path: PathBuf, reason: String },
-    #[error("refusing to read `{}` because it exceeds the {maximum_bytes} byte safety ceiling", path.display())]
+    #[error("refusing to read `{}` because it exceeds the {maximum_bytes} byte safety limit", path.display())]
     DocumentTooLarge { path: PathBuf, maximum_bytes: u64 },
     #[error("resource source is not a regular bounded file: `{}`",.0.display())]
     NotRegularFile(PathBuf),

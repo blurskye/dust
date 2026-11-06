@@ -18,8 +18,8 @@ use crate::files::ExplorerWatchEntryKind;
 use crate::files::ExplorerWatchError;
 use crate::files::ExplorerWatchPolicy;
 use crate::files::ExplorerWatchWorker;
-use crate::files::ProjectRootWorker;
 use crate::files::ProjectRootStrategy;
+use crate::files::ProjectRootWorker;
 use crate::files::RecoveryRecord;
 use crate::files::VfsError;
 use crate::files::VfsResult;
@@ -27,8 +27,8 @@ use crate::files::VfsWorker;
 use crate::files::WorkspaceSearchEvent;
 use crate::files::WorkspaceSearchMatch;
 use crate::files::WorkspaceSearchPolicy;
-use crate::files::WorkspaceSearchWorker;
 use crate::files::WorkspaceSearchSummary;
+use crate::files::WorkspaceSearchWorker;
 use crate::files::WriteExpectation;
 use crate::files::atomic_write;
 use crate::files::cleanup_recovery;
@@ -36,9 +36,9 @@ use crate::files::diff_explorer_fingerprints;
 use crate::files::directory::natural_name_key;
 use crate::files::discover_recovery;
 use crate::files::explorer_directory_fingerprint;
-use crate::files::recovery::RECOVERY_DIRECTORY_ENTRY_CEILING;
-use crate::files::recovery::RECOVERY_JOURNAL_BYTE_CEILING;
-use crate::files::recovery::RECOVERY_PAYLOAD_BYTE_CEILING;
+use crate::files::recovery::RECOVERY_DIRECTORY_ENTRY_LIMIT;
+use crate::files::recovery::RECOVERY_JOURNAL_BYTE_LIMIT;
+use crate::files::recovery::RECOVERY_PAYLOAD_BYTE_LIMIT;
 use crate::files::recovery::bounded_recovery_entries;
 use crate::files::recovery::read_bounded_bytes;
 use crate::files::recovery::recovery_journal_size_allowed;
@@ -68,7 +68,7 @@ fn project_root_resolution_requires_valid_tool_evidence_and_prefers_the_nested_p
     let workspace = fs::canonicalize(workspace.path()).unwrap();
     let document = fs::canonicalize(document).unwrap();
     let mut service = ProjectRootWorker::default();
-    let generation = service
+    let request_id = service
         .resolve(
             document.clone(),
             workspace.clone(),
@@ -85,7 +85,7 @@ fn project_root_resolution_requires_valid_tool_evidence_and_prefers_the_nested_p
         assert!(Instant::now() < deadline, "project-root worker timed out");
         std::thread::yield_now();
     };
-    assert_eq!(resolution.generation, generation);
+    assert_eq!(resolution.request_id, request_id);
     assert_eq!(resolution.root_revision, 7);
     assert_eq!(resolution.document, document);
     assert_eq!(resolution.project_root, Some(workspace.join("nested")));
@@ -165,7 +165,7 @@ fn a_file_not_saved_yet_still_finds_its_project_root() {
 
 #[test]
 fn marker_reads_reject_fifos_symlinks_and_oversized_files() {
-    use crate::files::project_root::PROJECT_ROOT_MANIFEST_BYTE_CEILING;
+    use crate::files::project_root::PROJECT_ROOT_MANIFEST_BYTE_LIMIT;
     use crate::files::project_root::bounded_project_marker;
     let root = tempdir().unwrap();
     let marker = root.path().join("Cargo.toml");
@@ -179,7 +179,7 @@ fn marker_reads_reject_fifos_symlinks_and_oversized_files() {
     fs::remove_file(&marker).unwrap();
     fs::write(
         &marker,
-        "x".repeat(PROJECT_ROOT_MANIFEST_BYTE_CEILING as usize + 1),
+        "x".repeat(PROJECT_ROOT_MANIFEST_BYTE_LIMIT as usize + 1),
     )
     .unwrap();
     assert!(bounded_project_marker(root.path(), "Cargo.toml").is_none());
@@ -605,33 +605,33 @@ fn recovery_paths_round_trip_native_bytes_and_read_legacy_journals() {
     .unwrap();
     assert_eq!(discover_recovery(root.path()).records.len(), 3);
     assert!(crate::files::recovery_size_allowed(
-        RECOVERY_PAYLOAD_BYTE_CEILING - 8192
+        RECOVERY_PAYLOAD_BYTE_LIMIT - 8192
     ));
     assert!(!crate::files::recovery_size_allowed(
-        RECOVERY_PAYLOAD_BYTE_CEILING - 8191
+        RECOVERY_PAYLOAD_BYTE_LIMIT - 8191
     ));
 }
 
 #[test]
-fn recovery_safety_ceilings_are_testable_without_large_disk_fixtures() {
-    assert!(recovery_journal_size_allowed(RECOVERY_JOURNAL_BYTE_CEILING));
+fn recovery_safety_limits_are_testable_without_large_disk_fixtures() {
+    assert!(recovery_journal_size_allowed(RECOVERY_JOURNAL_BYTE_LIMIT));
     assert!(!recovery_journal_size_allowed(
-        RECOVERY_JOURNAL_BYTE_CEILING + 1
+        RECOVERY_JOURNAL_BYTE_LIMIT + 1
     ));
     assert!(recovery_payload_size_allowed(
-        RECOVERY_PAYLOAD_BYTE_CEILING,
+        RECOVERY_PAYLOAD_BYTE_LIMIT,
         0
     ));
     assert!(!recovery_payload_size_allowed(
-        RECOVERY_PAYLOAD_BYTE_CEILING,
+        RECOVERY_PAYLOAD_BYTE_LIMIT,
         1
     ));
     let (paths, truncated) = bounded_recovery_entries(
-        (0..=RECOVERY_DIRECTORY_ENTRY_CEILING)
+        (0..=RECOVERY_DIRECTORY_ENTRY_LIMIT)
             .map(|index| std::path::PathBuf::from(format!("non-journal-{index}"))),
     );
     assert!(truncated);
-    assert_eq!(paths.len(), RECOVERY_DIRECTORY_ENTRY_CEILING);
+    assert_eq!(paths.len(), RECOVERY_DIRECTORY_ENTRY_LIMIT);
     assert!(
         paths.iter().all(|path| path.extension().is_none()),
         "raw non-TOML entries consume the same bounded scan budget"
@@ -655,11 +655,11 @@ fn recovery_reader_enforces_bytes_and_utf8_from_the_open_stream() {
     let root = tempdir().expect("tempdir");
     let path = root.path().join("invalid.toml");
     fs::write(&path, "1234").unwrap();
-    let exact = crate::files::vfs::read_file_with_ceiling(&path, 4).expect("exact limit");
+    let exact = crate::files::vfs::read_file_bounded(&path, 4).expect("exact limit");
     assert_eq!(exact, b"1234");
     fs::write(&path, "12345").unwrap();
     assert!(matches!(
-        crate::files::vfs::read_file_with_ceiling(&path, 4),
+        crate::files::vfs::read_file_bounded(&path, 4),
         Err(VfsError::DocumentTooLarge {
             maximum_bytes: 4,
             ..
@@ -694,7 +694,7 @@ fn recovery_discovery_bounds_records_and_aggregate_content() {
     let limited = crate::files::recovery::discover_recovery_bounded(root.path(), 100, 8);
     assert_eq!(limited.records.len(), 2);
     assert_eq!(limited.diagnostics.len(), 1);
-    assert!(limited.diagnostics[0].contains("byte safety ceiling"));
+    assert!(limited.diagnostics[0].contains("byte safety limit"));
     assert!(
         crate::files::recovery::discover_recovery_bounded(root.path(), 0, 100)
             .records
@@ -975,25 +975,25 @@ fn collect_files(
     crate::files::WorkspaceFileSummary,
 ) {
     let mut service = crate::files::WorkspaceFileWorker::default();
-    let generation = service.start(policy.clone()).expect("start finder");
+    let stream_id = service.start(policy.clone()).expect("start finder");
     let deadline = Instant::now() + Duration::from_secs(5);
     let mut entries = Vec::new();
     loop {
         match service.try_event() {
             Some(crate::files::WorkspaceFileEvent::Batch {
-                generation: actual,
+                stream_id: actual,
                 root_revision,
                 entries: batch,
             }) => {
-                assert_eq!((actual, root_revision), (generation, policy.root_revision));
+                assert_eq!((actual, root_revision), (stream_id, policy.root_revision));
                 entries.extend(batch);
             }
             Some(crate::files::WorkspaceFileEvent::Complete {
-                generation: actual,
+                stream_id: actual,
                 root_revision,
                 summary,
             }) => {
-                assert_eq!((actual, root_revision), (generation, policy.root_revision));
+                assert_eq!((actual, root_revision), (stream_id, policy.root_revision));
                 return (entries, summary);
             }
             Some(event) => panic!("finder failed: {event:?}"),
@@ -1436,7 +1436,7 @@ fn workspace_event_senders_wake_when_cancel_drops_a_full_queue() {
     let cancel = Arc::new(AtomicBool::new(false));
     let (sender, receiver) = mpsc::sync_channel(1);
     sender
-        .send(WorkspaceSearchEvent::Cancelled { generation: 1 })
+        .send(WorkspaceSearchEvent::Cancelled { stream_id: 1 })
         .unwrap();
     let worker_cancel = Arc::clone(&cancel);
     let (finished, completion) = mpsc::channel();
@@ -1444,7 +1444,7 @@ fn workspace_event_senders_wake_when_cancel_drops_a_full_queue() {
         let sent = send_search_event(
             &sender,
             &worker_cancel,
-            WorkspaceSearchEvent::Cancelled { generation: 2 },
+            WorkspaceSearchEvent::Cancelled { stream_id: 2 },
         );
         finished.send(sent).unwrap();
     });
@@ -1461,7 +1461,7 @@ fn workspace_event_senders_wake_when_cancel_drops_a_full_queue() {
     let (sender, receiver) = mpsc::sync_channel(1);
     sender
         .send(crate::files::WorkspaceFileEvent::Cancelled {
-            generation: 1,
+            stream_id: 1,
             root_revision: 1,
         })
         .unwrap();
@@ -1472,7 +1472,7 @@ fn workspace_event_senders_wake_when_cancel_drops_a_full_queue() {
             &sender,
             &worker_cancel,
             crate::files::WorkspaceFileEvent::Cancelled {
-                generation: 2,
+                stream_id: 2,
                 root_revision: 1,
             },
         );
@@ -1660,7 +1660,7 @@ fn workspace_search_bounds_picker_preview_text() {
 }
 
 #[test]
-fn workspace_search_obeys_per_file_and_aggregate_byte_ceilings() {
+fn workspace_search_obeys_per_file_and_aggregate_byte_limits() {
     if !isolated_git_test() {
         return;
     }
@@ -1748,7 +1748,7 @@ fn workspace_search_rejects_worktrees_behind_an_escaping_directory_symlink() {
 }
 
 #[test]
-fn workspace_search_replacement_cancels_old_generation_and_caps_results() {
+fn workspace_search_replacement_cancels_old_stream_id_and_caps_results() {
     let root = tempdir().expect("root");
     for index in 0..100 {
         fs::write(root.path().join(format!("{index:03}.txt")), "needle needle").expect("file");
@@ -2047,7 +2047,7 @@ fn workspace_file_delivery_waits_for_capacity_and_can_be_cancelled() {
     let (sender, receiver) = mpsc::sync_channel(1);
     let cancel = Arc::new(AtomicBool::new(false));
     let event = crate::files::WorkspaceFileEvent::Cancelled {
-        generation: 1,
+        stream_id: 1,
         root_revision: 2,
     };
     sender.send(event.clone()).unwrap();
@@ -2172,7 +2172,7 @@ fn workspace_files_are_bounded_deterministic_and_ignore_symlink_escapes() {
         std::os::unix::fs::symlink(outside.path(), root.path().join("escape")).unwrap();
     }
     let mut service = crate::files::WorkspaceFileWorker::default();
-    let generation = service
+    let stream_id = service
         .start(crate::files::WorkspaceFilePolicy {
             roots: vec![root.path().to_path_buf()],
             root_revision: 7,
@@ -2190,11 +2190,11 @@ fn workspace_files_are_bounded_deterministic_and_ignore_symlink_escapes() {
         if let Some(event) = service.try_event() {
             match event {
                 crate::files::WorkspaceFileEvent::Batch {
-                    generation: g,
+                    stream_id: g,
                     root_revision,
                     entries: batch,
                 } => {
-                    assert_eq!((g, root_revision), (generation, 7));
+                    assert_eq!((g, root_revision), (stream_id, 7));
                     entries.extend(batch)
                 }
                 crate::files::WorkspaceFileEvent::Complete { summary, .. } => break summary,

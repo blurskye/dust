@@ -25,7 +25,7 @@ use thiserror::Error;
 
 use crate::files::error::VfsError;
 
-use crate::files::vfs::read_file_with_ceiling;
+use crate::files::vfs::read_file_bounded;
 
 use crate::files::vfs::scoped_existing_path;
 
@@ -83,25 +83,25 @@ pub struct WorkspaceSearchSummary {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum WorkspaceSearchEvent {
     Batch {
-        generation: u64,
+        stream_id: u64,
         matches: Vec<WorkspaceSearchMatch>,
     },
     Complete {
-        generation: u64,
+        stream_id: u64,
         summary: WorkspaceSearchSummary,
     },
     Cancelled {
-        generation: u64,
+        stream_id: u64,
     },
     Failed {
-        generation: u64,
+        stream_id: u64,
         error: String,
     },
 }
 
 #[derive(Default)]
 pub struct WorkspaceSearchWorker {
-    generation: u64,
+    stream_id: u64,
     cancellation: Option<Arc<AtomicBool>>,
     receiver: Option<Receiver<WorkspaceSearchEvent>>,
 }
@@ -115,31 +115,31 @@ impl WorkspaceSearchWorker {
             sender.send(event).unwrap();
         }
         Self {
-            generation: 1,
+            stream_id: 1,
             cancellation: None,
             receiver: Some(receiver),
         }
     }
     pub fn start(&mut self, policy: WorkspaceSearchPolicy) -> Result<u64, WorkspaceSearchError> {
         validate_workspace_search_policy(&policy)?;
-        let generation =
-            self.generation
-                .checked_add(1)
-                .ok_or(WorkspaceSearchError::UnsafePolicy(
-                    "request identity exhausted",
-                ))?;
+        let stream_id = self
+            .stream_id
+            .checked_add(1)
+            .ok_or(WorkspaceSearchError::UnsafePolicy(
+                "request identity exhausted",
+            ))?;
         let cancellation = Arc::new(AtomicBool::new(false));
         let worker_cancellation = Arc::clone(&cancellation);
         let (sender, receiver) = mpsc::sync_channel(policy.event_queue_capacity);
         thread::Builder::new()
-            .name(format!("dust-workspace-search-{generation}"))
-            .spawn(move || run_workspace_search(generation, policy, worker_cancellation, sender))
+            .name(format!("dust-workspace-search-{stream_id}"))
+            .spawn(move || run_workspace_search(stream_id, policy, worker_cancellation, sender))
             .map_err(WorkspaceSearchError::Spawn)?;
         self.cancel();
-        self.generation = generation;
+        self.stream_id = stream_id;
         self.cancellation = Some(cancellation);
         self.receiver = Some(receiver);
-        Ok(generation)
+        Ok(stream_id)
     }
 
     pub fn cancel(&mut self) {
@@ -165,8 +165,8 @@ impl WorkspaceSearchWorker {
         }
     }
     #[must_use]
-    pub const fn generation(&self) -> u64 {
-        self.generation
+    pub const fn stream_id(&self) -> u64 {
+        self.stream_id
     }
 }
 
@@ -182,7 +182,7 @@ pub enum WorkspaceSearchError {
     EmptyQuery,
     #[error("workspace search requires at least one root")]
     NoRoots,
-    #[error("workspace search policy exceeds a safety ceiling: {0}")]
+    #[error("workspace search policy exceeds a safety limit: {0}")]
     UnsafePolicy(&'static str),
     #[error("failed to start workspace search worker: {0}")]
     Spawn(io::Error),
@@ -291,7 +291,7 @@ pub(super) fn owner_root<'a>(path: &Path, roots: &'a [PathBuf]) -> Option<&'a Pa
 }
 
 pub(super) fn run_workspace_search(
-    generation: u64,
+    stream_id: u64,
     policy: WorkspaceSearchPolicy,
     cancellation: Arc<AtomicBool>,
     sender: SyncSender<WorkspaceSearchEvent>,
@@ -300,7 +300,7 @@ pub(super) fn run_workspace_search(
         let _ = send_search_event(
             &sender,
             &cancellation,
-            WorkspaceSearchEvent::Failed { generation, error },
+            WorkspaceSearchEvent::Failed { stream_id, error },
         );
     };
     let pattern = match compile_workspace_pattern(&policy) {
@@ -361,7 +361,7 @@ pub(super) fn run_workspace_search(
             let _ = send_search_event(
                 &sender,
                 &cancellation,
-                WorkspaceSearchEvent::Cancelled { generation },
+                WorkspaceSearchEvent::Cancelled { stream_id },
             );
             return;
         }
@@ -435,7 +435,7 @@ pub(super) fn run_workspace_search(
             .maximum_total_bytes
             .saturating_sub(summary.bytes_searched);
         let read_limit = policy.maximum_file_bytes.min(remaining_bytes);
-        let bytes = match read_file_with_ceiling(&path, read_limit) {
+        let bytes = match read_file_bounded(&path, read_limit) {
             Ok(bytes) => bytes,
             Err(VfsError::DocumentTooLarge { .. }) => {
                 if read_limit < policy.maximum_file_bytes {
@@ -521,7 +521,7 @@ pub(super) fn run_workspace_search(
                     &sender,
                     &cancellation,
                     WorkspaceSearchEvent::Batch {
-                        generation,
+                        stream_id,
                         matches: std::mem::take(&mut matches),
                     },
                 )
@@ -534,7 +534,7 @@ pub(super) fn run_workspace_search(
                 &sender,
                 &cancellation,
                 WorkspaceSearchEvent::Batch {
-                    generation,
+                    stream_id,
                     matches: std::mem::take(&mut matches),
                 },
             )
@@ -549,10 +549,7 @@ pub(super) fn run_workspace_search(
     let _ = send_search_event(
         &sender,
         &cancellation,
-        WorkspaceSearchEvent::Complete {
-            generation,
-            summary,
-        },
+        WorkspaceSearchEvent::Complete { stream_id, summary },
     );
 }
 
@@ -566,7 +563,7 @@ mod tests {
     use std::time::Instant;
 
     #[test]
-    fn workspace_search_replacement_cancels_old_generation_and_caps_results() {
+    fn workspace_search_replacement_cancels_old_stream_id_and_caps_results() {
         if !isolated_git_test() {
             return;
         }
@@ -581,7 +578,7 @@ mod tests {
         let receiver = service.receiver.take().unwrap();
         assert!(matches!(
             receiver.recv_timeout(Duration::from_secs(5)).expect("first batch"),
-            WorkspaceSearchEvent::Batch { generation, .. } if generation == first
+            WorkspaceSearchEvent::Batch { stream_id, .. } if stream_id == first
         ));
         // There are 99 batches left and only one queue slot. Keeping the receiver
         // alive ensures disconnection cannot substitute for cancellation.
@@ -594,7 +591,7 @@ mod tests {
         let deadline = Instant::now() + Duration::from_secs(5);
         loop {
             match receiver.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
-                Ok(WorkspaceSearchEvent::Batch { generation, .. }) => assert_eq!(generation, first),
+                Ok(WorkspaceSearchEvent::Batch { stream_id, .. }) => assert_eq!(stream_id, first),
                 Ok(event) => panic!("cancelled worker completed instead: {event:?}"),
                 Err(mpsc::RecvTimeoutError::Disconnected) => break,
                 Err(error) => panic!("cancelled search did not stop: {error}"),

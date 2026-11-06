@@ -54,50 +54,50 @@ pub struct WorkspaceFileSummary {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum WorkspaceFileEvent {
     Batch {
-        generation: u64,
+        stream_id: u64,
         root_revision: u64,
         entries: Vec<WorkspaceFileEntry>,
     },
     Complete {
-        generation: u64,
+        stream_id: u64,
         root_revision: u64,
         summary: WorkspaceFileSummary,
     },
     Cancelled {
-        generation: u64,
+        stream_id: u64,
         root_revision: u64,
     },
     Failed {
-        generation: u64,
+        stream_id: u64,
         root_revision: u64,
         error: String,
     },
 }
 #[derive(Default)]
 pub struct WorkspaceFileWorker {
-    generation: u64,
+    stream_id: u64,
     cancellation: Option<Arc<AtomicBool>>,
     receiver: Option<Receiver<WorkspaceFileEvent>>,
 }
 impl WorkspaceFileWorker {
     pub fn start(&mut self, policy: WorkspaceFilePolicy) -> Result<u64, WorkspaceFileError> {
         validate_workspace_file_policy(&policy)?;
-        let generation = self
-            .generation
+        let stream_id = self
+            .stream_id
             .checked_add(1)
             .ok_or(WorkspaceFileError::Unsafe("request identity exhausted"))?;
         let cancellation = Arc::new(AtomicBool::new(false));
         let worker = Arc::clone(&cancellation);
         let (sender, receiver) = mpsc::sync_channel(policy.event_queue_capacity);
         thread::Builder::new()
-            .name(format!("dust-workspace-files-{generation}"))
-            .spawn(move || run_workspace_files(generation, policy, worker, sender))
+            .name(format!("dust-workspace-files-{stream_id}"))
+            .spawn(move || run_workspace_files(stream_id, policy, worker, sender))
             .map_err(WorkspaceFileError::Spawn)?;
         self.cancel();
-        self.generation = generation;
+        self.stream_id = stream_id;
         self.cancellation = Some(cancellation);
         self.receiver = Some(receiver);
-        Ok(generation)
+        Ok(stream_id)
     }
     pub fn cancel(&mut self) {
         if let Some(c) = self.cancellation.take() {
@@ -117,8 +117,8 @@ impl WorkspaceFileWorker {
             _ => Ok(None),
         }
     }
-    pub const fn generation(&self) -> u64 {
-        self.generation
+    pub const fn stream_id(&self) -> u64 {
+        self.stream_id
     }
 }
 impl Drop for WorkspaceFileWorker {
@@ -175,7 +175,7 @@ pub(super) fn send_file_event(
     }
 }
 pub(super) fn run_workspace_files(
-    generation: u64,
+    stream_id: u64,
     policy: WorkspaceFilePolicy,
     cancel: Arc<AtomicBool>,
     sender: SyncSender<WorkspaceFileEvent>,
@@ -189,7 +189,7 @@ pub(super) fn run_workspace_files(
                     &sender,
                     &cancel,
                     WorkspaceFileEvent::Failed {
-                        generation,
+                        stream_id,
                         root_revision: policy.root_revision,
                         error: format!(
                             "workspace file discovery incomplete: {}: {error}",
@@ -208,7 +208,7 @@ pub(super) fn run_workspace_files(
             &sender,
             &cancel,
             WorkspaceFileEvent::Failed {
-                generation,
+                stream_id,
                 root_revision: policy.root_revision,
                 error: "no canonical workspace roots".into(),
             },
@@ -239,7 +239,7 @@ pub(super) fn run_workspace_files(
                 &sender,
                 &cancel,
                 WorkspaceFileEvent::Cancelled {
-                    generation,
+                    stream_id,
                     root_revision: policy.root_revision,
                 },
             );
@@ -252,7 +252,7 @@ pub(super) fn run_workspace_files(
                     &sender,
                     &cancel,
                     WorkspaceFileEvent::Failed {
-                        generation,
+                        stream_id,
                         root_revision: policy.root_revision,
                         error: format!("workspace file discovery incomplete: {error}"),
                     },
@@ -301,7 +301,7 @@ pub(super) fn run_workspace_files(
             &sender,
             &cancel,
             WorkspaceFileEvent::Batch {
-                generation,
+                stream_id,
                 root_revision: policy.root_revision,
                 entries: batch.to_vec(),
             },
@@ -313,7 +313,7 @@ pub(super) fn run_workspace_files(
         &sender,
         &cancel,
         WorkspaceFileEvent::Complete {
-            generation,
+            stream_id,
             root_revision: policy.root_revision,
             summary: WorkspaceFileSummary {
                 files: accepted.len(),

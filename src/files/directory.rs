@@ -30,7 +30,7 @@ pub struct DirectoryEntry {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DirectoryListing {
-    pub generation: u64,
+    pub request_id: u64,
     pub root_revision: u64,
     pub directory: PathBuf,
     pub entries: Vec<DirectoryEntry>,
@@ -41,7 +41,7 @@ type DirectoryResult = Result<(DirectoryListing, Vec<crate::files::RootIdentity>
 
 #[derive(Default)]
 pub struct DirectoryWorker {
-    generation: u64,
+    request_id: u64,
     receiver: Option<Receiver<DirectoryResult>>,
 }
 
@@ -58,16 +58,16 @@ impl DirectoryWorker {
         if !(1..=100_000).contains(&maximum_entries) {
             return Err(VfsError::DirectoryLimit);
         }
-        self.generation = self.generation.checked_add(1).ok_or_else(|| VfsError::Io {
+        self.request_id = self.request_id.checked_add(1).ok_or_else(|| VfsError::Io {
             operation: "allocate directory request identity",
             path: directory.clone(),
             source: std::io::Error::other("directory request identity exhausted"),
         })?;
-        let generation = self.generation;
+        let request_id = self.request_id;
         let (sender, receiver) = mpsc::sync_channel(1);
         let worker_directory = directory.clone();
         thread::Builder::new()
-            .name(format!("dust-directory-{generation}"))
+            .name(format!("dust-directory-{request_id}"))
             .spawn(move || {
                 let result = (|| {
                     let canonical = canonical_path(&worker_directory)?;
@@ -104,7 +104,7 @@ impl DirectoryWorker {
                         };
                     let roots = capture()?;
                     let listing = list_scoped_directory(
-                        generation,
+                        request_id,
                         root_revision,
                         &worker_directory,
                         &canonical_roots,
@@ -131,7 +131,7 @@ impl DirectoryWorker {
                 source,
             })?;
         self.receiver = Some(receiver);
-        Ok(generation)
+        Ok(request_id)
     }
 
     pub(crate) fn poll_result(
@@ -231,7 +231,7 @@ pub(super) fn root_worktrees(
 /// `<repository>/.git/worktrees/<name>`.
 #[must_use]
 pub fn linked_worktree_repository(root: &Path) -> Option<String> {
-    let bytes = crate::files::vfs::read_file_with_ceiling(&root.join(".git"), 16 * 1024).ok()?;
+    let bytes = crate::files::vfs::read_file_bounded(&root.join(".git"), 16 * 1024).ok()?;
     let link = std::str::from_utf8(&bytes).ok()?;
     let git_directory = Path::new(link.strip_prefix("gitdir:")?.trim());
     let git_directory = std::path::absolute(root.join(git_directory)).ok()?;
@@ -250,7 +250,7 @@ pub fn linked_worktree_repository(root: &Path) -> Option<String> {
 }
 
 pub(super) fn list_scoped_directory(
-    generation: u64,
+    request_id: u64,
     root_revision: u64,
     directory: &Path,
     roots: &[PathBuf],
@@ -337,7 +337,7 @@ pub(super) fn list_scoped_directory(
     });
     let entries = keyed_entries.into_iter().map(|(_, entry)| entry).collect();
     Ok(DirectoryListing {
-        generation,
+        request_id,
         root_revision,
         directory,
         entries,

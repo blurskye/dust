@@ -281,10 +281,10 @@ fn read_scoped_file(path: &Path, roots: &[RootIdentity]) -> Result<Vec<u8>, VfsE
             openat(&file, name, flags, Mode::empty()).map_err(|e| error(path, e.to_string()))?,
         );
     }
-    crate::files::vfs::read_open_file_with_ceiling(
+    crate::files::vfs::read_open_file_bounded(
         file,
         path,
-        crate::files::recovery::DOCUMENT_BYTE_CEILING,
+        crate::files::recovery::DOCUMENT_BYTE_LIMIT,
     )
 }
 
@@ -390,7 +390,7 @@ mod tests {
             }
             assert!(
                 Instant::now() < deadline,
-                "explorer worker did not retire its request"
+                "explorer worker did not finish its request"
             );
             std::thread::sleep(Duration::from_millis(1));
         }

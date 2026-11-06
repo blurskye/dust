@@ -22,17 +22,17 @@ use crate::files::vfs::atomic_write;
 use crate::files::vfs::lock_file;
 
 pub const RECOVERY_VERSION: u32 = 2;
-pub const DOCUMENT_BYTE_CEILING: u64 = 256 * 1024 * 1024;
-pub(super) const RECOVERY_JOURNAL_BYTE_CEILING: u64 = 64 * 1024 * 1024;
-pub(super) const RECOVERY_DIRECTORY_ENTRY_CEILING: usize = 10_000;
+pub const DOCUMENT_BYTE_LIMIT: u64 = 256 * 1024 * 1024;
+pub(super) const RECOVERY_JOURNAL_BYTE_LIMIT: u64 = 64 * 1024 * 1024;
+pub(super) const RECOVERY_DIRECTORY_ENTRY_LIMIT: usize = 10_000;
 pub(super) const RECOVERY_TOML_OVERHEAD_ALLOWANCE: u64 = 1_024;
 pub(super) const RECOVERY_TOML_MAX_ESCAPE_EXPANSION: u64 = 6;
-pub(super) const RECOVERY_PAYLOAD_BYTE_CEILING: u64 = (RECOVERY_JOURNAL_BYTE_CEILING
+pub(super) const RECOVERY_PAYLOAD_BYTE_LIMIT: u64 = (RECOVERY_JOURNAL_BYTE_LIMIT
     - RECOVERY_TOML_OVERHEAD_ALLOWANCE)
     / RECOVERY_TOML_MAX_ESCAPE_EXPANSION;
 
 pub(super) const fn recovery_journal_size_allowed(bytes: u64) -> bool {
-    bytes <= RECOVERY_JOURNAL_BYTE_CEILING
+    bytes <= RECOVERY_JOURNAL_BYTE_LIMIT
 }
 
 /// Whether a file this size fits in a recovery journal, leaving room for its path.
@@ -41,7 +41,7 @@ pub const fn recovery_size_allowed(content_bytes: u64) -> bool {
 }
 
 pub(super) const fn recovery_payload_size_allowed(content_bytes: u64, path_bytes: u64) -> bool {
-    content_bytes.saturating_add(path_bytes) <= RECOVERY_PAYLOAD_BYTE_CEILING
+    content_bytes.saturating_add(path_bytes) <= RECOVERY_PAYLOAD_BYTE_LIMIT
 }
 
 pub(super) fn read_bounded_bytes(
@@ -56,7 +56,7 @@ pub(super) fn read_bounded_bytes(
 }
 
 pub(super) fn read_recovery_source(path: &Path) -> Result<String, String> {
-    let bytes = crate::files::vfs::read_file_with_ceiling(path, RECOVERY_JOURNAL_BYTE_CEILING)
+    let bytes = crate::files::vfs::read_file_bounded(path, RECOVERY_JOURNAL_BYTE_LIMIT)
         .map_err(|error| format!("cannot read recovery journal: {error}"))?;
     String::from_utf8(bytes).map_err(|error| format!("recovery journal is not UTF-8: {error}"))
 }
@@ -64,10 +64,10 @@ pub(super) fn read_recovery_source(path: &Path) -> Result<String, String> {
 pub(super) fn bounded_recovery_entries<T>(entries: impl IntoIterator<Item = T>) -> (Vec<T>, bool) {
     let mut paths = entries
         .into_iter()
-        .take(RECOVERY_DIRECTORY_ENTRY_CEILING.saturating_add(1))
+        .take(RECOVERY_DIRECTORY_ENTRY_LIMIT.saturating_add(1))
         .collect::<Vec<_>>();
-    let truncated = paths.len() > RECOVERY_DIRECTORY_ENTRY_CEILING;
-    paths.truncate(RECOVERY_DIRECTORY_ENTRY_CEILING);
+    let truncated = paths.len() > RECOVERY_DIRECTORY_ENTRY_LIMIT;
+    paths.truncate(RECOVERY_DIRECTORY_ENTRY_LIMIT);
     (paths, truncated)
 }
 
@@ -138,8 +138,8 @@ pub fn write_recovery(path: &Path, record: &RecoveryRecord) -> Result<(), VfsErr
         return Err(VfsError::Recovery {
             path: path.to_path_buf(),
             reason: format!(
-                "payload exceeds {} byte pre-serialization recovery safety ceiling",
-                RECOVERY_PAYLOAD_BYTE_CEILING
+                "payload exceeds {} byte pre-serialization recovery safety limit",
+                RECOVERY_PAYLOAD_BYTE_LIMIT
             ),
         });
     }
@@ -151,8 +151,8 @@ pub fn write_recovery(path: &Path, record: &RecoveryRecord) -> Result<(), VfsErr
         return Err(VfsError::Recovery {
             path: path.to_path_buf(),
             reason: format!(
-                "serialized journal exceeds {} byte recovery safety ceiling",
-                RECOVERY_JOURNAL_BYTE_CEILING
+                "serialized journal exceeds {} byte recovery safety limit",
+                RECOVERY_JOURNAL_BYTE_LIMIT
             ),
         });
     }
@@ -170,7 +170,7 @@ pub fn write_recovery(path: &Path, record: &RecoveryRecord) -> Result<(), VfsErr
 
 #[must_use]
 pub fn discover_recovery(directory: &Path) -> RecoveryDiscovery {
-    discover_recovery_bounded(directory, 100, RECOVERY_JOURNAL_BYTE_CEILING)
+    discover_recovery_bounded(directory, 100, RECOVERY_JOURNAL_BYTE_LIMIT)
 }
 
 pub(super) fn discover_recovery_bounded(
@@ -196,7 +196,7 @@ pub(super) fn discover_recovery_bounded(
     });
     if limited {
         diagnostics.push(format!(
-            "recovery discovery stopped at {maximum_bytes} byte safety ceiling"
+            "recovery discovery stopped at {maximum_bytes} byte safety limit"
         ));
     }
     RecoveryDiscovery {
@@ -224,7 +224,7 @@ fn visit_recovery(
     let (scanned, truncated) = bounded_recovery_entries(entries);
     if truncated {
         diagnostics.push(format!(
-            "recovery directory scan stopped at safety ceiling of {RECOVERY_DIRECTORY_ENTRY_CEILING} raw entries"
+            "recovery directory scan stopped at safety limit of {RECOVERY_DIRECTORY_ENTRY_LIMIT} raw entries"
         ));
     }
     let mut paths = scanned

@@ -17,11 +17,11 @@ use crate::files::error::VfsError;
 
 use crate::files::vfs::canonical_path;
 
-use crate::files::vfs::read_file_with_ceiling;
+use crate::files::vfs::read_file_bounded;
 
-pub const PROJECT_ROOT_MARKER_CEILING: usize = 16;
-pub const PROJECT_ROOT_ANCESTOR_CEILING: usize = 64;
-pub(super) const PROJECT_ROOT_MANIFEST_BYTE_CEILING: u64 = 512 * 1024;
+pub const PROJECT_ROOT_MARKER_LIMIT: usize = 16;
+pub const PROJECT_ROOT_ANCESTOR_LIMIT: usize = 64;
+pub(super) const PROJECT_ROOT_MANIFEST_BYTE_LIMIT: u64 = 512 * 1024;
 
 /// Adapter-defined project evidence. The filesystem worker never branches on a
 /// document language; it validates the policy selected by the tool catalog.
@@ -49,7 +49,7 @@ pub enum ProjectRootStrategy {
 /// proven; it is never replaced with an arbitrary containing directory.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProjectRootResolution {
-    pub generation: u64,
+    pub request_id: u64,
     pub root_revision: u64,
     pub document: PathBuf,
     pub workspace_root: PathBuf,
@@ -58,7 +58,7 @@ pub struct ProjectRootResolution {
 
 #[derive(Default)]
 pub struct ProjectRootWorker {
-    generation: u64,
+    request_id: u64,
     receiver: Option<Receiver<Result<ProjectRootResolution, VfsError>>>,
 }
 
@@ -71,26 +71,26 @@ impl ProjectRootWorker {
         markers: Vec<String>,
         strategy: ProjectRootStrategy,
     ) -> Result<u64, VfsError> {
-        if markers.len() > PROJECT_ROOT_MARKER_CEILING
+        if markers.len() > PROJECT_ROOT_MARKER_LIMIT
             || markers
                 .iter()
                 .any(|marker| !valid_project_root_marker(marker))
         {
             return Err(VfsError::ProjectRootMarker);
         }
-        self.generation = self.generation.checked_add(1).ok_or_else(|| VfsError::Io {
-            operation: "allocate project-root generation",
+        self.request_id = self.request_id.checked_add(1).ok_or_else(|| VfsError::Io {
+            operation: "allocate project-root request_id",
             path: document.clone(),
-            source: io::Error::other("project-root generation exhausted"),
+            source: io::Error::other("project-root request_id exhausted"),
         })?;
-        let generation = self.generation;
+        let request_id = self.request_id;
         let (sender, receiver) = mpsc::sync_channel(1);
         let worker_document = document.clone();
         thread::Builder::new()
-            .name(format!("dust-project-root-{generation}"))
+            .name(format!("dust-project-root-{request_id}"))
             .spawn(move || {
                 let result = resolve_project_root(
-                    generation,
+                    request_id,
                     root_revision,
                     &worker_document,
                     &workspace_root,
@@ -105,7 +105,7 @@ impl ProjectRootWorker {
                 source,
             })?;
         self.receiver = Some(receiver);
-        Ok(generation)
+        Ok(request_id)
     }
 
     /// Consuming terminal poll; unlike the compatibility query, disconnect is an outcome.
@@ -152,7 +152,7 @@ fn canonical_document(document: &Path) -> Result<PathBuf, VfsError> {
 }
 
 pub(super) fn resolve_project_root(
-    generation: u64,
+    request_id: u64,
     root_revision: u64,
     document: &Path,
     workspace_root: &Path,
@@ -169,7 +169,7 @@ pub(super) fn resolve_project_root(
         .map(Path::to_path_buf)
         .ok_or_else(|| VfsError::OutsideScope(document.clone()))?;
     let mut project_root = None;
-    for _ in 0..PROJECT_ROOT_ANCESTOR_CEILING {
+    for _ in 0..PROJECT_ROOT_ANCESTOR_LIMIT {
         if !directory.starts_with(&workspace_root) {
             break;
         }
@@ -190,7 +190,7 @@ pub(super) fn resolve_project_root(
         directory = parent.to_path_buf();
     }
     Ok(ProjectRootResolution {
-        generation,
+        request_id,
         root_revision,
         document,
         workspace_root,
@@ -215,7 +215,7 @@ pub(super) fn regular_project_marker(directory: &Path, marker: &str) -> Option<f
 
 pub(super) fn bounded_project_marker(directory: &Path, marker: &str) -> Option<String> {
     let bytes =
-        read_file_with_ceiling(&directory.join(marker), PROJECT_ROOT_MANIFEST_BYTE_CEILING).ok()?;
+        read_file_bounded(&directory.join(marker), PROJECT_ROOT_MANIFEST_BYTE_LIMIT).ok()?;
     String::from_utf8(bytes).ok()
 }
 

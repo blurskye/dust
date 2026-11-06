@@ -31,7 +31,7 @@ use crate::files::explorer_intent::ExplorerIoReply;
 
 use crate::files::explorer_intent::PreparedExplorerMutation;
 
-use crate::files::recovery::DOCUMENT_BYTE_CEILING;
+use crate::files::recovery::DOCUMENT_BYTE_LIMIT;
 
 use crate::files::recovery::RecoveryCleanup;
 
@@ -534,7 +534,7 @@ impl VfsWorker {
                                             result: read_scoped_file(
                                                 &path,
                                                 &canonical_roots,
-                                                DOCUMENT_BYTE_CEILING,
+                                                DOCUMENT_BYTE_LIMIT,
                                             ),
                                             path,
                                         }
@@ -735,7 +735,7 @@ impl VfsWorker {
                                     let discovery = discover_recovery_bounded(
                                         &directory,
                                         maximum_records,
-                                        crate::files::recovery::RECOVERY_JOURNAL_BYTE_CEILING,
+                                        crate::files::recovery::RECOVERY_JOURNAL_BYTE_LIMIT,
                                     );
                                     VfsResult::RecoveryDiscovered { id, discovery }
                                 }
@@ -1205,9 +1205,7 @@ impl VfsWorker {
         }
         self.requests
             .retain(|_, (state, _)| state.load(Ordering::Acquire) != 3);
-        let id = request
-            .id()
-            .expect("ordinary admission has request identity");
+        let id = request.id().expect("queued request has an identity");
         let state = Arc::new(std::sync::atomic::AtomicU8::new(0));
         let cancellable = explorer.is_some()
             || matches!(
@@ -1237,8 +1235,8 @@ impl VfsWorker {
     }
     /// Cancel a queued read/write or workspace resource request; true only before execution starts.
     /// Other request kinds currently return false.
-    /// A running filesystem operation may still finish; its owner must retire
-    /// publication independently. Cancellation never rolls back a disk write.
+    /// A running filesystem operation may still finish; its owner must reject stale
+    /// results independently. Cancellation never rolls back a disk write.
     pub fn cancel(&mut self, id: RequestId) -> bool {
         self.requests.get(&id).is_some_and(|(state, allowed)| {
             *allowed
@@ -1469,7 +1467,7 @@ pub(super) fn read_scoped_file(
         roots,
         rustix::fs::OFlags::RDONLY | rustix::fs::OFlags::NONBLOCK,
     )?;
-    read_open_file_with_ceiling(file, path, maximum_bytes)
+    read_open_file_bounded(file, path, maximum_bytes)
 }
 
 pub(super) fn scoped_existing_path(path: &Path, roots: &[PathBuf]) -> Result<PathBuf, VfsError> {
@@ -1718,7 +1716,7 @@ pub(super) fn resolve_resource_intent(
     if !metadata.is_file() || metadata.len() > maximum_bytes as u64 {
         return Err(VfsError::NotRegularFile(source));
     }
-    let bytes = read_open_file_with_ceiling(input, &source, maximum_bytes as u64)?;
+    let bytes = read_open_file_bounded(input, &source, maximum_bytes as u64)?;
     let kind = if let Some(target) = target {
         let name = target
             .file_name()
@@ -1784,7 +1782,7 @@ pub(super) fn apply_resource_intent(intent: &CheckedResourceIntent) -> Result<()
     if metadata.dev() != intent.source_device
         || metadata.ino() != intent.source_inode
         || intent.source_bytes.len() as u64 > intent.maximum_bytes
-        || read_open_file_with_ceiling(input, &source, intent.maximum_bytes)? != intent.source_bytes
+        || read_open_file_bounded(input, &source, intent.maximum_bytes)? != intent.source_bytes
     {
         return Err(VfsError::ChangedOnDisk);
     }
@@ -1912,7 +1910,7 @@ pub(crate) fn open_regular_file(path: &Path) -> io::Result<File> {
     Ok(file)
 }
 
-pub(crate) fn read_file_with_ceiling(path: &Path, maximum_bytes: u64) -> Result<Vec<u8>, VfsError> {
+pub(crate) fn read_file_bounded(path: &Path, maximum_bytes: u64) -> Result<Vec<u8>, VfsError> {
     use std::os::unix::fs::OpenOptionsExt;
     let file = fs::OpenOptions::new()
         .read(true)
@@ -1923,10 +1921,10 @@ pub(crate) fn read_file_with_ceiling(path: &Path, maximum_bytes: u64) -> Result<
             path: path.to_path_buf(),
             source,
         })?;
-    read_open_file_with_ceiling(file, path, maximum_bytes)
+    read_open_file_bounded(file, path, maximum_bytes)
 }
 
-pub(super) fn read_open_file_with_ceiling(
+pub(super) fn read_open_file_bounded(
     file: fs::File,
     path: &Path,
     maximum_bytes: u64,
@@ -1958,7 +1956,7 @@ pub(super) fn read_open_file_with_ceiling(
 }
 
 pub fn read_file(path: &Path) -> Result<Vec<u8>, VfsError> {
-    read_file_with_ceiling(path, DOCUMENT_BYTE_CEILING)
+    read_file_bounded(path, DOCUMENT_BYTE_LIMIT)
 }
 
 pub fn checked_atomic_write(
@@ -2617,7 +2615,7 @@ mod lifecycle_tests {
     }
 
     #[test]
-    fn queued_write_cancellation_is_exact_and_full_admission_never_writes() {
+    fn queued_write_cancellation_is_exact_and_a_full_queue_never_writes() {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("file");
         let (mut worker, gate) = VfsWorker::start_gated_for_test(1);
@@ -2643,10 +2641,10 @@ mod lifecycle_tests {
         let path = root.path().join("file");
         fs::write(&path, b"text").unwrap();
         let mut worker = VfsWorker::start(1);
-        let admission_deadline = std::time::Instant::now() + Duration::from_secs(2);
+        let queue_deadline = std::time::Instant::now() + Duration::from_secs(2);
         for _ in 0..3 {
             loop {
-                assert!(std::time::Instant::now() < admission_deadline);
+                assert!(std::time::Instant::now() < queue_deadline);
                 match worker.read(path.clone()) {
                     Ok(_) => break,
                     Err(VfsError::QueueFull) => thread::sleep(Duration::from_millis(1)),
@@ -2676,7 +2674,7 @@ mod lifecycle_tests {
         }
     }
     #[test]
-    fn reused_or_exhausted_request_identity_rejects_before_queue_admission() {
+    fn reused_or_exhausted_request_identity_rejects_before_queueing() {
         struct Repeated;
         impl crate::clock::IdSource for Repeated {
             fn next(&self) -> u64 {
