@@ -59,14 +59,14 @@ pub enum DapEvent {
     },
     Response {
         adapter: String,
-        stop_generation: u64,
+        stop_id: u64,
         request_id: u64,
         request: Option<DapControl>,
         response: DapResponse,
     },
     RequestFailed {
         adapter: String,
-        stop_generation: u64,
+        stop_id: u64,
         request_seq: i64,
         request_id: u64,
         request: Option<DapControl>,
@@ -197,8 +197,8 @@ pub enum DapControl {
 }
 
 mod reverse;
+pub(crate) use reverse::DapReplyDelivery;
 pub use reverse::DapReplyOutcome;
-pub(crate) use reverse::DapReplyReceipt;
 pub use reverse::DapTerminalReply;
 
 mod session;
@@ -528,7 +528,7 @@ fn run_adapter(
     }
     let clean_disconnect = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let mut child = Child(child, clean_disconnect.clone());
-    // Retire reply/source authority before potentially blocking child cleanup,
+    // Invalidate replies and contexts before potentially blocking child cleanup,
     // including unwind; rebinding transfers this guard's drop order.
     let _live = _live;
     let child = &mut child.0;
@@ -654,7 +654,7 @@ fn run_adapter(
     let mut thread_id = None;
     let mut stopping = false;
     let mut debuggee_exited = false;
-    let mut stop_generation = 0_u64;
+    let mut stop_id = 0_u64;
     let mut pending: HashMap<i64, (String, u64, u64, Option<DapControl>)> = HashMap::new();
     let mut breakpoint_ids = HashMap::<i64, (PathBuf, u64)>::new();
     let mut applied_breakpoints = HashMap::<PathBuf, i64>::new();
@@ -675,7 +675,7 @@ fn run_adapter(
             let Ok(control) = controls.try_recv() else {
                 break;
             };
-            if control.generation != events.actor.generation.load(Ordering::Acquire)
+            if control.stop_id != events.actor.stop_id.load(Ordering::Acquire)
                 && !matches!(
                     control.value,
                     DapControl::SetBreakpoints { .. }
@@ -705,12 +705,7 @@ fn run_adapter(
                 send_request(&mut stdin, sequence, "threads", json!({}));
                 pending.insert(
                     sequence,
-                    (
-                        "threads".into(),
-                        stop_generation,
-                        request_id,
-                        Some(original),
-                    ),
+                    ("threads".into(), stop_id, request_id, Some(original)),
                 );
                 sequence += 1;
                 continue;
@@ -789,7 +784,7 @@ fn run_adapter(
                 send_request(&mut stdin, sequence, command, arguments);
                 pending.insert(
                     sequence,
-                    (command.into(), stop_generation, request_id, Some(original)),
+                    (command.into(), stop_id, request_id, Some(original)),
                 );
                 sequence += 1;
             }
@@ -816,21 +811,13 @@ fn run_adapter(
                 );
                 pending.insert(
                     sequence,
-                    (
-                        "setBreakpoints".into(),
-                        stop_generation,
-                        request_id,
-                        Some(original),
-                    ),
+                    ("setBreakpoints".into(), stop_id, request_id, Some(original)),
                 );
                 sequence += 1;
             } else {
                 if supports_configuration_done {
                     send_request(&mut stdin, sequence, "configurationDone", json!({}));
-                    pending.insert(
-                        sequence,
-                        ("configurationDone".into(), stop_generation, 0, None),
-                    );
+                    pending.insert(sequence, ("configurationDone".into(), stop_id, 0, None));
                     sequence += 1;
                 }
                 configuration_sent = true;
@@ -870,7 +857,7 @@ fn run_adapter(
                         break;
                     }
                     send_request(&mut stdin, sequence, &request, request_arguments.clone());
-                    pending.insert(sequence, (request.clone(), stop_generation, 0, None));
+                    pending.insert(sequence, (request.clone(), stop_id, 0, None));
                     sequence += 1;
                     launched = true;
                 }
@@ -879,9 +866,9 @@ fn run_adapter(
                         && pending.get(&request_seq).is_some_and(|(command, _, _, _)| {
                             message.get("command").and_then(Value::as_str) == Some(command.as_str())
                         })
-                        && let Some((command, generation, request_id, original)) =
+                        && let Some((command, response_stop_id, request_id, original)) =
                             pending.remove(&request_seq)
-                        && (generation == stop_generation || is_session_request(&command))
+                        && (response_stop_id == stop_id || is_session_request(&command))
                     {
                         if message.get("success").and_then(Value::as_bool) != Some(true) {
                             let detail = rejection_detail(&message);
@@ -892,7 +879,7 @@ fn run_adapter(
                             events
                                 .send(DapEvent::RequestFailed {
                                     adapter: adapter.clone(),
-                                    stop_generation: generation,
+                                    stop_id: response_stop_id,
                                     request_seq,
                                     request_id,
                                     request: original.clone(),
@@ -920,14 +907,14 @@ fn run_adapter(
                             command.as_str(),
                             "continue" | "next" | "stepIn" | "stepOut"
                         ) {
-                            // Do not retire stopped data until the adapter accepts the resume.
-                            // A preceding continued event has already retired it.
+                            // Do not invalidate stopped data until the adapter accepts the resume.
+                            // A preceding continued event has already invalidated it.
                             if paused {
-                                let Some(next) = stop_generation.checked_add(1) else {
+                                let Some(next) = stop_id.checked_add(1) else {
                                     break;
                                 };
-                                stop_generation = next;
-                                events.actor.generation.store(next, Ordering::Release);
+                                stop_id = next;
+                                events.actor.stop_id.store(next, Ordering::Release);
                                 pending.retain(|_, (command, _, _, _)| is_session_request(command));
                             }
                             paused = false;
@@ -980,19 +967,14 @@ fn run_adapter(
                                     );
                                     pending.insert(
                                         sequence,
-                                        (
-                                            "pause".into(),
-                                            stop_generation,
-                                            request_id,
-                                            original.clone(),
-                                        ),
+                                        ("pause".into(), stop_id, request_id, original.clone()),
                                     );
                                     sequence += 1;
                                 } else {
                                     events
                                         .send(DapEvent::RequestFailed {
                                             adapter: adapter.clone(),
-                                            stop_generation,
+                                            stop_id,
                                             request_seq,
                                             request_id,
                                             request: original.clone(),
@@ -1010,7 +992,7 @@ fn run_adapter(
                             events
                                 .send(DapEvent::Response {
                                     adapter: adapter.clone(),
-                                    stop_generation: generation,
+                                    stop_id: response_stop_id,
                                     request_id,
                                     request: original.clone(),
                                     response: DapResponse::Disconnected {
@@ -1029,7 +1011,7 @@ fn run_adapter(
                             events
                                 .send(DapEvent::Response {
                                     adapter: adapter.clone(),
-                                    stop_generation: generation,
+                                    stop_id: response_stop_id,
                                     request_id,
                                     request: original.clone(),
                                     response,
@@ -1048,7 +1030,7 @@ fn run_adapter(
                             events
                                 .send(DapEvent::RequestFailed {
                                     adapter: adapter.clone(),
-                                    stop_generation: generation,
+                                    stop_id: response_stop_id,
                                     request_seq,
                                     request_id,
                                     request: original.clone(),
@@ -1076,7 +1058,7 @@ fn run_adapter(
                                 events
                                     .send(DapEvent::Response {
                                         adapter: adapter.clone(),
-                                        stop_generation,
+                                        stop_id,
                                         request_id: 0,
                                         request: None,
                                         response: DapResponse::BreakpointChanged {
@@ -1096,11 +1078,11 @@ fn run_adapter(
                         }
                         "initialized" => initialized = true,
                         "stopped" => {
-                            let Some(next) = stop_generation.checked_add(1) else {
+                            let Some(next) = stop_id.checked_add(1) else {
                                 break;
                             };
-                            stop_generation = next;
-                            events.actor.generation.store(next, Ordering::Release);
+                            stop_id = next;
+                            events.actor.stop_id.store(next, Ordering::Release);
                             paused = true;
                             // Startup belongs to this actor, not to one stopped context.
                             pending.retain(|_, (command, _, _, _)| is_session_request(command));
@@ -1113,12 +1095,7 @@ fn run_adapter(
                             send_request(&mut stdin, sequence, "threads", json!({}));
                             pending.insert(
                                 sequence,
-                                (
-                                    "threads".into(),
-                                    stop_generation,
-                                    0,
-                                    Some(DapControl::Threads),
-                                ),
+                                ("threads".into(), stop_id, 0, Some(DapControl::Threads)),
                             );
                             sequence += 1;
                             events
@@ -1142,11 +1119,11 @@ fn run_adapter(
                             {
                                 continue;
                             }
-                            let Some(next) = stop_generation.checked_add(1) else {
+                            let Some(next) = stop_id.checked_add(1) else {
                                 break;
                             };
-                            stop_generation = next;
-                            events.actor.generation.store(next, Ordering::Release);
+                            stop_id = next;
+                            events.actor.stop_id.store(next, Ordering::Release);
                             paused = false;
                             pending.retain(|_, (command, _, _, _)| is_session_request(command));
                             if launch_accepted {
@@ -1192,12 +1169,12 @@ fn run_adapter(
                         .unwrap_or_default();
                     reverse.retain_mut(|request| !request.flush(&mut stdin, &mut sequence));
                     if request_seq <= last_reverse_sequence || reverse.len() >= 32 {
-                        events.fail("DAP reverse request identity reused or admission full".into());
+                        events.fail("DAP reverse request identity reused or queue full".into());
                         break;
                     }
                     last_reverse_sequence = request_seq;
                     if command == "runInTerminal" {
-                        // Reserve the original obligation BEFORE argv/environment projection.
+                        // Reserve the reply mailbox before copying arguments and environment.
                         let (request, reply) =
                             reverse::ReverseRequest::reserve(request_seq, live.clone());
                         reverse.push(request);
@@ -1587,10 +1564,10 @@ pub enum DapError {
     ExecutableMissing(String),
     #[error("invalid debug adapter configuration")]
     InvalidConfiguration,
-    #[error("debug adapter admission is full")]
+    #[error("debug adapter queue is full")]
     Full,
-    #[error("debug adapter source or stopped context retired")]
-    Retired,
+    #[error("debug adapter source or stopped context is stale")]
+    StaleContext,
     #[error("failed to create debug-adapter thread: {0}")]
     Thread(#[source] std::io::Error),
 }

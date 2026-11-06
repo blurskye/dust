@@ -1,4 +1,4 @@
-//! Original reverse requests: reserved one-shot mailboxes and actual pipe-write receipts.
+//! Reverse requests, one-shot reply mailboxes and pipe-write completion.
 use crate::debugger::DapControl;
 use crate::debugger::DapError;
 use crate::debugger::session::Writer;
@@ -28,11 +28,11 @@ pub struct DapTerminalReply {
     inner: Arc<ReplySender>,
 }
 #[derive(Clone, Debug)]
-pub(crate) struct DapReplyReceipt {
+pub(crate) struct DapReplyDelivery {
     live: Arc<AtomicBool>,
     outcome: Arc<AtomicU8>,
 }
-impl DapReplyReceipt {
+impl DapReplyDelivery {
     pub(crate) fn outcome(&self) -> DapReplyOutcome {
         outcome(&self.live, &self.outcome)
     }
@@ -62,7 +62,7 @@ impl ReplySender {
             return Err(DapError::InvalidConfiguration);
         }
         if !self.live.load(Ordering::Acquire) || self.used.swap(true, Ordering::AcqRel) {
-            return Err(DapError::Retired);
+            return Err(DapError::StaleContext);
         }
         // Exactly one producer wins used. The original mailbox reserves one slot;
         // it cannot be full from another request or from the writer's backpressure.
@@ -78,7 +78,7 @@ impl ReplySender {
             .map_err(|_| {
                 self.outcome
                     .store(DapReplyOutcome::Unknown as u8, Ordering::Release);
-                DapError::Retired
+                DapError::StaleContext
             })
     }
 }
@@ -103,8 +103,8 @@ impl DapTerminalReply {
     pub(crate) fn respond(&self, success: bool, message: Option<String>) -> Result<(), DapError> {
         self.inner.submit(success, message)
     }
-    pub(crate) fn receipt(&self) -> DapReplyReceipt {
-        DapReplyReceipt {
+    pub(crate) fn delivery(&self) -> DapReplyDelivery {
+        DapReplyDelivery {
             live: self.inner.live.clone(),
             outcome: self.inner.outcome.clone(),
         }
@@ -193,7 +193,7 @@ impl Drop for ReverseRequest {
     fn drop(&mut self) {
         self.used.store(true, Ordering::Release);
         // Closed original mailboxes refuse even while the actor is still alive.
-        // A queued writer retains its receipt and may still finish later.
+        // A queued writer retains its delivery and may still finish later.
         let _ = self
             .outcome
             .fetch_update(Ordering::AcqRel, Ordering::Acquire, |state| {
@@ -289,15 +289,15 @@ pub(crate) fn fixture() {
         claimed.receiver.try_recv(),
         Ok(DapControl::ReverseResponse { success: false, .. })
     ));
-    let (_, retired) = ReverseRequest::reserve(7, live.clone());
+    let (_, closed) = ReverseRequest::reserve(7, live.clone());
     assert!(
-        !retired.current(),
+        !closed.current(),
         "closed mailbox still offered reply authority"
     );
-    assert_eq!(retired.outcome(), DapReplyOutcome::Unknown);
+    assert_eq!(closed.outcome(), DapReplyOutcome::Unknown);
     live.store(false, Ordering::Release);
-    assert!(!retired.current());
-    assert!(retired.respond(true, None).is_err());
+    assert!(!closed.current());
+    assert!(closed.respond(true, None).is_err());
     let invalid = json!({"arguments":{"cwd":"/owned","args":["ok",12],"env":{}}});
     assert!(terminal_arguments(&invalid).is_none());
     let oversized = json!({"arguments":{"cwd":"/owned","args":vec!["x";4097],"env":{}}});

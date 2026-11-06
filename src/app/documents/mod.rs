@@ -1,6 +1,6 @@
-//! Document-owned file/startup intents and policy, with bounded VFS admission/drain.
-//! Other feature payloads still live in legacy dispatch. Queued read/write cancellation
-//! and shutdown are nonblocking; running filesystem calls are not interruptible.
+//! Document open, save, reload and startup requests with bounded file I/O.
+//! Feature owners consume their own results. Queued cancellation and shutdown are
+//! nonblocking; running filesystem calls are not interruptible.
 
 pub(in crate::app) const VFS_QUEUE_CAPACITY: usize = 8;
 pub(in crate::app) const LARGE_FILE_BYTES: usize = 16 * 1024 * 1024;
@@ -55,7 +55,7 @@ struct StartupIntent {
     primary: bool,
     delivered: bool,
 }
-pub(in crate::app) struct StartupReceipt {
+pub(in crate::app) struct StartupRead {
     owner: Arc<()>,
     request: RequestId,
 }
@@ -71,7 +71,7 @@ pub(in crate::app) enum DocumentEvent {
         error: String,
     },
     Startup {
-        receipt: StartupReceipt,
+        read: StartupRead,
         path: PathBuf,
         text: Result<TextBuffer, String>,
     },
@@ -86,7 +86,7 @@ pub(super) struct Documents {
     pending_workspace: HashSet<RequestId>,
     pending_tasks: HashSet<RequestId>,
     pending_files: HashMap<RequestId, lifecycle::FileIntent>,
-    open_generation: Arc<()>,
+    latest_open: Arc<()>,
     maximum_pending: usize,
     closing: bool,
     stopped: bool,
@@ -133,7 +133,7 @@ impl Documents {
             pending_workspace: HashSet::new(),
             pending_tasks: HashSet::new(),
             pending_files: HashMap::new(),
-            open_generation: Arc::new(()),
+            latest_open: Arc::new(()),
             maximum_pending: maximum_pending.max(1),
             closing: false,
             stopped: false,
@@ -157,7 +157,7 @@ impl Documents {
             self.startup_activate &=
                 windows.navigation_current(stamp, &editor.window_version(), editor.active_view);
         } else {
-            // New startup files were opened synchronously and need no read receipt.
+            // New startup files were opened synchronously and need no read read.
             self.primary = self.primary_path.as_ref().and_then(|path| {
                 editor
                     .buffers
@@ -196,7 +196,7 @@ impl Documents {
         }
         let mut errors = Vec::new();
         while let Some((path, primary)) = self.startup.front() {
-            if self.check_admission().is_err() {
+            if self.check_capacity().is_err() {
                 break;
             }
             match self.vfs.read(path.clone()) {
@@ -298,7 +298,7 @@ impl Documents {
                     .map_err(|e| e.to_string())
                     .and_then(|bytes| TextBuffer::from_bytes(&bytes).map_err(|e| e.to_string()));
                 return DocumentEvent::Startup {
-                    receipt: StartupReceipt {
+                    read: StartupRead {
                         owner: self.owner.clone(),
                         request: id,
                     },
@@ -334,15 +334,15 @@ impl Documents {
     }
     pub(in crate::app) fn finish_startup(
         &mut self,
-        receipt: StartupReceipt,
+        read: StartupRead,
         buffer: Option<BufferId>,
         editor: &EditorWindowVersion,
         root_revision: u64,
     ) -> bool {
-        if !Arc::ptr_eq(&self.owner, &receipt.owner) {
+        if !Arc::ptr_eq(&self.owner, &read.owner) {
             return false;
         }
-        let Some(intent) = self.pending_startup.remove(&receipt.request) else {
+        let Some(intent) = self.pending_startup.remove(&read.request) else {
             return false;
         };
         if !self.startup_current(editor, root_revision) {
@@ -465,7 +465,7 @@ impl Documents {
     pub(in crate::app) fn startup_pending(&self) -> usize {
         self.pending_startup.len()
     }
-    pub(in crate::app) fn retire_startup(&mut self) {
+    pub(in crate::app) fn cancel_startup(&mut self) {
         self.startup.clear();
         self.primary = None;
         for id in self.pending_startup.keys() {
@@ -507,7 +507,7 @@ impl Documents {
     pub(in crate::app) fn worker_finished(&self) -> bool {
         self.vfs.shutdown_finished()
     }
-    pub(in crate::app) fn check_admission(&self) -> Result<(), VfsError> {
+    pub(in crate::app) fn check_capacity(&self) -> Result<(), VfsError> {
         if self.closing || self.stopped {
             return Err(VfsError::WorkerStopped);
         }
@@ -527,7 +527,7 @@ impl Documents {
     }
     #[cfg(test)]
     pub(in crate::app) fn read(&mut self, path: PathBuf) -> Result<RequestId, VfsError> {
-        self.check_admission()?;
+        self.check_capacity()?;
         let id = self.vfs.read(path)?;
         self.pending_legacy.insert(id);
         Ok(id)
@@ -537,7 +537,7 @@ impl Documents {
         &mut self,
         paths: Vec<PathBuf>,
     ) -> Result<RequestId, VfsError> {
-        self.check_admission()?;
+        self.check_capacity()?;
         let id = self.vfs.resolve_paths(paths)?;
         self.pending_legacy.insert(id);
         Ok(id)
@@ -549,7 +549,7 @@ impl Documents {
         root: PathBuf,
         bytes: Vec<u8>,
     ) -> Result<RequestId, VfsError> {
-        self.check_admission()?;
+        self.check_capacity()?;
         let id = self.vfs.agent_write(path, root, bytes)?;
         self.pending_legacy.insert(id);
         Ok(id)
@@ -560,14 +560,14 @@ impl Documents {
         path: PathBuf,
         canonical_roots: Vec<PathBuf>,
     ) -> Result<RequestId, VfsError> {
-        self.check_admission()?;
+        self.check_capacity()?;
         let id = self.vfs.read_scoped(path, canonical_roots)?;
         self.pending_legacy.insert(id);
         Ok(id)
     }
 
-    // Unlike general retirement, a failed queued cancellation must retain the
-    // routing obligation for an already-running or already-completed resource.
+    // If queued cancellation fails, keep routing the result: the resource operation
+    // may already be running or complete.
     pub(in crate::app) fn cancel_workspace_queued(
         &mut self,
         id: RequestId,
@@ -592,7 +592,7 @@ impl Documents {
         canonical_roots: Vec<PathBuf>,
         maximum_bytes: u64,
     ) -> Result<RequestId, VfsError> {
-        self.check_admission()?;
+        self.check_capacity()?;
         let id = self
             .vfs
             .read_scoped_bounded(path, canonical_roots, maximum_bytes)?;
@@ -607,7 +607,7 @@ impl Documents {
         canonical_roots: Vec<PathBuf>,
         maximum_bytes: usize,
     ) -> Result<RequestId, VfsError> {
-        self.check_admission()?;
+        self.check_capacity()?;
         let id = self
             .vfs
             .resolve_resource(source, target, canonical_roots, maximum_bytes)?;
@@ -619,7 +619,7 @@ impl Documents {
         &mut self,
         intent: CheckedResourceIntent,
     ) -> Result<RequestId, VfsError> {
-        self.check_admission()?;
+        self.check_capacity()?;
         let id = self.vfs.apply_resource(intent)?;
         self.pending_legacy.insert(id);
         Ok(id)
@@ -630,7 +630,7 @@ impl Documents {
         path: PathBuf,
         roots: Vec<crate::files::RootIdentity>,
     ) -> Result<RequestId, VfsError> {
-        self.check_admission()?;
+        self.check_capacity()?;
         let id = self.vfs.open_explorer(path, roots)?;
         self.pending_legacy.insert(id);
         Ok(id)
@@ -641,7 +641,7 @@ impl Documents {
         roots: Vec<crate::files::RootIdentity>,
         maximum: u64,
     ) -> Result<RequestId, VfsError> {
-        self.check_admission()?;
+        self.check_capacity()?;
         let id = self.vfs.inspect_explorer_rename(path, roots, maximum)?;
         self.pending_legacy.insert(id);
         Ok(id)
@@ -651,7 +651,7 @@ impl Documents {
         source: crate::files::ExplorerRenameSource,
         target: PathBuf,
     ) -> Result<RequestId, VfsError> {
-        self.check_admission()?;
+        self.check_capacity()?;
         let id = self.vfs.prepare_explorer_rename(source, target)?;
         self.pending_legacy.insert(id);
         Ok(id)
@@ -662,7 +662,7 @@ impl Documents {
         roots: Vec<crate::files::RootIdentity>,
         maximum: u64,
     ) -> Result<RequestId, VfsError> {
-        self.check_admission()?;
+        self.check_capacity()?;
         let id = self.vfs.prepare_explorer(operation, roots, maximum)?;
         self.pending_legacy.insert(id);
         Ok(id)
@@ -671,7 +671,7 @@ impl Documents {
         &mut self,
         intent: crate::files::PreparedExplorerMutation,
     ) -> Result<RequestId, VfsError> {
-        self.check_admission()?;
+        self.check_capacity()?;
         let id = self.vfs.apply_explorer(intent)?;
         self.pending_legacy.insert(id);
         Ok(id)
@@ -682,7 +682,7 @@ impl Documents {
         path: PathBuf,
         canonical_roots: Vec<PathBuf>,
     ) -> Result<RequestId, VfsError> {
-        self.check_admission()?;
+        self.check_capacity()?;
         let id = self.vfs.resolve_create(path, canonical_roots)?;
         self.pending_legacy.insert(id);
         Ok(id)
@@ -694,7 +694,7 @@ impl Documents {
         prefix: String,
         maximum_entries: usize,
     ) -> Result<RequestId, VfsError> {
-        self.check_admission()?;
+        self.check_capacity()?;
         let id = self.vfs.list_directory(path, prefix, maximum_entries)?;
         self.pending_legacy.insert(id);
         Ok(id)
@@ -720,8 +720,8 @@ impl Documents {
     }
 }
 
-/// Narrow loan of the actual VFS transport and its remaining document admission.
-/// Recovery retains its own original request obligations; this loan only routes I/O.
+/// Borrow of the VFS transport and its remaining document request capacity.
+/// Recovery tracks its pending requests; this borrow only routes I/O.
 pub(in crate::app) struct RecoveryIo<'a> {
     vfs: &'a mut VfsWorker,
     pending: &'a mut HashSet<RequestId>,
@@ -777,9 +777,9 @@ impl RecoveryIo<'_> {
     }
 }
 
-// Admissions are constructed only by this bounded router after the VFS result.
+// Submission results are constructed only by this router after the VFS result.
 // Constructed and consumed inside submission while the source loan is live.
-// Callers cannot fabricate an enqueue acknowledgement or detach its permit.
+// Callers cannot fabricate an enqueue acknowledgement or detach its prepared request.
 pub(in crate::app) struct WorkspaceSubmission {
     worker: Arc<()>,
     result: Result<RequestId, String>,
@@ -822,22 +822,25 @@ impl WorkspaceIoReply {
 impl Documents {
     pub(in crate::app) fn submit_workspace_io(
         &mut self,
-        permit: crate::app::workspace::edits::IoPermit<'_>,
+        prepared: crate::app::workspace::edits::PreparedIo<'_>,
     ) -> Result<bool, String> {
-        match self.check_admission() {
+        match self.check_capacity() {
             Err(VfsError::QueueFull) => return Ok(false),
             result => result.map_err(|e| e.to_string())?,
         }
-        let file = permit.file(&self.owner)?;
+        let file = prepared.file(&self.owner)?;
         use crate::app::workspace::edits::InputFile;
         let result = match file {
             InputFile::Read(path) | InputFile::ReadMatchingDisk { path, .. } => {
-                self.read_scoped_bounded(path, permit.roots().to_vec(), permit.maximum() as u64)
+                self.read_scoped_bounded(path, prepared.roots().to_vec(), prepared.maximum() as u64)
             }
-            InputFile::Create(path) => self.resolve_create(path, permit.roots().to_vec()),
-            InputFile::Resource { source, target } => {
-                self.resolve_resource(source, target, permit.roots().to_vec(), permit.maximum())
-            }
+            InputFile::Create(path) => self.resolve_create(path, prepared.roots().to_vec()),
+            InputFile::Resource { source, target } => self.resolve_resource(
+                source,
+                target,
+                prepared.roots().to_vec(),
+                prepared.maximum(),
+            ),
         };
         if matches!(result, Err(VfsError::QueueFull)) {
             return Ok(false);
@@ -846,7 +849,7 @@ impl Documents {
             self.pending_legacy.remove(id);
             self.pending_workspace.insert(*id);
         }
-        permit.finish(WorkspaceSubmission {
+        prepared.finish(WorkspaceSubmission {
             worker: self.owner.clone(),
             result: result.map_err(|e| e.to_string()),
         })?;
@@ -854,15 +857,15 @@ impl Documents {
     }
     pub(in crate::app) fn submit_workspace_resource(
         &mut self,
-        permit: crate::app::workspace::edits::ResourcePermit<'_>,
+        prepared: crate::app::workspace::edits::PreparedResource<'_>,
     ) -> Result<bool, String> {
-        match self.check_admission() {
+        match self.check_capacity() {
             Err(VfsError::QueueFull) => return Ok(false),
             result => result.map_err(|e| e.to_string())?,
         }
         // Keep the staged intent until the worker accepts it, including when
         // its own bounded queue is full.
-        let result = self.apply_resource(permit.intent(&self.owner)?.clone());
+        let result = self.apply_resource(prepared.intent(&self.owner)?.clone());
         if matches!(result, Err(VfsError::QueueFull)) {
             return Ok(false);
         }
@@ -870,7 +873,7 @@ impl Documents {
             self.pending_legacy.remove(id);
             self.pending_workspace.insert(*id);
         }
-        permit.finish(WorkspaceSubmission {
+        prepared.finish(WorkspaceSubmission {
             worker: self.owner.clone(),
             result: result.map_err(|e| e.to_string()),
         })?;
@@ -1036,9 +1039,9 @@ impl App {
                 })) => {
                     for id in requests {
                         self.input.retire_document_request(id);
-                        self.search.retire_document_request(id);
+                        self.search.forget_document_request(id);
                         self.language.retire_document_request(id);
-                        self.persistence.retire_document_request(id);
+                        self.persistence.forget_document_request(id);
                         self.navigation_reads.remove(&id);
                         self.recovery.take_read(id, self.workspace.version());
                     }
@@ -1051,18 +1054,14 @@ impl App {
                     {
                         self.reject_workspace_proposal();
                     }
-                    self.finish_workspace_resource_obligations("document worker stopped");
+                    self.finish_workspace_resources("document worker stopped");
                     self.tasks.linter_worker_stopped(task_reads);
                     self.drain_linter_sources();
                     self.show_error(error);
                     break;
                 }
                 Ok(Some(DocumentEvent::Discarded)) => continue,
-                Ok(Some(DocumentEvent::Startup {
-                    receipt,
-                    path,
-                    text,
-                })) => {
+                Ok(Some(DocumentEvent::Startup { read, path, text })) => {
                     let buffer = match text
                         .and_then(|text| self.open_startup_document(text, path.clone()))
                     {
@@ -1073,7 +1072,7 @@ impl App {
                         }
                     };
                     self.documents.finish_startup(
-                        receipt,
+                        read,
                         buffer,
                         &self.state.window_version(),
                         self.workspace.root_revision(),
@@ -1494,7 +1493,7 @@ impl App {
                 }
             }
         }
-        if self.search.preview_needs_retry() && self.documents.check_admission().is_ok() {
+        if self.search.preview_needs_retry() && self.documents.check_capacity().is_ok() {
             self.sync_picker_ui();
         }
         if self.workspace_edits.preparing() {
@@ -1848,13 +1847,13 @@ impl App {
     pub(in crate::app) fn formatting_save_for_request(
         &self,
         server: &str,
-        generation: u64,
+        request_id: u64,
     ) -> Option<crate::editor::BufferId> {
         self.format_on_save.values().find_map(|pending| {
             pending
                 .request
                 .as_ref()
-                .filter(|(key, request)| key == server && *request == generation)
+                .filter(|(key, request)| key == server && *request == request_id)
                 .map(|_| pending.buffer)
         })
     }
@@ -1898,9 +1897,9 @@ impl App {
         {
             self.tasks.stop_formatter(formatter, pending.buffer);
         }
-        if let Some((server, generation)) = pending.request {
-            let _ = self.language.cancel(&server, generation);
-            self.language.retire_request(&server, generation);
+        if let Some((server, request_id)) = pending.request {
+            let _ = self.language.cancel(&server, request_id);
+            self.language.retire_request(&server, request_id);
         }
         if self
             .state
@@ -1980,7 +1979,7 @@ impl App {
                 continue;
             }
             if matches!(
-                self.documents.check_admission(),
+                self.documents.check_capacity(),
                 Err(crate::files::VfsError::QueueFull)
             ) {
                 break;
@@ -2086,7 +2085,7 @@ impl App {
 impl App {
     pub(in crate::app) fn process_pending_saves(&mut self) {
         while !self.pending_saves.is_empty() {
-            match self.documents.check_admission() {
+            match self.documents.check_capacity() {
                 Ok(()) => {}
                 Err(crate::files::VfsError::QueueFull) => break,
                 Err(error) => {
@@ -2167,10 +2166,10 @@ impl App {
         path: Option<&Path>,
         clean: bool,
     ) {
-        self.recovery.retire_buffer(buffer_id, clean);
-        self.documents.retire_buffer(buffer_id, path);
+        self.recovery.forget_buffer(buffer_id, clean);
+        self.documents.cancel_buffer_requests(buffer_id, path);
         if let Some(path) = path
-            && let Some(id) = self.explorer.retire_buffer_path(path)
+            && let Some(id) = self.explorer.exclude_buffer_path(path)
         {
             self.documents.cancel_request(id);
         }

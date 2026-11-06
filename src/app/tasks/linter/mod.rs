@@ -1,4 +1,4 @@
-//! Linter interpretation and bounded source-read obligations belong to their original job.
+//! Linter output parsing and pending source reads for each job.
 use crate::app::diagnostics::DiagnosticBatch;
 use crate::app::diagnostics::DiagnosticValidity;
 use crate::app::diagnostics::Diagnostics;
@@ -74,7 +74,7 @@ impl Linters {
         }
         producer
     }
-    pub(in crate::app) fn retire(&mut self, reason: &str) {
+    pub(in crate::app) fn invalidate(&mut self, reason: &str) {
         for build in self.builds.values_mut() {
             build.fail(reason);
         }
@@ -106,7 +106,7 @@ impl LinterReadLoan<'_> {
             .build
             .unread
             .first_key_value()
-            .ok_or("linter read retired")?
+            .ok_or("linter read is stale")?
             .0;
         self.build.source.checked_document(path, self.editor)?;
         Ok((
@@ -156,7 +156,7 @@ impl Tasks {
     ) -> Result<(), String> {
         let (maximum_items, maximum_bytes) = limits;
         if !self.current(&task, workspace, configuration) {
-            return Err("linter run retired".into());
+            return Err("linter run is stale".into());
         }
         let AdapterContext::Linter { matcher, .. } = &task.adapter else {
             return Ok(());
@@ -172,7 +172,7 @@ impl Tasks {
             || maximum_items == 0
             || self.linters.builds.len() >= 64
         {
-            return Err("linter source retired, exhausted or full".into());
+            return Err("linter source is stale, exhausted or full".into());
         }
         let next = self
             .linters
@@ -313,7 +313,7 @@ impl Tasks {
     pub(in crate::app) fn linter_count(&self) -> usize {
         self.linters.builds.len()
     }
-    pub(in crate::app) fn retire_linter_sources(
+    pub(in crate::app) fn invalidate_linter_sources(
         &mut self,
         editor: &EditorState,
         workspace: &Workspace,
@@ -329,7 +329,7 @@ impl Tasks {
                     .is_some_and(|key| std::sync::Arc::ptr_eq(&key.epoch, &build.key.epoch))
                 || !build.source.current(diagnostics, workspace, configuration)
             {
-                build.fail("linter producing run retired");
+                build.fail("linter producing run is stale");
                 continue;
             }
             if build
@@ -350,7 +350,7 @@ impl Tasks {
         configuration: &'a u64,
         diagnostics: &'a Diagnostics,
     ) -> Option<LinterReadLoan<'a>> {
-        self.retire_linter_sources(editor, workspace, *configuration, diagnostics);
+        self.invalidate_linter_sources(editor, workspace, *configuration, diagnostics);
         let build = self
             .linters
             .builds
@@ -381,7 +381,7 @@ impl Tasks {
         }) {
             return Err("unowned or duplicate linter source terminal".into());
         }
-        self.retire_linter_sources(editor, workspace, configuration, diagnostics);
+        self.invalidate_linter_sources(editor, workspace, configuration, diagnostics);
         let Some(build) = self.linters.builds.values_mut().find(|build| {
             build
                 .pending
@@ -448,9 +448,9 @@ impl Tasks {
             }
         }
     }
-    pub(in crate::app) fn finish_linter_obligations(&mut self, reason: &str) -> usize {
+    pub(in crate::app) fn finish_linter_reads(&mut self, reason: &str) -> usize {
         let count = self.linters.builds.values().map(|b| b.pending.len()).sum();
-        self.linters.retire(reason);
+        self.linters.invalidate(reason);
         for build in self.linters.builds.values_mut() {
             build.pending.clear();
         }
@@ -463,7 +463,7 @@ impl Tasks {
         configuration: u64,
         diagnostics: &Diagnostics,
     ) -> Option<LinterUpdate> {
-        self.retire_linter_sources(editor, workspace, configuration, diagnostics);
+        self.invalidate_linter_sources(editor, workspace, configuration, diagnostics);
         let id = *self
             .linters
             .builds

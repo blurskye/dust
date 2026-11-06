@@ -168,7 +168,7 @@ pub fn write_user_setting(
     let file = UserFile::read(path)?;
     let edited = edited_source(&file.source, key, value)?;
     if edited.len() as u64 > crate::config::load::WATCH_FINGERPRINT_BYTE_LIMIT {
-        return Err("config.toml exceeds the configuration byte ceiling".into());
+        return Err("config.toml exceeds the configuration byte limit".into());
     }
     // A value of the wrong type fails in the deserializer, whose message names Rust types.
     crate::config::load::settings_from_source(&edited).map_err(|error| {

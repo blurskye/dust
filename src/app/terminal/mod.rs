@@ -97,7 +97,7 @@ pub(super) struct Terminals {
     owner: Arc<()>,
     epoch: Arc<()>,
     policy: TerminalsConfig,
-    retired: HashSet<PtyId>,
+    closed_ptys: HashSet<PtyId>,
     close_intent: Option<TerminalCloseSource>,
     closed: bool,
     /// Set for every terminal under the profile's own variables, such as `DUST_SERVER`.
@@ -121,7 +121,7 @@ impl Terminals {
             owner: Arc::new(()),
             epoch: Arc::new(()),
             policy: policy.clone(),
-            retired: HashSet::new(),
+            closed_ptys: HashSet::new(),
             close_intent: None,
             closed: false,
             environment: BTreeMap::new(),
@@ -233,7 +233,7 @@ impl Terminals {
         };
         let id = self
             .resolve(&source.key)
-            .ok_or("terminal close source retired or was replaced")?;
+            .ok_or("terminal close source is stale or was replaced")?;
         let terminal = &self.tabs[&id];
         if terminal.pty != source.pty || terminal.phase() != source.phase {
             return Err("terminal close source lifecycle changed".into());
@@ -382,7 +382,7 @@ impl Terminals {
                 n.saturating_add(k.len()).saturating_add(v.len())
             }) > 1024 * 1024
         {
-            return Err("terminal profile exceeds its admission bounds".into());
+            return Err("terminal profile exceeds its size limits".into());
         }
         let root = workspace
             .roots()
@@ -456,7 +456,7 @@ impl Terminals {
             || self.revision.is_none_or(|r| r == u64::MAX)
             || self.tabs.len() >= TERMINAL_QUEUE_CAPACITY
         {
-            return Err("terminal intent retired, foreign, full or exhausted".into());
+            return Err("terminal intent is stale, foreign, full or exhausted".into());
         }
         self.service.check_open().map_err(|e| e.to_string())?;
         let source = self.intent.take().expect("checked original intent");
@@ -528,7 +528,7 @@ impl Terminals {
     ) -> Result<(), String> {
         let id = self
             .resolve(&key)
-            .ok_or("terminal preflight source retired")?;
+            .ok_or("terminal preflight source is stale")?;
         let tab = &self.tabs[&id];
         let original = &tab
             .pending
@@ -559,11 +559,11 @@ impl Terminals {
     ) -> Result<PtyId, String> {
         let id = self
             .resolve(&key)
-            .ok_or("terminal open retired or foreign")?;
+            .ok_or("terminal open request is stale or foreign")?;
         let tab = self.tabs.get_mut(&id).ok_or("terminal closed")?;
         if self.closed || tab.scope != workspace.version() || !Arc::ptr_eq(&tab.epoch, &self.epoch)
         {
-            return Err("terminal source retired".into());
+            return Err("terminal source is stale".into());
         }
         let open = tab
             .pending
@@ -579,7 +579,7 @@ impl Terminals {
         if root.identity.canonical_path != result.root {
             return Err("terminal lexical and canonical roots differ".into());
         }
-        let admission = self.service.reserve().map_err(|e| e.to_string())?;
+        let reservation = self.service.reserve().map_err(|e| e.to_string())?;
         let request = PtyRequest {
             program: result.executable,
             argv0: Some(open.request.executable.clone()),
@@ -601,7 +601,7 @@ impl Terminals {
                 scrollback_bytes: TERMINAL_SCROLLBACK_BYTES,
             },
         };
-        let pty = admission
+        let pty = reservation
             .submit(request, Some(root.identity.clone()))
             .map_err(|e| e.to_string())?;
         tab.pty = Some(pty);
@@ -638,7 +638,7 @@ impl Terminals {
         };
         if let Some(pty) = tab.pty {
             let _ = self.service.close(pty);
-            self.retired.insert(pty);
+            self.closed_ptys.insert(pty);
         }
         self.revision = self.revision.and_then(|r| r.checked_add(1));
         if self.selected == Some(id) {
@@ -739,7 +739,7 @@ impl Terminals {
             return Ok(());
         };
         if tab.scope != workspace.version() || !Arc::ptr_eq(&tab.epoch, &self.epoch) {
-            return Err("terminal resize source retired".into());
+            return Err("terminal resize source is stale".into());
         }
         if columns == 0 || rows == 0 || usize::from(columns) * usize::from(rows) > 1_000_000 {
             return Err("terminal geometry is empty or exceeds its cell limit".into());
@@ -836,14 +836,14 @@ impl Terminals {
                 | PtyEvent::Unknown { id, .. }
                 | PtyEvent::Resized { id, .. } => *id,
             };
-            if self.retired.contains(&pty) {
+            if self.closed_ptys.contains(&pty) {
                 if matches!(
                     event,
                     PtyEvent::IoComplete { .. }
                         | PtyEvent::Failed { .. }
                         | PtyEvent::Unknown { .. }
                 ) {
-                    self.retired.remove(&pty);
+                    self.closed_ptys.remove(&pty);
                 }
                 continue;
             }
@@ -876,7 +876,7 @@ impl Terminals {
                     rows,
                     ..
                 } => {
-                    let receipt = ResizeReceipt {
+                    let reply = ResizeReply {
                         terminal: id,
                         pty,
                         sequence,
@@ -887,7 +887,7 @@ impl Terminals {
                     if !acknowledge_resize(
                         &mut tab.pending_resizes,
                         &mut tab.screen,
-                        receipt,
+                        reply,
                         current.as_ref(),
                         &mut tab.normal_cursor,
                         &mut tab.visual_anchor,
@@ -1006,7 +1006,7 @@ struct PendingResize {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct ResizeReceipt {
+struct ResizeReply {
     terminal: PtyId,
     pty: PtyId,
     sequence: u64,
@@ -1017,7 +1017,7 @@ struct ResizeReceipt {
 fn acknowledge_resize(
     pending: &mut VecDeque<PendingResize>,
     screen: &mut PtyScreen,
-    receipt: ResizeReceipt,
+    reply: ResizeReply,
     current: Option<&TerminalGeometrySource>,
     cursor: &mut Option<(usize, usize)>,
     anchor: &mut Option<(usize, usize)>,
@@ -1033,16 +1033,16 @@ fn acknowledge_resize(
         expected.columns,
         expected.rows,
     ) != (
-        receipt.terminal,
-        receipt.pty,
-        receipt.sequence,
-        receipt.columns,
-        receipt.rows,
+        reply.terminal,
+        reply.pty,
+        reply.sequence,
+        reply.columns,
+        reply.rows,
     ) {
         return false;
     }
     let expected = pending.pop_front().expect("matched pending resize");
-    screen.resize_tracked(receipt.columns, receipt.rows, cursor, anchor, offset);
+    screen.resize_tracked(reply.columns, reply.rows, cursor, anchor, offset);
     current == Some(&expected.source)
 }
 
@@ -1205,10 +1205,10 @@ impl TerminalRuntime {
     fn flush_replies(&mut self, service: &PtyWorker) {
         if !self.pending_replies.is_empty()
             && let Some(pty) = self.pty
-            && let Ok(admission) = service.reserve_input(pty)
+            && let Ok(reservation) = service.reserve_input(pty)
         {
             let count = self.pending_replies.len().min(TERMINAL_MAXIMUM_INPUT_BYTES);
-            if admission
+            if reservation
                 .submit(self.pending_replies[..count].to_vec())
                 .is_ok()
             {
@@ -1371,7 +1371,7 @@ impl App {
             }
         } else {
             self.terminal_session.cancel_open();
-            self.retire_terminal(id, true);
+            self.stop_or_remove_terminal(id, true);
         }
     }
 }
@@ -1401,7 +1401,7 @@ impl App {
                 {
                     Ok(()) => {
                         self.terminal_session.cancel_open();
-                        self.retire_terminal(id, true);
+                        self.stop_or_remove_terminal(id, true);
                     }
                     Err(error) => self.show_error(error),
                 }
@@ -1477,7 +1477,7 @@ impl App {
 }
 
 impl App {
-    pub(in crate::app) fn retire_terminal(&mut self, id: PtyId, request_close: bool) {
+    pub(in crate::app) fn stop_or_remove_terminal(&mut self, id: PtyId, request_close: bool) {
         let focused = self.window_session.focused_terminal() == Some(id.0);
         if request_close {
             match self.terminal_session.request_stop(id) {
@@ -1641,7 +1641,7 @@ impl App {
         reply: Option<crate::debugger::DapTerminalReply>,
     ) {
         if reply.as_ref().is_some_and(|r| !r.current()) {
-            self.show_error("requesting debugger retired");
+            self.show_error("requesting debugger closed");
             return;
         }
         let file = self.state.active_view.and_then(|view| {
@@ -1820,7 +1820,7 @@ impl App {
                 }
                 TerminalUpdate::Closed(id) => {
                     if let Some(reply) = self.debugger_session.take_terminal(&id) {
-                        let _ = reply.respond(false, Some("terminal source retired".into()));
+                        let _ = reply.respond(false, Some("terminal source closed".into()));
                     }
                     if self.window_session.focused_terminal() == Some(id.0) {
                         self.set_terminal_focus(false);

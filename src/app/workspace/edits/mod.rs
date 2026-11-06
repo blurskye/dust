@@ -15,10 +15,10 @@ use crate::workspace::WorkspaceEditDraft;
 use crate::workspace::WorkspaceEditProposal;
 use crate::workspace::WorkspaceState;
 pub(in crate::app) use preparation::InputFile;
-pub(in crate::app) use preparation::IoPermit;
 use preparation::Preparation;
 pub(in crate::app) use preparation::PreparationTicket;
 pub(in crate::app) use preparation::PreparedFiles;
+pub(in crate::app) use preparation::PreparedIo;
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
@@ -75,7 +75,7 @@ pub(in crate::app) struct ResourceApplication {
     change: BufferPathChange,
     workspace: WorkspaceVersion,
     configuration: u64,
-    retired: Option<String>,
+    invalidated: Option<String>,
 }
 impl ResourceApplication {
     pub(in crate::app) fn intent(&self) -> &CheckedResourceIntent {
@@ -91,14 +91,14 @@ impl ResourceApplication {
         (self.change, self.target)
     }
 }
-pub(in crate::app) struct ResourcePermit<'a> {
+pub(in crate::app) struct PreparedResource<'a> {
     accepted: &'a mut Vec<ResourceApplication>,
     applying: &'a mut HashMap<RequestId, (Arc<()>, ResourceApplication)>,
     _workspace: &'a crate::app::workspace::Workspace,
     _configuration: &'a u64,
     _editor: &'a crate::editor::EditorState,
 }
-impl ResourcePermit<'_> {
+impl PreparedResource<'_> {
     pub(in crate::app) fn intent(
         &self,
         worker: &Arc<()>,
@@ -119,7 +119,7 @@ impl ResourcePermit<'_> {
         let (worker, result) = submission.into_parts();
         let id = result.map_err(|error| {
             format!(
-                "proposal {} resource admission failed: {error}",
+                "proposal {} resource submission failed: {error}",
                 self.accepted[0].proposal.0
             )
         })?;
@@ -133,7 +133,7 @@ impl ResourcePermit<'_> {
         }
     }
 }
-pub(in crate::app) struct Retirement {
+pub(in crate::app) struct RejectedProposal {
     pub requests: Vec<RequestId>,
     pub origin: Option<OriginKey>,
 }
@@ -203,7 +203,7 @@ impl WorkspaceEdits {
                 !Arc::ptr_eq(&p.source.key, &ticket.key) || p.source.id != ticket.id
             })
         {
-            return Err("workspace preparation ticket is foreign or retired".into());
+            return Err("workspace preparation ticket is foreign or invalidated".into());
         }
         Ok(())
     }
@@ -217,7 +217,7 @@ impl WorkspaceEdits {
             .as_ref()
             .is_none_or(|p| !p.source.current(workspace, configuration))
         {
-            return Err("workspace preparation source retired".into());
+            return Err("workspace preparation source invalidated".into());
         }
         Ok(())
     }
@@ -464,19 +464,19 @@ impl WorkspaceEdits {
                             change,
                             workspace: p.source.workspace.clone(),
                             configuration: p.source.configuration,
-                            retired: None,
+                            invalidated: None,
                         }
                     }),
             );
         Ok(p.origin)
     }
-    pub(in crate::app) fn reject(&mut self) -> Retirement {
+    pub(in crate::app) fn reject(&mut self) -> RejectedProposal {
         self.approval = None;
-        // A retired worker only owns a private draft; it cannot publish an edit.
+        // An invalidated worker only owns a private draft; it cannot publish an edit.
         self.pending_approval = None;
         let preview = self.preview.take();
         let preparing = self.preparing.take();
-        Retirement {
+        RejectedProposal {
             origin: preview
                 .and_then(|p| p.origin)
                 .or_else(|| preparing.as_ref().and_then(|p| p.origin.clone())),
@@ -488,7 +488,7 @@ impl WorkspaceEdits {
         workspace: &'a crate::app::workspace::Workspace,
         configuration: &'a u64,
         editor: &'a crate::editor::EditorState,
-    ) -> Result<Option<ResourcePermit<'a>>, String> {
+    ) -> Result<Option<PreparedResource<'a>>, String> {
         let Some(request) = self.accepted.first() else {
             return Ok(None);
         };
@@ -496,7 +496,7 @@ impl WorkspaceEdits {
             || request.configuration != *configuration
             || *configuration == u64::MAX
         {
-            Err("resource application is foreign, retired or exhausted".into())
+            Err("resource application is foreign, invalidated or exhausted".into())
         } else {
             editor.validate_resource_change(
                 request.change(),
@@ -511,7 +511,7 @@ impl WorkspaceEdits {
                 request.proposal.0
             ));
         }
-        Ok(Some(ResourcePermit {
+        Ok(Some(PreparedResource {
             accepted: &mut self.accepted,
             applying: &mut self.applying,
             _workspace: workspace,
@@ -534,13 +534,13 @@ impl WorkspaceEdits {
             return None;
         }
         let (_, request) = self.applying.remove(&id).expect("checked worker request");
-        let retired = request.retired.clone().or_else(|| {
+        let invalidated = request.invalidated.clone().or_else(|| {
             (&request.workspace != workspace || request.configuration != configuration)
                 .then(|| "source change".to_owned())
         });
         Some(match reply.into_result() {
             crate::files::VfsResult::ResourceApplied { result, .. } => {
-                result.map(|()| request).map_err(|error| match retired {
+                result.map(|()| request).map_err(|error| match invalidated {
                     Some(reason) => format!("resource failed after {reason}: {error}"),
                     None => error.to_string(),
                 })
@@ -559,7 +559,7 @@ impl WorkspaceEdits {
             })
             .collect()
     }
-    pub(in crate::app) fn retire_resources(
+    pub(in crate::app) fn invalidate_resources(
         &mut self,
         reason: &str,
     ) -> (Vec<String>, Vec<RequestId>) {
@@ -568,10 +568,10 @@ impl WorkspaceEdits {
             .applying
             .iter_mut()
             .filter_map(|(id, (_, request))| {
-                if request.retired.is_some() {
+                if request.invalidated.is_some() {
                     return None;
                 }
-                request.retired = Some(reason.to_owned());
+                request.invalidated = Some(reason.to_owned());
                 Some(*id)
             })
             .collect();
@@ -757,9 +757,9 @@ impl App {
 }
 
 impl App {
-    pub(in crate::app) fn retire_workspace_resources(&mut self, reason: &str) {
+    pub(in crate::app) fn cancel_workspace_resources(&mut self, reason: &str) {
         self.language.cancel_deferred_edits(None);
-        let (notices, requests) = self.workspace_edits.retire_resources(reason);
+        let (notices, requests) = self.workspace_edits.invalidate_resources(reason);
         for notice in notices {
             self.show_error(notice);
         }
@@ -770,7 +770,7 @@ impl App {
                 }
             } else {
                 self.show_error(
-                    "resource publication retired; its filesystem outcome is still pending",
+                    "resource publication invalidated; its filesystem outcome is still pending",
                 );
             }
         }
@@ -778,7 +778,7 @@ impl App {
 }
 
 impl App {
-    pub(in crate::app) fn finish_workspace_resource_obligations(&mut self, reason: &str) {
+    pub(in crate::app) fn finish_workspace_resources(&mut self, reason: &str) {
         self.language.cancel_deferred_edits(None);
         for notice in self.workspace_edits.finish_resources(reason) {
             self.show_error(notice);
@@ -918,7 +918,7 @@ impl App {
                         self.configuration.binding_revision_ref(),
                         &self.state,
                     )
-                    .and_then(|permit| self.documents.submit_workspace_io(permit));
+                    .and_then(|prepared| self.documents.submit_workspace_io(prepared));
                 match admitted {
                     Ok(true) => {}
                     Ok(false) => return,
@@ -1000,15 +1000,15 @@ impl App {
 }
 
 impl App {
-    pub(in crate::app) fn retire_workspace_picker(&mut self, id: crate::workspace::ProposalId) {
+    pub(in crate::app) fn reject_workspace_picker(&mut self, id: crate::workspace::ProposalId) {
         if self.workspace_edits.proposal().is_none_or(|p| p.id != id) {
             return;
         }
-        let retired = self.workspace_edits.reject();
-        for request in retired.requests {
+        let invalidated = self.workspace_edits.reject();
+        for request in invalidated.requests {
             self.documents.cancel_request(request);
         }
-        if let Some(key) = retired.origin {
+        if let Some(key) = invalidated.origin {
             let _ = self.finish_workspace_edit_origin(
                 &key,
                 false,
@@ -1035,11 +1035,11 @@ impl App {
 
 impl App {
     pub(in crate::app) fn abort_workspace_edit(&mut self, reason: String) {
-        let retired = self.workspace_edits.reject();
-        for id in retired.requests {
+        let invalidated = self.workspace_edits.reject();
+        for id in invalidated.requests {
             self.documents.cancel_request(id);
         }
-        if let Some(origin) = retired.origin {
+        if let Some(origin) = invalidated.origin {
             let _ = self.finish_workspace_edit_origin(&origin, false, Some(reason.clone()));
         }
         self.close_picker();
@@ -1049,11 +1049,11 @@ impl App {
 
 impl App {
     pub(in crate::app) fn reject_workspace_proposal(&mut self) {
-        let retired = self.workspace_edits.reject();
-        for id in retired.requests {
+        let invalidated = self.workspace_edits.reject();
+        for id in invalidated.requests {
             self.documents.cancel_request(id);
         }
-        if let Some(origin) = retired.origin {
+        if let Some(origin) = invalidated.origin {
             let _ = self.finish_workspace_edit_origin(
                 &origin,
                 false,

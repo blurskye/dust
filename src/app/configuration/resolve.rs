@@ -295,7 +295,7 @@ pub(in crate::app) fn configured_text_width(
 use std::collections::BTreeMap;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ConfigurationSources {
+pub(in crate::app) struct ConfigurationSources {
     pub settings: PathBuf,
     pub keymaps: PathBuf,
     pub dashboard: PathBuf,
@@ -303,7 +303,7 @@ pub struct ConfigurationSources {
 }
 
 #[derive(Clone)]
-pub struct ResolvedConfiguration {
+pub(crate) struct ResolvedConfiguration {
     pub settings: crate::config::Config,
     pub dashboard: crate::config::DashboardConfig,
     pub theme: crate::config::ThemeConfig,
@@ -313,7 +313,7 @@ pub struct ResolvedConfiguration {
     pub deferred_plugin_keymaps: bool,
     pub expected_plugin_indexes: BTreeSet<String>,
     pub keymaps: ResolvedKeymaps,
-    pub sources: ConfigurationSources,
+    pub(in crate::app) sources: ConfigurationSources,
     pub user_setting_keys: BTreeSet<String>,
     pub user_setting_spans: BTreeMap<String, std::ops::Range<usize>>,
     pub dashboard_spans: BTreeMap<String, std::ops::Range<usize>>,

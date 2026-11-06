@@ -325,7 +325,7 @@ impl App {
             return;
         };
         let uri = crate::language::lsp::file_uri(&path);
-        self.diagnostics.retire_documents(&self.state);
+        self.diagnostics.clear_stale_documents(&self.state);
         let Some(key) =
             self.diagnostics
                 .adjacent(&uri, cursor, direction, filter.severities(), count)

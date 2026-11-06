@@ -101,7 +101,7 @@ pub(super) fn write_private_workspace_file(
             return Err("managed Nix workspace file is not a regular file".into());
         }
         if metadata.len() > 1024 * 1024 {
-            return Err("managed Nix workspace file exceeds its byte ceiling".into());
+            return Err("managed Nix workspace file exceeds its byte limit".into());
         }
         let existing = fs::read(&destination)
             .map_err(|error| format!("cannot read managed Nix workspace file: {error}"))?;

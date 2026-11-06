@@ -544,12 +544,12 @@ pub struct PersistenceId(pub u64);
 #[derive(Debug)]
 enum Request {
     Read {
-        generation: PersistenceId,
+        request_id: PersistenceId,
         path: PathBuf,
         policy: PersistencePolicy,
     },
     Write {
-        generation: PersistenceId,
+        request_id: PersistenceId,
         path: PathBuf,
         state: Box<PersistedState>,
         policy: PersistencePolicy,
@@ -558,14 +558,14 @@ enum Request {
 #[derive(Debug)]
 pub enum PersistenceEvent {
     Loaded {
-        generation: PersistenceId,
+        request_id: PersistenceId,
         state: Box<PersistedState>,
     },
     Saved {
-        generation: PersistenceId,
+        request_id: PersistenceId,
     },
     Failed {
-        generation: PersistenceId,
+        request_id: PersistenceId,
         error: PersistenceError,
     },
 }
@@ -622,30 +622,30 @@ impl PersistenceWorker {
                 while let Ok(request) = rx.recv() {
                     let event = match request {
                         Request::Read {
-                            generation,
+                            request_id,
                             path,
                             policy,
                         } => match read_state(&path, &policy) {
                             Ok(state) => {
                                 previous.insert(path, state.clone());
                                 PersistenceEvent::Loaded {
-                                    generation,
+                                    request_id,
                                     state: Box::new(state),
                                 }
                             }
-                            Err(error) => PersistenceEvent::Failed { generation, error },
+                            Err(error) => PersistenceEvent::Failed { request_id, error },
                         },
                         Request::Write {
-                            generation,
+                            request_id,
                             path,
                             state,
                             policy,
                         } => match write_state(&path, &state, previous.get(&path), &policy) {
                             Ok(()) => {
                                 previous.insert(path, *state);
-                                PersistenceEvent::Saved { generation }
+                                PersistenceEvent::Saved { request_id }
                             }
-                            Err(error) => PersistenceEvent::Failed { generation, error },
+                            Err(error) => PersistenceEvent::Failed { request_id, error },
                         },
                     };
                     if etx.send(event).is_err() {
@@ -676,15 +676,15 @@ impl PersistenceWorker {
         path: PathBuf,
         policy: PersistencePolicy,
     ) -> Result<PersistenceId, PersistenceError> {
-        let generation = self.id()?;
+        let request_id = self.id()?;
         self.sender
             .try_send(Request::Read {
-                generation,
+                request_id,
                 path,
                 policy,
             })
             .map_err(queue_error)?;
-        Ok(generation)
+        Ok(request_id)
     }
     pub fn write(
         &mut self,
@@ -693,16 +693,16 @@ impl PersistenceWorker {
         policy: PersistencePolicy,
     ) -> Result<PersistenceId, PersistenceError> {
         state.validate(&policy)?;
-        let generation = self.id()?;
+        let request_id = self.id()?;
         self.sender
             .try_send(Request::Write {
-                generation,
+                request_id,
                 path,
                 state: Box::new(state),
                 policy,
             })
             .map_err(queue_error)?;
-        Ok(generation)
+        Ok(request_id)
     }
     pub fn try_event(&self) -> Result<Option<PersistenceEvent>, PersistenceError> {
         match self.receiver.try_recv() {
@@ -913,9 +913,9 @@ pub enum PersistenceError {
     Json(#[source] serde_json::Error),
     #[error("unsupported persistence version {0}")]
     UnsupportedVersion(u32),
-    #[error("persistence file exceeds its byte ceiling")]
+    #[error("persistence file exceeds its byte limit")]
     TooLarge,
-    #[error("persistence collection exceeds its entry ceiling")]
+    #[error("persistence collection exceeds its entry limit")]
     TooManyEntries,
     #[error("persistent window rule is invalid or duplicated")]
     InvalidWindowRule,
@@ -929,7 +929,7 @@ pub enum PersistenceError {
     ForbiddenContentDescriptor,
     #[error("persistent content descriptor is stale for its semantic layout")]
     StaleContentDescriptor,
-    #[error("persistence entry exceeds its byte ceiling")]
+    #[error("persistence entry exceeds its byte limit")]
     EntryTooLarge,
     #[error("persistence path has no parent")]
     InvalidPath,

@@ -1,4 +1,4 @@
-//! Bounded adapter admission, original actor contexts and worker-owned pipe I/O.
+//! Bounded adapter reservation, original actor contexts and worker-owned pipe I/O.
 use crate::debugger::DapControl;
 use crate::debugger::DapError;
 use crate::debugger::DapEvent;
@@ -29,9 +29,9 @@ pub(super) struct Actor {
     pub(super) supports_terminate: AtomicBool,
     launch: bool,
     next_request: AtomicU64,
-    retired: AtomicBool,
+    closed: AtomicBool,
     done: AtomicBool,
-    pub(super) generation: AtomicU64,
+    pub(super) stop_id: AtomicU64,
     pub(super) live: Arc<AtomicBool>,
     failure: Mutex<Option<String>>,
     pub(super) stderr: Mutex<Vec<u8>>,
@@ -47,12 +47,12 @@ pub(super) struct Actor {
 #[derive(Clone, Debug)]
 pub(crate) struct DapContext {
     actor: Arc<Actor>,
-    generation: u64,
+    stop_id: u64,
 }
 pub(super) struct Control {
     pub(super) value: DapControl,
     pub(super) request_id: u64,
-    pub(super) generation: u64,
+    pub(super) stop_id: u64,
 }
 #[derive(Clone)]
 pub(super) struct Events {
@@ -70,7 +70,7 @@ impl Events {
     pub(super) fn send(&self, event: DapEvent) -> Result<(), ()> {
         let context = DapContext {
             actor: self.actor.clone(),
-            generation: self.actor.generation.load(Ordering::Acquire),
+            stop_id: self.actor.stop_id.load(Ordering::Acquire),
         };
         deliver(&self.sender, (context, event), &self.actor.cancel)
             .then_some(())
@@ -131,17 +131,17 @@ impl DapClient {
         let session = self.session.as_ref()?;
         Some(DapContext {
             actor: session.actor.clone(),
-            generation: session.actor.generation.load(Ordering::Acquire),
+            stop_id: session.actor.stop_id.load(Ordering::Acquire),
         })
     }
     pub(crate) fn current(&self, source: &DapContext) -> bool {
         self.session.as_ref().is_some_and(|s| {
             Arc::ptr_eq(&s.actor, &source.actor)
-                && !s.actor.retired.load(Ordering::Acquire)
+                && !s.actor.closed.load(Ordering::Acquire)
                 && !s.actor.cancel.load(Ordering::Acquire)
                 && !s.actor.done.load(Ordering::Acquire)
                 && s.actor.live.load(Ordering::Acquire)
-                && source.generation == s.actor.generation.load(Ordering::Acquire)
+                && source.stop_id == s.actor.stop_id.load(Ordering::Acquire)
         })
     }
     #[cfg(test)]
@@ -186,7 +186,7 @@ impl DapClient {
     pub(crate) fn restart_available(&self) -> bool {
         !self.closed && self.pending() < RESIDENT
     }
-    pub(crate) fn admission(&mut self) -> Result<DapAdmission<'_>, DapError> {
+    pub(crate) fn reservation(&mut self) -> Result<DapReservation<'_>, DapError> {
         if self.closed {
             return Err(DapError::NotRunning);
         }
@@ -199,13 +199,13 @@ impl DapClient {
         }
         let resident = Arc::new(());
         self.residents.push(Arc::downgrade(&resident));
-        Ok(DapAdmission {
+        Ok(DapReservation {
             service: self,
             resident,
         })
     }
     pub fn start_absolute(&mut self, launch: DapLaunch) -> Result<(), DapError> {
-        self.admission()?.submit(launch, None)
+        self.reservation()?.submit(launch, None)
     }
     fn submit(
         &mut self,
@@ -236,9 +236,9 @@ impl DapClient {
             supports_terminate: AtomicBool::new(false),
             launch: launch.request == "launch",
             next_request: AtomicU64::new(1),
-            retired: AtomicBool::new(false),
+            closed: AtomicBool::new(false),
             done: AtomicBool::new(false),
-            generation: AtomicU64::new(0),
+            stop_id: AtomicU64::new(0),
             live: Arc::new(AtomicBool::new(true)),
             failure: Mutex::new(None),
             stderr: Mutex::new(Vec::new()),
@@ -306,7 +306,7 @@ impl DapClient {
         control: DapControl,
     ) -> Result<u64, DapError> {
         if !self.current(source) {
-            return Err(DapError::Retired);
+            return Err(DapError::StaleContext);
         }
         let session = self.session.as_ref().ok_or(DapError::NotRunning)?;
         if matches!(control, DapControl::Stop) {
@@ -335,7 +335,7 @@ impl DapClient {
             .try_send(Control {
                 request_id,
                 value: control,
-                generation: source.generation,
+                stop_id: source.stop_id,
             })
             .map(|()| request_id)
             .map_err(|e| match e {
@@ -345,10 +345,10 @@ impl DapClient {
     }
     pub fn stop(&mut self) -> Result<(), DapError> {
         let session = self.session.take().ok_or(DapError::NotRunning)?;
-        session.actor.retired.store(true, Ordering::Release);
+        session.actor.closed.store(true, Ordering::Release);
         session.actor.live.store(false, Ordering::Release);
         session.actor.cancel.store(true, Ordering::Release);
-        // Dropping the receiver retires this actor's events, never the replacement.
+        // Dropping the receiver discards this actor's events, never the replacement.
         Ok(())
     }
     pub(crate) fn begin_shutdown(&mut self) {
@@ -381,7 +381,7 @@ impl DapClient {
                         }
                     ) || matches!(&event, DapEvent::RequestFailed { command, .. } if command == "setBreakpoints" || command == "disconnect");
                     if session_scoped {
-                        source.generation = session.actor.generation.load(Ordering::Acquire);
+                        source.stop_id = session.actor.stop_id.load(Ordering::Acquire);
                     }
                     if matches!(
                         event,
@@ -389,7 +389,7 @@ impl DapClient {
                             | DapEvent::RequestFailed { .. }
                             | DapEvent::Stopped { .. }
                     ) && !session_scoped
-                        && source.generation != session.actor.generation.load(Ordering::Acquire)
+                        && source.stop_id != session.actor.stop_id.load(Ordering::Acquire)
                     {
                         continue;
                     }
@@ -424,7 +424,7 @@ impl DapClient {
                     return Some((
                         DapContext {
                             actor: session.actor.clone(),
-                            generation: session.actor.generation.load(Ordering::Acquire),
+                            stop_id: session.actor.stop_id.load(Ordering::Acquire),
                         },
                         DapEvent::Failed {
                             adapter: session.name.clone(),
@@ -478,7 +478,7 @@ impl Writer {
                 let _resident = events;
                 while !_resident.actor.cancel.load(Ordering::Acquire) {
                     match receiver.recv_timeout(Duration::from_millis(10)) {
-                        Ok((value, receipt)) => {
+                        Ok((value, delivery)) => {
                             #[cfg(test)]
                             {
                                 _resident.actor.writes_queued.fetch_sub(1, Ordering::AcqRel);
@@ -500,8 +500,8 @@ impl Writer {
                                 break;
                             }
                             if let Err(error) = write_content_length_message(&mut pipe, &value) {
-                                if let Some(receipt) = &receipt {
-                                    receipt.store(
+                                if let Some(delivery) = &delivery {
+                                    delivery.store(
                                         crate::debugger::DapReplyOutcome::Failed as u8,
                                         Ordering::Release,
                                     );
@@ -513,8 +513,8 @@ impl Writer {
                                 _resident.actor.cancel.store(true, Ordering::Release);
                                 break;
                             }
-                            if let Some(receipt) = receipt {
-                                receipt.store(
+                            if let Some(delivery) = delivery {
+                                delivery.store(
                                     crate::debugger::DapReplyOutcome::Written as u8,
                                     Ordering::Release,
                                 );
@@ -534,9 +534,9 @@ impl Writer {
             worker,
         ))
     }
-    pub(super) fn reply(&mut self, value: Value, receipt: Arc<AtomicU8>) -> Result<(), Value> {
+    pub(super) fn reply(&mut self, value: Value, delivery: Arc<AtomicU8>) -> Result<(), Value> {
         if self.flush().is_err() {
-            receipt.store(
+            delivery.store(
                 crate::debugger::DapReplyOutcome::Unknown as u8,
                 Ordering::Release,
             );
@@ -550,11 +550,11 @@ impl Writer {
         }
         #[cfg(test)]
         self.actor.writes_queued.fetch_add(1, Ordering::AcqRel);
-        match self.sender.try_send((value, Some(receipt.clone()))) {
+        match self.sender.try_send((value, Some(delivery.clone()))) {
             Ok(()) => {
-                // Publish admission only after enqueue; do not overwrite a fast
-                // writer's already-completed receipt.
-                let _ = receipt.compare_exchange(
+                // Publish reservation only after enqueue; do not overwrite a fast
+                // writer's already-completed delivery.
+                let _ = delivery.compare_exchange(
                     crate::debugger::DapReplyOutcome::Ready as u8,
                     crate::debugger::DapReplyOutcome::WriterQueued as u8,
                     Ordering::AcqRel,
@@ -577,7 +577,7 @@ impl Writer {
                         (value, crate::debugger::DapReplyOutcome::Unknown)
                     }
                 };
-                receipt.store(state as u8, Ordering::Release);
+                delivery.store(state as u8, Ordering::Release);
                 Err(value)
             }
         }
@@ -624,18 +624,12 @@ impl TestAdapter {
     pub(crate) fn terminal_reply(&self) -> (impl Drop, crate::debugger::DapTerminalReply) {
         crate::debugger::reverse::ReverseRequest::reserve(1, self.events.actor.live.clone())
     }
-    pub(crate) fn event(&self, generation: u64, event: DapEvent) {
-        self.events
-            .actor
-            .generation
-            .store(generation, Ordering::Release);
+    pub(crate) fn event(&self, stop_id: u64, event: DapEvent) {
+        self.events.actor.stop_id.store(stop_id, Ordering::Release);
         self.events.send(event).unwrap();
     }
-    pub(crate) fn advance(&self, generation: u64) {
-        self.events
-            .actor
-            .generation
-            .store(generation, Ordering::Release);
+    pub(crate) fn advance(&self, stop_id: u64) {
+        self.events.actor.stop_id.store(stop_id, Ordering::Release);
     }
     pub(crate) fn control(&self) -> Option<DapControl> {
         self.controls.try_recv().ok().map(|c| c.value)
@@ -653,9 +647,9 @@ pub(crate) fn fixture() -> (DapClient, TestAdapter) {
         supports_terminate: AtomicBool::new(true),
         launch: true,
         next_request: AtomicU64::new(1),
-        retired: AtomicBool::new(false),
+        closed: AtomicBool::new(false),
         done: AtomicBool::new(false),
-        generation: AtomicU64::new(0),
+        stop_id: AtomicU64::new(0),
         live: Arc::new(AtomicBool::new(true)),
         failure: Mutex::new(None),
         stderr: Mutex::new(Vec::new()),
@@ -746,11 +740,11 @@ fn json_bounded(value: &Value) -> bool {
 }
 
 /// Exclusive reservation in the actual resident ledger, retained through worker registration.
-pub(crate) struct DapAdmission<'a> {
+pub(crate) struct DapReservation<'a> {
     service: &'a mut DapClient,
     resident: Arc<()>,
 }
-impl DapAdmission<'_> {
+impl DapReservation<'_> {
     pub(crate) fn submit(
         self,
         launch: DapLaunch,
@@ -799,7 +793,7 @@ mod request_tests {
         assert!(!service.restart_available());
     }
     #[test]
-    fn unsupported_detach_is_refused_before_admission() {
+    fn unsupported_detach_is_refused_before_enqueue() {
         let (service, adapter) = fixture();
         service
             .session
@@ -829,7 +823,7 @@ mod request_tests {
         ));
     }
     #[test]
-    fn queued_session_controls_survive_new_stop_generations() {
+    fn queued_session_controls_survive_new_stops() {
         use crate::debugger::transport_tests::ADAPTER;
         use crate::debugger::transport_tests::python;
         use serde_json::json;
@@ -899,7 +893,7 @@ while True:
                 .try_send(Control {
                     request_id,
                     value,
-                    generation: 0,
+                    stop_id: 0,
                 })
                 .unwrap();
         }
@@ -946,7 +940,7 @@ while True:
                 0,
                 DapEvent::Response {
                     adapter: "same-name".into(),
-                    stop_generation: 0,
+                    stop_id: 0,
                     request_id: 1,
                     request: Some(DapControl::Disconnect {
                         terminate_debuggee: false,
@@ -1038,10 +1032,10 @@ while True:
         }
         assert_eq!(writer.pending.len(), CAPACITY * 2);
         assert!(!actor.cancel.load(Ordering::Acquire));
-        let receipt = Arc::new(AtomicU8::new(crate::debugger::DapReplyOutcome::Ready as u8));
+        let delivery = Arc::new(AtomicU8::new(crate::debugger::DapReplyOutcome::Ready as u8));
         let reply = serde_json::json!({"seq": CAPACITY * 3});
         assert_eq!(
-            writer.reply(reply.clone(), receipt.clone()),
+            writer.reply(reply.clone(), delivery.clone()),
             Err(reply.clone())
         );
         for sequence in 0..CAPACITY * 3 {
@@ -1052,7 +1046,7 @@ while True:
             writer.flush().unwrap();
         }
         assert!(writer.pending.is_empty());
-        writer.reply(reply.clone(), receipt).unwrap();
+        writer.reply(reply.clone(), delivery).unwrap();
         assert_eq!(receiver.try_recv().unwrap().0, reply);
         assert!(!actor.cancel.load(Ordering::Acquire));
         drop(receiver);
@@ -1067,7 +1061,7 @@ while True:
                 0,
                 DapEvent::RequestFailed {
                     adapter: "same-name".into(),
-                    stop_generation: 0,
+                    stop_id: 0,
                     request_seq: 1,
                     request_id: 1,
                     request: None,
@@ -1079,7 +1073,7 @@ while True:
         adapter.advance(1);
         for expected in ["setBreakpoints", "disconnect"] {
             let (context, event) = service.try_owned_event().unwrap();
-            assert_eq!(context.generation, 1);
+            assert_eq!(context.stop_id, 1);
             assert!(
                 matches!(event, DapEvent::RequestFailed { command, .. } if command == expected)
             );
@@ -1087,14 +1081,14 @@ while True:
         assert!(service.try_event().is_none());
     }
     #[test]
-    fn queued_breakpoint_answers_survive_new_stop_generations() {
+    fn queued_breakpoint_answers_survive_new_stops() {
         let (mut service, adapter) = fixture();
         let path = std::path::PathBuf::from("/source");
         adapter.event(
             0,
             DapEvent::Response {
                 adapter: "same-name".into(),
-                stop_generation: 0,
+                stop_id: 0,
                 request_id: 4,
                 request: Some(DapControl::SetBreakpoints {
                     path: path.clone(),

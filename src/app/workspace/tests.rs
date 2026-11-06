@@ -934,11 +934,11 @@ fn workspace_root_addition_reconciles_previously_saved_trust() {
     owner
         .add_root_request(identity.canonical_path.clone(), None)
         .unwrap_or_else(|_| panic!("root request"));
-    let generation = owner.root_operation.as_ref().unwrap().generation;
+    let request_id = owner.root_operation.as_ref().unwrap().request_id;
     let mut updates = Vec::new();
     owner.accept_event(
         TrustEvent::RootInspected {
-            generation,
+            request_id,
             result: Ok(identity),
         },
         &mut updates,
@@ -974,11 +974,11 @@ fn workspace_root_replacement_at_capacity_is_atomic() {
     owner
         .add_root_request(identity.canonical_path.clone(), Some(RootId(1)))
         .unwrap_or_else(|_| panic!("root request"));
-    let generation = owner.root_operation.as_ref().unwrap().generation;
+    let request_id = owner.root_operation.as_ref().unwrap().request_id;
     let mut updates = Vec::new();
     owner.accept_event(
         TrustEvent::RootInspected {
-            generation,
+            request_id,
             result: Ok(identity.clone()),
         },
         &mut updates,
@@ -1084,14 +1084,14 @@ fn failed_trust_persistence_cancels_queued_probes() {
     let (mut owner, _directory) = fixture();
     let cancelled = owner.probe_cancellation().expect("trusted");
     owner.persist = Some(Persist {
-        generation: 7,
+        request_id: 7,
         source: owner.version(),
         target: None,
         identities: owner.store.identities(),
     });
     owner.accept_event(
         TrustEvent::Persisted {
-            generation: 7,
+            request_id: 7,
             result: Err(crate::workspace::TrustStateError::UnsupportedVersion(99)),
         },
         &mut Vec::new(),
@@ -1106,7 +1106,7 @@ fn cancelled_root_request_ignores_its_late_inspection() {
     let (mut owner, _directory) = fixture();
     let path = PathBuf::from("/practice");
     owner.root_operation = Some(RootOperation {
-        generation: 99,
+        request_id: 99,
         source: owner.version(),
         requested_path: path.clone(),
         replaces: owner.active_root(),
@@ -1119,7 +1119,7 @@ fn cancelled_root_request_ignores_its_late_inspection() {
     let mut updates = Vec::new();
     owner.accept_event(
         TrustEvent::RootInspected {
-            generation: 99,
+            request_id: 99,
             result: Ok(RootIdentity {
                 canonical_path: path,
                 filesystem_identity: Some((1, 3)),
@@ -1137,11 +1137,11 @@ fn cancelled_root_request_ignores_its_late_inspection() {
 fn failed_trust_load_cannot_replace_the_original_database() {
     let (mut owner, _directory) = fixture();
     std::fs::write(&owner.state_path, "broken database").unwrap();
-    owner.load_generation = Some(7);
+    owner.load_request_id = Some(7);
     let mut updates = Vec::new();
     owner.accept_event(
         TrustEvent::Loaded {
-            generation: 7,
+            request_id: 7,
             result: Err(crate::workspace::TrustStateError::UnsupportedVersion(99)),
         },
         &mut updates,
@@ -1155,15 +1155,15 @@ fn failed_trust_load_cannot_replace_the_original_database() {
     );
 }
 #[test]
-fn revoking_trust_does_not_retire_initial_root_inspection() {
+fn revoking_trust_does_not_cancel_initial_root_inspection() {
     let (mut owner, _directory) = fixture();
     let root = owner.state.roots()[0].clone();
     owner.identity_ready = false;
-    owner.identity_generation = Some((7, root.id, owner.version()));
+    owner.identity_request_id = Some((7, root.id, owner.version()));
     assert!(owner.revoke().is_ok());
     owner.accept_event(
         TrustEvent::RootInspected {
-            generation: 7,
+            request_id: 7,
             result: Ok(root.identity),
         },
         &mut Vec::new(),

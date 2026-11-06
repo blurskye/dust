@@ -1667,7 +1667,7 @@ fn real_pty_geometry_ack_focus_placement_and_cross_tab_keep_one_process() {
             height: 10,
         }))
         .unwrap();
-    let retired_source = driver.terminal_geometry_source().unwrap();
+    let previous_source = driver.terminal_geometry_source().unwrap();
     assert_eq!(driver.terminal_pending_resizes(), Some(1));
     assert_eq!(driver.terminal_screen_dimensions(), Some(before_rehost));
     driver.reset_terminal_window_runtime().unwrap();
@@ -1675,7 +1675,7 @@ fn real_pty_geometry_ack_focus_placement_and_cross_tab_keep_one_process() {
     let original_tab = driver.terminal_window_tab().unwrap();
     assert_ne!(identity, initial_identity);
     let current_source = driver.terminal_geometry_source().unwrap();
-    assert_ne!(current_source, retired_source);
+    assert_ne!(current_source, previous_source);
     assert_eq!(driver.terminal_pending_resizes(), Some(2));
     assert!(
         driver.terminal_pending_resize_matches(&current_source),
@@ -1853,7 +1853,7 @@ fn terminal_preflight_close_and_capture_keep_original_pty_and_geometry() {
     driver.terminal_close();
     assert!(
         driver.projection().terminal_panel.is_none(),
-        "close before the terminal starts retires the intent"
+        "close before the terminal starts cancels the intent"
     );
     assert_eq!(driver.terminal_started_markers(), "");
     driver.terminal_open("owned-terminal");
@@ -2050,24 +2050,24 @@ fn debugger_terminal_displays_without_focus_and_its_exit_keeps_another_terminal_
 
 #[cfg(unix)]
 #[test]
-fn retired_debugger_terminal_preflight_never_launches_the_program() {
+fn cancelled_debugger_terminal_preflight_never_launches_the_program() {
     use crate::app::tests::driver::TestSession;
     let mut loaded = crate::config::load_bundled_config();
     let mut program = loaded.config.terminals.profiles["shell"].clone();
     program.program = "/bin/sh".into();
-    program.arguments = vec!["-c".into(), "printf started > retired-debug-started".into()];
+    program.arguments = vec!["-c".into(), "printf started > closed-debug-started".into()];
     loaded
         .config
         .terminals
         .profiles
-        .insert("retired-debug".into(), program);
+        .insert("closed-debug".into(), program);
     let mut driver = TestSession::new(loaded);
     driver.new_buffer();
     driver.trust_owned_terminal_fixture();
     let (_service, adapter) = crate::debugger::test_session();
     let (_request, reply) = adapter.terminal_reply();
     let app = driver.application_mut();
-    app.request_terminal_open("retired-debug", Some(reply));
+    app.request_terminal_open("closed-debug", Some(reply));
     let debug = app.terminal_session.selected().unwrap();
     assert_eq!(app.terminal_session.preflight_count(), 1);
     let root = app.state.workspace_root.clone();
@@ -2080,7 +2080,7 @@ fn retired_debugger_terminal_preflight_never_launches_the_program() {
         thread::sleep(Duration::from_millis(2));
     }
     assert!(!driver.application_mut().terminal_session.contains(debug));
-    assert!(!root.join("retired-debug-started").exists());
+    assert!(!root.join("closed-debug-started").exists());
 }
 
 #[cfg(unix)]
@@ -2691,7 +2691,7 @@ fn terminal_replies_wait_for_input_capacity_and_retry_failed_submissions() {
     let (root, workspace, mut session) = fixture();
     launch_shell(root.path(), &workspace, &mut session);
     let pty = session.tabs[&PtyId(1)].pty.unwrap();
-    let admissions = (0..TERMINAL_QUEUE_CAPACITY)
+    let reservations = (0..TERMINAL_QUEUE_CAPACITY)
         .map(|_| session.service.reserve_input(pty).unwrap())
         .collect::<Vec<_>>();
     let tab = session.tabs.get_mut(&PtyId(1)).unwrap();
@@ -2700,7 +2700,7 @@ fn terminal_replies_wait_for_input_capacity_and_retry_failed_submissions() {
     assert_eq!(replies, b"\x1b[1;1R");
     tab.flush_replies(&session.service);
     assert_eq!(tab.pending_replies, replies);
-    drop(admissions);
+    drop(reservations);
     tab.flush_replies(&session.service);
     assert!(tab.pending_replies.is_empty());
     tab.feed_bytes(b"\x1b[6n");
@@ -2887,7 +2887,7 @@ fn disabled_focus_reports_do_not_require_a_live_terminal() {
 }
 
 #[test]
-fn workspace_changes_keep_running_terminals_and_retire_unlaunched_tabs() {
+fn workspace_changes_keep_running_terminals_and_cancel_unlaunched_tabs() {
     let root = tempfile::tempdir().unwrap();
     let state = crate::workspace::WorkspaceState::new(
         crate::workspace::WorkspaceId(1),
@@ -2942,7 +2942,7 @@ fn resize_acknowledgements_are_ordered_exact_and_one_shot() {
         columns,
         rows,
     };
-    let receipt = |sequence, columns, rows| ResizeReceipt {
+    let reply = |sequence, columns, rows| ResizeReply {
         terminal,
         pty,
         sequence,
@@ -2961,7 +2961,7 @@ fn resize_acknowledgements_are_ordered_exact_and_one_shot() {
     assert!(!acknowledge_resize(
         &mut pending,
         &mut screen,
-        receipt(8, 60, 20),
+        reply(8, 60, 20),
         Some(&source),
         &mut None,
         &mut None,
@@ -2970,9 +2970,9 @@ fn resize_acknowledgements_are_ordered_exact_and_one_shot() {
     assert!(!acknowledge_resize(
         &mut pending,
         &mut screen,
-        ResizeReceipt {
+        ResizeReply {
             terminal: PtyId(3),
-            ..receipt(7, 40, 10)
+            ..reply(7, 40, 10)
         },
         Some(&source),
         &mut None,
@@ -2983,7 +2983,7 @@ fn resize_acknowledgements_are_ordered_exact_and_one_shot() {
     assert!(acknowledge_resize(
         &mut pending,
         &mut screen,
-        receipt(7, 40, 10),
+        reply(7, 40, 10),
         Some(&source),
         &mut cursor,
         &mut anchor,
@@ -2997,7 +2997,7 @@ fn resize_acknowledgements_are_ordered_exact_and_one_shot() {
     assert!(!acknowledge_resize(
         &mut pending,
         &mut screen,
-        receipt(7, 40, 10),
+        reply(7, 40, 10),
         Some(&source),
         &mut None,
         &mut None,
@@ -3006,7 +3006,7 @@ fn resize_acknowledgements_are_ordered_exact_and_one_shot() {
     assert!(acknowledge_resize(
         &mut pending,
         &mut screen,
-        receipt(8, 60, 20),
+        reply(8, 60, 20),
         Some(&source),
         &mut None,
         &mut None,
@@ -3017,7 +3017,7 @@ fn resize_acknowledgements_are_ordered_exact_and_one_shot() {
     assert!(!acknowledge_resize(
         &mut pending,
         &mut screen,
-        receipt(8, 60, 20),
+        reply(8, 60, 20),
         Some(&source),
         &mut None,
         &mut None,
@@ -3028,19 +3028,19 @@ fn resize_acknowledgements_are_ordered_exact_and_one_shot() {
     assert!(!acknowledge_resize(
         &mut pending,
         &mut screen,
-        receipt(9, 40, 10),
+        reply(9, 40, 10),
         Some(&replacement),
         &mut None,
         &mut None,
         &mut 0,
     ));
-    assert!(pending.is_empty(), "stale window receipt was retired");
+    assert!(pending.is_empty(), "stale window reply was closed");
     assert_eq!(screen.dimensions(), (40, 10));
     pending.push_back(pending_resize(&replacement, 10, 40, 10));
     assert!(!acknowledge_resize(
         &mut pending,
         &mut screen,
-        receipt(9, 40, 10),
+        reply(9, 40, 10),
         Some(&replacement),
         &mut None,
         &mut None,
@@ -3049,7 +3049,7 @@ fn resize_acknowledgements_are_ordered_exact_and_one_shot() {
     assert!(acknowledge_resize(
         &mut pending,
         &mut screen,
-        receipt(10, 40, 10),
+        reply(10, 40, 10),
         Some(&replacement),
         &mut None,
         &mut None,

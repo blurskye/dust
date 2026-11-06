@@ -129,7 +129,7 @@ fn download_artifact(
         .content_length()
         .is_some_and(|length| length > MAXIMUM_TOOL_DOWNLOAD_BYTES as u64)
     {
-        return Err("tool artifact exceeds the download ceiling".into());
+        return Err("tool artifact exceeds the download limit".into());
     }
     let total = response.content_length();
     report("downloading", 0, total);
@@ -154,7 +154,7 @@ fn download_artifact(
         );
     }
     if bytes.len() > MAXIMUM_TOOL_DOWNLOAD_BYTES {
-        return Err("tool artifact exceeds the download ceiling".into());
+        return Err("tool artifact exceeds the download limit".into());
     }
     let actual = format!("{:x}", Sha256::digest(&bytes));
     if !actual.eq_ignore_ascii_case(expected_sha256) {
@@ -178,7 +178,7 @@ pub(super) fn copy_limited_with_budget(
         }
         let read = u64::try_from(read).unwrap_or(u64::MAX);
         if read > *remaining {
-            return Err("tool archive exceeds the unpacked-size ceiling".into());
+            return Err("tool archive exceeds the unpacked-size limit".into());
         }
         writer
             .write_all(&buffer[..usize::try_from(read).unwrap_or(0)])

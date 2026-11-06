@@ -74,7 +74,7 @@ impl NixWorkspaceWorker {
         let sender = self
             .sender
             .as_ref()
-            .ok_or("Nix workspace admission closed")?;
+            .ok_or("Nix workspace worker is not accepting requests")?;
         sender
             .try_send(NixWorkspaceRequest::Prepare { request_id })
             .map_err(|error| match error {

@@ -1391,7 +1391,7 @@ fn stopping_does_not_wait_for_a_daemon_that_kept_the_servers_pipes() {
     service.stop("daemonizing").expect("stop");
     assert!(
         started.elapsed() < Duration::from_millis(200),
-        "stop admission blocked"
+        "stop submission blocked"
     );
     // The origin is held by the session handle and its workers until cleanup finishes.
     while origin.upgrade().is_some() {

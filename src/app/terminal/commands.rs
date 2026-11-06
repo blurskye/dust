@@ -487,7 +487,7 @@ impl App {
                     Some(next) => self.reveal_terminal(next),
                     None => self.set_terminal_focus(false),
                 }
-                self.retire_terminal(id, true);
+                self.stop_or_remove_terminal(id, true);
             }
             effect => return Err(effect),
         }

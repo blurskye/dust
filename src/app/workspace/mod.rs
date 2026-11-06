@@ -57,7 +57,7 @@ pub(in crate::app) enum WorkspaceUpdate {
     },
 }
 struct RootOperation {
-    generation: u64,
+    request_id: u64,
     source: WorkspaceVersion,
     requested_path: PathBuf,
     /// The root this one replaces when switching worktrees.
@@ -68,7 +68,7 @@ struct Confirmation {
     identities: Vec<RootIdentity>,
 }
 struct Persist {
-    generation: u64,
+    request_id: u64,
     source: WorkspaceVersion,
     target: Option<WorkspaceTrust>,
     identities: Vec<RootIdentity>,
@@ -81,8 +81,8 @@ pub(super) struct Workspace {
     // Only a successful save may make newly granted trust effective.
     persisted_identities: Vec<RootIdentity>,
     state_path: PathBuf,
-    load_generation: Option<u64>,
-    identity_generation: Option<(u64, RootId, WorkspaceVersion)>,
+    load_request_id: Option<u64>,
+    identity_request_id: Option<(u64, RootId, WorkspaceVersion)>,
     persist: Option<Persist>,
     database_ready: bool,
     identity_ready: bool,
@@ -110,10 +110,10 @@ impl Workspace {
     ) -> Self {
         let mut service = WorkspaceTrustWorker::start(capacity);
         let version = WorkspaceVersion(Arc::new(()));
-        let load_generation = initialize
+        let load_request_id = initialize
             .then(|| service.load(state_path.clone()).ok())
             .flatten();
-        let identity_generation = if initialize {
+        let identity_request_id = if initialize {
             state
                 .active_root()
                 .and_then(|id| state.roots().iter().find(|r| r.id == id))
@@ -133,8 +133,8 @@ impl Workspace {
             store: TrustStore::default(),
             persisted_identities: Vec::new(),
             state_path,
-            load_generation,
-            identity_generation,
+            load_request_id,
+            identity_request_id,
             persist: None,
             database_ready: false,
             identity_ready: false,
@@ -226,12 +226,12 @@ impl Workspace {
         if self.root_operation.is_some() {
             return Err(WorkspaceFailure::Message("workspace_root_operation_busy"));
         }
-        let generation = self
+        let request_id = self
             .service
             .inspect_root(path.clone())
             .map_err(|e| WorkspaceFailure::Plain(e.to_string()))?;
         self.root_operation = Some(RootOperation {
-            generation,
+            request_id,
             source: self.version(),
             requested_path: path,
             replaces,
@@ -435,9 +435,9 @@ impl Workspace {
                 Vec::new()
             },
         ) {
-            Ok(generation) => {
+            Ok(request_id) => {
                 self.persist = Some(Persist {
-                    generation,
+                    request_id,
                     source: self.version(),
                     target,
                     identities,
@@ -530,10 +530,10 @@ impl Workspace {
         editor: &EditorState,
     ) {
         match event {
-            TrustEvent::Loaded { generation, result }
-                if self.load_generation == Some(generation) =>
+            TrustEvent::Loaded { request_id, result }
+                if self.load_request_id == Some(request_id) =>
             {
-                self.load_generation = None;
+                self.load_request_id = None;
                 self.database_ready = result.is_ok();
                 match result {
                     Ok(db) => {
@@ -553,13 +553,13 @@ impl Workspace {
                 }
                 self.reconcile_trust();
             }
-            TrustEvent::RootInspected { generation, result }
+            TrustEvent::RootInspected { request_id, result }
                 if self
-                    .identity_generation
+                    .identity_request_id
                     .as_ref()
-                    .is_some_and(|(g, _, _)| *g == generation) =>
+                    .is_some_and(|(g, _, _)| *g == request_id) =>
             {
-                let (_, root, _) = self.identity_generation.take().expect("matched identity");
+                let (_, root, _) = self.identity_request_id.take().expect("matched identity");
                 match result {
                     Ok(identity) => match self.state.replace_root_identity(root, identity) {
                         Ok(()) => {
@@ -576,11 +576,11 @@ impl Workspace {
                 }
                 self.reconcile_trust();
             }
-            TrustEvent::RootInspected { generation, result }
+            TrustEvent::RootInspected { request_id, result }
                 if self
                     .root_operation
                     .as_ref()
-                    .is_some_and(|r| r.generation == generation) =>
+                    .is_some_and(|r| r.request_id == request_id) =>
             {
                 let operation = self.root_operation.take().expect("matched root request");
                 if operation.source != self.version {
@@ -643,11 +643,11 @@ impl Workspace {
                     ))),
                 }
             }
-            TrustEvent::Persisted { generation, result }
+            TrustEvent::Persisted { request_id, result }
                 if self
                     .persist
                     .as_ref()
-                    .is_some_and(|p| p.generation == generation) =>
+                    .is_some_and(|p| p.request_id == request_id) =>
             {
                 let pending = self.persist.take().expect("matched persistence");
                 match result {
@@ -806,7 +806,7 @@ impl App {
                                 && let Some(reply) = self.debugger_session.take_terminal(&id)
                             {
                                 let _ =
-                                    reply.respond(false, Some("terminal workspace retired".into()));
+                                    reply.respond(false, Some("terminal workspace changed".into()));
                             }
                             self.terminal_session.reject(&key);
                             self.sync_terminal_panel();
@@ -1136,8 +1136,9 @@ impl App {
 
 impl App {
     pub(in crate::app) fn invalidate_root_scoped_operations(&mut self) {
-        self.documents.retire_startup();
-        self.documents.retire_workspace(&self.workspace.version());
+        self.documents.cancel_startup();
+        self.documents
+            .cancel_old_workspace_requests(&self.workspace.version());
         self.clear_git_status();
         self.terminal_session.retain_workspace(&self.workspace);
         self.reject_terminal_responses("workspace changed");
@@ -1180,15 +1181,15 @@ impl App {
                 self.diagnostics.clear_owner(&owner);
             }
         }
-        self.tasks.retire_workspace();
+        self.tasks.cancel_workspace_tasks();
         self.clear_git_status();
         self.search.cancel();
         if self.workspace_edits.preparing() || self.workspace_edits.proposal().is_some() {
             self.reject_workspace_proposal();
         }
-        self.retire_workspace_resources("workspace changed");
+        self.cancel_workspace_resources("workspace changed");
         self.retire_plugin_edit_sources();
-        self.retire_explorer_intents();
+        self.cancel_explorer_intents();
         self.explorer
             .reset_roots(self.workspace.roots(), self.workspace.root_revision());
         self.ui.explorer = None;
@@ -1235,9 +1236,10 @@ impl App {
         match self.workspace.set_active_root(id) {
             Ok(()) => {
                 if before != self.workspace.version() {
-                    self.documents.retire_startup();
+                    self.documents.cancel_startup();
                 }
-                self.documents.retire_workspace(&self.workspace.version());
+                self.documents
+                    .cancel_old_workspace_requests(&self.workspace.version());
                 self.clear_git_status();
                 let root = self
                     .workspace
@@ -1382,7 +1384,8 @@ impl App {
         let before = self.workspace.version();
         let updates = self.workspace.poll(&self.state);
         if before != self.workspace.version() {
-            self.documents.retire_workspace(&self.workspace.version());
+            self.documents
+                .cancel_old_workspace_requests(&self.workspace.version());
         }
         for event in updates {
             match event {

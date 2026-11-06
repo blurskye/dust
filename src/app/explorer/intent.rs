@@ -180,7 +180,7 @@ impl Explorer {
                 .map(|r| &r.identity.canonical_path)
                 .ne(self.roots.iter())
         {
-            return Err("explorer rename source retired".into());
+            return Err("explorer rename source is stale".into());
         }
         self.rename = Some(RenamePrompt {
             path: path.clone(),
@@ -207,7 +207,7 @@ impl Explorer {
                 rename.pending.is_none() && rename.inspected.is_none() && rename.submitted.is_none()
             })
             .map(RenameInspection)
-            .ok_or_else(|| "rename inspection admission retired or already consumed".into())
+            .ok_or_else(|| "rename inspection is stale or already consumed".into())
     }
     pub(in crate::app) fn accept_rename_inspection(
         &mut self,
@@ -228,7 +228,7 @@ impl Explorer {
         let rename = self.rename.as_mut().expect("matched rename inspection");
         rename.pending = None;
         Some(if !current {
-            Err("explorer rename source retired".into())
+            Err("explorer rename source is stale".into())
         } else {
             result
                 .map_err(|error| error.to_string())
@@ -263,7 +263,7 @@ impl Explorer {
         editor: &EditorWindowVersion,
     ) -> Result<ExplorerMutation, String> {
         if !self.rename_current(&scope, configuration, editor) {
-            return Err("explorer rename source retired".into());
+            return Err("explorer rename source is stale".into());
         }
         let rename = self.rename.as_ref().expect("current rename");
         if rename.inspected.is_none() {
@@ -359,7 +359,7 @@ impl Explorer {
             .as_ref()
             .ok_or("explorer clipboard is empty")?;
         if expected != scope {
-            return Err("explorer clipboard belongs to a retired workspace".into());
+            return Err("explorer clipboard belongs to a previous workspace".into());
         }
         let target = self
             .selected_parent()?
@@ -423,7 +423,7 @@ impl Explorer {
             .filter(|intent| {
                 Arc::ptr_eq(&intent.key, &ticket.0) && matches!(intent.phase, Phase::Admitting)
             })
-            .ok_or("explorer admission retired")?;
+            .ok_or("explorer request is stale")?;
         match result {
             Ok(id) => {
                 intent.phase = Phase::Preparing(id);
@@ -469,7 +469,7 @@ impl Explorer {
         // Once a write is admitted, its result must still reconcile buffer paths even
         // if the explorer closes or its configuration changes in the meantime.
         if !current && !matches!(intent.phase, Phase::Applying(_)) {
-            return Some(MutationUpdate::Failed("explorer result retired".into()));
+            return Some(MutationUpdate::Failed("explorer result is stale".into()));
         }
         match (reply, &intent.phase) {
             (
@@ -549,7 +549,7 @@ impl Explorer {
             .mutation
             .as_mut()
             .filter(|i| matches!(i.phase, Phase::AdmittingApply))
-            .ok_or("explorer apply admission retired")?;
+            .ok_or("explorer apply request is stale")?;
         match result {
             Ok(id) => {
                 intent.phase = Phase::Applying(id);
@@ -572,7 +572,7 @@ impl Explorer {
         }
         None
     }
-    pub(in crate::app) fn retire_stale_intents(
+    pub(in crate::app) fn cancel_stale_intents(
         &mut self,
         scope: WorkspaceVersion,
         configuration: u64,
@@ -611,7 +611,7 @@ impl Explorer {
                 && matches!(intent.phase, Phase::Preparing(_) | Phase::Ready(_))
         })
     }
-    pub(in crate::app) fn retire_intents(&mut self) -> Vec<RequestId> {
+    pub(in crate::app) fn cancel_intents(&mut self) -> Vec<RequestId> {
         let mut ids = self.cancel_rename();
         if let Some(open) = self.open.take()
             && let Some((id, _)) = open.read
@@ -628,7 +628,7 @@ impl Explorer {
         ids
     }
     pub(in crate::app) fn transport_stopped(&mut self) {
-        self.retire_intents();
+        self.cancel_intents();
         self.mutation = None;
     }
     pub(in crate::app) fn prepare_open(
@@ -657,7 +657,7 @@ impl Explorer {
         }
         let path = node.path.clone();
         let key = Arc::new(());
-        let retired = self
+        let previous_request = self
             .open
             .take()
             .and_then(|open| open.read.map(|(id, _)| id));
@@ -672,7 +672,7 @@ impl Explorer {
             excluded: Vec::new(),
         });
         Ok((
-            retired,
+            previous_request,
             OpenRequest {
                 ticket: OpenTicket(key),
                 path,
@@ -733,7 +733,7 @@ impl Explorer {
             split: open.split,
         }))
     }
-    pub(in crate::app) fn retire_buffer_path(&mut self, path: &Path) -> Option<RequestId> {
+    pub(in crate::app) fn exclude_buffer_path(&mut self, path: &Path) -> Option<RequestId> {
         let open = self.open.as_mut()?;
         if open.path == path || open.excluded.len() >= 64 {
             return self

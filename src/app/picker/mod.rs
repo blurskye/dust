@@ -131,7 +131,7 @@ pub(in crate::app) struct PickerInteraction {
 #[derive(Default)]
 pub(in crate::app) struct Picker {
     interaction: Option<PickerInteraction>,
-    generation: u64,
+    stream_id: u64,
     /// The surface that help was opened over, kept so closing help returns the user to the
     /// question they were looking at. Depth one: help opened over help replaces this, so the
     /// snapshot can never grow into an unbounded stack.
@@ -350,11 +350,11 @@ impl Search {
         scope: WorkspaceVersion,
         configuration: u64,
     ) -> Result<PickerEpoch, &'static str> {
-        let generation = self
+        let stream_id = self
             .picker
-            .generation
+            .stream_id
             .checked_add(1)
-            .ok_or("picker generation exhausted")?;
+            .ok_or("picker stream identity exhausted")?;
         let help_install = self.picker.take_help_install();
         let same_interaction = |picker: &PickerInteraction| {
             let same_origin = match (picker.origin, content.origin) {
@@ -386,10 +386,10 @@ impl Search {
         } else {
             None
         };
-        let mut state = PickerState::new(generation, content.title, maximum);
+        let mut state = PickerState::new(stream_id, content.title, maximum);
         let mut payloads = HashMap::new();
         state.append(
-            generation,
+            stream_id,
             content.items.into_iter().filter_map(|(item, payload)| {
                 // First row wins, exactly as PickerState::append does; overflow is never retained.
                 if let Entry::Vacant(entry) = payloads.entry(item.id.clone()) {
@@ -459,7 +459,7 @@ impl Search {
         } else {
             self.picker.interaction = Some(interaction);
         }
-        self.picker.generation = generation;
+        self.picker.stream_id = stream_id;
         Ok(epoch)
     }
     pub(in crate::app) fn theme_picker_key(&self) -> Option<&crate::app::configuration::ThemeKey> {
@@ -556,7 +556,7 @@ impl Search {
             .as_ref()
             .map_or(PickerSurfaceKind::Generic, |picker| picker.surface)
     }
-    pub(in crate::app) fn retire_picker(&mut self) {
+    pub(in crate::app) fn clear_picker(&mut self) {
         self.picker.interaction = None;
     }
     pub(in crate::app) fn picker_insert(&mut self, text: &str) -> Option<String> {
@@ -771,7 +771,7 @@ impl Search {
 }
 
 use crate::app::App;
-use crate::app::commands::PickerKind;
+use crate::app::PickerKind;
 use crate::app::search::MAXIMUM_PICKER_ITEMS;
 use crate::app::search::SEARCH_MAXIMUM_FILES;
 use crate::editor::text::ByteOffset;
@@ -830,10 +830,10 @@ impl App {
         if let PickerOrigin::PluginProvider(request) = origin
             && !self.extension.provider_presentable(request)
         {
-            self.show_error("plugin picker source retired");
+            self.show_error("plugin picker source is stale");
             return;
         }
-        let retired_preview = self
+        let replaced_preview = self
             .search
             .workspace_picker()
             .filter(|id| !matches!(origin, PickerOrigin::WorkspaceEdit(current) if current == *id));
@@ -876,8 +876,8 @@ impl App {
             self.input.begin_picker();
         }
         // A refused replacement must not destroy the still-valid old preview.
-        if let Some(id) = retired_preview {
-            self.retire_workspace_picker(id);
+        if let Some(id) = replaced_preview {
+            self.reject_workspace_picker(id);
         }
         self.language
             .retain_actions(self.search.picker_code_actions(&epoch));
@@ -1686,7 +1686,7 @@ impl App {
                 }
             }
             PickerPayload::MatcherSource(source) => {
-                let (retired, ticket) = self.search.prepare_preview(
+                let (previous_request, ticket) = self.search.prepare_preview(
                     source.path.clone(),
                     Some((source.line, source.column)),
                     label,
@@ -1694,7 +1694,7 @@ impl App {
                     self.workspace.version(),
                     self.configuration.binding_revision(),
                 );
-                if let Some(id) = retired {
+                if let Some(id) = previous_request {
                     self.documents.cancel_request(id);
                 }
                 let Some(ticket) = ticket else {
@@ -1740,7 +1740,7 @@ impl App {
             self.input.capture_changed();
         }
         if let Some(id) = self.search.workspace_picker() {
-            self.retire_workspace_picker(id);
+            self.reject_workspace_picker(id);
         }
         self.language.clear_actions();
         if let Some(id) = self.search.close_picker() {
@@ -1788,7 +1788,7 @@ impl App {
             self.show_workspace_proposal();
             return;
         }
-        // Retain only the accepted source match before close retires live search data.
+        // Retain only the accepted source match before close clears live search data.
         let search_match = match &payload {
             Some(PickerPayload::WorkspaceSearch(id)) => self
                 .search
@@ -1854,7 +1854,7 @@ impl App {
                     let (uri, range) = (row.uri.clone(), row.range);
                     self.navigate_byte_location(&uri, range);
                 } else {
-                    self.show_error("diagnostic source retired");
+                    self.show_error("diagnostic source is stale");
                 }
             }
             Some(PickerPayload::CodeAction(_)) => {
@@ -2005,7 +2005,7 @@ impl App {
                 if let Some(source) = self.tasks.resolve_test(&key) {
                     self.navigate_matcher_source(source);
                 } else {
-                    self.show_error("test result source retired");
+                    self.show_error("test result source is stale");
                 }
             }
             Some(PickerPayload::MatcherSource(source)) => self.navigate_matcher_source(source),

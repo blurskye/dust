@@ -13,10 +13,10 @@ use crate::workspace::RootId;
 use crate::workspace::WorkspaceRoot;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct ExplorerNodeId(pub u64);
+pub(in crate::app) struct ExplorerNodeId(pub(in crate::app) u64);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ExplorerKind {
+pub(in crate::app) enum ExplorerKind {
     Root,
     Directory,
     File,
@@ -24,7 +24,7 @@ pub enum ExplorerKind {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ExplorerLoadState {
+pub(in crate::app) enum ExplorerLoadState {
     Unloaded,
     Loading(u64),
     Loaded,
@@ -32,22 +32,22 @@ pub enum ExplorerLoadState {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ExplorerChild {
-    pub path: PathBuf,
-    pub name: String,
-    pub kind: ExplorerKind,
+pub(in crate::app) struct ExplorerChild {
+    pub(in crate::app) path: PathBuf,
+    pub(in crate::app) name: String,
+    pub(in crate::app) kind: ExplorerKind,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ExplorerNode {
-    pub id: ExplorerNodeId,
-    pub parent: Option<ExplorerNodeId>,
-    pub root: RootId,
-    pub path: PathBuf,
-    pub name: String,
-    pub kind: ExplorerKind,
-    pub load: ExplorerLoadState,
-    pub children: Vec<ExplorerNodeId>,
+pub(in crate::app) struct ExplorerNode {
+    pub(in crate::app) id: ExplorerNodeId,
+    pub(in crate::app) parent: Option<ExplorerNodeId>,
+    pub(in crate::app) root: RootId,
+    pub(in crate::app) path: PathBuf,
+    pub(in crate::app) name: String,
+    pub(in crate::app) kind: ExplorerKind,
+    pub(in crate::app) load: ExplorerLoadState,
+    pub(in crate::app) children: Vec<ExplorerNodeId>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -62,7 +62,7 @@ struct ExplorerData {
 /// One tree view over shared directory data. Selection, expansion, filter and
 /// visible-row projection belong to this view; cloning shares only `data`.
 #[derive(Clone, Debug)]
-pub struct ExplorerState {
+pub(in crate::app) struct ExplorerState {
     data: Arc<ExplorerData>,
     selected: Option<ExplorerNodeId>,
     expanded: BTreeSet<ExplorerNodeId>,
@@ -89,7 +89,7 @@ impl Default for ExplorerState {
 impl ExplorerState {
     /// Clone only view state while retaining the exact shared tree data source.
     #[must_use]
-    pub fn clone_view(&self) -> Self {
+    pub(in crate::app) fn clone_view(&self) -> Self {
         self.clone()
     }
 
@@ -112,11 +112,11 @@ impl ExplorerState {
     }
 
     #[must_use]
-    pub fn root_revision(&self) -> u64 {
+    pub(in crate::app) fn root_revision(&self) -> u64 {
         self.data.root_revision
     }
 
-    pub fn reset_roots(&mut self, roots: &[WorkspaceRoot], root_revision: u64) {
+    pub(in crate::app) fn reset_roots(&mut self, roots: &[WorkspaceRoot], root_revision: u64) {
         let previous = self.data.by_path.clone();
         let data = Arc::make_mut(&mut self.data);
         data.nodes.clear();
@@ -153,7 +153,7 @@ impl ExplorerState {
         self.rebuild_visible_projection();
     }
 
-    pub fn begin_load(&mut self, node: ExplorerNodeId, request_id: u64) -> bool {
+    pub(in crate::app) fn begin_load(&mut self, node: ExplorerNodeId, request_id: u64) -> bool {
         let data = Arc::make_mut(&mut self.data);
         let Some(node) = data.nodes.get_mut(&node) else {
             return false;
@@ -173,7 +173,7 @@ impl ExplorerState {
         true
     }
 
-    pub fn apply_load(
+    pub(in crate::app) fn apply_load(
         &mut self,
         node: ExplorerNodeId,
         request_id: u64,
@@ -263,7 +263,7 @@ impl ExplorerState {
         true
     }
 
-    pub fn set_error(&mut self, node: ExplorerNodeId, request_id: u64) {
+    pub(in crate::app) fn set_error(&mut self, node: ExplorerNodeId, request_id: u64) {
         let mut changed = false;
         if let Some(node) = Arc::make_mut(&mut self.data).nodes.get_mut(&node)
             && node.load == ExplorerLoadState::Loading(request_id)
@@ -276,7 +276,7 @@ impl ExplorerState {
         }
     }
 
-    pub fn toggle_loaded(&mut self, id: ExplorerNodeId) {
+    pub(in crate::app) fn toggle_loaded(&mut self, id: ExplorerNodeId) {
         if !self.data.nodes.get(&id).is_some_and(|node| {
             matches!(
                 node.load,
@@ -291,7 +291,7 @@ impl ExplorerState {
         self.rebuild_visible_projection();
     }
 
-    pub fn set_filter(&mut self, filter: impl Into<String>) {
+    pub(in crate::app) fn set_filter(&mut self, filter: impl Into<String>) {
         let filter = filter.into();
         if self.filter != filter {
             self.filter = filter;
@@ -300,13 +300,13 @@ impl ExplorerState {
     }
 
     #[must_use]
-    pub fn filter(&self) -> &str {
+    pub(in crate::app) fn filter(&self) -> &str {
         &self.filter
     }
 
     /// A folder not read yet, so a search can read the whole tree, up to `limit` entries.
     #[must_use]
-    pub fn unloaded_directory(&self, limit: usize) -> Option<ExplorerNodeId> {
+    pub(in crate::app) fn unloaded_directory(&self, limit: usize) -> Option<ExplorerNodeId> {
         if self.data.nodes.len() >= limit {
             return None;
         }
@@ -321,11 +321,11 @@ impl ExplorerState {
     }
 
     #[must_use]
-    pub fn is_expanded(&self, id: ExplorerNodeId) -> bool {
+    pub(in crate::app) fn is_expanded(&self, id: ExplorerNodeId) -> bool {
         self.expanded.contains(&id)
     }
 
-    pub fn select_first_child(&mut self) {
+    pub(in crate::app) fn select_first_child(&mut self) {
         let Some(id) = self.selected else { return };
         if !self.is_expanded(id) {
             self.toggle_loaded(id);
@@ -341,17 +341,17 @@ impl ExplorerState {
     }
 
     #[must_use]
-    pub fn id_for_path(&self, path: &Path) -> Option<ExplorerNodeId> {
+    pub(in crate::app) fn id_for_path(&self, path: &Path) -> Option<ExplorerNodeId> {
         self.data.by_path.get(path).copied()
     }
 
-    pub const fn selected_id(&self) -> Option<ExplorerNodeId> {
+    pub(in crate::app) const fn selected_id(&self) -> Option<ExplorerNodeId> {
         self.selected
     }
 
     /// Return whether each node in the root-to-row lineage is its parent's last child.
     #[must_use]
-    pub fn tree_lineage(&self, id: ExplorerNodeId) -> Vec<bool> {
+    pub(in crate::app) fn tree_lineage(&self, id: ExplorerNodeId) -> Vec<bool> {
         let mut lineage = Vec::new();
         let mut current = id;
         while let Some(parent) = self.data.nodes.get(&current).and_then(|node| node.parent) {
@@ -369,35 +369,35 @@ impl ExplorerState {
     }
 
     #[must_use]
-    pub fn selected_node(&self) -> Option<&ExplorerNode> {
+    pub(in crate::app) fn selected_node(&self) -> Option<&ExplorerNode> {
         self.selected.and_then(|id| self.data.nodes.get(&id))
     }
     #[must_use]
-    pub fn node(&self, id: ExplorerNodeId) -> Option<&ExplorerNode> {
+    pub(in crate::app) fn node(&self, id: ExplorerNodeId) -> Option<&ExplorerNode> {
         self.data.nodes.get(&id)
     }
     #[must_use]
     #[cfg(test)]
-    pub fn visible(&self) -> Vec<&ExplorerNode> {
+    pub(in crate::app) fn visible(&self) -> Vec<&ExplorerNode> {
         self.visible_nodes
             .iter()
             .filter_map(|id| self.data.nodes.get(id))
             .collect()
     }
     #[must_use]
-    pub fn visible_ids(&self) -> &[ExplorerNodeId] {
+    pub(in crate::app) fn visible_ids(&self) -> &[ExplorerNodeId] {
         &self.visible_nodes
     }
     #[must_use]
-    pub fn visible_index(&self, id: ExplorerNodeId) -> Option<usize> {
+    pub(in crate::app) fn visible_index(&self, id: ExplorerNodeId) -> Option<usize> {
         self.visible_positions.get(&id).copied()
     }
     #[must_use]
-    pub const fn projection_revision(&self) -> u64 {
+    pub(in crate::app) const fn projection_revision(&self) -> u64 {
         self.projection_revision
     }
     #[must_use]
-    pub fn watched_directories(&self) -> Vec<PathBuf> {
+    pub(in crate::app) fn watched_directories(&self) -> Vec<PathBuf> {
         self.data
             .nodes
             .values()
@@ -457,7 +457,7 @@ impl ExplorerState {
             false
         }
     }
-    pub fn move_selection(&mut self, delta: isize) {
+    pub(in crate::app) fn move_selection(&mut self, delta: isize) {
         if self.visible_nodes.is_empty() {
             return;
         }
@@ -470,7 +470,7 @@ impl ExplorerState {
             .clamp(0, self.visible_nodes.len() as isize - 1) as usize;
         self.selected = Some(self.visible_nodes[next]);
     }
-    pub fn ensure_selection(&mut self) {
+    pub(in crate::app) fn ensure_selection(&mut self) {
         let selected_is_visible = self
             .selected
             .is_some_and(|id| self.visible_positions.contains_key(&id));
@@ -478,12 +478,12 @@ impl ExplorerState {
             self.selected = self.visible_nodes.first().copied();
         }
     }
-    pub fn select(&mut self, id: ExplorerNodeId) {
+    pub(in crate::app) fn select(&mut self, id: ExplorerNodeId) {
         if self.data.nodes.contains_key(&id) {
             self.selected = Some(id)
         }
     }
-    pub fn collapse_or_parent(&mut self) {
+    pub(in crate::app) fn collapse_or_parent(&mut self) {
         let Some(id) = self.selected else { return };
         if self.expanded.remove(&id) {
             self.rebuild_visible_projection();

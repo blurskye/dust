@@ -1,7 +1,7 @@
 //! Requests to a running Dust from programs it starts. Dust listens on a Unix socket named
 //! in `DUST_SERVER`. `dust --remote FILE` (lazygit's edit key) sends one line per file,
-//! `<line>\t<JSON path bytes>` with line 0 when none was given, and exits after admission
-//! is acknowledged. `dust --agent-tools`
+//! `<line>\t<JSON path bytes>` with line 0 when none was given, and exits after the request
+//! is accepted. `dust --agent-tools`
 //! (the MCP server of an agent session) sends `agent\t<json>` to start a subagent and
 //! waits on the same connection for its answer.
 
@@ -267,7 +267,7 @@ impl RemoteServer {
                         if let Some(request) = request {
                             match sender.try_send(request) {
                                 Ok(()) => {}
-                                // Reject this connection rather than block admission or
+                                // Reject this connection rather than block new connections or
                                 // retain more requests while the editor catches up.
                                 Err(mpsc::TrySendError::Full(_)) => break,
                                 Err(mpsc::TrySendError::Disconnected(_)) => return,
@@ -498,7 +498,7 @@ mod tests {
     }
 
     #[test]
-    fn request_admission_is_bounded_without_blocking_the_listener() {
+    fn request_queue_is_bounded_without_blocking_the_listener() {
         let directory = tempfile::tempdir().unwrap();
         let server = RemoteServer::start(directory.path()).unwrap();
         let mut client = UnixStream::connect(server.path()).unwrap();
@@ -525,7 +525,7 @@ mod tests {
     }
 
     #[test]
-    fn bulk_opens_report_rejected_admission_instead_of_silent_success() {
+    fn bulk_opens_report_rejected_requests_instead_of_silent_success() {
         let directory = tempfile::tempdir().unwrap();
         let server = RemoteServer::start(directory.path()).unwrap();
         let paths = vec![PathBuf::from("/file.rs"); REQUEST_QUEUE_LIMIT];
@@ -737,7 +737,7 @@ mod tests {
     }
 
     #[test]
-    fn stalled_reply_delivery_times_out_and_admission_is_bounded() {
+    fn stalled_reply_delivery_times_out_and_request_queue_is_bounded() {
         let (stream, _stalled) = UnixStream::pair().unwrap();
         let started = std::time::Instant::now();
         let error = send_reply(stream, Ok("x".repeat(4 * 1024 * 1024))).unwrap_err();

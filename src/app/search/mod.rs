@@ -1,4 +1,4 @@
-//! Search worker admission, accepted results and interaction retirement.
+//! Search requests, accepted results and picker lifetime.
 //! Selected opaque actions share the lifetime and bounds of their actual rows.
 use crate::app::picker;
 use crate::app::search::workflow::ABS_MAX_BYTES;
@@ -111,7 +111,7 @@ impl Search {
     ) -> Option<ByteNavigation> {
         self.byte_navigation.remove(&id)
     }
-    pub(in crate::app) fn retire_document_request(&mut self, id: crate::files::RequestId) {
+    pub(in crate::app) fn forget_document_request(&mut self, id: crate::files::RequestId) {
         self.matcher_navigation.remove(&id);
         self.byte_navigation.remove(&id);
     }
@@ -186,7 +186,7 @@ impl Search {
         if self.picker.resume_after_help() {
             return None;
         }
-        self.retire_picker();
+        self.clear_picker();
         self.cancel_files();
         if self.live || !self.pending() {
             self.cancel_grep();

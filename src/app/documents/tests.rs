@@ -1451,7 +1451,7 @@ fn a_previewed_replacement_writes_nothing_until_it_is_confirmed() {
         app.ui.notification
     );
 
-    // Escape must retire the preview before a worktree-removal confirmation is opened.
+    // Escape must close the preview before a worktree-removal confirmation is opened.
     app.invoke(
         crate::editor::CommandInvocation::new(
             "workspace.git.conflict.replace",
@@ -1537,8 +1537,6 @@ fn a_previewed_replacement_writes_nothing_until_it_is_confirmed() {
     let _ = (our_tip, index_before);
 }
 
-/// W-26: the Changes surface renders as section 7.1 draws it — labelled sections, status and
-/// provenance columns, an unsaved badge and its own footer — proved from the rendered grid.
 #[test]
 fn the_changes_surface_renders_its_sections_columns_badge_and_footer() {
     let (_app_dirs, mut app) = app();
@@ -1809,7 +1807,6 @@ fn editing_a_missing_path_starts_a_new_file_that_saving_creates() {
     assert!(!app.state.buffers[buffer].new_file);
 }
 
-/// W-26: a refresh does not move the selection or reorder the list under the cursor.
 #[test]
 fn a_change_refresh_keeps_the_selection_on_the_same_row() {
     let (_app_dirs, mut app) = app();
@@ -1863,9 +1860,6 @@ fn a_change_refresh_keeps_the_selection_on_the_same_row() {
     );
 }
 
-/// W-26: staging a path whose buffer has unsaved edits is refused with the explicit
-/// save-and-stage choice, and the index is not written — for the FOCUSED row, which is not
-/// the active buffer.
 #[test]
 fn staging_a_row_moves_it_to_the_staged_section_of_the_open_list() {
     let (_app_dirs, mut app) = app();
@@ -1936,7 +1930,6 @@ fn staging_a_row_moves_it_to_the_staged_section_of_the_open_list() {
     );
 }
 
-/// W-26: `Ctrl-q` sends the changed-path list to the shared Results surface.
 #[test]
 fn ctrl_q_sends_the_change_rows_to_the_results_surface() {
     let (_app_dirs, mut app) = app();
@@ -2475,7 +2468,7 @@ fn a_previewed_replacement_writes_nothing_until_it_is_confirmed_slot5() {
         app.ui.notification
     );
 
-    // Escape must retire the preview, and neither kind of destructive confirmation
+    // Escape must close the preview, and neither kind of destructive confirmation
     // may inherit the other kind's target.
     app.invoke(
         crate::editor::CommandInvocation::new(
@@ -3361,7 +3354,7 @@ fn shutdown_returns_the_reason_dirty_buffers_cannot_be_recovered() {
 }
 
 #[test]
-fn shutdown_retries_recovery_after_document_admission_drains() {
+fn shutdown_retries_recovery_after_document_requests_drain() {
     let (_app_dirs, mut app) = app();
     app.recovery.skip_maintenance();
     let root = app.state.workspace_root.clone();
@@ -3969,7 +3962,7 @@ fn a_late_result_updates_its_own_record_and_leaves_a_newer_draft_untouched() {
         1,
         DapEvent::Response {
             adapter: "same-name".into(),
-            stop_generation: 1,
+            stop_id: 1,
             request_id: 2,
             request: Some(request),
             response: DapResponse::Evaluate(DapVariable {
@@ -4016,7 +4009,7 @@ fn a_late_result_updates_its_own_record_and_leaves_a_newer_draft_untouched() {
         1,
         DapEvent::Response {
             adapter: "same-name".into(),
-            stop_generation: 1,
+            stop_id: 1,
             request_id: 1,
             request: Some(older_request),
             response: DapResponse::Evaluate(DapVariable {
@@ -4360,7 +4353,7 @@ pub(in crate::app) fn fixture() -> (EditorState, Documents) {
 #[test]
 fn startup_reply_is_exact_once_and_rejects_root_or_editor_replacement_before_decode() {
     let (state, mut owner) = fixture();
-    // Owner-local fake delivery avoids filesystem timing and proves admission
+    // Owner-local fake delivery avoids filesystem timing and checks request submission
     // precedes UTF-8 decoding: invalid bytes must be discarded, not decoded.
     let id = RequestId(91);
     owner.pending_startup.insert(
@@ -4408,7 +4401,7 @@ fn startup_reply_is_exact_once_and_rejects_root_or_editor_replacement_before_dec
             delivered: false,
         },
     );
-    owner.retire_startup();
+    owner.cancel_startup();
     let materializations = TextBuffer::test_materializations();
     assert!(matches!(
         owner.route(
@@ -4462,7 +4455,7 @@ fn startup_reply_is_exact_once_and_rejects_root_or_editor_replacement_before_dec
         &state.window_version(),
         7,
     );
-    let DocumentEvent::Startup { receipt, text, .. } = event else {
+    let DocumentEvent::Startup { read, text, .. } = event else {
         panic!("startup event");
     };
     assert_eq!(text.unwrap().to_string(), "hello");
@@ -4478,7 +4471,7 @@ fn startup_reply_is_exact_once_and_rejects_root_or_editor_replacement_before_dec
         ),
         DocumentEvent::Discarded
     ));
-    assert!(owner.finish_startup(receipt, None, &state.window_version(), 7));
+    assert!(owner.finish_startup(read, None, &state.window_version(), 7));
     assert!(!owner.has_startup_work());
     assert!(matches!(
         owner.route(
@@ -4494,7 +4487,7 @@ fn startup_reply_is_exact_once_and_rejects_root_or_editor_replacement_before_dec
     ));
 }
 #[test]
-fn total_outstanding_admission_is_bounded_and_policy_does_not_follow_reused_buffer_ids() {
+fn total_outstanding_requests_are_bounded_and_policy_does_not_follow_reused_buffer_ids() {
     let (mut state, mut owner) = fixture();
     owner.pending_legacy.extend([RequestId(1), RequestId(2)]);
     assert!(matches!(
@@ -4510,7 +4503,7 @@ fn total_outstanding_admission_is_bounded_and_policy_does_not_follow_reused_buff
         &state.window_version(),
         7,
     );
-    assert!(owner.check_admission().is_ok());
+    assert!(owner.check_capacity().is_ok());
     let (id, _) = state
         .open_text(TextBuffer::from_text("tiny"), None)
         .unwrap();

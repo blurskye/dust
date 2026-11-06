@@ -11,8 +11,8 @@ use crate::debugger::DapContext;
 use crate::debugger::DapControl;
 use crate::debugger::DapError;
 use crate::debugger::DapEvent;
+use crate::debugger::DapReplyDelivery;
 use crate::debugger::DapReplyOutcome;
-use crate::debugger::DapReplyReceipt;
 use crate::debugger::DapResponse;
 use crate::debugger::DapSourceBreakpoint;
 use crate::debugger::DapStackFrame;
@@ -44,7 +44,7 @@ pub(in crate::app) enum DebugResponse {
         rows: Vec<DebugRow>,
     },
     Result(DapResponse),
-    Retired,
+    Stale,
     /// Part of following a stop: the panes show it, nothing opens.
     Absorbed,
     /// The program stopped here, so the editor goes there.
@@ -211,7 +211,7 @@ pub(super) struct Debugger {
     /// configuration naming a terminal, so the adapter's program runs in one as it asks.
     adapter_runs_terminal: bool,
     terminal_replies: HashMap<PtyId, DapTerminalReply>,
-    reply_receipts: Vec<(String, i64, DapReplyReceipt)>,
+    reply_deliveries: Vec<(String, i64, DapReplyDelivery)>,
     policy: DebugConfig,
     scope: WorkspaceVersion,
     choices: Option<Choices>,
@@ -261,7 +261,7 @@ impl Debugger {
             terminal_profile: None,
             adapter_runs_terminal: false,
             terminal_replies: HashMap::new(),
-            reply_receipts: Vec::new(),
+            reply_deliveries: Vec::new(),
             policy: policy.clone(),
             scope,
             choices: None,
@@ -287,7 +287,7 @@ impl Debugger {
         self.choices = None;
         self.event_source = None;
         self.source = None;
-        self.reject_terminals("requesting debugger retired");
+        self.reject_terminals("requesting debugger stopped");
         self.terminal_profile = None;
         self.adapter_runs_terminal = false;
         match self.service.stop() {
@@ -310,7 +310,7 @@ impl Debugger {
         self.service.begin_shutdown();
     }
     pub(in crate::app) fn pending(&self) -> usize {
-        self.service.pending() + self.reply_receipts.len()
+        self.service.pending() + self.reply_deliveries.len()
     }
     pub(in crate::app) fn is_running(&self) -> bool {
         self.service.is_running()
@@ -364,7 +364,7 @@ impl Debugger {
             .is_some_and(|c| self.service.current(&c))
             || policy.profiles.get(&original.name) != Some(&original.profile)
         {
-            return Err("original debug terminal profile retired".into());
+            return Err("original debug terminal profile changed".into());
         }
         if cwd != original.cwd
             || arguments.first().map(String::as_str) != original.profile.program.to_str()
@@ -385,9 +385,9 @@ impl Debugger {
     }
     pub(in crate::app) fn reply_failures(&mut self) -> Vec<String> {
         let mut errors = Vec::new();
-        self.reply_receipts.retain(|(adapter, sequence, receipt)| match receipt.outcome() {
+        self.reply_deliveries.retain(|(adapter, sequence, delivery)| match delivery.outcome() {
             DapReplyOutcome::Written => false,
-            DapReplyOutcome::Failed | DapReplyOutcome::Unknown => { errors.push(format!("DAP {adapter} reverse request {sequence}: {:?}; no peer acknowledgement claimed", receipt.outcome())); false },
+            DapReplyOutcome::Failed | DapReplyOutcome::Unknown => { errors.push(format!("DAP {adapter} reverse request {sequence}: {:?}; no peer acknowledgement claimed", delivery.outcome())); false },
             _ => true,
         });
         errors
@@ -398,7 +398,7 @@ impl Debugger {
     fn control_request(&mut self, control: DapControl) -> Result<Option<u64>, DapError> {
         // Source requests require a private selection and an original activation target.
         if matches!(control, DapControl::Source { .. }) {
-            return Err(DapError::Retired);
+            return Err(DapError::StaleContext);
         }
         let epoch = self.stop_epoch;
         // A reference ALREADY OPEN on this path is shown as a reference and never expanded again.
@@ -595,10 +595,10 @@ impl Debugger {
                 ) || matches!(request, DapControl::Evaluate { context, .. } if context == "watch");
                 // The transport owns the initial automatic threads request (ID zero);
                 // subsequent follow requests are recorded when we send them.
-                let retired_threads = id == 0
+                let stale_threads = id == 0
                     && matches!(request, DapControl::Threads)
                     && self.follow_request != Some(0);
-                if retired_threads
+                if stale_threads
                     || self.requests.get(&id).is_some_and(|pending| {
                         (pending.automatic && self.follow_request != Some(id))
                             || (frame_dependent
@@ -742,19 +742,17 @@ impl Debugger {
                 reply,
                 ..
             } => {
-                // At most 8 resident actors x 32 original reverse obligations.
-                if self.reply_receipts.len() >= 256 {
-                    let _ =
-                        reply.respond(false, Some("debugger reply receipt admission full".into()));
+                // At most 8 resident actors x 32 pending reverse replies.
+                if self.reply_deliveries.len() >= 256 {
+                    let _ = reply.respond(false, Some("debugger reply delivery queue full".into()));
                     let _ = self.stop();
                     return Some(DapEvent::Failed {
                         adapter: adapter.clone(),
-                        message: "debugger reply receipt admission full; write outcome unknown"
-                            .into(),
+                        message: "debugger reply delivery queue full; write outcome unknown".into(),
                     });
                 }
-                self.reply_receipts
-                    .push((adapter.clone(), *request_seq, reply.receipt()));
+                self.reply_deliveries
+                    .push((adapter.clone(), *request_seq, reply.delivery()));
             }
             DapEvent::RequestFailed { command, .. } if command == "source" => {
                 self.source = None;
@@ -1355,7 +1353,7 @@ impl Debugger {
             .as_ref()
             .is_some_and(|s| self.service.current(s))
         {
-            return DebugResponse::Retired;
+            return DebugResponse::Stale;
         }
         if matches!(response, DapResponse::Evaluate(_))
             && let Some(expression) = self.evaluations.pop_front().flatten()
@@ -1448,7 +1446,7 @@ impl Debugger {
                 )
             }
             DapResponse::Variables(rows) => ("variables", {
-                // The transport retires responses from earlier stops.
+                // The transport discards responses from earlier stops.
                 let page = self.pending_variable_pages.pop_front();
                 let current = rows;
                 let open: Vec<i64> = self.expansion.clone();
@@ -1728,9 +1726,9 @@ impl Debugger {
             .choices
             .as_ref()
             .filter(|c| Arc::ptr_eq(&c.epoch, &key.epoch) && self.service.current(&c.source))
-            .ok_or(DapError::Retired)?;
+            .ok_or(DapError::StaleContext)?;
         if key.index >= choices.values.len() {
-            return Err(DapError::Retired);
+            return Err(DapError::StaleContext);
         }
         let mut choices = self.choices.take().expect("checked choices");
         let choice = choices.values.swap_remove(key.index);
@@ -1756,7 +1754,7 @@ impl Debugger {
         mut target: SourceTarget,
     ) -> Result<Option<DebugLocation>, DapError> {
         if !self.service.current(&selection.source) {
-            return Err(DapError::Retired);
+            return Err(DapError::StaleContext);
         }
         match selection.choice {
             Choice::Value(_) => Ok(None),
@@ -1926,7 +1924,7 @@ impl App {
                 self.notices.mark_current_passing();
             }
             Ok(None) => {}
-            // A launch retired by revoked trust says how to get trust back, as tasks do.
+            // A launch cancelled by revoked trust says how to get trust back, as tasks do.
             Err(error) => match self.workspace.execution_allowed() {
                 Err(failure) => self.show_workspace_failure(failure),
                 Ok(()) => self.show_error(error),
@@ -1998,7 +1996,7 @@ impl App {
                 }
                 DapEvent::Response { response, .. } => {
                     match self.debugger_session.response(response) {
-                        crate::app::debugger::DebugResponse::Retired
+                        crate::app::debugger::DebugResponse::Stale
                         | crate::app::debugger::DebugResponse::Absorbed => {}
                         crate::app::debugger::DebugResponse::StoppedAt(location) => {
                             // A library frame outside the workspace stays in the stack pane.

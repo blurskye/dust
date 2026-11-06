@@ -234,7 +234,7 @@ pub(super) fn patch_nix_compatibility_tree(
             } else if metadata.file_type().is_file() {
                 bytes = bytes.saturating_add(metadata.len());
                 if bytes > MAXIMUM_TOOL_UNPACKED_BYTES {
-                    return Err("managed tool tree exceeds its byte ceiling".into());
+                    return Err("managed tool tree exceeds its byte limit".into());
                 }
                 #[cfg(unix)]
                 {

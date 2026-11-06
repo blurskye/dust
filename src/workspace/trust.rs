@@ -145,7 +145,7 @@ pub enum TrustStateError {
         #[source]
         source: io::Error,
     },
-    #[error("trust state `{}` exceeds the {} byte safety ceiling", .0.display(), TRUST_STATE_BYTE_LIMIT)]
+    #[error("trust state `{}` exceeds the {} byte safety limit", .0.display(), TRUST_STATE_BYTE_LIMIT)]
     TooLarge(PathBuf),
     #[error("invalid trust state `{}`: {reason}", path.display())]
     Invalid { path: PathBuf, reason: String },
@@ -368,15 +368,15 @@ fn update_trust_database(
 #[derive(Debug)]
 pub(super) enum TrustRequest {
     Load {
-        generation: u64,
+        request_id: u64,
         path: PathBuf,
     },
     InspectRoot {
-        generation: u64,
+        request_id: u64,
         path: PathBuf,
     },
     Persist {
-        generation: u64,
+        request_id: u64,
         path: PathBuf,
         database: TrustDatabase,
         revoked: Vec<RootIdentity>,
@@ -386,15 +386,15 @@ pub(super) enum TrustRequest {
 #[derive(Debug)]
 pub enum TrustEvent {
     Loaded {
-        generation: u64,
+        request_id: u64,
         result: Result<TrustDatabase, TrustStateError>,
     },
     RootInspected {
-        generation: u64,
+        request_id: u64,
         result: Result<RootIdentity, VfsError>,
     },
     Persisted {
-        generation: u64,
+        request_id: u64,
         result: Result<(), TrustStateError>,
     },
 }
@@ -402,7 +402,7 @@ pub enum TrustEvent {
 pub struct WorkspaceTrustWorker {
     sender: SyncSender<TrustRequest>,
     receiver: Receiver<TrustEvent>,
-    next_generation: u64,
+    next_request_id: u64,
     pending_writes: usize,
     write_error: Option<String>,
 }
@@ -417,21 +417,21 @@ impl WorkspaceTrustWorker {
                 let mut previous = TrustDatabase::default();
                 while let Ok(request) = request_receiver.recv() {
                     let event = match request {
-                        TrustRequest::Load { generation, path } => {
+                        TrustRequest::Load { request_id, path } => {
                             let result = load_trust_database(&path);
                             if let Ok(database) = &result {
                                 previous = database.clone();
                             }
-                            TrustEvent::Loaded { generation, result }
+                            TrustEvent::Loaded { request_id, result }
                         }
-                        TrustRequest::InspectRoot { generation, path } => {
+                        TrustRequest::InspectRoot { request_id, path } => {
                             TrustEvent::RootInspected {
-                                generation,
+                                request_id,
                                 result: RootIdentity::capture(&path),
                             }
                         }
                         TrustRequest::Persist {
-                            generation,
+                            request_id,
                             path,
                             database,
                             revoked,
@@ -441,7 +441,7 @@ impl WorkspaceTrustWorker {
                             if result.is_ok() {
                                 previous = database;
                             }
-                            TrustEvent::Persisted { generation, result }
+                            TrustEvent::Persisted { request_id, result }
                         }
                     };
                     if event_sender.send(event).is_err() {
@@ -453,37 +453,37 @@ impl WorkspaceTrustWorker {
         Self {
             sender: request_sender,
             receiver: event_receiver,
-            next_generation: 0,
+            next_request_id: 0,
             pending_writes: 0,
             write_error: None,
         }
     }
 
-    fn next_generation(&mut self) -> Result<u64, TrustStateError> {
-        self.next_generation =
-            self.next_generation
+    fn next_request_id(&mut self) -> Result<u64, TrustStateError> {
+        self.next_request_id =
+            self.next_request_id
                 .checked_add(1)
                 .ok_or_else(|| TrustStateError::Invalid {
                     path: PathBuf::new(),
-                    reason: "trust request generation exhausted".into(),
+                    reason: "trust request identity exhausted".into(),
                 })?;
-        Ok(self.next_generation)
+        Ok(self.next_request_id)
     }
 
     pub fn load(&mut self, path: PathBuf) -> Result<u64, TrustStateError> {
-        let generation = self.next_generation()?;
+        let request_id = self.next_request_id()?;
         self.sender
-            .try_send(TrustRequest::Load { generation, path })
+            .try_send(TrustRequest::Load { request_id, path })
             .map_err(map_trust_send_error)?;
-        Ok(generation)
+        Ok(request_id)
     }
 
     pub fn inspect_root(&mut self, path: PathBuf) -> Result<u64, TrustStateError> {
-        let generation = self.next_generation()?;
+        let request_id = self.next_request_id()?;
         self.sender
-            .try_send(TrustRequest::InspectRoot { generation, path })
+            .try_send(TrustRequest::InspectRoot { request_id, path })
             .map_err(map_trust_send_error)?;
-        Ok(generation)
+        Ok(request_id)
     }
 
     pub fn persist(
@@ -493,10 +493,10 @@ impl WorkspaceTrustWorker {
         seen: Vec<RootIdentity>,
         revoked: Vec<RootIdentity>,
     ) -> Result<u64, TrustStateError> {
-        let generation = self.next_generation()?;
+        let request_id = self.next_request_id()?;
         self.sender
             .try_send(TrustRequest::Persist {
-                generation,
+                request_id,
                 path,
                 database: TrustDatabase {
                     version: TRUST_STATE_VERSION,
@@ -507,7 +507,7 @@ impl WorkspaceTrustWorker {
             })
             .map_err(map_trust_send_error)?;
         self.pending_writes += 1;
-        Ok(generation)
+        Ok(request_id)
     }
 
     pub fn pending_writes(&self) -> bool {
@@ -548,12 +548,12 @@ pub(super) fn map_trust_send_error(error: TrySendError<TrustRequest>) -> TrustSt
 }
 
 #[cfg(test)]
-mod generation_tests {
+mod request_id_tests {
     use crate::workspace::trust::*;
     #[test]
-    fn exhausted_generation_never_reuses_an_admitted_identity() {
+    fn exhausted_request_id_never_reuses_an_accepted_identity() {
         let mut service = WorkspaceTrustWorker::start(1);
-        service.next_generation = u64::MAX;
+        service.next_request_id = u64::MAX;
         assert!(matches!(
             service.inspect_root(PathBuf::new()),
             Err(TrustStateError::Invalid { .. })

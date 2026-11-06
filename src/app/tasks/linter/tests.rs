@@ -130,7 +130,7 @@ fn reply(documents: &mut Documents, editor: &EditorState, workspace: &Workspace)
     }
 }
 #[test]
-fn linter_owner_validates_whole_sources_and_retires_original_publications() {
+fn linter_owner_validates_whole_sources_and_invalidates_original_publications() {
     let (root, mut editor, workspace, config, mut tasks, mut diagnostics) = fixture();
     let (id, _) = editor
         .open_text(
@@ -223,7 +223,7 @@ fn linter_owner_validates_whole_sources_and_retires_original_publications() {
         tasks
             .begin_linter(task, &foreign, &workspace, 1, &diagnostics, (100, 1024))
             .unwrap_err()
-            .contains("source retired")
+            .contains("source is stale")
     );
     // Supersession discards the old build, never the new producer's set.
     let task = completed(
@@ -489,7 +489,7 @@ fn linter_reads_reserve_real_capacity_keep_worker_identity_and_refuse_stale_deco
         tasks.linters.builds.values().next().unwrap().unread.len(),
         1
     );
-    tasks.retire_workspace();
+    tasks.cancel_workspace_tasks();
     assert_eq!(
         tasks.linters.builds.values().next().unwrap().pending.len(),
         1
@@ -651,7 +651,7 @@ fn linter_reads_reserve_real_capacity_keep_worker_identity_and_refuse_stale_deco
         tasks.next_linter_update(&editor, &workspace, 1, &diagnostics),
         Some(LinterUpdate::Failed(_))
     ));
-    other.finish_linter_obligations("fixture consumed foreign reply");
+    other.finish_linter_reads("fixture consumed foreign reply");
     // Actual stopped worker produces one sealed terminal and no resurrected source.
     let task = completed(
         &mut tasks,

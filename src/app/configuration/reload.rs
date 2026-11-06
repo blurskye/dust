@@ -95,7 +95,7 @@ impl App {
         if self.workspace_edits.preparing() || self.workspace_edits.proposal().is_some() {
             self.reject_workspace_proposal();
         }
-        self.retire_workspace_resources("configuration changed");
+        self.cancel_workspace_resources("configuration changed");
         self.retire_plugin_edit_sources();
         self.input.reconfigure();
         self.terminal_session

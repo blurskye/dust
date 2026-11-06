@@ -303,7 +303,6 @@ pub enum ApplicationError {
 
 use crate::app::App;
 use crate::app::InteractiveError;
-use crate::app::commands::register_app_commands;
 use crate::app::configuration::Configuration;
 use crate::app::configuration::resolve_configuration;
 use crate::app::debugger::Debugger;
@@ -315,6 +314,7 @@ use crate::app::input::InputState;
 use crate::app::persistence::PERSISTENCE_QUEUE_CAPACITY;
 use crate::app::persistence::STATE_FILE;
 use crate::app::persistence::STATE_MAXIMUM_BYTES;
+use crate::app::register_app_commands;
 use crate::app::syntax::SYNTAX_QUEUE_CAPACITY;
 use crate::app::syntax::Syntax;
 use crate::app::windows::Windows;

@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::str::FromStr;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum KeymapOperation {
+pub(crate) enum KeymapOperation {
     Command,
     Unmap,
     Disable,
@@ -35,19 +35,19 @@ impl KeymapOperation {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct KeymapInspection {
-    pub id: String,
-    pub context: String,
-    pub contribution_layer: InputContextLayer,
-    pub contribution_owner: Option<String>,
-    pub plugin_load: u64,
-    pub operation: KeymapOperation,
-    pub command: Option<String>,
-    pub arguments: BTreeMap<String, CommandValue>,
-    pub source_keys: String,
-    pub keys: String,
-    pub desc: Option<String>,
-    pub source: String,
+pub(crate) struct KeymapInspection {
+    pub(crate) id: String,
+    pub(crate) context: String,
+    pub(crate) contribution_layer: InputContextLayer,
+    pub(crate) contribution_owner: Option<String>,
+    pub(crate) plugin_load: u64,
+    pub(crate) operation: KeymapOperation,
+    pub(crate) command: Option<String>,
+    pub(crate) arguments: BTreeMap<String, CommandValue>,
+    pub(crate) source_keys: String,
+    pub(crate) keys: String,
+    pub(crate) desc: Option<String>,
+    pub(crate) source: String,
 }
 
 #[derive(Clone)]
@@ -58,49 +58,49 @@ pub(in crate::app) struct ReverseBinding {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ResolvedKeyGroup {
-    pub id: String,
-    pub context: String,
-    pub contribution_layer: InputContextLayer,
-    pub contribution_owner: Option<String>,
-    pub plugin_load: u64,
-    pub source_prefix: String,
-    pub prefix: String,
-    pub label: String,
-    pub icon: Option<String>,
-    pub order: i32,
-    pub source: String,
+pub(crate) struct ResolvedKeyGroup {
+    pub(crate) id: String,
+    pub(crate) context: String,
+    pub(crate) contribution_layer: InputContextLayer,
+    pub(crate) contribution_owner: Option<String>,
+    pub(crate) plugin_load: u64,
+    pub(crate) source_prefix: String,
+    pub(crate) prefix: String,
+    pub(crate) label: String,
+    pub(crate) icon: Option<String>,
+    pub(crate) order: i32,
+    pub(crate) source: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct KeyHintMapping {
-    pub id: String,
-    pub operation: KeymapOperation,
-    pub command: Option<String>,
-    pub source: String,
-    pub remaining_keys: String,
+pub(crate) struct KeyHintMapping {
+    pub(crate) id: String,
+    pub(crate) operation: KeymapOperation,
+    pub(crate) command: Option<String>,
+    pub(crate) source: String,
+    pub(crate) remaining_keys: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct KeyHintRow {
-    pub next_key: String,
-    pub label: String,
-    pub direct: bool,
-    pub group_id: Option<String>,
-    pub icon: Option<String>,
-    pub order: i32,
-    pub mappings: Vec<KeyHintMapping>,
+pub(crate) struct KeyHintRow {
+    pub(crate) next_key: String,
+    pub(crate) label: String,
+    pub(crate) direct: bool,
+    pub(crate) group_id: Option<String>,
+    pub(crate) icon: Option<String>,
+    pub(crate) order: i32,
+    pub(crate) mappings: Vec<KeyHintMapping>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct KeyHintProjection {
-    pub context: String,
-    pub prefix: String,
-    pub rows: Vec<KeyHintRow>,
+pub(crate) struct KeyHintProjection {
+    pub(crate) context: String,
+    pub(crate) prefix: String,
+    pub(crate) rows: Vec<KeyHintRow>,
 }
 
 #[derive(Clone, Default)]
-pub struct ResolvedKeymaps {
+pub(crate) struct ResolvedKeymaps {
     pub(super) bindings: HashMap<String, KeymapBindings>,
     pub(in crate::app) reverse: HashMap<(String, String), ReverseBinding>,
     pub(in crate::app) inspections: Vec<KeymapInspection>,
@@ -191,7 +191,7 @@ impl ResolvedKeymaps {
     /// Choose the smallest key so hash iteration order cannot change the displayed hint.
     /// Use `effective_binding` when every key matters.
     #[must_use]
-    pub fn binding_for(&self, context: &str, command: &str) -> Option<&str> {
+    pub(crate) fn binding_for(&self, context: &str, command: &str) -> Option<&str> {
         self.reverse
             .iter()
             .filter(|((mapped_context, fingerprint), _)| {
@@ -205,7 +205,7 @@ impl ResolvedKeymaps {
     }
 
     #[must_use]
-    pub fn inspect(&self, context: &str, command: &str) -> Option<KeymapInspection> {
+    pub(crate) fn inspect(&self, context: &str, command: &str) -> Option<KeymapInspection> {
         // A command can have several bindings; report the shortest so hints stay stable.
         self.reverse
             .iter()
@@ -226,7 +226,7 @@ impl ResolvedKeymaps {
     }
 
     #[must_use]
-    pub fn inspect_id(&self, id: &str) -> Option<KeymapInspection> {
+    pub(crate) fn inspect_id(&self, id: &str) -> Option<KeymapInspection> {
         self.inspections
             .iter()
             .find(|inspection| inspection.id == id)
@@ -234,7 +234,7 @@ impl ResolvedKeymaps {
     }
 
     #[must_use]
-    pub fn inspect_key(&self, context: &str, keys: &str) -> Option<KeymapInspection> {
+    pub(crate) fn inspect_key(&self, context: &str, keys: &str) -> Option<KeymapInspection> {
         self.inspections
             .iter()
             .find(|inspection| {
@@ -277,7 +277,7 @@ impl ResolvedKeymaps {
     /// Projects reachable continuations from the already-resolved mapping roster.
     /// This is read-only presentation data, never an alternate dispatch table.
     #[must_use]
-    pub fn hints_for_prefix(
+    pub(crate) fn hints_for_prefix(
         &self,
         context: &str,
         effective_prefix: &str,

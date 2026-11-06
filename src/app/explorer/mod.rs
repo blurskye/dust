@@ -268,7 +268,7 @@ impl Explorer {
         source: ExplorerViewId,
     ) -> Result<ExplorerCloneCandidate, &'static str> {
         if self.cloned_views.len().saturating_add(1) >= crate::MAX_WINDOWS {
-            return Err("explorer view ceiling reached");
+            return Err("explorer view limit reached");
         }
         let id = ExplorerViewId(
             self.next_view
@@ -539,7 +539,7 @@ impl Explorer {
             PRIMARY_EXPLORER_VIEW
         };
         if expected != scope || policy != configuration || !Arc::ptr_eq(&epoch, &self.epoch) {
-            // Only retire the old load in its original tree; IDs can be reused after reset.
+            // Only cancel the old load in its original tree; IDs can be reused after reset.
             if revision == self.tree().root_revision() {
                 if let Some(tree) = self.tree_for_mut(source_view) {
                     tree.set_error(node, request_id);
@@ -1045,7 +1045,7 @@ impl App {
             self.explorer_toggle();
             return;
         }
-        if let Err(error) = self.documents.check_admission() {
+        if let Err(error) = self.documents.check_capacity() {
             self.show_error(error);
             return;
         }
@@ -1058,14 +1058,14 @@ impl App {
             self.state.window_version(),
             self.workspace.roots(),
         );
-        let (retired, request) = match request {
+        let (previous_request, request) = match request {
             Ok(request) => request,
             Err(error) => {
                 self.show_error(error);
                 return;
             }
         };
-        if let Some(id) = retired {
+        if let Some(id) = previous_request {
             self.documents.cancel_request(id);
         }
         match self.documents.open_explorer(request.path, request.roots) {
@@ -1099,7 +1099,7 @@ impl App {
 
 impl App {
     pub(in crate::app) fn retire_stale_explorer_intents(&mut self) {
-        let ids = self.explorer.retire_stale_intents(
+        let ids = self.explorer.cancel_stale_intents(
             self.workspace.version(),
             self.configuration.binding_revision(),
             &self.state.window_version(),
@@ -1131,8 +1131,8 @@ impl App {
 }
 
 impl App {
-    pub(in crate::app) fn retire_explorer_intents(&mut self) {
-        for id in self.explorer.retire_intents() {
+    pub(in crate::app) fn cancel_explorer_intents(&mut self) {
+        for id in self.explorer.cancel_intents() {
             self.documents.cancel_request(id);
         }
     }
@@ -1150,7 +1150,7 @@ impl App {
             return Err("an explorer operation is already pending".into());
         }
         self.documents
-            .check_admission()
+            .check_capacity()
             .map_err(|error| error.to_string())?;
         let change = match &operation {
             ExplorerMutation::Rename { source, .. } | ExplorerMutation::Delete { path: source } => {
@@ -1573,7 +1573,7 @@ impl App {
 
     pub(in crate::app) fn reconcile_explorer_watch(&mut self) {
         if self.ui.explorer.is_none() {
-            self.retire_explorer_intents();
+            self.cancel_explorer_intents();
         }
         if let Err(error) = self.explorer.reconcile_watch(self.ui.explorer.is_some()) {
             self.show_error(error);
@@ -1911,7 +1911,7 @@ impl App {
 
 impl App {
     pub(in crate::app) fn refresh_explorer(&mut self) {
-        self.retire_explorer_intents();
+        self.cancel_explorer_intents();
         self.explorer
             .reset_roots(self.workspace.roots(), self.workspace.root_revision());
         self.sync_explorer_ui();

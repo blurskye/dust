@@ -289,10 +289,6 @@ fn terminal_tabs_keep_the_active_title_visible_and_hit_targets_match_borders() {
 
 #[test]
 fn the_debug_console_and_the_terminal_panel_are_planned_together_rather_than_colliding() {
-    // W-25 keeps the debug console and the program's terminal output as SEPARATE content; separate
-    // content also needs separate ROOM. This renders through the real path with BOTH a debug
-    // arrangement and a docked terminal panel, so the assertion can fail when the two docks are
-    // planned independently.
     let loaded = crate::config::load_bundled_config();
     let config = loaded.config.clone();
     let dashboard = crate::config::DashboardConfig::default();

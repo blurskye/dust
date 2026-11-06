@@ -33,7 +33,7 @@ impl App {
                     self.configuration.binding_revision_ref(),
                     &self.state,
                 ) {
-                    Ok(Some(permit)) => self.documents.submit_workspace_resource(permit),
+                    Ok(Some(prepared)) => self.documents.submit_workspace_resource(prepared),
                     Ok(None) => break,
                     Err(error) => {
                         self.language.cancel_deferred_edits(proposal);

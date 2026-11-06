@@ -1694,7 +1694,7 @@ fn a_setting_is_changed_in_place_and_reset_removes_it_but_keeps_its_comments() {
 }
 
 #[test]
-fn settings_save_rejects_growth_past_the_configuration_byte_ceiling() {
+fn settings_save_rejects_growth_past_the_configuration_byte_limit() {
     let root = tempdir().unwrap();
     let path = root.path().join("config.toml");
     let mut source = "[editor]\ntab_width = 2\n#".to_owned();
@@ -1710,7 +1710,7 @@ fn settings_save_rejects_growth_past_the_configuration_byte_ceiling() {
         Some(toml::Value::Integer(32)),
     )
     .unwrap_err();
-    assert!(error.contains("byte ceiling"), "{error}");
+    assert!(error.contains("byte limit"), "{error}");
     assert_eq!(fs::read_to_string(path).unwrap(), source);
 }
 

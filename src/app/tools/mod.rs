@@ -377,7 +377,7 @@ impl Tools {
         };
         let id = definition.id.clone();
         let Some(entry) = self.entries.iter().find(|e| e.definition.id == id) else {
-            return Err("tool source retired".into());
+            return Err("tool source is stale".into());
         };
         if matches!(entry.status, ToolStatus::Installing { .. }) {
             return Err(format!(
@@ -888,7 +888,7 @@ mod tests {
     }
 
     #[test]
-    fn full_probe_queue_retries_without_caching_admission_errors() {
+    fn full_probe_queue_retries_without_caching_queue_errors() {
         use std::fs;
         use std::os::unix::fs::PermissionsExt;
         use std::thread;

@@ -147,7 +147,7 @@ impl Recovery {
     fn recorded(&self, buffer: BufferId, revision: BufferRevision, path: &Option<PathBuf>) -> bool {
         self.paths.get(&buffer) == Some(path) && self.revisions.get(&buffer) == Some(&revision)
     }
-    pub(in crate::app) fn retire_buffer(&mut self, buffer: BufferId, clean: bool) {
+    pub(in crate::app) fn forget_buffer(&mut self, buffer: BufferId, clean: bool) {
         if clean && (self.revisions.contains_key(&buffer) || self.recovered.contains_key(&buffer)) {
             self.closed_journals.insert(self.path(buffer));
         }
@@ -184,7 +184,7 @@ impl Recovery {
             .copied()
             .collect::<Vec<_>>();
         for buffer in closed {
-            self.retire_buffer(buffer, false);
+            self.forget_buffer(buffer, false);
         }
         if !config.enabled {
             return;
@@ -571,7 +571,7 @@ mod tests {
             },
         );
 
-        recovery.retire_buffer(buffer, false);
+        recovery.forget_buffer(buffer, false);
         assert!(recovery.recovered.is_empty());
         assert!(recovery.revisions.is_empty());
         assert!(recovery.paths.is_empty());

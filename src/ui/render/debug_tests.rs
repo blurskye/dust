@@ -2,10 +2,6 @@
 
 #[test]
 fn the_debug_arrangement_is_coordinated_and_the_source_is_never_squeezed_out() {
-    // W-25: "sessions, threads, stack and breakpoints on one side, the dominant source in the
-    // centre, lazily loaded variables and watches on the other, and an interactive console bound
-    // to the selected frame. Narrow terminals replace panes with selectable inspectors rather
-    // than compressing the source below a readable minimum."
     use crate::ui::render::debug::DEBUG_SOURCE_MIN_WIDTH;
     use crate::ui::render::debug::DebugLayoutMode;
     use crate::ui::render::debug::DebugPane;

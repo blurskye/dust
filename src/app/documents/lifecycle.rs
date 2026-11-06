@@ -79,8 +79,8 @@ enum Operation {
         requested: PathBuf,
         line: Option<usize>,
         navigation: NavigationStamp,
-        generation: Arc<()>,
-        retired: Vec<PathBuf>,
+        open_request: Arc<()>,
+        closed_paths: Vec<PathBuf>,
     },
     Reload {
         version: Version,
@@ -212,7 +212,7 @@ impl Documents {
         navigation: NavigationStamp,
         line: Option<usize>,
     ) -> Result<(), DocumentFailure> {
-        self.check_file_admission(editor)?;
+        self.check_file_capacity(editor)?;
         let path = if path.is_absolute() {
             path
         } else {
@@ -227,7 +227,7 @@ impl Documents {
             }
             keep
         });
-        self.open_generation = Arc::new(());
+        self.latest_open = Arc::new(());
         self.pending_files.insert(
             id,
             FileIntent {
@@ -239,8 +239,8 @@ impl Documents {
                     requested: path,
                     line,
                     navigation,
-                    generation: self.open_generation.clone(),
-                    retired: Vec::new(),
+                    open_request: self.latest_open.clone(),
+                    closed_paths: Vec::new(),
                 },
             },
         );
@@ -271,7 +271,7 @@ impl Documents {
         editor: &EditorWindowVersion,
         workspace: WorkspaceVersion,
     ) -> Result<(), DocumentFailure> {
-        self.check_file_admission(editor)?;
+        self.check_file_capacity(editor)?;
         let view = view.ok_or(DocumentFailure::Policy("no_active_reload"))?;
         if view.virtual_read_only {
             return Err(DocumentFailure::Error(
@@ -304,7 +304,7 @@ impl Documents {
         view: Option<DocumentView<'_>>,
         mut request: SaveRequest<'_>,
     ) -> Result<RequestId, DocumentFailure> {
-        self.check_file_admission(request.editor)?;
+        self.check_file_capacity(request.editor)?;
         let view = view.ok_or(DocumentFailure::Policy("no_active_save"))?;
         if view.virtual_read_only || view.read_only {
             return Err(DocumentFailure::Error(
@@ -389,11 +389,11 @@ impl Documents {
         }
         Ok(())
     }
-    fn check_file_admission(&self, editor: &EditorWindowVersion) -> Result<(), DocumentFailure> {
+    fn check_file_capacity(&self, editor: &EditorWindowVersion) -> Result<(), DocumentFailure> {
         if editor.revision().is_none() {
             return Err(DocumentFailure::Error("editor source is exhausted".into()));
         }
-        self.check_admission()?;
+        self.check_capacity()?;
         Ok(())
     }
     pub(in crate::app) fn file_reply(&mut self, id: RequestId, event: VfsResult) -> DocumentEvent {
@@ -428,20 +428,20 @@ impl Documents {
                 Operation::Open {
                     navigation,
                     line,
-                    generation,
-                    retired,
+                    open_request,
+                    closed_paths,
                     ..
                 },
                 VfsResult::Read { path, result, .. },
             ) => {
-                if retired.contains(&path) {
+                if closed_paths.contains(&path) {
                     return Err(stale());
                 }
                 DocumentChange::Open {
                     path,
                     line,
                     navigation,
-                    activate: Arc::ptr_eq(&generation, &self.open_generation),
+                    activate: Arc::ptr_eq(&open_request, &self.latest_open),
                     text: TextBuffer::from_bytes(&result?)
                         .map_err(|e| DocumentFailure::Error(e.to_string()))?,
                 }
@@ -528,23 +528,25 @@ impl Documents {
             change,
         })
     }
-    pub(in crate::app) fn retire_buffer(&mut self, buffer: BufferId, path: Option<&Path>) {
+    pub(in crate::app) fn cancel_buffer_requests(&mut self, buffer: BufferId, path: Option<&Path>) {
         self.pending_files.retain(|id, intent| {
             let keep = match &mut intent.operation {
                 Operation::Reload { version, .. } | Operation::Save { version, .. } => {
                     version.id != buffer
                 }
                 Operation::Open {
-                    requested, retired, ..
+                    requested,
+                    closed_paths,
+                    ..
                 } => match path {
                     None => true,
                     Some(path) if path == requested => false,
                     Some(path) => {
-                        // Bound alias-retirement history to this outstanding read only.
-                        if !retired.iter().any(|p| p == path) {
-                            retired.push(path.to_path_buf());
+                        // Bound closed-path history to this outstanding read only.
+                        if !closed_paths.iter().any(|p| p == path) {
+                            closed_paths.push(path.to_path_buf());
                         }
-                        retired.len() <= 64
+                        closed_paths.len() <= 64
                     }
                 },
             };
@@ -555,7 +557,7 @@ impl Documents {
         });
         self.overrides.remove(&buffer);
     }
-    pub(in crate::app) fn retire_workspace(&mut self, current: &WorkspaceVersion) {
+    pub(in crate::app) fn cancel_old_workspace_requests(&mut self, current: &WorkspaceVersion) {
         self.pending_files.retain(|id, intent| {
             let keep = &intent.scope.workspace == current;
             if !keep && matches!(intent.operation, Operation::Save { .. }) && !self.vfs.cancel(*id)
@@ -1005,7 +1007,7 @@ mod tests {
         assert_eq!(state.buffers[id].persisted_bytes(), b"new disk");
     }
     #[test]
-    fn worker_stop_retires_document_and_legacy_bookkeeping_once() {
+    fn worker_stop_clears_document_and_legacy_bookkeeping_once() {
         let state = EditorState::new("/workspace".into());
         let workspace = workspace();
         let (vfs, gate) = crate::files::VfsWorker::start_gated_for_test(2);

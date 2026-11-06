@@ -65,7 +65,7 @@ pub enum ForgeReply {
 #[derive(Debug)]
 pub struct ForgeEvent {
     pub root: PathBuf,
-    pub generation: u64,
+    pub request_id: u64,
     pub reply: ForgeReply,
 }
 
@@ -101,11 +101,11 @@ impl ForgeJobs {
     }
 
     #[cfg(test)]
-    pub(crate) fn reply_for_test(&self, root: PathBuf, generation: u64, reply: ForgeReply) {
+    pub(crate) fn reply_for_test(&self, root: PathBuf, request_id: u64, reply: ForgeReply) {
         self.sender
             .send(ForgeEvent {
                 root,
-                generation,
+                request_id,
                 reply,
             })
             .unwrap();
@@ -118,7 +118,7 @@ impl ForgeJobs {
     fn spawn(
         &mut self,
         root: PathBuf,
-        generation: u64,
+        request_id: u64,
         job: impl FnOnce(&Path, &ForgeCommands<'_>) -> ForgeReply + Send + 'static,
     ) -> Result<(), String> {
         if self
@@ -141,7 +141,7 @@ impl ForgeJobs {
                     let reply = job(&root, &commands);
                     let _ = sender.send(ForgeEvent {
                         root,
-                        generation,
+                        request_id,
                         reply,
                     });
                 })
@@ -150,8 +150,8 @@ impl ForgeJobs {
         Ok(())
     }
 
-    pub fn list(&mut self, root: PathBuf, generation: u64) -> Result<(), String> {
-        self.spawn(root, generation, move |root, commands| {
+    pub fn list(&mut self, root: PathBuf, request_id: u64) -> Result<(), String> {
+        self.spawn(root, request_id, move |root, commands| {
             match commands.open_pull_requests(root) {
                 Ok(list) => ForgeReply::List(Ok(list)),
                 Err(error) => ForgeReply::Offline {
@@ -167,11 +167,11 @@ impl ForgeJobs {
     pub fn checkout(
         &mut self,
         root: PathBuf,
-        generation: u64,
+        request_id: u64,
         number: u64,
         workspace: crate::workspace::WorkspaceState,
     ) -> Result<(), String> {
-        self.spawn(root, generation, move |root, commands| {
+        self.spawn(root, request_id, move |root, commands| {
             ForgeReply::CheckedOut((|| {
                 workspace
                     .authorize_execution(crate::workspace::ExecutionSource::ProjectLocal)
@@ -201,8 +201,8 @@ impl ForgeJobs {
     }
 
     /// Review comments of the pull request for the current branch.
-    pub fn comments(&mut self, root: PathBuf, generation: u64) -> Result<(), String> {
-        self.spawn(root, generation, move |root, commands| {
+    pub fn comments(&mut self, root: PathBuf, request_id: u64) -> Result<(), String> {
+        self.spawn(root, request_id, move |root, commands| {
             ForgeReply::Comments(commands.with_forge(root, |forge| match forge {
                 Forge::GitHub => {
                     let number = commands.current_number(root, Forge::GitHub)?;
@@ -248,12 +248,12 @@ impl ForgeJobs {
     pub fn comment_target(
         &mut self,
         root: PathBuf,
-        generation: u64,
+        request_id: u64,
         path: PathBuf,
         line: usize,
         text: String,
     ) -> Result<(), String> {
-        self.spawn(root, generation, move |root, commands| {
+        self.spawn(root, request_id, move |root, commands| {
             ForgeReply::CommentTarget(
                 commands
                     .with_forge(root, |forge| commands.current_head(root, forge))
@@ -270,7 +270,7 @@ impl ForgeJobs {
     pub fn comment(
         &mut self,
         root: PathBuf,
-        generation: u64,
+        request_id: u64,
         target: ReviewCommentTarget,
         body: String,
     ) -> Result<(), String> {
@@ -280,7 +280,7 @@ impl ForgeJobs {
             text,
             head,
         } = target;
-        self.spawn(root, generation, move |root, commands| {
+        self.spawn(root, request_id, move |root, commands| {
             ForgeReply::Commented({
                 let relative = path
                     .strip_prefix(root)

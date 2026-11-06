@@ -600,7 +600,7 @@ pub(in crate::app) fn fixture() -> (tempfile::TempDir, EditorState, Workspace, T
     (root, editor, workspace, tasks)
 }
 #[test]
-fn configuration_retirement_cancels_pending_statuses_but_keeps_finished_ones() {
+fn configuration_changes_cancel_pending_statuses_but_keeps_finished_ones() {
     let (_root, _editor, workspace, mut tasks) = fixture();
     tasks.statuses.insert("task".into(), "running:task".into());
     tasks.statuses.insert("queued".into(), "queued".into());
@@ -758,7 +758,7 @@ fn identity_formatter_normalizes_bom_and_line_endings() {
     }
 }
 #[test]
-fn task_owner_rejects_retired_plans_and_formatter_incarnations_before_materialization() {
+fn task_owner_rejects_stale_plans_and_formatter_incarnations_before_materialization() {
     let root = tempfile::tempdir().unwrap();
     let scope = WorkspaceState::new(
         WorkspaceId(1),
@@ -800,7 +800,7 @@ fn task_owner_rejects_retired_plans_and_formatter_incarnations_before_materializ
     );
     let (step, _) = owner.step("task", &workspace, 1).unwrap();
     assert!(owner.step("task", &workspace, 1).is_err());
-    owner.retire_workspace();
+    owner.cancel_workspace_tasks();
     let before = TextBuffer::test_materializations();
     assert!(
         owner
@@ -852,6 +852,6 @@ fn task_owner_rejects_retired_plans_and_formatter_incarnations_before_materializ
         }],
     );
     assert!(owner.resolve_test(&key).is_some());
-    owner.retire_workspace();
+    owner.cancel_workspace_tasks();
     assert!(owner.resolve_test(&key).is_none());
 }

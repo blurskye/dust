@@ -229,7 +229,7 @@ impl Tasks {
             })
             .collect();
         self.linters
-            .retire("task source configuration/workspace retired");
+            .invalidate("task configuration or workspace changed");
         for status in self.statuses.values_mut() {
             if status == "queued"
                 || status.starts_with("starting:")
@@ -283,7 +283,7 @@ impl Tasks {
                         || status.starts_with("starting:")
                 })
         {
-            return Err("task admission is closed, full or already pending".into());
+            return Err("task reservation is closed, full or already pending".into());
         }
         let plan = task_plan(name, &config.tasks).ok_or("unknown task or dependency")?;
         self.keys.insert(
@@ -330,7 +330,7 @@ impl Tasks {
             .filter(|key| {
                 key.workspace == workspace.version() && key.configuration == configuration
             })
-            .ok_or("task plan retired")?;
+            .ok_or("task plan is stale")?;
         let plan = self.plans.get_mut(requested).ok_or("task plan closed")?;
         if self.closed || plan.awaiting {
             return Err("task plan is closed or already awaiting a step".into());
@@ -418,7 +418,7 @@ impl Tasks {
                     .is_some_and(|key| Arc::ptr_eq(&key.epoch, &step.key.epoch))
                 || !lane.preflight_available()?
             {
-                return Err("task preflight source retired or full".into());
+                return Err("task preflight source is stale or full".into());
             }
             lane.preflight(step.request.clone())
                 .map_err(|error| error.to_string())
@@ -455,7 +455,7 @@ impl Tasks {
         configuration: u64,
     ) -> Result<Option<DiagnosticProducer>, String> {
         if !self.key_current(&step.requested, &step.key, workspace, configuration) {
-            return Err("task launch retired".into());
+            return Err("task launch is stale".into());
         }
         let name = step.requested.clone();
         let result = ready
@@ -480,15 +480,15 @@ impl Tasks {
             || result.root_revision != workspace.root_revision()
             || self.running.len() >= MAXIMUM_RUNNING
         {
-            return Err("task launch source retired or full".into());
+            return Err("task launch source is stale or full".into());
         }
         let root = workspace
             .roots()
             .iter()
             .find(|root| root.identity.canonical_path == result.root)
-            .ok_or("task preflight root retired")?;
+            .ok_or("task preflight root is stale")?;
         // Reservation lends the actual supervisor before snapshots or request serialization.
-        let admission = self.jobs.reserve().map_err(|e| e.to_string())?;
+        let reservation = self.jobs.reserve().map_err(|e| e.to_string())?;
         let stdin = match &step.adapter {
             AdapterContext::Formatter { source } if step.name == step.requested => {
                 Some(source.stdin(editor, MAXIMUM_STDIN_BYTES)?)
@@ -548,7 +548,7 @@ impl Tasks {
                 timeout: Duration::from_millis(step.task.timeout_ms.unwrap_or(MAXIMUM_TIMEOUT_MS)),
             },
         };
-        let id = admission
+        let id = reservation
             .submit_scoped(request, root.identity.clone())
             .map_err(|e| e.to_string())?;
         self.statuses
@@ -616,7 +616,7 @@ impl Tasks {
     pub(in crate::app) fn stop_formatter(&mut self, name: &str, buffer: BufferId) {
         if matches!(self.adapters.get(name), Some(AdapterContext::Formatter { source }) if source.buffer() == buffer)
         {
-            // stop retires the run key as well as cancelling the process, so already
+            // stop invalidates the run key as well as cancelling the process, so already
             // buffered results cannot apply after a formatting-save timeout.
             let _ = self.stop(name);
         }
@@ -668,10 +668,10 @@ impl Tasks {
             Err("task is not running".into())
         }
     }
-    pub(in crate::app) fn retire_workspace(&mut self) {
+    pub(in crate::app) fn cancel_workspace_tasks(&mut self) {
         self.preflights.clear();
         self.linters
-            .retire("task source configuration/workspace retired");
+            .invalidate("task configuration or workspace changed");
         self.keys.clear();
         self.plans.clear();
         for (id, task) in &mut self.running {
@@ -687,7 +687,7 @@ impl Tasks {
         self.preflights.clear();
         self.closed = true;
         self.linters
-            .retire("task source configuration/workspace retired");
+            .invalidate("task configuration or workspace changed");
         self.keys.clear();
         self.plans.clear();
         for task in self.running.values_mut() {
@@ -848,7 +848,7 @@ impl Tasks {
                         }
                         return Some(TaskUpdate::Failed {
                             source: None,
-                            message: format!("retired task {}: {message}", task.requested),
+                            message: format!("cancelled task {}: {message}", task.requested),
                         });
                     }
                     self.plans.remove(&task.requested);
@@ -981,7 +981,7 @@ impl Tasks {
             return Ok(None);
         };
         if !self.current(task, workspace, configuration) {
-            return Err("formatter run retired".into());
+            return Err("formatter run is stale".into());
         }
         source.check(editor)?;
         let bytes = &task.output;
@@ -1204,7 +1204,7 @@ impl App {
 
 impl App {
     pub(in crate::app) fn drain_linter_sources(&mut self) {
-        self.tasks.retire_linter_sources(
+        self.tasks.invalidate_linter_sources(
             &self.state,
             &self.workspace,
             self.configuration.binding_revision(),
@@ -1224,7 +1224,7 @@ impl App {
             ) else {
                 break;
             };
-            // Full capacity preserves the unread path for retry. Permanent failure retires
+            // Full capacity preserves the unread path for retry. Permanent failure discards
             // only this build; already-admitted reads stay owned until a proven terminal.
             if !matches!(self.documents.submit_linter_read(loan), Ok(true)) {
                 break;

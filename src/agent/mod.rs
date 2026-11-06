@@ -246,10 +246,10 @@ impl Drop for AgentProcess {
     }
 }
 
-fn read_line(reader: &mut impl BufRead, line: &mut String, ceiling: usize) -> io::Result<usize> {
+fn read_line(reader: &mut impl BufRead, line: &mut String, byte_limit: usize) -> io::Result<usize> {
     line.clear();
-    let count = reader.take(ceiling as u64 + 1).read_line(line)?;
-    if count > ceiling {
+    let count = reader.take(byte_limit as u64 + 1).read_line(line)?;
+    if count > byte_limit {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "the agent sent an oversized message",

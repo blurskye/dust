@@ -119,7 +119,7 @@ fn found() -> WorkspaceSearchMatch {
     }
 }
 #[test]
-fn preview_retries_full_admission_but_caches_permanent_failures() {
+fn preview_retries_full_queue_but_caches_permanent_failures() {
     use crate::files::RequestId;
     use crate::files::VfsError;
     let directory = tempfile::tempdir().unwrap();
@@ -306,7 +306,7 @@ fn search_previews_keep_matches_beyond_the_line_character_limit() {
 }
 
 #[test]
-fn preview_admission_rejects_foreign_retired_oversized_and_duplicate_replies() {
+fn preview_rejects_foreign_stale_oversized_and_duplicate_replies() {
     let directory = tempfile::tempdir().unwrap();
     let source = scope(directory.path());
     let mut owner = Search::default();
@@ -966,7 +966,7 @@ fn crlf_previews_use_the_normalized_match_offset() {
 }
 
 #[test]
-fn rejected_live_query_retires_previous_results() {
+fn rejected_live_query_clears_previous_results() {
     let root = tempfile::tempdir().unwrap();
     let source = scope(root.path());
     let mut owner = Search::default();

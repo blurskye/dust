@@ -602,11 +602,11 @@ impl App {
         let source = self.state.window_version();
         let enabled = self.state.policy.registers_enabled;
         let was_waiting = self.clipboard.waiting();
-        let generation = self.state.registers.generation();
+        let revision = self.state.registers.generation();
         let paste = self
             .clipboard
             .finish_pull(&mut self.state.value.registers, enabled, &source);
-        if self.state.registers.generation() != generation {
+        if self.state.registers.generation() != revision {
             self.state.revision = self.state.revision.wrapping_add(1);
         }
         let cancelled = match paste {

@@ -421,7 +421,7 @@ pub(super) fn capture_source(path: PathBuf) -> CapturedSource {
             {
                 (
                     CapturedText::Error(format!(
-                        "configuration source exceeds {} byte ceiling",
+                        "configuration source exceeds {} byte limit",
                         WATCH_FINGERPRINT_BYTE_LIMIT
                     )),
                     hash,
@@ -1117,7 +1117,7 @@ pub(crate) struct SourceFingerprint {
     pub(super) path: PathBuf,
     pub(super) modified: Option<SystemTime>,
     pub(super) length: Option<u64>,
-    /// Hashes at most this process-owned ceiling, so polling cannot allocate or
+    /// Hashes at most this process-owned limit, so polling cannot allocate or
     /// read an unbounded file merely to detect a same-metadata replacement.
     pub(super) content_hash: Option<u64>,
 }
@@ -1189,12 +1189,12 @@ mod shutdown_tests {
             receiver,
             thread: Some(thread),
         };
-        let (retired, retirement) = mpsc::channel();
+        let (finished, completion) = mpsc::channel();
         let dropper = thread::spawn(move || {
             drop(worker);
-            retired.send(()).unwrap();
+            finished.send(()).unwrap();
         });
-        let nonblocking = retirement.recv_timeout(Duration::from_secs(1)).is_ok();
+        let nonblocking = completion.recv_timeout(Duration::from_secs(1)).is_ok();
         release.send(()).unwrap();
         dropper.join().unwrap();
         assert!(

@@ -124,7 +124,7 @@ fn explorer_prefilled_rename_keeps_original_target_and_dirty_split_views() {
 }
 
 #[test]
-fn explorer_rename_prompt_refuses_replaced_files_and_retired_or_cancelled_requests() {
+fn explorer_rename_prompt_refuses_replaced_files_and_stale_or_cancelled_requests() {
     let (_app_dirs, mut app) = app();
     let source = app.state.workspace_root.join("source.txt");
     let target = app.state.workspace_root.join("target.txt");
@@ -176,7 +176,7 @@ fn explorer_rename_prompt_refuses_replaced_files_and_retired_or_cancelled_reques
             )
             .is_err()
     );
-    // Cancelling after preparation admission still performs no mutation.
+    // Cancelling after preparation submission still performs no mutation.
     app.open_explorer_rename_prompt();
     wait_vfs(&mut app);
     for _ in 0.."source.txt".len() {
@@ -205,7 +205,7 @@ fn explorer_rename_prompt_refuses_replaced_files_and_retired_or_cancelled_reques
     }
     app.explorer
         .select(app.explorer.tree().id_for_path(&source).unwrap());
-    // A root epoch change retires the original prompt, even for equal path strings.
+    // A root epoch change invalidates the original prompt, even for equal path strings.
     app.open_explorer_rename_prompt();
     app.explorer
         .reset_roots(app.workspace.roots(), app.workspace.root_revision());
@@ -1729,7 +1729,7 @@ fn follow_reveals_cached_children_and_closed_clone_loads_finish() {
 }
 
 #[test]
-fn closing_and_reopening_retires_old_directory_results_before_tree_projection() {
+fn closing_and_reopening_invalidates_old_directory_results_before_tree_projection() {
     let root = tempfile::tempdir().unwrap();
     let path = root.path().join("one.txt");
     std::fs::write(&path, "one").unwrap();
@@ -1747,7 +1747,7 @@ fn closing_and_reopening_retires_old_directory_results_before_tree_projection() 
     assert!(owner.tree().id_for_path(&path).is_some());
 }
 #[test]
-fn retired_directory_policy_has_terminal_dispositions() {
+fn stale_directory_policy_completes_requests() {
     let root = tempfile::tempdir().unwrap();
     let a = root.path().join("a.txt");
     let b = root.path().join("b.txt");
@@ -1874,7 +1874,7 @@ fn cloned_explorer_views_share_tree_data_but_own_projection_state() {
 }
 
 #[test]
-fn explorer_clone_rejects_foreign_exhausted_and_over_ceiling_sources_without_publication() {
+fn explorer_clone_rejects_foreign_exhausted_and_over_limit_sources_without_publication() {
     let root = tempfile::tempdir().unwrap();
     let other_root = tempfile::tempdir().unwrap();
     let (mut owner, _) = fixture(root.path());
@@ -1893,7 +1893,7 @@ fn explorer_clone_rejects_foreign_exhausted_and_over_ceiling_sources_without_pub
     }
     assert_eq!(
         owner.prepare_clone(PRIMARY_EXPLORER_VIEW).unwrap_err(),
-        "explorer view ceiling reached"
+        "explorer view limit reached"
     );
     assert_eq!(
         owner.cloned_views.len().saturating_add(1),

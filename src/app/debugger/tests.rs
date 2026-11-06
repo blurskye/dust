@@ -338,7 +338,7 @@ fn debugger_protected_launch_source_capture_refusal_and_fresh_recovery() {
     assert_eq!(driver.debug_preflights(), 1);
     driver.debug_stop();
     drain(&mut driver);
-    assert!(!starts.exists(), "retired preflight launched adapter");
+    assert!(!starts.exists(), "cancelled preflight launched adapter");
     // Configured adapters may run scripts; exercise executable preflight through a native tool.
     driver.debug_start_native_program_fixture();
     let program_deadline = Instant::now() + Duration::from_secs(3);
@@ -356,7 +356,7 @@ fn debugger_protected_launch_source_capture_refusal_and_fresh_recovery() {
     drain(&mut driver);
     assert!(
         !starts.exists(),
-        "retired program preflight launched adapter"
+        "cancelled program preflight launched adapter"
     );
     driver.debug_start("owned");
     assert_eq!(driver.debug_preflights(), 1);
@@ -611,7 +611,7 @@ fn debugger_owner_keeps_original_actor_stop_context_and_private_selection() {
         1,
         DapEvent::Response {
             adapter: "same-name".into(),
-            stop_generation: 1,
+            stop_id: 1,
             request_id: 0,
             request: None,
             response: crate::debugger::DapResponse::Threads(Vec::new()),
@@ -635,11 +635,11 @@ fn debugger_owner_keeps_original_actor_stop_context_and_private_selection() {
     adapter.advance(2);
     assert!(matches!(
         owner.activate(pending, target()),
-        Err(DapError::Retired)
+        Err(DapError::StaleContext)
     ));
     assert!(matches!(
         owner.take_selection(&keys[0].key),
-        Err(DapError::Retired)
+        Err(DapError::StaleContext)
     ));
     assert!(adapter.control().is_none());
     // An event drained at stop 2 cannot be relabelled with stop 3 during row building.
@@ -647,7 +647,7 @@ fn debugger_owner_keeps_original_actor_stop_context_and_private_selection() {
         2,
         DapEvent::Response {
             adapter: "same-name".into(),
-            stop_generation: 2,
+            stop_id: 2,
             request_id: 0,
             request: None,
             response: crate::debugger::DapResponse::Threads(Vec::new()),
@@ -749,7 +749,7 @@ fn debugger_owner_keeps_original_actor_stop_context_and_private_selection() {
 }
 
 #[test]
-fn retired_debugger_terminal_preflight_keeps_its_rejected_owner() {
+fn cancelled_debugger_terminal_preflight_keeps_its_rejected_owner() {
     let (mut owner, adapter) = request_fixture();
     let id = PtyId(1);
     assert!(
@@ -762,7 +762,7 @@ fn retired_debugger_terminal_preflight_keeps_its_rejected_owner() {
         owner.stop().unwrap();
         assert!(
             !owner.terminal_current(&id),
-            "retired preflight must not launch"
+            "cancelled preflight must not launch"
         );
         assert!(!reply.current());
         assert!(owner.take_terminal(&id).is_some());
@@ -926,7 +926,7 @@ fn detaching_and_terminating_are_different_session_facts() {
         0,
         DapEvent::Response {
             adapter: "same-name".into(),
-            stop_generation: 0,
+            stop_id: 0,
             request_id: 1,
             request: Some(request),
             response: DapResponse::Disconnected { terminate_debuggee },
@@ -935,7 +935,7 @@ fn detaching_and_terminating_are_different_session_facts() {
     detached.try_event().unwrap();
     assert!(
         detached.active_adapter().is_none(),
-        "disconnect retires the service"
+        "disconnect stops the service"
     );
     assert!(detached.execution.is_none());
     assert!(detached.stop_reason.is_none());
@@ -966,7 +966,7 @@ fn detaching_and_terminating_are_different_session_facts() {
         0,
         DapEvent::Response {
             adapter: "same-name".into(),
-            stop_generation: 0,
+            stop_id: 0,
             request_id: 1,
             request: Some(request),
             response: DapResponse::Disconnected { terminate_debuggee },
@@ -975,7 +975,7 @@ fn detaching_and_terminating_are_different_session_facts() {
     terminated.try_event().unwrap();
     assert!(
         terminated.active_adapter().is_none(),
-        "disconnect retires the service"
+        "disconnect stops the service"
     );
     assert!(terminated.execution.is_none());
     assert!(terminated.stop_reason.is_none());
@@ -1124,7 +1124,7 @@ fn a_value_from_a_previous_stop_can_never_be_presented_as_current() {
 }
 
 #[test]
-fn running_and_repeated_stops_retire_inspector_values_and_picker_choices() {
+fn running_and_repeated_stops_clear_inspector_values_and_picker_choices() {
     let (mut owner, adapter) = paginated_owner();
     for (value, running) in [("1", true), ("2", false)] {
         adapter.event(
@@ -1213,15 +1213,13 @@ fn running_and_repeated_stops_retire_inspector_values_and_picker_choices() {
             owner.variables().is_empty(),
             "old locals must leave the inspector"
         );
-        assert!(owner.choices.is_none(), "old picker rows must be retired");
+        assert!(owner.choices.is_none(), "old picker rows must be cleared");
         assert!(owner.take_selection(&key).is_err());
     }
 }
 
 #[test]
 fn a_variables_answer_to_an_earlier_stop_is_refused_rather_than_presented_as_current() {
-    // W-24: "Continuing, restarting or re-stopping invalidates stopped data and pending variable
-    // references so a previous value can never be presented as current."
     crate::app::debugger::launch::original_launch_fixture();
     let root = tempfile::tempdir().unwrap();
     let state = WorkspaceState::new(
@@ -1256,7 +1254,7 @@ fn a_variables_answer_to_an_earlier_stop_is_refused_rather_than_presented_as_cur
     prime_for(&mut owner, &adapter);
     let presented = owner.response(crate::debugger::DapResponse::Variables(vec![variable("1")]));
     let DebugResponse::Picker { rows, .. } = &presented else {
-        panic!("expected a variables picker, not a retired or bare result")
+        panic!("expected a variables picker, not a stale or bare result")
     };
     assert_eq!(rows.len(), 1, "the current answer IS presented");
     assert_eq!(rows[0].label, "count = 1");
@@ -1272,7 +1270,7 @@ fn a_variables_answer_to_an_earlier_stop_is_refused_rather_than_presented_as_cur
         1,
         DapEvent::Response {
             adapter: "same-name".into(),
-            stop_generation: 1,
+            stop_id: 1,
             request_id: 2,
             request: Some(request()),
             response: DapResponse::Variables(vec![variable("1")]),
@@ -1282,12 +1280,12 @@ fn a_variables_answer_to_an_earlier_stop_is_refused_rather_than_presented_as_cur
     adapter.advance(2);
     assert!(
         owner.try_event().is_none(),
-        "the transport retires the original stopped request"
+        "the transport invalidates the original stopped request"
     );
     assert!(owner.variables().is_empty());
     assert!(matches!(
         owner.take_selection(&old_key),
-        Err(DapError::Retired)
+        Err(DapError::StaleContext)
     ));
 
     // A RE-STOP then answers for the NEW stop, and that value IS current.
@@ -1298,7 +1296,7 @@ fn a_variables_answer_to_an_earlier_stop_is_refused_rather_than_presented_as_cur
     prime_for(&mut owner, &adapter);
     let presented = owner.response(crate::debugger::DapResponse::Variables(vec![variable("2")]));
     let DebugResponse::Picker { rows, .. } = &presented else {
-        panic!("expected a variables picker, not a retired or bare result")
+        panic!("expected a variables picker, not a stale or bare result")
     };
     assert_eq!(rows.len(), 1, "the fresh answer is presented");
     assert_eq!(rows[0].label, "count = 2");
@@ -1378,7 +1376,7 @@ fn prime_for(owner: &mut Debugger, adapter: &crate::debugger::TestAdapter) {
         1,
         DapEvent::Response {
             adapter: "same-name".into(),
-            stop_generation: 1,
+            stop_id: 1,
             request_id: 0,
             request: None,
             response: crate::debugger::DapResponse::Threads(Vec::new()),
@@ -1428,7 +1426,6 @@ fn inspecting_a_leaf_leaves_pending_console_submissions_for_their_answers() {
 
 #[test]
 fn a_full_page_of_variables_offers_an_exact_continuation_that_carries_the_next_offset() {
-    // W-25: "Variables and collections load lazily and paginate."
     let (mut owner, adapter) = paginated_owner();
     let page = crate::app::debugger::VARIABLE_PAGE;
     owner
@@ -1515,7 +1512,7 @@ fn pagination_at_the_expansion_limit_does_not_open_another_reference() {
             1,
             DapEvent::Response {
                 adapter: "same-name".into(),
-                stop_generation: 1,
+                stop_id: 1,
                 request_id: reference as u64,
                 request: Some(request),
                 response: DapResponse::Variables(leaf_variables(1)),
@@ -1551,8 +1548,6 @@ fn pagination_at_the_expansion_limit_does_not_open_another_reference() {
 
 #[test]
 fn a_reference_already_open_is_shown_as_a_reference_and_is_never_requested_again() {
-    // W-25: "cyclic and repeated references are shown as bounded expandable references and are
-    // never materialized recursively."
     let (mut owner, adapter) = paginated_owner();
     owner
         .control(DapControl::Variables {
@@ -1606,8 +1601,6 @@ fn a_reference_already_open_is_shown_as_a_reference_and_is_never_requested_again
 
 #[test]
 fn the_left_inspector_retains_threads_and_a_stack_that_running_on_invalidates() {
-    // W-25 names "sessions, THREADS, STACK and breakpoints on one side", and a stack is stopped
-    // data: showing it after execution ran on would present a previous value as current.
     let (mut owner, adapter) = paginated_owner();
     owner.control(DapControl::Threads).unwrap();
     assert!(matches!(adapter.control(), Some(DapControl::Threads)));
@@ -1684,7 +1677,7 @@ fn answer(
         0,
         DapEvent::Response {
             adapter: "same-name".into(),
-            stop_generation: 0,
+            stop_id: 0,
             request_id,
             request: Some(request),
             response,
@@ -1720,7 +1713,7 @@ fn evaluation_answers_follow_the_original_watch_and_console_submission() {
             0,
             DapEvent::Response {
                 adapter: "same-name".into(),
-                stop_generation: 0,
+                stop_id: 0,
                 request_id: id,
                 request: Some(watch(expression)),
                 response: evaluation(value),
@@ -1744,7 +1737,7 @@ fn evaluation_answers_follow_the_original_watch_and_console_submission() {
         0,
         DapEvent::RequestFailed {
             adapter: "same-name".into(),
-            stop_generation: 0,
+            stop_id: 0,
             request_seq: 9,
             request_id: 3,
             request: Some(repl("bad")),
@@ -1761,7 +1754,7 @@ fn evaluation_answers_follow_the_original_watch_and_console_submission() {
         0,
         DapEvent::Response {
             adapter: "same-name".into(),
-            stop_generation: 0,
+            stop_id: 0,
             request_id: 4,
             request: Some(repl("good")),
             response: evaluation("ok"),
@@ -1798,7 +1791,7 @@ fn evaluation_answers_follow_the_original_watch_and_console_submission() {
     assert!(owner.pending_submissions.is_empty());
 }
 #[test]
-fn stopped_request_bookkeeping_is_retired_on_continue_and_failure() {
+fn stopped_request_bookkeeping_is_cleared_on_continue_and_failure() {
     let (mut owner, _) = request_fixture();
     owner.note_issued(true, Some(3), 0);
     owner.begin_running();
@@ -1829,7 +1822,7 @@ fn variable_pages_belong_to_the_request_and_picker_activation_keeps_expansion() 
         0,
         DapEvent::Response {
             adapter: "same-name".into(),
-            stop_generation: 0,
+            stop_id: 0,
             request_id: 1,
             request: Some(request),
             response: DapResponse::Variables(vec![crate::debugger::DapVariable {
@@ -1940,7 +1933,7 @@ fn breakpoint_rejections_update_only_the_latest_requested_rows() {
     let latest = adapter.control().unwrap();
     let failure = |request_id, request| DapEvent::RequestFailed {
         adapter: "same-name".into(),
-        stop_generation: 0,
+        stop_id: 0,
         request_seq: 9,
         request_id,
         request: Some(request),
@@ -1968,7 +1961,7 @@ fn breakpoint_rejections_update_only_the_latest_requested_rows() {
         0,
         DapEvent::Response {
             adapter: "same-name".into(),
-            stop_generation: 0,
+            stop_id: 0,
             request_id,
             request: Some(request),
             response: DapResponse::Breakpoints(vec![(true, Some(12), None)]),
@@ -1979,7 +1972,7 @@ fn breakpoint_rejections_update_only_the_latest_requested_rows() {
         0,
         DapEvent::Response {
             adapter: "same-name".into(),
-            stop_generation: 0,
+            stop_id: 0,
             request_id: first_id,
             request: Some(first.clone()),
             response: DapResponse::Breakpoints(vec![(true, Some(11), None)]),
@@ -2043,7 +2036,7 @@ fn breakpoint_changes_send_only_enabled_rows_and_acknowledge_the_captured_list()
         0,
         DapEvent::Response {
             adapter: "same-name".into(),
-            stop_generation: 0,
+            stop_id: 0,
             request_id: 0,
             request: None,
             response: DapResponse::BreakpointChanged {
@@ -2248,7 +2241,7 @@ fn removed_watches_drop_queued_cached_and_late_values() {
         0,
         DapEvent::Response {
             adapter: "same-name".into(),
-            stop_generation: 0,
+            stop_id: 0,
             request_id: 1,
             request: Some(request.clone()),
             response: evaluation("late"),
@@ -2291,7 +2284,7 @@ fn every_admitted_watch_is_refreshed_after_control_queue_backpressure() {
         (0..101).map(|i| format!("watch{i}")).collect::<Vec<_>>()
     );
     owner.event_source = owner.service.context();
-    owner.watch_refresh.push_back("retired stop".into());
+    owner.watch_refresh.push_back("previous stop".into());
     adapter.advance(1);
     owner.refresh_watches();
     assert!(owner.watch_refresh.is_empty());
@@ -2519,7 +2512,7 @@ fn selecting_a_frame_refreshes_locals_and_watches_and_rejects_old_frame_answers(
                 0,
                 DapEvent::Response {
                     adapter: "same-name".into(),
-                    stop_generation: 0,
+                    stop_id: 0,
                     request_id: id,
                     request: Some(request),
                     response,
@@ -2527,7 +2520,7 @@ fn selecting_a_frame_refreshes_locals_and_watches_and_rejects_old_frame_answers(
             );
             assert!(
                 owner.try_event().is_none(),
-                "old frame response was not retired"
+                "old frame response was not discarded"
             );
         }
         assert_eq!(owner.watch_value("x"), None);
@@ -2572,7 +2565,7 @@ fn selecting_a_frame_refreshes_locals_and_watches_and_rejects_old_frame_answers(
 }
 
 #[test]
-fn selecting_the_same_frame_retires_previous_automatic_inspector_requests() {
+fn selecting_the_same_frame_invalidates_previous_automatic_inspector_requests() {
     for (step, request, response) in [
         (
             StopFollow::Threads(Some(1)),
@@ -2643,7 +2636,7 @@ fn selecting_the_same_frame_retires_previous_automatic_inspector_requests() {
             0,
             DapEvent::Response {
                 adapter: "same-name".into(),
-                stop_generation: 0,
+                stop_id: 0,
                 request_id: old_id,
                 request: Some(request),
                 response,

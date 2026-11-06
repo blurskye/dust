@@ -17,11 +17,11 @@ pub mod clock;
 pub mod config;
 /// Built-in Debug Adapter Protocol transport and session control.
 pub mod debugger;
-/// Editing state, text, commands, input, transactions, startup, and live session composition.
+/// Editing state, text, commands, input and transactions.
 pub mod editor;
 /// Bounded filesystem effects, checked atomic persistence, and recovery journals.
 pub mod files;
-/// Pull requests through the GitHub CLI.
+/// Pull requests through the GitHub, Gitea and Forgejo CLIs.
 pub mod forge;
 /// Language identification, syntax execution, and built-in Language Server Protocol support.
 pub mod language;
@@ -40,9 +40,9 @@ pub mod telemetry;
 pub mod testing;
 /// Typed tool catalog, executable discovery, registry, and explicit installer worker.
 pub mod tools;
-/// Unicode cell-grid presentation, universal windows, and guarded terminal lifecycle.
+/// Unicode cell-grid presentation and terminal lifecycle.
 pub mod ui;
-/// Workspace roots, trust, diagnostics, pickers, Git, and revision-safe edit proposals.
+/// Workspace roots, trust, diagnostics, pickers and revision-safe edit proposals.
 pub mod workspace;
 
 /// Git operations.

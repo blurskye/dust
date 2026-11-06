@@ -45,7 +45,7 @@ fn first_frame_renders_before_startup_file_is_queued_and_vfs_then_opens_it() {
     app.window_session.observe_size((80, 24));
     assert!(app.documents.has_startup_work());
     assert!(!app.ui.dashboard);
-    // This is the same draw/admission boundary used by run_interactive.
+    // This is the same draw/request boundary used by run_interactive.
     let painted = app
         .draw_before_startup_reads(|app| {
             assert_eq!(app.documents.pending_count(), 0);
@@ -126,7 +126,7 @@ fn marks_follow_ordinary_edits_before_any_window_transition() {
 }
 
 #[test]
-fn path_completion_is_bounded_async_and_rejects_stale_generations() {
+fn path_completion_is_bounded_async_and_rejects_stale_requests() {
     let (_app_dirs, mut app) = app();
     fs::write(app.state.workspace_root.join("alpha.txt"), b"a").expect("alpha");
     wait_vfs(&mut app);
@@ -1490,7 +1490,7 @@ fn delayed_open_preserves_newer_unsaved_canonical_buffer_and_closed_reload_canno
     fs::remove_dir_all(state_directory).unwrap();
 }
 
-/// Includes startup VFS admission/read/decode, editor+window publication and
+/// Includes startup VFS submission/read/decode, editor+window publication and
 /// final primary selection, but not rendering or general process startup.
 #[test]
 #[ignore = "explicit startup lifecycle cost probe"]
@@ -2905,7 +2905,7 @@ fn recovery_rejected_paths_and_missing_files_under_outside_symlinks_become_scrat
 }
 
 #[test]
-fn recovery_failure_and_retired_reads_preserve_the_journal() {
+fn recovery_failure_and_cancelled_reads_preserve_the_journal() {
     let (_app_dirs, mut app) = app();
     app.recovery.skip_maintenance();
     let (buffer, _) = app
