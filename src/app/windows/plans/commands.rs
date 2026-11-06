@@ -1,5 +1,7 @@
+//! Command registration and execution for checked window and editor-close plans.
+
 use crate::app::windows::NativeSurfaceTarget;
-use crate::app::windows::WindowSession;
+use crate::app::windows::Windows;
 use crate::app::windows::plans::TargetError;
 use crate::app::windows::plans::WindowPlan;
 use crate::editor::EditorOperation;
@@ -66,7 +68,7 @@ pub(in crate::app) enum CommandEffect {
     CloseTerminal(u64),
     ClosedPicker(crate::ui::PickerSurfaceKind),
 }
-impl WindowSession {
+impl Windows {
     /// A shown terminal docked on the right (for `Horizontal`) or at the bottom (`Vertical`).
     fn docked_terminal_on(&self, axis: crate::editor::Axis) -> Option<NativeSurfaceTarget> {
         let wanted = match axis {

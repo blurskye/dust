@@ -1,9 +1,11 @@
+//! Checked application window changes and resource cleanup.
+
 use crate::app::windows::EditorWindowCandidate;
 use crate::app::windows::NativeSurfaceSignature;
 use crate::app::windows::NativeSurfaceTarget;
 use crate::app::windows::TerminalGeometrySource;
 use crate::app::windows::WindowCandidate;
-use crate::app::windows::WindowSession;
+use crate::app::windows::Windows;
 use crate::app::windows::bridge::EditorWindowBridge;
 use crate::app::windows::bridge::NativeSurfaceBridge;
 use crate::editor::EditorTopology;
@@ -37,7 +39,7 @@ impl WindowCandidate {
     }
 }
 
-impl WindowSession {
+impl Windows {
     pub(in crate::app) fn require_editor_source(
         &self,
         current: &crate::editor::EditorWindowVersion,
@@ -737,7 +739,7 @@ impl WindowSession {
     }
 }
 
-impl WindowSession {
+impl Windows {
     pub(in crate::app) fn native_placement(
         &self,
         target: NativeSurfaceTarget,
@@ -886,7 +888,7 @@ use crate::persistence::PersistedWindowPlacement;
 use crate::persistence::PersistedWindowRule;
 
 use crate::persistence::validate_window_rules;
-impl WindowSession {
+impl Windows {
     pub(in crate::app) fn persisted_editor_placement(
         &self,
         pane: crate::editor::PaneId,

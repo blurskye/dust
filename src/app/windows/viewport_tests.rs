@@ -1,3 +1,5 @@
+//! Viewport tests for window commands, focus and application state.
+
 use crate::app::FULL_PAGE_PERCENT;
 use crate::app::tests::*;
 use crate::ui::render::documentation::DOCUMENTATION_SCROLL_STEP;

@@ -1,7 +1,9 @@
+//! Checked window and editor-close plans.
+
 pub(in crate::app) mod commands;
 use crate::app::windows::EditorWindowCandidate;
 use crate::app::windows::NativeDescriptions;
-use crate::app::windows::WindowSession;
+use crate::app::windows::Windows;
 use crate::editor::BufferId;
 use crate::editor::EditorOperation;
 use crate::editor::EditorTopology;
@@ -137,7 +139,7 @@ pub(in crate::app) struct NavigationStamp {
     editor: EditorWindowVersion,
     view: Option<crate::editor::ViewId>,
 }
-impl WindowSession {
+impl Windows {
     pub(in crate::app) fn navigation_stamp(
         &self,
         editor: EditorWindowVersion,
@@ -174,7 +176,7 @@ fn editor_panes(node: &LayoutNode) -> Vec<PaneId> {
     }
 }
 
-impl WindowSession {
+impl Windows {
     fn validate_editor_close(
         &self,
         intent: &EditorCloseIntent,
@@ -867,7 +869,7 @@ pub(in crate::app) enum TargetError {
     MissingTerminal,
     Rejected(String),
 }
-impl WindowSession {
+impl Windows {
     pub(in crate::app) fn resolve_graph_target(
         &self,
         target: &str,
@@ -926,7 +928,7 @@ mod tests {
             .open_text(TextBuffer::from_text("other"), None)
             .unwrap();
         state.focus_tab(-1, true).unwrap();
-        let mut windows = WindowSession::default();
+        let mut windows = Windows::default();
         windows
             .core
             .editor

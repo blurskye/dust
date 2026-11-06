@@ -1,6 +1,8 @@
+//! Plugin-owned window drafts and checked publication.
+
 use crate::app::windows::WindowCandidate;
-use crate::app::windows::WindowCore;
-use crate::app::windows::WindowSession;
+use crate::app::windows::WindowState;
+use crate::app::windows::Windows;
 use crate::windows::ContentAdapterKind;
 use crate::windows::ContentId;
 use crate::windows::ContentTypeId;
@@ -48,7 +50,7 @@ impl PluginWindowDraft {
         )
     }
 }
-impl WindowSession {
+impl Windows {
     pub(in crate::app) fn accept_plugin_transition(
         &mut self,
         transition: PluginWindowTransition,
@@ -131,7 +133,7 @@ impl WindowSession {
         if !Arc::ptr_eq(&self.origin, &draft.origin) || self.epoch != draft.epoch {
             return Err("window candidate is stale or belongs to another session".into());
         }
-        let mut core = WindowCore {
+        let mut core = WindowState {
             graph: draft.graph,
             editor: self.core.editor.clone(),
             native: self.core.native.clone(),

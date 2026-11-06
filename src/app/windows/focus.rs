@@ -1,5 +1,7 @@
+//! Focus targets and application navigation.
+
 use crate::app::windows::NativeSurfaceTarget;
-use crate::app::windows::WindowSession;
+use crate::app::windows::Windows;
 use crate::windows::PANE_MINIMUM_WIDTH;
 use crate::windows::SpatialDirection;
 use crate::windows::WindowId;
@@ -18,7 +20,7 @@ pub(in crate::app) enum FocusTarget {
 const SHRUNK_TERMINAL_HEIGHT: u16 = 5;
 const SHORT_SCREEN_HEIGHT: u16 = 30;
 
-impl WindowSession {
+impl Windows {
     pub(in crate::app) fn new(dashboard: bool, terminal_height: u16) -> Self {
         Self {
             dashboard,

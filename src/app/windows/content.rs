@@ -1,4 +1,6 @@
-use crate::app::windows::WindowSession;
+//! Window content descriptions and application actions.
+
+use crate::app::windows::Windows;
 use crate::config::Config;
 use crate::editor::BufferId;
 use crate::editor::EditorTopology;
@@ -23,7 +25,7 @@ pub(super) struct ContentLine {
     #[cfg(test)]
     builds: usize,
 }
-impl WindowSession {
+impl Windows {
     pub(in crate::app) fn content_tabs(&self) -> &[ContentTabEntry] {
         &self.content_line.entries
     }

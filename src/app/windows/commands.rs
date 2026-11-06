@@ -1,3 +1,5 @@
+//! Command registration and execution for window commands, focus and application state.
+
 use crate::app::commands::AppEffect;
 use crate::app::commands::integer_arg;
 use crate::app::commands::register;

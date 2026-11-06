@@ -1,3 +1,5 @@
+//! Editor and native resource mapping into the window graph.
+
 use crate::editor::EditorTopology;
 use std::collections::BTreeMap;
 use std::collections::HashMap;

@@ -1,3 +1,5 @@
+//! Tests for editor and native resource mapping into the window graph.
+
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
