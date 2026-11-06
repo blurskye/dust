@@ -334,6 +334,34 @@ fn validate_preconditions(
     Ok(())
 }
 
+fn view_positions(state: &EditorState) -> Vec<(ViewId, ByteOffset, EditorMode)> {
+    state
+        .views
+        .iter()
+        .map(|(id, view)| (id, view.cursor, view.mode))
+        .collect()
+}
+
+fn record_view_changes(state: &mut EditorState, before: &[(ViewId, ByteOffset, EditorMode)]) {
+    for (id, cursor, mode) in before {
+        let Some(view) = state.views.get(*id) else {
+            continue;
+        };
+        if view.cursor != *cursor {
+            state.events.push(crate::editor::EditorEvent::CursorMoved {
+                view: *id,
+                position: view.cursor,
+            });
+        }
+        if view.mode != *mode {
+            state.events.push(crate::editor::EditorEvent::ModeChanged {
+                view: *id,
+                mode: view.mode,
+            });
+        }
+    }
+}
+
 fn apply_operation(
     state: &mut EditorState,
     operation: &EditorOperation,
@@ -375,7 +403,16 @@ fn apply_operation(
                     });
                 }
             }
+            let marks_before = target.decorations.positions();
             let delta = target.text.apply_edits(edits)?;
+            target.decorations.advance(&delta);
+            let change = target.record_change(edits.clone(), delta.clone());
+            state
+                .events
+                .push(crate::editor::EditorEvent::BufferChanged {
+                    buffer: *buffer,
+                    change,
+                });
             if let Some(view) = &mut target.saved_view {
                 view.cursor = delta.map_offset(view.cursor, Affinity::After);
             }
@@ -385,9 +422,11 @@ fn apply_operation(
                     target.undo.reset();
                 }
             } else {
-                target.undo.record(
+                target.undo.record_with_marks(
                     changes,
                     matches!(undo_policy, UndoPolicy::Merge | UndoPolicy::Boundary),
+                    marks_before,
+                    target.decorations.positions(),
                 );
             }
             for (_, view) in state
@@ -621,6 +660,7 @@ fn apply_operation(
             if target.read_only {
                 return Err(TransactionError::ReadOnly);
             }
+            let mark_positions = target.undo.mark_positions(undo);
             let changes = if undo {
                 target.undo.undo().ok_or(TransactionError::NothingToUndo)?
             } else {
@@ -639,10 +679,19 @@ fn apply_operation(
                     ));
                 }
                 let first_line = target.text.byte_to_line(range.start).unwrap_or(0);
-                let delta = target.text.apply_edits(&TextEditSet::new(
+                let edits = TextEditSet::new(
                     target.text.revision(),
                     vec![TextEdit::new(range, change.inserted)],
-                ))?;
+                );
+                let delta = target.text.apply_edits(&edits)?;
+                target.decorations.advance(&delta);
+                let record = target.record_change(edits, delta.clone());
+                state
+                    .events
+                    .push(crate::editor::EditorEvent::BufferChanged {
+                        buffer: *buffer,
+                        change: record,
+                    });
                 target
                     .text
                     .set_line_endings(first_line, &change.inserted_endings);
@@ -670,6 +719,9 @@ fn apply_operation(
                     view.replace_history.clear();
                     view.insert_repeat = None;
                 }
+            }
+            if let Some(positions) = mark_positions {
+                target.decorations.restore_positions(&positions);
             }
             target.refresh_dirty();
             clamp_views(state, *buffer);
@@ -848,8 +900,11 @@ impl EditorDraft {
             .map(|id| (id, self.state.buffers.get(id).map(|b| b.dirty)))
             .collect::<Vec<_>>();
         for operation in &transaction.operations {
+            let views = view_positions(&self.state);
             apply_operation(&mut self.state, operation, transaction.undo_policy)?;
+            record_view_changes(&mut self.state, &views);
         }
+        let views = view_positions(&self.state);
         for (_, view) in self.state.views.iter_mut().filter(|(_, view)| {
             view.mode == EditorMode::Normal
                 && dirty_before
@@ -872,6 +927,7 @@ impl EditorDraft {
                 view.preferred_column = None;
             }
         }
+        record_view_changes(&mut self.state, &views);
         if transaction.undo_policy == UndoPolicy::Boundary {
             for (_, buffer) in &mut self.state.buffers {
                 buffer.undo.boundary();

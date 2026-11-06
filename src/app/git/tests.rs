@@ -496,7 +496,17 @@ fn explorer_auto_git_status_colors_names_opens_picker_and_idles() {
     assert!(app.state.buffers[active].dirty);
     let dirty_revision = app.state.buffers[active].text.revision().0;
     app.reconcile_git_signs();
-    assert!(app.ui.git_signs.is_empty());
+    // The anchored signs stay at their lines while the new diff is being read.
+    assert_eq!(
+        app.ui.git_signs,
+        signs
+            .iter()
+            .map(|sign| crate::ui::UiGitSign {
+                buffer_revision: dirty_revision,
+                ..*sign
+            })
+            .collect::<Vec<_>>()
+    );
     let deadline = Instant::now() + Duration::from_secs(3);
     while app.git.signs_pending() {
         app.process_git_sign_events();

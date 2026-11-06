@@ -1,6 +1,7 @@
 //! Language-server requests and editor results.
 
 mod incoming;
+mod inlay;
 mod launch;
 
 pub(in crate::app) const LSP_REQUEST_TIMEOUT_MS: u64 = 10_000;
@@ -148,6 +149,7 @@ pub(in crate::app) struct LspRuntimeState {
 #[derive(Default)]
 pub(super) struct LspSession {
     projection: projection::Projection,
+    marks: inlay::LanguageMarks,
     preparation: launch::Preparation,
     service: LspClient,
     incoming: Option<(i64, OwnedLspEvent)>,
@@ -1438,26 +1440,15 @@ impl App {
             // Typing keeps the server's colours, moved along with the edit, until it sends new
             // ones; dropping them flashes the text back to tree-sitter's.
             let semantic = std::mem::take(&mut self.ui.lsp_semantic_spans);
-            let mut hints = std::mem::take(&mut self.ui.lsp_inlay_hints);
+            let hints = std::mem::take(&mut self.ui.lsp_inlay_hints);
             self.clear_lsp_ui_rows();
             if change == ProjectionChange::Typed {
                 self.ui.lsp_semantic_spans = semantic;
             }
             // Each buffer keeps its hints, moved along with edits, as in Neovim: switching back
             // to a file or typing shows them at once while fresh ones load.
-            hints.retain_mut(|hint| {
-                let Some(buffer) = self.state.buffers.get(hint.buffer) else {
-                    return false;
-                };
-                let Some(position) = buffer.text.map_offset_since(hint.revision, hint.position)
-                else {
-                    return false;
-                };
-                hint.position = position;
-                hint.revision = buffer.text.revision();
-                true
-            });
             self.ui.lsp_inlay_hints = hints;
+            self.project_language_marks();
             if !self.language.completion_items().is_empty() {
                 self.project_lsp_completion();
             }
@@ -1508,6 +1499,7 @@ impl App {
 
 impl App {
     pub(in crate::app) fn process_lsp_inlay_refresh(&mut self) {
+        self.project_language_marks();
         if self
             .language
             .inlay_ready(&self.configuration.settings().lsp, Instant::now())
@@ -2230,6 +2222,7 @@ impl App {
             .collect::<Vec<_>>();
         next.sort_unstable_by_key(|span| (span.buffer, span.range.start, span.range.end));
         self.ui.set(next, |ui| &mut ui.lsp_colors);
+        self.project_language_marks();
     }
 }
 
@@ -2831,6 +2824,7 @@ impl App {
                         .lsp_inlay_hints
                         .retain(|hint| hint.buffer != buffer_id);
                     self.ui.lsp_inlay_hints.extend(hints);
+                    self.project_language_marks();
                 }
             }
             LspFeatureResult::CodeLens(items) => {

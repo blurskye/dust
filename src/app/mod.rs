@@ -532,6 +532,7 @@ pub(super) mod tutor;
 
 mod documentation;
 mod editing;
+pub mod events;
 mod picker;
 mod prompt;
 

@@ -15,6 +15,8 @@ pub use id::ViewId;
 pub const MAXIMUM_LAYOUT_DEPTH: usize = crate::MAX_SPLIT_DEPTH;
 pub const MAXIMUM_LAYOUT_PANES: usize = crate::MAX_WINDOWS;
 mod buffer;
+pub(crate) mod events;
+pub use events::{BufferChange, EditorEvent};
 mod registers;
 mod view;
 pub use buffer::Buffer;
