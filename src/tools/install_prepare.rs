@@ -1,3 +1,5 @@
+//! Tool artifact preparation and Nix compatibility files.
+
 use std::fs;
 use std::io::Write;
 use std::path::Component;

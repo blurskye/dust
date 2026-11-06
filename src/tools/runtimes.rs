@@ -1,3 +1,5 @@
+//! Managed language runtimes and tool launch paths.
+
 use std::collections::BTreeMap;
 use std::env;
 use std::ffi::OsString;

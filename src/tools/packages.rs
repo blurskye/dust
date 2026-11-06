@@ -1,3 +1,5 @@
+//! Package storage, lock updates and background operations.
+
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fs;
@@ -47,12 +49,12 @@ use crate::tools::package_lock::write_protected_atomic;
 
 use crate::tools::registry::RegistryPackageMetadata;
 
-pub struct PackageManager {
+pub struct PackageStore {
     root: PathBuf,
     maximum_lock_bytes: usize,
     maximum_object_bytes: usize,
 }
-impl PackageManager {
+impl PackageStore {
     pub fn new(
         root: PathBuf,
         maximum_lock_bytes: usize,
@@ -495,7 +497,7 @@ pub struct PackageOperationResult {
     pub cleanup_error: Option<String>,
 }
 impl PackageOperationResult {
-    fn collect_garbage(&mut self, manager: &PackageManager) {
+    fn collect_garbage(&mut self, manager: &PackageStore) {
         match manager.gc(256) {
             Ok(removed) => self.removed = Some(removed),
             Err(error) => self.cleanup_error = Some(error.to_string()),
@@ -503,7 +505,7 @@ impl PackageOperationResult {
     }
 }
 #[derive(Debug)]
-pub enum PackageServiceEvent {
+pub enum PackageEvent {
     Completed(Box<PackageOperationResult>),
     Failed {
         id: u64,
@@ -511,13 +513,13 @@ pub enum PackageServiceEvent {
         error: PackageError,
     },
 }
-pub struct PackageService {
+pub struct PackageWorker {
     sender: SyncSender<(u64, PackageOperation)>,
-    receiver: Receiver<PackageServiceEvent>,
+    receiver: Receiver<PackageEvent>,
     ids: Arc<dyn crate::clock::IdSource>,
     pending: BTreeSet<u64>,
 }
-impl PackageService {
+impl PackageWorker {
     pub fn start(
         root: PathBuf,
         capacity: usize,
@@ -566,7 +568,7 @@ impl PackageService {
                     }
                     .to_owned();
                     let result = (|| {
-                        let manager = PackageManager::new(
+                        let manager = PackageStore::new(
                             root.clone(),
                             maximum_lock_bytes,
                             maximum_object_bytes,
@@ -741,12 +743,12 @@ impl PackageService {
                         Ok::<_, PackageError>(output)
                     })();
                     let event = result.map_or_else(
-                        |error| PackageServiceEvent::Failed {
+                        |error| PackageEvent::Failed {
                             id,
                             operation: name,
                             error,
                         },
-                        |result| PackageServiceEvent::Completed(Box::new(result)),
+                        |result| PackageEvent::Completed(Box::new(result)),
                     );
                     if etx.send(event).is_err() {
                         break;
@@ -776,14 +778,14 @@ impl PackageService {
     pub fn pending_count(&self) -> usize {
         self.pending.len()
     }
-    pub fn poll(&mut self) -> Result<Vec<PackageServiceEvent>, PackageError> {
+    pub fn poll(&mut self) -> Result<Vec<PackageEvent>, PackageError> {
         let mut events = Vec::new();
         loop {
             match self.receiver.try_recv() {
                 Ok(event) => {
                     let id = match &event {
-                        PackageServiceEvent::Completed(result) => result.id,
-                        PackageServiceEvent::Failed { id, .. } => *id,
+                        PackageEvent::Completed(result) => result.id,
+                        PackageEvent::Failed { id, .. } => *id,
                     };
                     self.pending.remove(&id);
                     events.push(event)
@@ -803,7 +805,7 @@ mod tests {
     fn gc_reaches_garbage_after_a_retained_directory_prefix() {
         for directory in ["store", "activations"] {
             let root = tempfile::tempdir().unwrap();
-            let manager = PackageManager::new(root.path().into(), 1024 * 1024, 1024).unwrap();
+            let manager = PackageStore::new(root.path().into(), 1024 * 1024, 1024).unwrap();
             for index in 0..12 {
                 let name = format!("{index:064x}");
                 let name = if directory == "activations" {
@@ -843,7 +845,7 @@ mod tests {
     #[test]
     fn package_cleanup_failure_preserves_the_committed_result() {
         let root = tempfile::tempdir().unwrap();
-        let manager = PackageManager::new(root.path().into(), 1024 * 1024, 1024).unwrap();
+        let manager = PackageStore::new(root.path().into(), 1024 * 1024, 1024).unwrap();
         let (manifest, plugin, bytes) = crate::tools::tests::package_fixture("demo");
         let object = manager.stage_verified_object(&manifest, &bytes).unwrap();
         manager
@@ -874,13 +876,13 @@ mod tests {
         use std::time::Duration;
         use std::time::Instant;
         let root = tempfile::tempdir().unwrap();
-        let manager = PackageManager::new(root.path().into(), 1024 * 1024, 1024).unwrap();
+        let manager = PackageStore::new(root.path().into(), 1024 * 1024, 1024).unwrap();
         let (installed, plugin, bytes) = crate::tools::tests::package_fixture("publisher/alpha");
         let object = manager.stage_verified_object(&installed, &bytes).unwrap();
         manager
             .commit_prepared(&installed, &plugin, &object)
             .unwrap();
-        let mut service = PackageService::start(root.path().into(), 1, 1024 * 1024, 1024);
+        let mut service = PackageWorker::start(root.path().into(), 1, 1024 * 1024, 1024);
         for registry in [false, true] {
             for (name, plugin_id, message) in [
                 ("alpha", "renamed", "cannot change plugin ID"),
@@ -931,7 +933,7 @@ mod tests {
                     std::thread::sleep(Duration::from_millis(2));
                 };
                 match event {
-                    PackageServiceEvent::Failed {
+                    PackageEvent::Failed {
                         id,
                         error: PackageError::Activation(error),
                         ..
@@ -950,7 +952,7 @@ mod tests {
     fn verification_waits_for_the_package_transaction() {
         use std::time::Duration;
         let root = tempfile::tempdir().unwrap();
-        let manager = PackageManager::new(root.path().into(), 1024 * 1024, 1024).unwrap();
+        let manager = PackageStore::new(root.path().into(), 1024 * 1024, 1024).unwrap();
         let (manifest, plugin, bytes) = crate::tools::tests::package_fixture("demo");
         let object = manager.stage_verified_object(&manifest, &bytes).unwrap();
         manager
@@ -958,7 +960,7 @@ mod tests {
             .unwrap();
         for direct in [false, true] {
             let transaction = manager.transaction().unwrap();
-            let other = PackageManager::new(root.path().into(), 1024 * 1024, 1024).unwrap();
+            let other = PackageStore::new(root.path().into(), 1024 * 1024, 1024).unwrap();
             let (started, ready) = mpsc::channel();
             let (done, result) = mpsc::channel();
             let worker = thread::spawn(move || {
@@ -997,7 +999,7 @@ mod tests {
         use nix::sys::stat::Mode;
         use nix::unistd::mkfifo;
         let root = tempfile::tempdir().unwrap();
-        let manager = PackageManager::new(root.path().into(), 1024 * 1024, 1024).unwrap();
+        let manager = PackageStore::new(root.path().into(), 1024 * 1024, 1024).unwrap();
         let (manifest, plugin, bytes) = crate::tools::tests::package_fixture("demo");
         let object = manager.stage_verified_object(&manifest, &bytes).unwrap();
         manager
@@ -1017,11 +1019,11 @@ mod tests {
         use crate::plugins::PluginCommandContext;
         use crate::plugins::PluginCommandDeclaration;
         use crate::plugins::PluginEvent;
-        use crate::plugins::PluginManager;
+        use crate::plugins::PluginHost;
         use std::time::Duration;
         use std::time::Instant;
         let root = tempfile::tempdir().unwrap();
-        let manager = PackageManager::new(root.path().into(), 1024 * 1024, 1024 * 1024).unwrap();
+        let manager = PackageStore::new(root.path().into(), 1024 * 1024, 1024 * 1024).unwrap();
         let (mut manifest, mut plugin, _) = crate::tools::tests::package_fixture("demo");
         let core = include_bytes!(concat!(
             env!("CARGO_MANIFEST_DIR"),
@@ -1070,7 +1072,7 @@ mod tests {
             .commit_prepared(&manifest, &plugin, &object)
             .unwrap();
         let mut activations = manager.activations().unwrap();
-        let other = PackageManager::new(root.path().into(), 1024 * 1024, 1024 * 1024).unwrap();
+        let other = PackageStore::new(root.path().into(), 1024 * 1024, 1024 * 1024).unwrap();
         other.remove("demo").unwrap();
         let (mut replacement, mut replacement_plugin, mut bytes) =
             crate::tools::tests::package_fixture("other");
@@ -1089,7 +1091,7 @@ mod tests {
 
         let (manifest, path, object_lock) = activations.pop().unwrap();
         let checksum = manifest.component_sha256.clone();
-        let mut plugins = PluginManager::start(2);
+        let mut plugins = PluginHost::start(2);
         let load = plugins
             .load_protected(
                 manager.store_root(),
@@ -1099,7 +1101,7 @@ mod tests {
                 Some(object_lock),
             )
             .unwrap();
-        let next_event = |plugins: &mut PluginManager| {
+        let next_event = |plugins: &mut PluginHost| {
             let deadline = Instant::now() + Duration::from_secs(5);
             loop {
                 if let Some(event) = plugins.poll().unwrap().into_iter().next() {
@@ -1125,11 +1127,11 @@ mod tests {
     #[test]
     fn gc_preserves_outstanding_prepared_objects_across_managers() {
         let root = tempfile::tempdir().unwrap();
-        let manager = PackageManager::new(root.path().into(), 1024 * 1024, 1024).unwrap();
+        let manager = PackageStore::new(root.path().into(), 1024 * 1024, 1024).unwrap();
         let (manifest, plugin, bytes) = crate::tools::tests::package_fixture("prepared");
         let object = manager.stage_verified_object(&manifest, &bytes).unwrap();
         let protected = protect_object(&object).unwrap();
-        let other = PackageManager::new(root.path().into(), 1024 * 1024, 1024).unwrap();
+        let other = PackageStore::new(root.path().into(), 1024 * 1024, 1024).unwrap();
         assert_eq!(other.gc(256).unwrap(), 0);
         assert!(object.exists());
         manager

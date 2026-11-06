@@ -1,3 +1,5 @@
+//! Package registry requests, downloads and metadata caching.
+
 use crate::plugins::PluginManifest;
 use crate::tools::PackageManifest;
 use crate::tools::PackageSource;
@@ -118,12 +120,12 @@ pub struct RegistryEvent {
     pub id: u64,
     pub result: Result<RegistryResult, RegistryError>,
 }
-pub struct RegistryService {
+pub struct RegistryWorker {
     sender: SyncSender<(u64, RegistryRequest)>,
     receiver: Receiver<RegistryEvent>,
     ids: Arc<dyn crate::clock::IdSource>,
 }
-impl RegistryService {
+impl RegistryWorker {
     pub fn start(policy: RegistryPolicy, cache: PathBuf) -> Result<Self, RegistryError> {
         Self::start_with_ids(policy, cache, Arc::new(crate::clock::AtomicIds::new(1)))
     }

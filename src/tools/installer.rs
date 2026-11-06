@@ -1,3 +1,5 @@
+//! Background tool installation and progress.
+
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::fs::File;

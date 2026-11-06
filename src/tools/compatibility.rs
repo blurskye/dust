@@ -1,3 +1,5 @@
+//! Host compatibility checks and tool launch environments.
+
 use std::collections::BTreeMap;
 use std::fs;
 use std::io::Read;

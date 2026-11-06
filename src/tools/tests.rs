@@ -1,3 +1,5 @@
+//! Tests for tool catalogs, installation and package storage.
+
 use reqwest::Url;
 
 use crate::tools::catalog::ToolArchiveFormat;
@@ -1576,7 +1578,7 @@ fn cancelled_queued_version_probes_do_not_spawn() {
     use std::time::Duration;
     use std::time::Instant;
     let directory = tempfile::tempdir().unwrap();
-    let service = crate::tools::ToolVersionService::start();
+    let service = crate::tools::ToolVersionWorker::start();
     let request = |id: &str, script: &str, cancelled| ToolVersionRequest {
         id: id.into(),
         executable: "/bin/sh".into(),
@@ -1662,7 +1664,7 @@ fn version_service_shutdown_with_full_results_is_bounded() {
     use std::sync::mpsc;
     use std::thread;
     use std::time::Duration;
-    let service = crate::tools::ToolVersionService::start();
+    let service = crate::tools::ToolVersionWorker::start();
     let directory = tempfile::tempdir().unwrap();
     let deadline = std::time::Instant::now() + Duration::from_secs(15);
     for id in 0..40 {
@@ -1773,7 +1775,7 @@ pub(super) fn package_fixture(
 #[test]
 fn package_gc_preserves_removed_package_for_rollback() {
     let root = tempfile::tempdir().unwrap();
-    let manager = crate::tools::PackageManager::new(root.path().into(), 1024 * 1024, 1024).unwrap();
+    let manager = crate::tools::PackageStore::new(root.path().into(), 1024 * 1024, 1024).unwrap();
     let (manifest, plugin, bytes) = package_fixture("demo");
     let object = manager.stage_verified_object(&manifest, &bytes).unwrap();
     manager
@@ -1788,7 +1790,7 @@ fn package_gc_preserves_removed_package_for_rollback() {
 #[test]
 fn package_activation_identity_is_independent_of_component() {
     let root = tempfile::tempdir().unwrap();
-    let manager = crate::tools::PackageManager::new(root.path().into(), 1024 * 1024, 1024).unwrap();
+    let manager = crate::tools::PackageStore::new(root.path().into(), 1024 * 1024, 1024).unwrap();
     for name in ["one", "two"] {
         let (manifest, plugin, bytes) = package_fixture(name);
         let object = manager.stage_verified_object(&manifest, &bytes).unwrap();
@@ -1975,7 +1977,7 @@ fn package_store_reinstall_repairs_corrupted_objects() {
         assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 1);
     }
     let manager =
-        crate::tools::PackageManager::new(root.path().join("manager"), 4096, 1024).unwrap();
+        crate::tools::PackageStore::new(root.path().join("manager"), 4096, 1024).unwrap();
     let object = manager.stage_verified_object(&manifest, &bytes).unwrap();
     std::fs::write(&object, b"corrupt").unwrap();
     assert_eq!(
@@ -2012,7 +2014,7 @@ fn package_atomic_writes_remove_staging_files_when_rename_fails() {
 #[test]
 fn package_commits_preserve_plugin_ownership_and_identity() {
     let root = tempfile::tempdir().unwrap();
-    let manager = crate::tools::PackageManager::new(root.path().into(), 1024 * 1024, 1024).unwrap();
+    let manager = crate::tools::PackageStore::new(root.path().into(), 1024 * 1024, 1024).unwrap();
     let (manifest, plugin, bytes) = package_fixture("demo");
     let object = manager.stage_verified_object(&manifest, &bytes).unwrap();
     let installed = manager
@@ -2041,7 +2043,7 @@ fn package_commits_preserve_plugin_ownership_and_identity() {
 #[test]
 fn package_commit_accepts_and_normalizes_uppercase_digest() {
     let root = tempfile::tempdir().unwrap();
-    let manager = crate::tools::PackageManager::new(root.path().into(), 1024 * 1024, 1024).unwrap();
+    let manager = crate::tools::PackageStore::new(root.path().into(), 1024 * 1024, 1024).unwrap();
     let (mut manifest, mut plugin, bytes) = package_fixture("demo");
     if let crate::tools::PackageSource::Registry { archive_sha256, .. } = &mut manifest.source {
         *archive_sha256 = archive_sha256.to_ascii_uppercase();
@@ -2068,7 +2070,7 @@ fn package_managers_serialize_concurrent_lock_updates() {
             let root = root.path().to_path_buf();
             let barrier = barrier.clone();
             std::thread::spawn(move || {
-                let manager = crate::tools::PackageManager::new(root, 1024 * 1024, 1024).unwrap();
+                let manager = crate::tools::PackageStore::new(root, 1024 * 1024, 1024).unwrap();
                 let (manifest, plugin, bytes) = package_fixture(&format!("package-{id}"));
                 let object = manager.stage_verified_object(&manifest, &bytes).unwrap();
                 barrier.wait();
@@ -2082,7 +2084,7 @@ fn package_managers_serialize_concurrent_lock_updates() {
     for thread in threads {
         thread.join().unwrap();
     }
-    let manager = crate::tools::PackageManager::new(root.path().into(), 1024 * 1024, 1024).unwrap();
+    let manager = crate::tools::PackageStore::new(root.path().into(), 1024 * 1024, 1024).unwrap();
     assert_eq!(manager.activations().unwrap().len(), 8);
 }
 
@@ -2114,7 +2116,7 @@ fn package_service_keeps_every_completion_under_backpressure() {
     use std::time::Duration;
     use std::time::Instant;
     let root = tempfile::tempdir().unwrap();
-    let mut service = crate::tools::PackageService::start(root.path().into(), 1, 1024, 1024);
+    let mut service = crate::tools::PackageWorker::start(root.path().into(), 1, 1024, 1024);
     let mut admitted = Vec::new();
     let deadline = Instant::now() + Duration::from_secs(10);
     for _ in 0..3 {
@@ -2137,7 +2139,7 @@ fn package_service_keeps_every_completion_under_backpressure() {
     while service.pending_count() != 0 {
         for event in service.poll().unwrap() {
             match event {
-                crate::tools::PackageServiceEvent::Completed(result) => received.push(result.id),
+                crate::tools::PackageEvent::Completed(result) => received.push(result.id),
                 event => panic!("unexpected {event:?}"),
             }
         }
@@ -2156,7 +2158,7 @@ fn registry_service_keeps_every_result_under_backpressure() {
     use std::time::Duration;
     use std::time::Instant;
     let root = tempfile::tempdir().unwrap();
-    let service = crate::tools::RegistryService::start(
+    let service = crate::tools::RegistryWorker::start(
         crate::tools::RegistryPolicy {
             offline: true,
             queue_capacity: 1,
@@ -2370,7 +2372,7 @@ fn rustfmt_is_available_as_a_stdin_formatter() {
 #[test]
 fn package_failed_commit_preserves_rollback() {
     let root = tempfile::tempdir().unwrap();
-    let manager = crate::tools::PackageManager::new(root.path().into(), 1024 * 1024, 1024).unwrap();
+    let manager = crate::tools::PackageStore::new(root.path().into(), 1024 * 1024, 1024).unwrap();
     let (manifest, mut plugin, bytes) = package_fixture("demo");
     let object = manager.stage_verified_object(&manifest, &bytes).unwrap();
     manager
@@ -2382,7 +2384,7 @@ fn package_failed_commit_preserves_rollback() {
         .unwrap();
     let backup_path = root.path().join("dust-packages.lock.previous.json");
     let backup = std::fs::read(&backup_path).unwrap();
-    let limited = crate::tools::PackageManager::new(
+    let limited = crate::tools::PackageStore::new(
         root.path().into(),
         serde_json::to_vec_pretty(&current).unwrap().len(),
         1024,
@@ -2402,7 +2404,7 @@ fn package_failed_commit_preserves_rollback() {
 #[test]
 fn package_missing_removal_preserves_rollback() {
     let root = tempfile::tempdir().unwrap();
-    let manager = crate::tools::PackageManager::new(root.path().into(), 1024 * 1024, 1024).unwrap();
+    let manager = crate::tools::PackageStore::new(root.path().into(), 1024 * 1024, 1024).unwrap();
     let (manifest, mut plugin, bytes) = package_fixture("demo");
     let object = manager.stage_verified_object(&manifest, &bytes).unwrap();
     manager
@@ -2423,7 +2425,7 @@ fn package_missing_removal_preserves_rollback() {
 #[test]
 fn package_removal_ignores_its_own_dependencies_but_not_other_packages() {
     let root = tempfile::tempdir().unwrap();
-    let manager = crate::tools::PackageManager::new(root.path().into(), 1024 * 1024, 1024).unwrap();
+    let manager = crate::tools::PackageStore::new(root.path().into(), 1024 * 1024, 1024).unwrap();
     let (manifest, plugin, bytes) = package_fixture("demo");
     let object = manager.stage_verified_object(&manifest, &bytes).unwrap();
     let mut lock = manager
@@ -2456,7 +2458,7 @@ fn package_removal_ignores_its_own_dependencies_but_not_other_packages() {
 #[test]
 fn package_commit_rejects_changed_or_shared_plugin_ids() {
     let root = tempfile::tempdir().unwrap();
-    let manager = crate::tools::PackageManager::new(root.path().into(), 1024 * 1024, 1024).unwrap();
+    let manager = crate::tools::PackageStore::new(root.path().into(), 1024 * 1024, 1024).unwrap();
     let (manifest, mut plugin, bytes) = package_fixture("alpha");
     let object = manager.stage_verified_object(&manifest, &bytes).unwrap();
     manager

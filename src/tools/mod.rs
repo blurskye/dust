@@ -1,3 +1,5 @@
+//! Tool catalogs, installation and package storage.
+
 #![forbid(unsafe_code)]
 mod registry;
 pub use registry::OFFICIAL_REGISTRY;
@@ -9,7 +11,7 @@ pub use registry::RegistryPolicy;
 pub use registry::RegistryRequest;
 pub use registry::RegistryResult;
 pub use registry::RegistrySearchResponse;
-pub use registry::RegistryService;
+pub use registry::RegistryWorker;
 
 use std::sync::OnceLock;
 
@@ -78,10 +80,10 @@ pub use installer::ToolOperation;
 mod version;
 pub use version::ToolVersionRequest;
 pub use version::ToolVersionResult;
-pub use version::ToolVersionService;
+pub use version::ToolVersionWorker;
 mod nix_workspace;
 pub use nix_workspace::NixWorkspaceResult;
-pub use nix_workspace::NixWorkspaceService;
+pub use nix_workspace::NixWorkspaceWorker;
 mod compatibility;
 mod download;
 mod install;
@@ -89,11 +91,11 @@ mod install_prepare;
 mod runtimes;
 pub use install::ToolInstallerError;
 mod packages;
-pub use packages::PackageManager;
+pub use packages::PackageStore;
 pub use packages::PackageOperation;
 pub use packages::PackageOperationResult;
-pub use packages::PackageService;
-pub use packages::PackageServiceEvent;
+pub use packages::PackageWorker;
+pub use packages::PackageEvent;
 pub use packages::PreparedPackage;
 
 #[cfg(test)]

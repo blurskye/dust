@@ -1,3 +1,5 @@
+//! Tool definitions imported from the Mason catalog.
+
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::path::Path;

@@ -1,3 +1,5 @@
+//! Background preparation of Nix language-server workspaces.
+
 use std::path::PathBuf;
 use std::sync::mpsc;
 use std::sync::mpsc::Receiver;
@@ -23,18 +25,18 @@ pub(super) enum NixWorkspaceRequest {
 
 /// Writes the pinned compatibility flake, without evaluating workspace-owned flakes.
 /// Closing revokes delivery; a running filesystem operation may still finish.
-pub struct NixWorkspaceService {
+pub struct NixWorkspaceWorker {
     next_generation: Option<u64>,
     sender: Option<SyncSender<NixWorkspaceRequest>>,
     receiver: Option<Receiver<NixWorkspaceResult>>,
     thread: Option<JoinHandle<()>>,
 }
-impl Default for NixWorkspaceService {
+impl Default for NixWorkspaceWorker {
     fn default() -> Self {
         Self::start()
     }
 }
-impl NixWorkspaceService {
+impl NixWorkspaceWorker {
     #[must_use]
     pub fn start() -> Self {
         Self::start_with(prepare_nix_lsp_workspace)
@@ -111,7 +113,7 @@ impl NixWorkspaceService {
             .is_some_and(|thread| !thread.is_finished())
     }
 }
-impl Drop for NixWorkspaceService {
+impl Drop for NixWorkspaceWorker {
     fn drop(&mut self) {
         self.close();
     } // Never join a possibly blocked filesystem worker.
@@ -125,7 +127,7 @@ mod tests {
         let (entered, wait_entered) = mpsc::channel();
         let (release, wait_release) = mpsc::channel();
         // Owned callback gate, not a blocked syscall and never a real Nix/store operation.
-        let mut worker = NixWorkspaceService::start_with(move || {
+        let mut worker = NixWorkspaceWorker::start_with(move || {
             entered.send(()).unwrap();
             wait_release.recv().unwrap();
             Ok(PathBuf::from("owned-fixture"))

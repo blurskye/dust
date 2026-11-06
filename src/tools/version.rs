@@ -1,3 +1,5 @@
+//! Bounded executable version probes.
+
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 #[cfg(unix)]
@@ -43,20 +45,20 @@ pub(super) enum ToolVersionCommand {
 /// Bounded, shell-free version inspection for the tool-manager presentation.
 /// It never decides whether a tool is executable; launch still uses canonical
 /// preflight immediately before the protocol process starts.
-pub struct ToolVersionService {
+pub struct ToolVersionWorker {
     sender: SyncSender<ToolVersionCommand>,
     receiver: Receiver<ToolVersionResult>,
     cancel: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
 }
 
-impl Default for ToolVersionService {
+impl Default for ToolVersionWorker {
     fn default() -> Self {
         Self::start()
     }
 }
 
-impl ToolVersionService {
+impl ToolVersionWorker {
     #[must_use]
     pub fn start() -> Self {
         let (sender, requests) = mpsc::sync_channel(32);
@@ -112,7 +114,7 @@ impl ToolVersionService {
     }
 }
 
-impl Drop for ToolVersionService {
+impl Drop for ToolVersionWorker {
     fn drop(&mut self) {
         self.cancel.store(true, Ordering::Release);
         let _ = self.sender.try_send(ToolVersionCommand::Shutdown);

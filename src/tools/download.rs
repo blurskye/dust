@@ -1,3 +1,5 @@
+//! Bounded tool downloads and artifact verification.
+
 use std::fs;
 use std::io::Cursor;
 use std::io::Read;

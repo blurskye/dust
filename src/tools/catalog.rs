@@ -1,3 +1,5 @@
+//! Bundled tool definitions and executable discovery.
+
 use crate::process::executable_file;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
