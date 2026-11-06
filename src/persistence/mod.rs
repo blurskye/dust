@@ -1,3 +1,5 @@
+//! Saved editor records and atomic state-file writes.
+
 #![forbid(unsafe_code)]
 
 use serde::Deserialize;
@@ -567,13 +569,13 @@ pub enum PersistenceEvent {
         error: PersistenceError,
     },
 }
-pub struct PersistenceService {
+pub struct PersistenceWorker {
     last_id: Option<u64>,
     ids: Arc<dyn crate::clock::IdSource>,
     sender: SyncSender<Request>,
     receiver: Receiver<PersistenceEvent>,
 }
-impl PersistenceService {
+impl PersistenceWorker {
     pub fn start(capacity: usize) -> Self {
         Self::start_with_ids(capacity, Arc::new(crate::clock::AtomicIds::new(1)))
     }
