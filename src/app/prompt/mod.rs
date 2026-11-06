@@ -70,9 +70,6 @@ pub(in crate::app) fn takes_path(command: &str) -> bool {
     matches!(command, "file.open" | "file.save" | "workspace.root.add")
 }
 
-
-
-
 mod commands;
 
 use crate::app::App;

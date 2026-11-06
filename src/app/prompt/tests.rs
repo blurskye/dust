@@ -1,9 +1,9 @@
 //! Prompt behavior and application integration tests.
 
+use crate::app::configuration::compile_keymaps;
 use crate::app::tests::*;
 use crate::editor::InvocationSource;
 use crate::editor::input::KeyEvent;
-use crate::app::configuration::compile_keymaps;
 
 #[test]
 fn help_preserves_a_draft_and_a_pending_confirmation() {
