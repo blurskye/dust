@@ -74,7 +74,7 @@ const MESSAGES_PER_TICK: usize = 256;
 /// before the question rather than inside the answer.
 const STARTUP_TEXT_WAIT: std::time::Duration = std::time::Duration::from_millis(200);
 /// Files larger than this are not read for the agent.
-const READ_BYTE_CEILING: u64 = 16 * 1024 * 1024;
+const READ_BYTE_LIMIT: u64 = 16 * 1024 * 1024;
 /// The option category ACP uses for reasoning effort.
 const THINKING: &str = "thought_level";
 /// How much of a saved conversation goes to an agent that starts fresh, in characters.
@@ -2162,7 +2162,7 @@ impl App {
                         self.respond_to_agent(index, request.id, Ok(json!({"content": agent::slice_lines(&text, request.params["line"].as_u64(), request.params["limit"].as_u64())})));
                         return None;
                     }
-                    match self.documents.read_scoped_bounded(path.clone(), vec![path], READ_BYTE_CEILING) {
+                    match self.documents.read_scoped_bounded(path.clone(), vec![path], READ_BYTE_LIMIT) {
                         Ok(id) => { self.agent.files.insert(id, request); return None; }
                         Err(error) => Err(error.to_string()),
                     }

@@ -1720,11 +1720,16 @@ fn managed_pi_starts_with_its_private_node_on_path() {
     if std::env::var_os("DUST_TEST_MANAGED_PI").is_none() {
         let directory = tempfile::tempdir().unwrap();
         let output = std::process::Command::new(std::env::current_exe().unwrap())
-            .args(["--exact", "app::agent::tests::managed_pi_starts_with_its_private_node_on_path", "--nocapture"])
+            .args([
+                "--exact",
+                "app::agent::tests::managed_pi_starts_with_its_private_node_on_path",
+                "--nocapture",
+            ])
             .env("DUST_TEST_MANAGED_PI", "1")
             .env("DUST_STATE_HOME", directory.path())
             .env("PATH", "")
-            .output().unwrap();
+            .output()
+            .unwrap();
         assert!(
             String::from_utf8_lossy(&output.stdout).contains("test result: ok. 1 passed;"),
             "child must run the managed-pi test: {output:?}"
