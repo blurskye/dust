@@ -34,6 +34,7 @@ pub enum SyntaxFoldAction {
 
 #[derive(Clone, Debug)]
 pub enum AppEffect {
+    Input(crate::app::input::InputCommand),
     Quit {
         force: bool,
     },
@@ -1270,7 +1271,8 @@ impl App {
             effect @ (AppEffect::NotificationHistory | AppEffect::NotificationDismiss) => {
                 self.process_notifications_effect(effect)
             }
-            effect @ (AppEffect::PlaceMouseCursor
+            effect @ (AppEffect::Input(..)
+            | AppEffect::PlaceMouseCursor
             | AppEffect::ExtendMouseSelection
             | AppEffect::CancelPendingMapping) => self.process_input_effect(effect),
             effect @ (AppEffect::HistoryClear
@@ -1312,6 +1314,9 @@ impl App {
 
 impl App {
     pub(in crate::app) fn invoke_checked(&mut self, mut invocation: CommandInvocation) -> bool {
+        if self.input.hold_invocation(&invocation) {
+            return true;
+        }
         if self.clipboard.waiting() {
             self.clipboard
                 .defer(crate::app::editing::clipboard::DeferredInput::Invocation(
@@ -1470,15 +1475,17 @@ impl App {
                 if text_changed {
                     self.push_change_location();
                 }
-                self.input.record_successful_invocation(
+                self.input.record_command_outcome(
                     &invocation,
                     repeat_override.as_ref(),
                     suppress_repeat,
                     text_changed,
+                    &outcome.effects,
                 );
                 self.tutor_observe(&invocation);
                 for effect in outcome.effects {
                     if !self.process_effect_checked(effect) {
+                        self.fail_pending_input_command();
                         return false;
                     }
                 }

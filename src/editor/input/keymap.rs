@@ -112,6 +112,10 @@ impl KeymapBindings {
     pub(crate) fn layer_mut(&mut self, layer: KeymapLayer) -> &mut Keymap {
         self.layers.entry(layer).or_default()
     }
+
+    pub(crate) fn highest_first(&self) -> impl Iterator<Item = &Keymap> {
+        self.layers.values().rev()
+    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -123,10 +127,18 @@ pub(crate) struct KeymapSequence {
 
 impl KeymapSequence {
     pub(crate) fn feed(&mut self, bindings: &KeymapBindings, key: KeyEvent) -> MappingResolution {
+        self.feed_layers(bindings.highest_first(), key)
+    }
+
+    pub(crate) fn feed_layers<'a>(
+        &mut self,
+        layers: impl IntoIterator<Item = &'a Keymap>,
+        key: KeyEvent,
+    ) -> MappingResolution {
         self.pending.push(key);
         let mut prefix = false;
         let mut disabled = false;
-        for (_, keymap) in bindings.layers.iter().rev() {
+        for keymap in layers {
             match keymap.lookup(&self.pending) {
                 Lookup::Disabled {
                     prefix: continuation,
@@ -205,14 +217,32 @@ impl KeymapSequence {
 pub struct KeymapResolver {
     bindings: KeymapBindings,
     sequence: KeymapSequence,
+    temporary: Vec<Keymap>,
 }
 
 impl KeymapResolver {
     pub fn layer_mut(&mut self, layer: KeymapLayer) -> &mut Keymap {
         self.bindings.layer_mut(layer)
     }
+    /// Changing layers cancels an unfinished sequence rather than interpreting it twice.
+    pub fn push_layer(&mut self, layer: Keymap) {
+        self.sequence.cancel();
+        self.temporary.push(layer);
+    }
+
+    pub fn pop_layer(&mut self) -> Option<Keymap> {
+        self.sequence.cancel();
+        self.temporary.pop()
+    }
+
     pub fn feed(&mut self, key: KeyEvent) -> MappingResolution {
-        self.sequence.feed(&self.bindings, key)
+        self.sequence.feed_layers(
+            self.temporary
+                .iter()
+                .rev()
+                .chain(self.bindings.highest_first()),
+            key,
+        )
     }
     #[must_use]
     pub fn pending_sequence(&self) -> &[KeyEvent] {
@@ -237,6 +267,49 @@ mod tests {
 
     use crate::editor::input::KeyEvent;
     use crate::editor::input::keymap::MappingResolution;
+
+    #[test]
+    fn temporary_layers_override_and_pop_back_to_the_previous_layer() {
+        let mut resolver = KeymapResolver::default();
+        let base = CommandInvocation::new("base.key", InvocationSource::Test).unwrap();
+        let first = CommandInvocation::new("first.key", InvocationSource::Test).unwrap();
+        let second = CommandInvocation::new("second.key", InvocationSource::Test).unwrap();
+        let key = KeyEvent::character('x');
+        resolver
+            .layer_mut(KeymapLayer::Mode)
+            .insert(std::slice::from_ref(&key), base.clone());
+        for command in [&first, &second] {
+            let mut layer = super::Keymap::default();
+            layer.insert(std::slice::from_ref(&key), command.clone());
+            resolver.push_layer(layer);
+            assert_eq!(
+                resolver.feed(key.clone()),
+                MappingResolution::Ready(command.clone())
+            );
+        }
+        assert!(resolver.pop_layer().is_some());
+        assert_eq!(resolver.feed(key.clone()), MappingResolution::Ready(first));
+        assert!(resolver.pop_layer().is_some());
+        assert_eq!(resolver.feed(key), MappingResolution::Ready(base));
+        assert!(resolver.pop_layer().is_none());
+    }
+
+    #[test]
+    fn popping_a_layer_cancels_its_prefix_and_keeps_lower_bindings() {
+        let mut resolver = KeymapResolver::default();
+        let command = CommandInvocation::new("base.key", InvocationSource::Test).unwrap();
+        let g = KeyEvent::character('g');
+        resolver
+            .layer_mut(KeymapLayer::Mode)
+            .insert(std::slice::from_ref(&g), command.clone());
+        let mut layer = super::Keymap::default();
+        layer.insert(&[g.clone(), g.clone()], command.clone());
+        resolver.push_layer(layer);
+        assert_eq!(resolver.feed(g.clone()), MappingResolution::Ambiguous);
+        resolver.pop_layer();
+        assert!(resolver.pending_sequence().is_empty());
+        assert_eq!(resolver.feed(g), MappingResolution::Ready(command));
+    }
 
     #[test]
     fn exact_prefix_waits_then_flushes() {

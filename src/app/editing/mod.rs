@@ -166,7 +166,7 @@ impl App {
 }
 
 impl App {
-    fn cancel_macro_replay(&mut self) {
+    pub(in crate::app) fn cancel_macro_replay(&mut self) {
         for _ in self.macro_replays.drain(..) {
             self.input.finish_macro_replay();
         }
@@ -174,8 +174,8 @@ impl App {
 }
 
 impl App {
-    fn continue_macro_replay(&mut self) -> bool {
-        if self.macro_running || self.clipboard.waiting() {
+    pub(in crate::app) fn continue_macro_replay(&mut self) -> bool {
+        if self.macro_running || self.clipboard.waiting() || self.input.command_pending() {
             return true;
         }
         self.macro_running = true;
@@ -207,7 +207,7 @@ impl App {
                 self.cancel_macro_replay();
                 break;
             }
-            if self.clipboard.waiting() {
+            if self.clipboard.waiting() || self.input.command_pending() {
                 break;
             }
         }

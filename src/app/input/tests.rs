@@ -13,6 +13,127 @@ use crate::ui::PromptKind;
 use std::path::Path;
 
 #[test]
+fn named_mode_uses_its_layer_cursor_label_and_base_typing_policy() {
+    use crate::app::commands::AppEffect;
+    use crate::app::input::InputCommand;
+    use crate::editor::input::{KeyEvent, Keymap, ModeCursor, ModeKeys, NamedMode};
+    use crate::editor::{CommandInvocation, CommandValue, EditorMode, InvocationSource};
+    let mut session = crate::app::tests::driver::TestSession::new(load_bundled_config());
+    session.new_buffer();
+    let app = &mut session.application;
+    assert_eq!(app.editor_input_mode().unwrap().name(), "normal");
+    let insert = |text: &str| {
+        CommandInvocation::new("edit.insert_text", InvocationSource::Keymap)
+            .unwrap()
+            .with_argument("text", CommandValue::String(text.into()))
+    };
+    let mut layer = Keymap::default();
+    layer.insert(&[KeyEvent::character('x')], insert("named"));
+    let mode = NamedMode::new(
+        "review".into(),
+        "REVIEW".into(),
+        ModeCursor::Underline,
+        layer,
+        ModeKeys::Base(EditorMode::Insert),
+    )
+    .unwrap();
+    app.process_effect(AppEffect::Input(InputCommand::EnterMode(Box::new(mode))));
+    assert_eq!(app.editor_input_mode().unwrap().name(), "review");
+    assert_eq!(
+        app.input_render_config().ui.status_line.mode_labels["insert"],
+        "REVIEW"
+    );
+    app.reconcile_editor_windows();
+    let mut frame = crate::ui::render(
+        &app.state,
+        &app.ui,
+        app.input_render_config().as_ref(),
+        app.configuration.dashboard(),
+        80,
+        24,
+    );
+    app.project_mode_cursor(&mut frame);
+    assert_eq!(
+        frame.cursor.unwrap().2,
+        crossterm::cursor::SetCursorStyle::SteadyUnderScore
+    );
+    app.handle_configured_key(KeyEvent::character('x'));
+    let mut layer = Keymap::default();
+    layer.insert(&[KeyEvent::character('x')], insert("temporary"));
+    app.process_effect(AppEffect::Input(InputCommand::PushLayer(Box::new(layer))));
+    app.handle_configured_key(KeyEvent::character('x'));
+    app.process_effect(AppEffect::Input(InputCommand::PopLayer));
+    app.handle_configured_key(KeyEvent::character('x'));
+    app.handle_configured_key(KeyEvent::character('z'));
+    let buffer = app.state.active_buffer_id().unwrap();
+    assert_eq!(
+        app.state.buffers[buffer].text.to_string(),
+        "namedtemporarynamedz"
+    );
+    app.handle_configured_key("escape".parse().unwrap());
+    assert_eq!(app.editor_input_mode().unwrap().name(), "normal");
+    app.handle_configured_key(KeyEvent::character('h'));
+    assert!(app.input.named_mode.is_none());
+}
+
+#[test]
+fn capture_mode_handles_unmapped_keys_without_running_normal_mode_bindings() {
+    use crate::app::commands::AppEffect;
+    use crate::app::input::InputCommand;
+    use crate::editor::input::{Keymap, ModeCursor, ModeKeys, NamedMode};
+    use crate::editor::{
+        ArgumentSchema, ArgumentType, CommandInvocation, CommandOutcome, CommandSpec,
+        InvocationSource,
+    };
+    use std::sync::{Arc, Mutex};
+    let mut session = crate::app::tests::driver::TestSession::new(load_bundled_config());
+    session.new_buffer();
+    let app = &mut session.application;
+    let received = Arc::new(Mutex::new(Vec::new()));
+    let keys = received.clone();
+    let mut spec = CommandSpec::builtin("test.capture", "Capture").unwrap();
+    spec.arguments = ArgumentSchema::default().field("key", ArgumentType::String, true);
+    app.commands
+        .register(spec, move |_, invocation| {
+            keys.lock()
+                .unwrap()
+                .push(invocation.arguments["key"].as_str().unwrap().to_owned());
+            Ok(CommandOutcome::empty())
+        })
+        .unwrap();
+    let capture = CommandInvocation::new("test.capture", InvocationSource::Keymap).unwrap();
+    let mode = NamedMode::new(
+        "capture".into(),
+        "CAPTURE".into(),
+        ModeCursor::Bar,
+        Keymap::default(),
+        ModeKeys::Capture(capture),
+    )
+    .unwrap();
+    app.process_effect(AppEffect::Input(InputCommand::EnterMode(Box::new(mode))));
+    for key in ["i", "ctrl-left", "escape"] {
+        app.handle_configured_key(key.parse().unwrap());
+    }
+    assert_eq!(*received.lock().unwrap(), ["i", "ctrl-left", "escape"]);
+    assert_eq!(
+        app.state.views[app.state.active_view.unwrap()].mode,
+        crate::editor::EditorMode::Normal
+    );
+    // Trusted prompts retain their own input context rather than inheriting editor capture.
+    app.input
+        .open_prompt(PromptKind::WorkspaceTrust, String::new(), None);
+    app.handle_configured_key("left".parse().unwrap());
+    assert_eq!(received.lock().unwrap().len(), 3);
+    app.close_prompt();
+    app.process_effect(AppEffect::Input(InputCommand::LeaveMode));
+    app.handle_configured_key("i".parse().unwrap());
+    assert_eq!(
+        app.state.views[app.state.active_view.unwrap()].mode,
+        crate::editor::EditorMode::Insert
+    );
+}
+
+#[test]
 fn prompt_edits_preserve_grapheme_boundaries_and_history_policy() {
     let mut input = InputState::new(100);
     input.open_prompt(PromptKind::Command, "é界".into(), None);

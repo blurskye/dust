@@ -5,6 +5,163 @@ use crate::app::input::InputState;
 use crate::editor::CommandInvocation;
 use crate::editor::InvocationSource;
 
+fn pending_session() -> crate::app::tests::driver::TestSession {
+    use crate::app::commands::AppEffect;
+    use crate::app::input::InputCommand;
+    use crate::editor::{CommandOutcome, CommandSpec};
+    use std::sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    };
+    let mut session =
+        crate::app::tests::driver::TestSession::new(crate::config::load_bundled_config());
+    session.new_buffer();
+    let app = &mut session.application;
+    app.handle_configured_key("i".parse().unwrap());
+    app.invoke_insert_text("abcdef".into());
+    app.invoke(CommandInvocation::new("mode.normal", InvocationSource::Test).unwrap());
+    let view = app.state.active_view.unwrap();
+    app.state.views[view].cursor = crate::editor::text::ByteOffset(0);
+    let ids = Arc::new(AtomicU64::new(1));
+    app.commands
+        .register(
+            CommandSpec::builtin("test.pending_edit", "Pending edit").unwrap(),
+            move |_, _| {
+                let mut outcome = CommandOutcome::empty();
+                outcome.effects.push(AppEffect::Input(InputCommand::Wait(
+                    ids.fetch_add(1, Ordering::Relaxed),
+                )));
+                Ok(outcome)
+            },
+        )
+        .unwrap();
+    let mut layer = crate::editor::input::Keymap::default();
+    layer.insert(
+        &[crate::editor::input::KeyEvent::character('x')],
+        CommandInvocation::new("test.pending_edit", InvocationSource::Keymap).unwrap(),
+    );
+    app.process_effect(AppEffect::Input(InputCommand::PushLayer(Box::new(layer))));
+    session
+}
+
+fn complete_edit(app: &mut crate::app::App, id: u64) {
+    let delete = CommandInvocation::new("edit.delete_char", InvocationSource::Test).unwrap();
+    let outcome = app.commands.execute(&app.state, &delete).unwrap();
+    app.apply_authoritative_editor_transaction(outcome.transaction.as_ref().unwrap())
+        .unwrap();
+    app.process_effect(crate::app::commands::AppEffect::Input(
+        crate::app::input::InputCommand::Complete {
+            id,
+            succeeded: true,
+            text_changed: true,
+        },
+    ));
+}
+
+fn keys(app: &mut crate::app::App, keys: &[&str]) {
+    for key in keys {
+        app.handle_event(crate::ui::UiEvent::Key {
+            key: key.parse().unwrap(),
+            kind: crate::ui::KeyInputKind::Press,
+        });
+    }
+}
+
+#[test]
+fn pending_command_holds_keys_and_replays_them_in_order_after_completion() {
+    let mut session = pending_session();
+    let app = &mut session.application;
+    let buffer = app.state.active_buffer_id().unwrap();
+    keys(app, &["x", "i", "1", "2", "escape"]);
+    assert!(app.input.command_pending());
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "abcdef");
+    app.complete_input_command(999, true, true);
+    assert!(app.input.command_pending());
+    complete_edit(app, 1);
+    assert!(!app.input.command_pending());
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "12bcdef");
+    assert_eq!(
+        app.state.views[app.state.active_view.unwrap()].mode,
+        crate::editor::EditorMode::Normal
+    );
+}
+
+#[test]
+fn dot_records_the_completed_pending_command_and_waits_again_when_replayed() {
+    let mut session = pending_session();
+    let app = &mut session.application;
+    let before = app.input.repeat_plan(100, None).unwrap();
+    keys(app, &["x", ".", "l"]);
+    assert_eq!(app.input.repeat_plan(100, None).unwrap(), before);
+    complete_edit(app, 1);
+    let plan = app.input.repeat_plan(100, None).unwrap();
+    assert_eq!(plan.len(), 1);
+    assert_eq!(plan[0].id.as_str(), "test.pending_edit");
+    assert!(app.input.command_pending());
+    assert_eq!(
+        app.state.views[app.state.active_view.unwrap()].cursor.get(),
+        0
+    );
+    complete_edit(app, 2);
+    assert!(!app.input.command_pending());
+    assert_eq!(
+        app.state.views[app.state.active_view.unwrap()].cursor.get(),
+        1
+    );
+    assert_eq!(
+        app.state.buffers[app.state.active_buffer_id().unwrap()]
+            .text
+            .to_string(),
+        "cdef"
+    );
+}
+
+#[test]
+fn macro_records_completion_and_pauses_its_remaining_steps_during_replay() {
+    let mut session = pending_session();
+    let app = &mut session.application;
+    keys(app, &["q", "a", "x", "l", "q"]);
+    assert!(app.input.recording_macro.as_ref().unwrap().1.is_empty());
+    complete_edit(app, 1);
+    let recorded = app.state.registers.get_macro('a').unwrap();
+    assert_eq!(recorded.len(), 2);
+    assert_eq!(recorded[0].id.as_str(), "test.pending_edit");
+    assert_eq!(recorded[1].id.as_str(), "view.cursor.move");
+    keys(app, &["@", "a"]);
+    assert!(app.input.command_pending());
+    assert_eq!(app.input.replay_depth(), 1);
+    assert_eq!(
+        app.state.views[app.state.active_view.unwrap()].cursor.get(),
+        1
+    );
+    complete_edit(app, 2);
+    assert_eq!(app.input.replay_depth(), 0);
+    assert_eq!(
+        app.state.views[app.state.active_view.unwrap()].cursor.get(),
+        2
+    );
+    assert_eq!(
+        app.state.buffers[app.state.active_buffer_id().unwrap()]
+            .text
+            .to_string(),
+        "bdef"
+    );
+}
+
+#[test]
+fn failed_pending_command_is_not_recorded_and_releases_later_keys() {
+    let mut session = pending_session();
+    let app = &mut session.application;
+    let before = app.input.repeat_plan(100, None).unwrap();
+    keys(app, &["q", "a", "x", "l", "q"]);
+    app.complete_input_command(1, false, false);
+    assert!(!app.input.command_pending());
+    assert_eq!(app.input.repeat_plan(100, None).unwrap(), before);
+    let recorded = app.state.registers.get_macro('a').unwrap();
+    assert_eq!(recorded.len(), 1);
+    assert_eq!(recorded[0].id.as_str(), "view.cursor.move");
+}
+
 fn invocation(id: &str) -> CommandInvocation {
     let mut buffers = slotmap::SlotMap::<crate::editor::BufferId, ()>::with_key();
     let mut invocation = CommandInvocation::new(id, InvocationSource::Test).unwrap();

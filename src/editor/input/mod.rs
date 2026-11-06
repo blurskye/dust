@@ -7,6 +7,7 @@ mod context;
 mod grammar;
 mod key;
 mod keymap;
+mod modes;
 mod search;
 
 pub use command_line::ExParseError;
@@ -37,6 +38,7 @@ pub use keymap::KeymapLayer;
 pub use keymap::KeymapResolver;
 pub(crate) use keymap::KeymapSequence;
 pub use keymap::MappingResolution;
+pub use modes::{ModeCursor, ModeError, ModeKeys, NamedMode};
 pub use search::SearchPatternError;
 pub use search::search_match;
 pub use search::search_matches;
