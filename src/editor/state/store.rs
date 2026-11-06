@@ -57,7 +57,7 @@ use crate::editor::state::buffer::Buffer;
 
 use crate::editor::state::buffer::BufferOrigin;
 
-use crate::editor::state::mod::EditingPolicy;
+use crate::editor::state::EditingPolicy;
 
 use crate::editor::state::view::EditorMode;
 

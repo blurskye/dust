@@ -10,9 +10,9 @@ use crate::app::TextBuffer;
 use crate::app::LoadedConfig;
 use crate::ui::render::TERMINAL_PANEL_MAXIMUM_HEIGHT;
 use crate::ui::render::TERMINAL_PANEL_MINIMUM_HEIGHT;
-use crate::workspace::PickerAction;
-use crate::workspace::PickerItem;
-use crate::workspace::PickerItemId;
+
+
+
 
 
 

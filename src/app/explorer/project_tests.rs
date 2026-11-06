@@ -4,7 +4,7 @@ use crate::app::tests::*;
 
 
 #[test]
-fn explorer_command_prompt_creates_a_file_from_the_selected_directory() {
+pub(in crate::app) fn explorer_command_prompt_creates_a_file_from_the_selected_directory() {
     let (_app_dirs, mut app) = app();
     app.open_explorer();
     app.open_prompt(crate::ui::PromptKind::Command, "exploreradd ".into());
@@ -22,7 +22,7 @@ fn explorer_command_prompt_creates_a_file_from_the_selected_directory() {
 
 
 #[test]
-fn explorer_prefilled_rename_keeps_original_target_and_dirty_split_views() {
+pub(in crate::app) fn explorer_prefilled_rename_keeps_original_target_and_dirty_split_views() {
     let (_app_dirs, mut app) = app();
     let root = app.state.workspace_root.clone();
     let source = root.join("source.rs");
@@ -108,7 +108,7 @@ fn explorer_prefilled_rename_keeps_original_target_and_dirty_split_views() {
 
 
 #[test]
-fn explorer_rename_prompt_refuses_replaced_files_and_retired_or_cancelled_requests() {
+pub(in crate::app) fn explorer_rename_prompt_refuses_replaced_files_and_retired_or_cancelled_requests() {
     let (_app_dirs, mut app) = app();
     let source = app.state.workspace_root.join("source.txt");
     let target = app.state.workspace_root.join("target.txt");
@@ -201,7 +201,7 @@ fn explorer_rename_prompt_refuses_replaced_files_and_retired_or_cancelled_reques
 
 
 #[test]
-fn explorer_rename_rejects_destinations_owned_by_unsaved_buffers() {
+pub(in crate::app) fn explorer_rename_rejects_destinations_owned_by_unsaved_buffers() {
     for directory in [false, true] {
         let (_app_dirs, mut app) = app();
         let root = app.state.workspace_root.clone();
@@ -258,7 +258,7 @@ fn explorer_rename_rejects_destinations_owned_by_unsaved_buffers() {
 
 
 #[test]
-fn explorer_close_reconciles_an_admitted_rename_even_after_disk_completion() {
+pub(in crate::app) fn explorer_close_reconciles_an_admitted_rename_even_after_disk_completion() {
     use crate::app::documents::DocumentEvent;
     let (_app_dirs, mut app) = app();
     let source = app.state.workspace_root.join("before.txt");
@@ -306,7 +306,7 @@ fn explorer_close_reconciles_an_admitted_rename_even_after_disk_completion() {
 
 
 #[test]
-fn explorer_rename_refuses_destinations_owned_by_unsaved_buffers_before_writing() {
+pub(in crate::app) fn explorer_rename_refuses_destinations_owned_by_unsaved_buffers_before_writing() {
     for directory in [false, true] {
         let (_app_dirs, mut app) = app();
         let source = app.state.workspace_root.join("source");
@@ -356,7 +356,7 @@ fn explorer_rename_refuses_destinations_owned_by_unsaved_buffers_before_writing(
 
 
 #[test]
-fn explorer_rename_and_delete_reconcile_open_buffers_without_losing_text() {
+pub(in crate::app) fn explorer_rename_and_delete_reconcile_open_buffers_without_losing_text() {
     let (_app_dirs, mut app) = app();
     let source = app.state.workspace_root.join("source.txt");
     fs::write(&source, "kept").unwrap();
@@ -534,7 +534,7 @@ pub(in crate::app) fn wait_explorer(app: &mut App) {
 
 
 #[test]
-fn explorer_lazily_loads_and_opens_scoped_file() {
+pub(in crate::app) fn explorer_lazily_loads_and_opens_scoped_file() {
     let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("explorer.txt");
     fs::write(&path, "explorer content\n").expect("fixture");
@@ -633,7 +633,7 @@ fn explorer_lazily_loads_and_opens_scoped_file() {
 
 
 #[test]
-fn explorer_uses_filename_and_extension_specific_nerd_font_icons() {
+pub(in crate::app) fn explorer_uses_filename_and_extension_specific_nerd_font_icons() {
     let (_app_dirs, mut app) = app();
     fs::write(app.state.workspace_root.join("README.md"), "# Dust\n").unwrap();
     fs::write(app.state.workspace_root.join("notes.md"), "notes\n").unwrap();
@@ -665,7 +665,7 @@ fn explorer_uses_filename_and_extension_specific_nerd_font_icons() {
 
 
 #[test]
-fn explorer_follow_lazily_expands_to_active_file() {
+pub(in crate::app) fn explorer_follow_lazily_expands_to_active_file() {
     let (_app_dirs, mut app) = app();
     let directory = app.state.workspace_root.join("a/b");
     fs::create_dir_all(&directory).unwrap();
@@ -692,7 +692,7 @@ fn explorer_follow_lazily_expands_to_active_file() {
 
 
 #[test]
-fn explorer_watch_batches_reload_through_directory_service_and_preserve_identity() {
+pub(in crate::app) fn explorer_watch_batches_reload_through_directory_service_and_preserve_identity() {
     let (_app_dirs, mut app) = app();
     let directory = app.state.workspace_root.join("dir");
     fs::create_dir_all(&directory).unwrap();
@@ -781,7 +781,7 @@ fn explorer_watch_batches_reload_through_directory_service_and_preserve_identity
 
 
 #[test]
-fn explorer_projection_formats_only_the_terminal_viewport() {
+pub(in crate::app) fn explorer_projection_formats_only_the_terminal_viewport() {
     let (_app_dirs, mut app) = app();
     app.window_session
         .observe_size((app.window_session.width(), 10));
@@ -940,7 +940,7 @@ fn explorer_projection_formats_only_the_terminal_viewport() {
 
 
 #[test]
-fn directional_focus_moves_spatially_then_crosses_the_explorer_boundary() {
+pub(in crate::app) fn directional_focus_moves_spatially_then_crosses_the_explorer_boundary() {
     let (_app_dirs, mut app) = app();
     app.state
         .open_text(crate::editor::text::TextBuffer::from_text("focus"), None)

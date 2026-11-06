@@ -40,7 +40,7 @@ pub(in crate::app) struct TerminalKey {
     id: PtyId,
 }
 impl PartialEq for TerminalKey {
-    pub(in crate::app) fn eq(&self, other: &Self) -> bool {
+    fn eq(&self, other: &Self) -> bool {
         self.id == other.id && Arc::ptr_eq(&self.owner, &other.owner)
     }
 }
@@ -1802,7 +1802,9 @@ fn expand_placeholders(
         use std::os::unix::ffi::OsStrExt;
         use std::os::unix::ffi::OsStringExt;
         #[cfg(windows)]
+        #[cfg(windows)]
         use std::os::windows::ffi::OsStrExt;
+        #[cfg(windows)]
         use std::os::windows::ffi::OsStringExt;
         #[cfg(unix)]
         let bytes = value.as_bytes();
@@ -1871,10 +1873,8 @@ pub(in crate::app) mod interaction;
 pub(in crate::app) mod commands;
 
 #[cfg(test)]
-mod project_tests;
+pub(in crate::app) mod project_tests;
+
 
 #[cfg(test)]
-mod project_tests;
-
-#[cfg(test)]
-mod surfaces_tests;
+pub(in crate::app) mod surfaces_tests;

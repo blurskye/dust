@@ -6,11 +6,8 @@ use crate::editor::text::TextBuffer;
 use crate::editor::transaction::UndoTree;
 use crate::editor::state::id::BufferId;
 
-use crate::editor::state::view::new;
 use crate::editor::state::view::View;
-use crate::editor::state::registers::fn;
 use crate::editor::state::registers::get;
-use crate::editor::state::view::default;
 
 
 

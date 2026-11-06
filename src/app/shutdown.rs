@@ -210,3 +210,24 @@ impl App {
         }))
     }
 }
+
+use crate::app::AppEffect;
+
+impl App {
+    pub(in crate::app) fn process_shutdown_effect(&mut self, effect: AppEffect) -> Result<(), AppEffect> {
+        match effect {
+            AppEffect::Quit { force } => {
+                if !force && self.state.buffers.iter().any(|(_, buffer)| buffer.dirty) {
+                    self.show_error(self.message("unsaved_quit", &[]));
+                } else {
+                    if force {
+                        self.queue_dirty_recovery_before_exit();
+                    }
+                    self.should_quit = true;
+                }
+            }
+            effect => return Err(effect),
+        }
+        Ok(())
+    }
+}

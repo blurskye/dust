@@ -11,7 +11,7 @@ use crate::ui::render::overlays::SCRATCH_ICON;
 
 
 #[test]
-fn perpendicular_docked_editor_resizes_do_nothing() {
+pub(in crate::app) fn perpendicular_docked_editor_resizes_do_nothing() {
     let (_app_dirs, mut app) = app();
     app.state
         .open_text(TextBuffer::from_text("editor"), None)
@@ -37,7 +37,7 @@ fn perpendicular_docked_editor_resizes_do_nothing() {
 
 
 #[test]
-fn directional_editor_resize_skips_hidden_splits_and_reaches_the_visible_dock() {
+pub(in crate::app) fn directional_editor_resize_skips_hidden_splits_and_reaches_the_visible_dock() {
     let (_app_dirs, mut app) = app();
     app.state
         .open_text(TextBuffer::from_text("editor"), None)
@@ -110,7 +110,7 @@ fn directional_editor_resize_skips_hidden_splits_and_reaches_the_visible_dock() 
 
 
 #[test]
-fn notifications_expire_but_remain_available_in_bounded_history() {
+pub(in crate::app) fn notifications_expire_but_remain_available_in_bounded_history() {
     let (_app_dirs, mut app) = app();
     let clock = std::sync::Arc::new(crate::clock::ManualClock::new(
         std::time::UNIX_EPOCH,
@@ -150,7 +150,7 @@ fn notifications_expire_but_remain_available_in_bounded_history() {
 
 
 #[test]
-fn log_selection_survives_eviction_of_an_earlier_entry() {
+pub(in crate::app) fn log_selection_survives_eviction_of_an_earlier_entry() {
     let (_app_dirs, mut app) = app();
     for line in ["first", "selected", "last"] {
         app.language.append_log(line.into(), 3);
@@ -170,7 +170,7 @@ fn log_selection_survives_eviction_of_an_earlier_entry() {
 
 
 #[test]
-fn normalized_mouse_position_invokes_real_cursor_placement() {
+pub(in crate::app) fn normalized_mouse_position_invokes_real_cursor_placement() {
     let (_app_dirs, mut app) = app();
     app.state
         .open_text(crate::editor::text::TextBuffer::from_text("abcdef"), None)
@@ -235,7 +235,7 @@ pub(in crate::app) fn gate_document_worker(app: &mut App) -> std::sync::mpsc::Se
 
 
 #[test]
-fn a_pending_open_reserves_its_save_destination() {
+pub(in crate::app) fn a_pending_open_reserves_its_save_destination() {
     for alias in [false, true] {
         let (_app_dirs, mut app) = app();
         let root = app.state.workspace_root.clone();
@@ -263,7 +263,7 @@ fn a_pending_open_reserves_its_save_destination() {
 
 
 #[test]
-fn an_alternate_spelling_of_the_current_file_uses_its_saved_bytes() {
+pub(in crate::app) fn an_alternate_spelling_of_the_current_file_uses_its_saved_bytes() {
     let (_app_dirs, mut app) = app();
     let root = app.state.workspace_root.clone();
     let path = root.join("file.txt");
@@ -289,7 +289,7 @@ fn an_alternate_spelling_of_the_current_file_uses_its_saved_bytes() {
 
 #[cfg(unix)]
 #[test]
-fn save_alias_identity_is_resolved_by_the_worker_before_writing() {
+pub(in crate::app) fn save_alias_identity_is_resolved_by_the_worker_before_writing() {
     let (_app_dirs, mut app) = app();
     let root = app.state.workspace_root.clone();
     let original = root.join("original.txt");
@@ -317,7 +317,7 @@ fn save_alias_identity_is_resolved_by_the_worker_before_writing() {
 
 
 #[test]
-fn saved_line_ending_policy_updates_the_live_buffer_without_losing_new_edits() {
+pub(in crate::app) fn saved_line_ending_policy_updates_the_live_buffer_without_losing_new_edits() {
     for edit_during_save in [false, true] {
         let (_app_dirs, mut app) = app();
         let path = app.state.workspace_root.join("file.txt");
@@ -362,7 +362,7 @@ fn saved_line_ending_policy_updates_the_live_buffer_without_losing_new_edits() {
 
 
 #[test]
-fn shutdown_saves_normalized_text_with_resumable_undo_history() {
+pub(in crate::app) fn shutdown_saves_normalized_text_with_resumable_undo_history() {
     for (source, policy, saved) in [
         ("base", crate::config::FinalNewlinePolicy::Insert, "Xbase\n"),
         (
@@ -412,7 +412,7 @@ fn shutdown_saves_normalized_text_with_resumable_undo_history() {
 
 
 #[test]
-fn undo_history_failures_are_notified_and_fail_shutdown() {
+pub(in crate::app) fn undo_history_failures_are_notified_and_fail_shutdown() {
     let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("history.txt");
     fs::write(&path, "base").unwrap();
@@ -444,7 +444,7 @@ fn undo_history_failures_are_notified_and_fail_shutdown() {
 
 
 #[test]
-fn configured_file_format_policy_is_applied_at_save_boundary() {
+pub(in crate::app) fn configured_file_format_policy_is_applied_at_save_boundary() {
     let (_app_dirs, mut app) = app();
     let mut fixture = app.configuration.fixture_snapshot();
     fixture.settings.editor.line_endings = crate::config::LineEndingPolicy::Lf;
@@ -464,7 +464,7 @@ fn configured_file_format_policy_is_applied_at_save_boundary() {
 
 
 #[test]
-fn dirty_buffer_close_save_discard_cancel_and_stale_ack_are_source_bound() {
+pub(in crate::app) fn dirty_buffer_close_save_discard_cancel_and_stale_ack_are_source_bound() {
     let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("dirty-close.txt");
     std::fs::write(&path, "saved\n").unwrap();
@@ -539,7 +539,7 @@ fn dirty_buffer_close_save_discard_cancel_and_stale_ack_are_source_bound() {
 
 
 #[test]
-fn dirty_close_save_waits_for_exact_vfs_ack_and_failure_preserves_arrangement() {
+pub(in crate::app) fn dirty_close_save_waits_for_exact_vfs_ack_and_failure_preserves_arrangement() {
     let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("save-before-close.txt");
     std::fs::write(&path, "old\n").unwrap();
@@ -606,7 +606,7 @@ fn dirty_close_save_waits_for_exact_vfs_ack_and_failure_preserves_arrangement() 
 
 
 #[test]
-fn recovery_debounce_coalesces_revisions_and_clean_state_deletes_last_journal() {
+pub(in crate::app) fn recovery_debounce_coalesces_revisions_and_clean_state_deletes_last_journal() {
     let (_app_dirs, mut app) = app();
     app.recovery.skip_maintenance();
     app.state
@@ -651,7 +651,7 @@ fn recovery_debounce_coalesces_revisions_and_clean_state_deletes_last_journal() 
 
 
 #[test]
-fn recovery_retention_keeps_all_live_dirty_journals() {
+pub(in crate::app) fn recovery_retention_keeps_all_live_dirty_journals() {
     let (_app_dirs, mut app) = app();
     let mut journals = Vec::new();
     for index in 0..101 {
@@ -687,7 +687,7 @@ fn recovery_retention_keeps_all_live_dirty_journals() {
 
 
 #[test]
-fn recovery_save_and_close_removes_the_older_journal() {
+pub(in crate::app) fn recovery_save_and_close_removes_the_older_journal() {
     let (_app_dirs, mut app) = app();
     app.recovery.skip_maintenance();
     let path = app.state.workspace_root.join("close-recovery.txt");
@@ -719,7 +719,7 @@ fn recovery_save_and_close_removes_the_older_journal() {
 
 
 #[test]
-fn recovery_rewrites_the_path_without_a_text_revision_change() {
+pub(in crate::app) fn recovery_rewrites_the_path_without_a_text_revision_change() {
     let (_app_dirs, mut app) = app();
     app.recovery.skip_maintenance();
     app.state
@@ -743,7 +743,7 @@ fn recovery_rewrites_the_path_without_a_text_revision_change() {
 
 
 #[test]
-fn shutdown_returns_the_reason_dirty_buffers_cannot_be_recovered() {
+pub(in crate::app) fn shutdown_returns_the_reason_dirty_buffers_cannot_be_recovered() {
     let (_app_dirs, mut app) = app();
     app.recovery.skip_maintenance();
     app.state
@@ -770,7 +770,7 @@ fn shutdown_returns_the_reason_dirty_buffers_cannot_be_recovered() {
 
 
 #[test]
-fn shutdown_retries_recovery_after_document_admission_drains() {
+pub(in crate::app) fn shutdown_retries_recovery_after_document_admission_drains() {
     let (_app_dirs, mut app) = app();
     app.recovery.skip_maintenance();
     let root = app.state.workspace_root.clone();
@@ -810,7 +810,7 @@ fn shutdown_retries_recovery_after_document_admission_drains() {
 
 
 #[test]
-fn recovery_dialog_discards_one_journal_and_recovers_another() {
+pub(in crate::app) fn recovery_dialog_discards_one_journal_and_recovers_another() {
     let (_app_dirs, mut app) = app();
     app.recovery.skip_maintenance();
     let directory = app.recovery.directory().to_owned();
@@ -878,7 +878,7 @@ fn recovery_dialog_discards_one_journal_and_recovers_another() {
 
 
 #[test]
-fn disabled_recovery_policy_schedules_no_work() {
+pub(in crate::app) fn disabled_recovery_policy_schedules_no_work() {
     let (_app_dirs, mut app) = app();
     {
         let mut fixture = app.configuration.fixture_snapshot();
@@ -896,7 +896,7 @@ fn disabled_recovery_policy_schedules_no_work() {
 
 
 #[test]
-fn bundled_upper_h_and_l_cycle_open_buffers_in_normal_mode() {
+pub(in crate::app) fn bundled_upper_h_and_l_cycle_open_buffers_in_normal_mode() {
     let (_app_dirs, mut app) = app();
     let (first, _) = app
         .state
@@ -923,7 +923,7 @@ fn bundled_upper_h_and_l_cycle_open_buffers_in_normal_mode() {
 
 
 #[test]
-fn buffer_line_mouse_selects_and_right_click_closes_with_dirty_safety() {
+pub(in crate::app) fn buffer_line_mouse_selects_and_right_click_closes_with_dirty_safety() {
     let (_app_dirs, mut app) = app();
     let (first, _) = app
         .state
@@ -1009,7 +1009,7 @@ fn buffer_line_mouse_selects_and_right_click_closes_with_dirty_safety() {
 
 
 #[test]
-fn content_line_pins_reorder_middle_mouse_and_survive_bridge_reset() {
+pub(in crate::app) fn content_line_pins_reorder_middle_mouse_and_survive_bridge_reset() {
     let (_app_dirs, mut app) = app();
     let (a, _) = app
         .state
@@ -1116,7 +1116,7 @@ fn content_line_pins_reorder_middle_mouse_and_survive_bridge_reset() {
 
 
 #[test]
-fn content_line_diagnostics_custom_entries_and_idle_projection_are_pure() {
+pub(in crate::app) fn content_line_diagnostics_custom_entries_and_idle_projection_are_pure() {
     let (_app_dirs, mut app) = app();
     let path = PathBuf::from("/workspace/diagnostic.rs");
     app.state
@@ -1287,7 +1287,7 @@ fn content_line_diagnostics_custom_entries_and_idle_projection_are_pure() {
 
 #[cfg(unix)]
 #[test]
-fn ctrl_arrows_in_a_lone_editor_resize_the_agent_docked_beside_it() {
+pub(in crate::app) fn ctrl_arrows_in_a_lone_editor_resize_the_agent_docked_beside_it() {
     use crate::app::tests::driver::TestSession;
     let mut loaded = crate::config::load_bundled_config();
     let agents = &mut loaded.config.agents;
@@ -1337,7 +1337,7 @@ fn ctrl_arrows_in_a_lone_editor_resize_the_agent_docked_beside_it() {
 
 
 #[test]
-fn a_late_result_updates_its_own_record_and_leaves_a_newer_draft_untouched() {
+pub(in crate::app) fn a_late_result_updates_its_own_record_and_leaves_a_newer_draft_untouched() {
     use crate::debugger::DapControl;
     use crate::debugger::DapEvent;
     use crate::debugger::DapResponse;
@@ -1465,7 +1465,7 @@ fn a_late_result_updates_its_own_record_and_leaves_a_newer_draft_untouched() {
 
 
 #[test]
-fn live_marks_follow_command_edits_before_saving_and_jumping() {
+pub(in crate::app) fn live_marks_follow_command_edits_before_saving_and_jumping() {
     let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("marked.txt");
     fs::write(&path, "abc").unwrap();
@@ -1503,7 +1503,7 @@ fn live_marks_follow_command_edits_before_saving_and_jumping() {
 
 
 #[test]
-fn an_agent_edit_of_a_file_with_unsaved_changes_warns_in_its_approval() {
+pub(in crate::app) fn an_agent_edit_of_a_file_with_unsaved_changes_warns_in_its_approval() {
     let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("draft.txt");
     let (buffer, _) = app
@@ -1549,7 +1549,7 @@ fn an_agent_edit_of_a_file_with_unsaved_changes_warns_in_its_approval() {
 
 
 #[test]
-fn a_saved_location_reads_as_file_and_line() {
+pub(in crate::app) fn a_saved_location_reads_as_file_and_line() {
     let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("marked-location.txt");
     std::fs::write(&path, "one\nline two\nline three\n").unwrap();
@@ -1593,7 +1593,7 @@ fn a_saved_location_reads_as_file_and_line() {
 
 
 #[test]
-fn buffer_cycling_follows_the_buffer_line_order() {
+pub(in crate::app) fn buffer_cycling_follows_the_buffer_line_order() {
     let (_app_dirs, mut app) = app();
     let mut buffers = Vec::new();
     for name in ["a.txt", "b.txt", "c.txt"] {
@@ -1623,7 +1623,7 @@ fn buffer_cycling_follows_the_buffer_line_order() {
 
 
 #[test]
-fn nested_border_drag_uses_the_border_axis_on_both_sides() {
+pub(in crate::app) fn nested_border_drag_uses_the_border_axis_on_both_sides() {
     fn drag(right: bool) -> u16 {
         let (_app_dirs, mut app) = app();
         app.state
@@ -1676,7 +1676,7 @@ fn nested_border_drag_uses_the_border_axis_on_both_sides() {
 
 
 #[test]
-fn clipped_dirty_close_cannot_save_or_discard() {
+pub(in crate::app) fn clipped_dirty_close_cannot_save_or_discard() {
     let (_app_dirs, mut app) = app();
     let (buffer, _) = app
         .state
@@ -1703,7 +1703,7 @@ fn clipped_dirty_close_cannot_save_or_discard() {
 
 
 #[test]
-fn recovered_missing_file_can_be_saved_without_force() {
+pub(in crate::app) fn recovered_missing_file_can_be_saved_without_force() {
     let (_app_dirs, mut app) = app();
     app.recovery.skip_maintenance();
     let path = app.state.workspace_root.join("deleted.txt");
@@ -1732,7 +1732,7 @@ fn recovered_missing_file_can_be_saved_without_force() {
 
 
 #[test]
-fn recovered_scratch_keeps_its_unsaved_baseline_and_durable_journal() {
+pub(in crate::app) fn recovered_scratch_keeps_its_unsaved_baseline_and_durable_journal() {
     let (_app_dirs, mut app) = app();
     app.recovery.skip_maintenance();
     let journal = app.recovery.directory().join("old-scratch.toml");

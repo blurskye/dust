@@ -3,7 +3,7 @@ use crate::app::FULL_PAGE_PERCENT;
 use crate::ui::render::documentation::DOCUMENTATION_SCROLL_STEP;
 
 #[test]
-fn adversarial_grapheme_rows_make_render_mouse_and_reversed_pages_agree() {
+pub(in crate::app) fn adversarial_grapheme_rows_make_render_mouse_and_reversed_pages_agree() {
     let (_app_dirs, mut app) = app();
     app.window_session.observe_size((3, 7));
     {
@@ -120,7 +120,7 @@ fn adversarial_grapheme_rows_make_render_mouse_and_reversed_pages_agree() {
 }
 
 #[test]
-fn wrapped_visual_rows_drive_margin_paging_resize_folds_and_mouse_consistently() {
+pub(in crate::app) fn wrapped_visual_rows_drive_margin_paging_resize_folds_and_mouse_consistently() {
     let (_app_dirs, mut app) = app();
     app.window_session.observe_size((12, 8));
     {
@@ -325,7 +325,7 @@ fn wrapped_visual_rows_drive_margin_paging_resize_folds_and_mouse_consistently()
 }
 
 #[test]
-fn vertical_margin_keeps_cursor_context_above_and_below() {
+pub(in crate::app) fn vertical_margin_keeps_cursor_context_above_and_below() {
     let (_app_dirs, mut app) = app();
     app.window_session
         .observe_size((app.window_session.width(), 10));
@@ -365,7 +365,7 @@ fn vertical_margin_keeps_cursor_context_above_and_below() {
 }
 
 #[test]
-fn exact_pane_horizontal_follow_is_display_safe_and_view_owned() {
+pub(in crate::app) fn exact_pane_horizontal_follow_is_display_safe_and_view_owned() {
     let (_app_dirs, mut app) = app();
     app.window_session.observe_size((18, 8));
     {
@@ -421,7 +421,7 @@ fn exact_pane_horizontal_follow_is_display_safe_and_view_owned() {
 }
 
 #[test]
-fn cursor_follow_skips_an_unrenderable_tab_in_a_narrow_pane() {
+pub(in crate::app) fn cursor_follow_skips_an_unrenderable_tab_in_a_narrow_pane() {
     let (_app_dirs, mut app) = app();
     let (_, view) = app
         .state
@@ -574,7 +574,7 @@ fn cursor_follow_skips_an_unrenderable_tab_in_a_narrow_pane() {
 }
 
 #[test]
-fn session_layout_capture_and_restore_preserve_each_view_scroll_column() {
+pub(in crate::app) fn session_layout_capture_and_restore_preserve_each_view_scroll_column() {
     let path = PathBuf::from("/workspace/main.rs");
     let text = TextBuffer::from_text("abcdefghijklmnopqrstuvwxyz");
     let mut source = crate::editor::EditorState::new(PathBuf::from("/workspace"));
@@ -604,7 +604,7 @@ fn session_layout_capture_and_restore_preserve_each_view_scroll_column() {
 }
 
 #[test]
-fn session_capture_keeps_project_panes_after_external_navigation() {
+pub(in crate::app) fn session_capture_keeps_project_panes_after_external_navigation() {
     let mut state = crate::editor::EditorState::new("/workspace".into());
     let path = PathBuf::from("/workspace/main.rs");
     state
@@ -635,7 +635,7 @@ fn session_capture_keeps_project_panes_after_external_navigation() {
 }
 
 #[test]
-fn horizontal_follow_reconciles_gutter_explorer_resize_and_nested_panes() {
+pub(in crate::app) fn horizontal_follow_reconciles_gutter_explorer_resize_and_nested_panes() {
     let (_app_dirs, mut app) = app();
     let text = format!("{}\nx", "0123456789".repeat(8));
     let (_, view) = app
@@ -756,7 +756,7 @@ fn horizontal_follow_reconciles_gutter_explorer_resize_and_nested_panes() {
 }
 
 #[test]
-fn documentation_keys_scroll_clamp_and_close_the_popup_context() {
+pub(in crate::app) fn documentation_keys_scroll_clamp_and_close_the_popup_context() {
     let (_app_dirs, mut app) = app();
     {
         let fixture = app.configuration.fixture_snapshot();
@@ -845,7 +845,7 @@ fn documentation_keys_scroll_clamp_and_close_the_popup_context() {
 }
 
 #[test]
-fn dragging_the_border_between_two_windows_resizes_them() {
+pub(in crate::app) fn dragging_the_border_between_two_windows_resizes_them() {
     let (_app_dirs, mut app) = app();
     app.window_session.observe_size((100, 30));
     app.state
@@ -889,7 +889,7 @@ fn dragging_the_border_between_two_windows_resizes_them() {
 }
 
 #[test]
-fn the_agent_panel_opens_narrow_and_ctrl_arrows_move_by_word_while_typing_and_resize_it_in_normal_mode()
+pub(in crate::app) fn the_agent_panel_opens_narrow_and_ctrl_arrows_move_by_word_while_typing_and_resize_it_in_normal_mode()
  {
     let (_app_dirs, mut app) = app();
     app.window_session.observe_size((160, 45));
@@ -957,7 +957,7 @@ fn the_agent_panel_opens_narrow_and_ctrl_arrows_move_by_word_while_typing_and_re
 }
 
 #[test]
-fn the_agent_panel_opens_on_the_left_when_its_side_says_so() {
+pub(in crate::app) fn the_agent_panel_opens_on_the_left_when_its_side_says_so() {
     let (_app_dirs, mut app) = app();
     let mut fixture = app.configuration.fixture_snapshot();
     fixture.settings.agents.side = crate::config::PanelSide::Left;
@@ -995,7 +995,7 @@ fn the_agent_panel_opens_on_the_left_when_its_side_says_so() {
 }
 
 #[test]
-fn scrolling_short_lines_keeps_normal_cursors_on_characters() {
+pub(in crate::app) fn scrolling_short_lines_keeps_normal_cursors_on_characters() {
     for mode in [
         crate::editor::EditorMode::Normal,
         crate::editor::EditorMode::Insert,
@@ -1034,7 +1034,7 @@ fn scrolling_short_lines_keeps_normal_cursors_on_characters() {
 }
 
 #[test]
-fn cancelling_incremental_search_restores_the_original_viewport() {
+pub(in crate::app) fn cancelling_incremental_search_restores_the_original_viewport() {
     let (_app_dirs, mut app) = app();
     app.window_session.observe_size((40, 20));
     let mut fixture = app.configuration.fixture_snapshot();
@@ -1063,7 +1063,7 @@ fn cancelling_incremental_search_restores_the_original_viewport() {
 }
 
 #[test]
-fn half_page_scroll_moves_a_cursor_already_inside_the_new_viewport() {
+pub(in crate::app) fn half_page_scroll_moves_a_cursor_already_inside_the_new_viewport() {
     let (_app_dirs, mut app) = app();
     app.window_session.observe_size((80, 44));
     let text = (0..200).map(|_| "line\n").collect::<String>();
@@ -1091,7 +1091,7 @@ fn half_page_scroll_moves_a_cursor_already_inside_the_new_viewport() {
 }
 
 #[test]
-fn horizontal_cursor_following_counts_inlay_and_substitute_widths() {
+pub(in crate::app) fn horizontal_cursor_following_counts_inlay_and_substitute_widths() {
     let (_app_dirs, mut app) = app();
     app.window_session.observe_size((40, 12));
     let mut config = app.configuration.fixture_snapshot();
@@ -1130,7 +1130,7 @@ fn horizontal_cursor_following_counts_inlay_and_substitute_widths() {
 }
 
 #[test]
-fn viewport_accounts_for_inlays_at_the_cursor_exactly() {
+pub(in crate::app) fn viewport_accounts_for_inlays_at_the_cursor_exactly() {
     for substitute in [false, true] {
         let (_app_dirs, mut app) = app();
         app.window_session.observe_size((40, 12));
@@ -1173,7 +1173,7 @@ fn viewport_accounts_for_inlays_at_the_cursor_exactly() {
 }
 
 #[test]
-fn horizontal_cursor_following_ignores_hints_hidden_by_scrolling() {
+pub(in crate::app) fn horizontal_cursor_following_ignores_hints_hidden_by_scrolling() {
     let (_app_dirs, mut app) = app();
     app.window_session.observe_size((22, 12));
     let mut config = app.configuration.fixture_snapshot();
@@ -1213,7 +1213,7 @@ fn horizontal_cursor_following_ignores_hints_hidden_by_scrolling() {
 }
 
 #[test]
-fn operation_bar_visibility_reprojects_the_editor_footer_inset() {
+pub(in crate::app) fn operation_bar_visibility_reprojects_the_editor_footer_inset() {
     let (_app_dirs, mut app) = app();
     app.window_session.observe_size((80, 24));
     app.state
@@ -1241,7 +1241,7 @@ fn operation_bar_visibility_reprojects_the_editor_footer_inset() {
 }
 
 #[test]
-fn half_page_scrolling_and_cursor_follow_include_expanded_diagnostic_rows() {
+pub(in crate::app) fn half_page_scrolling_and_cursor_follow_include_expanded_diagnostic_rows() {
     let (_app_dirs, mut app) = app();
     app.window_session.observe_size((80, 8));
     {
@@ -1324,7 +1324,7 @@ fn half_page_scrolling_and_cursor_follow_include_expanded_diagnostic_rows() {
 }
 
 #[test]
-fn table_mouse_hits_follow_wrapped_cells_even_when_wrap_is_disabled() {
+pub(in crate::app) fn table_mouse_hits_follow_wrapped_cells_even_when_wrap_is_disabled() {
     use crate::language::syntax::MarkdownMark;
     let text = "\n| a | long text here and more |\n|---|---|\n| b | c |\n\nlast";
     for wrap in [false, true] {
@@ -1378,7 +1378,7 @@ fn table_mouse_hits_follow_wrapped_cells_even_when_wrap_is_disabled() {
 }
 
 #[test]
-fn mouse_hits_use_painted_inlay_replacement_widths() {
+pub(in crate::app) fn mouse_hits_use_painted_inlay_replacement_widths() {
     for wrap in [false, true] {
         for ambiguous in [
             crate::config::AmbiguousWidth::Narrow,

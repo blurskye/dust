@@ -4,7 +4,7 @@ use crate::app::picker::project_tests::palette_row_for;
 
 
 #[test]
-fn palette_finds_plugin_titles_without_configured_labels_and_honors_overrides() {
+pub(in crate::app) fn palette_finds_plugin_titles_without_configured_labels_and_honors_overrides() {
     let (_app_dirs, mut app) = app();
     let mut manifest = crate::app::tests::plugin_manifest("demo", "plugin.demo.keymap.dashboard", "x");
     manifest.commands.get_mut("run").unwrap().title = "Print Hello".into();

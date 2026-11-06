@@ -47,66 +47,9 @@ impl App {
 
 use crate::app::AppEffect;
 
-impl App {
-    pub(in crate::app) fn process_health_effect(&mut self, effect: AppEffect) -> Result<(), AppEffect> {
-        match effect {
-            AppEffect::CrashInspect => {
-                let path = crate::config::user_state_directory().join("last-crash.json");
-                self.notify_message(
-                    self.message("crash_location", &[("path", path.display().to_string())]),
-                    path.is_file(),
-                );
-            }
-            AppEffect::CrashClear => {
-                let path = crate::config::user_state_directory().join("last-crash.json");
-                if let Err(error) = self
-                    .recovery
-                    .clear_crash(path, self.documents.recovery_io())
-                {
-                    self.show_error(error);
-                }
-            }
-            AppEffect::ShowHealth => {
-                self.notify_message(
-                    self.message(
-                        "healthy",
-                        &[
-                            ("buffers", self.state.buffers.len().to_string()),
-                            ("workspace", self.state.workspace_root.display().to_string()),
-                            ("terminal", self.health.terminal_capabilities().to_owned()),
-                            ("jobs", self.tasks.running_count().to_string()),
-                            ("ptys", self.terminal_session.running_count().to_string()),
-                            ("preflights", self.pending_preflight_count().to_string()),
-                            ("tasks", self.tasks.status_count().to_string()),
-                            ("plugins", self.extension.statuses().len().to_string()),
-                            (
-                                "plugin_failures",
-                                self.extension
-                                    .statuses()
-                                    .values()
-                                    .filter(|status| {
-                                        matches!(status, crate::plugins::PluginStatus::Failed(_))
-                                    })
-                                    .count()
-                                    .to_string(),
-                            ),
-                            ("packages", self.extension.pending_packages().to_string()),
-                            ("lsp", self.language.sessions().len().to_string()),
-                            ("persistence", self.persistence.pending().to_string()),
-                            ("safe", self.workspace.safe_mode().to_string()),
-                            ("dap", self.debugger_session.is_running().to_string()),
-                        ],
-                    ),
-                    false,
-                );
-            }
-            effect => return Err(effect),
-        }
-        Ok(())
-    }
-}
 
-use crate::app::commands::AppEffect;
+
+
 use crate::editor::ArgumentSchema;
 use crate::editor::CommandError;
 use crate::editor::CommandRegistry;
@@ -165,11 +108,11 @@ use std::time::Instant;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 use crate::telemetry::CrashSnapshotWriter;
-use crate::telemetry::LiveCrashSnapshot;
+
 use crate::telemetry::LogLevel;
 use crate::telemetry::LogPolicy;
 use crate::telemetry::StructuredLogs;
-use crate::app::Duration;
+
 
 pub(in crate::app) struct Health {
     logs: StructuredLogs,
@@ -350,5 +293,65 @@ use std::time::{Instant, Duration};
             serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
         assert_eq!(written["buffers"], 2);
         assert_eq!(written["dirty_buffers"], 1);
+    }
+}
+
+
+impl App {
+    pub(in crate::app) fn process_health_effect(&mut self, effect: AppEffect) -> Result<(), AppEffect> {
+        match effect {
+            AppEffect::CrashInspect => {
+                let path = crate::config::user_state_directory().join("last-crash.json");
+                self.notify_message(
+                    self.message("crash_location", &[("path", path.display().to_string())]),
+                    path.is_file(),
+                );
+            }
+            AppEffect::CrashClear => {
+                let path = crate::config::user_state_directory().join("last-crash.json");
+                if let Err(error) = self
+                    .recovery
+                    .clear_crash(path, self.documents.recovery_io())
+                {
+                    self.show_error(error);
+                }
+            }
+            AppEffect::ShowHealth => {
+                self.notify_message(
+                    self.message(
+                        "healthy",
+                        &[
+                            ("buffers", self.state.buffers.len().to_string()),
+                            ("workspace", self.state.workspace_root.display().to_string()),
+                            ("terminal", self.health.terminal_capabilities().to_owned()),
+                            ("jobs", self.tasks.running_count().to_string()),
+                            ("ptys", self.terminal_session.running_count().to_string()),
+                            ("preflights", self.pending_preflight_count().to_string()),
+                            ("tasks", self.tasks.status_count().to_string()),
+                            ("plugins", self.extension.statuses().len().to_string()),
+                            (
+                                "plugin_failures",
+                                self.extension
+                                    .statuses()
+                                    .values()
+                                    .filter(|status| {
+                                        matches!(status, crate::plugins::PluginStatus::Failed(_))
+                                    })
+                                    .count()
+                                    .to_string(),
+                            ),
+                            ("packages", self.extension.pending_packages().to_string()),
+                            ("lsp", self.language.sessions().len().to_string()),
+                            ("persistence", self.persistence.pending().to_string()),
+                            ("safe", self.workspace.safe_mode().to_string()),
+                            ("dap", self.debugger_session.is_running().to_string()),
+                        ],
+                    ),
+                    false,
+                );
+            }
+            effect => return Err(effect),
+        }
+        Ok(())
     }
 }

@@ -22,7 +22,7 @@ pub(super) struct MouseState {
     anchor: Option<MouseAnchor>,
 }
 impl Default for MouseState {
-    pub(in crate::app) fn default() -> Self {
+    fn default() -> Self {
         Self {
             position: None,
             generation: Some(0),

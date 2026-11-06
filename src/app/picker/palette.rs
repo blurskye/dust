@@ -22,7 +22,7 @@ use crate::workspace::PickerItemKind;
 const RECENT: usize = 8;
 
 /// Keys as people read them: `<leader> g w` is `Space g w`.
-pub(super) fn readable_keys(keys: &str) -> String {
+pub(in crate::app) fn readable_keys(keys: &str) -> String {
     keys.split(' ')
         .map(|key| if key == "<leader>" { "Space" } else { key })
         .collect::<Vec<_>>()

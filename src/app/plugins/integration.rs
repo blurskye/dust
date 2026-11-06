@@ -1391,7 +1391,7 @@ use crate::app::search::SEARCH_MAXIMUM_FILE_BYTES;
 use crate::ui::render::SCRATCH_LABEL;
 use crate::app::AppEffect;
 use crate::app::ArgumentSchema;
-use crate::app::BTreeMap;
+
 use crate::app::BTreeSet;
 use crate::app::CommandId;
 use crate::app::CommandOutcome;
@@ -1407,8 +1407,8 @@ use crate::app::PickerItem;
 use crate::app::PickerItemId;
 use crate::app::PickerPayload;
 use crate::app::PluginEvent;
-use crate::app::PluginLimits;
-use crate::app::PluginLoadId;
+
+
 use crate::app::PromptKind;
 use crate::app::WindowUpdate;
 use crate::app::plugins::VirtualContext;
@@ -1427,11 +1427,11 @@ use crate::app::search::workflow::SearchWorkflowId;
 use crate::app::search::workflow::SearchWorkflowSpec;
 use crate::app::search::workflow::picker_item_adapter;
 use crate::app::search::workflow::plugin_item_adapter;
-use crate::app::CommandValue;
+
 use crate::app::command;
-use crate::workspace::PickerAction;
-use crate::workspace::PickerItem;
-use crate::workspace::PickerItemId;
+
+
+
 
 
 

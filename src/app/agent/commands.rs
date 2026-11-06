@@ -182,3 +182,17 @@ impl App {
         }
     }
 }
+
+
+
+use crate::app::command;
+
+impl App {
+    pub(in crate::app) fn process_agent_effect(&mut self, effect: AppEffect) -> Result<(), AppEffect> {
+        match effect {
+            AppEffect::Agent(command) => self.run_agent_command(command),
+            effect => return Err(effect),
+        }
+        Ok(())
+    }
+}

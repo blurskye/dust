@@ -31,7 +31,7 @@ use std::sync::atomic::Ordering;
 #[derive(Clone, Debug)]
 pub(in crate::app) struct WorkspaceVersion(Arc<()>);
 impl PartialEq for WorkspaceVersion {
-    pub(in crate::app) fn eq(&self, other: &Self) -> bool {
+    fn eq(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.0, &other.0)
     }
 }
@@ -42,7 +42,7 @@ pub(in crate::app) enum WorkspaceFailure {
     Plain(String),
 }
 impl From<WorkspaceError> for WorkspaceFailure {
-    pub(in crate::app) fn from(e: WorkspaceError) -> Self {
+    fn from(e: WorkspaceError) -> Self {
         Self::Plain(e.to_string())
     }
 }
@@ -1085,10 +1085,8 @@ pub(in crate::app) mod interaction;
 pub(in crate::app) mod commands;
 
 #[cfg(test)]
-mod project_tests;
+pub(in crate::app) mod project_tests;
+
 
 #[cfg(test)]
-mod project_tests;
-
-#[cfg(test)]
-mod surfaces_tests;
+pub(in crate::app) mod surfaces_tests;

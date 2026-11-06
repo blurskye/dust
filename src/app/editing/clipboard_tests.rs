@@ -4,7 +4,7 @@ use crate::editor::CommandInvocation;
 use crate::editor::RegisterShape;
 use crate::editor::RegisterValue;
 
-fn press(app: &mut App, key: char) {
+pub(in crate::app) fn press(app: &mut App, key: char) {
     app.handle_event(UiEvent::Key {
         key: KeyEvent::character(key),
         kind: crate::ui::KeyInputKind::Press,
@@ -12,7 +12,7 @@ fn press(app: &mut App, key: char) {
 }
 
 #[test]
-fn clipboard_paste_finishes_before_later_input_or_macro_commands() {
+pub(in crate::app) fn clipboard_paste_finishes_before_later_input_or_macro_commands() {
     for macro_commands in [false, true] {
         let (_app_dirs, mut app) = app();
         app.set_dashboard_visibility(false);
@@ -61,16 +61,16 @@ fn clipboard_paste_finishes_before_later_input_or_macro_commands() {
     }
 }
 
-fn invocation(id: &str) -> CommandInvocation {
+pub(in crate::app) fn invocation(id: &str) -> CommandInvocation {
     CommandInvocation::new(id, InvocationSource::Test).unwrap()
 }
 
-fn paste() -> CommandInvocation {
+pub(in crate::app) fn paste() -> CommandInvocation {
     invocation("edit.put").with_argument("before", CommandValue::Bool(false))
 }
 
 #[test]
-fn clipboard_macro_stops_after_a_failed_command_following_a_paste() {
+pub(in crate::app) fn clipboard_macro_stops_after_a_failed_command_following_a_paste() {
     let (_app_dirs, mut app) = app();
     app.set_dashboard_visibility(false);
     let (buffer, _) = app
@@ -98,7 +98,7 @@ fn clipboard_macro_stops_after_a_failed_command_following_a_paste() {
 }
 
 #[test]
-fn clipboard_failed_reads_stop_suspended_macros_but_release_later_keys() {
+pub(in crate::app) fn clipboard_failed_reads_stop_suspended_macros_but_release_later_keys() {
     let (_app_dirs, mut app) = app();
     app.set_dashboard_visibility(false);
     let (buffer, view) = app
@@ -128,7 +128,7 @@ fn clipboard_failed_reads_stop_suspended_macros_but_release_later_keys() {
 }
 
 #[test]
-fn clipboard_recursive_macros_keep_the_recursion_limit_across_pastes() {
+pub(in crate::app) fn clipboard_recursive_macros_keep_the_recursion_limit_across_pastes() {
     let (_app_dirs, mut app) = app();
     app.set_dashboard_visibility(false);
     let (buffer, _) = app
@@ -160,7 +160,7 @@ fn clipboard_recursive_macros_keep_the_recursion_limit_across_pastes() {
 }
 
 #[test]
-fn clipboard_deferred_macros_expand_before_later_input() {
+pub(in crate::app) fn clipboard_deferred_macros_expand_before_later_input() {
     let (_app_dirs, mut app) = app();
     app.set_dashboard_visibility(false);
     let (buffer, view) = app
@@ -190,7 +190,7 @@ fn clipboard_deferred_macros_expand_before_later_input() {
 }
 
 #[test]
-fn clipboard_counted_macros_finish_each_replay_before_starting_the_next() {
+pub(in crate::app) fn clipboard_counted_macros_finish_each_replay_before_starting_the_next() {
     let (_app_dirs, mut app) = app();
     app.set_dashboard_visibility(false);
     let (buffer, view) = app
@@ -216,7 +216,7 @@ fn clipboard_counted_macros_finish_each_replay_before_starting_the_next() {
 }
 
 #[test]
-fn clipboard_failed_paste_reports_error_and_releases_later_input() {
+pub(in crate::app) fn clipboard_failed_paste_reports_error_and_releases_later_input() {
     let (_app_dirs, mut app) = app();
     app.set_dashboard_visibility(false);
     let (buffer, view) = app
@@ -251,7 +251,7 @@ fn clipboard_failed_paste_reports_error_and_releases_later_input() {
 }
 
 #[test]
-fn clipboard_imported_selection_is_used_by_the_requested_paste_register() {
+pub(in crate::app) fn clipboard_imported_selection_is_used_by_the_requested_paste_register() {
     for register in [None, Some('+'), Some('*')] {
         let (_app_dirs, mut app) = app();
         app.set_dashboard_visibility(false);

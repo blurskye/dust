@@ -4,7 +4,7 @@ use crate::app::tests::*;
 
 
 #[test]
-fn a_name_no_worktree_matches_is_the_name_of_a_new_one() {
+pub(in crate::app) fn a_name_no_worktree_matches_is_the_name_of_a_new_one() {
     let (_app_dirs, mut app) = app();
     let new_row = crate::workspace::PickerItem {
         badge: String::new(),

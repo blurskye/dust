@@ -1720,10 +1720,8 @@ pub(in crate::app) mod interaction;
 pub(in crate::app) mod commands;
 
 #[cfg(test)]
-mod project_tests;
+pub(in crate::app) mod project_tests;
+
 
 #[cfg(test)]
-mod project_tests;
-
-#[cfg(test)]
-mod surfaces_tests;
+pub(in crate::app) mod surfaces_tests;

@@ -15,4 +15,6 @@ impl App {
 }
 
 #[cfg(test)]
-mod surfaces_tests;
+pub(in crate::app) mod surfaces_tests;
+
+mod commands;

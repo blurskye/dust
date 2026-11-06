@@ -1,30 +1,30 @@
 //! Protocol-neutral workspace edit preparation, approval and resource lifetimes.
 mod preparation;
 use crate::app::workspace::WorkspaceVersion;
-use crate::editor::transaction::BufferPathChange;
-use crate::editor::transaction::EditorDraft;
-use crate::editor::transaction::EditorPublication;
-use crate::editor::transaction::WorkspaceCommitCheck;
-use crate::editor::transaction::WorkspaceEditSources;
+use crate::editor::BufferPathChange;
+use crate::editor::EditorDraft;
+use crate::editor::EditorPublication;
+use crate::editor::WorkspaceCommitCheck;
+use crate::editor::WorkspaceEditSources;
 use crate::files::CheckedResourceIntent;
 use crate::files::RequestId;
 use crate::files::ResourceIntentKind;
-use crate::editor::transaction::DocumentSnapshot as FileSnapshot;
+use crate::editor::DocumentSnapshot as FileSnapshot;
 use crate::workspace::ProposalId;
 use crate::workspace::WorkspaceEditDraft;
 use crate::workspace::WorkspaceEditProposal;
 use crate::workspace::WorkspaceState;
 use preparation::Preparation;
-pub(super) use preparation::InputFile;
-pub(super) use preparation::IoPermit;
-pub(super) use preparation::PreparationTicket;
-pub(super) use preparation::PreparedFiles;
+pub(in crate::app) use preparation::InputFile;
+pub(in crate::app) use preparation::IoPermit;
+pub(in crate::app) use preparation::PreparationTicket;
+pub(in crate::app) use preparation::PreparedFiles;
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
 #[derive(Clone, Debug)]
-pub(super) struct OriginKey(Arc<()>);
+pub(in crate::app) struct OriginKey(Arc<()>);
 impl OriginKey {
     pub(in crate::app) fn new() -> Self {
         Self(Arc::new(()))
@@ -33,7 +33,7 @@ impl OriginKey {
         Arc::ptr_eq(&self.0, &other.0)
     }
 }
-pub(super) struct PreparedEdits {
+pub(in crate::app) struct PreparedEdits {
     pub ticket: PreparationTicket,
     pub label: String,
     pub drafts: Vec<WorkspaceEditDraft>,
@@ -68,7 +68,7 @@ struct PendingApproval {
     worker: std::thread::JoinHandle<Result<EditorDraft, String>>,
     changes: Vec<BufferPathChange>,
 }
-pub(super) struct ResourceApplication {
+pub(in crate::app) struct ResourceApplication {
     proposal: ProposalId,
     intent: CheckedResourceIntent,
     target: Option<std::path::PathBuf>,
@@ -81,7 +81,7 @@ impl ResourceApplication {
     pub(in crate::app) fn intent(&self) -> &CheckedResourceIntent {
         &self.intent
     }
-    pub(super) fn change(&self) -> &BufferPathChange {
+    pub(in crate::app) fn change(&self) -> &BufferPathChange {
         &self.change
     }
     pub(in crate::app) fn target(&self) -> Option<&Path> {
@@ -91,7 +91,7 @@ impl ResourceApplication {
         (self.change, self.target)
     }
 }
-pub(super) struct ResourcePermit<'a> {
+pub(in crate::app) struct ResourcePermit<'a> {
     accepted: &'a mut Vec<ResourceApplication>,
     applying: &'a mut HashMap<RequestId, (Arc<()>, ResourceApplication)>,
     _workspace: &'a crate::app::workspace::WorkspaceSession,
@@ -130,11 +130,11 @@ impl ResourcePermit<'_> {
         }
     }
 }
-pub(super) struct Retirement {
+pub(in crate::app) struct Retirement {
     pub requests: Vec<RequestId>,
     pub origin: Option<OriginKey>,
 }
-pub(super) struct WorkspaceEditSession {
+pub(in crate::app) struct WorkspaceEditSession {
     owner: Arc<()>,
     next: u64,
     preparing: Option<Preparation>,
@@ -145,7 +145,7 @@ pub(super) struct WorkspaceEditSession {
     applying: HashMap<RequestId, (Arc<()>, ResourceApplication)>,
 }
 impl Default for WorkspaceEditSession {
-    pub(in crate::app) fn default() -> Self {
+    fn default() -> Self {
         Self {
             owner: Arc::new(()),
             next: 1,
@@ -468,7 +468,7 @@ impl WorkspaceEditSession {
             requests: preparing.map_or_else(Vec::new, |p| p.requests.into_keys().collect()),
         }
     }
-    pub(super) fn prepare_resource<'a>(
+    pub(in crate::app) fn prepare_resource<'a>(
         &'a mut self,
         workspace: &'a crate::app::workspace::WorkspaceSession,
         configuration: &'a u64,
@@ -590,8 +590,8 @@ mod tests;
 
 pub(in crate::app) mod interaction;
 
-fn selected_edits(proposal: &crate::workspace::WorkspaceEditProposal) -> Vec<crate::editor::transaction::DraftEdit<'_>> {
-    proposal.files.iter().filter(|file| file.selected).map(|file| crate::editor::transaction::DraftEdit {
+fn selected_edits(proposal: &crate::workspace::WorkspaceEditProposal) -> Vec<crate::editor::DraftEdit<'_>> {
+    proposal.files.iter().filter(|file| file.selected).map(|file| crate::editor::DraftEdit {
         canonical_path: &file.canonical_path,
         base_revision: file.base_revision,
         original_bytes: &file.original_bytes,
@@ -601,10 +601,10 @@ fn selected_edits(proposal: &crate::workspace::WorkspaceEditProposal) -> Vec<cra
 }
 pub(in crate::app) fn prepare_workspace_edit(
     state: &crate::editor::EditorState,
-    sources: &crate::editor::transaction::WorkspaceEditSources,
+    sources: &crate::editor::WorkspaceEditSources,
     proposal: &crate::workspace::WorkspaceEditProposal,
     transaction: crate::editor::TransactionId,
-) -> Result<crate::editor::transaction::EditorDraft, String> {
+) -> Result<crate::editor::EditorDraft, String> {
     // Preserve editor identity validation before the preview-state check.
     if !sources.same_editor(state) {
         return Err("workspace edit belongs to a foreign or exhausted editor".into());
@@ -615,8 +615,8 @@ pub(in crate::app) fn prepare_workspace_edit(
     state.prepare_document_edits(sources, &proposal.label, &selected_edits(proposal), transaction)
 }
 pub(crate) fn workspace_commit_check(
-    draft: &crate::editor::transaction::EditorDraft,
+    draft: &crate::editor::EditorDraft,
     proposal: &crate::workspace::WorkspaceEditProposal,
-) -> Result<crate::editor::transaction::WorkspaceCommitCheck, String> {
+) -> Result<crate::editor::WorkspaceCommitCheck, String> {
     draft.check_document_edits(proposal.files.iter().filter(|file| file.selected).map(|file| (file.canonical_path.as_path(), file.proposed_bytes.as_slice())))
 }

@@ -4,7 +4,7 @@ use crate::app::tests::*;
 
 
 #[test]
-fn dashboard_and_picker_are_stable_graph_overlays_with_projected_geometry() {
+pub(in crate::app) fn dashboard_and_picker_are_stable_graph_overlays_with_projected_geometry() {
     let (_app_dirs, mut app) = app();
     app.window_session.observe_size((100, 30));
     app.reconcile_editor_windows();
@@ -102,7 +102,7 @@ fn dashboard_and_picker_are_stable_graph_overlays_with_projected_geometry() {
 
 
 #[test]
-fn live_logs_and_output_refresh_preserve_picker_normal_without_leaking_it_to_new_sources() {
+pub(in crate::app) fn live_logs_and_output_refresh_preserve_picker_normal_without_leaking_it_to_new_sources() {
     let (_app_dirs, mut app) = app();
     for logs in [false, true] {
         app.close_picker();
@@ -138,7 +138,7 @@ fn live_logs_and_output_refresh_preserve_picker_normal_without_leaking_it_to_new
 
 
 #[test]
-fn closed_picker_surfaces_leave_the_content_line_but_keep_their_graph_identity() {
+pub(in crate::app) fn closed_picker_surfaces_leave_the_content_line_but_keep_their_graph_identity() {
     let (_app_dirs, mut app) = app();
     app.state
         .open_text(TextBuffer::from_text("editor"), None)
@@ -172,7 +172,7 @@ fn closed_picker_surfaces_leave_the_content_line_but_keep_their_graph_identity()
 
 
 #[test]
-fn picker_title_changes_update_the_retained_window_content() {
+pub(in crate::app) fn picker_title_changes_update_the_retained_window_content() {
     let (_app_dirs, mut app) = app();
     app.open_builtin_picker(PickerKind::Buffers);
     app.reconcile_editor_windows();

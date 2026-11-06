@@ -40,9 +40,9 @@ mod panels;
 pub(super) use hosting::WindowUpdate;
 pub(super) use integration::ExtensionUpdate;
 pub(super) use integration::RegistryUpdate;
-pub(super) use windows::PluginUiInteraction;
+pub(super) use panels::PluginUiInteraction;
 #[cfg(test)]
-pub(in crate::app) use windows::tests::fixture_manifest;
+pub(in crate::app) use panels::tests::fixture_manifest;
 pub(in crate::app) mod content;
 mod documents;
 pub(super) use content::VirtualContext;
@@ -56,7 +56,7 @@ pub(in crate::app) struct InvocationContext<'a> {
     pub generation: u64,
     pub ui_revision: Option<u64>,
     pub input_capture: std::sync::Arc<()>,
-    pub navigation: crate::app::windows::NavigationStamp,
+    pub navigation: crate::app::panels::NavigationStamp,
     pub interaction_available: bool,
     pub maximum: usize,
     pub arguments: Vec<String>,
@@ -66,7 +66,7 @@ type BufferObservation = (u64, u64, usize, usize, usize, u8);
 pub(in crate::app) type HostObservation = (u64, String, Option<BufferObservation>, u64);
 pub(super) struct ExtensionSession {
     runtime_epoch: u64,
-    windows: windows::PluginWindowHost,
+    windows: panels::PluginWindowHost,
     providers: PluginProviderBroker,
     virtual_documents: PluginVirtualDocumentBroker,
     virtual_editor: documents::VirtualDocumentEditorBridge,
@@ -112,7 +112,7 @@ impl ExtensionSession {
     ) -> Self {
         Self {
             runtime_epoch: 0,
-            windows: windows::PluginWindowHost::default(),
+            windows: panels::PluginWindowHost::default(),
             providers: PluginProviderBroker::default(),
             virtual_documents: PluginVirtualDocumentBroker::default(),
             virtual_editor: documents::VirtualDocumentEditorBridge::default(),
@@ -304,7 +304,7 @@ impl ExtensionSession {
         workspace: &WorkspaceVersion,
         configuration: u64,
         input: &crate::app::input::InputSession,
-        windows: &crate::app::windows::WindowSession,
+        windows: &crate::app::panels::WindowSession,
     ) -> Option<ConfirmationPresentation> {
         self.confirmations
             .activate_next(confirmations::ConfirmationContext {
@@ -343,7 +343,7 @@ impl ExtensionSession {
         workspace: &WorkspaceVersion,
         configuration: u64,
         input: &crate::app::input::InputSession,
-        windows: &crate::app::windows::WindowSession,
+        windows: &crate::app::panels::WindowSession,
     ) -> bool {
         self.confirmations
             .retire_stale(confirmations::ConfirmationContext {
@@ -617,7 +617,7 @@ pub(in crate::app) mod commands;
 mod extensions_tests;
 
 #[cfg(test)]
-mod project_tests;
+pub(in crate::app) mod project_tests;
 
 #[cfg(test)]
-mod surfaces_tests;
+pub(in crate::app) mod surfaces_tests;

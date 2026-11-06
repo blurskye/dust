@@ -2,7 +2,7 @@ use crate::app::tests::*;
 use crate::app::ViewToggle;
 
 #[test]
-fn saved_theme_restore_rejects_invalid_data_and_cannot_overwrite_newer_interactions() {
+pub(in crate::app) fn saved_theme_restore_rejects_invalid_data_and_cannot_overwrite_newer_interactions() {
     let (_app_dirs, mut app) = app();
     let original = app.configuration.theme().clone();
     let mut saved = original.clone();
@@ -94,7 +94,7 @@ fn saved_theme_restore_rejects_invalid_data_and_cannot_overwrite_newer_interacti
 }
 
 #[test]
-fn delayed_persistence_preserves_newer_runtime_breakpoint_and_watch_choices() {
+pub(in crate::app) fn delayed_persistence_preserves_newer_runtime_breakpoint_and_watch_choices() {
     use crate::persistence::PersistedBreakpoint;
     use crate::persistence::PersistedState;
     use crate::persistence::PersistedWatch;
@@ -195,7 +195,7 @@ fn delayed_persistence_preserves_newer_runtime_breakpoint_and_watch_choices() {
 }
 
 #[test]
-fn theme_picker_replaces_the_current_choice_with_its_installed_override() {
+pub(in crate::app) fn theme_picker_replaces_the_current_choice_with_its_installed_override() {
     let (_app_dirs, mut app) = app();
     let root = app.state.workspace_root.clone();
     let mut installed = app.configuration.theme().clone();
@@ -228,7 +228,7 @@ fn theme_picker_replaces_the_current_choice_with_its_installed_override() {
 }
 
 #[test]
-fn theme_picker_previews_cancels_applies_and_never_overwrites_a_newer_reload() {
+pub(in crate::app) fn theme_picker_previews_cancels_applies_and_never_overwrites_a_newer_reload() {
     let root = tempdir().unwrap();
     let saved = tempdir().unwrap();
     fs::create_dir(root.path().join("themes")).unwrap();
@@ -475,14 +475,14 @@ fn theme_picker_previews_cancels_applies_and_never_overwrites_a_newer_reload() {
 }
 
 #[test]
-fn stale_configuration_generations_are_never_applied() {
+pub(in crate::app) fn stale_configuration_generations_are_never_applied() {
     assert!(crate::app::tests::configuration_generation_is_newer(4, 5));
     assert!(!crate::app::tests::configuration_generation_is_newer(5, 5));
     assert!(!crate::app::tests::configuration_generation_is_newer(6, 5));
 }
 
 #[test]
-fn complete_configuration_reload_is_atomic() {
+pub(in crate::app) fn complete_configuration_reload_is_atomic() {
     let (_app_dirs, mut app) = app();
     let original_theme = app.configuration.theme().clone();
     let explanation = app
@@ -519,7 +519,7 @@ fn complete_configuration_reload_is_atomic() {
 }
 
 #[test]
-fn resolved_explain_reports_exact_layered_and_replacement_provenance() {
+pub(in crate::app) fn resolved_explain_reports_exact_layered_and_replacement_provenance() {
     let (_app_dirs, app) = app();
     let root = tempdir().expect("tempdir");
     let config_path = root.path().join("config.toml");
@@ -608,7 +608,7 @@ fn resolved_explain_reports_exact_layered_and_replacement_provenance() {
 }
 
 #[test]
-fn disabled_insert_prefix_is_consumed_on_timeout_and_rejection() {
+pub(in crate::app) fn disabled_insert_prefix_is_consumed_on_timeout_and_rejection() {
     let (_app_dirs, mut app) = app();
     let clock = std::sync::Arc::new(crate::clock::ManualClock::new(
         std::time::SystemTime::now(),
@@ -667,7 +667,7 @@ fn disabled_insert_prefix_is_consumed_on_timeout_and_rejection() {
 }
 
 #[test]
-fn user_keymaps_execute_typed_commands_and_unmap_defaults() {
+pub(in crate::app) fn user_keymaps_execute_typed_commands_and_unmap_defaults() {
     let (_app_dirs, mut app) = app();
     app.state
         .open_text(crate::editor::text::TextBuffer::from_text("abc"), None)
@@ -747,7 +747,7 @@ fn user_keymaps_execute_typed_commands_and_unmap_defaults() {
 }
 
 #[test]
-fn symbolic_leaders_expand_before_dispatch_and_preserve_literal_space_actions() {
+pub(in crate::app) fn symbolic_leaders_expand_before_dispatch_and_preserve_literal_space_actions() {
     let (_app_dirs, app) = app();
     let mut loaded = crate::config::load_bundled_config().keymaps;
     let bundled_count = loaded.entries.len();
@@ -806,7 +806,7 @@ fn symbolic_leaders_expand_before_dispatch_and_preserve_literal_space_actions() 
 }
 
 #[test]
-fn expanded_duplicate_sequences_are_rejected_with_symbolic_diagnostics() {
+pub(in crate::app) fn expanded_duplicate_sequences_are_rejected_with_symbolic_diagnostics() {
     let (_app_dirs, app) = app();
     let mut loaded = crate::config::load_bundled_config().keymaps;
     let mapping = |id: &str, keys: &str| crate::config::KeymapEntry {
@@ -837,7 +837,7 @@ fn expanded_duplicate_sequences_are_rejected_with_symbolic_diagnostics() {
 }
 
 #[test]
-fn invalid_leader_policy_rejects_the_complete_configuration_transactionally() {
+pub(in crate::app) fn invalid_leader_policy_rejects_the_complete_configuration_transactionally() {
     let (_app_dirs, mut app) = app();
     let original_policy = app.configuration.settings().input.keymaps.clone();
     let original_binding = app
@@ -864,7 +864,7 @@ fn invalid_leader_policy_rejects_the_complete_configuration_transactionally() {
 }
 
 #[test]
-fn identity_rebind_moves_a_bundled_mapping_without_leaving_the_old_sequence() {
+pub(in crate::app) fn identity_rebind_moves_a_bundled_mapping_without_leaving_the_old_sequence() {
     let (_app_dirs, app) = app();
     let target = "builtin.global.files-buffers.editor-normal";
     let mut loaded = crate::config::load_bundled_config().keymaps;
@@ -928,7 +928,7 @@ fn identity_rebind_moves_a_bundled_mapping_without_leaving_the_old_sequence() {
 }
 
 #[test]
-fn identity_disable_inherits_symbolic_location_and_tracks_leader_changes() {
+pub(in crate::app) fn identity_disable_inherits_symbolic_location_and_tracks_leader_changes() {
     let (_app_dirs, app) = app();
     let target = "builtin.global.files-explorer.editor-normal";
     let mut loaded = crate::config::load_bundled_config().keymaps;
@@ -982,7 +982,7 @@ fn identity_disable_inherits_symbolic_location_and_tracks_leader_changes() {
 }
 
 #[test]
-fn identity_disable_rejects_unknown_omitted_and_overdeclared_targets() {
+pub(in crate::app) fn identity_disable_rejects_unknown_omitted_and_overdeclared_targets() {
     let (_app_dirs, app) = app();
     let target = "builtin.global.files-explorer.editor-normal";
     for (id, context, expected) in [
@@ -1022,7 +1022,7 @@ fn identity_disable_rejects_unknown_omitted_and_overdeclared_targets() {
 }
 
 #[test]
-fn malformed_keymap_identity_rejects_the_configuration_transactionally() {
+pub(in crate::app) fn malformed_keymap_identity_rejects_the_configuration_transactionally() {
     let (_app_dirs, mut app) = app();
     let original = app
         .configuration
@@ -1063,7 +1063,7 @@ fn malformed_keymap_identity_rejects_the_configuration_transactionally() {
 }
 
 #[test]
-fn invalid_user_keymap_set_is_rejected_transactionally() {
+pub(in crate::app) fn invalid_user_keymap_set_is_rejected_transactionally() {
     let (_app_dirs, mut app) = app();
     let mut current = crate::config::load_bundled_config();
     current.keymaps.entries.push(crate::config::KeymapEntry {
@@ -1132,7 +1132,7 @@ fn invalid_user_keymap_set_is_rejected_transactionally() {
 }
 
 #[test]
-fn keymap_inspection_by_id_reports_identity_operation_sequences_and_source() {
+pub(in crate::app) fn keymap_inspection_by_id_reports_identity_operation_sequences_and_source() {
     let (_app_dirs, mut app) = app();
     let id = "builtin.global.files-explorer.editor-normal";
     app.process_effect(crate::app::AppEffect::InspectKeymap {
@@ -1153,7 +1153,7 @@ fn keymap_inspection_by_id_reports_identity_operation_sequences_and_source() {
 }
 
 #[test]
-fn keymap_inspection_reports_real_user_path_and_byte_range() {
+pub(in crate::app) fn keymap_inspection_reports_real_user_path_and_byte_range() {
     let (_app_dirs, mut app) = app();
     let root = tempdir().expect("tempdir");
     let path = root.path().join("keymaps.toml");
@@ -1188,7 +1188,7 @@ fn keymap_inspection_reports_real_user_path_and_byte_range() {
 }
 
 #[test]
-fn duplicate_user_ids_are_rejected_transactionally() {
+pub(in crate::app) fn duplicate_user_ids_are_rejected_transactionally() {
     let (_app_dirs, app) = app();
     let mut loaded = crate::config::load_bundled_config().keymaps;
     loaded.path = PathBuf::from("keymaps.toml");
@@ -1220,7 +1220,7 @@ fn duplicate_user_ids_are_rejected_transactionally() {
 }
 
 #[test]
-fn configured_focus_loss_cancels_pending_mapping() {
+pub(in crate::app) fn configured_focus_loss_cancels_pending_mapping() {
     let (_app_dirs, mut app) = app();
     let mut loaded = crate::config::load_bundled_config().keymaps;
     loaded.entries.push(crate::config::KeymapEntry {
@@ -1249,7 +1249,7 @@ fn configured_focus_loss_cancels_pending_mapping() {
 }
 
 #[test]
-fn prompt_special_keys_are_remappable_from_configuration() {
+pub(in crate::app) fn prompt_special_keys_are_remappable_from_configuration() {
     let (_app_dirs, mut app) = app();
     let mut loaded = crate::config::load_bundled_config().keymaps;
     loaded.entries.extend([
@@ -1293,7 +1293,7 @@ fn prompt_special_keys_are_remappable_from_configuration() {
 }
 
 #[test]
-fn confirmation_keys_and_hints_follow_accepted_remaps() {
+pub(in crate::app) fn confirmation_keys_and_hints_follow_accepted_remaps() {
     let (_app_dirs, mut app) = app();
     let mut loaded = crate::config::load_bundled_config().keymaps;
     loaded.entries.extend([
@@ -1402,7 +1402,7 @@ fn confirmation_keys_and_hints_follow_accepted_remaps() {
 }
 
 /// Compile the bundled keymaps exactly as application construction does.
-fn bundled_keymaps(app: &App) -> crate::app::ResolvedKeymaps {
+pub(in crate::app) fn bundled_keymaps(app: &App) -> crate::app::ResolvedKeymaps {
     let (keymaps, diagnostic) = compile_keymaps(
         &app.commands,
         &crate::config::load_bundled_config().keymaps,
@@ -1416,7 +1416,7 @@ fn bundled_keymaps(app: &App) -> crate::app::ResolvedKeymaps {
 ///
 /// `<leader>` expands to the bundled leader and every key is fed as a real key event, so this
 /// proves what a keypress does rather than comparing strings in a configuration file.
-fn documented_key_reaches(
+pub(in crate::app) fn documented_key_reaches(
     keymaps: &crate::app::ResolvedKeymaps,
     keys: &str,
 ) -> Option<crate::editor::CommandInvocation> {
@@ -1443,7 +1443,7 @@ fn documented_key_reaches(
 }
 
 #[test]
-fn the_agent_keys_each_reach_their_command() {
+pub(in crate::app) fn the_agent_keys_each_reach_their_command() {
     let (_app_dirs, app) = app();
     let keymaps = bundled_keymaps(&app);
     for (keys, command) in [
@@ -1473,7 +1473,7 @@ fn the_agent_keys_each_reach_their_command() {
 /// prefix table without a binding fails here instead of shipping as a dead prefix entry, and
 /// a key it marks as having no command must not be bound to something else.
 #[test]
-fn the_documented_git_and_debugger_keys_each_reach_their_command() {
+pub(in crate::app) fn the_documented_git_and_debugger_keys_each_reach_their_command() {
     let (_app_dirs, app) = app();
     let keymaps = bundled_keymaps(&app);
     let cases = [
@@ -1535,7 +1535,7 @@ fn the_documented_git_and_debugger_keys_each_reach_their_command() {
 }
 
 #[test]
-fn every_key_the_experience_document_names_is_bound_or_marked_as_having_no_command() {
+pub(in crate::app) fn every_key_the_experience_document_names_is_bound_or_marked_as_having_no_command() {
     let (_app_dirs, app) = app();
     let keymaps = bundled_keymaps(&app);
     let document = fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/docs/experience.md"))
@@ -1585,7 +1585,7 @@ fn every_key_the_experience_document_names_is_bound_or_marked_as_having_no_comma
 }
 
 #[test]
-fn the_pi_profile_adds_dust_tools_to_pi() {
+pub(in crate::app) fn the_pi_profile_adds_dust_tools_to_pi() {
     let (_app_dirs, app) = app();
     let agents = &app.configuration.settings().agents;
     assert!(agents.add_tools);
@@ -1600,7 +1600,7 @@ fn the_pi_profile_adds_dust_tools_to_pi() {
 }
 
 #[test]
-fn agents_own_subagents_are_off_over_acp_only() {
+pub(in crate::app) fn agents_own_subagents_are_off_over_acp_only() {
     let (_app_dirs, app) = app();
     let profiles = &app.configuration.settings().agents.profiles;
     assert_eq!(profiles["codex"].cli, ["codex"]);
@@ -1623,7 +1623,7 @@ fn agents_own_subagents_are_off_over_acp_only() {
 }
 
 #[test]
-fn the_agent_panel_opens_over_the_dashboard() {
+pub(in crate::app) fn the_agent_panel_opens_over_the_dashboard() {
     let (_app_dirs, mut app) = app();
     assert!(app.window_session.dashboard_visible());
     for key in [' ', 'a', 't'] {
@@ -1645,7 +1645,7 @@ fn the_agent_panel_opens_over_the_dashboard() {
 }
 
 #[test]
-fn asking_an_agent_whose_adapter_is_missing_says_how_to_install_it() {
+pub(in crate::app) fn asking_an_agent_whose_adapter_is_missing_says_how_to_install_it() {
     // Isolate discovery without changing the environment of parallel tests.
     if std::env::var_os("DUST_TEST_MISSING_ADAPTER").is_none() {
         let root = tempdir().unwrap();
@@ -1712,7 +1712,7 @@ fn asking_an_agent_whose_adapter_is_missing_says_how_to_install_it() {
 }
 
 #[test]
-fn colorscheme_with_a_name_applies_that_theme_and_refuses_an_unknown_one() {
+pub(in crate::app) fn colorscheme_with_a_name_applies_that_theme_and_refuses_an_unknown_one() {
     let (_app_dirs, mut app) = app();
     let root = tempdir().unwrap();
     let mut loaded = crate::config::load_bundled_config();
@@ -1737,7 +1737,7 @@ fn colorscheme_with_a_name_applies_that_theme_and_refuses_an_unknown_one() {
 }
 
 #[test]
-fn the_settings_page_searches_edits_and_closes_layer_by_layer() {
+pub(in crate::app) fn the_settings_page_searches_edits_and_closes_layer_by_layer() {
     use crate::app::commands::SettingsAction;
     use crate::ui::SettingsEdit;
     use crate::ui::SettingsValue;
@@ -1789,7 +1789,7 @@ fn the_settings_page_searches_edits_and_closes_layer_by_layer() {
 }
 
 #[test]
-fn the_settings_page_saves_and_reloads_user_configuration() {
+pub(in crate::app) fn the_settings_page_saves_and_reloads_user_configuration() {
     use crate::app::commands::SettingsAction;
     use crate::ui::SettingsValue;
     // The worker resolves the user configuration from the environment, so use a child
@@ -1875,7 +1875,7 @@ fn the_settings_page_saves_and_reloads_user_configuration() {
 }
 
 #[test]
-fn the_first_start_setup_saves_the_picked_choices_to_a_new_config() {
+pub(in crate::app) fn the_first_start_setup_saves_the_picked_choices_to_a_new_config() {
     use crate::app::commands::SetupAction;
     // As above, a child process so the user configuration paths can point at an empty folder.
     if std::env::var_os("DUST_TEST_FIRST_START").is_none() {
@@ -1954,7 +1954,7 @@ fn the_first_start_setup_saves_the_picked_choices_to_a_new_config() {
 }
 
 #[test]
-fn the_shortcuts_page_records_new_keys_and_resets_them() {
+pub(in crate::app) fn the_shortcuts_page_records_new_keys_and_resets_them() {
     use crate::app::commands::SettingsAction;
     use crate::ui::SettingsValue;
     // As above, a child process so the user configuration paths can point at a temporary folder.
@@ -2072,7 +2072,7 @@ fn the_shortcuts_page_records_new_keys_and_resets_them() {
 }
 
 #[test]
-fn undo_persistence_policy_changes_with_configuration() {
+pub(in crate::app) fn undo_persistence_policy_changes_with_configuration() {
     let (_app_dirs, mut app) = app();
     let mut loaded = crate::config::load_bundled_config();
     loaded.config.persistence.enabled = true;
@@ -2090,7 +2090,7 @@ fn undo_persistence_policy_changes_with_configuration() {
 }
 
 #[test]
-fn settings_refresh_cancels_an_edit_when_the_selected_key_disappears() {
+pub(in crate::app) fn settings_refresh_cancels_an_edit_when_the_selected_key_disappears() {
     let (_app_dirs, mut app) = app();
     app.open_settings();
     let page = app.ui.settings.as_mut().unwrap();
@@ -2105,7 +2105,7 @@ fn settings_refresh_cancels_an_edit_when_the_selected_key_disappears() {
 }
 
 #[test]
-fn reload_preserves_zen_exit_and_plugin_command_titles() {
+pub(in crate::app) fn reload_preserves_zen_exit_and_plugin_command_titles() {
     let (_app_dirs, mut app) = app();
     app.state
         .open_text(TextBuffer::from_text("a"), None)
@@ -2143,7 +2143,7 @@ fn reload_preserves_zen_exit_and_plugin_command_titles() {
 }
 
 #[test]
-fn plugin_alias_reload_requires_a_safe_label_before_command_completion() {
+pub(in crate::app) fn plugin_alias_reload_requires_a_safe_label_before_command_completion() {
     let (_app_dirs, mut app) = app();
     let mut spec = crate::editor::CommandSpec::builtin("plugin.demo.run", "Run demo").unwrap();
     spec.source = crate::editor::CommandSource::Plugin("demo".into());
@@ -2186,7 +2186,7 @@ fn plugin_alias_reload_requires_a_safe_label_before_command_completion() {
 }
 
 #[test]
-fn plugin_aliases_and_dashboard_actions_wait_for_indexed_declarations() {
+pub(in crate::app) fn plugin_aliases_and_dashboard_actions_wait_for_indexed_declarations() {
     let (_app_dirs, mut app) = app();
     let mut manifest = crate::app::plugins::fixture_manifest("0".repeat(64));
     manifest
@@ -2276,7 +2276,7 @@ fn plugin_aliases_and_dashboard_actions_wait_for_indexed_declarations() {
 }
 
 #[test]
-fn disabled_plugin_command_references_are_not_deferred() {
+pub(in crate::app) fn disabled_plugin_command_references_are_not_deferred() {
     let (_app_dirs, app) = app();
     let mut loaded = crate::config::load_bundled_config();
     loaded
@@ -2292,7 +2292,7 @@ fn disabled_plugin_command_references_are_not_deferred() {
 }
 
 #[test]
-fn direct_motion_binding_preserves_an_explicit_count_of_one() {
+pub(in crate::app) fn direct_motion_binding_preserves_an_explicit_count_of_one() {
     let (_app_dirs, mut app) = app();
     let mut loaded = crate::config::load_bundled_config();
     loaded.keymaps.entries.push(
@@ -2323,7 +2323,7 @@ fn direct_motion_binding_preserves_an_explicit_count_of_one() {
 }
 
 #[test]
-fn user_groups_with_deferred_plugin_continuations_wait_for_the_plugin() {
+pub(in crate::app) fn user_groups_with_deferred_plugin_continuations_wait_for_the_plugin() {
     let (_app_dirs, mut app) = app();
     let mut loaded = crate::config::load_bundled_config();
     loaded.installed_plugins.insert("demo".into());
@@ -2396,7 +2396,7 @@ fn user_groups_with_deferred_plugin_continuations_wait_for_the_plugin() {
 }
 
 #[test]
-fn installed_package_bindings_are_deferred_without_a_duplicate_plugin_entry() {
+pub(in crate::app) fn installed_package_bindings_are_deferred_without_a_duplicate_plugin_entry() {
     let (_app_dirs, app) = app();
     let mut loaded = crate::config::load_bundled_config();
     loaded.installed_plugins.insert("demo".into());
@@ -2419,7 +2419,7 @@ fn installed_package_bindings_are_deferred_without_a_duplicate_plugin_entry() {
 }
 
 #[test]
-fn reload_preserves_plugin_window_rules() {
+pub(in crate::app) fn reload_preserves_plugin_window_rules() {
     let (_app_dirs, mut app) = app();
     let manifest = crate::app::plugins::fixture_manifest("0".repeat(64));
     let index =
@@ -2480,7 +2480,7 @@ fn reload_preserves_plugin_window_rules() {
 }
 
 #[test]
-fn settings_toggles_wait_for_the_saved_configuration_to_reload() {
+pub(in crate::app) fn settings_toggles_wait_for_the_saved_configuration_to_reload() {
     use crate::app::commands::SettingsAction;
     let (_app_dirs, mut app) = app();
     app.open_settings();

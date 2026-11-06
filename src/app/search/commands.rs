@@ -50,3 +50,21 @@ pub(in crate::app) fn register_commands(registry: &mut CommandRegistry<AppEffect
     )?;
 Ok(())
 }
+
+
+use crate::app::App;
+
+impl App {
+    pub(in crate::app) fn process_search_effect(&mut self, effect: AppEffect) -> Result<(), AppEffect> {
+        match effect {
+            AppEffect::TodoSearch => self.start_todo_search(),
+            AppEffect::SearchRepeat { .. }
+            | AppEffect::SearchWord { .. }
+            | AppEffect::SearchSelectNext(_) => {
+                unreachable!("search effects return their status through process_effect_checked")
+            }
+            effect => return Err(effect),
+        }
+        Ok(())
+    }
+}

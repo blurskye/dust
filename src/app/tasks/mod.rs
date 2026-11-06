@@ -20,9 +20,9 @@ use crate::editor::text::ByteOffset;
 use crate::editor::text::ByteRange;
 use crate::editor::text::TextEdit;
 use crate::editor::text::TextEditSet;
-use crate::editor::transaction::EditorOperation;
-use crate::editor::transaction::EditorTransaction;
-use crate::editor::transaction::Precondition;
+use crate::editor::EditorOperation;
+use crate::editor::EditorTransaction;
+use crate::editor::Precondition;
 use crate::process::ExecutionPreflightRequest;
 use crate::process::ExecutionPreflightResult;
 use crate::process::JobEvent;
@@ -1380,4 +1380,4 @@ pub(in crate::app) mod interaction;
 pub(in crate::app) mod commands;
 
 #[cfg(test)]
-mod project_tests;
+pub(in crate::app) mod project_tests;

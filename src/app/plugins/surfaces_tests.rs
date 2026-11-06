@@ -9,7 +9,7 @@ use crate::ui::render::overlays::VIRTUAL_ICON;
 
 
 #[test]
-fn health_virtual_dogfood_opens_refreshes_and_remains_read_only() {
+pub(in crate::app) fn health_virtual_dogfood_opens_refreshes_and_remains_read_only() {
     let (_app_dirs, mut app) = app();
     app.process_effect(AppEffect::HealthVirtualOpen);
     let buffer = app.state.active_buffer_id().expect("health buffer");
@@ -159,7 +159,7 @@ fn health_virtual_dogfood_opens_refreshes_and_remains_read_only() {
 
 
 #[test]
-fn accepted_virtual_snapshot_publishes_through_the_tiled_editor_bridge() {
+pub(in crate::app) fn accepted_virtual_snapshot_publishes_through_the_tiled_editor_bridge() {
     let (_app_dirs, mut app) = app();
     let snapshot = crate::plugins::PluginVirtualDocumentSnapshot {
         plugin: "demo".into(),
@@ -231,7 +231,7 @@ fn accepted_virtual_snapshot_publishes_through_the_tiled_editor_bridge() {
 
 
 #[test]
-fn universal_window_clone_uses_editor_owned_independent_text_and_virtual_views() {
+pub(in crate::app) fn universal_window_clone_uses_editor_owned_independent_text_and_virtual_views() {
     let (_app_dirs, mut app) = app();
     let (buffer, original_view) = app
         .state
@@ -442,7 +442,7 @@ fn universal_window_clone_uses_editor_owned_independent_text_and_virtual_views()
 
 
 #[test]
-fn virtual_read_only_origin_never_queues_save_reload_or_recovery_io() {
+pub(in crate::app) fn virtual_read_only_origin_never_queues_save_reload_or_recovery_io() {
     let (_app_dirs, mut app) = app();
     let (buffer, _) = app
         .state
@@ -482,7 +482,7 @@ fn virtual_read_only_origin_never_queues_save_reload_or_recovery_io() {
 
 
 #[test]
-fn content_line_uses_filename_icons_for_extensionless_files() {
+pub(in crate::app) fn content_line_uses_filename_icons_for_extensionless_files() {
     let (_app_dirs, mut app) = app();
     for name in ["Dockerfile", "Makefile", "README", ".gitignore"] {
         app.state
@@ -508,7 +508,7 @@ fn content_line_uses_filename_icons_for_extensionless_files() {
 
 
 #[test]
-fn text_and_virtual_windows_project_input_and_preserve_identity_across_ordinary_placements() {
+pub(in crate::app) fn text_and_virtual_windows_project_input_and_preserve_identity_across_ordinary_placements() {
     let (_app_dirs, mut app) = app();
     app.window_session.observe_size((80, 24));
     app.state
@@ -856,7 +856,7 @@ fn text_and_virtual_windows_project_input_and_preserve_identity_across_ordinary_
 
 
 #[test]
-fn startup_plugin_publication_waits_for_session_restoration() {
+pub(in crate::app) fn startup_plugin_publication_waits_for_session_restoration() {
     use crate::persistence::PersistedLayout;
     use crate::persistence::PersistedPane;
     use crate::persistence::PersistedSession;

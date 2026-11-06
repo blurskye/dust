@@ -4,7 +4,7 @@ use crate::app::workspace::project_tests::wait_workspace_search;
 
 
 #[test]
-fn search_moves_forward_wraps_and_repeats() {
+pub(in crate::app) fn search_moves_forward_wraps_and_repeats() {
     let (_app_dirs, mut app) = app();
     let (_, view) = app
         .state
@@ -34,7 +34,7 @@ fn search_moves_forward_wraps_and_repeats() {
 
 
 #[test]
-fn help_filters_do_not_restart_the_suspended_live_grep() {
+pub(in crate::app) fn help_filters_do_not_restart_the_suspended_live_grep() {
     let (_app_dirs, mut app) = app();
     fs::write(app.state.workspace_root.join("match.txt"), "needle\n").unwrap();
     app.invoke_mapped_command("workspace.search.prompt");
@@ -63,7 +63,7 @@ fn help_filters_do_not_restart_the_suspended_live_grep() {
 
 
 #[test]
-fn grep_rows_draw_the_icon_location_and_highlighted_text_as_lazyvim_does() {
+pub(in crate::app) fn grep_rows_draw_the_icon_location_and_highlighted_text_as_lazyvim_does() {
     let (_app_dirs, mut app) = app();
     fs::write(
         app.state.workspace_root.join("main.rs"),

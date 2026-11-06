@@ -1,3 +1,4 @@
+//! Workspace preview source capture and all-or-nothing editor draft preparation.
 
 pub(crate) struct DraftEdit<'a> {
     pub(crate) canonical_path: &'a std::path::Path,
@@ -12,7 +13,6 @@ pub struct DocumentSnapshot {
     pub revision: Option<crate::editor::text::BufferRevision>,
     pub bytes: Vec<u8>,
 }
-//! Workspace preview source capture and all-or-nothing editor draft preparation.
 use std::path::PathBuf;
 
 use crate::editor::state::BufferId;
@@ -109,7 +109,7 @@ impl EditorState {
                 .as_ref()
                 .is_some_and(|path| path.starts_with(source))
                 && !sources.buffers.iter().any(|(expected, path, _)| {
-                    *expected == id && buffer.path.as_ref() == Some(path)
+                    *expected == id && buffer.path.as_deref() == Some(path)
                 })
         }) {
             return Err("a new buffer owns the workspace resource path".into());
@@ -173,7 +173,7 @@ impl EditorState {
             let current = self
                 .buffers
                 .iter()
-                .find(|(_, buffer)| buffer.path.as_ref() == Some(file.canonical_path));
+                .find(|(_, buffer)| buffer.path.as_deref() == Some(file.canonical_path));
             match (before, current) {
                 (Some((expected, _, version)), Some((id, buffer)))
                     if *expected == id
@@ -199,7 +199,7 @@ impl EditorState {
                 .state
                 .buffers
                 .iter()
-                .find(|(_, buffer)| buffer.path.as_ref() == Some(file.canonical_path))
+                .find(|(_, buffer)| buffer.path.as_deref() == Some(file.canonical_path))
                 .map(|(id, _)| id);
             let buffer = if let Some(id) = existing {
                 id
@@ -263,7 +263,7 @@ impl EditorDraft {
                     .buffers
                     .iter()
                     .find(|(_, buffer)| {
-                        buffer.path.as_ref() == Some(path)
+                        buffer.path.as_deref() == Some(path)
                             && buffer.text.matches_encoded_text(bytes)
                     })
                     .map(|(id, buffer)| {
@@ -290,7 +290,7 @@ impl WorkspaceCommitCheck {
         self.editor.same_editor(&editor.window_version())
             && self.targets.iter().all(|(id, path, text)| {
                 editor.buffers.get(*id).is_some_and(|buffer| {
-                    buffer.path.as_ref() == Some(path) && buffer.text.source_version() == *text
+                    buffer.path.as_deref() == Some(path) && buffer.text.source_version() == *text
                 })
             })
     }

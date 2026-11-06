@@ -4,7 +4,7 @@ use crate::app::tests::*;
 
 
 #[test]
-fn breakpoint_condition_prompt_preserves_its_original_target_and_other_settings() {
+pub(in crate::app) fn breakpoint_condition_prompt_preserves_its_original_target_and_other_settings() {
     let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("original.rs");
     let (_, view) = app
@@ -47,7 +47,7 @@ fn breakpoint_condition_prompt_preserves_its_original_target_and_other_settings(
 
 
 #[test]
-fn saved_watches_are_listed_without_a_debugger() {
+pub(in crate::app) fn saved_watches_are_listed_without_a_debugger() {
     let (_app_dirs, mut app) = app();
     app.process_effect(AppEffect::DapWatchAdd("counter".into()));
     app.process_effect(AppEffect::DapWatchList);
@@ -60,7 +60,7 @@ fn saved_watches_are_listed_without_a_debugger() {
 
 
 #[test]
-fn problems_logs_output_and_debug_keep_distinct_graph_surface_identities() {
+pub(in crate::app) fn problems_logs_output_and_debug_keep_distinct_graph_surface_identities() {
     let (_app_dirs, mut app) = app();
     app.state
         .open_text(TextBuffer::from_text("editor"), None)
@@ -198,7 +198,7 @@ fn problems_logs_output_and_debug_keep_distinct_graph_surface_identities() {
 
 
 #[test]
-fn breakpoint_gutter_signs_distinguish_disabled_breakpoints() {
+pub(in crate::app) fn breakpoint_gutter_signs_distinguish_disabled_breakpoints() {
     let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("source.rs");
     app.state
@@ -247,7 +247,7 @@ fn breakpoint_gutter_signs_distinguish_disabled_breakpoints() {
 
 #[cfg(unix)]
 #[test]
-fn debugger_protected_launch_source_capture_refusal_and_fresh_recovery() {
+pub(in crate::app) fn debugger_protected_launch_source_capture_refusal_and_fresh_recovery() {
     use crate::app::tests::driver::TestSession;
     let files = tempfile::tempdir().unwrap();
     let adapter = files.path().join("adapter.py");
@@ -471,7 +471,7 @@ pub(in crate::app) fn logging_adapter_fixture(
 
 
 #[test]
-fn a_started_session_makes_the_debug_arrangement_appear_with_its_own_identity() {
+pub(in crate::app) fn a_started_session_makes_the_debug_arrangement_appear_with_its_own_identity() {
     let (_files, _log_path, mut driver) =
         logging_adapter_fixture(crate::config::DebugRequestKind::Launch);
 

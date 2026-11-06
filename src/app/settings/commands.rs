@@ -2,18 +2,9 @@
 use crate::app::AppEffect;
 use crate::app::App;
 
-impl App {
-    pub(in crate::app) fn process_settings_effect(&mut self, effect: AppEffect) -> Result<(), AppEffect> {
-        match effect {
-            AppEffect::Settings(action) => self.settings_action(action),
-            AppEffect::Setup(action) => self.setup_action(action),
-            effect => return Err(effect),
-        }
-        Ok(())
-    }
-}
 
-use crate::app::commands::AppEffect;
+
+
 use crate::editor::ArgumentSchema;
 use crate::editor::ArgumentType;
 use crate::editor::CommandError;
@@ -197,4 +188,16 @@ pub(in crate::app) fn register_commands(registry: &mut CommandRegistry<AppEffect
         },
     )?;
 Ok(())
+}
+
+
+impl App {
+    pub(in crate::app) fn process_settings_effect(&mut self, effect: AppEffect) -> Result<(), AppEffect> {
+        match effect {
+            AppEffect::Settings(action) => self.settings_action(action),
+            AppEffect::Setup(action) => self.setup_action(action),
+            effect => return Err(effect),
+        }
+        Ok(())
+    }
 }

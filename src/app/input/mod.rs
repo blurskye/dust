@@ -43,7 +43,7 @@ struct PendingKeymap {
 
 /// Runtime input state is separate from immutable compiled configuration bindings.
 pub(super) struct InputSession {
-    snippet: Option<snippets::SnippetSession>,
+    pub(in crate::app) snippet: Option<snippets::SnippetSession>,
     mouse: mouse::MouseState,
     last_search_forward: bool,
     whole_word_search: bool,

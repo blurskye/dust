@@ -1556,3 +1556,18 @@ pub(in crate::app) fn register_commands(registry: &mut CommandRegistry<AppEffect
     )?;
 Ok(())
 }
+
+
+
+impl App {
+    pub(in crate::app) fn process_tutor_effect(&mut self, effect: AppEffect) -> Result<(), AppEffect> {
+        match effect {
+            AppEffect::Tutor => self.open_tutor(),
+            AppEffect::TutorNext => self.tutor_next(),
+            AppEffect::TutorBack => self.tutor_back(),
+            AppEffect::TutorQuit => self.tutor_quit(),
+            effect => return Err(effect),
+        }
+        Ok(())
+    }
+}

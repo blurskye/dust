@@ -4,7 +4,7 @@ use crate::app::tests::*;
 
 
 #[test]
-fn prompt_mouse_context_is_independently_configurable() {
+pub(in crate::app) fn prompt_mouse_context_is_independently_configurable() {
     let (_app_dirs, mut app) = app();
     let mut loaded = crate::config::load_bundled_config().keymaps;
     loaded.entries.push(crate::config::KeymapEntry {
@@ -37,7 +37,7 @@ fn prompt_mouse_context_is_independently_configurable() {
 
 
 #[test]
-fn protected_prompt_region_blocks_ordinary_compositor_hit_testing() {
+pub(in crate::app) fn protected_prompt_region_blocks_ordinary_compositor_hit_testing() {
     let (_app_dirs, mut app) = app();
     app.state
         .open_text(crate::editor::text::TextBuffer::from_text("abcdef"), None)

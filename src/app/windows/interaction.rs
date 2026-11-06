@@ -18,12 +18,12 @@ use crate::app::WindowPlacement;
 use crate::app::WindowRect;
 // Remaining editor/window routing; terminal data and algorithms live in the owner.
 use crate::app::PtyId;
-use crate::app::PtyId;
+
 use crate::app::command;
 use crate::windows::PANE_DEFAULT_RATIO;
 use crate::windows::PANE_MINIMUM_HEIGHT;
 use crate::windows::PANE_MINIMUM_WIDTH;
-use crate::windows::WindowPlacement;
+
 use crate::app::windows::CommandEffect;
 use crate::app::windows::CommandError;
 use crate::app::windows::CommandPolicy;

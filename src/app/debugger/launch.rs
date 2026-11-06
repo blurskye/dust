@@ -30,7 +30,7 @@ pub(in crate::app) struct DebugIntent {
     nonce: Arc<()>,
 }
 impl PartialEq for DebugIntent {
-    pub(in crate::app) fn eq(&self, other: &Self) -> bool {
+    fn eq(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.nonce, &other.nonce)
     }
 }

@@ -9,9 +9,9 @@ use crate::app::PickerOrigin;
 use crate::app::PickerPayload;
 use crate::app::PickerSurfaceKind;
 use crate::app::command;
-use crate::workspace::PickerAction;
-use crate::workspace::PickerItem;
-use crate::workspace::PickerItemId;
+
+
+
 
 
 
@@ -263,4 +263,18 @@ pub(in crate::app) fn register_commands(registry: &mut CommandRegistry<AppEffect
         |_invocation| Ok(AppEffect::HelpCommandReference),
     )?;
 Ok(())
+}
+
+
+
+impl App {
+    pub(in crate::app) fn process_help_effect(&mut self, effect: AppEffect) -> Result<(), AppEffect> {
+        match effect {
+            AppEffect::HelpForForm => self.open_form_help(),
+            AppEffect::HelpContextual => self.open_contextual_help(),
+            AppEffect::HelpCommandReference => self.open_command_reference(),
+            effect => return Err(effect),
+        }
+        Ok(())
+    }
 }

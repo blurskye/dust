@@ -16,9 +16,9 @@ use crate::app::TrustedAction;
 use crate::app::file_uri;
 use crate::app::language_id_for_path;
 use crate::app::command;
-use crate::workspace::PickerAction;
-use crate::workspace::PickerItem;
-use crate::workspace::PickerItemId;
+
+
+
 
 
 

@@ -146,7 +146,7 @@ fn substitution_edits(
 
 /// The edits a `:s` makes in `view`, and how many lines they change.
 fn view_substitution(
-    view: &crate::editor::state::View,
+    view: &crate::editor::View,
     text: &TextBuffer,
     (range, pattern, replacement, flags): (&str, &str, &str, &str),
 ) -> Result<(Vec<TextEdit>, usize), String> {
@@ -161,7 +161,7 @@ fn view_substitution(
 
 /// The zero-based lines of `range` that match `pattern`, or with `invert` that don't.
 fn global_lines(
-    view: &crate::editor::state::View,
+    view: &crate::editor::View,
     text: &TextBuffer,
     range: &str,
     pattern: &str,
@@ -714,7 +714,7 @@ mod tests {
     #[test]
     fn word_boundaries_are_directional_and_preserve_escaped_backslashes() {
         let text = TextBuffer::from_text("foo\\< foo\\>\nfoo\n");
-        let view = crate::editor::state::View::new(crate::editor::BufferId::default());
+        let view = crate::editor::View::new(crate::editor::BufferId::default());
         for (pattern, lines) in [
             (r"foo\<", vec![]),
             (r"\>foo", vec![]),
@@ -752,7 +752,7 @@ mod tests {
     #[test]
     fn global_takes_the_lines_that_match_or_with_v_the_others() {
         let text = TextBuffer::from_text("keep\n// note\nkeep too\n// more\n");
-        let view = crate::editor::state::View::new(crate::editor::BufferId::default());
+        let view = crate::editor::View::new(crate::editor::BufferId::default());
         assert_eq!(
             global_lines(&view, &text, "%", "^//", false),
             Ok(vec![1, 3])

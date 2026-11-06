@@ -4,7 +4,7 @@ use crate::app::explorer::ExplorerSession;
 use crate::app::explorer::WorkspaceVersion;
 use crate::app::windows::NavigationStamp;
 use crate::editor::EditorWindowVersion;
-use crate::editor::transaction::BufferPathChange;
+use crate::editor::BufferPathChange;
 use crate::files::ExplorerIoReply;
 use crate::files::ExplorerMutation;
 use crate::files::PreparedExplorerMutation;

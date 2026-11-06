@@ -4,7 +4,7 @@ use crate::app::tests::*;
 
 
 #[test]
-fn directional_resize_uses_the_focused_explorer_clone() {
+pub(in crate::app) fn directional_resize_uses_the_focused_explorer_clone() {
     let (_app_dirs, mut app) = app();
     app.state
         .open_text(TextBuffer::from_text("editor"), None)
@@ -58,7 +58,7 @@ fn directional_resize_uses_the_focused_explorer_clone() {
 
 
 #[test]
-fn dashboard_exposes_and_dispatches_the_file_explorer_without_picker_fallback() {
+pub(in crate::app) fn dashboard_exposes_and_dispatches_the_file_explorer_without_picker_fallback() {
     let (_app_dirs, mut app) = app();
     app.project_configuration();
     assert!(app.ui.dashboard);
@@ -80,7 +80,7 @@ fn dashboard_exposes_and_dispatches_the_file_explorer_without_picker_fallback() 
 
 
 #[test]
-fn clicking_explorer_cancels_flash_without_swallowing_the_next_key() {
+pub(in crate::app) fn clicking_explorer_cancels_flash_without_swallowing_the_next_key() {
     let (_app_dirs, mut app) = app();
     let (_, view) = app
         .state
@@ -117,7 +117,7 @@ fn clicking_explorer_cancels_flash_without_swallowing_the_next_key() {
 
 
 #[test]
-fn explorer_is_a_graph_dock_and_bundled_disable_is_transactional() {
+pub(in crate::app) fn explorer_is_a_graph_dock_and_bundled_disable_is_transactional() {
     let (_app_dirs, mut app) = app();
     app.state
         .open_text(TextBuffer::from_text("editor"), None)
@@ -147,7 +147,7 @@ fn explorer_is_a_graph_dock_and_bundled_disable_is_transactional() {
 
 
 #[test]
-fn the_explorer_moves_to_the_side_its_setting_names_while_open() {
+pub(in crate::app) fn the_explorer_moves_to_the_side_its_setting_names_while_open() {
     let (_app_dirs, mut app) = app();
     app.state
         .open_text(TextBuffer::from_text("editor"), None)
@@ -170,7 +170,7 @@ fn the_explorer_moves_to_the_side_its_setting_names_while_open() {
 
 
 #[test]
-fn swapping_a_configured_explorer_into_hidden_retains_its_actual_placement() {
+pub(in crate::app) fn swapping_a_configured_explorer_into_hidden_retains_its_actual_placement() {
     let (_app_dirs, mut app) = app();
     app.state
         .open_text(TextBuffer::from_text("editor"), None)
@@ -242,7 +242,7 @@ fn swapping_a_configured_explorer_into_hidden_retains_its_actual_placement() {
 
 
 #[test]
-fn hiding_the_terminal_goes_back_to_the_file_not_the_explorer() {
+pub(in crate::app) fn hiding_the_terminal_goes_back_to_the_file_not_the_explorer() {
     let (_app_dirs, mut app) = app();
     app.state
         .open_text(TextBuffer::from_text("editor"), None)
@@ -294,7 +294,7 @@ fn hiding_the_terminal_goes_back_to_the_file_not_the_explorer() {
 
 
 #[test]
-fn picker_mouse_input_does_not_scroll_the_background_explorer() {
+pub(in crate::app) fn picker_mouse_input_does_not_scroll_the_background_explorer() {
     let (_app_dirs, mut app) = app();
     for name in ["a", "b", "c", "d", "e"] {
         fs::write(app.state.workspace_root.join(name), name).unwrap();

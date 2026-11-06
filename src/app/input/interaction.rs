@@ -19,12 +19,12 @@ use crate::app::editor_state_gutter_width;
 use slotmap::Key;
 // Remaining editor/window routing; terminal data and algorithms live in the owner.
 use crate::app::PtyId;
-use crate::app::CommandValue;
+
 use crate::app::Duration;
 use crate::app::KeyEvent;
 use crate::app::KeyInputKind;
 use crate::app::MappingResolution;
-use crate::app::PtyId;
+
 use crate::app::TerminalPanelMode;
 use crate::app::UiEvent;
 use crate::app::command;
@@ -34,8 +34,8 @@ use crate::app::terminal_tab_at_column;
 use crate::ui::render::TERMINAL_PANEL_MINIMUM_HEIGHT;
 use crate::windows::PANE_MINIMUM_HEIGHT;
 use crate::windows::PANE_MINIMUM_WIDTH;
-use crate::windows::WindowPlacement;
-use crate::app::windows::rect_contains_point;
+
+
 use crate::app::workspace_top_rows;
 
 

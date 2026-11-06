@@ -1,7 +1,7 @@
 use crate::app::tests::*;
 
 #[test]
-fn first_frame_renders_before_startup_file_is_queued_and_vfs_then_opens_it() {
+pub(in crate::app) fn first_frame_renders_before_startup_file_is_queued_and_vfs_then_opens_it() {
     let root = tempdir().unwrap();
     let state = tempdir().unwrap();
     let path = root.path().join("startup.txt");
@@ -54,7 +54,7 @@ fn first_frame_renders_before_startup_file_is_queued_and_vfs_then_opens_it() {
 }
 
 #[test]
-fn deferred_startup_additional_files_restore_the_primary_buffer() {
+pub(in crate::app) fn deferred_startup_additional_files_restore_the_primary_buffer() {
     let (_app_dirs, mut app) = app();
     let primary = app.state.workspace_root.join("primary.txt");
     let additional = app.state.workspace_root.join("additional.txt");
@@ -81,7 +81,7 @@ fn deferred_startup_additional_files_restore_the_primary_buffer() {
 }
 
 #[test]
-fn marks_follow_ordinary_edits_before_any_window_transition() {
+pub(in crate::app) fn marks_follow_ordinary_edits_before_any_window_transition() {
     let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("marks.txt");
     fs::write(&path, "abc target").unwrap();
@@ -104,7 +104,7 @@ fn marks_follow_ordinary_edits_before_any_window_transition() {
 }
 
 #[test]
-fn path_completion_is_bounded_async_and_rejects_stale_generations() {
+pub(in crate::app) fn path_completion_is_bounded_async_and_rejects_stale_generations() {
     let (_app_dirs, mut app) = app();
     fs::write(app.state.workspace_root.join("alpha.txt"), b"a").expect("alpha");
     wait_vfs(&mut app);
@@ -135,7 +135,7 @@ fn path_completion_is_bounded_async_and_rejects_stale_generations() {
 }
 
 #[test]
-fn path_completion_limits_matching_entries() {
+pub(in crate::app) fn path_completion_limits_matching_entries() {
     use crate::app::input::COMPLETION_LIMIT;
     let (_app_dirs, mut app) = app();
     for index in 0..COMPLETION_LIMIT + 10 {
@@ -159,7 +159,7 @@ fn path_completion_limits_matching_entries() {
 }
 
 #[test]
-fn path_completion_keeps_open_buffers_and_lists_directory_children() {
+pub(in crate::app) fn path_completion_keeps_open_buffers_and_lists_directory_children() {
     let (_app_dirs, mut app) = app();
     let directory = app.state.workspace_root.join("src");
     fs::create_dir(&directory).expect("src");
@@ -193,7 +193,7 @@ fn path_completion_keeps_open_buffers_and_lists_directory_children() {
 }
 
 #[test]
-fn typing_a_path_keeps_one_listing_in_flight_and_completes_the_latest_input() {
+pub(in crate::app) fn typing_a_path_keeps_one_listing_in_flight_and_completes_the_latest_input() {
     let (_app_dirs, mut app) = app();
     fs::write(app.state.workspace_root.join("alpha.txt"), b"a").expect("alpha");
     fs::write(app.state.workspace_root.join("beta.txt"), b"b").expect("beta");
@@ -213,7 +213,7 @@ fn typing_a_path_keeps_one_listing_in_flight_and_completes_the_latest_input() {
 }
 
 #[test]
-fn command_completion_accepts_registry_items_and_preserves_invalid_input() {
+pub(in crate::app) fn command_completion_accepts_registry_items_and_preserves_invalid_input() {
     let (_app_dirs, mut app) = app();
     {
         let mut fixture = app.configuration.fixture_snapshot();
@@ -262,7 +262,7 @@ fn command_completion_accepts_registry_items_and_preserves_invalid_input() {
 }
 
 #[test]
-fn dot_repeats_semantic_insert_session() {
+pub(in crate::app) fn dot_repeats_semantic_insert_session() {
     let (_app_dirs, mut app) = app();
     app.state
         .open_text(crate::editor::text::TextBuffer::from_text("one"), None)
@@ -279,7 +279,7 @@ fn dot_repeats_semantic_insert_session() {
 }
 
 #[test]
-fn a_yank_lights_up_the_yanked_text_for_a_moment() {
+pub(in crate::app) fn a_yank_lights_up_the_yanked_text_for_a_moment() {
     let (_app_dirs, mut app) = app();
     app.state
         .open_text(
@@ -321,7 +321,7 @@ fn a_yank_lights_up_the_yanked_text_for_a_moment() {
 }
 
 #[test]
-fn counted_dot_overrides_the_recorded_count_and_keeps_it_for_later_repeats() {
+pub(in crate::app) fn counted_dot_overrides_the_recorded_count_and_keeps_it_for_later_repeats() {
     let (_app_dirs, mut app) = app();
     let (buffer, _) = app
         .state
@@ -341,7 +341,7 @@ fn counted_dot_overrides_the_recorded_count_and_keeps_it_for_later_repeats() {
 }
 
 #[test]
-fn counted_dot_repeats_inserted_text_and_open_lines() {
+pub(in crate::app) fn counted_dot_repeats_inserted_text_and_open_lines() {
     for (key, original, expected) in [
         ('i', "ABone", "ABABABABone"),
         ('a', "oABne", "oABABABABne"),
@@ -374,7 +374,7 @@ fn counted_dot_repeats_inserted_text_and_open_lines() {
 }
 
 #[test]
-fn counted_search_commands_move_to_the_requested_match() {
+pub(in crate::app) fn counted_search_commands_move_to_the_requested_match() {
     for (keys, cursor, expected, selected) in [
         ("3n", 0, 12, false),
         ("3N", 20, 8, false),
@@ -403,7 +403,7 @@ fn counted_search_commands_move_to_the_requested_match() {
 }
 
 #[test]
-fn counted_diagnostic_commands_move_the_requested_number_of_problems() {
+pub(in crate::app) fn counted_diagnostic_commands_move_the_requested_number_of_problems() {
     use crate::app::diagnostics::DiagnosticBatch;
     use crate::app::diagnostics::DiagnosticDocument;
     use crate::app::diagnostics::DiagnosticValidity;
@@ -463,7 +463,7 @@ fn counted_diagnostic_commands_move_the_requested_number_of_problems() {
 }
 
 #[test]
-fn counted_buffer_tab_and_pane_commands_keep_their_counts() {
+pub(in crate::app) fn counted_buffer_tab_and_pane_commands_keep_their_counts() {
     let (_app_dirs, mut app) = app();
     let buffers = (0..5)
         .map(|_| {
@@ -512,7 +512,7 @@ fn counted_buffer_tab_and_pane_commands_keep_their_counts() {
 }
 
 #[test]
-fn empty_insert_sessions_preserve_the_previous_dot_change() {
+pub(in crate::app) fn empty_insert_sessions_preserve_the_previous_dot_change() {
     let (_app_dirs, mut app) = app();
     app.state
         .open_text(crate::editor::text::TextBuffer::from_text("abc"), None)
@@ -526,7 +526,7 @@ fn empty_insert_sessions_preserve_the_previous_dot_change() {
 }
 
 #[test]
-fn insert_cursor_motion_splits_dot_recording() {
+pub(in crate::app) fn insert_cursor_motion_splits_dot_recording() {
     let (_app_dirs, mut app) = app();
     app.state
         .open_text(crate::editor::text::TextBuffer::from_text("one"), None)
@@ -547,7 +547,7 @@ fn insert_cursor_motion_splits_dot_recording() {
 }
 
 #[test]
-fn normalized_multiline_character_repeat_preserves_lines_and_end_column() {
+pub(in crate::app) fn normalized_multiline_character_repeat_preserves_lines_and_end_column() {
     let (_app_dirs, mut app) = app();
     app.state
         .open_text(
@@ -564,7 +564,7 @@ fn normalized_multiline_character_repeat_preserves_lines_and_end_column() {
 }
 
 #[test]
-fn multiline_visual_repeat_at_document_end_deletes_the_remaining_text() {
+pub(in crate::app) fn multiline_visual_repeat_at_document_end_deletes_the_remaining_text() {
     for terminated in [false, true] {
         let (_app_dirs, mut app) = app();
         let source = format!("ab\ncd\n0123456789{}", if terminated { "\n" } else { "" });
@@ -582,7 +582,7 @@ fn multiline_visual_repeat_at_document_end_deletes_the_remaining_text() {
 }
 
 #[test]
-fn normalized_visual_comment_and_surround_keep_operator_arguments() {
+pub(in crate::app) fn normalized_visual_comment_and_surround_keep_operator_arguments() {
     for (operator, argument, value, expected) in [
         ("surround_add", "character", ")", "(ab) (cd)"),
         ("comment", "comment", "//", "// ab\n// cd"),
@@ -619,7 +619,7 @@ fn normalized_visual_comment_and_surround_keep_operator_arguments() {
 }
 
 #[test]
-fn normalized_visual_indent_repeats_the_level_count() {
+pub(in crate::app) fn normalized_visual_indent_repeats_the_level_count() {
     let (_app_dirs, mut app) = app();
     app.state
         .open_text(crate::editor::text::TextBuffer::from_text("a\nb"), None)
@@ -637,7 +637,7 @@ fn normalized_visual_indent_repeats_the_level_count() {
 }
 
 #[test]
-fn counted_insert_and_dot_preserve_the_insertion_count() {
+pub(in crate::app) fn counted_insert_and_dot_preserve_the_insertion_count() {
     let (_app_dirs, mut app) = app();
     let (buffer, view) = app
         .state
@@ -657,7 +657,7 @@ fn counted_insert_and_dot_preserve_the_insertion_count() {
 }
 
 #[test]
-fn visual_comment_and_surround_dot_retain_operator_arguments() {
+pub(in crate::app) fn visual_comment_and_surround_dot_retain_operator_arguments() {
     let (_comment_dirs, mut comment) = app();
     let path = comment.state.workspace_root.join("repeat.rs");
     let (buffer, _) = comment
@@ -688,7 +688,7 @@ fn visual_comment_and_surround_dot_retain_operator_arguments() {
 }
 
 #[test]
-fn visual_indent_dot_retains_the_number_of_levels() {
+pub(in crate::app) fn visual_indent_dot_retains_the_number_of_levels() {
     let (_app_dirs, mut app) = app();
     let (buffer, _) = app
         .state
@@ -709,7 +709,7 @@ fn visual_indent_dot_retains_the_number_of_levels() {
 }
 
 #[test]
-fn normalized_characterwise_and_linewise_changes_repeat_without_selection() {
+pub(in crate::app) fn normalized_characterwise_and_linewise_changes_repeat_without_selection() {
     let (_character_dirs, mut character) = app();
     character
         .state
@@ -741,7 +741,7 @@ fn normalized_characterwise_and_linewise_changes_repeat_without_selection() {
 }
 
 #[test]
-fn normalized_multiline_character_repeat_keeps_its_last_line_extent() {
+pub(in crate::app) fn normalized_multiline_character_repeat_keeps_its_last_line_extent() {
     for reverse in [false, true] {
         let (_app_dirs, mut app) = app();
         let (buffer, view) = app
@@ -777,7 +777,7 @@ fn normalized_multiline_character_repeat_keeps_its_last_line_extent() {
 }
 
 #[test]
-fn normalized_block_repeat_does_not_insert_on_the_trailing_phantom_line() {
+pub(in crate::app) fn normalized_block_repeat_does_not_insert_on_the_trailing_phantom_line() {
     let (_app_dirs, mut app) = app();
     let (buffer, view) = app
         .state
@@ -798,7 +798,7 @@ fn normalized_block_repeat_does_not_insert_on_the_trailing_phantom_line() {
 }
 
 #[test]
-fn normalized_blockwise_change_repeats_without_a_stale_selection() {
+pub(in crate::app) fn normalized_blockwise_change_repeats_without_a_stale_selection() {
     let (_app_dirs, mut app) = app();
     app.state
         .open_text(
@@ -821,7 +821,7 @@ fn normalized_blockwise_change_repeats_without_a_stale_selection() {
 }
 
 #[test]
-fn normalized_block_repeat_pads_new_ragged_and_empty_rows_by_display_column() {
+pub(in crate::app) fn normalized_block_repeat_pads_new_ragged_and_empty_rows_by_display_column() {
     let (_app_dirs, mut app) = app();
     let (buffer, view) = app
         .state
@@ -863,7 +863,7 @@ fn normalized_block_repeat_pads_new_ragged_and_empty_rows_by_display_column() {
 }
 
 #[test]
-fn replace_mode_session_is_semantically_repeatable() {
+pub(in crate::app) fn replace_mode_session_is_semantically_repeatable() {
     let (_app_dirs, mut app) = app();
     app.state
         .open_text(crate::editor::text::TextBuffer::from_text("abc"), None)
@@ -879,7 +879,7 @@ fn replace_mode_session_is_semantically_repeatable() {
 }
 
 #[test]
-fn surround_find_keeps_the_target_separate_from_the_delimiter() {
+pub(in crate::app) fn surround_find_keeps_the_target_separate_from_the_delimiter() {
     for (keys, expected) in [("gsafX)", "(abcX)def"), ("gsatX]", "[abc]Xdef")] {
         let (_app_dirs, mut app) = app();
         app.state
@@ -895,7 +895,7 @@ fn surround_find_keeps_the_target_separate_from_the_delimiter() {
 }
 
 #[test]
-fn command_line_macro_recording_is_stopped_by_the_normal_toggle() {
+pub(in crate::app) fn command_line_macro_recording_is_stopped_by_the_normal_toggle() {
     let (_app_dirs, mut app) = app();
     app.state
         .open_text(TextBuffer::from_text("abcde"), None)
@@ -914,7 +914,7 @@ fn command_line_macro_recording_is_stopped_by_the_normal_toggle() {
 }
 
 #[test]
-fn blockwise_visual_commands_record_and_replay_as_typed_macro_invocations() {
+pub(in crate::app) fn blockwise_visual_commands_record_and_replay_as_typed_macro_invocations() {
     let (_app_dirs, mut app) = app();
     app.state
         .open_text(
@@ -934,7 +934,7 @@ fn blockwise_visual_commands_record_and_replay_as_typed_macro_invocations() {
 }
 
 #[test]
-fn explicit_macro_commands_and_q_share_recording_state() {
+pub(in crate::app) fn explicit_macro_commands_and_q_share_recording_state() {
     let (_app_dirs, mut app) = app();
     app.state
         .open_text(TextBuffer::from_text("abc"), None)
@@ -963,7 +963,7 @@ fn explicit_macro_commands_and_q_share_recording_state() {
 }
 
 #[test]
-fn macros_record_command_line_edits_once() {
+pub(in crate::app) fn macros_record_command_line_edits_once() {
     let (_app_dirs, mut app) = app();
     app.state
         .open_text(crate::editor::text::TextBuffer::from_text("abcde"), None)
@@ -986,7 +986,7 @@ fn macros_record_command_line_edits_once() {
 }
 
 #[test]
-fn macro_edits_replace_the_previous_dot_change() {
+pub(in crate::app) fn macro_edits_replace_the_previous_dot_change() {
     let (_app_dirs, mut app) = app();
     app.state
         .open_text(crate::editor::text::TextBuffer::from_text("abc"), None)
@@ -1000,7 +1000,7 @@ fn macro_edits_replace_the_previous_dot_change() {
 }
 
 #[test]
-fn direct_macro_commands_keep_the_recording_grammar_in_sync() {
+pub(in crate::app) fn direct_macro_commands_keep_the_recording_grammar_in_sync() {
     let (_app_dirs, mut app) = app();
     app.state
         .open_text(crate::editor::text::TextBuffer::from_text("abcd"), None)
@@ -1029,7 +1029,7 @@ fn direct_macro_commands_keep_the_recording_grammar_in_sync() {
 }
 
 #[test]
-fn macro_replay_honors_configured_counts() {
+pub(in crate::app) fn macro_replay_honors_configured_counts() {
     let (_app_dirs, mut app) = app();
     app.state
         .open_text(crate::editor::text::TextBuffer::from_text("abcde"), None)
@@ -1047,7 +1047,7 @@ fn macro_replay_honors_configured_counts() {
 }
 
 #[test]
-fn counted_macro_replay_stops_when_a_nested_macro_fails() {
+pub(in crate::app) fn counted_macro_replay_stops_when_a_nested_macro_fails() {
     let (_app_dirs, mut app) = app();
     let (buffer, _) = app
         .state
@@ -1073,7 +1073,7 @@ fn counted_macro_replay_stops_when_a_nested_macro_fails() {
 }
 
 #[test]
-fn key_hint_lifecycle_tracks_exact_prefix_delay_and_cancellation() {
+pub(in crate::app) fn key_hint_lifecycle_tracks_exact_prefix_delay_and_cancellation() {
     let (_app_dirs, mut app) = app();
     let clock = std::sync::Arc::new(crate::clock::ManualClock::new(
         std::time::UNIX_EPOCH,
@@ -1156,7 +1156,7 @@ fn key_hint_lifecycle_tracks_exact_prefix_delay_and_cancellation() {
 }
 
 #[test]
-fn key_hint_timeout_reload_and_pass_through_never_leave_stale_actions() {
+pub(in crate::app) fn key_hint_timeout_reload_and_pass_through_never_leave_stale_actions() {
     let (_app_dirs, mut app) = app();
     let clock = std::sync::Arc::new(crate::clock::ManualClock::new(
         std::time::UNIX_EPOCH,
@@ -1267,7 +1267,7 @@ fn key_hint_timeout_reload_and_pass_through_never_leave_stale_actions() {
 }
 
 #[test]
-fn an_unfinished_insert_mapping_types_its_keys() {
+pub(in crate::app) fn an_unfinished_insert_mapping_types_its_keys() {
     for (snippet, context, mode) in [
         (false, "editor", "insert"),
         (true, "editor", "insert"),
@@ -1360,7 +1360,7 @@ fn an_unfinished_insert_mapping_types_its_keys() {
 }
 
 #[test]
-fn snippet_keys_only_route_in_the_owning_buffer() {
+pub(in crate::app) fn snippet_keys_only_route_in_the_owning_buffer() {
     let (_app_dirs, mut app) = app();
     let (buffer, view) = app
         .state
@@ -1390,7 +1390,7 @@ fn snippet_keys_only_route_in_the_owning_buffer() {
 }
 
 #[test]
-fn timeout_executes_an_earlier_exact_mapping_and_replays_its_suffix() {
+pub(in crate::app) fn timeout_executes_an_earlier_exact_mapping_and_replays_its_suffix() {
     let (_app_dirs, mut app) = app();
     let clock = std::sync::Arc::new(crate::clock::ManualClock::new(
         std::time::UNIX_EPOCH,
@@ -1438,7 +1438,7 @@ fn timeout_executes_an_earlier_exact_mapping_and_replays_its_suffix() {
 }
 
 #[test]
-fn delayed_open_preserves_newer_unsaved_canonical_buffer_and_closed_reload_cannot_reopen_it() {
+pub(in crate::app) fn delayed_open_preserves_newer_unsaved_canonical_buffer_and_closed_reload_cannot_reopen_it() {
     let (_app_dirs, mut app) = app();
     let root = app.state.workspace_root.clone();
     let state_directory = app.workspace.state_path().parent().unwrap().to_path_buf();
@@ -1472,7 +1472,7 @@ fn delayed_open_preserves_newer_unsaved_canonical_buffer_and_closed_reload_canno
 /// final primary selection, but not rendering or general process startup.
 #[test]
 #[ignore = "explicit startup lifecycle cost probe"]
-fn startup_lifecycle_cost_probe() {
+pub(in crate::app) fn startup_lifecycle_cost_probe() {
     use crate::app::plugins::ExtensionSession;
     let (_app_dirs, mut app) = app();
     let root = app.state.workspace_root.clone();
@@ -1519,23 +1519,23 @@ fn startup_lifecycle_cost_probe() {
 }
 
 #[test]
-fn pending_open_cannot_resurrect_closed_path_or_steal_newer_navigation() {
+pub(in crate::app) fn pending_open_cannot_resurrect_closed_path_or_steal_newer_navigation() {
     crate::app::tests::driver::TestSession::new(crate::config::load_bundled_config()).verify_open_lifetimes();
 }
 
 #[test]
-fn force_save_as_does_not_overwrite_another_open_document() {
+pub(in crate::app) fn force_save_as_does_not_overwrite_another_open_document() {
     crate::app::tests::driver::TestSession::new(crate::config::load_bundled_config()).verify_save_collisions();
 }
 
 #[test]
-fn expired_shutdown_does_not_admit_or_report_an_exit_snapshot() {
+pub(in crate::app) fn expired_shutdown_does_not_admit_or_report_an_exit_snapshot() {
     crate::app::tests::driver::TestSession::new(crate::config::load_bundled_config())
         .verify_expired_shutdown_does_not_write();
 }
 
 #[test]
-fn the_line_after_a_final_newline_is_never_a_normal_mode_line() {
+pub(in crate::app) fn the_line_after_a_final_newline_is_never_a_normal_mode_line() {
     let (_app_dirs, mut app) = app();
     let (buffer, _) = app
         .state
@@ -1572,7 +1572,7 @@ fn the_line_after_a_final_newline_is_never_a_normal_mode_line() {
 }
 
 #[test]
-fn tutor_moves_on_when_each_step_is_done() {
+pub(in crate::app) fn tutor_moves_on_when_each_step_is_done() {
     fn press(app: &mut App, key: &str) {
         self::press(app, key);
         app.tutor_tick();
@@ -1735,7 +1735,7 @@ fn tutor_moves_on_when_each_step_is_done() {
 }
 
 #[test]
-fn j_and_k_keep_their_column_across_shorter_lines() {
+pub(in crate::app) fn j_and_k_keep_their_column_across_shorter_lines() {
     fn press(app: &mut App, key: &str) {
         app.handle_event(UiEvent::Key {
             key: key.parse().unwrap(),
@@ -1758,21 +1758,21 @@ fn j_and_k_keep_their_column_across_shorter_lines() {
     assert_eq!(app.state.views[view].cursor, ByteOffset(9));
 }
 
-fn press(app: &mut App, key: &str) {
+pub(in crate::app) fn press(app: &mut App, key: &str) {
     app.handle_event(UiEvent::Key {
         key: key.parse().unwrap(),
         kind: crate::ui::KeyInputKind::Press,
     });
 }
 
-fn press_keys(app: &mut App, keys: &[&str]) {
+pub(in crate::app) fn press_keys(app: &mut App, keys: &[&str]) {
     for key in keys {
         press(app, key);
     }
 }
 
 #[test]
-fn vim_edits_that_lazyvim_users_reach_for() {
+pub(in crate::app) fn vim_edits_that_lazyvim_users_reach_for() {
     let (_app_dirs, mut app) = app();
     app.set_dashboard_visibility(false);
     let (buffer, view) = app
@@ -1829,7 +1829,7 @@ fn vim_edits_that_lazyvim_users_reach_for() {
 }
 
 #[test]
-fn paragraph_moves_are_jumps_that_ctrl_o_returns_from() {
+pub(in crate::app) fn paragraph_moves_are_jumps_that_ctrl_o_returns_from() {
     let (_app_dirs, mut app) = app();
     app.set_dashboard_visibility(false);
     let path = app.state.workspace_root.join("jumps.txt");
@@ -1855,7 +1855,7 @@ fn paragraph_moves_are_jumps_that_ctrl_o_returns_from() {
 }
 
 #[test]
-fn markdown_lines_comment_with_html_comments() {
+pub(in crate::app) fn markdown_lines_comment_with_html_comments() {
     let (_app_dirs, mut app) = app();
     app.set_dashboard_visibility(false);
     let path = app.state.workspace_root.join("notes.md");
@@ -1873,7 +1873,7 @@ fn markdown_lines_comment_with_html_comments() {
 }
 
 #[test]
-fn several_cursors_change_every_match_and_type_on_every_line() {
+pub(in crate::app) fn several_cursors_change_every_match_and_type_on_every_line() {
     let (_app_dirs, mut app) = app();
     let (_, view) = app
         .state
@@ -1928,7 +1928,7 @@ fn several_cursors_change_every_match_and_type_on_every_line() {
 }
 
 #[test]
-fn dot_stops_before_inserting_after_a_failed_search_operator() {
+pub(in crate::app) fn dot_stops_before_inserting_after_a_failed_search_operator() {
     let (_app_dirs, mut app) = app();
     app.state
         .open_text(TextBuffer::from_text("cat cat"), None)
@@ -1946,7 +1946,7 @@ fn dot_stops_before_inserting_after_a_failed_search_operator() {
 }
 
 #[test]
-fn word_search_projects_its_boundary_policy_until_an_ordinary_search_replaces_it() {
+pub(in crate::app) fn word_search_projects_its_boundary_policy_until_an_ordinary_search_replaces_it() {
     let (_app_dirs, mut app) = app();
     app.state
         .open_text(TextBuffer::from_text("foo foobar foo"), None)
@@ -1963,7 +1963,7 @@ fn word_search_projects_its_boundary_policy_until_an_ordinary_search_replaces_it
 }
 
 #[test]
-fn cgn_repeats_with_dot_substitute_confirms_each_match_and_global_deletes_lines() {
+pub(in crate::app) fn cgn_repeats_with_dot_substitute_confirms_each_match_and_global_deletes_lines() {
     let (_app_dirs, mut app) = app();
     let (_, view) = app
         .state
@@ -2034,7 +2034,7 @@ fn cgn_repeats_with_dot_substitute_confirms_each_match_and_global_deletes_lines(
 }
 
 #[test]
-fn substitute_rejects_out_of_range_addresses_without_editing() {
+pub(in crate::app) fn substitute_rejects_out_of_range_addresses_without_editing() {
     let (_app_dirs, mut app) = app();
     let (buffer, _) = app
         .state
@@ -2048,7 +2048,7 @@ fn substitute_rejects_out_of_range_addresses_without_editing() {
 }
 
 #[test]
-fn substitute_cursor_stays_on_a_normal_mode_grapheme() {
+pub(in crate::app) fn substitute_cursor_stays_on_a_normal_mode_grapheme() {
     for flags in ["", "c"] {
         let (_app_dirs, mut app) = app();
         let (buffer, view) = app
@@ -2068,7 +2068,7 @@ fn substitute_cursor_stays_on_a_normal_mode_grapheme() {
 }
 
 #[test]
-fn substitute_cursor_does_not_split_a_grapheme_after_partial_replacement() {
+pub(in crate::app) fn substitute_cursor_does_not_split_a_grapheme_after_partial_replacement() {
     for flags in ["", "c"] {
         let (_app_dirs, mut app) = app();
         let (buffer, view) = app
@@ -2088,7 +2088,7 @@ fn substitute_cursor_does_not_split_a_grapheme_after_partial_replacement() {
 }
 
 #[test]
-fn substitute_and_global_delete_record_change_locations() {
+pub(in crate::app) fn substitute_and_global_delete_record_change_locations() {
     for flags in ["", "c"] {
         let (_app_dirs, mut app) = app();
         let path = app.state.workspace_root.join("substitute.txt");
@@ -2117,7 +2117,7 @@ fn substitute_and_global_delete_record_change_locations() {
 }
 
 #[test]
-fn global_delete_updates_the_linewise_register_and_paste() {
+pub(in crate::app) fn global_delete_updates_the_linewise_register_and_paste() {
     let (_app_dirs, mut app) = app();
     let (buffer, _) = app
         .state
@@ -2137,7 +2137,7 @@ fn global_delete_updates_the_linewise_register_and_paste() {
 }
 
 #[test]
-fn substitute_confirmation_refuses_reloaded_text_at_the_same_revision() {
+pub(in crate::app) fn substitute_confirmation_refuses_reloaded_text_at_the_same_revision() {
     for finish in [false, true] {
         let (_app_dirs, mut app) = app();
         let (buffer, _) = app
@@ -2161,7 +2161,7 @@ fn substitute_confirmation_refuses_reloaded_text_at_the_same_revision() {
 }
 
 #[test]
-fn substitute_confirmation_bounds_long_match_and_replacement_previews() {
+pub(in crate::app) fn substitute_confirmation_bounds_long_match_and_replacement_previews() {
     let (_app_dirs, mut app) = app();
     let (buffer, _) = app
         .state
@@ -2183,7 +2183,7 @@ fn substitute_confirmation_bounds_long_match_and_replacement_previews() {
 }
 
 #[test]
-fn substitute_confirmation_keeps_empty_matches_as_insertion_points() {
+pub(in crate::app) fn substitute_confirmation_keeps_empty_matches_as_insertion_points() {
     let (_app_dirs, mut app) = app();
     let (buffer, view) = app
         .state
@@ -2199,7 +2199,7 @@ fn substitute_confirmation_keeps_empty_matches_as_insertion_points() {
 }
 
 #[test]
-fn substitute_confirmation_scrolls_visual_rows_above_the_dialog() {
+pub(in crate::app) fn substitute_confirmation_scrolls_visual_rows_above_the_dialog() {
     for wrap in [false, true] {
         let (_app_dirs, mut app) = app();
         let text = if wrap {
@@ -2247,7 +2247,7 @@ fn substitute_confirmation_scrolls_visual_rows_above_the_dialog() {
 }
 
 #[test]
-fn multi_cursors_take_every_match_skip_remove_and_move_together() {
+pub(in crate::app) fn multi_cursors_take_every_match_skip_remove_and_move_together() {
     let (_app_dirs, mut app) = app();
     let (_, view) = app
         .state
@@ -2332,7 +2332,7 @@ fn multi_cursors_take_every_match_skip_remove_and_move_together() {
 }
 
 #[test]
-fn selecting_every_match_of_a_selected_part_of_a_word_matches_it_as_typed() {
+pub(in crate::app) fn selecting_every_match_of_a_selected_part_of_a_word_matches_it_as_typed() {
     let (_app_dirs, mut app) = app();
     let (_, view) = app
         .state
@@ -2352,7 +2352,7 @@ fn selecting_every_match_of_a_selected_part_of_a_word_matches_it_as_typed() {
 }
 
 #[test]
-fn visual_block_i_and_a_type_before_and_after_every_row() {
+pub(in crate::app) fn visual_block_i_and_a_type_before_and_after_every_row() {
     let (_app_dirs, mut app) = app();
     let (_, view) = app
         .state
@@ -2382,7 +2382,7 @@ fn visual_block_i_and_a_type_before_and_after_every_row() {
 }
 
 #[test]
-fn unknown_key_after_a_prefix_ends_the_sequence_without_editing() {
+pub(in crate::app) fn unknown_key_after_a_prefix_ends_the_sequence_without_editing() {
     let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("prefix.txt");
     fs::write(&path, b"Header\n").expect("file");
@@ -2405,7 +2405,7 @@ fn unknown_key_after_a_prefix_ends_the_sequence_without_editing() {
 }
 
 #[test]
-fn conflict_accept_rejects_unknown_sides_and_preserves_malformed_blocks() {
+pub(in crate::app) fn conflict_accept_rejects_unknown_sides_and_preserves_malformed_blocks() {
     let (_app_dirs, mut app) = app();
     let source = "<<<<<<< orphan\n>>>>>>> early\nunrelated\n<<<<<<<content\n<<<<< ours\nours\n=====\ntheirs\n>>>>> other\n";
     let (buffer, _) = app
@@ -2438,7 +2438,7 @@ fn conflict_accept_rejects_unknown_sides_and_preserves_malformed_blocks() {
 }
 
 #[test]
-fn conflict_keys_move_between_markers_and_wrap() {
+pub(in crate::app) fn conflict_keys_move_between_markers_and_wrap() {
     let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("merged.txt");
     fs::write(&path, b"Header\n<<<<<<< ours\na\n=======\nb\n>>>>>>> theirs\nmid\n<<<<<<< ours\nc\n=======\nd\n>>>>>>> theirs\n").expect("file");
@@ -2463,7 +2463,7 @@ fn conflict_keys_move_between_markers_and_wrap() {
 }
 
 #[test]
-fn the_first_disk_poll_detects_changes_since_opening() {
+pub(in crate::app) fn the_first_disk_poll_detects_changes_since_opening() {
     let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("changed-before-poll.txt");
     fs::write(&path, "before\n").unwrap();
@@ -2484,7 +2484,7 @@ fn the_first_disk_poll_detects_changes_since_opening() {
 }
 
 #[test]
-fn disk_checks_preserve_unsaved_edits_and_warn_only_when_disk_contents_differ() {
+pub(in crate::app) fn disk_checks_preserve_unsaved_edits_and_warn_only_when_disk_contents_differ() {
     let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("dirty-before-poll.txt");
     fs::write(&path, "disk\n").unwrap();
@@ -2520,7 +2520,7 @@ fn disk_checks_preserve_unsaved_edits_and_warn_only_when_disk_contents_differ() 
 }
 
 #[test]
-fn reload_normalizes_every_view_of_the_buffer_without_changing_focus() {
+pub(in crate::app) fn reload_normalizes_every_view_of_the_buffer_without_changing_focus() {
     let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("shortened.txt");
     fs::write(&path, "long first line\nsecond line\n").unwrap();
@@ -2551,7 +2551,7 @@ fn reload_normalizes_every_view_of_the_buffer_without_changing_focus() {
 }
 
 #[test]
-fn clean_buffers_follow_the_disk_and_changed_ones_keep_their_text() {
+pub(in crate::app) fn clean_buffers_follow_the_disk_and_changed_ones_keep_their_text() {
     let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("watched.txt");
     fs::write(&path, b"first\n").expect("file");
@@ -2583,7 +2583,7 @@ fn clean_buffers_follow_the_disk_and_changed_ones_keep_their_text() {
     );
 }
 
-fn wait_syntax(app: &mut App, buffer: crate::editor::BufferId) {
+pub(in crate::app) fn wait_syntax(app: &mut App, buffer: crate::editor::BufferId) {
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         app.process_syntax();
@@ -2604,7 +2604,7 @@ fn wait_syntax(app: &mut App, buffer: crate::editor::BufferId) {
 }
 
 #[test]
-fn syntax_objects_refresh_when_only_the_document_language_changes() {
+pub(in crate::app) fn syntax_objects_refresh_when_only_the_document_language_changes() {
     let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("hello.rs");
     let (buffer, _) = app
@@ -2628,7 +2628,7 @@ fn syntax_objects_refresh_when_only_the_document_language_changes() {
 }
 
 #[test]
-fn collapsed_syntax_folds_follow_lines_inserted_above_them() {
+pub(in crate::app) fn collapsed_syntax_folds_follow_lines_inserted_above_them() {
     let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("hello.rs");
     let (buffer, _) = app
@@ -2681,7 +2681,7 @@ fn collapsed_syntax_folds_follow_lines_inserted_above_them() {
 }
 
 #[test]
-fn idle_syntax_and_clipboard_polls_preserve_frame_revisions() {
+pub(in crate::app) fn idle_syntax_and_clipboard_polls_preserve_frame_revisions() {
     let (_app_dirs, mut app) = app();
     let (buffer, _) = app
         .state
@@ -2703,7 +2703,7 @@ fn idle_syntax_and_clipboard_polls_preserve_frame_revisions() {
 }
 
 #[test]
-fn colours_follow_typed_text_until_the_next_parse_or_token_reply() {
+pub(in crate::app) fn colours_follow_typed_text_until_the_next_parse_or_token_reply() {
     let (_app_dirs, mut app) = app();
     app.state
         .open_text(
@@ -2736,7 +2736,7 @@ fn colours_follow_typed_text_until_the_next_parse_or_token_reply() {
 
 #[cfg(unix)]
 #[test]
-fn recovery_through_an_alias_preserves_the_already_open_dirty_buffer() {
+pub(in crate::app) fn recovery_through_an_alias_preserves_the_already_open_dirty_buffer() {
     let (_app_dirs, mut app) = app();
     app.recovery.skip_maintenance();
     let path = app.state.workspace_root.join("current.txt");
@@ -2780,7 +2780,7 @@ fn recovery_through_an_alias_preserves_the_already_open_dirty_buffer() {
 }
 
 #[test]
-fn recovery_replies_never_replace_a_buffer_opened_during_the_read() {
+pub(in crate::app) fn recovery_replies_never_replace_a_buffer_opened_during_the_read() {
     let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("recover.txt");
     fs::write(&path, "disk").unwrap();
@@ -2809,7 +2809,7 @@ fn recovery_replies_never_replace_a_buffer_opened_during_the_read() {
 }
 
 #[test]
-fn recovery_missing_original_is_bound_only_inside_the_workspace() {
+pub(in crate::app) fn recovery_missing_original_is_bound_only_inside_the_workspace() {
     let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("missing.txt");
     let id = app
@@ -2829,7 +2829,7 @@ fn recovery_missing_original_is_bound_only_inside_the_workspace() {
 }
 
 #[test]
-fn recovery_missing_parent_does_not_bind_an_unvalidated_destination() {
+pub(in crate::app) fn recovery_missing_parent_does_not_bind_an_unvalidated_destination() {
     let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("missing-parent/original.txt");
     let id = app
@@ -2851,7 +2851,7 @@ fn recovery_missing_parent_does_not_bind_an_unvalidated_destination() {
 
 #[cfg(unix)]
 #[test]
-fn recovery_rejected_paths_and_missing_files_under_outside_symlinks_become_scratch() {
+pub(in crate::app) fn recovery_rejected_paths_and_missing_files_under_outside_symlinks_become_scratch() {
     for exists in [true, false] {
         let (_app_dirs, mut app) = app();
         let outside = tempdir().unwrap();
@@ -2881,7 +2881,7 @@ fn recovery_rejected_paths_and_missing_files_under_outside_symlinks_become_scrat
 }
 
 #[test]
-fn recovery_failure_and_retired_reads_preserve_the_journal() {
+pub(in crate::app) fn recovery_failure_and_retired_reads_preserve_the_journal() {
     let (_app_dirs, mut app) = app();
     app.recovery.skip_maintenance();
     let (buffer, _) = app
@@ -2913,7 +2913,7 @@ fn recovery_failure_and_retired_reads_preserve_the_journal() {
 }
 
 #[test]
-fn flash_labels_only_visible_wrapped_rows_and_horizontal_columns() {
+pub(in crate::app) fn flash_labels_only_visible_wrapped_rows_and_horizontal_columns() {
     for wrap in [true, false] {
         let (_app_dirs, mut app) = app();
         app.window_session.observe_size((12, 8));
@@ -2964,7 +2964,7 @@ fn flash_labels_only_visible_wrapped_rows_and_horizontal_columns() {
 }
 
 #[test]
-fn flash_follows_source_scrolling_and_does_not_label_clipped_inlay_anchors() {
+pub(in crate::app) fn flash_follows_source_scrolling_and_does_not_label_clipped_inlay_anchors() {
     let (_app_dirs, mut app) = app();
     app.window_session.observe_size((20, 8));
     let mut fixture = app.configuration.fixture_snapshot();
@@ -3013,7 +3013,7 @@ fn flash_follows_source_scrolling_and_does_not_label_clipped_inlay_anchors() {
 }
 
 #[test]
-fn flash_ignores_wrapped_folded_and_horizontally_clipped_text() {
+pub(in crate::app) fn flash_ignores_wrapped_folded_and_horizontally_clipped_text() {
     for (source, wrap, fold, scroll) in [
         (format!("{}\nz", "a".repeat(4000)), true, false, 0),
         ("a\nhidden z\na".into(), true, true, 0),
@@ -3048,7 +3048,7 @@ fn flash_ignores_wrapped_folded_and_horizontally_clipped_text() {
 }
 
 #[test]
-fn flash_cancels_cached_targets_after_a_reload() {
+pub(in crate::app) fn flash_cancels_cached_targets_after_a_reload() {
     let (_app_dirs, mut app) = app();
     let (buffer, view) = app
         .state
@@ -3074,7 +3074,7 @@ fn flash_cancels_cached_targets_after_a_reload() {
 }
 
 #[test]
-fn persisted_navigation_clamps_multibyte_offsets() {
+pub(in crate::app) fn persisted_navigation_clamps_multibyte_offsets() {
     let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("mark.txt");
     fs::write(&path, "éx").unwrap();
@@ -3093,7 +3093,7 @@ fn persisted_navigation_clamps_multibyte_offsets() {
 }
 
 #[test]
-fn cursor_only_commands_do_not_enter_the_change_list() {
+pub(in crate::app) fn cursor_only_commands_do_not_enter_the_change_list() {
     let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("changes.txt");
     app.state
@@ -3107,7 +3107,7 @@ fn cursor_only_commands_do_not_enter_the_change_list() {
 }
 
 #[test]
-fn count_errors_return_operator_pending_views_to_normal() {
+pub(in crate::app) fn count_errors_return_operator_pending_views_to_normal() {
     let (_app_dirs, mut app) = app();
     let (_, view) = app
         .state
@@ -3125,7 +3125,7 @@ fn count_errors_return_operator_pending_views_to_normal() {
 }
 
 #[test]
-fn count_only_and_empty_pattern_substitutions_preserve_their_meaning() {
+pub(in crate::app) fn count_only_and_empty_pattern_substitutions_preserve_their_meaning() {
     let (_app_dirs, mut app) = app();
     let (buffer, view) = app
         .state
@@ -3155,7 +3155,7 @@ fn count_only_and_empty_pattern_substitutions_preserve_their_meaning() {
 }
 
 #[test]
-fn recorded_dot_and_insert_delete_and_yank_replay_the_expected_change() {
+pub(in crate::app) fn recorded_dot_and_insert_delete_and_yank_replay_the_expected_change() {
     let (_app_dirs, mut app) = app();
     let (buffer, _) = app
         .state
@@ -3179,7 +3179,7 @@ fn recorded_dot_and_insert_delete_and_yank_replay_the_expected_change() {
 }
 
 #[test]
-fn macro_replay_stops_before_an_edit_after_a_failed_search_effect() {
+pub(in crate::app) fn macro_replay_stops_before_an_edit_after_a_failed_search_effect() {
     let (_app_dirs, mut app) = app();
     let mut fixture = app.configuration.fixture_snapshot();
     fixture.settings.search.wrap = false;
@@ -3199,7 +3199,7 @@ fn macro_replay_stops_before_an_edit_after_a_failed_search_effect() {
 }
 
 #[test]
-fn macro_replay_waits_for_clipboard_put_before_deleting() {
+pub(in crate::app) fn macro_replay_waits_for_clipboard_put_before_deleting() {
     let (_app_dirs, mut app) = app();
     app.state
         .open_text(TextBuffer::from_text("recording"), None)
@@ -3237,7 +3237,7 @@ fn macro_replay_waits_for_clipboard_put_before_deleting() {
 }
 
 #[test]
-fn macro_replay_stops_before_an_edit_after_a_failed_find() {
+pub(in crate::app) fn macro_replay_stops_before_an_edit_after_a_failed_find() {
     let (_app_dirs, mut app) = app();
     let (buffer, view) = app
         .state
@@ -3255,7 +3255,7 @@ fn macro_replay_stops_before_an_edit_after_a_failed_find() {
 }
 
 #[test]
-fn star_and_hash_repeat_only_whole_identifiers() {
+pub(in crate::app) fn star_and_hash_repeat_only_whole_identifiers() {
     let (_app_dirs, mut app) = app();
     let (_, view) = app
         .state
@@ -3271,7 +3271,7 @@ fn star_and_hash_repeat_only_whole_identifiers() {
 }
 
 #[test]
-fn empty_substitution_selection_positions_the_cursor_without_selecting_text() {
+pub(in crate::app) fn empty_substitution_selection_positions_the_cursor_without_selecting_text() {
     let (_app_dirs, mut app) = app();
     let (_, view) = app
         .state
@@ -3289,7 +3289,7 @@ fn empty_substitution_selection_positions_the_cursor_without_selecting_text() {
 }
 
 #[test]
-fn word_search_keeps_combining_marks_and_search_selection_keeps_word_boundaries() {
+pub(in crate::app) fn word_search_keeps_combining_marks_and_search_selection_keeps_word_boundaries() {
     let (_app_dirs, mut app) = app();
     let (_, view) = app
         .state
@@ -3318,7 +3318,7 @@ fn word_search_keeps_combining_marks_and_search_selection_keeps_word_boundaries(
 }
 
 #[test]
-fn operator_arrow_motions_are_linewise_like_j_and_k() {
+pub(in crate::app) fn operator_arrow_motions_are_linewise_like_j_and_k() {
     for (motion, cursor) in [("down", 1), ("up", 5)] {
         let (_app_dirs, mut app) = app();
         let (buffer, view) = app
@@ -3341,7 +3341,7 @@ fn operator_arrow_motions_are_linewise_like_j_and_k() {
 }
 
 #[test]
-fn a_new_primary_startup_file_stays_selected_after_existing_files_load() {
+pub(in crate::app) fn a_new_primary_startup_file_stays_selected_after_existing_files_load() {
     let (_app_dirs, mut app) = app();
     let primary = app.state.workspace_root.join("new.rs");
     let additional = app.state.workspace_root.join("existing.rs");
@@ -3368,7 +3368,7 @@ fn a_new_primary_startup_file_stays_selected_after_existing_files_load() {
 }
 
 #[test]
-fn startup_reads_load_without_changing_focus_after_user_navigation() {
+pub(in crate::app) fn startup_reads_load_without_changing_focus_after_user_navigation() {
     let (_app_dirs, mut app) = app();
     let primary = app.state.workspace_root.join("primary.txt");
     let additional = app.state.workspace_root.join("additional.txt");

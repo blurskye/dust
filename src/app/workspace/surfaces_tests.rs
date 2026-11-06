@@ -4,7 +4,7 @@ use crate::app::tests::*;
 
 
 #[test]
-fn remote_files_outside_the_workspace_open_writable_at_the_requested_line() {
+pub(in crate::app) fn remote_files_outside_the_workspace_open_writable_at_the_requested_line() {
     let (_app_dirs, mut app) = app();
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("note.txt");

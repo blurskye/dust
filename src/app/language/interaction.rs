@@ -38,9 +38,9 @@ use crate::app::command;
 use crate::app::diagnostics::MAXIMUM_DIAGNOSTICS_PER_URI;
 use crate::app::language::LSP_MAXIMUM_LOG_LINES;
 use crate::app::language::ProjectionChange;
-use crate::workspace::PickerAction;
-use crate::workspace::PickerItem;
-use crate::workspace::PickerItemId;
+
+
+
 
 
 
@@ -2164,6 +2164,1144 @@ impl App {
                         || self.ui.language_completion.is_some()) => {}
             LspFeatureResult::Empty if method == "workspace/executeCommand" => {}
             LspFeatureResult::Empty => self.show_lsp_no_result(server),
+        }
+    }
+}
+
+use crate::app::configuration::configured_text_width;
+use crate::app::DiagnosticOwner;
+use crate::app::EditorMode;
+use crate::app::ExecutionSource;
+use crate::app::LspAutostartObservation;
+use crate::app::LspDocument;
+use crate::app::LspLaunchRequest;
+use crate::app::LspLaunchSource;
+use crate::app::PendingLspProjectRoot;
+use crate::app::PromptKind;
+use crate::app::ToolInstall;
+use crate::app::ToolKind;
+use crate::app::ToolStatus;
+use crate::app::is_nixos_host;
+use crate::app::language_id_for_path;
+use crate::app::nix_lsp_launch_environment;
+use crate::app::nix_lsp_profile_installed;
+use crate::app::nix_workspace_shell_for_host;
+use crate::ui::CompletionItem;
+use crate::ui::LanguageCompletionState;
+
+impl App {
+
+    pub(in crate::app) fn sync_lsp_status_ui(&mut self) {
+        let running = self.language.running_servers();
+        let server = self
+            .language
+            .active()
+            .and_then(|server| {
+                self.language
+                    .sessions()
+                    .get(server)
+                    .map(|session| (server, session))
+            })
+            .map(|(server, session)| {
+                if session.capabilities.is_some() {
+                    session.server_id.clone()
+                } else if session.circuit_open {
+                    format!("failed {}", session.server_id)
+                } else if session.restart_due.is_some() {
+                    format!("backoff {}", session.server_id)
+                } else if running.contains(server) {
+                    format!("starting {}", session.server_id)
+                } else {
+                    format!("stopped {}", session.server_id)
+                }
+            });
+        self.ui.set(server, |ui| &mut ui.lsp_server);
+        let refresh = self.ui.tool_menu.as_ref().is_some_and(|menu| {
+            menu.rows.iter().any(|row| {
+                self.tooling
+                    .entries()
+                    .iter()
+                    .find(|entry| {
+                        entry.definition.id == row.id && entry.definition.kind == ToolKind::Lsp
+                    })
+                    .is_some_and(|entry| {
+                        !matches!(entry.status, ToolStatus::Installing { .. })
+                            && self.lsp_menu_lifecycle(&row.id).0 != row.session_state
+                    })
+            })
+        });
+        if refresh {
+            let category = self
+                .ui
+                .tool_menu
+                .as_ref()
+                .map_or_else(|| "lsp".into(), |menu| menu.category.clone());
+            let selected = self.selected_tool_id();
+            self.rebuild_tool_menu(&category, selected.as_deref());
+        }
+    }
+}
+
+impl App {
+
+
+    pub(in crate::app) fn reconcile_lsp_autostart(
+        &mut self,
+        buffer: crate::editor::BufferId,
+        document: &LspDocument,
+        matching_session: bool,
+    ) {
+        // A server runs for a workspace root; a file outside every root, such as the
+        // tutorial's copy, gets none rather than an error.
+        if self.workspace.require_path(&document.path).is_err() {
+            return;
+        }
+        // Wait before recording an observation or copying a launch document: another
+        // language's discovery can still own the shared lane.
+        if !self
+            .workspace
+            .execution_lane(crate::app::workspace::DiscoveryKind::Language)
+            .discovery_available()
+        {
+            return;
+        }
+        // Every matching server attaches, as in VS Code and Neovim: Tailwind runs
+        // beside the HTML or TypeScript server. They start one at a time because
+        // project-root discovery takes one launch at a time.
+        let attached = self
+            .language
+            .sessions()
+            .values()
+            .filter(|state| state.documents.contains_key(&buffer))
+            .map(|state| state.server_id.clone())
+            .collect::<Vec<_>>();
+        let mut launchable = self
+            .tooling
+            .entries()
+            .iter()
+            .filter(|entry| {
+                entry.definition.kind == ToolKind::Lsp
+                    && entry
+                        .definition
+                        .automatically_supports_language(&document.language_id)
+                    && !matches!(entry.status, ToolStatus::Installing { .. })
+                    && self.selected_lsp_runtime_available(&entry.definition)
+            })
+            .collect::<Vec<_>>();
+        // The most specific server starts first and stays primary for hover and
+        // definitions: typescript-language-server before Tailwind.
+        launchable.sort_by_key(|entry| entry.definition.languages.len());
+        let launchable = launchable
+            .into_iter()
+            .map(|entry| entry.definition.id.clone())
+            .collect::<Vec<_>>();
+        if !self
+            .workspace
+            .execution_lane(crate::app::workspace::DiscoveryKind::Language)
+            .discovery_available()
+            || launchable.iter().any(|id| self.language.launch_pending(id))
+        {
+            return;
+        }
+        let launchable_server = launchable
+            .iter()
+            .find(|id| {
+                !attached.contains(id)
+                    && !self.language.is_stopped(id)
+                    && !self.language.explicitly_detached(id, buffer)
+                    && !self.language.project_root_missing(
+                        id,
+                        &document.path,
+                        &self.workspace.version(),
+                        self.configuration.binding_revision(),
+                    )
+            })
+            .cloned();
+        // Like mason-lspconfig, install the server when none can start, or point at it when
+        // automatic installs are off or this host has no way to install it.
+        if launchable.is_empty() && !matching_session && self.configuration.settings().lsp.enabled {
+            let installable = self
+                .tooling
+                .entries()
+                .iter()
+                .filter(|entry| {
+                    entry.definition.kind == ToolKind::Lsp
+                        && entry
+                            .definition
+                            .automatically_supports_language(&document.language_id)
+                        && (entry.status == ToolStatus::Available
+                            && entry.definition.install.is_some()
+                            || self
+                                .rust_analyzer_rustup_install(&entry.definition)
+                                .is_some())
+                })
+                // The most specific server: zls for Zig, not a spell checker that covers it.
+                .min_by_key(|entry| entry.definition.languages.len())
+                .map(|entry| {
+                    let source = if self
+                        .rust_analyzer_rustup_install(&entry.definition)
+                        .is_some()
+                    {
+                        Some(LspRuntimeSource::Path)
+                    } else {
+                        Some(self.selected_lsp_runtime_source(&entry.definition)).filter(|source| {
+                            matches!(source, LspRuntimeSource::Managed | LspRuntimeSource::Nix)
+                        })
+                    };
+                    (
+                        entry.definition.id.clone(),
+                        entry.definition.name.clone(),
+                        source,
+                    )
+                });
+            if let Some((id, server, source)) = installable
+                && self.language.hint_install_once(&document.language_id)
+            {
+                if source.is_some()
+                    && self.configuration.settings().lsp.auto_install
+                    && self.workspace.execution_allowed().is_ok()
+                    && self
+                        .workspace
+                        .authorize_execution(ExecutionSource::ToolInstall)
+                        .is_ok()
+                {
+                    self.install_tool(&id, source);
+                    return;
+                }
+                self.notify_message(
+                    self.message(
+                        "lsp_install_hint",
+                        &[
+                            ("server", server),
+                            ("language", document.language_id.clone()),
+                        ],
+                    ),
+                    false,
+                );
+            }
+        }
+        let observation = LspAutostartObservation {
+            buffer,
+            path: document.path.clone(),
+            language: document.language_id.clone(),
+            root_revision: self.workspace.root_revision(),
+            trust: self.workspace.trust(),
+            enabled: self.configuration.settings().lsp.enabled,
+            auto_start: self.configuration.settings().lsp.auto_start,
+            nix_workspace_fallback: self.configuration.settings().lsp.nix_workspace_fallback,
+            launchable_server,
+        };
+        if let Some(server) = self
+            .language
+            .observe(observation, self.workspace.safe_mode())
+        {
+            self.start_lsp(Some(server));
+        }
+    }
+}
+
+impl App {
+
+
+    pub(in crate::app) fn sync_lsp_document(&mut self) {
+        let mut changed = self.language.retry_documents(&self.state);
+        let Some(buffer) = self.state.active_buffer_id() else {
+            self.language.reset_autostart();
+            return;
+        };
+        // The text is copied only for a server that needs it, not on every pass.
+        let Some((_, mut document)) = self.active_lsp_document_without_text() else {
+            let stale = self
+                .language
+                .sessions()
+                .iter()
+                .filter_map(|(key, state)| {
+                    state
+                        .documents
+                        .get(&buffer)
+                        .map(|document| (key.clone(), document.uri()))
+                })
+                .collect::<Vec<_>>();
+            self.detach_lsp_documents(buffer, stale);
+            // Focusing a panel or terminal leaves the files beside it showing their hints.
+            let mut hints = std::mem::take(&mut self.ui.lsp_inlay_hints);
+            hints.retain(|hint| hint.buffer != buffer);
+            self.clear_lsp_ui_projection();
+            self.ui.lsp_inlay_hints = hints;
+            self.language.clear_active();
+
+            self.language.reset_autostart();
+            return;
+        };
+        let revision = self.state.buffers[buffer].text.source_version();
+        let mut sessions = Vec::new();
+        let mut detach = Vec::new();
+        for (key, state) in self.language.sessions() {
+            // A lexical `starts_with` check would let a session for an outer
+            // project absorb a nested, independently resolved project. Only
+            // the asynchronous resolver may attach a new document to a server.
+            let owns = state.documents.contains_key(&buffer);
+            let supports = state.definition.supports_language(&document.language_id);
+            if owns && supports {
+                if let Some(previous) = state.documents.get(&buffer) {
+                    if previous.path != document.path
+                        || previous.language_id != document.language_id
+                    {
+                        detach.push((key.clone(), previous.uri()));
+                    } else {
+                        sessions.push(key.clone());
+                    }
+                }
+            } else if let Some(previous) = state.documents.get(&buffer) {
+                detach.push((key.clone(), previous.uri()));
+            }
+        }
+        sessions.sort();
+        if sessions.is_empty() {
+            self.language.clear_active();
+
+            self.clear_lsp_ui_projection();
+        }
+        if !sessions.is_empty()
+            && !sessions
+                .iter()
+                .any(|key| self.language.active() == Some(key))
+        {
+            // A full language server rather than a linter such as ESLint names the file's server.
+            let primary = sessions
+                .iter()
+                .find(|key| {
+                    self.language
+                        .sessions()
+                        .get(*key)
+                        .and_then(|session| session.capabilities.as_ref())
+                        .is_some_and(|capabilities| capabilities.definition)
+                })
+                .unwrap_or(&sessions[0])
+                .clone();
+            self.select_lsp_session(&primary);
+        }
+        self.detach_lsp_documents(buffer, detach);
+        let completion_open = self.ui.language_completion.is_some()
+            && self.language.projection().is_some_and(|owner| {
+                owner.buffer == buffer
+                    && Some(owner.view) == self.state.active_view
+                    && self.language.active() == Some(&owner.server)
+                    && owner.uri == document.uri()
+            });
+        self.refresh_lsp_projection_owner();
+        for server in &sessions {
+            if self.language.synced(server, buffer, &revision) {
+                continue;
+            }
+            if document.text.is_empty() {
+                document.text = self.state.buffers[buffer].text.to_string();
+            }
+            if self
+                .language
+                .sync_owned(server, document.clone(), (buffer, revision.clone()))
+                .is_ok()
+            {
+                changed = true;
+            }
+        }
+        if changed {
+            self.request_lsp_colors();
+        }
+        if changed
+            && !(self.configuration.settings().lsp.inlay_hint_level
+                == crate::config::InlayHintLevel::Max
+                && self.ui.lsp_inlay_hints.is_empty()
+                && self.language.inlay_pending())
+        {
+            self.schedule_lsp_inlay_refresh(false);
+        }
+        self.reconcile_lsp_autostart(buffer, &document, !sessions.is_empty());
+        let typed = self.language.take_typed();
+        let active_attached = self
+            .language
+            .active()
+            .is_some_and(|active| sessions.contains(active));
+        let trigger =
+            typed.is_some_and(|typed| self.language.is_completion_trigger(&sessions, typed));
+        if completion_open {
+            if changed && trigger && active_attached {
+                self.mark_lsp_completion_start(true);
+                self.request_lsp(LspFeature::Completion);
+            } else if changed && self.language.completion_incomplete() && active_attached {
+                self.request_lsp(LspFeature::Completion);
+            }
+            self.narrow_lsp_completion();
+        } else if changed
+            && self.configuration.settings().lsp.auto_completion
+            && !sessions.is_empty()
+            && !self.ui.large_file_buffers.contains(&buffer)
+            && self.lsp_completion_should_open(typed, trigger)
+        {
+            self.mark_lsp_completion_start(true);
+            self.request_lsp(LspFeature::Completion);
+        }
+    }
+}
+
+impl App {
+
+
+    /// Whether a typed character opens the menu: a server's trigger character, or a letter that
+    /// starts or continues a word. Numbers don't, and a request already out will show its answer.
+    fn lsp_completion_should_open(&self, typed: Option<char>, trigger: bool) -> bool {
+        if !self.lsp_completion_in_insert() {
+            return false;
+        }
+        if trigger {
+            return true;
+        }
+        typed.is_some_and(completion_word_char)
+            && !self.language.request_pending(self.language.generation())
+            && self
+                .lsp_word_before_cursor()
+                .and_then(|word| word.chars().next())
+                .is_some_and(|first| !first.is_numeric())
+    }
+}
+
+impl App {
+
+
+    fn lsp_completion_in_insert(&self) -> bool {
+        self.state
+            .active_view
+            .and_then(|view| self.state.views.get(view))
+            .is_some_and(|view| view.mode == EditorMode::Insert)
+    }
+}
+
+impl App {
+
+
+    /// The word the cursor is at the end of, with where it starts.
+    fn lsp_word_before_cursor(&self) -> Option<String> {
+        let start = self.lsp_word_start()?;
+        let view = &self.state.views[self.state.active_view?];
+        let range = ByteRange::new(start, view.cursor).ok()?;
+        self.state.buffers.get(view.buffer)?.text.slice(range).ok()
+    }
+}
+
+impl App {
+
+
+    fn lsp_word_start(&self) -> Option<ByteOffset> {
+        let view = &self.state.views[self.state.active_view?];
+        let text = &self.state.buffers.get(view.buffer)?.text;
+        let line_start = text
+            .line_to_byte(text.byte_to_line(view.cursor).ok()?)
+            .ok()?;
+        let before = text
+            .slice(ByteRange::new(line_start, view.cursor).ok()?)
+            .ok()?;
+        let word = before
+            .char_indices()
+            .rev()
+            .take_while(|(_, character)| completion_word_char(*character))
+            .last()
+            .map_or(before.len(), |(index, _)| index);
+        Some(ByteOffset(line_start.get() + word))
+    }
+}
+
+impl App {
+
+
+    /// Notes where this completion starts, which later typing is measured from.
+    pub(in crate::app) fn mark_lsp_completion_start(&mut self, automatic: bool) {
+        let start = self.lsp_word_start();
+        self.language.begin_completion(start, automatic);
+    }
+}
+
+impl App {
+
+
+    pub(in crate::app) fn cancel_lsp_completion(&mut self) {
+        self.language.cancel_completion();
+        self.ui.language_completion = None;
+    }
+}
+
+impl App {
+
+
+    /// Shows the items matching what was typed since the request, best first. The menu closes
+    /// when the cursor leaves the word or nothing matches.
+    pub(in crate::app) fn narrow_lsp_completion(&mut self) {
+        let Some(view) = self
+            .state
+            .active_view
+            .and_then(|view| self.state.views.get(view))
+        else {
+            return;
+        };
+        let Some(buffer) = self.state.buffers.get(view.buffer) else {
+            return;
+        };
+        let cursor = view.cursor;
+        let revision = buffer.text.revision();
+        let automatic_left_insert =
+            self.language.completion_automatic() && view.mode != EditorMode::Insert;
+        let start = self.language.completion_start();
+        let same_line = |offset: ByteOffset| {
+            buffer.text.byte_to_line(offset).ok() == buffer.text.byte_to_line(cursor).ok()
+        };
+        if automatic_left_insert || start.is_some_and(|start| start > cursor || !same_line(start)) {
+            self.cancel_lsp_completion();
+            return;
+        }
+        if !self.language.completion_needs_narrowing(cursor, revision) {
+            return;
+        }
+        let codec = PositionCodec::new(&buffer.text);
+        let typed = |from: ByteOffset| {
+            ByteRange::new(from, cursor)
+                .ok()
+                .and_then(|range| buffer.text.slice(range).ok())
+                .unwrap_or_default()
+        };
+        let from_start = start.map(typed).unwrap_or_default();
+        let encodings = self.language.completion_encodings();
+        let matches = self.language.score_completions(|server, item| {
+            // A server's range says where its item begins; other items start at the word.
+            let edit_start = item.text_edit.as_ref().and_then(|edit| {
+                let encoding = encodings.get(server).copied()?;
+                codec
+                    .lsp_to_byte(edit.range.start.line, edit.range.start.character, encoding)
+                    .ok()
+                    .filter(|offset| *offset <= cursor && same_line(*offset))
+            });
+            edit_start.map_or_else(|| from_start.clone(), typed)
+        });
+        self.language.narrow_completions(matches, cursor, revision);
+        self.project_lsp_completion();
+    }
+}
+
+impl App {
+
+
+    /// Mirrors the current items into the menu the renderer draws.
+    pub(in crate::app) fn project_lsp_completion(&mut self) {
+        let icons = &self
+            .configuration
+            .settings()
+            .ui
+            .command_line
+            .completion_kind_icons;
+        let items = self
+            .language
+            .completion_items()
+            .iter()
+            .enumerate()
+            .map(|(index, item)| {
+                let kind = Self::lsp_completion_kind(item);
+                CompletionItem {
+                    icon: icons.get(kind).cloned(),
+                    label: item.label.clone(),
+                    detail: if kind == "Snippet" {
+                        kind.to_owned()
+                    } else {
+                        self.lsp_server_label(
+                            self.language.completion_server(index).unwrap_or_default(),
+                        )
+                    },
+                    color: item.color(),
+                }
+            })
+            .collect::<Vec<_>>();
+        let typed = self.lsp_completion_typed_columns();
+        let (selected, scroll) = self.language.completion_position();
+        self.ui.language_completion = (!items.is_empty()).then_some(LanguageCompletionState {
+            typed,
+            items,
+            selected,
+            scroll,
+        });
+        if self.ui.language_completion.is_some() {
+            self.ui.lsp_loading = None;
+        }
+        self.refresh_lsp_completion_documentation();
+    }
+}
+
+impl App {
+
+
+    /// How much of the word being completed is already on the line.
+    fn lsp_completion_typed_columns(&self) -> u16 {
+        let Some(view) = self
+            .state
+            .active_view
+            .and_then(|view| self.state.views.get(view))
+        else {
+            return 0;
+        };
+        let Some(start) = self.language.completion_start() else {
+            return 0;
+        };
+        let text = &self.state.buffers[view.buffer].text;
+        if start > view.cursor
+            || text.byte_to_line(start).ok() != text.byte_to_line(view.cursor).ok()
+        {
+            return 0;
+        }
+        let Ok(line) = text.byte_to_line(start) else {
+            return 0;
+        };
+        let (Ok(line_start), Ok(content)) = (text.line_to_byte(line), text.line(line)) else {
+            return 0;
+        };
+        let from = start.get().saturating_sub(line_start.get());
+        let to = view.cursor.get().saturating_sub(line_start.get());
+        content.get(from..to).map_or(0, |typed| {
+            u16::try_from(configured_text_width(
+                typed,
+                self.configuration.settings().editor.tab_width,
+                self.configuration.settings().editor.ambiguous_width,
+            ))
+            .unwrap_or(u16::MAX)
+        })
+    }
+}
+
+impl App {
+
+
+    /// `<leader>cr` and F2: the command line, ready with the name under the cursor.
+    fn word_at_cursor(&self) -> Option<String> {
+        self.state
+            .active_view
+            .and_then(|view| self.state.views.get(view))
+            .and_then(|view| {
+                let source = self.state.buffers.get(view.buffer)?.text.to_string();
+                let cursor = view.cursor.get();
+                let start = source[..cursor]
+                    .char_indices()
+                    .rev()
+                    .take_while(|(_, character)| completion_word_char(*character))
+                    .last()
+                    .map_or(cursor, |(index, _)| index);
+                let end = source[cursor..]
+                    .char_indices()
+                    .find(|(_, character)| !completion_word_char(*character))
+                    .map_or(source.len(), |(relative, _)| cursor + relative);
+                Some(source[start..end].to_owned())
+            })
+    }
+}
+
+impl App {
+
+
+    pub(in crate::app) fn open_rename_prompt(&mut self) {
+        let word = self.word_at_cursor();
+        self.open_prompt(
+            PromptKind::Command,
+            format!("rename {}", word.unwrap_or_default()),
+        );
+    }
+}
+
+impl App {
+
+
+    /// Servers list nothing for an empty query, so `<leader>sS` asks for one.
+    pub(in crate::app) fn open_workspace_symbols_prompt(&mut self) {
+        let word = self.word_at_cursor().unwrap_or_default();
+        self.open_prompt(PromptKind::Command, format!("lsp.workspace_symbols {word}"));
+    }
+}
+
+
+
+/// Where a conflicted file's first marker is, so opening it lands there.
+fn first_conflict_line(path: &std::path::Path) -> usize {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|text| text.lines().position(|line| line.starts_with("<<<<<<<")))
+        .unwrap_or(0)
+}
+
+
+fn completion_word_char(character: char) -> bool {
+    character.is_alphanumeric() || character == '_' || character == '$'
+}
+impl App {
+
+    pub(in crate::app) fn active_lsp_document(
+        &self,
+    ) -> Option<(crate::editor::BufferId, LspDocument)> {
+        let (buffer_id, mut document) = self.active_lsp_document_without_text()?;
+        document.text = self.state.buffers[buffer_id].text.to_string();
+        Some((buffer_id, document))
+    }
+}
+
+impl App {
+
+
+    /// The active document's path, language and version, with empty text.
+    pub(in crate::app) fn active_lsp_document_without_text(
+        &self,
+    ) -> Option<(crate::editor::BufferId, LspDocument)> {
+        let buffer_id = self.state.active_buffer_id()?;
+        let buffer = self.state.buffers.get(buffer_id)?;
+        let path = buffer.path.clone()?;
+        let language_id = language_id_for_path(&path)?.to_owned();
+        Some((
+            buffer_id,
+            LspDocument {
+                path,
+                language_id,
+                version: buffer.text.revision().0,
+                text: String::new(),
+            },
+        ))
+    }
+}
+
+impl App {
+
+
+    pub(in crate::app) fn start_lsp(&mut self, requested: Option<String>) {
+        self.launch_lsp(requested, false);
+    }
+}
+
+impl App {
+
+
+    /// `asked` is a person starting this server, who is told when the project can't have it.
+    fn launch_lsp(&mut self, requested: Option<String>, asked: bool) {
+        if let Some(id) = requested.as_ref().filter(|_| asked) {
+            self.language.clear_stopped(id);
+        }
+        if !self.configuration.settings().lsp.enabled {
+            self.show_error(self.message("lsp_disabled", &[]));
+            return;
+        }
+        let Some((buffer, document)) = self.active_lsp_document() else {
+            self.show_error(self.message("lsp_no_buffer", &[]));
+            return;
+        };
+        let entry = if let Some(id) = requested.as_ref() {
+            let entry =
+                self.tooling.entries().iter().find(|entry| {
+                    entry.definition.id == *id && entry.definition.kind == ToolKind::Lsp
+                });
+            if !entry.is_some_and(|entry| entry.definition.supports_language(&document.language_id))
+            {
+                self.show_error(format!(
+                    "language server `{id}` does not support {}",
+                    document.language_id
+                ));
+                return;
+            }
+            entry
+        } else {
+            self.tooling
+                .entries()
+                .iter()
+                .find(|entry| {
+                    entry.definition.kind == ToolKind::Lsp
+                        && entry
+                            .definition
+                            .automatically_supports_language(&document.language_id)
+                        && matches!(entry.status, ToolStatus::Installed(_))
+                })
+                .or_else(|| {
+                    self.tooling.entries().iter().find(|entry| {
+                        entry.definition.kind == ToolKind::Lsp
+                            && entry
+                                .definition
+                                .automatically_supports_language(&document.language_id)
+                    })
+                })
+        };
+        let Some(entry) = entry else {
+            self.show_error(self.message("lsp_no_server", &[]));
+            return;
+        };
+        if matches!(entry.status, ToolStatus::Installing { .. }) {
+            self.show_error("language-server runtime is being changed");
+            return;
+        }
+        let base_definition = entry.definition.clone();
+        let source = self.selected_lsp_runtime_source(&base_definition);
+        let definition = if matches!(source, LspRuntimeSource::Managed | LspRuntimeSource::Nix) {
+            self.selected_managed_definition(&base_definition)
+        } else {
+            base_definition.clone()
+        };
+        let launch_source = match source {
+            LspRuntimeSource::Path => {
+                let Some(executable) = discover_executable(&definition.executable) else {
+                    self.show_error(format!(
+                        "{} is not available on PATH; press p to choose another runtime",
+                        definition.name
+                    ));
+                    return;
+                };
+                if definition.id == "rust-analyzer"
+                    && Self::rust_analyzer_is_rustup_proxy(&executable)
+                {
+                    let key = self.tool_version_key(
+                        &definition,
+                        LspRuntimeSource::Path,
+                        Some(&executable),
+                    );
+                    const CHECKING: &str = "checking rust-analyzer in the active rustup toolchain…";
+                    match self.tooling.version(&key) {
+                        Some(Ok(_)) => {
+                            if self
+                                .notices
+                                .current()
+                                .is_some_and(|(_, notice)| notice == CHECKING)
+                            {
+                                self.clear_notice();
+                            }
+                        }
+                        Some(Err(_)) => {
+                            self.show_error(Self::unavailable_rust_analyzer_message());
+                            return;
+                        }
+                        None => {
+                            self.queue_tool_version_probe(
+                                &definition,
+                                LspRuntimeSource::Path,
+                                executable,
+                            );
+                            self.notify_message(CHECKING.into(), false);
+                            return;
+                        }
+                    }
+                }
+                LspLaunchSource::Direct {
+                    executable,
+                    managed: false,
+                }
+            }
+            LspRuntimeSource::Managed => {
+                let Some(executable) = self.selected_managed_executable(&base_definition) else {
+                    self.show_error(format!(
+                        "{} Dust-download version {} is not installed; press i to install it",
+                        definition.name,
+                        definition.version.as_deref().unwrap_or("unknown")
+                    ));
+                    return;
+                };
+                LspLaunchSource::Direct {
+                    executable,
+                    managed: true,
+                }
+            }
+            LspRuntimeSource::Nix => {
+                let Some(shell) = nix_workspace_shell_for_host(
+                    &definition,
+                    self.configuration.settings().lsp.nix_workspace_fallback,
+                    is_nixos_host(),
+                ) else {
+                    self.show_error("Dust via Nix is unavailable on this host");
+                    return;
+                };
+                if !nix_lsp_profile_installed(&definition) {
+                    self.show_error("Dust via Nix is not installed; press i to install it");
+                    return;
+                }
+                let Some(executable) = self.selected_managed_executable(&base_definition) else {
+                    self.show_error(format!(
+                        "{} Dust via Nix version {} is not installed; press i",
+                        definition.name,
+                        definition.version.as_deref().unwrap_or("unknown")
+                    ));
+                    return;
+                };
+                if let Err(error) = nix_lsp_launch_environment(&definition) {
+                    self.show_error(error);
+                    return;
+                }
+                LspLaunchSource::NixWorkspace {
+                    nix: executable,
+                    shell: shell.into(),
+                }
+            }
+        };
+        self.language.clear_error(&definition.id);
+        let Ok(root_id) = self.workspace.require_path(&document.path) else {
+            self.show_error(self.message("lsp_no_buffer", &[]));
+            return;
+        };
+        let Some(root_path) = self
+            .workspace
+            .roots()
+            .iter()
+            .find(|root| root.id == root_id)
+            .map(|root| root.identity.canonical_path.clone())
+        else {
+            return;
+        };
+        if let Err(failure) = self.workspace.execution_allowed() {
+            self.show_workspace_failure(failure);
+            return;
+        }
+        if let Err(error) = self.workspace.authorize_execution(
+            if matches!(launch_source, LspLaunchSource::NixWorkspace { .. }) {
+                ExecutionSource::ProjectLocal
+            } else {
+                ExecutionSource::SystemTool
+            },
+        ) {
+            self.show_error(error);
+            return;
+        }
+        let context = crate::app::language::LaunchContext {
+            editor: &self.state,
+            workspace: self.workspace.version(),
+            configuration: self.configuration.binding_revision(),
+        };
+        if let Err(error) = self.language.discover_launch(
+            PendingLspProjectRoot {
+                asked,
+                definition,
+                launch_source,
+                root_id,
+                workspace_root: root_path,
+                buffer,
+                document,
+            },
+            context,
+            self.workspace
+                .execution_lane(crate::app::workspace::DiscoveryKind::Language),
+        ) {
+            self.show_error(error);
+        }
+    }
+}
+
+impl App {
+
+    pub(in crate::app) fn process_lsp_project_root(&mut self) {
+        let Some(result) = self
+            .workspace
+            .project_result(crate::app::workspace::DiscoveryKind::Language)
+        else {
+            return;
+        };
+        let context = crate::app::language::LaunchContext {
+            editor: &self.state,
+            workspace: self.workspace.version(),
+            configuration: self.configuration.binding_revision(),
+        };
+        if let Err(error) = self.language.accept_project_root(
+            result,
+            context,
+            self.workspace
+                .execution_lane(crate::app::workspace::DiscoveryKind::Language),
+        ) {
+            self.show_error(error);
+        }
+    }
+}
+
+impl App {
+
+    pub(in crate::app) fn process_nix_lsp_workspace(&mut self) {
+        let context = crate::app::language::LaunchContext {
+            editor: &self.state,
+            workspace: self.workspace.version(),
+            configuration: self.configuration.binding_revision(),
+        };
+        if let Err(error) = self.language.poll_nix_launch(
+            context,
+            self.workspace
+                .execution_lane(crate::app::workspace::DiscoveryKind::Language),
+        ) {
+            self.show_error(error);
+        }
+    }
+}
+
+impl App {
+
+    pub(in crate::app) fn queue_lsp_preflight(&mut self, pending: LspLaunchRequest) {
+        let context = crate::app::language::LaunchContext {
+            editor: &self.state,
+            workspace: self.workspace.version(),
+            configuration: self.configuration.binding_revision(),
+        };
+        if let Err(error) = self.language.queue_launch(
+            pending,
+            context,
+            self.workspace
+                .execution_lane(crate::app::workspace::DiscoveryKind::Language),
+        ) {
+            self.show_error(error);
+        }
+    }
+}
+
+impl App {
+
+
+    pub(in crate::app) fn restart_lsp_session(&mut self, key: String) {
+        self.language.retire_documents(&self.state);
+        let Some(state) = self.language.sessions().get(&key) else {
+            return;
+        };
+        if state.circuit_open || !state.desired_running {
+            return;
+        }
+        if let Err(failure) = self.workspace.execution_allowed() {
+            self.show_workspace_failure(failure);
+            return;
+        }
+        let Some((&buffer, document)) = state.documents.iter().find(|(id, document)| {
+            self.state
+                .buffers
+                .get(**id)
+                .is_some_and(|buffer| buffer.path.as_ref() == Some(&document.path))
+        }) else {
+            return;
+        };
+        let (definition, launch, root, root_path, document) = (
+            state.definition.clone(),
+            state.launch.clone(),
+            state.root,
+            state.root_path.clone(),
+            document.clone(),
+        );
+        self.queue_lsp_preflight(LspLaunchRequest {
+            session_key: key,
+            definition,
+            launch,
+            root_id: root,
+            project_root: root_path,
+            buffer,
+            document,
+            restart: true,
+        });
+    }
+}
+
+impl App {
+
+
+    pub(in crate::app) fn select_lsp_session(&mut self, key: &str) {
+        if self.language.select(key) {
+            self.ui.lsp_inlay_hints.clear();
+            self.schedule_lsp_inlay_refresh(true);
+        }
+    }
+}
+
+impl App {
+
+
+    pub(in crate::app) fn show_lsp_sessions(&mut self) {
+        let active = self.language.active().map(String::as_str);
+        let home = std::env::var_os("HOME").map(PathBuf::from);
+        let items = self
+            .language
+            .sessions()
+            .iter()
+            .map(|(key, session)| {
+                let root = &session.root_path;
+                let folder = root.file_name().map_or_else(
+                    || root.display().to_string(),
+                    |name| name.to_string_lossy().into_owned(),
+                );
+                // The folder and state come first so a narrow picker keeps them; the path last.
+                let state = if session.circuit_open {
+                    "crashed"
+                } else if session.restart_due.is_some() {
+                    "restarting"
+                } else if session.desired_running {
+                    "running"
+                } else {
+                    "stopped"
+                };
+                let mut detail = format!("{folder} · {state}");
+                if active == Some(key) {
+                    detail.push_str(" · active");
+                }
+                match session.restart_count {
+                    0 => {}
+                    1 => detail.push_str(" · 1 restart"),
+                    count => detail.push_str(&format!(" · {count} restarts")),
+                }
+                let source = match home
+                    .as_deref()
+                    .and_then(|home| root.strip_prefix(home).ok())
+                {
+                    Some(rest) => format!("~/{}", rest.display()),
+                    None => root.display().to_string(),
+                };
+                (
+                    PickerItem {
+                        badge: String::new(),
+                        kind: crate::workspace::PickerItemKind::Entry,
+                        id: PickerItemId(format!("lsp-session:{key}")),
+                        label: session.server_id.clone(),
+                        detail,
+                        source,
+                        action: PickerAction::None,
+                    },
+                    PickerPayload::LspSession(key.clone()),
+                )
+            })
+            .collect();
+        self.install_picker(self.message("picker_lsp_sessions_title", &[]), items);
+    }
+}
+
+impl App {
+
+
+    pub(in crate::app) fn clear_lsp_server_ownership(&mut self, server: &str) {
+        for prefix in ["lsp.", "lsp-pull:"] {
+            if let Ok(owner) = DiagnosticOwner::new(format!("{prefix}{server}")) {
+                self.diagnostics.clear_owner(&owner);
+            }
+        }
+        self.sync_ui_diagnostics();
+        self.language.forget_synced(server);
+        self.language.retire_projection_server(server);
+    }
+}
+
+impl App {
+
+
+    pub(in crate::app) fn detach_lsp_documents(
+        &mut self,
+        buffer: crate::editor::BufferId,
+        documents: Vec<(String, String)>,
+    ) {
+        let detached = !documents.is_empty();
+        for (server, uri) in documents {
+            let _ = self.language.close(&server, uri.clone());
+            self.language.invalidate_document(&server, buffer);
+            self.language.retire_projection_document(&server, &uri);
+            for prefix in ["lsp.", "lsp-pull:"] {
+                if let Ok(owner) = DiagnosticOwner::new(format!("{prefix}{server}")) {
+                    self.diagnostics.clear_owner_uri(&owner, &uri);
+                }
+            }
+            self.language.detach(&server, buffer);
+        }
+        if detached {
+            self.sync_ui_diagnostics();
+            if self.state.active_buffer_id() == Some(buffer) {
+                self.clear_lsp_ui_projection();
+            }
         }
     }
 }

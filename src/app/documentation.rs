@@ -431,12 +431,12 @@ mod tests {
     }
 }
 
-use crate::app::ByteRange;
-use crate::app::DocumentationPopupKind;
+
+
 use crate::app::App;
 use crate::app::LspMarkupContent;
 use crate::app::LspMarkupKind;
-use crate::app::DocumentationMarkupKind;
+
 
 
 impl App {
@@ -534,6 +534,9 @@ impl App {
 
 use crate::app::AppEffect;
 
+
+
+
 impl App {
     pub(in crate::app) fn process_documentation_effect(&mut self, effect: AppEffect) -> Result<(), AppEffect> {
         match effect {
@@ -551,7 +554,7 @@ impl App {
                 if let Some((visible, total)) = geometry {
                     self.input.scroll_documentation(
                         direction,
-                        crate::ui::render::documentation::DOCUMENTATION_SCROLL_STEP,
+                        crate::ui::render::overlays::DOCUMENTATION_SCROLL_STEP,
                         visible,
                         total,
                     );

@@ -5,7 +5,7 @@ use crate::app::tests::*;
 
 #[cfg(unix)]
 #[test]
-fn successful_task_dependencies_publish_their_matched_diagnostics() {
+pub(in crate::app) fn successful_task_dependencies_publish_their_matched_diagnostics() {
     let root = tempdir().unwrap();
     let state_dir = tempdir().unwrap();
     fs::write(root.path().join("a.txt"), "source\n").unwrap();
@@ -87,7 +87,7 @@ fn successful_task_dependencies_publish_their_matched_diagnostics() {
 
 #[cfg(unix)]
 #[test]
-fn task_formatter_uses_authorized_worker_and_refuses_reloaded_snapshot() {
+pub(in crate::app) fn task_formatter_uses_authorized_worker_and_refuses_reloaded_snapshot() {
     let root = tempdir().unwrap();
     let state_dir = tempdir().unwrap();
     let mut loaded = crate::config::load_bundled_config();
@@ -234,7 +234,7 @@ fn task_formatter_uses_authorized_worker_and_refuses_reloaded_snapshot() {
 
 #[cfg(unix)]
 #[test]
-fn a_task_inherits_the_shell_environment_and_its_own_settings_win() {
+pub(in crate::app) fn a_task_inherits_the_shell_environment_and_its_own_settings_win() {
     let root = tempdir().unwrap();
     let state_dir = tempdir().unwrap();
     let mut loaded = crate::config::load_bundled_config();
@@ -293,7 +293,7 @@ fn a_task_inherits_the_shell_environment_and_its_own_settings_win() {
 
 #[cfg(unix)]
 #[test]
-fn linter_job_and_vfs_publish_only_original_source_then_recover() {
+pub(in crate::app) fn linter_job_and_vfs_publish_only_original_source_then_recover() {
     let root = tempdir().unwrap();
     let state_dir = tempdir().unwrap();
     fs::write(root.path().join("open.txt"), "abc\n").unwrap();
@@ -399,7 +399,7 @@ fn linter_job_and_vfs_publish_only_original_source_then_recover() {
 
 
 #[test]
-fn a_task_with_a_matcher_puts_what_it_matched_in_problems() {
+pub(in crate::app) fn a_task_with_a_matcher_puts_what_it_matched_in_problems() {
     check_task_diagnostics(false);
 }
 
@@ -512,7 +512,7 @@ pub(in crate::app) fn check_task_diagnostics(with_dependency: bool) {
 
 
 #[test]
-fn matcher_navigation_uses_the_open_buffer_after_its_file_is_deleted() {
+pub(in crate::app) fn matcher_navigation_uses_the_open_buffer_after_its_file_is_deleted() {
     let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("deleted.txt");
     fs::write(&path, "first\nsecond\n").unwrap();

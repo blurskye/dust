@@ -76,3 +76,7 @@ pub use transaction::UndoTree;
 
 mod objects;
 pub use objects::{SyntaxObject, SyntaxObjectKind};
+
+pub(crate) use transaction::{DraftEdit,DocumentSnapshot,WorkspaceEditSources,WorkspaceCommitCheck,RestoredPane,RestoredLayout,RestoredTab};
+#[cfg(test)]
+pub(crate) use transaction::build_layout_for_test;

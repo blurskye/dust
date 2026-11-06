@@ -4,7 +4,7 @@ use crate::app::tests::*;
 
 
 #[test]
-fn help_restores_the_visible_palette_and_keeps_file_search_alive() {
+pub(in crate::app) fn help_restores_the_visible_palette_and_keeps_file_search_alive() {
     let (_app_dirs, mut app) = app();
     app.open_builtin_picker(crate::app::PickerKind::Commands);
     app.picker_insert("file");

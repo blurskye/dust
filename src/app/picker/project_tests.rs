@@ -4,7 +4,7 @@ use crate::app::tests::*;
 
 
 #[test]
-fn file_preview_retries_after_capacity_returns_without_picker_input() {
+pub(in crate::app) fn file_preview_retries_after_capacity_returns_without_picker_input() {
     use crate::app::picker::MatcherSource;
     use crate::app::picker::PickerPayload;
     let (_app_dirs, mut app) = app();
@@ -68,7 +68,7 @@ fn file_preview_retries_after_capacity_returns_without_picker_input() {
 
 
 #[test]
-fn closing_help_returns_the_palette_with_its_query_and_selection_intact() {
+pub(in crate::app) fn closing_help_returns_the_palette_with_its_query_and_selection_intact() {
     let (_app_dirs, mut app) = app();
     app.open_builtin_picker(crate::app::PickerKind::Commands);
     app.picker_insert("overlay.help.");
@@ -147,7 +147,7 @@ pub(in crate::app) fn palette_row_for(app: &mut App, query: &str) -> String {
 
 
 #[test]
-fn palette_finds_commands_by_the_words_people_type() {
+pub(in crate::app) fn palette_finds_commands_by_the_words_people_type() {
     let (_app_dirs, mut app) = app();
     for (query, expected) in [
         ("theme", "Select Color Theme"),
@@ -167,7 +167,7 @@ fn palette_finds_commands_by_the_words_people_type() {
 
 
 #[test]
-fn palette_runs_flagged_commands_with_the_flag_off() {
+pub(in crate::app) fn palette_runs_flagged_commands_with_the_flag_off() {
     let (_app_dirs, mut app) = app();
     let (buffer, _) = app
         .state
@@ -182,7 +182,7 @@ fn palette_runs_flagged_commands_with_the_flag_off() {
 
 
 #[test]
-fn palette_rows_that_need_text_open_a_command_line_that_runs_them() {
+pub(in crate::app) fn palette_rows_that_need_text_open_a_command_line_that_runs_them() {
     let (_app_dirs, mut app) = app();
     palette_row_for(&mut app, "file.open");
     app.accept_picker();
@@ -215,7 +215,7 @@ fn palette_rows_that_need_text_open_a_command_line_that_runs_them() {
 
 
 #[test]
-fn file_picker_can_filter_an_entry_after_the_display_limit() {
+pub(in crate::app) fn file_picker_can_filter_an_entry_after_the_display_limit() {
     use crate::app::picker::PickerOrigin;
     use crate::app::picker::PickerPayload;
     let (_app_dirs, mut app) = app();

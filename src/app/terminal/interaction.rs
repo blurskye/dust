@@ -10,10 +10,10 @@ use crate::app::WindowRect;
 use crate::app::PtyId;
 use crate::app::RegisterShape;
 use crate::app::RegisterValue;
-use crate::app::PtyId;
-use crate::windows::WindowPlacement;
-use crate::editor::RegisterShape;
-use crate::editor::RegisterValue;
+
+
+
+
 
 
 

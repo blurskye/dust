@@ -14,11 +14,11 @@ use crate::app::RegisterShape;
 use crate::app::RegisterValue;
 use crate::app::rect_contains_point;
 use crate::windows::PANE_DEFAULT_RATIO;
-use crate::app::windows::rect_contains_point;
-use crate::editor::RegisterShape;
-use crate::editor::RegisterValue;
+
+
+
 use crate::ui::ExplorerUiState;
-use crate::app::explorer::tree::ExplorerKind;
+
 use crate::app::explorer::tree::ExplorerLoadState;
 use crate::app::explorer::tree::ExplorerNodeId;
 

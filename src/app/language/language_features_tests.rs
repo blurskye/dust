@@ -1,7 +1,7 @@
 use crate::app::tests::*;
 
 #[test]
-fn auto_import_completion_keeps_snippet_tabstops_after_shifted_insertion() {
+pub(in crate::app) fn auto_import_completion_keeps_snippet_tabstops_after_shifted_insertion() {
     use crate::language::lsp::LspCompletionItem;
     use crate::language::lsp::LspPosition;
     use crate::language::lsp::LspRange;
@@ -128,7 +128,7 @@ fn auto_import_completion_keeps_snippet_tabstops_after_shifted_insertion() {
 }
 
 #[test]
-fn lsp_documentation_popup_preserves_multiline_kind_and_cancels_without_notification() {
+pub(in crate::app) fn lsp_documentation_popup_preserves_multiline_kind_and_cancels_without_notification() {
     let (_app_dirs, mut app) = app();
     app.notify_message("keep unrelated notification".into(), false);
     app.present_lsp_result(
@@ -203,7 +203,7 @@ fn lsp_documentation_popup_preserves_multiline_kind_and_cancels_without_notifica
 }
 
 #[test]
-fn interactive_lsp_results_follow_the_request_cursor() {
+pub(in crate::app) fn interactive_lsp_results_follow_the_request_cursor() {
     use crate::language::lsp::LspFeature;
     use crate::language::lsp::LspFeatureResult;
     use crate::language::lsp::LspHover;
@@ -242,7 +242,7 @@ fn interactive_lsp_results_follow_the_request_cursor() {
 }
 
 #[test]
-fn an_unavailable_secondary_server_does_not_discard_the_primary_reply() {
+pub(in crate::app) fn an_unavailable_secondary_server_does_not_discard_the_primary_reply() {
     use crate::language::lsp::*;
     let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("hover.rs");
@@ -276,7 +276,7 @@ fn an_unavailable_secondary_server_does_not_discard_the_primary_reply() {
 }
 
 #[test]
-fn capturing_formatter_positions_does_not_copy_unrelated_buffers() {
+pub(in crate::app) fn capturing_formatter_positions_does_not_copy_unrelated_buffers() {
     let (_app_dirs, mut app) = app();
     app.state
         .open_text(TextBuffer::from_text(&"other\n".repeat(1000)), None)
@@ -289,7 +289,7 @@ fn capturing_formatter_positions_does_not_copy_unrelated_buffers() {
 }
 
 #[test]
-fn inlay_hint_results_are_revision_owned_and_projected_at_exact_unicode_offsets() {
+pub(in crate::app) fn inlay_hint_results_are_revision_owned_and_projected_at_exact_unicode_offsets() {
     let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("hints.rs");
     let (buffer, _) = app
@@ -369,7 +369,7 @@ fn inlay_hint_results_are_revision_owned_and_projected_at_exact_unicode_offsets(
 }
 
 #[test]
-fn each_buffer_keeps_its_inlay_hints_and_they_follow_typing() {
+pub(in crate::app) fn each_buffer_keeps_its_inlay_hints_and_they_follow_typing() {
     use crate::language::lsp::*;
     let (_app_dirs, mut app) = app();
     let first_path = app.state.workspace_root.join("first.rs");
@@ -452,7 +452,7 @@ fn each_buffer_keeps_its_inlay_hints_and_they_follow_typing() {
 }
 
 #[test]
-fn a_file_keeps_its_inlay_hints_while_a_panel_without_a_language_is_focused() {
+pub(in crate::app) fn a_file_keeps_its_inlay_hints_while_a_panel_without_a_language_is_focused() {
     use crate::language::lsp::*;
     let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("main.rs");
@@ -489,7 +489,7 @@ fn a_file_keeps_its_inlay_hints_while_a_panel_without_a_language_is_focused() {
 }
 
 #[test]
-fn stale_owned_inlay_replies_cannot_replace_the_projection() {
+pub(in crate::app) fn stale_owned_inlay_replies_cannot_replace_the_projection() {
     use crate::language::lsp::*;
     for stale in [false, true] {
         let (_app_dirs, mut app) = app();
@@ -544,7 +544,7 @@ fn stale_owned_inlay_replies_cannot_replace_the_projection() {
 }
 
 #[test]
-fn content_modified_before_any_loading_is_asked_again_a_few_times() {
+pub(in crate::app) fn content_modified_before_any_loading_is_asked_again_a_few_times() {
     let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("retry.rs");
     let (buffer, _) = app
@@ -588,7 +588,7 @@ fn content_modified_before_any_loading_is_asked_again_a_few_times() {
 }
 
 #[test]
-fn stale_content_modified_failures_do_not_retry_the_latest_user_feature() {
+pub(in crate::app) fn stale_content_modified_failures_do_not_retry_the_latest_user_feature() {
     let (_app_dirs, mut app) = app();
     app.lsp_asked = Some(crate::language::lsp::LspFeature::Definition);
     app.lsp_asked_generation = Some(7);
@@ -611,7 +611,7 @@ fn stale_content_modified_failures_do_not_retry_the_latest_user_feature() {
 }
 
 #[test]
-fn background_inlay_failures_never_replace_the_user_notification() {
+pub(in crate::app) fn background_inlay_failures_never_replace_the_user_notification() {
     let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("inlay-failure.rs");
     let (buffer, view) = app
@@ -666,7 +666,7 @@ fn background_inlay_failures_never_replace_the_user_notification() {
 }
 
 #[test]
-fn documentation_resize_clamps_scroll_to_the_new_layout() {
+pub(in crate::app) fn documentation_resize_clamps_scroll_to_the_new_layout() {
     let (_app_dirs, mut app) = app();
     app.handle_event(UiEvent::Resize(120, 40));
     app.present_documentation_popup(
@@ -699,7 +699,7 @@ fn documentation_resize_clamps_scroll_to_the_new_layout() {
 }
 
 #[test]
-fn retiring_a_completion_server_refreshes_the_menu_without_a_text_edit() {
+pub(in crate::app) fn retiring_a_completion_server_refreshes_the_menu_without_a_text_edit() {
     use crate::language::lsp::LspCompletionItem;
     let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("completion.rs");
@@ -755,7 +755,7 @@ fn retiring_a_completion_server_refreshes_the_menu_without_a_text_edit() {
 }
 
 #[test]
-fn completion_documentation_is_typed_and_exact_request_owned() {
+pub(in crate::app) fn completion_documentation_is_typed_and_exact_request_owned() {
     let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("completion.rs");
     let (buffer, view) = app
@@ -871,7 +871,7 @@ fn completion_documentation_is_typed_and_exact_request_owned() {
     assert!(app.ui.notification_error);
 }
 
-fn app_waiting_to_save_formatted(
+pub(in crate::app) fn app_waiting_to_save_formatted(
     name: &str,
 ) -> (
     (tempfile::TempDir, tempfile::TempDir),
@@ -915,7 +915,7 @@ fn app_waiting_to_save_formatted(
 }
 
 #[test]
-fn a_format_result_applies_without_a_review_and_finishes_the_waiting_save() {
+pub(in crate::app) fn a_format_result_applies_without_a_review_and_finishes_the_waiting_save() {
     use crate::language::lsp::LspDocumentEdit;
     use crate::language::lsp::LspFeatureResult;
     use crate::language::lsp::LspPosition;
@@ -953,7 +953,7 @@ fn a_format_result_applies_without_a_review_and_finishes_the_waiting_save() {
 }
 
 #[test]
-fn formatting_syncs_unsent_edits_before_requesting_the_server() {
+pub(in crate::app) fn formatting_syncs_unsent_edits_before_requesting_the_server() {
     use crate::language::lsp::LspFeature;
     let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("unsynced.rs");
@@ -986,7 +986,7 @@ fn formatting_syncs_unsent_edits_before_requesting_the_server() {
 }
 
 #[test]
-fn formatting_rejects_missing_and_stale_document_sources() {
+pub(in crate::app) fn formatting_rejects_missing_and_stale_document_sources() {
     use crate::language::lsp::*;
     for ownership in ["missing context", "missing source", "stale source"] {
         let (_app_dirs, mut app) = app();
@@ -1050,7 +1050,7 @@ fn formatting_rejects_missing_and_stale_document_sources() {
 }
 
 #[test]
-fn debugger_navigation_converts_character_columns_for_open_and_unopened_files() {
+pub(in crate::app) fn debugger_navigation_converts_character_columns_for_open_and_unopened_files() {
     for already_open in [true, false] {
         let (_app_dirs, mut app) = app();
         let path = app.state.workspace_root.join("debug.rs");
@@ -1084,7 +1084,7 @@ fn debugger_navigation_converts_character_columns_for_open_and_unopened_files() 
 }
 
 #[test]
-fn an_empty_answer_while_the_server_loads_says_it_is_loading() {
+pub(in crate::app) fn an_empty_answer_while_the_server_loads_says_it_is_loading() {
     use crate::language::lsp::LspFeatureResult;
     use crate::language::lsp::LspProgressKind;
     let (_app_dirs, mut app, _, _, uri) = app_waiting_to_save_formatted("loading.rs");
@@ -1132,7 +1132,7 @@ fn an_empty_answer_while_the_server_loads_says_it_is_loading() {
 }
 
 #[test]
-fn code_actions_wait_for_every_server_and_list_them_together() {
+pub(in crate::app) fn code_actions_wait_for_every_server_and_list_them_together() {
     use crate::language::lsp::LspCodeAction;
     use crate::language::lsp::LspFeatureResult;
     use crate::language::lsp::LspWorkspaceEdit;
@@ -1205,7 +1205,7 @@ fn code_actions_wait_for_every_server_and_list_them_together() {
 }
 
 #[test]
-fn null_code_actions_finish_aggregation_after_another_server_offers_actions() {
+pub(in crate::app) fn null_code_actions_finish_aggregation_after_another_server_offers_actions() {
     use crate::language::lsp::*;
     let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("actions.rs");
@@ -1265,7 +1265,7 @@ fn null_code_actions_finish_aggregation_after_another_server_offers_actions() {
 }
 
 #[test]
-fn null_completion_preserves_other_servers_items_without_an_error() {
+pub(in crate::app) fn null_completion_preserves_other_servers_items_without_an_error() {
     use crate::language::lsp::*;
     let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("completion.rs");
@@ -1320,7 +1320,7 @@ fn null_completion_preserves_other_servers_items_without_an_error() {
 }
 
 #[test]
-fn null_projection_results_clear_previous_ranges_and_commands_succeed_quietly() {
+pub(in crate::app) fn null_projection_results_clear_previous_ranges_and_commands_succeed_quietly() {
     use crate::language::lsp::*;
     let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("highlights.rs");
@@ -1374,7 +1374,7 @@ fn null_projection_results_clear_previous_ranges_and_commands_succeed_quietly() 
 }
 
 #[test]
-fn a_format_replacing_the_whole_file_keeps_the_cursor_on_its_line() {
+pub(in crate::app) fn a_format_replacing_the_whole_file_keeps_the_cursor_on_its_line() {
     use crate::language::lsp::LspDocumentEdit;
     use crate::language::lsp::LspFeatureResult;
     use crate::language::lsp::LspPosition;
@@ -1429,7 +1429,7 @@ fn a_format_replacing_the_whole_file_keeps_the_cursor_on_its_line() {
 }
 
 #[test]
-fn a_save_still_happens_when_the_formatter_has_nothing_fails_or_is_slow() {
+pub(in crate::app) fn a_save_still_happens_when_the_formatter_has_nothing_fails_or_is_slow() {
     let (_nothing_dirs, mut app, _, path, uri) = app_waiting_to_save_formatted("nothing.txt");
     app.present_lsp_result(
         "formatter",
@@ -1469,7 +1469,7 @@ fn a_save_still_happens_when_the_formatter_has_nothing_fails_or_is_slow() {
 
 #[cfg(unix)]
 #[test]
-fn formatting_saves_using_the_same_managed_tool_run_in_turn() {
+pub(in crate::app) fn formatting_saves_using_the_same_managed_tool_run_in_turn() {
     let (_app_dirs, mut app, first, first_path, _) =
         app_waiting_to_save_formatted("first-managed.txt");
     let mut fixture = app.configuration.fixture_snapshot();
@@ -1544,7 +1544,7 @@ fn formatting_saves_using_the_same_managed_tool_run_in_turn() {
 }
 
 #[test]
-fn a_timed_out_managed_formatting_save_retires_already_buffered_results() {
+pub(in crate::app) fn a_timed_out_managed_formatting_save_retires_already_buffered_results() {
     let (_app_dirs, mut app, buffer, path, _) = app_waiting_to_save_formatted("slow-managed.txt");
     let pending = app.format_on_save.get_mut(&buffer).unwrap();
     pending.request = None;
@@ -1568,7 +1568,7 @@ fn a_timed_out_managed_formatting_save_retires_already_buffered_results() {
 }
 
 #[test]
-fn loading_a_session_refuses_to_replace_unsaved_work() {
+pub(in crate::app) fn loading_a_session_refuses_to_replace_unsaved_work() {
     let (_app_dirs, mut app, buffer, ..) = app_waiting_to_save_formatted("unsaved.txt");
     app.load_session_on_request();
     assert!(!app.session_load_requested);
@@ -1577,7 +1577,7 @@ fn loading_a_session_refuses_to_replace_unsaved_work() {
 }
 
 #[test]
-fn managed_formatter_keeps_cursor_and_selection_on_code_after_inserted_punctuation() {
+pub(in crate::app) fn managed_formatter_keeps_cursor_and_selection_on_code_after_inserted_punctuation() {
     let (_app_dirs, mut app) = app();
     let (buffer, view) = app
         .state
@@ -1608,7 +1608,7 @@ fn managed_formatter_keeps_cursor_and_selection_on_code_after_inserted_punctuati
 }
 
 #[test]
-fn debugger_file_locations_use_utf16_columns_for_open_and_unopened_files() {
+pub(in crate::app) fn debugger_file_locations_use_utf16_columns_for_open_and_unopened_files() {
     for open in [false, true] {
         let (_app_dirs, mut app) = app();
         let path = app.state.workspace_root.join("unicode.rs");
@@ -1632,7 +1632,7 @@ fn debugger_file_locations_use_utf16_columns_for_open_and_unopened_files() {
 }
 
 #[test]
-fn pending_debugger_file_navigation_does_not_interrupt_a_new_prompt() {
+pub(in crate::app) fn pending_debugger_file_navigation_does_not_interrupt_a_new_prompt() {
     let (_app_dirs, mut app) = app();
     let (_, view) = app
         .state
@@ -1659,7 +1659,7 @@ fn pending_debugger_file_navigation_does_not_interrupt_a_new_prompt() {
 }
 
 #[test]
-fn formatter_cursor_restoration_keeps_the_visual_head_synchronized() {
+pub(in crate::app) fn formatter_cursor_restoration_keeps_the_visual_head_synchronized() {
     let (_app_dirs, mut app) = app();
     let (buffer, view) = app
         .state
@@ -1688,7 +1688,7 @@ fn formatter_cursor_restoration_keeps_the_visual_head_synchronized() {
 }
 
 #[test]
-fn formatter_code_changes_keep_the_cursor_mapped_by_the_edits() {
+pub(in crate::app) fn formatter_code_changes_keep_the_cursor_mapped_by_the_edits() {
     let (_app_dirs, mut app) = app();
     let (buffer, view) = app
         .state
@@ -1719,7 +1719,7 @@ fn formatter_code_changes_keep_the_cursor_mapped_by_the_edits() {
 }
 
 #[test]
-fn obsolete_formatting_failures_do_not_finish_a_newer_save() {
+pub(in crate::app) fn obsolete_formatting_failures_do_not_finish_a_newer_save() {
     let (_app_dirs, mut app, buffer, ..) = app_waiting_to_save_formatted("newer-save.txt");
     app.format_on_save.get_mut(&buffer).unwrap().request = Some(("formatter".into(), 2));
     app.handle_lsp_request_failure(
@@ -1733,7 +1733,7 @@ fn obsolete_formatting_failures_do_not_finish_a_newer_save() {
 }
 
 #[test]
-fn formatting_save_finishes_its_original_buffer_after_focus_changes() {
+pub(in crate::app) fn formatting_save_finishes_its_original_buffer_after_focus_changes() {
     let (_app_dirs, mut app, buffer, path, ..) =
         app_waiting_to_save_formatted("save-in-background.txt");
     app.state
@@ -1748,7 +1748,7 @@ fn formatting_save_finishes_its_original_buffer_after_focus_changes() {
 }
 
 #[test]
-fn delayed_lsp_navigation_loads_without_stealing_focus() {
+pub(in crate::app) fn delayed_lsp_navigation_loads_without_stealing_focus() {
     use crate::language::lsp::LspLocation;
     use crate::language::lsp::LspPosition;
     use crate::language::lsp::LspRange;
@@ -1790,7 +1790,7 @@ fn delayed_lsp_navigation_loads_without_stealing_focus() {
 }
 
 #[test]
-fn lsp_fold_toggle_uses_the_innermost_fold_and_moves_out_of_hidden_text() {
+pub(in crate::app) fn lsp_fold_toggle_uses_the_innermost_fold_and_moves_out_of_hidden_text() {
     let (_app_dirs, mut app) = app();
     let (buffer, view) = app
         .state
@@ -1826,7 +1826,7 @@ fn lsp_fold_toggle_uses_the_innermost_fold_and_moves_out_of_hidden_text() {
 }
 
 #[test]
-fn lsp_selection_expands_parents_and_preserves_exclusive_range_ends() {
+pub(in crate::app) fn lsp_selection_expands_parents_and_preserves_exclusive_range_ends() {
     let (_app_dirs, mut app) = app();
     let (buffer, view) = app
         .state
@@ -1850,7 +1850,7 @@ fn lsp_selection_expands_parents_and_preserves_exclusive_range_ends() {
 }
 
 #[test]
-fn location_picker_keeps_utf8_positions_after_server_capabilities_disappear() {
+pub(in crate::app) fn location_picker_keeps_utf8_positions_after_server_capabilities_disappear() {
     let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("encoded.rs");
     let (_, view) = app
@@ -1879,7 +1879,7 @@ fn location_picker_keeps_utf8_positions_after_server_capabilities_disappear() {
 }
 
 #[test]
-fn an_unrelated_formatter_cannot_release_a_pending_save() {
+pub(in crate::app) fn an_unrelated_formatter_cannot_release_a_pending_save() {
     let (_app_dirs, mut app, pending_buffer, path, _) = app_waiting_to_save_formatted("pending.rs");
     app.format_on_save
         .get_mut(&pending_buffer)
@@ -1918,7 +1918,7 @@ fn an_unrelated_formatter_cannot_release_a_pending_save() {
 }
 
 #[test]
-fn leaving_the_last_snippet_stop_clears_its_selection() {
+pub(in crate::app) fn leaving_the_last_snippet_stop_clears_its_selection() {
     let (_app_dirs, mut app) = app();
     let (buffer, view) = app
         .state
@@ -1946,7 +1946,7 @@ fn leaving_the_last_snippet_stop_clears_its_selection() {
 }
 
 #[test]
-fn auto_import_completion_keeps_snippet_tabstops_after_normalized_shifted_insertion() {
+pub(in crate::app) fn auto_import_completion_keeps_snippet_tabstops_after_normalized_shifted_insertion() {
     use crate::language::lsp::LspCompletionItem;
     use crate::language::lsp::LspPosition;
     use crate::language::lsp::LspRange;

@@ -19,3 +19,4 @@ pub(crate) fn executable_file(path: &Path) -> bool {
     #[cfg(not(unix))]
     true
 }
+use std::fs;

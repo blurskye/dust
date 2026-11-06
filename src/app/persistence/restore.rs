@@ -1,4 +1,4 @@
-use crate::editor::transaction::{RestoredLayout, RestoredPane, RestoredTab};
+use crate::editor::{RestoredLayout, RestoredPane, RestoredTab};
 fn layout(record: &crate::persistence::PersistedLayout) -> RestoredLayout {
     match record {
         crate::persistence::PersistedLayout::Pane { pane } => RestoredLayout::Pane {
@@ -15,7 +15,7 @@ fn layout(record: &crate::persistence::PersistedLayout) -> RestoredLayout {
     }
 }
 pub(in crate::app) fn restore_layout(
-    draft: &mut crate::editor::transaction::EditorDraft,
+    draft: &mut crate::editor::EditorDraft,
     session: &crate::persistence::PersistedSession,
     loaded: &std::collections::HashMap<std::path::PathBuf, (std::path::PathBuf, crate::editor::text::TextBuffer)>,
 ) -> Result<(), String> {
@@ -28,5 +28,5 @@ pub(in crate::app) fn build_restored_layout(
     record: &crate::persistence::PersistedLayout,
     loaded: &std::collections::HashMap<std::path::PathBuf, (std::path::PathBuf, crate::editor::text::TextBuffer)>,
 ) -> Option<(crate::editor::LayoutNode, Vec<(std::path::PathBuf, crate::editor::PaneId)>)> {
-    crate::editor::transaction::build_layout_for_test(state, &layout(record), loaded)
+    crate::editor::build_layout_for_test(state, &layout(record), loaded)
 }

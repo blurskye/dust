@@ -6,9 +6,54 @@ use crate::app::PickerItem;
 use crate::app::PickerItemId;
 use crate::app::PickerPayload;
 use crate::app::command;
-use crate::workspace::PickerAction;
-use crate::workspace::PickerItem;
-use crate::workspace::PickerItemId;
+
+
+
+
+
+
+
+use crate::editor::ArgumentSchema;
+use crate::editor::ArgumentType;
+use crate::editor::CommandError;
+use crate::editor::CommandRegistry;
+use crate::editor::ContextRequirement;
+use crate::app::commands::register;
+use crate::app::commands::string_arg;
+
+pub(in crate::app) fn register_commands(registry: &mut CommandRegistry<AppEffect>) -> Result<(), CommandError> {
+
+    register(
+        registry,
+        "plugin.disable",
+        "Disable plugin",
+        ContextRequirement::Application,
+        ArgumentSchema::default().field("id", ArgumentType::String, true),
+        |invocation| {
+            Ok(AppEffect::PluginDisable(
+                string_arg(invocation, "id")?.to_owned(),
+            ))
+        },
+    )?;
+    register(
+        registry,
+        "plugin.validate",
+        "Validate configured plugins",
+        ContextRequirement::Application,
+        ArgumentSchema::default(),
+        |_| AppEffect::PluginValidate,
+    )?;
+    register(
+        registry,
+        "plugin.list",
+        "List plugin status",
+        ContextRequirement::Application,
+        ArgumentSchema::default(),
+        |_| AppEffect::PluginList,
+    )?;
+Ok(())
+}
+
 
 impl App {
     pub(in crate::app) fn process_plugins_effect(&mut self, effect: AppEffect) -> Result<(), AppEffect> {
@@ -74,46 +119,4 @@ impl App {
         }
         Ok(())
     }
-}
-
-use crate::app::commands::AppEffect;
-use crate::editor::ArgumentSchema;
-use crate::editor::ArgumentType;
-use crate::editor::CommandError;
-use crate::editor::CommandRegistry;
-use crate::editor::ContextRequirement;
-use crate::app::commands::register;
-use crate::app::commands::string_arg;
-
-pub(in crate::app) fn register_commands(registry: &mut CommandRegistry<AppEffect>) -> Result<(), CommandError> {
-
-    register(
-        registry,
-        "plugin.disable",
-        "Disable plugin",
-        ContextRequirement::Application,
-        ArgumentSchema::default().field("id", ArgumentType::String, true),
-        |invocation| {
-            Ok(AppEffect::PluginDisable(
-                string_arg(invocation, "id")?.to_owned(),
-            ))
-        },
-    )?;
-    register(
-        registry,
-        "plugin.validate",
-        "Validate configured plugins",
-        ContextRequirement::Application,
-        ArgumentSchema::default(),
-        |_| AppEffect::PluginValidate,
-    )?;
-    register(
-        registry,
-        "plugin.list",
-        "List plugin status",
-        ContextRequirement::Application,
-        ArgumentSchema::default(),
-        |_| AppEffect::PluginList,
-    )?;
-Ok(())
 }

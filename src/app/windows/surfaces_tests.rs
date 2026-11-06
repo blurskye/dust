@@ -4,7 +4,7 @@ use crate::app::debugger::surfaces_tests::logging_adapter_fixture;
 
 
 #[test]
-fn placement_swap_moves_editing_focus_to_the_visible_editor() {
+pub(in crate::app) fn placement_swap_moves_editing_focus_to_the_visible_editor() {
     let (_app_dirs, mut app) = app();
     app.state
         .open_text(TextBuffer::from_text("oldest"), None)
@@ -60,7 +60,7 @@ fn placement_swap_moves_editing_focus_to_the_visible_editor() {
 
 
 #[test]
-fn fullscreen_editor_swap_moves_editing_focus_to_the_fullscreen_recipient() {
+pub(in crate::app) fn fullscreen_editor_swap_moves_editing_focus_to_the_fullscreen_recipient() {
     let (_app_dirs, mut app) = app();
     app.state
         .open_text(TextBuffer::from_text("first"), None)
@@ -110,7 +110,7 @@ fn fullscreen_editor_swap_moves_editing_focus_to_the_fullscreen_recipient() {
 
 
 #[test]
-fn fullscreen_placement_swaps_keep_graph_and_editor_focus_together() {
+pub(in crate::app) fn fullscreen_placement_swaps_keep_graph_and_editor_focus_together() {
     for reverse in [false, true] {
         let (_app_dirs, mut app) = app();
         let (_, original_view) = app
@@ -172,7 +172,7 @@ fn fullscreen_placement_swaps_keep_graph_and_editor_focus_together() {
 
 
 #[test]
-fn tiled_window_resize_accepts_the_minimum_delta() {
+pub(in crate::app) fn tiled_window_resize_accepts_the_minimum_delta() {
     let (_app_dirs, mut app) = app();
     app.state
         .open_text(TextBuffer::from_text("editor"), None)
@@ -190,7 +190,7 @@ fn tiled_window_resize_accepts_the_minimum_delta() {
 
 
 #[test]
-fn nonwrapped_mouse_uses_the_same_snapped_tab_origin_as_rendering() {
+pub(in crate::app) fn nonwrapped_mouse_uses_the_same_snapped_tab_origin_as_rendering() {
     let (_app_dirs, mut app) = app();
     app.window_session.observe_size((6, 5));
     {
@@ -229,7 +229,7 @@ fn nonwrapped_mouse_uses_the_same_snapped_tab_origin_as_rendering() {
 
 
 #[test]
-fn mouse_click_focuses_the_real_target_pane_before_placing_cursor() {
+pub(in crate::app) fn mouse_click_focuses_the_real_target_pane_before_placing_cursor() {
     let (_app_dirs, mut app) = app();
     app.state
         .open_text(
@@ -304,7 +304,7 @@ fn mouse_click_focuses_the_real_target_pane_before_placing_cursor() {
 
 
 #[test]
-fn universal_window_clone_refuses_native_noncloneable_content_without_mutation() {
+pub(in crate::app) fn universal_window_clone_refuses_native_noncloneable_content_without_mutation() {
     let (_app_dirs, mut app) = app();
     app.state
         .open_text(TextBuffer::from_text("editor"), None)
@@ -397,7 +397,7 @@ fn universal_window_clone_refuses_native_noncloneable_content_without_mutation()
 
 
 #[test]
-fn window_clone_rejects_an_exhausted_editor_source_before_graph_mutation() {
+pub(in crate::app) fn window_clone_rejects_an_exhausted_editor_source_before_graph_mutation() {
     let (_app_dirs, mut app) = app();
     app.state
         .open_text(TextBuffer::from_text("seed"), None)
@@ -429,7 +429,7 @@ fn window_clone_rejects_an_exhausted_editor_source_before_graph_mutation() {
 
 
 #[test]
-fn ordinary_read_only_files_can_reload_without_becoming_writable() {
+pub(in crate::app) fn ordinary_read_only_files_can_reload_without_becoming_writable() {
     let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("external.txt");
     fs::write(&path, "old").unwrap();
@@ -448,7 +448,7 @@ fn ordinary_read_only_files_can_reload_without_becoming_writable() {
 
 
 #[test]
-fn shared_dirty_buffers_do_not_block_view_only_tab_close_or_forced_buffer_close() {
+pub(in crate::app) fn shared_dirty_buffers_do_not_block_view_only_tab_close_or_forced_buffer_close() {
     let (_app_dirs, mut app) = app();
     let (dirty, _) = app
         .state
@@ -484,7 +484,7 @@ fn shared_dirty_buffers_do_not_block_view_only_tab_close_or_forced_buffer_close(
 
 
 #[test]
-fn exact_dirty_window_close_rejects_stale_focus_then_discards_only_its_target() {
+pub(in crate::app) fn exact_dirty_window_close_rejects_stale_focus_then_discards_only_its_target() {
     let (_app_dirs, mut app) = app();
     let (keeper, _) = app
         .state
@@ -526,7 +526,7 @@ fn exact_dirty_window_close_rejects_stale_focus_then_discards_only_its_target() 
 
 
 #[test]
-fn tab_close_reviews_every_last_dirty_reference_before_one_publication() {
+pub(in crate::app) fn tab_close_reviews_every_last_dirty_reference_before_one_publication() {
     let (_app_dirs, mut app) = app();
     let keeper = app.state.workspace_root.join("keeper.txt");
     std::fs::write(&keeper, "keeper\n").unwrap();
@@ -679,7 +679,7 @@ fn tab_close_reviews_every_last_dirty_reference_before_one_publication() {
 
 
 #[test]
-fn editor_lifecycle_reconciles_into_window_graph_and_drives_content_tabs() {
+pub(in crate::app) fn editor_lifecycle_reconciles_into_window_graph_and_drives_content_tabs() {
     let (_app_dirs, mut app) = app();
     let (first, _) = app
         .state
@@ -800,7 +800,7 @@ fn editor_lifecycle_reconciles_into_window_graph_and_drives_content_tabs() {
 
 
 #[test]
-fn editor_layout_commands_commit_state_bridge_and_graph_as_one_authoritative_transaction() {
+pub(in crate::app) fn editor_layout_commands_commit_state_bridge_and_graph_as_one_authoritative_transaction() {
     let (_app_dirs, mut app) = app();
     app.state
         .open_text(TextBuffer::from_text("editor"), None)
@@ -921,7 +921,7 @@ fn editor_layout_commands_commit_state_bridge_and_graph_as_one_authoritative_tra
 
 
 #[test]
-fn overlapping_mixed_floats_paint_and_focus_in_compositor_z_order() {
+pub(in crate::app) fn overlapping_mixed_floats_paint_and_focus_in_compositor_z_order() {
     let (_app_dirs, mut app) = app();
     app.window_session.observe_size((80, 24));
     app.state
@@ -1005,7 +1005,7 @@ fn overlapping_mixed_floats_paint_and_focus_in_compositor_z_order() {
 
 
 #[test]
-fn editor_window_swap_rejects_mixed_and_cross_tab_targets_atomically() {
+pub(in crate::app) fn editor_window_swap_rejects_mixed_and_cross_tab_targets_atomically() {
     let (_app_dirs, mut app) = app();
     app.state
         .open_text(TextBuffer::from_text("editor"), None)
@@ -1076,7 +1076,7 @@ fn editor_window_swap_rejects_mixed_and_cross_tab_targets_atomically() {
 
 
 #[test]
-fn editor_window_revision_skips_idle_rebuilds_and_tracks_projection_changes() {
+pub(in crate::app) fn editor_window_revision_skips_idle_rebuilds_and_tracks_projection_changes() {
     let (_app_dirs, mut app) = app();
     let (buffer, _) = app
         .state
@@ -1158,7 +1158,7 @@ fn editor_window_revision_skips_idle_rebuilds_and_tracks_projection_changes() {
 
 
 #[test]
-fn generic_native_window_operations_are_revision_checked_atomic_and_identity_preserving() {
+pub(in crate::app) fn generic_native_window_operations_are_revision_checked_atomic_and_identity_preserving() {
     let (_app_dirs, mut app) = app();
     app.state
         .open_text(TextBuffer::from_text("editor"), None)
@@ -1440,7 +1440,7 @@ fn generic_native_window_operations_are_revision_checked_atomic_and_identity_pre
 
 
 #[test]
-fn configured_window_rule_candidate_is_cloned_validated_and_published_atomically() {
+pub(in crate::app) fn configured_window_rule_candidate_is_cloned_validated_and_published_atomically() {
     let (_app_dirs, mut app) = app();
     app.state
         .open_text(TextBuffer::from_text("editor"), None)
@@ -1519,7 +1519,7 @@ fn configured_window_rule_candidate_is_cloned_validated_and_published_atomically
 
 
 #[test]
-fn a_stop_fills_the_panes_and_makes_room_for_them_without_opening_anything() {
+pub(in crate::app) fn a_stop_fills_the_panes_and_makes_room_for_them_without_opening_anything() {
     use crate::app::tests::driver::TestSession;
     let (_files, _log_path, mut driver) =
         logging_adapter_fixture(crate::config::DebugRequestKind::Launch);
@@ -1575,7 +1575,7 @@ fn a_stop_fills_the_panes_and_makes_room_for_them_without_opening_anything() {
 
 
 #[test]
-fn zoom_and_zen_show_the_pane_alone_and_put_everything_back() {
+pub(in crate::app) fn zoom_and_zen_show_the_pane_alone_and_put_everything_back() {
     let (_app_dirs, mut app) = app();
     app.window_session.observe_size((80, 24));
     app.state

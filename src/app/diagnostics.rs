@@ -847,23 +847,9 @@ impl App {
 
 use crate::app::AppEffect;
 
-impl App {
-    pub(in crate::app) fn process_diagnostics_effect(&mut self, effect: AppEffect) -> Result<(), AppEffect> {
-        match effect {
-            AppEffect::DiagnosticNavigate {
-                direction,
-                filter,
-                count,
-            } => {
-                self.navigate_diagnostic(direction, filter, count);
-            }
-            effect => return Err(effect),
-        }
-        Ok(())
-    }
-}
 
-use crate::app::commands::AppEffect;
+
+
 use crate::editor::ArgumentSchema;
 use crate::editor::CommandError;
 use crate::editor::CommandRegistry;
@@ -965,4 +951,21 @@ pub(in crate::app) fn register_commands(registry: &mut CommandRegistry<AppEffect
         )?;
     }
 Ok(())
+}
+
+
+impl App {
+    pub(in crate::app) fn process_diagnostics_effect(&mut self, effect: AppEffect) -> Result<(), AppEffect> {
+        match effect {
+            AppEffect::DiagnosticNavigate {
+                direction,
+                filter,
+                count,
+            } => {
+                self.navigate_diagnostic(direction, filter, count);
+            }
+            effect => return Err(effect),
+        }
+        Ok(())
+    }
 }

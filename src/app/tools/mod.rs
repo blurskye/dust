@@ -998,3 +998,7 @@ mod tests {
 }
 
 pub(in crate::app) mod commands;
+
+pub(in crate::app) mod interaction;
+
+pub(in crate::app) mod packages;

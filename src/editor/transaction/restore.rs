@@ -1,3 +1,4 @@
+//! Canonical restoration of editor stores through a consuming draft.
 pub(crate) struct RestoredPane {
     pub(crate) path: PathBuf,
     pub(crate) cursor: usize,
@@ -14,7 +15,6 @@ pub(crate) struct RestoredTab {
     pub(crate) focused_pane: Option<usize>,
     pub(crate) focused_path: Option<PathBuf>,
 }
-//! Canonical restoration of editor stores through a consuming draft.
 use crate::editor::transaction::EditorDraft;
 use crate::editor::EditorState;
 use crate::editor::text::ByteOffset;

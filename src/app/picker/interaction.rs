@@ -29,9 +29,9 @@ use crate::app::path_from_file_uri;
 use crate::ui::render::editor::STATUS_DIRTY_MARKER;
 use crate::ui::render::picker::PICKER_MAXIMUM_PREVIEW_BYTES;
 use crate::app::command;
-use crate::workspace::PickerAction;
-use crate::workspace::PickerItem;
-use crate::workspace::PickerItemId;
+
+
+
 
 use crate::app::documents::coordination::RECOVERY_PREVIEW_LINES;
 

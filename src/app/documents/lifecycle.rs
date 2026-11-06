@@ -60,7 +60,7 @@ pub(in crate::app) enum DocumentFailure {
     Error(String),
 }
 impl From<VfsError> for DocumentFailure {
-    pub(in crate::app) fn from(e: VfsError) -> Self {
+    fn from(e: VfsError) -> Self {
         Self::Error(e.to_string())
     }
 }

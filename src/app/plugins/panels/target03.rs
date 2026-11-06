@@ -1,5 +1,5 @@
 //! Test-only adapter from the normative target ABI into the existing window owners.
-use crate::app::plugins::windows::*;
+use crate::app::plugins::panels::*;
 use crate::plugins::target03::StagedUiRequest;
 use crate::plugins::target03::TargetAdmission;
 use crate::plugins::target03::api::dust::plugin::host as wire;

@@ -77,7 +77,7 @@ pub(in crate::app) struct TerminalGeometrySource {
 }
 
 impl PartialEq for TerminalGeometrySource {
-    pub(in crate::app) fn eq(&self, other: &Self) -> bool {
+    fn eq(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.origin, &other.origin)
             && self.terminal == other.terminal
             && self.content == other.content
@@ -302,7 +302,7 @@ pub(in crate::app) mod commands;
 mod viewport_tests;
 
 #[cfg(test)]
-mod project_tests;
+pub(in crate::app) mod project_tests;
 
 #[cfg(test)]
-mod surfaces_tests;
+pub(in crate::app) mod surfaces_tests;

@@ -8,8 +8,8 @@ use crate::editor::text::TextEdit;
 #[test]
 fn workspace_approval_restores_unopened_file_history_on_a_worker() {
     use crate::editor::text::TextEditSet;
-    use crate::editor::transaction::EditorOperation;
-    use crate::editor::transaction::EditorTransaction;
+    use crate::editor::EditorOperation;
+    use crate::editor::EditorTransaction;
     let root = tempfile::tempdir().unwrap();
     let path = root.path().join("file.txt");
     let history = root.path().join("undo");
@@ -35,7 +35,7 @@ fn workspace_approval_restores_unopened_file_history_on_a_worker() {
         ))
         .unwrap();
     recorded = recording_editor.buffers[buffer].clone();
-    crate::editor::transaction::save_undo_history(
+    crate::editor::save_undo_history(
         history.clone(),
         path.clone(),
         recorded.text.clone(),
@@ -43,7 +43,7 @@ fn workspace_approval_restores_unopened_file_history_on_a_worker() {
         maximum,
     );
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-    while crate::editor::transaction::load_undo_history(&history, &path, &recorded.text, maximum)
+    while crate::editor::load_undo_history(&history, &path, &recorded.text, maximum)
         .is_none()
     {
         assert!(

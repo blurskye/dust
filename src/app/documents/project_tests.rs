@@ -5,7 +5,7 @@ use crate::app::tasks::project_tests::check_task_diagnostics;
 
 
 #[test]
-fn diagnostic_navigation_filters_severity_wraps_and_expands_the_landed_line() {
+pub(in crate::app) fn diagnostic_navigation_filters_severity_wraps_and_expands_the_landed_line() {
     let root = tempfile::tempdir().unwrap();
     let state_dir = tempfile::tempdir().unwrap();
     let mut app = App::new(
@@ -149,7 +149,7 @@ fn diagnostic_navigation_filters_severity_wraps_and_expands_the_landed_line() {
 
 
 #[test]
-fn accepting_a_disk_diagnostic_opens_its_file_and_validates_the_range() {
+pub(in crate::app) fn accepting_a_disk_diagnostic_opens_its_file_and_validates_the_range() {
     let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("unopened.txt");
     fs::write(&path, "first\nerror\n").unwrap();
@@ -204,7 +204,7 @@ fn accepting_a_disk_diagnostic_opens_its_file_and_validates_the_range() {
 
 
 #[test]
-fn operation_state_read_failure_is_reported_as_unavailable_not_idle() {
+pub(in crate::app) fn operation_state_read_failure_is_reported_as_unavailable_not_idle() {
     let (_app_dirs, mut app) = app();
     let repo = git2::Repository::init(&app.state.workspace_root).unwrap();
     let git_dir = repo.path().to_path_buf();
@@ -233,7 +233,7 @@ fn operation_state_read_failure_is_reported_as_unavailable_not_idle() {
 
 
 #[test]
-fn soft_reset_refreshes_status_even_when_index_and_head_files_do_not_change() {
+pub(in crate::app) fn soft_reset_refreshes_status_even_when_index_and_head_files_do_not_change() {
     let (_app_dirs, mut app, repo, _) = near_changes_fixture();
     let old = repo.head().unwrap().peel_to_commit().unwrap();
     let mut index = repo.index().unwrap();
@@ -327,7 +327,7 @@ pub(in crate::app) fn near_changes_fixture() -> (
 
 
 #[test]
-fn save_all_retries_documents_beyond_the_request_capacity() {
+pub(in crate::app) fn save_all_retries_documents_beyond_the_request_capacity() {
     let (_app_dirs, mut app) = app();
     let mut saved = Vec::new();
     for index in 0..12 {
@@ -358,7 +358,7 @@ fn save_all_retries_documents_beyond_the_request_capacity() {
 
 
 #[test]
-fn save_as_reload_close_and_external_change_protection_work() {
+pub(in crate::app) fn save_as_reload_close_and_external_change_protection_work() {
     let (_app_dirs, mut app) = app();
     let root = app.state.workspace_root.clone();
     app.state
@@ -414,7 +414,7 @@ fn save_as_reload_close_and_external_change_protection_work() {
 
 
 #[test]
-fn dirty_quit_is_blocked_but_forced_quit_succeeds() {
+pub(in crate::app) fn dirty_quit_is_blocked_but_forced_quit_succeeds() {
     let (_app_dirs, mut app) = app();
     let (_, _) = app
         .state
@@ -437,7 +437,7 @@ fn dirty_quit_is_blocked_but_forced_quit_succeeds() {
 
 #[cfg(unix)]
 #[test]
-fn a_failed_test_is_listed_in_problems_and_jumps_to_its_line() {
+pub(in crate::app) fn a_failed_test_is_listed_in_problems_and_jumps_to_its_line() {
     let root = tempdir().unwrap();
     let state_dir = tempdir().unwrap();
     fs::write(root.path().join("a.txt"), "one\ntwo\néX\n").unwrap();
@@ -535,7 +535,7 @@ fn a_failed_test_is_listed_in_problems_and_jumps_to_its_line() {
 
 
 #[test]
-fn successful_dependency_diagnostics_keep_separate_stream_records() {
+pub(in crate::app) fn successful_dependency_diagnostics_keep_separate_stream_records() {
     check_task_diagnostics(true);
 }
 
@@ -549,7 +549,7 @@ pub(in crate::app) fn index_bytes(root: &std::path::Path, name: &str) -> String 
 
 
 #[test]
-fn named_staging_commands_change_only_the_index() {
+pub(in crate::app) fn named_staging_commands_change_only_the_index() {
     fn index_bytes(root: &std::path::Path, name: &str) -> String {
         let repo = git2::Repository::open(root).unwrap();
         let index = repo.index().unwrap();
@@ -693,7 +693,7 @@ fn named_staging_commands_change_only_the_index() {
 
 
 #[test]
-fn staging_an_unsaved_buffer_offers_an_explicit_choice() {
+pub(in crate::app) fn staging_an_unsaved_buffer_offers_an_explicit_choice() {
     fn index_bytes(root: &std::path::Path, name: &str) -> String {
         let repo = git2::Repository::open(root).unwrap();
         let index = repo.index().unwrap();
@@ -818,7 +818,7 @@ fn staging_an_unsaved_buffer_offers_an_explicit_choice() {
 
 
 #[test]
-fn status_reports_a_path_whose_only_change_is_an_unsaved_buffer() {
+pub(in crate::app) fn status_reports_a_path_whose_only_change_is_an_unsaved_buffer() {
     let (_app_dirs, mut app) = app();
     let repo = git2::Repository::init(&app.state.workspace_root).unwrap();
     let path = app.state.workspace_root.join("unsaved-only.txt");
@@ -872,7 +872,7 @@ fn status_reports_a_path_whose_only_change_is_an_unsaved_buffer() {
 
 
 #[test]
-fn staging_one_of_two_changed_lines_keeps_the_file_in_order() {
+pub(in crate::app) fn staging_one_of_two_changed_lines_keeps_the_file_in_order() {
     let (_app_dirs, mut app) = app();
     let repo = git2::Repository::init(&app.state.workspace_root).unwrap();
     let path = app.state.workspace_root.join("pair.txt");
@@ -960,7 +960,7 @@ pub(in crate::app) fn history_fixture(root: &std::path::Path, subjects: &[&str])
 
 
 #[test]
-fn help_preserves_a_buffer_selection_byte_for_byte() {
+pub(in crate::app) fn help_preserves_a_buffer_selection_byte_for_byte() {
     let (_app_dirs, mut app) = app();
     let (buffer, view) = app
         .state
@@ -1000,7 +1000,7 @@ fn help_preserves_a_buffer_selection_byte_for_byte() {
 
 
 #[test]
-fn the_advertised_help_key_is_the_key_that_resolves() {
+pub(in crate::app) fn the_advertised_help_key_is_the_key_that_resolves() {
     let (_app_dirs, mut app) = app();
     app.open_confirmation(
         crate::ui::PromptKind::Command,
@@ -1053,7 +1053,7 @@ fn the_advertised_help_key_is_the_key_that_resolves() {
 
 
 #[test]
-fn accepting_inside_help_closes_the_page_and_invokes_nothing() {
+pub(in crate::app) fn accepting_inside_help_closes_the_page_and_invokes_nothing() {
     let (_app_dirs, mut app) = app();
     app.open_builtin_picker(crate::app::PickerKind::Commands);
     app.picker_insert("overlay.help.reference");
@@ -1094,7 +1094,7 @@ fn accepting_inside_help_closes_the_page_and_invokes_nothing() {
 
 
 #[test]
-fn a_surface_installed_over_help_discards_the_snapshot() {
+pub(in crate::app) fn a_surface_installed_over_help_discards_the_snapshot() {
     let (_app_dirs, mut app) = app();
     app.open_builtin_picker(crate::app::PickerKind::Commands);
     app.picker_insert("overlay.help.reference");
@@ -1120,7 +1120,7 @@ fn a_surface_installed_over_help_discards_the_snapshot() {
 
 
 #[test]
-fn help_opened_over_help_keeps_the_original_surface() {
+pub(in crate::app) fn help_opened_over_help_keeps_the_original_surface() {
     let (_app_dirs, mut app) = app();
     app.open_builtin_picker(crate::app::PickerKind::Commands);
     app.picker_insert("overlay.help.reference");
@@ -1169,7 +1169,7 @@ fn help_opened_over_help_keeps_the_original_surface() {
 
 
 #[test]
-fn choosing_a_side_edits_the_result_buffer_and_leaves_save_and_stage_separate() {
+pub(in crate::app) fn choosing_a_side_edits_the_result_buffer_and_leaves_save_and_stage_separate() {
     let (_app_dirs, mut app) = app();
     let repo = history_fixture(&app.state.workspace_root, &["base"]);
     let root = app.state.workspace_root.clone();
@@ -1313,7 +1313,7 @@ fn choosing_a_side_edits_the_result_buffer_and_leaves_save_and_stage_separate() 
 
 
 #[test]
-fn a_previewed_replacement_writes_nothing_until_it_is_confirmed() {
+pub(in crate::app) fn a_previewed_replacement_writes_nothing_until_it_is_confirmed() {
     let (_app_dirs, mut app) = app();
     let root = app.state.workspace_root.clone();
     let (our_tip, _their_tip) = {
@@ -1527,7 +1527,7 @@ fn a_previewed_replacement_writes_nothing_until_it_is_confirmed() {
 /// W-26: the Changes surface renders as section 7.1 draws it — labelled sections, status and
 /// provenance columns, an unsaved badge and its own footer — proved from the rendered grid.
 #[test]
-fn the_changes_surface_renders_its_sections_columns_badge_and_footer() {
+pub(in crate::app) fn the_changes_surface_renders_its_sections_columns_badge_and_footer() {
     let (_app_dirs, mut app) = app();
     let repo = git2::Repository::init(&app.state.workspace_root).unwrap();
     let sig = git2::Signature::now("Dust", "dust@example.invalid").unwrap();
@@ -1770,7 +1770,7 @@ pub(in crate::app) fn wait_changes_preview(app: &mut App) {
 
 /// `:e` on a path with nothing there starts that file, and the first save creates it.
 #[test]
-fn editing_a_missing_path_starts_a_new_file_that_saving_creates() {
+pub(in crate::app) fn editing_a_missing_path_starts_a_new_file_that_saving_creates() {
     let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("new-file.txt");
     app.edit_path(PathBuf::from("new-file.txt"));
@@ -1801,7 +1801,7 @@ fn editing_a_missing_path_starts_a_new_file_that_saving_creates() {
 
 /// W-26: a refresh does not move the selection or reorder the list under the cursor.
 #[test]
-fn a_change_refresh_keeps_the_selection_on_the_same_row() {
+pub(in crate::app) fn a_change_refresh_keeps_the_selection_on_the_same_row() {
     let (_app_dirs, mut app) = app();
     let repo = git2::Repository::init(&app.state.workspace_root).unwrap();
     let sig = git2::Signature::now("Dust", "dust@example.invalid").unwrap();
@@ -1858,7 +1858,7 @@ fn a_change_refresh_keeps_the_selection_on_the_same_row() {
 /// save-and-stage choice, and the index is not written — for the FOCUSED row, which is not
 /// the active buffer.
 #[test]
-fn staging_a_row_moves_it_to_the_staged_section_of_the_open_list() {
+pub(in crate::app) fn staging_a_row_moves_it_to_the_staged_section_of_the_open_list() {
     let (_app_dirs, mut app) = app();
     let repo = git2::Repository::init(&app.state.workspace_root).unwrap();
     let sig = git2::Signature::now("Dust", "dust@example.invalid").unwrap();
@@ -1930,7 +1930,7 @@ fn staging_a_row_moves_it_to_the_staged_section_of_the_open_list() {
 
 /// W-26: `Ctrl-q` sends the changed-path list to the shared Results surface.
 #[test]
-fn ctrl_q_sends_the_change_rows_to_the_results_surface() {
+pub(in crate::app) fn ctrl_q_sends_the_change_rows_to_the_results_surface() {
     let (_app_dirs, mut app) = app();
     let repo = git2::Repository::init(&app.state.workspace_root).unwrap();
     let sig = git2::Signature::now("Dust", "dust@example.invalid").unwrap();
@@ -1984,7 +1984,7 @@ fn ctrl_q_sends_the_change_rows_to_the_results_surface() {
 
 
 #[test]
-fn opening_changes_before_status_arrives_opens_them_when_it_does() {
+pub(in crate::app) fn opening_changes_before_status_arrives_opens_them_when_it_does() {
     let (_app_dirs, mut app) = app();
     git2::Repository::init(&app.state.workspace_root).unwrap();
     fs::write(app.state.workspace_root.join("a.txt"), "one\n").unwrap();
@@ -2013,7 +2013,7 @@ fn opening_changes_before_status_arrives_opens_them_when_it_does() {
 
 
 #[test]
-fn command_line_completes_commands_without_an_alias_and_fills_in_their_arguments() {
+pub(in crate::app) fn command_line_completes_commands_without_an_alias_and_fills_in_their_arguments() {
     let (_app_dirs, mut app) = app();
     app.open_prompt(crate::ui::PromptKind::Command, "wor".into());
     app.refresh_completions();
@@ -2056,7 +2056,7 @@ fn command_line_completes_commands_without_an_alias_and_fills_in_their_arguments
 
 
 #[test]
-fn completing_a_path_after_w_keeps_the_save_command() {
+pub(in crate::app) fn completing_a_path_after_w_keeps_the_save_command() {
     let (_app_dirs, mut app) = app();
     fs::write(app.state.workspace_root.join("q!"), b"").expect("file");
     app.open_prompt(crate::ui::PromptKind::Command, "w q".into());
@@ -2068,7 +2068,7 @@ fn completing_a_path_after_w_keeps_the_save_command() {
 
 
 #[test]
-fn deferred_navigation_does_not_replace_a_newer_buffer_choice() {
+pub(in crate::app) fn deferred_navigation_does_not_replace_a_newer_buffer_choice() {
     let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("late.txt");
     fs::write(&path, "destination").unwrap();
@@ -2088,7 +2088,7 @@ fn deferred_navigation_does_not_replace_a_newer_buffer_choice() {
 
 
 #[test]
-fn location_labels_read_only_the_required_prefix_of_a_large_file() {
+pub(in crate::app) fn location_labels_read_only_the_required_prefix_of_a_large_file() {
     let (_app_dirs, app) = app();
     let path = app.state.workspace_root.join("sparse.txt");
     let file = fs::File::create(&path).unwrap();
@@ -2105,7 +2105,7 @@ fn location_labels_read_only_the_required_prefix_of_a_large_file() {
 
 
 #[test]
-fn failed_and_cancelled_staging_never_replays_on_an_ordinary_save() {
+pub(in crate::app) fn failed_and_cancelled_staging_never_replays_on_an_ordinary_save() {
     let (_app_dirs, mut app, _repo, path) = near_changes_fixture();
     let index_before = index_bytes(&app.state.workspace_root, "near.txt");
     app.process_effect(AppEffect::GitLinesStage {
@@ -2154,7 +2154,7 @@ fn failed_and_cancelled_staging_never_replays_on_an_ordinary_save() {
 
 
 #[test]
-fn disk_polling_retries_reloads_refused_by_document_capacity() {
+pub(in crate::app) fn disk_polling_retries_reloads_refused_by_document_capacity() {
     let (_app_dirs, mut app) = app();
     let mut buffers = Vec::new();
     for index in 0..9 {
@@ -2187,7 +2187,7 @@ fn disk_polling_retries_reloads_refused_by_document_capacity() {
 
 
 #[test]
-fn failed_save_and_stage_does_not_leak_into_a_later_save() {
+pub(in crate::app) fn failed_save_and_stage_does_not_leak_into_a_later_save() {
     let (_app_dirs, mut app, repo, path) = near_changes_fixture();
     let buffer = app.state.active_buffer_id().unwrap();
     app.replace_with_recovered(buffer, "unsaved\n".into())
@@ -2219,7 +2219,7 @@ fn failed_save_and_stage_does_not_leak_into_a_later_save() {
 
 
 #[test]
-fn staging_an_unsaved_buffer_offers_an_explicit_choice_slot5() {
+pub(in crate::app) fn staging_an_unsaved_buffer_offers_an_explicit_choice_slot5() {
     fn index_bytes(root: &std::path::Path, name: &str) -> String {
         let repo = git2::Repository::open(root).unwrap();
         let index = repo.index().unwrap();
@@ -2353,7 +2353,7 @@ fn staging_an_unsaved_buffer_offers_an_explicit_choice_slot5() {
 
 
 #[test]
-fn a_previewed_replacement_writes_nothing_until_it_is_confirmed_slot5() {
+pub(in crate::app) fn a_previewed_replacement_writes_nothing_until_it_is_confirmed_slot5() {
     let (_app_dirs, mut app) = app();
     let root = app.state.workspace_root.clone();
     let (our_tip, _their_tip) = {
@@ -2541,7 +2541,7 @@ fn a_previewed_replacement_writes_nothing_until_it_is_confirmed_slot5() {
 
 
 #[test]
-fn opening_changes_refreshes_cached_unsaved_document_information() {
+pub(in crate::app) fn opening_changes_refreshes_cached_unsaved_document_information() {
     let (_app_dirs, mut app) = app();
     history_fixture(&app.state.workspace_root, &["base"]);
     let path = app.state.workspace_root.join("h0.txt");
@@ -2599,7 +2599,7 @@ fn opening_changes_refreshes_cached_unsaved_document_information() {
 
 
 #[test]
-fn file_rows_dim_the_folder_and_count_what_the_query_leaves_of_all() {
+pub(in crate::app) fn file_rows_dim_the_folder_and_count_what_the_query_leaves_of_all() {
     let (_app_dirs, mut app) = app();
     fs::create_dir(app.state.workspace_root.join("src")).unwrap();
     fs::write(app.state.workspace_root.join("src/lib.rs"), "").unwrap();

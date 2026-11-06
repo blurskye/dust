@@ -14,7 +14,7 @@ use crate::editor::text::ByteOffset;
 use crate::editor::text::ByteRange;
 use crate::editor::text::TextEdit;
 use crate::editor::text::TextVersion;
-use crate::editor::transaction::WorkspaceEditSources;
+use crate::editor::WorkspaceEditSources;
 use crate::plugins::PluginEditProposal;
 use crate::plugins::PluginExecution;
 use crate::plugins::PluginExecutionReply;

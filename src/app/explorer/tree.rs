@@ -71,7 +71,7 @@ pub struct ExplorerState {
 }
 
 impl Default for ExplorerState {
-    pub(in crate::app) fn default() -> Self {
+    fn default() -> Self {
         Self {
             data: Arc::new(ExplorerData::default()),
             selected: None,

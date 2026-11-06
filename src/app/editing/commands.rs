@@ -13,13 +13,298 @@ use crate::app::builtin_languages;
 use crate::app::plugins::VirtualContext;
 use crate::app::command;
 use crate::app::language_for_document;
-use crate::workspace::PickerAction;
-use crate::workspace::PickerItem;
-use crate::workspace::PickerItemId;
+
+
+
+
+
+
+
+use crate::editor::ArgumentSchema;
+use crate::editor::ArgumentType;
+use crate::editor::CommandError;
+use crate::editor::CommandRegistry;
+use crate::editor::ContextRequirement;
+use crate::app::commands::register;
+use crate::app::commands::string_arg;
+use crate::app::commands::optional_bool_arg;
+use crate::app::commands::bool_arg;
+use crate::app::ViewToggle;
+use crate::app::commands::one_character_arg;
+
+pub(in crate::app) fn register_commands(registry: &mut CommandRegistry<AppEffect>) -> Result<(), CommandError> {
+
+    register(
+        registry,
+        "editor.quit",
+        "Quit Dust",
+        ContextRequirement::Application,
+        ArgumentSchema::default().field("force", ArgumentType::Bool, true),
+        |invocation| {
+            Ok(AppEffect::Quit {
+                force: bool_arg(invocation, "force")?,
+            })
+        },
+    )?;
+    register(
+        registry,
+        "input.mapping.cancel",
+        "Cancel pending mapping",
+        ContextRequirement::Application,
+        ArgumentSchema::default(),
+        |_| AppEffect::CancelPendingMapping,
+    )?;
+    register(
+        registry,
+        "editor.flash",
+        "Jump to a visible match by its label",
+        ContextRequirement::View,
+        ArgumentSchema::default(),
+        |_| AppEffect::FlashBegin,
+    )?;
+    register(
+        registry,
+        "edit.repeat_last",
+        "Repeat last change",
+        ContextRequirement::View,
+        ArgumentSchema::default(),
+        |invocation| AppEffect::RepeatLast(invocation.count),
+    )?;
+    register(
+        registry,
+        "macro.record.start",
+        "Start macro recording",
+        ContextRequirement::View,
+        ArgumentSchema::default().field("register", ArgumentType::String, true),
+        |invocation| {
+            let name = one_character_arg(invocation, "register")?;
+            Ok(AppEffect::MacroRecordStart(name))
+        },
+    )?;
+    register(
+        registry,
+        "macro.record.stop",
+        "Stop macro recording",
+        ContextRequirement::View,
+        ArgumentSchema::default(),
+        |_| AppEffect::MacroRecordStop,
+    )?;
+    register(
+        registry,
+        "macro.replay",
+        "Replay macro",
+        ContextRequirement::View,
+        ArgumentSchema::default().field("register", ArgumentType::String, true),
+        |invocation| {
+            let name = one_character_arg(invocation, "register")?;
+            Ok(AppEffect::MacroReplay {
+                register: name,
+                count: invocation.count.map_or(1, |count| count.get()),
+            })
+        },
+    )?;
+    register(
+        registry,
+        "view.scroll",
+        "Scroll view",
+        ContextRequirement::View,
+        ArgumentSchema::default()
+            .field("kind", ArgumentType::String, true)
+            .field("at_mouse", ArgumentType::Bool, false),
+        |invocation| {
+            Ok(AppEffect::Scroll {
+                kind: string_arg(invocation, "kind")?.into(),
+                count: invocation.count.map_or(1, |count| count.get()),
+                at_mouse: optional_bool_arg(invocation, "at_mouse").unwrap_or(false),
+            })
+        },
+    )?;
+    register(
+        registry,
+        "view.cursor.place_mouse",
+        "Place cursor at mouse position",
+        ContextRequirement::View,
+        ArgumentSchema::default(),
+        |_| AppEffect::PlaceMouseCursor,
+    )?;
+    register(
+        registry,
+        "view.selection.extend_mouse",
+        "Extend selection to mouse position",
+        ContextRequirement::View,
+        ArgumentSchema::default(),
+        |_| AppEffect::ExtendMouseSelection,
+    )?;
+    for (id, title, toggle) in [
+        ("view.wrap.toggle", "Toggle line wrap", ViewToggle::Wrap),
+        (
+            "view.line_numbers.toggle",
+            "Toggle line numbers",
+            ViewToggle::LineNumbers,
+        ),
+        (
+            "view.relative_numbers.toggle",
+            "Toggle relative line numbers",
+            ViewToggle::RelativeNumbers,
+        ),
+        (
+            "view.indent_guides.toggle",
+            "Toggle indent guides",
+            ViewToggle::IndentGuides,
+        ),
+        (
+            "view.git_signs.toggle",
+            "Toggle git signs",
+            ViewToggle::GitSigns,
+        ),
+        (
+            "view.format_on_save.toggle",
+            "Toggle format on save",
+            ViewToggle::FormatOnSave,
+        ),
+    ] {
+        register(
+            registry,
+            id,
+            title,
+            ContextRequirement::Application,
+            ArgumentSchema::default(),
+            move |_| AppEffect::ViewToggle(toggle),
+        )?;
+    }
+    register(
+        registry,
+        "view.zen.toggle",
+        "Toggle zen mode",
+        ContextRequirement::View,
+        ArgumentSchema::default(),
+        |_| AppEffect::Zen,
+    )?;
+    register(
+        registry,
+        "edit.substitute_rest",
+        "Replace every remaining match",
+        ContextRequirement::Application,
+        ArgumentSchema::default(),
+        |_| Ok(AppEffect::SubstituteAll),
+    )?;
+Ok(())
+}
+
+use crate::app::PluginUiInteraction;
 
 impl App {
     pub(in crate::app) fn process_editing_effect(&mut self, effect: AppEffect) -> Result<(), AppEffect> {
         match effect {
+            AppEffect::OpenWorkspaceFilePicker => self.start_workspace_file_picker(),
+            AppEffect::WalkJumps(back) => self.walk_jumps(back),
+            AppEffect::FlashBegin => self.begin_flash(),
+            AppEffect::OpenPrompt { kind, initial } => self.open_prompt(kind, initial),
+            AppEffect::NotificationHistory => {
+                let items = self
+                    .notices
+                    .history()
+                    .rev()
+                    .enumerate()
+                    .map(|(index, (error, message))| {
+                        (
+                            PickerItem {
+                                badge: String::new(),
+                                kind: crate::workspace::PickerItemKind::Entry,
+                                id: PickerItemId(format!("notification:{index}")),
+                                label: message.clone(),
+                                detail: if *error {
+                                    "error".into()
+                                } else {
+                                    "info".into()
+                                },
+                                source: "application".into(),
+                                action: PickerAction::None,
+                            },
+                            PickerPayload::Notice {
+                                title: "Notification".into(),
+                                text: message.clone(),
+                            },
+                        )
+                    })
+                    .collect();
+                self.clear_notice();
+                self.install_picker("Notifications".into(), items);
+            }
+            AppEffect::NotificationDismiss => {
+                self.clear_notice();
+            }
+            AppEffect::SubstituteAll => {
+                if self.substitute_confirm.is_some() {
+                    self.answer_substitution(true, true);
+                }
+            }
+            AppEffect::Scroll {
+                kind,
+                count,
+                at_mouse,
+            } => {
+                if at_mouse {
+                    self.focus_mouse_pane();
+                }
+                self.scroll_view(&kind, count);
+            }
+            AppEffect::PlaceMouseCursor => self.apply_mouse_cursor(false),
+            AppEffect::ExtendMouseSelection => self.apply_mouse_cursor(true),
+            AppEffect::ViewToggle(toggle) => {
+                let enabled = self.configuration.toggle_view(toggle);
+                let name = match toggle {
+                    crate::app::ViewToggle::Wrap => "wrap",
+                    crate::app::ViewToggle::LineNumbers => "line numbers",
+                    crate::app::ViewToggle::RelativeNumbers => "relative numbers",
+                    crate::app::ViewToggle::IndentGuides => "indent guides",
+                    crate::app::ViewToggle::GitSigns => "git signs",
+                    crate::app::ViewToggle::FormatOnSave => "format on save",
+                };
+                self.ensure_cursor_visible();
+                self.notify_message(
+                    format!("{name} {}", if enabled { "enabled" } else { "disabled" }),
+                    false,
+                );
+            }
+            AppEffect::RetainedUiFocus(delta) => {
+                self.apply_retained_ui_interaction(PluginUiInteraction::Focus(delta));
+            }
+            AppEffect::RetainedUiScroll(delta) => {
+                self.apply_retained_ui_interaction(PluginUiInteraction::Scroll(delta));
+            }
+            AppEffect::RetainedUiActivate => {
+                self.apply_retained_ui_interaction(PluginUiInteraction::Activate);
+            }
+            AppEffect::RetainedUiMouseSelect => self.select_retained_ui_at_mouse(),
+            AppEffect::PrivateUiActivate { at_mouse } => {
+                self.activate_private_surface_action(at_mouse);
+            }
+            AppEffect::RepeatLast(count) => self.repeat_last_change(count),
+            AppEffect::MacroRecordStart(register) => {
+                self.input.start_macro_recording(register);
+                self.notify_message(
+                    self.message("macro_recording", &[("register", register.to_string())]),
+                    false,
+                );
+            }
+            AppEffect::MacroRecordStop => {
+                if let Some((register, invocations)) = self.input.finish_macro_recording() {
+                    self.state.registers.set_macro(register, invocations);
+                    self.state.mark_editor_changed();
+                    self.notify_message(
+                        self.message("macro_recorded", &[("register", register.to_string())]),
+                        false,
+                    );
+                } else {
+                    self.show_error(self.message("no_macro_recording", &[]));
+                }
+            }
+            AppEffect::MacroReplay { .. } => {
+                unreachable!("macro effects return their status through process_effect_checked")
+            }
+            AppEffect::Grammar(input) => self.process_grammar_input(input),
+            AppEffect::CancelPendingMapping => self.cancel_pending_mapping(),
             AppEffect::ExplainConfig(key) => {
                 if let Some(explanation) = self.configuration.explain(&key) {
                     self.notify_message(
@@ -318,176 +603,4 @@ impl App {
         }
         Ok(())
     }
-}
-
-use crate::app::commands::AppEffect;
-use crate::editor::ArgumentSchema;
-use crate::editor::ArgumentType;
-use crate::editor::CommandError;
-use crate::editor::CommandRegistry;
-use crate::editor::ContextRequirement;
-use crate::app::commands::register;
-use crate::app::commands::string_arg;
-use crate::app::commands::optional_bool_arg;
-use crate::app::commands::bool_arg;
-use crate::app::ViewToggle;
-use crate::app::commands::one_character_arg;
-
-pub(in crate::app) fn register_commands(registry: &mut CommandRegistry<AppEffect>) -> Result<(), CommandError> {
-
-    register(
-        registry,
-        "editor.quit",
-        "Quit Dust",
-        ContextRequirement::Application,
-        ArgumentSchema::default().field("force", ArgumentType::Bool, true),
-        |invocation| {
-            Ok(AppEffect::Quit {
-                force: bool_arg(invocation, "force")?,
-            })
-        },
-    )?;
-    register(
-        registry,
-        "input.mapping.cancel",
-        "Cancel pending mapping",
-        ContextRequirement::Application,
-        ArgumentSchema::default(),
-        |_| AppEffect::CancelPendingMapping,
-    )?;
-    register(
-        registry,
-        "editor.flash",
-        "Jump to a visible match by its label",
-        ContextRequirement::View,
-        ArgumentSchema::default(),
-        |_| AppEffect::FlashBegin,
-    )?;
-    register(
-        registry,
-        "edit.repeat_last",
-        "Repeat last change",
-        ContextRequirement::View,
-        ArgumentSchema::default(),
-        |invocation| AppEffect::RepeatLast(invocation.count),
-    )?;
-    register(
-        registry,
-        "macro.record.start",
-        "Start macro recording",
-        ContextRequirement::View,
-        ArgumentSchema::default().field("register", ArgumentType::String, true),
-        |invocation| {
-            let name = one_character_arg(invocation, "register")?;
-            Ok(AppEffect::MacroRecordStart(name))
-        },
-    )?;
-    register(
-        registry,
-        "macro.record.stop",
-        "Stop macro recording",
-        ContextRequirement::View,
-        ArgumentSchema::default(),
-        |_| AppEffect::MacroRecordStop,
-    )?;
-    register(
-        registry,
-        "macro.replay",
-        "Replay macro",
-        ContextRequirement::View,
-        ArgumentSchema::default().field("register", ArgumentType::String, true),
-        |invocation| {
-            let name = one_character_arg(invocation, "register")?;
-            Ok(AppEffect::MacroReplay {
-                register: name,
-                count: invocation.count.map_or(1, |count| count.get()),
-            })
-        },
-    )?;
-    register(
-        registry,
-        "view.scroll",
-        "Scroll view",
-        ContextRequirement::View,
-        ArgumentSchema::default()
-            .field("kind", ArgumentType::String, true)
-            .field("at_mouse", ArgumentType::Bool, false),
-        |invocation| {
-            Ok(AppEffect::Scroll {
-                kind: string_arg(invocation, "kind")?.into(),
-                count: invocation.count.map_or(1, |count| count.get()),
-                at_mouse: optional_bool_arg(invocation, "at_mouse").unwrap_or(false),
-            })
-        },
-    )?;
-    register(
-        registry,
-        "view.cursor.place_mouse",
-        "Place cursor at mouse position",
-        ContextRequirement::View,
-        ArgumentSchema::default(),
-        |_| AppEffect::PlaceMouseCursor,
-    )?;
-    register(
-        registry,
-        "view.selection.extend_mouse",
-        "Extend selection to mouse position",
-        ContextRequirement::View,
-        ArgumentSchema::default(),
-        |_| AppEffect::ExtendMouseSelection,
-    )?;
-    for (id, title, toggle) in [
-        ("view.wrap.toggle", "Toggle line wrap", ViewToggle::Wrap),
-        (
-            "view.line_numbers.toggle",
-            "Toggle line numbers",
-            ViewToggle::LineNumbers,
-        ),
-        (
-            "view.relative_numbers.toggle",
-            "Toggle relative line numbers",
-            ViewToggle::RelativeNumbers,
-        ),
-        (
-            "view.indent_guides.toggle",
-            "Toggle indent guides",
-            ViewToggle::IndentGuides,
-        ),
-        (
-            "view.git_signs.toggle",
-            "Toggle git signs",
-            ViewToggle::GitSigns,
-        ),
-        (
-            "view.format_on_save.toggle",
-            "Toggle format on save",
-            ViewToggle::FormatOnSave,
-        ),
-    ] {
-        register(
-            registry,
-            id,
-            title,
-            ContextRequirement::Application,
-            ArgumentSchema::default(),
-            move |_| AppEffect::ViewToggle(toggle),
-        )?;
-    }
-    register(
-        registry,
-        "view.zen.toggle",
-        "Toggle zen mode",
-        ContextRequirement::View,
-        ArgumentSchema::default(),
-        |_| AppEffect::Zen,
-    )?;
-    register(
-        registry,
-        "edit.substitute_rest",
-        "Replace every remaining match",
-        ContextRequirement::Application,
-        ArgumentSchema::default(),
-        |_| Ok(AppEffect::SubstituteAll),
-    )?;
-Ok(())
 }

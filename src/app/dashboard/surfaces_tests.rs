@@ -5,7 +5,7 @@ use crate::app::AgentCommand;
 
 
 #[test]
-fn showing_the_last_editor_dismisses_the_dashboard() {
+pub(in crate::app) fn showing_the_last_editor_dismisses_the_dashboard() {
     let (_app_dirs, mut app) = app();
     app.state
         .open_text(TextBuffer::from_text("editor"), None)
@@ -34,7 +34,7 @@ fn showing_the_last_editor_dismisses_the_dashboard() {
 
 
 #[test]
-fn configured_text_and_dashboard_commands_are_schema_validated() {
+pub(in crate::app) fn configured_text_and_dashboard_commands_are_schema_validated() {
     let (_app_dirs, app) = app();
     let mut loaded = crate::config::load_bundled_config();
     assert!(validate_configured_commands(&app.commands, &loaded).is_ok());
@@ -53,7 +53,7 @@ fn configured_text_and_dashboard_commands_are_schema_validated() {
 
 #[cfg(unix)]
 #[test]
-fn the_dashboard_cursor_runs_items_and_ctrl_h_l_reach_an_agent_beside_it() {
+pub(in crate::app) fn the_dashboard_cursor_runs_items_and_ctrl_h_l_reach_an_agent_beside_it() {
     use crate::app::tests::driver::TestSession;
     let mut loaded = crate::config::load_bundled_config();
     let agents = &mut loaded.config.agents;
@@ -109,7 +109,7 @@ fn the_dashboard_cursor_runs_items_and_ctrl_h_l_reach_an_agent_beside_it() {
 
 #[cfg(unix)]
 #[test]
-fn ctrl_h_from_an_agent_beside_the_dashboard_returns_to_it_and_it_stays_beside_the_agent() {
+pub(in crate::app) fn ctrl_h_from_an_agent_beside_the_dashboard_returns_to_it_and_it_stays_beside_the_agent() {
     use crate::app::tests::driver::TestSession;
     let mut loaded = crate::config::load_bundled_config();
     let agents = &mut loaded.config.agents;

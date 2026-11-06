@@ -4,7 +4,7 @@ use crate::app::tests::*;
 
 
 #[test]
-fn dashboard_selection_tracks_the_actions_after_configuration_refresh() {
+pub(in crate::app) fn dashboard_selection_tracks_the_actions_after_configuration_refresh() {
     let (_app_dirs, mut app) = app();
     app.project_configuration();
     app.ui.dashboard_selected = app.ui.dashboard_actions.len() - 1;
@@ -36,7 +36,7 @@ fn dashboard_selection_tracks_the_actions_after_configuration_refresh() {
 
 
 #[test]
-fn persisted_window_rules_validate_the_final_fullscreen_configuration() {
+pub(in crate::app) fn persisted_window_rules_validate_the_final_fullscreen_configuration() {
     let (_app_dirs, mut app) = app();
     app.state
         .open_text(TextBuffer::from_text("editor"), None)

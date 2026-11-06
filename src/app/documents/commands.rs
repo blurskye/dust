@@ -4,78 +4,9 @@ use crate::app::App;
 use crate::app::LargeFileOverride;
 use crate::app::mode_name_large;
 
-impl App {
-    pub(in crate::app) fn process_documents_effect(&mut self, effect: AppEffect) -> Result<(), AppEffect> {
-        match effect {
-            AppEffect::ReloadConfiguration => match self.configuration.request_reload() {
-                Ok(()) => {
-                    self.notify_message(self.message("config_reload_queued", &[]), false);
-                }
-                Err(error) => self.show_error(error),
-            },
-            AppEffect::LargeFileSet(mode) => {
-                let Some(buffer) = self
-                    .state
-                    .active_view
-                    .and_then(|view| self.state.views.get(view).map(|view| view.buffer))
-                else {
-                    return Ok(());
-                };
-                let mode = match mode.as_str() {
-                    "auto" => LargeFileOverride::Auto,
-                    "on" => LargeFileOverride::On,
-                    "off" => LargeFileOverride::Off,
-                    _ => {
-                        self.show_error(self.message("large_file_invalid", &[]));
-                        return Ok(());
-                    }
-                };
-                self.documents.set_large_file_mode(
-                    buffer,
-                    self.state.buffers[buffer].path.as_deref(),
-                    mode,
-                );
-                self.process_large_file_modes();
-                self.notify_message(
-                    self.message(
-                        "large_file_changed",
-                        &[("mode", mode_name_large(mode).into())],
-                    ),
-                    false,
-                );
-            }
-            AppEffect::LargeFileStatus => {
-                let Some(buffer) = self
-                    .state
-                    .active_view
-                    .and_then(|view| self.state.views.get(view).map(|view| view.buffer))
-                else {
-                    return Ok(());
-                };
-                let configured = self.documents.configured_mode(buffer);
-                let effective = if self.effective_large_file(buffer) {
-                    "on"
-                } else {
-                    "off"
-                };
-                self.notify_message(
-                    self.message(
-                        "large_file_status",
-                        &[
-                            ("mode", mode_name_large(configured).into()),
-                            ("effective", effective.into()),
-                        ],
-                    ),
-                    false,
-                );
-            }
-            effect => return Err(effect),
-        }
-        Ok(())
-    }
-}
 
-use crate::app::commands::AppEffect;
+
+
 use crate::editor::ArgumentSchema;
 use crate::editor::ArgumentType;
 use crate::editor::CommandError;
@@ -314,4 +245,128 @@ pub(in crate::app) fn register_commands(registry: &mut CommandRegistry<AppEffect
         |_| AppEffect::VirtualDocumentRefresh,
     )?;
 Ok(())
+}
+
+use crate::app::TextBuffer;
+
+impl App {
+    pub(in crate::app) fn process_documents_effect(&mut self, effect: AppEffect) -> Result<(), AppEffect> {
+        match effect {
+            AppEffect::Save {
+                quit_after,
+                path,
+                force,
+            } => {
+                if path.is_some() || force || !self.begin_format_on_save(quit_after) {
+                    self.start_save(quit_after, path, force);
+                }
+            }
+            AppEffect::SaveAll { quit_after } => self.save_all(quit_after),
+            AppEffect::OpenPath(path) => self.edit_path(path),
+            AppEffect::ForceOpenPath(path) => {
+                let wanted = self.state.workspace_root.join(&path).canonicalize().ok();
+                let current = self
+                    .state
+                    .active_buffer_id()
+                    .and_then(|id| self.state.buffers[id].path.as_ref())
+                    .and_then(|file| file.canonicalize().ok());
+                if wanted.is_some() && wanted == current {
+                    self.start_reload(true);
+                } else {
+                    self.edit_path(path);
+                }
+            }
+            // Settings files are optional, so the first open creates one to edit.
+            AppEffect::OpenUserFile(path) => match create_user_file(&path) {
+                Ok(()) => self.start_open(path),
+                Err(error) => self.show_error(format!("{}: {error}", path.display())),
+            },
+            AppEffect::Reload { force } => self.start_reload(force),
+            AppEffect::CloseBuffer { force } => self.close_active_buffer(force),
+            AppEffect::CycleBuffer(offset) => {
+                self.project_window_content_tabs();
+                let order = self.window_session.content_tab_buffers();
+                match self.state.cycle_buffer(&order, offset, true) {
+                    Ok(_) => {
+                        self.set_dashboard_visibility(false);
+                    }
+                    Err(error) => self.show_error(error),
+                }
+            }
+            AppEffect::ToggleBufferPin => self.toggle_active_buffer_pin(),
+            AppEffect::MoveBufferLine(direction) => self.move_active_buffer_line(direction),
+            AppEffect::NewBuffer => {
+                if let Err(error) = self.state.open_text(TextBuffer::from_text(""), None) {
+                    self.show_error(error);
+                    return Ok(());
+                }
+                self.set_dashboard_visibility(false);
+                self.notify_message(self.message("new_scratch", &[]), false);
+            }
+            AppEffect::ReloadConfiguration => match self.configuration.request_reload() {
+                Ok(()) => {
+                    self.notify_message(self.message("config_reload_queued", &[]), false);
+                }
+                Err(error) => self.show_error(error),
+            },
+            AppEffect::LargeFileSet(mode) => {
+                let Some(buffer) = self
+                    .state
+                    .active_view
+                    .and_then(|view| self.state.views.get(view).map(|view| view.buffer))
+                else {
+                    return Ok(());
+                };
+                let mode = match mode.as_str() {
+                    "auto" => LargeFileOverride::Auto,
+                    "on" => LargeFileOverride::On,
+                    "off" => LargeFileOverride::Off,
+                    _ => {
+                        self.show_error(self.message("large_file_invalid", &[]));
+                        return Ok(());
+                    }
+                };
+                self.documents.set_large_file_mode(
+                    buffer,
+                    self.state.buffers[buffer].path.as_deref(),
+                    mode,
+                );
+                self.process_large_file_modes();
+                self.notify_message(
+                    self.message(
+                        "large_file_changed",
+                        &[("mode", mode_name_large(mode).into())],
+                    ),
+                    false,
+                );
+            }
+            AppEffect::LargeFileStatus => {
+                let Some(buffer) = self
+                    .state
+                    .active_view
+                    .and_then(|view| self.state.views.get(view).map(|view| view.buffer))
+                else {
+                    return Ok(());
+                };
+                let configured = self.documents.configured_mode(buffer);
+                let effective = if self.effective_large_file(buffer) {
+                    "on"
+                } else {
+                    "off"
+                };
+                self.notify_message(
+                    self.message(
+                        "large_file_status",
+                        &[
+                            ("mode", mode_name_large(configured).into()),
+                            ("effective", effective.into()),
+                        ],
+                    ),
+                    false,
+                );
+            }
+            effect => return Err(effect),
+        }
+        Ok(())
+    }
 }

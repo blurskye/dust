@@ -4,7 +4,7 @@ use crate::app::documents::surfaces_tests::gate_document_worker;
 
 
 #[test]
-fn lsp_log_selection_keeps_the_same_message_when_old_entries_are_evicted() {
+pub(in crate::app) fn lsp_log_selection_keeps_the_same_message_when_old_entries_are_evicted() {
     let (_app_dirs, mut app) = app();
     for index in 0..200 {
         app.append_lsp_log(format!("message {index}"));
@@ -27,7 +27,7 @@ fn lsp_log_selection_keeps_the_same_message_when_old_entries_are_evicted() {
 
 
 #[test]
-fn saves_and_reloads_wait_for_the_same_buffers_completion() {
+pub(in crate::app) fn saves_and_reloads_wait_for_the_same_buffers_completion() {
     for reload_first in [false, true] {
         let (_app_dirs, mut app) = app();
         let root = app.state.workspace_root.clone();
@@ -88,7 +88,7 @@ fn saves_and_reloads_wait_for_the_same_buffers_completion() {
 
 
 #[test]
-fn documentation_scrolling_uses_the_final_completion_box_and_reaches_its_tail() {
+pub(in crate::app) fn documentation_scrolling_uses_the_final_completion_box_and_reaches_its_tail() {
     let (_app_dirs, mut app) = app();
     app.state
         .open_text(TextBuffer::from_text(&"line\n".repeat(30)), None)
@@ -139,7 +139,7 @@ fn documentation_scrolling_uses_the_final_completion_box_and_reaches_its_tail() 
 
 
 #[test]
-fn recovery_delete_completion_cannot_forget_a_newer_queued_write() {
+pub(in crate::app) fn recovery_delete_completion_cannot_forget_a_newer_queued_write() {
     let (_app_dirs, mut app) = app();
     app.recovery.skip_maintenance();
     app.state
@@ -191,7 +191,7 @@ fn recovery_delete_completion_cannot_forget_a_newer_queued_write() {
 
 
 #[test]
-fn semantic_window_layout_persistence_is_strict_transactional_and_id_free() {
+pub(in crate::app) fn semantic_window_layout_persistence_is_strict_transactional_and_id_free() {
     let (_source_dirs, mut source) = app();
     let path = source.state.workspace_root.join("editor.rs");
     source
@@ -314,7 +314,7 @@ fn semantic_window_layout_persistence_is_strict_transactional_and_id_free() {
 
 
 #[test]
-fn semantic_content_restore_uses_fresh_ids_and_preserves_unclamped_desired_placement() {
+pub(in crate::app) fn semantic_content_restore_uses_fresh_ids_and_preserves_unclamped_desired_placement() {
     use crate::app::persistence::RestoreContext;
     use crate::persistence::PersistedWindowPlacement;
 

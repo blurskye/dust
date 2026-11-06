@@ -500,4 +500,4 @@ mod configuration_tests;
 mod contributions_tests;
 
 #[cfg(test)]
-mod surfaces_tests;
+pub(in crate::app) mod surfaces_tests;

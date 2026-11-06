@@ -40,7 +40,7 @@ type ByteNavigation = (crate::editor::text::ByteRange, Option<std::sync::Arc<[u8
 
 #[derive(Default)]
 pub(in crate::app) struct SearchSession {
-    picker: picker::PickerSession,
+    pub(in crate::app) picker: picker::PickerSession,
     preview: Option<crate::ui::PickerPreview>,
     preview_snapshot_key: Option<(std::sync::Arc<[u8]>, std::ops::Range<usize>, usize)>,
     preview_path: Option<std::path::PathBuf>,
@@ -473,7 +473,8 @@ pub(in crate::app) mod interaction;
 pub(in crate::app) mod commands;
 
 #[cfg(test)]
-mod project_tests;
+pub(in crate::app) mod project_tests;
 
-#[cfg(test)]
-mod project_tests;
+
+use crate::app::picker::{MatcherSource, PickerContent, PickerEpoch, PickerOrigin, PickerPayload};
+pub(in crate::app) mod workflow;

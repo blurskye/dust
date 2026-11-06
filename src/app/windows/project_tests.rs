@@ -4,7 +4,7 @@ use crate::app::documents::project_tests::wait_changes_preview;
 
 
 #[test]
-fn the_confirmation_help_action_is_focusable_advertised_and_leaves_the_question_pending() {
+pub(in crate::app) fn the_confirmation_help_action_is_focusable_advertised_and_leaves_the_question_pending() {
     let (_app_dirs, mut app) = app();
     app.open_confirmation(
         crate::ui::PromptKind::Command,
@@ -77,7 +77,7 @@ fn the_confirmation_help_action_is_focusable_advertised_and_leaves_the_question_
 /// W-26: the diff pane follows the focused row and shows that path's real diff, and `Tab`
 /// switches it between the two comparisons.
 #[test]
-fn the_changes_diff_pane_follows_focus_and_tab_switches_the_comparison() {
+pub(in crate::app) fn the_changes_diff_pane_follows_focus_and_tab_switches_the_comparison() {
     let (_app_dirs, mut app) = app();
     let repo = git2::Repository::init(&app.state.workspace_root).unwrap();
     let sig = git2::Signature::now("Dust", "dust@example.invalid").unwrap();
@@ -189,7 +189,7 @@ fn the_changes_diff_pane_follows_focus_and_tab_switches_the_comparison() {
 /// A long file's only change sits far below the top of a small diff pane: the pane opens on it,
 /// and the page keys move through the rest.
 #[test]
-fn a_small_changes_pane_opens_on_the_change_and_ctrl_d_scrolls_it() {
+pub(in crate::app) fn a_small_changes_pane_opens_on_the_change_and_ctrl_d_scrolls_it() {
     let (_app_dirs, mut app) = app();
     let repo = git2::Repository::init(&app.state.workspace_root).unwrap();
     let sig = git2::Signature::now("Dust", "dust@example.invalid").unwrap();
@@ -294,7 +294,7 @@ fn a_small_changes_pane_opens_on_the_change_and_ctrl_d_scrolls_it() {
 /// W-26: the footer labels `s` and `u` by focus, so the change surface stages the ROW UNDER
 /// THE CURSOR rather than whatever buffer happens to be active.
 #[test]
-fn staging_from_the_change_surface_acts_on_the_focused_row_not_the_active_buffer() {
+pub(in crate::app) fn staging_from_the_change_surface_acts_on_the_focused_row_not_the_active_buffer() {
     let (_app_dirs, mut app) = app();
     let repo = git2::Repository::init(&app.state.workspace_root).unwrap();
     let sig = git2::Signature::now("Dust", "dust@example.invalid").unwrap();
@@ -396,7 +396,7 @@ fn staging_from_the_change_surface_acts_on_the_focused_row_not_the_active_buffer
 
 
 #[test]
-fn staging_an_unsaved_focused_row_offers_the_choice_and_writes_nothing() {
+pub(in crate::app) fn staging_an_unsaved_focused_row_offers_the_choice_and_writes_nothing() {
     let (_app_dirs, mut app) = app();
     let repo = git2::Repository::init(&app.state.workspace_root).unwrap();
     let sig = git2::Signature::now("Dust", "dust@example.invalid").unwrap();

@@ -4,51 +4,9 @@ use crate::app::App;
 use crate::app::PickerPayload;
 use crate::app::PickerSurfaceKind;
 
-impl App {
-    pub(in crate::app) fn process_picker_effect(&mut self, effect: AppEffect) -> Result<(), AppEffect> {
-        match effect {
-            AppEffect::OpenPicker(kind) => self.open_builtin_picker(kind),
-            AppEffect::PickerInsert(text) => self.picker_insert(&text),
-            AppEffect::PickerBackspace => self.picker_backspace(),
-            AppEffect::PickerMove(direction) => self.picker_move(direction),
-            AppEffect::PickerPreviewPage(direction) => {
-                self.search.picker_preview_page(direction);
-                self.sync_picker_ui();
-            }
-            AppEffect::PickerResults => {
-                if self.search.set_picker_surface(PickerSurfaceKind::Problems) {
-                    self.sync_picker_ui();
-                }
-            }
-            AppEffect::PickerRemove => match self.search.selected_picker_payload().cloned() {
-                Some(PickerPayload::Recovery(journal)) => {
-                    if let Err(error) =
-                        self.recovery
-                            .discard(&journal, true, self.documents.recovery_io())
-                    {
-                        self.show_error(error);
-                    }
-                }
-                Some(PickerPayload::GitWorktree { .. }) => self.request_git_worktree_remove(),
-                _ => {}
-            },
-            AppEffect::PickerAccept => self.accept_picker(),
-            AppEffect::PickerCancel => self.close_picker(),
-            AppEffect::PickerNormal if self.palette_is_open() => self.close_picker(),
-            AppEffect::PickerNormal | AppEffect::PickerInsertMode => {
-                if self.search.picker().is_some() && self.search.workspace_picker().is_none() {
-                    self.input
-                        .set_picker_normal(matches!(effect, AppEffect::PickerNormal));
-                    self.sync_picker_ui();
-                }
-            }
-            effect => return Err(effect),
-        }
-        Ok(())
-    }
-}
 
-use crate::app::commands::AppEffect;
+
+
 use crate::editor::ArgumentSchema;
 use crate::editor::ArgumentType;
 use crate::editor::CommandError;
@@ -176,4 +134,49 @@ pub(in crate::app) fn register_commands(registry: &mut CommandRegistry<AppEffect
         },
     )?;
 Ok(())
+}
+
+
+impl App {
+    pub(in crate::app) fn process_picker_effect(&mut self, effect: AppEffect) -> Result<(), AppEffect> {
+        match effect {
+            AppEffect::OpenPicker(kind) => self.open_builtin_picker(kind),
+            AppEffect::PickerInsert(text) => self.picker_insert(&text),
+            AppEffect::PickerBackspace => self.picker_backspace(),
+            AppEffect::PickerMove(direction) => self.picker_move(direction),
+            AppEffect::PickerPreviewPage(direction) => {
+                self.search.picker_preview_page(direction);
+                self.sync_picker_ui();
+            }
+            AppEffect::PickerResults => {
+                if self.search.set_picker_surface(PickerSurfaceKind::Problems) {
+                    self.sync_picker_ui();
+                }
+            }
+            AppEffect::PickerRemove => match self.search.selected_picker_payload().cloned() {
+                Some(PickerPayload::Recovery(journal)) => {
+                    if let Err(error) =
+                        self.recovery
+                            .discard(&journal, true, self.documents.recovery_io())
+                    {
+                        self.show_error(error);
+                    }
+                }
+                Some(PickerPayload::GitWorktree { .. }) => self.request_git_worktree_remove(),
+                _ => {}
+            },
+            AppEffect::PickerAccept => self.accept_picker(),
+            AppEffect::PickerCancel => self.close_picker(),
+            AppEffect::PickerNormal if self.palette_is_open() => self.close_picker(),
+            AppEffect::PickerNormal | AppEffect::PickerInsertMode => {
+                if self.search.picker().is_some() && self.search.workspace_picker().is_none() {
+                    self.input
+                        .set_picker_normal(matches!(effect, AppEffect::PickerNormal));
+                    self.sync_picker_ui();
+                }
+            }
+            effect => return Err(effect),
+        }
+        Ok(())
+    }
 }

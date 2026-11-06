@@ -4,7 +4,7 @@ use crate::app::tests::*;
 
 
 #[test]
-fn help_preserves_a_draft_and_a_pending_confirmation() {
+pub(in crate::app) fn help_preserves_a_draft_and_a_pending_confirmation() {
     let (_app_dirs, mut app) = app();
     app.open_prompt(crate::ui::PromptKind::Command, "exploreradd ".into());
     app.prompt_insert("draft-name.txt");
@@ -78,7 +78,7 @@ fn help_preserves_a_draft_and_a_pending_confirmation() {
 
 
 #[test]
-fn form_help_captures_keys_without_changing_the_prompt_draft() {
+pub(in crate::app) fn form_help_captures_keys_without_changing_the_prompt_draft() {
     let (_app_dirs, mut app) = app();
     app.open_prompt(crate::ui::PromptKind::Command, "write draft".into());
     app.handle_configured_key("ctrl-g".parse().unwrap());

@@ -34,7 +34,7 @@ pub(in crate::app) const COLOR_GENERATION: u64 = u64::MAX / 2;
 /// Answers for the status line's breadcrumbs, which never open the symbol picker.
 pub(in crate::app) const BREADCRUMB_GENERATION: u64 = COLOR_GENERATION + 1;
 #[derive(Default)]
-pub(super) struct Projection {
+pub(in crate::app) struct Projection {
     generation: u64,
     inlay_generation: u64,
     owner: Option<LspProjectionOwner>,

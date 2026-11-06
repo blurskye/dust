@@ -1,5 +1,5 @@
 use crate::app::documents::configured_file_bytes;
-mod driver;
+pub(in crate::app) mod driver;
 mod input_workflows;
 pub(super) mod window_workflows;
 
@@ -257,7 +257,7 @@ fn write_plugin_manifest(root: &std::path::Path, manifest: &crate::plugins::Plug
     .expect("manifest");
 }
 
-fn wait_vfs(app: &mut App) {
+pub(in crate::app) fn wait_vfs(app: &mut App) {
     let deadline = Instant::now() + Duration::from_secs(2);
     while app.documents.has_work() {
         app.queue_startup_reads();
@@ -267,7 +267,7 @@ fn wait_vfs(app: &mut App) {
     }
 }
 
-fn wait_workspace_approval(app: &mut App) {
+pub(in crate::app) fn wait_workspace_approval(app: &mut App) {
     let deadline = Instant::now() + Duration::from_secs(2);
     while app.workspace_edits.proposal().is_some() {
         app.process_workspace_approval();
@@ -290,7 +290,7 @@ fn prepare_trust_identity(app: &mut App) {
     app.reconcile_workspace_trust();
 }
 
-fn wait_trust(app: &mut App) {
+pub(in crate::app) fn wait_trust(app: &mut App) {
     let deadline = Instant::now() + Duration::from_secs(2);
     while app.workspace.persist_pending() {
         app.process_trust_events();

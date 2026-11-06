@@ -881,4 +881,4 @@ mod language_tests;
 mod language_features_tests;
 
 #[cfg(test)]
-mod surfaces_tests;
+pub(in crate::app) mod surfaces_tests;

@@ -403,7 +403,7 @@ fn boxes_overlap(at: (u16, u16), size: (u16, u16), other: WindowRect) -> bool {
         && at.1 < other.y.saturating_add(other.height)
         && other.y < at.1.saturating_add(size.1)
 }
-use crate::ui::render::documentation::DOCUMENTATION_MAX_HEIGHT;
+
 
 
 

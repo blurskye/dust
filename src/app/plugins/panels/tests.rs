@@ -1,4 +1,4 @@
-use crate::app::plugins::windows::*;
+use crate::app::plugins::panels::*;
 use crate::plugins::PluginActivationBehavior;
 use crate::plugins::PluginCommandContext;
 use crate::plugins::PluginCommandDeclaration;

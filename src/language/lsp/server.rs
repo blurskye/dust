@@ -363,3 +363,4 @@ fn registration_matches(options: &Value, document: &LspDocument) -> bool {
         })
     })
 }
+use sha2::Digest;

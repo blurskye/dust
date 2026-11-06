@@ -1,4 +1,4 @@
-use crate::editor::transaction::DocumentSnapshot;
+use crate::editor::DocumentSnapshot;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::path::PathBuf;

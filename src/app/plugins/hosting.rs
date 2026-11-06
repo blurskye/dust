@@ -1,7 +1,7 @@
 //! Extension-owned retained/private presenters; graph publication stays with WindowSession.
 use crate::app::plugins::ExtensionSession;
-use crate::app::plugins::windows::PluginUiInteraction;
-use crate::app::plugins::windows::PluginWindowHost;
+use crate::app::plugins::panels::PluginUiInteraction;
+use crate::app::plugins::panels::PluginWindowHost;
 use crate::app::configuration::ContributionCandidate;
 use crate::app::configuration::ContributionReceipt;
 use crate::app::configuration::WindowRuleSource;

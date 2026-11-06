@@ -4,7 +4,7 @@ use crate::app::debugger::surfaces_tests::logging_adapter_fixture;
 
 
 #[test]
-fn recovery_sessions_keep_distinct_journals_for_the_same_buffer() {
+pub(in crate::app) fn recovery_sessions_keep_distinct_journals_for_the_same_buffer() {
     let (_app_dirs, mut app) = app();
     app.recovery.skip_maintenance();
     app.state
@@ -34,7 +34,7 @@ fn recovery_sessions_keep_distinct_journals_for_the_same_buffer() {
 
 
 #[test]
-fn session_restore_reads_more_files_than_the_document_queue_capacity() {
+pub(in crate::app) fn session_restore_reads_more_files_than_the_document_queue_capacity() {
     use crate::app::persistence::RestoreContext;
 
     let (_app_dirs, mut app) = app();
@@ -79,7 +79,7 @@ fn session_restore_reads_more_files_than_the_document_queue_capacity() {
 
 
 #[test]
-fn session_restore_keeps_the_focused_split_when_paths_are_identical() {
+pub(in crate::app) fn session_restore_keeps_the_focused_split_when_paths_are_identical() {
     use crate::app::persistence::RestoreContext;
 
     let (_app_dirs, mut app) = app();
@@ -116,7 +116,7 @@ fn session_restore_keeps_the_focused_split_when_paths_are_identical() {
 
 
 #[test]
-fn session_restore_focuses_the_saved_pane_when_panes_share_a_file() {
+pub(in crate::app) fn session_restore_focuses_the_saved_pane_when_panes_share_a_file() {
     use crate::app::persistence::RestoreContext;
 
     let (_app_dirs, mut app) = app();
@@ -162,7 +162,7 @@ fn session_restore_focuses_the_saved_pane_when_panes_share_a_file() {
 
 
 #[test]
-fn session_restore_keeps_tab_order_after_the_first_tab_was_closed() {
+pub(in crate::app) fn session_restore_keeps_tab_order_after_the_first_tab_was_closed() {
     use crate::app::persistence::RestoreContext;
 
     let (_app_dirs, mut app) = app();
@@ -215,7 +215,7 @@ fn session_restore_keeps_tab_order_after_the_first_tab_was_closed() {
 
 
 #[test]
-fn malformed_content_descriptor_restore_is_atomic_before_io_or_publication() {
+pub(in crate::app) fn malformed_content_descriptor_restore_is_atomic_before_io_or_publication() {
     use crate::app::persistence::RestoreContext;
 
     let (_app_dirs, mut app) = app();
@@ -253,7 +253,7 @@ fn malformed_content_descriptor_restore_is_atomic_before_io_or_publication() {
 
 
 #[test]
-fn cancelled_session_restore_reads_are_discarded_before_a_later_restore() {
+pub(in crate::app) fn cancelled_session_restore_reads_are_discarded_before_a_later_restore() {
     use crate::app::persistence::RestoreContext;
     let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("cancelled-restore.txt");
@@ -292,7 +292,7 @@ fn cancelled_session_restore_reads_are_discarded_before_a_later_restore() {
 
 
 #[test]
-fn restore_reads_preserve_newer_edits_capture_and_original_editor_identity() {
+pub(in crate::app) fn restore_reads_preserve_newer_edits_capture_and_original_editor_identity() {
     use crate::app::persistence::RestoreContext;
     use crate::persistence::PersistedLayout;
     use crate::persistence::PersistedLocation;
@@ -464,7 +464,7 @@ fn restore_reads_preserve_newer_edits_capture_and_original_editor_identity() {
 
 
 #[test]
-fn hiding_an_inspector_sends_no_disconnect_and_leaves_the_session_running() {
+pub(in crate::app) fn hiding_an_inspector_sends_no_disconnect_and_leaves_the_session_running() {
     // W-25 acceptance, verbatim: "proof that hiding inspectors does not terminate a session".
     // The stronger half is MEASURED: the adapter itself records every request it receives, so the
     // test can show that hiding sent no disconnect and no terminate, which "still looks alive"
@@ -525,7 +525,7 @@ fn hiding_an_inspector_sends_no_disconnect_and_leaves_the_session_running() {
 
 
 #[test]
-fn an_attached_session_names_the_target_it_was_given_in_its_status() {
+pub(in crate::app) fn an_attached_session_names_the_target_it_was_given_in_its_status() {
     // W-24's residual: the attach status was wired but unasserted. The launch counter-case lives
     // in `a_started_session_makes_the_debug_arrangement_appear_with_its_own_identity`, so a single
     // branch cannot satisfy both.
@@ -563,7 +563,7 @@ fn an_attached_session_names_the_target_it_was_given_in_its_status() {
 
 
 #[test]
-fn a_restored_session_keeps_the_buffer_line_in_window_order() {
+pub(in crate::app) fn a_restored_session_keeps_the_buffer_line_in_window_order() {
     use crate::app::persistence::RestoreContext;
 
     let (_app_dirs, mut app) = app();

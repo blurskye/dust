@@ -405,3 +405,168 @@ pub(in crate::app) fn register_commands(registry: &mut CommandRegistry<AppEffect
     }
 Ok(())
 }
+
+
+use crate::app::DockEdge;
+use crate::app::App;
+use crate::app::PickerAction;
+use crate::app::PickerItem;
+use crate::app::PickerItemId;
+use crate::app::PickerPayload;
+use crate::app::WindowPlacement;
+use crate::app::WindowRect;
+
+
+
+
+use crate::app::TextBuffer;
+
+impl App {
+    pub(in crate::app) fn process_windows_effect(&mut self, effect: AppEffect) -> Result<(), AppEffect> {
+        match effect {
+            AppEffect::NewTab => {
+                // An untouched [No Name] tab is reused, so ctrl-t never piles up empty tabs;
+                // the file picked from the finder replaces it.
+                let unused = self.state.buffers.iter().find(|(_, buffer)| {
+                    buffer.path.is_none()
+                        && !buffer.dirty
+                        && buffer.text.len_bytes() == 0
+                        && buffer.origin == crate::editor::BufferOrigin::FileOrScratch
+                });
+                match unused.map(|(id, _)| id) {
+                    Some(buffer) => {
+                        if let Err(error) = self.state.show_buffer(buffer) {
+                            self.show_error(error);
+                        }
+                    }
+                    None => {
+                        if let Err(error) = self.state.open_text(TextBuffer::from_text(""), None) {
+                            self.show_error(error);
+                            return Ok(());
+                        }
+                    }
+                }
+                self.set_dashboard_visibility(false);
+                self.start_workspace_file_picker();
+            }
+            AppEffect::Layout(action) => self.apply_layout_action(action),
+            AppEffect::SurfaceFocus(direction) => self.focus_surface(direction),
+            AppEffect::WindowClone { target, axis } => {
+                if let Err(error) = self.clone_graph_window(&target, axis) {
+                    self.show_error(error);
+                }
+            }
+            AppEffect::WindowList => {
+                let graph = self.window_session.graph();
+                let items = graph
+                    .windows()
+                    .filter_map(|window| {
+                        let content = graph.content_for_window(window.id)?;
+                        Some((
+                            PickerItem {
+                                badge: String::new(),
+                                kind: crate::workspace::PickerItemKind::Entry,
+                                id: PickerItemId(format!("window:{}", window.id.0)),
+                                label: content.title.clone(),
+                                detail: format!(
+                                    "{} · {:?} · {:?} · tab {}",
+                                    content.content_type.as_str(),
+                                    content.lifecycle,
+                                    window.placement,
+                                    window.tab.0
+                                ),
+                                source: content.owner.clone(),
+                                action: PickerAction::None,
+                            },
+                            PickerPayload::Window(window.id),
+                        ))
+                    })
+                    .collect();
+                self.install_picker("Windows".into(), items);
+            }
+            AppEffect::WindowDock { target, edge, size } => {
+                let edge = match edge.as_str() {
+                    "left" => DockEdge::Left,
+                    "right" => DockEdge::Right,
+                    "top" => DockEdge::Top,
+                    "bottom" => DockEdge::Bottom,
+                    _ => {
+                        self.show_error("window dock edge must be left, right, top, or bottom");
+                        return Ok(());
+                    }
+                };
+                let result =
+                    self.place_graph_window(&target, WindowPlacement::Docked { edge, size });
+                if let Err(error) = result {
+                    self.show_error(error);
+                }
+            }
+            AppEffect::WindowFloat {
+                target,
+                x,
+                y,
+                width,
+                height,
+            } => {
+                let result = self.place_graph_window(
+                    &target,
+                    WindowPlacement::Floating(WindowRect {
+                        x,
+                        y,
+                        width,
+                        height,
+                    }),
+                );
+                if let Err(error) = result {
+                    self.show_error(error);
+                }
+            }
+            AppEffect::WindowFullscreen(target) => {
+                let result = self.place_graph_window(&target, WindowPlacement::Fullscreen);
+                if let Err(error) = result {
+                    self.show_error(error);
+                }
+            }
+            AppEffect::WindowHide(target) => {
+                let result = self.place_graph_window(&target, WindowPlacement::Hidden);
+                if let Err(error) = result {
+                    self.show_error(error);
+                }
+            }
+            AppEffect::WindowShow(target) => {
+                let result = self.show_graph_window(&target);
+                if let Err(error) = result {
+                    self.show_error(error);
+                }
+            }
+            AppEffect::WindowClose(target) => {
+                if let Err(error) = self.close_graph_window(&target) {
+                    self.show_error(error);
+                }
+            }
+            AppEffect::WindowResize { target, amount } => {
+                if let Err(error) = self.resize_graph_window(&target, amount) {
+                    self.show_error(error);
+                }
+            }
+            AppEffect::WindowResizeDirectional(direction, count) => {
+                if let Err(error) = self.resize_focused_window(direction, count) {
+                    self.show_error(error);
+                }
+            }
+            AppEffect::WindowMove { target, x, y } => {
+                let result = self.move_graph_window(&target, x, y);
+                if let Err(error) = result {
+                    self.show_error(error);
+                }
+            }
+            AppEffect::WindowSwap { first, second } => {
+                if let Err(error) = self.swap_graph_windows(&first, &second) {
+                    self.show_error(error);
+                }
+            }
+            effect => return Err(effect),
+        }
+        Ok(())
+    }
+}

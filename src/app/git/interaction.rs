@@ -26,11 +26,11 @@ use crate::app::RegisterValue;
 use crate::app::BufferRevision;
 use crate::app::TextEditSet;
 use std::ops::ControlFlow::Continue;
-use crate::editor::RegisterShape;
-use crate::editor::RegisterValue;
-use crate::workspace::PickerAction;
-use crate::workspace::PickerItem;
-use crate::workspace::PickerItemId;
+
+
+
+
+
 
 
 

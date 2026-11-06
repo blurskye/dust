@@ -427,7 +427,7 @@ mod tests {
     }
 }
 
-use crate::ui::render::explorer::EXPLORER_MAXIMUM_VISIBLE_ROWS;
+
 
 
 

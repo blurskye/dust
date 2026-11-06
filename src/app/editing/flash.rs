@@ -145,7 +145,7 @@ mod tests {
     }
 }
 
-use crate::app::ByteOffset;
+
 use crate::app::EditorOperation;
 use crate::app::EditorTransaction;
 use crate::app::App;
@@ -155,7 +155,7 @@ use crate::app::VisualRowModel;
 use crate::app::active_editor_pane_viewport;
 use crate::app::editor_state_content_width;
 use crate::app::KeyEvent;
-use crate::app::ViewId;
+
 
 
 impl App {

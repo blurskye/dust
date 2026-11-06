@@ -58,3 +58,17 @@ pub struct EditingPolicy {
     pub ambiguous_width_wide: bool,
     pub autopairs: bool,
 }
+impl Default for EditingPolicy {
+    fn default() -> Self {
+        Self {
+            tab_width: 4,
+            indent_width: 4,
+            expand_tabs: true,
+            undo_break_on_text_commit: false,
+            registers_enabled: true,
+            mirror_named_to_unnamed: true,
+            ambiguous_width_wide: false,
+            autopairs: false,
+        }
+    }
+}

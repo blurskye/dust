@@ -298,7 +298,7 @@ use crate::ui::workspace_top_rows;
 use crate::workspace::DiagnosticOwner;
 use crate::workspace::ExecutionSource;
 use crate::app::explorer::tree::ExplorerKind;
-use crate::editor::transaction::DocumentSnapshot as FileSnapshot;
+use crate::editor::DocumentSnapshot as FileSnapshot;
 use crate::workspace::PickerAction;
 use crate::workspace::PickerItem;
 use crate::workspace::PickerItemId;
@@ -416,7 +416,7 @@ struct App {
     /// What project replace is looking for, while it asks what to replace it with.
     replace_query: Option<String>,
     /// A `:s///c` asking about each match in turn.
-    substitute_confirm: Option<substitute::SubstituteConfirm>,
+    substitute_confirm: Option<crate::app::editing::substitute::SubstituteConfirm>,
     session_load_requested: bool,
     session_restore_notice: bool,
     notices: crate::app::notifications::NoticeSession,
@@ -440,7 +440,7 @@ struct App {
     flash: Option<crate::app::editing::flash::FlashState>,
     /// The ACP agent session and its transcript panel.
     agent: agent::AgentPanel,
-    pull_requests: pull_requests::PullRequests,
+    pull_requests: crate::app::git::pull_requests::PullRequests,
     tutor: tutor::Tutor,
     /// Commands last run from the palette, newest first.
     palette_recent: Vec<String>,
@@ -563,9 +563,7 @@ pub fn run_interactive(
         },
         application.configuration.theme().clone(),
     )?;
-    application
-        .notices
-        .set_terminal_capabilities(terminal.capability_summary());
+    application.health.set_terminal_capabilities(terminal.capability_summary());
     application.window_session.observe_size(terminal.size()?);
     application.clipboard.enable(&application.state.registers);
 
@@ -640,9 +638,7 @@ pub fn run_interactive(
         terminal.set_mouse(application.configuration.settings().ui.mouse)?;
         terminal.set_color_mode(application.configuration.settings().ui.color_mode);
         terminal.set_theme(application.configuration.theme());
-        application
-            .notices
-            .set_terminal_capabilities(terminal.capability_summary());
+        application.health.set_terminal_capabilities(terminal.capability_summary());
         // The frame is a pure function of these, so it is only rebuilt when one moved.
         let inputs = (
             application.state.revision,

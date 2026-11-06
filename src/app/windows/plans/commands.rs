@@ -31,12 +31,12 @@ pub(in crate::app) enum CommandError {
     Rejected(String),
 }
 impl From<String> for CommandError {
-    pub(in crate::app) fn from(s: String) -> Self {
+    fn from(s: String) -> Self {
         Self::Rejected(s)
     }
 }
 impl From<TargetError> for CommandError {
-    pub(in crate::app) fn from(e: TargetError) -> Self {
+    fn from(e: TargetError) -> Self {
         Self::Target(e)
     }
 }

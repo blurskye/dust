@@ -687,7 +687,9 @@ fn takes_path(command: &str) -> bool {
 pub(in crate::app) mod interaction;
 
 #[cfg(test)]
-mod project_tests;
+pub(in crate::app) mod project_tests;
 
 #[cfg(test)]
-mod surfaces_tests;
+pub(in crate::app) mod surfaces_tests;
+
+mod commands;

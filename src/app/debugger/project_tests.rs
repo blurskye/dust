@@ -4,7 +4,7 @@ use crate::app::tests::*;
 
 
 #[test]
-fn breakpoint_toggle_uses_disabled_state_after_another_breakpoint_is_added() {
+pub(in crate::app) fn breakpoint_toggle_uses_disabled_state_after_another_breakpoint_is_added() {
     let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("main.rs");
     app.state

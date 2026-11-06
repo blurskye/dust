@@ -22,7 +22,7 @@ impl App {
     }
 }
 
-use crate::app::commands::AppEffect;
+
 use crate::editor::ArgumentSchema;
 use crate::editor::ArgumentType;
 use crate::editor::CommandError;
@@ -271,4 +271,51 @@ pub(in crate::app) fn register_commands(registry: &mut CommandRegistry<AppEffect
     }
     register_grammar_commands(registry)?;
 Ok(())
+}
+
+use crate::app::LayoutAction;
+
+impl App {
+    pub(in crate::app) fn process_configuration_effect(&mut self, effect: AppEffect) -> Result<(), AppEffect> {
+        match effect {
+            AppEffect::Zen => {
+                let explorer_open = self.ui.explorer.is_some();
+                match self
+                    .configuration
+                    .toggle_zen(explorer_open, self.state.is_zoomed())
+                {
+                    None => {
+                        if explorer_open {
+                            let _ = self.process_explorer_effect(AppEffect::ExplorerClose);
+                        }
+                        if !self.state.is_zoomed() {
+                            self.apply_layout_action(LayoutAction::Zoom);
+                        }
+                    }
+                    Some((reopen_explorer, undo_zoom)) => {
+                        if undo_zoom && self.state.is_zoomed() {
+                            self.apply_layout_action(LayoutAction::Zoom);
+                        }
+                        if reopen_explorer {
+                            let _ = self.process_explorer_effect(AppEffect::ExplorerOpen);
+                        }
+                    }
+                }
+                self.ensure_cursor_visible();
+            }
+            AppEffect::SelectTheme | AppEffect::SetTheme(_) => {
+                self.close_picker();
+                match self.configuration.begin_theme_picker() {
+                    Ok(rows) => self.present_theme_picker(rows),
+                    Err(error) => self.show_error(error),
+                }
+                self.configuration.want_theme(match effect {
+                    AppEffect::SetTheme(name) => Some(name),
+                    _ => None,
+                });
+            }
+            effect => return Err(effect),
+        }
+        Ok(())
+    }
 }

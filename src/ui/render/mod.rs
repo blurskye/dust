@@ -1810,7 +1810,7 @@ fn render_error_notification(
 fn wrap_plain_text(text: &str, width: usize, ambiguous: AmbiguousWidth) -> Vec<String> {
     text.split('\n')
         .flat_map(|line| {
-            overlays::wrap_ranges(line, width, ambiguous)
+            documentation::wrap_ranges(line, width, ambiguous)
                 .into_iter()
                 .map(|range| line[range].to_owned())
         })
@@ -2587,3 +2587,5 @@ mod terminal_tests;
 mod debug_tests;
 use crate::ui::grid::Frame;
 use crate::ui::diff::{DiffLineKind,DiffSpan,DiffLine,DiffHunk,DiffLayout,DiffRow,DiffSideCell,DiffSideRow,DiffPreview,DiffRowKind};
+
+use crate::ui::grid::{CONTROL_CHARACTER_REPLACEMENT,ZERO_WIDTH_REPLACEMENT};

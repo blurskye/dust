@@ -1,7 +1,7 @@
 use crate::app::tests::*;
 
 #[test]
-fn plugin_confirmation_is_typed_one_shot_and_source_owned() {
+pub(in crate::app) fn plugin_confirmation_is_typed_one_shot_and_source_owned() {
     let (_app_dirs, mut app) = app();
     let (manager, fixture) = crate::plugins::ExecutionFixture::new(4);
     app.extension.fixture_manager(manager);
@@ -117,7 +117,7 @@ fn plugin_confirmation_is_typed_one_shot_and_source_owned() {
 }
 
 #[test]
-fn hidden_confirmation_suffix_cannot_be_submitted() {
+pub(in crate::app) fn hidden_confirmation_suffix_cannot_be_submitted() {
     let (_app_dirs, mut app) = app();
     let (manager, fixture) = crate::plugins::ExecutionFixture::new(4);
     app.extension.fixture_manager(manager);
@@ -145,7 +145,7 @@ fn hidden_confirmation_suffix_cannot_be_submitted() {
 }
 
 #[test]
-fn selected_yes_refuses_one_row_and_one_column_visibility_boundaries() {
+pub(in crate::app) fn selected_yes_refuses_one_row_and_one_column_visibility_boundaries() {
     for (width, height, token) in [(100, 4, 44), (1, 10, 45)] {
         let (_app_dirs, mut app) = app();
         app.state
@@ -210,7 +210,7 @@ fn selected_yes_refuses_one_row_and_one_column_visibility_boundaries() {
 }
 
 #[test]
-fn docked_layout_render_and_protection_share_confirmation_bounds() {
+pub(in crate::app) fn docked_layout_render_and_protection_share_confirmation_bounds() {
     let (_app_dirs, mut app) = app();
     app.state
         .open_text(TextBuffer::from_text("x"), None)
@@ -285,7 +285,7 @@ fn docked_layout_render_and_protection_share_confirmation_bounds() {
 }
 
 #[test]
-fn delayed_confirmation_cannot_replace_a_newer_native_interaction() {
+pub(in crate::app) fn delayed_confirmation_cannot_replace_a_newer_native_interaction() {
     let (_app_dirs, mut app) = app();
     let (manager, fixture) = crate::plugins::ExecutionFixture::new(8);
     app.extension.fixture_manager(manager);
@@ -325,7 +325,7 @@ fn delayed_confirmation_cannot_replace_a_newer_native_interaction() {
 }
 
 #[test]
-fn delayed_initial_confirmation_reply_gets_terminal_failure_after_config_reload() {
+pub(in crate::app) fn delayed_initial_confirmation_reply_gets_terminal_failure_after_config_reload() {
     let (_app_dirs, mut app) = app();
     let (manager, fixture) = crate::plugins::ExecutionFixture::new(8);
     app.extension.fixture_manager(manager);
@@ -364,7 +364,7 @@ fn delayed_initial_confirmation_reply_gets_terminal_failure_after_config_reload(
 }
 
 #[test]
-fn accepted_confirmation_cannot_wait_past_a_newer_prompt_capture() {
+pub(in crate::app) fn accepted_confirmation_cannot_wait_past_a_newer_prompt_capture() {
     let (_app_dirs, mut app) = app();
     let (manager, fixture) = crate::plugins::ExecutionFixture::new(8);
     app.extension.fixture_manager(manager);
@@ -410,7 +410,7 @@ fn accepted_confirmation_cannot_wait_past_a_newer_prompt_capture() {
 }
 
 #[test]
-fn tool_menu_blocks_background_and_retires_delayed_confirmation() {
+pub(in crate::app) fn tool_menu_blocks_background_and_retires_delayed_confirmation() {
     for delayed in [false, true] {
         let (_app_dirs, mut app) = app();
         let (manager, fixture) = crate::plugins::ExecutionFixture::new(8);
@@ -460,7 +460,7 @@ fn tool_menu_blocks_background_and_retires_delayed_confirmation() {
 }
 
 #[test]
-fn pending_key_capture_blocks_background_and_retires_delayed_confirmation() {
+pub(in crate::app) fn pending_key_capture_blocks_background_and_retires_delayed_confirmation() {
     for delayed in [false, true] {
         let (_app_dirs, mut app) = app();
         let (manager, fixture) = crate::plugins::ExecutionFixture::new(8);
@@ -510,7 +510,7 @@ fn pending_key_capture_blocks_background_and_retires_delayed_confirmation() {
 }
 
 #[test]
-fn unfinished_modal_grammar_blocks_and_survives_confirmation_rejection() {
+pub(in crate::app) fn unfinished_modal_grammar_blocks_and_survives_confirmation_rejection() {
     for keys in [vec!['2'], vec!['d'], vec!['"', 'a'], vec!['r']] {
         for delayed in [false, true] {
             let (_app_dirs, mut app) = app();
@@ -577,7 +577,7 @@ fn unfinished_modal_grammar_blocks_and_survives_confirmation_rejection() {
 }
 
 #[test]
-fn background_confirmation_during_documentation_fails_without_overlay() {
+pub(in crate::app) fn background_confirmation_during_documentation_fails_without_overlay() {
     let (_app_dirs, mut app) = app();
     let policy = app.configuration.settings().clone();
     app.input.present_documentation(
@@ -627,7 +627,7 @@ fn background_confirmation_during_documentation_fails_without_overlay() {
 }
 
 #[test]
-fn background_confirmation_during_picker_fails_without_overlay() {
+pub(in crate::app) fn background_confirmation_during_picker_fails_without_overlay() {
     let (_app_dirs, mut app) = app();
     app.install_picker("Newer picker".into(), Vec::new());
     let (manager, fixture) = crate::plugins::ExecutionFixture::new(8);
@@ -664,7 +664,7 @@ fn background_confirmation_during_picker_fails_without_overlay() {
 }
 
 #[test]
-fn confirmation_result_retains_document_a_without_materializing_later_b() {
+pub(in crate::app) fn confirmation_result_retains_document_a_without_materializing_later_b() {
     let (_app_dirs, mut app) = app();
     let a_path = app.state.workspace_root.join("a.txt");
     let b_path = app.state.workspace_root.join("b.txt");
@@ -710,7 +710,7 @@ fn confirmation_result_retains_document_a_without_materializing_later_b() {
 }
 
 #[test]
-fn changed_confirmation_document_gets_a_terminal_failure() {
+pub(in crate::app) fn changed_confirmation_document_gets_a_terminal_failure() {
     let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("a.txt");
     let (buffer, _) = app
@@ -754,7 +754,7 @@ fn changed_confirmation_document_gets_a_terminal_failure() {
 }
 
 #[test]
-fn stale_ordinary_reply_releases_only_its_exact_confirmation_reservation() {
+pub(in crate::app) fn stale_ordinary_reply_releases_only_its_exact_confirmation_reservation() {
     let (_app_dirs, mut app) = app();
     let (manager, fixture) = crate::plugins::ExecutionFixture::new(8);
     app.extension.fixture_manager(manager);
@@ -813,7 +813,7 @@ fn stale_ordinary_reply_releases_only_its_exact_confirmation_reservation() {
 }
 
 #[test]
-fn confirmation_capacity_is_reserved_before_the_guest_call() {
+pub(in crate::app) fn confirmation_capacity_is_reserved_before_the_guest_call() {
     let (_app_dirs, mut app) = app();
     let (manager, fixture) = crate::plugins::ExecutionFixture::new(128);
     app.extension.fixture_manager(manager);
@@ -854,7 +854,7 @@ fn confirmation_capacity_is_reserved_before_the_guest_call() {
 }
 
 #[test]
-fn real_component_observes_queue_full_from_aggregate_confirmation_ownership() {
+pub(in crate::app) fn real_component_observes_queue_full_from_aggregate_confirmation_ownership() {
     use sha2::Digest;
     use sha2::Sha256;
     let core = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/retained-guest/retained-guest.core.wasm"));
@@ -995,7 +995,7 @@ fn real_component_observes_queue_full_from_aggregate_confirmation_ownership() {
 }
 
 #[test]
-fn packaged_production_02_component_clone_refusal_never_enqueues_a_guest_callback() {
+pub(in crate::app) fn packaged_production_02_component_clone_refusal_never_enqueues_a_guest_callback() {
     use sha2::Digest;
     use sha2::Sha256;
     let core = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/retained-guest/retained-guest.core.wasm"));
@@ -1170,7 +1170,7 @@ fn packaged_production_02_component_clone_refusal_never_enqueues_a_guest_callbac
 }
 
 #[test]
-fn packaged_real_guest_confirmation_updates_its_custom_view() {
+pub(in crate::app) fn packaged_real_guest_confirmation_updates_its_custom_view() {
     use sha2::Digest;
     use sha2::Sha256;
     let core = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/retained-guest/retained-guest.core.wasm"));
@@ -1324,7 +1324,7 @@ fn packaged_real_guest_confirmation_updates_its_custom_view() {
 }
 
 #[test]
-fn retained_plugin_window_projection_is_idle_and_generation_owned() {
+pub(in crate::app) fn retained_plugin_window_projection_is_idle_and_generation_owned() {
     let (_app_dirs, mut app) = app();
     app.state
         .open_text(TextBuffer::from_text("editor"), None)
@@ -1452,7 +1452,7 @@ fn retained_plugin_window_projection_is_idle_and_generation_owned() {
 }
 
 #[test]
-fn plugin_host_events_are_snapshot_owned_coalesced_and_idle() {
+pub(in crate::app) fn plugin_host_events_are_snapshot_owned_coalesced_and_idle() {
     let (_app_dirs, mut app) = app();
     app.state
         .open_text(TextBuffer::from_text("editor"), None)
@@ -1523,7 +1523,7 @@ fn plugin_host_events_are_snapshot_owned_coalesced_and_idle() {
 }
 
 #[test]
-fn plugin_picker_provider_uses_the_generic_presenter_and_cancels_exactly() {
+pub(in crate::app) fn plugin_picker_provider_uses_the_generic_presenter_and_cancels_exactly() {
     let (_app_dirs, mut app) = app();
     let mut manifest = plugin_manifest("demo", "plugin.demo.keymap.dashboard", "x y");
     manifest
@@ -1725,7 +1725,7 @@ fn plugin_picker_provider_uses_the_generic_presenter_and_cancels_exactly() {
 }
 
 #[test]
-fn private_plugin_surface_geometry_snapshot_and_idle_projection_are_application_owned() {
+pub(in crate::app) fn private_plugin_surface_geometry_snapshot_and_idle_projection_are_application_owned() {
     let (_app_dirs, mut app) = app();
     app.state
         .open_text(TextBuffer::from_text("editor"), None)
@@ -1835,7 +1835,7 @@ fn private_plugin_surface_geometry_snapshot_and_idle_projection_are_application_
 }
 
 #[test]
-fn retained_interaction_commands_use_host_focus_scroll_and_mouse_state() {
+pub(in crate::app) fn retained_interaction_commands_use_host_focus_scroll_and_mouse_state() {
     let (_app_dirs, mut app) = app();
     app.state
         .open_text(TextBuffer::from_text("editor"), None)
@@ -1948,7 +1948,7 @@ fn retained_interaction_commands_use_host_focus_scroll_and_mouse_state() {
 }
 
 #[test]
-fn invalid_plugin_arguments_leave_pending_deliveries_intact() {
+pub(in crate::app) fn invalid_plugin_arguments_leave_pending_deliveries_intact() {
     let (_app_dirs, mut app) = app();
     let (manager, fixture) = crate::plugins::ExecutionFixture::new(4);
     app.extension.fixture_manager(manager);
@@ -2013,7 +2013,7 @@ fn invalid_plugin_arguments_leave_pending_deliveries_intact() {
 }
 
 #[test]
-fn runtime_reset_retires_pending_invocations_without_disabling_new_calls() {
+pub(in crate::app) fn runtime_reset_retires_pending_invocations_without_disabling_new_calls() {
     let (_app_dirs, mut app) = app();
     let (manager, fixture) = crate::plugins::ExecutionFixture::new(4);
     app.extension.fixture_manager(manager);
@@ -2064,7 +2064,7 @@ fn runtime_reset_retires_pending_invocations_without_disabling_new_calls() {
 }
 
 #[test]
-fn stale_generation_cleanup_preserves_replacement_ui_events() {
+pub(in crate::app) fn stale_generation_cleanup_preserves_replacement_ui_events() {
     let (_app_dirs, mut app) = app();
     let event = |token| crate::plugins::PluginUiEvent {
         token,
@@ -2155,7 +2155,7 @@ fn stale_generation_cleanup_preserves_replacement_ui_events() {
 }
 
 #[test]
-fn expected_index_failure_before_sibling_index_aborts_the_complete_batch() {
+pub(in crate::app) fn expected_index_failure_before_sibling_index_aborts_the_complete_batch() {
     let (_app_dirs, mut app) = app();
     {
         let mut fixture = app.configuration.fixture_snapshot();
@@ -2216,7 +2216,7 @@ fn expected_index_failure_before_sibling_index_aborts_the_complete_batch() {
 }
 
 #[test]
-fn deferred_user_plugin_move_compiles_after_index_then_falls_back_after_activation_failure() {
+pub(in crate::app) fn deferred_user_plugin_move_compiles_after_index_then_falls_back_after_activation_failure() {
     let (_app_dirs, mut app) = app();
     let root = tempfile::tempdir().expect("plugin store");
     write_plugin_manifest(
@@ -2336,7 +2336,7 @@ fn deferred_user_plugin_move_compiles_after_index_then_falls_back_after_activati
 }
 
 #[test]
-fn enabled_plugin_references_are_deferred_but_unknown_namespaces_still_reject() {
+pub(in crate::app) fn enabled_plugin_references_are_deferred_but_unknown_namespaces_still_reject() {
     let (_app_dirs, app) = app();
     let mut loaded = crate::config::load_bundled_config();
     loaded.config.plugins.entries.insert(
@@ -2470,7 +2470,7 @@ fn enabled_plugin_references_are_deferred_but_unknown_namespaces_still_reject() 
 }
 
 #[test]
-fn deferred_batch_abort_and_worker_loss_clear_static_ownership() {
+pub(in crate::app) fn deferred_batch_abort_and_worker_loss_clear_static_ownership() {
     pub(in crate::app) fn index(owner: &str, generation: u64) -> crate::plugins::PluginContributionIndex {
         crate::plugins::PluginContributionIndex {
             owner: owner.into(),
@@ -2530,7 +2530,7 @@ fn deferred_batch_abort_and_worker_loss_clear_static_ownership() {
 }
 
 #[test]
-fn provider_chunks_use_the_revision_after_virtual_publication() {
+pub(in crate::app) fn provider_chunks_use_the_revision_after_virtual_publication() {
     let (_app_dirs, mut app) = app();
     let (manager, fixture) = crate::plugins::ExecutionFixture::new(4);
     app.extension.fixture_manager(manager);
@@ -2636,7 +2636,7 @@ fn provider_chunks_use_the_revision_after_virtual_publication() {
 }
 
 #[test]
-fn virtual_publication_keeps_original_request_until_checked_window_acceptance() {
+pub(in crate::app) fn virtual_publication_keeps_original_request_until_checked_window_acceptance() {
     use crate::app::plugins::VirtualContext;
     let (_app_dirs, mut app) = app();
     let mut manifest = plugin_manifest("demo", "plugin.demo.keymap.dashboard", "x y");
@@ -2772,7 +2772,7 @@ fn virtual_publication_keeps_original_request_until_checked_window_acceptance() 
 }
 
 #[test]
-fn virtual_document_titles_and_languages_reach_windows_and_syntax() {
+pub(in crate::app) fn virtual_document_titles_and_languages_reach_windows_and_syntax() {
     let (_app_dirs, mut app) = app();
     let before = app.state.version();
     let mut draft = app.state.draft();
@@ -2843,7 +2843,7 @@ fn virtual_document_titles_and_languages_reach_windows_and_syntax() {
 }
 
 #[test]
-fn provider_selection_delivers_request_item_and_action_data() {
+pub(in crate::app) fn provider_selection_delivers_request_item_and_action_data() {
     let (_app_dirs, mut app) = app();
     let (manager, fixture) = crate::plugins::ExecutionFixture::new(4);
     app.extension.fixture_manager(manager);
@@ -2910,7 +2910,7 @@ fn provider_selection_delivers_request_item_and_action_data() {
 }
 
 #[test]
-fn plugin_surface_observations_include_counts_and_geometry_preserves_receipts() {
+pub(in crate::app) fn plugin_surface_observations_include_counts_and_geometry_preserves_receipts() {
     let (_app_dirs, mut app) = app();
     let mut manifest = plugin_manifest("demo", "plugin.demo.keymap.dashboard", "x y");
     manifest
@@ -2969,7 +2969,7 @@ fn plugin_surface_observations_include_counts_and_geometry_preserves_receipts() 
 }
 
 #[test]
-fn conflicting_plugin_defaults_resolve_after_user_key_and_group_overrides() {
+pub(in crate::app) fn conflicting_plugin_defaults_resolve_after_user_key_and_group_overrides() {
     let (_app_dirs, mut app) = app();
     let mut catalog = crate::plugins::PluginContributionCatalog::default();
     for owner in ["demo", "other"] {
@@ -3016,7 +3016,7 @@ fn conflicting_plugin_defaults_resolve_after_user_key_and_group_overrides() {
 }
 
 #[test]
-fn virtual_open_deduplicates_requests_and_cancels_after_navigation() {
+pub(in crate::app) fn virtual_open_deduplicates_requests_and_cancels_after_navigation() {
     let (_app_dirs, mut app) = app();
     let (manager, fixture) = crate::plugins::ExecutionFixture::new(4);
     app.extension.fixture_manager(manager);
@@ -3115,7 +3115,7 @@ fn virtual_open_deduplicates_requests_and_cancels_after_navigation() {
 }
 
 #[test]
-fn deferred_activation_admission_failure_aborts_unsubmitted_siblings() {
+pub(in crate::app) fn deferred_activation_admission_failure_aborts_unsubmitted_siblings() {
     let (_app_dirs, mut app) = app();
     let (mut manager, fixture) = crate::plugins::ExecutionFixture::new(1);
     manager
@@ -3164,7 +3164,7 @@ fn deferred_activation_admission_failure_aborts_unsubmitted_siblings() {
 }
 
 #[test]
-fn rejected_package_commands_schedule_the_installed_version_for_reload() {
+pub(in crate::app) fn rejected_package_commands_schedule_the_installed_version_for_reload() {
     let (_app_dirs, mut app) = app();
     let (manager, fixture) = crate::plugins::ExecutionFixture::new(4);
     app.extension.fixture_manager(manager);
@@ -3199,7 +3199,7 @@ fn rejected_package_commands_schedule_the_installed_version_for_reload() {
 }
 
 #[test]
-fn active_plugin_failure_does_not_abort_a_siblings_index() {
+pub(in crate::app) fn active_plugin_failure_does_not_abort_a_siblings_index() {
     let (_app_dirs, mut app) = app();
     let (manager, fixture) = crate::plugins::ExecutionFixture::new(4);
     app.extension.fixture_manager(manager);
@@ -3226,7 +3226,7 @@ fn active_plugin_failure_does_not_abort_a_siblings_index() {
 }
 
 #[test]
-fn synchronous_plugin_load_refusal_retires_the_deferred_batch() {
+pub(in crate::app) fn synchronous_plugin_load_refusal_retires_the_deferred_batch() {
     let (_app_dirs, mut app) = app_with_plugin_queue(1);
     let root = tempfile::tempdir().unwrap();
     for owner in ["one", "two"] {
@@ -3263,7 +3263,7 @@ fn synchronous_plugin_load_refusal_retires_the_deferred_batch() {
 }
 
 #[test]
-fn plugin_command_arguments_reach_the_existing_execution_request() {
+pub(in crate::app) fn plugin_command_arguments_reach_the_existing_execution_request() {
     let (_app_dirs, mut app) = app();
     let (manager, fixture) = crate::plugins::ExecutionFixture::new(4);
     app.extension.fixture_manager(manager);
@@ -3290,7 +3290,7 @@ fn plugin_command_arguments_reach_the_existing_execution_request() {
 }
 
 #[test]
-fn repeated_virtual_open_does_not_dispatch_an_empty_callback() {
+pub(in crate::app) fn repeated_virtual_open_does_not_dispatch_an_empty_callback() {
     let (_app_dirs, mut app) = app();
     let (manager, fixture) = crate::plugins::ExecutionFixture::new(4);
     app.extension.fixture_manager(manager);
@@ -3329,7 +3329,7 @@ fn repeated_virtual_open_does_not_dispatch_an_empty_callback() {
 }
 
 #[test]
-fn plugin_picker_provider_uses_the_generic_presenter_and_cancels_exactly_slot5() {
+pub(in crate::app) fn plugin_picker_provider_uses_the_generic_presenter_and_cancels_exactly_slot5() {
     let (_app_dirs, mut app) = app();
     let mut manifest = plugin_manifest("demo", "plugin.demo.keymap.dashboard", "x y");
     manifest
@@ -3501,7 +3501,7 @@ fn plugin_picker_provider_uses_the_generic_presenter_and_cancels_exactly_slot5()
     assert!(broker.presentable(next));
 }
 
-fn provider_selection_fixture() -> (
+pub(in crate::app) fn provider_selection_fixture() -> (
     (tempfile::TempDir, tempfile::TempDir),
     App,
     crate::plugins::ExecutionFixture,
@@ -3572,7 +3572,7 @@ fn provider_selection_fixture() -> (
 }
 
 #[test]
-fn provider_selection_delivers_request_item_and_action_data_slot5() {
+pub(in crate::app) fn provider_selection_delivers_request_item_and_action_data_slot5() {
     let (_app_dirs, mut app, fixture, request) = provider_selection_fixture();
     app.accept_picker();
     assert_eq!(
@@ -3583,7 +3583,7 @@ fn provider_selection_delivers_request_item_and_action_data_slot5() {
 }
 
 #[test]
-fn provider_selection_survives_a_discarded_replacement() {
+pub(in crate::app) fn provider_selection_survives_a_discarded_replacement() {
     let (_app_dirs, mut app, fixture, request) = provider_selection_fixture();
     let replacement = app
         .extension
@@ -3611,7 +3611,7 @@ fn provider_selection_survives_a_discarded_replacement() {
 }
 
 #[test]
-fn provider_selection_rejects_reloaded_text_at_the_same_numeric_revision() {
+pub(in crate::app) fn provider_selection_rejects_reloaded_text_at_the_same_numeric_revision() {
     let (_app_dirs, mut app, fixture, _) = provider_selection_fixture();
     let buffer = app.state.active_buffer_id().unwrap();
     let path = app.state.buffers[buffer].path.clone().unwrap();
@@ -3629,7 +3629,7 @@ fn provider_selection_rejects_reloaded_text_at_the_same_numeric_revision() {
 }
 
 #[test]
-fn provider_selection_rejects_a_different_buffer_with_the_same_revision() {
+pub(in crate::app) fn provider_selection_rejects_a_different_buffer_with_the_same_revision() {
     let (_app_dirs, mut app, fixture, _) = provider_selection_fixture();
     app.state
         .open_text(TextBuffer::from_text("other"), None)
@@ -3641,7 +3641,7 @@ fn provider_selection_rejects_a_different_buffer_with_the_same_revision() {
     );
 }
 
-fn virtual_document_fixture(
+pub(in crate::app) fn virtual_document_fixture(
     capacity: usize,
 ) -> (
     (tempfile::TempDir, tempfile::TempDir),
@@ -3680,7 +3680,7 @@ fn virtual_document_fixture(
 }
 
 #[test]
-fn repeated_virtual_open_does_not_dispatch_an_empty_callback_slot5() {
+pub(in crate::app) fn repeated_virtual_open_does_not_dispatch_an_empty_callback_slot5() {
     let (_app_dirs, mut app, fixture, _) = virtual_document_fixture(4);
     app.process_effect(AppEffect::VirtualDocumentOpen {
         source: "plugin.demo.virtual.help".into(),
@@ -3695,7 +3695,7 @@ fn repeated_virtual_open_does_not_dispatch_an_empty_callback_slot5() {
     }
 }
 
-fn publish_virtual_fixture(
+pub(in crate::app) fn publish_virtual_fixture(
     app: &mut App,
     request: &crate::plugins::PluginVirtualDocumentRequest,
 ) {
@@ -3735,7 +3735,7 @@ fn publish_virtual_fixture(
 }
 
 #[test]
-fn virtual_open_can_retry_immediately_after_execution_admission_fails() {
+pub(in crate::app) fn virtual_open_can_retry_immediately_after_execution_admission_fails() {
     let (_app_dirs, mut app, fixture, _) = virtual_document_fixture(1);
     app.process_effect(AppEffect::PluginExecute {
         plugin: "demo".into(),
@@ -3758,7 +3758,7 @@ fn virtual_open_can_retry_immediately_after_execution_admission_fails() {
 }
 
 #[test]
-fn virtual_refresh_can_retry_immediately_after_execution_admission_fails() {
+pub(in crate::app) fn virtual_refresh_can_retry_immediately_after_execution_admission_fails() {
     let (_app_dirs, mut app, fixture, _) = virtual_document_fixture(1);
     app.process_effect(AppEffect::VirtualDocumentOpen {
         source: "plugin.demo.virtual.help".into(),
@@ -3783,7 +3783,7 @@ fn virtual_refresh_can_retry_immediately_after_execution_admission_fails() {
 }
 
 #[test]
-fn closing_a_virtual_buffer_delivers_close_notice_and_accepts_its_acknowledgement() {
+pub(in crate::app) fn closing_a_virtual_buffer_delivers_close_notice_and_accepts_its_acknowledgement() {
     let (_app_dirs, mut app, fixture, _) = virtual_document_fixture(4);
     app.process_effect(AppEffect::VirtualDocumentOpen {
         source: "plugin.demo.virtual.help".into(),
@@ -3827,7 +3827,7 @@ fn closing_a_virtual_buffer_delivers_close_notice_and_accepts_its_acknowledgemen
 }
 
 #[test]
-fn virtual_error_returns_the_broker_error_and_releases_the_open_request() {
+pub(in crate::app) fn virtual_error_returns_the_broker_error_and_releases_the_open_request() {
     let (_app_dirs, mut app, fixture, _) = virtual_document_fixture(4);
     app.process_effect(AppEffect::VirtualDocumentOpen {
         source: "plugin.demo.virtual.help".into(),

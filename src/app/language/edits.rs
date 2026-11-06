@@ -12,9 +12,9 @@ use crate::editor::text::PositionEncoding;
 use crate::editor::text::TextBuffer;
 use crate::editor::text::TextEdit;
 use crate::editor::text::TextEditSet;
-use crate::editor::transaction::EditorOperation;
-use crate::editor::transaction::EditorTransaction;
-use crate::editor::transaction::Precondition;
+use crate::editor::EditorOperation;
+use crate::editor::EditorTransaction;
+use crate::editor::Precondition;
 use crate::language::lsp::ApplyEditReply;
 use crate::language::lsp::EditContext;
 use crate::language::lsp::LspDocumentEdit;
@@ -29,13 +29,13 @@ use std::collections::VecDeque;
 use std::path::Path;
 use std::path::PathBuf;
 
-pub(super) struct EditDocument<'a> {
+pub(in crate::app) struct EditDocument<'a> {
     pub id: BufferId,
     pub path: &'a Path,
     pub text: &'a TextBuffer,
     pub dirty: bool,
 }
-pub(super) struct SourcePlan {
+pub(in crate::app) struct SourcePlan {
     pub key: OriginKey,
     pub files: Vec<InputFile>,
     pub all_files: bool,
@@ -50,18 +50,18 @@ struct Request {
     command: Option<(String, crate::language::lsp::LspCommand)>,
 }
 #[derive(Clone, Debug)]
-pub(super) struct CodeActionKey {
+pub(in crate::app) struct CodeActionKey {
     set: std::sync::Arc<()>,
     index: usize,
 }
-pub(super) struct CodeActionChoice {
+pub(in crate::app) struct CodeActionChoice {
     pub key: CodeActionKey,
     pub title: String,
     pub detail: String,
     pub server: String,
 }
 /// A code action and the server that offered it, which is the one that can read its positions.
-pub(super) struct OfferedAction {
+pub(in crate::app) struct OfferedAction {
     pub server: String,
     pub action: crate::language::lsp::LspCodeAction,
     pub context: Option<EditContext>,
@@ -72,7 +72,7 @@ struct CodeActions {
     actions: Vec<OfferedAction>,
 }
 #[derive(Default)]
-pub(super) struct LspEditSources {
+pub(in crate::app) struct LspEditSources {
     actions: Option<CodeActions>,
     /// What the attached servers have answered so far to the current request.
     offered: Vec<OfferedAction>,
@@ -113,7 +113,7 @@ impl LspEditSources {
         offered.sort_by_key(|offered| Some(offered.server.as_str()) != first);
         self.install_actions(offered, service, maximum)
     }
-    pub(super) fn install_actions(
+    pub(in crate::app) fn install_actions(
         &mut self,
         mut actions: Vec<OfferedAction>,
         service: &LspService,
@@ -146,7 +146,7 @@ impl LspEditSources {
         self.actions = Some(CodeActions { key, actions });
         Ok(rows)
     }
-    pub(super) fn retain_actions<'a>(
+    pub(in crate::app) fn retain_actions<'a>(
         &mut self,
         displayed: impl Iterator<Item = &'a CodeActionKey>,
     ) {
@@ -844,7 +844,7 @@ mod tests {
                 expected_revision: Some(BufferRevision(0)),
                 edits: decoded,
             }],
-            vec![crate::editor::transaction::DocumentSnapshot {
+            vec![crate::editor::DocumentSnapshot {
                 canonical_path: path.clone(),
                 revision: Some(BufferRevision(0)),
                 bytes: b"x".to_vec(),

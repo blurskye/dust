@@ -32,9 +32,9 @@ use crate::app::search::Intent;
 use crate::app::search::SearchUpdate;
 use crate::app::BufferRevision;
 use crate::app::ViewId;
-use crate::workspace::PickerAction;
-use crate::workspace::PickerItem;
-use crate::workspace::PickerItemId;
+
+
+
 
 
 
@@ -788,5 +788,40 @@ impl App {
             }
             Err(error) => self.show_error(error),
         }
+    }
+}
+
+use crate::app::TextBuffer;
+
+
+
+/// A character of an identifier, for the word completion replaces and filters on.
+/// Where a search from `cursor` lands, as a byte offset.
+fn search_target(
+    text: &TextBuffer,
+    matches: &[std::ops::Range<usize>],
+    cursor: ByteOffset,
+    forward: bool,
+    wrap: bool,
+) -> Option<usize> {
+    let offset = cursor.get().min(text.len_bytes());
+    if forward {
+        let start = if offset < text.len_bytes() {
+            crate::editor::text::next_grapheme_boundary(text, cursor).get()
+        } else {
+            offset
+        };
+        matches
+            .iter()
+            .find(|matched| matched.start >= start)
+            .or_else(|| wrap.then(|| matches.first()).flatten())
+            .map(|matched| matched.start)
+    } else {
+        matches
+            .iter()
+            .rev()
+            .find(|matched| matched.start < offset)
+            .or_else(|| wrap.then(|| matches.last()).flatten())
+            .map(|matched| matched.start)
     }
 }

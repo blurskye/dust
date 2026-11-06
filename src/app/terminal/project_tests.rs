@@ -4,7 +4,7 @@ use crate::app::workspace::project_tests::wait_root_operation;
 
 
 #[test]
-fn a_pending_root_switch_rechecks_new_edits_and_terminals() {
+pub(in crate::app) fn a_pending_root_switch_rechecks_new_edits_and_terminals() {
     for terminal in [None, Some(false), Some(true)] {
         let (_app_dirs, mut app) = app();
         let old = app.state.workspace_root.clone();
@@ -52,7 +52,7 @@ fn a_pending_root_switch_rechecks_new_edits_and_terminals() {
 
 
 #[test]
-fn saving_an_existing_empty_file_detects_external_deletion() {
+pub(in crate::app) fn saving_an_existing_empty_file_detects_external_deletion() {
     let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("existing-empty.txt");
     fs::write(&path, b"").unwrap();
@@ -77,7 +77,7 @@ fn saving_an_existing_empty_file_detects_external_deletion() {
 
 /// The page keys have names a keymap can use, and a focused terminal receives them.
 #[test]
-fn page_keys_parse_and_count_as_terminal_navigation() {
+pub(in crate::app) fn page_keys_parse_and_count_as_terminal_navigation() {
     assert_eq!(
         "pagedown".parse::<KeyEvent>().unwrap().code,
         crate::editor::input::KeyCode::PageDown
@@ -97,7 +97,7 @@ fn page_keys_parse_and_count_as_terminal_navigation() {
 
 
 #[test]
-fn an_empty_plugin_list_says_how_to_get_one() {
+pub(in crate::app) fn an_empty_plugin_list_says_how_to_get_one() {
     let (_app_dirs, mut app) = app();
     app.process_effect(AppEffect::PluginList);
     assert_eq!(
@@ -108,7 +108,7 @@ fn an_empty_plugin_list_says_how_to_get_one() {
 
 
 #[test]
-fn switching_folders_with_open_terminals_warns_before_ending_them() {
+pub(in crate::app) fn switching_folders_with_open_terminals_warns_before_ending_them() {
     let main = tempdir().unwrap();
     let state_dir = tempdir().unwrap();
     let main = main.path().canonicalize().unwrap();
@@ -160,7 +160,7 @@ fn switching_folders_with_open_terminals_warns_before_ending_them() {
 
 
 #[test]
-fn reloading_terminal_settings_keeps_running_terminals() {
+pub(in crate::app) fn reloading_terminal_settings_keeps_running_terminals() {
     let (_app_dirs, mut app) = app();
     app.terminal_session.fixture(
         crate::process::PtyId(1),
@@ -195,7 +195,7 @@ fn reloading_terminal_settings_keeps_running_terminals() {
 
 
 #[test]
-fn removing_a_root_preserves_terminals_and_updates_relative_paths() {
+pub(in crate::app) fn removing_a_root_preserves_terminals_and_updates_relative_paths() {
     let (_app_dirs, mut app) = app();
     prepare_trust_identity(&mut app);
     let first = app.workspace.active_root().unwrap();

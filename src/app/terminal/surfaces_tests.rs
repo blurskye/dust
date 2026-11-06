@@ -5,7 +5,7 @@ use crate::app::AgentCommand;
 
 
 #[test]
-fn floating_terminal_receives_clicks_above_underlying_buffer_tabs() {
+pub(in crate::app) fn floating_terminal_receives_clicks_above_underlying_buffer_tabs() {
     let (_app_dirs, mut app) = app();
     let (first, _) = app
         .state
@@ -67,7 +67,7 @@ fn floating_terminal_receives_clicks_above_underlying_buffer_tabs() {
 
 
 #[test]
-fn closing_an_explicit_terminal_window_keeps_the_focused_terminal() {
+pub(in crate::app) fn closing_an_explicit_terminal_window_keeps_the_focused_terminal() {
     for running in [false, true] {
         let (_app_dirs, mut app) = app();
         app.state
@@ -116,7 +116,7 @@ fn closing_an_explicit_terminal_window_keeps_the_focused_terminal() {
 
 
 #[test]
-fn debug_tabs_remain_clickable_beside_a_right_docked_terminal() {
+pub(in crate::app) fn debug_tabs_remain_clickable_beside_a_right_docked_terminal() {
     let (_app_dirs, mut app) = app();
     app.state
         .open_text(TextBuffer::from_text("source"), None)
@@ -190,7 +190,7 @@ fn debug_tabs_remain_clickable_beside_a_right_docked_terminal() {
 
 
 #[test]
-fn the_terminal_opens_where_its_placement_setting_says() {
+pub(in crate::app) fn the_terminal_opens_where_its_placement_setting_says() {
     use crate::app::tests::driver::TestSession;
     for (placement, expected) in [
         (crate::config::TerminalPlacement::Float, "float"),
@@ -231,7 +231,7 @@ fn the_terminal_opens_where_its_placement_setting_says() {
 
 
 #[test]
-fn showing_a_terminal_with_a_hidden_semantic_default_uses_a_visible_fallback() {
+pub(in crate::app) fn showing_a_terminal_with_a_hidden_semantic_default_uses_a_visible_fallback() {
     let (_app_dirs, mut app) = app();
     app.state
         .open_text(TextBuffer::from_text("editor"), None)
@@ -290,7 +290,7 @@ fn showing_a_terminal_with_a_hidden_semantic_default_uses_a_visible_fallback() {
 
 
 #[test]
-fn default_terminal_float_handles_dimensions_larger_than_u16_multiplication() {
+pub(in crate::app) fn default_terminal_float_handles_dimensions_larger_than_u16_multiplication() {
     let (_app_dirs, mut app) = app();
     // Even the largest dimensions must not overflow before the missing-terminal check.
     app.window_session.observe_size((u16::MAX, u16::MAX));
@@ -339,7 +339,7 @@ fn default_terminal_float_handles_dimensions_larger_than_u16_multiplication() {
 
 
 #[test]
-fn terminal_panel_focus_cycle_resize_and_close_preserve_independent_sessions() {
+pub(in crate::app) fn terminal_panel_focus_cycle_resize_and_close_preserve_independent_sessions() {
     let mut loaded = crate::config::load_bundled_config();
     loaded.config.ui.terminal_panel.height = 10;
     let workspace = tempdir().unwrap();
@@ -842,7 +842,7 @@ fn terminal_panel_focus_cycle_resize_and_close_preserve_independent_sessions() {
 
 #[cfg(unix)]
 #[test]
-fn live_pty_clone_refusal_preserves_process_screen_geometry_focus_and_sources() {
+pub(in crate::app) fn live_pty_clone_refusal_preserves_process_screen_geometry_focus_and_sources() {
     use crate::app::tests::driver::TestSession;
     let mut loaded = crate::config::load_bundled_config();
     loaded.config.terminals.profiles.insert(
@@ -919,7 +919,7 @@ fn live_pty_clone_refusal_preserves_process_screen_geometry_focus_and_sources() 
 
 #[cfg(unix)]
 #[test]
-fn ordinary_terminal_profile_names_do_not_make_agent_terminals() {
+pub(in crate::app) fn ordinary_terminal_profile_names_do_not_make_agent_terminals() {
     use crate::app::tests::driver::TestSession;
     let mut loaded = crate::config::load_bundled_config();
     loaded.config.agents.connection = crate::config::AgentConnection::Terminal;
@@ -953,7 +953,7 @@ fn ordinary_terminal_profile_names_do_not_make_agent_terminals() {
 
 #[cfg(unix)]
 #[test]
-fn a_terminal_profile_named_like_an_agent_is_not_reused_as_that_agent() {
+pub(in crate::app) fn a_terminal_profile_named_like_an_agent_is_not_reused_as_that_agent() {
     use crate::app::tests::driver::TestSession;
     let mut loaded = crate::config::load_bundled_config();
     loaded.config.agents.connection = crate::config::AgentConnection::Terminal;
@@ -1011,7 +1011,7 @@ fn a_terminal_profile_named_like_an_agent_is_not_reused_as_that_agent() {
 
 #[cfg(unix)]
 #[test]
-fn a_terminal_agent_accepts_selections_from_normal_mode_and_preserves_rejected_ones() {
+pub(in crate::app) fn a_terminal_agent_accepts_selections_from_normal_mode_and_preserves_rejected_ones() {
     use crate::app::tests::driver::TestSession;
     let mut loaded = crate::config::load_bundled_config();
     loaded.config.agents.connection = crate::config::AgentConnection::Terminal;
@@ -1095,7 +1095,7 @@ fn a_terminal_agent_accepts_selections_from_normal_mode_and_preserves_rejected_o
 
 #[cfg(unix)]
 #[test]
-fn a_terminal_agent_opens_on_the_right_where_the_agent_panel_goes() {
+pub(in crate::app) fn a_terminal_agent_opens_on_the_right_where_the_agent_panel_goes() {
     use crate::app::tests::driver::TestSession;
     let mut loaded = crate::config::load_bundled_config();
     let agents = &mut loaded.config.agents;
@@ -1157,7 +1157,7 @@ fn a_terminal_agent_opens_on_the_right_where_the_agent_panel_goes() {
 
 #[cfg(unix)]
 #[test]
-fn ctrl_slash_beside_a_terminal_agent_opens_a_shell_and_both_keep_their_windows_and_sizes() {
+pub(in crate::app) fn ctrl_slash_beside_a_terminal_agent_opens_a_shell_and_both_keep_their_windows_and_sizes() {
     use crate::app::tests::driver::TestSession;
     let mut loaded = crate::config::load_bundled_config();
     loaded.config.terminals.profiles.insert(
@@ -1304,7 +1304,7 @@ fn ctrl_slash_beside_a_terminal_agent_opens_a_shell_and_both_keep_their_windows_
 
 #[cfg(unix)]
 #[test]
-fn resizing_a_terminal_that_is_stopping_is_not_an_error() {
+pub(in crate::app) fn resizing_a_terminal_that_is_stopping_is_not_an_error() {
     use crate::app::tests::driver::TestSession;
     let mut loaded = crate::config::load_bundled_config();
     loaded.config.terminals.profiles.insert(
@@ -1340,7 +1340,7 @@ fn resizing_a_terminal_that_is_stopping_is_not_an_error() {
 
 #[cfg(unix)]
 #[test]
-fn real_pty_geometry_ack_focus_placement_and_cross_tab_keep_one_process() {
+pub(in crate::app) fn real_pty_geometry_ack_focus_placement_and_cross_tab_keep_one_process() {
     use crate::app::tests::driver::TestSession;
     let mut loaded = crate::config::load_bundled_config();
     loaded.config.terminals.profiles.insert(
@@ -1599,7 +1599,7 @@ fn real_pty_geometry_ack_focus_placement_and_cross_tab_keep_one_process() {
 
 #[cfg(unix)]
 #[test]
-fn terminal_preflight_close_and_capture_keep_original_pty_and_geometry() {
+pub(in crate::app) fn terminal_preflight_close_and_capture_keep_original_pty_and_geometry() {
     use crate::app::tests::driver::TestSession;
     let mut loaded = crate::config::load_bundled_config();
     loaded.config.terminals.profiles.insert("owned-terminal".into(),crate::config::TerminalProfileConfig {program:"/bin/sh".into(),arguments:vec!["-c".into(),"printf x >> starts; printf 'READY\n'; read value; printf 'ACK:%s\n' \"$value\"; read end".into()],cwd:None,environment:Default::default(),columns:80,rows:8,float:false,close_on_exit:false});
@@ -1746,7 +1746,7 @@ fn terminal_preflight_close_and_capture_keep_original_pty_and_geometry() {
 
 #[cfg(unix)]
 #[test]
-fn debugger_terminal_displays_without_focus_and_its_exit_keeps_another_terminal_focused() {
+pub(in crate::app) fn debugger_terminal_displays_without_focus_and_its_exit_keeps_another_terminal_focused() {
     use crate::app::tests::driver::TestSession;
     let mut loaded = crate::config::load_bundled_config();
     let mut program = loaded.config.terminals.profiles["shell"].clone();
@@ -1809,7 +1809,7 @@ fn debugger_terminal_displays_without_focus_and_its_exit_keeps_another_terminal_
 
 #[cfg(unix)]
 #[test]
-fn retired_debugger_terminal_preflight_never_launches_the_program() {
+pub(in crate::app) fn retired_debugger_terminal_preflight_never_launches_the_program() {
     use crate::app::tests::driver::TestSession;
     let mut loaded = crate::config::load_bundled_config();
     let mut program = loaded.config.terminals.profiles["shell"].clone();
@@ -1845,7 +1845,7 @@ fn retired_debugger_terminal_preflight_never_launches_the_program() {
 
 #[cfg(unix)]
 #[test]
-fn real_pty_reports_exit_io_failure_and_shared_deadline_unknown_distinctly() {
+pub(in crate::app) fn real_pty_reports_exit_io_failure_and_shared_deadline_unknown_distinctly() {
     use crate::app::tests::driver::TestSession;
     let mut loaded = crate::config::load_bundled_config();
     loaded.config.terminals.profiles.insert(
@@ -1975,7 +1975,7 @@ fn real_pty_reports_exit_io_failure_and_shared_deadline_unknown_distinctly() {
 
 #[cfg(unix)]
 #[test]
-fn successful_terminal_exit_keeps_output_unless_profile_closes_on_exit() {
+pub(in crate::app) fn successful_terminal_exit_keeps_output_unless_profile_closes_on_exit() {
     use crate::app::tests::driver::TestSession;
     for (profile, close_on_exit) in [
         ("completed", false),
@@ -2036,7 +2036,7 @@ fn successful_terminal_exit_keeps_output_unless_profile_closes_on_exit() {
 
 #[cfg(unix)]
 #[test]
-fn oversized_terminal_paste_reports_its_rejection() {
+pub(in crate::app) fn oversized_terminal_paste_reports_its_rejection() {
     use crate::app::tests::driver::TestSession;
     let mut loaded = crate::config::load_bundled_config();
     loaded.config.terminals.profiles.insert(
@@ -2076,7 +2076,7 @@ fn oversized_terminal_paste_reports_its_rejection() {
 
 
 #[test]
-fn configured_terminal_navigation_bindings_run_before_pty_encoding() {
+pub(in crate::app) fn configured_terminal_navigation_bindings_run_before_pty_encoding() {
     let (_app_dirs, mut app) = app();
     app.state
         .open_text(TextBuffer::from_text("editor"), None)
@@ -2120,7 +2120,7 @@ fn configured_terminal_navigation_bindings_run_before_pty_encoding() {
 
 
 #[test]
-fn hiding_another_terminal_preserves_the_focused_terminal() {
+pub(in crate::app) fn hiding_another_terminal_preserves_the_focused_terminal() {
     let (_app_dirs, mut app) = app();
     app.window_session.observe_size((100, 30));
     app.state
@@ -2168,7 +2168,7 @@ fn hiding_another_terminal_preserves_the_focused_terminal() {
 
 #[cfg(unix)]
 #[test]
-fn real_pty_reports_nonzero_exit_and_shared_deadline_unknown_distinctly() {
+pub(in crate::app) fn real_pty_reports_nonzero_exit_and_shared_deadline_unknown_distinctly() {
     use crate::app::tests::driver::TestSession;
     let mut loaded = crate::config::load_bundled_config();
     loaded.config.terminals.profiles.insert(

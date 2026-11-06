@@ -1,7 +1,7 @@
 use crate::app::tests::*;
 
 #[test]
-fn indexed_plugin_defaults_install_before_activation_and_roll_back_on_failure() {
+pub(in crate::app) fn indexed_plugin_defaults_install_before_activation_and_roll_back_on_failure() {
     let (_app_dirs, mut app) = app();
     let root = tempfile::tempdir().expect("plugin store");
     let manifest = crate::plugins::PluginManifest {
@@ -103,7 +103,7 @@ fn indexed_plugin_defaults_install_before_activation_and_roll_back_on_failure() 
 }
 
 #[test]
-fn typed_plugin_defaults_compile_between_bundled_and_user_contributions() {
+pub(in crate::app) fn typed_plugin_defaults_compile_between_bundled_and_user_contributions() {
     let (_app_dirs, mut app) = app();
     app.commands
         .register(
@@ -270,7 +270,7 @@ fn typed_plugin_defaults_compile_between_bundled_and_user_contributions() {
 }
 
 #[test]
-fn resolved_key_hints_follow_leaders_groups_and_configured_command_labels() {
+pub(in crate::app) fn resolved_key_hints_follow_leaders_groups_and_configured_command_labels() {
     let (_app_dirs, app) = app();
     let labels = &app.configuration.settings().command_labels;
     let hints = app
@@ -401,7 +401,7 @@ fn resolved_key_hints_follow_leaders_groups_and_configured_command_labels() {
 }
 
 #[test]
-fn identity_replacements_shadow_lower_layers_in_precedence_order() {
+pub(in crate::app) fn identity_replacements_shadow_lower_layers_in_precedence_order() {
     let (_app_dirs, app) = app();
     let mut loaded = crate::config::load_bundled_config().keymaps;
     loaded.entries.push(
@@ -456,7 +456,7 @@ fn identity_replacements_shadow_lower_layers_in_precedence_order() {
 }
 
 #[test]
-fn pass_through_preserves_the_lower_command_binding_metadata() {
+pub(in crate::app) fn pass_through_preserves_the_lower_command_binding_metadata() {
     let (_app_dirs, app) = app();
     let mut loaded = crate::config::load_bundled_config().keymaps;
     loaded.entries.push(
@@ -506,7 +506,7 @@ fn pass_through_preserves_the_lower_command_binding_metadata() {
 }
 
 #[test]
-fn reverse_bindings_fall_back_when_the_preferred_shortcut_is_overridden() {
+pub(in crate::app) fn reverse_bindings_fall_back_when_the_preferred_shortcut_is_overridden() {
     let (_app_dirs, app) = app();
     let mut loaded = crate::config::load_bundled_config().keymaps;
     loaded.entries.push(
@@ -551,7 +551,7 @@ fn reverse_bindings_fall_back_when_the_preferred_shortcut_is_overridden() {
 }
 
 #[test]
-fn exact_prefix_overrides_hide_unreachable_bindings_and_groups() {
+pub(in crate::app) fn exact_prefix_overrides_hide_unreachable_bindings_and_groups() {
     let (_app_dirs, app) = app();
     let mut loaded = crate::config::load_bundled_config().keymaps;
     loaded.entries.push(
@@ -605,7 +605,7 @@ fn exact_prefix_overrides_hide_unreachable_bindings_and_groups() {
 }
 
 #[test]
-fn key_groups_require_a_command_not_an_orphan_pass_through() {
+pub(in crate::app) fn key_groups_require_a_command_not_an_orphan_pass_through() {
     let (_app_dirs, app) = app();
     let mut loaded = crate::config::load_bundled_config().keymaps;
     loaded.entries.push(
@@ -644,7 +644,7 @@ fn key_groups_require_a_command_not_an_orphan_pass_through() {
 }
 
 #[test]
-fn key_hint_projection_uses_final_identity_and_sequence_operations_only() {
+pub(in crate::app) fn key_hint_projection_uses_final_identity_and_sequence_operations_only() {
     let (_app_dirs, app) = app();
     let original = app
         .configuration
@@ -778,7 +778,7 @@ fn key_hint_projection_uses_final_identity_and_sequence_operations_only() {
 }
 
 #[test]
-fn key_hints_and_effective_bindings_exclude_terminated_prefixes() {
+pub(in crate::app) fn key_hints_and_effective_bindings_exclude_terminated_prefixes() {
     let (_app_dirs, app) = app();
     for disabled in [false, true] {
         let mut loaded = crate::config::load_bundled_config().keymaps;
@@ -835,7 +835,7 @@ fn key_hints_and_effective_bindings_exclude_terminated_prefixes() {
 }
 
 #[test]
-fn invalid_key_groups_reject_compilation_and_reload_transactionally() {
+pub(in crate::app) fn invalid_key_groups_reject_compilation_and_reload_transactionally() {
     let (_app_dirs, app) = app();
     for (group, expected) in [
         (
@@ -1088,7 +1088,7 @@ fn invalid_key_groups_reject_compilation_and_reload_transactionally() {
 }
 
 #[test]
-fn macros_record_replay_last_register_and_stop_at_limits() {
+pub(in crate::app) fn macros_record_replay_last_register_and_stop_at_limits() {
     let (_app_dirs, mut app) = app();
     app.state
         .open_text(crate::editor::text::TextBuffer::from_text("abc"), None)
@@ -1117,7 +1117,7 @@ fn macros_record_replay_last_register_and_stop_at_limits() {
 }
 
 #[test]
-fn question_mark_still_navigates_and_only_the_leader_opens_help() {
+pub(in crate::app) fn question_mark_still_navigates_and_only_the_leader_opens_help() {
     let (_app_dirs, app) = app();
     let keymaps = app.configuration.keymaps();
 
@@ -1155,7 +1155,7 @@ fn question_mark_still_navigates_and_only_the_leader_opens_help() {
 }
 
 #[test]
-fn help_is_reachable_from_the_confirmation_and_from_a_form() {
+pub(in crate::app) fn help_is_reachable_from_the_confirmation_and_from_a_form() {
     let (_app_dirs, app) = app();
     let keymaps = app.configuration.keymaps();
 
@@ -1190,7 +1190,7 @@ fn help_is_reachable_from_the_confirmation_and_from_a_form() {
 }
 
 #[test]
-fn action_bindings_distinguish_arguments_containing_fingerprint_delimiters() {
+pub(in crate::app) fn action_bindings_distinguish_arguments_containing_fingerprint_delimiters() {
     let (_app_dirs, app) = app();
     let mut loaded = crate::config::load_bundled_config().keymaps;
     let arguments = |query: &str, replacement: &str| {
@@ -1238,7 +1238,7 @@ fn action_bindings_distinguish_arguments_containing_fingerprint_delimiters() {
 }
 
 #[test]
-fn effective_bindings_report_remaps_unbound_commands_and_the_asked_context() {
+pub(in crate::app) fn effective_bindings_report_remaps_unbound_commands_and_the_asked_context() {
     let (_app_dirs, app) = app();
     let mut policy = app.configuration.settings().input.keymaps.clone();
     policy.leader = ",".into();
@@ -1331,7 +1331,7 @@ fn effective_bindings_report_remaps_unbound_commands_and_the_asked_context() {
 }
 
 #[test]
-fn binding_for_names_the_same_key_every_time_for_a_multi_bound_command() {
+pub(in crate::app) fn binding_for_names_the_same_key_every_time_for_a_multi_bound_command() {
     let (_app_dirs, app) = app();
     let keymaps = app.configuration.keymaps();
     // `command_line.open` answers to several keys and `reverse` is a HashMap, so before this was

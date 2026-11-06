@@ -10,10 +10,10 @@ use crate::app::PickerSurfaceKind;
 use crate::app::PositionEncoding;
 use crate::app::ResourceIntentKind;
 use crate::app::VfsResult;
-use crate::files::ResourceIntentKind;
-use crate::workspace::PickerAction;
-use crate::workspace::PickerItem;
-use crate::workspace::PickerItemId;
+
+
+
+
 
 
 
@@ -492,8 +492,8 @@ impl App {
 
     fn finish_workspace_approval(
         &mut self,
-        draft: crate::editor::transaction::EditorDraft,
-        changes: Vec<crate::editor::transaction::BufferPathChange>,
+        draft: crate::editor::EditorDraft,
+        changes: Vec<crate::editor::BufferPathChange>,
     ) {
         if let Err(error) = self.workspace_edits.stage_approval(&draft, changes) {
             self.show_error(error);

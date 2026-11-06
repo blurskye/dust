@@ -4,126 +4,9 @@ use crate::app::App;
 use crate::app::PickerPayload;
 use crate::app::WorkspaceTrust;
 
-impl App {
-    pub(in crate::app) fn process_workspace_effect(&mut self, effect: AppEffect) -> Result<(), AppEffect> {
-        match effect {
-            AppEffect::SafeModeStatus => {
-                self.notify_message(
-                    self.message(
-                        "safe_mode_status",
-                        &[(
-                            "state",
-                            if self.workspace.safe_mode() {
-                                "active".into()
-                            } else {
-                                "inactive".into()
-                            },
-                        )],
-                    ),
-                    false,
-                );
-            }
-            AppEffect::WorkspaceTrust => self.request_workspace_trust(),
-            AppEffect::WorkspaceUntrust => self.revoke_workspace_trust(),
-            AppEffect::WorkspaceStatus => {
-                let state = if self.workspace.trust() == WorkspaceTrust::Trusted {
-                    self.message("workspace_trust_trusted", &[])
-                } else {
-                    self.message("workspace_trust_untrusted", &[])
-                };
-                self.notify_message(
-                    self.message("workspace_trust_status", &[("state", state)]),
-                    false,
-                );
-            }
-            AppEffect::WorkspaceRootAdd(path) => self.add_workspace_root(path),
-            AppEffect::WorkspaceRootActivate(id) => {
-                self.activate_workspace_root(crate::workspace::RootId(id));
-            }
-            AppEffect::WorkspaceRootRemove(id) => {
-                self.remove_workspace_root(crate::workspace::RootId(id));
-            }
-            AppEffect::WorkspaceRootStatus => {
-                if let Some(root) = self
-                    .workspace
-                    .active_root()
-                    .and_then(|id| self.workspace.roots().iter().find(|root| root.id == id))
-                {
-                    self.notify_message(
-                        self.message(
-                            "workspace_root_status",
-                            &[
-                                ("id", root.id.0.to_string()),
-                                ("path", root.identity.canonical_path.display().to_string()),
-                            ],
-                        ),
-                        false,
-                    );
-                }
-            }
-            AppEffect::WorkspaceSearchPrompt => self.open_live_workspace_search(),
-            AppEffect::WorkspaceSearch(query) => self.start_workspace_search(query, None),
-            AppEffect::WorkspaceSearchCancel => {
-                self.search.cancel_grep();
-                self.notify_message(self.message("workspace_search_cancelled", &[]), false);
-            }
-            AppEffect::WorkspaceReplace { query, replacement } => {
-                self.start_workspace_search(query, Some(replacement));
-            }
-            AppEffect::WorkspaceEditToggle => {
-                self.retire_stale_picker();
-                let selected = self
-                    .selected_picker_payload()
-                    .and_then(|payload| match payload {
-                        PickerPayload::ProposalFile(index) => Some(*index),
-                        _ => None,
-                    });
-                if let Some(index) = selected
-                    && self.workspace_edits.toggle(index).is_ok()
-                {
-                    self.show_workspace_proposal();
-                }
-            }
-            AppEffect::WorkspaceEditAccept => self.accept_workspace_proposal(),
-            AppEffect::WorkspaceEditReject => self.reject_workspace_proposal(),
-            AppEffect::WorkspaceResourceApply => loop {
-                let proposal = self.workspace_edits.next_resource_proposal();
-                let result = match self.workspace_edits.prepare_resource(
-                    &self.workspace,
-                    self.configuration.binding_revision_ref(),
-                    &self.state,
-                ) {
-                    Ok(Some(permit)) => self.documents.submit_workspace_resource(permit),
-                    Ok(None) => break,
-                    Err(error) => {
-                        self.language.cancel_deferred_edits(proposal);
-                        self.show_error(error);
-                        break;
-                    }
-                };
-                match result {
-                    Ok(true) => {}
-                    Ok(false) => {
-                        self.notify_message(
-                            "Document queue is full; remaining resources are still staged. Apply them again after pending work finishes.".into(),
-                            false,
-                        );
-                        break;
-                    }
-                    Err(error) => {
-                        self.language.cancel_deferred_edits(proposal);
-                        self.show_error(error);
-                        break;
-                    }
-                }
-            },
-            effect => return Err(effect),
-        }
-        Ok(())
-    }
-}
 
-use crate::app::commands::AppEffect;
+
+
 use crate::editor::ArgumentSchema;
 use crate::editor::ArgumentType;
 use crate::editor::CommandError;
@@ -288,4 +171,124 @@ pub(in crate::app) fn register_commands(registry: &mut CommandRegistry<AppEffect
         |_| AppEffect::HistoryClear,
     )?;
 Ok(())
+}
+
+
+impl App {
+    pub(in crate::app) fn process_workspace_effect(&mut self, effect: AppEffect) -> Result<(), AppEffect> {
+        match effect {
+            AppEffect::WorkspaceTrust => self.request_workspace_trust(),
+            AppEffect::WorkspaceUntrust => self.revoke_workspace_trust(),
+            AppEffect::WorkspaceStatus => {
+                let state = if self.workspace.trust() == WorkspaceTrust::Trusted {
+                    self.message("workspace_trust_trusted", &[])
+                } else {
+                    self.message("workspace_trust_untrusted", &[])
+                };
+                self.notify_message(
+                    self.message("workspace_trust_status", &[("state", state)]),
+                    false,
+                );
+            }
+            AppEffect::WorkspaceRootAdd(path) => self.add_workspace_root(path),
+            AppEffect::WorkspaceRootActivate(id) => {
+                self.activate_workspace_root(crate::workspace::RootId(id));
+            }
+            AppEffect::WorkspaceRootRemove(id) => {
+                self.remove_workspace_root(crate::workspace::RootId(id));
+            }
+            AppEffect::WorkspaceRootStatus => {
+                if let Some(root) = self
+                    .workspace
+                    .active_root()
+                    .and_then(|id| self.workspace.roots().iter().find(|root| root.id == id))
+                {
+                    self.notify_message(
+                        self.message(
+                            "workspace_root_status",
+                            &[
+                                ("id", root.id.0.to_string()),
+                                ("path", root.identity.canonical_path.display().to_string()),
+                            ],
+                        ),
+                        false,
+                    );
+                }
+            }
+            AppEffect::WorkspaceSearchPrompt => self.open_live_workspace_search(),
+            AppEffect::WorkspaceSearch(query) => self.start_workspace_search(query, None),
+            AppEffect::WorkspaceSearchCancel => {
+                self.search.cancel_grep();
+                self.notify_message(self.message("workspace_search_cancelled", &[]), false);
+            }
+            AppEffect::WorkspaceReplace { query, replacement } => {
+                self.start_workspace_search(query, Some(replacement));
+            }
+            AppEffect::WorkspaceEditToggle => {
+                self.retire_stale_picker();
+                let selected = self
+                    .selected_picker_payload()
+                    .and_then(|payload| match payload {
+                        PickerPayload::ProposalFile(index) => Some(*index),
+                        _ => None,
+                    });
+                if let Some(index) = selected
+                    && self.workspace_edits.toggle(index).is_ok()
+                {
+                    self.show_workspace_proposal();
+                }
+            }
+            AppEffect::WorkspaceEditAccept => self.accept_workspace_proposal(),
+            AppEffect::WorkspaceEditReject => self.reject_workspace_proposal(),
+            AppEffect::WorkspaceResourceApply => loop {
+                let proposal = self.workspace_edits.next_resource_proposal();
+                let result = match self.workspace_edits.prepare_resource(
+                    &self.workspace,
+                    self.configuration.binding_revision_ref(),
+                    &self.state,
+                ) {
+                    Ok(Some(permit)) => self.documents.submit_workspace_resource(permit),
+                    Ok(None) => break,
+                    Err(error) => {
+                        self.language.cancel_deferred_edits(proposal);
+                        self.show_error(error);
+                        break;
+                    }
+                };
+                match result {
+                    Ok(true) => {}
+                    Ok(false) => {
+                        self.notify_message(
+                            "Document queue is full; remaining resources are still staged. Apply them again after pending work finishes.".into(),
+                            false,
+                        );
+                        break;
+                    }
+                    Err(error) => {
+                        self.language.cancel_deferred_edits(proposal);
+                        self.show_error(error);
+                        break;
+                    }
+                }
+            },
+            AppEffect::SafeModeStatus => {
+                self.notify_message(
+                    self.message(
+                        "safe_mode_status",
+                        &[(
+                            "state",
+                            if self.workspace.safe_mode() {
+                                "active".into()
+                            } else {
+                                "inactive".into()
+                            },
+                        )],
+                    ),
+                    false,
+                );
+            }
+            effect => return Err(effect),
+        }
+        Ok(())
+    }
 }

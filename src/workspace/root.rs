@@ -255,3 +255,5 @@ impl WorkspaceState {
         Ok(())
     }
 }
+
+use crate::files::RootIdentity;

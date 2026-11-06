@@ -275,7 +275,7 @@ impl SearchSession {
         true
     }
 }
-pub(super) fn search_picker_preview(
+pub(in crate::app) fn search_picker_preview(
     found: &crate::files::WorkspaceSearchMatch,
     maximum_bytes: usize,
 ) -> PickerPreview {

@@ -4,7 +4,7 @@ use crate::app::tests::*;
 
 
 #[test]
-fn workspace_trust_is_one_key_cancels_on_focus_loss_and_persists() {
+pub(in crate::app) fn workspace_trust_is_one_key_cancels_on_focus_loss_and_persists() {
     let key = |name: &str| name.parse::<KeyEvent>().expect("key");
     let (_app_dirs, mut app) = app();
     prepare_trust_identity(&mut app);
@@ -66,7 +66,7 @@ fn workspace_trust_is_one_key_cancels_on_focus_loss_and_persists() {
 
 
 #[test]
-fn shutdown_waits_for_a_queued_workspace_revocation() {
+pub(in crate::app) fn shutdown_waits_for_a_queued_workspace_revocation() {
     let (_app_dirs, mut app) = app();
     prepare_trust_identity(&mut app);
     let path = app.workspace.state_path().to_path_buf();
@@ -108,7 +108,7 @@ fn shutdown_waits_for_a_queued_workspace_revocation() {
 
 
 #[test]
-fn shutdown_reports_failed_workspace_trust_writes() {
+pub(in crate::app) fn shutdown_reports_failed_workspace_trust_writes() {
     let (_app_dirs, mut app) = app();
     prepare_trust_identity(&mut app);
     let path = app.workspace.state_path().to_path_buf();
@@ -127,7 +127,7 @@ fn shutdown_reports_failed_workspace_trust_writes() {
 
 
 #[test]
-fn shutdown_reports_workspace_trust_writes_that_exceed_its_deadline() {
+pub(in crate::app) fn shutdown_reports_workspace_trust_writes_that_exceed_its_deadline() {
     let (_app_dirs, mut app) = app();
     prepare_trust_identity(&mut app);
     let path = app.workspace.state_path().to_path_buf();
@@ -153,7 +153,7 @@ fn shutdown_reports_workspace_trust_writes_that_exceed_its_deadline() {
 
 
 #[test]
-fn unseen_workspace_prompts_once_after_identity_and_database_are_ready() {
+pub(in crate::app) fn unseen_workspace_prompts_once_after_identity_and_database_are_ready() {
     let (_app_dirs, mut app) = app();
     prepare_trust_identity(&mut app);
     let identity = app.workspace.roots()[0].identity.clone();
@@ -179,7 +179,7 @@ fn unseen_workspace_prompts_once_after_identity_and_database_are_ready() {
 
 
 #[test]
-fn workspace_history_records_visits_without_trust_prompts() {
+pub(in crate::app) fn workspace_history_records_visits_without_trust_prompts() {
     let (_app_dirs, mut app) = app();
     prepare_trust_identity(&mut app);
     let first = app.state.workspace_root.clone();
@@ -225,7 +225,7 @@ fn workspace_history_records_visits_without_trust_prompts() {
 
 
 #[test]
-fn automatic_workspace_trust_prompt_never_steals_an_active_prompt_or_safe_mode() {
+pub(in crate::app) fn automatic_workspace_trust_prompt_never_steals_an_active_prompt_or_safe_mode() {
     let (_app_dirs, mut app) = app();
     prepare_trust_identity(&mut app);
     app.open_prompt(crate::ui::PromptKind::Command, String::new());
@@ -242,7 +242,7 @@ fn automatic_workspace_trust_prompt_never_steals_an_active_prompt_or_safe_mode()
 
 
 #[test]
-fn workspace_trust_never_activates_before_identity_and_database_are_ready() {
+pub(in crate::app) fn workspace_trust_never_activates_before_identity_and_database_are_ready() {
     let (_app_dirs, mut app) = app();
     app.confirm_workspace_trust();
     assert_eq!(
@@ -264,7 +264,7 @@ pub(in crate::app) fn wait_root_operation(app: &mut App) {
 
 
 #[test]
-fn async_root_add_activation_and_dirty_removal_preflight_are_real() {
+pub(in crate::app) fn async_root_add_activation_and_dirty_removal_preflight_are_real() {
     let (_app_dirs, mut app) = app();
     let first = app.workspace.active_root().expect("first root");
     let second_directory = tempdir().expect("second root");
@@ -308,7 +308,7 @@ fn async_root_add_activation_and_dirty_removal_preflight_are_real() {
 
 
 #[test]
-fn workspace_switch_rechecks_dirty_buffers_before_publishing() {
+pub(in crate::app) fn workspace_switch_rechecks_dirty_buffers_before_publishing() {
     let (_app_dirs, mut app) = app();
     prepare_trust_identity(&mut app);
     let original = app.state.workspace_root.clone();
@@ -344,7 +344,7 @@ fn workspace_switch_rechecks_dirty_buffers_before_publishing() {
 
 
 #[test]
-fn stale_async_root_add_and_pending_service_removal_are_rejected() {
+pub(in crate::app) fn stale_async_root_add_and_pending_service_removal_are_rejected() {
     let (_app_dirs, mut app) = app();
     let second = tempdir().expect("second");
     let third = tempdir().expect("third");
@@ -381,7 +381,7 @@ pub(in crate::app) fn wait_workspace_search(app: &mut App) {
 
 
 #[test]
-fn workspace_file_picker_publishes_the_full_discovery_byte_budget() {
+pub(in crate::app) fn workspace_file_picker_publishes_the_full_discovery_byte_budget() {
     let (_app_dirs, mut app) = app();
     let files = tempfile::tempdir_in(&app.state.workspace_root).unwrap();
     let mut directory = files.path().to_path_buf();
@@ -432,7 +432,7 @@ fn workspace_file_picker_publishes_the_full_discovery_byte_budget() {
 
 
 #[test]
-fn workspace_file_command_uses_bounded_picker_and_opens_selection() {
+pub(in crate::app) fn workspace_file_command_uses_bounded_picker_and_opens_selection() {
     let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("find-me.txt");
     let mut contents = String::from("found\n");
@@ -480,7 +480,7 @@ fn workspace_file_command_uses_bounded_picker_and_opens_selection() {
 
 
 #[test]
-fn workspace_search_uses_generic_picker_and_opens_unopened_match() {
+pub(in crate::app) fn workspace_search_uses_generic_picker_and_opens_unopened_match() {
     let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("match.txt");
     let text = (0..1_200)
@@ -543,7 +543,7 @@ fn workspace_search_uses_generic_picker_and_opens_unopened_match() {
 
 
 #[test]
-fn workspace_search_accepts_normalized_open_buffers() {
+pub(in crate::app) fn workspace_search_accepts_normalized_open_buffers() {
     for open in [false, true] {
         let (_app_dirs, mut app) = app();
         let path = app.state.workspace_root.join("crlf.txt");
@@ -569,7 +569,7 @@ fn workspace_search_accepts_normalized_open_buffers() {
 
 
 #[test]
-fn workspace_search_rejects_stale_open_and_closed_file_offsets() {
+pub(in crate::app) fn workspace_search_rejects_stale_open_and_closed_file_offsets() {
     for open in [false, true] {
         let (_app_dirs, mut app) = app();
         let path = app.state.workspace_root.join("match.txt");
@@ -602,7 +602,7 @@ fn workspace_search_rejects_stale_open_and_closed_file_offsets() {
 
 
 #[test]
-fn workspace_search_streams_exact_batches_and_root_changes_cancel() {
+pub(in crate::app) fn workspace_search_streams_exact_batches_and_root_changes_cancel() {
     let (_app_dirs, mut app) = app();
     fs::write(app.state.workspace_root.join("one.txt"), "needle\n").unwrap();
     fs::write(app.state.workspace_root.join("two.txt"), "needle\n").unwrap();
@@ -634,7 +634,7 @@ fn workspace_search_streams_exact_batches_and_root_changes_cancel() {
 
 
 #[test]
-fn workspace_replacement_groups_many_matches_from_shared_snapshots() {
+pub(in crate::app) fn workspace_replacement_groups_many_matches_from_shared_snapshots() {
     let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("many.txt");
     let before = "needle\n".repeat(3000);
@@ -657,7 +657,7 @@ fn workspace_replacement_groups_many_matches_from_shared_snapshots() {
 
 
 #[test]
-fn workspace_replacement_rejects_open_buffer_that_differs_from_search_snapshot() {
+pub(in crate::app) fn workspace_replacement_rejects_open_buffer_that_differs_from_search_snapshot() {
     let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("stale.txt");
     fs::write(&path, "needle\n").expect("disk");
@@ -681,7 +681,7 @@ fn workspace_replacement_rejects_open_buffer_that_differs_from_search_snapshot()
 
 
 #[test]
-fn truncated_workspace_search_does_not_offer_partial_replacement() {
+pub(in crate::app) fn truncated_workspace_search_does_not_offer_partial_replacement() {
     let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("many.txt");
     fs::write(&path, "needle\n").unwrap();
@@ -722,7 +722,7 @@ fn truncated_workspace_search_does_not_offer_partial_replacement() {
 
 
 #[test]
-fn workspace_search_rejects_changed_disk_and_open_buffer_snapshots() {
+pub(in crate::app) fn workspace_search_rejects_changed_disk_and_open_buffer_snapshots() {
     for open in [false, true] {
         let (_app_dirs, mut app) = app();
         let path = app.state.workspace_root.join("match.txt");
@@ -753,7 +753,7 @@ fn workspace_search_rejects_changed_disk_and_open_buffer_snapshots() {
 
 
 #[test]
-fn workspace_search_revalidates_buffers_opened_while_navigation_is_pending() {
+pub(in crate::app) fn workspace_search_revalidates_buffers_opened_while_navigation_is_pending() {
     for changed in [false, true] {
         let (_app_dirs, mut app) = app();
         let path = app.state.workspace_root.join("match.txt");
@@ -790,7 +790,7 @@ fn workspace_search_revalidates_buffers_opened_while_navigation_is_pending() {
 
 
 #[test]
-fn workspace_search_accepts_unchanged_encoded_snapshots() {
+pub(in crate::app) fn workspace_search_accepts_unchanged_encoded_snapshots() {
     for open in [false, true] {
         let (_app_dirs, mut app) = app();
         let path = app.state.workspace_root.join("match.txt");
@@ -816,7 +816,7 @@ fn workspace_search_accepts_unchanged_encoded_snapshots() {
 
 
 #[test]
-fn workspace_search_presentation_limit_keeps_matches_and_blocks_replacement() {
+pub(in crate::app) fn workspace_search_presentation_limit_keeps_matches_and_blocks_replacement() {
     for replacement in [None, Some("changed".into())] {
         let replacing = replacement.is_some();
         let (_app_dirs, mut app) = app();

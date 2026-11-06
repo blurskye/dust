@@ -2,11 +2,11 @@
 use crate::app::workspace::edits::OriginKey;
 use crate::app::workspace::edits::Source;
 use crate::app::workspace::edits::WorkspaceEditSession;
-use crate::editor::transaction::WorkspaceEditSources;
+use crate::editor::WorkspaceEditSources;
 use crate::files::CheckedResourceIntent;
 use crate::files::RequestId;
 use crate::files::VfsResult;
-use crate::editor::transaction::DocumentSnapshot as FileSnapshot;
+use crate::editor::DocumentSnapshot as FileSnapshot;
 use crate::workspace::ProposalId;
 use std::collections::HashMap;
 use std::path::Path;
@@ -35,9 +35,9 @@ impl InputFile {
     }
 }
 pub(in crate::app) struct PreparationTicket {
-    pub(super) owner: Arc<()>,
-    pub(super) key: Arc<()>,
-    pub(super) id: ProposalId,
+    pub(in crate::app) owner: Arc<()>,
+    pub(in crate::app) key: Arc<()>,
+    pub(in crate::app) id: ProposalId,
 }
 #[cfg(test)]
 impl PreparationTicket {
@@ -45,24 +45,24 @@ impl PreparationTicket {
         self.id
     }
 }
-pub(super) enum Slot {
+pub(in crate::app) enum Slot {
     Waiting(InputFile),
     Pending(RequestId),
     Complete,
 }
-pub(super) struct Preparation {
+pub(in crate::app) struct Preparation {
     pub source: Source,
     pub label: String,
     pub origin: Option<OriginKey>,
     pub all_files: bool,
-    pub(super) slots: Vec<Slot>,
-    pub(super) requests: HashMap<RequestId, (usize, InputFile, Arc<()>)>,
-    pub(super) snapshots: Vec<FileSnapshot>,
-    pub(super) paths: HashMap<PathBuf, PathBuf>,
-    pub(super) creates: Vec<PathBuf>,
-    pub(super) resources: Vec<CheckedResourceIntent>,
-    pub(super) maximum: usize,
-    pub(super) roots: Vec<PathBuf>,
+    pub(in crate::app) slots: Vec<Slot>,
+    pub(in crate::app) requests: HashMap<RequestId, (usize, InputFile, Arc<()>)>,
+    pub(in crate::app) snapshots: Vec<FileSnapshot>,
+    pub(in crate::app) paths: HashMap<PathBuf, PathBuf>,
+    pub(in crate::app) creates: Vec<PathBuf>,
+    pub(in crate::app) resources: Vec<CheckedResourceIntent>,
+    pub(in crate::app) maximum: usize,
+    pub(in crate::app) roots: Vec<PathBuf>,
 }
 pub(in crate::app) struct PreparedFiles<'a> {
     snapshots: &'a [FileSnapshot],
@@ -216,7 +216,7 @@ impl WorkspaceEditSession {
     pub(in crate::app) fn open_snapshot(
         &mut self,
         index: usize,
-        snapshot: crate::editor::transaction::WorkspaceSnapshot,
+        snapshot: crate::editor::WorkspaceSnapshot,
     ) -> Result<(), String> {
         let p = self
             .preparing
