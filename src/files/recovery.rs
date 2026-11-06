@@ -1,3 +1,5 @@
+//! Recovery journals and bounded recovery reads.
+
 use std::ffi::OsString;
 use std::fs;
 use std::io;

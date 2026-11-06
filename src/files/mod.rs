@@ -1,3 +1,5 @@
+//! Filesystem reads, writes and directory traversal.
+
 #![forbid(unsafe_code)]
 
 mod icons;
@@ -41,13 +43,13 @@ mod project_root;
 pub use project_root::PROJECT_ROOT_ANCESTOR_CEILING;
 pub use project_root::PROJECT_ROOT_MARKER_CEILING;
 pub use project_root::ProjectRootResolution;
-pub use project_root::ProjectRootService;
+pub use project_root::ProjectRootWorker;
 pub use project_root::ProjectRootStrategy;
 mod directory;
 pub use directory::DirectoryEntry;
 pub use directory::DirectoryEntryKind;
 pub use directory::DirectoryListing;
-pub use directory::DirectoryService;
+pub use directory::DirectoryWorker;
 pub use directory::linked_worktree_repository;
 mod watch;
 pub use watch::ExplorerDirectoryFingerprint;
@@ -58,7 +60,7 @@ pub use watch::ExplorerWatchError;
 pub use watch::ExplorerWatchEvent;
 pub use watch::ExplorerWatchGeneration;
 pub use watch::ExplorerWatchPolicy;
-pub use watch::ExplorerWatchService;
+pub use watch::ExplorerWatchWorker;
 pub use watch::diff_explorer_fingerprints;
 pub use watch::explorer_directory_fingerprint;
 mod workspace_search;
@@ -66,7 +68,7 @@ pub use workspace_search::WorkspaceSearchError;
 pub use workspace_search::WorkspaceSearchEvent;
 pub use workspace_search::WorkspaceSearchMatch;
 pub use workspace_search::WorkspaceSearchPolicy;
-pub use workspace_search::WorkspaceSearchService;
+pub use workspace_search::WorkspaceSearchWorker;
 pub use workspace_search::WorkspaceSearchSummary;
 mod error;
 pub use error::VfsError;
@@ -75,7 +77,7 @@ pub use workspace_files::WorkspaceFileEntry;
 pub use workspace_files::WorkspaceFileError;
 pub use workspace_files::WorkspaceFileEvent;
 pub use workspace_files::WorkspaceFilePolicy;
-pub use workspace_files::WorkspaceFileService;
+pub use workspace_files::WorkspaceFileWorker;
 pub use workspace_files::WorkspaceFileSummary;
 
 #[cfg(test)]

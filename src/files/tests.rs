@@ -1,3 +1,5 @@
+//! Tests for filesystem reads, writes and directory traversal.
+
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
@@ -10,13 +12,13 @@ use tempfile::tempdir;
 use crate::files::directory::list_scoped_directory;
 
 use crate::files::DirectoryEntryKind;
-use crate::files::DirectoryService;
+use crate::files::DirectoryWorker;
 use crate::files::ExplorerMutation;
 use crate::files::ExplorerWatchEntryKind;
 use crate::files::ExplorerWatchError;
 use crate::files::ExplorerWatchPolicy;
-use crate::files::ExplorerWatchService;
-use crate::files::ProjectRootService;
+use crate::files::ExplorerWatchWorker;
+use crate::files::ProjectRootWorker;
 use crate::files::ProjectRootStrategy;
 use crate::files::RecoveryRecord;
 use crate::files::VfsError;
@@ -25,7 +27,7 @@ use crate::files::VfsWorker;
 use crate::files::WorkspaceSearchEvent;
 use crate::files::WorkspaceSearchMatch;
 use crate::files::WorkspaceSearchPolicy;
-use crate::files::WorkspaceSearchService;
+use crate::files::WorkspaceSearchWorker;
 use crate::files::WorkspaceSearchSummary;
 use crate::files::WriteExpectation;
 use crate::files::atomic_write;
@@ -65,7 +67,7 @@ fn project_root_resolution_requires_valid_tool_evidence_and_prefers_the_nested_p
     fs::write(&document, "fn main() {}\n").unwrap();
     let workspace = fs::canonicalize(workspace.path()).unwrap();
     let document = fs::canonicalize(document).unwrap();
-    let mut service = ProjectRootService::default();
+    let mut service = ProjectRootWorker::default();
     let generation = service
         .resolve(
             document.clone(),
@@ -139,7 +141,7 @@ fn a_file_not_saved_yet_still_finds_its_project_root() {
     let workspace = tempdir().unwrap();
     let workspace = fs::canonicalize(workspace.path()).unwrap();
     fs::write(workspace.join("Cargo.toml"), "[package]\nname = \"a\"\n").unwrap();
-    let mut service = ProjectRootService::default();
+    let mut service = ProjectRootWorker::default();
     service
         .resolve(
             workspace.join("src/new.rs"),
@@ -317,7 +319,7 @@ fn explorer_watch_reads_symlinked_ignore_files() {
     assert_ne!(before.ignore_rules, after.ignore_rules);
 
     // Initial reconciliation must also succeed, not just individual reads.
-    let mut watch = ExplorerWatchService::start(ExplorerWatchPolicy {
+    let mut watch = ExplorerWatchWorker::start(ExplorerWatchPolicy {
         poll_interval: Duration::from_millis(10),
         debounce: Duration::ZERO,
         ..ExplorerWatchPolicy::default()
@@ -437,7 +439,7 @@ fn disabled_explorer_watch_has_zero_worker_or_snapshot_activity() {
         maximum_path_bytes: 256,
         queue_capacity: 1,
     };
-    let mut service = ExplorerWatchService::start(policy).unwrap();
+    let mut service = ExplorerWatchWorker::start(policy).unwrap();
     assert_eq!(service.reconcile(1, Vec::new(), Vec::new()).unwrap(), None);
     assert_eq!(service.reconcile_count(), 0);
     assert!(service.poll().is_empty());
@@ -948,7 +950,7 @@ pub(super) fn search_policy(root: &Path, query: &str) -> WorkspaceSearchPolicy {
 }
 
 pub(super) fn collect_search(
-    service: &WorkspaceSearchService,
+    service: &WorkspaceSearchWorker,
 ) -> (Vec<WorkspaceSearchMatch>, WorkspaceSearchSummary) {
     let deadline = Instant::now() + Duration::from_secs(5);
     let mut matches = Vec::new();
@@ -972,7 +974,7 @@ fn collect_files(
     Vec<crate::files::WorkspaceFileEntry>,
     crate::files::WorkspaceFileSummary,
 ) {
-    let mut service = crate::files::WorkspaceFileService::default();
+    let mut service = crate::files::WorkspaceFileWorker::default();
     let generation = service.start(policy.clone()).expect("start finder");
     let deadline = Instant::now() + Duration::from_secs(5);
     let mut entries = Vec::new();
@@ -1066,7 +1068,7 @@ fn a_root_shows_its_worktrees_and_a_worktree_shows_only_itself() {
     assert!(listing.entries.iter().any(|entry| entry.name == "feat"));
 
     let searched = |root: &Path| {
-        let mut service = WorkspaceSearchService::default();
+        let mut service = WorkspaceSearchWorker::default();
         service.start(search_policy(root, "needle")).expect("start");
         let mut paths = collect_search(&service)
             .0
@@ -1081,7 +1083,7 @@ fn a_root_shows_its_worktrees_and_a_worktree_shows_only_itself() {
     assert_eq!(searched(&worktree), ["feat.txt"]);
 
     let found = |root: &Path| {
-        let mut service = crate::files::WorkspaceFileService::default();
+        let mut service = crate::files::WorkspaceFileWorker::default();
         service
             .start(crate::files::WorkspaceFilePolicy {
                 roots: vec![root.to_path_buf()],
@@ -1242,7 +1244,7 @@ fn worktree_symlinks_cannot_add_outside_files_to_finder_or_grep() {
         });
         assert!(entries.is_empty());
         assert!(!summary.truncated);
-        let mut search = WorkspaceSearchService::default();
+        let mut search = WorkspaceSearchWorker::default();
         search.start(search_policy(root.path(), "needle")).unwrap();
         assert!(collect_search(&search).0.is_empty());
     }
@@ -1273,7 +1275,7 @@ fn scoped_directory_listing_is_lazy_sorted_hidden_aware_and_bounded() {
     fs::write(root.path().join("file2"), "2").expect("file2");
     fs::write(root.path().join(".hidden"), "h").expect("hidden");
     let canonical = fs::canonicalize(root.path()).expect("canonical");
-    let mut service = DirectoryService::default();
+    let mut service = DirectoryWorker::default();
     service
         .list(
             canonical.clone(),
@@ -1382,7 +1384,7 @@ fn workspace_files_and_search_keep_distinct_non_utf8_path_identities() {
             return;
         }
     }
-    let mut service = crate::files::WorkspaceFileService::default();
+    let mut service = crate::files::WorkspaceFileWorker::default();
     service
         .start(crate::files::WorkspaceFilePolicy {
             roots: vec![root.path().to_path_buf()],
@@ -1415,7 +1417,7 @@ fn workspace_files_and_search_keep_distinct_non_utf8_path_identities() {
         entries[1].relative_path.display().to_string()
     );
     assert_ne!(entries[0].id, entries[1].id);
-    let mut search = WorkspaceSearchService::default();
+    let mut search = WorkspaceSearchWorker::default();
     search.start(search_policy(root.path(), "needle")).unwrap();
     let (matches, _) = collect_search(&search);
     assert_eq!(matches.len(), 2);
@@ -1552,7 +1554,7 @@ fn workspace_search_positions_many_matches_after_a_large_prefix() {
     policy.maximum_file_bytes = 8 * 1024 * 1024;
     policy.maximum_total_bytes = 8 * 1024 * 1024;
     policy.maximum_results = 10_001;
-    let mut service = WorkspaceSearchService::default();
+    let mut service = WorkspaceSearchWorker::default();
     service.start(policy).unwrap();
     let (matches, _) = collect_search(&service);
     assert_eq!(matches.len(), 10_001);
@@ -1573,7 +1575,7 @@ fn workspace_search_is_unicode_exact_regex_smart_case_and_whole_word() {
     let root = tempdir().expect("root");
     fs::write(root.path().join("a.txt"), "café CAFE cat scatter cat\n").expect("a");
     fs::write(root.path().join("bom.txt"), b"\xef\xbb\xbfcat\r\n").expect("bom");
-    let mut service = WorkspaceSearchService::default();
+    let mut service = WorkspaceSearchWorker::default();
     let mut policy = search_policy(root.path(), "café|cat");
     policy.regex = true;
     policy.whole_word = true;
@@ -1612,7 +1614,7 @@ fn workspace_search_obeys_hidden_ignore_globs_binary_and_limits() {
     fs::write(root.path().join("binary.rs"), b"needle\0binary").expect("binary");
     fs::write(root.path().join("invalid.rs"), b"needle\xff").expect("invalid UTF-8");
     fs::write(root.path().join("other.txt"), "needle\n").expect("other");
-    let mut service = WorkspaceSearchService::default();
+    let mut service = WorkspaceSearchWorker::default();
     let mut policy = search_policy(root.path(), "needle");
     policy.include_globs = vec!["**/*.rs".into()];
     policy.maximum_results = 1;
@@ -1648,7 +1650,7 @@ fn workspace_search_bounds_picker_preview_text() {
         format!("needle{}", "x".repeat(10_000)),
     )
     .expect("long line");
-    let mut service = WorkspaceSearchService::default();
+    let mut service = WorkspaceSearchWorker::default();
     let mut policy = search_policy(root.path(), "needle");
     policy.maximum_preview_bytes = 16;
     service.start(policy).expect("start");
@@ -1665,7 +1667,7 @@ fn workspace_search_obeys_per_file_and_aggregate_byte_ceilings() {
     let root = tempdir().expect("root");
     fs::write(root.path().join("a"), "needle plus").expect("a");
     fs::write(root.path().join("b"), "needle plus").expect("b");
-    let mut service = WorkspaceSearchService::default();
+    let mut service = WorkspaceSearchWorker::default();
     let mut policy = search_policy(root.path(), "needle");
     policy.maximum_file_bytes = 8;
     service.start(policy).expect("start");
@@ -1695,7 +1697,7 @@ fn workspace_search_does_not_follow_symlink_escapes_and_nested_roots_deduplicate
     let outside = tempdir().expect("outside");
     fs::write(outside.path().join("secret"), "needle").expect("secret");
     symlink(outside.path(), root.path().join("escape")).expect("link");
-    let mut service = WorkspaceSearchService::default();
+    let mut service = WorkspaceSearchWorker::default();
     let mut policy = search_policy(root.path(), "needle");
     policy.roots.push(nested.clone());
     service.start(policy).expect("start");
@@ -1718,7 +1720,7 @@ fn workspace_search_overlapping_roots_do_not_exhaust_the_unique_file_limit() {
     let mut policy = search_policy(&first, "needle");
     policy.roots.extend([nested, last]);
     policy.maximum_files = 3;
-    let mut service = WorkspaceSearchService::default();
+    let mut service = WorkspaceSearchWorker::default();
     service.start(policy).unwrap();
     let (matches, summary) = collect_search(&service);
     assert_eq!(matches.len(), 3);
@@ -1738,7 +1740,7 @@ fn workspace_search_rejects_worktrees_behind_an_escaping_directory_symlink() {
     fs::write(checkout.join(".git"), "gitdir: /elsewhere").unwrap();
     fs::write(checkout.join("secret"), "needle").unwrap();
     symlink(outside.path(), root.path().join(".worktree")).unwrap();
-    let mut service = WorkspaceSearchService::default();
+    let mut service = WorkspaceSearchWorker::default();
     service.start(search_policy(root.path(), "needle")).unwrap();
     let (matches, _) = collect_search(&service);
     assert_eq!(matches.len(), 1);
@@ -1751,7 +1753,7 @@ fn workspace_search_replacement_cancels_old_generation_and_caps_results() {
     for index in 0..100 {
         fs::write(root.path().join(format!("{index:03}.txt")), "needle needle").expect("file");
     }
-    let mut service = WorkspaceSearchService::default();
+    let mut service = WorkspaceSearchWorker::default();
     let first = service
         .start(search_policy(root.path(), "never"))
         .expect("first");
@@ -2080,7 +2082,7 @@ fn workspace_files_reject_worktrees_behind_a_symlinked_ancestor() {
         root.path().join(".worktree"),
     )
     .unwrap();
-    let mut service = crate::files::WorkspaceFileService::default();
+    let mut service = crate::files::WorkspaceFileWorker::default();
     service
         .start(crate::files::WorkspaceFilePolicy {
             roots: vec![root.path().to_path_buf()],
@@ -2118,7 +2120,7 @@ fn workspace_files_report_a_missing_root_instead_of_partial_success() {
     let root = tempdir().unwrap();
     fs::write(root.path().join("present.txt"), b"present").unwrap();
     let missing = root.path().join("missing-root");
-    let mut service = crate::files::WorkspaceFileService::default();
+    let mut service = crate::files::WorkspaceFileWorker::default();
     service
         .start(crate::files::WorkspaceFilePolicy {
             roots: vec![root.path().to_path_buf(), missing.clone()],
@@ -2169,7 +2171,7 @@ fn workspace_files_are_bounded_deterministic_and_ignore_symlink_escapes() {
         fs::write(outside.path().join("secret.txt"), "secret").unwrap();
         std::os::unix::fs::symlink(outside.path(), root.path().join("escape")).unwrap();
     }
-    let mut service = crate::files::WorkspaceFileService::default();
+    let mut service = crate::files::WorkspaceFileWorker::default();
     let generation = service
         .start(crate::files::WorkspaceFilePolicy {
             roots: vec![root.path().to_path_buf()],

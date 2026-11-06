@@ -1,3 +1,5 @@
+//! Bounded workspace file discovery.
+
 use std::collections::HashSet;
 use std::fs;
 use std::io;
@@ -72,12 +74,12 @@ pub enum WorkspaceFileEvent {
     },
 }
 #[derive(Default)]
-pub struct WorkspaceFileService {
+pub struct WorkspaceFileWorker {
     generation: u64,
     cancellation: Option<Arc<AtomicBool>>,
     receiver: Option<Receiver<WorkspaceFileEvent>>,
 }
-impl WorkspaceFileService {
+impl WorkspaceFileWorker {
     pub fn start(&mut self, policy: WorkspaceFilePolicy) -> Result<u64, WorkspaceFileError> {
         validate_workspace_file_policy(&policy)?;
         let generation = self
@@ -119,7 +121,7 @@ impl WorkspaceFileService {
         self.generation
     }
 }
-impl Drop for WorkspaceFileService {
+impl Drop for WorkspaceFileWorker {
     fn drop(&mut self) {
         self.cancel()
     }

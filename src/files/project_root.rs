@@ -1,3 +1,5 @@
+//! Project-root discovery from files and configured markers.
+
 use std::fs;
 use std::io;
 use std::path::Path;
@@ -55,12 +57,12 @@ pub struct ProjectRootResolution {
 }
 
 #[derive(Default)]
-pub struct ProjectRootService {
+pub struct ProjectRootWorker {
     generation: u64,
     receiver: Option<Receiver<Result<ProjectRootResolution, VfsError>>>,
 }
 
-impl ProjectRootService {
+impl ProjectRootWorker {
     pub fn resolve(
         &mut self,
         document: PathBuf,

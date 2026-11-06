@@ -1,3 +1,5 @@
+//! Workspace text search and streamed matches.
+
 use std::collections::HashSet;
 use std::fs;
 use std::io;
@@ -98,13 +100,13 @@ pub enum WorkspaceSearchEvent {
 }
 
 #[derive(Default)]
-pub struct WorkspaceSearchService {
+pub struct WorkspaceSearchWorker {
     generation: u64,
     cancellation: Option<Arc<AtomicBool>>,
     receiver: Option<Receiver<WorkspaceSearchEvent>>,
 }
 
-impl WorkspaceSearchService {
+impl WorkspaceSearchWorker {
     #[cfg(test)]
     pub(crate) fn events_for_test(events: Vec<WorkspaceSearchEvent>) -> Self {
         assert!(events.len() <= 256);
@@ -168,7 +170,7 @@ impl WorkspaceSearchService {
     }
 }
 
-impl Drop for WorkspaceSearchService {
+impl Drop for WorkspaceSearchWorker {
     fn drop(&mut self) {
         self.cancel();
     }
@@ -570,7 +572,7 @@ mod tests {
         }
         let root = tempfile::tempdir().expect("root");
         fs::write(root.path().join("matches.txt"), "needle ".repeat(100)).expect("file");
-        let mut service = WorkspaceSearchService::default();
+        let mut service = WorkspaceSearchWorker::default();
         let mut policy = search_policy(root.path(), "needle");
         policy.batch_size = 1;
         policy.event_queue_capacity = 1;

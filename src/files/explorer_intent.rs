@@ -462,7 +462,7 @@ mod tests {
                 filesystem_identity: None,
             },
         ];
-        let mut directory = crate::files::DirectoryService::default();
+        let mut directory = crate::files::DirectoryWorker::default();
         directory
             .list(
                 a.clone(),

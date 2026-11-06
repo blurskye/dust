@@ -1,3 +1,5 @@
+//! Checked background file reads, writes and resource mutations.
+
 use std::fs;
 use std::io;
 use std::io::Read;
@@ -320,11 +322,11 @@ pub struct VfsWorker {
     ids: Arc<dyn crate::clock::IdSource>,
 }
 
-pub(crate) struct VfsReadAdmission<'a> {
+pub(crate) struct VfsReadReservation<'a> {
     worker: &'a mut VfsWorker,
     id: RequestId,
 }
-impl VfsReadAdmission<'_> {
+impl VfsReadReservation<'_> {
     pub(crate) fn submit(
         self,
         path: PathBuf,
@@ -337,7 +339,7 @@ impl VfsReadAdmission<'_> {
     }
 }
 impl VfsWorker {
-    pub(crate) fn reserve_read(&mut self) -> Result<VfsReadAdmission<'_>, VfsError> {
+    pub(crate) fn reserve_read(&mut self) -> Result<VfsReadReservation<'_>, VfsError> {
         if self.stopping.load(Ordering::Acquire) || self.finished.load(Ordering::Acquire) {
             return Err(VfsError::WorkerStopped);
         }
@@ -353,7 +355,7 @@ impl VfsWorker {
             return Err(VfsError::QueueFull);
         }
         let id = self.next_request_id()?;
-        Ok(VfsReadAdmission { worker: self, id })
+        Ok(VfsReadReservation { worker: self, id })
     }
 
     #[cfg(test)]

@@ -1,3 +1,5 @@
+//! Directory listing requests and filtered entries.
+
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::mpsc;
@@ -38,12 +40,12 @@ pub struct DirectoryListing {
 type DirectoryResult = Result<(DirectoryListing, Vec<crate::files::RootIdentity>), VfsError>;
 
 #[derive(Default)]
-pub struct DirectoryService {
+pub struct DirectoryWorker {
     generation: u64,
     receiver: Option<Receiver<DirectoryResult>>,
 }
 
-impl DirectoryService {
+impl DirectoryWorker {
     pub fn list(
         &mut self,
         directory: PathBuf,

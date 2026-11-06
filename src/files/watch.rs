@@ -1,3 +1,5 @@
+//! Directory fingerprints and explorer watch changes.
+
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fs;
@@ -291,7 +293,7 @@ pub fn diff_explorer_fingerprints(
     Ok(paths.into_iter().collect())
 }
 
-pub struct ExplorerWatchService {
+pub struct ExplorerWatchWorker {
     policy: ExplorerWatchPolicy,
     sender: Option<SyncSender<ExplorerWatchCommand>>,
     receiver: Option<Receiver<ExplorerWatchEvent>>,
@@ -300,7 +302,7 @@ pub struct ExplorerWatchService {
     active: Option<(ExplorerWatchGeneration, u64, Vec<PathBuf>)>,
     cancelled_through: Arc<AtomicU64>,
 }
-impl ExplorerWatchService {
+impl ExplorerWatchWorker {
     pub fn start(policy: ExplorerWatchPolicy) -> Result<Self, ExplorerWatchError> {
         if policy.maximum_directories == 0
             || policy.maximum_entries_per_directory == 0
@@ -556,14 +558,14 @@ mod tests {
     }
 
     fn service_channels() -> (
-        ExplorerWatchService,
+        ExplorerWatchWorker,
         Receiver<ExplorerWatchCommand>,
         SyncSender<ExplorerWatchEvent>,
     ) {
         let (sender, commands) = mpsc::sync_channel(2);
         let (events, receiver) = mpsc::sync_channel(2);
         (
-            ExplorerWatchService {
+            ExplorerWatchWorker {
                 policy: ExplorerWatchPolicy::default(),
                 sender: Some(sender),
                 receiver: Some(receiver),
@@ -760,7 +762,7 @@ mod tests {
         let root_path = fs::canonicalize(root.path()).unwrap();
         // The displayed listing was empty; the file appears before watching starts.
         fs::write(root.path().join("new"), "new").unwrap();
-        let mut service = ExplorerWatchService::start(ExplorerWatchPolicy {
+        let mut service = ExplorerWatchWorker::start(ExplorerWatchPolicy {
             poll_interval: Duration::from_millis(10),
             debounce: Duration::ZERO,
             ..ExplorerWatchPolicy::default()

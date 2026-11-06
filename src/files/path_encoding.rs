@@ -1,3 +1,5 @@
+//! Lossless path encoding for saved records.
+
 // Keep existing UTF-8 paths readable; Unix paths with other bytes use byte arrays.
 
 use serde::{Deserialize, Serialize};

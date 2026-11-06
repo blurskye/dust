@@ -1,3 +1,5 @@
+//! Canonical paths and filesystem identities for workspace roots.
+
 use crate::files::VfsError;
 use serde::{Deserialize, Serialize};
 use std::{
