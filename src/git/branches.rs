@@ -117,7 +117,7 @@ pub(super) enum GitBranchEvent {
     Complete(Result<GitBranchResult, GitBranchError>),
 }
 #[derive(Default)]
-pub struct GitBranchService {
+pub struct GitBranchWorker {
     pub(super) next: u64,
     active: Option<GitBranchGeneration>,
     cancel: Option<Arc<AtomicBool>>,
@@ -125,7 +125,7 @@ pub struct GitBranchService {
     accepted: Option<GitBranchResult>,
     mutating: bool,
 }
-impl GitBranchService {
+impl GitBranchWorker {
     pub fn start(
         &mut self,
         request: GitBranchRequest,
@@ -196,7 +196,7 @@ impl GitBranchService {
         }
     }
 }
-impl Drop for GitBranchService {
+impl Drop for GitBranchWorker {
     fn drop(&mut self) {
         self.cancel();
     }

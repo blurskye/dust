@@ -1,3 +1,5 @@
+//! Diff hunks, signs and background hunk reads.
+
 use std::hash::Hash;
 use std::hash::Hasher;
 use std::path::PathBuf;
@@ -351,7 +353,7 @@ pub(super) enum GitHunkEvent {
     Complete(Result<GitHunkSnapshot, GitHunkError>),
 }
 #[derive(Default)]
-pub struct GitHunkService {
+pub struct GitHunkWorker {
     next: u64,
     active: Option<GitHunkGeneration>,
     cancel: Option<Arc<AtomicBool>>,
@@ -359,7 +361,7 @@ pub struct GitHunkService {
     accepted: Option<GitHunkSnapshot>,
     revision: u64,
 }
-impl GitHunkService {
+impl GitHunkWorker {
     pub fn start(&mut self, policy: GitHunkPolicy) -> Result<GitHunkGeneration, GitHunkError> {
         self.start_owned(policy, None)
     }
@@ -458,7 +460,7 @@ impl GitHunkService {
         self.next
     }
 }
-impl Drop for GitHunkService {
+impl Drop for GitHunkWorker {
     fn drop(&mut self) {
         self.cancel()
     }

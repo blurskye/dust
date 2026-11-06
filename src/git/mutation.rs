@@ -1,3 +1,5 @@
+//! Checked staging, reset and repository change plans.
+
 use std::hash::Hash;
 use std::hash::Hasher;
 use std::path::Path;
@@ -255,14 +257,14 @@ pub(super) enum GitMutationEvent {
     Complete(Result<GitMutationResult, GitMutationError>),
 }
 #[derive(Default)]
-pub struct GitMutationService {
+pub struct GitMutationWorker {
     pub(super) next: u64,
     active: Option<GitMutationGeneration>,
     cancel: Option<Arc<AtomicBool>>,
     receiver: Option<Receiver<GitMutationEvent>>,
     accepted: Option<GitMutationResult>,
 }
-impl GitMutationService {
+impl GitMutationWorker {
     pub fn start(
         &mut self,
         request: GitMutationRequest,
@@ -346,7 +348,7 @@ impl GitMutationService {
         }
     }
 }
-impl Drop for GitMutationService {
+impl Drop for GitMutationWorker {
     fn drop(&mut self) {
         self.cancel()
     }
@@ -1353,7 +1355,7 @@ mod tests {
     fn cancellation_suppresses_a_completion_delivered_after_cancel() {
         let (tx, rx) = mpsc::sync_channel(1);
         let cancellation = Arc::new(AtomicBool::new(false));
-        let mut service = GitMutationService {
+        let mut service = GitMutationWorker {
             next: 1,
             active: Some(GitMutationGeneration(1)),
             cancel: Some(Arc::clone(&cancellation)),

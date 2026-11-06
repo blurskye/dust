@@ -1,3 +1,5 @@
+//! Tests for repository status, hunks and mutations.
+
 use std::hash::Hash;
 use std::hash::Hasher;
 use std::path::Path;
@@ -61,7 +63,7 @@ fn mutation_service_rejects_stale_worktree_wrong_hunk_and_suppresses_cancelled_l
 
     let mut wrong = base.clone();
     wrong.selected.header.push_str(" stale");
-    let mut service = GitMutationService::default();
+    let mut service = GitMutationWorker::default();
     service.start(GitMutationRequest::StageHunk(wrong)).unwrap();
     assert_eq!(
         wait_mutation_error(&mut service),
@@ -99,7 +101,7 @@ fn status_is_bounded_sorted_and_idle() {
     commit(&repo, "tracked.txt", "one");
     std::fs::write(dir.path().join("tracked.txt"), "two").unwrap();
     std::fs::write(dir.path().join("new.txt"), "new").unwrap();
-    let mut service = GitStatusService::default();
+    let mut service = GitStatusWorker::default();
     service
         .start(GitStatusPolicy {
             root: dir.path().into(),
@@ -385,7 +387,7 @@ fn nested_root_is_scoped_and_ceilings_truncate() {
     std::fs::write(dir.path().join("sibling.txt"), "outside").unwrap();
     std::fs::write(dir.path().join("nested/tracked.txt"), "two").unwrap();
     std::fs::write(dir.path().join("nested/new.txt"), "new").unwrap();
-    let mut service = GitStatusService::default();
+    let mut service = GitStatusWorker::default();
     service
         .start(GitStatusPolicy {
             root: dir.path().join("nested"),
@@ -431,7 +433,7 @@ fn nested_root_is_scoped_and_ceilings_truncate() {
         vec![Path::new("new.txt"), Path::new("tracked.txt")]
     );
     assert_eq!(
-        GitStatusService::default()
+        GitStatusWorker::default()
             .start(GitStatusPolicy {
                 root: dir.path().into(),
                 root_revision: 1,
@@ -466,7 +468,7 @@ fn unstaged_unicode_hunks_are_bounded_and_revision_owned() {
         maximum_bytes: 4096,
         deadline: Duration::from_secs(2),
     };
-    let mut service = GitHunkService::default();
+    let mut service = GitHunkWorker::default();
     let generation = service.start(policy.clone()).unwrap();
     let deadline = Instant::now() + Duration::from_secs(3);
     let snapshot = loop {
@@ -595,7 +597,7 @@ fn buffer_hunks_compare_exact_unsaved_revision_to_index_without_worktree_mutatio
         deadline: Duration::from_secs(2),
     };
     assert!(read_hunks(&policy).unwrap().hunks.is_empty());
-    let mut service = GitHunkService::default();
+    let mut service = GitHunkWorker::default();
     service
         .start_buffer(
             policy.clone(),
@@ -757,7 +759,7 @@ fn mutation_service_stages_exact_hunk_and_rejects_stale_index() {
         maximum_patch_bytes: 64 * 1024,
         deadline: Duration::from_secs(2),
     };
-    let mut service = GitMutationService::default();
+    let mut service = GitMutationWorker::default();
     let generation = service
         .start(GitMutationRequest::StageHunk(request.clone()))
         .unwrap();
@@ -791,7 +793,7 @@ fn mutation_service_stages_exact_hunk_and_rejects_stale_index() {
     let mut stale = request;
     stale.expected_index = Some(index);
     let current = git_index_fingerprint(&root).unwrap();
-    let mut second = GitMutationService::default();
+    let mut second = GitMutationWorker::default();
     second.start(GitMutationRequest::StageHunk(stale)).unwrap();
     let deadline = Instant::now() + Duration::from_secs(3);
     loop {
@@ -873,7 +875,7 @@ fn libgit2_can_reset_one_exact_hunk_without_changing_index() {
         .is_empty()
     );
 }
-fn wait_mutation_error(service: &mut GitMutationService) -> GitMutationError {
+fn wait_mutation_error(service: &mut GitMutationWorker) -> GitMutationError {
     let deadline = Instant::now() + Duration::from_secs(3);
     loop {
         if let Err(error) = service.poll() {
@@ -919,7 +921,7 @@ fn mutation_service_rejects_stale_worktree_wrong_hunk_and_cancelled_requests() {
 
     let mut wrong = base.clone();
     wrong.selected.header.push_str(" stale");
-    let mut service = GitMutationService::default();
+    let mut service = GitMutationWorker::default();
     service.start(GitMutationRequest::StageHunk(wrong)).unwrap();
     assert_eq!(
         wait_mutation_error(&mut service),
@@ -976,7 +978,7 @@ fn mutation_service_rejects_symlink_root_replacement_binary_and_directory_paths(
         maximum_patch_bytes: 65536,
         deadline: Duration::from_secs(2),
     };
-    let mut service = GitMutationService::default();
+    let mut service = GitMutationWorker::default();
 
     let outside = tempdir().unwrap();
     std::fs::write(outside.path().join("outside.txt"), "changed\n").unwrap();
@@ -1265,7 +1267,7 @@ fn reset_service_restores_only_selected_hunk_and_preserves_index() {
         maximum_patch_bytes: 65536,
         deadline: Duration::from_secs(2),
     };
-    let mut service = GitMutationService::default();
+    let mut service = GitMutationWorker::default();
     service
         .start(GitMutationRequest::ResetUnstagedHunk(request))
         .unwrap();
@@ -1335,7 +1337,7 @@ fn plan_template(policy: GitHunkPolicy, kind: GitMutationKind) -> GitChangePlanR
 }
 
 fn run_plan(plan: GitChangePlanRequest) -> Result<GitMutationResult, GitMutationError> {
-    let mut service = GitMutationService::default();
+    let mut service = GitMutationWorker::default();
     service.start(GitMutationRequest::Plan(plan)).unwrap();
     let deadline = Instant::now() + Duration::from_secs(3);
     loop {
@@ -1359,7 +1361,7 @@ fn index_text(root: &Path, path: &str) -> String {
     String::from_utf8(blob.content().to_vec()).unwrap()
 }
 
-fn wait_status(service: &mut GitStatusService) -> GitStatusSnapshot {
+fn wait_status(service: &mut GitStatusWorker) -> GitStatusSnapshot {
     let deadline = Instant::now() + Duration::from_secs(3);
     loop {
         if let Some(snapshot) = service.poll().unwrap() {
@@ -1382,7 +1384,7 @@ fn change_sources_distinguish_staged_unstaged_and_unsaved() {
     index.add_path(Path::new("staged.txt")).unwrap();
     index.write().unwrap();
     std::fs::write(dir.path().join("unstaged.txt"), "two\n").unwrap();
-    let mut service = GitStatusService::default();
+    let mut service = GitStatusWorker::default();
     service
         .start_with_unsaved(
             GitStatusPolicy {
@@ -1472,7 +1474,7 @@ fn hunk_snapshot_source_reports_staged_unstaged_and_unsaved() {
         read_hunks(&staged).unwrap().source(),
         GitChangeSource::Staged
     );
-    let mut service = GitHunkService::default();
+    let mut service = GitHunkWorker::default();
     service
         .start_buffer(
             plan_policy(&root, "src.txt", GitDiffLayer::Unstaged),
@@ -1693,7 +1695,7 @@ fn invalid_line_selections_are_rejected_without_writing_the_index() {
     // An empty selection never reaches a worker.
     let mut empty = build(Vec::new());
     empty.selected_lines.clear();
-    let mut service = GitMutationService::default();
+    let mut service = GitMutationWorker::default();
     assert_eq!(
         service.start(GitMutationRequest::Plan(empty)),
         Err(GitMutationError::Invalid)
@@ -1844,7 +1846,7 @@ fn plan_requires_the_captured_hunk_and_rejects_a_foreign_selection() {
     let mut missing = plan_template(policy, GitMutationKind::StageHunk);
     missing.expected_index = Some(index_before);
     missing.expected_worktree = snapshot.worktree_sha256;
-    let mut service = GitMutationService::default();
+    let mut service = GitMutationWorker::default();
     assert_eq!(
         service.start(GitMutationRequest::Plan(missing)),
         Err(GitMutationError::Invalid)
@@ -1872,8 +1874,8 @@ fn unstage_reports_no_change_when_the_index_already_matches_head() {
 fn run_branch(
     request: crate::git::GitBranchRequest,
 ) -> Result<crate::git::GitBranchResult, crate::git::GitBranchError> {
-    use crate::git::GitBranchService;
-    let mut service = GitBranchService::default();
+    use crate::git::GitBranchWorker;
+    let mut service = GitBranchWorker::default();
     service.start(request).unwrap();
     let deadline = Instant::now() + Duration::from_secs(6);
     loop {
@@ -2019,7 +2021,7 @@ fn worktree_list_reports_detached_heads_without_a_branch() {
 #[test]
 fn worktree_mutations_keep_their_completion_until_polled() {
     let dir = tempdir().unwrap();
-    let mut service = GitBranchService::default();
+    let mut service = GitBranchWorker::default();
     let request = branch_request(dir.path(), "remove-worktree", "missing", "");
     service.start(request.clone()).unwrap();
     service.cancel();
@@ -3357,7 +3359,7 @@ fn the_worktree_list_names_the_main_checkout_from_inside_a_linked_worktree() {
     })
     .unwrap();
     let linked = root.join(".worktree/feat");
-    let mut service = GitStatusService::default();
+    let mut service = GitStatusWorker::default();
     service
         .start(GitStatusPolicy {
             root: linked.clone(),
@@ -3989,7 +3991,7 @@ fn deleted_worktree_files_can_be_staged_and_reset_by_hunk() {
                 maximum_patch_bytes: 65536,
                 deadline: Duration::from_secs(2),
             };
-            let mut service = GitMutationService::default();
+            let mut service = GitMutationWorker::default();
             service
                 .start(GitMutationRequest::StageHunk(request))
                 .unwrap();
@@ -4033,7 +4035,7 @@ fn deleted_worktree_files_can_be_staged_and_reset_by_hunk() {
             maximum_patch_bytes: 65536,
             deadline: Duration::from_secs(2),
         };
-        let mut service = GitMutationService::default();
+        let mut service = GitMutationWorker::default();
         service
             .start(GitMutationRequest::ResetUnstagedHunk(request))
             .unwrap();
@@ -4438,7 +4440,7 @@ fn status_uses_rename_destinations_and_merges_unsaved_paths_once() {
     index.remove_path(Path::new("old.txt")).unwrap();
     index.add_path(Path::new("sub/b.txt")).unwrap();
     index.write().unwrap();
-    let mut service = GitStatusService::default();
+    let mut service = GitStatusWorker::default();
     service
         .start_with_unsaved(
             GitStatusPolicy {

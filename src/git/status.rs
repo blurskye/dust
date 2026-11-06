@@ -1,3 +1,5 @@
+//! Repository status reads and accepted snapshots.
+
 use std::collections::BTreeMap;
 use std::hash::Hash;
 use std::hash::Hasher;
@@ -299,7 +301,7 @@ pub(super) enum Event {
     Complete(Result<GitStatusSnapshot, GitStatusError>),
 }
 #[derive(Default)]
-pub struct GitStatusService {
+pub struct GitStatusWorker {
     next: u64,
     cancel: Option<Arc<AtomicBool>>,
     receiver: Option<Receiver<Event>>,
@@ -313,7 +315,7 @@ pub struct GitStatusService {
         Vec<GitUnsavedDocument>,
     )>,
 }
-impl GitStatusService {
+impl GitStatusWorker {
     pub fn start(
         &mut self,
         policy: GitStatusPolicy,
@@ -423,7 +425,7 @@ impl GitStatusService {
         self.accepted.as_ref().filter(|s| s.revision != last)
     }
 }
-impl Drop for GitStatusService {
+impl Drop for GitStatusWorker {
     fn drop(&mut self) {
         self.cancel()
     }
@@ -900,7 +902,7 @@ mod tests {
         git2::Repository::init(dir.path()).unwrap();
         std::fs::write(dir.path().join("new"), "content").unwrap();
         let (release, wait) = mpsc::channel();
-        let mut service = GitStatusService::default();
+        let mut service = GitStatusWorker::default();
         service.worker = Some(thread::spawn(move || {
             let _ = wait.recv();
         }));
