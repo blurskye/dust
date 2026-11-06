@@ -1886,7 +1886,7 @@ fn explorer_clone_rejects_foreign_exhausted_and_over_ceiling_sources_without_pub
     );
     assert_eq!(owner.cloned_views.len(), 0);
 
-    for expected in 2..=crate::MAX_WINDOWS as u64 {
+    for expected in 2..=crate::windows::MAX_WINDOWS as u64 {
         let candidate = owner.prepare_clone(PRIMARY_EXPLORER_VIEW).unwrap();
         assert_eq!(candidate.id(), ExplorerViewId(expected));
         owner.accept_clone(candidate).unwrap();
@@ -1897,7 +1897,7 @@ fn explorer_clone_rejects_foreign_exhausted_and_over_ceiling_sources_without_pub
     );
     assert_eq!(
         owner.cloned_views.len().saturating_add(1),
-        crate::MAX_WINDOWS
+        crate::windows::MAX_WINDOWS
     );
 
     let (mut exhausted, _) = fixture(root.path());

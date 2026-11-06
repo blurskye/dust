@@ -13,9 +13,9 @@ use crate::editor::text::ByteOffset;
 
 use crate::editor::text::TextBuffer;
 
-use crate::editor::state::MAXIMUM_LAYOUT_DEPTH;
+use crate::windows::MAX_SPLIT_DEPTH;
 
-use crate::editor::state::MAXIMUM_LAYOUT_PANES;
+use crate::windows::MAX_WINDOWS;
 
 use crate::editor::state::id::BufferId;
 
@@ -697,11 +697,10 @@ impl EditorState {
             .find_map(|(id, tab)| pane_ids(&tab.root).contains(&source_pane).then_some(id))
             .ok_or("source pane is absent from the editor")?;
         let tab = self.tabs.get(tab_id).ok_or("source tab is stale")?;
-        if self.panes.len() >= MAXIMUM_LAYOUT_PANES {
+        if self.panes.len() >= MAX_WINDOWS {
             return Err("layout pane ceiling reached");
         }
-        if pane_depth(&tab.root, source_pane, 1).is_some_and(|depth| depth >= MAXIMUM_LAYOUT_DEPTH)
-        {
+        if pane_depth(&tab.root, source_pane, 1).is_some_and(|depth| depth >= MAX_SPLIT_DEPTH) {
             return Err("layout depth ceiling reached");
         }
         let source_view = self
@@ -730,7 +729,7 @@ impl EditorState {
     }
 
     pub fn new_tab(&mut self) -> Result<TabId, &'static str> {
-        if self.panes.len() >= MAXIMUM_LAYOUT_PANES {
+        if self.panes.len() >= MAX_WINDOWS {
             return Err("layout pane ceiling reached");
         }
         let source = self.active_view.ok_or("no active view")?;
@@ -1119,13 +1118,13 @@ impl EditorState {
     }
 
     pub fn validate_layout(&self) -> Result<(), &'static str> {
-        if self.panes.len() > MAXIMUM_LAYOUT_PANES {
+        if self.panes.len() > MAX_WINDOWS {
             return Err("layout pane ceiling exceeded");
         }
         if self
             .tabs
             .values()
-            .any(|tab| layout_depth(&tab.root) > MAXIMUM_LAYOUT_DEPTH)
+            .any(|tab| layout_depth(&tab.root) > MAX_SPLIT_DEPTH)
         {
             return Err("layout depth ceiling exceeded");
         }

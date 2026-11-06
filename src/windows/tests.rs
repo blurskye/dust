@@ -8,8 +8,8 @@ use crate::windows::ContentId;
 use crate::windows::ContentLifecycle;
 use crate::windows::ContentTypeId;
 use crate::windows::DockEdge;
-use crate::windows::MAXIMUM_TILED_DEPTH;
-use crate::windows::MAXIMUM_TILED_WINDOWS;
+use crate::windows::MAX_SPLIT_DEPTH;
+use crate::windows::MAX_WINDOWS;
 use crate::windows::ProjectedWindow;
 use crate::windows::SpatialDirection;
 use crate::windows::TileAxis;
@@ -222,7 +222,7 @@ fn tiled_topology_rejects_stale_duplicate_orphan_and_excess_depth() {
         Err(WindowError::NonTiledWindowInLayout)
     );
     let mut too_deep = TiledLayoutNode::Window(WindowId(999));
-    for _ in 0..MAXIMUM_TILED_DEPTH {
+    for _ in 0..MAX_SPLIT_DEPTH {
         too_deep = TiledLayoutNode::Split {
             axis: TileAxis::Horizontal,
             ratio: 500,
@@ -244,7 +244,7 @@ fn tiled_topology_rejects_stale_duplicate_orphan_and_excess_depth() {
 fn window_limit_rejects_even_a_shallow_balanced_tree() {
     let (mut graph, content, first_view, tab) = graph_with_content();
     let mut windows = Vec::new();
-    for index in 0..=MAXIMUM_TILED_WINDOWS {
+    for index in 0..=MAX_WINDOWS {
         let view = if index == 0 {
             first_view
         } else {
@@ -285,7 +285,7 @@ fn window_limit_rejects_even_a_shallow_balanced_tree() {
 fn checked_topology_mutations_reject_without_partial_graph_changes() {
     let (mut graph, content, first_view, tab) = graph_with_content();
     let mut tiled = Vec::new();
-    for index in 0..MAXIMUM_TILED_WINDOWS {
+    for index in 0..MAX_WINDOWS {
         let view = if index == 0 {
             first_view
         } else {
@@ -380,7 +380,7 @@ fn depth_limit_refusals_preserve_the_entire_graph() {
         .open_window(tab, view, WindowPlacement::Tiled, true, "builtin", 1)
         .expect("first window");
     let mut root = TiledLayoutNode::Window(first);
-    for _ in 1..MAXIMUM_TILED_DEPTH {
+    for _ in 1..MAX_SPLIT_DEPTH {
         let view = graph.create_view(content, "builtin", 1).expect("view");
         let window = graph
             .open_window(tab, view, WindowPlacement::Tiled, true, "builtin", 1)

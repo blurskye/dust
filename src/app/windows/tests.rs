@@ -2349,7 +2349,9 @@ fn failed_explorer_reconstruction_does_not_publish_a_partial_graph_or_bridge() {
         editor_window: None,
         focused_plugin: None,
         explorer_visible: true,
-        explorer_views: (1..=crate::MAX_WINDOWS as u64).collect::<Vec<_>>().into(),
+        explorer_views: (1..=crate::windows::MAX_WINDOWS as u64)
+            .collect::<Vec<_>>()
+            .into(),
         focused_explorer: Some(1),
         explorer_size: 24,
         explorer_edge: crate::windows::DockEdge::Left,

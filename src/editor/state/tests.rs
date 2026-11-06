@@ -251,7 +251,7 @@ fn split_rejects_before_exceeding_the_universal_layout_depth_ceiling() {
     state
         .open_text(TextBuffer::from_text("seed"), None)
         .unwrap();
-    for _ in 1..crate::editor::state::MAXIMUM_LAYOUT_DEPTH {
+    for _ in 1..crate::windows::MAX_SPLIT_DEPTH {
         state
             .split_active(crate::editor::state::Axis::Horizontal, 500)
             .expect("split within depth ceiling");
@@ -260,10 +260,7 @@ fn split_rejects_before_exceeding_the_universal_layout_depth_ceiling() {
         state.split_active(crate::editor::state::Axis::Horizontal, 500),
         Err("layout depth ceiling reached")
     );
-    assert_eq!(
-        state.panes.len(),
-        crate::editor::state::MAXIMUM_LAYOUT_DEPTH
-    );
+    assert_eq!(state.panes.len(), crate::windows::MAX_SPLIT_DEPTH);
     state
         .validate_layout()
         .expect("bounded layout remains valid");
@@ -305,16 +302,13 @@ fn new_tabs_share_the_global_layout_pane_ceiling_without_partial_mutation() {
     state
         .open_text(TextBuffer::from_text("seed"), None)
         .unwrap();
-    for _ in 1..crate::editor::state::MAXIMUM_LAYOUT_PANES {
+    for _ in 1..crate::windows::MAX_WINDOWS {
         state.new_tab().expect("tab within pane ceiling");
     }
     let revision = state.window_revision();
     assert_eq!(state.new_tab(), Err("layout pane ceiling reached"));
     assert_eq!(state.window_revision(), revision);
-    assert_eq!(
-        state.panes.len(),
-        crate::editor::state::MAXIMUM_LAYOUT_PANES
-    );
+    assert_eq!(state.panes.len(), crate::windows::MAX_WINDOWS);
     state.validate_layout().expect("bounded tabs remain valid");
 }
 
@@ -324,7 +318,7 @@ fn clone_pane_refuses_the_global_ceiling_without_partial_mutation() {
     state
         .open_text(TextBuffer::from_text("seed"), None)
         .unwrap();
-    for _ in 1..crate::editor::state::MAXIMUM_LAYOUT_PANES {
+    for _ in 1..crate::windows::MAX_WINDOWS {
         state.new_tab().expect("tab within pane ceiling");
     }
     let tab = state.active_tab.expect("active tab");
@@ -338,10 +332,7 @@ fn clone_pane_refuses_the_global_ceiling_without_partial_mutation() {
     );
     assert_eq!(state.window_revision(), revision);
     assert_eq!(state.active_view, active);
-    assert_eq!(
-        state.panes.len(),
-        crate::editor::state::MAXIMUM_LAYOUT_PANES
-    );
+    assert_eq!(state.panes.len(), crate::windows::MAX_WINDOWS);
     assert_eq!(state.views.len(), views);
     state.validate_layout().expect("bounded clone refusal");
 }
@@ -356,7 +347,7 @@ fn opening_beside_a_kept_pane_propagates_split_failure_without_replacing_it() {
         .open_text(TextBuffer::from_text("panel"), None)
         .unwrap();
     state.kept_buffer = Some(kept);
-    for _ in 1..crate::editor::state::MAXIMUM_LAYOUT_PANES {
+    for _ in 1..crate::windows::MAX_WINDOWS {
         state.new_tab().unwrap();
     }
     let active = state.active_view;

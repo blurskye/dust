@@ -51,8 +51,6 @@ pub(crate) use state::EditorVersion;
 pub(crate) use state::EditorWindowVersion;
 pub use state::FocusDirection;
 pub use state::LayoutNode;
-pub use state::MAXIMUM_LAYOUT_DEPTH;
-pub use state::MAXIMUM_LAYOUT_PANES;
 pub use state::Pane;
 pub use state::PaneId;
 pub use state::RegisterShape;

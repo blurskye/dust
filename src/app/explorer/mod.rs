@@ -267,7 +267,7 @@ impl Explorer {
         &self,
         source: ExplorerViewId,
     ) -> Result<ExplorerCloneCandidate, &'static str> {
-        if self.cloned_views.len().saturating_add(1) >= crate::MAX_WINDOWS {
+        if self.cloned_views.len().saturating_add(1) >= crate::windows::MAX_WINDOWS {
             return Err("explorer view ceiling reached");
         }
         let id = ExplorerViewId(

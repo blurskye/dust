@@ -3,9 +3,9 @@
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 
-use crate::windows::MAXIMUM_TILED_DEPTH;
+use crate::windows::MAX_SPLIT_DEPTH;
 
-use crate::windows::MAXIMUM_TILED_WINDOWS;
+use crate::windows::MAX_WINDOWS;
 
 use crate::windows::error::WindowError;
 
@@ -53,7 +53,7 @@ pub(super) fn validate_tiled_layout(
         depth: usize,
         leaves: &mut BTreeSet<WindowId>,
     ) -> Result<(), WindowError> {
-        if depth > MAXIMUM_TILED_DEPTH {
+        if depth > MAX_SPLIT_DEPTH {
             return Err(WindowError::TiledLayoutTooDeep);
         }
         match node {
@@ -66,7 +66,7 @@ pub(super) fn validate_tiled_layout(
                 if !leaves.insert(*window) {
                     return Err(WindowError::DuplicateTiledWindow);
                 }
-                if leaves.len() > MAXIMUM_TILED_WINDOWS {
+                if leaves.len() > MAX_WINDOWS {
                     return Err(WindowError::TooManyTiledWindows);
                 }
             }
@@ -93,7 +93,7 @@ pub(super) fn validate_tiled_layout(
                 .then_some(window.id)
         })
         .collect::<BTreeSet<_>>();
-    if expected.len() > MAXIMUM_TILED_WINDOWS {
+    if expected.len() > MAX_WINDOWS {
         return Err(WindowError::TooManyTiledWindows);
     }
     let mut leaves = BTreeSet::new();
