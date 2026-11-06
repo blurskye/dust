@@ -1,40 +1,39 @@
 //! Windows behavior and application integration tests.
 
-use crate::app::tests::*;
-use crate::app::documents::tests::wait_changes_preview;
 use crate::app::App;
+use crate::app::AppEffect;
+use crate::app::debugger::tests::logging_adapter_fixture;
+use crate::app::documents::tests::wait_changes_preview;
+use crate::app::tests::*;
+use crate::app::windows::ProjectionRequest;
+use crate::app::windows::Windows;
+use crate::config::load_bundled_config;
 use crate::editor::InvocationSource;
 use crate::editor::input::KeyEvent;
-use std::fs;
-use std::thread;
-use std::time::Duration;
-use std::time::Instant;
-use crate::app::debugger::tests::logging_adapter_fixture;
-use crate::app::AppEffect;
 use crate::editor::text::ByteOffset;
 use crate::editor::text::TextBuffer;
 use crate::process::PtyId;
+use crate::ui::NativeSurfaceWindowBinding;
 use crate::ui::PtyScreen;
 use crate::ui::UiEvent;
 use crate::ui::active_pane_viewport;
 use crate::ui::render;
+use crate::windows::ContentAdapterKind;
+use crate::windows::ContentContract;
 use crate::windows::DockEdge;
+use crate::windows::WindowId;
 use crate::windows::WindowPlacement;
 use crate::windows::WindowRect;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
+use std::fs;
 use std::path::PathBuf;
-use crate::app::windows::ProjectionRequest;
-use crate::app::windows::Windows;
-use crate::config::load_bundled_config;
-use crate::ui::NativeSurfaceWindowBinding;
-use crate::windows::ContentAdapterKind;
-use crate::windows::ContentContract;
-use crate::windows::WindowId;
+use std::thread;
+use std::time::Duration;
+use std::time::Instant;
 
 #[test]
-fn the_confirmation_help_action_is_focusable_advertised_and_leaves_the_question_pending()
- {
+fn the_confirmation_help_action_is_focusable_advertised_and_leaves_the_question_pending() {
     let (_app_dirs, mut app) = app();
     app.open_confirmation(
         crate::ui::PromptKind::Command,
@@ -321,8 +320,7 @@ fn a_small_changes_pane_opens_on_the_change_and_ctrl_d_scrolls_it() {
 /// W-26: the footer labels `s` and `u` by focus, so the change surface stages the ROW UNDER
 /// THE CURSOR rather than whatever buffer happens to be active.
 #[test]
-fn staging_from_the_change_surface_acts_on_the_focused_row_not_the_active_buffer()
- {
+fn staging_from_the_change_surface_acts_on_the_focused_row_not_the_active_buffer() {
     let (_app_dirs, mut app) = app();
     let repo = git2::Repository::init(&app.state.workspace_root).unwrap();
     let sig = git2::Signature::now("Dust", "dust@example.invalid").unwrap();
@@ -812,8 +810,7 @@ fn mouse_click_focuses_the_real_target_pane_before_placing_cursor() {
 }
 
 #[test]
-fn universal_window_clone_refuses_native_noncloneable_content_without_mutation()
-{
+fn universal_window_clone_refuses_native_noncloneable_content_without_mutation() {
     let (_app_dirs, mut app) = app();
     app.state
         .open_text(TextBuffer::from_text("editor"), None)
@@ -954,8 +951,7 @@ fn ordinary_read_only_files_can_reload_without_becoming_writable() {
 }
 
 #[test]
-fn shared_dirty_buffers_do_not_block_view_only_tab_close_or_forced_buffer_close()
-{
+fn shared_dirty_buffers_do_not_block_view_only_tab_close_or_forced_buffer_close() {
     let (_app_dirs, mut app) = app();
     let (dirty, _) = app
         .state
@@ -1303,8 +1299,7 @@ fn editor_lifecycle_reconciles_into_window_graph_and_drives_content_tabs() {
 }
 
 #[test]
-fn editor_layout_commands_commit_state_bridge_and_graph_as_one_authoritative_transaction()
- {
+fn editor_layout_commands_commit_state_bridge_and_graph_as_one_authoritative_transaction() {
     let (_app_dirs, mut app) = app();
     app.state
         .open_text(TextBuffer::from_text("editor"), None)
@@ -1660,8 +1655,7 @@ fn editor_window_revision_skips_idle_rebuilds_and_tracks_projection_changes() {
 }
 
 #[test]
-fn generic_native_window_operations_are_revision_checked_atomic_and_identity_preserving()
- {
+fn generic_native_window_operations_are_revision_checked_atomic_and_identity_preserving() {
     let (_app_dirs, mut app) = app();
     app.state
         .open_text(TextBuffer::from_text("editor"), None)
@@ -1952,8 +1946,7 @@ fn generic_native_window_operations_are_revision_checked_atomic_and_identity_pre
 }
 
 #[test]
-fn configured_window_rule_candidate_is_cloned_validated_and_published_atomically()
- {
+fn configured_window_rule_candidate_is_cloned_validated_and_published_atomically() {
     let (_app_dirs, mut app) = app();
     app.state
         .open_text(TextBuffer::from_text("editor"), None)

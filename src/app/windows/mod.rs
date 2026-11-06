@@ -276,7 +276,6 @@ impl Windows {
     }
 }
 
-
 pub(in crate::app) fn rect_contains_point(rect: WindowRect, column: u16, row: u16) -> bool {
     column >= rect.x
         && column < rect.x.saturating_add(rect.width)
@@ -290,13 +289,10 @@ pub(in crate::app) use plugin::PluginWindowReceipt;
 
 pub(in crate::app) use plugin::PluginWindowTransition;
 
-
 pub(in crate::app) mod commands;
 
 #[cfg(test)]
 mod viewport_tests;
-
-
 
 use crate::app::App;
 use crate::editor::EditorTransaction;
