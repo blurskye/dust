@@ -82,7 +82,7 @@ pub(in crate::app) enum DeferredInput {
 }
 
 #[derive(Debug, Default)]
-pub(in crate::app) struct ClipboardSession {
+pub(in crate::app) struct Clipboard {
     enabled: bool,
     tool: Option<Tool>,
     /// Register generation last queued for copying or imported from a read.
@@ -111,7 +111,7 @@ impl crate::app::App {
     }
 }
 
-impl ClipboardSession {
+impl Clipboard {
     /// Turn sync on for a real terminal session. Tests never call this, so they never touch
     /// the developer's clipboard.
     pub(in crate::app) fn enable(&mut self, registers: &RegisterStore) {
@@ -366,7 +366,7 @@ fn read_command(program: &str, arguments: &[&str]) -> Option<String> {
 }
 
 #[cfg(test)]
-impl ClipboardSession {
+impl Clipboard {
     pub(in crate::app) fn fixture_read(&mut self) -> mpsc::Sender<Option<String>> {
         let (sender, receiver) = mpsc::channel();
         self.enabled = true;
@@ -380,7 +380,7 @@ impl ClipboardSession {
 mod tests {
     use crate::app::editing::clipboard::*;
 
-    impl ClipboardSession {
+    impl Clipboard {
         pub(in crate::app) fn pending_copy_fixture(generation: u64, text: &str) -> Self {
             let (_, receiver) = mpsc::channel();
             Self {
@@ -419,7 +419,7 @@ mod tests {
         let invocation =
             CommandInvocation::new("edit.put", crate::editor::InvocationSource::Test).unwrap();
         let (sender, receiver) = mpsc::channel();
-        let mut session = ClipboardSession {
+        let mut session = Clipboard {
             reading: Some(receiver),
             paste: Some((invocation.clone(), version.clone(), 0)),
             ..Default::default()
@@ -462,7 +462,7 @@ mod tests {
             CommandInvocation::new("edit.put", crate::editor::InvocationSource::Test).unwrap();
         invocation.register = Some('*');
         let (sender, receiver) = mpsc::channel();
-        let mut session = ClipboardSession {
+        let mut session = Clipboard {
             reading: Some(receiver),
             paste: None,
             ..Default::default()
@@ -482,7 +482,7 @@ mod tests {
 
     #[test]
     fn primary_reads_do_not_suppress_a_pending_clipboard_yank() {
-        let mut session = ClipboardSession {
+        let mut session = Clipboard {
             enabled: true,
             ..Default::default()
         };
@@ -509,7 +509,7 @@ mod tests {
         registers.set('"', value("old"), true, false);
         let invocation =
             CommandInvocation::new("edit.put", crate::editor::InvocationSource::Test).unwrap();
-        let (mut session, sender) = ClipboardSession::pending_read_fixture(
+        let (mut session, sender) = Clipboard::pending_read_fixture(
             invocation,
             version.clone(),
             registers.generation(),
@@ -528,7 +528,7 @@ mod tests {
         let mut registers = RegisterStore::default();
         let invocation =
             CommandInvocation::new("edit.put", crate::editor::InvocationSource::Test).unwrap();
-        let (mut session, sender) = ClipboardSession::pending_read_fixture(
+        let (mut session, sender) = Clipboard::pending_read_fixture(
             invocation,
             version.clone(),
             registers.generation(),
@@ -547,7 +547,7 @@ mod tests {
             registers.set('"', value("before"), true, false);
             let invocation =
                 CommandInvocation::new("edit.put", crate::editor::InvocationSource::Test).unwrap();
-            let (mut session, sender) = ClipboardSession::pending_read_fixture(
+            let (mut session, sender) = Clipboard::pending_read_fixture(
                 invocation,
                 version.clone(),
                 registers.generation(),
@@ -586,7 +586,7 @@ mod tests {
             let version = state.window_version();
             let mut registers = RegisterStore::default();
             let (_sender, receiver) = mpsc::channel();
-            let mut session = ClipboardSession {
+            let mut session = Clipboard {
                 enabled: true,
                 tool: Some(Tool::Xclip),
                 copying: Some((receiver, "in flight".into())),
@@ -633,7 +633,7 @@ mod tests {
         let mut invocation =
             CommandInvocation::new("edit.put", crate::editor::InvocationSource::Test).unwrap();
         invocation.register = Some('*');
-        let (mut session, sender) = ClipboardSession::pending_read_fixture(
+        let (mut session, sender) = Clipboard::pending_read_fixture(
             invocation.clone(),
             version.clone(),
             registers.generation(),
@@ -653,7 +653,7 @@ mod tests {
 
     #[test]
     fn cache_hits_populate_plus_and_empty_reads_clear_old_text() {
-        let mut session = ClipboardSession::default();
+        let mut session = Clipboard::default();
         let mut registers = RegisterStore::default();
         registers.set(
             '"',
@@ -674,7 +674,7 @@ mod tests {
 
     #[test]
     fn a_stale_selection_cache_does_not_hide_the_unnamed_register_shape() {
-        let mut session = ClipboardSession::default();
+        let mut session = Clipboard::default();
         let mut registers = RegisterStore::default();
         registers.set('+', value("old clipboard"), true, false);
         registers.set(
@@ -699,7 +699,7 @@ mod tests {
 
     #[test]
     fn identical_yanks_each_replace_the_external_clipboard() {
-        let mut session = ClipboardSession {
+        let mut session = Clipboard {
             enabled: true,
             ..Default::default()
         };
@@ -724,7 +724,7 @@ mod tests {
 
     #[test]
     fn copy_queue_keeps_the_latest_yank_and_retries_failures() {
-        let mut session = ClipboardSession {
+        let mut session = Clipboard {
             enabled: true,
             ..Default::default()
         };

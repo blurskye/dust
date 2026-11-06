@@ -1,3 +1,5 @@
+//! Command registration and execution for editing commands, transactions and replay.
+
 use crate::app::App;
 use crate::app::commands::AppEffect;
 

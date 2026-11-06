@@ -1,3 +1,5 @@
+//! Recorded editing actions and replay validation.
+
 use crate::editor::CommandInvocation;
 use crate::editor::InvocationSource;
 
