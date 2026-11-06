@@ -86,6 +86,7 @@ pub(super) struct Git {
     staged_sign_source: Option<(u64, u64, GitRepositoryId, PathBuf)>,
     staged_signs: Option<GitHunkSnapshot>,
     sign_source: Option<SignSource>,
+    sign_marks: Vec<(crate::editor::decorations::MarkId, UiGitSign)>,
     selected: Option<(GitHunkSnapshot, GitHunk, PathBuf)>,
     /// One change inside the selected hunk, when the cursor picked one out of several.
     selected_change: Vec<u32>,
@@ -415,7 +416,7 @@ impl Git {
             buffer.text.source_version(),
         ))
     }
-    /// True means the previous derived signs must be cleared.
+    /// True means the diff source changed. Anchored signs can stay while it refreshes.
     pub(in crate::app) fn reconcile_signs(
         &mut self,
         editor: &EditorState,
@@ -1593,6 +1594,62 @@ mod regression_tests {
     }
 
     #[test]
+    fn git_sign_marks_follow_edits_and_undo_while_the_diff_refreshes() {
+        let (dir, _repo, editor, git) = fixture();
+        let (_dirs, mut app) = crate::app::tests::app();
+        *app.state = editor;
+        app.git = git;
+        let revision = app.workspace.root_revision();
+        app.git
+            .refresh(&app.state, Some(dir.path()), revision, true)
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while app.git.status_pending() {
+            app.git.poll_status(revision).unwrap();
+            assert!(Instant::now() < deadline);
+            thread::yield_now();
+        }
+        loop {
+            app.process_git_sign_events();
+            if !app.ui.git_signs.is_empty() {
+                break;
+            }
+            assert!(Instant::now() < deadline);
+            thread::yield_now();
+        }
+        assert!(app.ui.git_signs.iter().any(|sign| sign.line == 1));
+        let buffer = app.state.active_buffer_id().unwrap();
+        let revision = app.state.buffers[buffer].text.revision();
+        app.state
+            .apply_transaction(
+                &crate::editor::EditorTransaction::new(crate::editor::TransactionId(1))
+                    .with_operation(crate::editor::EditorOperation::ApplyEdits {
+                        buffer,
+                        edits: crate::editor::text::TextEditSet::new(
+                            revision,
+                            vec![crate::editor::text::TextEdit::new(
+                                crate::editor::text::ByteRange::empty(
+                                    crate::editor::text::ByteOffset(0),
+                                ),
+                                "new\n",
+                            )],
+                        ),
+                    }),
+            )
+            .unwrap();
+        app.project_git_signs();
+        assert!(app.ui.git_signs.iter().any(|sign| sign.line == 2));
+        app.state
+            .apply_transaction(
+                &crate::editor::EditorTransaction::new(crate::editor::TransactionId(1))
+                    .with_operation(crate::editor::EditorOperation::Undo { buffer }),
+            )
+            .unwrap();
+        app.project_git_signs();
+        assert!(app.ui.git_signs.iter().any(|sign| sign.line == 1));
+    }
+
+    #[test]
     fn reloaded_text_invalidates_signs_even_at_the_same_revision() {
         let (_dir, _, mut editor, mut session) = fixture();
         let before = read_signs(&mut session, &editor);
@@ -2202,6 +2259,10 @@ use crate::workspace::WorkspaceTrust;
 impl App {
     pub(in crate::app) fn clear_git_status(&mut self) {
         self.git.clear();
+        self.git.sign_marks.clear();
+        for buffer in self.state.buffers.values_mut() {
+            buffer.decorations.clear("git");
+        }
         self.ui.git_signs.clear();
     }
 }
@@ -2217,25 +2278,83 @@ impl App {
         {
             self.start_git_status_refresh_silent();
         }
-        if self.git.reconcile_signs(
+        self.git.reconcile_signs(
             &self.state,
             self.workspace.root_revision(),
             self.configuration.settings().editor.git_signs.enabled,
-        ) {
-            self.ui.git_signs.clear();
-        }
+        );
+        self.project_git_signs();
     }
 }
 
 impl App {
     pub(in crate::app) fn process_git_sign_events(&mut self) {
+        self.git.reconcile_signs(
+            &self.state,
+            self.workspace.root_revision(),
+            self.configuration.settings().editor.git_signs.enabled,
+        );
         if let Some(signs) = self.git.poll_signs(
             &self.state,
             self.workspace.root_revision(),
             self.configuration.settings().editor.git_signs.enabled,
         ) {
-            self.ui.git_signs = signs;
+            self.git.sign_marks.clear();
+            for buffer in self.state.buffers.values_mut() {
+                buffer.decorations.clear("git");
+            }
+            for sign in signs {
+                let Some(buffer) = self.state.buffers.get_mut(sign.buffer) else {
+                    continue;
+                };
+                let Ok(position) = buffer.text.line_to_byte(sign.line) else {
+                    continue;
+                };
+                if let Some(mark) = buffer.decorations.insert(
+                    &buffer.text,
+                    "git",
+                    crate::editor::text::ByteRange::empty(position),
+                    crate::editor::decorations::Gravity::Right,
+                    crate::editor::decorations::Gravity::Right,
+                ) {
+                    self.git.sign_marks.push((mark, sign));
+                }
+            }
         }
+        self.project_git_signs();
+    }
+
+    fn project_git_signs(&mut self) {
+        let source = self.git.sign_source(
+            &self.state,
+            self.workspace.root_revision(),
+            self.configuration.settings().editor.git_signs.enabled,
+        );
+        let signs = self
+            .git
+            .sign_marks
+            .iter()
+            .filter_map(|(mark, sign)| {
+                let source = source.as_ref()?;
+                if (
+                    sign.root_revision,
+                    sign.status_revision,
+                    sign.repository_id,
+                    sign.buffer,
+                ) != (source.0, source.1, source.2, source.4)
+                {
+                    return None;
+                }
+                let buffer = self.state.buffers.get(sign.buffer)?;
+                let position = buffer.decorations.range(*mark)?.start;
+                Some(UiGitSign {
+                    line: buffer.text.byte_to_line(position).ok()?,
+                    buffer_revision: buffer.text.revision().0,
+                    ..*sign
+                })
+            })
+            .collect();
+        self.ui.set(signs, |ui| &mut ui.git_signs);
     }
 }
 

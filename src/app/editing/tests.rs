@@ -2977,13 +2977,20 @@ fn flash_labels_only_visible_wrapped_rows_and_horizontal_columns() {
         let starts = flash
             .targets
             .iter()
-            .map(|target| target.range.start.get())
+            .map(|(mark, _)| {
+                app.state.buffers[flash.buffer]
+                    .decorations
+                    .range(*mark)
+                    .unwrap()
+                    .start
+                    .get()
+            })
             .collect::<Vec<_>>();
         let expected = (first..end)
             .filter(|at| at % 2 == 0 && *at != first)
             .collect::<Vec<_>>();
         assert_eq!(starts, expected, "wrap={wrap}");
-        assert!(flash.targets.iter().any(|target| target.label.is_some()));
+        assert!(flash.targets.iter().any(|(_, label)| label.is_some()));
     }
 }
 
@@ -3019,7 +3026,12 @@ fn flash_follows_source_scrolling_and_does_not_label_clipped_inlay_anchors() {
         flash
             .targets
             .iter()
-            .map(|target| target.range.start.get())
+            .map(|(mark, _)| app.state.buffers[flash.buffer]
+                .decorations
+                .range(*mark)
+                .unwrap()
+                .start
+                .get())
             .collect::<Vec<_>>(),
         vec![12, 14, 16]
     );
@@ -3031,7 +3043,7 @@ fn flash_follows_source_scrolling_and_does_not_label_clipped_inlay_anchors() {
         20,
         8,
     );
-    for label in flash.targets.iter().filter_map(|target| target.label) {
+    for label in flash.targets.iter().filter_map(|(_, label)| *label) {
         assert!((0..8).any(|row| frame.grid.row_text(row).contains(label)));
     }
 }
@@ -3072,6 +3084,50 @@ fn flash_ignores_wrapped_folded_and_horizontally_clipped_text() {
 }
 
 #[test]
+fn flash_targets_follow_insertions_before_the_label_is_chosen() {
+    let (_dirs, mut app) = app();
+    let (buffer, view) = app
+        .state
+        .open_text(TextBuffer::from_text("abc abc abc"), None)
+        .unwrap();
+    app.set_dashboard_visibility(false);
+    app.reconcile_editor_windows();
+    app.begin_flash();
+    press_keys(&mut app, &["a"]);
+    let (mark, label) = app.flash.as_ref().unwrap().targets[0];
+    let before = app.state.buffers[buffer]
+        .decorations
+        .range(mark)
+        .unwrap()
+        .start;
+    let revision = app.state.buffers[buffer].text.revision();
+    app.state
+        .apply_transaction(
+            &crate::editor::EditorTransaction::new(crate::editor::TransactionId(1)).with_operation(
+                crate::editor::EditorOperation::ApplyEdits {
+                    buffer,
+                    edits: crate::editor::text::TextEditSet::new(
+                        revision,
+                        vec![crate::editor::text::TextEdit::new(
+                            crate::editor::text::ByteRange::empty(ByteOffset(0)),
+                            "new ",
+                        )],
+                    ),
+                },
+            ),
+        )
+        .unwrap();
+    app.sync_flash_ui();
+    assert_eq!(
+        app.ui.flash.as_ref().unwrap().matches[0].start,
+        ByteOffset(before.get() + 4)
+    );
+    press_keys(&mut app, &[&label.unwrap().to_string()]);
+    assert_eq!(app.state.views[view].cursor, ByteOffset(before.get() + 4));
+    assert!(app.flash.is_none());
+}
+
+#[test]
 fn flash_cancels_cached_targets_after_a_reload() {
     let (_app_dirs, mut app) = app();
     let (buffer, view) = app
@@ -3088,7 +3144,7 @@ fn flash_cancels_cached_targets_after_a_reload() {
         .unwrap()
         .targets
         .iter()
-        .find_map(|target| target.label)
+        .find_map(|(_, label)| *label)
         .unwrap();
     app.state.buffers[buffer].text = TextBuffer::from_text("é");
     app.state.views[view].cursor = ByteOffset(0);

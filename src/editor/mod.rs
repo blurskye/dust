@@ -3,6 +3,7 @@
 #![forbid(unsafe_code)]
 
 mod command;
+pub(crate) mod decorations;
 pub mod input;
 mod state;
 pub mod text;
@@ -66,6 +67,7 @@ pub use state::TabId;
 pub use state::TransactionId;
 pub use state::View;
 pub use state::ViewId;
+pub use state::{BufferChange, EditorEvent};
 pub(crate) use transaction::EditorDraft;
 pub use transaction::EditorOperation;
 pub use transaction::EditorTransaction;

@@ -141,6 +141,11 @@ pub(super) struct Debugger {
     launch: Option<launch::Launch>,
     console: VecDeque<crate::debugger::DapConsoleEntry>,
     breakpoints: BTreeMap<PathBuf, Vec<DapSourceBreakpoint>>,
+    sign_marks: Vec<(
+        crate::ui::DebugSign,
+        crate::editor::BufferId,
+        crate::editor::decorations::MarkId,
+    )>,
     /// Settings changed while persistence is loading must win over the saved values.
     changed_breakpoints: Option<std::collections::BTreeSet<(PathBuf, u64)>>,
     changed_watches: Option<std::collections::BTreeSet<String>>,
@@ -225,6 +230,7 @@ impl Debugger {
             launch: None,
             console: VecDeque::new(),
             breakpoints: BTreeMap::new(),
+            sign_marks: Vec::new(),
             changed_breakpoints: Default::default(),
             changed_watches: Default::default(),
             breakpoint_states: BTreeMap::new(),
@@ -2587,8 +2593,64 @@ impl App {
                 },
             );
         }
+        self.debugger_session
+            .sign_marks
+            .retain(|(source, buffer, mark)| {
+                if signs.iter().any(|sign| same_debug_position(sign, source))
+                    && self.state.buffers.get(*buffer).is_some_and(|buffer| {
+                        buffer.path.as_ref() == Some(&source.path)
+                            && buffer.decorations.range(*mark).is_some()
+                    })
+                {
+                    return true;
+                }
+                if let Some(buffer) = self.state.buffers.get_mut(*buffer) {
+                    buffer.decorations.remove(*mark);
+                }
+                false
+            });
+        for sign in &mut signs {
+            let existing = self
+                .debugger_session
+                .sign_marks
+                .iter()
+                .find(|(source, _, _)| same_debug_position(source, sign))
+                .map(|(_, buffer, mark)| (*buffer, *mark));
+            let anchored = existing.or_else(|| {
+                let (id, buffer) = self
+                    .state
+                    .buffers
+                    .iter_mut()
+                    .find(|(_, buffer)| buffer.path.as_ref() == Some(&sign.path))?;
+                let position = buffer.text.line_to_byte(sign.line).ok()?;
+                let mark = buffer.decorations.insert(
+                    &buffer.text,
+                    "debug",
+                    crate::editor::text::ByteRange::empty(position),
+                    crate::editor::decorations::Gravity::Right,
+                    crate::editor::decorations::Gravity::Right,
+                )?;
+                self.debugger_session
+                    .sign_marks
+                    .push((sign.clone(), id, mark));
+                Some((id, mark))
+            });
+            if let Some((id, mark)) = anchored {
+                let buffer = &self.state.buffers[id];
+                if let Some(range) = buffer.decorations.range(mark) {
+                    sign.line = buffer.text.byte_to_line(range.start).unwrap_or(sign.line);
+                }
+            }
+        }
         self.ui.debug_signs = signs;
     }
+}
+
+fn same_debug_position(a: &crate::ui::DebugSign, b: &crate::ui::DebugSign) -> bool {
+    a.path == b.path
+        && a.line == b.line
+        && (a.kind == crate::ui::DebugSignKind::Execution)
+            == (b.kind == crate::ui::DebugSignKind::Execution)
 }
 
 #[cfg(test)]

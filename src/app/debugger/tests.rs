@@ -280,6 +280,36 @@ fn breakpoint_gutter_signs_distinguish_disabled_breakpoints() {
         app.ui.debug_signs[0].kind,
         crate::ui::DebugSignKind::ConditionalBreakpoint
     );
+    let buffer = app.state.active_buffer_id().unwrap();
+    let revision = app.state.buffers[buffer].text.revision();
+    app.state
+        .apply_transaction(
+            &crate::editor::EditorTransaction::new(crate::editor::TransactionId(1)).with_operation(
+                crate::editor::EditorOperation::ApplyEdits {
+                    buffer,
+                    edits: crate::editor::text::TextEditSet::new(
+                        revision,
+                        vec![crate::editor::text::TextEdit::new(
+                            crate::editor::text::ByteRange::empty(crate::editor::text::ByteOffset(
+                                0,
+                            )),
+                            "new\n",
+                        )],
+                    ),
+                },
+            ),
+        )
+        .unwrap();
+    app.project_debug_panes();
+    assert_eq!(app.ui.debug_signs[0].line, 10);
+    app.state
+        .apply_transaction(
+            &crate::editor::EditorTransaction::new(crate::editor::TransactionId(1))
+                .with_operation(crate::editor::EditorOperation::Undo { buffer }),
+        )
+        .unwrap();
+    app.project_debug_panes();
+    assert_eq!(app.ui.debug_signs[0].line, 9);
 }
 
 #[cfg(unix)]

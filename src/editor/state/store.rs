@@ -1,5 +1,7 @@
 //! Editor resource storage and active views.
 
+use crate::editor::EditorEvent;
+use crate::editor::state::events::EditorEvents;
 use std::collections::HashSet;
 use std::path::PathBuf;
 
@@ -163,6 +165,7 @@ struct Zoom {
 #[cfg_attr(not(test), derive(Clone))]
 #[derive(Debug)]
 pub struct EditorState {
+    pub(crate) events: EditorEvents,
     window_identity: std::sync::Arc<()>,
     window_snapshot: std::sync::Arc<()>,
     editor_snapshot: std::sync::Arc<()>,
@@ -195,6 +198,7 @@ impl Clone for EditorState {
     fn clone(&self) -> Self {
         EDITOR_CLONES.with(|n| n.set(n.get() + 1));
         Self {
+            events: self.events.clone(),
             window_identity: self.window_identity.clone(),
             window_snapshot: self.window_snapshot.clone(),
             editor_snapshot: self.editor_snapshot.clone(),
@@ -222,6 +226,8 @@ impl EditorState {
     pub fn set_workspace_root(&mut self, root: PathBuf) {
         if self.workspace_root != root {
             self.workspace_repository = None;
+            self.events
+                .push(EditorEvent::WorkspaceChanged { root: root.clone() });
             self.workspace_root = root;
             self.mark_window_changed();
         }
@@ -230,6 +236,7 @@ impl EditorState {
     #[must_use]
     pub fn new(workspace_root: PathBuf) -> Self {
         Self {
+            events: EditorEvents::default(),
             window_identity: std::sync::Arc::new(()),
             window_snapshot: std::sync::Arc::new(()),
             editor_snapshot: std::sync::Arc::new(()),
@@ -330,6 +337,7 @@ impl EditorState {
     pub fn remove_buffer(&mut self, buffer: BufferId) -> Option<Buffer> {
         let removed = self.buffers.remove(buffer);
         if removed.is_some() {
+            self.events.push(EditorEvent::BufferClosed { buffer });
             self.mark_window_changed();
         }
         removed
@@ -348,6 +356,11 @@ impl EditorState {
         let before_path = target.path.clone();
         let before_dirty = target.dirty;
         target.mark_saved_as(revision, bytes, path);
+        self.events.push(EditorEvent::BufferSaved {
+            buffer,
+            revision,
+            path: target.path.clone(),
+        });
         if target.path != before_path || target.dirty != before_dirty {
             self.mark_window_changed();
         } else {
@@ -365,6 +378,7 @@ impl EditorState {
             return buffer;
         }
         let buffer = self.buffers.insert(self.file_buffer(text, path));
+        self.events.push(EditorEvent::BufferOpened { buffer });
         self.mark_window_changed();
         buffer
     }
@@ -422,6 +436,7 @@ impl EditorState {
             revision,
         };
         *target = replacement;
+        self.events.push(EditorEvent::BufferReloaded { buffer });
         let text = &target.text;
         let len = text.len_bytes();
         for (_, view) in self
@@ -496,6 +511,7 @@ impl EditorState {
             self.buffers.remove(buffer);
             return Err(error);
         }
+        self.events.push(EditorEvent::BufferOpened { buffer });
         Ok((buffer, view))
     }
 
@@ -529,8 +545,11 @@ impl EditorState {
             return Err("focused pane is stale");
         }
         let buffer = buffer.unwrap_or_else(|| {
-            self.buffers
-                .insert(Buffer::new(TextBuffer::from_text(""), None))
+            let buffer = self
+                .buffers
+                .insert(Buffer::new(TextBuffer::from_text(""), None));
+            self.events.push(EditorEvent::BufferOpened { buffer });
+            buffer
         });
         let view = self
             .views
@@ -1091,6 +1110,7 @@ impl EditorState {
         let read_only = target.read_only;
         let origin = target.origin.clone();
         *target = Buffer::new(text, Some(path));
+        self.events.push(EditorEvent::BufferReloaded { buffer });
         if let Some(directory) = &self.undo_directory {
             target.restore_undo_history(directory, self.undo_maximum_bytes);
         }

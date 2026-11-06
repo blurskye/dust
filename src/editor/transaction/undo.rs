@@ -44,6 +44,11 @@ struct UndoNode {
     children: Vec<usize>,
     /// The changes from the parent's text to this node's, applied one after another.
     changes: Vec<Change>,
+    #[serde(skip)]
+    marks: Option<(
+        crate::editor::decorations::MarkPositions,
+        crate::editor::decorations::MarkPositions,
+    )>,
 }
 
 /// Branch-preserving undo tree. Each node stores the changes from its parent, so memory
@@ -90,6 +95,7 @@ impl Default for UndoTree {
                 parent: None,
                 children: Vec::new(),
                 changes: Vec::new(),
+                marks: None,
             })],
             current: 0,
             merge_active: false,
@@ -116,12 +122,52 @@ impl UndoTree {
             parent: Some(self.current),
             children: Vec::new(),
             changes,
+            marks: None,
         }));
         Arc::make_mut(&mut self.nodes[self.current])
             .children
             .push(next);
         self.current = next;
         self.merge_active = merge;
+    }
+
+    pub(crate) fn record_with_marks(
+        &mut self,
+        changes: Vec<Change>,
+        merge: bool,
+        before: crate::editor::decorations::MarkPositions,
+        after: crate::editor::decorations::MarkPositions,
+    ) {
+        if !changes.iter().any(|change| {
+            change.removed != change.inserted || change.removed_endings != change.inserted_endings
+        }) {
+            return;
+        }
+        self.record(changes, merge);
+        let node = Arc::make_mut(&mut self.nodes[self.current]);
+        if let Some((_, previous_after)) = &mut node.marks {
+            *previous_after = after;
+        } else {
+            node.marks = Some((before, after));
+        }
+    }
+
+    pub(crate) fn mark_positions(
+        &self,
+        undo: bool,
+    ) -> Option<crate::editor::decorations::MarkPositions> {
+        if undo {
+            self.nodes[self.current]
+                .marks
+                .as_ref()
+                .map(|(before, _)| before.clone())
+        } else {
+            let child = *self.nodes[self.current].children.last()?;
+            self.nodes[child]
+                .marks
+                .as_ref()
+                .map(|(_, after)| after.clone())
+        }
     }
 
     pub fn boundary(&mut self) {

@@ -23,6 +23,8 @@ pub enum BufferOrigin {
 #[derive(Clone, Debug)]
 pub struct Buffer {
     pub text: TextBuffer,
+    pub(crate) decorations: crate::editor::decorations::Decorations,
+    changes: std::collections::VecDeque<std::sync::Arc<crate::editor::BufferChange>>,
     pub path: Option<PathBuf>,
     pub read_only: bool,
     pub origin: BufferOrigin,
@@ -77,6 +79,8 @@ impl Buffer {
         let persisted_bytes = text.to_bytes().into();
         Self {
             undo: UndoTree::default(),
+            decorations: crate::editor::decorations::Decorations::default(),
+            changes: std::collections::VecDeque::new(),
             saved_format: text.format().clone(),
             text,
             path,
@@ -97,6 +101,39 @@ impl Buffer {
     #[must_use]
     pub fn is_virtual_read_only(&self) -> bool {
         matches!(self.origin, BufferOrigin::VirtualReadOnly { .. })
+    }
+
+    pub(crate) fn record_change(
+        &mut self,
+        edits: crate::editor::text::TextEditSet,
+        delta: crate::editor::text::EditDelta,
+    ) -> std::sync::Arc<crate::editor::BufferChange> {
+        let change = std::sync::Arc::new(crate::editor::BufferChange {
+            before: edits.base_revision(),
+            after: self.text.revision(),
+            edits,
+            delta,
+        });
+        self.changes.push_back(change.clone());
+        if self.changes.len() > 64 {
+            self.changes.pop_front();
+        }
+        change
+    }
+
+    /// Changes are contiguous within this buffer incarnation; a gap needs a snapshot.
+    pub fn changes_since(
+        &self,
+        revision: BufferRevision,
+    ) -> Option<Vec<std::sync::Arc<crate::editor::BufferChange>>> {
+        if revision == self.text.revision() {
+            return Some(Vec::new());
+        }
+        let start = self
+            .changes
+            .iter()
+            .position(|change| change.before == revision)?;
+        Some(self.changes.iter().skip(start).cloned().collect())
     }
 
     pub fn refresh_dirty(&mut self) {

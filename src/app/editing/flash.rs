@@ -1,6 +1,7 @@
 //! Flash-style jump (`s`), as flash.nvim in LazyVim: type a few characters, every visible
 //! match gets a one-key label, and typing that label jumps there.
 
+use crate::editor::decorations::{Gravity, MarkId};
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::editor::ViewId;
@@ -20,7 +21,7 @@ pub(in crate::app) struct FlashState {
     pub(super) buffer: crate::editor::BufferId,
     pub(super) source: crate::editor::text::TextVersion,
     pub(super) query: String,
-    pub(super) targets: Vec<FlashTarget>,
+    pub(super) targets: Vec<(MarkId, Option<char>)>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -134,7 +135,7 @@ impl App {
                 .state
                 .buffers
                 .get(flash.buffer)
-                .is_some_and(|buffer| buffer.text.source_version() == flash.source)
+                .is_some_and(|buffer| buffer.text.source_version().same_incarnation(&flash.source))
         {
             self.sync_flash_ui();
             return;
@@ -143,12 +144,13 @@ impl App {
             crate::editor::input::KeyCode::Char(character)
                 if !key.modifiers.control && !key.modifiers.alt =>
             {
-                if let Some(target) = flash
+                if let Some((mark, _)) = flash
                     .targets
                     .iter()
-                    .find(|target| target.label == Some(character))
+                    .find(|(_, label)| *label == Some(character))
+                    && let Some(range) = self.state.buffers[flash.buffer].decorations.range(*mark)
                 {
-                    self.flash_jump(flash.view, target.range.start);
+                    self.flash_jump(flash.view, range.start);
                     return;
                 }
                 flash.query.push(character);
@@ -200,15 +202,29 @@ impl App {
         } else {
             Vec::new()
         };
-        flash.targets =
-            crate::app::editing::flash::flash_targets(text, &ranges, view.cursor, &flash.query);
-        match flash.targets.as_slice() {
+        let targets = flash_targets(text, &ranges, view.cursor, &flash.query);
+        match targets.as_slice() {
             [] if !flash.query.is_empty() => {
                 self.sync_flash_ui();
                 self.notify_message(format!("no match for {}", flash.query), false);
             }
             [only] => self.flash_jump(flash.view, only.range.start),
             _ => {
+                let buffer = &mut self.state.buffers[flash.buffer];
+                buffer.decorations.clear("flash");
+                flash.targets = targets
+                    .into_iter()
+                    .filter_map(|target| {
+                        let mark = buffer.decorations.insert(
+                            &buffer.text,
+                            "flash",
+                            target.range,
+                            Gravity::Right,
+                            Gravity::Left,
+                        )?;
+                        Some((mark, target.label))
+                    })
+                    .collect();
                 self.flash = Some(flash);
                 self.sync_flash_ui();
             }
@@ -247,14 +263,28 @@ impl App {
         }) {
             self.flash = None;
         }
-        self.ui.flash = self.flash.as_ref().map(|flash| crate::ui::FlashOverlay {
-            view: flash.view,
-            matches: flash.targets.iter().map(|target| target.range).collect(),
-            labels: flash
-                .targets
-                .iter()
-                .filter_map(|target| Some((target.range.start, target.label?)))
-                .collect(),
+        if self.flash.is_none() {
+            for buffer in self.state.buffers.values_mut() {
+                buffer.decorations.clear("flash");
+            }
+        }
+        self.ui.flash = self.flash.as_ref().and_then(|flash| {
+            let buffer = self.state.buffers.get(flash.buffer)?;
+            Some(crate::ui::FlashOverlay {
+                view: flash.view,
+                matches: flash
+                    .targets
+                    .iter()
+                    .filter_map(|(mark, _)| buffer.decorations.range(*mark))
+                    .collect(),
+                labels: flash
+                    .targets
+                    .iter()
+                    .filter_map(|(mark, label)| {
+                        Some((buffer.decorations.range(*mark)?.start, (*label)?))
+                    })
+                    .collect(),
+            })
         });
     }
 }
