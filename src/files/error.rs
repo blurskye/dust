@@ -5,6 +5,13 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum VfsError {
+    #[error("cannot {operation} `{}`: {source}", path.display())]
+    RootIo {
+        operation: &'static str,
+        path: PathBuf,
+        #[source]
+        source: io::Error,
+    },
     #[error("workspace root is not a directory: {0}")]
     RootNotDirectory(PathBuf),
     #[error("failed to {operation} `{}`: {source}", path.display())]

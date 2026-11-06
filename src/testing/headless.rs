@@ -94,7 +94,7 @@ mod tests {
 
     #[test]
     fn headless_commands_apply_transactions_to_the_startup_document() {
-        use crate::editor::{CommandInvocation, EditorMode, InvocationSource};
+        use crate::editor::{CommandInvocation, CommandValue, EditorMode, InvocationSource};
 
         let directory = tempdir().unwrap();
         let mut app = HeadlessApplication::bootstrap(StartupTarget::File {
@@ -109,8 +109,12 @@ mod tests {
                 .specs()
                 .any(|spec| spec.id.as_str() == "mode.insert")
         );
-        app.execute(&CommandInvocation::new("mode.insert", InvocationSource::Test).unwrap())
-            .unwrap();
+        app.execute(
+            &CommandInvocation::new("mode.insert", InvocationSource::Test)
+                .unwrap()
+                .with_argument("placement", CommandValue::String("before".into())),
+        )
+        .unwrap();
         let view = app.state.active_view.unwrap();
         assert_eq!(app.state.views[view].mode, EditorMode::Insert);
     }
