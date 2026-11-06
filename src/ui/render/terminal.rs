@@ -1,3 +1,5 @@
+//! Terminal grid, scrollback and selection drawing.
+
 use crate::ui::grid::CONTROL_CHARACTER_REPLACEMENT;
 use crate::ui::grid::ZERO_WIDTH_REPLACEMENT;
 

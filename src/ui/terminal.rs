@@ -1,3 +1,5 @@
+//! Terminal event decoding, rendering and restoration.
+
 use std::cell::Cell;
 use std::fs::File;
 use std::io;

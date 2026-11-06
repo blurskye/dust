@@ -1,3 +1,5 @@
+//! Tools tests for editor surfaces and frame composition.
+
 fn tool_menu_for_render() -> crate::ui::render::ToolMenuState {
     crate::ui::render::ToolMenuState {
         category: "lsp".into(),

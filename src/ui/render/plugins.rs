@@ -1,3 +1,5 @@
+//! Retained plugin trees and private cell surface drawing.
+
 use crate::ui::Style;
 use crate::ui::grid::Frame;
 use crate::ui::render::PluginSurfaceUiState;

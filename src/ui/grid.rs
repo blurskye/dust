@@ -1,3 +1,5 @@
+//! Terminal cells, styles and frame buffers.
+
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 

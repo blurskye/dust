@@ -1,3 +1,5 @@
+//! Composition tests for editor surfaces and frame composition.
+
 use crate::editor::EditorState;
 use crate::ui::grid::CONTROL_CHARACTER_REPLACEMENT;
 use crate::ui::render::EditorWindowBinding;

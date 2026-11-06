@@ -1,3 +1,5 @@
+//! Workspace tabs, buffer lines and status drawing.
+
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::config::AmbiguousWidth;

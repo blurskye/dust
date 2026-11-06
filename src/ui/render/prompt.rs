@@ -1,3 +1,5 @@
+//! Prompt text, confirmation buttons and completion drawing.
+
 use crate::config::BorderStyle;
 use crate::config::Config;
 use crate::ui::CellGrid;

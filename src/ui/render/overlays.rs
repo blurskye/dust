@@ -1,3 +1,5 @@
+//! Notifications, key hints and overlay drawing.
+
 use crate::config::AmbiguousWidth;
 use crate::config::Config;
 use crate::config::DashboardConfig;

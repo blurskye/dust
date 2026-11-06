@@ -1,3 +1,5 @@
+//! Terminal input, cell grids and rendering.
+
 #![forbid(unsafe_code)]
 
 mod diff;

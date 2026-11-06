@@ -1,3 +1,5 @@
+//! Tests for markdown layout and drawing.
+
 use crate::editor::EditorState;
 use crate::ui::render::editor::render_editor_view;
 use crate::ui::render::markdown::*;

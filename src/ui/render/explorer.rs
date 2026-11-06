@@ -1,3 +1,5 @@
+//! Explorer tree rows and viewport drawing.
+
 use crate::config::AmbiguousWidth;
 use crate::config::Config;
 use crate::ui::CellGrid;

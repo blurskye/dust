@@ -1,3 +1,5 @@
+//! Window tests for editor surfaces and frame composition.
+
 use crate::editor::EditorState;
 use crate::ui::render::UiState;
 use std::path::PathBuf;

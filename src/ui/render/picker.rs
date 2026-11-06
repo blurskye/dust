@@ -1,3 +1,5 @@
+//! Picker rows, selection and preview drawing.
+
 use crate::config::BorderStyle;
 use crate::config::Config;
 #[cfg(test)]

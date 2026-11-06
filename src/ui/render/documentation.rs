@@ -1,3 +1,5 @@
+//! Documentation popup drawing.
+
 use crate::config::AmbiguousWidth;
 use crate::config::BorderStyle;
 use crate::config::Config;

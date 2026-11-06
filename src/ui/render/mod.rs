@@ -1,3 +1,5 @@
+//! Editor surfaces and frame composition.
+
 pub(crate) mod terminal;
 
 use terminal::active_compositor;

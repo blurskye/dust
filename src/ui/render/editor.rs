@@ -1,3 +1,5 @@
+//! Text buffers, selections, cursors and editor gutter drawing.
+
 use crate::ui::grid::CONTROL_CHARACTER_REPLACEMENT;
 use crate::ui::grid::ZERO_WIDTH_REPLACEMENT;
 use crate::ui::render::SCRATCH_LABEL;

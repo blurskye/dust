@@ -1,3 +1,5 @@
+//! Visual buffer rows, wrapping and viewport caches.
+
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 

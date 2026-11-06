@@ -1,3 +1,5 @@
+//! Tool catalog, runtime choices and installation progress drawing.
+
 use crate::config::BorderStyle;
 use crate::config::Config;
 use crate::ui::Style;
