@@ -1,3 +1,5 @@
+//! ACP agent connections.
+
 #![forbid(unsafe_code)]
 
 //! Agent Client Protocol (ACP) client. An agent such as Claude Code (`claude-agent-acp`),
