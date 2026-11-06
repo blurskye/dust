@@ -1,5 +1,8 @@
-use serde::{Deserialize, Serialize};
-use std::{collections::BTreeMap, io::Read, path::Path};
+use serde::Deserialize;
+use serde::Serialize;
+use std::collections::BTreeMap;
+use std::io::Read;
+use std::path::Path;
 pub const COMMAND_API_VERSION: u32 = 1;
 pub const WIT_API_VERSION: &str = "0.2.0";
 pub const CONFIG_SCHEMA_VERSION: u32 = crate::config::CONFIG_SCHEMA_VERSION;
@@ -92,10 +95,10 @@ pub struct ApiCompatibility {
 }
 
 pub fn manifest() -> Result<ApiManifest, String> {
-    let mut registry = crate::editor::CommandRegistry::<crate::editor::AppEffect>::default();
+    let mut registry = crate::editor::CommandRegistry::<crate::app::AppEffect>::default();
     crate::editor::register_builtin_commands(&mut registry)
         .map_err(|error| format!("built-in command inventory failed: {error}"))?;
-    crate::editor::register_app_commands(&mut registry)
+    crate::app::register_app_commands(&mut registry)
         .map_err(|error| format!("application command inventory failed: {error}"))?;
     let commands = registry
         .specs()
@@ -222,45 +225,45 @@ pub fn manifest() -> Result<ApiManifest, String> {
 
 #[cfg(test)]
 mod tests {
-    fn compatibility(required: &super::ApiManifest) -> super::ApiCompatibility {
+    fn compatibility(required: &crate::api::ApiManifest) -> crate::api::ApiCompatibility {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("manifest.json");
         std::fs::write(&path, serde_json::to_vec(required).unwrap()).unwrap();
-        super::check_compatibility(&path, 1024 * 1024).unwrap()
+        crate::api::check_compatibility(&path, 1024 * 1024).unwrap()
     }
 
     #[test]
     fn compatibility_requires_a_regular_bounded_file() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("manifest.json");
-        let bytes = serde_json::to_vec(&super::manifest().unwrap()).unwrap();
+        let bytes = serde_json::to_vec(&crate::api::manifest().unwrap()).unwrap();
         std::fs::write(&path, &bytes).unwrap();
-        assert!(super::check_compatibility(&path, bytes.len()).is_ok());
-        assert!(super::check_compatibility(&path, bytes.len() - 1).is_err());
-        assert!(super::check_compatibility(std::path::Path::new("/dev/zero"), 1024).is_err());
+        assert!(crate::api::check_compatibility(&path, bytes.len()).is_ok());
+        assert!(crate::api::check_compatibility(&path, bytes.len() - 1).is_err());
+        assert!(crate::api::check_compatibility(std::path::Path::new("/dev/zero"), 1024).is_err());
         std::fs::remove_file(&path).unwrap();
         nix::unistd::mkfifo(&path, nix::sys::stat::Mode::S_IRUSR).unwrap();
-        assert!(super::check_compatibility(&path, 1024).is_err());
+        assert!(crate::api::check_compatibility(&path, 1024).is_err());
     }
 
     #[test]
     fn command_api_must_be_in_the_supported_range() {
-        let mut required = super::manifest().unwrap();
+        let mut required = crate::api::manifest().unwrap();
         assert!(compatibility(&required).compatible);
         required.command_api = 0;
         required.minimum_compatible_command_api = 0;
         assert!(!compatibility(&required).compatible);
-        required.command_api = super::COMMAND_API_VERSION + 1;
+        required.command_api = crate::api::COMMAND_API_VERSION + 1;
         assert!(!compatibility(&required).compatible);
     }
 
     #[test]
     fn persistence_schema_must_match_the_reader() {
-        let mut required = super::manifest().unwrap();
+        let mut required = crate::api::manifest().unwrap();
         for version in [
             0,
-            super::PERSISTENCE_SCHEMA_VERSION - 1,
-            super::PERSISTENCE_SCHEMA_VERSION + 1,
+            crate::api::PERSISTENCE_SCHEMA_VERSION - 1,
+            crate::api::PERSISTENCE_SCHEMA_VERSION + 1,
         ] {
             required.persistence_schema = version;
             assert!(!compatibility(&required).compatible);
@@ -269,14 +272,14 @@ mod tests {
 
     #[test]
     fn command_palette_is_a_supported_config_section() {
-        let mut required = super::manifest().unwrap();
+        let mut required = crate::api::manifest().unwrap();
         required.config_sections = vec!["command_palette".into()];
         assert!(compatibility(&required).compatible);
     }
 
     #[test]
     fn removed_installer_is_not_supported() {
-        let mut required = super::manifest().unwrap();
+        let mut required = crate::api::manifest().unwrap();
         assert!(!required.capabilities.contains_key("installer"));
         required
             .capabilities
@@ -286,7 +289,7 @@ mod tests {
 
     #[test]
     fn checked_in_release_contract_is_supported() {
-        let compatibility = super::check_compatibility(
+        let compatibility = crate::api::check_compatibility(
             &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("api/compat-v1.json"),
             1024 * 1024,
         )

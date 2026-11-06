@@ -15,6 +15,8 @@ pub mod config;
 pub mod debugger;
 /// Editing state, text, commands, input, transactions, startup, and live session composition.
 pub mod editor;
+/// Application composition and ordered event loop.
+pub mod app;
 /// Bounded asynchronous WebAssembly Component Model extension ownership.
 pub mod extensions;
 /// Bounded filesystem effects, checked atomic persistence, and recovery journals.

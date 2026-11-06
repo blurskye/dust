@@ -1,21 +1,55 @@
 #![forbid(unsafe_code)]
+mod headless;
 
 use crate::editor::input::ABSOLUTE_MAX_COUNT;
-use std::{collections::HashMap, path::PathBuf};
+use std::collections::HashMap;
+use std::path::PathBuf;
 
-use crate::{
-    config::{Config, load_bundled_config},
-    editor::input::{
-        GrammarInput, InputAction, InputError, KeyEvent, KeymapSequence, MappingResolution,
-        ModalResolver,
-    },
-    editor::text::TextBuffer,
-    editor::{AppEffect, ResolvedKeymaps, compile_keymaps, register_app_commands},
-    editor::{
-        CommandError, CommandInvocation, CommandRegistry, CommandValue, EditorMode, EditorState,
-        TransactionError, ViewId, register_builtin_commands,
-    },
-};
+use crate::config::Config;
+
+use crate::config::load_bundled_config;
+
+use crate::editor::input::GrammarInput;
+
+use crate::editor::input::InputAction;
+
+use crate::editor::input::InputError;
+
+use crate::editor::input::KeyEvent;
+
+use crate::editor::input::KeymapSequence;
+
+use crate::editor::input::MappingResolution;
+
+use crate::editor::input::ModalResolver;
+
+use crate::editor::text::TextBuffer;
+
+use crate::app::AppEffect;
+
+use crate::app::ResolvedKeymaps;
+
+use crate::app::compile_keymaps;
+
+use crate::app::register_app_commands;
+
+use crate::editor::CommandError;
+
+use crate::editor::CommandInvocation;
+
+use crate::editor::CommandRegistry;
+
+use crate::editor::CommandValue;
+
+use crate::editor::EditorMode;
+
+use crate::editor::EditorState;
+
+use crate::editor::TransactionError;
+
+use crate::editor::ViewId;
+
+use crate::editor::register_builtin_commands;
 
 /// Deterministic editor harness that exercises bundled configuration, the same
 /// registry, semantic modal grammar, transactions, and reducer without a terminal.
@@ -237,7 +271,7 @@ pub enum HarnessError {
 mod tests {
     use crate::editor::input::KeyEvent;
 
-    use super::HeadlessEditor;
+    use crate::testing::HeadlessEditor;
 
     #[test]
     fn modal_sequence_edits_and_undoes_through_bundled_keymaps() {
@@ -279,7 +313,7 @@ mod tests {
         mapping.mode = "insert".into();
         mapping.keys = Some("j k".into());
         loaded.keymaps.entries.push(mapping);
-        let (keymaps, diagnostic) = crate::editor::compile_keymaps(
+        let (keymaps, diagnostic) = crate::app::compile_keymaps(
             &editor.registry,
             &loaded.keymaps,
             &loaded.config.input.keymaps,
@@ -677,7 +711,9 @@ mod tests {
 
     #[test]
     fn comment_operator_toggles_lines_at_the_smallest_indent() {
-        use crate::editor::{CommandInvocation, CommandValue, InvocationSource};
+        use crate::editor::CommandInvocation;
+        use crate::editor::CommandValue;
+        use crate::editor::InvocationSource;
         let source = "fn a() {\n    x();\n\n    y();\n}\n";
         let mut editor = HeadlessEditor::with_text(source);
         let toggle = || {

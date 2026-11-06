@@ -1,20 +1,24 @@
 #![forbid(unsafe_code)]
 
-use crossterm::{
-    cursor::Show,
-    execute,
-    terminal::{LeaveAlternateScreen, disable_raw_mode},
-};
-use std::{
-    fs,
-    io::{Read, Write},
-    path::{Path, PathBuf},
-    process::ExitCode,
-};
+use crossterm::cursor::Show;
+
+use crossterm::execute;
+
+use crossterm::terminal::LeaveAlternateScreen;
+
+use crossterm::terminal::disable_raw_mode;
+use std::fs;
+use std::io::Read;
+use std::io::Write;
+use std::path::Path;
+use std::path::PathBuf;
+use std::process::ExitCode;
 
 use clap::Parser;
-use dust::config::{load_bundled_config, load_user_config};
-use dust::editor::{resolve_startup, run_interactive};
+use dust::config::load_bundled_config;
+use dust::config::load_user_config;
+use dust::app::startup::resolve_startup;
+use dust::app::run_interactive;
 
 #[derive(Debug, Parser)]
 #[command(name = "dust", version, about = "Dust modal terminal IDE")]
@@ -250,7 +254,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         load_user_config()
     };
     if cli.check_config {
-        dust::editor::validate_loaded_configuration(config.clone())?;
+        dust::app::validate_loaded_configuration(config.clone())?;
         println!("configuration valid");
         return Ok(());
     }
@@ -377,7 +381,7 @@ fn install_crash_hook() {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::main::*;
 
     #[test]
     fn crash_counts_accept_bounded_regular_reports() {
@@ -399,7 +403,8 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn crash_counts_reject_special_files_and_symlinks() {
-        use nix::{sys::stat::Mode, unistd::mkfifo};
+        use nix::sys::stat::Mode;
+        use nix::unistd::mkfifo;
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("last-crash.json");
         std::os::unix::fs::symlink("/dev/zero", &path).unwrap();
