@@ -1,3 +1,5 @@
+//! Command registration and execution for dashboard actions and visibility.
+
 use crate::app::App;
 use crate::app::commands::AppEffect;
 

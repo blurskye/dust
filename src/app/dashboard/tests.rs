@@ -1,8 +1,17 @@
+//! Dashboard behavior and application integration tests.
+
 use crate::app::agent::commands::AgentCommand;
 use crate::app::tests::*;
+use crate::app::configuration::validate_configured_commands;
+use crate::editor::text::TextBuffer;
+use crate::windows::WindowPlacement;
+use std::thread;
+use std::time::Duration;
+use std::time::Instant;
+use crate::app::AppEffect;
 
 #[test]
-pub(in crate::app) fn showing_the_last_editor_dismisses_the_dashboard() {
+fn showing_the_last_editor_dismisses_the_dashboard() {
     let (_app_dirs, mut app) = app();
     app.state
         .open_text(TextBuffer::from_text("editor"), None)
@@ -30,7 +39,7 @@ pub(in crate::app) fn showing_the_last_editor_dismisses_the_dashboard() {
 }
 
 #[test]
-pub(in crate::app) fn configured_text_and_dashboard_commands_are_schema_validated() {
+fn configured_text_and_dashboard_commands_are_schema_validated() {
     let (_app_dirs, app) = app();
     let mut loaded = crate::config::load_bundled_config();
     assert!(validate_configured_commands(&app.commands, &loaded).is_ok());
@@ -48,7 +57,7 @@ pub(in crate::app) fn configured_text_and_dashboard_commands_are_schema_validate
 
 #[cfg(unix)]
 #[test]
-pub(in crate::app) fn the_dashboard_cursor_runs_items_and_ctrl_h_l_reach_an_agent_beside_it() {
+fn the_dashboard_cursor_runs_items_and_ctrl_h_l_reach_an_agent_beside_it() {
     use crate::app::tests::driver::TestSession;
     let mut loaded = crate::config::load_bundled_config();
     let agents = &mut loaded.config.agents;
@@ -103,7 +112,7 @@ pub(in crate::app) fn the_dashboard_cursor_runs_items_and_ctrl_h_l_reach_an_agen
 
 #[cfg(unix)]
 #[test]
-pub(in crate::app) fn ctrl_h_from_an_agent_beside_the_dashboard_returns_to_it_and_it_stays_beside_the_agent()
+fn ctrl_h_from_an_agent_beside_the_dashboard_returns_to_it_and_it_stays_beside_the_agent()
  {
     use crate::app::tests::driver::TestSession;
     let mut loaded = crate::config::load_bundled_config();
@@ -166,11 +175,3 @@ pub(in crate::app) fn ctrl_h_from_an_agent_beside_the_dashboard_returns_to_it_an
         Some(agent.0)
     );
 }
-use crate::app::configuration::validate_configured_commands;
-use crate::editor::text::TextBuffer;
-use crate::windows::WindowPlacement;
-use std::thread;
-use std::time::Duration;
-use std::time::Instant;
-
-use crate::app::AppEffect;

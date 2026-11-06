@@ -1,3 +1,5 @@
+//! Dashboard actions and visibility.
+
 use crate::app::App;
 
 impl App {
@@ -11,7 +13,8 @@ impl App {
     }
 }
 
-#[cfg(test)]
-pub(in crate::app) mod surfaces_tests;
 
 mod commands;
+
+#[cfg(test)]
+pub(in crate::app) mod tests;
