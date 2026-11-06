@@ -1,3 +1,5 @@
+//! Command registration and execution for saved editor state and session restoration.
+
 use crate::app::App;
 use crate::app::commands::AppEffect;
 use crate::app::persistence::MARK_LIMIT;

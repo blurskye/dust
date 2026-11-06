@@ -1,3 +1,5 @@
+//! Interpretation of saved editor records for restoration.
+
 use crate::editor::{RestoredLayout, RestoredPane, RestoredTab};
 fn layout(record: &crate::persistence::PersistedLayout) -> RestoredLayout {
     match record {

@@ -1,9 +1,9 @@
 //! Session history and source-bound restore obligations.
-use crate::app::input::InputSession;
-use crate::app::persistence::PersistenceSession;
+use crate::app::input::InputState;
+use crate::app::persistence::Persistence;
 use crate::app::windows::NavigationStamp;
-use crate::app::windows::WindowSession;
-use crate::app::workspace::WorkspaceSession;
+use crate::app::windows::Windows;
+use crate::app::workspace::Workspace;
 use crate::app::workspace::WorkspaceVersion;
 use crate::editor::EditorDraft;
 use crate::editor::EditorState;
@@ -32,9 +32,9 @@ use std::sync::Arc;
 
 pub(in crate::app) struct RestoreContext<'a> {
     pub editor: &'a EditorState,
-    pub workspace: &'a WorkspaceSession,
-    pub input: &'a InputSession,
-    pub windows: &'a WindowSession,
+    pub workspace: &'a Workspace,
+    pub input: &'a InputState,
+    pub windows: &'a Windows,
     pub configuration: u64,
 }
 pub(super) struct RestoreSource {
@@ -146,7 +146,7 @@ pub(in crate::app) enum RestoreUpdate {
     Abandoned,
     Failed(String),
 }
-impl PersistenceSession {
+impl Persistence {
     /// Startup contributions must wait until the saved layout has been published.
     pub(in crate::app) fn restoring(&self) -> bool {
         self.restore.is_some()
@@ -470,8 +470,8 @@ impl PersistenceSession {
     pub(in crate::app) fn capture_session(
         &self,
         state: &EditorState,
-        workspace: &WorkspaceSession,
-        windows: &WindowSession,
+        workspace: &Workspace,
+        windows: &Windows,
         rules: Vec<PersistedWindowRule>,
         virtual_sources: &[(crate::editor::BufferId, String, String, String)],
     ) -> Result<Option<PersistedSession>, String> {
@@ -575,7 +575,7 @@ impl PersistenceSession {
     }
 }
 #[cfg(test)]
-impl PersistenceSession {
+impl Persistence {
     pub(in crate::app) fn fixture_restore_source(&mut self, context: RestoreContext<'_>) {
         self.load_source = Some(RestoreSource::capture(&context));
     }

@@ -1,9 +1,63 @@
-use crate::app::tests::*;
+//! Persistence behavior and application integration tests.
 
-use crate::app::debugger::surfaces_tests::logging_adapter_fixture;
+use crate::app::tests::*;
+use std::fs;
+use std::thread;
+use std::time::Duration;
+use std::time::Instant;
+use crate::app::debugger::tests::logging_adapter_fixture;
+use crate::app::AppEffect;
+use crate::editor::text::ByteOffset;
+use crate::editor::text::TextBuffer;
+use crate::app::persistence::RestoreContext;
+use crate::persistence::PersistedLocation;
+use crate::persistence::PersistedSession;
+use crate::persistence::PersistedState;
 
 #[test]
-pub(in crate::app) fn recovery_sessions_keep_distinct_journals_for_the_same_buffer() {
+fn help_restores_the_visible_palette_and_keeps_file_search_alive() {
+    let (_app_dirs, mut app) = app();
+    app.open_builtin_picker(crate::app::commands::PickerKind::Commands);
+    app.picker_insert("file");
+    let before = app.ui.picker.as_ref().unwrap().query.clone();
+    app.open_contextual_help();
+    app.close_picker();
+    assert_eq!(app.ui.picker.as_ref().unwrap().query, before);
+    let path = app.state.workspace_root.join("surviving-search.txt");
+    fs::write(&path, "found after help\n").unwrap();
+    app.start_workspace_file_picker();
+    app.open_contextual_help();
+    app.process_workspace_file_events();
+    assert!(app.search.help_is_open());
+    app.close_picker();
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while app.search.files_pending() {
+        app.process_workspace_file_events();
+        assert!(Instant::now() < deadline);
+        thread::yield_now();
+    }
+    app.picker_insert("surviving-search");
+    let picker = app.ui.picker.as_ref().expect("restored file picker");
+    assert_eq!(picker.title, "Files");
+    assert!(
+        picker
+            .rows
+            .iter()
+            .any(|row| row.label == "surviving-search.txt")
+    );
+    app.reconcile_editor_windows();
+    app.accept_picker();
+    wait_vfs(&mut app);
+    let buffer = app.state.active_buffer_id().expect("opened search result");
+    assert_eq!(app.state.buffers[buffer].path.as_ref(), Some(&path));
+    assert_eq!(
+        app.state.buffers[buffer].text.to_string(),
+        "found after help\n"
+    );
+}
+
+#[test]
+fn recovery_sessions_keep_distinct_journals_for_the_same_buffer() {
     let (_app_dirs, mut app) = app();
     app.recovery.skip_maintenance();
     app.state
@@ -16,7 +70,7 @@ pub(in crate::app) fn recovery_sessions_keep_distinct_journals_for_the_same_buff
     wait_vfs(&mut app);
     let first = app.recovery.path(buffer);
     let directory = app.recovery.directory().to_path_buf();
-    app.recovery = crate::app::documents::recovery::RecoverySession::new(directory.clone());
+    app.recovery = crate::app::documents::recovery::Recovery::new(directory.clone());
     app.recovery.skip_maintenance();
     let second = app.recovery.path(buffer);
     assert_ne!(first, second);
@@ -32,7 +86,7 @@ pub(in crate::app) fn recovery_sessions_keep_distinct_journals_for_the_same_buff
 }
 
 #[test]
-pub(in crate::app) fn session_restore_reads_more_files_than_the_document_queue_capacity() {
+fn session_restore_reads_more_files_than_the_document_queue_capacity() {
     let (_app_dirs, mut app) = app();
     app.set_dashboard_visibility(false);
     for index in 0..12 {
@@ -74,7 +128,7 @@ pub(in crate::app) fn session_restore_reads_more_files_than_the_document_queue_c
 }
 
 #[test]
-pub(in crate::app) fn session_restore_keeps_the_focused_split_when_paths_are_identical() {
+fn session_restore_keeps_the_focused_split_when_paths_are_identical() {
     let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("same.txt");
     fs::write(&path, "first line\nsecond line\nthird line\n").unwrap();
@@ -108,7 +162,7 @@ pub(in crate::app) fn session_restore_keeps_the_focused_split_when_paths_are_ide
 }
 
 #[test]
-pub(in crate::app) fn session_restore_focuses_the_saved_pane_when_panes_share_a_file() {
+fn session_restore_focuses_the_saved_pane_when_panes_share_a_file() {
     let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("shared-panes.txt");
     std::fs::write(&path, "first\nsecond\n").unwrap();
@@ -151,7 +205,7 @@ pub(in crate::app) fn session_restore_focuses_the_saved_pane_when_panes_share_a_
 }
 
 #[test]
-pub(in crate::app) fn session_restore_keeps_tab_order_after_the_first_tab_was_closed() {
+fn session_restore_keeps_tab_order_after_the_first_tab_was_closed() {
     let (_app_dirs, mut app) = app();
     let paths = ["one.txt", "two.txt", "three.txt"].map(|name| {
         let path = app.state.workspace_root.join(name);
@@ -201,7 +255,7 @@ pub(in crate::app) fn session_restore_keeps_tab_order_after_the_first_tab_was_cl
 }
 
 #[test]
-pub(in crate::app) fn malformed_content_descriptor_restore_is_atomic_before_io_or_publication() {
+fn malformed_content_descriptor_restore_is_atomic_before_io_or_publication() {
     let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("descriptor-hostile.txt");
     std::fs::write(&path, "preserved\n").expect("fixture file");
@@ -236,7 +290,7 @@ pub(in crate::app) fn malformed_content_descriptor_restore_is_atomic_before_io_o
 }
 
 #[test]
-pub(in crate::app) fn cancelled_session_restore_reads_are_discarded_before_a_later_restore() {
+fn cancelled_session_restore_reads_are_discarded_before_a_later_restore() {
     let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("cancelled-restore.txt");
     fs::write(&path, "restored\n").unwrap();
@@ -273,7 +327,7 @@ pub(in crate::app) fn cancelled_session_restore_reads_are_discarded_before_a_lat
 }
 
 #[test]
-pub(in crate::app) fn restore_reads_preserve_newer_edits_capture_and_original_editor_identity() {
+fn restore_reads_preserve_newer_edits_capture_and_original_editor_identity() {
     use crate::persistence::PersistedLayout;
     use crate::persistence::PersistedMark;
     use crate::persistence::PersistedPane;
@@ -440,7 +494,7 @@ pub(in crate::app) fn restore_reads_preserve_newer_edits_capture_and_original_ed
 }
 
 #[test]
-pub(in crate::app) fn hiding_an_inspector_sends_no_disconnect_and_leaves_the_session_running() {
+fn hiding_an_inspector_sends_no_disconnect_and_leaves_the_session_running() {
     // W-25 acceptance, verbatim: "proof that hiding inspectors does not terminate a session".
     // The stronger half is MEASURED: the adapter itself records every request it receives, so the
     // test can show that hiding sent no disconnect and no terminate, which "still looks alive"
@@ -500,7 +554,7 @@ pub(in crate::app) fn hiding_an_inspector_sends_no_disconnect_and_leaves_the_ses
 }
 
 #[test]
-pub(in crate::app) fn an_attached_session_names_the_target_it_was_given_in_its_status() {
+fn an_attached_session_names_the_target_it_was_given_in_its_status() {
     // W-24's residual: the attach status was wired but unasserted. The launch counter-case lives
     // in `a_started_session_makes_the_debug_arrangement_appear_with_its_own_identity`, so a single
     // branch cannot satisfy both.
@@ -537,7 +591,7 @@ pub(in crate::app) fn an_attached_session_names_the_target_it_was_given_in_its_s
 }
 
 #[test]
-pub(in crate::app) fn a_restored_session_keeps_the_buffer_line_in_window_order() {
+fn a_restored_session_keeps_the_buffer_line_in_window_order() {
     let (_app_dirs, mut app) = app();
     let zeta = app.state.workspace_root.join("zeta.txt");
     let alpha = app.state.workspace_root.join("alpha.txt");
@@ -574,14 +628,3 @@ pub(in crate::app) fn a_restored_session_keeps_the_buffer_line_in_window_order()
         .collect::<Vec<_>>();
     assert_eq!(order, [zeta, alpha]);
 }
-use crate::app::AppEffect;
-use crate::editor::text::ByteOffset;
-use crate::editor::text::TextBuffer;
-use std::fs;
-use std::time::Duration;
-use std::time::Instant;
-
-use crate::app::persistence::RestoreContext;
-use crate::persistence::PersistedLocation;
-use crate::persistence::PersistedSession;
-use crate::persistence::PersistedState;
