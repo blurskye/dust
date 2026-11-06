@@ -7,7 +7,6 @@ pub mod markdown;
 mod pty_screen;
 pub(crate) mod render;
 mod terminal;
-pub mod window;
 
 pub use diff::{emphasise_changed_spans, parse_unified_patch};
 pub use grid::{Cell, CellGrid, Style};

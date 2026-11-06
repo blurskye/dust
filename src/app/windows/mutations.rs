@@ -7,13 +7,13 @@ use crate::app::windows::NativeSurfaceTarget;
 use crate::app::windows::TerminalGeometrySource;
 use crate::app::windows::WindowCandidate;
 use crate::app::windows::WindowSession;
-use crate::ui::window::ContentLifecycle;
-use crate::ui::window::WindowGraph;
-use crate::ui::window::WindowId;
-use crate::ui::window::WindowPlacement;
+use crate::windows::ContentLifecycle;
+use crate::windows::WindowGraph;
+use crate::windows::WindowId;
+use crate::windows::WindowPlacement;
 use crate::editor::FocusDirection;
-use crate::ui::window::DockEdge;
-use crate::ui::window::WindowRect;
+use crate::windows::DockEdge;
+use crate::windows::WindowRect;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -141,7 +141,7 @@ impl WindowSession {
         if let Some(dashboard) = candidate.dashboard {
             self.dashboard = dashboard;
         }
-        let focus_content = |graph: &crate::ui::window::WindowGraph| {
+        let focus_content = |graph: &crate::windows::WindowGraph| {
             graph
                 .focused()
                 .and_then(|w| graph.window(w))
@@ -888,7 +888,7 @@ impl WindowSession {
     pub(in crate::app) fn persisted_editor_placement(
         &self,
         pane: crate::editor::PaneId,
-        expected_adapter: crate::ui::window::ContentAdapterKind,
+        expected_adapter: crate::windows::ContentAdapterKind,
     ) -> Result<PersistedWindowPlacement, String> {
         let window = self
             .editor_ids()

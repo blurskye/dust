@@ -819,8 +819,8 @@ impl ExplorerSession {
         &mut self,
         view: ExplorerViewId,
         config: &crate::config::ExplorerConfig,
-        body: crate::ui::window::WindowRect,
-        git_status: &BTreeMap<PathBuf, crate::workspace::git::GitFileStatus>,
+        body: crate::windows::WindowRect,
+        git_status: &BTreeMap<PathBuf, crate::git::GitFileStatus>,
         title: String,
         root_label: &str,
     ) -> Result<ExplorerUiState, &'static str> {
@@ -837,8 +837,8 @@ impl ExplorerSession {
     pub(in crate::app) fn projection(
         &mut self,
         config: &crate::config::ExplorerConfig,
-        body: crate::ui::window::WindowRect,
-        git_status: &BTreeMap<PathBuf, crate::workspace::git::GitFileStatus>,
+        body: crate::windows::WindowRect,
+        git_status: &BTreeMap<PathBuf, crate::git::GitFileStatus>,
         title: String,
         root_label: &str,
     ) -> ExplorerUiState {
@@ -950,13 +950,13 @@ impl ExplorerSession {
                 let right_segments = git_status
                     .map(|status| ExplorerUiSegment {
                         text: match status {
-                            crate::workspace::git::GitFileStatus::Untracked => "?",
-                            crate::workspace::git::GitFileStatus::Added => "A",
-                            crate::workspace::git::GitFileStatus::Modified => "M",
-                            crate::workspace::git::GitFileStatus::TypeChanged => "T",
-                            crate::workspace::git::GitFileStatus::Deleted => "D",
-                            crate::workspace::git::GitFileStatus::Renamed => "R",
-                            crate::workspace::git::GitFileStatus::Conflicted => "!",
+                            crate::git::GitFileStatus::Untracked => "?",
+                            crate::git::GitFileStatus::Added => "A",
+                            crate::git::GitFileStatus::Modified => "M",
+                            crate::git::GitFileStatus::TypeChanged => "T",
+                            crate::git::GitFileStatus::Deleted => "D",
+                            crate::git::GitFileStatus::Renamed => "R",
+                            crate::git::GitFileStatus::Conflicted => "!",
                         }
                         .into(),
                         role: ExplorerSegmentRole::Git,
@@ -1673,14 +1673,14 @@ mod tests {
         drain(&mut owner, source);
         let config = crate::config::load_bundled_config();
         let git = BTreeMap::new();
-        let body = crate::ui::window::WindowRect {
+        let body = crate::windows::WindowRect {
             x: 0,
             y: 3,
             width: 30,
             height: 20,
         };
         let before = (
-            crate::ui::window::WindowGraph::test_clone_count(),
+            crate::windows::WindowGraph::test_clone_count(),
             crate::editor::EditorState::test_clone_count(),
             crate::editor::text::TextBuffer::test_materializations(),
         );
@@ -1704,7 +1704,7 @@ mod tests {
         println!(
             "case=explorer_projection iterations=100 rows_materialized={rows} elapsed_ns={} graph_copies={} editor_copies={} text_decodes={} text_displays={}",
             elapsed.as_nanos(),
-            crate::ui::window::WindowGraph::test_clone_count() - before.0,
+            crate::windows::WindowGraph::test_clone_count() - before.0,
             crate::editor::EditorState::test_clone_count() - before.1,
             after.0 - before.2.0,
             after.1 - before.2.1

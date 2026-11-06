@@ -1063,7 +1063,7 @@ fn health_virtual_dogfood_opens_refreshes_and_remains_read_only() {
         .expect("virtual content");
     assert_eq!(
         virtual_content.adapter,
-        crate::ui::window::ContentAdapterKind::VirtualDocument
+        crate::windows::ContentAdapterKind::VirtualDocument
     );
     assert!(virtual_content.capabilities.persist_descriptor);
     let persisted = app.capture_session().expect("virtual descriptor session");
@@ -3350,9 +3350,9 @@ fn content_line_diagnostics_custom_entries_and_idle_projection_are_pure() {
         .unwrap();
     let custom = draft
         .create_content_with_contract(
-            crate::ui::window::ContentTypeId::new("plugin.demo-custom").unwrap(),
-            crate::ui::window::ContentContract::adapter_defaults(
-                crate::ui::window::ContentAdapterKind::DeclarativeUi,
+            crate::windows::ContentTypeId::new("plugin.demo-custom").unwrap(),
+            crate::windows::ContentContract::adapter_defaults(
+                crate::windows::ContentAdapterKind::DeclarativeUi,
             ),
             "Custom surface".into(),
             false,
@@ -3741,7 +3741,7 @@ fn text_and_virtual_windows_project_input_and_preserve_identity_across_ordinary_
         .compositor_projection()
         .and_then(|projection| projection.window(source_window))
         .expect("floating editor projection");
-    assert_eq!(floating.layer, crate::ui::window::CompositorLayer::Floating);
+    assert_eq!(floating.layer, crate::windows::CompositorLayer::Floating);
     assert_eq!(
         floating.rect,
         WindowRect {
@@ -3942,7 +3942,7 @@ fn text_and_virtual_windows_project_input_and_preserve_identity_across_ordinary_
         .clone();
     assert_eq!(
         virtual_content.adapter,
-        crate::ui::window::ContentAdapterKind::VirtualDocument
+        crate::windows::ContentAdapterKind::VirtualDocument
     );
     virtual_app
         .place_graph_window(
@@ -4302,7 +4302,7 @@ fn explorer_is_a_graph_dock_and_bundled_disable_is_transactional() {
             .expect("explorer window")
             .placement,
         WindowPlacement::Docked {
-            edge: crate::ui::window::DockEdge::Left,
+            edge: crate::windows::DockEdge::Left,
             ..
         }
     ));
@@ -4569,7 +4569,7 @@ fn generic_native_window_operations_are_revision_checked_atomic_and_identity_pre
             .find(|content| content.content_type.as_str() == "builtin.terminal")
             .expect("terminal content")
             .lifecycle,
-        crate::ui::window::ContentLifecycle::Running
+        crate::windows::ContentLifecycle::Running
     );
     let explorer = app
         .window_session
@@ -5348,7 +5348,7 @@ fn terminal_panel_focus_cycle_resize_and_close_preserve_independent_sessions() {
         .terminal(1)
         .expect("terminal resources");
     app.process_effect(crate::app::AppEffect::TerminalFloat(Some(
-        crate::ui::window::WindowRect {
+        crate::windows::WindowRect {
             x: 5,
             y: 3,
             width: 40,
@@ -5550,7 +5550,7 @@ fn terminal_panel_focus_cycle_resize_and_close_preserve_independent_sessions() {
     );
     app.process_effect(crate::app::AppEffect::TerminalFocus(2));
     app.process_effect(crate::app::AppEffect::TerminalFloat(Some(
-        crate::ui::window::WindowRect {
+        crate::windows::WindowRect {
             x: 9,
             y: 4,
             width: 33,
@@ -6761,7 +6761,7 @@ fn debugger_terminal_displays_without_focus_and_its_exit_keeps_another_terminal_
             .descriptions()
             .iter()
             .any(|(id, _, state)| {
-                *id == debug.0 && *state == crate::ui::window::ContentLifecycle::Exited
+                *id == debug.0 && *state == crate::windows::ContentLifecycle::Exited
             })
         {
             break;
@@ -8707,7 +8707,7 @@ fn nested_border_drag_uses_the_border_axis_on_both_sides() {
             .borders
             .iter()
             .find(|border| {
-                border.axis == crate::ui::window::TileAxis::Vertical && border.length > 100
+                border.axis == crate::windows::TileAxis::Vertical && border.length > 100
             })
             .unwrap();
         let (x, y) = (

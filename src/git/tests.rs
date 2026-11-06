@@ -1867,9 +1867,9 @@ fn unstage_reports_no_change_when_the_index_already_matches_head() {
 }
 
 fn run_branch(
-    request: crate::workspace::git::GitBranchRequest,
-) -> Result<crate::workspace::git::GitBranchResult, crate::workspace::git::GitBranchError> {
-    use crate::workspace::git::GitBranchService;
+    request: crate::git::GitBranchRequest,
+) -> Result<crate::git::GitBranchResult, crate::git::GitBranchError> {
+    use crate::git::GitBranchService;
     let mut service = GitBranchService::default();
     service.start(request).unwrap();
     let deadline = Instant::now() + Duration::from_secs(6);
@@ -1884,16 +1884,16 @@ fn run_branch(
     }
 }
 
-fn branch_list(root: &Path) -> crate::workspace::git::GitBranchList {
-    match run_branch(crate::workspace::git::GitBranchRequest::List(
-        crate::workspace::git::GitBranchListRequest {
+fn branch_list(root: &Path) -> crate::git::GitBranchList {
+    match run_branch(crate::git::GitBranchRequest::List(
+        crate::git::GitBranchListRequest {
             repository: root.to_path_buf(),
             deadline: Duration::from_secs(5),
         },
     ))
     .unwrap()
     {
-        crate::workspace::git::GitBranchResult::List(list) => list,
+        crate::git::GitBranchResult::List(list) => list,
         other => panic!("expected a list, got {other:?}"),
     }
 }
@@ -1909,8 +1909,8 @@ fn branch_request(
     kind: &str,
     name: &str,
     extra: &str,
-) -> crate::workspace::git::GitBranchRequest {
-    use crate::workspace::git::GitBranchRequest as R;
+) -> crate::git::GitBranchRequest {
+    use crate::git::GitBranchRequest as R;
     let repository = repository.to_path_buf();
     let deadline = Duration::from_secs(5);
     match kind {
@@ -2140,7 +2140,7 @@ fn worktree_creation_and_removal_refuse_before_writing() {
             &occupied.display().to_string()
         )),
         Err(
-            crate::workspace::git::GitBranchError::RefusedDestinationNotEmpty(
+            crate::git::GitBranchError::RefusedDestinationNotEmpty(
                 occupied.display().to_string()
             )
         )
@@ -2173,14 +2173,14 @@ fn worktree_creation_and_removal_refuse_before_writing() {
             "trip",
             &root.join("wt-trip2").display().to_string()
         )),
-        Err(crate::workspace::git::GitBranchError::RefusedBranchAlreadyCheckedOut("trip".into()))
+        Err(crate::git::GitBranchError::RefusedBranchAlreadyCheckedOut("trip".into()))
     );
 
     // A dirty worktree is refused removal and its files are unchanged.
     std::fs::write(trip.join("notes.txt"), "unsaved\n").unwrap();
     assert_eq!(
         run_branch(branch_request(&root, "remove-worktree", "trip", "")),
-        Err(crate::workspace::git::GitBranchError::RefusedDirtyWorktree(
+        Err(crate::git::GitBranchError::RefusedDirtyWorktree(
             "trip".into()
         ))
     );
@@ -2198,7 +2198,7 @@ fn worktree_creation_and_removal_refuse_before_writing() {
 
 #[test]
 fn a_locked_or_paused_worktree_refuses_removal_before_any_write() {
-    use crate::workspace::git::GitBranchError;
+    use crate::git::GitBranchError;
     let dir = tempdir().unwrap();
     let root = dir.path().join("main");
     std::fs::create_dir_all(&root).unwrap();
@@ -2290,7 +2290,7 @@ fn the_https_and_ssh_transports_are_present_at_runtime() {
 
 #[test]
 fn conflict_provenance_reports_the_three_sides_from_the_index_on_demand() {
-    use crate::workspace::git::read_conflict_state;
+    use crate::git::read_conflict_state;
     let dir = tempdir().unwrap();
     let root = dir.path().join("work");
     std::fs::create_dir_all(&root).unwrap();
@@ -2664,7 +2664,7 @@ fn continue_reports_committed_revision_when_cleanup_fails_and_retry_only_cleans_
 
 #[test]
 fn continue_refuses_while_conflicts_remain_and_then_records_two_parents() {
-    use crate::workspace::git::{GitRecoveryRefusal, continue_operation};
+    use crate::git::{GitRecoveryRefusal, continue_operation};
     let dir = tempdir().unwrap();
     let root = dir.path().join("work");
     std::fs::create_dir_all(&root).unwrap();
@@ -2832,7 +2832,7 @@ fn abort_rebase_restores_original_branch_attachment_and_tip() {
 
 #[test]
 fn abort_returns_to_the_recorded_start_and_refuses_to_discard_work() {
-    use crate::workspace::git::{GitRecoveryRefusal, abort_operation, read_conflict_state};
+    use crate::git::{GitRecoveryRefusal, abort_operation, read_conflict_state};
     let dir = tempdir().unwrap();
     let root = dir.path().join("work");
     std::fs::create_dir_all(&root).unwrap();
@@ -2900,7 +2900,7 @@ fn abort_returns_to_the_recorded_start_and_refuses_to_discard_work() {
 
 #[test]
 fn recovery_refuses_when_nothing_is_paused() {
-    use crate::workspace::git::{GitRecoveryRefusal, abort_operation, continue_operation};
+    use crate::git::{GitRecoveryRefusal, abort_operation, continue_operation};
     let dir = tempdir().unwrap();
     let repo = git2::Repository::init(dir.path()).unwrap();
     commit(&repo, "only.txt", "one\n");
@@ -2921,7 +2921,7 @@ fn recovery_refuses_when_nothing_is_paused() {
 
 #[test]
 fn the_operation_bar_lists_only_the_actions_valid_in_the_repositorys_real_state() {
-    use crate::workspace::git::{
+    use crate::git::{
         GitConflictChoice, GitOperationAction, GitOperationBar, read_conflict_state,
     };
     let dir = tempdir().unwrap();
@@ -3100,7 +3100,7 @@ fn conflict_replacement_failure_reports_files_already_written() {
 
 #[test]
 fn whole_file_replacement_previews_cancels_and_applies_exactly_its_file_list() {
-    use crate::workspace::git::{
+    use crate::git::{
         GitConflictChoice, apply_replacement, git_index_fingerprint, plan_replacement,
     };
     let dir = tempdir().unwrap();
@@ -3174,7 +3174,7 @@ fn whole_file_replacement_previews_cancels_and_applies_exactly_its_file_list() {
 
 #[test]
 fn the_bar_names_every_paused_operation_the_contract_lists() {
-    use crate::workspace::git::{GitOperationAction, GitOperationBar, read_conflict_state};
+    use crate::git::{GitOperationAction, GitOperationBar, read_conflict_state};
     // Each pause is constructed from the marker state GIT ITSELF leaves behind, so the bar is
     // proved against real repository state rather than against a hand-made operation name.
     let cases: [(&str, Option<&str>, &str); 4] = [
@@ -3233,7 +3233,7 @@ fn the_bar_names_every_paused_operation_the_contract_lists() {
 
 #[test]
 fn a_review_worktree_is_detached_at_the_inspected_revision_and_moves_no_branch() {
-    use crate::workspace::git::GitBranchRequest as R;
+    use crate::git::GitBranchRequest as R;
     let dir = tempdir().unwrap();
     let repo = git2::Repository::init_opts(
         dir.path(),
@@ -3335,7 +3335,7 @@ fn the_worktree_list_names_the_main_checkout_from_inside_a_linked_worktree() {
     commit(&repo, "w.txt", "one\n");
     let root = std::fs::canonicalize(dir.path()).unwrap();
     let main_branch = repo.head().unwrap().shorthand().unwrap().to_owned();
-    run_branch(crate::workspace::git::GitBranchRequest::CreateWorktree {
+    run_branch(crate::git::GitBranchRequest::CreateWorktree {
         repository: root.clone(),
         name: "feat".into(),
         path: PathBuf::from(".worktree/feat"),
@@ -3359,8 +3359,8 @@ fn the_worktree_list_names_the_main_checkout_from_inside_a_linked_worktree() {
         root.file_name().and_then(|name| name.to_str())
     );
 
-    let GitBranchResult::List(list) = run_branch(crate::workspace::git::GitBranchRequest::List(
-        crate::workspace::git::GitBranchListRequest {
+    let GitBranchResult::List(list) = run_branch(crate::git::GitBranchRequest::List(
+        crate::git::GitBranchListRequest {
             repository: linked.clone(),
             deadline: Duration::from_secs(5),
         },
@@ -3447,7 +3447,7 @@ fn a_new_worktree_creates_its_branch_at_head_and_stays_out_of_status() {
     let root = std::fs::canonicalize(dir.path()).unwrap();
     let head = repo.head().unwrap().target().unwrap();
 
-    run_branch(crate::workspace::git::GitBranchRequest::CreateWorktree {
+    run_branch(crate::git::GitBranchRequest::CreateWorktree {
         repository: root.clone(),
         name: "feat-x".into(),
         path: PathBuf::from(".worktree/feat-x"),

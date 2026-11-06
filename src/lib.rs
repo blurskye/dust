@@ -42,3 +42,8 @@ pub mod tools;
 pub mod ui;
 /// Workspace roots, trust, diagnostics, pickers, Git, and revision-safe edit proposals.
 pub mod workspace;
+
+/// Window topology and contracts.
+pub mod windows;
+/// Git operations.
+pub mod git;

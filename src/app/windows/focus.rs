@@ -1,8 +1,8 @@
 use crate::app::windows::NativeSurfaceTarget;
 use crate::app::windows::WindowSession;
-use crate::ui::window::PANE_MINIMUM_WIDTH;
-use crate::ui::window::SpatialDirection;
-use crate::ui::window::WindowId;
+use crate::windows::PANE_MINIMUM_WIDTH;
+use crate::windows::SpatialDirection;
+use crate::windows::WindowId;
 
 /// The underlying keyboard target. Picker/prompt/documentation capture does not
 /// erase this target; its identity is revalidated when the graph is reconciled.
@@ -177,8 +177,8 @@ impl WindowSession {
         self.require_projected_graph()?;
         let target = NativeSurfaceTarget::Terminal(id);
         let current = match self.native_placement(target)? {
-            crate::ui::window::WindowPlacement::Docked { size, .. } => size,
-            crate::ui::window::WindowPlacement::Floating(rect) => rect.height,
+            crate::windows::WindowPlacement::Docked { size, .. } => size,
+            crate::windows::WindowPlacement::Floating(rect) => rect.height,
             _ => self.terminal_height(),
         };
         let height = u16::try_from(
@@ -192,28 +192,28 @@ impl WindowSession {
         .unwrap_or(current);
         let placement = match self.native_placement(target)? {
             // A terminal on the left or right, such as an agent, grows in columns.
-            crate::ui::window::WindowPlacement::Docked {
+            crate::windows::WindowPlacement::Docked {
                 edge:
-                    edge @ (crate::ui::window::DockEdge::Left | crate::ui::window::DockEdge::Right),
+                    edge @ (crate::windows::DockEdge::Left | crate::windows::DockEdge::Right),
                 size,
             } => {
                 let step =
                     i32::from(rows) * i32::from(crate::ui::render::TERMINAL_PANEL_RESIZE_STEP);
                 let widest = i32::from(self.width().saturating_sub(PANE_MINIMUM_WIDTH)).max(20);
                 let size = (i32::from(size) + step).clamp(20, widest);
-                let placement = crate::ui::window::WindowPlacement::Docked {
+                let placement = crate::windows::WindowPlacement::Docked {
                     edge,
                     size: u16::try_from(size).unwrap_or(u16::MAX),
                 };
                 self.place_native(target, placement)?;
                 return Ok(());
             }
-            crate::ui::window::WindowPlacement::Docked { edge, .. } => {
-                Some(crate::ui::window::WindowPlacement::Docked { edge, size: height })
+            crate::windows::WindowPlacement::Docked { edge, .. } => {
+                Some(crate::windows::WindowPlacement::Docked { edge, size: height })
             }
-            crate::ui::window::WindowPlacement::Floating(mut rect) => {
+            crate::windows::WindowPlacement::Floating(mut rect) => {
                 rect.height = height;
-                Some(crate::ui::window::WindowPlacement::Floating(rect))
+                Some(crate::windows::WindowPlacement::Floating(rect))
             }
             _ => None,
         };

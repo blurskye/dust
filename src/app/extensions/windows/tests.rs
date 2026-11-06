@@ -5,7 +5,7 @@ use crate::extensions::PluginCommandDeclaration;
 use crate::extensions::PluginContentTypeContribution;
 use crate::extensions::PluginPresenterKind;
 use crate::extensions::PluginPrivateCellPolicy;
-use crate::ui::window::ContentLifecycle;
+use crate::windows::ContentLifecycle;
 
 fn index(owner: &str, generation: u64) -> PluginContributionIndex {
     PluginContributionIndex {
@@ -383,7 +383,7 @@ fn private_cells_are_local_revisioned_atomic_and_generation_owned() {
     let before_clone = graph.clone();
     assert_eq!(
         graph.create_view(content, "plugin.demo", 9),
-        Err(crate::ui::window::WindowError::Unsupported("clone-view"))
+        Err(crate::windows::WindowError::Unsupported("clone-view"))
     );
     assert_eq!(graph, before_clone);
     let projection = graph.compositor_snapshot(tab).expect("snapshot").project(
@@ -1710,9 +1710,9 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
     let invocation = |id: u64,
                       command: &str,
                       graph: &WindowGraph,
-                      content: crate::ui::window::ContentId,
-                      view: crate::ui::window::ViewId,
-                      window: crate::ui::window::WindowId| wire::Invocation {
+                      content: crate::windows::ContentId,
+                      view: crate::windows::ViewId,
+                      window: crate::windows::WindowId| wire::Invocation {
         id,
         kind: wire::ExecutionKind::Command,
         command: command.into(),
@@ -1937,7 +1937,7 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
     let original = host
         .process_target03(&mut graph, &catalogue, &admission, requests.remove(0))
         .expect("checked original publication");
-    let original_content = crate::ui::window::ContentId(original.content);
+    let original_content = crate::windows::ContentId(original.content);
     assert!(
         graph
             .content(original_content)
@@ -1947,7 +1947,7 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
     );
     assert_eq!(
         graph.require_persist_descriptor(original_content),
-        Err(crate::ui::window::WindowError::Unsupported(
+        Err(crate::windows::WindowError::Unsupported(
             "persist-descriptor"
         ))
     );
@@ -1993,9 +1993,9 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
                 4,
                 "clone",
                 &graph,
-                crate::ui::window::ContentId(original.content),
-                crate::ui::window::ViewId(original.view),
-                crate::ui::window::WindowId(original.window),
+                crate::windows::ContentId(original.content),
+                crate::windows::ViewId(original.view),
+                crate::windows::WindowId(original.window),
             ),
             &catalogue,
         )
@@ -2041,9 +2041,9 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
                     id,
                     "clone",
                     &graph,
-                    crate::ui::window::ContentId(original.content),
-                    crate::ui::window::ViewId(original.view),
-                    crate::ui::window::WindowId(original.window),
+                    crate::windows::ContentId(original.content),
+                    crate::windows::ViewId(original.view),
+                    crate::windows::WindowId(original.window),
                 ),
                 &catalogue,
             )
@@ -2088,9 +2088,9 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
                 5,
                 "clone",
                 &graph,
-                crate::ui::window::ContentId(original.content),
-                crate::ui::window::ViewId(original.view),
-                crate::ui::window::WindowId(original.window),
+                crate::windows::ContentId(original.content),
+                crate::windows::ViewId(original.view),
+                crate::windows::WindowId(original.window),
             ),
             &catalogue,
         )
@@ -2126,9 +2126,9 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
                         $id,
                         $command,
                         &graph,
-                        crate::ui::window::ContentId(source.content),
-                        crate::ui::window::ViewId(source.view),
-                        crate::ui::window::WindowId(source.window),
+                        crate::windows::ContentId(source.content),
+                        crate::windows::ViewId(source.view),
+                        crate::windows::WindowId(source.window),
                     ),
                     &catalogue,
                 )
@@ -2151,7 +2151,7 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
     let moved = apply_component_window_operation!(6, "move", clone);
     assert_eq!(
         graph
-            .window(crate::ui::window::WindowId(clone.window))
+            .window(crate::windows::WindowId(clone.window))
             .expect("moved target window")
             .placement,
         WindowPlacement::Floating(WindowRect {
@@ -2165,7 +2165,7 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
     assert_eq!(tiled.content, original.content);
     assert_eq!(
         graph
-            .window(crate::ui::window::WindowId(clone.window))
+            .window(crate::windows::WindowId(clone.window))
             .expect("tiled target window")
             .placement,
         WindowPlacement::Tiled
@@ -2173,18 +2173,18 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
     let docked = apply_component_window_operation!(8, "dock", tiled);
     assert_eq!(
         graph
-            .window(crate::ui::window::WindowId(clone.window))
+            .window(crate::windows::WindowId(clone.window))
             .expect("docked target window")
             .placement,
         WindowPlacement::Docked {
-            edge: crate::ui::window::DockEdge::Right,
+            edge: crate::windows::DockEdge::Right,
             size: 19,
         }
     );
     let fullscreen = apply_component_window_operation!(9, "fullscreen", docked);
     assert_eq!(
         graph
-            .window(crate::ui::window::WindowId(clone.window))
+            .window(crate::windows::WindowId(clone.window))
             .expect("fullscreen target window")
             .placement,
         WindowPlacement::Fullscreen
@@ -2192,7 +2192,7 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
     let hidden = apply_component_window_operation!(10, "hide", fullscreen);
     assert_eq!(
         graph
-            .window(crate::ui::window::WindowId(clone.window))
+            .window(crate::windows::WindowId(clone.window))
             .expect("hidden target window")
             .placement,
         WindowPlacement::Hidden
@@ -2203,9 +2203,9 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
                 11,
                 "focus",
                 &graph,
-                crate::ui::window::ContentId(hidden.content),
-                crate::ui::window::ViewId(hidden.view),
-                crate::ui::window::WindowId(hidden.window),
+                crate::windows::ContentId(hidden.content),
+                crate::windows::ViewId(hidden.view),
+                crate::windows::WindowId(hidden.window),
             ),
             &catalogue,
         )
@@ -2232,7 +2232,7 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
     let focused = apply_component_window_operation!(13, "focus", shown);
     assert_eq!(
         graph.focused(),
-        Some(crate::ui::window::WindowId(clone.window))
+        Some(crate::windows::WindowId(clone.window))
     );
     let other_tab = graph
         .create_workspace_tab("builtin.cross-tab", 1)
@@ -2244,7 +2244,7 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
     assert_eq!(graph.active_tab(), Some(tab));
     assert_eq!(
         graph
-            .window(crate::ui::window::WindowId(focused.window))
+            .window(crate::windows::WindowId(focused.window))
             .expect("same cross-tab retained window")
             .view
             .0,
@@ -2259,17 +2259,17 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
     assert_eq!(closed.window, close_source.window);
     assert!(
         graph
-            .window(crate::ui::window::WindowId(close_source.window))
+            .window(crate::windows::WindowId(close_source.window))
             .is_none()
     );
     assert!(
         graph
-            .window(crate::ui::window::WindowId(clone.window))
+            .window(crate::windows::WindowId(clone.window))
             .is_some()
     );
     assert_eq!(
         graph
-            .content(crate::ui::window::ContentId(original.content))
+            .content(crate::windows::ContentId(original.content))
             .expect("original shared content survives clone close")
             .id
             .0,
@@ -2324,9 +2324,9 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
             id,
             "move",
             &graph,
-            crate::ui::window::ContentId(original.content),
-            crate::ui::window::ViewId(original.view),
-            crate::ui::window::WindowId(original.window),
+            crate::windows::ContentId(original.content),
+            crate::windows::ViewId(original.view),
+            crate::windows::WindowId(original.window),
         );
         let ui = hostile.ui.as_mut().expect("hostile identity UI source");
         match identity {
@@ -2380,9 +2380,9 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
                 21,
                 "clone",
                 &graph,
-                crate::ui::window::ContentId(original.content),
-                crate::ui::window::ViewId(original.view),
-                crate::ui::window::WindowId(original.window),
+                crate::windows::ContentId(original.content),
+                crate::windows::ViewId(original.view),
+                crate::windows::WindowId(original.window),
             ),
             &catalogue,
         )
@@ -2424,9 +2424,9 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
                 211,
                 "tile",
                 &graph,
-                crate::ui::window::ContentId(original.content),
-                crate::ui::window::ViewId(original.view),
-                crate::ui::window::WindowId(original.window),
+                crate::windows::ContentId(original.content),
+                crate::windows::ViewId(original.view),
+                crate::windows::WindowId(original.window),
             ),
             &catalogue,
         )
@@ -2472,9 +2472,9 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
                 22,
                 "clone",
                 &graph,
-                crate::ui::window::ContentId(original.content),
-                crate::ui::window::ViewId(original.view),
-                crate::ui::window::WindowId(original.window),
+                crate::windows::ContentId(original.content),
+                crate::windows::ViewId(original.view),
+                crate::windows::WindowId(original.window),
             ),
             &catalogue,
         )
@@ -2566,9 +2566,9 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
                 30,
                 "openprivate",
                 &graph,
-                crate::ui::window::ContentId(clone.content),
-                crate::ui::window::ViewId(clone.view),
-                crate::ui::window::WindowId(clone.window),
+                crate::windows::ContentId(clone.content),
+                crate::windows::ViewId(clone.view),
+                crate::windows::WindowId(clone.window),
             ),
             &catalogue,
         )
@@ -2639,7 +2639,7 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
     assert_eq!(private_moved.window, private_original.window);
     assert_eq!(
         graph
-            .window(crate::ui::window::WindowId(private_moved.window))
+            .window(crate::windows::WindowId(private_moved.window))
             .expect("moved private window")
             .placement,
         WindowPlacement::Floating(WindowRect {
@@ -2652,7 +2652,7 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
     let private_tiled = apply_component_window_operation!(121, "tile", private_moved);
     assert_eq!(
         graph
-            .window(crate::ui::window::WindowId(private_tiled.window))
+            .window(crate::windows::WindowId(private_tiled.window))
             .expect("tiled private window")
             .placement,
         WindowPlacement::Tiled
@@ -2660,7 +2660,7 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
     let private_docked = apply_component_window_operation!(122, "dock", private_tiled);
     assert!(matches!(
         graph
-            .window(crate::ui::window::WindowId(private_docked.window))
+            .window(crate::windows::WindowId(private_docked.window))
             .expect("docked private window")
             .placement,
         WindowPlacement::Docked { .. }
@@ -2668,7 +2668,7 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
     let private_fullscreen = apply_component_window_operation!(123, "fullscreen", private_docked);
     assert_eq!(
         graph
-            .window(crate::ui::window::WindowId(private_fullscreen.window))
+            .window(crate::windows::WindowId(private_fullscreen.window))
             .expect("fullscreen private window")
             .placement,
         WindowPlacement::Fullscreen
@@ -2676,7 +2676,7 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
     let private_hidden = apply_component_window_operation!(124, "hide", private_fullscreen);
     assert_eq!(
         graph
-            .window(crate::ui::window::WindowId(private_hidden.window))
+            .window(crate::windows::WindowId(private_hidden.window))
             .expect("hidden private window")
             .placement,
         WindowPlacement::Hidden
@@ -2699,7 +2699,7 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
     assert_eq!(graph.active_tab(), Some(tab));
     assert_eq!(
         graph
-            .window(crate::ui::window::WindowId(private_focused.window))
+            .window(crate::windows::WindowId(private_focused.window))
             .expect("same cross-tab private window")
             .view
             .0,
@@ -2752,9 +2752,9 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
                 33,
                 "cloneprivate",
                 &graph,
-                crate::ui::window::ContentId(private_original.content),
-                crate::ui::window::ViewId(private_original.view),
-                crate::ui::window::WindowId(private_original.window),
+                crate::windows::ContentId(private_original.content),
+                crate::windows::ViewId(private_original.view),
+                crate::windows::WindowId(private_original.window),
             ),
             &catalogue,
         )
@@ -2769,9 +2769,9 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
                 34,
                 "cloneprivate",
                 &graph,
-                crate::ui::window::ContentId(private_original.content),
-                crate::ui::window::ViewId(private_original.view),
-                crate::ui::window::WindowId(private_original.window),
+                crate::windows::ContentId(private_original.content),
+                crate::windows::ViewId(private_original.view),
+                crate::windows::WindowId(private_original.window),
             ),
             &catalogue,
         )
@@ -2836,11 +2836,11 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
     assert_ne!(private[0].window, private[1].window);
     assert_eq!(
         graph
-            .view(crate::ui::window::ViewId(private_original.view))
+            .view(crate::windows::ViewId(private_original.view))
             .expect("private original view")
             .content,
         graph
-            .view(crate::ui::window::ViewId(private_clone.view))
+            .view(crate::windows::ViewId(private_clone.view))
             .expect("private clone view")
             .content
     );
@@ -2856,9 +2856,9 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
                 42,
                 "openprivatefail",
                 &graph,
-                crate::ui::window::ContentId(private_clone.content),
-                crate::ui::window::ViewId(private_clone.view),
-                crate::ui::window::WindowId(private_clone.window),
+                crate::windows::ContentId(private_clone.content),
+                crate::windows::ViewId(private_clone.view),
+                crate::windows::WindowId(private_clone.window),
             ),
             &catalogue,
         )
@@ -2916,9 +2916,9 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
                 44,
                 "openprivateoversized",
                 &graph,
-                crate::ui::window::ContentId(private_clone.content),
-                crate::ui::window::ViewId(private_clone.view),
-                crate::ui::window::WindowId(private_clone.window),
+                crate::windows::ContentId(private_clone.content),
+                crate::windows::ViewId(private_clone.view),
+                crate::windows::WindowId(private_clone.window),
             ),
             &catalogue,
         )
@@ -2977,9 +2977,9 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
                 900,
                 "openprivatetrap",
                 &graph,
-                crate::ui::window::ContentId(private_clone.content),
-                crate::ui::window::ViewId(private_clone.view),
-                crate::ui::window::WindowId(private_clone.window),
+                crate::windows::ContentId(private_clone.content),
+                crate::windows::ViewId(private_clone.view),
+                crate::windows::WindowId(private_clone.window),
             ),
             &catalogue,
         )
@@ -3045,9 +3045,9 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
                     event,
                     probe,
                     &graph,
-                    crate::ui::window::ContentId(private_clone.content),
-                    crate::ui::window::ViewId(private_clone.view),
-                    crate::ui::window::WindowId(private_clone.window),
+                    crate::windows::ContentId(private_clone.content),
+                    crate::windows::ViewId(private_clone.view),
+                    crate::windows::WindowId(private_clone.window),
                 ),
                 &catalogue,
             )
@@ -3129,9 +3129,9 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
                 90,
                 "openprivate",
                 &graph,
-                crate::ui::window::ContentId(private_clone.content),
-                crate::ui::window::ViewId(private_clone.view),
-                crate::ui::window::WindowId(private_clone.window),
+                crate::windows::ContentId(private_clone.content),
+                crate::windows::ViewId(private_clone.view),
+                crate::windows::WindowId(private_clone.window),
             ),
             &catalogue,
         )
@@ -3170,9 +3170,9 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
                 47,
                 "clone",
                 &graph,
-                crate::ui::window::ContentId(original.content),
-                crate::ui::window::ViewId(original.view),
-                crate::ui::window::WindowId(original.window),
+                crate::windows::ContentId(original.content),
+                crate::windows::ViewId(original.view),
+                crate::windows::WindowId(original.window),
             ),
             &catalogue,
         )
@@ -3236,9 +3236,9 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
                     id,
                     command,
                     &graph,
-                    crate::ui::window::ContentId(original.content),
-                    crate::ui::window::ViewId(original.view),
-                    crate::ui::window::WindowId(original.window),
+                    crate::windows::ContentId(original.content),
+                    crate::windows::ViewId(original.view),
+                    crate::windows::WindowId(original.window),
                 ),
                 &catalogue,
             )
@@ -3249,7 +3249,7 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
         let mut stale_graph = graph.clone();
         let mut stale_host = host.clone();
         stale_graph
-            .focus(crate::ui::window::WindowId(original.window))
+            .focus(crate::windows::WindowId(original.window))
             .expect("intervening focus changes graph revision");
         let changed_graph = stale_graph.clone();
         let unchanged_host = stale_host.clone();
@@ -3290,9 +3290,9 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
                 48,
                 "clone",
                 &graph,
-                crate::ui::window::ContentId(original.content),
-                crate::ui::window::ViewId(original.view),
-                crate::ui::window::WindowId(original.window),
+                crate::windows::ContentId(original.content),
+                crate::windows::ViewId(original.view),
+                crate::windows::WindowId(original.window),
             ),
             &catalogue,
         )
@@ -3302,8 +3302,8 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
     let mut closed_graph = graph.clone();
     let mut closed_host = host.clone();
     closed_graph
-        .close_window(crate::ui::window::WindowId(original.window))
-        .and_then(|_| closed_graph.remove_view(crate::ui::window::ViewId(original.view)))
+        .close_window(crate::windows::WindowId(original.window))
+        .and_then(|_| closed_graph.remove_view(crate::windows::ViewId(original.view)))
         .expect("close exact staged source view");
     let closed_before = closed_graph.clone();
     let closed_host_before = closed_host.clone();
@@ -3407,9 +3407,9 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
         1,
         "clone",
         &wrong_tab_graph,
-        crate::ui::window::ContentId(original.content),
-        crate::ui::window::ViewId(original.view),
-        crate::ui::window::WindowId(original.window),
+        crate::windows::ContentId(original.content),
+        crate::windows::ViewId(original.view),
+        crate::windows::WindowId(original.window),
     );
     wrong_tab_invocation
         .ui
@@ -3466,7 +3466,7 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
     while ceiling_graph
         .windows()
         .filter(|window| {
-            window.tab == tab && window.placement != crate::ui::window::WindowPlacement::Tiled
+            window.tab == tab && window.placement != crate::windows::WindowPlacement::Tiled
         })
         .count()
         < 128
@@ -3494,7 +3494,7 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
         ceiling_graph
             .windows()
             .filter(|window| {
-                window.tab == tab && window.placement != crate::ui::window::WindowPlacement::Tiled
+                window.tab == tab && window.placement != crate::windows::WindowPlacement::Tiled
             })
             .count(),
         128
@@ -3508,9 +3508,9 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
                 1,
                 "clone",
                 &ceiling_graph,
-                crate::ui::window::ContentId(original.content),
-                crate::ui::window::ViewId(original.view),
-                crate::ui::window::WindowId(original.window),
+                crate::windows::ContentId(original.content),
+                crate::windows::ViewId(original.view),
+                crate::windows::WindowId(original.window),
             ),
             &catalogue,
         )
@@ -3617,9 +3617,9 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
                 166,
                 "clone",
                 &graph,
-                crate::ui::window::ContentId(original.content),
-                crate::ui::window::ViewId(original.view),
-                crate::ui::window::WindowId(original.window),
+                crate::windows::ContentId(original.content),
+                crate::windows::ViewId(original.view),
+                crate::windows::WindowId(original.window),
             ),
             &catalogue,
         )
@@ -3690,12 +3690,12 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
     assert_eq!(closed_private_clone.content, private_original.content);
     assert!(
         graph
-            .window(crate::ui::window::WindowId(private_clone.window))
+            .window(crate::windows::WindowId(private_clone.window))
             .is_none()
     );
     assert!(
         graph
-            .content(crate::ui::window::ContentId(private_original.content))
+            .content(crate::windows::ContentId(private_original.content))
             .is_some(),
         "shared private content survives until its last view closes"
     );
@@ -3703,7 +3703,7 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
     assert_eq!(closed_private_original.content, private_original.content);
     assert!(
         graph
-            .content(crate::ui::window::ContentId(private_original.content))
+            .content(crate::windows::ContentId(private_original.content))
             .is_none()
     );
     assert!(host.private_snapshots(&graph).is_empty());
@@ -3714,9 +3714,9 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
                 167,
                 "clone",
                 &graph,
-                crate::ui::window::ContentId(original.content),
-                crate::ui::window::ViewId(original.view),
-                crate::ui::window::WindowId(original.window),
+                crate::windows::ContentId(original.content),
+                crate::windows::ViewId(original.view),
+                crate::windows::WindowId(original.window),
             ),
             &catalogue,
         )
@@ -3727,9 +3727,9 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
                 168,
                 "clone",
                 &graph,
-                crate::ui::window::ContentId(original.content),
-                crate::ui::window::ViewId(original.view),
-                crate::ui::window::WindowId(original.window),
+                crate::windows::ContentId(original.content),
+                crate::windows::ViewId(original.view),
+                crate::windows::WindowId(original.window),
             ),
             &catalogue,
         )
@@ -3771,9 +3771,9 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
                 170,
                 "clone",
                 &graph,
-                crate::ui::window::ContentId(original.content),
-                crate::ui::window::ViewId(original.view),
-                crate::ui::window::WindowId(original.window),
+                crate::windows::ContentId(original.content),
+                crate::windows::ViewId(original.view),
+                crate::windows::WindowId(original.window),
             ),
             &catalogue,
         )
@@ -3816,7 +3816,7 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
         graph
             .content_snapshots()
             .iter()
-            .all(|content| content.id != crate::ui::window::ContentId(original.content))
+            .all(|content| content.id != crate::windows::ContentId(original.content))
     );
 
     let replacement = TargetAdmission::parse(manifest_source, 10).expect("replacement admission");
@@ -3915,12 +3915,12 @@ fn generation_owned_retained_window_lifecycle_is_revision_checked() {
     assert!(!capabilities.clone_view);
     assert_eq!(
         graph.require_clone_view(content.id),
-        Err(crate::ui::window::WindowError::Unsupported("clone-view"))
+        Err(crate::windows::WindowError::Unsupported("clone-view"))
     );
     let before_clone = graph.clone();
     assert_eq!(
         graph.create_view(content.id, "plugin.demo", 7),
-        Err(crate::ui::window::WindowError::Unsupported("clone-view"))
+        Err(crate::windows::WindowError::Unsupported("clone-view"))
     );
     assert_eq!(graph, before_clone);
     assert!(!capabilities.tile);
@@ -4343,7 +4343,7 @@ fn retained_ui_rejects_shared_children_and_bounds_traversals() {
 
 #[test]
 fn retained_keyboard_focus_scrolls_with_the_projected_height() {
-    use crate::ui::window::WindowRect;
+    use crate::windows::WindowRect;
     let mut graph = WindowGraph::default();
     let tab = graph.create_workspace_tab("builtin.test", 1).unwrap();
     let mut host = PluginWindowHost::default();

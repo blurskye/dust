@@ -38,29 +38,29 @@ use crate::extensions::PluginUiTree;
 
 use crate::extensions::PluginWindowPlacementKind;
 
-use crate::ui::window::ContentAdapterKind;
+use crate::windows::ContentAdapterKind;
 
-use crate::ui::window::ContentCapabilities;
+use crate::windows::ContentCapabilities;
 
-use crate::ui::window::ContentContract;
+use crate::windows::ContentContract;
 
-use crate::ui::window::ContentId;
+use crate::windows::ContentId;
 
-use crate::ui::window::ContentTypeId;
+use crate::windows::ContentTypeId;
 
-use crate::ui::window::DockEdge;
+use crate::windows::DockEdge;
 
-use crate::ui::window::ViewId;
+use crate::windows::ViewId;
 
-use crate::ui::window::WindowError;
+use crate::windows::WindowError;
 
-use crate::ui::window::WindowGraph;
+use crate::windows::WindowGraph;
 
-use crate::ui::window::WindowId;
+use crate::windows::WindowId;
 
-use crate::ui::window::WindowPlacement;
+use crate::windows::WindowPlacement;
 
-use crate::ui::window::WindowRect;
+use crate::windows::WindowRect;
 
 use crate::ui::PluginSurfaceRow;
 

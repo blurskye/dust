@@ -2035,11 +2035,11 @@ fn explorer_auto_git_status_colors_names_opens_picker_and_idles() {
     let revision = app.git.status().unwrap().revision;
     assert_eq!(
         app.git.decorations().get(&path),
-        Some(&crate::workspace::git::GitFileStatus::Modified)
+        Some(&crate::git::GitFileStatus::Modified)
     );
     assert_eq!(
         app.git.decorations().get(&app.state.workspace_root),
-        Some(&crate::workspace::git::GitFileStatus::Modified)
+        Some(&crate::git::GitFileStatus::Modified)
     );
     wait_explorer(&mut app);
     let tracked_row = app
@@ -2080,7 +2080,7 @@ fn explorer_auto_git_status_colors_names_opens_picker_and_idles() {
         .as_ref()
         .map(|p| p.title.clone())
         .expect("title");
-    let branch = crate::workspace::git::git_branch_name(&app.state.workspace_root)
+    let branch = crate::git::git_branch_name(&app.state.workspace_root)
         .expect("a branch read")
         .expect("the fixture is on a branch");
     assert_eq!(
@@ -2296,7 +2296,7 @@ fn trusted_stage_hunk_flow_changes_only_index_and_refreshes_status() {
             .is_err()
     );
     assert!(!app.git.mutation_pending());
-    let before = crate::workspace::git::git_index_fingerprint(&app.state.workspace_root).unwrap();
+    let before = crate::git::git_index_fingerprint(&app.state.workspace_root).unwrap();
     app.stage_selected_git_hunk();
     assert!(app.git.mutation_pending());
     let deadline = Instant::now() + Duration::from_secs(4);
@@ -2306,34 +2306,34 @@ fn trusted_stage_hunk_flow_changes_only_index_and_refreshes_status() {
         assert!(Instant::now() < deadline);
         thread::yield_now()
     }
-    let after = crate::workspace::git::git_index_fingerprint(&app.state.workspace_root).unwrap();
+    let after = crate::git::git_index_fingerprint(&app.state.workspace_root).unwrap();
     assert_ne!(before, after);
     assert_eq!(fs::read_to_string(&path).unwrap(), changed);
     assert!(!app.git.has_selection());
     assert!(app.git.hunks().is_none());
     let status = app.git.status().cloned().unwrap();
-    let mut policy = crate::workspace::git::GitHunkPolicy {
+    let mut policy = crate::git::GitHunkPolicy {
         scope_root: status.scope_root,
         repository_id: status.repository_id,
         status_revision: status.revision,
         root_revision: status.root_revision,
         file: "two-hunks.txt".into(),
-        layer: crate::workspace::git::GitDiffLayer::Unstaged,
+        layer: crate::git::GitDiffLayer::Unstaged,
         maximum_hunks: 10,
         maximum_lines: 100,
         maximum_bytes: 4096,
         deadline: Duration::from_secs(2),
     };
     assert_eq!(
-        crate::workspace::git::read_hunks(&policy)
+        crate::git::read_hunks(&policy)
             .unwrap()
             .hunks
             .len(),
         1
     );
-    policy.layer = crate::workspace::git::GitDiffLayer::Staged;
+    policy.layer = crate::git::GitDiffLayer::Staged;
     assert_eq!(
-        crate::workspace::git::read_hunks(&policy)
+        crate::git::read_hunks(&policy)
             .unwrap()
             .hunks
             .len(),
@@ -2348,7 +2348,7 @@ fn trusted_stage_hunk_flow_changes_only_index_and_refreshes_status() {
     }
     app.accept_picker();
     let index_before_reset =
-        crate::workspace::git::git_index_fingerprint(&app.state.workspace_root).unwrap();
+        crate::git::git_index_fingerprint(&app.state.workspace_root).unwrap();
     let worktree_before_reset = fs::read_to_string(&path).unwrap();
     app.request_reset_selected_git_hunk();
     assert_eq!(
@@ -2365,7 +2365,7 @@ fn trusted_stage_hunk_flow_changes_only_index_and_refreshes_status() {
     );
     app.close_prompt();
     assert_eq!(
-        crate::workspace::git::git_index_fingerprint(&app.state.workspace_root).unwrap(),
+        crate::git::git_index_fingerprint(&app.state.workspace_root).unwrap(),
         index_before_reset
     );
     assert_eq!(fs::read_to_string(&path).unwrap(), worktree_before_reset);
@@ -2380,14 +2380,14 @@ fn trusted_stage_hunk_flow_changes_only_index_and_refreshes_status() {
         thread::yield_now()
     }
     assert_eq!(
-        crate::workspace::git::git_index_fingerprint(&app.state.workspace_root).unwrap(),
+        crate::git::git_index_fingerprint(&app.state.workspace_root).unwrap(),
         index_before_reset
     );
     let reset_text = fs::read_to_string(&path).unwrap();
     assert!(reset_text.contains("changed 2\n") && !reset_text.contains("changed 18\n"));
-    policy.layer = crate::workspace::git::GitDiffLayer::Unstaged;
+    policy.layer = crate::git::GitDiffLayer::Unstaged;
     assert!(
-        crate::workspace::git::read_hunks(&policy)
+        crate::git::read_hunks(&policy)
             .unwrap()
             .hunks
             .is_empty()
@@ -3676,7 +3676,7 @@ fn named_staging_commands_change_only_the_index() {
     let add = snapshot.hunks[0]
         .lines
         .iter()
-        .find(|line| line.kind == crate::workspace::git::GitDiffLineKind::Add)
+        .find(|line| line.kind == crate::git::GitDiffLineKind::Add)
         .and_then(|line| line.new_line)
         .expect("fixture adds a line") as i64;
     invoke(
@@ -3871,8 +3871,8 @@ fn status_reports_a_path_whose_only_change_is_an_unsaved_buffer() {
 
 #[test]
 fn git_change_source_labels_cover_every_combination() {
-    use crate::workspace::git::GitChangeSource;
-    use crate::workspace::git::GitChangeSources;
+    use crate::git::GitChangeSource;
+    use crate::git::GitChangeSources;
     let label = |staged, unstaged, unsaved: Option<u64>| {
         GitChangeSources {
             staged,
@@ -5468,7 +5468,7 @@ fn choosing_a_side_edits_the_result_buffer_and_leaves_save_and_stage_separate() 
     app.state.active_view = Some(view);
     app.state.views[view].buffer = buffer;
     let before_choose = app.state.buffers[buffer].text.to_string();
-    let index_before = crate::workspace::git::git_index_fingerprint(&root).unwrap();
+    let index_before = crate::git::git_index_fingerprint(&root).unwrap();
 
     // ---- CHOOSING A SIDE.
     app.invoke(
@@ -5480,10 +5480,10 @@ fn choosing_a_side_edits_the_result_buffer_and_leaves_save_and_stage_separate() 
         .with_argument("side", CommandValue::String("theirs".into())),
     );
     assert!(!app.ui.notification_error, "{:?}", app.ui.notification);
-    let content = crate::workspace::git::read_side_content(
+    let content = crate::git::read_side_content(
         &root,
         &conflicted,
-        crate::workspace::git::GitConflictChoice::Theirs,
+        crate::git::GitConflictChoice::Theirs,
     )
     .expect("the theirs side is readable");
     assert_eq!(
@@ -5513,7 +5513,7 @@ fn choosing_a_side_edits_the_result_buffer_and_leaves_save_and_stage_separate() 
     );
     // STAGING IS SEPARATE: the index is unchanged until an explicit stage.
     assert_eq!(
-        crate::workspace::git::git_index_fingerprint(&root).unwrap(),
+        crate::git::git_index_fingerprint(&root).unwrap(),
         index_before,
         "the index is untouched by choosing a side"
     );
@@ -5655,7 +5655,7 @@ fn a_previewed_replacement_writes_nothing_until_it_is_confirmed() {
     }
     let target = root.join("h0.txt");
     let before = fs::read(&target).unwrap();
-    let index_before = crate::workspace::git::git_index_fingerprint(&root).unwrap();
+    let index_before = crate::git::git_index_fingerprint(&root).unwrap();
 
     // PREVIEW: a confirmation naming the file and the side, and nothing written yet.
     app.invoke(
@@ -5703,7 +5703,7 @@ fn a_previewed_replacement_writes_nothing_until_it_is_confirmed() {
         "a cancelled preview leaves the file byte-identical"
     );
     assert_eq!(
-        crate::workspace::git::git_index_fingerprint(&root).unwrap(),
+        crate::git::git_index_fingerprint(&root).unwrap(),
         index_before,
         "and the index untouched"
     );
@@ -6502,13 +6502,13 @@ fn staging_from_the_change_surface_acts_on_the_focused_row_not_the_active_buffer
     }
 
     // The staged diff names b.txt and not a.txt.
-    let staged = crate::workspace::git::read_hunks(&crate::workspace::git::GitHunkPolicy {
+    let staged = crate::git::read_hunks(&crate::git::GitHunkPolicy {
         scope_root: app.state.workspace_root.clone(),
         repository_id: app.git.status().expect("status").repository_id,
         status_revision: app.git.status().expect("status").revision,
         root_revision: app.workspace.root_revision(),
         file: std::path::PathBuf::from("b.txt"),
-        layer: crate::workspace::git::GitDiffLayer::Staged,
+        layer: crate::git::GitDiffLayer::Staged,
         maximum_hunks: 100,
         maximum_lines: 1_000,
         maximum_bytes: 1024 * 1024,
@@ -6516,13 +6516,13 @@ fn staging_from_the_change_surface_acts_on_the_focused_row_not_the_active_buffer
     })
     .expect("b.txt hunks");
     assert!(!staged.hunks.is_empty(), "the FOCUSED row b.txt was staged");
-    let a_staged = crate::workspace::git::read_hunks(&crate::workspace::git::GitHunkPolicy {
+    let a_staged = crate::git::read_hunks(&crate::git::GitHunkPolicy {
         scope_root: app.state.workspace_root.clone(),
         repository_id: app.git.status().expect("status").repository_id,
         status_revision: app.git.status().expect("status").revision,
         root_revision: app.workspace.root_revision(),
         file: std::path::PathBuf::from("a.txt"),
-        layer: crate::workspace::git::GitDiffLayer::Staged,
+        layer: crate::git::GitDiffLayer::Staged,
         maximum_hunks: 100,
         maximum_lines: 1_000,
         maximum_bytes: 1024 * 1024,
@@ -7990,7 +7990,7 @@ fn a_previewed_replacement_writes_nothing_until_it_is_confirmed_slot5() {
     }
     let target = root.join("h0.txt");
     let before = fs::read(&target).unwrap();
-    let index_before = crate::workspace::git::git_index_fingerprint(&root).unwrap();
+    let index_before = crate::git::git_index_fingerprint(&root).unwrap();
 
     // PREVIEW: a confirmation naming the file and the side, and nothing written yet.
     app.invoke(
@@ -8038,7 +8038,7 @@ fn a_previewed_replacement_writes_nothing_until_it_is_confirmed_slot5() {
         "a cancelled preview leaves the file byte-identical"
     );
     assert_eq!(
-        crate::workspace::git::git_index_fingerprint(&root).unwrap(),
+        crate::git::git_index_fingerprint(&root).unwrap(),
         index_before,
         "and the index untouched"
     );

@@ -50,10 +50,10 @@ use crate::files::ResourceIntentKind;
 use crate::ui::ExplorerUiState;
 use crate::ui::render::SCRATCH_LABEL;
 use crate::ui::render::TERMINAL_PANEL_RESIZE_STEP;
-use crate::ui::window::PANE_DEFAULT_RATIO;
-use crate::ui::window::PANE_MINIMUM_HEIGHT;
-use crate::ui::window::PANE_MINIMUM_WIDTH;
-use crate::ui::window::PANE_RESIZE_STEP;
+use crate::windows::PANE_DEFAULT_RATIO;
+use crate::windows::PANE_MINIMUM_HEIGHT;
+use crate::windows::PANE_MINIMUM_WIDTH;
+use crate::windows::PANE_RESIZE_STEP;
 use crate::workspace::ExplorerKind;
 use crate::workspace::ExplorerLoadState;
 use crate::workspace::ExplorerNodeId;
@@ -375,7 +375,7 @@ impl App {
             return;
         };
         let repository = status.repository.clone();
-        let state = match crate::workspace::git::read_conflict_state(&repository) {
+        let state = match crate::git::read_conflict_state(&repository) {
             Ok(state) => state,
             Err(error) => {
                 self.ui.operation_bar = Some(crate::ui::OperationBarState {
@@ -389,7 +389,7 @@ impl App {
                 return;
             }
         };
-        self.ui.operation_bar = crate::workspace::git::GitOperationBar::of(&state).map(|bar| {
+        self.ui.operation_bar = crate::git::GitOperationBar::of(&state).map(|bar| {
             crate::ui::OperationBarState {
                 operation: bar.operation,
                 phase: bar.phase,
@@ -1198,7 +1198,7 @@ impl App {
     /// The tree row under the pointer in the layout now on screen.
     pub(super) fn explorer_row_at(
         &self,
-        window: crate::ui::window::WindowId,
+        window: crate::windows::WindowId,
         column: u16,
         row: u16,
     ) -> Option<ExplorerNodeId> {
@@ -1777,7 +1777,7 @@ impl App {
                         },
                         PANE_MINIMUM_WIDTH,
                         PANE_MINIMUM_HEIGHT,
-                        crate::ui::window::TiledInsets {
+                        crate::windows::TiledInsets {
                             screen_bottom,
                             ..Default::default()
                         },
@@ -1817,7 +1817,7 @@ impl App {
                         graph_revision,
                         bounds: preliminary.bounds,
                         minimum_size: (PANE_MINIMUM_WIDTH, PANE_MINIMUM_HEIGHT),
-                        insets: crate::ui::window::TiledInsets {
+                        insets: crate::windows::TiledInsets {
                             screen_bottom,
                             top,
                             bottom: bottom_panes,

@@ -861,7 +861,7 @@ fn dragging_the_border_between_two_windows_resizes_them() {
             .expect("projection")
             .borders
             .iter()
-            .find(|border| border.axis == crate::ui::window::TileAxis::Horizontal)
+            .find(|border| border.axis == crate::windows::TileAxis::Horizontal)
             .copied()
             .expect("side by side border")
     };
@@ -906,7 +906,7 @@ fn the_agent_panel_opens_narrow_and_ctrl_arrows_move_by_word_while_typing_and_re
         let borders = projection
             .borders
             .iter()
-            .filter(|border| border.axis == crate::ui::window::TileAxis::Horizontal)
+            .filter(|border| border.axis == crate::windows::TileAxis::Horizontal)
             .map(|border| border.x)
             .collect::<Vec<_>>();
         let windows = projection
@@ -975,7 +975,7 @@ fn the_agent_panel_opens_on_the_left_when_its_side_says_so() {
     let borders = projection
         .borders
         .iter()
-        .filter(|border| border.axis == crate::ui::window::TileAxis::Horizontal)
+        .filter(|border| border.axis == crate::windows::TileAxis::Horizontal)
         .map(|border| border.x)
         .collect::<Vec<_>>();
     assert_eq!(borders.len(), 1);

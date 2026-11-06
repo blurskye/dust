@@ -168,15 +168,15 @@ fn ordinary_placement(placement: &TargetPlacement) -> Result<WindowPlacement, wi
 
 fn tile_parameters(
     placement: &TargetPlacement,
-) -> Option<(Option<WindowId>, crate::ui::window::TileAxis, bool, u16)> {
+) -> Option<(Option<WindowId>, crate::windows::TileAxis, bool, u16)> {
     let TargetPlacement::Tiled(tile) = placement else {
         return None;
     };
     Some((
         tile.neighbor.map(WindowId),
         match tile.axis {
-            wire::Axis::Horizontal => crate::ui::window::TileAxis::Horizontal,
-            wire::Axis::Vertical => crate::ui::window::TileAxis::Vertical,
+            wire::Axis::Horizontal => crate::windows::TileAxis::Horizontal,
+            wire::Axis::Vertical => crate::windows::TileAxis::Vertical,
         },
         tile.after,
         tile.ratio,
@@ -400,7 +400,7 @@ impl PluginWindowHost {
         let window =
             if let Some((neighbor, axis, after, ratio)) = tile_parameters(&requested_placement) {
                 draft.open_tiled_window(
-                    crate::ui::window::WorkspaceTabId(open.tab),
+                    crate::windows::WorkspaceTabId(open.tab),
                     view,
                     declaration.focusable,
                     &owner,
@@ -409,7 +409,7 @@ impl PluginWindowHost {
                 )
             } else {
                 draft.open_window(
-                    crate::ui::window::WorkspaceTabId(open.tab),
+                    crate::windows::WorkspaceTabId(open.tab),
                     view,
                     ordinary_placement(&requested_placement)?,
                     declaration.focusable,
@@ -778,7 +778,7 @@ impl PluginWindowHost {
 
     pub(in crate::app) fn target03_dimensions(
         &mut self,
-        projection: &crate::ui::window::CompositorProjection,
+        projection: &crate::windows::CompositorProjection,
         catalogue: &crate::extensions::PluginContributionCatalog,
         admission: &TargetAdmission,
         first_event: u64,

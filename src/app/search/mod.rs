@@ -69,12 +69,12 @@ pub(in crate::app) struct SearchSession {
     matcher_navigation: std::collections::HashMap<crate::files::RequestId, MatcherSource>,
     byte_navigation: std::collections::HashMap<crate::files::RequestId, ByteNavigation>,
     preview_location: Option<(usize, usize)>,
-    diff_preview: crate::workspace::git::GitHunkService,
+    diff_preview: crate::git::GitHunkService,
     diff_preview_key: Option<(
         WorkspaceVersion,
         u64,
         std::path::PathBuf,
-        crate::workspace::git::GitDiffLayer,
+        crate::git::GitDiffLayer,
     )>,
     /// The icon a picker row of a file without its own icon gets, or `None` when the
     /// explorer draws no Nerd Font icons and the rows draw none either.

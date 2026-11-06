@@ -27,7 +27,7 @@ use unicode_segmentation::UnicodeSegmentation;
 
 use crate::app::App;
 use crate::app::commands::PromptMove;
-use crate::ui::window::ContentLifecycle;
+use crate::windows::ContentLifecycle;
 use crate::agent::self;
 use crate::agent::AgentMessage;
 use crate::agent::AgentProcess;
@@ -60,7 +60,7 @@ use crate::ui::ContentTabKind;
 use crate::ui::PromptKind;
 use crate::ui::markdown::self;
 use crate::ui::markdown::Styled;
-use crate::ui::window::ContentId;
+use crate::windows::ContentId;
 use crate::workspace::PickerAction;
 use crate::workspace::PickerItem;
 use crate::workspace::PickerItemId;
@@ -2308,7 +2308,7 @@ impl App {
                 Some(id) => {
                     if let Err(error) = self.apply_native_window_placement(
                         super::NativeSurfaceTarget::Terminal(id.0),
-                        crate::ui::window::WindowPlacement::Hidden,
+                        crate::windows::WindowPlacement::Hidden,
                     ) {
                         self.show_error(error);
                     }

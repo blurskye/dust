@@ -1,6 +1,5 @@
 #![forbid(unsafe_code)]
 
-pub mod git;
 pub mod search_workflow;
 
 const ABSOLUTE_ROOT_LIMIT: usize = 64;

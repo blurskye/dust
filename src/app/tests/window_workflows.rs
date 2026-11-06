@@ -152,9 +152,9 @@ fn universal_window_clone_publishes_independent_explorer_views_over_shared_tree_
 
 #[test]
 fn cloned_explorer_rehosts_and_restores_without_replacing_shared_or_view_identity() {
-    use crate::ui::window::DockEdge;
-    use crate::ui::window::WindowPlacement;
-    use crate::ui::window::WindowRect;
+    use crate::windows::DockEdge;
+    use crate::windows::WindowPlacement;
+    use crate::windows::WindowRect;
 
     let mut session = TestSession::new(crate::config::load_bundled_config());
     session.new_buffer();
@@ -229,7 +229,7 @@ fn explorer_clone_paging_uses_its_own_height() {
     session
         .place_window(
             clone,
-            crate::ui::window::WindowPlacement::Floating(crate::ui::window::WindowRect {
+            crate::windows::WindowPlacement::Floating(crate::windows::WindowRect {
                 x: 25,
                 y: 3,
                 width: 40,

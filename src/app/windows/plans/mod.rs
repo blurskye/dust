@@ -4,10 +4,10 @@ use crate::app::windows::EditorTopology;
 use crate::app::windows::EditorWindowCandidate;
 use crate::app::windows::NativeDescriptions;
 use crate::app::windows::WindowSession;
-use crate::ui::window::ContentTypeId;
-use crate::ui::window::WindowTarget;
-use crate::ui::window::PANE_DEFAULT_RATIO;
-use crate::ui::window::PANE_RESIZE_STEP;
+use crate::windows::ContentTypeId;
+use crate::windows::WindowTarget;
+use crate::windows::PANE_DEFAULT_RATIO;
+use crate::windows::PANE_RESIZE_STEP;
 use crate::editor::text::TextVersion;
 use crate::editor::BufferId;
 use crate::editor::EditorOperation;
@@ -17,10 +17,10 @@ use crate::editor::PaneId;
 use crate::editor::TabId;
 use crate::editor::ViewId;
 use crate::extensions::PluginCatalogVersion;
-use crate::ui::window::ContentId;
-use crate::ui::window::ViewId as WindowViewId;
-use crate::ui::window::WindowId;
-use crate::ui::window::WindowPlacement;
+use crate::windows::ContentId;
+use crate::windows::ViewId as WindowViewId;
+use crate::windows::WindowId;
+use crate::windows::WindowPlacement;
 pub(in crate::app) use commands::CommandEffect;
 pub(in crate::app) use commands::CommandError;
 pub(in crate::app) use commands::CommandPolicy;
@@ -52,7 +52,7 @@ pub(in crate::app) struct WindowPlan {
         WindowId,
         WindowViewId,
         ContentId,
-        crate::ui::window::WorkspaceTabId,
+        crate::windows::WorkspaceTabId,
     )>,
     clone_source: Option<(WindowId, WindowViewId, ContentId)>,
     focus_editor: bool,
@@ -126,7 +126,7 @@ pub(in crate::app) enum EditorCloseStep {
 pub(in crate::app) struct FocusLease {
     origin: Arc<()>,
     window: WindowId,
-    view: crate::ui::window::ViewId,
+    view: crate::windows::ViewId,
     source: EditorWindowVersion,
     focus_stamp: Arc<()>,
 }
@@ -873,7 +873,7 @@ impl WindowSession {
         &self,
         target: &str,
         selected_terminal: Option<u64>,
-    ) -> Result<crate::ui::window::WindowId, TargetError> {
+    ) -> Result<crate::windows::WindowId, TargetError> {
         if target == "terminal" {
             let terminal = selected_terminal.ok_or(TargetError::MissingTerminal)?;
             return self
@@ -890,7 +890,7 @@ impl WindowSession {
                 ContentTypeId::new("builtin.explorer")
                     .map_err(|error| TargetError::Rejected(error.to_string()))?,
             ),
-            value if value.starts_with("window:") => WindowTarget::Id(crate::ui::window::WindowId(
+            value if value.starts_with("window:") => WindowTarget::Id(crate::windows::WindowId(
                 value["window:".len()..].parse::<u64>().map_err(|_| {
                     TargetError::Rejected(format!("invalid runtime window target `{value}`"))
                 })?,

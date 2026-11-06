@@ -2,11 +2,11 @@ use crate::app::windows::ProjectionRequest;
 use crate::app::windows::WindowSession;
 use crate::config::load_bundled_config;
 use crate::ui::NativeSurfaceWindowBinding;
-use crate::ui::window::ContentAdapterKind;
-use crate::ui::window::ContentContract;
-use crate::ui::window::WindowId;
-use crate::ui::window::WindowPlacement;
-use crate::ui::window::WindowRect;
+use crate::windows::ContentAdapterKind;
+use crate::windows::ContentContract;
+use crate::windows::WindowId;
+use crate::windows::WindowPlacement;
+use crate::windows::WindowRect;
 
 fn editor_fixture() -> (crate::editor::EditorState, WindowSession) {
     let mut state = crate::editor::EditorState::new("/workspace".into());
@@ -27,7 +27,7 @@ fn session_restore_retires_plugin_windows_before_replacing_their_tabs() {
     use crate::persistence::PersistedPane;
     use crate::persistence::PersistedSession;
     use crate::persistence::PersistedTab;
-    use crate::ui::window::ContentTypeId;
+    use crate::windows::ContentTypeId;
     let (state, mut windows) = editor_fixture();
     let tab = windows.graph().active_tab().unwrap();
     let graph = &mut windows.core.graph;
@@ -119,7 +119,7 @@ fn session_restore_retires_plugin_windows_before_replacing_their_tabs() {
                     explorer_views: std::sync::Arc::from([1]),
                     focused_explorer: None,
                     explorer_size: 24,
-                    explorer_edge: crate::ui::window::DockEdge::Left,
+                    explorer_edge: crate::windows::DockEdge::Left,
                     active_terminal: None,
                     shown_terminals: std::sync::Arc::from([]),
                     terminal_focused: false,
@@ -215,7 +215,7 @@ fn failed_explorer_reconstruction_does_not_publish_a_partial_graph_or_bridge() {
             .into(),
         focused_explorer: Some(1),
         explorer_size: 24,
-        explorer_edge: crate::ui::window::DockEdge::Left,
+        explorer_edge: crate::windows::DockEdge::Left,
         active_terminal: None,
         shown_terminals: Vec::new().into(),
         terminal_focused: false,
@@ -348,21 +348,21 @@ fn exhausted_owner_rejects_transition_before_either_live_state_is_replaced() {
     assert_eq!(accepted.window_version(), expected);
     assert_eq!(windows.epoch, u64::MAX);
     let graph = windows.graph().clone();
-    let copies = crate::ui::window::WindowGraph::test_clone_count();
+    let copies = crate::windows::WindowGraph::test_clone_count();
     assert!(
         windows
             .prepare_editor(&(&accepted).into(), "[scratch]")
             .is_err()
     );
-    assert_eq!(crate::ui::window::WindowGraph::test_clone_count(), copies);
+    assert_eq!(crate::windows::WindowGraph::test_clone_count(), copies);
     assert_eq!(windows.graph(), &graph);
 }
 
 #[test]
 fn plugin_drafts_cannot_write_editor_resources_foreign_generations_tabs_or_protected_layers() {
     let catalog = crate::extensions::PluginCatalogVersion::default();
-    use crate::ui::window::ContentTypeId;
-    use crate::ui::window::WindowError;
+    use crate::windows::ContentTypeId;
+    use crate::windows::WindowError;
     let (state, mut windows) = editor_fixture();
     let editor_window = windows.graph().focused().unwrap();
     let active = windows.graph().active_tab().unwrap();
@@ -523,11 +523,11 @@ fn accepted_projection_rejects_old_source_graph_size_and_invalidation() {
         width: 100,
         height: 30,
     };
-    let mut graph = crate::ui::window::WindowGraph::default();
+    let mut graph = crate::windows::WindowGraph::default();
     let tab = graph.create_workspace_tab("fixture", 1).unwrap();
     let content = graph
         .create_content(
-            crate::ui::window::ContentTypeId::new("fixture.explorer").unwrap(),
+            crate::windows::ContentTypeId::new("fixture.explorer").unwrap(),
             ContentAdapterKind::DeclarativeUi,
             "Explorer".into(),
             false,
@@ -541,7 +541,7 @@ fn accepted_projection_rejects_old_source_graph_size_and_invalidation() {
             tab,
             view,
             WindowPlacement::Docked {
-                edge: crate::ui::window::DockEdge::Left,
+                edge: crate::windows::DockEdge::Left,
                 size: 25,
             },
             true,
@@ -558,7 +558,7 @@ fn accepted_projection_rejects_old_source_graph_size_and_invalidation() {
         graph_revision: revision,
         bounds,
         minimum_size: (4, 2),
-        insets: crate::ui::window::TiledInsets {
+        insets: crate::windows::TiledInsets {
             top: 1,
             bottom: 1,
             ..Default::default()
@@ -639,7 +639,7 @@ fn staged_window_work_rejects_editor_and_catalog_changes_without_a_window_epoch_
         })
         .unwrap();
     assert_eq!(windows.epoch, epoch);
-    let copies = crate::ui::window::WindowGraph::test_clone_count();
+    let copies = crate::windows::WindowGraph::test_clone_count();
     assert!(
         windows
             .commit_plugin(draft, &before, &catalog.version())
@@ -650,7 +650,7 @@ fn staged_window_work_rejects_editor_and_catalog_changes_without_a_window_epoch_
             .accept_editor_transition(transition, &state.version(), &catalog.version())
             .is_err()
     );
-    assert_eq!(crate::ui::window::WindowGraph::test_clone_count(), copies);
+    assert_eq!(crate::windows::WindowGraph::test_clone_count(), copies);
     assert_eq!(windows.graph(), &graph);
     let draft = windows
         .begin_plugin("demo", 7, (&before, &catalog.version()))
@@ -666,7 +666,7 @@ fn staged_window_work_rejects_editor_and_catalog_changes_without_a_window_epoch_
         )
         .unwrap();
     assert_eq!(windows.epoch, epoch);
-    let copies = crate::ui::window::WindowGraph::test_clone_count();
+    let copies = crate::windows::WindowGraph::test_clone_count();
     assert!(
         windows
             .check_plan(&plan, &state.window_version(), &catalog.version())
@@ -682,7 +682,7 @@ fn staged_window_work_rejects_editor_and_catalog_changes_without_a_window_epoch_
             .begin_plugin("demo", 7, (&state.window_version(), &catalog.version()))
             .is_err()
     );
-    assert_eq!(crate::ui::window::WindowGraph::test_clone_count(), copies);
+    assert_eq!(crate::windows::WindowGraph::test_clone_count(), copies);
     assert_eq!(windows.graph(), &graph);
 }
 
@@ -784,13 +784,13 @@ fn editor_proposals_cannot_swap_equal_revision_branches_or_rebase_stale_work() {
         ))
         .unwrap();
     assert_eq!(state.window_version(), window_source);
-    let copies = crate::ui::window::WindowGraph::test_clone_count();
+    let copies = crate::windows::WindowGraph::test_clone_count();
     assert!(
         windows
             .prepare_editor_transition(left, &state.version(), catalog.clone(), "scratch", None)
             .is_err()
     );
-    assert_eq!(crate::ui::window::WindowGraph::test_clone_count(), copies);
+    assert_eq!(crate::windows::WindowGraph::test_clone_count(), copies);
     assert_eq!(windows.graph(), &graph);
 
     let proposal = state.prepare_transaction(&transaction).unwrap();
@@ -811,7 +811,7 @@ fn invalid_editor_sources_reject_before_graph_copy() {
     let mut exhausted = state.clone();
     exhausted.exhaust_window_source_for_test();
     let (foreign, _) = editor_fixture();
-    let copies = crate::ui::window::WindowGraph::test_clone_count();
+    let copies = crate::windows::WindowGraph::test_clone_count();
     assert!(
         windows
             .prepare_editor(&(&exhausted).into(), "scratch")
@@ -822,7 +822,7 @@ fn invalid_editor_sources_reject_before_graph_copy() {
             .prepare_editor(&(&foreign).into(), "scratch")
             .is_err()
     );
-    assert_eq!(crate::ui::window::WindowGraph::test_clone_count(), copies);
+    assert_eq!(crate::windows::WindowGraph::test_clone_count(), copies);
 }
 
 /// Run directly with --ignored --nocapture --test-threads=1. Optional Linux
@@ -835,7 +835,7 @@ fn window_admission_cost_probe() {
     use crate::editor::EditorState;
     use crate::editor::EditorTransaction;
     use crate::editor::TransactionId;
-    use crate::ui::window::WindowGraph;
+    use crate::windows::WindowGraph;
     let case = std::env::var("DUST_COST_CASE").unwrap_or_else(|_| "idle".into());
     let iterations: usize = std::env::var("DUST_COST_ITERATIONS")
         .ok()
@@ -947,7 +947,7 @@ fn startup_document_and_dashboard_publish_together_only_for_the_accepted_proposa
             explorer_views: vec![1].into(),
             focused_explorer: None,
             explorer_size: 24,
-            explorer_edge: crate::ui::window::DockEdge::Left,
+            explorer_edge: crate::windows::DockEdge::Left,
             active_terminal: None,
             shown_terminals: Vec::new().into(),
             terminal_focused: false,
@@ -1005,9 +1005,9 @@ fn startup_document_and_dashboard_publish_together_only_for_the_accepted_proposa
     assert_eq!(accepted.buffers[buffer].text.to_string(), "startup");
     assert!(!windows.dashboard_visible());
     windows.epoch = u64::MAX;
-    let copies = crate::ui::window::WindowGraph::test_clone_count();
+    let copies = crate::windows::WindowGraph::test_clone_count();
     assert!(windows.check_editor_admission(&(&accepted).into()).is_err());
-    assert_eq!(crate::ui::window::WindowGraph::test_clone_count(), copies);
+    assert_eq!(crate::windows::WindowGraph::test_clone_count(), copies);
 }
 
 #[test]
@@ -1042,7 +1042,7 @@ fn native_command_plans_are_source_bound_before_any_candidate_copy() {
         pane_step: 2,
         terminal_step: 2,
     };
-    let copies = crate::ui::window::WindowGraph::test_clone_count();
+    let copies = crate::windows::WindowGraph::test_clone_count();
     let clone_plan = windows
         .plan_window_command(
             WindowCommand::Clone("focused", crate::editor::Axis::Horizontal, 500),
@@ -1055,7 +1055,7 @@ fn native_command_plans_are_source_bound_before_any_candidate_copy() {
         clone_plan.operations(),
         [crate::editor::EditorOperation::ClonePane { .. }]
     ));
-    assert_eq!(crate::ui::window::WindowGraph::test_clone_count(), copies);
+    assert_eq!(crate::windows::WindowGraph::test_clone_count(), copies);
     let mut changed = state.clone();
     changed
         .split_active(crate::editor::Axis::Vertical, 500)
@@ -1109,7 +1109,7 @@ fn native_command_plans_are_source_bound_before_any_candidate_copy() {
         .plan_window_command(
             WindowCommand::Place(
                 "focused",
-                crate::ui::window::WindowPlacement::Floating(WindowRect {
+                crate::windows::WindowPlacement::Floating(WindowRect {
                     x: 3,
                     y: 2,
                     width: 30,
@@ -1171,14 +1171,14 @@ fn native_command_plans_are_source_bound_before_any_candidate_copy() {
         .unwrap_or_else(|_| panic!("clone plan"));
     windows.invalidate_native();
     let before = windows.graph().clone();
-    let copies = crate::ui::window::WindowGraph::test_clone_count();
+    let copies = crate::windows::WindowGraph::test_clone_count();
     assert!(
         windows
             .accept_window_command(plan, &source, &catalog)
             .is_err()
     );
     assert_eq!(windows.graph(), &before);
-    assert_eq!(crate::ui::window::WindowGraph::test_clone_count(), copies);
+    assert_eq!(crate::windows::WindowGraph::test_clone_count(), copies);
 }
 
 #[test]

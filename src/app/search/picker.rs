@@ -68,15 +68,15 @@ pub(in crate::app) enum PickerPayload {
     Command(String),
     ProposalFile(usize),
     Terminal(crate::app::terminal::TerminalKey),
-    Window(crate::ui::window::WindowId),
+    Window(crate::windows::WindowId),
     LspSession(String),
     Debug(crate::app::debugger::DebugKey),
     PersistedLocation(PersistedLocation),
     GitHunk {
         path: PathBuf,
         status_revision: u64,
-        repository: crate::workspace::git::GitRepositoryId,
-        hunk: crate::workspace::git::GitHunkId,
+        repository: crate::git::GitRepositoryId,
+        hunk: crate::git::GitHunkId,
         new_line: usize,
     },
     MatcherSource(MatcherSource),
@@ -447,7 +447,7 @@ impl SearchSession {
     }
 
     /// Which comparison the change surface's diff pane shows.
-    pub(in crate::app) fn changes_layer(&self) -> crate::workspace::git::GitDiffLayer {
+    pub(in crate::app) fn changes_layer(&self) -> crate::git::GitDiffLayer {
         // A row shows its own comparison, and Tab shows the other one.
         let staged = self.picker.interaction.as_ref().is_some_and(|picker| {
             let staged_row = picker
@@ -457,9 +457,9 @@ impl SearchSession {
             staged_row != picker.changes_other_layer
         });
         if staged {
-            crate::workspace::git::GitDiffLayer::Staged
+            crate::git::GitDiffLayer::Staged
         } else {
-            crate::workspace::git::GitDiffLayer::Unstaged
+            crate::git::GitDiffLayer::Unstaged
         }
     }
 
@@ -467,7 +467,7 @@ impl SearchSession {
     /// now shows, so the caller can refresh the pane.
     pub(in crate::app) fn switch_changes_layer(
         &mut self,
-    ) -> Option<crate::workspace::git::GitDiffLayer> {
+    ) -> Option<crate::git::GitDiffLayer> {
         let picker = self.picker.interaction.as_mut()?;
         if picker.surface != PickerSurfaceKind::Changes {
             return None;

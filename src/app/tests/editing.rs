@@ -1484,7 +1484,7 @@ fn startup_lifecycle_cost_probe() {
         app.documents.enqueue_startup_fixture(path, n == 0);
     }
     let baseline = (
-        crate::ui::window::WindowGraph::test_clone_count(),
+        crate::windows::WindowGraph::test_clone_count(),
         crate::editor::EditorState::test_clone_count(),
         ExtensionSession::fixture_window_clone_count(),
         TextBuffer::test_materializations(),
@@ -1499,7 +1499,7 @@ fn startup_lifecycle_cost_probe() {
     println!(
         "startup_files=4 bytes_per_file={} elapsed_ns={elapsed} graph_copies={} editor_copies={} host_copies={} text_decodes={} text_displays={}",
         bytes.len(),
-        crate::ui::window::WindowGraph::test_clone_count() - baseline.0,
+        crate::windows::WindowGraph::test_clone_count() - baseline.0,
         crate::editor::EditorState::test_clone_count() - baseline.1,
         ExtensionSession::fixture_window_clone_count() - baseline.2,
         materializations.0 - baseline.3.0,

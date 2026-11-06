@@ -241,7 +241,7 @@ fn choice_geometry(
     page: &SettingsPageState,
     layout: SettingsLayout,
     ambiguous: AmbiguousWidth,
-) -> Option<(crate::ui::window::WindowRect, usize)> {
+) -> Option<(crate::windows::WindowRect, usize)> {
     let SettingsEdit::Choice { selected } = page.edit.as_ref()? else {
         return None;
     };
@@ -278,7 +278,7 @@ fn choice_geometry(
     }
     let first = (*selected + 1).saturating_sub(usize::from(height - 2));
     Some((
-        crate::ui::window::WindowRect {
+        crate::windows::WindowRect {
             x: (layout.list_x + layout.list_width).saturating_sub(width + 1),
             y: top,
             width,

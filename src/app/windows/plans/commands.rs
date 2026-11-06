@@ -47,13 +47,13 @@ pub(super) enum NativeAction {
     Place(NativeSurfaceTarget, WindowPlacement),
     PlaceEditor(
         crate::editor::PaneId,
-        crate::ui::window::WindowId,
+        crate::windows::WindowId,
         WindowPlacement,
     ),
-    ShowEditor(crate::editor::PaneId, crate::ui::window::WindowId),
+    ShowEditor(crate::editor::PaneId, crate::windows::WindowId),
     SwapEditors(
-        (crate::editor::PaneId, crate::ui::window::WindowId),
-        (crate::editor::PaneId, crate::ui::window::WindowId),
+        (crate::editor::PaneId, crate::windows::WindowId),
+        (crate::editor::PaneId, crate::windows::WindowId),
     ),
     Close(NativeSurfaceTarget),
     Swap(NativeSurfaceTarget, NativeSurfaceTarget),
@@ -70,8 +70,8 @@ impl WindowSession {
     /// A shown terminal docked on the right (for `Horizontal`) or at the bottom (`Vertical`).
     fn docked_terminal_on(&self, axis: crate::editor::Axis) -> Option<NativeSurfaceTarget> {
         let wanted = match axis {
-            crate::editor::Axis::Horizontal => crate::ui::window::DockEdge::Right,
-            crate::editor::Axis::Vertical => crate::ui::window::DockEdge::Bottom,
+            crate::editor::Axis::Horizontal => crate::windows::DockEdge::Right,
+            crate::editor::Axis::Vertical => crate::windows::DockEdge::Bottom,
         };
         let mut ids: Vec<u64> = self.native_ids().terminal_ids().collect();
         ids.sort_unstable();
@@ -439,16 +439,16 @@ impl WindowSession {
                         }
                         WindowPlacement::Docked { edge, size } => {
                             let grow = match (edge, direction) {
-                                (crate::ui::window::DockEdge::Bottom, FocusDirection::Up)
-                                | (crate::ui::window::DockEdge::Top, FocusDirection::Down)
-                                | (crate::ui::window::DockEdge::Left, FocusDirection::Right)
-                                | (crate::ui::window::DockEdge::Right, FocusDirection::Left) => {
+                                (crate::windows::DockEdge::Bottom, FocusDirection::Up)
+                                | (crate::windows::DockEdge::Top, FocusDirection::Down)
+                                | (crate::windows::DockEdge::Left, FocusDirection::Right)
+                                | (crate::windows::DockEdge::Right, FocusDirection::Left) => {
                                     true
                                 }
-                                (crate::ui::window::DockEdge::Bottom, FocusDirection::Down)
-                                | (crate::ui::window::DockEdge::Top, FocusDirection::Up)
-                                | (crate::ui::window::DockEdge::Left, FocusDirection::Left)
-                                | (crate::ui::window::DockEdge::Right, FocusDirection::Right) => {
+                                (crate::windows::DockEdge::Bottom, FocusDirection::Down)
+                                | (crate::windows::DockEdge::Top, FocusDirection::Up)
+                                | (crate::windows::DockEdge::Left, FocusDirection::Left)
+                                | (crate::windows::DockEdge::Right, FocusDirection::Right) => {
                                     false
                                 }
                                 _ => {

@@ -17,9 +17,9 @@ use tempfile::TempDir;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct TerminalCloneState {
-    graph: crate::ui::window::WindowGraph,
+    graph: crate::windows::WindowGraph,
     editor: crate::editor::EditorWindowVersion,
-    descriptions: Vec<(u64, String, crate::ui::window::ContentLifecycle)>,
+    descriptions: Vec<(u64, String, crate::windows::ContentLifecycle)>,
     selected: Option<crate::process::PtyId>,
     focused: Option<u64>,
     dimensions: Option<(usize, usize)>,
@@ -88,7 +88,7 @@ impl TestSession {
         self.application
             .process_effect(crate::app::AppEffect::WindowList);
     }
-    pub(super) fn focused_window(&self) -> Option<crate::ui::window::WindowId> {
+    pub(super) fn focused_window(&self) -> Option<crate::windows::WindowId> {
         self.application.window_session.graph().focused()
     }
     pub(super) fn active_tab(&self) -> Option<crate::editor::TabId> {
@@ -99,7 +99,7 @@ impl TestSession {
     }
     pub(super) fn copy_counts(&self) -> (usize, usize, usize) {
         (
-            crate::ui::window::WindowGraph::test_clone_count(),
+            crate::windows::WindowGraph::test_clone_count(),
             crate::app::extensions::ExtensionSession::fixture_window_clone_count(),
             self.application.window_session.content_builds(),
         )
@@ -109,11 +109,11 @@ impl TestSession {
     }
     pub(super) fn window_identity(
         &self,
-        window: crate::ui::window::WindowId,
+        window: crate::windows::WindowId,
     ) -> (
-        crate::ui::window::WindowId,
-        crate::ui::window::ViewId,
-        crate::ui::window::ContentId,
+        crate::windows::WindowId,
+        crate::windows::ViewId,
+        crate::windows::ContentId,
     ) {
         let descriptor = self
             .application
@@ -426,7 +426,7 @@ impl TestSession {
         }));
         selections
     }
-    pub(super) fn explorer_body(&self, view: u64) -> crate::ui::window::WindowRect {
+    pub(super) fn explorer_body(&self, view: u64) -> crate::windows::WindowRect {
         let ids = self
             .application
             .window_session
@@ -460,7 +460,7 @@ impl TestSession {
     }
     pub(super) fn explorer_content_ids(
         &self,
-    ) -> Vec<(u64, crate::ui::window::ContentId, crate::ui::window::ViewId)> {
+    ) -> Vec<(u64, crate::windows::ContentId, crate::windows::ViewId)> {
         self.application
             .window_session
             .native_ids()
@@ -479,7 +479,7 @@ impl TestSession {
             });
         self.application.reconcile_editor_windows();
     }
-    pub(super) fn explorer_window(&self, view: u64) -> crate::ui::window::WindowId {
+    pub(super) fn explorer_window(&self, view: u64) -> crate::windows::WindowId {
         self.application
             .window_session
             .native_ids()
@@ -489,8 +489,8 @@ impl TestSession {
     }
     pub(super) fn window_tab(
         &self,
-        window: crate::ui::window::WindowId,
-    ) -> crate::ui::window::WorkspaceTabId {
+        window: crate::windows::WindowId,
+    ) -> crate::windows::WorkspaceTabId {
         self.application
             .window_session
             .graph()
@@ -498,7 +498,7 @@ impl TestSession {
             .expect("fixture window")
             .tab
     }
-    pub(super) fn active_window_tab(&self) -> crate::ui::window::WorkspaceTabId {
+    pub(super) fn active_window_tab(&self) -> crate::windows::WorkspaceTabId {
         self.application
             .window_session
             .graph()
@@ -507,8 +507,8 @@ impl TestSession {
     }
     pub(super) fn window_placement(
         &self,
-        window: crate::ui::window::WindowId,
-    ) -> crate::ui::window::WindowPlacement {
+        window: crate::windows::WindowId,
+    ) -> crate::windows::WindowPlacement {
         self.application
             .window_session
             .graph()
@@ -518,15 +518,15 @@ impl TestSession {
     }
     pub(super) fn place_window(
         &mut self,
-        window: crate::ui::window::WindowId,
-        placement: crate::ui::window::WindowPlacement,
+        window: crate::windows::WindowId,
+        placement: crate::windows::WindowPlacement,
     ) -> Result<(), String> {
         self.application
             .place_graph_window(&format!("window:{}", window.0), placement)
     }
     pub(super) fn show_window(
         &mut self,
-        window: crate::ui::window::WindowId,
+        window: crate::windows::WindowId,
     ) -> Result<(), String> {
         self.application
             .show_graph_window(&format!("window:{}", window.0))
@@ -647,7 +647,7 @@ impl TestSession {
     pub(super) fn window_policy_snapshot(
         &self,
     ) -> (
-        crate::ui::window::WindowGraph,
+        crate::windows::WindowGraph,
         crate::config::WindowsConfig,
         u64,
     ) {
@@ -906,7 +906,7 @@ impl TestSession {
     }
     pub(super) fn place_terminal(
         &mut self,
-        placement: crate::ui::window::WindowPlacement,
+        placement: crate::windows::WindowPlacement,
     ) -> Result<(), String> {
         self.application.place_graph_window("terminal", placement)
     }
@@ -916,9 +916,9 @@ impl TestSession {
     pub(super) fn terminal_window_identity(
         &self,
     ) -> Option<(
-        crate::ui::window::ContentId,
-        crate::ui::window::ViewId,
-        crate::ui::window::WindowId,
+        crate::windows::ContentId,
+        crate::windows::ViewId,
+        crate::windows::WindowId,
     )> {
         let id = self.application.displayed_terminal()?;
         let ids = self
@@ -936,7 +936,7 @@ impl TestSession {
             .window_session
             .terminal_geometry_source(id.0)
     }
-    pub(super) fn terminal_window_tab(&self) -> Option<crate::ui::window::WorkspaceTabId> {
+    pub(super) fn terminal_window_tab(&self) -> Option<crate::windows::WorkspaceTabId> {
         let (_, _, window) = self.terminal_window_identity()?;
         self.application
             .window_session

@@ -263,7 +263,7 @@ fn docked_layout_render_and_protection_share_confirmation_bounds() {
         .expect("protected prompt");
     assert_eq!(
         protected,
-        crate::ui::window::WindowRect {
+        crate::windows::WindowRect {
             x: expected.left,
             y: expected.top,
             width: expected.width,
@@ -1057,7 +1057,7 @@ fn packaged_production_02_component_clone_refusal_never_enqueues_a_guest_callbac
                 .content_snapshots()
                 .iter()
                 .any(|content| {
-                    content.adapter == crate::ui::window::ContentAdapterKind::PrivateCellSurface
+                    content.adapter == crate::windows::ContentAdapterKind::PrivateCellSurface
                 })
             {
                 app.process_plugin_events();

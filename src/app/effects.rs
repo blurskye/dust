@@ -6914,7 +6914,7 @@ impl App {
     }
 
     /// Every terminal with a window on screen, the active one first.
-    pub(super) fn shown_terminal_windows(&self) -> Vec<(PtyId, crate::ui::window::WindowId)> {
+    pub(super) fn shown_terminal_windows(&self) -> Vec<(PtyId, crate::windows::WindowId)> {
         let Some(projection) = self.compositor_projection() else {
             return Vec::new();
         };
@@ -7765,12 +7765,12 @@ impl App {
         &mut self,
         action: Option<GitHunkAction>,
     ) {
-        self.start_git_hunks_with_layer(action, crate::workspace::git::GitDiffLayer::Unstaged);
+        self.start_git_hunks_with_layer(action, crate::git::GitDiffLayer::Unstaged);
     }
     pub(in crate::app) fn start_git_hunks_with_layer(
         &mut self,
         action: Option<GitHunkAction>,
-        layer: crate::workspace::git::GitDiffLayer,
+        layer: crate::git::GitDiffLayer,
     ) {
         let path = self
             .state
@@ -7972,7 +7972,7 @@ impl App {
     }
     pub(in crate::app) fn unstage_selected_git_hunk(&mut self) {
         self.git.reconcile_hunk_path(&self.state);
-        use crate::workspace::git::GitDiffLayer;
+        use crate::git::GitDiffLayer;
         if !self.active_git_hunks(GitDiffLayer::Staged) {
             self.start_git_hunks_with_layer(Some(GitHunkAction::Unstage), GitDiffLayer::Staged);
             return;
@@ -7986,7 +7986,7 @@ impl App {
         }
         if let Err(error) = self.git.start_plan(
             &self.state,
-            crate::workspace::git::GitMutationKind::UnstageHunk,
+            crate::git::GitMutationKind::UnstageHunk,
             self.workspace.root_revision(),
             self.workspace.trust() == WorkspaceTrust::Trusted,
             Vec::new(),
@@ -8011,7 +8011,7 @@ impl App {
                                 let file = self.git.hunks().map(|snapshot| snapshot.file.clone());
                                 self.git.start_plan_for(
                                     &self.state,
-                                    crate::workspace::git::GitMutationKind::StageLines,
+                                    crate::git::GitMutationKind::StageLines,
                                     self.workspace.root_revision(),
                                     self.workspace.trust() == WorkspaceTrust::Trusted,
                                     lines,
@@ -8136,7 +8136,7 @@ impl App {
             self.notify_message(self.message("conflict_none", &[]), false);
         }
     }
-    fn active_git_hunks(&self, layer: crate::workspace::git::GitDiffLayer) -> bool {
+    fn active_git_hunks(&self, layer: crate::git::GitDiffLayer) -> bool {
         self.state
             .active_buffer_id()
             .and_then(|id| self.state.buffers[id].path.as_deref())
@@ -8147,7 +8147,7 @@ impl App {
     }
     pub(in crate::app) fn navigate_git_hunk(&mut self, direction: i8) {
         self.git.reconcile_hunk_path(&self.state);
-        if !self.active_git_hunks(crate::workspace::git::GitDiffLayer::Unstaged) {
+        if !self.active_git_hunks(crate::git::GitDiffLayer::Unstaged) {
             self.start_git_hunks_with_action(Some(GitHunkAction::Move(direction.signum())));
             return;
         }
@@ -8177,7 +8177,7 @@ impl App {
     }
     pub(in crate::app) fn preview_selected_git_hunk(&mut self) {
         self.git.reconcile_hunk_path(&self.state);
-        if !self.active_git_hunks(crate::workspace::git::GitDiffLayer::Unstaged) {
+        if !self.active_git_hunks(crate::git::GitDiffLayer::Unstaged) {
             self.start_git_hunks_with_action(Some(GitHunkAction::Preview));
             return;
         }
@@ -8202,7 +8202,7 @@ impl App {
             self.show_error("Git reset requires a trusted workspace");
             return;
         }
-        if !self.active_git_hunks(crate::workspace::git::GitDiffLayer::Unstaged) {
+        if !self.active_git_hunks(crate::git::GitDiffLayer::Unstaged) {
             self.start_git_hunks_with_action(Some(GitHunkAction::Reset));
             return;
         }
@@ -8217,7 +8217,7 @@ impl App {
     }
     pub(in crate::app) fn confirm_reset_selected_git_hunk(&mut self, phrase: String) {
         let same_target = self.git.take_reset_target();
-        if !same_target || !self.active_git_hunks(crate::workspace::git::GitDiffLayer::Unstaged) {
+        if !same_target || !self.active_git_hunks(crate::git::GitDiffLayer::Unstaged) {
             self.show_error("Git hunk target changed");
             return;
         }
@@ -8259,7 +8259,7 @@ impl App {
             self.show_error("line range must be two non-negative integers with end >= start");
             return;
         };
-        let unstaged = crate::workspace::git::GitDiffLayer::Unstaged;
+        let unstaged = crate::git::GitDiffLayer::Unstaged;
         if !self.active_git_hunks(unstaged) {
             self.start_git_hunks_with_action(Some(GitHunkAction::StageLines(start, end)));
             return;
@@ -8274,7 +8274,7 @@ impl App {
         };
         if let Err(error) = self.git.start_plan(
             &self.state,
-            crate::workspace::git::GitMutationKind::StageLines,
+            crate::git::GitMutationKind::StageLines,
             self.workspace.root_revision(),
             self.workspace.trust() == WorkspaceTrust::Trusted,
             lines,
@@ -8301,7 +8301,7 @@ impl App {
     }
     pub(in crate::app) fn stage_selected_git_hunk(&mut self) {
         self.git.reconcile_hunk_path(&self.state);
-        if !self.active_git_hunks(crate::workspace::git::GitDiffLayer::Unstaged) {
+        if !self.active_git_hunks(crate::git::GitDiffLayer::Unstaged) {
             self.start_git_hunks_with_action(Some(GitHunkAction::Stage(self.cursor_line_number())));
             return;
         }
@@ -8363,8 +8363,8 @@ impl App {
         effect: AppEffect,
         selected_line: Option<u32>,
     ) {
-        use crate::workspace::git::GitDiffLayer;
-        use crate::workspace::git::GitMutationKind;
+        use crate::git::GitDiffLayer;
+        use crate::git::GitMutationKind;
         self.input.set_pending_stage(effect.clone());
         let result = match effect {
             AppEffect::GitFileStage | AppEffect::GitConflictStage | AppEffect::GitFileUnstage => {
@@ -8542,7 +8542,7 @@ impl App {
         let conflicted: Vec<_> = snapshot
             .entries
             .iter()
-            .filter(|entry| entry.status == crate::workspace::git::GitFileStatus::Conflicted)
+            .filter(|entry| entry.status == crate::git::GitFileStatus::Conflicted)
             .collect();
         // The Unstaged section holds what is not staged. A path whose buffer has unsaved
         // edits but nothing on disk is listed here too, because the document says such a path
@@ -8552,7 +8552,7 @@ impl App {
             .entries
             .iter()
             .filter(|entry| {
-                entry.status != crate::workspace::git::GitFileStatus::Conflicted
+                entry.status != crate::git::GitFileStatus::Conflicted
                     && (entry.sources.unstaged || entry.sources.unsaved_document_revision.is_some())
             })
             .collect();
@@ -8560,7 +8560,7 @@ impl App {
             .entries
             .iter()
             .filter(|entry| {
-                entry.status != crate::workspace::git::GitFileStatus::Conflicted
+                entry.status != crate::git::GitFileStatus::Conflicted
                     && entry.sources.staged
             })
             .collect();
@@ -8631,7 +8631,7 @@ impl App {
         // The title names the branch the changes are against, as the document draws it. A
         // detached HEAD has no branch name, so the segment is simply absent rather than
         // filled with something invented.
-        let branch = crate::workspace::git::git_branch_name(&snapshot.repository)
+        let branch = crate::git::git_branch_name(&snapshot.repository)
             .ok()
             .flatten();
         let title = match branch {
@@ -8663,7 +8663,7 @@ impl App {
             self.show_error("this needs a file buffer");
             return;
         };
-        let url = match crate::workspace::git::git_browse_url(&path, line) {
+        let url = match crate::git::git_browse_url(&path, line) {
             Ok(url) => url,
             Err(error) => {
                 self.show_error(error);
@@ -8708,7 +8708,7 @@ impl App {
 
     /// The two-character index/worktree code a change row shows. Unmerged and untracked have
     /// their own codes; everything else names which side differs.
-    fn change_code(entry: &crate::workspace::git::GitStatusEntry) -> String {
+    fn change_code(entry: &crate::git::GitStatusEntry) -> String {
         entry.change_code()
     }
 }
@@ -10573,7 +10573,7 @@ impl App {
     /// Saving and staging are deliberately NOT part of this: the buffer is left dirty and the
     /// file on disk and the index are untouched until their own explicit actions run.
     pub(in crate::app) fn choose_git_conflict_side(&mut self, side: &str) {
-        let Some(choice) = crate::workspace::git::GitConflictChoice::parse(side) else {
+        let Some(choice) = crate::git::GitConflictChoice::parse(side) else {
             self.show_error("choose base, ours or theirs");
             return;
         };
@@ -10601,7 +10601,7 @@ impl App {
             return;
         };
         // The content comes from the repository, and every refusal is decided before the edit.
-        let content = match crate::workspace::git::read_side_content(&repository, &path, choice) {
+        let content = match crate::git::read_side_content(&repository, &path, choice) {
             Ok(content) => content,
             Err(error) => {
                 self.show_error(error.to_string());
@@ -10655,7 +10655,7 @@ impl App {
     /// confirmation is answered, and the plan is REBUILT when it is, so a preview taken against
     /// one repository state is never applied to another.
     pub(in crate::app) fn preview_git_replacement(&mut self, side: &str, files: &str) {
-        let Some(choice) = crate::workspace::git::GitConflictChoice::parse(side) else {
+        let Some(choice) = crate::git::GitConflictChoice::parse(side) else {
             self.show_error("choose base, ours or theirs");
             return;
         };
@@ -10679,7 +10679,7 @@ impl App {
             self.show_error("name at least one file to replace");
             return;
         }
-        let plan = match crate::workspace::git::plan_replacement(&repository, &paths, choice) {
+        let plan = match crate::git::plan_replacement(&repository, &paths, choice) {
             Ok(plan) => plan,
             Err(error) => {
                 self.show_error(error.to_string());
@@ -10701,7 +10701,7 @@ impl App {
     /// captured before the question was asked.
     pub(in crate::app) fn apply_git_replacement(
         &mut self,
-        previewed: crate::workspace::git::GitReplacementPlan,
+        previewed: crate::git::GitReplacementPlan,
         answer: crate::ui::ConfirmationChoice,
     ) {
         if answer != crate::ui::ConfirmationChoice::Yes {
@@ -10717,14 +10717,14 @@ impl App {
             .map(|(path, _, _)| path.clone())
             .collect::<Vec<_>>();
         let plan =
-            match crate::workspace::git::plan_replacement(&repository, &paths, previewed.choice) {
+            match crate::git::plan_replacement(&repository, &paths, previewed.choice) {
                 Ok(plan) => plan,
                 Err(error) => {
                     self.show_error(error.to_string());
                     return;
                 }
             };
-        match crate::workspace::git::apply_replacement(&plan) {
+        match crate::git::apply_replacement(&plan) {
             Ok(written) => self.notify_message(
                 format!(
                     "Replaced {} file(s); saving and staging are separate steps",
@@ -10860,7 +10860,7 @@ impl App {
         self.input.set_pending_stage(AppEffect::GitConflictStage);
         if let Err(error) = self.git.start_plan(
             &self.state,
-            crate::workspace::git::GitMutationKind::StageFile,
+            crate::git::GitMutationKind::StageFile,
             self.workspace.root_revision(),
             self.workspace.trust() == WorkspaceTrust::Trusted,
             Vec::new(),
@@ -10875,7 +10875,7 @@ impl App {
         let Some(repository) = self.conflict_repository() else {
             return;
         };
-        match crate::workspace::git::continue_operation(&repository, "") {
+        match crate::git::continue_operation(&repository, "") {
             Ok(outcome) => {
                 self.notify_message(
                     format!(
@@ -10902,7 +10902,7 @@ impl App {
         let Some(repository) = self.conflict_repository() else {
             return;
         };
-        match crate::workspace::git::abort_operation(&repository) {
+        match crate::git::abort_operation(&repository) {
             Ok(outcome) => {
                 self.notify_message(
                     format!(
@@ -10948,7 +10948,7 @@ impl App {
         };
         let repository = status.repository.clone();
         let scope_root = status.scope_root.clone();
-        let state = match crate::workspace::git::read_conflict_state(&repository) {
+        let state = match crate::git::read_conflict_state(&repository) {
             Ok(state) => state,
             Err(error) => {
                 self.show_error(error.to_string());
@@ -14679,7 +14679,7 @@ impl App {
                 let file = self.changes_focused_relative();
                 if let Err(error) = self.git.start_plan_for(
                     &self.state,
-                    crate::workspace::git::GitMutationKind::StageFile,
+                    crate::git::GitMutationKind::StageFile,
                     self.workspace.root_revision(),
                     self.workspace.trust() == WorkspaceTrust::Trusted,
                     Vec::new(),
@@ -14694,7 +14694,7 @@ impl App {
                 let file = self.changes_focused_relative();
                 if let Err(error) = self.git.start_plan_for(
                     &self.state,
-                    crate::workspace::git::GitMutationKind::UnstageFile,
+                    crate::git::GitMutationKind::UnstageFile,
                     self.workspace.root_revision(),
                     self.workspace.trust() == WorkspaceTrust::Trusted,
                     Vec::new(),
@@ -14733,7 +14733,7 @@ impl App {
             AppEffect::GitWorktreeRemove => self.request_git_worktree_remove(),
             AppEffect::GitWorktreesOpen => self.start_git_worktrees(),
             AppEffect::GitHunksOpenStaged => {
-                self.start_git_hunks_with_layer(None, crate::workspace::git::GitDiffLayer::Staged);
+                self.start_git_hunks_with_layer(None, crate::git::GitDiffLayer::Staged);
             }
             AppEffect::GitHunkUnstage => self.unstage_selected_git_hunk(),
             AppEffect::GitStatusRefresh => self.start_git_status_refresh(),
@@ -15477,7 +15477,7 @@ impl App {
         let Some(status) = self.git.status() else {
             return;
         };
-        let Ok(head) = crate::workspace::git::git_head_id(&status.repository) else {
+        let Ok(head) = crate::git::git_head_id(&status.repository) else {
             return;
         };
         let metadata = ["index", "HEAD"].map(|name| {

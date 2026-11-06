@@ -1,5 +1,5 @@
 //! Accepting one conflict block at a time from its markers, like VS Code's Accept Current,
-//! Accept Incoming and Accept Both. The whole-file choices live in `workspace::git::conflict`.
+//! Accept Incoming and Accept Both. The whole-file choices live in `git::conflict`.
 
 use crate::app::ByteOffset;
 

@@ -16,35 +16,35 @@ use crate::editor::ViewId as EditorViewId;
 
 use crate::ui::PickerSurfaceKind;
 
-use crate::ui::window::ContentAdapterKind;
+use crate::windows::ContentAdapterKind;
 
-use crate::ui::window::ContentContract;
+use crate::windows::ContentContract;
 
-use crate::ui::window::ContentId;
+use crate::windows::ContentId;
 
-use crate::ui::window::ContentLifecycle;
+use crate::windows::ContentLifecycle;
 
-use crate::ui::window::ContentTypeId;
+use crate::windows::ContentTypeId;
 
-use crate::ui::window::TileAxis;
+use crate::windows::TileAxis;
 
-use crate::ui::window::TiledLayoutNode;
+use crate::windows::TiledLayoutNode;
 
-use crate::ui::window::TiledLayoutSnapshot;
+use crate::windows::TiledLayoutSnapshot;
 
-use crate::ui::window::ViewId;
+use crate::windows::ViewId;
 
-use crate::ui::window::WindowError;
+use crate::windows::WindowError;
 
-use crate::ui::window::WindowGraph;
+use crate::windows::WindowGraph;
 
-use crate::ui::window::WindowId;
+use crate::windows::WindowId;
 
-use crate::ui::window::WindowPlacement;
+use crate::windows::WindowPlacement;
 
-use crate::ui::window::WindowRect;
+use crate::windows::WindowRect;
 
-use crate::ui::window::WorkspaceTabId;
+use crate::windows::WorkspaceTabId;
 
 const EDITOR_OWNER: &str = "builtin.editor";
 const EDITOR_GENERATION: u64 = 1;
@@ -689,7 +689,7 @@ pub(in crate::app) struct NativeSurfaceSignature {
     pub explorer_views: Arc<[u64]>,
     pub focused_explorer: Option<u64>,
     pub explorer_size: u16,
-    pub explorer_edge: crate::ui::window::DockEdge,
+    pub explorer_edge: crate::windows::DockEdge,
     pub active_terminal: Option<u64>,
     /// Terminals that keep their windows while another is active: the panel's terminal and side
     /// terminals such as a docked agent.
@@ -701,7 +701,7 @@ pub(in crate::app) struct NativeSurfaceSignature {
     pub terminal_width: u16,
     pub terminal_height: u16,
     pub dashboard_visible: bool,
-    pub picker_rect: Option<crate::ui::window::WindowRect>,
+    pub picker_rect: Option<crate::windows::WindowRect>,
     pub picker_surface: Option<PickerSurfaceKind>,
     pub picker_title: String,
     pub protected_prompt_height: u16,
@@ -903,7 +903,7 @@ impl NativeSurfaceBridge {
             graph.rehost(ids.window, tab, ids.view, explorer_placement, true)?;
             Some(ids)
         } else {
-            let mut capabilities = crate::ui::window::ContentCapabilities::for_adapter(
+            let mut capabilities = crate::windows::ContentCapabilities::for_adapter(
                 ContentAdapterKind::DeclarativeUi,
             );
             capabilities.clone_view = true;
@@ -976,7 +976,7 @@ impl NativeSurfaceBridge {
         let dashboard_placement = if signature.dashboard_visible {
             self.dashboard_placement
                 .or_else(|| self.configured_placements.get("builtin.dashboard").copied())
-                .unwrap_or(WindowPlacement::Overlay(crate::ui::window::WindowRect {
+                .unwrap_or(WindowPlacement::Overlay(crate::windows::WindowRect {
                     x: 0,
                     y: 0,
                     width: signature.terminal_width.max(1),
@@ -1093,7 +1093,7 @@ impl NativeSurfaceBridge {
                         .or(self.terminal_default_placement)
                         .or_else(|| self.configured_placements.get("builtin.terminal").copied())
                         .unwrap_or(WindowPlacement::Docked {
-                            edge: crate::ui::window::DockEdge::Bottom,
+                            edge: crate::windows::DockEdge::Bottom,
                             size: signature.terminal_size.max(1),
                         })
                 } else {
@@ -1102,8 +1102,8 @@ impl NativeSurfaceBridge {
                 let placement = match placement {
                     WindowPlacement::Docked {
                         edge:
-                            edge @ (crate::ui::window::DockEdge::Top
-                            | crate::ui::window::DockEdge::Bottom),
+                            edge @ (crate::windows::DockEdge::Top
+                            | crate::windows::DockEdge::Bottom),
                         size,
                     } if signature.terminal_shrunk => WindowPlacement::Docked {
                         edge,
@@ -1446,7 +1446,7 @@ impl NativeSurfaceBridge {
                 .picker_restore_placements
                 .get(&kind)
                 .copied()
-                .unwrap_or(WindowPlacement::Floating(crate::ui::window::WindowRect {
+                .unwrap_or(WindowPlacement::Floating(crate::windows::WindowRect {
                     x: 1,
                     y: 1,
                     width: 60,

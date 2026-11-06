@@ -216,7 +216,7 @@ impl PluginWindowHost {
                         }
                     }
                 }
-                crate::ui::window::validate_title(if title.is_empty() {
+                crate::windows::validate_title(if title.is_empty() {
                     &declaration.title
                 } else {
                     title
@@ -933,7 +933,7 @@ impl PluginWindowHost {
 
     pub(in crate::app) fn synchronize_private_geometry(
         &mut self,
-        projection: Option<&crate::ui::window::CompositorProjection>,
+        projection: Option<&crate::windows::CompositorProjection>,
     ) -> Vec<(String, u64, PluginUiEvent)> {
         let mut events = Vec::new();
         for (handle, instance) in &mut self.instances {

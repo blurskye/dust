@@ -509,7 +509,7 @@ impl PersistenceSession {
                     key: None,
                     desired_placement: windows.persisted_editor_placement(
                         pane,
-                        crate::ui::window::ContentAdapterKind::TextBuffer,
+                        crate::windows::ContentAdapterKind::TextBuffer,
                     )?,
                 });
             }
@@ -549,7 +549,7 @@ impl PersistenceSession {
                     key: Some((*key).clone()),
                     desired_placement: windows.persisted_editor_placement(
                         pane,
-                        crate::ui::window::ContentAdapterKind::VirtualDocument,
+                        crate::windows::ContentAdapterKind::VirtualDocument,
                     )?,
                 });
                 virtual_index = virtual_index

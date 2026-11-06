@@ -59,7 +59,7 @@ use std::time::Instant;
 use crate::config::{AmbiguousWidth, Config, DashboardConfig, PromptTextConfig};
 use crate::editor::EditorState;
 use crate::editor::text::{ByteOffset, ByteRange};
-use crate::ui::window::{
+use crate::windows::{
     CompositorProjection, ContentAdapterKind, ContentId, TiledLayoutSnapshot, WindowId, WindowRect,
 };
 use crossterm::cursor::SetCursorStyle;
@@ -1431,7 +1431,7 @@ pub struct UiGitSign {
     pub buffer_revision: u64,
     pub root_revision: u64,
     pub status_revision: u64,
-    pub repository_id: crate::workspace::git::GitRepositoryId,
+    pub repository_id: crate::git::GitRepositoryId,
     pub line: usize,
     pub kind: UiGitSignKind,
     pub staged: bool,
@@ -2234,7 +2234,7 @@ pub(crate) fn render_with_documentation_geometry(
     let terminal_geometry = compositor.and_then(|compositor| {
         let (_, window) = compositor.surfaces.terminal?;
         let projected = compositor.projection.window(window)?;
-        (projected.layer != crate::ui::window::CompositorLayer::Floating)
+        (projected.layer != crate::windows::CompositorLayer::Floating)
             .then(|| terminal_window_geometry(projected))?
     });
     let workspace = compositor.map(|compositor| compositor.projection.workspace_bounds);
@@ -2244,13 +2244,13 @@ pub(crate) fn render_with_documentation_geometry(
         compositor
             .projection
             .window(window)
-            .filter(|window| window.layer != crate::ui::window::CompositorLayer::Floating)
+            .filter(|window| window.layer != crate::windows::CompositorLayer::Floating)
             .map(|window| window.rect)
     });
     let dashboard_window = compositor
         .and_then(|compositor| compositor.projection.window(compositor.surfaces.dashboard?));
     let dashboard_floating = dashboard_window
-        .is_some_and(|window| window.layer == crate::ui::window::CompositorLayer::Floating);
+        .is_some_and(|window| window.layer == crate::windows::CompositorLayer::Floating);
     // ONE decision, so the regions cannot disagree: the source is whatever the inspectors leave,
     // and the workspace is rendered at that size rather than being squeezed into it.
     // The terminal panel is planned WITH the arrangement rather than after it: the panel's top row
@@ -2278,7 +2278,7 @@ pub(crate) fn render_with_documentation_geometry(
         // The compositor already subtracts every dock, including top and bottom docks.
         workspace.map(|bounds| {
             if let Some(window) = dashboard_window
-                && window.layer != crate::ui::window::CompositorLayer::Overlay
+                && window.layer != crate::windows::CompositorLayer::Overlay
             {
                 return window.rect;
             }
@@ -2367,7 +2367,7 @@ pub(crate) fn render_with_documentation_geometry(
             if let Some(window) = compositor
                 .projection
                 .window(view.window)
-                .filter(|window| window.layer != crate::ui::window::CompositorLayer::Floating)
+                .filter(|window| window.layer != crate::windows::CompositorLayer::Floating)
             {
                 render_explorer_window(
                     &mut workspace_frame,
@@ -2391,7 +2391,7 @@ pub(crate) fn render_with_documentation_geometry(
         else {
             continue;
         };
-        if projected.layer == crate::ui::window::CompositorLayer::Floating {
+        if projected.layer == crate::windows::CompositorLayer::Floating {
             continue;
         }
         if let Some(geometry) = terminal_window_geometry(projected) {
@@ -2403,7 +2403,7 @@ pub(crate) fn render_with_documentation_geometry(
             .projection
             .windows
             .iter()
-            .any(|window| window.layer == crate::ui::window::CompositorLayer::Fullscreen)
+            .any(|window| window.layer == crate::windows::CompositorLayer::Fullscreen)
     });
     let foot_rows = screen_foot_rows(state, ui, config, height);
     if !fullscreen && foot_rows > 0 {
@@ -2423,7 +2423,7 @@ pub(crate) fn render_with_documentation_geometry(
                     .projection
                     .window(surface.window)
                     .filter(|projected| {
-                        projected.layer != crate::ui::window::CompositorLayer::Floating
+                        projected.layer != crate::windows::CompositorLayer::Floating
                     })
                     .map(|projected| {
                         (
@@ -2439,7 +2439,7 @@ pub(crate) fn render_with_documentation_geometry(
                     .projection
                     .window(surface.window)
                     .filter(|projected| {
-                        projected.layer != crate::ui::window::CompositorLayer::Floating
+                        projected.layer != crate::windows::CompositorLayer::Floating
                     })
                     .map(|projected| {
                         (
@@ -2470,7 +2470,7 @@ pub(crate) fn render_with_documentation_geometry(
             .projection
             .windows
             .iter()
-            .filter(|window| window.layer == crate::ui::window::CompositorLayer::Floating)
+            .filter(|window| window.layer == crate::windows::CompositorLayer::Floating)
         {
             if render_non_tiled_editor_window(&mut frame, state, ui, config, projected) {
                 continue;
@@ -2670,7 +2670,7 @@ pub(crate) fn render_with_documentation_geometry(
             compositor
                 .projection
                 .window(window)
-                .is_some_and(|window| window.layer == crate::ui::window::CompositorLayer::Floating)
+                .is_some_and(|window| window.layer == crate::windows::CompositorLayer::Floating)
         })
     });
     let information = !ui.notification_error && !ui.notification_warning;

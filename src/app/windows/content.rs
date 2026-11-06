@@ -147,12 +147,12 @@ impl WindowSession {
                 .filter(|content| {
                     matches!(
                         content.adapter,
-                        crate::ui::window::ContentAdapterKind::TextBuffer
-                            | crate::ui::window::ContentAdapterKind::VirtualDocument
+                        crate::windows::ContentAdapterKind::TextBuffer
+                            | crate::windows::ContentAdapterKind::VirtualDocument
                     ) || matches!(
                         content.adapter,
-                        crate::ui::window::ContentAdapterKind::DeclarativeUi
-                            | crate::ui::window::ContentAdapterKind::PrivateCellSurface
+                        crate::windows::ContentAdapterKind::DeclarativeUi
+                            | crate::windows::ContentAdapterKind::PrivateCellSurface
                     ) && (content.content_type.as_str().starts_with("plugin.")
                         || matches!(
                             content.content_type.as_str(),
@@ -208,11 +208,11 @@ impl WindowSession {
                                 {
                                     config.ui.explorer.active_glyphs().file.clone()
                                 }
-                                crate::ui::window::ContentAdapterKind::TerminalSession
-                                | crate::ui::window::ContentAdapterKind::ExternalTui => {
+                                crate::windows::ContentAdapterKind::TerminalSession
+                                | crate::windows::ContentAdapterKind::ExternalTui => {
                                     TERMINAL_ICON.to_owned()
                                 }
-                                crate::ui::window::ContentAdapterKind::VirtualDocument => {
+                                crate::windows::ContentAdapterKind::VirtualDocument => {
                                     VIRTUAL_ICON.to_owned()
                                 }
                                 _ => CUSTOM_ICON.to_owned(),

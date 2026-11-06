@@ -4,43 +4,43 @@ use crate::editor::EditorState;
 use crate::editor::text::TextVersion;
 use crate::ui::UiGitSign;
 use crate::ui::UiGitSignKind;
-use crate::workspace::git::GitBranchGeneration;
-use crate::workspace::git::GitBranchList;
-use crate::workspace::git::GitBranchListRequest;
-use crate::workspace::git::GitBranchRequest;
-use crate::workspace::git::GitBranchService;
-use crate::workspace::git::GitChangePlanRequest;
-use crate::workspace::git::GitDiffLayer;
-use crate::workspace::git::GitDiffLineKind;
-use crate::workspace::git::GitFileStatus;
-use crate::workspace::git::GitHeadExpectation;
-use crate::workspace::git::GitHunk;
-use crate::workspace::git::GitHunkBufferInput;
-use crate::workspace::git::GitHunkGeneration;
-use crate::workspace::git::GitHunkId;
-use crate::workspace::git::GitHunkPolicy;
-use crate::workspace::git::GitHunkService;
-use crate::workspace::git::GitHunkSignKind;
-use crate::workspace::git::GitHunkSnapshot;
-use crate::workspace::git::GitMutationError;
-use crate::workspace::git::GitMutationGeneration;
-use crate::workspace::git::GitMutationKind;
-use crate::workspace::git::GitMutationRequest;
-use crate::workspace::git::GitMutationService;
-use crate::workspace::git::GitRepositoryId;
-use crate::workspace::git::GitResetHunkRequest;
-use crate::workspace::git::GitStatusGeneration;
-use crate::workspace::git::GitStatusPolicy;
-use crate::workspace::git::GitStatusService;
-use crate::workspace::git::GitStatusSnapshot;
-use crate::workspace::git::GitUnsavedDocument;
-use crate::workspace::git::aggregate_git_status;
-use crate::workspace::git::git_branch_name;
-use crate::workspace::git::git_head_id;
-use crate::workspace::git::git_hunk_signs;
-use crate::workspace::git::git_index_fingerprint;
-use crate::workspace::git::git_staged_signs;
-use crate::workspace::git::index_line_in_buffer;
+use crate::git::GitBranchGeneration;
+use crate::git::GitBranchList;
+use crate::git::GitBranchListRequest;
+use crate::git::GitBranchRequest;
+use crate::git::GitBranchService;
+use crate::git::GitChangePlanRequest;
+use crate::git::GitDiffLayer;
+use crate::git::GitDiffLineKind;
+use crate::git::GitFileStatus;
+use crate::git::GitHeadExpectation;
+use crate::git::GitHunk;
+use crate::git::GitHunkBufferInput;
+use crate::git::GitHunkGeneration;
+use crate::git::GitHunkId;
+use crate::git::GitHunkPolicy;
+use crate::git::GitHunkService;
+use crate::git::GitHunkSignKind;
+use crate::git::GitHunkSnapshot;
+use crate::git::GitMutationError;
+use crate::git::GitMutationGeneration;
+use crate::git::GitMutationKind;
+use crate::git::GitMutationRequest;
+use crate::git::GitMutationService;
+use crate::git::GitRepositoryId;
+use crate::git::GitResetHunkRequest;
+use crate::git::GitStatusGeneration;
+use crate::git::GitStatusPolicy;
+use crate::git::GitStatusService;
+use crate::git::GitStatusSnapshot;
+use crate::git::GitUnsavedDocument;
+use crate::git::aggregate_git_status;
+use crate::git::git_branch_name;
+use crate::git::git_head_id;
+use crate::git::git_hunk_signs;
+use crate::git::git_index_fingerprint;
+use crate::git::git_staged_signs;
+use crate::git::index_line_in_buffer;
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::path::PathBuf;
@@ -99,7 +99,7 @@ pub(super) struct GitSession {
     /// The previewed whole-file replacement waiting for its confirmation. The plan is rebuilt
     /// when the answer arrives, so a plan previewed against one repository state is never applied
     /// to another.
-    pending_replacement: Option<crate::workspace::git::GitReplacementPlan>,
+    pending_replacement: Option<crate::git::GitReplacementPlan>,
     pending_destructive: Option<GitDestructiveAction>,
     /// Path the outstanding plan was built for, so a refusal can name it.
     plan_path: Option<PathBuf>,
@@ -160,7 +160,7 @@ impl GitSession {
     /// Hold the previewed replacement until its confirmation is answered.
     pub(super) fn set_pending_replacement(
         &mut self,
-        plan: crate::workspace::git::GitReplacementPlan,
+        plan: crate::git::GitReplacementPlan,
     ) {
         self.pending_destructive = None;
         self.pending_replacement = Some(plan);
@@ -168,7 +168,7 @@ impl GitSession {
     /// Take the previewed replacement, so it can be answered exactly once.
     pub(super) fn take_pending_replacement(
         &mut self,
-    ) -> Option<crate::workspace::git::GitReplacementPlan> {
+    ) -> Option<crate::git::GitReplacementPlan> {
         self.pending_replacement.take()
     }
     pub(super) fn cancel_destructive(&mut self) {
@@ -506,7 +506,7 @@ impl GitSession {
                 self.last_unstaged = Some(snapshot.clone());
             }
             Ok(None) => {}
-            Err(crate::workspace::git::GitHunkError::Unmerged) => {
+            Err(crate::git::GitHunkError::Unmerged) => {
                 let source = source.clone();
                 self.clear_signs();
                 // An unmerged index has no baseline; retry only when the source changes.
@@ -528,7 +528,7 @@ impl GitSession {
             .staged_signs
             .as_ref()
             .map_or_else(Vec::new, |staged| git_staged_signs(staged, &unstaged));
-        let sign = |sign: crate::workspace::git::GitHunkSign, staged: bool| UiGitSign {
+        let sign = |sign: crate::git::GitHunkSign, staged: bool| UiGitSign {
             buffer: source.4,
             buffer_revision: source.5,
             root_revision: source.0,
@@ -1171,7 +1171,7 @@ impl GitSession {
             return Ok(None);
         }
         match self.branches.poll() {
-            Ok(Some(crate::workspace::git::GitBranchResult::List(list))) => {
+            Ok(Some(crate::git::GitBranchResult::List(list))) => {
                 if Some(list.generation) != self.branch_generation {
                     return Ok(None);
                 }
@@ -1179,7 +1179,7 @@ impl GitSession {
                 self.branch_list_scope = None;
                 Ok(Some(GitBranchOutcome::List(list.clone())))
             }
-            Ok(Some(crate::workspace::git::GitBranchResult::Changed)) => {
+            Ok(Some(crate::git::GitBranchResult::Changed)) => {
                 self.branch_generation = None;
                 Ok(Some(GitBranchOutcome::Changed))
             }
@@ -1419,7 +1419,7 @@ pub(in crate::app) fn text_diff_preview(
 }
 
 pub(in crate::app) fn diff_preview_from_hunks(
-    hunks: &[crate::workspace::git::GitHunk],
+    hunks: &[crate::git::GitHunk],
     provenance: &str,
     truncated: bool,
     total_lines: usize,
@@ -1436,9 +1436,9 @@ pub(in crate::app) fn diff_preview_from_hunks(
             .iter()
             .map(|line| DiffLine {
                 kind: match line.kind {
-                    crate::workspace::git::GitDiffLineKind::Context => DiffLineKind::Context,
-                    crate::workspace::git::GitDiffLineKind::Add => DiffLineKind::Added,
-                    crate::workspace::git::GitDiffLineKind::Delete => DiffLineKind::Removed,
+                    crate::git::GitDiffLineKind::Context => DiffLineKind::Context,
+                    crate::git::GitDiffLineKind::Add => DiffLineKind::Added,
+                    crate::git::GitDiffLineKind::Delete => DiffLineKind::Removed,
                 },
                 old_number: line.old_line,
                 new_number: line.new_line,
@@ -1543,7 +1543,7 @@ mod regression_tests {
         let mut session = GitSession::default();
         refresh(&mut session, &editor, dir.path());
         let status = session.status_snapshot.as_ref().unwrap();
-        let mut snapshot = crate::workspace::git::read_hunks(&GitSession::policy(
+        let mut snapshot = crate::git::read_hunks(&GitSession::policy(
             status,
             "a.txt".into(),
             GitDiffLayer::Unstaged,
@@ -1973,7 +1973,7 @@ mod regression_tests {
             std::fs::remove_file(&path).unwrap();
             refresh(&mut session, &editor, dir.path());
             let status = session.status_snapshot.as_ref().unwrap();
-            let mut snapshot = crate::workspace::git::read_hunks(&GitSession::policy(
+            let mut snapshot = crate::git::read_hunks(&GitSession::policy(
                 status,
                 "a.txt".into(),
                 GitDiffLayer::Unstaged,

@@ -310,7 +310,7 @@ pub(in crate::app) enum TerminalInput<'a> {
         crate::editor::input::Modifiers,
         u16,
         u16,
-        crate::ui::window::WindowRect,
+        crate::windows::WindowRect,
     ),
 }
 fn terminal_row_end(row: &[crate::ui::PtyCell]) -> usize {

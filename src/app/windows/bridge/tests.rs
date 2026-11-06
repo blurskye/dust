@@ -7,23 +7,23 @@ use crate::editor::Axis;
 
 use crate::editor::EditorState;
 
-use crate::ui::window::ContentAdapterKind;
+use crate::windows::ContentAdapterKind;
 
-use crate::ui::window::ContentTypeId;
+use crate::windows::ContentTypeId;
 
-use crate::ui::window::WindowError;
+use crate::windows::WindowError;
 
-use crate::ui::window::WindowGraph;
+use crate::windows::WindowGraph;
 
-use crate::ui::window::WindowPlacement;
+use crate::windows::WindowPlacement;
 
 use crate::app::windows::bridge::EditorWindowBridge;
 
 use crate::app::windows::bridge::NativeSurfaceBridge;
 
 use crate::app::windows::bridge::NativeSurfaceSignature;
-use crate::ui::window::ContentLifecycle;
-use crate::ui::window::WindowRect;
+use crate::windows::ContentLifecycle;
+use crate::windows::WindowRect;
 use std::sync::Arc;
 
 fn reconcile(bridge: &mut EditorWindowBridge, graph: &mut WindowGraph, state: &EditorState) {
@@ -67,7 +67,7 @@ fn same_content_has_independent_views_and_windows_with_stable_focus_identity() {
     assert_eq!(graph.content_snapshots()[0].view_count, 2);
     let tab = bridge.tab_for(state.active_tab.expect("tab")).expect("tab");
     let before = graph.tiled_layout_snapshot(tab).expect("layout").project(
-        crate::ui::window::WindowRect {
+        crate::windows::WindowRect {
             x: 0,
             y: 0,
             width: 100,
@@ -80,7 +80,7 @@ fn same_content_has_independent_views_and_windows_with_stable_focus_identity() {
     assert!(!bridge.is_current(&(&state).into(), "[scratch]"));
     reconcile(&mut bridge, &mut graph, &state);
     let after = graph.tiled_layout_snapshot(tab).expect("layout").project(
-        crate::ui::window::WindowRect {
+        crate::windows::WindowRect {
             x: 0,
             y: 0,
             width: 100,
@@ -136,7 +136,7 @@ fn editor_reconciliation_preserves_foreign_tiled_windows_and_identity() {
             .tiled_layout_snapshot(tab)
             .expect("mixed tiled layout")
             .project(
-                crate::ui::window::WindowRect {
+                crate::windows::WindowRect {
                     x: 0,
                     y: 0,
                     width: 80,
@@ -228,7 +228,7 @@ fn native_reset_reconstructs_runtime_ids_but_retains_semantic_policy() {
         .set_semantic_default(
             "builtin.explorer",
             WindowPlacement::Docked {
-                edge: crate::ui::window::DockEdge::Right,
+                edge: crate::windows::DockEdge::Right,
                 size: 29,
             },
         )
@@ -239,7 +239,7 @@ fn native_reset_reconstructs_runtime_ids_but_retains_semantic_policy() {
         vec![(
             "builtin.explorer",
             WindowPlacement::Docked {
-                edge: crate::ui::window::DockEdge::Right,
+                edge: crate::windows::DockEdge::Right,
                 size: 29,
             }
         )]
@@ -375,7 +375,7 @@ fn closing_the_final_document_keeps_a_populated_plugin_host() {
     graph.validate().unwrap();
 }
 
-fn native_signature(tab: crate::ui::window::WorkspaceTabId) -> NativeSurfaceSignature {
+fn native_signature(tab: crate::windows::WorkspaceTabId) -> NativeSurfaceSignature {
     NativeSurfaceSignature {
         editor_tab: Some(tab),
         editor_window: None,
@@ -384,7 +384,7 @@ fn native_signature(tab: crate::ui::window::WorkspaceTabId) -> NativeSurfaceSign
         explorer_views: Arc::from([1]),
         focused_explorer: None,
         explorer_size: 20,
-        explorer_edge: crate::ui::window::DockEdge::Left,
+        explorer_edge: crate::windows::DockEdge::Left,
         active_terminal: None,
         shown_terminals: Arc::from([]),
         terminal_focused: false,
@@ -630,7 +630,7 @@ fn explorer_reopen_clones_and_debug_terminal_sizes_use_effective_placements() {
     let tab = graph.create_workspace_tab("builtin.editor", 1).unwrap();
     let mut native = NativeSurfaceBridge::default();
     let right = WindowPlacement::Docked {
-        edge: crate::ui::window::DockEdge::Right,
+        edge: crate::windows::DockEdge::Right,
         size: 27,
     };
     native
@@ -644,7 +644,7 @@ fn explorer_reopen_clones_and_debug_terminal_sizes_use_effective_placements() {
         explorer_views: Arc::from([1, 2]),
         focused_explorer: Some(1),
         explorer_size: 20,
-        explorer_edge: crate::ui::window::DockEdge::Left,
+        explorer_edge: crate::windows::DockEdge::Left,
         active_terminal: Some(1),
         shown_terminals: Arc::from([1]),
         terminal_focused: false,
@@ -677,11 +677,11 @@ fn explorer_reopen_clones_and_debug_terminal_sizes_use_effective_placements() {
         .show_target(
             crate::app::windows::bridge::NativeSurfaceTarget::Explorer,
             WindowPlacement::Docked {
-                edge: crate::ui::window::DockEdge::Left,
+                edge: crate::windows::DockEdge::Left,
                 size: 20,
             },
             WindowPlacement::Docked {
-                edge: crate::ui::window::DockEdge::Bottom,
+                edge: crate::windows::DockEdge::Bottom,
                 size: 8,
             },
         )
@@ -711,7 +711,7 @@ fn explorer_reopen_clones_and_debug_terminal_sizes_use_effective_placements() {
     native.terminal_placements.insert(
         1,
         WindowPlacement::Docked {
-            edge: crate::ui::window::DockEdge::Bottom,
+            edge: crate::windows::DockEdge::Bottom,
             size: 12,
         },
     );
@@ -737,14 +737,14 @@ fn explorer_reopen_clones_and_debug_terminal_sizes_use_effective_placements() {
     assert_eq!(
         graph.window(native.terminals[&1].window).unwrap().placement,
         WindowPlacement::Docked {
-            edge: crate::ui::window::DockEdge::Bottom,
+            edge: crate::windows::DockEdge::Bottom,
             size: 5
         }
     );
     assert_eq!(
         native.terminal_placements[&1],
         WindowPlacement::Docked {
-            edge: crate::ui::window::DockEdge::Bottom,
+            edge: crate::windows::DockEdge::Bottom,
             size: 12
         }
     );

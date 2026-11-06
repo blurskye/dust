@@ -73,10 +73,10 @@ use crate::app::lsp::LSP_MAXIMUM_LOG_LINES;
 use crate::app::lsp::ProjectionChange;
 use crate::ui::render::TERMINAL_PANEL_MAXIMUM_HEIGHT;
 use crate::ui::render::TERMINAL_PANEL_MINIMUM_HEIGHT;
-use crate::ui::window::PANE_DEFAULT_RATIO;
-use crate::ui::window::PANE_MINIMUM_HEIGHT;
-use crate::ui::window::PANE_MINIMUM_WIDTH;
-use crate::ui::window::WindowPlacement;
+use crate::windows::PANE_DEFAULT_RATIO;
+use crate::windows::PANE_MINIMUM_HEIGHT;
+use crate::windows::PANE_MINIMUM_WIDTH;
+use crate::windows::WindowPlacement;
 
 impl App {
     pub(super) fn begin_flash(&mut self) {
@@ -268,7 +268,7 @@ impl App {
     /// terminal, or the top row of the bottom panel.
     fn handle_dock_drag(&mut self, key: &KeyEvent, column: u16, row: u16) -> bool {
         use crate::editor::input::TerminalMouseInput;
-        use crate::ui::window::DockEdge;
+        use crate::windows::DockEdge;
         let docked = |this: &Self, id: PtyId| {
             let rect = this.terminal_rect(id)?;
             match this
@@ -363,7 +363,7 @@ impl App {
     /// Dragging the border between two editor windows resizes them, as in Neovim.
     fn handle_border_drag(&mut self, key: &KeyEvent, column: u16, row: u16) -> bool {
         use crate::editor::input::TerminalMouseInput;
-        use crate::ui::window::TileAxis;
+        use crate::windows::TileAxis;
         let Some(projection) = self.compositor_projection() else {
             return false;
         };
@@ -487,7 +487,7 @@ impl App {
         };
         let top =
             crate::ui::workspace_top_rows(&self.state, &self.ui, self.configuration.settings());
-        let region = crate::ui::window::WindowRect {
+        let region = crate::windows::WindowRect {
             y: bounds.y.saturating_add(top),
             height: bounds.height.saturating_sub(top),
             ..bounds
@@ -744,8 +744,8 @@ impl App {
                         .is_some_and(|window| {
                             matches!(
                                 window.layer,
-                                crate::ui::window::CompositorLayer::Floating
-                                    | crate::ui::window::CompositorLayer::Fullscreen
+                                crate::windows::CompositorLayer::Floating
+                                    | crate::windows::CompositorLayer::Fullscreen
                             )
                         })
                 });

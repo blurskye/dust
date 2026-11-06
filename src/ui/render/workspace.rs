@@ -38,7 +38,7 @@ pub(super) struct WorkspaceProjection {
     tab_line_visible: bool,
     buffer_line_visible: bool,
     panes: Vec<PaneRect>,
-    borders: Vec<crate::ui::window::ProjectedBorder>,
+    borders: Vec<crate::windows::ProjectedBorder>,
 }
 
 fn global_editor_pane_viewports(state: &EditorState, ui: &UiState) -> Vec<PaneViewport> {
@@ -160,7 +160,7 @@ pub(super) fn workspace_projection(
         .projection
         .windows
         .iter()
-        .filter(|projected| projected.layer == crate::ui::window::CompositorLayer::Tiled)
+        .filter(|projected| projected.layer == crate::windows::CompositorLayer::Tiled)
         .filter_map(|projected| {
             let binding = layout
                 .bindings
@@ -181,7 +181,7 @@ pub(super) fn workspace_projection(
         .projection
         .borders
         .iter()
-        .map(|border| crate::ui::window::ProjectedBorder {
+        .map(|border| crate::windows::ProjectedBorder {
             x: border.x.saturating_sub(origin.x),
             y: border.y.saturating_sub(origin.y),
             ..*border
@@ -239,9 +239,9 @@ pub(super) fn render_non_tiled_editor_window(
     state: &EditorState,
     ui: &UiState,
     config: &Config,
-    projected: &crate::ui::window::ProjectedCompositorWindow,
+    projected: &crate::windows::ProjectedCompositorWindow,
 ) -> bool {
-    if projected.layer == crate::ui::window::CompositorLayer::Tiled {
+    if projected.layer == crate::windows::CompositorLayer::Tiled {
         return false;
     }
     let Some(tab) = state.active_tab.and_then(|tab| state.tabs.get(tab)) else {
@@ -313,7 +313,7 @@ pub(super) fn render_non_tiled_editor_windows(
         .projection
         .windows
         .iter()
-        .filter(|window| window.layer != crate::ui::window::CompositorLayer::Floating)
+        .filter(|window| window.layer != crate::windows::CompositorLayer::Floating)
     {
         render_non_tiled_editor_window(frame, state, ui, config, projected);
     }

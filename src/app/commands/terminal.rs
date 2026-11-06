@@ -138,7 +138,7 @@ pub(super) fn register_commands(
                 })
             };
             Ok(AppEffect::TerminalFloat(Some(
-                crate::ui::window::WindowRect {
+                crate::windows::WindowRect {
                     x: bounded("x")?,
                     y: bounded("y")?,
                     width: bounded("width")?,

@@ -96,9 +96,9 @@ use crate::process::PtyId;
 use crate::tools::ToolKind;
 use crate::tools::ToolStatus;
 use crate::tools::is_nixos_host;
-use crate::ui::window::DockEdge;
-use crate::ui::window::WindowPlacement;
-use crate::ui::window::WindowRect;
+use crate::windows::DockEdge;
+use crate::windows::WindowPlacement;
+use crate::windows::WindowRect;
 use crate::workspace::DiagnosticSeverity;
 use crate::workspace::WorkspaceTrust;
 

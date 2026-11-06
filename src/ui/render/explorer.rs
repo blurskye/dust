@@ -1,5 +1,5 @@
 use crate::ui::render::{CONTROL_CHARACTER_REPLACEMENT, ZERO_WIDTH_REPLACEMENT};
-use crate::ui::window::PANE_MINIMUM_WIDTH;
+use crate::windows::PANE_MINIMUM_WIDTH;
 use crate::{
     config::{AmbiguousWidth, Config},
     ui::{CellGrid, Style, geometry::text_width, window::WindowRect},

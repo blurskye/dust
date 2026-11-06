@@ -16,7 +16,7 @@ use crate::ui::PtyScreen;
 use crate::ui::TerminalPanelMode;
 use crate::ui::TerminalPanelState;
 use crate::ui::TerminalTabState;
-use crate::ui::window::ContentLifecycle;
+use crate::windows::ContentLifecycle;
 
 pub(crate) const TERMINAL_QUEUE_CAPACITY: usize = 256;
 pub(crate) const TERMINAL_MAXIMUM_INPUT_BYTES: usize = 1024 * 1024;

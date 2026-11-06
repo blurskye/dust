@@ -1287,7 +1287,7 @@ pub(super) fn convert_component_ui_request(
                     "content type was not statically declared",
                 ));
             }
-            if crate::ui::window::validate_title(&request.title).is_err() {
+            if crate::windows::validate_title(&request.title).is_err() {
                 return Err(PluginUiError::new(
                     PluginUiErrorCode::InvalidTree,
                     "window title ceiling exceeded",

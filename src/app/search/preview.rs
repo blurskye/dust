@@ -122,7 +122,7 @@ impl SearchSession {
     }
     pub(in crate::app) fn prepare_diff_preview(
         &mut self,
-        policy: crate::workspace::git::GitHunkPolicy,
+        policy: crate::git::GitHunkPolicy,
         scope: WorkspaceVersion,
         configuration: u64,
         title: String,
@@ -171,8 +171,8 @@ impl SearchSession {
         match self.diff_preview.poll() {
             Ok(Some(snapshot)) => {
                 let provenance = match snapshot.layer {
-                    crate::workspace::git::GitDiffLayer::Staged => "HEAD -> index",
-                    crate::workspace::git::GitDiffLayer::Unstaged => "index -> disk",
+                    crate::git::GitDiffLayer::Staged => "HEAD -> index",
+                    crate::git::GitDiffLayer::Unstaged => "index -> disk",
                 };
                 let body =
                     PickerPreviewBody::Diff(crate::app::git::diff_preview_from_hunks(

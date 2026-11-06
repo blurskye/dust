@@ -1,16 +1,16 @@
 use crate::app::windows::WindowCandidate;
 use crate::app::windows::WindowCore;
 use crate::app::windows::WindowSession;
-use crate::ui::window::ContentAdapterKind;
-use crate::ui::window::ContentId;
-use crate::ui::window::ContentTypeId;
-use crate::ui::window::ViewId;
-use crate::ui::window::WindowDescriptor;
-use crate::ui::window::WindowError;
-use crate::ui::window::WindowGraph;
-use crate::ui::window::WindowId;
-use crate::ui::window::WindowPlacement;
-use crate::ui::window::WorkspaceTabId;
+use crate::windows::ContentAdapterKind;
+use crate::windows::ContentId;
+use crate::windows::ContentTypeId;
+use crate::windows::ViewId;
+use crate::windows::WindowDescriptor;
+use crate::windows::WindowError;
+use crate::windows::WindowGraph;
+use crate::windows::WindowId;
+use crate::windows::WindowPlacement;
+use crate::windows::WorkspaceTabId;
 use std::sync::Arc;
 
 /// Detached, generation-scoped proposal. It has no mutable graph escape hatch.
@@ -189,7 +189,7 @@ impl PluginWindowDraft {
     pub(in crate::app) fn create_content_with_contract(
         &mut self,
         kind: ContentTypeId,
-        contract: crate::ui::window::ContentContract,
+        contract: crate::windows::ContentContract,
         title: String,
         dirty: bool,
         owner: &str,
@@ -253,7 +253,7 @@ impl PluginWindowDraft {
         focusable: bool,
         owner: &str,
         generation: u64,
-        insertion: (Option<WindowId>, crate::ui::window::TileAxis, bool, u16),
+        insertion: (Option<WindowId>, crate::windows::TileAxis, bool, u16),
     ) -> Result<WindowId, WindowError> {
         self.require_owner(owner, generation)?;
         if self.graph.active_tab() != Some(tab) {
@@ -277,7 +277,7 @@ impl PluginWindowDraft {
     pub(in crate::app) fn tile(
         &mut self,
         window: WindowId,
-        insertion: (Option<WindowId>, crate::ui::window::TileAxis, bool, u16),
+        insertion: (Option<WindowId>, crate::windows::TileAxis, bool, u16),
     ) -> Result<(), WindowError> {
         self.require_window(window)?;
         self.graph

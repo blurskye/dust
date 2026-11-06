@@ -517,7 +517,7 @@ fn search_owner_cost_probe() {
     };
     owner.preview_match("one", max);
     let before = (
-        crate::ui::window::WindowGraph::test_clone_count(),
+        crate::windows::WindowGraph::test_clone_count(),
         crate::editor::EditorState::test_clone_count(),
         crate::editor::text::TextBuffer::test_materializations(),
     );
@@ -535,7 +535,7 @@ fn search_owner_cost_probe() {
     println!(
         "case={mode} iterations={count} elapsed_ns={} graph_copies={} editor_copies={} text_decodes={} text_displays={}",
         elapsed.as_nanos(),
-        crate::ui::window::WindowGraph::test_clone_count() - before.0,
+        crate::windows::WindowGraph::test_clone_count() - before.0,
         crate::editor::EditorState::test_clone_count() - before.1,
         after.0 - before.2.0,
         after.1 - before.2.1

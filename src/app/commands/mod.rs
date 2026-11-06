@@ -318,7 +318,7 @@ pub enum AppEffect {
         size: u16,
     },
     /// Without a rectangle the terminal floats centred, at most of the screen.
-    TerminalFloat(Option<crate::ui::window::WindowRect>),
+    TerminalFloat(Option<crate::windows::WindowRect>),
     TerminalFullscreen,
     TerminalHide,
     TerminalSend(String),

@@ -1,6 +1,6 @@
 use crate::ui::render::CONTROL_CHARACTER_REPLACEMENT;
 use crate::ui::render::overlays::{BUFFER_OVERFLOW_LEFT, BUFFER_OVERFLOW_RIGHT, BUFFER_SEPARATOR};
-use crate::ui::window::{PANE_MINIMUM_HEIGHT, PANE_MINIMUM_WIDTH};
+use crate::windows::{PANE_MINIMUM_HEIGHT, PANE_MINIMUM_WIDTH};
 use std::path::{Path, PathBuf};
 
 use crate::editor::EditorState;
@@ -17,27 +17,27 @@ fn editor_layout(state: &EditorState) -> EditorWindowLayoutState {
         state: &EditorState,
         next: &mut u64,
         bindings: &mut Vec<EditorWindowBinding>,
-    ) -> crate::ui::window::TiledLayoutNode {
+    ) -> crate::windows::TiledLayoutNode {
         match node {
             crate::editor::LayoutNode::Pane(pane) => {
                 *next += 1;
-                let window = crate::ui::window::WindowId(*next);
+                let window = crate::windows::WindowId(*next);
                 bindings.push(EditorWindowBinding {
                     window,
                     pane: *pane,
                     view: state.panes[*pane].view,
                 });
-                crate::ui::window::TiledLayoutNode::Window(window)
+                crate::windows::TiledLayoutNode::Window(window)
             }
             crate::editor::LayoutNode::Split {
                 axis,
                 ratio,
                 first,
                 second,
-            } => crate::ui::window::TiledLayoutNode::Split {
+            } => crate::windows::TiledLayoutNode::Split {
                 axis: match axis {
-                    crate::editor::Axis::Horizontal => crate::ui::window::TileAxis::Horizontal,
-                    crate::editor::Axis::Vertical => crate::ui::window::TileAxis::Vertical,
+                    crate::editor::Axis::Horizontal => crate::windows::TileAxis::Horizontal,
+                    crate::editor::Axis::Vertical => crate::windows::TileAxis::Vertical,
                 },
                 ratio: *ratio,
                 first: Box::new(convert(first, state, next, bindings)),
@@ -55,7 +55,7 @@ fn editor_layout(state: &EditorState) -> EditorWindowLayoutState {
         .map(|binding| binding.window);
     EditorWindowLayoutState {
         source_revision: state.window_revision().expect("test revision"),
-        layout: crate::ui::window::TiledLayoutSnapshot { root, focused },
+        layout: crate::windows::TiledLayoutSnapshot { root, focused },
         bindings,
     }
 }
@@ -78,34 +78,34 @@ fn attach_test_compositor(
     let mut windows = layout
         .into_iter()
         .flat_map(|layout| &layout.bindings)
-        .map(|binding| crate::ui::window::CompositorWindowSnapshot {
+        .map(|binding| crate::windows::CompositorWindowSnapshot {
             window: binding.window,
-            placement: crate::ui::window::WindowPlacement::Tiled,
-            adapter: crate::ui::window::ContentAdapterKind::TextBuffer,
+            placement: crate::windows::WindowPlacement::Tiled,
+            adapter: crate::windows::ContentAdapterKind::TextBuffer,
             focusable: true,
         })
         .collect::<Vec<_>>();
     let explorer_window = ui
         .explorer
         .as_ref()
-        .map(|_| crate::ui::window::WindowId(10_001));
+        .map(|_| crate::windows::WindowId(10_001));
     if let Some(window) = explorer_window {
         let size =
             super::explorer_panel_width(config, width).map_or(1, |panel| panel.saturating_add(1));
-        windows.push(crate::ui::window::CompositorWindowSnapshot {
+        windows.push(crate::windows::CompositorWindowSnapshot {
             window,
-            placement: crate::ui::window::WindowPlacement::Docked {
-                edge: crate::ui::window::DockEdge::Left,
+            placement: crate::windows::WindowPlacement::Docked {
+                edge: crate::windows::DockEdge::Left,
                 size,
             },
-            adapter: crate::ui::window::ContentAdapterKind::DeclarativeUi,
+            adapter: crate::windows::ContentAdapterKind::DeclarativeUi,
             focusable: true,
         });
     }
     let terminal_window = ui
         .terminal_panel
         .as_ref()
-        .map(|terminal| (terminal.id, crate::ui::window::WindowId(10_002)));
+        .map(|terminal| (terminal.id, crate::windows::WindowId(10_002)));
     if let Some((_, window)) = terminal_window {
         let size = super::terminal_panel_geometry(
             height,
@@ -115,27 +115,27 @@ fn attach_test_compositor(
                 .requested_height,
         )
         .map_or(1, |geometry| geometry.height);
-        windows.push(crate::ui::window::CompositorWindowSnapshot {
+        windows.push(crate::windows::CompositorWindowSnapshot {
             window,
-            placement: crate::ui::window::WindowPlacement::Docked {
-                edge: crate::ui::window::DockEdge::Bottom,
+            placement: crate::windows::WindowPlacement::Docked {
+                edge: crate::windows::DockEdge::Bottom,
                 size,
             },
-            adapter: crate::ui::window::ContentAdapterKind::TerminalSession,
+            adapter: crate::windows::ContentAdapterKind::TerminalSession,
             focusable: true,
         });
     }
-    let dashboard_window = ui.dashboard.then_some(crate::ui::window::WindowId(10_003));
+    let dashboard_window = ui.dashboard.then_some(crate::windows::WindowId(10_003));
     if let Some(window) = dashboard_window {
-        windows.push(crate::ui::window::CompositorWindowSnapshot {
+        windows.push(crate::windows::CompositorWindowSnapshot {
             window,
-            placement: crate::ui::window::WindowPlacement::Overlay(crate::ui::window::WindowRect {
+            placement: crate::windows::WindowPlacement::Overlay(crate::windows::WindowRect {
                 x: 0,
                 y: 0,
                 width,
                 height,
             }),
-            adapter: crate::ui::window::ContentAdapterKind::DeclarativeUi,
+            adapter: crate::windows::ContentAdapterKind::DeclarativeUi,
             focusable: true,
         });
     }
@@ -145,7 +145,7 @@ fn attach_test_compositor(
         .and_then(|picker| {
             crate::ui::geometry::picker_window_geometry(
                 picker,
-                crate::ui::window::WindowRect {
+                crate::windows::WindowRect {
                     x: 0,
                     y: 0,
                     width,
@@ -153,12 +153,12 @@ fn attach_test_compositor(
                 },
             )
         })
-        .map(|rect| (crate::ui::window::WindowId(10_004), rect));
+        .map(|rect| (crate::windows::WindowId(10_004), rect));
     if let Some((window, rect)) = picker_window {
-        windows.push(crate::ui::window::CompositorWindowSnapshot {
+        windows.push(crate::windows::CompositorWindowSnapshot {
             window,
-            placement: crate::ui::window::WindowPlacement::Overlay(rect),
-            adapter: crate::ui::window::ContentAdapterKind::DeclarativeUi,
+            placement: crate::windows::WindowPlacement::Overlay(rect),
+            adapter: crate::windows::ContentAdapterKind::DeclarativeUi,
             focusable: true,
         });
     }
@@ -175,13 +175,13 @@ fn attach_test_compositor(
     } else {
         layout.and_then(|layout| layout.layout.focused)
     };
-    let snapshot = crate::ui::window::CompositorSnapshot {
-        tab: crate::ui::window::WorkspaceTabId(1),
+    let snapshot = crate::windows::CompositorSnapshot {
+        tab: crate::windows::WorkspaceTabId(1),
         tiled: layout.map(|layout| layout.layout.clone()),
         windows,
         focused,
     };
-    let bounds = crate::ui::window::WindowRect {
+    let bounds = crate::windows::WindowRect {
         x: 0,
         y: 0,
         width,
@@ -193,7 +193,7 @@ fn attach_test_compositor(
         bounds,
         PANE_MINIMUM_WIDTH,
         PANE_MINIMUM_HEIGHT,
-        crate::ui::window::TiledInsets {
+        crate::windows::TiledInsets {
             screen_bottom,
             ..Default::default()
         },
@@ -217,7 +217,7 @@ fn attach_test_compositor(
             bounds,
             PANE_MINIMUM_WIDTH,
             PANE_MINIMUM_HEIGHT,
-            crate::ui::window::TiledInsets {
+            crate::windows::TiledInsets {
                 screen_bottom,
                 top,
                 left,
@@ -258,7 +258,7 @@ fn workspace_frame_respects_nonzero_compositor_origin_for_side_and_top_docks() {
             grid: local,
             cursor: Some((1, 1, crossterm::cursor::SetCursorStyle::SteadyBlock)),
         },
-        crate::ui::window::WindowRect {
+        crate::windows::WindowRect {
             x: 7,
             y: 4,
             width: 6,
@@ -1234,7 +1234,7 @@ fn workspace_tab_line_measures_sanitized_labels() {
 
 #[test]
 fn workspace_editor_cursor_follows_compositor_focus() {
-    use crate::ui::window::{CompositorLayer, ProjectedCompositorWindow, WindowId, WindowRect};
+    use crate::windows::{CompositorLayer, ProjectedCompositorWindow, WindowId, WindowRect};
 
     let loaded = crate::config::load_bundled_config();
     for split in [false, true] {
@@ -1291,7 +1291,7 @@ fn workspace_editor_cursor_follows_compositor_focus() {
 
 #[test]
 fn workspace_split_separators_stay_one_cell_under_wide_ambiguous_width() {
-    use crate::ui::window::TileAxis;
+    use crate::windows::TileAxis;
 
     let loaded = crate::config::load_bundled_config();
     let mut config = loaded.config;
@@ -1355,7 +1355,7 @@ fn buffer_line_lists_unique_dirty_content_and_follows_active_overflow() {
     let config = loaded.config;
     let entries = vec![
         super::ContentTabEntry {
-            identity: super::ContentTabIdentity(crate::ui::window::ContentId(1)),
+            identity: super::ContentTabIdentity(crate::windows::ContentId(1)),
             kind: super::ContentTabKind::Text,
             title: "src/main.rs ·1".into(),
             active: false,
@@ -1366,7 +1366,7 @@ fn buffer_line_lists_unique_dirty_content_and_follows_active_overflow() {
             closeable: true,
         },
         super::ContentTabEntry {
-            identity: super::ContentTabIdentity(crate::ui::window::ContentId(2)),
+            identity: super::ContentTabIdentity(crate::windows::ContentId(2)),
             kind: super::ContentTabKind::Text,
             title: "tests/main.rs ·2".into(),
             active: false,
@@ -1377,7 +1377,7 @@ fn buffer_line_lists_unique_dirty_content_and_follows_active_overflow() {
             closeable: true,
         },
         super::ContentTabEntry {
-            identity: super::ContentTabIdentity(crate::ui::window::ContentId(3)),
+            identity: super::ContentTabIdentity(crate::windows::ContentId(3)),
             kind: super::ContentTabKind::Text,
             title: "very-long-active-buffer-name.rs".into(),
             active: true,
@@ -1412,7 +1412,7 @@ fn content_line_segment_width_and_hit_testing_share_exact_boundaries() {
     let loaded = crate::config::load_bundled_config();
     let config = loaded.config;
     let entry = super::ContentTabEntry {
-        identity: super::ContentTabIdentity(crate::ui::window::ContentId(9)),
+        identity: super::ContentTabIdentity(crate::windows::ContentId(9)),
         kind: super::ContentTabKind::Text,
         title: "a.rs".into(),
         active: true,
@@ -1462,7 +1462,7 @@ fn content_line_segment_width_and_hit_testing_share_exact_boundaries() {
     );
     let mut entries = vec![entry.clone(), entry.clone(), entry.clone()];
     for (index, entry) in entries.iter_mut().enumerate() {
-        entry.identity = super::ContentTabIdentity(crate::ui::window::ContentId(index as u64 + 1));
+        entry.identity = super::ContentTabIdentity(crate::windows::ContentId(index as u64 + 1));
         entry.title = char::from(b'a' + index as u8).to_string();
         entry.active = index == 2;
     }
@@ -1507,7 +1507,7 @@ fn buffer_line_begins_after_the_explorer_dock() {
         editor_window_layout: Some(editor_layout(&state)),
         content_tabs: vec![
             super::ContentTabEntry {
-                identity: super::ContentTabIdentity(crate::ui::window::ContentId(1)),
+                identity: super::ContentTabIdentity(crate::windows::ContentId(1)),
                 kind: super::ContentTabKind::Text,
                 title: "one.rs".into(),
                 active: false,
@@ -1518,7 +1518,7 @@ fn buffer_line_begins_after_the_explorer_dock() {
                 closeable: true,
             },
             super::ContentTabEntry {
-                identity: super::ContentTabIdentity(crate::ui::window::ContentId(2)),
+                identity: super::ContentTabIdentity(crate::windows::ContentId(2)),
                 kind: super::ContentTabKind::Text,
                 title: "two.rs".into(),
                 active: true,
@@ -2372,7 +2372,7 @@ fn immutable_git_signs_use_the_reserved_gutter_and_exact_buffer_revision() {
             buffer_revision: revision,
             root_revision: 1,
             status_revision: 1,
-            repository_id: crate::workspace::git::GitRepositoryId(1),
+            repository_id: crate::git::GitRepositoryId(1),
             line: 0,
             kind: super::UiGitSignKind::Added,
             staged: false,
@@ -2382,7 +2382,7 @@ fn immutable_git_signs_use_the_reserved_gutter_and_exact_buffer_revision() {
             buffer_revision: revision,
             root_revision: 1,
             status_revision: 1,
-            repository_id: crate::workspace::git::GitRepositoryId(1),
+            repository_id: crate::git::GitRepositoryId(1),
             line: 1,
             kind: super::UiGitSignKind::Changed,
             staged: false,
@@ -2392,7 +2392,7 @@ fn immutable_git_signs_use_the_reserved_gutter_and_exact_buffer_revision() {
             buffer_revision: revision,
             root_revision: 1,
             status_revision: 1,
-            repository_id: crate::workspace::git::GitRepositoryId(1),
+            repository_id: crate::git::GitRepositoryId(1),
             line: 2,
             kind: super::UiGitSignKind::Deleted,
             staged: false,
@@ -2780,7 +2780,7 @@ fn retained_plugin_surface_rows_are_strictly_clipped_to_the_projected_window() {
     };
     let surface = super::PluginSurfaceUiState {
         handle: 9,
-        window: crate::ui::window::WindowId(99),
+        window: crate::windows::WindowId(99),
         tree_revision: 1,
         scroll: 0,
         rows: vec![
@@ -2805,7 +2805,7 @@ fn retained_plugin_surface_rows_are_strictly_clipped_to_the_projected_window() {
     super::render_plugin_surface(
         &mut frame,
         &surface,
-        crate::ui::window::WindowRect {
+        crate::windows::WindowRect {
             x: 3,
             y: 1,
             width: 4,
@@ -2986,7 +2986,7 @@ fn picker_preview_highlighting_is_prepared_before_paint_and_replaced_with_its_te
         .unwrap()
         .spans
         .as_ptr();
-    let rect = crate::ui::window::WindowRect {
+    let rect = crate::windows::WindowRect {
         x: 0,
         y: 0,
         width: 100,
@@ -3315,7 +3315,7 @@ fn private_surface_cells_and_cursor_are_local_and_strictly_clipped() {
     };
     let surface = super::PrivateSurfaceUiState {
         handle: 3,
-        window: crate::ui::window::WindowId(7),
+        window: crate::windows::WindowId(7),
         dimensions_revision: 2,
         surface_revision: 1,
         width: 4,
@@ -3363,7 +3363,7 @@ fn private_surface_cells_and_cursor_are_local_and_strictly_clipped() {
     super::render_private_surface(
         &mut frame,
         &surface,
-        crate::ui::window::WindowRect {
+        crate::windows::WindowRect {
             x: 2,
             y: 1,
             width: 4,
@@ -3396,7 +3396,7 @@ fn private_surface_cells_and_cursor_are_local_and_strictly_clipped() {
     super::render_private_surface(
         &mut frame,
         &stale,
-        crate::ui::window::WindowRect {
+        crate::windows::WindowRect {
             x: 2,
             y: 1,
             width: 4,
@@ -4092,13 +4092,13 @@ fn terminal_tabs_keep_the_active_title_visible_and_hit_targets_match_borders() {
     ] {
         config.editor.ambiguous_width = policy;
         for layer in [
-            crate::ui::window::CompositorLayer::Docked,
-            crate::ui::window::CompositorLayer::Floating,
+            crate::windows::CompositorLayer::Docked,
+            crate::windows::CompositorLayer::Floating,
         ] {
             let geometry =
-                super::terminal_window_geometry(crate::ui::window::ProjectedCompositorWindow {
-                    window: crate::ui::window::WindowId(1),
-                    rect: crate::ui::window::WindowRect {
+                super::terminal_window_geometry(crate::windows::ProjectedCompositorWindow {
+                    window: crate::windows::WindowId(1),
+                    rect: crate::windows::WindowRect {
                         x: 10,
                         y: 1,
                         width: 40,
@@ -4237,7 +4237,7 @@ fn key_hints_use_available_rows_and_stay_inside_a_lower_workspace() {
     super::terminal::render_key_hints(
         &mut frame,
         &hints,
-        crate::ui::window::WindowRect {
+        crate::windows::WindowRect {
             x: 0,
             y: 30,
             width: 80,
@@ -4276,7 +4276,7 @@ fn key_hints_measure_wide_labels_and_keep_borders_single_cell() {
         super::terminal::render_key_hints(
             &mut frame,
             &hints,
-            crate::ui::window::WindowRect {
+            crate::windows::WindowRect {
                 x: 0,
                 y: 0,
                 width,
@@ -4356,7 +4356,7 @@ fn dashboard_and_prompt_render_at_multiple_sizes() {
 
 #[test]
 fn dashboard_respects_top_docks_and_floating_window_order() {
-    use crate::ui::window::{CompositorLayer, WindowRect};
+    use crate::windows::{CompositorLayer, WindowRect};
     let state = EditorState::new(PathBuf::from("/workspace"));
     let loaded = crate::config::load_bundled_config();
     let mut ui = UiState {
@@ -6211,7 +6211,7 @@ fn completion_height_fits_on_one_side_of_the_cursor() {
         &mut frame,
         &completion,
         &config,
-        crate::ui::window::WindowRect {
+        crate::windows::WindowRect {
             x: 0,
             y: 0,
             width: 40,
@@ -6433,7 +6433,7 @@ fn documentation_scroll_reaches_the_tail_of_a_single_wrapped_line() {
         &mut frame,
         &popup,
         &config,
-        crate::ui::window::WindowRect {
+        crate::windows::WindowRect {
             x: 0,
             y: 0,
             width: 80,
@@ -6516,15 +6516,15 @@ fn floating_editor_uses_its_whole_body_below_the_screen_statusline() {
         grid: crate::ui::CellGrid::new(40, 10),
         cursor: None,
     };
-    let projected = crate::ui::window::ProjectedCompositorWindow {
+    let projected = crate::windows::ProjectedCompositorWindow {
         window: binding.window,
-        rect: crate::ui::window::WindowRect {
+        rect: crate::windows::WindowRect {
             x: 1,
             y: 1,
             width: 25,
             height: 2,
         },
-        layer: crate::ui::window::CompositorLayer::Floating,
+        layer: crate::windows::CompositorLayer::Floating,
         z_index: 1,
         focused: true,
         focusable: true,
@@ -6582,15 +6582,15 @@ fn side_docked_terminal_keeps_the_debug_inspectors_visible() {
         .projection
         .windows
         .iter_mut()
-        .find(|window| window.window == crate::ui::window::WindowId(10_002))
+        .find(|window| window.window == crate::windows::WindowId(10_002))
         .unwrap();
-    terminal.rect = crate::ui::window::WindowRect {
+    terminal.rect = crate::windows::WindowRect {
         x: 80,
         y: 0,
         width: 40,
         height: 39,
     };
-    compositor.projection.workspace_bounds = crate::ui::window::WindowRect {
+    compositor.projection.workspace_bounds = crate::windows::WindowRect {
         x: 0,
         y: 0,
         width: 80,
@@ -7124,7 +7124,7 @@ fn documentation_popup_clamps_scroll_after_widening() {
         &mut frame,
         &popup,
         &config,
-        crate::ui::window::WindowRect {
+        crate::windows::WindowRect {
             x: 0,
             y: 0,
             width: 16,
@@ -7143,7 +7143,7 @@ fn documentation_popup_clamps_scroll_after_widening() {
         &mut frame,
         &popup,
         &config,
-        crate::ui::window::WindowRect {
+        crate::windows::WindowRect {
             x: 0,
             y: 0,
             width: 80,
@@ -7179,7 +7179,7 @@ fn documentation_popup_wraps_visible_replacements_and_keeps_wide_borders_inside(
         &mut frame,
         &popup,
         &config,
-        crate::ui::window::WindowRect {
+        crate::windows::WindowRect {
             x: 0,
             y: 0,
             width: 16,
@@ -7209,7 +7209,7 @@ fn content_tabs_keep_literal_placeholders_and_measure_visible_replacements() {
     .into_iter()
     .enumerate()
     .map(|(index, title)| super::ContentTabEntry {
-        identity: super::ContentTabIdentity(crate::ui::window::ContentId(index as u64)),
+        identity: super::ContentTabIdentity(crate::windows::ContentId(index as u64)),
         kind: super::ContentTabKind::Text,
         title,
         active: index == 0,
@@ -7257,7 +7257,7 @@ fn content_tabs_follow_the_last_of_many_entries() {
     let config = crate::config::load_bundled_config().config;
     let entries = (0..1000)
         .map(|index| super::ContentTabEntry {
-            identity: super::ContentTabIdentity(crate::ui::window::ContentId(index)),
+            identity: super::ContentTabIdentity(crate::windows::ContentId(index)),
             kind: super::ContentTabKind::Text,
             title: format!("file-{index}.rs"),
             active: index == 999,
@@ -7397,13 +7397,13 @@ fn completion_documentation_reports_final_wrapping_and_suppresses_cursor_overlap
         &mut frame,
         &popup,
         &config,
-        crate::ui::window::WindowRect {
+        crate::windows::WindowRect {
             x: 0,
             y: 0,
             width: 80,
             height: 24,
         },
-        Some(crate::ui::window::WindowRect {
+        Some(crate::windows::WindowRect {
             x: 20,
             y: 4,
             width: 53,
@@ -7435,13 +7435,13 @@ fn completion_documentation_reports_final_wrapping_and_suppresses_cursor_overlap
             &mut frame,
             &popup,
             &config,
-            crate::ui::window::WindowRect {
+            crate::windows::WindowRect {
                 x: 0,
                 y: 0,
                 width: 80,
                 height: 3
             },
-            Some(crate::ui::window::WindowRect {
+            Some(crate::windows::WindowRect {
                 x: 20,
                 y: 0,
                 width: 53,

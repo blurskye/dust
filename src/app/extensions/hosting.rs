@@ -20,9 +20,9 @@ use crate::extensions::PluginUiEvent;
 use crate::extensions::PluginUiRequest;
 use crate::ui::PluginSurfaceUiState;
 use crate::ui::PrivateSurfaceUiState;
-use crate::ui::window::CompositorProjection;
-use crate::ui::window::WindowGraph;
-use crate::ui::window::WindowId;
+use crate::windows::CompositorProjection;
+use crate::windows::WindowGraph;
+use crate::windows::WindowId;
 
 pub(in crate::app) enum WindowUpdate<'a> {
     Ready(PluginUiEvent),

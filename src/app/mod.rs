@@ -174,7 +174,7 @@ use thiserror::Error;
 use crate::app::extensions::{PluginUiInteraction, WindowUpdate};
 use crate::app::startup::{ApplicationError, StartupTarget, build_state};
 
-use crate::ui::window::{
+use crate::windows::{
     CompositorProjection, DockEdge, SpatialDirection, WindowPlacement, WindowRect,
 };
 
@@ -262,7 +262,7 @@ struct App {
     /// When the repository's index and HEAD last changed, as of the last disk check.
     pub(super) git_stamp: Option<(
         [Option<std::time::SystemTime>; 2],
-        Option<crate::workspace::git::GitHeadId>,
+        Option<crate::git::GitHeadId>,
     )>,
     /// What project replace is looking for, while it asks what to replace it with.
     replace_query: Option<String>,

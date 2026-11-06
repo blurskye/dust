@@ -6,7 +6,7 @@ pub(in crate::app) use focus::FocusTarget;
 mod mutations;
 mod plans;
 mod plugin;
-use crate::ui::window::WindowGraph;
+use crate::windows::WindowGraph;
 use crate::config::Config;
 use crate::ui::CompositorLayoutState;
 use crate::ui::NativeSurfaceWindowBinding;
@@ -15,13 +15,13 @@ use crate::ui::geometry::SurfaceContentGeometry;
 use crate::ui::geometry::documentation_page_rows;
 use crate::ui::geometry::explorer_body_geometry;
 use crate::ui::geometry::picker_content_geometry;
-use crate::ui::window::CompositorProjection;
-use crate::ui::window::ContentId;
-use crate::ui::window::ViewId;
-use crate::ui::window::WindowId;
-use crate::ui::window::WindowPlacement;
-use crate::ui::window::WindowRect;
-use crate::ui::window::WorkspaceTabId;
+use crate::windows::CompositorProjection;
+use crate::windows::ContentId;
+use crate::windows::ViewId;
+use crate::windows::WindowId;
+use crate::windows::WindowPlacement;
+use crate::windows::WindowRect;
+use crate::windows::WorkspaceTabId;
 pub(in crate::app) use bridge::EditorWindowBridge;
 use bridge::NativeSurfaceBridge;
 pub(in crate::app) use bridge::NativeSurfaceSignature;
@@ -50,7 +50,7 @@ pub(super) struct ProjectionRequest {
     pub graph_revision: u64,
     pub bounds: WindowRect,
     pub minimum_size: (u16, u16),
-    pub insets: crate::ui::window::TiledInsets,
+    pub insets: crate::windows::TiledInsets,
     pub surfaces: NativeSurfaceWindowBinding,
     pub protected: Option<WindowRect>,
 }
