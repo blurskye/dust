@@ -63,9 +63,9 @@ use serde_json::json;
 
 /// The variable terminals started by Dust find the socket in.
 pub const SERVER_VARIABLE: &str = "DUST_SERVER";
-const REQUEST_BYTE_CEILING: u64 = 1024 * 1024;
+const REQUEST_BYTE_LIMIT: u64 = 1024 * 1024;
 const AGENT_PREFIX: &str = "agent\t";
-const REQUEST_QUEUE_CEILING: usize = 64;
+const REQUEST_QUEUE_LIMIT: usize = 64;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(2);
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -154,7 +154,7 @@ impl RemoteServer {
         fs::set_permissions(&path, fs::Permissions::from_mode(0o600))?;
         listener.set_nonblocking(true)?;
         let (wake, wake_reader) = UnixStream::pair()?;
-        let (sender, requests) = mpsc::sync_channel(REQUEST_QUEUE_CEILING);
+        let (sender, requests) = mpsc::sync_channel(REQUEST_QUEUE_LIMIT);
         let (replies, pending) = mpsc::sync_channel::<(UnixStream, Result<String, String>)>(8);
         let stopping = Arc::new(AtomicBool::new(false));
         let reading = Arc::new(Mutex::new(None));
@@ -217,7 +217,7 @@ impl RemoteServer {
                     let Ok(reader) = stream.try_clone() else {
                         continue;
                     };
-                    let mut reader = BufReader::new(reader.take(REQUEST_BYTE_CEILING));
+                    let mut reader = BufReader::new(reader.take(REQUEST_BYTE_LIMIT));
                     let mut line = Vec::new();
                     let mut complete = false;
                     loop {
@@ -394,7 +394,7 @@ pub fn send(server: &Path, paths: &[PathBuf], line: Option<usize>) -> io::Result
         let encoded =
             serde_json::to_string(path.as_os_str().as_bytes()).map_err(io::Error::other)?;
         let entry = format!("{line}\t{encoded}\n");
-        if message.len().saturating_add(entry.len()) > REQUEST_BYTE_CEILING as usize {
+        if message.len().saturating_add(entry.len()) > REQUEST_BYTE_LIMIT as usize {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "remote request exceeds 1 MiB",
@@ -505,13 +505,13 @@ mod tests {
         client
             .set_read_timeout(Some(Duration::from_secs(5)))
             .unwrap();
-        for _ in 0..=REQUEST_QUEUE_CEILING {
+        for _ in 0..=REQUEST_QUEUE_LIMIT {
             writeln!(client, "0\t/file.rs").unwrap();
         }
         let mut byte = [0];
         assert_eq!(client.read(&mut byte).unwrap(), 0);
         let received: Vec<_> = std::iter::from_fn(|| server.try_request()).collect();
-        assert_eq!(received.len(), REQUEST_QUEUE_CEILING);
+        assert_eq!(received.len(), REQUEST_QUEUE_LIMIT);
         send(server.path(), &[PathBuf::from("/next.rs")], None).unwrap();
         let deadline = Instant::now() + Duration::from_secs(3);
         loop {
@@ -528,15 +528,15 @@ mod tests {
     fn bulk_opens_report_rejected_admission_instead_of_silent_success() {
         let directory = tempfile::tempdir().unwrap();
         let server = RemoteServer::start(directory.path()).unwrap();
-        let paths = vec![PathBuf::from("/file.rs"); REQUEST_QUEUE_CEILING];
+        let paths = vec![PathBuf::from("/file.rs"); REQUEST_QUEUE_LIMIT];
         send(server.path(), &paths, None).unwrap();
         assert!(send(server.path(), &[PathBuf::from("/rejected.rs")], None).is_err());
         let received: Vec<_> = std::iter::from_fn(|| server.try_request()).collect();
-        assert_eq!(received.len(), REQUEST_QUEUE_CEILING);
+        assert_eq!(received.len(), REQUEST_QUEUE_LIMIT);
         assert!(send(server.path(), &[PathBuf::from("/next.rs")], None).is_ok());
 
         let server = RemoteServer::start(&directory.path().join("bulk")).unwrap();
-        let paths = vec![PathBuf::from("/file.rs"); REQUEST_QUEUE_CEILING + 1];
+        let paths = vec![PathBuf::from("/file.rs"); REQUEST_QUEUE_LIMIT + 1];
         assert!(send(server.path(), &paths, None).is_err());
     }
 
