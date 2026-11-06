@@ -1,3 +1,5 @@
+//! Child processes, framing and execution preflight.
+
 #![forbid(unsafe_code)]
 
 use serde_json::Value;
@@ -37,8 +39,8 @@ pub(crate) fn terminate_process_group(id: u32) {
     }
 }
 
-pub const PROTOCOL_MESSAGE_BYTE_CEILING: usize = 16 * 1024 * 1024;
-const PROTOCOL_HEADER_BYTE_CEILING: usize = 16 * 1024;
+pub const MAX_PROTOCOL_MESSAGE_BYTES: usize = 16 * 1024 * 1024;
+const MAX_PROTOCOL_HEADER_BYTES: usize = 16 * 1024;
 
 pub fn read_content_length_message(
     reader: &mut impl BufRead,
@@ -48,8 +50,8 @@ pub fn read_content_length_message(
     loop {
         let mut line = String::new();
         // Limit materialization as well as the post-read length check. A peer
-        // need not supply a newline before the header ceiling takes effect.
-        let remaining = PROTOCOL_HEADER_BYTE_CEILING.saturating_sub(header_bytes) + 1;
+        // need not supply a newline before the header limit takes effect.
+        let remaining = MAX_PROTOCOL_HEADER_BYTES.saturating_sub(header_bytes) + 1;
         let read = std::io::Read::take(&mut *reader, remaining as u64)
             .read_line(&mut line)
             .map_err(ProtocolError::Io)?;
@@ -61,7 +63,7 @@ pub fn read_content_length_message(
             };
         }
         header_bytes = header_bytes.saturating_add(read);
-        if header_bytes > PROTOCOL_HEADER_BYTE_CEILING {
+        if header_bytes > MAX_PROTOCOL_HEADER_BYTES {
             return Err(ProtocolError::HeadersTooLarge);
         }
         if line == "\r\n" || line == "\n" {
@@ -79,7 +81,7 @@ pub fn read_content_length_message(
         }
     }
     let content_length = content_length.ok_or(ProtocolError::MissingContentLength)?;
-    if content_length > PROTOCOL_MESSAGE_BYTE_CEILING {
+    if content_length > MAX_PROTOCOL_MESSAGE_BYTES {
         return Err(ProtocolError::MessageTooLarge(content_length));
     }
     let mut body = vec![0_u8; content_length];
@@ -94,7 +96,7 @@ pub fn write_content_length_message(
     value: &Value,
 ) -> Result<(), ProtocolError> {
     let body = serde_json::to_vec(value).map_err(ProtocolError::Json)?;
-    if body.len() > PROTOCOL_MESSAGE_BYTE_CEILING {
+    if body.len() > MAX_PROTOCOL_MESSAGE_BYTES {
         return Err(ProtocolError::MessageTooLarge(body.len()));
     }
     write!(writer, "Content-Length: {}\r\n\r\n", body.len()).map_err(ProtocolError::Io)?;
@@ -108,13 +110,13 @@ pub enum ProtocolError {
     Io(#[source] io::Error),
     #[error("protocol stream ended in the middle of headers")]
     UnexpectedEof,
-    #[error("protocol headers exceed the safety ceiling")]
+    #[error("protocol headers exceed the safety limit")]
     HeadersTooLarge,
     #[error("protocol message is missing Content-Length")]
     MissingContentLength,
     #[error("protocol Content-Length is invalid")]
     InvalidContentLength,
-    #[error("protocol message length {0} exceeds the safety ceiling")]
+    #[error("protocol message length {0} exceeds the safety limit")]
     MessageTooLarge(usize),
     #[error("protocol JSON is invalid: {0}")]
     Json(#[source] serde_json::Error),
@@ -220,7 +222,7 @@ mod tests {
         assert!(read_content_length_message(&mut missing).is_err());
         let source = format!(
             "Content-Length: {}\r\n\r\n",
-            crate::process::PROTOCOL_MESSAGE_BYTE_CEILING + 1
+            crate::process::MAX_PROTOCOL_MESSAGE_BYTES + 1
         );
         let mut oversized = BufReader::new(Cursor::new(source));
         assert!(read_content_length_message(&mut oversized).is_err());
@@ -293,7 +295,7 @@ pub enum PtyEvent {
     },
 }
 mod pty;
-pub use pty::PtyService;
+pub use pty::PtyWorker;
 #[derive(Debug, Error)]
 pub enum PtyError {
     #[error("PTY identity exhausted")]
@@ -339,12 +341,12 @@ struct PreflightCommand {
     id: PreflightId,
     request: ExecutionPreflightRequest,
 }
-pub struct ExecutionPreflightService {
+pub struct ExecutionPreflightWorker {
     next: u64,
     sender: SyncSender<PreflightCommand>,
     receiver: Receiver<ExecutionPreflightEvent>,
 }
-impl ExecutionPreflightService {
+impl ExecutionPreflightWorker {
     pub(crate) fn identity_available(&self) -> bool {
         self.next < u64::MAX
     }
@@ -484,7 +486,7 @@ mod preflight_lifecycle_tests {
     #[test]
     fn full_result_queue_retains_every_terminal_reply_and_exhaustion_fails_closed() {
         let root = tempfile::tempdir().unwrap();
-        let mut service = ExecutionPreflightService::start(1);
+        let mut service = ExecutionPreflightWorker::start(1);
         let request = || ExecutionPreflightRequest {
             executable: std::env::current_exe().unwrap(),
             cwd: root.path().into(),

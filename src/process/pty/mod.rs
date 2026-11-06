@@ -1,4 +1,4 @@
-//! Bounded PTY admission. All filesystem/PTY/process I/O runs on owned workers.
+//! PTY sessions, capacity reservations and worker-owned I/O.
 use crate::process::PtyError;
 use crate::process::PtyEvent;
 use crate::process::PtyId;
@@ -46,7 +46,7 @@ struct Handle {
     capacity: usize,
     finished: Arc<AtomicBool>,
 }
-pub struct PtyService {
+pub struct PtyWorker {
     next: Option<u64>,
     capacity: usize,
     residents: Arc<AtomicUsize>,
@@ -55,15 +55,15 @@ pub struct PtyService {
     receiver: Receiver<PtyEvent>,
     closed: bool,
 }
-pub(crate) struct PtyAdmission<'a> {
-    service: &'a mut PtyService,
+pub(crate) struct PtyReservation<'a> {
+    service: &'a mut PtyWorker,
     slot: Slot,
 }
-pub(crate) struct PtyInputAdmission<'a> {
+pub(crate) struct PtyInputReservation<'a> {
     handle: &'a Handle,
     slot: Slot,
 }
-impl PtyInputAdmission<'_> {
+impl PtyInputReservation<'_> {
     pub(crate) fn submit(self, bytes: Vec<u8>) -> Result<(), PtyError> {
         if self.handle.cancel.load(Ordering::Acquire)
             || self.handle.finished.load(Ordering::Acquire)
@@ -82,7 +82,7 @@ impl PtyInputAdmission<'_> {
             .map_err(queue)
     }
 }
-impl PtyAdmission<'_> {
+impl PtyReservation<'_> {
     pub(crate) fn submit(
         self,
         request: PtyRequest,
@@ -145,7 +145,7 @@ impl PtyAdmission<'_> {
         Ok(id)
     }
 }
-impl PtyService {
+impl PtyWorker {
     pub fn start(capacity: usize) -> Self {
         let capacity = capacity.clamp(1, 256);
         let (sender, receiver) = mpsc::sync_channel(capacity);
@@ -173,19 +173,19 @@ impl PtyService {
         }
         Ok(())
     }
-    pub(crate) fn reserve(&mut self) -> Result<PtyAdmission<'_>, PtyError> {
+    pub(crate) fn reserve(&mut self) -> Result<PtyReservation<'_>, PtyError> {
         self.check_open()?;
         let slot = Slot::reserve(&self.residents, self.capacity)?;
-        Ok(PtyAdmission {
+        Ok(PtyReservation {
             service: self,
             slot,
         })
     }
-    /// Asynchronous admission, not a successful spawn or directory observation.
+    /// Queues the spawn; success does not mean the process has started.
     pub fn open(&mut self, request: PtyRequest) -> Result<PtyId, PtyError> {
         self.reserve()?.submit(request, None)
     }
-    pub(crate) fn reserve_input(&self, id: PtyId) -> Result<PtyInputAdmission<'_>, PtyError> {
+    pub(crate) fn reserve_input(&self, id: PtyId) -> Result<PtyInputReservation<'_>, PtyError> {
         if self.closed {
             return Err(PtyError::Stopped);
         }
@@ -194,14 +194,14 @@ impl PtyService {
             return Err(PtyError::Stopped);
         }
         let slot = Slot::reserve(&handle.queued, handle.capacity)?;
-        Ok(PtyInputAdmission { handle, slot })
+        Ok(PtyInputReservation { handle, slot })
     }
-    pub fn input(&self, id: PtyId, bytes: Vec<u8>, ceiling: usize) -> Result<(), PtyError> {
-        let admission = self.reserve_input(id)?;
-        if bytes.len() > ceiling {
+    pub fn input(&self, id: PtyId, bytes: Vec<u8>, limit: usize) -> Result<(), PtyError> {
+        let reservation = self.reserve_input(id)?;
+        if bytes.len() > limit {
             return Err(PtyError::InvalidPolicy);
         }
-        admission.submit(bytes)
+        reservation.submit(bytes)
     }
     pub fn resize(&self, id: PtyId, columns: u16, rows: u16) -> Result<(), PtyError> {
         self.resize_checked(id, 0, columns, rows)
@@ -296,7 +296,7 @@ impl PtyService {
         events
     }
 }
-impl Drop for PtyService {
+impl Drop for PtyWorker {
     fn drop(&mut self) {
         self.begin_shutdown();
     }

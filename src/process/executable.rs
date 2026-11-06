@@ -1,3 +1,5 @@
+//! Executable file checks.
+
 use std::path::Path;
 pub(crate) fn executable_file(path: &Path) -> bool {
     let Ok(metadata) = fs::metadata(path) else {

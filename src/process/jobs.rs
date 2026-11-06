@@ -1,3 +1,5 @@
+//! Bounded child-process jobs, output and cancellation.
+
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::io;
@@ -91,7 +93,7 @@ struct Submission {
     cancel: Arc<AtomicBool>,
     slot: Arc<JobSlot>,
 }
-/// Bounded admission only. Filesystem, spawn, process polling and teardown are worker-owned.
+/// Reserves worker capacity. Filesystem access, spawning and process cleanup run on workers.
 pub struct JobSupervisor {
     next: Option<u64>,
     jobs: HashMap<JobId, Arc<AtomicBool>>,
@@ -101,7 +103,7 @@ pub struct JobSupervisor {
     residents: Arc<AtomicUsize>,
     worker: thread::JoinHandle<()>,
 }
-pub(crate) struct JobAdmission<'a> {
+pub(crate) struct JobReservation<'a> {
     supervisor: &'a mut JobSupervisor,
     slot: Arc<JobSlot>,
 }
@@ -175,7 +177,7 @@ impl JobSupervisor {
             worker,
         })
     }
-    pub(crate) fn reserve(&mut self) -> Result<JobAdmission<'_>, JobError> {
+    pub(crate) fn reserve(&mut self) -> Result<JobReservation<'_>, JobError> {
         if self.stop.load(Ordering::Acquire) || self.worker.is_finished() {
             return Err(JobError::Stopped);
         }
@@ -188,7 +190,7 @@ impl JobSupervisor {
             })
             .map_err(|_| JobError::Full)?;
         let slot = Arc::new(JobSlot(self.residents.clone()));
-        Ok(JobAdmission {
+        Ok(JobReservation {
             supervisor: self,
             slot,
         })
@@ -243,7 +245,7 @@ impl JobSupervisor {
         self.jobs.clear();
     }
 }
-impl JobAdmission<'_> {
+impl JobReservation<'_> {
     pub(crate) fn submit(self, request: JobRequest) -> Result<JobId, JobError> {
         self.submit_inner(request, None)
     }
@@ -739,10 +741,10 @@ fn stream_reader(
         })
         .map(|_| ())
 }
-fn reserve_output(total: &AtomicUsize, ceiling: usize, requested: usize) -> usize {
+fn reserve_output(total: &AtomicUsize, limit: usize, requested: usize) -> usize {
     let mut current = total.load(Ordering::Relaxed);
     loop {
-        let allowed = requested.min(ceiling.saturating_sub(current));
+        let allowed = requested.min(limit.saturating_sub(current));
         match total.compare_exchange_weak(
             current,
             current.saturating_add(allowed),
@@ -799,7 +801,7 @@ pub enum JobError {
     Spawn(#[source] io::Error),
     #[error("unknown job {0:?}")]
     Unknown(JobId),
-    #[error("job admission is full")]
+    #[error("job queue is full")]
     Full,
     #[error("job worker stopped")]
     Stopped,
@@ -870,7 +872,7 @@ mod tests {
     }
 
     #[test]
-    fn job_admission_is_worker_owned_bounded_and_drains_output_before_terminal() {
+    fn job_capacity_is_bounded_and_output_drains_before_completion() {
         let root = tempfile::tempdir().unwrap();
         let mut jobs = JobSupervisor::new(1);
         let id = jobs

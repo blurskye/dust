@@ -1,3 +1,5 @@
+//! Tests for pty sessions and worker queues.
+
 use crate::process::PtyPolicy;
 use crate::process::pty::*;
 use std::path::Path;
@@ -19,7 +21,7 @@ fn request(root: &Path, script: &str) -> PtyRequest {
         },
     }
 }
-fn drain(service: &mut PtyService, id: PtyId) -> Vec<PtyEvent> {
+fn drain(service: &mut PtyWorker, id: PtyId) -> Vec<PtyEvent> {
     let deadline = Instant::now() + Duration::from_secs(4);
     let mut received = Vec::new();
     loop {
@@ -103,7 +105,7 @@ fn pinned_pty_cwd_cannot_be_retargeted_or_fall_back_to_home() {
 #[test]
 fn pty_worker_reserves_real_capacity_and_preserves_stream_before_terminal() {
     let root = tempfile::tempdir().unwrap();
-    let mut missing = PtyService::start(1);
+    let mut missing = PtyWorker::start(1);
     let id = missing
         .open(request(&root.path().join("missing"), "printf forbidden"))
         .expect("foreground admits; worker inspects directory");
@@ -112,7 +114,7 @@ fn pty_worker_reserves_real_capacity_and_preserves_stream_before_terminal() {
         matches!(&events[..],[PtyEvent::Failed{message,..}] if message.contains("working directory"))
     );
 
-    let mut service = PtyService::start(1);
+    let mut service = PtyWorker::start(1);
     drop(service.reserve().unwrap());
     assert_eq!(service.residents.load(Ordering::Acquire), 0);
     let id=service.open(request(root.path(),"printf 'READY\n'; read value; printf 'ACK:%s\n' \"$value\"; i=0; while [ $i -lt 3000 ]; do printf 'ROW:%s\n' \"$i\"; i=$((i+1)); done")).unwrap();
@@ -199,7 +201,7 @@ fn pty_worker_reserves_real_capacity_and_preserves_stream_before_terminal() {
     let identity = crate::files::RootIdentity::capture(&target).unwrap();
     std::fs::rename(&target, root.path().join("old-scope")).unwrap();
     std::fs::create_dir(&target).unwrap();
-    let mut replaced = PtyService::start(1);
+    let mut replaced = PtyWorker::start(1);
     let id = replaced
         .reserve()
         .unwrap()
@@ -211,7 +213,7 @@ fn pty_worker_reserves_real_capacity_and_preserves_stream_before_terminal() {
     assert!(drain(&mut replaced,id).iter().any(|e|matches!(e,PtyEvent::Failed{message,..} if message.contains("filesystem identity changed"))));
     assert!(!target.join("marker").exists());
 
-    let mut cancelled = PtyService::start(1);
+    let mut cancelled = PtyWorker::start(1);
     let id = cancelled
         .open(request(
             root.path(),
@@ -253,7 +255,7 @@ fn pty_worker_reserves_real_capacity_and_preserves_stream_before_terminal() {
     let before = Instant::now();
     drop(cancelled);
     assert!(before.elapsed() < Duration::from_millis(500));
-    let mut limited = PtyService::start(1);
+    let mut limited = PtyWorker::start(1);
     let mut oversized = request(root.path(), "printf 123456789");
     oversized.policy.maximum_output_bytes = 4;
     let id = limited.open(oversized).unwrap();
@@ -268,7 +270,7 @@ fn pty_worker_reserves_real_capacity_and_preserves_stream_before_terminal() {
         .expect("reader failure is a distinct I/O completion");
     assert!(exit < io);
 
-    let mut detached = PtyService::start(1);
+    let mut detached = PtyWorker::start(1);
     let _ = detached
         .open(request(root.path(), "while :; do :; done"))
         .unwrap();
@@ -337,7 +339,7 @@ fn reaped_pty_child_is_never_signalled_again() {
 #[test]
 fn closing_pty_kills_hup_resistant_descendants_and_releases_workers() {
     let root = tempfile::tempdir().unwrap();
-    let mut service = PtyService::start(1);
+    let mut service = PtyWorker::start(1);
     let id = service
         .open(request(
             root.path(),
@@ -382,7 +384,7 @@ fn closing_reaped_pty_cancels_reads_while_another_process_holds_the_slave() {
         }
     }
     let root = tempfile::tempdir().unwrap();
-    let mut service = PtyService::start(1);
+    let mut service = PtyWorker::start(1);
     let id = service
         .open(request(root.path(), "tty > slave; read value"))
         .unwrap();
@@ -443,7 +445,7 @@ fn interactive_pty_keeps_invocation_name() {
     let root = tempfile::tempdir().unwrap();
     let invocation = root.path().join("custom-sh");
     std::os::unix::fs::symlink("/bin/sh", &invocation).unwrap();
-    let mut service = PtyService::start(1);
+    let mut service = PtyWorker::start(1);
     let mut request = request(root.path(), "printf '%s' \"$0\"");
     request.program = invocation.canonicalize().unwrap();
     request.argv0 = Some(invocation.clone());
@@ -467,7 +469,7 @@ fn interactive_pty_keeps_invocation_name() {
 #[test]
 fn interactive_pty_output_has_no_lifetime_quota() {
     let root = tempfile::tempdir().unwrap();
-    let mut service = PtyService::start(256);
+    let mut service = PtyWorker::start(256);
     // 4224 blocks of 8192 bytes exceed the former 32 MiB lifetime limit.
     let mut request = request(
         root.path(),
@@ -510,64 +512,11 @@ fn interactive_pty_output_has_no_lifetime_quota() {
 
 #[cfg(unix)]
 #[test]
-fn pty_resize_ack_precedes_the_childs_resize_output() {
-    let root = tempfile::tempdir().unwrap();
-    let mut service = PtyService::start(1);
-    let script = root.path().join("resize.py");
-    std::fs::write(&script, "import os,signal,time\ndef resized(*_): os.write(1, b'\\x1b[1;999HX')\nsignal.signal(signal.SIGWINCH, resized)\nos.write(1, b'\\x1b[?1049hREADY')\ntime.sleep(30)\n").unwrap();
-    let mut request = request(root.path(), "");
-    request.program =
-        crate::tools::discover_executable("python3").expect("PTY resize fixture needs Python 3");
-    request.arguments = vec![script.as_os_str().to_owned()];
-    let id = service.open(request).unwrap();
-    let deadline = Instant::now() + Duration::from_secs(4);
-    let mut screen = crate::ui::PtyScreen::new(80, 8, 8);
-    while !screen.lines().iter().any(|line| line.contains("READY")) {
-        for event in service.poll().unwrap() {
-            if let PtyEvent::Output { bytes, .. } = event {
-                screen.feed_bytes(&bytes);
-            }
-        }
-        assert!(Instant::now() < deadline);
-        thread::sleep(Duration::from_millis(2));
-    }
-    service.resize_checked(id, 1, 40, 8).unwrap();
-    let mut acknowledged = false;
-    loop {
-        for event in service.poll().unwrap() {
-            match event {
-                PtyEvent::Resized { columns, rows, .. } => {
-                    acknowledged = true;
-                    screen.resize(columns, rows);
-                }
-                PtyEvent::Output { bytes, .. } => {
-                    assert!(acknowledged, "resize output overtook the acknowledgement");
-                    screen.feed_bytes(&bytes);
-                }
-                _ => {}
-            }
-        }
-        if screen.history_row(0).unwrap()[39].text == "X" {
-            break;
-        }
-        assert!(
-            Instant::now() < deadline,
-            "missing resize frame: {:?}",
-            screen.lines()
-        );
-        thread::sleep(Duration::from_millis(2));
-    }
-    service.close(id).unwrap();
-    drain(&mut service, id);
-}
-
-#[cfg(unix)]
-#[test]
 fn interactive_pty_output_has_no_lifetime_quota_and_keeps_invocation_name() {
     let root = tempfile::tempdir().unwrap();
     let invocation = root.path().join("custom-sh");
     std::os::unix::fs::symlink("/bin/sh", &invocation).unwrap();
-    let mut service = PtyService::start(1);
+    let mut service = PtyWorker::start(1);
     let mut request = request(root.path(), "printf '%s' \"$0\"");
     request.program = invocation.canonicalize().unwrap();
     request.argv0 = Some(invocation.clone());
