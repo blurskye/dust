@@ -99,7 +99,7 @@ struct Row {
     key: DiagnosticKey,
     problem: ProblemRow,
 }
-pub(super) struct DiagnosticSession {
+pub(super) struct Diagnostics {
     store: DiagnosticStore,
     producers: BTreeMap<DiagnosticOwner, DiagnosticProducer>,
     batches: BTreeMap<(DiagnosticOwner, String), Batch>,
@@ -108,7 +108,7 @@ pub(super) struct DiagnosticSession {
     expanded: Option<(DiagnosticKey, Vec<DiagnosticSeverity>)>,
     dirty: bool,
 }
-impl DiagnosticSession {
+impl Diagnostics {
     pub(in crate::app) fn new(total: usize, per_uri: usize) -> Self {
         Self {
             store: DiagnosticStore::new(total, per_uri),
@@ -679,7 +679,7 @@ mod tests {
             .unwrap();
         let uri = crate::language::lsp::file_uri(&path);
         let producer = DiagnosticProducer::new(DiagnosticOwner::new("test").unwrap());
-        let mut owner = DiagnosticSession::new(10, 10);
+        let mut owner = Diagnostics::new(10, 10);
         owner.activate(producer.clone());
         let batch = |data: i32| DiagnosticBatch {
             producer: producer.clone(),
@@ -726,7 +726,7 @@ mod tests {
         let uri = crate::language::lsp::file_uri(&path);
         let old = DiagnosticProducer::new(DiagnosticOwner::new("same name").unwrap());
         let other = DiagnosticProducer::new(DiagnosticOwner::new("independent").unwrap());
-        let mut owner = DiagnosticSession::new(4, 2);
+        let mut owner = Diagnostics::new(4, 2);
         let batch =
             |producer: &DiagnosticProducer, message: &str, editor: &EditorState| DiagnosticBatch {
                 producer: producer.clone(),
@@ -828,7 +828,7 @@ mod tests {
 
     #[test]
     fn diagnostic_intersections_are_half_open_and_include_points() {
-        let mut owner = DiagnosticSession::new(10, 10);
+        let mut owner = Diagnostics::new(10, 10);
         owner.rows = [(0, 1), (1, 2), (2, 3), (1, 1), (2, 2)]
             .into_iter()
             .enumerate()
@@ -870,7 +870,7 @@ mod tests {
             .unwrap();
         let uri = crate::language::lsp::file_uri(&path);
         let producer = DiagnosticProducer::new(DiagnosticOwner::new("test").unwrap());
-        let mut owner = DiagnosticSession::new(10, 10);
+        let mut owner = Diagnostics::new(10, 10);
         owner.activate(producer.clone());
         owner
             .publish(
@@ -935,7 +935,7 @@ mod tests {
             .unwrap();
         let uri = crate::language::lsp::file_uri(&path);
         let producer = DiagnosticProducer::new(DiagnosticOwner::new("server").unwrap());
-        let mut owner = DiagnosticSession::new(4, 2);
+        let mut owner = Diagnostics::new(4, 2);
         owner.activate(producer.clone());
         // At the end of the first line, as rust-analyzer reports "expected COMMA".
         let batch = DiagnosticBatch {

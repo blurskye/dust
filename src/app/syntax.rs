@@ -1,3 +1,5 @@
+//! Syntax requests and accepted buffer highlights.
+
 use std::collections::HashMap;
 use std::time::Duration;
 use std::time::Instant;
@@ -22,7 +24,7 @@ use crate::language::syntax::SyntaxPolicy;
 
 use crate::language::syntax::SyntaxResult;
 
-use crate::language::syntax::SyntaxService;
+use crate::language::syntax::SyntaxWorker;
 
 use crate::language::syntax::SyntaxSupport;
 
@@ -55,8 +57,8 @@ pub(super) enum IndentError {
 }
 
 /// Owns parser admission, document identities, debounce and accepted results.
-pub(super) struct SyntaxSession {
-    service: SyntaxService,
+pub(super) struct Syntax {
+    service: SyntaxWorker,
     versions: HashMap<BufferId, TextVersion>,
     documents: HashMap<BufferId, SyntaxDocumentId>,
     submitted: HashMap<BufferId, (BufferRevision, u64, SyntaxLanguage)>,
@@ -69,10 +71,10 @@ pub(super) struct SyntaxSession {
     tab_width: usize,
 }
 
-impl SyntaxSession {
+impl Syntax {
     pub(in crate::app) fn new(queue_capacity: usize) -> Self {
         Self {
-            service: SyntaxService::start(queue_capacity),
+            service: SyntaxWorker::start(queue_capacity),
             versions: HashMap::new(),
             documents: HashMap::new(),
             submitted: HashMap::new(),
@@ -388,7 +390,7 @@ mod tests {
             })
             .collect::<Vec<_>>();
         let config = SyntaxConfig::default();
-        let mut session = SyntaxSession::new(2);
+        let mut session = Syntax::new(2);
         let start = Instant::now();
         session.tick(&documents, &config, 4, start, "large");
         let deadline = Instant::now() + Duration::from_secs(5);
@@ -416,7 +418,7 @@ mod tests {
             ("fn f() {\n    if true {\n    } foo(); }\n", 1),
         ] {
             let text = TextBuffer::from_text(source);
-            let mut session = SyntaxSession::new(1);
+            let mut session = Syntax::new(1);
             let start = Instant::now();
             let documents = [SyntaxDocument {
                 buffer,
@@ -458,7 +460,7 @@ mod tests {
             enabled: true,
         }];
         let config = SyntaxConfig::default();
-        let mut session = SyntaxSession::new(1);
+        let mut session = Syntax::new(1);
         let mut now = Instant::now();
         for (tab_width, folds) in [(4, 1), (8, 2)] {
             session.tick(&documents, &config, tab_width, now, "large");
@@ -485,7 +487,7 @@ mod tests {
             enabled: true,
         }];
         let config = SyntaxConfig::default();
-        let mut session = SyntaxSession::new(2);
+        let mut session = Syntax::new(2);
         let start = Instant::now();
         assert_eq!(session.tick(&documents, &config, 4, start, "too large"), 1);
         let now = start + std::time::Duration::from_millis(SYNTAX_DEBOUNCE_MS);
@@ -510,7 +512,7 @@ mod tests {
         let buffer = ids.insert(());
         let mut text = TextBuffer::from_text("// note\nfn main() {}\n");
         let config = SyntaxConfig::default();
-        let mut session = SyntaxSession::new(2);
+        let mut session = Syntax::new(2);
         let mut now = Instant::now();
         for _ in 0..400 {
             let documents = [SyntaxDocument {
@@ -546,7 +548,7 @@ mod tests {
         let mut ids = SlotMap::<BufferId, ()>::with_key();
         let buffer = ids.insert(());
         let original = TextBuffer::from_text("fn old() {}\n");
-        let mut session = SyntaxSession::new(2);
+        let mut session = Syntax::new(2);
         let config = SyntaxConfig::default();
         let mut now = Instant::now();
         for _ in 0..400 {
@@ -605,7 +607,7 @@ mod tests {
             enabled: true,
         }];
         let config = SyntaxConfig::default();
-        let mut session = SyntaxSession::new(2);
+        let mut session = Syntax::new(2);
         let start = Instant::now();
         assert_eq!(session.tick(&documents, &config, 4, start, "large"), 1);
         assert!(session.first_frame_pending(buffer, start));
@@ -628,7 +630,7 @@ mod tests {
         let mut ids = SlotMap::<BufferId, ()>::with_key();
         let buffer = ids.insert(());
         let document = SyntaxDocumentId(42);
-        let mut session = SyntaxSession::new(2);
+        let mut session = Syntax::new(2);
         session.documents.insert(buffer, document);
         session
             .submitted

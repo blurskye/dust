@@ -1,3 +1,5 @@
+//! Notifications, expiry and history.
+
 use crate::app::App;
 use std::collections::VecDeque;
 use std::time::Duration;
@@ -5,7 +7,7 @@ use std::time::Instant;
 
 /// Owns notification insertion, expiry, history and telemetry writers.
 /// The renderer receives a projection, never this owner's mutable state.
-pub(super) struct NoticeSession {
+pub(super) struct Notifications {
     current: Option<(bool, String)>,
     /// A notice to take down when what it announced is over.
     passing: Option<String>,
@@ -15,7 +17,7 @@ pub(super) struct NoticeSession {
     deadline: Option<Instant>,
 }
 
-impl NoticeSession {
+impl Notifications {
     pub(in crate::app) fn new() -> Self {
         Self {
             current: None,
@@ -227,14 +229,14 @@ impl App {
 
 #[cfg(test)]
 mod tests {
-    use crate::app::notifications::NoticeSession;
+    use crate::app::notifications::Notifications;
     use std::time::Duration;
     use std::time::Instant;
 
     #[test]
     fn explicit_insertion_owns_history_and_expiry_without_observing_ui() {
         let now = Instant::now();
-        let mut notices = NoticeSession::new();
+        let mut notices = Notifications::new();
         notices.notify("first".into(), false, now, Duration::from_secs(1));
         notices.notify(
             "first".into(),
@@ -261,7 +263,7 @@ mod tests {
     #[test]
     fn changed_severity_records_a_new_notice_and_restarts_expiry() {
         let now = Instant::now();
-        let mut notices = NoticeSession::new();
+        let mut notices = Notifications::new();
         notices.notify("offline".into(), false, now, Duration::from_secs(1));
         notices.notify(
             "offline".into(),
@@ -281,7 +283,7 @@ mod tests {
     #[test]
     fn history_retains_only_the_latest_two_hundred_notices() {
         let now = Instant::now();
-        let mut notices = NoticeSession::new();
+        let mut notices = Notifications::new();
         for index in 0..205 {
             notices.notify(index.to_string(), false, now, Duration::ZERO);
         }

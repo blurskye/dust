@@ -1,3 +1,5 @@
+//! Ordered application shutdown and worker cleanup.
+
 use crate::app::App;
 use crate::app::InteractiveError;
 use crate::files::VfsError;
@@ -71,7 +73,7 @@ impl App {
             }
             std::thread::sleep(Duration::from_millis(2));
         }
-        self.documents.close_admission();
+        self.documents.stop_accepting();
         let unwritten = self
             .recovery
             .unwritten(&self.state, &self.configuration.settings().recovery);

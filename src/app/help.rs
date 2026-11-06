@@ -1,3 +1,5 @@
+//! Help pages and command documentation.
+
 use crate::app::App;
 use crate::app::picker::PickerContent;
 use crate::app::picker::PickerOrigin;

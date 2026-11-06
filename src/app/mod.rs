@@ -57,16 +57,16 @@ pub use agent::commands::AgentCommand;
 pub use configuration::validate_loaded_configuration;
 
 use crate::app::configuration::Configuration;
-use crate::app::documents::DocumentSession;
-use crate::app::input::InputSession;
-use crate::app::windows::WindowSession;
+use crate::app::documents::Documents;
+use crate::app::input::InputState;
+use crate::app::windows::Windows;
 pub(super) mod commands;
-use crate::app::debugger::DebugSession;
+use crate::app::debugger::Debugger;
 pub(super) mod agent;
 mod remote;
 mod settings;
 
-use crate::app::syntax::SyntaxSession;
+use crate::app::syntax::Syntax;
 
 pub use commands::AppEffect;
 
@@ -202,20 +202,20 @@ struct App {
     substitute_confirm: Option<crate::app::editing::substitute::SubstituteConfirm>,
     session_load_requested: bool,
     session_restore_notice: bool,
-    notices: crate::app::notifications::NoticeSession,
+    notices: crate::app::notifications::Notifications,
     health: crate::app::health::Health,
     clock: std::sync::Arc<dyn crate::clock::Clock>,
     state: Tracked<EditorState>,
-    extension: crate::app::plugins::ExtensionSession,
-    workspace: crate::app::workspace::WorkspaceSession,
-    diagnostics: crate::app::diagnostics::DiagnosticSession,
-    workspace_edits: crate::app::workspace::edits::WorkspaceEditSession,
+    extension: crate::app::plugins::Plugins,
+    workspace: crate::app::workspace::Workspace,
+    diagnostics: crate::app::diagnostics::Diagnostics,
+    workspace_edits: crate::app::workspace::edits::WorkspaceEdits,
     commands: CommandRegistry<AppEffect>,
-    input: InputSession,
+    input: InputState,
     configuration: Configuration,
     ui: Tracked<UiState>,
-    documents: DocumentSession,
-    search: crate::app::search::SearchSession,
+    documents: Documents,
+    search: crate::app::search::Search,
     should_quit: bool,
     /// When the last key arrived, so automatic prompts wait until typing pauses.
     last_key_at: Option<Instant>,
@@ -253,22 +253,22 @@ struct App {
             ByteRange,
         )>,
     >,
-    window_session: WindowSession,
-    tooling: crate::app::tools::ToolingSession,
+    window_session: Windows,
+    tooling: crate::app::tools::Tools,
     language: crate::app::language::LspSession,
 
-    debugger_session: DebugSession,
+    debugger_session: Debugger,
     debug_terminal: Option<PtyId>,
-    recovery: crate::app::documents::recovery::RecoverySession,
+    recovery: crate::app::documents::recovery::Recovery,
     next_transaction: u64,
-    git: crate::app::git::GitSession,
-    clipboard: crate::app::editing::clipboard::ClipboardSession,
+    git: crate::app::git::Git,
+    clipboard: crate::app::editing::clipboard::Clipboard,
     macro_replays: Vec<(Vec<CommandInvocation>, usize, u64)>,
     macro_running: bool,
-    explorer: crate::app::explorer::ExplorerSession,
-    syntax: SyntaxSession,
-    persistence: crate::app::persistence::PersistenceSession,
-    tasks: crate::app::tasks::TaskSession,
+    explorer: crate::app::explorer::Explorer,
+    syntax: Syntax,
+    persistence: crate::app::persistence::Persistence,
+    tasks: crate::app::tasks::Tasks,
     terminal_session: crate::app::terminal::TerminalSession,
 }
 

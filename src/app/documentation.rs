@@ -1,3 +1,5 @@
+//! Documentation popup content, scrolling and lifetime.
+
 use crate::editor::text::ByteRange;
 use crate::ui::DocumentationMarkupKind;
 use crate::ui::DocumentationPopupKind;
@@ -303,7 +305,7 @@ mod tests {
 
     #[test]
     fn documentation_bounds_source_before_markdown_rendering() {
-        let mut input = crate::app::input::InputSession::new(100);
+        let mut input = crate::app::input::InputState::new(100);
         let config = crate::config::load_bundled_config().config;
         // Rendering would remove these badges and otherwise reveal the text after the source limit.
         let source = format!(
@@ -344,7 +346,7 @@ mod tests {
 
     #[test]
     fn git_wrapping_keeps_graphemes_whole_and_uses_configured_width() {
-        let mut input = crate::app::input::InputSession::new(100);
+        let mut input = crate::app::input::InputState::new(100);
         let mut config = crate::config::load_bundled_config().config;
         let text = format!("+{}👩‍💻", "x".repeat(65));
         input.present_documentation(
@@ -383,7 +385,7 @@ mod tests {
     }
     #[test]
     fn long_git_lines_store_scrollable_wrapped_rows() {
-        let mut input = crate::app::input::InputSession::new(100);
+        let mut input = crate::app::input::InputState::new(100);
         let text = format!("+{}", "x".repeat(1000));
         input.present_documentation(
             crate::ui::DocumentationPopupKind::Git,

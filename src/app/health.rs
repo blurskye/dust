@@ -1,3 +1,5 @@
+//! Health diagnostics, logging and crash snapshots.
+
 use crate::app::App;
 use crate::plugins::PluginStatus;
 use crate::telemetry::LiveCrashSnapshot;
