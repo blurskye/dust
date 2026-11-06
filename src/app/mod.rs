@@ -269,7 +269,7 @@ struct App {
     syntax: Syntax,
     persistence: crate::app::persistence::Persistence,
     tasks: crate::app::tasks::Tasks,
-    terminal_session: crate::app::terminal::TerminalSession,
+    terminal_session: crate::app::terminal::Terminals,
 }
 
 pub fn run_interactive(

@@ -418,7 +418,7 @@ impl App {
         )
         .map_err(|error| InteractiveError::Configuration(error.to_string()))?;
         let terminal_session =
-            crate::app::terminal::TerminalSession::new(&configuration.settings.terminals);
+            crate::app::terminal::Terminals::new(&configuration.settings.terminals);
         let terminal_panel_height = configuration.settings.ui.terminal_panel.height;
         let explorer_watch =
             ExplorerWatchWorker::start(crate::files::ExplorerWatchPolicy::default())
@@ -430,8 +430,7 @@ impl App {
             workspace.root_revision(),
             vfs_queue_capacity,
         );
-        let debugger_session =
-            Debugger::new(&configuration.settings.debug, workspace.version());
+        let debugger_session = Debugger::new(&configuration.settings.debug, workspace.version());
         let tooling = crate::app::tools::Tools::new(
             tool_inspection
                 .join()
