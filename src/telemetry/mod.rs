@@ -1,3 +1,5 @@
+//! Logging, traces and crash records.
+
 #![forbid(unsafe_code)]
 use serde::Deserialize;
 use serde::Serialize;
