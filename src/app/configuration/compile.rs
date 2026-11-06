@@ -14,7 +14,7 @@ use crate::editor::CommandRegistry;
 use crate::editor::CommandValue;
 use crate::editor::InvocationSource;
 use crate::editor::input::InputContextLayer;
-use crate::editor::input::InputContextRegistry;
+use crate::editor::input::InputContexts;
 use crate::editor::input::KeyEvent;
 use crate::editor::input::KeymapLayer;
 use crate::editor::input::KeymapSequence;
@@ -625,7 +625,7 @@ pub(in crate::app) fn compile_keymap_entries(
         &entry_origins,
         source.groups,
         &group_origins,
-        &InputContextRegistry::bundled(),
+        &InputContexts::bundled(),
         source.policy,
     )
 }
@@ -734,7 +734,7 @@ pub(in crate::app) fn compile_typed_keymap_entries(
     entry_origins: &[KeymapContributionOrigin],
     groups: &[crate::config::KeyGroupEntry],
     group_origins: &[KeymapContributionOrigin],
-    contexts: &InputContextRegistry,
+    contexts: &InputContexts,
     policy: &crate::config::KeymapPolicyConfig,
 ) -> Result<ResolvedKeymaps, Vec<String>> {
     let mut result = ResolvedKeymaps::default();

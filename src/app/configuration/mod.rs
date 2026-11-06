@@ -9,7 +9,7 @@ use crate::config::LoadedConfig;
 use crate::editor::CommandInvocation;
 use crate::editor::CommandRegistry;
 use crate::editor::InvocationSource;
-use crate::editor::input::InputContextRegistry;
+use crate::editor::input::InputContexts;
 use crate::plugins::PluginContributionCatalog;
 use crate::ui::DashboardAction;
 use std::collections::BTreeSet;
@@ -48,7 +48,7 @@ pub(in crate::app) use themes::ThemeKey;
 pub(in crate::app) use themes::ThemeRows;
 
 fn configured_context(
-    contexts: &InputContextRegistry,
+    contexts: &InputContexts,
     context: &str,
     mode: &str,
 ) -> Result<String, String> {

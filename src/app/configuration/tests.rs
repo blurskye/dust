@@ -158,8 +158,8 @@ pub(in crate::app) fn delayed_persistence_preserves_newer_runtime_breakpoint_and
         .collect();
     let state_path = saved.path().join("session.json");
     fs::write(&state_path, serde_json::to_vec(&state).unwrap()).unwrap();
-    let (worker, release) = PersistenceService::gated_for_test(1);
-    app.persistence = crate::app::persistence::PersistenceSession::new(worker, state_path);
+    let (worker, release) = PersistenceWorker::gated_for_test(1);
+    app.persistence = crate::app::persistence::Persistence::new(worker, state_path);
     let row = |line, condition: &str| crate::debugger::DapSourceBreakpoint {
         path: path.clone(),
         line,
@@ -2659,4 +2659,4 @@ fn product_plan_terminal_profile_and_keymap_are_accepted() {
 }
 
 use crate::persistence::PersistedState;
-use crate::persistence::PersistenceService;
+use crate::persistence::PersistenceWorker;

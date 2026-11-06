@@ -13,7 +13,7 @@ use crate::app::configuration::plugin_owner_from_id;
 use crate::app::configuration::validate_configured_commands;
 use crate::config::LoadedConfig;
 use crate::editor::CommandRegistry;
-use crate::editor::input::InputContextRegistry;
+use crate::editor::input::InputContexts;
 use crate::editor::register_builtin_commands;
 use crate::ui::DashboardAction;
 use std::collections::BTreeSet;
@@ -81,7 +81,7 @@ pub(in crate::app) fn base_safe_keymaps(
         literal_key_sequence("input.keymaps.local_leader", &policy.local_leader)
             .map(|local_leader| (leader, local_leader))
     });
-    let contexts = InputContextRegistry::bundled();
+    let contexts = InputContexts::bundled();
     let mut groups = base.groups[..base.bundled_group_count].to_vec();
     let mut group_spans = Vec::new();
     for (offset, group) in base.groups[base.bundled_group_count..].iter().enumerate() {
