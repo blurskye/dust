@@ -1,9 +1,9 @@
 //! Provider interaction and source-bound virtual document publication.
-use crate::app::plugins::ExtensionSession;
+use crate::app::plugins::Plugins;
 use crate::app::plugins::documents::VirtualDocumentEditorBridge;
 use crate::app::windows::EditorWindowCandidate;
 use crate::app::windows::NativeDescriptions;
-use crate::app::windows::WindowSession;
+use crate::app::windows::Windows;
 use crate::editor::BufferId;
 use crate::editor::EditorState;
 use crate::editor::EditorVersion;
@@ -19,7 +19,7 @@ use crate::plugins::PluginVirtualDocumentSnapshot;
 
 pub(in crate::app) struct VirtualContext<'a> {
     pub editor: &'a EditorState,
-    pub windows: &'a WindowSession,
+    pub windows: &'a Windows,
     pub scratch: &'a str,
 }
 pub(in crate::app) struct VirtualPublication<'a> {
@@ -68,7 +68,7 @@ pub(in crate::app) struct ProviderUpdate {
     pub refresh: Option<u64>,
     pub command: Option<String>,
 }
-impl ExtensionSession {
+impl Plugins {
     pub(in crate::app) fn start_provider(
         &mut self,
         provider: &str,
@@ -554,7 +554,7 @@ impl ExtensionSession {
     }
 }
 #[cfg(test)]
-impl ExtensionSession {
+impl Plugins {
     pub(in crate::app) fn fixture_provider_install(
         &mut self,
         index: &crate::plugins::PluginContributionIndex,

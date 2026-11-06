@@ -1,5 +1,5 @@
 //! Extension catalog and package/registry transitions; editor publication stays in dispatch.
-use crate::app::plugins::ExtensionSession;
+use crate::app::plugins::Plugins;
 use crate::plugins::PluginContributionCatalog;
 use crate::plugins::PluginContributionIndex;
 use crate::plugins::PluginLimits;
@@ -7,7 +7,7 @@ use crate::plugins::PluginLoadId;
 use crate::tools::PackageError;
 use crate::tools::PackageLock;
 use crate::tools::PackageOperation;
-use crate::tools::PackageServiceEvent;
+use crate::tools::PackageEvent;
 use crate::tools::RegistryEvent;
 use crate::tools::RegistryRequest;
 use crate::tools::RegistryResult;
@@ -27,7 +27,7 @@ pub(in crate::app) enum RegistryUpdate {
     ValidateArtifact,
     Error(String),
 }
-impl ExtensionSession {
+impl Plugins {
     pub(in crate::app) fn pending_packages(&self) -> usize {
         self.packages.pending_count()
             + self.package_aborts.len()
@@ -494,7 +494,7 @@ impl ExtensionSession {
         let mut updates = Vec::new();
         for event in self.packages.poll().unwrap_or_default() {
             match event {
-                PackageServiceEvent::Completed(mut result) => {
+                PackageEvent::Completed(mut result) => {
                     if let Some(error) = result.cleanup_error.take() {
                         updates.push(ExtensionUpdate::Error(format!(
                             "package cleanup failed: {error}"
@@ -576,7 +576,7 @@ impl ExtensionSession {
                         ));
                     }
                 }
-                PackageServiceEvent::Failed {
+                PackageEvent::Failed {
                     id,
                     operation,
                     error,
@@ -625,7 +625,7 @@ impl ExtensionSession {
     }
 }
 #[cfg(test)]
-impl ExtensionSession {
+impl Plugins {
     pub(in crate::app) fn fixture_contribution(
         &mut self,
         index: PluginContributionIndex,
@@ -1787,7 +1787,7 @@ impl App {
 
 impl App {
     pub(in crate::app) fn accept_virtual_publication(
-        windows: &mut crate::app::windows::WindowSession,
+        windows: &mut crate::app::windows::Windows,
         (source, transition): (
             VirtualPublication<'_>,
             crate::app::windows::EditorWindowCandidate,
@@ -1835,7 +1835,7 @@ use slotmap::Key;
 
 #[cfg(test)]
 mod tests {
-    use crate::app::plugins::ExtensionSession;
+    use crate::app::plugins::Plugins;
     use crate::app::plugins::integration::ExtensionUpdate;
     use crate::app::plugins::integration::RegistryUpdate;
     use crate::plugins::PluginLimits;
@@ -1846,13 +1846,13 @@ mod tests {
     use crate::tools::RegistryEvent;
     use crate::tools::RegistryPackageMetadata;
     use crate::tools::RegistryResult;
-    use crate::tools::RegistryService;
+    use crate::tools::RegistryWorker;
     use std::time::Duration;
     use std::time::Instant;
     #[test]
     fn package_update_replaces_managed_plugin_and_commits_after_load() {
         use crate::plugins::PluginEvent;
-        use crate::tools::PackageManager;
+        use crate::tools::PackageStore;
         use crate::tools::PackageOperation;
         use sha2::Digest;
         use sha2::Sha256;
@@ -1860,7 +1860,7 @@ mod tests {
         use std::thread;
         let root = tempfile::tempdir().unwrap();
         let packages = root.path().join("packages");
-        let registry = RegistryService::start(
+        let registry = RegistryWorker::start(
             crate::tools::RegistryPolicy {
                 offline: true,
                 ..Default::default()
@@ -1869,7 +1869,7 @@ mod tests {
         )
         .unwrap();
         let mut owner =
-            ExtensionSession::new(root.path().join("storage"), 8, packages.clone(), registry);
+            Plugins::new(root.path().join("storage"), 8, packages.clone(), registry);
         let core = include_bytes!(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/tests/fixtures/retained-guest/retained-guest.core.wasm"
@@ -1960,7 +1960,7 @@ mod tests {
             assert_ne!(Some(load), old_load);
             let token = owner.take_prepared("demo", load).unwrap();
             let manager =
-                PackageManager::new(packages.clone(), 1024 * 1024, 64 * 1024 * 1024).unwrap();
+                PackageStore::new(packages.clone(), 1024 * 1024, 64 * 1024 * 1024).unwrap();
             assert_eq!(
                 manager
                     .read_lock()
@@ -2021,7 +2021,7 @@ mod tests {
             assert!(owner.manager.load_id("renamed").is_none());
             assert!(owner.package_prepared.is_empty());
             let manager =
-                PackageManager::new(packages.clone(), 1024 * 1024, 64 * 1024 * 1024).unwrap();
+                PackageStore::new(packages.clone(), 1024 * 1024, 64 * 1024 * 1024).unwrap();
             assert_eq!(manager.read_lock().unwrap().packages.len(), 1);
             assert_eq!(manager.read_lock().unwrap().packages[0].name, "demo");
         }
@@ -2053,19 +2053,19 @@ mod tests {
     fn registry_presentations_keep_the_requesting_picker_epoch() {
         use crate::app::picker::PickerContent;
         use crate::app::picker::PickerOrigin;
-        use crate::app::search::SearchSession;
-        use crate::app::workspace::WorkspaceSession;
+        use crate::app::search::Search;
+        use crate::app::workspace::Workspace;
         let root = tempfile::tempdir().unwrap();
         let registry =
-            RegistryService::start(Default::default(), root.path().join("cache")).unwrap();
-        let mut owner = ExtensionSession::new(
+            RegistryWorker::start(Default::default(), root.path().join("cache")).unwrap();
+        let mut owner = Plugins::new(
             root.path().join("storage"),
             4,
             root.path().join("packages"),
             registry,
         );
         let identity = crate::files::RootIdentity::capture(root.path()).unwrap();
-        let workspace = WorkspaceSession::new(
+        let workspace = Workspace::new(
             crate::workspace::WorkspaceState::new(
                 crate::workspace::WorkspaceId(1),
                 [("root".into(), identity)],
@@ -2077,7 +2077,7 @@ mod tests {
             false,
             1,
         );
-        let mut search = SearchSession::default();
+        let mut search = Search::default();
         let content = |title: &str| PickerContent {
             surface: crate::ui::PickerSurfaceKind::Generic,
             origin: PickerOrigin::General,
@@ -2117,8 +2117,8 @@ mod tests {
     fn package_activation_respects_safe_mode_and_disabled_plugins() {
         let root = tempfile::tempdir().unwrap();
         let registry =
-            RegistryService::start(Default::default(), root.path().join("cache")).unwrap();
-        let mut owner = ExtensionSession::new(
+            RegistryWorker::start(Default::default(), root.path().join("cache")).unwrap();
+        let mut owner = Plugins::new(
             root.path().join("storage"),
             4,
             root.path().join("packages"),
@@ -2210,8 +2210,8 @@ mod tests {
     fn package_activation_conflicts_do_not_request_persistent_rollback() {
         let root = tempfile::tempdir().unwrap();
         let registry =
-            RegistryService::start(Default::default(), root.path().join("cache")).unwrap();
-        let mut owner = ExtensionSession::new(
+            RegistryWorker::start(Default::default(), root.path().join("cache")).unwrap();
+        let mut owner = Plugins::new(
             root.path().join("storage"),
             4,
             root.path().join("packages"),
@@ -2247,8 +2247,8 @@ mod tests {
         use crate::tools::PackageOperation;
         let root = tempfile::tempdir().unwrap();
         let registry =
-            RegistryService::start(Default::default(), root.path().join("cache")).unwrap();
-        let mut owner = ExtensionSession::new(
+            RegistryWorker::start(Default::default(), root.path().join("cache")).unwrap();
+        let mut owner = Plugins::new(
             root.path().join("storage"),
             4,
             root.path().join("packages"),
@@ -2308,17 +2308,17 @@ mod tests {
     fn package_abort_retries_after_queue_saturation() {
         use crate::tools::PackageError;
         use crate::tools::PackageOperation;
-        use crate::tools::PackageService;
+        use crate::tools::PackageWorker;
         let root = tempfile::tempdir().unwrap();
         let registry =
-            RegistryService::start(Default::default(), root.path().join("cache")).unwrap();
-        let mut owner = ExtensionSession::new(
+            RegistryWorker::start(Default::default(), root.path().join("cache")).unwrap();
+        let mut owner = Plugins::new(
             root.path().join("storage"),
             4,
             root.path().join("packages"),
             registry,
         );
-        owner.packages = PackageService::start(root.path().join("packages"), 1, 1024 * 1024, 1024);
+        owner.packages = PackageWorker::start(root.path().join("packages"), 1, 1024 * 1024, 1024);
         let deadline = Instant::now() + Duration::from_secs(5);
         // One result fills the event queue, the next blocks its worker, and a third fills requests.
         while owner.packages.pending_count() < 3 {
@@ -2361,8 +2361,8 @@ mod tests {
     fn retired_registry_and_replacement_package_obligations_are_not_adopted() {
         let root = tempfile::tempdir().unwrap();
         let registry =
-            RegistryService::start(Default::default(), root.path().join("cache")).unwrap();
-        let mut owner = ExtensionSession::new(
+            RegistryWorker::start(Default::default(), root.path().join("cache")).unwrap();
+        let mut owner = Plugins::new(
             root.path().join("storage"),
             4,
             root.path().join("packages"),
@@ -2450,8 +2450,8 @@ mod tests {
     fn deferred_activation_failure_keeps_unsubmitted_indexes() {
         let root = tempfile::tempdir().unwrap();
         let registry =
-            RegistryService::start(Default::default(), root.path().join("cache")).unwrap();
-        let mut owner = ExtensionSession::new(
+            RegistryWorker::start(Default::default(), root.path().join("cache")).unwrap();
+        let mut owner = Plugins::new(
             root.path().join("storage"),
             4,
             root.path().join("packages"),
@@ -2480,8 +2480,8 @@ mod tests {
     fn prepared_updates_replace_only_managed_generations_and_ignore_retired_requests() {
         let root = tempfile::tempdir().unwrap();
         let registry =
-            RegistryService::start(Default::default(), root.path().join("cache")).unwrap();
-        let mut owner = ExtensionSession::new(
+            RegistryWorker::start(Default::default(), root.path().join("cache")).unwrap();
+        let mut owner = Plugins::new(
             root.path().join("storage"),
             4,
             root.path().join("packages"),

@@ -1,6 +1,8 @@
-use crate::app::input::InputSession;
+//! Plugin confirmation requests and their answers.
+
+use crate::app::input::InputState;
 use crate::app::plugins::edits::ConfirmationSource;
-use crate::app::windows::WindowSession;
+use crate::app::windows::Windows;
 use crate::app::workspace::WorkspaceVersion;
 use crate::editor::EditorState;
 use crate::plugins::PluginConfirmationAnswer;
@@ -14,7 +16,7 @@ use crate::plugins::PluginExecutionReply;
 use crate::plugins::PluginExecutionRequest;
 use crate::plugins::PluginInvocationOrigin;
 use crate::plugins::PluginLoadId;
-use crate::plugins::PluginManager;
+use crate::plugins::PluginHost;
 use crate::plugins::PluginUiEvent;
 use std::collections::BTreeMap;
 use std::collections::VecDeque;
@@ -50,12 +52,12 @@ pub(in crate::app) struct ConfirmationPresentation {
 }
 
 pub(super) struct ConfirmationContext<'a> {
-    pub manager: &'a PluginManager,
+    pub manager: &'a PluginHost,
     pub editor: &'a EditorState,
     pub workspace: &'a WorkspaceVersion,
     pub configuration: u64,
-    pub input: &'a InputSession,
-    pub windows: &'a WindowSession,
+    pub input: &'a InputState,
+    pub windows: &'a Windows,
 }
 
 pub(super) struct ConfirmationReservationLoan<'a> {
@@ -142,7 +144,7 @@ impl PluginConfirmations {
         &mut self,
         source: ConfirmationSource,
         requests: Vec<PluginConfirmationRequest>,
-        manager: &PluginManager,
+        manager: &PluginHost,
     ) -> Result<(), String> {
         if !source.manager_current(manager) {
             return Err("plugin confirmation source is stale".into());
@@ -255,7 +257,7 @@ impl PluginConfirmations {
 
     pub(in crate::app) fn dispatch(
         &mut self,
-        manager: &mut PluginManager,
+        manager: &mut PluginHost,
         editor: &EditorState,
         workspace: &WorkspaceVersion,
         configuration: u64,
@@ -330,7 +332,7 @@ impl PluginConfirmations {
     pub(in crate::app) fn receive(
         &mut self,
         reply: PluginExecutionReply,
-        manager: &PluginManager,
+        manager: &PluginHost,
     ) -> Result<(PluginExecution, ConfirmationSource), String> {
         let origin = reply
             .origin()

@@ -1,3 +1,5 @@
+//! Plugin panels and their window resources.
+
 use std::collections::BTreeMap;
 
 use crate::plugins::PluginPresenterKind;

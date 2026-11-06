@@ -1,3 +1,5 @@
+//! Plugin tree, cell and placement validation.
+
 use crate::app::plugins::panels::MAXIMUM_PLUGIN_UI_CHILDREN;
 use crate::app::plugins::panels::MAXIMUM_PLUGIN_UI_DEPTH;
 use crate::app::plugins::panels::MAXIMUM_PLUGIN_UI_NODE_TEXT_BYTES;

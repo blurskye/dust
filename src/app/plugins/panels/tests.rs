@@ -1,3 +1,5 @@
+//! Tests for plugin panels and their window resources.
+
 use crate::app::plugins::panels::*;
 use crate::plugins::PluginActivationBehavior;
 use crate::plugins::PluginCommandContext;
@@ -1004,7 +1006,7 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
     }
 
     let mut storage =
-        crate::plugins::PluginStorageService::start(store.path().join("plugin-data"), 8);
+        crate::plugins::PluginStorageWorker::start(store.path().join("plugin-data"), 8);
     storage.install_generation("demo", crate::plugins::PluginLoadId(44));
     let policy = manifest
         .contributions
@@ -4306,7 +4308,7 @@ fn process_fixture(
     index: &PluginContributionIndex,
     request: PluginUiRequest,
 ) -> PluginUiEvent {
-    let mut windows = crate::app::windows::WindowSession::from_test_graph(graph.clone());
+    let mut windows = crate::app::windows::Windows::from_test_graph(graph.clone());
     let mut draft = windows.begin_plugin_fixture(&index.owner, index.generation);
     let mut candidate = host.clone();
     let event = candidate.process(&mut draft, index, request);
@@ -4325,7 +4327,7 @@ fn remove_fixture(
     plugin: &str,
     load: u64,
 ) -> Result<bool, String> {
-    let mut windows = crate::app::windows::WindowSession::from_test_graph(graph.clone());
+    let mut windows = crate::app::windows::Windows::from_test_graph(graph.clone());
     windows.remove_plugin_generation(plugin, load)?;
     *graph = windows.graph().clone();
     Ok(host.remove_generation(plugin, load))

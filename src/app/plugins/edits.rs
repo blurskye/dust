@@ -1,9 +1,9 @@
 //! Extension-source facet: invocation snapshots and one-way edit proposal lifetimes.
 //! Other extension runtime/provider ownership has not yet migrated here.
-use crate::app::input::InputSession;
+use crate::app::input::InputState;
 use crate::app::windows::NavigationStamp;
-use crate::app::windows::WindowSession;
-use crate::app::workspace::WorkspaceSession;
+use crate::app::windows::Windows;
+use crate::app::workspace::Workspace;
 use crate::app::workspace::WorkspaceVersion;
 use crate::app::workspace::edits::OriginKey;
 use crate::editor::BufferId;
@@ -22,7 +22,7 @@ use crate::plugins::PluginExecutionRequest;
 use crate::plugins::PluginInvocation;
 use crate::plugins::PluginInvocationOrigin;
 use crate::plugins::PluginLoadId;
-use crate::plugins::PluginManager;
+use crate::plugins::PluginHost;
 use crate::plugins::PluginSnapshot;
 use crate::workspace::WorkspaceEditDraft;
 use slotmap::Key;
@@ -50,7 +50,7 @@ struct Invocation {
 impl Invocation {
     pub(in crate::app) fn current(
         &self,
-        manager: &PluginManager,
+        manager: &PluginHost,
         workspace: &WorkspaceVersion,
         configuration: u64,
     ) -> bool {
@@ -102,7 +102,7 @@ pub(super) struct InvocationLoan<'a> {
     admission: PluginInvocation<'a>,
     invocation: Invocation,
     editor: &'a EditorState,
-    _workspace: &'a WorkspaceSession,
+    _workspace: &'a Workspace,
     _configuration: &'a u64,
 }
 impl InvocationLoan<'_> {
@@ -141,12 +141,12 @@ impl ConfirmationSource {
     pub(in crate::app) fn origin(&self) -> &PluginInvocationOrigin {
         &self.origin
     }
-    pub(in crate::app) fn manager_current(&self, manager: &PluginManager) -> bool {
+    pub(in crate::app) fn manager_current(&self, manager: &PluginHost) -> bool {
         self.origin.current(manager)
     }
     pub(in crate::app) fn current(
         &self,
-        manager: &PluginManager,
+        manager: &PluginHost,
         editor: &EditorState,
         workspace: &WorkspaceVersion,
         configuration: u64,
@@ -167,7 +167,7 @@ impl ConfirmationSource {
     pub(in crate::app) fn navigation_current(
         &self,
         editor: &EditorState,
-        windows: &WindowSession,
+        windows: &Windows,
     ) -> bool {
         self.navigation.as_ref().is_none_or(|navigation| {
             windows.navigation_current(navigation, &editor.window_version(), editor.active_view)
@@ -175,12 +175,12 @@ impl ConfirmationSource {
     }
     pub(in crate::app) fn presentation_current(
         &self,
-        manager: &PluginManager,
+        manager: &PluginHost,
         editor: &EditorState,
         workspace: &WorkspaceVersion,
         configuration: u64,
-        input: &InputSession,
-        windows: &WindowSession,
+        input: &InputState,
+        windows: &Windows,
     ) -> bool {
         self.interaction_available
             && self.current(manager, editor, workspace, configuration)
@@ -214,10 +214,10 @@ impl PluginEditSources {
     #[cfg(test)]
     pub(super) fn prepare<'a>(
         &'a mut self,
-        manager: &'a mut PluginManager,
+        manager: &'a mut PluginHost,
         invocation: (&str, &str),
         editor: &'a EditorState,
-        workspace: &'a WorkspaceSession,
+        workspace: &'a Workspace,
         configuration: &'a u64,
         maximum: usize,
     ) -> Result<InvocationLoan<'a>, String> {
@@ -232,10 +232,10 @@ impl PluginEditSources {
     }
     pub(super) fn prepare_interactive<'a>(
         &'a mut self,
-        manager: &'a mut PluginManager,
+        manager: &'a mut PluginHost,
         invocation: (&str, &str),
         editor: &'a EditorState,
-        workspace: &'a WorkspaceSession,
+        workspace: &'a Workspace,
         configuration: &'a u64,
         interaction: (
             usize,
@@ -295,7 +295,7 @@ impl PluginEditSources {
     pub(in crate::app) fn receive(
         &mut self,
         reply: PluginExecutionReply,
-        manager: &PluginManager,
+        manager: &PluginHost,
         workspace: &WorkspaceVersion,
         configuration: u64,
     ) -> Result<SourceExecution, String> {
@@ -365,7 +365,7 @@ impl PluginEditSources {
     pub(in crate::app) fn check(
         &self,
         key: &OriginKey,
-        manager: &PluginManager,
+        manager: &PluginHost,
         editor: &EditorState,
         workspace: &WorkspaceVersion,
         configuration: u64,
@@ -384,7 +384,7 @@ impl PluginEditSources {
     pub(in crate::app) fn prepare_preview(
         &mut self,
         key: &OriginKey,
-        manager: &PluginManager,
+        manager: &PluginHost,
         editor: &EditorState,
         workspace: &WorkspaceVersion,
         configuration: u64,
@@ -460,7 +460,7 @@ impl PluginEditSources {
     }
     pub(in crate::app) fn retire(
         &mut self,
-        manager: &PluginManager,
+        manager: &PluginHost,
         editor: &EditorState,
         workspace: &WorkspaceVersion,
         configuration: u64,
@@ -495,7 +495,7 @@ mod tests {
     use crate::plugins::OwnedPluginEvent;
     use crate::plugins::PluginEdit;
     use crate::plugins::empty_execution_request;
-    pub(in crate::app) fn reply(manager: &mut PluginManager) -> PluginExecutionReply {
+    pub(in crate::app) fn reply(manager: &mut PluginHost) -> PluginExecutionReply {
         let OwnedPluginEvent::Executed(reply) = manager.poll_owned().unwrap().pop().unwrap() else {
             panic!("execution reply");
         };
@@ -513,7 +513,7 @@ mod tests {
         )
         .unwrap();
         let workspace =
-            WorkspaceSession::new(scope, root.path().join("trust.json"), 1, false, false, 1);
+            Workspace::new(scope, root.path().join("trust.json"), 1, false, false, 1);
         let version = workspace.version();
         let mut editor = EditorState::new(root.path().into());
         let path = root.path().join("source");
@@ -523,7 +523,7 @@ mod tests {
         let (mut manager, endpoint) = ExecutionFixture::new(1);
         let mut source = PluginEditSources::default();
         let submit =
-            |source: &mut PluginEditSources, manager: &mut PluginManager, editor: &EditorState| {
+            |source: &mut PluginEditSources, manager: &mut PluginHost, editor: &EditorState| {
                 let mut request = empty_execution_request();
                 request.snapshot = Some(PluginSnapshot {
                     buffer: 999,

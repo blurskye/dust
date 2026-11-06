@@ -1,3 +1,5 @@
+//! Plugin panel windows, content and actions.
+
 use crate::app::plugins::panels::PluginPrivateState;
 use crate::app::plugins::panels::PluginUiInteraction;
 use crate::app::plugins::panels::PluginWindowHost;

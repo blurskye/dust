@@ -1,3 +1,5 @@
+//! Plugin document requests and editor publication.
+
 #![forbid(unsafe_code)]
 
 use crate::editor::text::TextBuffer;

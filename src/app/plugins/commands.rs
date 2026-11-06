@@ -1,3 +1,5 @@
+//! Command registration and execution for plugin commands and application effects.
+
 use crate::app::App;
 use crate::app::commands::AppEffect;
 use crate::app::picker::PickerPayload;

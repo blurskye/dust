@@ -2,7 +2,7 @@
 use crate::app::plugins::edits::PluginEditSources;
 use crate::app::plugins::edits::PreparedPluginEdit;
 use crate::app::plugins::edits::SourceExecution;
-use crate::app::workspace::WorkspaceSession;
+use crate::app::workspace::Workspace;
 use crate::app::workspace::WorkspaceVersion;
 use crate::app::workspace::edits::OriginKey;
 use crate::editor::EditorState;
@@ -15,19 +15,19 @@ use crate::plugins::PluginExecutionRequest;
 use crate::plugins::PluginHostEventQueue;
 use crate::plugins::PluginLimits;
 use crate::plugins::PluginLoadId;
-use crate::plugins::PluginManager;
+use crate::plugins::PluginHost;
 use crate::plugins::PluginProviderBroker;
 use crate::plugins::PluginStatus;
 use crate::plugins::PluginStorageContribution;
 use crate::plugins::PluginStorageRequest;
 use crate::plugins::PluginStorageResult;
-use crate::plugins::PluginStorageService;
+use crate::plugins::PluginStorageWorker;
 use crate::plugins::PluginSubscriptionKind;
 use crate::plugins::PluginUiEvent;
 use crate::plugins::PluginVirtualDocumentBroker;
-use crate::tools::PackageService;
+use crate::tools::PackageWorker;
 use crate::tools::RegistryPackageMetadata;
-use crate::tools::RegistryService;
+use crate::tools::RegistryWorker;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
@@ -51,7 +51,7 @@ pub(super) use content::VirtualPublication;
 
 pub(in crate::app) struct InvocationContext<'a> {
     pub editor: &'a EditorState,
-    pub workspace: &'a WorkspaceSession,
+    pub workspace: &'a Workspace,
     pub configuration: &'a u64,
     pub generation: u64,
     pub ui_revision: Option<u64>,
@@ -64,7 +64,7 @@ pub(in crate::app) struct InvocationContext<'a> {
 
 type BufferObservation = (u64, u64, usize, usize, usize, u8);
 pub(in crate::app) type HostObservation = (u64, String, Option<BufferObservation>, u64);
-pub(super) struct ExtensionSession {
+pub(super) struct Plugins {
     runtime_epoch: u64,
     windows: panels::PluginWindowHost,
     providers: PluginProviderBroker,
@@ -77,8 +77,8 @@ pub(super) struct ExtensionSession {
     plugin_contributions: PluginContributionCatalog,
     pending_index_activation: BTreeMap<String, (PluginLoadId, String)>,
     rejected_plugin_loads: BTreeSet<(String, PluginLoadId)>,
-    packages: PackageService,
-    registry: RegistryService,
+    packages: PackageWorker,
+    registry: RegistryWorker,
     registry_intents: HashMap<u64, (bool, Option<crate::app::picker::PickerEpoch>)>,
     pending_registry_artifact: Option<(RegistryPackageMetadata, Vec<u8>)>,
     package_preparing: BTreeSet<u64>,
@@ -94,21 +94,21 @@ pub(super) struct ExtensionSession {
     package_startup_rollback_attempted: bool,
     plugin_worker_reported: bool,
     package_store: PathBuf,
-    manager: PluginManager,
+    manager: PluginHost,
     edits: PluginEditSources,
     ui: BTreeMap<(String, PluginLoadId), Vec<PluginUiEvent>>,
     events: PluginHostEventQueue,
     observation: Option<HostObservation>,
     observation_counts: Option<(usize, usize, usize)>,
-    storage: PluginStorageService,
+    storage: PluginStorageWorker,
     results: BTreeMap<(String, PluginLoadId), Vec<PluginStorageResult>>,
 }
-impl ExtensionSession {
+impl Plugins {
     pub(in crate::app) fn new(
         root: PathBuf,
         capacity: usize,
         package_root: PathBuf,
-        registry: RegistryService,
+        registry: RegistryWorker,
     ) -> Self {
         Self {
             runtime_epoch: 0,
@@ -138,14 +138,14 @@ impl ExtensionSession {
             plugin_worker_reported: false,
             registry,
             package_store: package_root.join("store"),
-            packages: PackageService::start(package_root, 8, 16 * 1024 * 1024, 64 * 1024 * 1024),
-            manager: PluginManager::start(capacity),
+            packages: PackageWorker::start(package_root, 8, 16 * 1024 * 1024, 64 * 1024 * 1024),
+            manager: PluginHost::start(capacity),
             edits: PluginEditSources::default(),
             ui: BTreeMap::new(),
             events: PluginHostEventQueue::default(),
             observation: None,
             observation_counts: None,
-            storage: PluginStorageService::start(root, capacity),
+            storage: PluginStorageWorker::start(root, capacity),
             results: BTreeMap::new(),
         }
     }
@@ -239,7 +239,7 @@ impl ExtensionSession {
             virtual_document_requests: Vec::new(),
             generation: context.generation,
         };
-        PluginManager::validate_invocation(&request).map_err(|error| error.to_string())?;
+        PluginHost::validate_invocation(&request).map_err(|error| error.to_string())?;
         let mut virtual_requests: crate::plugins::PluginVirtualRequestLane<'_> =
             self.virtual_documents.request_lane();
         // Validate before consuming deliveries; real queue admission stays reserved
@@ -303,8 +303,8 @@ impl ExtensionSession {
         editor: &EditorState,
         workspace: &WorkspaceVersion,
         configuration: u64,
-        input: &crate::app::input::InputSession,
-        windows: &crate::app::windows::WindowSession,
+        input: &crate::app::input::InputState,
+        windows: &crate::app::windows::Windows,
     ) -> Option<ConfirmationPresentation> {
         self.confirmations
             .activate_next(confirmations::ConfirmationContext {
@@ -342,8 +342,8 @@ impl ExtensionSession {
         editor: &EditorState,
         workspace: &WorkspaceVersion,
         configuration: u64,
-        input: &crate::app::input::InputSession,
-        windows: &crate::app::windows::WindowSession,
+        input: &crate::app::input::InputState,
+        windows: &crate::app::windows::Windows,
     ) -> bool {
         self.confirmations
             .retire_stale(confirmations::ConfirmationContext {
@@ -587,8 +587,8 @@ impl ExtensionSession {
     }
 }
 #[cfg(test)]
-impl ExtensionSession {
-    pub(in crate::app) fn fixture_manager(&mut self, manager: PluginManager) {
+impl Plugins {
+    pub(in crate::app) fn fixture_manager(&mut self, manager: PluginHost) {
         self.manager = manager;
         self.edits = PluginEditSources::default();
     }
@@ -615,15 +615,272 @@ impl ExtensionSession {
 
 pub(in crate::app) mod edits;
 
-pub(in crate::app) mod interaction;
 
 pub(in crate::app) mod commands;
 
-#[cfg(test)]
-mod extensions_tests;
+
+
+
+use crate::app::App;
+use crate::app::commands::AppEffect;
+use crate::app::picker::PickerOrigin;
+use crate::app::search::SEARCH_MAXIMUM_FILE_BYTES;
+use crate::ui::PickerSurfaceKind;
+use crate::ui::PromptKind;
+
+use crate::app::plugins::integration::compose_plugin_picker_items;
+
+impl App {
+    pub(in crate::app) fn apply_retained_ui_interaction(
+        &mut self,
+        interaction: PluginUiInteraction,
+    ) {
+        match self
+            .extension
+            .window_interaction(self.window_session.graph(), interaction)
+        {
+            Ok(action) => {
+                self.ui.plugin_surfaces = self.extension.window_snapshots();
+                if let Some(action) = action {
+                    self.invoke_mapped_command(&action);
+                }
+            }
+            Err(error) => self.show_error(error.detail),
+        }
+    }
+}
+
+impl App {
+    pub(in crate::app) fn select_retained_ui_at_mouse(&mut self) {
+        let Some((column, row)) = self.input.mouse_position() else {
+            return;
+        };
+        let Some(projection) = self.compositor_projection() else {
+            return;
+        };
+        let Some(window) = projection.hit_test(column, row) else {
+            return;
+        };
+        let Some(rect) = projection.window(window).map(|projected| projected.rect) else {
+            return;
+        };
+        if let Err(error) = self
+            .extension
+            .focus_window_row(window, usize::from(row.saturating_sub(rect.y)))
+        {
+            self.show_error(error.detail);
+            return;
+        }
+        self.ui.plugin_surfaces = self.extension.window_snapshots();
+    }
+}
+
+impl App {
+    pub(in crate::app) fn activate_private_surface_action(&mut self, at_mouse: bool) {
+        let Some(projection) = self.compositor_projection() else {
+            return;
+        };
+        let target = if at_mouse {
+            self.input.mouse_position().and_then(|(x, y)| {
+                projection.hit_test(x, y).and_then(|window| {
+                    projection.window(window).map(|projected| {
+                        (
+                            window,
+                            x.saturating_sub(projected.rect.x),
+                            y.saturating_sub(projected.rect.y),
+                        )
+                    })
+                })
+            })
+        } else {
+            self.window_session.graph().focused().and_then(|window| {
+                self.ui
+                    .private_surfaces
+                    .iter()
+                    .find(|surface| surface.window == window)
+                    .and_then(|surface| surface.cursor.map(|(x, y)| (window, x, y)))
+            })
+        };
+        let Some((window, x, y)) = target else { return };
+        match self.extension.private_action(window, x, y) {
+            Ok(Some(action)) => self.invoke_mapped_command(&action),
+            Ok(None) => {}
+            Err(error) => self.show_error(error),
+        }
+    }
+}
+
+impl App {
+    pub(in crate::app) fn present_next_plugin_confirmation(&mut self) {
+        if self.input.prompt().is_some() {
+            return;
+        }
+        let Some(request) = self.extension.next_confirmation(
+            &self.state,
+            &self.workspace.version(),
+            self.configuration.binding_revision(),
+            &self.input,
+            &self.window_session,
+        ) else {
+            let _ = self.extension.dispatch_confirmation_results(
+                &self.state,
+                &self.workspace.version(),
+                self.configuration.binding_revision(),
+            );
+            return;
+        };
+        let selected = match request.default_answer {
+            crate::plugins::PluginConfirmationAnswer::Yes => crate::ui::ConfirmationChoice::Yes,
+            crate::plugins::PluginConfirmationAnswer::No
+            | crate::plugins::PluginConfirmationAnswer::Cancelled => {
+                crate::ui::ConfirmationChoice::No
+            }
+        };
+        self.open_confirmation(
+            PromptKind::PluginConfirmation,
+            format!("Plugin {} · {}", request.plugin, request.title),
+            request.message,
+            selected,
+        );
+    }
+}
+
+impl App {
+    pub(in crate::app) fn submit_plugin_confirmation(
+        &mut self,
+        selected: crate::ui::ConfirmationChoice,
+    ) {
+        let answer = match selected {
+            crate::ui::ConfirmationChoice::Yes => crate::plugins::PluginConfirmationAnswer::Yes,
+            crate::ui::ConfirmationChoice::No => crate::plugins::PluginConfirmationAnswer::No,
+        };
+        self.extension.answer_confirmation(answer);
+        self.close_prompt();
+        let _ = self.extension.dispatch_confirmation_results(
+            &self.state,
+            &self.workspace.version(),
+            self.configuration.binding_revision(),
+        );
+        self.present_next_plugin_confirmation();
+    }
+}
+
+impl App {
+    pub(in crate::app) fn open_plugin_picker(&mut self, provider: String, query: String) {
+        let invocation = match self.extension.start_provider(
+            &provider,
+            query,
+            self.workspace.root_revision(),
+            &self.state,
+        ) {
+            Ok(invocation) => invocation,
+            Err(error) => {
+                self.show_error(error);
+                return;
+            }
+        };
+        self.install_surface_picker_state(
+            PickerSurfaceKind::Generic,
+            format!("Plugin · {provider}"),
+            Vec::new(),
+            String::new(),
+            true,
+            PickerOrigin::PluginProvider(invocation.request),
+        );
+        if self.extension.provider_visible(invocation.request) {
+            self.process_effect(AppEffect::PluginExecute {
+                plugin: invocation.plugin,
+                command: invocation.command,
+                arguments: Vec::new(),
+            });
+        } else {
+            self.extension
+                .discard_unpresented_provider(invocation.request);
+        }
+    }
+}
+
+impl App {
+    pub(in crate::app) fn execute_plugin_command(
+        &mut self,
+        plugin: String,
+        command: String,
+        arguments: Vec<String>,
+    ) -> bool {
+        let Some(load) = self.extension.load_id(&plugin) else {
+            self.show_error(crate::plugins::PluginError::NotActive);
+            return false;
+        };
+        if !self.extension.is_active_generation(&plugin, load) {
+            self.show_error(crate::plugins::PluginError::NotActive);
+            return false;
+        }
+        self.refresh_plugin_host_events();
+        self.retire_plugin_edit_sources();
+        let maximum = SEARCH_MAXIMUM_FILE_BYTES;
+        let input_capture = self.input.capture_epoch();
+        let interaction_available = self.input.prompt().is_none()
+            && self.ui.picker.is_none()
+            && self.ui.tool_menu.is_none()
+            && self.ui.settings.is_none()
+            && self.input.documentation().is_none()
+            && !self.input.mapping_pending()
+            && !self.input.grammar_pending();
+        let navigation = self
+            .window_session
+            .navigation_stamp(self.state.window_version(), self.state.active_view);
+        let result = self.extension.execute(
+            &plugin,
+            &command,
+            crate::app::plugins::InvocationContext {
+                editor: &self.state,
+                workspace: &self.workspace,
+                configuration: self.configuration.binding_revision_ref(),
+                generation: self.configuration.reload_id(),
+                ui_revision: self.window_session.graph().revision(),
+                input_capture,
+                navigation,
+                interaction_available,
+                maximum,
+                arguments,
+            },
+        );
+        if let Err(error) = result {
+            self.show_error(error);
+            return false;
+        }
+        true
+    }
+}
+
+impl App {
+    pub(in crate::app) fn present_plugin_picker(&mut self, request: u64) {
+        if !self.extension.provider_visible(request) {
+            return;
+        }
+        let Some(projection) = self.extension.provider_projection(request) else {
+            return;
+        };
+        if let Some(error) = &projection.error {
+            self.show_error(&error.detail);
+        }
+        let items = match compose_plugin_picker_items(&projection) {
+            Ok(items) => items,
+            Err(error) => {
+                self.show_error(error.to_string());
+                return;
+            }
+        };
+        self.install_surface_picker_state(
+            PickerSurfaceKind::Generic,
+            format!("Plugin · {}", projection.provider),
+            items,
+            String::new(),
+            true,
+            PickerOrigin::PluginProvider(request),
+        );
+    }
+}
 
 #[cfg(test)]
-pub(in crate::app) mod project_tests;
-
-#[cfg(test)]
-pub(in crate::app) mod surfaces_tests;
+pub(in crate::app) mod tests;

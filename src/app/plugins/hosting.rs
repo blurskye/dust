@@ -1,14 +1,14 @@
-//! Extension-owned retained/private presenters; graph publication stays with WindowSession.
+//! Extension-owned retained/private presenters; graph publication stays with Windows.
 use crate::app::configuration::AcceptedContributions;
 use crate::app::configuration::ContributionCandidate;
 use crate::app::configuration::WindowRuleSource;
-use crate::app::plugins::ExtensionSession;
+use crate::app::plugins::Plugins;
 use crate::app::plugins::panels::PluginUiInteraction;
 use crate::app::plugins::panels::PluginWindowHost;
 use crate::app::windows::PluginWindowKey;
 use crate::app::windows::PluginWindowReceipt;
 use crate::app::windows::PluginWindowTransition;
-use crate::app::windows::WindowSession;
+use crate::app::windows::Windows;
 use crate::editor::EditorState;
 use crate::plugins::PluginCatalogVersion;
 use crate::plugins::PluginContributionCatalog;
@@ -80,7 +80,7 @@ impl WindowRules<'_> {
         Ok(())
     }
 }
-impl ExtensionSession {
+impl Plugins {
     pub(in crate::app) fn prepare_window_rules(
         &mut self,
         candidate: &ContributionCandidate,
@@ -101,7 +101,7 @@ impl ExtensionSession {
         index: &PluginContributionIndex,
         request: PluginUiRequest,
         editor: &EditorState,
-        windows: &WindowSession,
+        windows: &Windows,
         ambiguous_wide: bool,
     ) -> WindowUpdate<'_> {
         self.windows.set_ambiguous_width(ambiguous_wide);
@@ -227,7 +227,7 @@ impl ExtensionSession {
     }
 }
 #[cfg(test)]
-impl ExtensionSession {
+impl Plugins {
     pub(in crate::app) fn fixture_window_clone_count() -> usize {
         PluginWindowHost::test_clone_count()
     }

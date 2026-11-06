@@ -312,7 +312,7 @@ impl PluginWindowHost {
             ));
         }
 
-        let mut windows = crate::app::windows::WindowSession::from_test_graph(graph.clone());
+        let mut windows = crate::app::windows::Windows::from_test_graph(graph.clone());
         let mut draft = windows.begin_plugin_fixture(&index.owner, index.generation);
         let mut candidate = self.clone();
         let owner = format!("plugin.{}", index.owner);
@@ -532,7 +532,7 @@ impl PluginWindowHost {
                 "target placement is not declared",
             ));
         }
-        let mut windows = crate::app::windows::WindowSession::from_test_graph(graph.clone());
+        let mut windows = crate::app::windows::Windows::from_test_graph(graph.clone());
         let mut draft =
             windows.begin_plugin_fixture(&admission.index.owner, admission.index.generation);
         if let Some((neighbor, axis, after, ratio)) = tile_parameters(&requested) {
@@ -582,7 +582,7 @@ impl PluginWindowHost {
             ));
         }
         let (_, instance) = self.target03_instance(graph, admission, &ui)?;
-        let mut windows = crate::app::windows::WindowSession::from_test_graph(graph.clone());
+        let mut windows = crate::app::windows::Windows::from_test_graph(graph.clone());
         let mut draft =
             windows.begin_plugin_fixture(&admission.index.owner, admission.index.generation);
         draft
@@ -623,7 +623,7 @@ impl PluginWindowHost {
             ));
         }
         let (handle, instance) = self.target03_instance(graph, admission, &ui)?;
-        let mut windows = crate::app::windows::WindowSession::from_test_graph(graph.clone());
+        let mut windows = crate::app::windows::Windows::from_test_graph(graph.clone());
         let mut draft =
             windows.begin_plugin_fixture(&admission.index.owner, admission.index.generation);
         draft
