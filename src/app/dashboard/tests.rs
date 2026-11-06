@@ -1,14 +1,14 @@
 //! Dashboard behavior and application integration tests.
 
+use crate::app::AppEffect;
 use crate::app::agent::commands::AgentCommand;
-use crate::app::tests::*;
 use crate::app::configuration::validate_configured_commands;
+use crate::app::tests::*;
 use crate::editor::text::TextBuffer;
 use crate::windows::WindowPlacement;
 use std::thread;
 use std::time::Duration;
 use std::time::Instant;
-use crate::app::AppEffect;
 
 #[test]
 fn showing_the_last_editor_dismisses_the_dashboard() {
@@ -112,8 +112,7 @@ fn the_dashboard_cursor_runs_items_and_ctrl_h_l_reach_an_agent_beside_it() {
 
 #[cfg(unix)]
 #[test]
-fn ctrl_h_from_an_agent_beside_the_dashboard_returns_to_it_and_it_stays_beside_the_agent()
- {
+fn ctrl_h_from_an_agent_beside_the_dashboard_returns_to_it_and_it_stays_beside_the_agent() {
     use crate::app::tests::driver::TestSession;
     let mut loaded = crate::config::load_bundled_config();
     let agents = &mut loaded.config.agents;

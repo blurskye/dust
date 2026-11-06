@@ -13,7 +13,6 @@ impl App {
     }
 }
 
-
 mod commands;
 
 #[cfg(test)]
