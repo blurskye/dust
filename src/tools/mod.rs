@@ -91,11 +91,11 @@ mod install_prepare;
 mod runtimes;
 pub use install::ToolInstallerError;
 mod packages;
-pub use packages::PackageStore;
+pub use packages::PackageEvent;
 pub use packages::PackageOperation;
 pub use packages::PackageOperationResult;
+pub use packages::PackageStore;
 pub use packages::PackageWorker;
-pub use packages::PackageEvent;
 pub use packages::PreparedPackage;
 
 #[cfg(test)]

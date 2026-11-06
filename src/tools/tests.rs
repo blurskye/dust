@@ -1976,8 +1976,7 @@ fn package_store_reinstall_repairs_corrupted_objects() {
         assert_eq!(std::fs::read(&object).unwrap(), bytes);
         assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 1);
     }
-    let manager =
-        crate::tools::PackageStore::new(root.path().join("manager"), 4096, 1024).unwrap();
+    let manager = crate::tools::PackageStore::new(root.path().join("manager"), 4096, 1024).unwrap();
     let object = manager.stage_verified_object(&manifest, &bytes).unwrap();
     std::fs::write(&object, b"corrupt").unwrap();
     assert_eq!(

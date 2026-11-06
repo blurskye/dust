@@ -135,7 +135,7 @@ fn validate_snapshot(snapshot: &MasonCatalogSnapshot) -> Result<(), String> {
                 .iter()
                 .any(|language| !bounded_text(language))
             || server.project_root_markers.is_empty()
-            || server.project_root_markers.len() > crate::files::PROJECT_ROOT_MARKER_CEILING
+            || server.project_root_markers.len() > crate::files::PROJECT_ROOT_MARKER_LIMIT
             || server
                 .project_root_markers
                 .iter()

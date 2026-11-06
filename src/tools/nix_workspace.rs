@@ -14,19 +14,19 @@ use crate::tools::install_prepare::prepare_nix_lsp_workspace;
 
 #[derive(Clone, Debug)]
 pub struct NixWorkspaceResult {
-    pub generation: u64,
+    pub request_id: u64,
     pub result: Result<PathBuf, String>,
 }
 
 pub(super) enum NixWorkspaceRequest {
-    Prepare { generation: u64 },
+    Prepare { request_id: u64 },
     Shutdown,
 }
 
 /// Writes the pinned compatibility flake, without evaluating workspace-owned flakes.
 /// Closing revokes delivery; a running filesystem operation may still finish.
 pub struct NixWorkspaceWorker {
-    next_generation: Option<u64>,
+    next_request_id: Option<u64>,
     sender: Option<SyncSender<NixWorkspaceRequest>>,
     receiver: Option<Receiver<NixWorkspaceResult>>,
     thread: Option<JoinHandle<()>>,
@@ -47,10 +47,10 @@ impl NixWorkspaceWorker {
         let thread = thread::Builder::new()
             .name("dust-nix-lsp-workspace".into())
             .spawn(move || {
-                while let Ok(NixWorkspaceRequest::Prepare { generation }) = requests.recv() {
+                while let Ok(NixWorkspaceRequest::Prepare { request_id }) = requests.recv() {
                     if results
                         .send(NixWorkspaceResult {
-                            generation,
+                            request_id,
                             result: prepare(),
                         })
                         .is_err()
@@ -61,30 +61,30 @@ impl NixWorkspaceWorker {
             })
             .ok();
         Self {
-            next_generation: Some(1),
+            next_request_id: Some(1),
             sender: Some(sender),
             receiver: Some(receiver),
             thread,
         }
     }
     pub fn prepare(&mut self) -> Result<u64, String> {
-        let generation = self
-            .next_generation
+        let request_id = self
+            .next_request_id
             .ok_or("Nix workspace request identity exhausted")?;
         let sender = self
             .sender
             .as_ref()
             .ok_or("Nix workspace admission closed")?;
         sender
-            .try_send(NixWorkspaceRequest::Prepare { generation })
+            .try_send(NixWorkspaceRequest::Prepare { request_id })
             .map_err(|error| match error {
                 TrySendError::Full(_) => {
                     "Nix LSP workspace preparation is already pending".to_owned()
                 }
                 TrySendError::Disconnected(_) => "Nix LSP workspace worker stopped".to_owned(),
             })?;
-        self.next_generation = generation.checked_add(1);
-        Ok(generation)
+        self.next_request_id = request_id.checked_add(1);
+        Ok(request_id)
     }
     pub(crate) fn poll_result(&self) -> Result<Option<NixWorkspaceResult>, String> {
         let receiver = self
@@ -132,7 +132,7 @@ mod tests {
             wait_release.recv().unwrap();
             Ok(PathBuf::from("owned-fixture"))
         });
-        worker.next_generation = Some(u64::MAX);
+        worker.next_request_id = Some(u64::MAX);
         assert_eq!(worker.prepare().unwrap(), u64::MAX);
         assert!(worker.prepare().unwrap_err().contains("exhausted"));
         wait_entered.recv_timeout(Duration::from_secs(2)).unwrap();
