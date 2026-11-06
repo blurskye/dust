@@ -1,7 +1,98 @@
+//! Search behavior and application integration tests.
+
+use crate::app::tests::*;
+use crate::app::workspace::tests::wait_workspace_search;
+use crate::editor::text::ByteOffset;
+use std::fs;
 use crate::app::search::*;
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
+use crate::app::picker::PickerContent;
+use crate::app::picker::PickerOrigin;
+use crate::app::picker::PickerPayload;
+
+#[test]
+fn search_moves_forward_wraps_and_repeats() {
+    let (_app_dirs, mut app) = app();
+    let (_, view) = app
+        .state
+        .open_text(
+            crate::editor::text::TextBuffer::from_text("one two one"),
+            None,
+        )
+        .unwrap();
+    app.set_dashboard_visibility(false);
+    app.ui.search_query = Some("one".into());
+    app.perform_search(true, 1);
+    assert_eq!(
+        app.state.views[view].cursor,
+        crate::editor::text::ByteOffset(8)
+    );
+    app.perform_search(true, 1);
+    assert_eq!(
+        app.state.views[view].cursor,
+        crate::editor::text::ByteOffset(0)
+    );
+    app.perform_search(false, 1);
+    assert_eq!(
+        app.state.views[view].cursor,
+        crate::editor::text::ByteOffset(8)
+    );
+}
+
+#[test]
+fn help_filters_do_not_restart_the_suspended_live_grep() {
+    let (_app_dirs, mut app) = app();
+    fs::write(app.state.workspace_root.join("match.txt"), "needle\n").unwrap();
+    app.invoke_mapped_command("workspace.search.prompt");
+    app.picker_insert("needle");
+    wait_workspace_search(&mut app);
+    assert!(app.search.live());
+    let sequence = app.search.sequence();
+    app.open_contextual_help();
+    assert!(!app.search.live());
+    app.picker_insert("help");
+    app.picker_backspace();
+    assert!(app.search.help_is_open());
+    assert_eq!(app.search.query(), "needle");
+    assert_eq!(app.search.sequence(), sequence);
+    assert_eq!(app.search.matches().len(), 1);
+    app.close_picker();
+    assert!(app.search.live());
+    assert_eq!(app.ui.picker.as_ref().unwrap().query, "needle");
+    app.accept_picker();
+    wait_vfs(&mut app);
+    assert_eq!(
+        app.state.views[app.state.active_view.unwrap()].cursor,
+        ByteOffset(0)
+    );
+}
+
+#[test]
+fn grep_rows_draw_the_icon_location_and_highlighted_text_as_lazyvim_does() {
+    let (_app_dirs, mut app) = app();
+    fs::write(
+        app.state.workspace_root.join("main.rs"),
+        "\n    let needle = 1;\n",
+    )
+    .unwrap();
+    app.invoke_mapped_command("workspace.search.prompt");
+    app.picker_insert("needle");
+    wait_workspace_search(&mut app);
+    let picker = app.search.picker_projection().unwrap();
+    assert_eq!(picker.surface, crate::ui::PickerSurfaceKind::Grep);
+    let cells = &picker.rows[0].cells;
+    let icon = crate::files::file_icon("main.rs").unwrap().glyph;
+    assert_eq!(cells[0].text, format!("{icon} "));
+    let texts: Vec<_> = cells[1..6].iter().map(|cell| cell.text.as_str()).collect();
+    assert_eq!(texts, ["main.rs", ":", "2", ":", "9"]);
+    assert_eq!(cells[3].style, crate::ui::Style::Accent);
+    assert_eq!(cells[5].style, crate::ui::Style::Muted);
+    let keyword = cells.iter().find(|cell| cell.text == "let").unwrap();
+    assert!(matches!(keyword.style, crate::ui::Style::Syntax(_)));
+}
+
 fn scope(root: &std::path::Path) -> WorkspaceVersion {
     let identity = crate::files::RootIdentity::capture(root).unwrap();
     let state = crate::workspace::WorkspaceState::new(
@@ -9,7 +100,7 @@ fn scope(root: &std::path::Path) -> WorkspaceVersion {
         [("root".into(), identity)],
     )
     .unwrap();
-    crate::app::workspace::WorkspaceSession::new(state, root.join("trust.json"), 1, false, false, 1)
+    crate::app::workspace::Workspace::new(state, root.join("trust.json"), 1, false, false, 1)
         .version()
 }
 fn found() -> WorkspaceSearchMatch {
@@ -33,8 +124,8 @@ fn preview_retries_full_admission_but_caches_permanent_failures() {
     use crate::files::VfsError;
     let directory = tempfile::tempdir().unwrap();
     let source = scope(directory.path());
-    let mut owner = SearchSession::default();
-    let prepare = |owner: &mut SearchSession| {
+    let mut owner = Search::default();
+    let prepare = |owner: &mut Search| {
         owner.prepare_preview(
             "file".into(),
             Some((0, 0)),
@@ -75,7 +166,7 @@ fn file_previews_follow_selected_lines_and_normalize_newlines() {
     use crate::files::RequestId;
     let directory = tempfile::tempdir().unwrap();
     let source = scope(directory.path());
-    let mut owner = SearchSession::default();
+    let mut owner = Search::default();
     let bytes = (0..1100)
         .map(|line| format!("line {line}\n"))
         .collect::<String>()
@@ -141,7 +232,7 @@ fn location_preview_loading_and_errors_remain_visible() {
     use crate::files::VfsError;
     let directory = tempfile::tempdir().unwrap();
     let source = scope(directory.path());
-    let mut owner = SearchSession::default();
+    let mut owner = Search::default();
     let ticket = owner
         .prepare_preview(
             "file".into(),
@@ -194,7 +285,7 @@ fn search_previews_keep_matches_beyond_the_line_character_limit() {
         let mut item = found();
         item.range = prefix.len()..prefix.len() + 6;
         item.snapshot = Arc::from(format!("{prefix}needle{}\n", "z".repeat(10_000)).into_bytes());
-        let mut owner = SearchSession {
+        let mut owner = Search {
             matches: vec![item],
             ..Default::default()
         };
@@ -218,7 +309,7 @@ fn search_previews_keep_matches_beyond_the_line_character_limit() {
 fn preview_admission_rejects_foreign_retired_oversized_and_duplicate_replies() {
     let directory = tempfile::tempdir().unwrap();
     let source = scope(directory.path());
-    let mut owner = SearchSession::default();
+    let mut owner = Search::default();
     let ticket = owner
         .prepare_preview(
             "file".into(),
@@ -230,7 +321,7 @@ fn preview_admission_rejects_foreign_retired_oversized_and_duplicate_replies() {
         )
         .1
         .unwrap();
-    let mut other = SearchSession::default();
+    let mut other = Search::default();
     assert!(!other.admit_preview(ticket, crate::files::RequestId(1), 8));
     let ticket = owner
         .prepare_preview(
@@ -333,7 +424,7 @@ fn preview_admission_rejects_foreign_retired_oversized_and_duplicate_replies() {
 fn matcher_previews_follow_the_source_location_within_one_file() {
     let directory = tempfile::tempdir().unwrap();
     let source = scope(directory.path());
-    let mut owner = SearchSession::default();
+    let mut owner = Search::default();
     let ticket = owner
         .prepare_preview(
             "file.rs".into(),
@@ -400,11 +491,11 @@ fn matcher_previews_follow_the_source_location_within_one_file() {
 fn completed_stream_and_idle_snapshot_have_one_accepted_lifetime() {
     let directory = tempfile::tempdir().unwrap();
     let source = scope(directory.path());
-    let mut owner = SearchSession {
+    let mut owner = Search {
         generation: Some(1),
         scope: Some((source.clone(), 1)),
         intent: Some(Intent::Find),
-        ..SearchSession::default()
+        ..Search::default()
     };
     let mut broker = SearchWorkflowBroker::try_new(SearchWorkflowSpec {
         id: SearchWorkflowId(1),
@@ -504,7 +595,7 @@ fn search_owner_cost_probe() {
     item.range = 69632..69638;
     let mode = std::env::var("DUST_COST_CASE").unwrap_or("unchanged_snapshot".into());
     let max = 65536;
-    let mut owner = SearchSession {
+    let mut owner = Search {
         matches: vec![item],
         ..Default::default()
     };
@@ -568,13 +659,13 @@ fn bounded_drain_publishes_only_the_final_accepted_store_disposition() {
                 summary: crate::files::WorkspaceSearchSummary::default(),
             }
         });
-        let mut owner = SearchSession {
-            grep: WorkspaceSearchService::events_for_test(events),
+        let mut owner = Search {
+            grep: WorkspaceSearchWorker::events_for_test(events),
             generation: Some(1),
             scope: Some((source.clone(), 1)),
             workflow: Some(workflow),
             intent: Some(Intent::Find),
-            ..SearchSession::default()
+            ..Search::default()
         };
         let updates = owner.poll(source.clone(), 1);
         assert_eq!(updates.len(), 1);
@@ -603,7 +694,7 @@ fn picker_epochs_scope_and_close_preserve_only_current_interaction() {
     use crate::workspace::PickerItemId;
     let root = tempfile::tempdir().unwrap();
     let source = scope(root.path());
-    let mut owner = SearchSession::default();
+    let mut owner = Search::default();
     let content = || PickerContent {
         surface: PickerSurfaceKind::Generic,
         origin: PickerOrigin::General,
@@ -631,7 +722,7 @@ fn picker_epochs_scope_and_close_preserve_only_current_interaction() {
         .install_picker(content(), 100, source.clone(), 1)
         .unwrap();
     assert!(owner.owns_picker_epoch(&epoch));
-    assert!(!SearchSession::default().owns_picker_epoch(&epoch));
+    assert!(!Search::default().owns_picker_epoch(&epoch));
     assert_eq!(owner.picker_insert("jk"), Some("jk".into()));
     for _ in 0..17 {
         owner.picker_move(1, false);
@@ -665,7 +756,7 @@ fn picker_epochs_scope_and_close_preserve_only_current_interaction() {
     assert_eq!(owner.close_picker(), None);
     owner.open_live();
     owner.generation = Some(9);
-    owner.grep = WorkspaceSearchService::events_for_test(vec![WorkspaceSearchEvent::Batch {
+    owner.grep = WorkspaceSearchWorker::events_for_test(vec![WorkspaceSearchEvent::Batch {
         generation: 9,
         matches: vec![found()],
     }]);
@@ -686,7 +777,7 @@ fn streaming_picker_keeps_query_selection_and_epoch_but_not_foreign_actions() {
     use crate::workspace::PickerItemId;
     let root = tempfile::tempdir().unwrap();
     let source = scope(root.path());
-    let mut owner = SearchSession::default();
+    let mut owner = Search::default();
     let content = |origin, ids: &[&str], query: &str| PickerContent {
         surface: PickerSurfaceKind::Generic,
         origin,
@@ -785,7 +876,7 @@ fn picker_rows_and_actions_share_first_wins_bounds_and_replacement() {
     use crate::workspace::PickerItemId;
     let root = tempfile::tempdir().unwrap();
     let source = scope(root.path());
-    let mut owner = SearchSession::default();
+    let mut owner = Search::default();
     let row = |id: &str, value: &str| {
         (
             PickerItem {
@@ -840,14 +931,14 @@ fn picker_rows_and_actions_share_first_wins_bounds_and_replacement() {
     assert!(owner.selected_picker_payload().is_none());
 }
 
-impl SearchSession {
+impl Search {
     pub(in crate::app) fn fixture_search_completion(
         &mut self,
         matches: Vec<WorkspaceSearchMatch>,
         truncated: bool,
     ) {
         let generation = self.generation.expect("admitted search");
-        self.grep = WorkspaceSearchService::events_for_test(vec![
+        self.grep = WorkspaceSearchWorker::events_for_test(vec![
             WorkspaceSearchEvent::Batch {
                 generation,
                 matches,
@@ -881,13 +972,13 @@ fn crlf_previews_use_the_normalized_match_offset() {
 fn rejected_live_query_retires_previous_results() {
     let root = tempfile::tempdir().unwrap();
     let source = scope(root.path());
-    let mut owner = SearchSession::default();
+    let mut owner = Search::default();
     owner.open_live();
     owner.set_query("needle".into());
     owner.generation = Some(9);
     owner.scope = Some((source.clone(), 1));
     owner.matches.push(found());
-    owner.grep = WorkspaceSearchService::events_for_test(vec![WorkspaceSearchEvent::Batch {
+    owner.grep = WorkspaceSearchWorker::events_for_test(vec![WorkspaceSearchEvent::Batch {
         generation: 9,
         matches: vec![found()],
     }]);
@@ -919,7 +1010,3 @@ fn rejected_live_query_retires_previous_results() {
     assert!(owner.workflow().is_none());
     assert!(owner.poll(source, 1).is_empty());
 }
-
-use crate::app::picker::PickerContent;
-use crate::app::picker::PickerOrigin;
-use crate::app::picker::PickerPayload;

@@ -1,3 +1,5 @@
+//! Command registration and execution for buffer and workspace search.
+
 use crate::app::commands::AppEffect;
 use crate::app::commands::bool_arg;
 use crate::app::commands::register;

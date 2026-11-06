@@ -1,3 +1,5 @@
+//! Search requests, result streams and selected actions.
+
 use crate::workspace::PickerAction;
 use crate::workspace::PickerItem;
 use crate::workspace::fuzzy_score;
