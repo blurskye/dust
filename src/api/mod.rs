@@ -1,3 +1,5 @@
+//! Public command and configuration descriptions.
+
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeMap;
