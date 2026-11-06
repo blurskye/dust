@@ -1,3 +1,5 @@
+//! Headless editor and application test drivers.
+
 #![forbid(unsafe_code)]
 mod headless;
 

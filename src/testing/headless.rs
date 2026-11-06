@@ -1,3 +1,5 @@
+//! Headless application execution for tests.
+
 use crate::app::startup::ApplicationError;
 use crate::app::startup::StartupTarget;
 use crate::app::startup::build_state;
