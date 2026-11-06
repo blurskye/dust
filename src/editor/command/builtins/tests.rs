@@ -1,3 +1,5 @@
+//! Tests for built-in editing commands.
+
 use std::path::PathBuf;
 
 use crate::editor::text::TextBuffer;

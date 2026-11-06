@@ -1,3 +1,5 @@
+//! Search patterns and buffer match navigation.
+
 use std::ops::Range;
 
 use regex::RegexBuilder;

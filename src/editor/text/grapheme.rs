@@ -1,3 +1,5 @@
+//! Grapheme boundaries and navigation.
+
 use unicode_segmentation::GraphemeCursor;
 use unicode_segmentation::GraphemeIncomplete;
 use unicode_width::UnicodeWidthStr;

@@ -1,3 +1,5 @@
+//! Text deltas and position mapping.
+
 use crate::editor::text::ByteOffset;
 use crate::editor::text::ByteRange;
 

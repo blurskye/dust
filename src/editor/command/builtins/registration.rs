@@ -1,3 +1,5 @@
+//! Built-in editing command declarations.
+
 use crate::editor::command::ArgumentSchema;
 use crate::editor::command::ArgumentType;
 use crate::editor::command::CommandError;

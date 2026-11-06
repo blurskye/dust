@@ -1,3 +1,5 @@
+//! Key identities, modifiers and textual key notation.
+
 use std::fmt;
 use std::str::FromStr;
 

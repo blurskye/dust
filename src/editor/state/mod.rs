@@ -1,3 +1,5 @@
+//! Buffers, views, registers and editor state.
+
 mod id;
 
 pub use id::BufferId;

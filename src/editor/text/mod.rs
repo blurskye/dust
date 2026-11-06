@@ -1,3 +1,5 @@
+//! Text storage and positions.
+
 #![forbid(unsafe_code)]
 
 mod codec;

@@ -1,3 +1,5 @@
+//! Editor resource storage and active views.
+
 use std::collections::HashSet;
 use std::path::PathBuf;
 

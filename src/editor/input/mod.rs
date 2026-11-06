@@ -1,3 +1,5 @@
+//! Keys, mappings and Vim input grammar.
+
 #![forbid(unsafe_code)]
 
 mod command_line;
@@ -16,7 +18,7 @@ pub use context::InputContextDescriptor;
 pub use context::InputContextError;
 pub use context::InputContextLayer;
 pub use context::InputContextPolicy;
-pub use context::InputContextRegistry;
+pub use context::InputContexts;
 pub use grammar::ABSOLUTE_MAX_COUNT;
 pub use grammar::GrammarInput;
 pub use grammar::InputAction;

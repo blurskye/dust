@@ -1,3 +1,5 @@
+//! Tests for buffers, views, registers and editor state.
+
 use std::path::PathBuf;
 
 use crate::editor::text::ByteOffset;

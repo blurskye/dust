@@ -1,3 +1,5 @@
+//! Execution of built-in editing commands.
+
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::editor::state::EditorMode;

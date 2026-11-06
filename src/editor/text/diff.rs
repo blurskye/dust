@@ -1,3 +1,5 @@
+//! Changed byte spans between text snapshots.
+
 /// Only what differs between the texts, so cursors and marks elsewhere stay where they are.
 /// Replaces the whole text when a line diff can't describe the change, as with binary content.
 pub(crate) fn changed_spans(before: &str, after: &str) -> Vec<(std::ops::Range<usize>, String)> {

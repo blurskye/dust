@@ -1,3 +1,5 @@
+//! Rope-backed text buffers and revisions.
+
 use std::fmt;
 
 use ropey::Rope;

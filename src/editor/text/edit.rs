@@ -1,3 +1,5 @@
+//! Byte-range edits and checked edit sets.
+
 use thiserror::Error;
 
 use crate::editor::text::BufferRevision;

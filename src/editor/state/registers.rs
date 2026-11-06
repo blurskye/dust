@@ -1,3 +1,5 @@
+//! Text registers and recorded macros.
+
 use crate::editor::CommandInvocation;
 use std::collections::HashMap;
 

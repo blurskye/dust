@@ -1,3 +1,5 @@
+//! Key sequence matching and layered bindings.
+
 use std::collections::BTreeMap;
 
 use crate::editor::CommandInvocation;

@@ -1,3 +1,5 @@
+//! Transactions produced by built-in editing commands.
+
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 

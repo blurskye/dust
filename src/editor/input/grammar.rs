@@ -1,3 +1,5 @@
+//! Vim grammar for counts, registers, motions and operators.
+
 use std::num::NonZeroU64;
 
 use crate::editor::CommandError;

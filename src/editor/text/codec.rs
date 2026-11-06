@@ -1,3 +1,5 @@
+//! Text encoding detection and file decoding.
+
 use crate::editor::text::ByteOffset;
 use crate::editor::text::PositionError;
 use crate::editor::text::TextBuffer;

@@ -1,3 +1,5 @@
+//! Byte offsets, ranges and line positions.
+
 use std::fmt;
 
 use thiserror::Error;

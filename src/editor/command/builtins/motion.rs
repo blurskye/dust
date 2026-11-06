@@ -1,3 +1,5 @@
+//! Cursor motions and motion ranges.
+
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::editor::state::EditingPolicy;

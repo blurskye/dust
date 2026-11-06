@@ -1,3 +1,5 @@
+//! Display columns and text width.
+
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 

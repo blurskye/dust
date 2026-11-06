@@ -1,3 +1,5 @@
+//! Syntax object kinds and byte ranges.
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SyntaxObjectKind {
     Function,

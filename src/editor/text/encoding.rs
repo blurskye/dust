@@ -1,3 +1,5 @@
+//! Text encoding names and conversion policy.
+
 use thiserror::Error;
 
 /// A line separator observed in the source file.

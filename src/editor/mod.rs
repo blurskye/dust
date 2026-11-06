@@ -1,3 +1,5 @@
+//! Buffers, editing state and command execution.
+
 #![forbid(unsafe_code)]
 
 mod command;

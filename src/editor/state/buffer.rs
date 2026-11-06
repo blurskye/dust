@@ -1,3 +1,5 @@
+//! Buffer text, metadata and revision identity.
+
 use crate::editor::text::BufferRevision;
 use crate::editor::text::ByteOffset;
 use crate::editor::text::FileFormat;

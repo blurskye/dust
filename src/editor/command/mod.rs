@@ -1,3 +1,5 @@
+//! Command declarations and dispatch.
+
 mod builtins;
 
 pub use builtins::register_builtin_commands;

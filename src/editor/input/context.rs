@@ -1,3 +1,5 @@
+//! Input contexts and their inherited keymap layers.
+
 use std::collections::BTreeMap;
 
 const MAXIMUM_CONTEXTS_PER_PLUGIN: usize = 64;
@@ -106,18 +108,18 @@ impl Default for InputContextPolicy {
 }
 
 #[derive(Clone, Debug)]
-pub struct InputContextRegistry {
+pub struct InputContexts {
     contexts: BTreeMap<String, InputContextDescriptor>,
     policy: InputContextPolicy,
 }
 
-impl Default for InputContextRegistry {
+impl Default for InputContexts {
     fn default() -> Self {
         Self::bundled()
     }
 }
 
-impl InputContextRegistry {
+impl InputContexts {
     #[must_use]
     pub fn bundled() -> Self {
         Self::bundled_with_policy(InputContextPolicy::default())
@@ -312,7 +314,7 @@ mod tests {
 
     #[test]
     fn bundled_registry_preserves_all_contexts_aliases_and_modes() {
-        let registry = InputContextRegistry::bundled();
+        let registry = InputContexts::bundled();
         for surface in BUILTIN_SURFACES {
             assert_eq!(registry.resolve(surface, "").as_deref(), Ok(*surface));
         }
@@ -334,7 +336,7 @@ mod tests {
 
     #[test]
     fn plugin_context_limits_and_parent_kinds_are_injectable_and_deterministic() {
-        let mut registry = InputContextRegistry::bundled_with_policy(InputContextPolicy {
+        let mut registry = InputContexts::bundled_with_policy(InputContextPolicy {
             maximum_contexts_per_plugin: 2,
             maximum_dynamic_contexts: 3,
         });
@@ -356,7 +358,7 @@ mod tests {
             Err(InputContextError::GlobalLimit)
         ));
         assert!(matches!(
-            InputContextRegistry::bundled().register_plugin(
+            InputContexts::bundled().register_plugin(
                 "demo",
                 "x",
                 "X",
@@ -376,7 +378,7 @@ mod tests {
 
     #[test]
     fn plugin_contexts_are_namespaced_bounded_and_generation_conditional() {
-        let mut registry = InputContextRegistry::bundled();
+        let mut registry = InputContexts::bundled();
         let id = registry
             .register_plugin(
                 "demo",

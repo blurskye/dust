@@ -1,3 +1,5 @@
+//! Cursor, selection and viewport state.
+
 use crate::editor::state::id::BufferId;
 use crate::editor::text::ByteOffset;
 

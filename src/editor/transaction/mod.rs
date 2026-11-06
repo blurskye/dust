@@ -1,3 +1,5 @@
+//! Checked edits and undo history.
+
 use crate::editor::EditorTopology;
 use crate::editor::EditorVersion;
 use crate::editor::EditorWindowVersion;

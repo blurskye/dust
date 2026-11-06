@@ -1,3 +1,5 @@
+//! Editor tabs, panes and split layouts.
+
 use crate::editor::state::id::PaneId;
 
 pub(super) fn layout_ratios_are_valid(node: &LayoutNode) -> bool {

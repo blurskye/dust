@@ -1,3 +1,5 @@
+//! Parsing of command-line input and arguments.
+
 use std::collections::BTreeMap;
 
 use crate::editor::CommandError;
