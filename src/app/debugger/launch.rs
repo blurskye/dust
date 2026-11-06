@@ -1,9 +1,9 @@
 //! Original debugger intent and its discovery/preflight/actor lifecycle.
-use crate::app::debugger::DebugSession;
+use crate::app::debugger::Debugger;
 use crate::app::debugger::TerminalPolicy;
 use crate::app::workspace::ExecutionLane;
 use crate::app::workspace::ExecutionReady;
-use crate::app::workspace::WorkspaceSession;
+use crate::app::workspace::Workspace;
 use crate::app::workspace::WorkspaceVersion;
 use crate::config::DebugAdapterConfig;
 use crate::config::DebugConfig;
@@ -103,14 +103,14 @@ impl Launch {
         }
     }
 }
-impl DebugSession {
+impl Debugger {
     pub(in crate::app) fn request_debug(
         &mut self,
         selection: (Option<&str>, Option<&str>),
         program: Option<PathBuf>,
         document: Option<(&Path, &str)>,
         policy: (&DebugConfig, &crate::config::TerminalsConfig, u64),
-        workspace: &WorkspaceSession,
+        workspace: &Workspace,
         tools: &[ToolEntry],
     ) -> Result<DebugIntent, String> {
         self.request_debug_inner(
@@ -120,7 +120,7 @@ impl DebugSession {
     pub(in crate::app) fn request_restart(
         &mut self,
         policy: (&DebugConfig, &crate::config::TerminalsConfig, u64),
-        workspace: &WorkspaceSession,
+        workspace: &Workspace,
         tools: &[ToolEntry],
     ) -> Result<DebugIntent, String> {
         let target = self.target.clone().ok_or("debugger has no launch target")?;
@@ -151,7 +151,7 @@ impl DebugSession {
         program: Option<PathBuf>,
         document: Option<(&Path, &str)>,
         policy: (&DebugConfig, &crate::config::TerminalsConfig, u64),
-        workspace: &WorkspaceSession,
+        workspace: &Workspace,
         tools: &[ToolEntry],
         restarting: bool,
     ) -> Result<DebugIntent, String> {
@@ -383,7 +383,7 @@ impl DebugSession {
     pub(in crate::app) fn authorize_debug(
         &mut self,
         intent: DebugIntent,
-        workspace: &WorkspaceSession,
+        workspace: &Workspace,
     ) -> Result<(), String> {
         let launch = self
             .launch
@@ -699,10 +699,10 @@ mod tests {
             [("root".into(), RootIdentity::capture(root.path()).unwrap())],
         )
         .unwrap();
-        let workspace = WorkspaceSession::new(state, root.path().join("trust"), 1, false, false, 1);
+        let workspace = Workspace::new(state, root.path().join("trust"), 1, false, false, 1);
         let policy = DebugConfig::default();
         let terminals = crate::config::TerminalsConfig::default();
-        let mut owner = DebugSession::new(&policy, workspace.version());
+        let mut owner = Debugger::new(&policy, workspace.version());
         let (service, _adapter) = crate::debugger::test_session();
         owner.service = service;
         let path = root.path().join("original.py");
@@ -771,10 +771,10 @@ mod tests {
             [("root".into(), identity)],
         )
         .unwrap();
-        let workspace = WorkspaceSession::new(state, root.path().join("trust"), 1, false, false, 1);
+        let workspace = Workspace::new(state, root.path().join("trust"), 1, false, false, 1);
         let policy = DebugConfig::default();
         let terminals = crate::config::TerminalsConfig::default();
-        let mut owner = DebugSession::new(&policy, workspace.version());
+        let mut owner = Debugger::new(&policy, workspace.version());
         let definition = crate::tools::bundled_tool_catalog()
             .into_iter()
             .find(|d| d.id == "codelldb")
@@ -826,7 +826,7 @@ mod tests {
         )
         .unwrap();
         let mut workspace =
-            WorkspaceSession::new(state, directory.path().join("trust"), 2, false, false, 2);
+            Workspace::new(state, directory.path().join("trust"), 2, false, false, 2);
         workspace
             .fixture_identity(RootId(1), identity.clone())
             .unwrap();
@@ -853,7 +853,7 @@ mod tests {
                 path_maps: BTreeMap::new(),
             },
         );
-        let mut owner = DebugSession::new(&policy, workspace.version());
+        let mut owner = Debugger::new(&policy, workspace.version());
         let terminals = crate::config::TerminalsConfig::default();
         let old = owner
             .request_debug(
@@ -899,7 +899,7 @@ mod tests {
             ["original"]
         );
         // A separately constructed owner cannot consume the first owner's intent.
-        let mut foreign = DebugSession::new(&policy, workspace.version());
+        let mut foreign = Debugger::new(&policy, workspace.version());
         assert!(foreign.authorize_debug(fresh, &workspace).is_err());
         let _ = owner.stop();
         let deadline = Instant::now() + Duration::from_secs(2);
@@ -972,7 +972,7 @@ mod tests {
         )
         .unwrap();
         let mut workspace =
-            WorkspaceSession::new(state, directory.path().join("trust"), 2, false, false, 2);
+            Workspace::new(state, directory.path().join("trust"), 2, false, false, 2);
         workspace
             .fixture_identity(RootId(1), identity.clone())
             .unwrap();
@@ -1001,7 +1001,7 @@ mod tests {
                 path_maps: BTreeMap::new(),
             },
         );
-        let mut owner = DebugSession::new(&policy, workspace.version());
+        let mut owner = Debugger::new(&policy, workspace.version());
         let terminals = crate::config::TerminalsConfig::default();
         let intent = owner
             .request_debug(
@@ -1096,7 +1096,7 @@ mod tests {
             )
             .unwrap();
             let mut workspace =
-                WorkspaceSession::new(state, root.path().join("trust"), 2, false, false, 2);
+                Workspace::new(state, root.path().join("trust"), 2, false, false, 2);
             workspace
                 .fixture_identity(RootId(1), identity.clone())
                 .unwrap();
@@ -1133,7 +1133,7 @@ mod tests {
                 definition,
                 status: ToolStatus::Installed(python),
             }];
-            let mut owner = DebugSession::new(&policy, workspace.version());
+            let mut owner = Debugger::new(&policy, workspace.version());
             let terminals = crate::config::TerminalsConfig::default();
             let intent = owner
                 .request_debug(
