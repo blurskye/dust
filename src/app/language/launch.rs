@@ -269,13 +269,13 @@ impl LspSession {
             return Err("language-server root admission is retired or busy".into());
         }
         let source = Source::capture(value.buffer, &value.document.path, &context)?;
-        let generation = lane.discover(
+        let request_id = lane.discover(
             value.document.path.clone(),
             value.root_id,
             value.definition.project_root_markers.clone(),
             value.definition.project_root_strategy,
         )?;
-        self.preparation.root = Some((generation, Pending { value, source }));
+        self.preparation.root = Some((request_id, Pending { value, source }));
         Ok(())
     }
     pub(in crate::app) fn accept_project_root(
@@ -284,12 +284,12 @@ impl LspSession {
         context: LaunchContext<'_>,
         lane: ExecutionLane<'_>,
     ) -> Result<(), String> {
-        let Some((generation, _)) = &self.preparation.root else {
+        let Some((request_id, _)) = &self.preparation.root else {
             return Ok(());
         };
         if result
             .as_ref()
-            .is_ok_and(|result| result.generation != *generation)
+            .is_ok_and(|result| result.request_id != *request_id)
         {
             return Ok(());
         }
@@ -387,9 +387,9 @@ impl LspSession {
                 if self.preparation.nix.is_some() {
                     return Err("Nix LSP workspace preparation is already pending".into());
                 }
-                let generation = self.preparation.worker.prepare()?;
+                let request_id = self.preparation.worker.prepare()?;
                 self.preparation.nix = Some((
-                    generation,
+                    request_id,
                     Pending {
                         value: PendingNixLspWorkspace {
                             session_key,
@@ -453,10 +453,10 @@ impl LspSession {
                 };
             }
         };
-        let Some((generation, _)) = &self.preparation.nix else {
+        let Some((request_id, _)) = &self.preparation.nix else {
             return Ok(());
         };
-        if result.generation != *generation {
+        if result.request_id != *request_id {
             return Ok(());
         }
         let (
@@ -650,8 +650,7 @@ mod tests {
             [("root".into(), identity)],
         )
         .unwrap();
-        let mut workspace =
-            Workspace::new(state, root.path().join("trust"), 1, false, false, 1);
+        let mut workspace = Workspace::new(state, root.path().join("trust"), 1, false, false, 1);
         let identity = workspace.roots()[0].identity.clone();
         workspace
             .fixture_identity(crate::workspace::RootId(1), identity.clone())
@@ -824,8 +823,7 @@ mod tests {
             [("root".into(), identity)],
         )
         .unwrap();
-        let workspace =
-            Workspace::new(state, root.path().join("trust.json"), 1, false, false, 1);
+        let workspace = Workspace::new(state, root.path().join("trust.json"), 1, false, false, 1);
         let mut editor = EditorState::new(root.path().into());
         let path = root.path().join("source.rs");
         let (buffer, _) = editor

@@ -17,8 +17,8 @@ use crate::editor::text::TextEdit;
 use crate::editor::text::TextEditSet;
 use crate::language::lsp::ApplyEditReply;
 use crate::language::lsp::EditContext;
-use crate::language::lsp::LspDocumentEdit;
 use crate::language::lsp::LspClient;
+use crate::language::lsp::LspDocumentEdit;
 use crate::language::lsp::LspTextEdit;
 use crate::language::lsp::LspWorkspaceEdit;
 use crate::language::lsp::OwnedLspEvent;
@@ -1491,8 +1491,8 @@ impl LspEditSources {
 
 #[cfg(test)]
 mod diagnostic_tests {
-    use crate::app::diagnostics::Diagnostics;
     use crate::app::diagnostics::DiagnosticValidity;
+    use crate::app::diagnostics::Diagnostics;
     use crate::app::language::edits::*;
     use crate::editor::EditorState;
     use crate::language::lsp::DiagnosticLineage;

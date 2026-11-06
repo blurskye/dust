@@ -33,12 +33,12 @@ use crate::editor::text::TextVersion;
 use crate::language::lsp::ApplyEditReply;
 use crate::language::lsp::EditContext;
 use crate::language::lsp::LspCapabilities;
+use crate::language::lsp::LspClient;
 use crate::language::lsp::LspCodeAction;
 use crate::language::lsp::LspDiagnostic;
 use crate::language::lsp::LspDocument;
 use crate::language::lsp::LspError;
 use crate::language::lsp::LspServerConfiguration;
-use crate::language::lsp::LspClient;
 use crate::language::lsp::LspSessionLaunch;
 use crate::language::lsp::LspWorkspaceEdit;
 use crate::language::lsp::OwnedLspEvent;
@@ -884,11 +884,7 @@ impl LspSession {
 pub(in crate::app) mod edits;
 pub(in crate::app) mod snippets;
 
-
 pub(in crate::app) mod commands;
-
-
-
 
 use crate::app::App;
 use crate::app::commands::AppEffect;
