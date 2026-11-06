@@ -4,16 +4,10 @@ mod id;
 
 pub use id::BufferId;
 
-pub use id::PaneId;
-
-pub use id::TabId;
-
 pub use id::TransactionId;
 
 pub use id::ViewId;
 
-pub const MAXIMUM_LAYOUT_DEPTH: usize = crate::MAX_SPLIT_DEPTH;
-pub const MAXIMUM_LAYOUT_PANES: usize = crate::MAX_WINDOWS;
 mod buffer;
 pub(crate) mod events;
 pub use events::{BufferChange, EditorEvent};
@@ -21,12 +15,7 @@ mod registers;
 mod view;
 pub use buffer::Buffer;
 pub use buffer::BufferOrigin;
-pub use layout::Axis;
 
-pub use layout::FocusDirection;
-pub use layout::LayoutNode;
-pub use layout::Pane;
-pub use layout::Tab;
 pub use registers::RegisterShape;
 pub use registers::RegisterStore;
 pub use registers::RegisterValue;
@@ -37,11 +26,11 @@ pub use view::Selection;
 pub use view::SelectionKind;
 pub use view::View;
 mod store;
+mod windows;
 pub use store::EditorState;
 pub(crate) use store::EditorTopology;
 pub(crate) use store::EditorVersion;
 pub(crate) use store::EditorWindowVersion;
-mod layout;
 
 #[cfg(test)]
 mod tests;

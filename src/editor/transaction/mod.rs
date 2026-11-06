@@ -149,12 +149,12 @@ pub enum EditorOperation {
         buffer: BufferId,
     },
     SplitPane {
-        axis: crate::editor::Axis,
+        axis: crate::windows::TileAxis,
         ratio: u16,
     },
     ClonePane {
-        pane: crate::editor::PaneId,
-        axis: crate::editor::Axis,
+        pane: crate::windows::WindowId,
+        axis: crate::windows::TileAxis,
         ratio: u16,
     },
     NewTab,
@@ -164,17 +164,17 @@ pub enum EditorOperation {
         delta: i16,
     },
     ResizePaneOnAxis {
-        axis: crate::editor::Axis,
+        axis: crate::windows::TileAxis,
         delta: i16,
     },
     SetSplitRatio {
-        first: crate::editor::PaneId,
-        second: crate::editor::PaneId,
+        first: crate::windows::WindowId,
+        second: crate::windows::WindowId,
         ratio: u16,
     },
     SwapPanes {
-        first: crate::editor::PaneId,
-        second: crate::editor::PaneId,
+        first: crate::windows::WindowId,
+        second: crate::windows::WindowId,
     },
     CloseTab,
     DiscardUnreferencedBuffers {
@@ -185,14 +185,14 @@ pub enum EditorOperation {
         wrap: bool,
     },
     FocusPaneId {
-        pane: crate::editor::PaneId,
+        pane: crate::windows::WindowId,
     },
     FocusTab {
         offset: isize,
         wrap: bool,
     },
     FocusTabId {
-        tab: crate::editor::TabId,
+        tab: crate::windows::WorkspaceTabId,
     },
 }
 
@@ -726,7 +726,7 @@ fn apply_operation(
             target.refresh_dirty();
             clamp_views(state, *buffer);
             // Like Vim, the cursor lands on the earliest changed text.
-            if let (Some(first), Some(view)) = (first, state.active_view)
+            if let (Some(first), Some(view)) = (first, state.active_view())
                 && let Some(view) = state.views.get_mut(view).filter(|v| v.buffer == *buffer)
             {
                 view.cursor = first.min(ByteOffset(state.buffers[*buffer].text.len_bytes()));
@@ -821,6 +821,7 @@ fn clamp_views(state: &mut EditorState, buffer: BufferId) {
 /// replaced or paired independently by the window/extension owner.
 pub(crate) struct EditorDraft {
     before: EditorVersion,
+    before_graph_revision: Option<u64>,
     state: EditorState,
 }
 impl EditorState {
@@ -834,11 +835,16 @@ impl EditorState {
     pub(crate) fn draft(&self) -> EditorDraft {
         EditorDraft {
             before: self.version(),
+            before_graph_revision: self.graph.revision(),
             state: self.clone(),
         }
     }
 }
 impl EditorDraft {
+    pub(crate) fn before_graph_revision(&self) -> Option<u64> {
+        self.before_graph_revision
+    }
+
     pub(crate) fn version(&self) -> EditorVersion {
         self.state.version()
     }
@@ -854,10 +860,7 @@ impl EditorDraft {
                 if current == owner && *load == generation && *id == document)) {
             return Err("virtual document removal source changed".into());
         }
-        let focus = self
-            .state
-            .active_tab
-            .and_then(|tab| self.state.tabs.get(tab).map(|value| (tab, value.focused)));
+        let focus = self.state.focused_window();
         let views = self
             .state
             .views
@@ -868,12 +871,10 @@ impl EditorDraft {
             self.state.close_view(view).map_err(str::to_owned)?;
         }
         self.state.remove_buffer(buffer);
-        if let Some((tab, pane)) = focus
-            && self.state.tabs.contains_key(tab)
-            && self.state.panes.contains_key(pane)
+        if let Some(window) = focus
+            && let Some(view) = self.state.window_view(window)
         {
-            self.state.active_tab = Some(tab);
-            self.state.focus_pane_id(pane).map_err(str::to_owned)?;
+            self.state.focus_view(view).map_err(str::to_owned)?;
         }
         Ok(())
     }
@@ -983,10 +984,14 @@ impl EditorDraft {
     }
     pub(crate) fn split_document(&mut self, ratio: u16) -> Result<(), &'static str> {
         self.state
-            .split_active(crate::editor::Axis::Vertical, ratio)
+            .split_active(crate::windows::TileAxis::Vertical, ratio)
             .map(|_| ())
     }
-    pub(crate) fn load_document(&mut self, text: TextBuffer, path: std::path::PathBuf) -> BufferId {
+    pub(crate) fn load_document(
+        &mut self,
+        text: TextBuffer,
+        path: std::path::PathBuf,
+    ) -> Result<BufferId, String> {
         self.state.load_hidden_text(text, path)
     }
     pub(crate) fn reload_document(
@@ -1109,7 +1114,7 @@ impl EditorDraft {
         view: ViewId,
         buffer: BufferId,
     ) -> Result<bool, &'static str> {
-        if self.state.active_view != Some(view)
+        if self.state.active_view() != Some(view)
             || self
                 .state
                 .views
@@ -1147,7 +1152,7 @@ impl EditorDraft {
         if removed {
             self.state.remove_buffer(buffer);
         }
-        if self.state.active_view.is_none()
+        if self.state.active_view().is_none()
             && let Some(buffer) = self.state.buffers.keys().next()
         {
             self.state.show_buffer(buffer)?;
@@ -1395,17 +1400,24 @@ mod tests {
         let (second, view) = state
             .open_text(TextBuffer::from_text("other"), None)
             .unwrap();
-        let pane = state.tabs[state.active_tab.unwrap()].focused;
+        let pane = state
+            .tab_focused_window(state.active_tab().unwrap())
+            .unwrap();
         let mut draft = state.draft();
         assert!(draft.close_document(view, second).unwrap());
         state = draft.accept(&state.version()).unwrap();
-        let restored = &state.views[state.active_view.unwrap()];
+        let restored = &state.views[state.active_view().unwrap()];
         assert_eq!(restored.buffer, first);
         assert_eq!(restored.cursor, ByteOffset(500));
         assert_eq!(restored.scroll_line, 95);
         assert_eq!(restored.scroll_wrap_row, 2);
         assert_eq!(restored.scroll_column, 3);
-        assert_eq!(state.tabs[state.active_tab.unwrap()].focused, pane);
+        assert_eq!(
+            state
+                .tab_focused_window(state.active_tab().unwrap())
+                .unwrap(),
+            pane
+        );
         assert!(!state.buffers.contains_key(second));
         state.validate_layout().unwrap();
     }
@@ -1643,7 +1655,7 @@ mod tests {
             .open_virtual_read_only(TextBuffer::from_text("long text"), "demo".into(), 1, 1, 1)
             .unwrap();
         let second = state
-            .split_active(crate::editor::Axis::Horizontal, 500)
+            .split_active(crate::windows::TileAxis::Horizontal, 500)
             .unwrap();
         for id in [first, second] {
             let view = &mut state.views[id];

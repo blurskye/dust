@@ -1844,12 +1844,14 @@ fn process_fixture(
     request: PluginUiRequest,
 ) -> PluginUiEvent {
     let mut windows = crate::app::windows::Windows::from_test_graph(graph.clone());
+    let mut state = crate::editor::EditorState::new(std::path::PathBuf::new());
+    state.graph = graph.clone();
     let mut draft = windows.begin_plugin_fixture(&index.owner, index.plugin_load);
     let mut candidate = host.clone();
     let event = candidate.process(&mut draft, index, request);
     if event.error.is_none() {
         windows
-            .commit_plugin_fixture(draft)
+            .commit_plugin_fixture(draft, &mut state)
             .expect("checked plugin commit");
         *host = candidate;
         *graph = windows.graph().clone();
@@ -1863,7 +1865,9 @@ fn remove_fixture(
     load: u64,
 ) -> Result<bool, String> {
     let mut windows = crate::app::windows::Windows::from_test_graph(graph.clone());
-    windows.remove_plugin_generation(plugin, load)?;
+    let mut state = crate::editor::EditorState::new(std::path::PathBuf::new());
+    state.graph = graph.clone();
+    windows.remove_plugin_generation(plugin, load, &mut state)?;
     *graph = windows.graph().clone();
     Ok(host.remove_load(plugin, load))
 }

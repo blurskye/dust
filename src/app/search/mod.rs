@@ -928,7 +928,7 @@ impl App {
 
 impl App {
     pub(in crate::app) fn search_word_under_cursor(&mut self, forward: bool, count: u64) -> bool {
-        let Some(view_id) = self.state.active_view else {
+        let Some(view_id) = self.state.active_view() else {
             return false;
         };
         let view = &self.state.views[view_id];
@@ -971,7 +971,7 @@ impl App {
         };
         let forward = prompt.kind == PromptKind::SearchForward;
         let query = prompt.input.clone();
-        let Some(view_id) = self.state.active_view else {
+        let Some(view_id) = self.state.active_view() else {
             return;
         };
         let buffer_id = self.state.views[view_id].buffer;
@@ -1020,7 +1020,7 @@ impl App {
             return false;
         };
         self.record_jump();
-        let Some(view_id) = self.state.active_view else {
+        let Some(view_id) = self.state.active_view() else {
             return false;
         };
         let view = &self.state.views[view_id];
@@ -1099,7 +1099,7 @@ impl App {
             self.show_error(self.message("no_previous_search", &[]));
             return false;
         };
-        let Some(view_id) = self.state.active_view else {
+        let Some(view_id) = self.state.active_view() else {
             return false;
         };
         let view = &self.state.views[view_id];

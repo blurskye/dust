@@ -278,7 +278,7 @@ pub(in crate::app) fn wrapped_visual_rows_drive_margin_paging_resize_folds_and_m
     app.state.views[view].scroll_wrap_row = 1;
     let sibling = app
         .state
-        .split_active(crate::editor::Axis::Horizontal, 500)
+        .split_active(crate::windows::TileAxis::Horizontal, 500)
         .expect("split view");
     assert_eq!(app.state.views[sibling].scroll_wrap_row, 1);
     app.reconcile_editor_windows();
@@ -292,7 +292,7 @@ pub(in crate::app) fn wrapped_visual_rows_drive_margin_paging_resize_folds_and_m
     )
     .unwrap();
     assert!(split_viewport.width > 0 && split_viewport.height > 0);
-    let reconciliation_count = app.window_session.editor_ids().reconciliation_count();
+    let reconciliation_count = app.window_session.test_publications();
     let window_revision = app.state.window_revision();
     let transaction = app.next_transaction;
     let accepted_scroll = (
@@ -311,10 +311,7 @@ pub(in crate::app) fn wrapped_visual_rows_drive_margin_paging_resize_folds_and_m
             app.window_session.height(),
         );
     }
-    assert_eq!(
-        app.window_session.editor_ids().reconciliation_count(),
-        reconciliation_count
-    );
+    assert_eq!(app.window_session.test_publications(), reconciliation_count);
     assert_eq!(app.state.window_revision(), window_revision);
     assert_eq!(app.next_transaction, transaction);
     assert_eq!(
@@ -397,15 +394,10 @@ pub(in crate::app) fn exact_pane_horizontal_follow_is_display_safe_and_view_owne
     );
     let sibling = app
         .state
-        .split_active(crate::editor::Axis::Horizontal, 500)
+        .split_active(crate::windows::TileAxis::Horizontal, 500)
         .expect("split view");
     assert_eq!(app.state.views[sibling].scroll_column, shifted);
-    let first_pane = app
-        .state
-        .panes
-        .iter()
-        .find_map(|(pane, state)| (state.view == view).then_some(pane))
-        .expect("first pane");
+    let first_pane = app.state.view_window(view).expect("first pane");
     app.state
         .focus_pane_id(first_pane)
         .expect("first view focus");
@@ -558,10 +550,10 @@ pub(in crate::app) fn cursor_follow_skips_an_unrenderable_tab_in_a_narrow_pane()
     app.window_session
         .observe_size((6, app.window_session.height()));
     app.state
-        .split_active(crate::editor::Axis::Horizontal, 100)
+        .split_active(crate::windows::TileAxis::Horizontal, 100)
         .expect("minimum-ratio split");
     app.state.focus_pane(-1, false).expect("zero-width leaf");
-    let zero_view = app.state.active_view.expect("zero-width view");
+    let zero_view = app.state.active_view().expect("zero-width view");
     app.state.views[zero_view].scroll_column = 9;
     app.ensure_cursor_visible();
     let zero_viewport = active_pane_viewport(
@@ -584,13 +576,13 @@ pub(in crate::app) fn session_layout_capture_and_restore_preserve_each_view_scro
     let (_, first) = source.open_text(text.clone(), Some(path.clone())).unwrap();
     source.views[first].scroll_column = 4;
     let second = source
-        .split_active(crate::editor::Axis::Horizontal, 500)
+        .split_active(crate::windows::TileAxis::Horizontal, 500)
         .expect("split source view");
     source.views[second].scroll_column = 17;
-    let source_tab = source.active_tab.expect("source tab");
+    let source_tab = source.active_tab().expect("source tab");
     let persisted = capture_persisted_layout(
         &source,
-        &source.tabs[source_tab].root,
+        &source.tab_layout(source_tab).unwrap(),
         std::slice::from_ref(&source.workspace_root),
     )
     .expect("capture clean layout");
@@ -601,7 +593,7 @@ pub(in crate::app) fn session_layout_capture_and_restore_preserve_each_view_scro
         .expect("restore persisted layout");
     let columns = panes
         .iter()
-        .map(|(_, pane)| restored.views[restored.panes[*pane].view].scroll_column)
+        .map(|(_, pane)| restored.views[restored.window_view(*pane).unwrap()].scroll_column)
         .collect::<Vec<_>>();
     assert_eq!(columns, vec![4, 17]);
 }
@@ -614,7 +606,7 @@ pub(in crate::app) fn session_capture_keeps_project_panes_after_external_navigat
         .open_text(TextBuffer::from_text("project"), Some(path.clone()))
         .unwrap();
     state
-        .split_active(crate::editor::Axis::Horizontal, 500)
+        .split_active(crate::windows::TileAxis::Horizontal, 500)
         .unwrap();
     let (external, _) = state
         .open_text(
@@ -623,11 +615,12 @@ pub(in crate::app) fn session_capture_keeps_project_panes_after_external_navigat
         )
         .unwrap();
     state.buffers[external].read_only = true;
-    let tab = state.active_tab.unwrap();
+    let tab = state.active_tab().unwrap();
     let roots = std::slice::from_ref(&state.workspace_root);
-    let layout = capture_persisted_layout(&state, &state.tabs[tab].root, roots).unwrap();
+    let layout = capture_persisted_layout(&state, &state.tab_layout(tab).unwrap(), roots).unwrap();
     state.buffers[external].read_only = false;
-    let writable_layout = capture_persisted_layout(&state, &state.tabs[tab].root, roots).unwrap();
+    let writable_layout =
+        capture_persisted_layout(&state, &state.tab_layout(tab).unwrap(), roots).unwrap();
     assert_eq!(
         serde_json::to_value(&layout).unwrap(),
         serde_json::to_value(&writable_layout).unwrap()
@@ -725,12 +718,12 @@ pub(in crate::app) fn horizontal_follow_reconciles_gutter_explorer_resize_and_ne
         .observe_size((90, app.window_session.height()));
     app.state.views[view].cursor = ByteOffset(80);
     app.state
-        .split_active(crate::editor::Axis::Horizontal, 300)
+        .split_active(crate::windows::TileAxis::Horizontal, 300)
         .expect("first split");
     app.state
-        .split_active(crate::editor::Axis::Horizontal, 400)
+        .split_active(crate::windows::TileAxis::Horizontal, 400)
         .expect("nested split");
-    let focused = app.state.active_view.expect("focused nested view");
+    let focused = app.state.active_view().expect("focused nested view");
     app.state.views[focused].scroll_column = 0;
     app.ensure_cursor_visible();
     let viewport = active_pane_viewport(
@@ -856,7 +849,7 @@ pub(in crate::app) fn dragging_the_border_between_two_windows_resizes_them() {
         .unwrap();
     app.set_dashboard_visibility(false);
     app.apply_layout_action(crate::app::windows::LayoutAction::Split(
-        crate::editor::Axis::Horizontal,
+        crate::windows::TileAxis::Horizontal,
     ));
     app.reconcile_editor_windows();
     let border = |app: &App| {
@@ -921,7 +914,9 @@ pub(in crate::app) fn the_agent_panel_opens_narrow_and_ctrl_arrows_move_by_word_
             borders,
             format!(
                 "{windows:?} {:?}",
-                app.state.tabs[app.state.active_tab.unwrap()].root
+                app.state
+                    .tab_layout(app.state.active_tab().unwrap())
+                    .unwrap()
             ),
         )
     };

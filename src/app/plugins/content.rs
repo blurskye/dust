@@ -443,7 +443,7 @@ impl Plugins {
         }
         context
             .windows
-            .check_editor_admission(&context.editor.into())?;
+            .check_editor_source(&context.editor.into())?;
         let mut broker = self.virtual_documents.clone();
         let snapshot = broker
             .apply(plugin, load, proposal)
@@ -467,7 +467,7 @@ impl Plugins {
     ) -> Result<(VirtualPublication<'a>, EditorWindowCandidate), String> {
         context
             .windows
-            .check_editor_admission(&context.editor.into())?;
+            .check_editor_source(&context.editor.into())?;
         let existing = self.virtual_editor.find(
             "builtin.health",
             PluginLoadId(1),
@@ -526,7 +526,7 @@ impl Plugins {
         }
         context
             .windows
-            .check_editor_admission(&context.editor.into())?;
+            .check_editor_source(&context.editor.into())?;
         let mut draft = context.editor.draft();
         let mut bridge = self.virtual_editor.clone();
         bridge.remove_load(&mut draft, plugin, load)?;

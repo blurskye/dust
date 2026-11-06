@@ -183,6 +183,7 @@ pub struct WindowDescriptor {
     pub tab: WorkspaceTabId,
     pub view: ViewId,
     pub placement: WindowPlacement,
+    pub restore_placement: WindowPlacement,
     pub focusable: bool,
     pub owner: String,
     pub instance_id: u64,

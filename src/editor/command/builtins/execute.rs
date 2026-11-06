@@ -99,7 +99,7 @@ pub(super) fn execute_builtin<E>(
     let view_id = invocation
         .target
         .view
-        .or(state.active_view)
+        .or(state.active_view())
         .ok_or_else(|| CommandError::Unavailable("no active view".into()))?;
     let view = state
         .views

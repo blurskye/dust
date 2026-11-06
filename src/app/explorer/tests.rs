@@ -54,7 +54,7 @@ fn explorer_prefilled_rename_keeps_original_target_and_dirty_split_views() {
     app.state.set_buffer_dirty(buffer, true);
     let second = app
         .state
-        .split_active(crate::editor::Axis::Vertical, 500)
+        .split_active(crate::windows::TileAxis::Vertical, 500)
         .unwrap();
     app.state.views[first].cursor = ByteOffset(1);
     app.state.views[second].cursor = ByteOffset(4);
@@ -517,10 +517,10 @@ fn explorer_rename_and_delete_reconcile_open_buffers_without_losing_text() {
     app.open_explorer();
     app.explorer
         .select(app.explorer.tree().id_for_path(&opened).unwrap());
-    let panes = app.state.panes.len();
+    let panes = app.state.editor_windows().count();
     app.explorer_open_file(true);
     wait_vfs(&mut app);
-    assert_eq!(app.state.panes.len(), panes + 1);
+    assert_eq!(app.state.editor_windows().count(), panes + 1);
     let active = app.state.active_buffer_id().unwrap();
     assert_eq!(app.state.buffers[active].path.as_ref(), Some(&opened));
     assert_eq!(
@@ -598,8 +598,8 @@ fn explorer_lazily_loads_and_opens_scoped_file() {
     assert!(!app.ui.content_tabs.is_empty());
     assert!(app.ui.content_tabs.iter().all(|tab| tab.icon == "·"));
     assert_eq!(app.active_input_context(), "editor.normal");
-    let tab = app.state.active_tab;
-    let view = app.state.active_view;
+    let tab = app.state.active_tab();
+    let view = app.state.active_view();
 
     // Reopening an existing file switches back to its tab/view, without
     // duplicating the buffer or replacing its in-memory contents from disk.
@@ -615,8 +615,8 @@ fn explorer_lazily_loads_and_opens_scoped_file() {
     app.reconcile_editor_windows();
     wait_vfs(&mut app);
     assert_eq!(app.state.active_buffer_id(), Some(buffer));
-    assert_eq!(app.state.active_tab, tab);
-    assert_eq!(app.state.active_view, view);
+    assert_eq!(app.state.active_tab(), tab);
+    assert_eq!(app.state.active_view(), view);
     assert_eq!(app.state.buffers.len(), buffers);
     assert_eq!(
         app.state.buffers[buffer].text.to_string(),
@@ -953,13 +953,13 @@ fn directional_focus_moves_spatially_then_crosses_the_explorer_boundary() {
         .unwrap();
     app.set_dashboard_visibility(false);
     app.apply_layout_action(crate::app::windows::LayoutAction::Split(
-        crate::editor::Axis::Horizontal,
+        crate::windows::TileAxis::Horizontal,
     ));
-    let tab = app.state.active_tab.expect("active tab");
-    let right = app.state.tabs[tab].focused;
+    let tab = app.state.active_tab().expect("active tab");
+    let right = app.state.tab_focused_window(tab).unwrap();
     let left = app
         .state
-        .directional_pane(crate::editor::FocusDirection::Left)
+        .directional_pane(crate::windows::SpatialDirection::Left)
         .expect("directional query")
         .expect("left pane");
 
@@ -967,19 +967,19 @@ fn directional_focus_moves_spatially_then_crosses_the_explorer_boundary() {
     assert!(app.ui.explorer_focused);
     app.handle_configured_key("ctrl-l".parse::<KeyEvent>().expect("Ctrl-l"));
     assert!(!app.ui.explorer_focused);
-    assert_eq!(app.state.tabs[tab].focused, left);
+    assert_eq!(app.state.tab_focused_window(tab).unwrap(), left);
     app.handle_configured_key("ctrl-l".parse::<KeyEvent>().expect("Ctrl-l"));
-    assert_eq!(app.state.tabs[tab].focused, right);
+    assert_eq!(app.state.tab_focused_window(tab).unwrap(), right);
 
     app.handle_configured_key("ctrl-h".parse::<KeyEvent>().expect("Ctrl-h"));
     assert!(!app.ui.explorer_focused);
-    assert_eq!(app.state.tabs[tab].focused, left);
+    assert_eq!(app.state.tab_focused_window(tab).unwrap(), left);
     app.handle_configured_key("ctrl-h".parse::<KeyEvent>().expect("Ctrl-h"));
     assert!(app.ui.explorer_focused);
-    assert_eq!(app.state.tabs[tab].focused, left);
+    assert_eq!(app.state.tab_focused_window(tab).unwrap(), left);
     app.handle_configured_key("ctrl-l".parse::<KeyEvent>().expect("Ctrl-l"));
     assert!(!app.ui.explorer_focused);
-    assert_eq!(app.state.tabs[tab].focused, left);
+    assert_eq!(app.state.tab_focused_window(tab).unwrap(), left);
 }
 
 #[test]
@@ -991,7 +991,7 @@ fn directional_resize_uses_the_focused_explorer_clone() {
     app.set_dashboard_visibility(false);
     app.open_explorer();
     let primary = app.window_session.native_ids().explorer().unwrap().window;
-    app.clone_graph_window("explorer", crate::editor::Axis::Horizontal)
+    app.clone_graph_window("explorer", crate::windows::TileAxis::Horizontal)
         .unwrap();
     let clone = app.window_session.graph().focused().unwrap();
     assert_ne!(primary, clone);
@@ -1012,7 +1012,7 @@ fn directional_resize_uses_the_focused_explorer_clone() {
         .unwrap()
         .placement;
     app.process_effect(AppEffect::WindowResizeDirectional(
-        crate::editor::FocusDirection::Right,
+        crate::windows::SpatialDirection::Right,
         1,
     ));
     assert_eq!(
@@ -1027,7 +1027,7 @@ fn directional_resize_uses_the_focused_explorer_clone() {
         matches!(app.window_session.graph().window(clone).unwrap().placement, WindowPlacement::Floating(rect) if rect.width > 20)
     );
     app.process_effect(AppEffect::WindowResizeDirectional(
-        crate::editor::FocusDirection::Left,
+        crate::windows::SpatialDirection::Left,
         1_000_000,
     ));
     assert!(
@@ -1167,7 +1167,7 @@ fn swapping_a_configured_explorer_into_hidden_retains_its_actual_placement() {
         })
         .unwrap();
     app.window_session
-        .accept_current(candidate, &app.state.window_version())
+        .accept_current(candidate, &app.state.window_version(), &mut app.state)
         .unwrap();
     app.open_explorer();
     let explorer = app.window_session.native_ids().explorer().unwrap();
@@ -1886,7 +1886,7 @@ fn explorer_clone_rejects_foreign_exhausted_and_over_limit_sources_without_publi
     );
     assert_eq!(owner.cloned_views.len(), 0);
 
-    for expected in 2..=crate::MAX_WINDOWS as u64 {
+    for expected in 2..=crate::windows::MAX_WINDOWS as u64 {
         let candidate = owner.prepare_clone(PRIMARY_EXPLORER_VIEW).unwrap();
         assert_eq!(candidate.id(), ExplorerViewId(expected));
         owner.accept_clone(candidate).unwrap();
@@ -1897,7 +1897,7 @@ fn explorer_clone_rejects_foreign_exhausted_and_over_limit_sources_without_publi
     );
     assert_eq!(
         owner.cloned_views.len().saturating_add(1),
-        crate::MAX_WINDOWS
+        crate::windows::MAX_WINDOWS
     );
 
     let (mut exhausted, _) = fixture(root.path());

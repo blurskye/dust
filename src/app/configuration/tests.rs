@@ -288,7 +288,7 @@ pub(in crate::app) fn theme_picker_previews_cancels_applies_and_never_overwrites
     app.window_session.observe_size((100, 30));
     app.process_effect(AppEffect::NewBuffer);
     app.handle_configured_key(KeyEvent::character('i'));
-    let view = app.state.active_view.unwrap();
+    let view = app.state.active_view().unwrap();
     assert_eq!(
         app.state.views[view].mode,
         crate::editor::EditorMode::Insert
@@ -1670,7 +1670,7 @@ pub(in crate::app) fn the_agent_panel_opens_over_the_dashboard() {
         app.handle_configured_key(KeyEvent::character(key));
     }
     assert!(!app.window_session.dashboard_visible());
-    assert!(app.state.active_view.is_some());
+    assert!(app.state.active_view().is_some());
     // Keys now go to the panel's input, not to the placeholder buffer.
     assert_eq!(app.active_input_context(), "agent");
     for key in "hi ab".chars() {

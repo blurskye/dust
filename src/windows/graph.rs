@@ -65,9 +65,9 @@ use crate::windows::projection::remove_tiled_window;
 
 use crate::windows::projection::replace_tiled_window;
 
-use crate::windows::projection::resize_tiled_parent;
+use crate::windows::tree::resize_parent;
 
-use crate::windows::projection::tiled_contains;
+use crate::windows::tree::contains_window;
 
 use crate::windows::projection::validate_tiled_layout;
 
@@ -85,6 +85,7 @@ pub struct WindowGraph {
     pub(super) active_tab: Option<WorkspaceTabId>,
     pub(super) focused: Option<WindowId>,
     pub(super) remembered_focus: BTreeMap<WorkspaceTabId, WindowId>,
+    pub(super) owner_focus: BTreeMap<(WorkspaceTabId, String), WindowId>,
     pub(super) revision: u64,
 }
 
@@ -108,6 +109,7 @@ impl Clone for WindowGraph {
             active_tab: self.active_tab,
             focused: self.focused,
             remembered_focus: self.remembered_focus.clone(),
+            owner_focus: self.owner_focus.clone(),
             revision: self.revision,
         }
     }
@@ -156,6 +158,7 @@ impl WindowGraph {
             && self.active_tab == other.active_tab
             && self.focused == other.focused
             && self.remembered_focus == other.remembered_focus
+            && self.owner_focus == other.owner_focus
     }
 
     #[cfg(test)]
@@ -376,7 +379,13 @@ impl WindowGraph {
             if !candidate.workspace_tabs.contains_key(&tab) {
                 return Err(WindowError::UnknownWorkspaceTab);
             }
-            validate_tiled_layout(tab, root.as_ref(), &candidate.windows)?;
+            let expected = candidate
+                .windows
+                .values()
+                .filter(|window| window.tab == tab && window.placement == WindowPlacement::Tiled)
+                .map(|window| window.id)
+                .collect();
+            validate_tiled_layout(tab, root.as_ref(), &candidate.windows, &expected)?;
             candidate
                 .workspace_tabs
                 .get_mut(&tab)
@@ -390,7 +399,11 @@ impl WindowGraph {
     pub fn tiled_layout_snapshot(&self, tab: WorkspaceTabId) -> Option<TiledLayoutSnapshot> {
         let descriptor = self.workspace_tabs.get(&tab)?;
         Some(TiledLayoutSnapshot {
-            root: descriptor.tiled_root.clone()?,
+            root: descriptor.tiled_root.as_ref()?.filtered(&|window| {
+                self.windows
+                    .get(&window)
+                    .is_some_and(|window| window.placement == WindowPlacement::Tiled)
+            })?,
             focused: self.focused.filter(|focused| {
                 self.windows
                     .get(focused)
@@ -446,7 +459,7 @@ impl WindowGraph {
                 .tiled_root
                 .as_mut()
                 .ok_or(WindowError::MissingTiledLayout)?;
-            if !resize_tiled_parent(root, window, delta) {
+            if !resize_parent(root, window, None, delta, 1, 999) {
                 return Err(WindowError::WindowNotInTiledLayout);
             }
             Ok(())
@@ -470,7 +483,7 @@ impl WindowGraph {
                 .tiled_root
                 .as_mut()
                 .ok_or(WindowError::MissingTiledLayout)?;
-            if !tiled_contains(root, first) || !tiled_contains(root, second) {
+            if !contains_window(root, first) || !contains_window(root, second) {
                 return Err(WindowError::WindowNotInTiledLayout);
             }
             replace_tiled_window(root, first, WindowId(0));
@@ -527,6 +540,11 @@ impl WindowGraph {
                 tab,
                 view,
                 placement,
+                restore_placement: if placement == WindowPlacement::Hidden {
+                    WindowPlacement::Tiled
+                } else {
+                    placement
+                },
                 focusable,
                 owner,
                 instance_id,
@@ -596,7 +614,7 @@ impl WindowGraph {
             .get(&window)
             .map(|descriptor| (descriptor.tab, descriptor.placement))
             .ok_or(WindowError::UnknownWindow)?;
-        if matches!(previous_placement, WindowPlacement::Tiled)
+        if previous_tab != tab
             && let Some(previous) = self.workspace_tabs.get_mut(&previous_tab)
         {
             previous.tiled_root = previous
@@ -610,10 +628,19 @@ impl WindowGraph {
             .ok_or(WindowError::UnknownWindow)?;
         descriptor.tab = tab;
         descriptor.view = view;
+        if placement != WindowPlacement::Hidden {
+            descriptor.restore_placement = placement;
+        } else if previous_placement != WindowPlacement::Hidden {
+            descriptor.restore_placement = previous_placement;
+        }
         descriptor.placement = placement;
         descriptor.focusable = focusable;
         if placement == WindowPlacement::Tiled
             && let Some(workspace_tab) = self.workspace_tabs.get_mut(&tab)
+            && workspace_tab
+                .tiled_root
+                .as_ref()
+                .is_none_or(|root| !contains_window(root, window))
         {
             workspace_tab.tiled_root = append_tiled_window(workspace_tab.tiled_root.take(), window);
         }
@@ -750,23 +777,22 @@ impl WindowGraph {
             return Err(WindowError::Unsupported("placement"));
         }
         let (tab, previous_placement) = (descriptor.tab, descriptor.placement);
-        if matches!(previous_placement, WindowPlacement::Tiled)
-            && !matches!(placement, WindowPlacement::Tiled)
-            && let Some(workspace_tab) = self.workspace_tabs.get_mut(&tab)
-        {
-            workspace_tab.tiled_root = workspace_tab
-                .tiled_root
-                .take()
-                .and_then(|root| remove_tiled_window(root, window));
-        }
         let descriptor = self
             .windows
             .get_mut(&window)
             .ok_or(WindowError::UnknownWindow)?;
+        if placement != WindowPlacement::Hidden {
+            descriptor.restore_placement = placement;
+        } else if previous_placement != WindowPlacement::Hidden {
+            descriptor.restore_placement = previous_placement;
+        }
         descriptor.placement = placement;
-        if !matches!(previous_placement, WindowPlacement::Tiled)
-            && placement == WindowPlacement::Tiled
+        if placement == WindowPlacement::Tiled
             && let Some(workspace_tab) = self.workspace_tabs.get_mut(&tab)
+            && workspace_tab
+                .tiled_root
+                .as_ref()
+                .is_none_or(|root| !contains_window(root, window))
         {
             workspace_tab.tiled_root = append_tiled_window(workspace_tab.tiled_root.take(), window);
         }
@@ -948,9 +974,7 @@ impl WindowGraph {
             .windows
             .remove(&window)
             .ok_or(WindowError::UnknownWindow)?;
-        if matches!(removed.placement, WindowPlacement::Tiled)
-            && let Some(tab) = self.workspace_tabs.get_mut(&removed.tab)
-        {
+        if let Some(tab) = self.workspace_tabs.get_mut(&removed.tab) {
             tab.tiled_root = tab
                 .tiled_root
                 .take()
@@ -1095,7 +1119,7 @@ impl WindowGraph {
         }
     }
 
-    fn checked_mutation<T>(
+    pub(super) fn checked_mutation<T>(
         &mut self,
         mutation: impl FnOnce(&mut Self) -> Result<T, WindowError>,
     ) -> Result<T, WindowError> {
@@ -1113,6 +1137,10 @@ impl WindowGraph {
 
     pub fn validate(&self) -> Result<(), WindowError> {
         let mut hosted = BTreeSet::new();
+        let mut tiled: BTreeMap<WorkspaceTabId, BTreeSet<WindowId>> = BTreeMap::new();
+        let mut non_tiled: BTreeMap<WorkspaceTabId, usize> = BTreeMap::new();
+        let mut overlays: BTreeMap<WorkspaceTabId, usize> = BTreeMap::new();
+        let mut fullscreen: BTreeMap<WorkspaceTabId, WindowId> = BTreeMap::new();
         for view in self.views.values() {
             if !self.contents.contains_key(&view.content) {
                 return Err(WindowError::UnknownContent);
@@ -1141,6 +1169,19 @@ impl WindowGraph {
                 return Err(WindowError::ViewAlreadyHosted);
             }
             window.placement.validate()?;
+            if window.placement == WindowPlacement::Tiled {
+                tiled.entry(window.tab).or_default().insert(window.id);
+            } else {
+                *non_tiled.entry(window.tab).or_default() += 1;
+            }
+            if window.placement == WindowPlacement::Fullscreen
+                && fullscreen.insert(window.tab, window.id).is_some()
+            {
+                return Err(WindowError::MultipleFullscreenWindows);
+            }
+            if matches!(window.placement, WindowPlacement::Overlay(_)) {
+                *overlays.entry(window.tab).or_default() += 1;
+            }
             let capabilities = self.capabilities_for_view(window.view)?;
             if !capabilities.permits(window.placement) {
                 return Err(WindowError::Unsupported("placement"));
@@ -1149,34 +1190,18 @@ impl WindowGraph {
                 return Err(WindowError::Unsupported("focus"));
             }
         }
+        let empty = BTreeSet::new();
         for (tab, descriptor) in &self.workspace_tabs {
-            validate_tiled_layout(*tab, descriptor.tiled_root.as_ref(), &self.windows)?;
-            let non_tiled = self
-                .windows
-                .values()
-                .filter(|window| window.tab == *tab && window.placement != WindowPlacement::Tiled)
-                .count();
-            if non_tiled > MAXIMUM_NON_TILED_WINDOWS_PER_TAB {
+            crate::windows::projection::validate_logical_layout(
+                *tab,
+                descriptor.tiled_root.as_ref(),
+                &self.windows,
+                tiled.get(tab).unwrap_or(&empty),
+            )?;
+            if non_tiled.get(tab).copied().unwrap_or(0) > MAXIMUM_NON_TILED_WINDOWS_PER_TAB {
                 return Err(WindowError::TooManyNonTiledWindows);
             }
-            let fullscreen = self
-                .windows
-                .values()
-                .filter(|window| {
-                    window.tab == *tab && window.placement == WindowPlacement::Fullscreen
-                })
-                .count();
-            if fullscreen > 1 {
-                return Err(WindowError::MultipleFullscreenWindows);
-            }
-            let overlays = self
-                .windows
-                .values()
-                .filter(|window| {
-                    window.tab == *tab && matches!(window.placement, WindowPlacement::Overlay(_))
-                })
-                .count();
-            if overlays > MAXIMUM_OVERLAY_WINDOWS_PER_TAB {
+            if overlays.get(tab).copied().unwrap_or(0) > MAXIMUM_OVERLAY_WINDOWS_PER_TAB {
                 return Err(WindowError::TooManyOverlayWindows);
             }
         }
@@ -1186,7 +1211,13 @@ impl WindowGraph {
             return Err(WindowError::UnknownWorkspaceTab);
         }
         for (tab, remembered) in &self.remembered_focus {
-            if !self.eligible_focus(*remembered, *tab) {
+            if self.windows.get(remembered).is_none_or(|window| {
+                window.tab != *tab
+                    || !window.focusable
+                    || window.placement == WindowPlacement::Hidden
+                    || (fullscreen.get(tab).is_some_and(|id| id != remembered)
+                        && !matches!(window.placement, WindowPlacement::Overlay(_)))
+            }) {
                 return Err(WindowError::NotFocusable);
             }
         }
@@ -1352,17 +1383,27 @@ impl WindowGraph {
 
     fn synchronize_focus_memory(&mut self) {
         let windows = &self.windows;
+        self.owner_focus.retain(|(tab, owner), id| {
+            windows
+                .get(id)
+                .is_some_and(|window| window.tab == *tab && window.owner == *owner)
+        });
+        if let Some(window) = self.focused.and_then(|id| windows.get(&id)) {
+            self.owner_focus
+                .insert((window.tab, window.owner.clone()), window.id);
+        }
+        let fullscreen = windows
+            .values()
+            .filter(|window| window.placement == WindowPlacement::Fullscreen)
+            .map(|window| (window.tab, window.id))
+            .collect::<BTreeMap<_, _>>();
         self.remembered_focus.retain(|tab, remembered| {
             windows.get(remembered).is_some_and(|window| {
                 window.tab == *tab
                     && window.focusable
                     && window.placement != WindowPlacement::Hidden
-                    && !windows.values().any(|other| {
-                        !matches!(window.placement, WindowPlacement::Overlay(_))
-                            && other.tab == window.tab
-                            && other.placement == WindowPlacement::Fullscreen
-                            && other.id != window.id
-                    })
+                    && (fullscreen.get(tab).is_none_or(|id| id == remembered)
+                        || matches!(window.placement, WindowPlacement::Overlay(_)))
             })
         });
         if let Some(focused) = self.focused
@@ -1374,7 +1415,7 @@ impl WindowGraph {
         }
     }
 
-    fn select_focus_fallback(&mut self) {
+    pub(super) fn select_focus_fallback(&mut self) {
         if self.focused.is_some() {
             return;
         }
@@ -1411,7 +1452,7 @@ fn replace_tiled_leaf(
         }
         TiledLayoutNode::Window(_) => false,
         TiledLayoutNode::Split { first, second, .. } => {
-            if tiled_contains(first, target) {
+            if contains_window(first, target) {
                 replace_tiled_leaf(first, target, replacement)
             } else {
                 replace_tiled_leaf(second, target, replacement)

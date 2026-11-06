@@ -49,7 +49,7 @@ impl App {
     ) {
         let mode = self
             .state
-            .active_view
+            .active_view()
             .and_then(|view| self.state.views.get(view))
             .map_or(EditorMode::Normal, |view| view.mode);
         match self.input.feed(mode, input) {
@@ -98,7 +98,7 @@ impl App {
         let view = self
             .state
             .views
-            .get(invocation.target.view.or(self.state.active_view)?)?;
+            .get(invocation.target.view.or(self.state.active_view())?)?;
         self.input.normalized_visual_repeat(
             invocation,
             &self.state.buffers.get(view.buffer)?.text,
@@ -239,7 +239,7 @@ impl App {
             )?;
         }
         self.window_session
-            .check_editor_admission(&(&*self.state).into())?;
+            .check_editor_source(&(&*self.state).into())?;
         let candidate = self
             .state
             .prepare_transaction(transaction)
@@ -256,7 +256,7 @@ impl App {
         activate_document: bool,
     ) -> Result<(), String> {
         self.window_session
-            .check_editor_admission(&(&*self.state).into())?;
+            .check_editor_source(&(&*self.state).into())?;
         let current = self.state.version();
         candidate.check_current(&current)?;
         if !activate_document
@@ -268,7 +268,7 @@ impl App {
         }
 
         let terminals = self.terminal_session.descriptions();
-        let mut signature = self.native_surface_signature(self.window_session.editor_ids());
+        let mut signature = self.native_surface_signature();
         signature.dashboard_visible =
             self.window_session.dashboard_visible() || candidate.topology().active_tab().is_none();
         let title = self.message("explorer_title", &[]);
@@ -322,7 +322,7 @@ impl App {
 impl App {
     pub(in crate::app) fn scroll_view(&mut self, kind: &str, count: u64) {
         self.reconcile_editor_windows();
-        let Some(view_id) = self.state.active_view else {
+        let Some(view_id) = self.state.active_view() else {
             return;
         };
         let view = &self.state.views[view_id];
@@ -555,7 +555,7 @@ impl App {
 
 impl App {
     pub(in crate::app) fn keep_cursor_off_final_newline(&mut self) {
-        let Some(view_id) = self.state.active_view else {
+        let Some(view_id) = self.state.active_view() else {
             return;
         };
         self.keep_view_cursor_off_final_newline(view_id);
@@ -697,7 +697,7 @@ impl App {
 
 impl App {
     pub(in crate::app) fn set_mode(&mut self, mode: EditorMode) {
-        if let Some(view) = self.state.active_view {
+        if let Some(view) = self.state.active_view() {
             self.set_specific_mode(view, mode);
         }
     }
@@ -719,7 +719,7 @@ impl App {
     pub(in crate::app) fn ensure_cursor_visible(&mut self) {
         self.reconcile_editor_windows();
         self.sync_flash_ui();
-        let Some(view_id) = self.state.active_view else {
+        let Some(view_id) = self.state.active_view() else {
             return;
         };
         let view = &self.state.views[view_id];

@@ -91,8 +91,8 @@ impl TestSession {
     pub(in crate::app) fn focused_window(&self) -> Option<crate::windows::WindowId> {
         self.application.window_session.graph().focused()
     }
-    pub(in crate::app) fn active_tab(&self) -> Option<crate::editor::TabId> {
-        self.application.state.active_tab
+    pub(in crate::app) fn active_tab(&self) -> Option<crate::windows::WorkspaceTabId> {
+        self.application.state.active_tab()
     }
     pub(in crate::app) fn reconcile_windows(&mut self) {
         self.application.reconcile_editor_windows();
@@ -168,7 +168,7 @@ impl TestSession {
         self.application
             .process_effect(crate::app::commands::AppEffect::WindowClone {
                 target,
-                axis: crate::editor::Axis::Vertical,
+                axis: crate::windows::TileAxis::Vertical,
             });
     }
     pub(in crate::app) fn attempt_host_plugin_window_operations(&mut self, target: &str) {
@@ -372,7 +372,7 @@ impl TestSession {
             .ok_or_else(|| "explorer fixture view is unavailable".to_owned())?;
         self.application.clone_graph_window(
             &format!("window:{}", ids.window.0),
-            crate::editor::Axis::Horizontal,
+            crate::windows::TileAxis::Horizontal,
         )?;
         self.application.reconcile_editor_windows();
         Ok(())
@@ -388,13 +388,17 @@ impl TestSession {
             .close_graph_window(&format!("window:{}", ids.window.0))
     }
     pub(in crate::app) fn reset_window_runtime(&mut self) -> Result<(), String> {
-        self.application.window_session.reset_runtime(&[])?;
+        self.application
+            .window_session
+            .reset_runtime(&[], &mut self.application.state)?;
         self.application.reconcile_editor_windows();
         self.application.sync_explorer_ui();
         Ok(())
     }
     pub(in crate::app) fn reset_terminal_window_runtime(&mut self) -> Result<(), String> {
-        self.application.window_session.reset_runtime(&[])?;
+        self.application
+            .window_session
+            .reset_runtime(&[], &mut self.application.state)?;
         self.application.reconcile_editor_windows();
         self.application.sync_terminal_panel();
         self.application.resize_active_terminal_to_panel();
@@ -623,7 +627,7 @@ impl TestSession {
         &mut self.application
     }
     pub(in crate::app) fn editor_mode(&self) -> crate::editor::EditorMode {
-        self.application.state.views[self.application.state.active_view.unwrap()].mode
+        self.application.state.views[self.application.state.active_view().unwrap()].mode
     }
     pub(in crate::app) fn key(&mut self, key: &str) {
         self.application.handle_event(UiEvent::Key {
@@ -740,7 +744,7 @@ impl TestSession {
         app.reconcile_editor_windows();
         gate.send(()).unwrap();
         wait_vfs(app);
-        assert_eq!(app.state.active_view, Some(view), "late open stole focus");
+        assert_eq!(app.state.active_view(), Some(view), "late open stole focus");
         assert_eq!(app.state.active_buffer_id(), Some(other));
         assert!(
             app.state
@@ -759,7 +763,8 @@ impl TestSession {
         let target = root.join("target.txt");
         fs::write(&target, b"target").unwrap();
         app.state
-            .load_hidden_text(TextBuffer::from_text("target"), target.clone());
+            .load_hidden_text(TextBuffer::from_text("target"), target.clone())
+            .unwrap();
         let (source, _) = app
             .state
             .open_text(
@@ -910,7 +915,7 @@ impl TestSession {
         self.application
             .process_effect(crate::app::commands::AppEffect::WindowClone {
                 target: "terminal".into(),
-                axis: crate::editor::Axis::Horizontal,
+                axis: crate::windows::TileAxis::Horizontal,
             });
     }
     pub(in crate::app) fn place_terminal(
@@ -1177,7 +1182,7 @@ impl TestSession {
     }
     pub(in crate::app) fn debug_source_text(&self) -> Option<String> {
         let editor = &self.application.state;
-        let buffer = &editor.buffers[editor.views[editor.active_view?].buffer];
+        let buffer = &editor.buffers[editor.views[editor.active_view()?].buffer];
         buffer
             .is_virtual_read_only()
             .then(|| buffer.text.to_string())

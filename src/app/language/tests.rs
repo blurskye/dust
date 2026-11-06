@@ -1107,7 +1107,7 @@ fn completion_documentation_is_typed_and_exact_request_owned() {
     app.language
         .fixture_completion_source(Some((7, live_owner)));
     app.state
-        .split_active(crate::editor::Axis::Horizontal, 500)
+        .split_active(crate::windows::TileAxis::Horizontal, 500)
         .unwrap();
     app.invoke_mapped_command("lsp.completion.documentation.open");
     assert!(app.ui.documentation_popup.is_none());
@@ -1310,7 +1310,7 @@ fn debugger_navigation_converts_character_columns_for_open_and_unopened_files() 
             column: 2,
         });
         wait_vfs(&mut app);
-        let view = &app.state.views[app.state.active_view.unwrap()];
+        let view = &app.state.views[app.state.active_view().unwrap()];
         assert_eq!(view.cursor, ByteOffset("first\né".len()));
         app.navigate_debug_location(crate::app::debugger::DebugLocation {
             path,
@@ -1318,7 +1318,7 @@ fn debugger_navigation_converts_character_columns_for_open_and_unopened_files() 
             column: u64::MAX,
         });
         assert_eq!(
-            app.state.views[app.state.active_view.unwrap()].cursor,
+            app.state.views[app.state.active_view().unwrap()].cursor,
             ByteOffset("first\né😀value".len())
         );
     }
@@ -1860,7 +1860,7 @@ fn debugger_file_locations_use_utf16_columns_for_open_and_unopened_files() {
             column: 4,
         });
         wait_vfs(&mut app);
-        let view = &app.state.views[app.state.active_view.unwrap()];
+        let view = &app.state.views[app.state.active_view().unwrap()];
         assert_eq!(app.state.buffers[view.buffer].path.as_ref(), Some(&path));
         assert_eq!(view.cursor, ByteOffset(6));
     }
@@ -1883,7 +1883,7 @@ fn pending_debugger_file_navigation_does_not_interrupt_a_new_prompt() {
     });
     app.open_prompt(crate::ui::PromptKind::Command, "keep draft".into());
     wait_vfs(&mut app);
-    assert_eq!(app.state.active_view, Some(view));
+    assert_eq!(app.state.active_view(), Some(view));
     assert_eq!(
         app.state.buffers[app.state.views[view].buffer]
             .text
@@ -2014,7 +2014,7 @@ fn delayed_lsp_navigation_loads_without_stealing_focus() {
         .open_text(TextBuffer::from_text("second"), None)
         .unwrap();
     crate::app::tests::wait_vfs(&mut app);
-    assert_eq!(app.state.active_view, Some(view));
+    assert_eq!(app.state.active_view(), Some(view));
     assert!(
         app.state
             .buffers
@@ -6255,7 +6255,11 @@ fn semantic_window_layout_persistence_is_strict_transactional_and_id_free() {
         .expect("configured fullscreen candidate");
     restored
         .window_session
-        .accept_current(candidate, &restored.state.window_version())
+        .accept_current(
+            candidate,
+            &restored.state.window_version(),
+            &mut restored.state,
+        )
         .expect("one configured fullscreen");
     let merged_conflict = [PersistedWindowRule {
         content_type: "builtin.explorer".into(),

@@ -365,7 +365,7 @@ impl App {
         self.window_session.prepare_rules(
             windows,
             NativeDescriptions {
-                signature: self.native_surface_signature(self.window_session.editor_ids()),
+                signature: self.native_surface_signature(),
                 explorer_title: &self.message("explorer_title", &[]),
                 dashboard_title: &self.configuration.dashboard().identity,
                 picker_title: self
@@ -388,7 +388,7 @@ impl App {
         let candidate = self.window_session.prepare_persisted_rules(
             rules,
             NativeDescriptions {
-                signature: self.native_surface_signature(self.window_session.editor_ids()),
+                signature: self.native_surface_signature(),
                 explorer_title: &self.message("explorer_title", &[]),
                 dashboard_title: &self.configuration.dashboard().identity,
                 picker_title: self
@@ -399,8 +399,11 @@ impl App {
                 terminals: &terminals,
             },
         )?;
-        self.window_session
-            .accept_current(candidate, &self.state.window_version())?;
+        self.window_session.accept_current(
+            candidate,
+            &self.state.window_version(),
+            &mut self.state,
+        )?;
         let requires_projection = self.window_session.graph().active_tab().is_some();
         self.reconcile_editor_windows();
         if requires_projection && self.compositor_projection().is_none() {
@@ -708,7 +711,7 @@ impl App {
                  }| {
                     let terminals = self.terminal_session.descriptions();
                     let descriptions = NativeDescriptions {
-                        signature: self.native_surface_signature(self.window_session.editor_ids()),
+                        signature: self.native_surface_signature(),
                         explorer_title: &self.message("explorer_title", &[]),
                         dashboard_title: &self.configuration.dashboard().identity,
                         picker_title: self

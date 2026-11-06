@@ -3,9 +3,9 @@
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 
-use crate::windows::MAXIMUM_TILED_DEPTH;
+use crate::windows::MAX_SPLIT_DEPTH;
 
-use crate::windows::MAXIMUM_TILED_WINDOWS;
+use crate::windows::MAX_WINDOWS;
 
 use crate::windows::error::WindowError;
 
@@ -45,6 +45,7 @@ pub(super) fn validate_tiled_layout(
     tab: WorkspaceTabId,
     root: Option<&TiledLayoutNode>,
     windows: &BTreeMap<WindowId, WindowDescriptor>,
+    expected: &BTreeSet<WindowId>,
 ) -> Result<(), WindowError> {
     fn collect(
         node: &TiledLayoutNode,
@@ -53,7 +54,7 @@ pub(super) fn validate_tiled_layout(
         depth: usize,
         leaves: &mut BTreeSet<WindowId>,
     ) -> Result<(), WindowError> {
-        if depth > MAXIMUM_TILED_DEPTH {
+        if depth > MAX_SPLIT_DEPTH {
             return Err(WindowError::TiledLayoutTooDeep);
         }
         match node {
@@ -66,7 +67,7 @@ pub(super) fn validate_tiled_layout(
                 if !leaves.insert(*window) {
                     return Err(WindowError::DuplicateTiledWindow);
                 }
-                if leaves.len() > MAXIMUM_TILED_WINDOWS {
+                if leaves.len() > MAX_WINDOWS {
                     return Err(WindowError::TooManyTiledWindows);
                 }
             }
@@ -86,33 +87,76 @@ pub(super) fn validate_tiled_layout(
         Ok(())
     }
 
-    let expected = windows
-        .values()
-        .filter_map(|window| {
-            (window.tab == tab && matches!(window.placement, WindowPlacement::Tiled))
-                .then_some(window.id)
-        })
-        .collect::<BTreeSet<_>>();
-    if expected.len() > MAXIMUM_TILED_WINDOWS {
+    if expected.len() > MAX_WINDOWS {
         return Err(WindowError::TooManyTiledWindows);
     }
     let mut leaves = BTreeSet::new();
     if let Some(root) = root {
         collect(root, tab, windows, 1, &mut leaves)?;
     }
-    if leaves != expected {
+    if &leaves != expected {
         return Err(WindowError::OrphanTiledWindow);
     }
     Ok(())
 }
 
-pub(super) fn tiled_contains(node: &TiledLayoutNode, target: WindowId) -> bool {
-    match node {
-        TiledLayoutNode::Window(window) => *window == target,
-        TiledLayoutNode::Split { first, second, .. } => {
-            tiled_contains(first, target) || tiled_contains(second, target)
+pub(super) fn validate_logical_layout(
+    tab: WorkspaceTabId,
+    root: Option<&TiledLayoutNode>,
+    windows: &BTreeMap<WindowId, WindowDescriptor>,
+    expected: &BTreeSet<WindowId>,
+) -> Result<(), WindowError> {
+    fn ratios(
+        node: &TiledLayoutNode,
+        windows: &BTreeMap<WindowId, WindowDescriptor>,
+    ) -> Result<bool, WindowError> {
+        match node {
+            TiledLayoutNode::Window(id) => Ok(windows
+                .get(id)
+                .is_some_and(|window| window.owner == "builtin.editor")),
+            TiledLayoutNode::Split {
+                ratio,
+                first,
+                second,
+                ..
+            } => {
+                let first_editor = ratios(first, windows)?;
+                let second_editor = ratios(second, windows)?;
+                let editor_split = first_editor && second_editor;
+                if !(1..=999).contains(ratio) || (editor_split && !(100..=900).contains(ratio)) {
+                    return Err(WindowError::InvalidPlacement);
+                }
+                Ok(editor_split)
+            }
         }
     }
+    if let Some(root) = root {
+        ratios(root, windows)?;
+        if crate::windows::tree::layout_depth(root) > MAX_SPLIT_DEPTH {
+            return Err(WindowError::TiledLayoutTooDeep);
+        }
+        let mut seen = BTreeSet::new();
+        for id in root.windows() {
+            let window = windows.get(&id).ok_or(WindowError::StaleTiledWindow)?;
+            if window.tab != tab {
+                return Err(WindowError::NonTiledWindowInLayout);
+            }
+            if !seen.insert(id) {
+                return Err(WindowError::DuplicateTiledWindow);
+            }
+        }
+        if seen.len() > MAX_WINDOWS {
+            return Err(WindowError::TooManyTiledWindows);
+        }
+    }
+    let tiled = root.and_then(|root| {
+        root.filtered(&|id| {
+            windows
+                .get(&id)
+                .is_some_and(|window| window.placement == WindowPlacement::Tiled)
+        })
+    });
+    validate_tiled_layout(tab, tiled.as_ref(), windows, expected)
 }
 
 pub(super) fn append_tiled_window(
@@ -133,7 +177,9 @@ pub(super) fn append_tiled_window(
                 first,
                 second,
             } => {
-                if depth(&first) <= depth(&second) {
+                if crate::windows::tree::layout_depth(&first)
+                    <= crate::windows::tree::layout_depth(&second)
+                {
                     TiledLayoutNode::Split {
                         axis,
                         ratio,
@@ -151,12 +197,7 @@ pub(super) fn append_tiled_window(
             }
         }
     }
-    fn depth(node: &TiledLayoutNode) -> usize {
-        match node {
-            TiledLayoutNode::Window(_) => 1,
-            TiledLayoutNode::Split { first, second, .. } => 1 + depth(first).max(depth(second)),
-        }
-    }
+
     Some(root.map_or(TiledLayoutNode::Window(window), |root| append(root, window)))
 }
 
@@ -196,35 +237,6 @@ pub(super) fn replace_tiled_window(node: &mut TiledLayoutNode, from: WindowId, t
             replace_tiled_window(second, from, to);
         }
     }
-}
-
-pub(super) fn resize_tiled_parent(
-    node: &mut TiledLayoutNode,
-    target: WindowId,
-    delta: i16,
-) -> bool {
-    let TiledLayoutNode::Split {
-        ratio,
-        first,
-        second,
-        ..
-    } = node
-    else {
-        return false;
-    };
-    if resize_tiled_parent(first, target, delta) || resize_tiled_parent(second, target, delta) {
-        return true;
-    }
-    let signed = if tiled_contains(first, target) {
-        i32::from(delta)
-    } else if tiled_contains(second, target) {
-        -i32::from(delta)
-    } else {
-        return false;
-    };
-    let adjusted = i32::from(*ratio) + signed;
-    *ratio = u16::try_from(adjusted.clamp(1, 999)).unwrap_or(*ratio);
-    true
 }
 
 pub(super) fn push_compositor_window(

@@ -19,7 +19,7 @@ fn terminal_is_a_full_width_bottom_dock_with_direct_cells_and_focus_cursor() {
         )
         .unwrap();
     state
-        .split_active(crate::editor::Axis::Horizontal, 400)
+        .split_active(crate::windows::TileAxis::Horizontal, 400)
         .expect("nested editor split");
     let loaded = crate::config::load_bundled_config();
     let mut config = loaded.config;

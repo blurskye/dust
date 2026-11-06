@@ -432,7 +432,7 @@ impl App {
                 log_message,
             } => self.configure_breakpoint(condition, hit_condition, log_message),
             AppEffect::DapBreakpointToggle => {
-                let Some(view) = self.state.active_view else {
+                let Some(view) = self.state.active_view() else {
                     return Ok(());
                 };
                 let buffer = &self.state.buffers[self.state.views[view].buffer];

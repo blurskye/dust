@@ -2,80 +2,16 @@
 
 use crate::editor::EditorEvent;
 use crate::editor::state::events::EditorEvents;
-use std::collections::HashSet;
-use std::path::PathBuf;
-
-use slotmap::Key;
-
-use slotmap::SlotMap;
-
-use crate::editor::text::BufferRevision;
-
-use crate::editor::text::ByteOffset;
-
-use crate::editor::text::TextBuffer;
-
-use crate::editor::state::MAXIMUM_LAYOUT_DEPTH;
-
-use crate::editor::state::MAXIMUM_LAYOUT_PANES;
-
-use crate::editor::state::id::BufferId;
-
-use crate::editor::state::id::PaneId;
-
-use crate::editor::state::id::TabId;
-
-use crate::editor::state::id::ViewId;
-
-use crate::editor::state::layout::FocusRectangle;
-
-use crate::editor::state::layout::collect_focus_rectangles;
-
-use crate::editor::state::layout::focus_score;
-
-use crate::editor::state::layout::layout_depth;
-
-use crate::editor::state::layout::layout_ratios_are_valid;
-
-use crate::editor::state::layout::offset_index;
-
-use crate::editor::state::layout::pane_depth;
-
-use crate::editor::state::layout::pane_ids;
-
-use crate::editor::state::layout::remove_leaf;
-
-use crate::editor::state::layout::resize_parent;
-
-use crate::editor::state::layout::resize_parent_on_axis;
-
-use crate::editor::state::layout::split_between;
-
-use crate::editor::state::layout::split_leaf;
-
-use crate::editor::state::layout::swap_layout_leaves;
-
-use crate::editor::state::layout::Axis;
-
-use crate::editor::state::buffer::Buffer;
-
-use crate::editor::state::buffer::BufferOrigin;
-
 use crate::editor::state::EditingPolicy;
-
-use crate::editor::state::view::EditorMode;
-
-use crate::editor::state::layout::FocusDirection;
-
-use crate::editor::state::layout::LayoutNode;
-
-use crate::editor::state::layout::Pane;
-
+use crate::editor::state::buffer::{Buffer, BufferOrigin};
+use crate::editor::state::id::{BufferId, ViewId};
 use crate::editor::state::registers::RegisterStore;
-
-use crate::editor::state::layout::Tab;
-
-use crate::editor::state::view::View;
+use crate::editor::state::view::{EditorMode, View};
+use crate::editor::text::{BufferRevision, ByteOffset, TextBuffer};
+use crate::windows::{ContentId, WindowGraph, WorkspaceTabId};
+use slotmap::SlotMap;
+use std::collections::HashMap;
+use std::path::PathBuf;
 
 /// Opaque identity/revision of editor-owned window topology. Transaction clones
 /// preserve identity; independently constructed editor states do not.
@@ -106,45 +42,35 @@ impl EditorWindowVersion {
 /// An editor-created immutable source view. Callers cannot pair one editor's
 /// revision ticket with another editor's stores, or supply mutable authority.
 pub(crate) struct EditorTopology<'a> {
-    workspace_root: &'a std::path::Path,
-    buffers: &'a SlotMap<BufferId, Buffer>,
-    views: &'a SlotMap<ViewId, View>,
-    panes: &'a SlotMap<PaneId, Pane>,
-    tabs: &'a SlotMap<TabId, Tab>,
-    active_tab: Option<TabId>,
+    state: &'a EditorState,
     version: EditorWindowVersion,
 }
 impl<'a> From<&'a EditorState> for EditorTopology<'a> {
     fn from(state: &'a EditorState) -> Self {
         Self {
-            workspace_root: &state.workspace_root,
-            buffers: &state.buffers,
-            views: &state.views,
-            panes: &state.panes,
-            tabs: &state.tabs,
-            active_tab: state.active_tab,
+            state,
             version: state.window_version(),
         }
     }
 }
 impl<'a> EditorTopology<'a> {
+    pub(crate) fn state(&self) -> &'a EditorState {
+        self.state
+    }
     pub(crate) fn workspace_root(&self) -> &'a std::path::Path {
-        self.workspace_root
+        &self.state.workspace_root
     }
     pub(crate) fn buffers(&self) -> &'a SlotMap<BufferId, Buffer> {
-        self.buffers
+        &self.state.buffers
     }
     pub(crate) fn views(&self) -> &'a SlotMap<ViewId, View> {
-        self.views
+        &self.state.views
     }
-    pub(crate) fn panes(&self) -> &'a SlotMap<PaneId, Pane> {
-        self.panes
+    pub(crate) fn graph(&self) -> &'a WindowGraph {
+        &self.state.graph
     }
-    pub(crate) fn tabs(&self) -> &'a SlotMap<TabId, Tab> {
-        self.tabs
-    }
-    pub(crate) fn active_tab(&self) -> Option<TabId> {
-        self.active_tab
+    pub(crate) fn active_tab(&self) -> Option<WorkspaceTabId> {
+        self.state.active_tab()
     }
     pub(crate) fn version(&self) -> &EditorWindowVersion {
         &self.version
@@ -156,10 +82,10 @@ impl<'a> EditorTopology<'a> {
 
 /// A view zoomed into its own tab, and where it came from.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct Zoom {
-    tab: TabId,
-    origin_tab: TabId,
-    origin_view: ViewId,
+pub(super) struct Zoom {
+    pub(super) tab: WorkspaceTabId,
+    pub(super) origin_tab: WorkspaceTabId,
+    pub(super) origin_view: ViewId,
 }
 
 #[cfg_attr(not(test), derive(Clone))]
@@ -174,16 +100,15 @@ pub struct EditorState {
     pub workspace_repository: Option<String>,
     pub buffers: SlotMap<BufferId, Buffer>,
     pub views: SlotMap<ViewId, View>,
-    pub panes: SlotMap<PaneId, Pane>,
-    pub tabs: SlotMap<TabId, Tab>,
-    pub active_tab: Option<TabId>,
-    pub active_view: Option<ViewId>,
+    pub(crate) graph: WindowGraph,
+    pub(in crate::editor) buffer_contents: HashMap<BufferId, ContentId>,
+    pub(in crate::editor) graph_views: HashMap<ViewId, crate::windows::ViewId>,
     pub registers: RegisterStore,
     pub policy: EditingPolicy,
     /// Where undo history is saved next to each file's text, when it is kept.
     pub undo_directory: Option<PathBuf>,
     pub undo_maximum_bytes: usize,
-    zoom: Option<Zoom>,
+    pub(super) zoom: Option<Zoom>,
     /// A buffer that keeps its window, such as the agent panel's: files open beside it,
     /// never over it, and buffer cycling skips it.
     pub kept_buffer: Option<BufferId>,
@@ -206,10 +131,9 @@ impl Clone for EditorState {
             workspace_repository: self.workspace_repository.clone(),
             buffers: self.buffers.clone(),
             views: self.views.clone(),
-            panes: self.panes.clone(),
-            tabs: self.tabs.clone(),
-            active_tab: self.active_tab,
-            active_view: self.active_view,
+            graph: self.graph.clone(),
+            buffer_contents: self.buffer_contents.clone(),
+            graph_views: self.graph_views.clone(),
             registers: self.registers.clone(),
             policy: self.policy,
             undo_directory: self.undo_directory.clone(),
@@ -244,10 +168,9 @@ impl EditorState {
             workspace_root,
             buffers: SlotMap::with_key(),
             views: SlotMap::with_key(),
-            panes: SlotMap::with_key(),
-            tabs: SlotMap::with_key(),
-            active_tab: None,
-            active_view: None,
+            graph: WindowGraph::default(),
+            buffer_contents: HashMap::new(),
+            graph_views: HashMap::new(),
             registers: RegisterStore::default(),
             policy: EditingPolicy::default(),
             undo_directory: None,
@@ -335,6 +258,13 @@ impl EditorState {
     }
 
     pub fn remove_buffer(&mut self, buffer: BufferId) -> Option<Buffer> {
+        if let Some(content) = self.buffer_contents.get(&buffer).copied() {
+            if self.graph.content(content).is_some() && self.graph.remove_content(content).is_err()
+            {
+                return None;
+            }
+            self.buffer_contents.remove(&buffer);
+        }
         let removed = self.buffers.remove(buffer);
         if removed.is_some() {
             self.events.push(EditorEvent::BufferClosed { buffer });
@@ -369,18 +299,26 @@ impl EditorState {
         true
     }
 
-    pub fn load_hidden_text(&mut self, text: TextBuffer, path: PathBuf) -> BufferId {
+    pub fn load_hidden_text(
+        &mut self,
+        text: TextBuffer,
+        path: PathBuf,
+    ) -> Result<BufferId, String> {
         if let Some((buffer, _)) = self
             .buffers
             .iter()
             .find(|(_, buffer)| buffer.path.as_ref() == Some(&path))
         {
-            return buffer;
+            return Ok(buffer);
         }
         let buffer = self.buffers.insert(self.file_buffer(text, path));
+        if let Err(error) = self.register_window_content() {
+            self.buffers.remove(buffer);
+            return Err(error.to_string());
+        }
         self.events.push(EditorEvent::BufferOpened { buffer });
         self.mark_window_changed();
-        buffer
+        Ok(buffer)
     }
 
     pub(crate) fn open_virtual_read_only(
@@ -391,8 +329,7 @@ impl EditorState {
         document: u64,
         revision: u64,
     ) -> Result<(BufferId, ViewId), &'static str> {
-        let (buffer, view) = self.open_text(text, None)?;
-        let target = &mut self.buffers[buffer];
+        let mut target = Buffer::new(text, None);
         target.read_only = true;
         target.origin = BufferOrigin::VirtualReadOnly {
             owner,
@@ -400,6 +337,18 @@ impl EditorState {
             document,
             revision,
         };
+        let buffer = self.buffers.insert(target);
+        let view = self.views.insert(View::new(buffer));
+        if let Err(error) = self.show_view(view) {
+            self.remove_view(view)?;
+            if let Some(content) = self.buffer_contents.remove(&buffer) {
+                self.graph
+                    .remove_content(content)
+                    .map_err(|_| "new buffer content is still viewed")?;
+            }
+            self.buffers.remove(buffer);
+            return Err(error);
+        }
         Ok((buffer, view))
     }
 
@@ -468,7 +417,7 @@ impl EditorState {
         true
     }
 
-    fn file_buffer(&self, text: TextBuffer, path: PathBuf) -> Buffer {
+    pub(super) fn file_buffer(&self, text: TextBuffer, path: PathBuf) -> Buffer {
         let mut buffer = Buffer::new(text, Some(path));
         if let Some(directory) = &self.undo_directory {
             buffer.restore_undo_history(directory, self.undo_maximum_bytes);
@@ -495,7 +444,7 @@ impl EditorState {
                 .views
                 .insert(self.buffers[buffer].restored_view(buffer));
             if let Err(error) = self.show_view(view) {
-                self.views.remove(view);
+                self.remove_view(view)?;
                 return Err(error);
             }
             return Ok((buffer, view));
@@ -507,7 +456,12 @@ impl EditorState {
         let buffer = self.buffers.insert(buffer);
         let view = self.views.insert(View::new(buffer));
         if let Err(error) = self.show_view(view) {
-            self.views.remove(view);
+            self.remove_view(view)?;
+            if let Some(content) = self.buffer_contents.remove(&buffer) {
+                self.graph
+                    .remove_content(content)
+                    .map_err(|_| "new buffer content is still viewed")?;
+            }
             self.buffers.remove(buffer);
             return Err(error);
         }
@@ -530,35 +484,11 @@ impl EditorState {
         });
         if let Err(error) = self.show_view(view) {
             if existing.is_none() {
-                self.views.remove(view);
+                self.remove_view(view)?;
             }
             return Err(error);
         }
         Ok(view)
-    }
-
-    /// Show `buffer`, or a new empty one, in the focused pane in place of its view.
-    pub fn replace_active_view(&mut self, buffer: Option<BufferId>) -> Result<(), &'static str> {
-        let tab = self.active_tab.ok_or("no active tab")?;
-        let pane = self.tabs.get(tab).ok_or("active tab is stale")?.focused;
-        if !self.panes.contains_key(pane) {
-            return Err("focused pane is stale");
-        }
-        let buffer = buffer.unwrap_or_else(|| {
-            let buffer = self
-                .buffers
-                .insert(Buffer::new(TextBuffer::from_text(""), None));
-            self.events.push(EditorEvent::BufferOpened { buffer });
-            buffer
-        });
-        let view = self
-            .views
-            .insert(self.buffers[buffer].restored_view(buffer));
-        let old = std::mem::replace(&mut self.panes[pane].view, view);
-        self.views.remove(old);
-        self.active_view = Some(view);
-        self.mark_window_changed();
-        Ok(())
     }
 
     /// Show the buffer `offset` places from the active one in `order`, the buffer line's order.
@@ -584,518 +514,8 @@ impl EditorState {
             .iter()
             .position(|buffer| *buffer == current)
             .unwrap_or(0);
-        let target = buffers[offset_index(index, buffers.len(), offset, wrap)];
+        let target = buffers[crate::windows::offset_index(index, buffers.len(), offset, wrap)];
         self.show_buffer(target)
-    }
-
-    fn show_view(&mut self, view: ViewId) -> Result<(), &'static str> {
-        if let Some((tab_id, pane_id)) = self.tabs.iter().find_map(|(tab_id, tab)| {
-            pane_ids(&tab.root).into_iter().find_map(|pane_id| {
-                self.panes
-                    .get(pane_id)
-                    .is_some_and(|pane| pane.view == view)
-                    .then_some((tab_id, pane_id))
-            })
-        }) {
-            self.active_tab = Some(tab_id);
-            if let Some(tab) = self.tabs.get_mut(tab_id) {
-                tab.focused = pane_id;
-            }
-            self.active_view = Some(view);
-            self.mark_window_changed();
-            return Ok(());
-        }
-        self.leave_kept_pane(view)?;
-        if let Some(tab_id) = self.active_tab
-            && let Some(tab) = self.tabs.get(tab_id)
-            && let Some(pane) = self.panes.get_mut(tab.focused)
-        {
-            let previous = pane.view;
-            pane.view = view;
-            self.active_view = Some(view);
-            if previous != view
-                && !self
-                    .panes
-                    .iter()
-                    .any(|(_, candidate)| candidate.view == previous)
-                && let Some(old) = self.views.remove(previous)
-            {
-                self.save_view(old.clone());
-                // An untouched [No Name] buffer gives way to what opens over it, as
-                // in Vim, so `ctrl-t` and a picked file leave one tab.
-                let unused = self.buffers.get(old.buffer).is_some_and(|buffer| {
-                    buffer.path.is_none()
-                        && !buffer.dirty
-                        && buffer.text.len_bytes() == 0
-                        && buffer.origin == BufferOrigin::FileOrScratch
-                });
-                if unused && !self.views.values().any(|other| other.buffer == old.buffer) {
-                    self.buffers.remove(old.buffer);
-                }
-            }
-            self.mark_window_changed();
-            return Ok(());
-        }
-        let pane = self.panes.insert(Pane { view });
-        let tab = self.tabs.insert(Tab {
-            root: LayoutNode::Pane(pane),
-            focused: pane,
-        });
-        self.active_tab = Some(tab);
-        self.active_view = Some(view);
-        self.mark_window_changed();
-        Ok(())
-    }
-
-    /// When the focused pane holds the kept buffer and something else is to be shown, focus
-    /// another pane of the tab, or split one off to the kept pane's left.
-    fn leave_kept_pane(&mut self, view: ViewId) -> Result<(), &'static str> {
-        let Some(kept) = self.kept_buffer else {
-            return Ok(());
-        };
-        let Some(tab_id) = self.active_tab else {
-            return Ok(());
-        };
-        let Some(tab) = self.tabs.get(tab_id) else {
-            return Ok(());
-        };
-        let shows_kept = |state: &Self, pane: PaneId| {
-            state
-                .panes
-                .get(pane)
-                .and_then(|pane| state.views.get(pane.view))
-                .is_some_and(|view| view.buffer == kept)
-        };
-        let focused = tab.focused;
-        if !shows_kept(self, focused)
-            || self.views.get(view).is_some_and(|view| view.buffer == kept)
-        {
-            return Ok(());
-        }
-        if let Some(other) = pane_ids(&tab.root)
-            .into_iter()
-            .find(|pane| !shows_kept(self, *pane))
-        {
-            if let Some(tab) = self.tabs.get_mut(tab_id) {
-                tab.focused = other;
-            }
-            return Ok(());
-        }
-        // The split's new pane lands on the right: it takes the kept view, and the old pane
-        // on the left is left focused for what opens.
-        let kept_view = self.panes[focused].view;
-        let clone = self.clone_pane(focused, Axis::Horizontal, 500)?;
-        if let Some(right) = self.tabs.get(tab_id).map(|tab| tab.focused) {
-            self.panes[right].view = kept_view;
-            self.views.remove(clone);
-            if let Some(tab) = self.tabs.get_mut(tab_id) {
-                tab.focused = focused;
-            }
-        }
-        Ok(())
-    }
-
-    pub fn split_active(&mut self, axis: Axis, ratio: u16) -> Result<ViewId, &'static str> {
-        let tab = self.active_tab.ok_or("no active tab")?;
-        let pane = self.tabs.get(tab).ok_or("active tab is stale")?.focused;
-        self.clone_pane(pane, axis, ratio)
-    }
-
-    pub fn clone_pane(
-        &mut self,
-        source_pane: PaneId,
-        axis: Axis,
-        ratio: u16,
-    ) -> Result<ViewId, &'static str> {
-        if !(100..=900).contains(&ratio) {
-            return Err("split ratio must be between 100 and 900");
-        }
-        let tab_id = self
-            .tabs
-            .iter()
-            .find_map(|(id, tab)| pane_ids(&tab.root).contains(&source_pane).then_some(id))
-            .ok_or("source pane is absent from the editor")?;
-        let tab = self.tabs.get(tab_id).ok_or("source tab is stale")?;
-        if self.panes.len() >= MAXIMUM_LAYOUT_PANES {
-            return Err("layout pane ceiling reached");
-        }
-        if pane_depth(&tab.root, source_pane, 1).is_some_and(|depth| depth >= MAXIMUM_LAYOUT_DEPTH)
-        {
-            return Err("layout depth ceiling reached");
-        }
-        let source_view = self
-            .panes
-            .get(source_pane)
-            .ok_or("source pane is stale")?
-            .view;
-        let cloned = self
-            .views
-            .get(source_view)
-            .ok_or("source view is stale")?
-            .clone();
-        let view = self.views.insert(cloned);
-        let pane = self.panes.insert(Pane { view });
-        let tab = self.tabs.get_mut(tab_id).ok_or("source tab is stale")?;
-        if !split_leaf(&mut tab.root, source_pane, axis, ratio, pane) {
-            self.panes.remove(pane);
-            self.views.remove(view);
-            return Err("source pane is absent from layout");
-        }
-        tab.focused = pane;
-        self.active_tab = Some(tab_id);
-        self.active_view = Some(view);
-        self.mark_window_changed();
-        Ok(view)
-    }
-
-    pub fn new_tab(&mut self) -> Result<TabId, &'static str> {
-        if self.panes.len() >= MAXIMUM_LAYOUT_PANES {
-            return Err("layout pane ceiling reached");
-        }
-        let source = self.active_view.ok_or("no active view")?;
-        let view = self.views.insert(
-            self.views
-                .get(source)
-                .ok_or("active view is stale")?
-                .clone(),
-        );
-        let pane = self.panes.insert(Pane { view });
-        let tab = self.tabs.insert(Tab {
-            root: LayoutNode::Pane(pane),
-            focused: pane,
-        });
-        self.active_tab = Some(tab);
-        self.active_view = Some(view);
-        self.mark_window_changed();
-        Ok(tab)
-    }
-
-    /// LazyVim's zoom: show the active view alone in a tab of its own. Toggling again closes
-    /// that tab and puts the zoomed view back into the split it came from.
-    pub fn toggle_zoom(&mut self) -> Result<(), &'static str> {
-        if let Some(zoom) = self.zoom.take() {
-            let origin_pane = self.tabs.get(zoom.origin_tab).and_then(|tab| {
-                pane_ids(&tab.root).into_iter().find(|pane| {
-                    self.panes
-                        .get(*pane)
-                        .is_some_and(|p| p.view == zoom.origin_view)
-                })
-            });
-            if let (true, Some(pane)) = (self.active_tab == Some(zoom.tab), origin_pane) {
-                let zoomed = self
-                    .active_view
-                    .and_then(|view| self.views.get(view))
-                    .cloned();
-                self.close_active_tab()?;
-                if let Some(zoomed) = zoomed {
-                    if self.views[zoom.origin_view].buffer == zoomed.buffer {
-                        self.views[zoom.origin_view] = zoomed;
-                    } else {
-                        let view = self.views.insert(zoomed);
-                        self.panes[pane].view = view;
-                        self.views.remove(zoom.origin_view);
-                    }
-                }
-                self.active_tab = Some(zoom.origin_tab);
-                return self.set_focused_pane(zoom.origin_tab, pane);
-            }
-        }
-        let origin_tab = self.active_tab.ok_or("no active tab")?;
-        let origin_view = self.active_view.ok_or("no active view")?;
-        if self
-            .tabs
-            .get(origin_tab)
-            .is_some_and(|tab| matches!(tab.root, LayoutNode::Pane(_)))
-        {
-            return Ok(());
-        }
-        let tab = self.new_tab()?;
-        self.zoom = Some(Zoom {
-            tab,
-            origin_tab,
-            origin_view,
-        });
-        Ok(())
-    }
-
-    #[must_use]
-    pub fn is_zoomed(&self) -> bool {
-        self.zoom
-            .is_some_and(|zoom| self.active_tab == Some(zoom.tab))
-    }
-
-    #[must_use]
-    pub fn active_tab_views(&self) -> Vec<ViewId> {
-        self.active_tab
-            .and_then(|tab| self.tabs.get(tab))
-            .map_or_else(Vec::new, |tab| {
-                pane_ids(&tab.root)
-                    .into_iter()
-                    .filter_map(|pane| self.panes.get(pane).map(|pane| pane.view))
-                    .collect()
-            })
-    }
-
-    pub fn focus_pane_id(&mut self, pane: PaneId) -> Result<(), &'static str> {
-        let tab = self.active_tab.ok_or("no active tab")?;
-        if !pane_ids(&self.tabs.get(tab).ok_or("active tab is stale")?.root).contains(&pane) {
-            return Err("pane is absent from active tab");
-        }
-        self.set_focused_pane(tab, pane)
-    }
-
-    /// Whether the focused pane is the only one left, so closing it would close the editor.
-    #[must_use]
-    pub fn is_last_pane(&self) -> bool {
-        self.tabs.len() == 1
-            && self
-                .active_tab
-                .and_then(|tab| self.tabs.get(tab))
-                .is_some_and(|tab| pane_ids(&tab.root).len() == 1)
-    }
-
-    pub fn focus_pane(&mut self, offset: isize, wrap: bool) -> Result<(), &'static str> {
-        let tab_id = self.active_tab.ok_or("no active tab")?;
-        let tab = self.tabs.get(tab_id).ok_or("active tab is stale")?;
-        let panes = pane_ids(&tab.root);
-        let current = panes
-            .iter()
-            .position(|pane| *pane == tab.focused)
-            .ok_or("focused pane is absent from layout")?;
-        let target = offset_index(current, panes.len(), offset, wrap);
-        self.set_focused_pane(tab_id, panes[target])
-    }
-
-    /// Return the spatially adjacent pane without mutating focus.
-    pub fn directional_pane(
-        &self,
-        direction: FocusDirection,
-    ) -> Result<Option<PaneId>, &'static str> {
-        const EXTENT: u64 = 1_000_000;
-        let tab = self
-            .tabs
-            .get(self.active_tab.ok_or("no active tab")?)
-            .ok_or("active tab is stale")?;
-        let mut rectangles = Vec::new();
-        collect_focus_rectangles(
-            &tab.root,
-            FocusRectangle {
-                x: 0,
-                y: 0,
-                width: EXTENT,
-                height: EXTENT,
-            },
-            &mut rectangles,
-        );
-        let source = rectangles
-            .iter()
-            .find(|(pane, _)| *pane == tab.focused)
-            .map(|(_, rectangle)| *rectangle)
-            .ok_or("focused pane is absent from layout")?;
-        Ok(rectangles
-            .into_iter()
-            .filter(|(pane, _)| *pane != tab.focused)
-            .filter_map(|(pane, candidate)| {
-                focus_score(source, candidate, direction)
-                    .map(|score| (score, pane.data().as_ffi(), pane))
-            })
-            .min_by_key(|(score, stable_id, _)| (*score, *stable_id))
-            .map(|(_, _, pane)| pane))
-    }
-
-    pub fn activate_tab(&mut self, tab: TabId) -> Result<(), &'static str> {
-        let pane = self.tabs.get(tab).ok_or("target tab is stale")?.focused;
-        self.active_tab = Some(tab);
-        self.set_focused_pane(tab, pane)
-    }
-
-    pub fn focus_tab(&mut self, offset: isize, wrap: bool) -> Result<(), &'static str> {
-        let tabs = self.tabs.keys().collect::<Vec<_>>();
-        let active = self.active_tab.ok_or("no active tab")?;
-        let current = tabs
-            .iter()
-            .position(|tab| *tab == active)
-            .ok_or("active tab is stale")?;
-        let target = tabs[offset_index(current, tabs.len(), offset, wrap)];
-        let pane = self.tabs.get(target).ok_or("target tab is stale")?.focused;
-        self.active_tab = Some(target);
-        self.set_focused_pane(target, pane)
-    }
-
-    pub fn resize_active_pane(&mut self, delta: i16) -> Result<(), &'static str> {
-        let tab_id = self.active_tab.ok_or("no active tab")?;
-        let tab = self.tabs.get_mut(tab_id).ok_or("active tab is stale")?;
-        if resize_parent(&mut tab.root, tab.focused, delta) {
-            self.mark_window_changed();
-            Ok(())
-        } else {
-            Err("active pane has no resizable split")
-        }
-    }
-
-    pub fn resize_active_pane_on_axis(
-        &mut self,
-        axis: Axis,
-        delta: i16,
-    ) -> Result<(), &'static str> {
-        let tab_id = self.active_tab.ok_or("no active tab")?;
-        let tab = self.tabs.get_mut(tab_id).ok_or("active tab is stale")?;
-        if resize_parent_on_axis(&mut tab.root, tab.focused, axis, delta) {
-            self.mark_window_changed();
-            Ok(())
-        } else {
-            Err("active pane has no resizable split on that axis")
-        }
-    }
-
-    /// The panes under the split between `first` and `second`, for measuring it on screen.
-    #[must_use]
-    pub fn panes_of_split_between(&self, first: PaneId, second: PaneId) -> Option<Vec<PaneId>> {
-        let mut root = self.tabs.get(self.active_tab?)?.root.clone();
-        split_between(&mut root, first, second).map(|node| pane_ids(node))
-    }
-
-    /// Move the border between `first` and `second` so `first`'s side gets `ratio` per mille.
-    pub fn set_split_ratio_between(
-        &mut self,
-        first: PaneId,
-        second: PaneId,
-        ratio: u16,
-    ) -> Result<(), &'static str> {
-        let tab_id = self.active_tab.ok_or("no active tab")?;
-        let tab = self.tabs.get_mut(tab_id).ok_or("active tab is stale")?;
-        let Some(LayoutNode::Split { ratio: current, .. }) =
-            split_between(&mut tab.root, first, second)
-        else {
-            return Err("no split between those panes");
-        };
-        let ratio = ratio.clamp(100, 900);
-        if *current != ratio {
-            *current = ratio;
-            self.mark_window_changed();
-        }
-        Ok(())
-    }
-
-    /// Swap two pane leaves in the active tab without changing pane, view, or
-    /// content identity. Focus follows the focused pane identity.
-    pub fn swap_panes(&mut self, first: PaneId, second: PaneId) -> Result<(), &'static str> {
-        if first == second {
-            return Ok(());
-        }
-        let tab_id = self.active_tab.ok_or("no active tab")?;
-        let tab = self.tabs.get_mut(tab_id).ok_or("active tab is stale")?;
-        let leaves = pane_ids(&tab.root);
-        if !leaves.contains(&first) || !leaves.contains(&second) {
-            return Err("both panes must belong to the active tab");
-        }
-        if !swap_layout_leaves(&mut tab.root, first, second) {
-            return Err("pane swap could not be applied");
-        }
-        self.mark_window_changed();
-        Ok(())
-    }
-
-    pub(crate) fn close_view(&mut self, view: ViewId) -> Result<(), &'static str> {
-        self.focus_view(view)?;
-        self.close_active_view().map(|_| ())
-    }
-
-    /// Makes this view the active one, in whichever tab holds it.
-    pub(crate) fn focus_view(&mut self, view: ViewId) -> Result<(), &'static str> {
-        let (tab, pane) = self
-            .tabs
-            .iter()
-            .find_map(|(tab_id, tab)| {
-                pane_ids(&tab.root)
-                    .into_iter()
-                    .find(|pane| self.panes.get(*pane).is_some_and(|host| host.view == view))
-                    .map(|pane| (tab_id, pane))
-            })
-            .ok_or("view is not hosted")?;
-        self.active_tab = Some(tab);
-        self.set_focused_pane(tab, pane)
-    }
-
-    fn save_view(&mut self, mut view: View) {
-        if let Some(buffer) = self.buffers.get_mut(view.buffer) {
-            view.mode = EditorMode::Normal;
-            view.selection = None;
-            view.clear_editing_state();
-            buffer.saved_view = Some(view);
-        }
-    }
-
-    fn remove_view(&mut self, view: ViewId) {
-        if let Some(view) = self.views.remove(view)
-            && !self.views.values().any(|other| other.buffer == view.buffer)
-        {
-            self.save_view(view);
-        }
-    }
-
-    pub fn close_active_view(&mut self) -> Result<ViewId, &'static str> {
-        let view = self.active_view.ok_or("no active view")?;
-        let tab_id = self.active_tab.ok_or("no active tab")?;
-        let pane_count = pane_ids(&self.tabs.get(tab_id).ok_or("active tab is stale")?.root).len();
-        if pane_count > 1 {
-            self.close_active_pane()?;
-        } else if self.tabs.len() > 1 {
-            self.close_active_tab()?;
-        } else {
-            let tab = self.tabs.remove(tab_id).ok_or("active tab is stale")?;
-            for pane_id in pane_ids(&tab.root) {
-                self.panes.remove(pane_id);
-            }
-            self.remove_view(view);
-            self.active_tab = None;
-            self.active_view = None;
-            self.mark_window_changed();
-        }
-        Ok(view)
-    }
-
-    pub fn close_active_pane(&mut self) -> Result<(), &'static str> {
-        let tab_id = self.active_tab.ok_or("no active tab")?;
-        let focused = self.tabs.get(tab_id).ok_or("active tab is stale")?.focused;
-        let pane_count = pane_ids(&self.tabs.get(tab_id).ok_or("active tab is stale")?.root).len();
-        if pane_count == 1 {
-            return self.close_active_tab();
-        }
-        let tab = self.tabs.get_mut(tab_id).ok_or("active tab is stale")?;
-        let new_root = remove_leaf(tab.root.clone(), focused).ok_or("cannot close pane")?;
-        tab.root = new_root;
-        let next = pane_ids(&tab.root)[0];
-        tab.focused = next;
-        if let Some(pane) = self.panes.remove(focused) {
-            self.remove_view(pane.view);
-        }
-        self.set_focused_pane(tab_id, next)
-    }
-
-    pub fn close_active_tab(&mut self) -> Result<(), &'static str> {
-        if self.tabs.len() <= 1 {
-            return Err("cannot close the final tab");
-        }
-        let active = self.active_tab.ok_or("no active tab")?;
-        let tab = self.tabs.remove(active).ok_or("active tab is stale")?;
-        for pane_id in pane_ids(&tab.root) {
-            if let Some(pane) = self.panes.remove(pane_id) {
-                self.remove_view(pane.view);
-            }
-        }
-        let next = self.tabs.keys().next().ok_or("no remaining tab")?;
-        let pane = self.tabs.get(next).ok_or("remaining tab is stale")?.focused;
-        self.active_tab = Some(next);
-        self.set_focused_pane(next, pane)
-    }
-
-    fn set_focused_pane(&mut self, tab: TabId, pane: PaneId) -> Result<(), &'static str> {
-        let view = self.panes.get(pane).ok_or("target pane is stale")?.view;
-        self.tabs.get_mut(tab).ok_or("target tab is stale")?.focused = pane;
-        self.active_view = Some(view);
-        self.mark_window_changed();
-        Ok(())
     }
 
     pub fn replace_buffer_from_disk(
@@ -1138,77 +558,9 @@ impl EditorState {
         true
     }
 
-    pub fn validate_layout(&self) -> Result<(), &'static str> {
-        if self.panes.len() > MAXIMUM_LAYOUT_PANES {
-            return Err("layout pane ceiling exceeded");
-        }
-        if self
-            .tabs
-            .values()
-            .any(|tab| layout_depth(&tab.root) > MAXIMUM_LAYOUT_DEPTH)
-        {
-            return Err("layout depth ceiling exceeded");
-        }
-        if self
-            .tabs
-            .values()
-            .any(|tab| !layout_ratios_are_valid(&tab.root))
-        {
-            return Err("layout split ratio is invalid");
-        }
-        if self.tabs.is_empty() {
-            return if self.panes.is_empty()
-                && self.views.is_empty()
-                && self.active_tab.is_none()
-                && self.active_view.is_none()
-            {
-                Ok(())
-            } else {
-                Err("empty layout retains pane/view state")
-            };
-        }
-        let active_tab = self.active_tab.ok_or("tabs exist without an active tab")?;
-        let active = self.tabs.get(active_tab).ok_or("active tab is stale")?;
-        let mut referenced_panes = HashSet::new();
-        let mut referenced_views = HashSet::new();
-        for (_, tab) in &self.tabs {
-            let leaves = pane_ids(&tab.root);
-            if !leaves.contains(&tab.focused) {
-                return Err("focused pane is absent from tab layout");
-            }
-            for pane_id in leaves {
-                if !referenced_panes.insert(pane_id) {
-                    return Err("pane appears more than once in layouts");
-                }
-                let pane = self.panes.get(pane_id).ok_or("layout pane is stale")?;
-                if !referenced_views.insert(pane.view) {
-                    return Err("view appears in more than one pane");
-                }
-                if !self.views.contains_key(pane.view) {
-                    return Err("pane view is stale");
-                }
-            }
-        }
-        if referenced_panes.len() != self.panes.len() {
-            return Err("orphan pane exists");
-        }
-        if referenced_views.len() != self.views.len() {
-            return Err("orphan view exists");
-        }
-        let focused_view = self
-            .panes
-            .get(active.focused)
-            .ok_or("active focused pane is stale")?
-            .view;
-        if self.active_view != Some(focused_view) {
-            return Err("active view disagrees with active tab focus");
-        }
-        Ok(())
-    }
-
     #[must_use]
     pub fn active_buffer_id(&self) -> Option<BufferId> {
-        self.active_view
+        self.active_view()
             .and_then(|view| self.views.get(view))
             .map(|view| view.buffer)
     }

@@ -65,8 +65,11 @@ impl App {
         self.configuration
             .stage_watch(&candidate, self.extension.contributions())?;
         if let Some(window_candidate) = window_candidate {
-            self.window_session
-                .accept_current(window_candidate, &self.state.window_version())?;
+            self.window_session.accept_current(
+                window_candidate,
+                &self.state.window_version(),
+                &mut self.state,
+            )?;
         }
         self.state.policy = candidate.view().settings.editor.editing_policy();
         self.state.mark_editor_changed();

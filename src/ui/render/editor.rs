@@ -200,7 +200,7 @@ pub(super) fn render_editor_view(
         .as_ref()
         .filter(|panel| panel.view == view_id)
     {
-        let focused = state.active_view == Some(view_id) && !ui.explorer_focused;
+        let focused = state.active_view() == Some(view_id) && !ui.explorer_focused;
         // Alone on screen the panel keeps the status line under it, like any editor view.
         let status = config.ui.status_line.enabled && height > 1;
         let mut frame = crate::ui::render::agent::render_agent_panel(

@@ -1089,7 +1089,6 @@ pub struct ContentTabEntry {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct EditorWindowBinding {
     pub window: WindowId,
-    pub pane: crate::editor::PaneId,
     pub view: crate::editor::ViewId,
 }
 
@@ -1580,7 +1579,8 @@ pub fn prompt_surface_dimensions(
 /// paused operation. The dashboard has neither.
 #[must_use]
 pub fn screen_foot_rows(state: &EditorState, ui: &UiState, config: &Config, height: u16) -> u16 {
-    if !config.ui.status_line.enabled || ui.dashboard || state.active_view.is_none() || height < 2 {
+    if !config.ui.status_line.enabled || ui.dashboard || state.active_view().is_none() || height < 2
+    {
         return 0;
     }
     1 + u16::from(ui.operation_bar.is_some() && height > 2)
@@ -1588,7 +1588,7 @@ pub fn screen_foot_rows(state: &EditorState, ui: &UiState, config: &Config, heig
 
 #[must_use]
 pub fn workspace_top_rows(state: &EditorState, ui: &UiState, config: &Config) -> u16 {
-    let tab_line = state.tabs.len() > 1;
+    let tab_line = state.editor_tabs().count() > 1;
     let buffer_line = config.ui.buffer_line.enabled
         && ui.content_tabs.len() > usize::from(config.ui.buffer_line.hide_when_single);
     u16::from(tab_line).saturating_add(u16::from(buffer_line))
@@ -1986,7 +1986,7 @@ pub(crate) fn render_with_documentation_geometry(
     let debug = ui
         .debug_panes
         .as_ref()
-        .filter(|_| !ui.dashboard && state.active_view.is_some())
+        .filter(|_| !ui.dashboard && state.active_view().is_some())
         .and_then(|_| {
             let area = workspace.unwrap_or(WindowRect {
                 x: 0,
@@ -2002,7 +2002,7 @@ pub(crate) fn render_with_documentation_geometry(
                 ..area
             })
         });
-    let content_bounds = if (ui.dashboard || state.active_view.is_none()) && !dashboard_floating {
+    let content_bounds = if (ui.dashboard || state.active_view().is_none()) && !dashboard_floating {
         // The compositor already subtracts every dock, including top and bottom docks.
         workspace.map(|bounds| {
             if let Some(window) = dashboard_window
@@ -2033,7 +2033,7 @@ pub(crate) fn render_with_documentation_geometry(
     };
     let content_width = content_bounds.map_or(width, |bounds| bounds.width);
     let content_height = content_bounds.map_or(workspace_height, |bounds| bounds.height);
-    let content = if dashboard_floating && (ui.dashboard || state.active_view.is_none()) {
+    let content = if dashboard_floating && (ui.dashboard || state.active_view().is_none()) {
         Frame {
             grid: CellGrid::new_with_policy(
                 content_width,
@@ -2044,7 +2044,7 @@ pub(crate) fn render_with_documentation_geometry(
             ),
             cursor: None,
         }
-    } else if ui.dashboard || state.active_view.is_none() {
+    } else if ui.dashboard || state.active_view().is_none() {
         render_dashboard(
             &state.workspace_root,
             &ui.dashboard_actions,
@@ -2135,7 +2135,7 @@ pub(crate) fn render_with_documentation_geometry(
     });
     let foot_rows = screen_foot_rows(state, ui, config, height);
     if !fullscreen && foot_rows > 0 {
-        if let Some(view) = state.active_view {
+        if let Some(view) = state.active_view() {
             editor::render_status_line(&mut frame.grid, state, view, ui, config, width, height - 1);
         }
         if ui.operation_bar.is_some() && height > 2 {

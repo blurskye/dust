@@ -6,7 +6,6 @@ use crate::editor::EditorMode;
 use crate::editor::EditorOperation;
 use crate::editor::EditorTransaction;
 use crate::editor::EditorWindowVersion;
-use crate::editor::PaneId;
 use crate::editor::Precondition;
 use crate::editor::TransactionId;
 use crate::editor::UndoPolicy;
@@ -17,6 +16,7 @@ use crate::editor::text::ByteOffset;
 use crate::editor::text::TextBuffer;
 use crate::ui::VisualRowAnchor;
 use crate::ui::VisualRowModel;
+use crate::windows::WindowId;
 
 pub(super) struct MouseState {
     position: Option<(u16, u16)>,
@@ -42,7 +42,7 @@ struct MouseAnchor {
 pub(in crate::app) struct MouseDocument<'a> {
     pub editor: &'a crate::editor::EditorVersion,
     pub view_id: ViewId,
-    pub pane_id: PaneId,
+    pub pane_id: WindowId,
     pub view: &'a View,
     pub text: &'a TextBuffer,
 }
@@ -242,7 +242,7 @@ mod tests {
         extend: bool,
     ) -> MousePlan {
         let config = crate::config::load_bundled_config().config;
-        let view_id = state.active_view.unwrap();
+        let view_id = state.active_view().unwrap();
         let view = &state.views[view_id];
         let text = &state.buffers[view.buffer].text;
         let rows = VisualRowModel::new_for_state(state, text, view_id, ui, &config, 80, false);
@@ -251,7 +251,11 @@ mod tests {
                 MouseDocument {
                     editor: &state.version(),
                     view_id,
-                    pane_id: state.panes.keys().next().unwrap(),
+                    pane_id: state
+                        .editor_windows()
+                        .map(|window| window.id)
+                        .next()
+                        .unwrap(),
                     view,
                     text,
                 },

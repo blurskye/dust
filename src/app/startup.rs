@@ -555,7 +555,7 @@ impl App {
         path: PathBuf,
     ) -> Result<crate::editor::BufferId, String> {
         self.window_session
-            .check_editor_admission(&(&*self.state).into())?;
+            .check_editor_source(&(&*self.state).into())?;
         let mut candidate = self.state.draft();
         let activate = self
             .documents
@@ -563,7 +563,7 @@ impl App {
         let buffer = if activate {
             candidate.open_document(text, path)?.0
         } else {
-            candidate.load_document(text, path)
+            candidate.load_document(text, path)?
         };
         self.commit_editor_draft(candidate, None, activate)?;
         if activate {
@@ -584,7 +584,7 @@ impl App {
         {
             if let Err(error) = self
                 .window_session
-                .check_editor_admission(&(&*self.state).into())
+                .check_editor_source(&(&*self.state).into())
             {
                 self.show_error(error);
                 return;

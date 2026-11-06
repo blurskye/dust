@@ -291,7 +291,7 @@ fn floating_terminal_receives_clicks_above_underlying_buffer_tabs() {
         width: 60,
         height: 12,
     });
-    let target = app.window_session.editor_ids().content_for(first).unwrap();
+    let target = app.state.content_for_buffer(first).unwrap();
     let bounds = app.workspace_bounds().unwrap();
     let column = (0..bounds.width)
         .find(|column| {
@@ -305,7 +305,7 @@ fn floating_terminal_receives_clicks_above_underlying_buffer_tabs() {
         })
         .unwrap()
         + bounds.x;
-    let row = bounds.y + u16::from(app.state.tabs.len() > 1);
+    let row = bounds.y + u16::from(app.state.editor_tabs().count() > 1);
     app.handle_event(UiEvent::Mouse {
         key: KeyEvent::mouse(
             crate::editor::input::KeyCode::MouseRightDown,
@@ -929,7 +929,7 @@ fn terminal_panel_focus_cycle_resize_and_close_preserve_independent_sessions() {
         app.window_session.native_ids().terminal(1),
         Some(terminal_ids)
     );
-    let first_editor_tab = app.state.active_tab.expect("first editor tab");
+    let first_editor_tab = app.state.active_tab().expect("first editor tab");
     let terminal_two_ids = app
         .window_session
         .native_ids()
@@ -974,7 +974,7 @@ fn terminal_panel_focus_cycle_resize_and_close_preserve_independent_sessions() {
     app.process_effect(crate::app::commands::AppEffect::Layout(
         crate::app::windows::LayoutAction::FocusTab(-1),
     ));
-    assert_eq!(app.state.active_tab, Some(first_editor_tab));
+    assert_eq!(app.state.active_tab(), Some(first_editor_tab));
     assert_eq!(
         app.window_session.native_ids().terminal(1),
         Some(terminal_ids)
@@ -1523,7 +1523,7 @@ fn ctrl_slash_beside_a_terminal_agent_opens_a_shell_and_both_keep_their_windows_
     app.process_effect(crate::app::commands::AppEffect::TerminalFocus(agent.0));
     assert_eq!(app.window_session.focused_terminal(), Some(agent.0));
     assert!(app.terminal_rect(shell).is_some(), "the shell stays below");
-    app.resize_focused_window(crate::editor::FocusDirection::Left, 1)
+    app.resize_focused_window(crate::windows::SpatialDirection::Left, 1)
         .expect("resize");
     let wider = app.terminal_rect(agent).expect("agent");
     assert_eq!(

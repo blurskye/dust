@@ -223,15 +223,12 @@ fn problems_logs_output_and_debug_keep_distinct_graph_surface_identities() {
                 .is_none()
         );
     }
-    let reconciliation_count = app.window_session.editor_ids().reconciliation_count();
+    let reconciliation_count = app.window_session.test_publications();
     let idle_graph = app.window_session.graph().clone();
     for _ in 0..256 {
         app.reconcile_editor_windows();
     }
-    assert_eq!(
-        app.window_session.editor_ids().reconciliation_count(),
-        reconciliation_count
-    );
+    assert_eq!(app.window_session.test_publications(), reconciliation_count);
     assert_eq!(app.window_session.graph(), &idle_graph);
 }
 
@@ -652,7 +649,7 @@ fn debugger_owner_keeps_original_actor_stop_context_and_private_selection() {
     let editor = EditorState::new(root.path().into());
     let windows = crate::app::windows::Windows::new(false, 10);
     let target = || SourceTarget {
-        navigation: windows.navigation_stamp(editor.window_version(), editor.active_view),
+        navigation: windows.navigation_stamp(editor.window_version(), editor.active_view()),
         capture: Arc::new(()),
         line: 1,
         column: 1,
@@ -1878,7 +1875,7 @@ fn variable_pages_belong_to_the_request_and_picker_activation_keeps_expansion() 
         .activate(
             selection,
             SourceTarget {
-                navigation: windows.navigation_stamp(editor.window_version(), editor.active_view),
+                navigation: windows.navigation_stamp(editor.window_version(), editor.active_view()),
                 capture: Arc::new(()),
                 line: 1,
                 column: 1,
@@ -1916,7 +1913,7 @@ fn accepting_a_leaf_does_not_reopen_its_closed_expansion() {
         .activate(
             selection,
             SourceTarget {
-                navigation: windows.navigation_stamp(editor.window_version(), editor.active_view),
+                navigation: windows.navigation_stamp(editor.window_version(), editor.active_view()),
                 capture: Arc::new(()),
                 line: 1,
                 column: 1,
@@ -2506,7 +2503,7 @@ fn selecting_a_frame_refreshes_locals_and_watches_and_rejects_old_frame_answers(
                 selection,
                 SourceTarget {
                     navigation: windows
-                        .navigation_stamp(editor.window_version(), editor.active_view),
+                        .navigation_stamp(editor.window_version(), editor.active_view()),
                     capture: Arc::new(()),
                     line: 1,
                     column: 1,
@@ -2653,7 +2650,7 @@ fn selecting_the_same_frame_invalidates_previous_automatic_inspector_requests() 
                 selection,
                 SourceTarget {
                     navigation: windows
-                        .navigation_stamp(editor.window_version(), editor.active_view),
+                        .navigation_stamp(editor.window_version(), editor.active_view()),
                     capture: Arc::new(()),
                     line: 1,
                     column: 1,
@@ -2744,7 +2741,7 @@ fn automatic_stop_navigation_fetches_generated_source_and_locals() {
         .request_source(
             frame.source_reference.unwrap(),
             SourceTarget {
-                navigation: windows.navigation_stamp(editor.window_version(), editor.active_view),
+                navigation: windows.navigation_stamp(editor.window_version(), editor.active_view()),
                 capture: Arc::new(()),
                 line: frame.line,
                 column: frame.column,
@@ -2828,7 +2825,7 @@ fn virtual_source_requests_retain_the_selected_frame_position() {
         .activate(
             selection,
             SourceTarget {
-                navigation: windows.navigation_stamp(editor.window_version(), editor.active_view),
+                navigation: windows.navigation_stamp(editor.window_version(), editor.active_view()),
                 capture: Arc::new(()),
                 line: 1,
                 column: 1,

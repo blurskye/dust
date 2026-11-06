@@ -26,7 +26,7 @@ use crate::ui::render::visual_rows::one_cell_symbol;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PaneViewport {
-    pub pane: crate::editor::PaneId,
+    pub pane: crate::windows::WindowId,
     pub view: crate::editor::ViewId,
     pub x: u16,
     pub y: u16,
@@ -36,7 +36,7 @@ pub struct PaneViewport {
 
 #[derive(Clone, Copy)]
 pub(super) struct PaneRect {
-    pane: crate::editor::PaneId,
+    pane: crate::windows::WindowId,
     view: crate::editor::ViewId,
     focused: bool,
     x: u16,
@@ -80,7 +80,7 @@ fn global_editor_pane_viewports(state: &EditorState, ui: &UiState) -> Vec<PaneVi
                 .iter()
                 .find(|binding| binding.window == projected.window)?;
             Some(PaneViewport {
-                pane: binding.pane,
+                pane: binding.window,
                 view: binding.view,
                 x: projected.rect.x,
                 y: projected.rect.y,
@@ -122,7 +122,7 @@ pub fn editor_pane_viewport_at(
         .find(|binding| binding.window == projected.window)?;
     global_editor_pane_viewports(state, ui)
         .into_iter()
-        .find(|viewport| viewport.pane == binding.pane)
+        .find(|viewport| viewport.pane == binding.window)
 }
 
 /// Where `view` is shown, if any pane shows it.
@@ -139,10 +139,10 @@ pub fn view_pane_viewport(
 
 #[must_use]
 pub fn active_editor_pane_viewport(state: &EditorState, ui: &UiState) -> Option<PaneViewport> {
-    let tab = state.tabs.get(state.active_tab?)?;
+    let focused = state.focused_window()?;
     global_editor_pane_viewports(state, ui)
         .into_iter()
-        .find(|viewport| viewport.pane == tab.focused)
+        .find(|viewport| viewport.pane == focused)
 }
 
 pub(super) fn workspace_projection(
@@ -152,7 +152,7 @@ pub(super) fn workspace_projection(
     width: u16,
     height: u16,
 ) -> Option<WorkspaceProjection> {
-    state.tabs.get(state.active_tab?)?;
+    state.active_tab()?;
     let source_revision = state.window_revision()?;
     let layout = ui.editor_window_layout.as_ref()?;
     let compositor = ui.compositor_layout.as_ref()?;
@@ -163,7 +163,7 @@ pub(super) fn workspace_projection(
     {
         return None;
     }
-    let tab_line_visible = state.tabs.len() > 1;
+    let tab_line_visible = state.editor_tabs().count() > 1;
     let buffer_line_visible = config.ui.buffer_line.enabled
         && ui.content_tabs.len() > usize::from(config.ui.buffer_line.hide_when_single);
     let origin = compositor.projection.workspace_bounds;
@@ -178,7 +178,7 @@ pub(super) fn workspace_projection(
                 .iter()
                 .find(|binding| binding.window == projected.window)?;
             Some(PaneRect {
-                pane: binding.pane,
+                pane: binding.window,
                 view: binding.view,
                 focused: projected.focused,
                 x: projected.rect.x.saturating_sub(origin.x),
@@ -239,10 +239,10 @@ pub fn active_pane_viewport(
     width: u16,
     height: u16,
 ) -> Option<PaneViewport> {
-    let tab = state.tabs.get(state.active_tab?)?;
+    let focused = state.focused_window()?;
     pane_viewports(state, ui, config, width, height)
         .into_iter()
-        .find(|viewport| viewport.pane == tab.focused)
+        .find(|viewport| viewport.pane == focused)
 }
 
 pub(super) fn render_non_tiled_editor_window(
@@ -255,7 +255,7 @@ pub(super) fn render_non_tiled_editor_window(
     if projected.layer == crate::windows::CompositorLayer::Tiled {
         return false;
     }
-    let Some(tab) = state.active_tab.and_then(|tab| state.tabs.get(tab)) else {
+    let Some(focused) = state.focused_window() else {
         return false;
     };
     let Some(source_revision) = state.window_revision() else {
@@ -299,7 +299,7 @@ pub(super) fn render_non_tiled_editor_window(
             }
         }
     }
-    if binding.pane == tab.focused && projected.focused {
+    if binding.window == focused && projected.focused {
         frame.cursor = rendered.cursor.map(|(x, y, shape)| {
             (
                 projected.rect.x.saturating_add(x),
@@ -337,7 +337,7 @@ pub(super) fn render_workspace(
     width: u16,
     height: u16,
 ) -> Frame {
-    let Some(tab_id) = state.active_tab else {
+    let Some(tab_id) = state.active_tab() else {
         let mut grid = CellGrid::new_with_policy(
             width,
             height,
@@ -348,7 +348,7 @@ pub(super) fn render_workspace(
         grid.put_text(0, 0, END_OF_BUFFER_MARKER, Style::Muted);
         return Frame { grid, cursor: None };
     };
-    let Some(tab) = state.tabs.get(tab_id) else {
+    let Some(focused) = state.tab_focused_window(tab_id) else {
         return Frame {
             grid: CellGrid::new(width, height),
             cursor: None,
@@ -395,11 +395,12 @@ pub(super) fn render_workspace(
         grid.fill_row(0, Style::Status);
         let mut labels = Vec::new();
         let mut active = 0;
-        for (candidate, candidate_tab) in &state.tabs {
+        for candidate_tab in state.editor_tabs() {
+            let candidate = candidate_tab.id;
             let title = state
-                .panes
-                .get(candidate_tab.focused)
-                .and_then(|pane| state.views.get(pane.view))
+                .tab_focused_window(candidate)
+                .and_then(|window| state.window_view(window))
+                .and_then(|view| state.views.get(view))
                 .and_then(|view| state.buffers.get(view.buffer))
                 .and_then(|buffer| buffer.path.as_ref())
                 .and_then(|path| path.file_name())
@@ -483,7 +484,7 @@ pub(super) fn render_workspace(
                 }
             }
         }
-        if rect.pane == tab.focused
+        if rect.pane == focused
             && rect.focused
             && let Some((x, y, shape)) = frame.cursor
         {

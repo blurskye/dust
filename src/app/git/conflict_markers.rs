@@ -113,7 +113,7 @@ fn resolved_text(lines: &[&str], block: ConflictBlock, side: &str) -> Result<Str
 
 impl App {
     pub(in crate::app) fn accept_conflict_block(&mut self, side: &str) {
-        let Some(view_id) = self.state.active_view else {
+        let Some(view_id) = self.state.active_view() else {
             return;
         };
         let view = &self.state.views[view_id];

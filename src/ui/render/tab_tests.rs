@@ -19,7 +19,7 @@ fn split_tree_and_tab_line_render_real_independent_views() {
             Some(PathBuf::from("/workspace/main.rs")),
         )
         .unwrap();
-    let first_tab = state.active_tab.expect("first tab");
+    let first_tab = state.active_tab().expect("first tab");
     state.new_tab().expect("second tab");
     state
         .open_text(
@@ -29,7 +29,7 @@ fn split_tree_and_tab_line_render_real_independent_views() {
         .unwrap();
     state.activate_tab(first_tab).expect("return to split tab");
     let second_view = state
-        .split_active(crate::editor::Axis::Horizontal, 500)
+        .split_active(crate::windows::TileAxis::Horizontal, 500)
         .expect("split");
     state.views[second_view].scroll_line = 13;
     state.views[second_view].cursor = crate::editor::text::ByteOffset(text.find("right").unwrap());
@@ -61,7 +61,7 @@ fn workspace_tab_line_keeps_the_active_label_visible() {
             Some(PathBuf::from("/workspace/an-earlier-long-filename.rs")),
         )
         .unwrap();
-    let first = state.active_tab.unwrap();
+    let first = state.active_tab().unwrap();
     let second = state.new_tab().unwrap();
     state
         .open_text(
@@ -371,7 +371,7 @@ fn line_number_gutter_uses_the_largest_open_buffer_across_tabs() {
             Some(PathBuf::from("/workspace/short.rs")),
         )
         .unwrap();
-    let first_tab = state.active_tab.unwrap();
+    let first_tab = state.active_tab().unwrap();
     state.new_tab().unwrap();
     let long_text = (0..1_000).map(|_| "long\n").collect::<String>();
     let (long, long_view) = state
@@ -400,7 +400,7 @@ fn line_number_gutter_uses_the_largest_open_buffer_across_tabs() {
     assert_eq!(short_gutter, long_gutter);
     assert_eq!(short_gutter, 7);
     state.focus_tab(-1, true).unwrap();
-    assert_eq!(state.active_tab, Some(first_tab));
+    assert_eq!(state.active_tab(), Some(first_tab));
     let ui = ui_with_editor_layout(&state);
     let frame =
         crate::ui::render::render_editor_view(&state, short_view, &ui, &loaded.config, 80, 4);

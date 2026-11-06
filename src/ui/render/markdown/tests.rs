@@ -51,7 +51,7 @@ fn markdown<'a>(
     editor: &'a EditorConfig,
     width: usize,
 ) -> MarkdownMarks<'a> {
-    let view = &state.views[state.active_view.unwrap()];
+    let view = &state.views[state.active_view().unwrap()];
     MarkdownMarks::new(ui, view, &state.buffers[view.buffer].text, editor, width).unwrap()
 }
 
@@ -107,7 +107,8 @@ fn tables_own_borders_next_to_a_blank_cursor_line() {
     let marks = markdown(&state, &ui, &editor, 80);
     assert!(marks.line(0).is_none());
     assert!(marks.line(1).unwrap().table.unwrap().frames[0].starts_with('┌'));
-    state.views[state.active_view.unwrap()].cursor = ByteOffset(end);
+    let view = state.active_view().unwrap();
+    state.views[view].cursor = ByteOffset(end);
     let marks = markdown(&state, &ui, &editor, 80);
     assert!(marks.line(4).is_none());
     assert!(
@@ -150,7 +151,7 @@ fn table_geometry_uses_display_cells_for_wide_borders_and_alignment() {
         let a = row.place(ByteOffset(source.find('a').unwrap())).unwrap();
         let b = row.place(ByteOffset(source.find('b').unwrap())).unwrap();
         assert_eq!((a.1, b.1), (3, 8));
-        let frame = render_editor_view(&state, state.active_view.unwrap(), &ui, &config, 12, 8);
+        let frame = render_editor_view(&state, state.active_view().unwrap(), &ui, &config, 12, 8);
         assert_eq!(frame.grid.get(3, 2).unwrap().symbol, "a");
         assert_eq!(frame.grid.get(8, 2).unwrap().symbol, "b");
         assert!(markdown(&state, &ui, &config.editor, 11).tables.is_empty());
@@ -218,13 +219,14 @@ fn tables_that_cannot_fit_their_minimum_width_show_source_and_scroll() {
     let marks = markdown(&state, &ui, &config.editor, 20);
     assert!(marks.tables.is_empty());
     assert!(marks.line(1).unwrap().table.is_none());
-    let frame = render_editor_view(&state, state.active_view.unwrap(), &ui, &config, 20, 5);
+    let frame = render_editor_view(&state, state.active_view().unwrap(), &ui, &config, 20, 5);
     assert_eq!(
         frame.grid.row_text(1),
         &source.lines().nth(1).unwrap()[..20]
     );
-    state.views[state.active_view.unwrap()].scroll_column = 8;
-    let frame = render_editor_view(&state, state.active_view.unwrap(), &ui, &config, 20, 5);
+    let view = state.active_view().unwrap();
+    state.views[view].scroll_column = 8;
+    let frame = render_editor_view(&state, state.active_view().unwrap(), &ui, &config, 20, 5);
     assert!(frame.grid.row_text(1).starts_with("| c | d | e | f |"));
 }
 
@@ -253,7 +255,7 @@ fn link_heavy_cells_keep_hidden_markup_and_icons_while_advancing_marks() {
         })
         .collect();
     let (state, ui) = fixture(&source, spans);
-    let view = &state.views[state.active_view.unwrap()];
+    let view = &state.views[state.active_view().unwrap()];
     let text = &state.buffers[view.buffer].text;
     let marks = ui.markdown_marks.iter().collect::<Vec<_>>();
     let glyphs = MarkdownGlyphs {

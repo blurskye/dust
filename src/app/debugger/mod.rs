@@ -2018,7 +2018,7 @@ impl App {
                                 column: frame.column,
                                 navigation: self.window_session.navigation_stamp(
                                     self.state.window_version(),
-                                    self.state.active_view,
+                                    self.state.active_view(),
                                 ),
                                 capture: self.input.capture_epoch(),
                             };
@@ -2069,7 +2069,7 @@ impl App {
                                     if !self.window_session.navigation_current(
                                         &target.navigation,
                                         &self.state.window_version(),
-                                        self.state.active_view,
+                                        self.state.active_view(),
                                     ) || !self.input.capture_current(&target.capture)
                                     {
                                         continue;
@@ -2090,7 +2090,7 @@ impl App {
                                         self.show_error(error);
                                         continue;
                                     }
-                                    if let Some(view) = self.state.active_view {
+                                    if let Some(view) = self.state.active_view() {
                                         let buffer = self.state.views[view].buffer;
                                         let text = &self.state.buffers[buffer].text;
                                         let line = target.line.saturating_sub(1) as usize;
@@ -2209,7 +2209,7 @@ impl App {
             program,
             &self.workspace,
             self.window_session
-                .navigation_stamp(self.state.window_version(), self.state.active_view),
+                .navigation_stamp(self.state.window_version(), self.state.active_view()),
             self.input.capture_epoch(),
             false,
         ) {
@@ -2322,7 +2322,7 @@ impl App {
     /// Show what is TRUE about each breakpoint. The rows carry the adapter's verdict, so a
     /// request is never presented as a fact.
     pub(in crate::app) fn cursor_breakpoint_place(&self) -> Option<(PathBuf, u64)> {
-        let view = &self.state.views[self.state.active_view?];
+        let view = &self.state.views[self.state.active_view()?];
         let buffer = &self.state.buffers[view.buffer];
         let line = buffer.text.byte_to_line(view.cursor).ok()?;
         Some((buffer.path.clone()?, line as u64 + 1))
@@ -2396,7 +2396,7 @@ impl App {
     /// Enable or disable the breakpoint on the cursor line. Disabling is SESSION state, so it
     /// survives whatever the adapter later says about that breakpoint.
     pub(in crate::app) fn toggle_breakpoint_disabled(&mut self) {
-        let Some(view) = self.state.active_view else {
+        let Some(view) = self.state.active_view() else {
             self.show_error("no view is active");
             return;
         };

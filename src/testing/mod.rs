@@ -87,7 +87,9 @@ impl HeadlessEditor {
     }
 
     pub fn active_view(&self) -> ViewId {
-        self.state.active_view.expect("headless editor has a view")
+        self.state
+            .active_view()
+            .expect("headless editor has a view")
     }
 
     pub fn text(&self) -> String {
@@ -100,7 +102,7 @@ impl HeadlessEditor {
             self.input.decorate_invocation(&mut invocation);
         }
         if invocation.target.view.is_none() {
-            invocation.target.view = self.state.active_view;
+            invocation.target.view = self.state.active_view();
         }
         if invocation.target.buffer.is_none() {
             invocation.target.buffer = self.state.active_buffer_id();

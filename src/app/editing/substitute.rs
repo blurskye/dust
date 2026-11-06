@@ -199,7 +199,7 @@ impl App {
             .filter(|prompt| prompt.kind == PromptKind::Command)?;
         let (range, pattern, replacement, flags) =
             crate::editor::input::typed_substitution(&prompt.input)?;
-        let view = self.state.views.get(self.state.active_view?)?;
+        let view = self.state.views.get(self.state.active_view()?)?;
         if self.ui.large_file_buffers.contains(&view.buffer) {
             return None;
         }
@@ -256,7 +256,7 @@ impl App {
             pattern.to_owned()
         };
         let pattern = pattern.as_str();
-        let Some(view_id) = self.state.active_view else {
+        let Some(view_id) = self.state.active_view() else {
             return;
         };
         let view = &self.state.views[view_id];
@@ -320,7 +320,7 @@ impl App {
     /// `:g/pattern/d`, or with `invert` `:v/pattern/d`: deletes the lines of `range` (the whole
     /// file without one) that match, or that don't.
     pub(in crate::app) fn run_global_delete(&mut self, range: &str, pattern: &str, invert: bool) {
-        let Some(view_id) = self.state.active_view else {
+        let Some(view_id) = self.state.active_view() else {
             return;
         };
         let view = &self.state.views[view_id];

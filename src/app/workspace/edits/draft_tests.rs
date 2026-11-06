@@ -219,7 +219,7 @@ fn workspace_edits_keep_cursors_between_disjoint_replacements() {
         .open_text(TextBuffer::from_text("x keep x\n"), Some(path.clone()))
         .unwrap();
     let sibling = editor
-        .split_active(crate::editor::Axis::Horizontal, 500)
+        .split_active(crate::windows::TileAxis::Horizontal, 500)
         .unwrap();
     editor
         .apply_transaction(

@@ -11,7 +11,7 @@ use crate::windows::projection::project_tiled_node;
 use crate::windows::projection::push_compositor_window;
 use crate::windows::projection::rect_contains;
 use crate::windows::projection::spatial_score;
-use crate::windows::projection::tiled_contains;
+use crate::windows::tree::contains_window;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ContentAdapterKind {
@@ -76,6 +76,33 @@ pub enum TiledLayoutNode {
         first: Box<TiledLayoutNode>,
         second: Box<TiledLayoutNode>,
     },
+}
+
+impl TiledLayoutNode {
+    pub fn windows(&self) -> Vec<WindowId> {
+        crate::windows::tree::window_ids(self)
+    }
+
+    pub fn filtered(&self, keep: &impl Fn(WindowId) -> bool) -> Option<Self> {
+        match self {
+            Self::Window(window) => keep(*window).then_some(self.clone()),
+            Self::Split {
+                axis,
+                ratio,
+                first,
+                second,
+            } => match (first.filtered(keep), second.filtered(keep)) {
+                (Some(first), Some(second)) => Some(Self::Split {
+                    axis: *axis,
+                    ratio: *ratio,
+                    first: Box::new(first),
+                    second: Box::new(second),
+                }),
+                (Some(node), None) | (None, Some(node)) => Some(node),
+                (None, None) => None,
+            },
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -407,7 +434,7 @@ impl TiledLayoutSnapshot {
         if violates_minimum && projection.windows.len() > 1 {
             let focused = self
                 .focused
-                .filter(|focused| tiled_contains(&self.root, *focused))
+                .filter(|focused| contains_window(&self.root, *focused))
                 .unwrap_or_else(|| projection.windows[0].window);
             projection.windows = vec![ProjectedWindow {
                 window: focused,

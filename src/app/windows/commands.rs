@@ -10,7 +10,7 @@ use crate::editor::ArgumentType;
 use crate::editor::CommandError;
 use crate::editor::CommandRegistry;
 use crate::editor::ContextRequirement;
-use crate::editor::FocusDirection;
+use crate::windows::SpatialDirection;
 
 pub(in crate::app) fn register_commands(
     registry: &mut CommandRegistry<AppEffect>,
@@ -33,8 +33,8 @@ pub(in crate::app) fn register_commands(
             .field("axis", ArgumentType::String, true),
         |invocation| {
             let axis = match string_arg(invocation, "axis")? {
-                "horizontal" => crate::editor::Axis::Horizontal,
-                "vertical" => crate::editor::Axis::Vertical,
+                "horizontal" => crate::windows::TileAxis::Horizontal,
+                "vertical" => crate::windows::TileAxis::Vertical,
                 _ => {
                     return Err(CommandError::InvalidArguments(
                         "window clone axis must be horizontal or vertical".into(),
@@ -151,10 +151,10 @@ pub(in crate::app) fn register_commands(
         ArgumentSchema::default().field("direction", ArgumentType::String, true),
         |invocation| {
             let direction = match string_arg(invocation, "direction")? {
-                "left" => FocusDirection::Left,
-                "down" => FocusDirection::Down,
-                "up" => FocusDirection::Up,
-                "right" => FocusDirection::Right,
+                "left" => SpatialDirection::Left,
+                "down" => SpatialDirection::Down,
+                "up" => SpatialDirection::Up,
+                "right" => SpatialDirection::Right,
                 _ => {
                     return Err(CommandError::InvalidArguments(
                         "window resize direction must be left, down, up, or right".into(),
@@ -233,22 +233,22 @@ pub(in crate::app) fn register_commands(
         (
             "surface.focus.left",
             "Focus surface to the left",
-            FocusDirection::Left,
+            SpatialDirection::Left,
         ),
         (
             "surface.focus.down",
             "Focus surface below",
-            FocusDirection::Down,
+            SpatialDirection::Down,
         ),
         (
             "surface.focus.up",
             "Focus surface above",
-            FocusDirection::Up,
+            SpatialDirection::Up,
         ),
         (
             "surface.focus.right",
             "Focus surface to the right",
-            FocusDirection::Right,
+            SpatialDirection::Right,
         ),
     ] {
         register(
@@ -341,12 +341,12 @@ pub(in crate::app) fn register_commands(
         (
             "pane.split.horizontal",
             "Split pane horizontally",
-            LayoutAction::Split(crate::editor::Axis::Horizontal),
+            LayoutAction::Split(crate::windows::TileAxis::Horizontal),
         ),
         (
             "pane.split.vertical",
             "Split pane vertically",
-            LayoutAction::Split(crate::editor::Axis::Vertical),
+            LayoutAction::Split(crate::windows::TileAxis::Vertical),
         ),
         ("pane.close", "Close pane", LayoutAction::ClosePane),
         (

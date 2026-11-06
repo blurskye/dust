@@ -6,12 +6,11 @@ use crate::app::windows::NativeSurfaceTarget;
 use crate::app::windows::TerminalGeometrySource;
 use crate::app::windows::WindowCandidate;
 use crate::app::windows::Windows;
-use crate::app::windows::bridge::EditorWindowBridge;
-use crate::app::windows::bridge::NativeSurfaceBridge;
+use crate::app::windows::native::NativeSurfaces;
 use crate::editor::EditorTopology;
-use crate::editor::FocusDirection;
 use crate::windows::ContentLifecycle;
 use crate::windows::DockEdge;
+use crate::windows::SpatialDirection;
 use crate::windows::WindowGraph;
 use crate::windows::WindowId;
 use crate::windows::WindowPlacement;
@@ -44,7 +43,7 @@ impl Windows {
         &self,
         current: &crate::editor::EditorWindowVersion,
     ) -> Result<(), String> {
-        if current.revision().is_none() || self.core.editor.source() != Some(current) {
+        if current.revision().is_none() || self.core.source.as_ref() != Some(current) {
             return Err("window editor source is stale".into());
         }
         Ok(())
@@ -52,10 +51,7 @@ impl Windows {
     pub(in crate::app) fn graph(&self) -> &WindowGraph {
         &self.core.graph
     }
-    pub(in crate::app) fn editor_ids(&self) -> &EditorWindowBridge {
-        &self.core.editor
-    }
-    pub(in crate::app) fn native_ids(&self) -> &NativeSurfaceBridge {
+    pub(in crate::app) fn native_ids(&self) -> &NativeSurfaces {
         &self.core.native
     }
     pub(in crate::app) fn terminal_geometry_source(
@@ -92,18 +88,21 @@ impl Windows {
     pub(in crate::app) fn configure_initial(
         &mut self,
         windows: &crate::config::WindowsConfig,
+        state: &mut crate::editor::EditorState,
     ) -> Result<(), String> {
         let placements = configured_window_placements(windows)?;
         if self.core.graph.active_tab().is_some() {
             return Err("initial window policy requires an empty session".into());
         }
         let mut candidate = self.candidate()?;
+        candidate.core.graph = state.graph.clone();
+        candidate.core.source = Some(state.window_version());
         candidate
             .core
             .native
             .set_configured_placements(placements)
             .map_err(|e| e.to_string())?;
-        self.commit(candidate)
+        self.commit(candidate, state)
     }
     pub(in crate::app) fn check_transition_capacity(&self) -> Result<(), String> {
         self.epoch
@@ -124,9 +123,21 @@ impl Windows {
             dashboard: None,
         })
     }
-    pub(in crate::app) fn commit(&mut self, candidate: WindowCandidate) -> Result<(), String> {
+    pub(in crate::app) fn commit(
+        &mut self,
+        mut candidate: WindowCandidate,
+        state: &mut crate::editor::EditorState,
+    ) -> Result<(), String> {
         if !Arc::ptr_eq(&self.origin, &candidate.origin) || self.epoch != candidate.epoch {
             return Err("window candidate is stale or belongs to another session".into());
+        }
+        if candidate
+            .core
+            .source
+            .as_ref()
+            .is_some_and(|source| source != &state.window_version())
+        {
+            return Err("window candidate editor source is stale".into());
         }
         candidate
             .graph()
@@ -155,6 +166,10 @@ impl Windows {
         {
             self.focus_stamp = Arc::new(());
         }
+        if state.graph != candidate.core.graph {
+            state.graph = candidate.core.graph.clone();
+        }
+        candidate.core.source = Some(state.window_version());
         self.core = candidate.core;
         self.accept_graph_focus();
         self.epoch = epoch;
@@ -165,16 +180,17 @@ impl Windows {
         &mut self,
         candidate: WindowCandidate,
         current: &crate::editor::EditorWindowVersion,
+        state: &mut crate::editor::EditorState,
     ) -> Result<(), String> {
         if candidate
             .core
-            .editor
-            .source()
+            .source
+            .as_ref()
             .map_or(current.revision() == Some(0), |source| {
                 source == current && current.revision().is_some()
             })
         {
-            self.commit(candidate)
+            self.commit(candidate, state)
         } else {
             Err("window candidate editor source is stale".into())
         }
@@ -211,8 +227,8 @@ impl Windows {
         descriptions.signature.dashboard_visible = false;
         let restored_descriptions = descriptions.clone();
         proposal.check_current(source.0)?;
-        self.check_editor_admission(&proposal.topology())?;
-        let mut candidate = self.candidate()?;
+        self.check_editor_source(&proposal.topology())?;
+        let mut candidate = self.prepare_editor(&proposal.topology(), scratch)?;
         for (plugin, load) in generations {
             candidate
                 .core
@@ -220,11 +236,6 @@ impl Windows {
                 .remove_owner_instance(&format!("plugin.{plugin}"), *load)
                 .map_err(|error| error.to_string())?;
         }
-        candidate
-            .core
-            .editor
-            .reconcile(&proposal.topology(), &mut candidate.core.graph, scratch)
-            .map_err(|error| error.to_string())?;
         let mut transition = self.stage_editor_transition(proposal, candidate, source.1)?;
         validate_window_rules(policy.rules).map_err(|error| error.to_string())?;
         let mut rules = policy.rules.iter().collect::<Vec<_>>();
@@ -242,8 +253,8 @@ impl Windows {
         }
         let topology = transition.proposal.topology();
         let mut signature = restored_descriptions.signature;
-        signature.editor_tab = transition.candidate.core.editor.active_tab(&topology);
-        signature.editor_window = transition.candidate.core.editor.focused_window(&topology);
+        signature.editor_tab = topology.state().active_tab();
+        signature.editor_window = topology.state().focused_window();
         transition
             .candidate
             .core
@@ -281,16 +292,36 @@ impl Windows {
                 ))
             })
             .collect::<Result<Vec<_>, String>>()?;
-        transition
-            .candidate
-            .core
-            .editor
-            .restore_desired_placements(
-                &topology,
-                &mut transition.candidate.core.graph,
-                &placements,
-            )
-            .map_err(|error| error.to_string())?;
+        for (tab_index, pane_index, path, placement) in placements {
+            let tab = topology
+                .state()
+                .editor_tabs()
+                .nth(tab_index)
+                .ok_or("unknown restored tab")?
+                .id;
+            let window = *topology
+                .state()
+                .tab_windows(tab)
+                .get(pane_index)
+                .ok_or("unknown restored window")?;
+            let view = topology
+                .state()
+                .window_view(window)
+                .ok_or("unknown restored view")?;
+            if topology.buffers()[topology.views()[view].buffer]
+                .path
+                .as_ref()
+                != Some(&path)
+            {
+                return Err("stale persisted text descriptor".into());
+            }
+            transition
+                .candidate
+                .core
+                .graph
+                .place(window, placement)
+                .map_err(|error| error.to_string())?;
+        }
         transition.candidate.core.native.invalidate();
         transition
             .candidate
@@ -332,10 +363,15 @@ impl Windows {
         self.epoch
             .checked_add(1)
             .ok_or("window owner revision is exhausted")?;
+        if self.core.source.as_ref() == Some(proposal.before_window())
+            && proposal.before_graph_revision() != self.core.graph.revision()
+        {
+            return Err("editor proposal window graph changed before acceptance".into());
+        }
         let after = candidate
             .core
-            .editor
-            .source()
+            .source
+            .as_ref()
             .ok_or("missing proposed editor source")?;
         let before = proposal.before_window();
         if before.revision().is_none()
@@ -369,8 +405,8 @@ impl Windows {
         if &transition.catalog != catalog {
             return Err("editor transition source changed before acceptance".into());
         }
-        let state = transition.proposal.accept(current)?;
-        self.commit(transition.candidate)?;
+        let mut state = transition.proposal.accept(current)?;
+        self.commit(transition.candidate, &mut state)?;
         Ok(state)
     }
     pub(in crate::app) fn invalidate_native(&mut self) {
@@ -397,51 +433,30 @@ impl Windows {
         scratch: &str,
         descriptions: NativeDescriptions<'_>,
     ) -> Result<WindowCandidate, String> {
-        self.check_editor_admission(state)?;
-        let mut candidate = self.candidate()?;
-        let core = &mut candidate.core;
-        let current = core.editor.is_current(state, scratch);
-        let bind = |editor: &EditorWindowBridge| {
-            let mut signature = descriptions.signature.clone();
-            signature.editor_tab = editor.active_tab(state);
-            signature.editor_window = editor.focused_window(state);
-            signature
-        };
-        if !current {
-            let signature = bind(&core.editor);
-            if !core.native.is_current(&signature) {
-                core.native
-                    .reconcile(
-                        &mut core.graph,
-                        signature,
-                        descriptions.explorer_title,
-                        descriptions.dashboard_title,
-                        descriptions.picker_title,
-                        descriptions.terminals,
-                    )
-                    .map_err(|e| e.to_string())?;
-            }
-            core.editor
-                .reconcile(state, &mut core.graph, scratch)
-                .map_err(|e| e.to_string())?;
-        }
-        let signature = bind(&core.editor);
-        if !current || !core.native.is_current(&signature) {
-            core.native
-                .reconcile(
-                    &mut core.graph,
-                    signature,
-                    descriptions.explorer_title,
-                    descriptions.dashboard_title,
-                    descriptions.picker_title,
-                    descriptions.terminals,
-                )
-                .map_err(|e| e.to_string())?;
-        }
-        core.graph.validate().map_err(|e| e.to_string())?;
+        let mut candidate = self.prepare_editor(state, scratch)?;
+        let mut signature = descriptions.signature;
+        signature.editor_tab = state.state().active_tab();
+        signature.editor_window = state.state().focused_window();
+        candidate
+            .core
+            .native
+            .reconcile(
+                &mut candidate.core.graph,
+                signature,
+                descriptions.explorer_title,
+                descriptions.dashboard_title,
+                descriptions.picker_title,
+                descriptions.terminals,
+            )
+            .map_err(|error| error.to_string())?;
+        candidate
+            .core
+            .graph
+            .validate()
+            .map_err(|error| error.to_string())?;
         Ok(candidate)
     }
-    pub(in crate::app) fn check_editor_admission(
+    pub(in crate::app) fn check_editor_source(
         &self,
         state: &EditorTopology<'_>,
     ) -> Result<(), String> {
@@ -451,8 +466,8 @@ impl Windows {
         }
         if self
             .core
-            .editor
-            .source()
+            .source
+            .as_ref()
             .is_some_and(|source| !source.same_editor(state.version()))
         {
             return Err("editor source belongs to another editor".into());
@@ -464,16 +479,29 @@ impl Windows {
         state: &EditorTopology<'_>,
         scratch: &str,
     ) -> Result<WindowCandidate, String> {
-        self.check_editor_admission(state)?;
+        self.check_editor_source(state)?;
         let mut candidate = self.candidate()?;
-        candidate
-            .core
-            .editor
-            .reconcile(state, &mut candidate.core.graph, scratch)
-            .map_err(|e| e.to_string())?;
+        candidate.core.graph = state.graph().clone();
+        for (buffer, title) in crate::app::windows::content::editor_buffer_titles(state, scratch) {
+            let content = state
+                .state()
+                .content_for_buffer(buffer)
+                .ok_or("buffer has no graph content")?;
+            candidate
+                .core
+                .graph
+                .update_content(content, title, state.buffers()[buffer].dirty)
+                .map_err(|error| error.to_string())?;
+        }
+        candidate.core.source = Some(state.version().clone());
+        candidate.core.scratch_label = Some(scratch.to_owned());
         Ok(candidate)
     }
-    pub(in crate::app) fn focus_window(&mut self, window: WindowId) -> Result<(), String> {
+    pub(in crate::app) fn focus_window(
+        &mut self,
+        window: WindowId,
+        state: &mut crate::editor::EditorState,
+    ) -> Result<(), String> {
         let mut candidate = self.candidate()?;
         candidate
             .core
@@ -481,7 +509,7 @@ impl Windows {
             .focus(window)
             .map_err(|e| e.to_string())?;
         candidate.core.native.invalidate();
-        self.commit(candidate)
+        self.commit(candidate, state)
     }
     pub(in crate::app) fn require_projected_graph(&self) -> Result<(), String> {
         if self
@@ -514,6 +542,7 @@ impl Windows {
         &mut self,
         target: NativeSurfaceTarget,
         placement: WindowPlacement,
+        state: &mut crate::editor::EditorState,
     ) -> Result<(), String> {
         self.require_projected_graph()?;
         let hiding_focused_terminal = placement == WindowPlacement::Hidden
@@ -539,7 +568,7 @@ impl Windows {
         core.graph
             .place(ids.window, placement)
             .map_err(|e| e.to_string())?;
-        self.commit(candidate)?;
+        self.commit(candidate, state)?;
         if hiding_focused_terminal {
             self.return_from_terminal();
         }
@@ -562,6 +591,7 @@ impl Windows {
         target: NativeSurfaceTarget,
         explorer: WindowPlacement,
         terminal: WindowPlacement,
+        state: &mut crate::editor::EditorState,
     ) -> Result<(), String> {
         self.require_projected_graph()?;
         let ids = self
@@ -590,13 +620,14 @@ impl Windows {
         core.graph
             .place(ids.window, placement)
             .map_err(|e| e.to_string())?;
-        self.commit(candidate)
+        self.commit(candidate, state)
     }
 
     pub(in crate::app) fn swap_native(
         &mut self,
         first: NativeSurfaceTarget,
         second: NativeSurfaceTarget,
+        state: &mut crate::editor::EditorState,
     ) -> Result<(), String> {
         self.require_projected_graph()?;
         let mut candidate = self.candidate()?;
@@ -638,7 +669,7 @@ impl Windows {
         core.native
             .place_target(second, ap)
             .map_err(|e| e.to_string())?;
-        self.commit(candidate)
+        self.commit(candidate, state)
     }
     pub(in crate::app) fn prepare_rules(
         &self,
@@ -695,6 +726,7 @@ impl Windows {
     pub(in crate::app) fn reset_runtime(
         &mut self,
         plugin_generations: &[(String, u64)],
+        state: &mut crate::editor::EditorState,
     ) -> Result<(), String> {
         let semantic_focus = match self.focus {
             crate::app::windows::FocusTarget::Explorer(_)
@@ -712,10 +744,7 @@ impl Windows {
         core.native
             .reset(&mut core.graph)
             .map_err(|e| e.to_string())?;
-        core.editor
-            .reset(&mut core.graph)
-            .map_err(|e| e.to_string())?;
-        self.commit(candidate)?;
+        self.commit(candidate, state)?;
         if let Some(focus) = semantic_focus {
             self.focus = focus;
             self.core.native.invalidate();
@@ -727,15 +756,18 @@ impl Windows {
         &mut self,
         plugin: &str,
         load: u64,
+        state: &mut crate::editor::EditorState,
     ) -> Result<(), String> {
         let mut candidate = self.candidate()?;
+        candidate.core.graph = state.graph.clone();
+        candidate.core.source = Some(state.window_version());
         candidate
             .core
             .graph
             .remove_owner_instance(&format!("plugin.{plugin}"), load)
             .map_err(|e| e.to_string())?;
         candidate.core.native.invalidate();
-        self.commit(candidate)
+        self.commit(candidate, state)
     }
 }
 
@@ -781,21 +813,21 @@ impl Windows {
     pub(in crate::app) fn directional_native_placement(
         &self,
         target: NativeSurfaceTarget,
-        direction: crate::editor::FocusDirection,
+        direction: crate::windows::SpatialDirection,
         step: i16,
     ) -> Result<Option<WindowPlacement>, String> {
         let placement = self.native_placement(target)?;
         let placement = match placement {
             WindowPlacement::Docked { edge, size } => {
                 let grow = match (edge, direction) {
-                    (DockEdge::Bottom, FocusDirection::Up)
-                    | (DockEdge::Top, FocusDirection::Down)
-                    | (DockEdge::Left, FocusDirection::Right)
-                    | (DockEdge::Right, FocusDirection::Left) => true,
-                    (DockEdge::Bottom, FocusDirection::Down)
-                    | (DockEdge::Top, FocusDirection::Up)
-                    | (DockEdge::Left, FocusDirection::Left)
-                    | (DockEdge::Right, FocusDirection::Right) => false,
+                    (DockEdge::Bottom, SpatialDirection::Up)
+                    | (DockEdge::Top, SpatialDirection::Down)
+                    | (DockEdge::Left, SpatialDirection::Right)
+                    | (DockEdge::Right, SpatialDirection::Left) => true,
+                    (DockEdge::Bottom, SpatialDirection::Down)
+                    | (DockEdge::Top, SpatialDirection::Up)
+                    | (DockEdge::Left, SpatialDirection::Left)
+                    | (DockEdge::Right, SpatialDirection::Right) => false,
                     _ => return Ok(None),
                 };
                 WindowPlacement::Docked {
@@ -807,16 +839,16 @@ impl Windows {
             }
             WindowPlacement::Floating(mut rect) => {
                 match direction {
-                    FocusDirection::Left => {
+                    SpatialDirection::Left => {
                         rect.width = rect.width.saturating_add_signed(-step).max(1)
                     }
-                    FocusDirection::Right => {
+                    SpatialDirection::Right => {
                         rect.width = rect.width.saturating_add_signed(step).max(1)
                     }
-                    FocusDirection::Up => {
+                    SpatialDirection::Up => {
                         rect.height = rect.height.saturating_add_signed(step).max(1)
                     }
-                    FocusDirection::Down => {
+                    SpatialDirection::Down => {
                         rect.height = rect.height.saturating_add_signed(-step).max(1)
                     }
                 }
@@ -891,13 +923,10 @@ use crate::persistence::validate_window_rules;
 impl Windows {
     pub(in crate::app) fn persisted_editor_placement(
         &self,
-        pane: crate::editor::PaneId,
+        pane: crate::windows::WindowId,
         expected_adapter: crate::windows::ContentAdapterKind,
     ) -> Result<PersistedWindowPlacement, String> {
-        let window = self
-            .editor_ids()
-            .window_for(pane)
-            .ok_or("editor pane has no authoritative window")?;
+        let window = pane;
         let content = self
             .graph()
             .content_for_window(window)
@@ -908,12 +937,11 @@ impl Windows {
         self.graph()
             .require_persist_descriptor(content.id)
             .map_err(|error| error.to_string())?;
-        let placement = self.editor_ids().desired_placement(pane).unwrap_or(
-            self.graph()
-                .window(window)
-                .ok_or("editor window is stale")?
-                .placement,
-        );
+        let placement = self
+            .graph()
+            .window(window)
+            .ok_or("editor window is stale")?
+            .placement;
         persisted_window_placement(placement)
             .ok_or_else(|| "editor window placement is not persistable".into())
     }

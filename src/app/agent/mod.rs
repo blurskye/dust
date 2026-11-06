@@ -41,7 +41,6 @@ use crate::app::commands::PromptMove;
 use crate::app::picker::PickerPayload;
 use crate::app::windows::LayoutAction;
 use crate::config::Highlight;
-use crate::editor::Axis;
 use crate::editor::BufferId;
 use crate::editor::EditorMode;
 use crate::editor::text::TextBuffer;
@@ -57,6 +56,7 @@ use crate::ui::ContentTabIdentity;
 use crate::ui::ContentTabKind;
 use crate::ui::PromptKind;
 use crate::windows::ContentLifecycle;
+use crate::windows::TileAxis;
 
 use crate::ui::markdown::Styled;
 use crate::windows::ContentId;
@@ -531,7 +531,7 @@ impl App {
             self.ask_terminal_agent();
             return;
         }
-        if let Some(view) = self.state.active_view
+        if let Some(view) = self.state.active_view()
             && self.state.views[view].selection.is_some()
         {
             let buffer = &self.state.buffers[self.state.views[view].buffer];
@@ -613,7 +613,7 @@ impl App {
                     )
             })
             .map(|(id, ..)| crate::process::PtyId(id));
-        let source_view = self.state.active_view;
+        let source_view = self.state.active_view();
         let selection = source_view.and_then(|view| {
             self.state.views[view].selection?;
             let buffer = &self.state.buffers[self.state.views[view].buffer];
@@ -663,7 +663,7 @@ impl App {
             program,
             &self.workspace,
             self.window_session
-                .navigation_stamp(self.state.window_version(), self.state.active_view),
+                .navigation_stamp(self.state.window_version(), self.state.active_view()),
             self.input.capture_epoch(),
             true,
         ) {
@@ -2352,8 +2352,8 @@ impl App {
         if self.agent_pane().is_none() {
             let pane_width = crate::ui::active_editor_pane_viewport(&self.state, &self.ui)
                 .map(|viewport| u32::from(viewport.width));
-            if self.state.active_view.is_some() {
-                self.apply_layout_action(LayoutAction::Split(Axis::Horizontal));
+            if self.state.active_view().is_some() {
+                self.apply_layout_action(LayoutAction::Split(TileAxis::Horizontal));
             }
             let shown = match self
                 .agent
@@ -2416,25 +2416,22 @@ impl App {
         self.reconcile_editor_windows();
     }
 
-    pub(in crate::app) fn agent_pane(&self) -> Option<crate::editor::PaneId> {
+    pub(in crate::app) fn agent_pane(&self) -> Option<crate::windows::WindowId> {
         let buffer = self.agent.buffer?;
         let shown = self.state.active_tab_views();
-        self.state
-            .panes
-            .iter()
-            .find(|(_, pane)| {
-                shown.contains(&pane.view)
-                    && self
-                        .state
-                        .views
-                        .get(pane.view)
-                        .is_some_and(|view| view.buffer == buffer)
+        shown
+            .into_iter()
+            .find(|view| {
+                self.state
+                    .views
+                    .get(*view)
+                    .is_some_and(|view| view.buffer == buffer)
             })
-            .map(|(id, _)| id)
+            .and_then(|view| self.state.view_window(view))
     }
 
-    fn active_tab_focus(&self) -> Option<crate::editor::PaneId> {
-        Some(self.state.tabs.get(self.state.active_tab?)?.focused)
+    fn active_tab_focus(&self) -> Option<crate::windows::WindowId> {
+        self.state.focused_window()
     }
 
     fn active_path(&self) -> Option<PathBuf> {
@@ -2443,7 +2440,7 @@ impl App {
     }
 
     pub(in crate::app) fn agent_view(&self) -> Option<crate::editor::ViewId> {
-        Some(self.state.panes.get(self.agent_pane()?)?.view)
+        self.state.window_view(self.agent_pane()?)
     }
 
     /// Whether keys go to the panel's input.
@@ -2451,7 +2448,7 @@ impl App {
         self.ui
             .agent_panel
             .as_ref()
-            .is_some_and(|panel| Some(panel.view) == self.state.active_view)
+            .is_some_and(|panel| Some(panel.view) == self.state.active_view())
     }
 
     /// Build what the panel draws from the active session.

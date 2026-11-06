@@ -546,7 +546,7 @@ fn validate_context(
     invocation: &CommandInvocation,
     requirement: ContextRequirement,
 ) -> Result<(), CommandError> {
-    let view = invocation.target.view.or(state.active_view);
+    let view = invocation.target.view.or(state.active_view());
     let buffer = invocation.target.buffer.or_else(|| {
         view.and_then(|view| state.views.get(view))
             .map(|view| view.buffer)

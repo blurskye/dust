@@ -822,7 +822,7 @@ impl App {
             && !self.input.grammar_pending();
         let navigation = self
             .window_session
-            .navigation_stamp(self.state.window_version(), self.state.active_view);
+            .navigation_stamp(self.state.window_version(), self.state.active_view());
         let result = self.extension.execute(
             &plugin,
             &command,

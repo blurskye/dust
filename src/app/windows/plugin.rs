@@ -56,8 +56,9 @@ impl Windows {
         transition: PluginWindowTransition,
         current: &crate::editor::EditorWindowVersion,
         catalog: &crate::plugins::PluginCatalogVersion,
+        state: &mut crate::editor::EditorState,
     ) -> Result<PluginWindowReceipt, String> {
-        self.commit_plugin(transition.draft, current, catalog)?;
+        self.commit_plugin(transition.draft, current, catalog, state)?;
         Ok(PluginWindowReceipt(transition.key))
     }
 
@@ -78,8 +79,9 @@ impl Windows {
     pub(in crate::app) fn commit_plugin_fixture(
         &mut self,
         draft: PluginWindowDraft,
+        state: &mut crate::editor::EditorState,
     ) -> Result<(), String> {
-        self.publish_plugin(draft)
+        self.publish_plugin(draft, state)
     }
     pub(in crate::app) fn begin_plugin(
         &self,
@@ -123,28 +125,37 @@ impl Windows {
         draft: PluginWindowDraft,
         current: &crate::editor::EditorWindowVersion,
         catalog: &crate::plugins::PluginCatalogVersion,
+        state: &mut crate::editor::EditorState,
     ) -> Result<(), String> {
         if draft.source.as_ref() != Some(current) || &draft.catalog != catalog {
             return Err("plugin window editor or catalog source is stale".into());
         }
-        self.publish_plugin(draft)
+        self.publish_plugin(draft, state)
     }
-    fn publish_plugin(&mut self, draft: PluginWindowDraft) -> Result<(), String> {
+    fn publish_plugin(
+        &mut self,
+        draft: PluginWindowDraft,
+        state: &mut crate::editor::EditorState,
+    ) -> Result<(), String> {
         if !Arc::ptr_eq(&self.origin, &draft.origin) || self.epoch != draft.epoch {
             return Err("window candidate is stale or belongs to another session".into());
         }
         let mut core = WindowState {
             graph: draft.graph,
-            editor: self.core.editor.clone(),
+            source: self.core.source.clone(),
+            scratch_label: self.core.scratch_label.clone(),
             native: self.core.native.clone(),
         };
         core.native.invalidate();
-        self.commit(WindowCandidate {
-            dashboard: None,
-            origin: draft.origin,
-            epoch: draft.epoch,
-            core,
-        })
+        self.commit(
+            WindowCandidate {
+                dashboard: None,
+                origin: draft.origin,
+                epoch: draft.epoch,
+                core,
+            },
+            state,
+        )
     }
     #[cfg(test)]
     pub(in crate::app) fn from_test_graph(graph: WindowGraph) -> Self {

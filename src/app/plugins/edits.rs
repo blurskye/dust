@@ -173,7 +173,7 @@ impl ConfirmationSource {
         windows: &Windows,
     ) -> bool {
         self.navigation.as_ref().is_none_or(|navigation| {
-            windows.navigation_current(navigation, &editor.window_version(), editor.active_view)
+            windows.navigation_current(navigation, &editor.window_version(), editor.active_view())
         })
     }
     pub(in crate::app) fn presentation_current(
@@ -196,7 +196,11 @@ impl ConfirmationSource {
                 .as_ref()
                 .is_none_or(|capture| input.capture_current(capture))
             && self.navigation.as_ref().is_none_or(|navigation| {
-                windows.navigation_current(navigation, &editor.window_version(), editor.active_view)
+                windows.navigation_current(
+                    navigation,
+                    &editor.window_version(),
+                    editor.active_view(),
+                )
             })
     }
 }

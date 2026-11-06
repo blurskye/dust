@@ -1651,8 +1651,8 @@ fn agent_panel_hides_in_place_when_it_is_the_only_pane() {
     let pane = app.agent_pane().unwrap();
     let others: Vec<_> = app
         .state
-        .panes
-        .keys()
+        .editor_windows()
+        .map(|window| window.id)
         .filter(|other| *other != pane)
         .collect();
     for other in others {
@@ -1672,13 +1672,13 @@ fn agent_panel_opens_in_the_requested_tab_without_switching_tabs() {
     let (_directories, mut app) = test_app();
     tab(&mut app);
     app.show_agent_panel();
-    let first = app.state.active_tab.unwrap();
+    let first = app.state.active_tab().unwrap();
     app.state.new_tab().unwrap();
     app.state.replace_active_view(None).unwrap();
-    let second = app.state.active_tab.unwrap();
+    let second = app.state.active_tab().unwrap();
     app.reconcile_editor_windows();
     app.show_agent_panel();
-    assert_eq!(app.state.active_tab, Some(second));
+    assert_eq!(app.state.active_tab(), Some(second));
     assert!(app.agent_pane().is_some());
     assert_eq!(app.state.active_tab_views().len(), 2);
     app.state.activate_tab(first).unwrap();

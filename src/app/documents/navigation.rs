@@ -107,8 +107,10 @@ impl App {
                         id,
                         location.range.clone(),
                         encoding,
-                        self.window_session
-                            .navigation_stamp(self.state.window_version(), self.state.active_view),
+                        self.window_session.navigation_stamp(
+                            self.state.window_version(),
+                            self.state.active_view(),
+                        ),
                         self.workspace.version(),
                     );
                     self.notify_message(self.message("opening_file", &[]), false);
@@ -144,7 +146,7 @@ impl App {
 
 impl App {
     pub(in crate::app) fn current_persisted_location(&self) -> Option<PersistedLocation> {
-        let view = self.state.views.get(self.state.active_view?)?;
+        let view = self.state.views.get(self.state.active_view()?)?;
         let buffer = self.state.buffers.get(view.buffer)?;
         Some(PersistedLocation {
             path: buffer.path.clone()?,
@@ -194,7 +196,7 @@ impl App {
             id,
             (
                 self.window_session
-                    .navigation_stamp(self.state.window_version(), self.state.active_view),
+                    .navigation_stamp(self.state.window_version(), self.state.active_view()),
                 self.input.capture_epoch(),
             ),
         );
@@ -315,7 +317,7 @@ impl App {
         filter: DiagnosticFilter,
         count: u64,
     ) {
-        let Some(view_id) = self.state.active_view else {
+        let Some(view_id) = self.state.active_view() else {
             return;
         };
         let view = &self.state.views[view_id];

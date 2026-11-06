@@ -221,7 +221,7 @@ fn accepting_a_disk_diagnostic_opens_its_file_and_validates_the_range() {
     app.open_builtin_picker(PickerKind::Diagnostics);
     app.accept_picker();
     wait_vfs(&mut app);
-    let view = &app.state.views[app.state.active_view.unwrap()];
+    let view = &app.state.views[app.state.active_view().unwrap()];
     assert_eq!(app.state.buffers[view.buffer].path.as_ref(), Some(&path));
     assert_eq!(view.cursor, ByteOffset(6));
 
@@ -439,7 +439,7 @@ fn save_as_reload_close_and_external_change_protection_work() {
     assert!(!app.state.buffers[buffer].dirty);
     app.close_active_buffer(false);
     assert!(app.ui.dashboard);
-    assert!(app.state.active_view.is_none());
+    assert!(app.state.active_view().is_none());
 }
 
 #[test]
@@ -532,7 +532,7 @@ fn a_failed_test_is_listed_in_problems_and_jumps_to_its_line() {
     assert_eq!(rows[0].label, "a.txt:3  adds: wrong sum");
     app.accept_picker();
     wait_vfs(&mut app);
-    let view = &app.state.views[app.state.active_view.expect("view")];
+    let view = &app.state.views[app.state.active_view().expect("view")];
     let buffer = &app.state.buffers[view.buffer];
     assert_eq!(
         buffer.path.as_deref(),
@@ -992,7 +992,7 @@ fn help_preserves_a_buffer_selection_byte_for_byte() {
             None,
         )
         .unwrap();
-    app.state.active_view = Some(view);
+    app.state.focus_view(view).unwrap();
     app.state.views[view].buffer = buffer;
     app.state.views[view].cursor = crate::editor::text::ByteOffset(15);
     app.state.views[view].mode = crate::editor::EditorMode::VisualChar;
@@ -1263,7 +1263,7 @@ fn choosing_a_side_edits_the_result_buffer_and_leaves_save_and_stage_separate() 
             Some(conflicted.clone()),
         )
         .unwrap();
-    app.state.active_view = Some(view);
+    app.state.focus_view(view).unwrap();
     app.state.views[view].buffer = buffer;
     let before_choose = app.state.buffers[buffer].text.to_string();
     let index_before = crate::git::git_index_fingerprint(&root).unwrap();
@@ -2649,22 +2649,24 @@ fn directional_editor_resize_skips_hidden_splits_and_reaches_the_visible_dock() 
     app.reconcile_editor_windows();
     let first = app.window_session.graph().focused().unwrap();
     app.process_effect(AppEffect::Layout(crate::app::windows::LayoutAction::Split(
-        crate::editor::Axis::Horizontal,
+        crate::windows::TileAxis::Horizontal,
     )));
     app.process_effect(AppEffect::Layout(crate::app::windows::LayoutAction::Split(
-        crate::editor::Axis::Horizontal,
+        crate::windows::TileAxis::Horizontal,
     )));
     app.place_graph_window("focused", WindowPlacement::Hidden)
         .unwrap();
-    let tab = app.state.active_tab.unwrap();
+    let tab = app.state.active_tab().unwrap();
     app.handle_configured_key("ctrl-right".parse().unwrap());
-    let crate::editor::LayoutNode::Split { ratio, second, .. } = &app.state.tabs[tab].root else {
+    let crate::windows::TiledLayoutNode::Split { ratio, second, .. } =
+        &app.state.tab_layout(tab).unwrap()
+    else {
         panic!("outer split");
     };
     assert!(*ratio < 500);
     assert!(matches!(
         **second,
-        crate::editor::LayoutNode::Split { ratio: 500, .. }
+        crate::windows::TiledLayoutNode::Split { ratio: 500, .. }
     ));
     assert!(!app.ui.notification_error, "{:?}", app.ui.notification);
 
@@ -2693,9 +2695,9 @@ fn directional_editor_resize_skips_hidden_splits_and_reaches_the_visible_dock() 
     )
     .unwrap();
     app.process_effect(AppEffect::TerminalUnfocus);
-    let root = app.state.tabs[tab].root.clone();
+    let root = app.state.tab_layout(tab).unwrap().clone();
     app.handle_configured_key("ctrl-right".parse().unwrap());
-    assert_eq!(app.state.tabs[tab].root, root);
+    assert_eq!(app.state.tab_layout(tab).unwrap(), root);
     let terminal = app.window_session.native_ids().terminal(1).unwrap().window;
     assert_eq!(
         app.window_session
@@ -2777,7 +2779,7 @@ fn normalized_mouse_position_invokes_real_cursor_placement() {
         .unwrap();
     app.set_dashboard_visibility(false);
     app.reconcile_editor_windows();
-    let view = app.state.active_view.expect("view");
+    let view = app.state.active_view().expect("view");
     let workspace = app.workspace_bounds().expect("workspace");
     let viewport = active_pane_viewport(
         &app.state,
@@ -3074,10 +3076,10 @@ fn dirty_buffer_close_save_discard_cancel_and_stale_ack_are_source_bound() {
     app.state.set_buffer_dirty(buffer, true);
     app.reconcile_editor_windows();
     let arrangement = (
-        app.state.active_tab,
-        app.state.active_view,
-        app.state.tabs.len(),
-        app.state.panes.len(),
+        app.state.active_tab(),
+        app.state.active_view(),
+        app.state.editor_tabs().count(),
+        app.state.editor_windows().count(),
         app.state.views.len(),
     );
 
@@ -3092,10 +3094,10 @@ fn dirty_buffer_close_save_discard_cancel_and_stale_ack_are_source_bound() {
     assert!(app.state.buffers.contains_key(buffer));
     assert_eq!(
         (
-            app.state.active_tab,
-            app.state.active_view,
-            app.state.tabs.len(),
-            app.state.panes.len(),
+            app.state.active_tab(),
+            app.state.active_view(),
+            app.state.editor_tabs().count(),
+            app.state.editor_windows().count(),
             app.state.views.len(),
         ),
         arrangement
@@ -3169,10 +3171,10 @@ fn dirty_close_save_waits_for_exact_vfs_ack_and_failure_preserves_arrangement() 
     app.state.set_buffer_dirty(failed, true);
     app.reconcile_editor_windows();
     let arrangement = (
-        app.state.active_tab,
-        app.state.active_view,
-        app.state.tabs.len(),
-        app.state.panes.len(),
+        app.state.active_tab(),
+        app.state.active_view(),
+        app.state.editor_tabs().count(),
+        app.state.editor_windows().count(),
         app.state.views.len(),
     );
     app.close_active_buffer(false);
@@ -3184,10 +3186,10 @@ fn dirty_close_save_waits_for_exact_vfs_ack_and_failure_preserves_arrangement() 
     assert!(app.state.buffers[failed].dirty);
     assert_eq!(
         (
-            app.state.active_tab,
-            app.state.active_view,
-            app.state.tabs.len(),
-            app.state.panes.len(),
+            app.state.active_tab(),
+            app.state.active_view(),
+            app.state.editor_tabs().count(),
+            app.state.editor_windows().count(),
             app.state.views.len(),
         ),
         arrangement
@@ -3522,7 +3524,7 @@ fn buffer_line_mouse_selects_and_right_click_closes_with_dirty_safety() {
     app.set_dashboard_visibility(false);
     app.reconcile_editor_windows();
     let bounds = app.workspace_bounds().unwrap();
-    let target = app.window_session.editor_ids().content_for(first).unwrap();
+    let target = app.state.content_for_buffer(first).unwrap();
     let local = (0..bounds.width)
         .find(|column| {
             crate::ui::content_tab_at_column(
@@ -3534,7 +3536,7 @@ fn buffer_line_mouse_selects_and_right_click_closes_with_dirty_safety() {
             .is_some_and(|id| id.0 == target)
         })
         .unwrap();
-    let row = bounds.y + u16::from(app.state.tabs.len() > 1);
+    let row = bounds.y + u16::from(app.state.editor_tabs().count() > 1);
     let left = KeyEvent::mouse(
         crate::editor::input::KeyCode::MouseLeftDown,
         crate::editor::input::Modifiers::default(),
@@ -3652,7 +3654,7 @@ fn content_line_pins_reorder_middle_mouse_and_survive_bridge_reset() {
     app.move_active_buffer_line(-1);
     assert_eq!(app.window_session.content_order(), before);
     let bounds = app.workspace_bounds().unwrap();
-    let target = app.window_session.editor_ids().content_for(c).unwrap();
+    let target = app.state.content_for_buffer(c).unwrap();
     let local = (0..bounds.width)
         .find(|column| {
             crate::ui::content_tab_at_column(
@@ -3664,7 +3666,7 @@ fn content_line_pins_reorder_middle_mouse_and_survive_bridge_reset() {
             .is_some_and(|id| id.0 == target)
         })
         .unwrap();
-    let row = bounds.y + u16::from(app.state.tabs.len() > 1);
+    let row = bounds.y + u16::from(app.state.editor_tabs().count() > 1);
     let middle = KeyEvent::mouse(
         crate::editor::input::KeyCode::MouseMiddleDown,
         crate::editor::input::Modifiers::default(),
@@ -3673,7 +3675,9 @@ fn content_line_pins_reorder_middle_mouse_and_survive_bridge_reset() {
     assert!(app.window_session.pins().contains(&c));
     let pins = app.window_session.pins().clone();
     let order = app.window_session.content_order().to_vec();
-    app.window_session.reset_runtime(&[]).unwrap();
+    app.window_session
+        .reset_runtime(&[], &mut app.state)
+        .unwrap();
     app.reconcile_editor_windows();
     assert_eq!(app.window_session.pins(), &pins);
     assert_eq!(app.window_session.content_order(), order);
@@ -3765,6 +3769,7 @@ fn content_line_diagnostics_custom_entries_and_idle_projection_are_pure() {
             draft,
             &app.state.window_version(),
             &app.extension.contributions().version(),
+            &mut app.state,
         )
         .unwrap();
     app.reconcile_editor_windows();
@@ -3808,7 +3813,7 @@ fn content_line_diagnostics_custom_entries_and_idle_projection_are_pure() {
             .is_some_and(|id| id.0 == custom)
         })
         .unwrap();
-    let row = bounds.y + u16::from(app.state.tabs.len() > 1);
+    let row = bounds.y + u16::from(app.state.editor_tabs().count() > 1);
     let right = KeyEvent::mouse(
         crate::editor::input::KeyCode::MouseRightDown,
         crate::editor::input::Modifiers::default(),
@@ -3824,7 +3829,7 @@ fn content_line_diagnostics_custom_entries_and_idle_projection_are_pure() {
                 .any(|entry| entry.id == custom)
     );
     app.window_session
-        .remove_plugin_generation("demo", 2)
+        .remove_plugin_generation("demo", 2, &mut app.state)
         .unwrap();
     assert!(
         app.window_session
@@ -3834,7 +3839,7 @@ fn content_line_diagnostics_custom_entries_and_idle_projection_are_pure() {
             .any(|entry| entry.id == custom)
     );
     app.window_session
-        .remove_plugin_generation("demo", 1)
+        .remove_plugin_generation("demo", 1, &mut app.state)
         .unwrap();
     app.reconcile_editor_windows();
     assert!(
@@ -4066,7 +4071,7 @@ fn live_marks_follow_command_edits_before_saving_and_jumping() {
     app.process_effect(AppEffect::MarkJump("a".into()));
     wait_vfs(&mut app);
     assert_eq!(
-        app.state.views[app.state.active_view.unwrap()].cursor,
+        app.state.views[app.state.active_view().unwrap()].cursor,
         ByteOffset(182)
     );
     assert_eq!(app.persistence.marks()[0].location.anchor, 182);
@@ -4179,7 +4184,7 @@ fn buffer_cycling_follows_the_buffer_line_order() {
     app.process_effect(AppEffect::MoveBufferLine(-1));
     app.project_window_content_tabs();
     assert_eq!(
-        app.window_session.content_tab_buffers(),
+        app.window_session.content_tab_buffers(&app.state),
         [buffers[2], buffers[0], buffers[1]]
     );
     // c is first on the line now, so next goes to a, then b, then wraps to c.
@@ -4198,10 +4203,10 @@ fn nested_border_drag_uses_the_border_axis_on_both_sides() {
             .unwrap();
         app.set_dashboard_visibility(false);
         app.state
-            .split_active(crate::editor::Axis::Vertical, 500)
+            .split_active(crate::windows::TileAxis::Vertical, 500)
             .unwrap();
         app.state
-            .split_active(crate::editor::Axis::Horizontal, 500)
+            .split_active(crate::windows::TileAxis::Horizontal, 500)
             .unwrap();
         app.handle_event(UiEvent::Resize(120, 40));
         app.reconcile_editor_windows();
@@ -4225,8 +4230,12 @@ fn nested_border_drag_uses_the_border_axis_on_both_sides() {
             column: x,
             row: y + 3,
         });
-        match &app.state.tabs[app.state.active_tab.unwrap()].root {
-            crate::editor::LayoutNode::Split { ratio, .. } => {
+        match &app
+            .state
+            .tab_layout(app.state.active_tab().unwrap())
+            .unwrap()
+        {
+            crate::windows::TiledLayoutNode::Split { ratio, .. } => {
                 assert!(
                     *ratio > 500,
                     "dragging down must enlarge the top pane (right={right}): {ratio}"

@@ -117,7 +117,7 @@ mod tests {
                 .with_argument("placement", CommandValue::String("before".into())),
         )
         .unwrap();
-        let view = app.state.active_view.unwrap();
+        let view = app.state.active_view().unwrap();
         assert_eq!(app.state.views[view].mode, EditorMode::Insert);
     }
 

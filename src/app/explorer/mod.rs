@@ -267,7 +267,7 @@ impl Explorer {
         &self,
         source: ExplorerViewId,
     ) -> Result<ExplorerCloneCandidate, &'static str> {
-        if self.cloned_views.len().saturating_add(1) >= crate::MAX_WINDOWS {
+        if self.cloned_views.len().saturating_add(1) >= crate::windows::MAX_WINDOWS {
             return Err("explorer view limit reached");
         }
         let id = ExplorerViewId(
@@ -1076,7 +1076,7 @@ impl App {
                 self.reconcile_editor_windows();
                 let navigation = self
                     .window_session
-                    .navigation_stamp(self.state.window_version(), self.state.active_view);
+                    .navigation_stamp(self.state.window_version(), self.state.active_view());
                 if !self.explorer.admit_open(request.ticket, id, navigation) {
                     self.documents.cancel_request(id);
                 }
@@ -1386,7 +1386,7 @@ impl App {
             };
             if let Err(error) = self
                 .window_session
-                .check_editor_admission(&(&*self.state).into())
+                .check_editor_source(&(&*self.state).into())
             {
                 self.show_error(error);
                 return;
@@ -1404,12 +1404,12 @@ impl App {
             let activate = self.window_session.navigation_current(
                 &reply.navigation,
                 &self.state.window_version(),
-                self.state.active_view,
+                self.state.active_view(),
             );
             let mut draft = self.state.draft();
             if activate {
                 if reply.split
-                    && self.state.active_view.is_some()
+                    && self.state.active_view().is_some()
                     && let Err(error) = draft.split_document(PANE_DEFAULT_RATIO)
                 {
                     self.show_error(error);
@@ -1420,7 +1420,10 @@ impl App {
                     return;
                 }
             } else {
-                draft.load_document(text, path);
+                if let Err(error) = draft.load_document(text, path) {
+                    self.show_error(error);
+                    return;
+                }
             }
             if let Err(error) = self.commit_editor_draft(draft, None, activate) {
                 self.show_error(error);
@@ -1479,7 +1482,7 @@ impl App {
             MutationUpdate::Complete { operation, change } => {
                 let reconciliation = (|| -> Result<(), String> {
                     self.window_session
-                        .check_editor_admission(&(&*self.state).into())?;
+                        .check_editor_source(&(&*self.state).into())?;
                     if let Some(change) = change {
                         let target = match &operation {
                             ExplorerMutation::Rename { target, .. } => Some(target.as_path()),

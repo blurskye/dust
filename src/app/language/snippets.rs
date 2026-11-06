@@ -590,7 +590,7 @@ mod tests {
             editor: source,
             buffer,
             text: &state.buffers[buffer].text,
-            view: state.active_view,
+            view: state.active_view(),
         }
     }
     fn stops(source: &str) -> Vec<SnippetTabstop> {

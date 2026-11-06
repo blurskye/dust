@@ -25,7 +25,7 @@ fn cursor_belongs_to_view_not_shared_buffer() {
         .open_text(TextBuffer::from_text("shared"), None)
         .unwrap();
     let second = state
-        .split_active(crate::editor::state::Axis::Horizontal, 500)
+        .split_active(crate::windows::TileAxis::Horizontal, 500)
         .unwrap();
     let mut transaction =
         crate::editor::transaction::EditorTransaction::new(crate::editor::state::TransactionId(1));
@@ -134,7 +134,7 @@ fn opening_a_file_retires_only_an_unhosted_empty_scratch() {
     assert!(!state.buffers.contains_key(scratch));
     let (shared, _) = state.open_text(TextBuffer::from_text(""), None).unwrap();
     state
-        .split_active(crate::editor::state::Axis::Horizontal, 500)
+        .split_active(crate::windows::TileAxis::Horizontal, 500)
         .unwrap();
     state
         .open_text(TextBuffer::from_text("b"), Some("/workspace/b".into()))
@@ -168,7 +168,7 @@ fn replacing_a_pane_keeps_hidden_buffers_without_orphan_views() {
     assert!(!state.views.contains_key(first_view));
     assert!(state.buffers.contains_key(first_buffer));
     assert_eq!(state.views.len(), 1);
-    assert_eq!(state.active_view, Some(second_view));
+    assert_eq!(state.active_view(), Some(second_view));
     state
         .cycle_buffer(&[], -1, true)
         .expect("reopen hidden dirty buffer");
@@ -178,11 +178,32 @@ fn replacing_a_pane_keeps_hidden_buffers_without_orphan_views() {
 }
 
 #[test]
+fn rejected_edit_after_a_split_preserves_the_live_graph_and_selected_view() {
+    let mut state = EditorState::new(PathBuf::from("/workspace"));
+    let (_, view) = state.open_text(TextBuffer::from_text("abc"), None).unwrap();
+    let before = state.graph.clone();
+    let transaction = crate::editor::EditorTransaction::new(crate::editor::TransactionId(1))
+        .with_operation(crate::editor::EditorOperation::SplitPane {
+            axis: crate::windows::TileAxis::Horizontal,
+            ratio: 500,
+        })
+        .with_operation(crate::editor::EditorOperation::SetCursor {
+            view,
+            position: crate::editor::text::ByteOffset(usize::MAX),
+        });
+    assert!(state.apply_transaction(&transaction).is_err());
+    assert_eq!(state.graph, before);
+    assert_eq!(state.views.len(), 1);
+    assert_eq!(state.active_view(), Some(view));
+    state.validate_layout().unwrap();
+}
+
+#[test]
 fn split_and_tab_layouts_keep_independent_views_and_focus() {
     let mut state = EditorState::new(PathBuf::from("/tmp"));
     let (buffer, first) = state.open_text(TextBuffer::from_text("abc"), None).unwrap();
     let second = state
-        .split_active(crate::editor::state::Axis::Horizontal, 500)
+        .split_active(crate::windows::TileAxis::Horizontal, 500)
         .expect("split");
     assert_eq!(state.views[first].buffer, buffer);
     assert_eq!(state.views[second].buffer, buffer);
@@ -190,11 +211,11 @@ fn split_and_tab_layouts_keep_independent_views_and_focus() {
     state.views[second].scroll_column = 12;
     state.resize_active_pane(50).expect("grow second pane");
     assert!(matches!(
-        state.tabs[state.active_tab.expect("tab")].root,
-        crate::editor::state::LayoutNode::Split { ratio: 450, .. }
+        state.tab_layout(state.active_tab().expect("tab")).unwrap(),
+        crate::windows::TiledLayoutNode::Split { ratio: 450, .. }
     ));
     state.focus_pane(-1, true).expect("first pane");
-    assert_eq!(state.active_view, Some(first));
+    assert_eq!(state.active_view(), Some(first));
     assert_eq!(
         state.views[first].cursor,
         crate::editor::text::ByteOffset(0)
@@ -202,16 +223,16 @@ fn split_and_tab_layouts_keep_independent_views_and_focus() {
     assert_eq!(state.views[first].scroll_column, 0);
     assert_eq!(state.views[second].scroll_column, 12);
     state.focus_pane(-1, false).expect("clamped focus");
-    assert_eq!(state.active_view, Some(first));
-    let first_tab = state.active_tab.expect("tab");
+    assert_eq!(state.active_view(), Some(first));
+    let first_tab = state.active_tab().expect("tab");
     let second_tab = state.new_tab().expect("new tab");
     assert_ne!(first_tab, second_tab);
     state.focus_tab(-1, true).expect("previous tab");
-    assert_eq!(state.active_tab, Some(first_tab));
+    assert_eq!(state.active_tab(), Some(first_tab));
     state.close_active_pane().expect("close split");
     assert_eq!(
-        state.tabs[first_tab].root,
-        crate::editor::state::LayoutNode::Pane(state.tabs[first_tab].focused)
+        state.tab_layout(first_tab).unwrap(),
+        crate::windows::TiledLayoutNode::Window(state.tab_focused_window(first_tab).unwrap())
     );
 }
 
@@ -222,20 +243,20 @@ fn minimum_resize_delta_clamps_both_sides_without_overflow() {
             let mut state = EditorState::new(PathBuf::from("/resize"));
             state.open_text(TextBuffer::from_text("abc"), None).unwrap();
             state
-                .split_active(crate::editor::state::Axis::Horizontal, 500)
+                .split_active(crate::windows::TileAxis::Horizontal, 500)
                 .unwrap();
             if first {
                 state.focus_pane(-1, true).unwrap();
             }
             if on_axis {
                 state
-                    .resize_active_pane_on_axis(crate::editor::state::Axis::Horizontal, i16::MIN)
+                    .resize_active_pane_on_axis(crate::windows::TileAxis::Horizontal, i16::MIN)
                     .unwrap();
             } else {
                 state.resize_active_pane(i16::MIN).unwrap();
             }
-            let crate::editor::state::LayoutNode::Split { ratio, .. } =
-                state.tabs[state.active_tab.unwrap()].root
+            let crate::windows::TiledLayoutNode::Split { ratio, .. } =
+                state.tab_layout(state.active_tab().unwrap()).unwrap()
             else {
                 panic!("split");
             };
@@ -251,18 +272,18 @@ fn split_rejects_before_exceeding_the_universal_layout_depth_ceiling() {
     state
         .open_text(TextBuffer::from_text("seed"), None)
         .unwrap();
-    for _ in 1..crate::editor::state::MAXIMUM_LAYOUT_DEPTH {
+    for _ in 1..crate::windows::MAX_SPLIT_DEPTH {
         state
-            .split_active(crate::editor::state::Axis::Horizontal, 500)
+            .split_active(crate::windows::TileAxis::Horizontal, 500)
             .expect("split within depth ceiling");
     }
     assert_eq!(
-        state.split_active(crate::editor::state::Axis::Horizontal, 500),
+        state.split_active(crate::windows::TileAxis::Horizontal, 500),
         Err("layout depth ceiling reached")
     );
     assert_eq!(
-        state.panes.len(),
-        crate::editor::state::MAXIMUM_LAYOUT_DEPTH
+        state.editor_windows().count(),
+        crate::windows::MAX_SPLIT_DEPTH
     );
     state
         .validate_layout()
@@ -286,17 +307,21 @@ fn layout_validation_rejects_ratios_outside_editor_source_policy() {
         .open_text(TextBuffer::from_text("seed"), None)
         .unwrap();
     state
-        .split_active(crate::editor::state::Axis::Horizontal, 500)
+        .split_active(crate::windows::TileAxis::Horizontal, 500)
         .expect("split");
-    let tab = state.active_tab.expect("tab");
-    let crate::editor::state::LayoutNode::Split { ratio, .. } = &mut state.tabs[tab].root else {
+    let tab = state.active_tab().expect("tab");
+    let before = state.graph.clone();
+    let mut root = state.tab_layout(tab).unwrap();
+    let crate::windows::TiledLayoutNode::Split { ratio, .. } = &mut root else {
         panic!("expected split");
     };
     *ratio = 99;
     assert_eq!(
-        state.validate_layout(),
-        Err("layout split ratio is invalid")
+        state.graph.replace_layout(tab, Some(root)),
+        Err(crate::windows::WindowError::InvalidPlacement)
     );
+    assert_eq!(state.graph, before);
+    state.validate_layout().unwrap();
 }
 
 #[test]
@@ -305,16 +330,13 @@ fn new_tabs_share_the_global_layout_pane_ceiling_without_partial_mutation() {
     state
         .open_text(TextBuffer::from_text("seed"), None)
         .unwrap();
-    for _ in 1..crate::editor::state::MAXIMUM_LAYOUT_PANES {
+    for _ in 1..crate::windows::MAX_WINDOWS {
         state.new_tab().expect("tab within pane ceiling");
     }
     let revision = state.window_revision();
     assert_eq!(state.new_tab(), Err("layout pane ceiling reached"));
     assert_eq!(state.window_revision(), revision);
-    assert_eq!(
-        state.panes.len(),
-        crate::editor::state::MAXIMUM_LAYOUT_PANES
-    );
+    assert_eq!(state.editor_windows().count(), crate::windows::MAX_WINDOWS);
     state.validate_layout().expect("bounded tabs remain valid");
 }
 
@@ -324,24 +346,21 @@ fn clone_pane_refuses_the_global_ceiling_without_partial_mutation() {
     state
         .open_text(TextBuffer::from_text("seed"), None)
         .unwrap();
-    for _ in 1..crate::editor::state::MAXIMUM_LAYOUT_PANES {
+    for _ in 1..crate::windows::MAX_WINDOWS {
         state.new_tab().expect("tab within pane ceiling");
     }
-    let tab = state.active_tab.expect("active tab");
-    let pane = state.tabs[tab].focused;
+    let tab = state.active_tab().expect("active tab");
+    let pane = state.tab_focused_window(tab).unwrap();
     let revision = state.window_revision();
-    let active = state.active_view;
+    let active = state.active_view();
     let views = state.views.len();
     assert_eq!(
-        state.clone_pane(pane, crate::editor::state::Axis::Horizontal, 500),
+        state.clone_pane(pane, crate::windows::TileAxis::Horizontal, 500),
         Err("layout pane ceiling reached")
     );
     assert_eq!(state.window_revision(), revision);
-    assert_eq!(state.active_view, active);
-    assert_eq!(
-        state.panes.len(),
-        crate::editor::state::MAXIMUM_LAYOUT_PANES
-    );
+    assert_eq!(state.active_view(), active);
+    assert_eq!(state.editor_windows().count(), crate::windows::MAX_WINDOWS);
     assert_eq!(state.views.len(), views);
     state.validate_layout().expect("bounded clone refusal");
 }
@@ -356,10 +375,10 @@ fn opening_beside_a_kept_pane_propagates_split_failure_without_replacing_it() {
         .open_text(TextBuffer::from_text("panel"), None)
         .unwrap();
     state.kept_buffer = Some(kept);
-    for _ in 1..crate::editor::state::MAXIMUM_LAYOUT_PANES {
+    for _ in 1..crate::windows::MAX_WINDOWS {
         state.new_tab().unwrap();
     }
-    let active = state.active_view;
+    let active = state.active_view();
     let before = state.window_version();
     let buffers = state.buffers.len();
     let views = state.views.len();
@@ -378,7 +397,7 @@ fn opening_beside_a_kept_pane_propagates_split_failure_without_replacing_it() {
         state.show_buffer(hidden),
         Err("layout pane ceiling reached")
     );
-    assert_eq!(state.active_view, active);
+    assert_eq!(state.active_view(), active);
     assert_eq!(state.active_buffer_id(), Some(kept));
     assert_eq!(state.window_version(), before);
     assert_eq!(state.buffers.len(), buffers);
@@ -392,38 +411,38 @@ fn directional_focus_selects_spatial_neighbors_in_a_two_by_two_layout() {
     state
         .open_text(TextBuffer::from_text("seed"), None)
         .unwrap();
-    let tab = state.active_tab.expect("tab");
-    let top_left = state.tabs[tab].focused;
+    let tab = state.active_tab().expect("tab");
+    let top_left = state.tab_focused_window(tab).unwrap();
     state
-        .split_active(crate::editor::state::Axis::Horizontal, 500)
+        .split_active(crate::windows::TileAxis::Horizontal, 500)
         .expect("right split");
-    let top_right = state.tabs[tab].focused;
+    let top_right = state.tab_focused_window(tab).unwrap();
     state.focus_pane_id(top_left).expect("focus top left");
     state
-        .split_active(crate::editor::state::Axis::Vertical, 500)
+        .split_active(crate::windows::TileAxis::Vertical, 500)
         .expect("left lower split");
-    let bottom_left = state.tabs[tab].focused;
+    let bottom_left = state.tab_focused_window(tab).unwrap();
     state.focus_pane_id(top_right).expect("focus top right");
     state
-        .split_active(crate::editor::state::Axis::Vertical, 500)
+        .split_active(crate::windows::TileAxis::Vertical, 500)
         .expect("right lower split");
-    let bottom_right = state.tabs[tab].focused;
+    let bottom_right = state.tab_focused_window(tab).unwrap();
 
     state.focus_pane_id(top_left).expect("focus top left");
     assert_eq!(
-        state.directional_pane(crate::editor::state::FocusDirection::Right),
+        state.directional_pane(crate::windows::SpatialDirection::Right),
         Ok(Some(top_right))
     );
     assert_eq!(
-        state.directional_pane(crate::editor::state::FocusDirection::Down),
+        state.directional_pane(crate::windows::SpatialDirection::Down),
         Ok(Some(bottom_left))
     );
     assert_eq!(
-        state.directional_pane(crate::editor::state::FocusDirection::Left),
+        state.directional_pane(crate::windows::SpatialDirection::Left),
         Ok(None)
     );
     assert_eq!(
-        state.directional_pane(crate::editor::state::FocusDirection::Up),
+        state.directional_pane(crate::windows::SpatialDirection::Up),
         Ok(None)
     );
 
@@ -431,11 +450,11 @@ fn directional_focus_selects_spatial_neighbors_in_a_two_by_two_layout() {
         .focus_pane_id(bottom_right)
         .expect("focus bottom right");
     assert_eq!(
-        state.directional_pane(crate::editor::state::FocusDirection::Left),
+        state.directional_pane(crate::windows::SpatialDirection::Left),
         Ok(Some(bottom_left))
     );
     assert_eq!(
-        state.directional_pane(crate::editor::state::FocusDirection::Up),
+        state.directional_pane(crate::windows::SpatialDirection::Up),
         Ok(Some(top_right))
     );
 }
@@ -448,10 +467,10 @@ fn layout_model_sequences_preserve_all_id_and_focus_invariants() {
         .unwrap();
     for step in 0..120 {
         match step % 8 {
-            0 if state.panes.len() < 8 => {
-                let _ = state.split_active(crate::editor::state::Axis::Horizontal, 500);
+            0 if state.editor_windows().count() < 8 => {
+                let _ = state.split_active(crate::windows::TileAxis::Horizontal, 500);
             }
-            1 if state.tabs.len() < 4 => {
+            1 if state.editor_tabs().count() < 4 => {
                 let _ = state.new_tab();
             }
             2 => {
@@ -468,10 +487,10 @@ fn layout_model_sequences_preserve_all_id_and_focus_invariants() {
                     .open_text(TextBuffer::from_text(&format!("buffer-{step}")), None)
                     .unwrap();
             }
-            6 if state.panes.len() > state.tabs.len() => {
+            6 if state.editor_windows().count() > state.editor_tabs().count() => {
                 let _ = state.close_active_pane();
             }
-            7 if state.tabs.len() > 1 => {
+            7 if state.editor_tabs().count() > 1 => {
                 let _ = state.close_active_tab();
             }
             _ => {}
@@ -586,10 +605,12 @@ fn presentation_mutators_mint_sources_and_rejected_preconditions_do_not_clone() 
         s.replace_buffer_from_disk(buffer, TextBuffer::from_text("new"), "/two".into());
     });
     changed(&mut state, |s| {
-        s.load_hidden_text(TextBuffer::from_text("hidden"), "/hidden".into());
+        s.load_hidden_text(TextBuffer::from_text("hidden"), "/hidden".into())
+            .unwrap();
     });
     changed(&mut state, |s| {
-        s.split_active(crate::editor::Axis::Vertical, 500).unwrap();
+        s.split_active(crate::windows::TileAxis::Vertical, 500)
+            .unwrap();
     });
     changed(&mut state, |s| {
         s.focus_pane(-1, true).unwrap();
@@ -597,7 +618,10 @@ fn presentation_mutators_mint_sources_and_rejected_preconditions_do_not_clone() 
     changed(&mut state, |s| {
         s.resize_active_pane(20).unwrap();
     });
-    let panes = state.panes.keys().collect::<Vec<_>>();
+    let panes = state
+        .editor_windows()
+        .map(|window| window.id)
+        .collect::<Vec<_>>();
     changed(&mut state, |s| {
         s.swap_panes(panes[0], panes[1]).unwrap();
     });
@@ -705,7 +729,7 @@ fn closing_a_buffer_restores_the_hidden_replacements_navigation() {
     assert!(draft.close_document(view, b).unwrap());
     let state = draft.accept(&state.version()).unwrap();
     assert_eq!(state.active_buffer_id(), Some(a));
-    let restored = &state.views[state.active_view.unwrap()];
+    let restored = &state.views[state.active_view().unwrap()];
     assert_eq!(restored.cursor, ByteOffset(8));
     assert_eq!(restored.scroll_line, 2);
 }
@@ -724,7 +748,7 @@ fn closing_last_views_preserves_navigation_without_editing_state() {
             state.new_tab().unwrap();
         } else {
             state
-                .split_active(crate::editor::state::Axis::Horizontal, 500)
+                .split_active(crate::windows::TileAxis::Horizontal, 500)
                 .unwrap();
         }
         let (a, view) = state
@@ -761,15 +785,15 @@ fn unzoom_allocates_a_view_when_its_buffer_changes() {
         .open_text(TextBuffer::from_text("a"), Some("/workspace/a".into()))
         .unwrap();
     state
-        .split_active(crate::editor::Axis::Vertical, 500)
+        .split_active(crate::windows::TileAxis::Vertical, 500)
         .unwrap();
-    let origin = state.active_view.unwrap();
+    let origin = state.active_view().unwrap();
     state.toggle_zoom().unwrap();
     let (b, _) = state
         .open_text(TextBuffer::from_text("b"), Some("/workspace/b".into()))
         .unwrap();
     state.toggle_zoom().unwrap();
     assert_eq!(state.active_buffer_id(), Some(b));
-    assert_ne!(state.active_view, Some(origin));
+    assert_ne!(state.active_view(), Some(origin));
     state.validate_layout().unwrap();
 }
