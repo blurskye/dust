@@ -1,3 +1,5 @@
+//! Workspace roots, diagnostics and picker data.
+
 #![forbid(unsafe_code)]
 
 const ABSOLUTE_ROOT_LIMIT: usize = 64;
@@ -18,7 +20,7 @@ pub use trust::TrustDatabase;
 pub use trust::TrustEvent;
 pub use trust::TrustStateError;
 pub use trust::TrustStore;
-pub use trust::WorkspaceTrustService;
+pub use trust::WorkspaceTrustWorker;
 mod diagnostics;
 pub use diagnostics::Diagnostic;
 pub use diagnostics::DiagnosticOwner;

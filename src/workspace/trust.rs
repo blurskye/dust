@@ -1,3 +1,5 @@
+//! Workspace trust records and background persistence.
+
 use std::collections::HashSet;
 use std::fs;
 use std::io;
@@ -397,7 +399,7 @@ pub enum TrustEvent {
     },
 }
 
-pub struct WorkspaceTrustService {
+pub struct WorkspaceTrustWorker {
     sender: SyncSender<TrustRequest>,
     receiver: Receiver<TrustEvent>,
     next_generation: u64,
@@ -405,7 +407,7 @@ pub struct WorkspaceTrustService {
     write_error: Option<String>,
 }
 
-impl WorkspaceTrustService {
+impl WorkspaceTrustWorker {
     pub fn start(queue_capacity: usize) -> Self {
         let (request_sender, request_receiver) = mpsc::sync_channel(queue_capacity.max(1));
         let (event_sender, event_receiver) = mpsc::sync_channel(queue_capacity.max(1));
@@ -550,7 +552,7 @@ mod generation_tests {
     use crate::workspace::trust::*;
     #[test]
     fn exhausted_generation_never_reuses_an_admitted_identity() {
-        let mut service = WorkspaceTrustService::start(1);
+        let mut service = WorkspaceTrustWorker::start(1);
         service.next_generation = u64::MAX;
         assert!(matches!(
             service.inspect_root(PathBuf::new()),
@@ -567,7 +569,7 @@ mod generation_tests {
 mod persistence_tests {
     use crate::workspace::trust::*;
 
-    fn wait_for_event(service: &mut WorkspaceTrustService) -> TrustEvent {
+    fn wait_for_event(service: &mut WorkspaceTrustWorker) -> TrustEvent {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
         loop {
             if let Some(event) = service.try_event().unwrap() {
@@ -609,7 +611,7 @@ mod persistence_tests {
         let dir = tempfile::tempdir().unwrap();
         let identity = RootIdentity::capture(dir.path()).unwrap();
         let path = dir.path().join("trust.toml");
-        let mut service = WorkspaceTrustService::start(2);
+        let mut service = WorkspaceTrustWorker::start(2);
         service.load(path.clone()).unwrap();
         assert!(matches!(
             wait_for_event(&mut service),
@@ -673,7 +675,7 @@ mod persistence_tests {
     fn shutdown_tracks_all_accepted_writes_and_retains_failures() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("trust.toml");
-        let mut service = WorkspaceTrustService::start(2);
+        let mut service = WorkspaceTrustWorker::start(2);
         service
             .persist(dir.path().to_path_buf(), vec![], vec![], vec![])
             .unwrap();

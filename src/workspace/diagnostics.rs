@@ -1,3 +1,5 @@
+//! Diagnostics grouped by source and document revision.
+
 use std::collections::BTreeMap;
 use std::time::SystemTime;
 

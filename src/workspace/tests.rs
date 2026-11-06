@@ -1,3 +1,5 @@
+//! Tests for workspace roots, diagnostics and picker data.
+
 use std::fs;
 use std::path::Path;
 
@@ -359,7 +361,7 @@ fn persisted_trust_does_not_follow_replaced_root_inode() {
 fn trust_worker_reports_distinct_generations_and_async_identity() {
     let root = tempdir().expect("root");
     let state = tempdir().expect("state");
-    let mut service = WorkspaceTrustService::start(4);
+    let mut service = WorkspaceTrustWorker::start(4);
     let identity_generation = service
         .inspect_root(root.path().to_path_buf())
         .expect("inspect");

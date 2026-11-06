@@ -1,3 +1,5 @@
+//! Workspace edit proposals and validation.
+
 use crate::editor::DocumentSnapshot;
 use std::collections::HashMap;
 use std::collections::HashSet;

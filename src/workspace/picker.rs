@@ -1,3 +1,5 @@
+//! Picker items, fuzzy ranking and streamed results.
+
 use std::collections::HashSet;
 
 use crate::editor::text::ByteRange;

@@ -1,3 +1,5 @@
+//! Workspace roots, active-root selection and trust state.
+
 use std::collections::HashSet;
 use std::path::Path;
 
