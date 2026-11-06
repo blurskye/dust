@@ -44,7 +44,7 @@ pub(super) struct SyntaxDocument<'a> {
 
 struct SyntaxFailure {
     revision: BufferRevision,
-    generation: u64,
+    request_id: u64,
     language: SyntaxLanguage,
     diagnostic: String,
 }
@@ -56,7 +56,7 @@ pub(super) enum IndentError {
     Truncated,
 }
 
-/// Owns parser admission, document identities, debounce and accepted results.
+/// Owns parser requests, document identities, debounce and accepted results.
 pub(super) struct Syntax {
     service: SyntaxWorker,
     versions: HashMap<BufferId, TextVersion>,
@@ -67,7 +67,7 @@ pub(super) struct Syntax {
     due: HashMap<BufferId, (BufferRevision, Instant)>,
     opened: HashMap<BufferId, Instant>,
     next_document: u64,
-    next_generation: u64,
+    next_request_id: u64,
     tab_width: usize,
 }
 
@@ -83,7 +83,7 @@ impl Syntax {
             due: HashMap::new(),
             opened: HashMap::new(),
             next_document: 1,
-            next_generation: 1,
+            next_request_id: 1,
             tab_width: 0,
         }
     }
@@ -100,8 +100,8 @@ impl Syntax {
         self.opened.remove(&buffer);
     }
 
-    /// Returns how many source strings were materialized, for admission-cost checks.
-    /// No source snapshot is created before revision, debounce and queue admission succeed.
+    /// Returns how many source strings were materialized, for allocation checks.
+    /// No source snapshot is created before revision, debounce and queue reservation succeed.
     pub(in crate::app) fn tick(
         &mut self,
         documents: &[SyntaxDocument<'_>],
@@ -164,7 +164,7 @@ impl Syntax {
         self.failures.retain(|buffer, failure| {
             live.get(buffer) == Some(&(failure.revision, failure.language))
                 && self.submitted.get(buffer)
-                    == Some(&(failure.revision, failure.generation, failure.language))
+                    == Some(&(failure.revision, failure.request_id, failure.language))
         });
         let mut materialized = 0;
         for doc in documents {
@@ -203,8 +203,8 @@ impl Syntax {
                 self.next_document = self.next_document.saturating_add(1);
                 id
             });
-            let generation = self.next_generation;
-            self.next_generation = self.next_generation.saturating_add(1);
+            let request_id = self.next_request_id;
+            self.next_request_id = self.next_request_id.saturating_add(1);
             let policy = SyntaxPolicy {
                 maximum_source_bytes: 8 * 1024 * 1024,
                 maximum_spans: 100_000,
@@ -216,7 +216,7 @@ impl Syntax {
                 .service
                 .submit(
                     document,
-                    generation,
+                    request_id,
                     revision.0,
                     language,
                     || {
@@ -228,7 +228,7 @@ impl Syntax {
                 .is_ok()
             {
                 self.submitted
-                    .insert(doc.buffer, (revision, generation, language));
+                    .insert(doc.buffer, (revision, request_id, language));
                 self.due.remove(&doc.buffer);
             } else {
                 break;
@@ -246,26 +246,26 @@ impl Syntax {
         live: &HashMap<BufferId, (BufferRevision, SyntaxLanguage)>,
         too_large: &str,
     ) {
-        let (document, revision, generation, language) = match &event {
+        let (document, revision, request_id, language) = match &event {
             SyntaxEvent::Parsed(result) => (
                 result.document,
                 result.revision,
-                result.generation,
+                result.request_id,
                 result.language,
             ),
             SyntaxEvent::Failed {
                 document,
                 revision,
-                generation,
+                request_id,
                 language,
                 ..
             }
             | SyntaxEvent::Skipped {
                 document,
                 revision,
-                generation,
+                request_id,
                 language,
-            } => (*document, *revision, *generation, *language),
+            } => (*document, *revision, *request_id, *language),
         };
         let Some((&buffer, _)) = self
             .documents
@@ -274,7 +274,7 @@ impl Syntax {
         else {
             return;
         };
-        if self.submitted.get(&buffer) != Some(&(BufferRevision(revision), generation, language))
+        if self.submitted.get(&buffer) != Some(&(BufferRevision(revision), request_id, language))
             || live.get(&buffer) != Some(&(BufferRevision(revision), language))
         {
             return;
@@ -293,7 +293,7 @@ impl Syntax {
                     buffer,
                     SyntaxFailure {
                         revision: BufferRevision(revision),
-                        generation,
+                        request_id,
                         language,
                         diagnostic,
                     },
@@ -305,7 +305,7 @@ impl Syntax {
                     buffer,
                     SyntaxFailure {
                         revision: BufferRevision(revision),
-                        generation,
+                        request_id,
                         language,
                         diagnostic: too_large.to_owned(),
                     },
@@ -544,7 +544,7 @@ mod tests {
     }
 
     #[test]
-    fn reload_at_the_same_revision_retires_syntax_objects() {
+    fn reload_at_the_same_revision_invalidates_syntax_objects() {
         let mut ids = SlotMap::<BufferId, ()>::with_key();
         let buffer = ids.insert(());
         let original = TextBuffer::from_text("fn old() {}\n");
@@ -626,7 +626,7 @@ mod tests {
     }
 
     #[test]
-    fn stale_generation_revision_language_and_closed_document_cannot_publish_failure() {
+    fn stale_request_revision_language_and_closed_document_cannot_publish_failure() {
         let mut ids = SlotMap::<BufferId, ()>::with_key();
         let buffer = ids.insert(());
         let document = SyntaxDocumentId(42);
@@ -636,10 +636,10 @@ mod tests {
             .submitted
             .insert(buffer, (BufferRevision(3), 7, SyntaxLanguage::Rust));
         let live = HashMap::from([(buffer, (BufferRevision(3), SyntaxLanguage::Rust))]);
-        let event = |revision, generation, language| SyntaxEvent::Failed {
+        let event = |revision, request_id, language| SyntaxEvent::Failed {
             document,
             revision,
-            generation,
+            request_id,
             language,
             diagnostic: "failure".into(),
         };
@@ -881,7 +881,7 @@ impl App {
                 self.syntax.source(*buffer) == Some(&target.text.source_version())
                     && !self.syntax_spans_source.0.contains(&(
                         *buffer,
-                        result.generation,
+                        result.request_id,
                         result.revision,
                     ))
             });
@@ -895,7 +895,7 @@ impl App {
         let source = (
             self.syntax
                 .results()
-                .map(|(buffer, result)| (*buffer, result.generation, result.revision))
+                .map(|(buffer, result)| (*buffer, result.request_id, result.revision))
                 .collect::<Vec<_>>(),
             self.state
                 .views

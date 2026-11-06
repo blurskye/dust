@@ -661,7 +661,7 @@ pub enum RegistryError {
     ContentType,
     #[error("registry Content-Length is malformed")]
     ContentLength,
-    #[error("registry response exceeds its byte ceiling")]
+    #[error("registry response exceeds its byte limit")]
     TooLarge,
     #[error("registry metadata is invalid or yanked")]
     InvalidMetadata,

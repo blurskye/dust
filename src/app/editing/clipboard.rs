@@ -85,8 +85,8 @@ pub(in crate::app) enum DeferredInput {
 pub(in crate::app) struct Clipboard {
     enabled: bool,
     tool: Option<Tool>,
-    /// Register generation last queued for copying or imported from a read.
-    synced_generation: u64,
+    /// Register revision last queued for copying or imported from a read.
+    synced_revision: u64,
     copying: Option<(mpsc::Receiver<bool>, String)>,
     queued: Option<String>,
     reading: Option<mpsc::Receiver<Option<String>>>,
@@ -98,13 +98,13 @@ pub(in crate::app) struct Clipboard {
 impl crate::app::App {
     pub(in crate::app) fn process_clipboard(&mut self) -> Option<String> {
         self.process_clipboard_paste();
-        let generation = self.state.registers.generation();
+        let revision = self.state.registers.generation();
         let output = if self.clipboard_shared() {
             self.clipboard.push(&mut self.state.value.registers)
         } else {
             None
         };
-        if self.state.registers.generation() != generation {
+        if self.state.registers.generation() != revision {
             self.state.revision = self.state.revision.wrapping_add(1);
         }
         output
@@ -117,7 +117,7 @@ impl Clipboard {
     pub(in crate::app) fn enable(&mut self, registers: &RegisterStore) {
         self.enabled = true;
         self.tool = Tool::detect();
-        self.synced_generation = registers.generation();
+        self.synced_revision = registers.generation();
     }
 
     /// Send a changed unnamed register to the system clipboard. Returns the text when it must
@@ -154,14 +154,14 @@ impl Clipboard {
     }
 
     fn queue_copy(&mut self, registers: &mut RegisterStore) {
-        if registers.generation() != self.synced_generation {
+        if registers.generation() != self.synced_revision {
             if let Some(value) = registers.get('"').cloned() {
                 registers.set('+', value.clone(), true, false);
                 // A new yank must replace any clipboard changes made by other applications,
                 // even when its text matches our last copy.
                 self.queued = Some(value.text);
             }
-            self.synced_generation = registers.generation();
+            self.synced_revision = registers.generation();
         }
     }
 
@@ -245,8 +245,8 @@ impl Clipboard {
             Err(mpsc::TryRecvError::Disconnected) => None,
         };
         self.reading = None;
-        let (invocation, source, generation) = self.paste.take().expect("pending clipboard paste");
-        if &source != current || generation != registers.generation() {
+        let (invocation, source, revision) = self.paste.take().expect("pending clipboard paste");
+        if &source != current || revision != registers.generation() {
             return Ok(None);
         }
         let text = text.ok_or("Could not read the system clipboard; paste cancelled")?;
@@ -285,7 +285,7 @@ impl Clipboard {
         registers.set(register, value.clone(), enabled, false);
         if register != '*' {
             registers.set('"', value, enabled, false);
-            self.synced_generation = registers.generation();
+            self.synced_revision = registers.generation();
         }
     }
 }
@@ -381,12 +381,12 @@ mod tests {
     use crate::app::editing::clipboard::*;
 
     impl Clipboard {
-        pub(in crate::app) fn pending_copy_fixture(generation: u64, text: &str) -> Self {
+        pub(in crate::app) fn pending_copy_fixture(revision: u64, text: &str) -> Self {
             let (_, receiver) = mpsc::channel();
             Self {
                 enabled: true,
                 tool: Some(Tool::Xclip),
-                synced_generation: generation,
+                synced_revision: revision,
                 copying: Some((receiver, text.into())),
                 ..Default::default()
             }
@@ -395,16 +395,16 @@ mod tests {
         pub(in crate::app) fn pending_read_fixture(
             invocation: CommandInvocation,
             source: EditorWindowVersion,
-            generation: u64,
+            revision: u64,
         ) -> (Self, mpsc::Sender<Option<String>>) {
             let (sender, receiver) = mpsc::channel();
             (
                 Self {
                     enabled: true,
                     tool: Some(Tool::Xclip),
-                    synced_generation: generation,
+                    synced_revision: revision,
                     reading: Some(receiver),
-                    paste: Some((invocation, source, generation)),
+                    paste: Some((invocation, source, revision)),
                     ..Default::default()
                 },
                 sender,

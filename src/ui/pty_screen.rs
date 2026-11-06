@@ -585,13 +585,13 @@ pub fn encode_key(key: PtyInputKey, application: bool) -> &'static [u8] {
         (PtyInputKey::PageDown, _) => b"\x1b[6~",
     }
 }
-pub fn encode_paste(text: &str, bracketed: bool, ceiling: usize) -> Option<Vec<u8>> {
+pub fn encode_paste(text: &str, bracketed: bool, byte_limit: usize) -> Option<Vec<u8>> {
     let sanitized = text
         .replace("\x1b[200~", "")
         .replace("\x1b[201~", "")
         .replace('\x1b', "");
     let needed = sanitized.len() + if bracketed { 12 } else { 0 };
-    if needed > ceiling {
+    if needed > byte_limit {
         return None;
     }
     let mut out = Vec::with_capacity(needed);
@@ -622,7 +622,7 @@ pub struct TerminalMouseEncoding {
     pub height: u16,
     pub mode: PtyMouseMode,
     pub sgr: bool,
-    pub ceiling: usize,
+    pub byte_limit: usize,
 }
 
 pub fn encode_terminal_mouse_event(input: TerminalMouseEncoding) -> Option<Vec<u8>> {
@@ -637,7 +637,7 @@ pub fn encode_terminal_mouse_event(input: TerminalMouseEncoding) -> Option<Vec<u
         height,
         mode,
         sgr,
-        ceiling,
+        byte_limit,
     } = input;
     if column < left
         || row < top
@@ -663,7 +663,7 @@ pub fn encode_terminal_mouse_event(input: TerminalMouseEncoding) -> Option<Vec<u
         crate::editor::input::TerminalMouseInput::ScrollRight => PtyMouseEvent::Press(67),
     };
     let bytes = encode_sgr_mouse(event, column - left, row - top, mode, sgr, modifiers)?;
-    (bytes.len() <= ceiling).then_some(bytes)
+    (bytes.len() <= byte_limit).then_some(bytes)
 }
 
 pub fn encode_sgr_mouse(
@@ -923,7 +923,7 @@ mod tests {
                         height: 6,
                         mode,
                         sgr: true,
-                        ceiling: 64,
+                        byte_limit: 64,
                     },
                 )
                 .unwrap();
@@ -1254,7 +1254,7 @@ mod tests {
                     height: 6,
                     mode: PtyMouseMode::Click,
                     sgr: true,
-                    ceiling: 64,
+                    byte_limit: 64,
                 }
             )
             .unwrap(),
@@ -1273,7 +1273,7 @@ mod tests {
                     height: 6,
                     mode: PtyMouseMode::Any,
                     sgr: true,
-                    ceiling: 64,
+                    byte_limit: 64,
                 }
             )
             .is_none()

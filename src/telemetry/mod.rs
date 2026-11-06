@@ -210,7 +210,7 @@ fn write_live_snapshot(path: &PathBuf, snapshot: &LiveCrashSnapshot) -> std::io:
     if bytes.len() > 64 * 1024 {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
-            "crash snapshot ceiling",
+            "crash snapshot size limit",
         ));
     }
     let temp = path.with_extension(format!("tmp-{}", std::process::id()));

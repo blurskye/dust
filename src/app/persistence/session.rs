@@ -1,4 +1,4 @@
-//! Session history and source-bound restore obligations.
+//! Saved session history and restore requests.
 use crate::app::input::InputState;
 use crate::app::persistence::Persistence;
 use crate::app::windows::NavigationStamp;

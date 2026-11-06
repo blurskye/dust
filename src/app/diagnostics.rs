@@ -1,4 +1,4 @@
-//! Canonical diagnostics, source retirement, selection and derived presentation.
+//! Diagnostics, stale-source cleanup, selection and presentation.
 use crate::editor::BufferId;
 use crate::editor::EditorState;
 use crate::editor::EditorWindowVersion;
@@ -150,7 +150,7 @@ impl Diagnostics {
         editor: &EditorState,
     ) -> Result<(), String> {
         if !self.current(producer) || batches.len() > self.store.limits().0 {
-            return Err("diagnostic source retired or oversized".into());
+            return Err("diagnostic source stale or oversized".into());
         }
         let mut uris = std::collections::BTreeSet::new();
         for batch in &batches {
@@ -177,7 +177,7 @@ impl Diagnostics {
         editor: &EditorState,
     ) -> Result<PathBuf, String> {
         if !self.current(&batch.producer) {
-            return Err("diagnostic producer retired".into());
+            return Err("diagnostic producer stale".into());
         }
         let path =
             crate::language::lsp::path_from_file_uri(&batch.uri).ok_or("invalid diagnostic URI")?;
@@ -328,18 +328,18 @@ impl Diagnostics {
         }
         self.dirty = true;
     }
-    pub(in crate::app) fn retire_documents(&mut self, editor: &EditorState) {
+    pub(in crate::app) fn clear_stale_documents(&mut self, editor: &EditorState) {
         self.follow_edits(editor);
-        let retired = self
+        let stale = self
             .batches
             .iter()
             .filter(|(_, batch)| !batch.current(editor))
             .map(|(key, _)| key.clone())
             .collect::<Vec<_>>();
-        if retired.is_empty() {
+        if stale.is_empty() {
             return;
         }
-        for (owner, uri) in retired {
+        for (owner, uri) in stale {
             self.store.clear_owner_uri(&owner, &uri);
             self.batches.remove(&(owner, uri));
         }
@@ -471,7 +471,7 @@ impl Diagnostics {
             };
             let text = &buffer.text;
             // Only edits of the same file in this editor, which are still remembered, move them;
-            // a reload or another file retires them as before.
+            // a reload or another file invalidates them.
             if text.revision() == revision
                 || !document.editor.same_editor(&editor.window_version())
                 || buffer.path.as_ref() != Some(&document.path)
@@ -503,7 +503,7 @@ impl Diagnostics {
         }
     }
     pub(in crate::app) fn projection(&mut self, editor: &EditorState) -> Option<Vec<UiDiagnostic>> {
-        self.retire_documents(editor);
+        self.clear_stale_documents(editor);
         if !std::mem::take(&mut self.dirty) {
             return None;
         }

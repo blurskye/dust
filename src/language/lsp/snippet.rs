@@ -63,7 +63,7 @@ pub fn parse_snippet_with_variables(
     variables: &HashMap<String, String>,
 ) -> Result<ParsedSnippet, String> {
     if source.len() > maximum_bytes {
-        return Err("snippet exceeds byte ceiling".into());
+        return Err("snippet exceeds byte limit".into());
     }
     // TextEdit performs this same normalization when the completion is inserted.
     let normalized = crate::editor::text::TextEdit::new(
@@ -448,7 +448,7 @@ impl<'a> Resolver<'a> {
                 }
             }
             if text.len() > self.maximum_bytes {
-                return Err("expanded snippet exceeds byte ceiling".into());
+                return Err("expanded snippet exceeds byte limit".into());
             }
         }
         Ok(())
@@ -494,7 +494,7 @@ impl Transform {
                 maximum_bytes,
             )?);
             if output.len() > maximum_bytes {
-                return Err("expanded snippet exceeds byte ceiling".into());
+                return Err("expanded snippet exceeds byte limit".into());
             }
             end = matched.end();
             if !self.options.contains('g') {
@@ -503,7 +503,7 @@ impl Transform {
         }
         output.push_str(&value[end..]);
         if output.len() > maximum_bytes {
-            return Err("expanded snippet exceeds byte ceiling".into());
+            return Err("expanded snippet exceeds byte limit".into());
         }
         Ok(output)
     }
@@ -589,7 +589,7 @@ fn format_capture(
             parser.cursor += 1;
         }
         if output.len() > maximum_bytes {
-            return Err("expanded snippet exceeds byte ceiling".into());
+            return Err("expanded snippet exceeds byte limit".into());
         }
     }
     Ok(output)
@@ -683,7 +683,7 @@ mod tests {
         assert_eq!(parsed.tabstops.len(), 25);
     }
     #[test]
-    fn transform_replacements_obey_the_expansion_ceiling() {
+    fn transform_replacements_obey_the_expansion_limit() {
         let source = format!(
             "${{1:{}}} ${{1/(.*)/{}/}}",
             "x".repeat(1024),

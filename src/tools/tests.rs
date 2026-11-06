@@ -815,7 +815,7 @@ fn await_lsp_response(
             )?;
         }
     }
-    Err(format!("LSP response {id} exceeded the message ceiling"))
+    Err(format!("LSP response {id} exceeded the message limit"))
 }
 
 #[test]
@@ -1691,7 +1691,7 @@ fn version_service_shutdown_with_full_results_is_bounded() {
                 Err(std::sync::mpsc::TrySendError::Full(())) => {
                     assert!(
                         std::time::Instant::now() < deadline,
-                        "probe admission timed out"
+                        "probe submission timed out"
                     );
                     thread::sleep(Duration::from_millis(2));
                 }
@@ -2126,10 +2126,10 @@ fn package_service_keeps_every_completion_under_backpressure() {
                     break;
                 }
                 Err(crate::tools::PackageError::QueueFull) => {
-                    assert!(Instant::now() < deadline, "package admission timed out");
+                    assert!(Instant::now() < deadline, "package submission timed out");
                     thread::sleep(Duration::from_millis(2));
                 }
-                Err(error) => panic!("package admission failed: {error}"),
+                Err(error) => panic!("package submission failed: {error}"),
             }
         }
     }
@@ -2178,10 +2178,10 @@ fn registry_service_keeps_every_result_under_backpressure() {
                     break;
                 }
                 Err(crate::tools::RegistryError::QueueFull) => {
-                    assert!(Instant::now() < deadline, "registry admission timed out");
+                    assert!(Instant::now() < deadline, "registry submission timed out");
                     thread::sleep(Duration::from_millis(2));
                 }
-                Err(error) => panic!("registry admission failed: {error}"),
+                Err(error) => panic!("registry submission failed: {error}"),
             }
         }
     }

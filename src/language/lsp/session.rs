@@ -1303,7 +1303,7 @@ pub(super) fn handle_command(
                     completed.try_send(write_apply_response(stdin, request_id, applied, reason));
             } else {
                 let _ = completed.try_send(Err(
-                    "requesting edit identity retired before response".into()
+                    "requesting edit identity changed before response".into()
                 ));
             }
         }
@@ -2020,7 +2020,7 @@ while True:
     }
 
     #[test]
-    fn reopening_a_document_retires_the_old_diagnostic_transport() {
+    fn reopening_a_document_invalidates_the_old_diagnostic_transport() {
         use crate::editor::EditorState;
         use crate::editor::text::TextBuffer;
         let mut editor = EditorState::new("/fixture".into());

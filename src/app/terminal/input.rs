@@ -17,7 +17,7 @@ impl Terminals {
     ) -> Result<bool, String> {
         let tab = self.tabs.get(&id).ok_or("terminal closed")?;
         if tab.scope != workspace.version() || !Arc::ptr_eq(&tab.epoch, &self.epoch) {
-            return Err("terminal input source retired".into());
+            return Err("terminal input source is stale".into());
         }
         if tab.stopping {
             return Err("terminal stop is pending".into());
@@ -27,16 +27,16 @@ impl Terminals {
         {
             return Ok(false);
         }
-        let ceiling = crate::app::terminal::TERMINAL_MAXIMUM_INPUT_BYTES;
+        let byte_limit = crate::app::terminal::TERMINAL_MAXIMUM_INPUT_BYTES;
         let bytes = match input {
             TerminalInput::Text(text) => {
-                if text.len() > ceiling {
+                if text.len() > byte_limit {
                     return Err("terminal input exceeds limit".into());
                 }
                 Some(text.as_bytes().to_vec())
             }
             TerminalInput::Paste(text) => {
-                crate::ui::encode_paste(text, tab.screen.bracketed_paste(), ceiling)
+                crate::ui::encode_paste(text, tab.screen.bracketed_paste(), byte_limit)
             }
             TerminalInput::Focus(focused) => {
                 crate::ui::encode_focus(focused, tab.screen.focus_reporting()).map(<[u8]>::to_vec)
@@ -56,7 +56,7 @@ impl Terminals {
                     height: rect.height,
                     mode: tab.screen.mouse_mode(),
                     sgr: tab.screen.sgr_mouse(),
-                    ceiling,
+                    byte_limit,
                 })
             }
         };
@@ -64,8 +64,8 @@ impl Terminals {
             return Ok(false);
         };
         let pty = tab.pty.ok_or("terminal has not started")?;
-        let admission = self.service.reserve_input(pty).map_err(|e| e.to_string())?;
-        admission.submit(bytes).map_err(|e| e.to_string())?;
+        let reservation = self.service.reserve_input(pty).map_err(|e| e.to_string())?;
+        reservation.submit(bytes).map_err(|e| e.to_string())?;
         Ok(true)
     }
     pub(in crate::app) fn enter_terminal_normal_mode(&mut self, id: PtyId) {

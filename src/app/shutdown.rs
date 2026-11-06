@@ -8,8 +8,7 @@ use std::time::Instant;
 
 impl App {
     pub(in crate::app) fn finish_shutdown(&mut self) -> Result<(), InteractiveError> {
-        // The existing two-second exit budget is shared, not extended. Owner
-        // methods admit/drain/signal only; no worker join runs on this thread.
+        // Workers share a two-second exit budget; none are joined on this thread.
         self.finish_shutdown_before(Instant::now() + Duration::from_secs(2))
     }
     pub(in crate::app) fn finish_shutdown_before(
@@ -26,14 +25,14 @@ impl App {
             self.health.record(
                 crate::telemetry::LogLevel::Info,
                 "plugins",
-                "discarded-result-obligations-at-shutdown",
+                "discarded-pending-results-at-shutdown",
                 std::collections::BTreeMap::from([("count".into(), discarded.to_string())]),
             );
         }
         for notice in self.workspace_edits.discard_staged_resources("shutdown") {
             diagnostics.push(notice.to_string());
         }
-        self.retire_explorer_intents();
+        self.cancel_explorer_intents();
         for name in self.tasks.names() {
             if let Ok(owner) = crate::workspace::DiagnosticOwner::new(format!("task:{name}")) {
                 self.diagnostics.clear_owner(&owner);
@@ -45,7 +44,7 @@ impl App {
         self.terminal_session.begin_shutdown();
         self.reject_terminal_responses("terminal shutdown requested");
         self.drain_linter_sources();
-        self.documents.retire_startup();
+        self.documents.cancel_startup();
         self.queue_dirty_recovery_before_exit();
         while (self
             .recovery
@@ -97,7 +96,7 @@ impl App {
         }
         let unfinished_reads = self
             .tasks
-            .finish_linter_obligations("linter source outcome unknown at shared shutdown deadline");
+            .finish_linter_reads("linter source outcome unknown at shared shutdown deadline");
         if unfinished_reads != 0 {
             diagnostics.push(format!(
                 "{unfinished_reads} linter source reads unfinished at shutdown"
@@ -117,12 +116,12 @@ impl App {
             diagnostics.push(format!("{} PTY worker outcomes remain at shared shutdown deadline; detached I/O or descendants may remain",self.terminal_session.pending()));
         }
         if self.debugger_session.pending() != 0 {
-            diagnostics.push(format!("{} DAP worker groups/reply receipts remain at shared shutdown deadline; I/O, reply and descendant outcomes unknown",self.debugger_session.pending()));
+            diagnostics.push(format!("{} DAP worker groups/reply deliveries remain at shared shutdown deadline; I/O, reply and descendant outcomes unknown",self.debugger_session.pending()));
         }
         let incomplete = self.documents.has_work() || unwritten != 0;
-        // Keep admitted resource outcomes owned through the drain; only retire
-        // unfinished publication after the existing deadline, never claim rollback.
-        self.finish_workspace_resource_obligations("shared shutdown deadline");
+        // Keep tracking resource results until the deadline. Dropping unfinished
+        // results does not roll back filesystem operations.
+        self.finish_workspace_resources("shared shutdown deadline");
         self.documents.stop_worker();
         self.persistence
             .begin_shutdown(self.configuration.settings().persistence.enabled);

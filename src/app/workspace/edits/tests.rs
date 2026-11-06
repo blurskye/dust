@@ -144,7 +144,7 @@ fn workspace_approval_restores_unopened_file_history_on_a_worker() {
 }
 
 #[test]
-fn workspace_preview_owns_selection_and_rejects_retired_or_replaced_sources_before_clone() {
+fn workspace_preview_owns_selection_and_rejects_stale_or_replaced_sources_before_clone() {
     let root = tempfile::tempdir().unwrap();
     let scope = WorkspaceState::new(
         crate::workspace::WorkspaceId(1),
@@ -205,16 +205,20 @@ fn workspace_preview_owns_selection_and_rejects_retired_or_replaced_sources_befo
         resources: Vec::new(),
     };
     let mut owner = WorkspaceEdits::default();
-    let retired = owner
+    let invalidated = owner
         .begin(version.clone(), 1, editor.workspace_edit_sources().unwrap())
         .unwrap();
     owner.reject();
     let id = owner
         .begin(version.clone(), 1, editor.workspace_edit_sources().unwrap())
         .unwrap();
-    assert!(id.id() > retired.id());
+    assert!(id.id() > invalidated.id());
     let before = TextBuffer::test_materializations();
-    assert!(owner.build(prepared(retired), &scope, &version, 1).is_err());
+    assert!(
+        owner
+            .build(prepared(invalidated), &scope, &version, 1)
+            .is_err()
+    );
     let mut foreign_owner = WorkspaceEdits::default();
     let foreign_ticket = foreign_owner
         .begin(version.clone(), 1, editor.workspace_edit_sources().unwrap())
@@ -316,7 +320,7 @@ fn workspace_preview_owns_selection_and_rejects_retired_or_replaced_sources_befo
             .any(|(_, b)| b.path.as_ref() == Some(&hidden) && b.text.to_string() == "H" && b.dirty)
     );
     assert!(owner.accepted(editor.publication()).is_err());
-    // A single real bounded document lane proves read/create admission, queue
+    // A single real bounded document lane proves read/create submission, queue
     // refusal, cancellation, and a late terminal without reviving old preparation.
     use crate::app::documents::DocumentEvent;
     use crate::app::documents::Documents;
@@ -351,15 +355,15 @@ fn workspace_preview_owns_selection_and_rejects_retired_or_replaced_sources_befo
         (vec![root.path().into()], 1024),
     )
     .unwrap();
-    let permit = io.prepare_io(0, &workspace, &1, &editor).unwrap();
-    documents.submit_workspace_io(permit).unwrap();
-    let permit = io.prepare_io(1, &workspace, &1, &editor).unwrap();
-    assert!(!documents.submit_workspace_io(permit).unwrap());
+    let prepared = io.prepare_io(0, &workspace, &1, &editor).unwrap();
+    documents.submit_workspace_io(prepared).unwrap();
+    let prepared = io.prepare_io(1, &workspace, &1, &editor).unwrap();
+    assert!(!documents.submit_workspace_io(prepared).unwrap());
     assert!(matches!(io.next_file(), Some((1, InputFile::Create(path))) if path == &created));
     assert_eq!(documents.pending_count(), 1);
-    let retired = io.reject();
-    assert_eq!(retired.requests.len(), 1);
-    assert!(documents.cancel_request(retired.requests[0]));
+    let invalidated = io.reject();
+    assert_eq!(invalidated.requests.len(), 1);
+    assert!(documents.cancel_request(invalidated.requests[0]));
     let ticket = io
         .begin(version.clone(), 1, editor.workspace_edit_sources().unwrap())
         .unwrap();
@@ -385,8 +389,8 @@ fn workspace_preview_owns_selection_and_rejects_retired_or_replaced_sources_befo
     };
     assert!(matches!(wait(&mut documents), DocumentEvent::Discarded));
     assert!(io.preparing());
-    let permit = io.prepare_io(0, &workspace, &1, &editor).unwrap();
-    documents.submit_workspace_io(permit).unwrap();
+    let prepared = io.prepare_io(0, &workspace, &1, &editor).unwrap();
+    documents.submit_workspace_io(prepared).unwrap();
     let mut foreign_documents = Documents::new(
         VfsWorker::start(2),
         &StartupTarget::Dashboard {
@@ -415,12 +419,12 @@ fn workspace_preview_owns_selection_and_rejects_retired_or_replaced_sources_befo
             (vec![root.path().into()], 1024),
         )
         .unwrap();
-    let permit = foreign_io.prepare_io(0, &workspace, &1, &editor).unwrap();
-    foreign_documents.submit_workspace_io(permit).unwrap();
+    let prepared = foreign_io.prepare_io(0, &workspace, &1, &editor).unwrap();
+    foreign_documents.submit_workspace_io(prepared).unwrap();
     let DocumentEvent::WorkspaceIo(foreign_reply) = wait(&mut foreign_documents) else {
         panic!("foreign read");
     };
-    assert_eq!(foreign_reply.id().0, retired.requests[0].0 + 1);
+    assert_eq!(foreign_reply.id().0, invalidated.requests[0].0 + 1);
     assert!(
         !io.owns_preparation_reply(&foreign_reply),
         "equal VFS IDs do not substitute another worker"
@@ -443,8 +447,8 @@ fn workspace_preview_owns_selection_and_rejects_retired_or_replaced_sources_befo
     };
     assert_eq!(
         reply.id().0,
-        retired.requests[0].0 + 1,
-        "full admission did not mint another VFS ID"
+        invalidated.requests[0].0 + 1,
+        "full queue did not allocate another VFS ID"
     );
     assert!(io.owns_preparation_reply(&reply));
     assert!(!owner.owns_preparation_reply(&reply));
@@ -467,8 +471,8 @@ fn workspace_preview_owns_selection_and_rejects_retired_or_replaced_sources_befo
         (vec![root.path().into()], 1024),
     )
     .unwrap();
-    let permit = io.prepare_io(0, &workspace, &1, &editor).unwrap();
-    documents.submit_workspace_io(permit).unwrap();
+    let prepared = io.prepare_io(0, &workspace, &1, &editor).unwrap();
+    documents.submit_workspace_io(prepared).unwrap();
     let DocumentEvent::WorkspaceIo(reply) = wait(&mut documents) else {
         panic!("owned create inspection");
     };
@@ -500,8 +504,8 @@ fn workspace_preview_owns_selection_and_rejects_retired_or_replaced_sources_befo
         (vec![root.path().into()], 1024),
     )
     .unwrap();
-    let permit = io.prepare_io(0, &workspace, &1, &editor).unwrap();
-    assert!(documents.submit_workspace_io(permit).is_err());
+    let prepared = io.prepare_io(0, &workspace, &1, &editor).unwrap();
+    assert!(documents.submit_workspace_io(prepared).is_err());
     io.reject();
     documents.stop_worker();
     let resource = root.path().join("resource");
@@ -528,12 +532,12 @@ fn workspace_preview_owns_selection_and_rejects_retired_or_replaced_sources_befo
     );
     {
         // An unused loan neither consumes the stage nor submits work.
-        let _permit = resources
+        let _prepared = resources
             .prepare_resource(&workspace, &1, &editor)
             .unwrap()
             .unwrap();
     }
-    let (notices, requests) = resources.retire_resources("configuration changed");
+    let (notices, requests) = resources.invalidate_resources("configuration changed");
     assert_eq!(notices.len(), 1);
     assert!(requests.is_empty());
     assert!(
@@ -544,7 +548,7 @@ fn workspace_preview_owns_selection_and_rejects_retired_or_replaced_sources_befo
     );
     assert!(
         resources
-            .retire_resources("configuration changed")
+            .invalidate_resources("configuration changed")
             .0
             .is_empty()
     );
@@ -576,7 +580,7 @@ fn workspace_preview_owns_selection_and_rejects_retired_or_replaced_sources_befo
                 .unwrap(),
         )
         .unwrap();
-    let (_, requests) = resources.retire_resources("configuration changed");
+    let (_, requests) = resources.invalidate_resources("configuration changed");
     assert_eq!(requests.len(), 1);
     let cancelled = writes
         .cancel_workspace_queued(requests[0])
@@ -617,7 +621,7 @@ fn workspace_preview_owns_selection_and_rejects_retired_or_replaced_sources_befo
         panic!("disk terminal");
     };
     assert!(!resource.exists() && target.exists());
-    let (_, requests) = resources.retire_resources("configuration changed");
+    let (_, requests) = resources.invalidate_resources("configuration changed");
     assert_eq!(requests.len(), 1);
     assert!(inspections.cancel_workspace_queued(requests[0]).is_none());
     assert!(
@@ -717,8 +721,8 @@ fn stage_resource(
             (vec![source.parent().unwrap().into()], 1024),
         )
         .unwrap();
-    let permit = owner.prepare_io(0, workspace, &1, editor).unwrap();
-    documents.submit_workspace_io(permit).unwrap();
+    let prepared = owner.prepare_io(0, workspace, &1, editor).unwrap();
+    documents.submit_workspace_io(prepared).unwrap();
     let crate::app::documents::DocumentEvent::WorkspaceIo(reply) =
         wait_workspace_document(documents, editor)
     else {
@@ -795,8 +799,8 @@ fn new_file_text_uses_one_creation_snapshot_and_one_draft() {
         .unwrap();
     let (index, file) = owner.next_file().unwrap();
     assert!(matches!(file, InputFile::Create(_)));
-    let permit = owner.prepare_io(index, &workspace, &1, &editor).unwrap();
-    documents.submit_workspace_io(permit).unwrap();
+    let prepared = owner.prepare_io(index, &workspace, &1, &editor).unwrap();
+    documents.submit_workspace_io(prepared).unwrap();
     let crate::app::documents::DocumentEvent::WorkspaceIo(reply) =
         wait_workspace_document(&mut documents, &editor)
     else {

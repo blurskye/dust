@@ -370,7 +370,7 @@ mod tests {
         owner
     }
     #[test]
-    fn discovery_is_bounded_exact_once_and_rejects_retired_workspace_versions() {
+    fn discovery_is_bounded_exact_once_and_rejects_stale_workspace_versions() {
         let directory = tempfile::tempdir().unwrap();
         std::fs::write(
             directory.path().join("Cargo.toml"),

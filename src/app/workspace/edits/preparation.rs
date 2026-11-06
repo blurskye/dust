@@ -1,4 +1,4 @@
-//! Protocol-neutral file preparation and one-shot I/O admission.
+//! Workspace file preparation and tracked I/O submission.
 use crate::app::workspace::edits::OriginKey;
 use crate::app::workspace::edits::Source;
 use crate::app::workspace::edits::WorkspaceEdits;
@@ -79,16 +79,16 @@ impl PreparedFiles<'_> {
         self.snapshots.iter().map(|s| s.canonical_path.as_path())
     }
 }
-// This loan cannot outlive its preparation or the live admission sources.
-// Submission records its terminal obligation before releasing the loan.
-pub(in crate::app) struct IoPermit<'a> {
+// This borrow keeps the preparation and its sources alive until submission.
+// Submission records the pending reply before releasing the borrow.
+pub(in crate::app) struct PreparedIo<'a> {
     preparation: &'a mut Preparation,
     index: usize,
     _workspace: &'a crate::app::workspace::Workspace,
     _configuration: &'a u64,
     _editor: &'a crate::editor::EditorState,
 }
-impl IoPermit<'_> {
+impl PreparedIo<'_> {
     pub(in crate::app) fn file(&self, worker: &Arc<()>) -> Result<InputFile, String> {
         if self
             .preparation
@@ -121,7 +121,7 @@ impl IoPermit<'_> {
         let Slot::Waiting(file) =
             std::mem::replace(&mut self.preparation.slots[self.index], Slot::Pending(id))
         else {
-            return Err("workspace operation changed during admission".into());
+            return Err("workspace operation changed during submission".into());
         };
         self.preparation
             .requests
@@ -221,7 +221,7 @@ impl WorkspaceEdits {
         let p = self
             .preparing
             .as_mut()
-            .ok_or("workspace preparation retired")?;
+            .ok_or("workspace preparation is stale")?;
         let Some(Slot::Waiting(InputFile::Read(path))) = p.slots.get(index) else {
             return Err("workspace snapshot did not match a pending read".into());
         };
@@ -241,11 +241,11 @@ impl WorkspaceEdits {
         workspace: &'a crate::app::workspace::Workspace,
         configuration: &'a u64,
         editor: &'a crate::editor::EditorState,
-    ) -> Result<IoPermit<'a>, String> {
+    ) -> Result<PreparedIo<'a>, String> {
         let p = self
             .preparing
             .as_mut()
-            .ok_or("workspace preparation retired")?;
+            .ok_or("workspace preparation is stale")?;
         if !p.source.current(&workspace.version(), *configuration) || *configuration == u64::MAX {
             return Err("workspace preparation source changed or exhausted".into());
         }
@@ -253,7 +253,7 @@ impl WorkspaceEdits {
             return Err("workspace operation is not waiting".into());
         };
         editor.validate_workspace_sources(&p.source.editor, std::iter::once(file.path()))?;
-        Ok(IoPermit {
+        Ok(PreparedIo {
             preparation: p,
             index,
             _workspace: workspace,
@@ -289,7 +289,7 @@ impl WorkspaceEdits {
         let p = self
             .preparing
             .as_mut()
-            .ok_or("workspace preparation retired")?;
+            .ok_or("workspace preparation is stale")?;
         let (index, file, _) = p
             .requests
             .remove(&id)

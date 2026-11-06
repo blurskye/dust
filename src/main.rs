@@ -220,12 +220,12 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         }
         const MAXIMUM: u64 = 16 * 1024 * 1024;
         if metadata.len() > MAXIMUM {
-            return Err("configuration exceeds migration ceiling".into());
+            return Err("configuration exceeds migration limit".into());
         }
         let mut bytes = Vec::new();
         file.take(MAXIMUM + 1).read_to_end(&mut bytes)?;
         if bytes.len() as u64 > MAXIMUM {
-            return Err("configuration exceeds migration ceiling".into());
+            return Err("configuration exceeds migration limit".into());
         }
         let source = String::from_utf8(bytes)?;
         let (migrated, changed) = dust::config::migrate_config_source(&source)

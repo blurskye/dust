@@ -317,7 +317,7 @@ pub(super) fn handle_server_message(context: ServerMessageContext<'_>, message: 
                 } else {
                     let _ = write_content_length_message(
                         stdin,
-                        &json!({"jsonrpc":"2.0","id":request_id.value(),"result":{"applied":false,"failureReason":"workspace edit admission queue is full"}}),
+                        &json!({"jsonrpc":"2.0","id":request_id.value(),"result":{"applied":false,"failureReason":"workspace edit request queue is full"}}),
                     );
                 }
             }

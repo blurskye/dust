@@ -1,8 +1,4 @@
-//! Parsing unified patch text into the diff structure the renderer draws.
-//!
-//! The text this parses is what `src/workspace/git/log.rs` already emits through git2's patch
-//! printer and what the session layer already hands to the hunk preview, so there is one
-//! patch producer and this module only reads its output.
+//! Unified patch parsing and the diff data used by previews.
 
 use unicode_segmentation::UnicodeSegmentation;
 

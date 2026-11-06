@@ -1,4 +1,4 @@
-//! Persistence I/O, history, capture and original restore obligations.
+//! Persistence I/O, history, session capture and pending restores.
 //! Dispatch composes other owners' snapshots and consumes checked editor/window plans.
 use crate::persistence::PersistedState;
 use crate::persistence::PersistenceError;
@@ -142,7 +142,7 @@ impl Persistence {
     ) -> Option<crate::persistence::PersistedLocation> {
         self.navigation_reads.remove(&id)
     }
-    pub(in crate::app) fn retire_document_request(&mut self, id: crate::files::RequestId) {
+    pub(in crate::app) fn forget_document_request(&mut self, id: crate::files::RequestId) {
         self.navigation_reads.remove(&id);
     }
     pub(in crate::app) fn request_save_notice(&mut self) {
@@ -210,15 +210,15 @@ impl Persistence {
                     return Some(Err(self.failed(error)));
                 }
             };
-            let generation = match &event {
-                PersistenceEvent::Loaded { generation, .. }
-                | PersistenceEvent::Saved { generation }
-                | PersistenceEvent::Failed { generation, .. } => *generation,
+            let request_id = match &event {
+                PersistenceEvent::Loaded { request_id, .. }
+                | PersistenceEvent::Saved { request_id }
+                | PersistenceEvent::Failed { request_id, .. } => *request_id,
             };
             let Some((expected, saving)) = self.pending else {
                 continue;
             };
-            if expected != generation {
+            if expected != request_id {
                 continue;
             }
             self.pending = None;
@@ -228,7 +228,7 @@ impl Persistence {
                 }
                 PersistenceEvent::Loaded { .. } if !saving => {}
                 PersistenceEvent::Saved { .. } if saving => {
-                    self.saved_on_exit = self.exit_request == Some(generation);
+                    self.saved_on_exit = self.exit_request == Some(request_id);
                     if !self.save_requested && std::mem::take(&mut self.save_notice) {
                         self.saved_notice = true;
                     }
@@ -637,7 +637,7 @@ impl App {
             .map(|root| root.identity.canonical_path.clone())
             .collect::<Vec<_>>();
         while let Some(path) = self.persistence.next_restore_path() {
-            match self.documents.check_admission() {
+            match self.documents.check_capacity() {
                 Ok(()) => {}
                 Err(crate::files::VfsError::QueueFull) => return,
                 Err(error) => {
@@ -740,8 +740,8 @@ impl App {
         match result {
             Ok((state, paths, pinned)) => {
                 *self.state = state;
-                let retired_confirmation = self.extension.reset_runtime();
-                if retired_confirmation
+                let cancelled_confirmation = self.extension.reset_runtime();
+                if cancelled_confirmation
                     && self
                         .input
                         .prompt()

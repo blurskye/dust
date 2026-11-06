@@ -205,7 +205,7 @@ impl Debugger {
             if adapter.arguments.len() > crate::app::debugger::MAXIMUM_DEBUG_ARGUMENTS
                 || adapter.environment.len() > crate::app::debugger::MAXIMUM_DEBUG_ENVIRONMENT
             {
-                return Err("debug configuration exceeds admission bounds".into());
+                return Err("debug configuration exceeds its size limits".into());
             }
             (
                 name.to_owned(),
@@ -332,9 +332,7 @@ impl Debugger {
                             .sum::<usize>()
                         > 1024 * 1024
                 {
-                    return Err(
-                        "original debugger terminal profile exceeds admission bounds".into(),
-                    );
+                    return Err("original debugger terminal profile exceeds its size limits".into());
                 }
                 let root = roots
                     .iter()
@@ -393,7 +391,7 @@ impl Debugger {
                     && l.scope == workspace.version()
                     && matches!(l.phase, Phase::Requested)
             })
-            .ok_or("debug launch intent retired or foreign")?;
+            .ok_or("debug launch intent is stale or foreign")?;
         workspace
             .execution_allowed()
             .map_err(|_| "debuggers run only in a trusted workspace".to_owned())?;
@@ -512,7 +510,7 @@ impl Debugger {
                 })
             })
         {
-            return Err("debug launch source retired".into());
+            return Err("debug launch source is stale".into());
         }
         match launch.phase {
             Phase::Requested | Phase::Discovering(_) | Phase::Preflight { .. } => {}
@@ -562,7 +560,7 @@ impl Debugger {
                 // intent, and the identity must describe what was actually asked for.
                 let target = launch.identity();
                 let breakpoints = self.startup_breakpoints();
-                let admission = self.service.admission().map_err(|e| e.to_string())?;
+                let reservation = self.service.reservation().map_err(|e| e.to_string())?;
                 let mut paths = vec![launch.cwd.clone()];
                 if let Some(program) = &launch.program {
                     paths.push(program.clone());
@@ -623,7 +621,7 @@ impl Debugger {
                     };
                     arguments.insert("program".into(), serde_json::json!(program));
                 }
-                admission
+                reservation
                     .submit(
                         DapLaunch {
                             adapter: launch.session.adapter,
@@ -753,7 +751,7 @@ mod tests {
         owner.stop().unwrap();
         let (service, _adapter) = crate::debugger::test_session();
         owner.service = service;
-        // The application's terminated-event handler retires the service directly.
+        // The application's terminated-event handler stops the service directly.
         owner.service.stop().unwrap();
         owner
             .request_restart((&policy, &terminals, 1), &workspace, &tools)

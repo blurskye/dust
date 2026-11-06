@@ -719,7 +719,7 @@ fn prompt_and_documentation_capture_preserve_explicit_focus_changes_and_closed_t
 }
 
 #[test]
-fn plugin_admission_counts_all_graph_and_host_copies_in_invalid_unchanged_valid_and_idle_cases() {
+fn plugin_requests_count_all_graph_and_host_copies_in_invalid_unchanged_valid_and_idle_cases() {
     use crate::plugins::PluginRequestedPlacement;
     use crate::plugins::PluginUiErrorCode;
     use crate::plugins::PluginUiNode;
@@ -734,7 +734,7 @@ fn plugin_admission_counts_all_graph_and_host_copies_in_invalid_unchanged_valid_
     let manifest =
         crate::app::tests::plugin_manifest("demo", "plugin.demo.keymap.dashboard", "x y");
     let index =
-        crate::plugins::index_manifest_contributions(&manifest, 77, "admission fixture".into())
+        crate::plugins::index_manifest_contributions(&manifest, 77, "request fixture".into())
             .unwrap();
     session.install_plugin_fixture(index.clone());
     let tree = |revision| PluginUiTree {
@@ -846,7 +846,7 @@ fn plugin_admission_counts_all_graph_and_host_copies_in_invalid_unchanged_valid_
     assert_eq!(stale.error.unwrap().code, PluginUiErrorCode::GenerationLost);
     assert_eq!(session.copy_counts(), idle);
     eprintln!(
-        "admission copies (graph, host): invalid=(0,0), unchanged=(0,0), valid-open={valid_copies:?}, valid-retained=(0,0); 256 idle reconciliations=(0,0), content builds=0"
+        "request copies (graph, host): invalid=(0,0), unchanged=(0,0), valid-open={valid_copies:?}, valid-retained=(0,0); 256 idle reconciliations=(0,0), content builds=0"
     );
 }
 

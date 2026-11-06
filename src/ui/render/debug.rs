@@ -1,13 +1,7 @@
-//! The coordinated debug arrangement.
+//! Debugger inspector layout and drawing.
 //!
-//! W-25: "sessions, threads, stack and breakpoints on one side, the dominant source in the
-//! centre, lazily loaded variables and watches on the other, and an interactive console bound to
-//! the selected frame. Narrow terminals replace panes with selectable inspectors rather than
-//! compressing the source below a readable minimum."
-//!
-//! The arrangement is computed HERE, as one decision, so the regions cannot disagree with each
-//! other: the source is whatever the inspectors leave, and the inspectors exist only when the
-//! source can still be read.
+//! Narrow terminals show one selectable inspector instead of squeezing the source.
+//! All regions are computed together to preserve the source's minimum readable size.
 
 use unicode_segmentation::UnicodeSegmentation;
 

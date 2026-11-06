@@ -495,10 +495,6 @@ fn restore_reads_preserve_newer_edits_capture_and_original_editor_identity() {
 
 #[test]
 fn hiding_an_inspector_sends_no_disconnect_and_leaves_the_session_running() {
-    // W-25 acceptance, verbatim: "proof that hiding inspectors does not terminate a session".
-    // The stronger half is MEASURED: the adapter itself records every request it receives, so the
-    // test can show that hiding sent no disconnect and no terminate, which "still looks alive"
-    // could never distinguish.
     let (_files, log_path, mut driver) =
         logging_adapter_fixture(crate::config::DebugRequestKind::Launch);
 
@@ -555,9 +551,6 @@ fn hiding_an_inspector_sends_no_disconnect_and_leaves_the_session_running() {
 
 #[test]
 fn an_attached_session_names_the_target_it_was_given_in_its_status() {
-    // W-24's residual: the attach status was wired but unasserted. The launch counter-case lives
-    // in `a_started_session_makes_the_debug_arrangement_appear_with_its_own_identity`, so a single
-    // branch cannot satisfy both.
     let (_files, _log_path, mut driver) =
         logging_adapter_fixture(crate::config::DebugRequestKind::Attach);
     driver.debug_start("attached");
@@ -700,7 +693,7 @@ fn state_save_requests_coalesce_without_consuming_a_pending_write() {
     );
 }
 #[test]
-fn full_and_stopped_exit_admission_are_not_successful_snapshots() {
+fn full_and_stopped_exit_queues_are_not_successful_snapshots() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("state.json");
     let (mut worker, release) = PersistenceWorker::gated_for_test(1);
@@ -747,7 +740,7 @@ fn earlier_save_finishing_during_exit_does_not_acknowledge_the_exit_snapshot() {
     owner.shutdown_result().unwrap();
 }
 #[test]
-fn exit_requires_a_completed_snapshot_not_idle_or_failed_admission() {
+fn exit_requires_a_completed_snapshot_not_idle_or_failed_submission() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("state.json");
     let mut owner = Persistence::new(PersistenceWorker::start(1), path.clone());

@@ -30,7 +30,7 @@ fn file_preview_retries_after_capacity_returns_without_picker_input() {
         {
             Ok(id) => requests.push(id),
             Err(crate::files::VfsError::QueueFull) => break,
-            Err(error) => panic!("unexpected admission error: {error}"),
+            Err(error) => panic!("unexpected submission error: {error}"),
         }
     }
     app.install_picker(

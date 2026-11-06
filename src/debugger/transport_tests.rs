@@ -699,10 +699,10 @@ fn dap_owned_transport_backpressures_results_and_stops_nonreading_adapter() {
     )
     .unwrap();
     let mut scoped = DapClient::new();
-    drop(scoped.admission().unwrap());
+    drop(scoped.reservation().unwrap());
     assert_eq!(scoped.pending(), 0, "unused reservation leaked a resident");
-    let admission = scoped.admission().unwrap();
-    admission
+    let reservation = scoped.reservation().unwrap();
+    reservation
         .submit(
             launch(&scoped_root, &denied_script),
             Some(ExecutionScope {
@@ -797,12 +797,12 @@ while True:
     service.writer_gate(true);
     service.control(DapControl::Scopes { frame_id: 1 }).unwrap();
     wait(|| service.writer_waiting());
-    let admission_deadline = Instant::now() + Duration::from_secs(3);
+    let reservation_deadline = Instant::now() + Duration::from_secs(3);
     for _ in 0..32 {
         loop {
             assert!(
-                Instant::now() < admission_deadline,
-                "gated writer admission deadline"
+                Instant::now() < reservation_deadline,
+                "gated writer reservation deadline"
             );
             match service.control(DapControl::Scopes { frame_id: 1 }) {
                 Ok(()) => break,
@@ -813,7 +813,7 @@ while True:
     }
     wait(|| service.writes_queued() == 32);
     std::fs::write(root.path().join("reverse-go"), "go").unwrap();
-    let mut receipts = Vec::new();
+    let mut replies = Vec::new();
     let mut sequences = Vec::new();
     wait(|| {
         for _ in 0..32 {
@@ -824,17 +824,17 @@ while True:
                     sequences.push(request_seq);
                     let reply = reply.claim();
                     reply.respond(true, None).unwrap();
-                    receipts.push(reply);
+                    replies.push(reply);
                 }
                 Some(DapEvent::Failed { message, .. }) => panic!("{message}"),
                 None => break,
                 _ => {}
             }
         }
-        receipts.len() == 32 && service.reverse_retries() > 0
+        replies.len() == 32 && service.reverse_retries() > 0
     });
     assert!(
-        receipts
+        replies
             .iter()
             .all(|r| r.outcome() == DapReplyOutcome::Ready)
     );
@@ -853,7 +853,7 @@ while True:
                 _ => {}
             }
         }
-        receipts
+        replies
             .iter()
             .all(|r| r.outcome() == DapReplyOutcome::Written)
             && late.is_some()
@@ -1082,7 +1082,7 @@ fn the_bridge_reads_one_whole_message_at_a_time() {
 }
 
 #[test]
-fn continued_events_only_retire_the_affected_stopped_thread() {
+fn continued_events_only_invalidate_the_affected_stopped_thread() {
     let prefix = ADAPTER.split("while True:\n m=read()").next().unwrap();
     for (continued, preserved) in [
         (json!({"threadId":1,"allThreadsContinued":false}), true),

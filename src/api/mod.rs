@@ -32,14 +32,14 @@ pub struct ApiManifest {
 pub fn check_compatibility(path: &Path, maximum_bytes: usize) -> Result<ApiCompatibility, String> {
     let file = crate::files::open_regular_file(path).map_err(|error| error.to_string())?;
     if file.metadata().map_err(|error| error.to_string())?.len() > maximum_bytes as u64 {
-        return Err("API fixture exceeds byte ceiling".into());
+        return Err("API fixture exceeds byte limit".into());
     }
     let mut bytes = Vec::new();
     file.take((maximum_bytes as u64).saturating_add(1))
         .read_to_end(&mut bytes)
         .map_err(|error| error.to_string())?;
     if bytes.len() > maximum_bytes {
-        return Err("API fixture exceeds byte ceiling".into());
+        return Err("API fixture exceeds byte limit".into());
     }
     let required: ApiManifest =
         serde_json::from_slice(&bytes).map_err(|error| error.to_string())?;

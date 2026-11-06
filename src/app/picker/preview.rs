@@ -124,7 +124,7 @@ impl Search {
         self.preview_read.take().map(|(id, _)| id)
     }
     /// Replace the preview with one the session already holds, such as a diff built from the
-    /// structured hunk read. Any in-flight file preview is retired first, so a late read can
+    /// structured hunk read. Any in-flight file preview is invalidated first, so a late read can
     /// never overwrite it with a different path's content.
     pub(in crate::app) fn set_preview(&mut self, preview: PickerPreview) -> Option<RequestId> {
         let same_diff = self.preview.as_ref().is_some_and(|shown| {
@@ -139,9 +139,9 @@ impl Search {
         if !same_diff {
             self.picker_preview_replaced();
         }
-        let retired = self.clear_preview();
+        let previous_request = self.clear_preview();
         self.preview = Some(preview);
-        retired
+        previous_request
     }
     pub(in crate::app) fn preview_match(&mut self, id: &str, maximum: usize) -> Option<RequestId> {
         let Some(found) = self.matches.iter().find(|found| found.id == id) else {
@@ -165,11 +165,11 @@ impl Search {
         let preview = search_picker_preview(found, maximum);
         let key = (found.snapshot.clone(), found.range.clone(), maximum);
         let path = found.canonical_path.clone();
-        let retired = self.clear_preview();
+        let previous_request = self.clear_preview();
         self.preview = Some(preview);
         self.preview_snapshot_key = Some(key);
         self.preview_path = Some(path);
-        retired
+        previous_request
     }
     pub(in crate::app) fn prepare_preview(
         &mut self,
@@ -191,7 +191,7 @@ impl Search {
         {
             return (None, None);
         }
-        let retired = self.clear_preview();
+        let previous_request = self.clear_preview();
         self.preview_scope = Some((scope, configuration));
         self.preview = Some(PickerPreview {
             title,
@@ -204,7 +204,10 @@ impl Search {
         });
         self.preview_path = Some(path);
         self.preview_location = location;
-        (retired, Some(PreviewTicket(self.preview_epoch.clone())))
+        (
+            previous_request,
+            Some(PreviewTicket(self.preview_epoch.clone())),
+        )
     }
     pub(in crate::app) fn prepare_diff_preview(
         &mut self,
@@ -224,7 +227,7 @@ impl Search {
         {
             return None;
         }
-        let retired = self.clear_preview();
+        let previous_request = self.clear_preview();
         self.picker_preview_replaced();
         self.preview_scope = Some((scope, configuration));
         self.diff_preview_key = Some(key);
@@ -239,7 +242,7 @@ impl Search {
                 )),
             });
         }
-        retired
+        previous_request
     }
 
     pub(in crate::app) fn poll_diff_preview(

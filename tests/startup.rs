@@ -1,5 +1,7 @@
+//! Startup configuration migration through the command line.
+
 #[test]
-fn migration_reads_regular_files_within_the_ceiling() {
+fn migration_reads_regular_files_within_the_limit() {
     let root = tempfile::tempdir().unwrap();
     let path = root.path().join("config.toml");
     std::fs::write(&path, "[editor]\ntab_width = 4\n").unwrap();
@@ -30,7 +32,7 @@ fn migration_reads_regular_files_within_the_ceiling() {
     assert!(
         String::from_utf8(output.stderr)
             .unwrap()
-            .contains("exceeds migration ceiling")
+            .contains("exceeds migration limit")
     );
 }
 

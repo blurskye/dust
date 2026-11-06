@@ -185,11 +185,11 @@ impl App {
     pub(in crate::app) fn process_pull_request_events(&mut self) {
         self.pull_requests.prepare(self.workspace.version());
         while let Some(event) = self.pull_requests.jobs.try_reply() {
-            if !self.pull_request_is_current(&event.root, event.generation) {
+            if !self.pull_request_is_current(&event.root, event.request_id) {
                 continue;
             }
             let root = event.root;
-            let request_id = event.generation;
+            let request_id = event.request_id;
             // The "loading…" notice is answered by whatever this reply shows.
             self.clear_notice();
             match event.reply {

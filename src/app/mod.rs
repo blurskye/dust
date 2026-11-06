@@ -53,7 +53,6 @@ pub(in crate::app) enum TrustedAction {
     },
 }
 
-pub use agent::commands::AgentCommand;
 pub use configuration::validate_loaded_configuration;
 
 use crate::app::configuration::Configuration;
@@ -70,13 +69,9 @@ use crate::app::syntax::Syntax;
 
 pub use commands::AppEffect;
 
-pub use windows::LayoutAction;
+pub(crate) use commands::PickerKind;
 
-pub use commands::PickerKind;
-
-pub use commands::PromptMove;
-
-pub use commands::register_app_commands;
+pub(crate) use commands::register_app_commands;
 
 use std::collections::BTreeMap;
 

@@ -23,7 +23,7 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::str::FromStr;
 
-pub fn compile_keymaps(
+pub(crate) fn compile_keymaps(
     commands: &CommandRegistry<AppEffect>,
     loaded: &crate::config::LoadedKeymaps,
     policy: &crate::config::KeymapPolicyConfig,
@@ -591,14 +591,14 @@ pub(in crate::app) fn standard_contribution_origins(
 }
 
 pub(in crate::app) struct KeymapCompilation<'a> {
-    pub entries: &'a [crate::config::KeymapEntry],
-    pub bundled_count: usize,
-    pub groups: &'a [crate::config::KeyGroupEntry],
-    pub bundled_group_count: usize,
-    pub user_path: &'a std::path::Path,
-    pub user_spans: &'a [std::ops::Range<usize>],
-    pub user_group_spans: &'a [std::ops::Range<usize>],
-    pub policy: &'a crate::config::KeymapPolicyConfig,
+    pub(crate) entries: &'a [crate::config::KeymapEntry],
+    pub(crate) bundled_count: usize,
+    pub(crate) groups: &'a [crate::config::KeyGroupEntry],
+    pub(crate) bundled_group_count: usize,
+    pub(crate) user_path: &'a std::path::Path,
+    pub(crate) user_spans: &'a [std::ops::Range<usize>],
+    pub(crate) user_group_spans: &'a [std::ops::Range<usize>],
+    pub(crate) policy: &'a crate::config::KeymapPolicyConfig,
 }
 
 pub(in crate::app) fn compile_keymap_entries(
@@ -630,7 +630,7 @@ pub(in crate::app) fn compile_keymap_entries(
     )
 }
 
-pub fn compile_keymaps_with_plugin_catalog(
+pub(crate) fn compile_keymaps_with_plugin_catalog(
     commands: &CommandRegistry<AppEffect>,
     loaded: &crate::config::LoadedKeymaps,
     catalog: &crate::plugins::PluginContributionCatalog,

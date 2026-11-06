@@ -122,7 +122,7 @@ fn root_ids_are_monotonic_removal_has_fallback_and_root_changes_revoke_trust() {
 }
 
 #[test]
-fn workspace_enforces_absolute_root_ceiling() {
+fn workspace_enforces_absolute_root_limit() {
     let parent = tempdir().expect("parent");
     let first = parent.path().join("root-0");
     fs::create_dir(&first).expect("first");
@@ -358,28 +358,28 @@ fn persisted_trust_does_not_follow_replaced_root_inode() {
 }
 
 #[test]
-fn trust_worker_reports_distinct_generations_and_async_identity() {
+fn trust_worker_reports_distinct_request_ids_and_async_identity() {
     let root = tempdir().expect("root");
     let state = tempdir().expect("state");
     let mut service = WorkspaceTrustWorker::start(4);
-    let identity_generation = service
+    let identity_request_id = service
         .inspect_root(root.path().to_path_buf())
         .expect("inspect");
-    let load_generation = service.load(state.path().join("missing")).expect("load");
-    assert!(load_generation > identity_generation);
+    let load_request_id = service.load(state.path().join("missing")).expect("load");
+    assert!(load_request_id > identity_request_id);
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
     let mut identity_seen = false;
     let mut load_seen = false;
     while !identity_seen || !load_seen {
         if let Some(event) = service.try_event().expect("event") {
             match event {
-                TrustEvent::RootInspected { generation, result } => {
-                    assert_eq!(generation, identity_generation);
+                TrustEvent::RootInspected { request_id, result } => {
+                    assert_eq!(request_id, identity_request_id);
                     assert!(result.expect("identity").filesystem_identity.is_some());
                     identity_seen = true;
                 }
-                TrustEvent::Loaded { generation, result } => {
-                    assert_eq!(generation, load_generation);
+                TrustEvent::Loaded { request_id, result } => {
+                    assert_eq!(request_id, load_request_id);
                     assert!(result.expect("database").identities.is_empty());
                     load_seen = true;
                 }

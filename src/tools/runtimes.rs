@@ -231,7 +231,7 @@ pub(super) fn run_managed(
             break Err("tool installation cancelled".to_owned());
         }
         if Instant::now() >= deadline {
-            break Err("tool installation exceeded the 15-minute ceiling".to_owned());
+            break Err("tool installation exceeded the 15-minute limit".to_owned());
         }
         match child.try_wait() {
             Ok(Some(status)) => break Ok(status),
@@ -514,7 +514,7 @@ pub(super) fn install_path_rustup_component(
             break Err("rustup component installation cancelled".to_owned());
         }
         if Instant::now() >= deadline {
-            break Err("rustup component installation exceeded the 15-minute ceiling".to_owned());
+            break Err("rustup component installation exceeded the 15-minute limit".to_owned());
         }
         match child.try_wait() {
             Ok(Some(status)) => break Ok(status),

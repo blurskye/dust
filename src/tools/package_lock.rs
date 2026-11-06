@@ -382,7 +382,7 @@ pub enum PackageError {
     ServiceStopped,
     #[error("package content checksum mismatch")]
     ChecksumMismatch,
-    #[error("package lock exceeds its ceiling")]
+    #[error("package lock exceeds its size limit")]
     LockTooLarge,
     #[error("package lock JSON failed: {0}")]
     Json(#[source] serde_json::Error),

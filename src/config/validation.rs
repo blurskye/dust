@@ -90,7 +90,7 @@ impl Config {
             "builtin.theme",
         ];
         if self.windows.rules.len() > 32 {
-            return Err("windows.rule exceeds the 32-rule ceiling".into());
+            return Err("windows.rule exceeds the 32-rule limit".into());
         }
         let mut window_targets = BTreeSet::new();
         let mut fullscreen_rules = 0_usize;

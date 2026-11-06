@@ -4,25 +4,25 @@ use crate::workspace::PickerAction;
 use crate::workspace::PickerItem;
 use crate::workspace::fuzzy_score;
 
-pub const MAX_QUERY_BYTES: usize = 4096;
-pub const MAX_ITEM_FIELD_BYTES: usize = 16 * 1024;
-pub const MAX_PREVIEW_BYTES: usize = 256 * 1024;
-pub const ABS_MAX_ITEMS: usize = 100_000;
-pub const ABS_MAX_BYTES: usize = 16 * 1024 * 1024;
+pub(in crate::app) const MAX_QUERY_BYTES: usize = 4096;
+pub(in crate::app) const MAX_ITEM_FIELD_BYTES: usize = 16 * 1024;
+pub(in crate::app) const MAX_PREVIEW_BYTES: usize = 256 * 1024;
+pub(in crate::app) const ABS_MAX_ITEMS: usize = 100_000;
+pub(in crate::app) const ABS_MAX_BYTES: usize = 16 * 1024 * 1024;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use thiserror::Error;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct SearchWorkflowId(pub u64);
+pub(in crate::app) struct SearchWorkflowId(pub(in crate::app) u64);
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct SearchRequestId(pub u64);
+pub(in crate::app) struct SearchRequestId(pub(in crate::app) u64);
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct SearchStreamId(pub u64);
+pub(in crate::app) struct SearchStreamId(pub(in crate::app) u64);
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct SearchPreviewRevision(pub u64);
+pub(in crate::app) struct SearchPreviewRevision(pub(in crate::app) u64);
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum SearchSourceKind {
+pub(in crate::app) enum SearchSourceKind {
     #[expect(
         dead_code,
         reason = "File enumeration currently uses the file picker rather than a workflow stream."
@@ -35,16 +35,16 @@ pub enum SearchSourceKind {
     },
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum SearchMatcherKind {
+pub(in crate::app) enum SearchMatcherKind {
     Fuzzy,
     Literal,
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum SearchPresenterKind {
+pub(in crate::app) enum SearchPresenterKind {
     Picker,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum SearchHostAction {
+pub(in crate::app) enum SearchHostAction {
     OpenLocation { uri: String },
     InvokeBundledCommand { command: String },
     InvokeDeclaredProviderCommand,
@@ -52,36 +52,36 @@ pub enum SearchHostAction {
     None,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct SearchWorkflowSpec {
-    pub id: SearchWorkflowId,
-    pub source: SearchSourceKind,
-    pub matcher: SearchMatcherKind,
-    pub presenter: SearchPresenterKind,
-    pub maximum_items: usize,
-    pub maximum_bytes: usize,
+pub(in crate::app) struct SearchWorkflowSpec {
+    pub(in crate::app) id: SearchWorkflowId,
+    pub(in crate::app) source: SearchSourceKind,
+    pub(in crate::app) matcher: SearchMatcherKind,
+    pub(in crate::app) presenter: SearchPresenterKind,
+    pub(in crate::app) maximum_items: usize,
+    pub(in crate::app) maximum_bytes: usize,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct SearchWorkflowItem {
-    pub stable_key: String,
-    pub title: String,
-    pub detail: String,
-    pub search_text: String,
-    pub action: SearchHostAction,
+pub(in crate::app) struct SearchWorkflowItem {
+    pub(in crate::app) stable_key: String,
+    pub(in crate::app) title: String,
+    pub(in crate::app) detail: String,
+    pub(in crate::app) search_text: String,
+    pub(in crate::app) action: SearchHostAction,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct SearchWorkflowChunk {
-    pub request: SearchRequestId,
-    pub stream_id: SearchStreamId,
-    pub sequence: u64,
-    pub items: Vec<SearchWorkflowItem>,
-    pub complete: bool,
+pub(in crate::app) struct SearchWorkflowChunk {
+    pub(in crate::app) request: SearchRequestId,
+    pub(in crate::app) stream_id: SearchStreamId,
+    pub(in crate::app) sequence: u64,
+    pub(in crate::app) items: Vec<SearchWorkflowItem>,
+    pub(in crate::app) complete: bool,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct SearchWorkflowSnapshot {
-    pub revision: u64,
-    pub request: SearchRequestId,
-    pub items: Vec<SearchWorkflowItem>,
-    pub complete: bool,
+pub(in crate::app) struct SearchWorkflowSnapshot {
+    pub(in crate::app) revision: u64,
+    pub(in crate::app) request: SearchRequestId,
+    pub(in crate::app) items: Vec<SearchWorkflowItem>,
+    pub(in crate::app) complete: bool,
 }
 #[derive(Clone, Debug)]
 struct Active {
@@ -97,13 +97,13 @@ struct Active {
     preview: Option<(String, SearchPreviewRevision, String)>,
 }
 #[derive(Clone, Debug)]
-pub struct SearchWorkflowBroker {
+pub(in crate::app) struct SearchWorkflowBroker {
     spec: SearchWorkflowSpec,
     active: Option<Active>,
     revision: u64,
 }
 #[derive(Clone, Debug, Error, Eq, PartialEq)]
-pub enum SearchWorkflowError {
+pub(in crate::app) enum SearchWorkflowError {
     #[error("invalid workflow spec")]
     InvalidSpec,
     #[error("stale request")]
@@ -120,7 +120,7 @@ pub enum SearchWorkflowError {
     Preview,
 }
 impl SearchWorkflowBroker {
-    pub fn try_new(spec: SearchWorkflowSpec) -> Result<Self, SearchWorkflowError> {
+    pub(in crate::app) fn try_new(spec: SearchWorkflowSpec) -> Result<Self, SearchWorkflowError> {
         if spec.maximum_items == 0
             || spec.maximum_items > ABS_MAX_ITEMS
             || spec.maximum_bytes == 0
@@ -134,7 +134,7 @@ impl SearchWorkflowBroker {
             revision: 0,
         })
     }
-    pub fn begin(
+    pub(in crate::app) fn begin(
         &mut self,
         request: SearchRequestId,
         stream_id: SearchStreamId,
@@ -163,7 +163,7 @@ impl SearchWorkflowBroker {
         dead_code,
         reason = "Retain the workflow revision query alongside its snapshot contract."
     )]
-    pub fn revision(&self) -> u64 {
+    pub(in crate::app) fn revision(&self) -> u64 {
         self.revision
     }
     #[cfg_attr(
@@ -173,11 +173,14 @@ impl SearchWorkflowBroker {
             reason = "The picker owns current preview requests; retain the tested workflow contract."
         )
     )]
-    pub fn cancel(&mut self) {
+    pub(in crate::app) fn cancel(&mut self) {
         self.active = None;
         self.revision = self.revision.saturating_add(1)
     }
-    pub fn accept(&mut self, chunk: SearchWorkflowChunk) -> Result<(), SearchWorkflowError> {
+    pub(in crate::app) fn accept(
+        &mut self,
+        chunk: SearchWorkflowChunk,
+    ) -> Result<(), SearchWorkflowError> {
         let next = self.active.as_ref().ok_or(SearchWorkflowError::Stale)?;
         let mut bytes = next.bytes;
         let sequence = next
@@ -244,7 +247,7 @@ impl SearchWorkflowBroker {
             reason = "The picker owns current preview requests; retain the tested workflow contract."
         )
     )]
-    pub fn request_preview(
+    pub(in crate::app) fn request_preview(
         &mut self,
         key: &str,
         revision: SearchPreviewRevision,
@@ -270,7 +273,7 @@ impl SearchWorkflowBroker {
             reason = "The picker owns current preview requests; retain the tested workflow contract."
         )
     )]
-    pub fn accept_preview(
+    pub(in crate::app) fn accept_preview(
         &mut self,
         key: &str,
         revision: SearchPreviewRevision,
@@ -316,7 +319,7 @@ impl SearchWorkflowBroker {
         });
         Some(items.into_iter().map(|(item, _)| item).collect())
     }
-    pub fn snapshot_if_changed(&self, last: u64) -> Option<SearchWorkflowSnapshot> {
+    pub(in crate::app) fn snapshot_if_changed(&self, last: u64) -> Option<SearchWorkflowSnapshot> {
         if last == self.revision {
             return None;
         }
@@ -330,7 +333,7 @@ impl SearchWorkflowBroker {
         })
     }
 }
-pub fn picker_item_adapter(item: &PickerItem) -> SearchWorkflowItem {
+pub(in crate::app) fn picker_item_adapter(item: &PickerItem) -> SearchWorkflowItem {
     SearchWorkflowItem {
         stable_key: item.id.0.clone(),
         title: item.label.clone(),
@@ -350,7 +353,11 @@ pub fn picker_item_adapter(item: &PickerItem) -> SearchWorkflowItem {
         },
     }
 }
-pub fn plugin_item_adapter(id: &str, primary: &str, secondary: Option<&str>) -> SearchWorkflowItem {
+pub(in crate::app) fn plugin_item_adapter(
+    id: &str,
+    primary: &str,
+    secondary: Option<&str>,
+) -> SearchWorkflowItem {
     SearchWorkflowItem {
         stable_key: id.into(),
         title: primary.into(),

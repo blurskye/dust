@@ -76,19 +76,19 @@ impl Documents {
         loan: crate::app::tasks::LinterReadLoan<'_>,
     ) -> Result<bool, String> {
         let result = (|| {
-            match self.check_admission() {
+            match self.check_capacity() {
                 Ok(()) => {}
                 Err(crate::files::VfsError::QueueFull) => return Ok(None),
                 Err(error) => return Err(error.to_string()),
             }
             // A borrowed real queue slot/ID precedes cloning path/root request metadata.
-            let admission = match self.vfs.reserve_read() {
-                Ok(admission) => admission,
+            let reservation = match self.vfs.reserve_read() {
+                Ok(reservation) => reservation,
                 Err(crate::files::VfsError::QueueFull) => return Ok(None),
                 Err(error) => return Err(error.to_string()),
             };
             let (path, roots, maximum) = loan.request(&self.owner)?;
-            let id = match admission.submit(path, roots, maximum) {
+            let id = match reservation.submit(path, roots, maximum) {
                 Ok(id) => id,
                 Err(crate::files::VfsError::QueueFull) => return Ok(None),
                 Err(error) => return Err(error.to_string()),

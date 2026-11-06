@@ -748,7 +748,7 @@ pub struct SyntaxIndent {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SyntaxResult {
     pub document: SyntaxDocumentId,
-    pub generation: u64,
+    pub request_id: u64,
     pub revision: u64,
     pub language: SyntaxLanguage,
     pub capabilities: SyntaxCapabilities,
@@ -788,14 +788,14 @@ pub enum SyntaxEvent {
     Parsed(SyntaxResult),
     Failed {
         document: SyntaxDocumentId,
-        generation: u64,
+        request_id: u64,
         revision: u64,
         language: SyntaxLanguage,
         diagnostic: String,
     },
     Skipped {
         document: SyntaxDocumentId,
-        generation: u64,
+        request_id: u64,
         revision: u64,
         language: SyntaxLanguage,
     },
@@ -803,7 +803,7 @@ pub enum SyntaxEvent {
 #[derive(Debug)]
 struct Request {
     document: SyntaxDocumentId,
-    generation: u64,
+    request_id: u64,
     revision: u64,
     language: SyntaxLanguage,
     source: String,
@@ -843,18 +843,18 @@ impl SyntaxWorker {
                         .lock()
                         .ok()
                         .and_then(|map| map.get(&request.document).copied())
-                        != Some(request.generation)
+                        != Some(request.request_id)
                     {
                         continue;
                     }
                     let document = request.document;
-                    let generation = request.generation;
+                    let request_id = request.request_id;
                     let event = parse(request);
                     if worker
                         .lock()
                         .ok()
                         .and_then(|map| map.get(&document).copied())
-                        == Some(generation)
+                        == Some(request_id)
                         && etx.send(event).is_err()
                     {
                         break;
@@ -873,7 +873,7 @@ impl SyntaxWorker {
     pub fn submit(
         &self,
         document: SyntaxDocumentId,
-        generation: u64,
+        request_id: u64,
         revision: u64,
         language: SyntaxLanguage,
         source: impl FnOnce() -> String,
@@ -886,7 +886,7 @@ impl SyntaxWorker {
         })?;
         let request = Request {
             document,
-            generation,
+            request_id,
             revision,
             language,
             source: source(),
@@ -895,7 +895,7 @@ impl SyntaxWorker {
         let mut latest = self.latest.lock().map_err(|_| SyntaxError::Stopped)?;
         match self.sender.try_send(request) {
             Ok(()) => {
-                latest.insert(document, generation);
+                latest.insert(document, request_id);
                 Ok(())
             }
             Err(error) => {
@@ -1513,7 +1513,7 @@ fn parse(request: Request) -> SyntaxEvent {
     if request.source.len() > request.policy.maximum_source_bytes {
         return SyntaxEvent::Skipped {
             document: request.document,
-            generation: request.generation,
+            request_id: request.request_id,
             revision: request.revision,
             language: request.language,
         };
@@ -1616,7 +1616,7 @@ fn parse(request: Request) -> SyntaxEvent {
     let objects = Arc::new(objects::collect(&tree, &request.source, 50_000));
     SyntaxEvent::Parsed(SyntaxResult {
         document: request.document,
-        generation: request.generation,
+        request_id: request.request_id,
         revision: request.revision,
         language: request.language,
         capabilities: language_info(request.language).capabilities,
@@ -1739,7 +1739,7 @@ fn indentation_folds(source: &str, limit: usize, tab_width: usize) -> (Vec<Synta
 fn failed(request: &Request, diagnostic: String) -> SyntaxEvent {
     SyntaxEvent::Failed {
         document: request.document,
-        generation: request.generation,
+        request_id: request.request_id,
         revision: request.revision,
         language: request.language,
         diagnostic,
@@ -1750,7 +1750,7 @@ fn failed(request: &Request, diagnostic: String) -> SyntaxEvent {
 mod tests {
     use crate::language::syntax::*;
     #[test]
-    fn full_queue_does_not_materialize_source_or_replace_accepted_generation() {
+    fn full_queue_does_not_materialize_source_or_replace_accepted_request() {
         let (sender, _requests) = mpsc::sync_channel(1);
         let (_events, receiver) = mpsc::sync_channel(1);
         let (release_slot, slots) = mpsc::sync_channel(1);
@@ -1876,7 +1876,7 @@ mod tests {
         let source = "<!doctype html>\n<html>\n<head>\n<title>x</title>\n</head>\n</html>\n";
         let request = Request {
             document: SyntaxDocumentId(1),
-            generation: 2,
+            request_id: 2,
             revision: 3,
             language: SyntaxLanguage::Html,
             source: source.into(),
@@ -1904,7 +1904,7 @@ mod tests {
         let source = "[app]\na = 1\nb = 2\n[app.flags]\nenabled = true\n";
         let request = Request {
             document: SyntaxDocumentId(1),
-            generation: 2,
+            request_id: 2,
             revision: 3,
             language: SyntaxLanguage::Toml,
             source: source.into(),
@@ -1945,7 +1945,7 @@ mod tests {
         ] {
             let request = Request {
                 document: SyntaxDocumentId(1),
-                generation: 2,
+                request_id: 2,
                 revision: 3,
                 language,
                 source: source.into(),
@@ -2083,7 +2083,7 @@ mod tests {
     ) -> SyntaxResult {
         let event = parse(Request {
             document: SyntaxDocumentId(1),
-            generation: 1,
+            request_id: 1,
             revision: 1,
             language,
             source: source.into(),
@@ -2123,7 +2123,7 @@ mod tests {
         let source = "## Sub\n\n- one\n  * two\n- [x] done\n\n> quote **bold** `code` [link](https://x.y) ![alt](a.png)\n\n---\n\n```rust\nfn main() {}\n```\n\n> [!NOTE]\n> noted\n\n| a | b |\n|---|:-:|\n| c | d |\n";
         let request = Request {
             document: SyntaxDocumentId(1),
-            generation: 1,
+            request_id: 1,
             revision: 1,
             language: SyntaxLanguage::Markdown,
             source: source.into(),
@@ -2218,7 +2218,7 @@ mod tests {
         let source = "[a][missing]\n\n![a][missing]\n\n[missing][]\n\n[missing]\n\n![missing][]\n\n![missing]\n\n```markdown\n[missing]: https://example.com\n```\n";
         let request = Request {
             document: SyntaxDocumentId(1),
-            generation: 1,
+            request_id: 1,
             revision: 1,
             language: SyntaxLanguage::Markdown,
             source: source.into(),
@@ -2252,7 +2252,7 @@ mod tests {
         );
         let request = Request {
             document: SyntaxDocumentId(1),
-            generation: 1,
+            request_id: 1,
             revision: 1,
             language: SyntaxLanguage::Markdown,
             source: source.clone(),
@@ -2547,7 +2547,7 @@ mod tests {
     fn oversized_source_falls_back() {
         let request = Request {
             document: SyntaxDocumentId(1),
-            generation: 1,
+            request_id: 1,
             revision: 1,
             language: SyntaxLanguage::Rust,
             source: "12345".into(),

@@ -595,7 +595,7 @@ pub(super) fn normalize_result(
                 .and_then(Value::as_array)
                 .ok_or("semantic token delta edits are not an array")?;
             if edits.len() > 10_000 {
-                return Err("semantic token delta exceeds edit ceiling".into());
+                return Err("semantic token delta exceeds edit limit".into());
             }
             let mut normalized = Vec::new();
             for edit in edits {
@@ -624,7 +624,7 @@ pub(super) fn normalize_result(
                     })
                     .collect::<Result<Vec<_>, _>>()?;
                 if data.len() > 500_000 {
-                    return Err("semantic delta insert exceeds ceiling".into());
+                    return Err("semantic delta insert exceeds limit".into());
                 }
                 normalized.push(LspSemanticTokenEdit {
                     start,
@@ -829,7 +829,7 @@ pub(super) fn completion_items(result: &Value) -> Result<Vec<LspCompletionItem>,
 pub(super) fn completion_item(item: &Value, resolved: bool) -> Result<LspCompletionItem, String> {
     let encoded = serde_json::to_vec(item).map_err(|_| "completion item is not serializable")?;
     if encoded.len() > 64 * 1024 {
-        return Err("completion item exceeds byte ceiling".into());
+        return Err("completion item exceeds byte limit".into());
     }
     let label = item
         .get("label")

@@ -1519,7 +1519,7 @@ fn agent_write_refreshes_buffers_opened_during_io_and_preserves_file_format() {
 
 #[cfg(unix)]
 #[test]
-fn cancelling_a_turn_retires_permissions_still_resolving_paths() {
+fn cancelling_a_turn_cancels_permissions_still_resolving_paths() {
     let (_directories, mut app) = test_app();
     let index = echo_agent(&mut app);
     app.agent.active = index;
@@ -1687,7 +1687,7 @@ fn agent_panel_opens_in_the_requested_tab_without_switching_tabs() {
 }
 
 #[test]
-fn replacing_a_permission_prompt_retires_the_original_request() {
+fn replacing_a_permission_prompt_cancels_the_original_request() {
     let root = tempfile::tempdir().unwrap();
     let state = tempfile::tempdir().unwrap();
     let mut app = App::new(
