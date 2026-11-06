@@ -12,7 +12,7 @@ use unicode_segmentation::UnicodeSegmentation;
 use crate::config::Highlight;
 
 /// Code blocks larger than this are shown without highlighting.
-const HIGHLIGHT_BYTE_CEILING: usize = 64 * 1024;
+const HIGHLIGHT_BYTE_LIMIT: usize = 64 * 1024;
 
 /// Text with the styled byte ranges in it.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -289,8 +289,7 @@ fn code_block(out: &mut Styled, info: &str, body: &[&str], width: usize, framed:
     }
     let mut code = body.join("\n");
     code.push('\n');
-    let language =
-        syntax::language_for_fence(name).filter(|_| code.len() <= HIGHLIGHT_BYTE_CEILING);
+    let language = syntax::language_for_fence(name).filter(|_| code.len() <= HIGHLIGHT_BYTE_LIMIT);
     let mut spans = language
         .map(|language| syntax::highlight(language, &code))
         .unwrap_or_default();

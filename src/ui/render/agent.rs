@@ -33,9 +33,9 @@ use crate::ui::grid::Frame;
 use crate::ui::render::overlays::render_content_tab_line;
 
 /// The input box grows with what is typed up to this many rows, then scrolls.
-const INPUT_ROW_CEILING: usize = 8;
+const INPUT_ROW_LIMIT: usize = 8;
 /// Rows of the slash-command menu and of the subagent list.
-const LIST_ROW_CEILING: usize = 8;
+const LIST_ROW_LIMIT: usize = 8;
 
 /// One session of the shown conversation's family: the main session and its subagents.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -87,7 +87,7 @@ impl AgentPanelUi {
         } else {
             self.menu.len()
         };
-        u16::try_from(count.min(LIST_ROW_CEILING))
+        u16::try_from(count.min(LIST_ROW_LIMIT))
             .unwrap_or(0)
             .min(height.saturating_sub(8) / 2)
     }
@@ -96,7 +96,7 @@ impl AgentPanelUi {
         let chips = u16::from(!self.context.is_empty());
         let list = self.list_height(height);
         let room = usize::from(height.saturating_sub(6 + chips + list)).max(1);
-        let shown = input_rows.min(INPUT_ROW_CEILING).min(room);
+        let shown = input_rows.min(INPUT_ROW_LIMIT).min(room);
         usize::from(height.saturating_sub(4 + chips + list)).saturating_sub(shown)
     }
 
@@ -596,7 +596,7 @@ mod tests {
             })
             .collect::<Vec<_>>();
         let listed = lines.iter().filter(|line| line.contains("task ")).count();
-        assert_eq!(listed, LIST_ROW_CEILING - 1, "{lines:#?}");
+        assert_eq!(listed, LIST_ROW_LIMIT - 1, "{lines:#?}");
         assert!(
             lines.iter().any(|line| line.contains("● claude  task 10")),
             "{lines:#?}"
