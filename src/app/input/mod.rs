@@ -455,7 +455,6 @@ impl InputState {
     }
 }
 
-
 use crate::editor::CommandValue;
 use crate::editor::InvocationSource;
 
