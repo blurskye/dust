@@ -1,3 +1,5 @@
+//! Validated plugin contributions and their owners.
+
 use crate::plugins::component::ComponentHostState;
 use crate::plugins::component::ComponentLimits;
 use crate::plugins::component::component_api;
@@ -221,7 +223,7 @@ pub(super) fn index_manifest_contributions_with_text(
     }) {
         return Err(PluginError::InvalidManifest);
     }
-    let mut contexts = crate::editor::input::InputContextRegistry::bundled();
+    let mut contexts = crate::editor::input::InputContexts::bundled();
     let mut ids = BTreeSet::new();
     let mut indexed_contexts = manifest.contributions.input_contexts.clone();
     indexed_contexts.sort_by(|left, right| left.id.cmp(&right.id));

@@ -1,3 +1,5 @@
+//! Component instantiation and WIT host calls.
+
 use crate::plugins::execution::PluginConfirmationAnswer;
 use crate::plugins::execution::PluginConfirmationError;
 use crate::plugins::execution::PluginConfirmationErrorCode;

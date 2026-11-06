@@ -1,3 +1,5 @@
+//! Sandboxed component plugins and host requests.
+
 #![forbid(unsafe_code)]
 
 mod providers;
@@ -27,7 +29,7 @@ pub use storage::PluginStorageErrorCode;
 pub use storage::PluginStorageRequest;
 pub use storage::PluginStorageRequestKind;
 pub use storage::PluginStorageResult;
-pub use storage::PluginStorageService;
+pub use storage::PluginStorageWorker;
 pub use storage::STORAGE_KEY_BYTE_CEILING;
 pub use storage::STORAGE_LIST_BYTE_CEILING;
 pub use storage::STORAGE_LIST_ENTRY_CEILING;
@@ -120,7 +122,7 @@ pub use host::PluginEvent;
 pub(crate) use host::PluginExecutionReply;
 pub(crate) use host::PluginInvocation;
 pub(crate) use host::PluginInvocationOrigin;
-pub use host::PluginManager;
+pub use host::PluginHost;
 pub mod component;
 mod index;
 pub use component::ComponentHostState;

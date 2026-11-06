@@ -1,3 +1,5 @@
+//! Host tests for sandboxed component plugins and host requests.
+
 use crate::plugins::host::QueuedRequest;
 use crate::plugins::host::Request;
 use crate::plugins::host::WorkerEvent;
@@ -12,8 +14,8 @@ use std::sync::mpsc;
 use std::sync::mpsc::Receiver;
 use std::sync::mpsc::SyncSender;
 use std::time::Duration;
-fn manager(sender: SyncSender<QueuedRequest>, receiver: Receiver<WorkerEvent>) -> PluginManager {
-    PluginManager {
+fn manager(sender: SyncSender<QueuedRequest>, receiver: Receiver<WorkerEvent>) -> PluginHost {
+    PluginHost {
         owner: std::sync::Arc::new(()),
         queued: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         sender,
@@ -773,7 +775,7 @@ fn index_worker_does_not_touch_component_and_requires_host_acceptance() {
     let root = tempfile::tempdir().expect("store");
     let manifest_source = toml::to_string(&manifest()).expect("serialize manifest");
     fs::write(root.path().join("manifest.toml"), manifest_source).expect("manifest");
-    let mut manager = PluginManager::start(4);
+    let mut manager = PluginHost::start(4);
     let load = manager
         .index_from_store(
             "demo".into(),
@@ -831,7 +833,7 @@ fn execution_before_activation_removes_the_workers_indexed_candidate() {
         toml::to_string(&manifest()).unwrap(),
     )
     .unwrap();
-    let mut manager = PluginManager::start(4);
+    let mut manager = PluginHost::start(4);
     let load = manager
         .index_from_store(
             "demo".into(),
@@ -1415,7 +1417,7 @@ impl CapturedExecution {
     }
 }
 impl ExecutionFixture {
-    pub(crate) fn new(capacity: usize) -> (PluginManager, Self) {
+    pub(crate) fn new(capacity: usize) -> (PluginHost, Self) {
         let (tx, requests) = mpsc::sync_channel(capacity);
         let (events, rx) = mpsc::sync_channel(capacity);
         let mut manager = manager(tx, rx);
@@ -2045,7 +2047,7 @@ fn manager_accepts_a_component_inside_a_symlinked_store() {
     let link = root.path().join("store");
     std::os::unix::fs::symlink(&store, &link).unwrap();
     fs::write(store.join("guest.wasm"), b"\0asm").unwrap();
-    let mut manager = PluginManager::start(4);
+    let mut manager = PluginHost::start(4);
     let load = manager
         .load(
             link.clone(),

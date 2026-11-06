@@ -1,3 +1,5 @@
+//! Plugin loading, execution and runtime ownership.
+
 use crate::plugins::execution::ActiveRuntime;
 use crate::plugins::execution::LoadedComponent;
 use crate::plugins::execution::PluginExecution;
@@ -141,7 +143,7 @@ impl PluginInvocationOrigin {
     pub(crate) fn same(&self, other: &Self) -> bool {
         std::sync::Arc::ptr_eq(&self.invocation, &other.invocation)
     }
-    pub(crate) fn current(&self, manager: &PluginManager) -> bool {
+    pub(crate) fn current(&self, manager: &PluginHost) -> bool {
         std::sync::Arc::ptr_eq(&self.manager, &manager.owner)
             && manager.is_active_generation(&self.plugin, self.load)
     }
@@ -172,7 +174,7 @@ pub(crate) enum OwnedPluginEvent {
     Executed(PluginExecutionReply),
 }
 pub(crate) struct PluginInvocation<'a> {
-    manager: &'a mut PluginManager,
+    manager: &'a mut PluginHost,
     origin: PluginInvocationOrigin,
     slot: QueueSlot,
 }
@@ -184,7 +186,7 @@ impl PluginInvocation<'_> {
         if invocation.plugin != self.origin.plugin || invocation.command != self.origin.command {
             return Err(PluginError::InvalidInvocation);
         }
-        PluginManager::validate_invocation(invocation)
+        PluginHost::validate_invocation(invocation)
     }
     pub(crate) fn submit(self, invocation: PluginExecutionRequest) -> Result<(), PluginError> {
         self.check(&invocation)?;
@@ -209,7 +211,7 @@ pub(super) struct IndexedCandidate {
     limits: PluginLimits,
     _object_lock: Option<Arc<fs::File>>,
 }
-pub struct PluginManager {
+pub struct PluginHost {
     pub(super) owner: std::sync::Arc<()>,
     pub(super) queued: Arc<AtomicUsize>,
     pub(super) sender: SyncSender<QueuedRequest>,
@@ -221,7 +223,7 @@ pub struct PluginManager {
     pub(super) maximum_loads: usize,
     pub(super) stopped: bool,
 }
-impl PluginManager {
+impl PluginHost {
     #[cfg(test)]
     pub(crate) fn fixture_queued(&self) -> usize {
         self.queued.load(Ordering::Acquire)

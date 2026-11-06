@@ -1,3 +1,5 @@
+//! Private plugin storage requests and atomic persistence.
+
 #![forbid(unsafe_code)]
 
 use crate::plugins::PluginLoadId;
@@ -189,14 +191,14 @@ struct Work {
     request: PluginStorageRequest,
 }
 
-pub struct PluginStorageService {
+pub struct PluginStorageWorker {
     sender: SyncSender<Work>,
     receiver: Receiver<(u64, PluginStorageResult)>,
     generations: Arc<Mutex<BTreeMap<String, (PluginLoadId, u64)>>>,
     stopped: bool,
 }
 
-impl PluginStorageService {
+impl PluginStorageWorker {
     #[must_use]
     pub fn start(root: PathBuf, capacity: usize) -> Self {
         let capacity = capacity.clamp(1, STORAGE_REQUEST_CEILING);
@@ -827,7 +829,7 @@ mod tests {
         }
     }
 
-    fn wait(service: &mut PluginStorageService) -> PluginStorageResult {
+    fn wait(service: &mut PluginStorageWorker) -> PluginStorageResult {
         let deadline = Instant::now() + Duration::from_secs(2);
         loop {
             if let Some(result) = service.poll().pop() {
@@ -858,7 +860,7 @@ mod tests {
     fn storage_is_atomic_revisioned_persistent_and_generation_owned() {
         use std::os::unix::fs::PermissionsExt;
         let root = tempfile::tempdir().expect("root");
-        let mut service = PluginStorageService::start(root.path().join("data"), 8);
+        let mut service = PluginStorageWorker::start(root.path().join("data"), 8);
         service.install_generation("demo", PluginLoadId(7));
         service
             .request(
@@ -970,7 +972,7 @@ mod tests {
         }
         let root = tempfile::tempdir().expect("root");
         let data = root.path().join("data");
-        let mut service = PluginStorageService::start(data.clone(), 8);
+        let mut service = PluginStorageWorker::start(data.clone(), 8);
         service.install_generation("demo", PluginLoadId(1));
         assert_eq!(
             service
@@ -1017,7 +1019,7 @@ mod tests {
     #[test]
     fn item_and_total_quota_rejection_preserves_the_previous_map() {
         let root = tempfile::tempdir().expect("root");
-        let mut service = PluginStorageService::start(root.path().join("data"), 8);
+        let mut service = PluginStorageWorker::start(root.path().join("data"), 8);
         service.install_generation("demo", PluginLoadId(1));
         let policy = PluginStorageContribution {
             maximum_items: 1,
@@ -1101,7 +1103,7 @@ mod tests {
             ],
         };
         let duplicate_bytes = write_payload(&path, duplicate);
-        let mut service = PluginStorageService::start(data.clone(), 4);
+        let mut service = PluginStorageWorker::start(data.clone(), 4);
         service.install_generation("demo", PluginLoadId(1));
         service
             .request(
@@ -1149,7 +1151,7 @@ mod tests {
     fn idle_polling_performs_no_storage_io() {
         let root = tempfile::tempdir().expect("root");
         let data = root.path().join("not-created");
-        let mut service = PluginStorageService::start(data.clone(), 4);
+        let mut service = PluginStorageWorker::start(data.clone(), 4);
         for _ in 0..256 {
             assert!(service.poll().is_empty());
         }
@@ -1160,7 +1162,7 @@ mod tests {
     fn failed_atomic_write_preserves_the_previous_file() {
         let root = tempfile::tempdir().expect("root");
         let data = root.path().join("data");
-        let mut service = PluginStorageService::start(data.clone(), 4);
+        let mut service = PluginStorageWorker::start(data.clone(), 4);
         service.install_generation("demo", PluginLoadId(1));
         service
             .request(
@@ -1226,7 +1228,7 @@ mod tests {
             data.join(format!("{:x}.json", Sha256::digest(b"demo"))),
         )
         .unwrap();
-        let mut service = PluginStorageService::start(data, 4);
+        let mut service = PluginStorageWorker::start(data, 4);
         service.install_generation("demo", PluginLoadId(1));
         service
             .request(
@@ -1248,7 +1250,7 @@ mod tests {
         assert_eq!(fs::read(outside).unwrap(), b"outside");
     }
 
-    fn result(service: &mut PluginStorageService) -> PluginStorageResult {
+    fn result(service: &mut PluginStorageWorker) -> PluginStorageResult {
         let deadline = Instant::now() + Duration::from_secs(5);
         loop {
             if let Some(result) = service.poll().pop() {
@@ -1262,8 +1264,8 @@ mod tests {
     #[test]
     fn storage_transactions_share_a_stable_lock_and_deletions_reduce_quota() {
         let root = tempfile::tempdir().unwrap();
-        let mut first = PluginStorageService::start(root.path().into(), 8);
-        let mut second = PluginStorageService::start(root.path().into(), 8);
+        let mut first = PluginStorageWorker::start(root.path().into(), 8);
+        let mut second = PluginStorageWorker::start(root.path().into(), 8);
         let load = PluginLoadId(1);
         first.install_generation("demo", load);
         second.install_generation("demo", load);
@@ -1352,7 +1354,7 @@ mod tests {
     #[test]
     fn buffered_storage_results_are_discarded_after_reset() {
         let root = tempfile::tempdir().unwrap();
-        let mut service = PluginStorageService::start(root.path().into(), 8);
+        let mut service = PluginStorageWorker::start(root.path().into(), 8);
         let load = PluginLoadId(1);
         service.install_generation("demo", load);
         service
@@ -1384,7 +1386,7 @@ mod tests {
     #[test]
     fn storage_revocation_prevents_a_waiting_transaction_from_committing() {
         let root = tempfile::tempdir().unwrap();
-        let mut service = PluginStorageService::start(root.path().into(), 8);
+        let mut service = PluginStorageWorker::start(root.path().into(), 8);
         let load = PluginLoadId(1);
         service.install_generation("demo", load);
         let lock_path = root

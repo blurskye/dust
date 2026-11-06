@@ -1,3 +1,5 @@
+//! Plugin picker requests and validated result chunks.
+
 #![forbid(unsafe_code)]
 
 use crate::plugins::PluginContributionIndex;

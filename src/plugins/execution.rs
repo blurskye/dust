@@ -1,3 +1,5 @@
+//! Plugin execution requests and owned worker results.
+
 use crate::plugins::component::ComponentHostState;
 use crate::plugins::component::component_api;
 use crate::plugins::index::PluginError;

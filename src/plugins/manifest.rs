@@ -1,3 +1,5 @@
+//! Plugin manifests, capabilities and contribution declarations.
+
 use crate::plugins::index::PluginError;
 use serde::Deserialize;
 use serde::Serialize;
@@ -356,8 +358,8 @@ impl PluginContributionCatalog {
 
     pub fn context_snapshot(
         &self,
-    ) -> Result<crate::editor::input::InputContextRegistry, PluginError> {
-        let mut contexts = crate::editor::input::InputContextRegistry::bundled();
+    ) -> Result<crate::editor::input::InputContexts, PluginError> {
+        let mut contexts = crate::editor::input::InputContexts::bundled();
         for index in self.indexes.values() {
             let namespace = format!("plugin.{}.", index.owner);
             for context in &index.contexts {

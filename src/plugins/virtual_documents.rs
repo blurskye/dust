@@ -1,3 +1,5 @@
+//! Plugin document requests and validated text proposals.
+
 #![forbid(unsafe_code)]
 
 use crate::plugins::PluginContributionIndex;
