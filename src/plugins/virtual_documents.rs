@@ -11,10 +11,10 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 use std::time::Instant;
 
-pub const VIRTUAL_DOCUMENT_REQUEST_QUEUE_CEILING: usize = 64;
-pub const VIRTUAL_DOCUMENT_KEY_BYTE_CEILING: usize = 512;
-pub const VIRTUAL_DOCUMENT_TITLE_BYTE_CEILING: usize = 256;
-pub const VIRTUAL_DOCUMENT_LANGUAGE_BYTE_CEILING: usize = 64;
+pub const VIRTUAL_DOCUMENT_REQUEST_QUEUE_LIMIT: usize = 64;
+pub const VIRTUAL_DOCUMENT_KEY_BYTE_LIMIT: usize = 512;
+pub const VIRTUAL_DOCUMENT_TITLE_BYTE_LIMIT: usize = 256;
+pub const VIRTUAL_DOCUMENT_LANGUAGE_BYTE_LIMIT: usize = 64;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PluginVirtualDocumentErrorCode {
@@ -234,7 +234,7 @@ impl PluginVirtualDocumentBroker {
         source: &str,
         key: String,
     ) -> Result<u64, PluginVirtualDocumentError> {
-        validate_text(&key, VIRTUAL_DOCUMENT_KEY_BYTE_CEILING, true)?;
+        validate_text(&key, VIRTUAL_DOCUMENT_KEY_BYTE_LIMIT, true)?;
         let owner = self
             .owners
             .get(&(plugin.into(), load, source.into()))
@@ -391,7 +391,7 @@ impl PluginVirtualDocumentBroker {
         now: Instant,
         deadline_ms: u32,
     ) -> Result<(), PluginVirtualDocumentError> {
-        if self.pending.len() >= VIRTUAL_DOCUMENT_REQUEST_QUEUE_CEILING {
+        if self.pending.len() >= VIRTUAL_DOCUMENT_REQUEST_QUEUE_LIMIT {
             return Err(err(
                 PluginVirtualDocumentErrorCode::QueueFull,
                 "request queue full",
@@ -444,7 +444,7 @@ impl PluginVirtualDocumentBroker {
                     && declared == Some(command))
                 .then_some(*id)
             })
-            .take(VIRTUAL_DOCUMENT_REQUEST_QUEUE_CEILING)
+            .take(VIRTUAL_DOCUMENT_REQUEST_QUEUE_LIMIT)
             .collect::<Vec<_>>();
         let mut out = Vec::new();
         for id in ids {

@@ -14,14 +14,14 @@ use std::collections::BTreeSet;
 use std::time::Duration;
 use std::time::Instant;
 
-pub const PROVIDER_REQUEST_QUEUE_CEILING: usize = 64;
-pub const PROVIDER_CHUNK_ITEM_CEILING: usize = 512;
-pub const PROVIDER_ITEM_ID_BYTE_CEILING: usize = 128;
-pub const PROVIDER_PRIMARY_BYTE_CEILING: usize = 1_024;
-pub const PROVIDER_SECONDARY_BYTE_CEILING: usize = 2_048;
-pub const PROVIDER_ACTION_BYTE_CEILING: usize = 4_096;
-pub const PROVIDER_QUERY_BYTE_CEILING: usize = 1_024;
-pub const PROVIDER_CONTEXT_BYTE_CEILING: usize = 4_096;
+pub const PROVIDER_REQUEST_QUEUE_LIMIT: usize = 64;
+pub const PROVIDER_CHUNK_ITEM_LIMIT: usize = 512;
+pub const PROVIDER_ITEM_ID_BYTE_LIMIT: usize = 128;
+pub const PROVIDER_PRIMARY_BYTE_LIMIT: usize = 1_024;
+pub const PROVIDER_SECONDARY_BYTE_LIMIT: usize = 2_048;
+pub const PROVIDER_ACTION_BYTE_LIMIT: usize = 4_096;
+pub const PROVIDER_QUERY_BYTE_LIMIT: usize = 1_024;
+pub const PROVIDER_CONTEXT_BYTE_LIMIT: usize = 4_096;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PluginProviderErrorCode {
@@ -223,8 +223,8 @@ impl PluginProviderBroker {
             workspace_revision,
             buffer_revision,
         } = request;
-        validate_text(&query, PROVIDER_QUERY_BYTE_CEILING, true)?;
-        validate_text(&context, PROVIDER_CONTEXT_BYTE_CEILING, true)?;
+        validate_text(&query, PROVIDER_QUERY_BYTE_LIMIT, true)?;
+        validate_text(&context, PROVIDER_CONTEXT_BYTE_LIMIT, true)?;
         let owner = self
             .owners
             .get(&(plugin.clone(), load, provider.clone()))
@@ -313,7 +313,7 @@ impl PluginProviderBroker {
                     && session.status == PluginProviderSessionStatus::Active
                     && session.deadline >= now
             })
-            .take(PROVIDER_REQUEST_QUEUE_CEILING)
+            .take(PROVIDER_REQUEST_QUEUE_LIMIT)
             .map(|(id, session)| PluginPickerRequestEnvelope {
                 id: *id,
                 provider: session.provider.clone(),
@@ -539,8 +539,7 @@ fn validate_text(
 }
 
 pub fn validate_chunk(chunk: &PluginPickerChunk) -> Result<(), PluginProviderError> {
-    if chunk.request == 0 || chunk.sequence == 0 || chunk.items.len() > PROVIDER_CHUNK_ITEM_CEILING
-    {
+    if chunk.request == 0 || chunk.sequence == 0 || chunk.items.len() > PROVIDER_CHUNK_ITEM_LIMIT {
         return Err(PluginProviderError::new(
             PluginProviderErrorCode::ItemCeiling,
             "provider chunk count or identity is invalid",
@@ -552,12 +551,12 @@ pub fn validate_chunk(chunk: &PluginPickerChunk) -> Result<(), PluginProviderErr
     };
     if !terminal_valid
         || chunk.items.iter().any(|item| {
-            validate_text(&item.id, PROVIDER_ITEM_ID_BYTE_CEILING, false).is_err()
-                || validate_text(&item.primary, PROVIDER_PRIMARY_BYTE_CEILING, false).is_err()
+            validate_text(&item.id, PROVIDER_ITEM_ID_BYTE_LIMIT, false).is_err()
+                || validate_text(&item.primary, PROVIDER_PRIMARY_BYTE_LIMIT, false).is_err()
                 || item.secondary.as_ref().is_some_and(|secondary| {
-                    validate_text(secondary, PROVIDER_SECONDARY_BYTE_CEILING, true).is_err()
+                    validate_text(secondary, PROVIDER_SECONDARY_BYTE_LIMIT, true).is_err()
                 })
-                || item.action_data.len() > PROVIDER_ACTION_BYTE_CEILING
+                || item.action_data.len() > PROVIDER_ACTION_BYTE_LIMIT
         })
     {
         return Err(PluginProviderError::new(

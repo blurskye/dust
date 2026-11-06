@@ -47,11 +47,11 @@ use crate::plugins::manifest::PluginPresenterKind;
 use crate::plugins::manifest::PluginProviderKind;
 use crate::plugins::manifest::PluginSubscriptionKind;
 use crate::plugins::manifest::PluginVirtualDocumentMode;
-use crate::plugins::providers::PROVIDER_REQUEST_QUEUE_CEILING;
-use crate::plugins::storage::STORAGE_REQUEST_CEILING;
-use crate::plugins::virtual_documents::VIRTUAL_DOCUMENT_LANGUAGE_BYTE_CEILING;
-use crate::plugins::virtual_documents::VIRTUAL_DOCUMENT_REQUEST_QUEUE_CEILING;
-use crate::plugins::virtual_documents::VIRTUAL_DOCUMENT_TITLE_BYTE_CEILING;
+use crate::plugins::providers::PROVIDER_REQUEST_QUEUE_LIMIT;
+use crate::plugins::storage::STORAGE_REQUEST_LIMIT;
+use crate::plugins::virtual_documents::VIRTUAL_DOCUMENT_LANGUAGE_BYTE_LIMIT;
+use crate::plugins::virtual_documents::VIRTUAL_DOCUMENT_REQUEST_QUEUE_LIMIT;
+use crate::plugins::virtual_documents::VIRTUAL_DOCUMENT_TITLE_BYTE_LIMIT;
 use sha2::Digest;
 use sha2::Sha256;
 use std::collections::BTreeMap;
@@ -71,7 +71,7 @@ pub(super) fn index_manifest_from_store(
     load: PluginLoadId,
     limits: &PluginLimits,
 ) -> Result<(PluginManifest, PluginContributionIndex, PathBuf, PathBuf), PluginError> {
-    const MANIFEST_BYTE_CEILING: u64 = 1024 * 1024;
+    const MANIFEST_BYTE_LIMIT: u64 = 1024 * 1024;
     if manifest_relative.is_absolute() || component_relative.is_absolute() {
         return Err(PluginError::OutsideStore);
     }
@@ -82,14 +82,14 @@ pub(super) fn index_manifest_from_store(
     }
     let file = crate::files::open_regular_file(&manifest_path).map_err(PluginError::Io)?;
     let metadata = file.metadata().map_err(PluginError::Io)?;
-    if !metadata.file_type().is_file() || metadata.len() > MANIFEST_BYTE_CEILING {
+    if !metadata.file_type().is_file() || metadata.len() > MANIFEST_BYTE_LIMIT {
         return Err(PluginError::InvalidManifest);
     }
     let mut bytes = Vec::with_capacity(metadata.len() as usize);
-    file.take(MANIFEST_BYTE_CEILING + 1)
+    file.take(MANIFEST_BYTE_LIMIT + 1)
         .read_to_end(&mut bytes)
         .map_err(PluginError::Io)?;
-    if bytes.len() as u64 > MANIFEST_BYTE_CEILING {
+    if bytes.len() as u64 > MANIFEST_BYTE_LIMIT {
         return Err(PluginError::InvalidManifest);
     }
     let source = String::from_utf8(bytes).map_err(|_| PluginError::InvalidManifest)?;
@@ -417,10 +417,10 @@ pub(super) fn index_manifest_contributions_with_text(
             || !valid_contribution_id(&document.id)
             || !ids.insert(document.id.clone())
             || document.title.trim().is_empty()
-            || document.title.len() > VIRTUAL_DOCUMENT_TITLE_BYTE_CEILING
+            || document.title.len() > VIRTUAL_DOCUMENT_TITLE_BYTE_LIMIT
             || document.title.chars().any(char::is_control)
             || document.language.is_empty()
-            || document.language.len() > VIRTUAL_DOCUMENT_LANGUAGE_BYTE_CEILING
+            || document.language.len() > VIRTUAL_DOCUMENT_LANGUAGE_BYTE_LIMIT
             || !document
                 .language
                 .bytes()
@@ -920,13 +920,13 @@ pub(crate) fn execute_component(
         state.storage_results.extend(
             storage_results
                 .into_iter()
-                .take(STORAGE_REQUEST_CEILING)
+                .take(STORAGE_REQUEST_LIMIT)
                 .map(component_storage_result),
         );
         state.storage_requests.clear();
         state.provider_requests = provider_requests
             .into_iter()
-            .take(PROVIDER_REQUEST_QUEUE_CEILING)
+            .take(PROVIDER_REQUEST_QUEUE_LIMIT)
             .map(component_provider_request)
             .collect();
         state.delivered_provider_requests = state
@@ -937,7 +937,7 @@ pub(crate) fn execute_component(
         state.provider_chunks.clear();
         state.virtual_document_requests = virtual_document_requests
             .into_iter()
-            .take(VIRTUAL_DOCUMENT_REQUEST_QUEUE_CEILING)
+            .take(VIRTUAL_DOCUMENT_REQUEST_QUEUE_LIMIT)
             .map(component_virtual_document_request)
             .collect();
         state.delivered_virtual_document_requests = state

@@ -356,9 +356,7 @@ impl PluginContributionCatalog {
         self.indexes.values()
     }
 
-    pub fn context_snapshot(
-        &self,
-    ) -> Result<crate::editor::input::InputContexts, PluginError> {
+    pub fn context_snapshot(&self) -> Result<crate::editor::input::InputContexts, PluginError> {
         let mut contexts = crate::editor::input::InputContexts::bundled();
         for index in self.indexes.values() {
             let namespace = format!("plugin.{}.", index.owner);

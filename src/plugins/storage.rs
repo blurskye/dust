@@ -27,13 +27,13 @@ use std::sync::mpsc::TryRecvError;
 use std::sync::mpsc::TrySendError;
 use std::thread;
 
-pub const STORAGE_REQUEST_CEILING: usize = 64;
-pub const STORAGE_KEY_BYTE_CEILING: usize = 128;
-pub const STORAGE_VALUE_BYTE_CEILING: usize = 256 * 1024;
-pub const STORAGE_FILE_BYTE_CEILING: u64 = 8 * 1024 * 1024;
-pub const STORAGE_LIST_ENTRY_CEILING: u16 = 1_024;
-pub const STORAGE_LIST_BYTE_CEILING: usize = 512 * 1024;
-pub const STORAGE_RESULT_QUEUE_BYTE_CEILING: usize = 4 * 1024 * 1024;
+pub const STORAGE_REQUEST_LIMIT: usize = 64;
+pub const STORAGE_KEY_BYTE_LIMIT: usize = 128;
+pub const STORAGE_VALUE_BYTE_LIMIT: usize = 256 * 1024;
+pub const STORAGE_FILE_BYTE_LIMIT: u64 = 8 * 1024 * 1024;
+pub const STORAGE_LIST_ENTRY_LIMIT: u16 = 1_024;
+pub const STORAGE_LIST_BYTE_LIMIT: usize = 512 * 1024;
+pub const STORAGE_RESULT_QUEUE_BYTE_LIMIT: usize = 4 * 1024 * 1024;
 const STORAGE_SCHEMA: u32 = 1;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -201,7 +201,7 @@ pub struct PluginStorageWorker {
 impl PluginStorageWorker {
     #[must_use]
     pub fn start(root: PathBuf, capacity: usize) -> Self {
-        let capacity = capacity.clamp(1, STORAGE_REQUEST_CEILING);
+        let capacity = capacity.clamp(1, STORAGE_REQUEST_LIMIT);
         let (sender, requests) = mpsc::sync_channel::<Work>(capacity);
         let (results, receiver) = mpsc::sync_channel::<(u64, PluginStorageResult)>(capacity);
         let generations = Arc::new(Mutex::new(BTreeMap::new()));
@@ -355,7 +355,7 @@ impl PluginStorageWorker {
 
 pub fn validate_key(key: &str, allow_empty: bool) -> Result<(), PluginStorageError> {
     if (key.is_empty() && !allow_empty)
-        || key.len() > STORAGE_KEY_BYTE_CEILING
+        || key.len() > STORAGE_KEY_BYTE_LIMIT
         || key == "."
         || key == ".."
         || key.starts_with('.')
@@ -387,7 +387,7 @@ pub fn validate_request(
         PluginStorageRequestKind::Get { key } => validate_key(key, false),
         PluginStorageRequestKind::CompareAndSet { key, value, .. } => {
             validate_key(key, false)?;
-            if value.len() > STORAGE_VALUE_BYTE_CEILING
+            if value.len() > STORAGE_VALUE_BYTE_LIMIT
                 || value.len() > policy.maximum_value_bytes as usize
             {
                 return Err(PluginStorageError::new(
@@ -412,7 +412,7 @@ pub fn validate_request(
         }
         PluginStorageRequestKind::List { prefix, maximum } => {
             validate_key(prefix, true)?;
-            if *maximum == 0 || *maximum > STORAGE_LIST_ENTRY_CEILING {
+            if *maximum == 0 || *maximum > STORAGE_LIST_ENTRY_LIMIT {
                 return Err(PluginStorageError::new(
                     PluginStorageErrorCode::QuotaExceeded,
                     "storage list count exceeds the host bound",
@@ -561,8 +561,8 @@ fn process(
                     }
                     let entry_bytes = key.len().saturating_add(record.value.len());
                     if entries.len() >= usize::from(maximum)
-                        || entries.len() >= usize::from(STORAGE_LIST_ENTRY_CEILING)
-                        || bytes.saturating_add(entry_bytes) > STORAGE_LIST_BYTE_CEILING
+                        || entries.len() >= usize::from(STORAGE_LIST_ENTRY_LIMIT)
+                        || bytes.saturating_add(entry_bytes) > STORAGE_LIST_BYTE_LIMIT
                     {
                         truncated = true;
                         break;
@@ -610,7 +610,7 @@ fn load_state(path: &Path) -> Result<StorageState, PluginStorageError> {
     };
     if !metadata.file_type().is_file()
         || metadata.file_type().is_symlink()
-        || metadata.len() > STORAGE_FILE_BYTE_CEILING
+        || metadata.len() > STORAGE_FILE_BYTE_LIMIT
     {
         return Err(PluginStorageError::new(
             PluginStorageErrorCode::Corrupt,
@@ -620,10 +620,10 @@ fn load_state(path: &Path) -> Result<StorageState, PluginStorageError> {
     let mut bytes = Vec::with_capacity(metadata.len() as usize);
     fs::File::open(path)
         .map_err(|error| PluginStorageError::new(PluginStorageErrorCode::Unavailable, error))?
-        .take(STORAGE_FILE_BYTE_CEILING + 1)
+        .take(STORAGE_FILE_BYTE_LIMIT + 1)
         .read_to_end(&mut bytes)
         .map_err(|error| PluginStorageError::new(PluginStorageErrorCode::Unavailable, error))?;
-    if bytes.len() as u64 > STORAGE_FILE_BYTE_CEILING {
+    if bytes.len() as u64 > STORAGE_FILE_BYTE_LIMIT {
         return Err(PluginStorageError::new(
             PluginStorageErrorCode::Corrupt,
             "storage state exceeds the file bound",
@@ -652,7 +652,7 @@ fn load_state(path: &Path) -> Result<StorageState, PluginStorageError> {
             validate_key(&record.key, false).is_err()
                 || record.revision == 0
                 || record.revision >= envelope.payload.next_revision
-                || record.value.len() > STORAGE_VALUE_BYTE_CEILING
+                || record.value.len() > STORAGE_VALUE_BYTE_LIMIT
                 || !revisions.insert(record.revision)
                 || records
                     .insert(
@@ -757,7 +757,7 @@ fn persist(context: PersistContext<'_>) -> Result<(), PluginStorageError> {
     };
     let bytes = serde_json::to_vec(&envelope)
         .map_err(|error| PluginStorageError::new(PluginStorageErrorCode::Unavailable, error))?;
-    if bytes.len() as u64 > STORAGE_FILE_BYTE_CEILING {
+    if bytes.len() as u64 > STORAGE_FILE_BYTE_LIMIT {
         return Err(PluginStorageError::new(
             PluginStorageErrorCode::QuotaExceeded,
             "serialized storage exceeds the file bound",

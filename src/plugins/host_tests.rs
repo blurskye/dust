@@ -392,7 +392,7 @@ fn component_storage_queue_is_capability_key_and_count_bounded() {
             .code,
         component_api::dust::plugin::host::StorageErrorCode::InvalidKey
     );
-    for _ in 1..STORAGE_REQUEST_CEILING {
+    for _ in 1..STORAGE_REQUEST_LIMIT {
         host.queue_storage_request(StorageRequest::Delete(
             component_api::dust::plugin::host::StorageDeleteRequest {
                 key: "valid".into(),
@@ -407,7 +407,7 @@ fn component_storage_queue_is_capability_key_and_count_bounded() {
             .code,
         component_api::dust::plugin::host::StorageErrorCode::QueueFull
     );
-    assert_eq!(host.storage_requests.len(), STORAGE_REQUEST_CEILING);
+    assert_eq!(host.storage_requests.len(), STORAGE_REQUEST_LIMIT);
     use component_api::dust::plugin::host::VirtualDocumentProposal;
     use component_api::dust::plugin::host::VirtualDocumentProposalKind;
     assert_eq!(

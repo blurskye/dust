@@ -35,7 +35,7 @@ use crate::plugins::manifest::MAXIMUM_VIRTUAL_PATCH_BYTES;
 use crate::plugins::manifest::PluginCapability;
 use crate::plugins::manifest::PluginStorageContribution;
 use crate::plugins::providers;
-use crate::plugins::providers::PROVIDER_REQUEST_QUEUE_CEILING;
+use crate::plugins::providers::PROVIDER_REQUEST_QUEUE_LIMIT;
 use crate::plugins::providers::PluginPickerChunk;
 use crate::plugins::providers::PluginPickerItem;
 use crate::plugins::providers::PluginPickerRequestEnvelope;
@@ -48,7 +48,7 @@ use crate::plugins::storage::PluginStorageErrorCode;
 use crate::plugins::storage::PluginStorageRequest;
 use crate::plugins::storage::PluginStorageRequestKind;
 use crate::plugins::storage::PluginStorageResult;
-use crate::plugins::storage::STORAGE_REQUEST_CEILING;
+use crate::plugins::storage::STORAGE_REQUEST_LIMIT;
 use crate::plugins::virtual_documents::PluginVirtualDocumentError;
 use crate::plugins::virtual_documents::PluginVirtualDocumentErrorCode;
 use crate::plugins::virtual_documents::PluginVirtualDocumentFull;
@@ -58,9 +58,9 @@ use crate::plugins::virtual_documents::PluginVirtualDocumentProposal;
 use crate::plugins::virtual_documents::PluginVirtualDocumentProposalKind;
 use crate::plugins::virtual_documents::PluginVirtualDocumentRequest;
 use crate::plugins::virtual_documents::PluginVirtualDocumentRequestKind;
-use crate::plugins::virtual_documents::VIRTUAL_DOCUMENT_LANGUAGE_BYTE_CEILING;
-use crate::plugins::virtual_documents::VIRTUAL_DOCUMENT_REQUEST_QUEUE_CEILING;
-use crate::plugins::virtual_documents::VIRTUAL_DOCUMENT_TITLE_BYTE_CEILING;
+use crate::plugins::virtual_documents::VIRTUAL_DOCUMENT_LANGUAGE_BYTE_LIMIT;
+use crate::plugins::virtual_documents::VIRTUAL_DOCUMENT_REQUEST_QUEUE_LIMIT;
+use crate::plugins::virtual_documents::VIRTUAL_DOCUMENT_TITLE_BYTE_LIMIT;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 
@@ -417,7 +417,7 @@ impl component_api::dust::plugin::host::Host for ComponentHostState {
                 "capability denied",
             )));
         }
-        if self.storage_requests.len() >= STORAGE_REQUEST_CEILING {
+        if self.storage_requests.len() >= STORAGE_REQUEST_LIMIT {
             return Err(component_storage_error(PluginStorageError::new(
                 PluginStorageErrorCode::QueueFull,
                 "storage request ceiling exceeded",
@@ -440,17 +440,17 @@ impl component_api::dust::plugin::host::Host for ComponentHostState {
         })?;
         storage::validate_request(&candidate, policy).map_err(component_storage_error)?;
         let bytes = match &candidate.kind {
-            PluginStorageRequestKind::Get { .. } => storage::STORAGE_VALUE_BYTE_CEILING + 4096,
-            PluginStorageRequestKind::List { .. } => storage::STORAGE_LIST_BYTE_CEILING + 4096,
+            PluginStorageRequestKind::Get { .. } => storage::STORAGE_VALUE_BYTE_LIMIT + 4096,
+            PluginStorageRequestKind::List { .. } => storage::STORAGE_LIST_BYTE_LIMIT + 4096,
             _ => 4096,
         };
-        if self.pending_storage.len() >= STORAGE_REQUEST_CEILING
+        if self.pending_storage.len() >= STORAGE_REQUEST_LIMIT
             || self
                 .pending_storage
                 .values()
                 .sum::<usize>()
                 .saturating_add(bytes)
-                > storage::STORAGE_RESULT_QUEUE_BYTE_CEILING
+                > storage::STORAGE_RESULT_QUEUE_BYTE_LIMIT
         {
             return Err(component_storage_error(PluginStorageError::new(
                 PluginStorageErrorCode::QueueFull,
@@ -506,7 +506,7 @@ impl component_api::dust::plugin::host::Host for ComponentHostState {
                 "capability denied",
             )));
         }
-        if self.provider_chunks.len() >= PROVIDER_REQUEST_QUEUE_CEILING {
+        if self.provider_chunks.len() >= PROVIDER_REQUEST_QUEUE_LIMIT {
             return Err(component_provider_error(PluginProviderError::new(
                 PluginProviderErrorCode::QueueFull,
                 "provider chunk queue is full",
@@ -583,7 +583,7 @@ impl component_api::dust::plugin::host::Host for ComponentHostState {
                 ),
             ));
         }
-        if self.virtual_document_proposals.len() >= VIRTUAL_DOCUMENT_REQUEST_QUEUE_CEILING {
+        if self.virtual_document_proposals.len() >= VIRTUAL_DOCUMENT_REQUEST_QUEUE_LIMIT {
             return Err(component_virtual_document_error(
                 PluginVirtualDocumentError::new(
                     PluginVirtualDocumentErrorCode::QueueFull,
@@ -740,8 +740,8 @@ pub(super) fn convert_component_virtual_document_proposal(
     use component_api::dust::plugin::host::VirtualDocumentProposalKind as K;
     let kind = match p.kind {
         K::Full(f) => {
-            if f.title.len() > VIRTUAL_DOCUMENT_TITLE_BYTE_CEILING
-                || f.language.len() > VIRTUAL_DOCUMENT_LANGUAGE_BYTE_CEILING
+            if f.title.len() > VIRTUAL_DOCUMENT_TITLE_BYTE_LIMIT
+                || f.language.len() > VIRTUAL_DOCUMENT_LANGUAGE_BYTE_LIMIT
                 || f.text.len() > MAXIMUM_VIRTUAL_DOCUMENT_BYTES as usize
             {
                 return Err(PluginVirtualDocumentError::new(
