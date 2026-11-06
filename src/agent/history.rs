@@ -21,8 +21,8 @@ use std::thread;
 use std::time::Instant;
 
 /// Saved transcripts must also fit the reader's byte limit.
-const FILE_BYTE_CEILING: u64 = 32 * 1024 * 1024;
-const HEADER_BYTE_CEILING: u64 = 64 * 1024;
+const FILE_BYTE_LIMIT: u64 = 32 * 1024 * 1024;
+const HEADER_BYTE_LIMIT: u64 = 64 * 1024;
 
 /// One part of a conversation as the panel shows it.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -104,10 +104,10 @@ fn write_history(
     let write = || -> Result<(), String> {
         let head = serde_json::to_string(conversation).map_err(|error| error.to_string())?;
         let body = serde_json::to_string(entries).map_err(|error| error.to_string())?;
-        if head.len() as u64 + 1 > HEADER_BYTE_CEILING {
+        if head.len() as u64 + 1 > HEADER_BYTE_LIMIT {
             return Err("conversation header exceeds its size limit".into());
         }
-        if head.len() as u64 + body.len() as u64 + 2 > FILE_BYTE_CEILING {
+        if head.len() as u64 + body.len() as u64 + 2 > FILE_BYTE_LIMIT {
             return Err("conversation exceeds its size limit".into());
         }
         let parent = target.parent().ok_or("history path has no parent")?;
@@ -234,10 +234,10 @@ pub fn list(directory: &Path) -> Vec<Conversation> {
         })
         .filter_map(|entry| {
             let mut line = String::new();
-            BufReader::new(open_history(&entry.path())?.take(HEADER_BYTE_CEILING + 1))
+            BufReader::new(open_history(&entry.path())?.take(HEADER_BYTE_LIMIT + 1))
                 .read_line(&mut line)
                 .ok()?;
-            if line.len() as u64 > HEADER_BYTE_CEILING {
+            if line.len() as u64 > HEADER_BYTE_LIMIT {
                 return None;
             }
             serde_json::from_str::<Conversation>(&line).ok()
@@ -250,15 +250,15 @@ pub fn list(directory: &Path) -> Vec<Conversation> {
 #[must_use]
 pub fn load(directory: &Path, id: &str) -> Option<(Conversation, Vec<Entry>)> {
     let source = open_history(&file(directory, id))?;
-    if source.metadata().ok()?.len() > FILE_BYTE_CEILING {
+    if source.metadata().ok()?.len() > FILE_BYTE_LIMIT {
         return None;
     }
     let mut text = String::new();
     source
-        .take(FILE_BYTE_CEILING + 1)
+        .take(FILE_BYTE_LIMIT + 1)
         .read_to_string(&mut text)
         .ok()?;
-    if text.len() as u64 > FILE_BYTE_CEILING {
+    if text.len() as u64 > FILE_BYTE_LIMIT {
         return None;
     }
     let (head, body) = text.split_once('\n')?;
@@ -410,7 +410,7 @@ mod tests {
         writer.save(
             directory.path().into(),
             conversation.clone(),
-            vec![Entry::Agent("x".repeat(FILE_BYTE_CEILING as usize))],
+            vec![Entry::Agent("x".repeat(FILE_BYTE_LIMIT as usize))],
         );
         let error = writer
             .flush(Instant::now() + std::time::Duration::from_secs(10))
@@ -421,7 +421,7 @@ mod tests {
             Some((conversation.clone(), entries.clone()))
         );
         let mut oversized_header = conversation.clone();
-        oversized_header.title = "x".repeat(HEADER_BYTE_CEILING as usize);
+        oversized_header.title = "x".repeat(HEADER_BYTE_LIMIT as usize);
         writer.save(directory.path().into(), oversized_header, entries.clone());
         let error = writer
             .flush(Instant::now() + std::time::Duration::from_secs(5))
@@ -486,7 +486,7 @@ mod tests {
             agent: "fixture".into(),
             root: directory.path().into(),
             session: None,
-            title: "x".repeat(HEADER_BYTE_CEILING as usize),
+            title: "x".repeat(HEADER_BYTE_LIMIT as usize),
             updated: 1,
         };
         let path = file(directory.path(), &conversation.id);
@@ -500,7 +500,7 @@ mod tests {
             .write(true)
             .open(&path)
             .unwrap()
-            .set_len(FILE_BYTE_CEILING + 1)
+            .set_len(FILE_BYTE_LIMIT + 1)
             .unwrap();
         assert!(load(directory.path(), &conversation.id).is_none());
     }

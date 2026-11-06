@@ -36,7 +36,7 @@ pub mod history;
 pub mod mcp;
 
 pub const PROTOCOL_VERSION: u64 = 1;
-const LINE_BYTE_CEILING: usize = 16 * 1024 * 1024;
+const LINE_BYTE_LIMIT: usize = 16 * 1024 * 1024;
 const MESSAGE_CAPACITY: usize = 256;
 const WRITE_CAPACITY: usize = 16;
 
@@ -116,7 +116,7 @@ impl AgentProcess {
             let mut reader = BufReader::new(stdout);
             let mut line = String::new();
             let reason = loop {
-                match read_line(&mut reader, &mut line, LINE_BYTE_CEILING) {
+                match read_line(&mut reader, &mut line, LINE_BYTE_LIMIT) {
                     Ok(0) => break "the agent exited".to_owned(),
                     Ok(_) => {
                         let Some(message) = parse_line(line.trim()) else {
@@ -140,7 +140,7 @@ impl AgentProcess {
                 let mut line = Vec::new();
                 while let Ok(count) = reader
                     .by_ref()
-                    .take(LINE_BYTE_CEILING as u64)
+                    .take(LINE_BYTE_LIMIT as u64)
                     .read_until(b'\n', &mut line)
                 {
                     if count == 0 {
