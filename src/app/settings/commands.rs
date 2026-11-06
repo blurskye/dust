@@ -1,3 +1,5 @@
+//! Command registration and execution for settings pages and first-start setup.
+
 use crate::app::App;
 use crate::app::commands::AppEffect;
 

@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 
 use crate::app::App;
-use crate::app::documents::coordination::create_user_file;
+use crate::app::documents::create_user_file;
 use crate::config::DeclaredKeymap;
 use crate::config::declared_keymaps;
 use crate::config::remove_user_keymap;
