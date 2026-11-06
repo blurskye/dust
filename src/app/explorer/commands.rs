@@ -1,3 +1,5 @@
+//! Command registration and execution for explorer navigation and filesystem changes.
+
 use crate::app::App;
 use crate::app::commands::AppEffect;
 use crate::ui::PromptKind;

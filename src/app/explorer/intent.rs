@@ -1,5 +1,5 @@
 //! Explorer operations retain their exact request, confirmation and reconciliation context.
-use crate::app::explorer::ExplorerSession;
+use crate::app::explorer::Explorer;
 use crate::app::explorer::tree::ExplorerKind;
 use crate::app::windows::NavigationStamp;
 use crate::app::workspace::WorkspaceVersion;
@@ -95,7 +95,7 @@ pub(in crate::app) struct OpenReply {
     pub navigation: NavigationStamp,
     pub split: bool,
 }
-impl ExplorerSession {
+impl Explorer {
     fn operation_roots(&self, roots: &[WorkspaceRoot]) -> Vec<crate::files::RootIdentity> {
         roots
             .iter()

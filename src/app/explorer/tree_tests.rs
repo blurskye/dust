@@ -1,3 +1,5 @@
+//! Tree tests for explorer navigation and filesystem changes.
+
 use crate::files::RootIdentity;
 use crate::workspace::*;
 use std::fs;

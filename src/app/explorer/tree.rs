@@ -1,3 +1,5 @@
+//! Explorer nodes, directory children and visible tree rows.
+
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
