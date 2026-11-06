@@ -1,8 +1,8 @@
 //! Workspace behavior and application integration tests.
 
-use crate::app::tests::*;
 use crate::app::App;
 use crate::app::AppEffect;
+use crate::app::tests::*;
 use crate::editor::input::KeyEvent;
 use crate::editor::text::ByteOffset;
 use crate::editor::text::TextBuffer;
@@ -228,8 +228,7 @@ fn workspace_history_records_visits_without_trust_prompts() {
 }
 
 #[test]
-fn automatic_workspace_trust_prompt_never_steals_an_active_prompt_or_safe_mode()
-{
+fn automatic_workspace_trust_prompt_never_steals_an_active_prompt_or_safe_mode() {
     let (_app_dirs, mut app) = app();
     prepare_trust_identity(&mut app);
     app.open_prompt(crate::ui::PromptKind::Command, String::new());
@@ -647,8 +646,7 @@ fn workspace_replacement_groups_many_matches_from_shared_snapshots() {
 }
 
 #[test]
-fn workspace_replacement_rejects_open_buffer_that_differs_from_search_snapshot()
-{
+fn workspace_replacement_rejects_open_buffer_that_differs_from_search_snapshot() {
     let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("stale.txt");
     fs::write(&path, "needle\n").expect("disk");
@@ -865,4 +863,343 @@ fn remote_files_outside_the_workspace_open_writable_at_the_requested_line() {
     assert_eq!(app.state.buffers[view.buffer].path.as_ref(), Some(&path));
     assert!(!app.state.buffers[view.buffer].read_only);
     assert_eq!(view.cursor.get(), 4);
+}
+
+use crate::app::workspace::*;
+pub(in crate::app) fn fixture() -> (Workspace, tempfile::TempDir) {
+    let state = WorkspaceState::new(
+        crate::workspace::WorkspaceId(1),
+        [
+            (
+                "one".into(),
+                RootIdentity {
+                    canonical_path: "/one".into(),
+                    filesystem_identity: Some((1, 1)),
+                },
+            ),
+            (
+                "two".into(),
+                RootIdentity {
+                    canonical_path: "/two".into(),
+                    filesystem_identity: Some((1, 2)),
+                },
+            ),
+        ],
+    )
+    .unwrap();
+    let directory = tempfile::tempdir().unwrap();
+    let mut owner = Workspace::new(
+        state,
+        directory.path().join("trust.toml"),
+        4,
+        false,
+        false,
+        4,
+    );
+    owner.database_ready = true;
+    owner.identity_ready = true;
+    for root in owner.state.roots() {
+        owner.store.trust(root.identity.clone());
+        owner.store.mark_seen(root.identity.clone());
+    }
+    owner.persisted_identities = owner.store.identities();
+    owner.reconcile_trust();
+    (owner, directory)
+}
+#[test]
+fn removing_a_root_preserves_trust_of_remaining_roots() {
+    let (mut owner, _directory) = fixture();
+    owner.remove_root(RootId(2)).unwrap();
+    assert_eq!(owner.trust(), WorkspaceTrust::Trusted);
+    assert!(owner.execution_allowed().is_ok());
+}
+
+#[test]
+fn workspace_root_removal_reconciles_remaining_trust() {
+    let (mut owner, _directory) = fixture();
+    owner.remove_root(RootId(2)).unwrap();
+    assert_eq!(owner.trust(), WorkspaceTrust::Trusted);
+    assert!(owner.execution_allowed().is_ok());
+}
+
+#[test]
+fn workspace_root_addition_reconciles_previously_saved_trust() {
+    let (mut owner, _directory) = fixture();
+    let identity = RootIdentity {
+        canonical_path: "/three".into(),
+        filesystem_identity: Some((1, 3)),
+    };
+    owner.store.trust(identity.clone());
+    owner.persisted_identities.push(identity.clone());
+    owner
+        .add_root_request(identity.canonical_path.clone(), None)
+        .unwrap_or_else(|_| panic!("root request"));
+    let generation = owner.root_operation.as_ref().unwrap().generation;
+    let mut updates = Vec::new();
+    owner.accept_event(
+        TrustEvent::RootInspected {
+            generation,
+            result: Ok(identity),
+        },
+        &mut updates,
+        &EditorState::new("/".into()),
+    );
+    assert!(matches!(
+        updates.as_slice(),
+        [WorkspaceUpdate::RootAdded(_)]
+    ));
+    assert_eq!(owner.trust(), WorkspaceTrust::Trusted);
+    assert!(owner.execution_allowed().is_ok());
+}
+
+#[test]
+fn workspace_root_replacement_at_capacity_is_atomic() {
+    let (mut owner, _directory) = fixture();
+    for index in 3..=64 {
+        owner
+            .state
+            .add_root(
+                format!("root-{index}"),
+                RootIdentity {
+                    canonical_path: format!("/root-{index}").into(),
+                    filesystem_identity: Some((1, index)),
+                },
+            )
+            .unwrap();
+    }
+    let identity = RootIdentity {
+        canonical_path: "/replacement".into(),
+        filesystem_identity: Some((1, 100)),
+    };
+    owner
+        .add_root_request(identity.canonical_path.clone(), Some(RootId(1)))
+        .unwrap_or_else(|_| panic!("root request"));
+    let generation = owner.root_operation.as_ref().unwrap().generation;
+    let mut updates = Vec::new();
+    owner.accept_event(
+        TrustEvent::RootInspected {
+            generation,
+            result: Ok(identity.clone()),
+        },
+        &mut updates,
+        &EditorState::new("/".into()),
+    );
+    assert!(
+        matches!(updates.as_slice(), [WorkspaceUpdate::RootSwitched { path, old }]
+            if path == &identity.canonical_path && old == Path::new("/one"))
+    );
+    assert_eq!(owner.roots().len(), 64);
+    assert!(owner.roots().iter().all(|root| root.id != RootId(1)));
+    let new = owner.active_root().unwrap();
+    assert_eq!(
+        owner
+            .roots()
+            .iter()
+            .find(|root| root.id == new)
+            .unwrap()
+            .identity,
+        identity
+    );
+
+    let roots = owner.roots().to_vec();
+    let version = owner.version();
+    let revision = owner.root_revision();
+    assert!(
+        owner
+            .switch_root(new, "duplicate".into(), roots[0].identity.clone())
+            .is_err()
+    );
+    assert_eq!(owner.roots(), roots);
+    assert_eq!(owner.active_root(), Some(new));
+    assert_eq!(owner.version(), version);
+    assert_eq!(owner.root_revision(), revision);
+}
+
+#[test]
+fn workspace_trust_persistence_survives_active_root_changes() {
+    for fail in [false, true] {
+        let (mut owner, directory) = fixture();
+        owner.store.replace(Vec::new());
+        owner.persisted_identities.clear();
+        owner.reconcile_trust();
+        if fail {
+            owner.state_path = directory.path().to_path_buf();
+        }
+        owner
+            .request_confirmation()
+            .unwrap_or_else(|_| panic!("prompt"));
+        owner.confirm().unwrap_or_else(|_| panic!("save trust"));
+        owner.set_active_root(RootId(2)).unwrap();
+        assert_eq!(owner.trust(), WorkspaceTrust::Untrusted);
+        assert!(owner.execution_allowed().is_err());
+
+        let mut updates = Vec::new();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while owner.persist_pending() {
+            updates.extend(owner.poll(&EditorState::new("/".into())));
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::yield_now();
+        }
+        if fail {
+            assert!(matches!(
+                updates.as_slice(),
+                [WorkspaceUpdate::Failure(WorkspaceFailure::Diagnostic(
+                    "workspace_trust_state_failed",
+                    _
+                ))]
+            ));
+            assert_eq!(owner.trust(), WorkspaceTrust::Untrusted);
+            assert!(owner.store.identities().is_empty());
+            owner.reconcile_trust();
+            assert!(owner.execution_allowed().is_err());
+        } else {
+            assert!(updates.is_empty(), "no stale trust confirmation message");
+            assert_eq!(owner.trust(), WorkspaceTrust::Trusted);
+            assert!(owner.execution_allowed().is_ok());
+        }
+    }
+}
+
+#[test]
+fn revoking_trust_cancels_queued_probes_permanently() {
+    let (mut owner, _directory) = fixture();
+    let cancelled = owner.probe_cancellation().expect("trusted");
+    assert!(!cancelled.load(Ordering::Acquire));
+    assert!(owner.revoke().is_ok());
+    assert!(cancelled.load(Ordering::Acquire));
+    assert!(owner.probe_cancellation().is_none());
+    for root in owner.state.roots() {
+        owner.store.trust(root.identity.clone());
+    }
+    owner.persisted_identities = owner.store.identities();
+    owner.reconcile_trust();
+    assert!(!owner.probe_cancellation().unwrap().load(Ordering::Acquire));
+    assert!(cancelled.load(Ordering::Acquire));
+    owner.safe_mode = true;
+    owner.reconcile_trust();
+    assert!(owner.probe_cancellation().is_none());
+}
+#[test]
+fn failed_trust_persistence_cancels_queued_probes() {
+    let (mut owner, _directory) = fixture();
+    let cancelled = owner.probe_cancellation().expect("trusted");
+    owner.persist = Some(Persist {
+        generation: 7,
+        source: owner.version(),
+        target: None,
+        identities: owner.store.identities(),
+    });
+    owner.accept_event(
+        TrustEvent::Persisted {
+            generation: 7,
+            result: Err(crate::workspace::TrustStateError::UnsupportedVersion(99)),
+        },
+        &mut Vec::new(),
+        &EditorState::new("/".into()),
+    );
+    assert_eq!(owner.trust(), WorkspaceTrust::Untrusted);
+    assert!(cancelled.load(Ordering::Acquire));
+    assert!(owner.probe_cancellation().is_none());
+}
+#[test]
+fn cancelled_root_request_ignores_its_late_inspection() {
+    let (mut owner, _directory) = fixture();
+    let path = PathBuf::from("/practice");
+    owner.root_operation = Some(RootOperation {
+        generation: 99,
+        source: owner.version(),
+        requested_path: path.clone(),
+        replaces: owner.active_root(),
+    });
+    let active = owner.active_root();
+    owner.cancel_root_request(Path::new("/other"));
+    assert!(owner.root_operation_pending());
+    owner.cancel_root_request(&path);
+    assert!(!owner.root_operation_pending());
+    let mut updates = Vec::new();
+    owner.accept_event(
+        TrustEvent::RootInspected {
+            generation: 99,
+            result: Ok(RootIdentity {
+                canonical_path: path,
+                filesystem_identity: Some((1, 3)),
+            }),
+        },
+        &mut updates,
+        &EditorState::new("/".into()),
+    );
+    assert!(updates.is_empty());
+    assert_eq!(owner.active_root(), active);
+    assert_eq!(owner.roots().len(), 2);
+}
+
+#[test]
+fn failed_trust_load_cannot_replace_the_original_database() {
+    let (mut owner, _directory) = fixture();
+    std::fs::write(&owner.state_path, "broken database").unwrap();
+    owner.load_generation = Some(7);
+    let mut updates = Vec::new();
+    owner.accept_event(
+        TrustEvent::Loaded {
+            generation: 7,
+            result: Err(crate::workspace::TrustStateError::UnsupportedVersion(99)),
+        },
+        &mut updates,
+        &EditorState::new("/".into()),
+    );
+    assert!(!owner.database_ready);
+    assert!(owner.persist_state(None).is_err());
+    assert_eq!(
+        std::fs::read_to_string(&owner.state_path).unwrap(),
+        "broken database"
+    );
+}
+#[test]
+fn revoking_trust_does_not_retire_initial_root_inspection() {
+    let (mut owner, _directory) = fixture();
+    let root = owner.state.roots()[0].clone();
+    owner.identity_ready = false;
+    owner.identity_generation = Some((7, root.id, owner.version()));
+    assert!(owner.revoke().is_ok());
+    owner.accept_event(
+        TrustEvent::RootInspected {
+            generation: 7,
+            result: Ok(root.identity),
+        },
+        &mut Vec::new(),
+        &EditorState::new("/".into()),
+    );
+    assert!(owner.identity_ready);
+}
+#[test]
+fn confirmation_is_bound_to_identity_root_selection_cancellation_and_safe_mode() {
+    let (mut owner, _directory) = fixture();
+    owner
+        .request_confirmation()
+        .unwrap_or_else(|_| panic!("prompt"));
+    owner.cancel_confirmation();
+    assert!(owner.confirm().is_err());
+    owner
+        .request_confirmation()
+        .unwrap_or_else(|_| panic!("prompt"));
+    owner.set_active_root(RootId(2)).unwrap();
+    assert!(owner.confirm().is_err());
+    owner
+        .request_confirmation()
+        .unwrap_or_else(|_| panic!("prompt"));
+    let mut replacement = owner.roots()[0].identity.clone();
+    replacement.filesystem_identity = Some((1, 99));
+    owner.fixture_identity(RootId(1), replacement).unwrap();
+    assert!(owner.confirm().is_err());
+    owner
+        .request_confirmation()
+        .unwrap_or_else(|_| panic!("prompt"));
+    owner.fixture_safe_mode(true);
+    assert!(owner.confirm().is_err());
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    while owner.persist.is_some() {
+        owner.poll(&EditorState::new("/".into()));
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
 }

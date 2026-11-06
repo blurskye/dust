@@ -606,7 +606,6 @@ impl WorkspaceEdits {
 #[cfg(test)]
 mod tests;
 
-
 fn selected_edits(
     proposal: &crate::workspace::WorkspaceEditProposal,
 ) -> Vec<crate::editor::DraftEdit<'_>> {

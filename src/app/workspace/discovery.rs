@@ -2,8 +2,8 @@
 use crate::app::workspace::Workspace;
 use crate::app::workspace::WorkspaceVersion;
 use crate::files::ProjectRootResolution;
-use crate::files::ProjectRootWorker;
 use crate::files::ProjectRootStrategy;
+use crate::files::ProjectRootWorker;
 use crate::files::RootIdentity;
 use crate::process::ExecutionPreflightEvent;
 use crate::process::ExecutionPreflightRequest;
@@ -82,7 +82,7 @@ pub(super) struct Discovery {
     pending: Option<DiscoveryIntent>,
 }
 struct DiscoveryIntent {
-    generation: u64,
+    request_id: u64,
     source: WorkspaceVersion,
     root: RootId,
     identity: RootIdentity,
@@ -131,7 +131,7 @@ impl Workspace {
         let intent = discovery.pending.take()?;
         Some(result.map_err(|e| e.to_string()).and_then(|result| {
             if intent.source != self.version
-                || result.generation != intent.generation
+                || result.request_id != intent.request_id
                 || result.document != intent.document
                 || result.workspace_root != intent.identity.canonical_path
                 || !self
@@ -300,7 +300,7 @@ impl ExecutionLane<'_> {
         if discovery.pending.is_some() {
             return Err("project-root discovery is already pending".into());
         }
-        let generation = discovery
+        let request_id = discovery
             .worker
             .resolve(
                 document.clone(),
@@ -311,13 +311,13 @@ impl ExecutionLane<'_> {
             )
             .map_err(|e| e.to_string())?;
         discovery.pending = Some(DiscoveryIntent {
-            generation,
+            request_id,
             source,
             root,
             identity,
             document,
         });
-        Ok(generation)
+        Ok(request_id)
     }
     pub(in crate::app) fn preflight(
         &mut self,
@@ -408,7 +408,7 @@ mod tests {
             assert!(Instant::now() < deadline);
             thread::sleep(Duration::from_millis(1));
         };
-        assert_eq!(result.generation, id);
+        assert_eq!(result.request_id, id);
         assert_eq!(result.project_root.as_deref(), Some(directory.path()));
         assert!(owner.project_result(DiscoveryKind::Language).is_none());
         owner
