@@ -1,23 +1,30 @@
 #![forbid(unsafe_code)]
 
-use serde::{Deserialize, Serialize};
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    fs,
-    io::{self, Read, Write},
-    path::{Path, PathBuf},
-    sync::{
-        Arc,
-        mpsc::{self, Receiver, SyncSender, TryRecvError, TrySendError},
-    },
-    thread,
-};
+use serde::Deserialize;
+
+use serde::Serialize;
+use std::collections::BTreeMap;
+use std::collections::BTreeSet;
+use std::fs;
+use std::io::self;
+use std::io::Read;
+use std::io::Write;
+use std::path::Path;
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::mpsc::self;
+use std::sync::mpsc::Receiver;
+use std::sync::mpsc::SyncSender;
+use std::sync::mpsc::TryRecvError;
+use std::sync::mpsc::TrySendError;
+use std::thread;
 use thiserror::Error;
 
 // Keep existing UTF-8 paths readable; Unix paths with other bytes use byte arrays.
 pub(crate) mod persisted_path {
-    use super::*;
-    use std::os::unix::ffi::{OsStrExt, OsStringExt};
+    use crate::persistence::*;
+    use std::os::unix::ffi::OsStrExt;
+    use std::os::unix::ffi::OsStringExt;
 
     #[derive(Serialize, Deserialize)]
     #[serde(untagged)]
@@ -48,7 +55,7 @@ pub(crate) mod persisted_path {
         Encoded::deserialize(deserializer).map(Encoded::into_path)
     }
     pub mod optional {
-        use super::*;
+        use crate::persistence::persisted_path::*;
         pub fn serialize<S: serde::Serializer>(
             path: &Option<PathBuf>,
             serializer: S,
@@ -64,7 +71,7 @@ pub(crate) mod persisted_path {
         }
     }
     pub mod list {
-        use super::*;
+        use crate::persistence::persisted_path::*;
         pub fn serialize<S: serde::Serializer>(
             paths: &[PathBuf],
             serializer: S,
@@ -1005,20 +1012,44 @@ pub enum PersistenceError {
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        collections::{BTreeMap, BTreeSet},
-        fs,
-        path::PathBuf,
-    };
+    use std::collections::BTreeMap;
+    use std::collections::BTreeSet;
+    use std::fs;
+    use std::path::PathBuf;
 
     use tempfile::tempdir;
 
-    use super::{
-        MAXIMUM_DESCRIPTOR_ID_BYTES, MAXIMUM_VIRTUAL_KEY_BYTES, PersistedContentDescriptor,
-        PersistedLayout, PersistedLocation, PersistedPane, PersistedSession, PersistedState,
-        PersistedTab, PersistedWindowPlacement, PersistedWindowRule, PersistenceError,
-        PersistencePolicy, STATE_VERSION, read_state, write_state,
-    };
+    use crate::persistence::MAXIMUM_DESCRIPTOR_ID_BYTES;
+
+    use crate::persistence::MAXIMUM_VIRTUAL_KEY_BYTES;
+
+    use crate::persistence::PersistedContentDescriptor;
+
+    use crate::persistence::PersistedLayout;
+
+    use crate::persistence::PersistedLocation;
+
+    use crate::persistence::PersistedPane;
+
+    use crate::persistence::PersistedSession;
+
+    use crate::persistence::PersistedState;
+
+    use crate::persistence::PersistedTab;
+
+    use crate::persistence::PersistedWindowPlacement;
+
+    use crate::persistence::PersistedWindowRule;
+
+    use crate::persistence::PersistenceError;
+
+    use crate::persistence::PersistencePolicy;
+
+    use crate::persistence::STATE_VERSION;
+
+    use crate::persistence::read_state;
+
+    use crate::persistence::write_state;
 
     #[test]
     fn non_utf8_paths_round_trip_in_every_persisted_location() {
@@ -1054,13 +1085,13 @@ mod tests {
             desired_placement: PersistedWindowPlacement::Tiled,
         }];
         state.recent_files = vec![path.clone()];
-        state.marks = vec![super::PersistedMark {
+        state.marks = vec![crate::persistence::PersistedMark {
             name: "A".into(),
             location: location.clone(),
         }];
         state.jumps = vec![location.clone()];
         state.changes = vec![location];
-        state.breakpoints = vec![super::PersistedBreakpoint {
+        state.breakpoints = vec![crate::persistence::PersistedBreakpoint {
             path: path.clone(),
             line: 1,
             column: None,
@@ -1068,7 +1099,7 @@ mod tests {
             hit_condition: None,
             log_message: None,
         }];
-        state.large_file_overrides = vec![super::PersistedLargeFileOverride {
+        state.large_file_overrides = vec![crate::persistence::PersistedLargeFileOverride {
             path: path.clone(),
             mode: "on".into(),
         }];
@@ -1137,12 +1168,12 @@ mod tests {
             ..previous.clone()
         };
         let mut state = previous.clone();
-        super::merge_shared_state(&mut state, &current, Some(&previous), 3);
+        crate::persistence::merge_shared_state(&mut state, &current, Some(&previous), 3);
         assert_eq!(state.recent_files, paths(&["/c", "/d", "/a"]));
 
         // Local opens stay ahead of external opens, while local deletions stay deleted.
         state.recent_files = paths(&["/e", "/a"]);
-        super::merge_shared_state(&mut state, &current, Some(&previous), 3);
+        crate::persistence::merge_shared_state(&mut state, &current, Some(&previous), 3);
         assert_eq!(state.recent_files, paths(&["/e", "/c", "/d"]));
 
         let reordered = PersistedState {
@@ -1150,10 +1181,10 @@ mod tests {
             ..previous.clone()
         };
         state = previous.clone();
-        super::merge_shared_state(&mut state, &reordered, Some(&previous), 3);
+        crate::persistence::merge_shared_state(&mut state, &reordered, Some(&previous), 3);
         assert_eq!(state.recent_files, reordered.recent_files);
         state = reordered.clone();
-        super::merge_shared_state(&mut state, &current, Some(&previous), 3);
+        crate::persistence::merge_shared_state(&mut state, &current, Some(&previous), 3);
         assert_eq!(state.recent_files, paths(&["/b", "/c", "/d"]));
     }
 
@@ -1172,7 +1203,7 @@ mod tests {
         first.command_history.push("first".into());
         first.metadata.clear();
         first.metadata.insert("first".into(), "first".into());
-        first.marks.push(super::PersistedMark {
+        first.marks.push(crate::persistence::PersistedMark {
             name: "A".into(),
             location: PersistedLocation {
                 path: "/first".into(),
@@ -1186,7 +1217,7 @@ mod tests {
         second.recent_files.push("/second".into());
         second.command_history.push("second".into());
         second.metadata.insert("second".into(), "second".into());
-        second.marks.push(super::PersistedMark {
+        second.marks.push(crate::persistence::PersistedMark {
             name: "B".into(),
             location: PersistedLocation {
                 path: "/second".into(),

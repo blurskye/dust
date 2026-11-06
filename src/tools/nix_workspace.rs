@@ -1,12 +1,14 @@
 #[cfg(test)]
 use std::time::Duration;
-use std::{
-    path::PathBuf,
-    sync::mpsc::{self, Receiver, SyncSender, TrySendError},
-    thread::{self, JoinHandle},
-};
+use std::path::PathBuf;
+use std::sync::mpsc::self;
+use std::sync::mpsc::Receiver;
+use std::sync::mpsc::SyncSender;
+use std::sync::mpsc::TrySendError;
+use std::thread::self;
+use std::thread::JoinHandle;
 
-use super::install_prepare::prepare_nix_lsp_workspace;
+use crate::tools::install_prepare::prepare_nix_lsp_workspace;
 
 #[derive(Clone, Debug)]
 pub struct NixWorkspaceResult {
@@ -117,7 +119,7 @@ impl Drop for NixWorkspaceService {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::tools::nix_workspace::*;
     #[test]
     fn nix_workspace_close_does_not_join_blocked_work_and_ids_never_repeat() {
         let (entered, wait_entered) = mpsc::channel();

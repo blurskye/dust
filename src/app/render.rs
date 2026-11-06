@@ -54,9 +54,9 @@ use crate::windows::PANE_DEFAULT_RATIO;
 use crate::windows::PANE_MINIMUM_HEIGHT;
 use crate::windows::PANE_MINIMUM_WIDTH;
 use crate::windows::PANE_RESIZE_STEP;
-use crate::workspace::ExplorerKind;
-use crate::workspace::ExplorerLoadState;
-use crate::workspace::ExplorerNodeId;
+use crate::app::explorer::tree::ExplorerKind;
+use crate::app::explorer::tree::ExplorerLoadState;
+use crate::app::explorer::tree::ExplorerNodeId;
 use crate::workspace::PickerAction;
 use crate::workspace::PickerItem;
 use crate::workspace::PickerItemId;
@@ -399,7 +399,7 @@ impl App {
                     .configuration
                     .keymaps()
                     .binding_for("editor.normal", "workspace.git.conflict.abort")
-                    .map(crate::app::palette::readable_keys),
+                    .map(crate::app::picker::palette::readable_keys),
             }
         });
     }

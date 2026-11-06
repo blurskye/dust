@@ -1,17 +1,22 @@
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    fs,
-    path::{Path, PathBuf},
-    sync::{
-        Arc,
-        atomic::{AtomicU64, Ordering},
-        mpsc::{self, Receiver, SyncSender, TryRecvError, TrySendError},
-    },
-    thread,
-    time::Duration,
-};
+use std::collections::BTreeMap;
+use std::collections::BTreeSet;
+use std::fs;
+use std::path::Path;
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
+use std::sync::mpsc::self;
+use std::sync::mpsc::Receiver;
+use std::sync::mpsc::SyncSender;
+use std::sync::mpsc::TryRecvError;
+use std::sync::mpsc::TrySendError;
+use std::thread;
+use std::time::Duration;
 
-use sha2::{Digest, Sha256};
+use sha2::Digest;
+
+use sha2::Sha256;
 use thiserror::Error;
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -219,19 +224,19 @@ pub fn explorer_directory_fingerprint(
         // Ignore files may be symlinks; the bounded reader still checks that
         // the resolved target is a regular file and opens it without following links.
         let contents = fs::canonicalize(&path)
-            .map_err(|source| super::VfsError::Io {
+            .map_err(|source| crate::files::VfsError::Io {
                 operation: "resolve ignore file",
                 path: path.clone(),
                 source,
             })
-            .and_then(|target| super::vfs::read_file_with_ceiling(&target, 512 * 1024));
+            .and_then(|target| crate::files::vfs::read_file_with_ceiling(&target, 512 * 1024));
         match contents {
             Ok(bytes) => {
                 ignore_rules.update(watch_name_bytes(path.as_os_str()));
                 ignore_rules.update((bytes.len() as u64).to_le_bytes());
                 ignore_rules.update(bytes);
             }
-            Err(super::VfsError::Io { source, .. })
+            Err(crate::files::VfsError::Io { source, .. })
                 if matches!(
                     source.kind(),
                     std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
@@ -536,7 +541,7 @@ pub(super) fn explorer_watch_worker(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::files::watch::*;
 
     fn watch_set(generation: u64, directories: Vec<PathBuf>) -> ExplorerWatchSet {
         ExplorerWatchSet {

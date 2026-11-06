@@ -1,25 +1,44 @@
-use std::{cell::RefCell, collections::BTreeMap};
+use std::cell::RefCell;
+use std::collections::BTreeMap;
 
 use unicode_segmentation::UnicodeSegmentation;
 
-use crate::{
-    config::{AmbiguousWidth, Config, EditorConfig, LineNumbers},
-    editor::{
-        EditorState,
-        text::{ByteOffset, ByteRange, DisplayWidthPolicy, display_column_at},
-    },
-    ui::geometry::{cell_text_width, text_width},
-    ui::render::editor::{GUTTER_PADDING, LINE_NUMBER_SEPARATOR},
-};
+use crate::config::AmbiguousWidth;
 
-use super::{UiState, editor::display_column};
+use crate::config::Config;
+
+use crate::config::EditorConfig;
+
+use crate::config::LineNumbers;
+
+use crate::editor::EditorState;
+
+use crate::editor::text::ByteOffset;
+
+use crate::editor::text::ByteRange;
+
+use crate::editor::text::DisplayWidthPolicy;
+
+use crate::editor::text::display_column_at;
+
+use crate::ui::geometry::cell_text_width;
+
+use crate::ui::geometry::text_width;
+
+use crate::ui::render::editor::GUTTER_PADDING;
+
+use crate::ui::render::editor::LINE_NUMBER_SEPARATOR;
+
+use crate::ui::render::UiState;
+
+use crate::ui::render::editor::display_column;
 
 /// Hints inside a source grapheme are drawn immediately after it. Scan each hinted line once.
 pub(super) fn projected_inlay_hints(
     text: &crate::editor::text::TextBuffer,
     buffer: crate::editor::BufferId,
     ui: &UiState,
-) -> Vec<super::UiInlayHint> {
+) -> Vec<crate::ui::render::UiInlayHint> {
     let mut hints = ui
         .lsp_inlay_hints
         .iter()
@@ -80,7 +99,7 @@ pub struct VisualRowModel<'a> {
     rows: RefCell<BTreeMap<usize, Vec<VisualRowSlice>>>,
     diagnostic_rows: Option<(usize, Vec<(String, crate::ui::Style)>)>,
     /// Rendered markdown, so rows break and cells are counted where it is drawn.
-    markdown: Option<super::markdown::MarkdownMarks<'a>>,
+    markdown: Option<crate::ui::render::markdown::MarkdownMarks<'a>>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -220,7 +239,7 @@ impl<'a> VisualRowModel<'a> {
             inlay_widths,
         });
         model.markdown = state.views.get(view).and_then(|view| {
-            super::markdown::MarkdownMarks::new(ui, view, text, &config.editor, model.content_width)
+            crate::ui::render::markdown::MarkdownMarks::new(ui, view, text, &config.editor, model.content_width)
         });
         if let Some(buffer) = state
             .views
@@ -228,7 +247,7 @@ impl<'a> VisualRowModel<'a> {
             .and_then(|view| state.buffers.get(view.buffer))
             && !ui.large_file_buffers.contains(&state.views[view].buffer)
         {
-            model.diagnostic_rows = super::editor::expanded_diagnostic_rows(
+            model.diagnostic_rows = crate::ui::render::editor::expanded_diagnostic_rows(
                 text,
                 buffer.path.as_deref(),
                 ui,
@@ -294,7 +313,7 @@ impl<'a> VisualRowModel<'a> {
     }
 
     /// What a markdown line draws in place of its source, `None` when it shows its source.
-    pub(super) fn markdown_line(&self, line: usize) -> Option<super::markdown::MarkdownLine<'a>> {
+    pub(super) fn markdown_line(&self, line: usize) -> Option<crate::ui::render::markdown::MarkdownLine<'a>> {
         self.markdown.as_ref()?.line(line)
     }
 
@@ -307,7 +326,7 @@ impl<'a> VisualRowModel<'a> {
     /// The cells a grapheme takes as drawn, with what markdown draws before it.
     fn drawn_width(
         &self,
-        markdown: Option<&super::markdown::MarkdownLine>,
+        markdown: Option<&crate::ui::render::markdown::MarkdownLine>,
         at: ByteOffset,
         grapheme: &str,
         source_column: usize,
@@ -647,7 +666,7 @@ impl<'a> VisualRowModel<'a> {
                 .map_or(row.byte_start, |(_, relative)| relative);
         }
         if !self.wrap {
-            row.byte_start = super::editor::byte_offset_at_display_column(
+            row.byte_start = crate::ui::render::editor::byte_offset_at_display_column(
                 content,
                 scroll_column,
                 self.tab_width,
@@ -714,7 +733,7 @@ impl<'a> VisualRowModel<'a> {
         let first = if self.wrap || table.is_some() {
             row.byte_start
         } else {
-            super::editor::byte_offset_at_display_column(
+            crate::ui::render::editor::byte_offset_at_display_column(
                 content,
                 scroll_column,
                 self.tab_width,
@@ -743,8 +762,8 @@ impl<'a> VisualRowModel<'a> {
                     used = used.saturating_add(text_width(text, self.ambiguous_width));
                 }
                 match markdown.at(at) {
-                    Some(super::markdown::Drawn::Hidden) => continue,
-                    Some(super::markdown::Drawn::Glyph(glyph, _)) => {
+                    Some(crate::ui::render::markdown::Drawn::Hidden) => continue,
+                    Some(crate::ui::render::markdown::Drawn::Glyph(glyph, _)) => {
                         used = used.saturating_add(text_width(glyph, self.ambiguous_width));
                         continue;
                     }
@@ -1219,7 +1238,7 @@ pub fn editor_state_content_width(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::ui::render::visual_rows::*;
 
     #[test]
     fn visible_cells_return_whole_graphemes_across_tabs_and_wrapped_rows() {
@@ -1332,7 +1351,9 @@ mod tests {
 
     #[test]
     fn visible_ranges_exclude_hidden_markdown_and_unpainted_table_cells() {
-        use crate::{editor::text::TextBuffer, language::syntax::MarkdownMark, ui::UiMarkdownMark};
+        use crate::editor::text::TextBuffer;
+        use crate::language::syntax::MarkdownMark;
+        use crate::ui::UiMarkdownMark;
         let source =
             "cursor\nz hidden\n| a | long text here and more |\n|---|---|\n| b | c |\nlast";
         let mut state = EditorState::new("/workspace".into());

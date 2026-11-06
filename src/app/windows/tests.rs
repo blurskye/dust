@@ -104,7 +104,7 @@ fn session_restore_retires_plugin_windows_before_replacing_their_tabs() {
             )]),
         )
         .unwrap();
-    let catalog = crate::extensions::PluginCatalogVersion::default();
+    let catalog = crate::plugins::PluginCatalogVersion::default();
     let transition = windows
         .prepare_restore_transition(
             draft,
@@ -254,7 +254,7 @@ fn failed_explorer_reconstruction_does_not_publish_a_partial_graph_or_bridge() {
 
 #[test]
 fn editor_transition_rejects_changed_and_foreign_sources_without_window_publication() {
-    let catalog = crate::extensions::PluginCatalogVersion::default();
+    let catalog = crate::plugins::PluginCatalogVersion::default();
     let (mut state, mut windows) = editor_fixture();
     let base = state.clone();
     let before = state.window_version();
@@ -326,7 +326,7 @@ fn editor_transition_rejects_changed_and_foreign_sources_without_window_publicat
 
 #[test]
 fn exhausted_owner_rejects_transition_before_either_live_state_is_replaced() {
-    let catalog = crate::extensions::PluginCatalogVersion::default();
+    let catalog = crate::plugins::PluginCatalogVersion::default();
     let (state, mut windows) = editor_fixture();
     windows.epoch = u64::MAX - 1;
     let proposed = state
@@ -360,7 +360,7 @@ fn exhausted_owner_rejects_transition_before_either_live_state_is_replaced() {
 
 #[test]
 fn plugin_drafts_cannot_write_editor_resources_foreign_generations_tabs_or_protected_layers() {
-    let catalog = crate::extensions::PluginCatalogVersion::default();
+    let catalog = crate::plugins::PluginCatalogVersion::default();
     use crate::windows::ContentTypeId;
     use crate::windows::WindowError;
     let (state, mut windows) = editor_fixture();
@@ -604,8 +604,8 @@ fn accepted_projection_rejects_old_source_graph_size_and_invalidation() {
 
 #[test]
 fn staged_window_work_rejects_editor_and_catalog_changes_without_a_window_epoch_change() {
-    use crate::extensions::PluginContributionCatalog;
-    use crate::extensions::PluginContributionIndex;
+    use crate::plugins::PluginContributionCatalog;
+    use crate::plugins::PluginContributionIndex;
     let (mut state, mut windows) = editor_fixture();
     let mut catalog = PluginContributionCatalog::default();
     let before = state.window_version();
@@ -692,7 +692,7 @@ fn cross_tab_focus_plan_targets_the_exact_editor_tab_without_eager_mutation() {
     use crate::editor::EditorTransaction;
     use crate::editor::TransactionId;
     let (mut state, mut windows) = editor_fixture();
-    let catalog = crate::extensions::PluginContributionCatalog::default();
+    let catalog = crate::plugins::PluginContributionCatalog::default();
     let original_window = windows.graph().focused().expect("first tab window");
     state
         .apply_transaction(
@@ -723,7 +723,7 @@ fn cross_tab_focus_plan_targets_the_exact_editor_tab_without_eager_mutation() {
 #[test]
 fn focus_capture_survives_geometry_invalidation_but_not_reset_or_another_editor() {
     let (state, mut windows) = editor_fixture();
-    let catalog = crate::extensions::PluginContributionCatalog::default();
+    let catalog = crate::plugins::PluginContributionCatalog::default();
     let capture = windows.capture_focus().unwrap();
     windows.invalidate_native();
     assert!(
@@ -754,7 +754,7 @@ fn editor_proposals_cannot_swap_equal_revision_branches_or_rebase_stale_work() {
     use crate::editor::EditorTransaction;
     use crate::editor::TransactionId;
     let (mut state, mut windows) = editor_fixture();
-    let catalog = crate::extensions::PluginCatalogVersion::default();
+    let catalog = crate::plugins::PluginCatalogVersion::default();
     let transaction =
         EditorTransaction::new(TransactionId(1)).with_operation(EditorOperation::NewTab);
     let left = state.prepare_transaction(&transaction).unwrap();
@@ -864,7 +864,7 @@ fn window_admission_cost_probe() {
         .unwrap();
     let current = state.version();
     let source = state.window_version();
-    let catalog = crate::extensions::PluginCatalogVersion::default();
+    let catalog = crate::plugins::PluginCatalogVersion::default();
     let transaction =
         EditorTransaction::new(TransactionId(1)).with_operation(EditorOperation::NewTab);
     let baseline = (
@@ -936,7 +936,7 @@ fn window_admission_cost_probe() {
 fn startup_document_and_dashboard_publish_together_only_for_the_accepted_proposal() {
     let (state, mut windows) = editor_fixture();
     windows.dashboard = true;
-    let catalog = crate::extensions::PluginCatalogVersion::default();
+    let catalog = crate::plugins::PluginCatalogVersion::default();
     let current = state.version();
     let descriptions = || crate::app::windows::NativeDescriptions {
         signature: crate::app::windows::bridge::NativeSurfaceSignature {
@@ -1016,7 +1016,7 @@ fn native_command_plans_are_source_bound_before_any_candidate_copy() {
     use crate::app::windows::WindowCommand;
     let (state, mut windows) = editor_fixture();
     let source = state.window_version();
-    let catalog = crate::extensions::PluginCatalogVersion::default();
+    let catalog = crate::plugins::PluginCatalogVersion::default();
     windows.project(ProjectionRequest {
         tab: windows.graph().active_tab().unwrap(),
         source_revision: state.window_revision().unwrap(),

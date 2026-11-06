@@ -1,8 +1,11 @@
-use std::sync::{
-    Arc, OnceLock, RwLock,
-    atomic::{AtomicU64, Ordering},
-};
-use std::time::{Duration, Instant, SystemTime};
+use std::sync::Arc;
+use std::sync::OnceLock;
+use std::sync::RwLock;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
+use std::time::Duration;
+use std::time::Instant;
+use std::time::SystemTime;
 
 pub trait Clock: Send + Sync + 'static {
     fn system_time(&self) -> SystemTime;
@@ -121,7 +124,7 @@ impl IdSource for AtomicIds {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::clock::*;
 
     #[test]
     fn fixed_clock_keeps_all_tick_bits_and_saturates() {

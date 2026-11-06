@@ -1,13 +1,12 @@
 //! Canonical restoration of editor stores through a consuming draft.
-use super::EditorDraft;
-use crate::{
-    editor::{
-        EditorState,
-        text::{ByteOffset, TextBuffer},
-    },
-    persistence::{PersistedLayout, PersistedSession},
-};
-use std::{collections::HashMap, path::PathBuf};
+use crate::editor::transaction::EditorDraft;
+use crate::editor::EditorState;
+use crate::editor::text::ByteOffset;
+use crate::editor::text::TextBuffer;
+use crate::persistence::PersistedLayout;
+use crate::persistence::PersistedSession;
+use std::collections::HashMap;
+use std::path::PathBuf;
 impl EditorDraft {
     pub(crate) fn restore_layout(
         &mut self,

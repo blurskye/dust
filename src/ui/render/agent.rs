@@ -4,19 +4,33 @@
 //! place of the pane that holds it, so the pane still moves, resizes and zooms like any
 //! other window.
 
-use crate::ui::render::{CONTROL_CHARACTER_REPLACEMENT, ZERO_WIDTH_REPLACEMENT};
+use crate::ui::render::CONTROL_CHARACTER_REPLACEMENT;
+
+use crate::ui::render::ZERO_WIDTH_REPLACEMENT;
 use std::ops::Range;
 
 use crossterm::cursor::SetCursorStyle;
 use unicode_segmentation::UnicodeSegmentation;
 
-use crate::{
-    config::{AmbiguousWidth, Config},
-    editor::ViewId,
-    ui::{CellGrid, Style, geometry::text_width, markdown::Styled},
-};
+use crate::config::AmbiguousWidth;
 
-use super::{ContentTabEntry, Frame, overlays::render_content_tab_line};
+use crate::config::Config;
+
+use crate::editor::ViewId;
+
+use crate::ui::CellGrid;
+
+use crate::ui::Style;
+
+use crate::ui::geometry::text_width;
+
+use crate::ui::markdown::Styled;
+
+use crate::ui::render::ContentTabEntry;
+
+use crate::ui::render::Frame;
+
+use crate::ui::render::overlays::render_content_tab_line;
 
 /// The input box grows with what is typed up to this many rows, then scrolls.
 const INPUT_ROW_CEILING: usize = 8;
@@ -238,7 +252,7 @@ pub(super) fn render_agent_panel(
             let start = x.saturating_add(2).max(18);
             let room = usize::from((width - 1).saturating_sub(start));
             let description =
-                super::surfaces::ellipsized(description, room, config.editor.ambiguous_width);
+                crate::ui::render::surfaces::ellipsized(description, room, config.editor.ambiguous_width);
             grid.put_text_clipped(start, y, &description, text_style, width - 1);
         }
     }
@@ -351,14 +365,14 @@ fn fitted_settings(settings: &str, room: usize, ambiguous: AmbiguousWidth) -> St
     let separator_width = text_width(" · ", ambiguous);
     match settings.split_once(" · ") {
         Some((model, rest)) if text_width(rest, ambiguous) + separator_width + 6 <= room => {
-            let model = super::surfaces::ellipsized(
+            let model = crate::ui::render::surfaces::ellipsized(
                 model,
                 room - text_width(rest, ambiguous) - separator_width,
                 ambiguous,
             );
             format!("{model} · {rest}")
         }
-        _ => super::surfaces::ellipsized(settings, room, ambiguous),
+        _ => crate::ui::render::surfaces::ellipsized(settings, room, ambiguous),
     }
 }
 
@@ -435,7 +449,7 @@ fn wrap_input(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::ui::render::agent::*;
 
     fn panel() -> AgentPanelUi {
         AgentPanelUi {

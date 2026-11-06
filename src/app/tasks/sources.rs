@@ -185,7 +185,7 @@ impl TaskSession {
                 source: captures
                     .name(&matcher.path_group)
                     .map(|value| PathBuf::from(value.as_str()))
-                    .map(|path| crate::app::search::MatcherSource {
+                    .map(|path| crate::app::picker::MatcherSource {
                         path: if path.is_absolute() {
                             path
                         } else {

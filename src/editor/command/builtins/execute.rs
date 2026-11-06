@@ -1,33 +1,94 @@
 use unicode_segmentation::UnicodeSegmentation;
 
-use crate::editor::{
-    state::{EditorMode, EditorState, RegisterShape, ReplaceRecord},
-    text::{
-        ByteOffset, ByteRange, DisplayWidthPolicy, TextEdit, TextEditSet, display_column_at,
-        grapheme_cell_width, insertion_at_display_column, next_grapheme_boundary,
-        previous_grapheme_boundary,
-    },
-    transaction::{EditorOperation, UndoPolicy},
-};
+use crate::editor::state::EditorMode;
 
-use super::{
-    super::{CommandError, CommandId, CommandInvocation, CommandOutcome},
-    comment::build_comment_toggle,
-    motion::{
-        block_start_column, cursor_display_column, line_content_end, motion_target,
-        on_last_character, operator_range, repeat_visual_ranges, visual_ranges,
-    },
-    multi,
-    pairs::{
-        AutoPair, auto_pair, auto_pair_over, build_surround_add, build_surround_change,
-        empty_pair_end,
-    },
-    text_object::text_object,
-    transaction::{
-        bool_argument, build_indent, build_insert_transition, build_join_lines, build_toggle_case,
-        failed, string_argument, transaction_for,
-    },
-};
+use crate::editor::state::EditorState;
+
+use crate::editor::state::RegisterShape;
+
+use crate::editor::state::ReplaceRecord;
+
+use crate::editor::text::ByteOffset;
+
+use crate::editor::text::ByteRange;
+
+use crate::editor::text::DisplayWidthPolicy;
+
+use crate::editor::text::TextEdit;
+
+use crate::editor::text::TextEditSet;
+
+use crate::editor::text::display_column_at;
+
+use crate::editor::text::grapheme_cell_width;
+
+use crate::editor::text::insertion_at_display_column;
+
+use crate::editor::text::next_grapheme_boundary;
+
+use crate::editor::text::previous_grapheme_boundary;
+
+use crate::editor::transaction::EditorOperation;
+
+use crate::editor::transaction::UndoPolicy;
+
+use crate::editor::command::CommandError;
+
+use crate::editor::command::CommandId;
+
+use crate::editor::command::CommandInvocation;
+
+use crate::editor::command::CommandOutcome;
+
+use crate::editor::command::builtins::comment::build_comment_toggle;
+
+use crate::editor::command::builtins::motion::block_start_column;
+
+use crate::editor::command::builtins::motion::cursor_display_column;
+
+use crate::editor::command::builtins::motion::line_content_end;
+
+use crate::editor::command::builtins::motion::motion_target;
+
+use crate::editor::command::builtins::motion::on_last_character;
+
+use crate::editor::command::builtins::motion::operator_range;
+
+use crate::editor::command::builtins::motion::repeat_visual_ranges;
+
+use crate::editor::command::builtins::motion::visual_ranges;
+
+use crate::editor::command::builtins::multi;
+
+use crate::editor::command::builtins::pairs::AutoPair;
+
+use crate::editor::command::builtins::pairs::auto_pair;
+
+use crate::editor::command::builtins::pairs::auto_pair_over;
+
+use crate::editor::command::builtins::pairs::build_surround_add;
+
+use crate::editor::command::builtins::pairs::build_surround_change;
+
+use crate::editor::command::builtins::pairs::empty_pair_end;
+
+use crate::editor::command::builtins::text_object::text_object;
+
+use crate::editor::command::builtins::transaction::bool_argument;
+
+use crate::editor::command::builtins::transaction::build_indent;
+
+use crate::editor::command::builtins::transaction::build_insert_transition;
+
+use crate::editor::command::builtins::transaction::build_join_lines;
+
+use crate::editor::command::builtins::transaction::build_toggle_case;
+
+use crate::editor::command::builtins::transaction::failed;
+
+use crate::editor::command::builtins::transaction::string_argument;
+
+use crate::editor::command::builtins::transaction::transaction_for;
 
 pub(super) fn execute_builtin<E>(
     state: &EditorState,

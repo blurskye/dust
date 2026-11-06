@@ -1,28 +1,54 @@
 use crate::editor::text::TextBuffer;
-use crate::editor::{EditorTopology, EditorVersion, EditorWindowVersion};
+use crate::editor::EditorTopology;
+use crate::editor::EditorVersion;
+use crate::editor::EditorWindowVersion;
 mod paths;
 mod restore;
 #[cfg(test)]
 pub(crate) use restore::build_restored_layout;
 mod workspace;
-pub(crate) use workspace::{
-    EditorPublication, WorkspaceCommitCheck, WorkspaceEditSources, WorkspaceSnapshot, changed_spans,
-};
+pub(crate) use workspace::EditorPublication;
+pub(crate) use workspace::WorkspaceCommitCheck;
+pub(crate) use workspace::WorkspaceEditSources;
+pub(crate) use workspace::WorkspaceSnapshot;
+pub(crate) use workspace::changed_spans;
 mod undo;
 pub(crate) use paths::BufferPathChange;
 
 pub use undo::UndoTree;
-pub(crate) use undo::{load_undo_history, save_undo_history};
+pub(crate) use undo::load_undo_history;
+pub(crate) use undo::save_undo_history;
 
-use crate::editor::text::{
-    Affinity, BufferRevision, ByteOffset, ByteRange, EditError, TextEdit, TextEditSet,
-};
+use crate::editor::text::Affinity;
+
+use crate::editor::text::BufferRevision;
+
+use crate::editor::text::ByteOffset;
+
+use crate::editor::text::ByteRange;
+
+use crate::editor::text::EditError;
+
+use crate::editor::text::TextEdit;
+
+use crate::editor::text::TextEditSet;
 use thiserror::Error;
 
-use crate::editor::{
-    BufferId, EditorMode, EditorState, RegisterShape, RegisterValue, Selection, TransactionId,
-    ViewId,
-};
+use crate::editor::BufferId;
+
+use crate::editor::EditorMode;
+
+use crate::editor::EditorState;
+
+use crate::editor::RegisterShape;
+
+use crate::editor::RegisterValue;
+
+use crate::editor::Selection;
+
+use crate::editor::TransactionId;
+
+use crate::editor::ViewId;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum UndoPolicy {
@@ -1147,11 +1173,27 @@ impl EditorState {
 mod tests {
     use std::path::PathBuf;
 
-    use crate::editor::text::{ByteOffset, ByteRange, TextBuffer, TextEdit, TextEditSet};
+    use crate::editor::text::ByteOffset;
 
-    use crate::editor::{
-        EditorMode, EditorOperation, EditorState, EditorTransaction, Precondition, TransactionId,
-    };
+    use crate::editor::text::ByteRange;
+
+    use crate::editor::text::TextBuffer;
+
+    use crate::editor::text::TextEdit;
+
+    use crate::editor::text::TextEditSet;
+
+    use crate::editor::EditorMode;
+
+    use crate::editor::EditorOperation;
+
+    use crate::editor::EditorState;
+
+    use crate::editor::EditorTransaction;
+
+    use crate::editor::Precondition;
+
+    use crate::editor::TransactionId;
 
     fn edit(
         state: &mut EditorState,
@@ -1206,7 +1248,7 @@ mod tests {
         assert!(!state.buffers[buffer].dirty);
         assert_eq!(history(&mut state, buffer, false), "1 two 3!");
 
-        super::save_undo_history(
+        crate::editor::transaction::save_undo_history(
             directory.path().to_path_buf(),
             path.clone(),
             state.buffers[buffer].text.clone(),
@@ -1366,7 +1408,7 @@ mod tests {
             });
         assert!(matches!(
             state.apply_transaction(&edit),
-            Err(super::TransactionError::ReadOnly)
+            Err(crate::editor::transaction::TransactionError::ReadOnly)
         ));
         for operation in [
             EditorOperation::Undo { buffer },
@@ -1376,7 +1418,7 @@ mod tests {
                 state.apply_transaction(
                     &EditorTransaction::new(TransactionId(5)).with_operation(operation)
                 ),
-                Err(super::TransactionError::ReadOnly)
+                Err(crate::editor::transaction::TransactionError::ReadOnly)
             ));
         }
         assert_eq!(state.buffers[buffer].text.to_string(), before);

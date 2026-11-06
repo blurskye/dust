@@ -1,7 +1,9 @@
 //! What the Settings page lists: each setting's section, title and description, from
 //! `assets/defaults/settings.toml`, and how one setting is changed in the user's config.toml.
 
-use std::{path::Path, sync::OnceLock};
+use std::path::Path;
+
+use std::sync::OnceLock;
 
 use serde::Deserialize;
 
@@ -146,7 +148,7 @@ pub fn setup_catalog() -> &'static SetupCatalog {
 /// A setting's bundled default.
 #[must_use]
 pub fn default_setting(key: &str) -> Option<toml::Value> {
-    super::load::bundled_setting(key)
+    crate::config::load::bundled_setting(key)
 }
 
 /// Set one setting in the user's config.toml, or remove it with `None` so the default applies,
@@ -159,11 +161,11 @@ pub fn write_user_setting(
 ) -> Result<(), String> {
     let file = UserFile::read(path)?;
     let edited = edited_source(&file.source, key, value)?;
-    if edited.len() as u64 > super::load::WATCH_FINGERPRINT_BYTE_CEILING {
+    if edited.len() as u64 > crate::config::load::WATCH_FINGERPRINT_BYTE_CEILING {
         return Err("config.toml exceeds the configuration byte ceiling".into());
     }
     // A value of the wrong type fails in the deserializer, whose message names Rust types.
-    super::load::settings_from_source(&edited).map_err(|error| {
+    crate::config::load::settings_from_source(&edited).map_err(|error| {
         if error
             .lines()
             .next()
@@ -230,7 +232,7 @@ pub(super) fn edited_source(
     let mut document = source
         .parse::<toml_edit::DocumentMut>()
         .map_err(|error| format!("config.toml has a mistake to fix first: {error}"))?;
-    let segments = super::config_key_segments(key).ok_or_else(|| format!("bad key {key}"))?;
+    let segments = crate::config::config_key_segments(key).ok_or_else(|| format!("bad key {key}"))?;
     let Some(value) = value else {
         if let Some(comments) = remove_setting(document.as_table_mut(), &segments) {
             let trailing = document.trailing().as_str().unwrap_or("").to_owned();

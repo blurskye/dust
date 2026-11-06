@@ -1,7 +1,7 @@
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
-use super::pty_screen::PtyStyle;
+use crate::ui::pty_screen::PtyStyle;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum Style {
@@ -314,13 +314,14 @@ impl CellGrid {
 
 #[cfg(test)]
 mod tests {
-    use super::{CellGrid, Style};
+    use crate::ui::grid::CellGrid;
+    use crate::ui::grid::Style;
 
     #[test]
     fn overlapping_wide_writes_clear_the_old_trailing_cell() {
-        let mut grid = super::CellGrid::new(6, 1);
-        grid.set_cell(2, 0, "界", super::Style::Default);
-        grid.set_cell(1, 0, "語", super::Style::Default);
+        let mut grid = crate::ui::grid::CellGrid::new(6, 1);
+        grid.set_cell(2, 0, "界", crate::ui::grid::Style::Default);
+        grid.set_cell(1, 0, "語", crate::ui::grid::Style::Default);
         assert!(grid.get(2, 0).unwrap().continuation);
         assert!(!grid.get(3, 0).unwrap().continuation);
         assert_eq!(grid.get(3, 0).unwrap().symbol, " ");
@@ -331,9 +332,9 @@ mod tests {
         let mut grid = CellGrid::new(u16::MAX, 1);
         let last = u16::MAX - 1;
         grid.set_cell(last, 0, "界", Style::Accent);
-        assert_eq!(grid.get(last, 0), Some(&super::Cell::default()));
+        assert_eq!(grid.get(last, 0), Some(&crate::ui::grid::Cell::default()));
         assert_eq!(grid.put_text(last, 0, "界", Style::Accent), last);
-        assert_eq!(grid.get(last, 0), Some(&super::Cell::default()));
+        assert_eq!(grid.get(last, 0), Some(&crate::ui::grid::Cell::default()));
         grid.set_cell(last - 1, 0, "界", Style::Accent);
         assert!(grid.get(last, 0).unwrap().continuation);
         grid.set_cell(last, 0, "x", Style::Default);

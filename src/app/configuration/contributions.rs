@@ -7,8 +7,8 @@ use crate::config::WindowPlacementConfig;
 use crate::config::WindowsConfig;
 use crate::app::AppEffect;
 use crate::editor::CommandRegistry;
-use crate::extensions::PluginContributionCatalog;
-use crate::extensions::PluginWindowPlacementKind;
+use crate::plugins::PluginContributionCatalog;
+use crate::plugins::PluginWindowPlacementKind;
 use std::sync::Arc;
 
 impl ConfigurationSession {

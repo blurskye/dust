@@ -1,24 +1,31 @@
-use std::{
-    collections::HashSet,
-    fs, io,
-    path::{Path, PathBuf},
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-        mpsc::{self, Receiver, SyncSender},
-    },
-    thread,
-};
+use std::collections::HashSet;
+use std::fs;
+use std::io;
+use std::path::Path;
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
+use std::sync::mpsc::self;
+use std::sync::mpsc::Receiver;
+use std::sync::mpsc::SyncSender;
+use std::thread;
 
-use globset::{Glob, GlobSet, GlobSetBuilder};
+use globset::Glob;
+
+use globset::GlobSet;
+
+use globset::GlobSetBuilder;
 use ignore::WalkBuilder;
-use regex::{Regex, RegexBuilder};
+use regex::Regex;
+use regex::RegexBuilder;
 use thiserror::Error;
 
-use super::{
-    error::VfsError,
-    vfs::{read_file_with_ceiling, scoped_existing_path},
-};
+use crate::files::error::VfsError;
+
+use crate::files::vfs::read_file_with_ceiling;
+
+use crate::files::vfs::scoped_existing_path;
 
 pub(super) const ABSOLUTE_WORKSPACE_SEARCH_FILES: usize = 1_000_000;
 pub(super) const ABSOLUTE_WORKSPACE_SEARCH_RESULTS: usize = 100_000;
@@ -468,7 +475,7 @@ pub(super) fn run_workspace_search(
                 line_starts.push(offset + 1);
             }
         }
-        let path_id = super::workspace_files::file_id(&path);
+        let path_id = crate::files::workspace_files::file_id(&path);
         for found in pattern.find_iter(&source) {
             if cancellation.load(Ordering::Acquire) {
                 return;
@@ -549,9 +556,12 @@ pub(super) fn run_workspace_search(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::files::tests::{collect_search, isolated_git_test, search_policy};
-    use std::time::{Duration, Instant};
+    use crate::files::workspace_search::*;
+    use crate::files::tests::collect_search;
+    use crate::files::tests::isolated_git_test;
+    use crate::files::tests::search_policy;
+    use std::time::Duration;
+    use std::time::Instant;
 
     #[test]
     fn workspace_search_replacement_cancels_old_generation_and_caps_results() {

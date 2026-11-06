@@ -98,7 +98,7 @@ fn web_base(remote: &str) -> Option<reqwest::Url> {
 
 #[cfg(test)]
 mod tests {
-    use super::web_base;
+    use crate::git::browse::web_base;
 
     fn repository_with_file(name: &std::path::Path) -> (tempfile::TempDir, git2::Repository) {
         let dir = tempfile::tempdir().unwrap();
@@ -126,7 +126,7 @@ mod tests {
         repo.remote("origin", "git@github.com:owner/repo.git")
             .unwrap();
         assert_eq!(
-            super::git_browse_url(&file, 3).unwrap(),
+            crate::git::browse::git_browse_url(&file, 3).unwrap(),
             "https://github.com/owner/repo/blob/feature%2Fa%23b/notes%23draft%20%25.rs#L3"
         );
     }
@@ -139,7 +139,7 @@ mod tests {
         // Exercise arbitrary Unix filename bytes without requiring filesystem support.
         let name = std::ffi::OsStr::from_bytes(b"notes\xFF.rs");
         assert_eq!(
-            super::encode_component(name.as_encoded_bytes()),
+            crate::git::browse::encode_component(name.as_encoded_bytes()),
             "notes%FF.rs"
         );
     }
@@ -157,7 +157,7 @@ mod tests {
             repo.remote("origin", remote).unwrap();
             let base = remote.strip_suffix(".git").unwrap();
             assert_eq!(
-                super::git_browse_url(&dir.path().join("file.rs"), 2).unwrap(),
+                crate::git::browse::git_browse_url(&dir.path().join("file.rs"), 2).unwrap(),
                 format!("{base}/{route}/{oid}/file.rs#L2")
             );
             repo.remote_delete("origin").unwrap();
@@ -179,12 +179,12 @@ mod tests {
             let base = remote.strip_suffix(".git").unwrap();
             repo.set_head("refs/heads/feature").unwrap();
             assert_eq!(
-                super::git_browse_url(&dir.path().join("file.rs"), 4).unwrap(),
+                crate::git::browse::git_browse_url(&dir.path().join("file.rs"), 4).unwrap(),
                 format!("{base}/src/branch/feature/file.rs#L4")
             );
             repo.set_head_detached(oid).unwrap();
             assert_eq!(
-                super::git_browse_url(&dir.path().join("file.rs"), 4).unwrap(),
+                crate::git::browse::git_browse_url(&dir.path().join("file.rs"), 4).unwrap(),
                 format!("{base}/src/commit/{oid}/file.rs#L4")
             );
             repo.remote_delete("origin").unwrap();

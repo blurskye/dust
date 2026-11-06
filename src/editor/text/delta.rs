@@ -1,4 +1,5 @@
-use crate::editor::text::{ByteOffset, ByteRange};
+use crate::editor::text::ByteOffset;
+use crate::editor::text::ByteRange;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Affinity {
@@ -63,7 +64,11 @@ impl EditDelta {
 
 #[cfg(test)]
 mod tests {
-    use crate::editor::text::{Affinity, ByteOffset, ByteRange, DeltaSpan, EditDelta};
+    use crate::editor::text::Affinity;
+    use crate::editor::text::ByteOffset;
+    use crate::editor::text::ByteRange;
+    use crate::editor::text::DeltaSpan;
+    use crate::editor::text::EditDelta;
 
     #[test]
     fn adjacent_replacement_and_insertion_both_move_the_boundary() {

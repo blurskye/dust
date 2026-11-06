@@ -37,7 +37,8 @@ fn migration_reads_regular_files_within_the_ceiling() {
 #[cfg(unix)]
 #[test]
 fn migration_rejects_special_files() {
-    use nix::{sys::stat::Mode, unistd::mkfifo};
+    use nix::sys::stat::Mode;
+    use nix::unistd::mkfifo;
     let root = tempfile::tempdir().unwrap();
     let fifo = root.path().join("config.toml");
     mkfifo(&fifo, Mode::S_IRUSR | Mode::S_IWUSR).unwrap();
@@ -66,7 +67,8 @@ fn migration_rejects_special_files() {
 #[cfg(unix)]
 #[test]
 fn startup_errors_escape_filesystem_terminal_controls() {
-    use nix::{sys::stat::Mode, unistd::mkfifo};
+    use nix::sys::stat::Mode;
+    use nix::unistd::mkfifo;
 
     let root = tempfile::tempdir().unwrap();
     let fifo = root.path().join("pipe\x1b]0;untrusted\x07");

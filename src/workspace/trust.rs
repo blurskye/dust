@@ -1,17 +1,26 @@
-use std::{
-    collections::HashSet,
-    fs,
-    io::{self, Read, Write},
-    path::{Path, PathBuf},
-    sync::mpsc::{self, Receiver, SyncSender, TryRecvError, TrySendError},
-    thread,
-};
+use std::collections::HashSet;
+use std::fs;
+use std::io::self;
+use std::io::Read;
+use std::io::Write;
+use std::path::Path;
+use std::path::PathBuf;
+use std::sync::mpsc::self;
+use std::sync::mpsc::Receiver;
+use std::sync::mpsc::SyncSender;
+use std::sync::mpsc::TryRecvError;
+use std::sync::mpsc::TrySendError;
+use std::thread;
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+
+use serde::Serialize;
 use tempfile::NamedTempFile;
 use thiserror::Error;
 
-use super::{edit::WorkspaceError, root::RootIdentity};
+use crate::workspace::edit::WorkspaceError;
+
+use crate::workspace::root::RootIdentity;
 
 #[derive(Clone, Debug, Default)]
 pub struct TrustStore {
@@ -538,7 +547,7 @@ pub(super) fn map_trust_send_error(error: TrySendError<TrustRequest>) -> TrustSt
 
 #[cfg(test)]
 mod generation_tests {
-    use super::*;
+    use crate::workspace::trust::*;
     #[test]
     fn exhausted_generation_never_reuses_an_admitted_identity() {
         let mut service = WorkspaceTrustService::start(1);
@@ -556,7 +565,7 @@ mod generation_tests {
 
 #[cfg(test)]
 mod persistence_tests {
-    use super::*;
+    use crate::workspace::trust::*;
 
     fn wait_for_event(service: &mut WorkspaceTrustService) -> TrustEvent {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);

@@ -1,29 +1,49 @@
-use std::{
-    collections::BTreeMap,
-    fs,
-    path::Path,
-    time::{Duration, Instant},
-};
+use std::collections::BTreeMap;
+use std::fs;
+use std::path::Path;
+use std::time::Duration;
+use std::time::Instant;
 
 use crate::editor::text::TextBuffer;
 use tempfile::tempdir;
 
-use super::directory::{list_scoped_directory, natural_name_key};
-use super::recovery::{
-    RECOVERY_DIRECTORY_ENTRY_CEILING, RECOVERY_JOURNAL_BYTE_CEILING, RECOVERY_PAYLOAD_BYTE_CEILING,
-    bounded_recovery_entries, read_bounded_bytes, recovery_journal_size_allowed,
-    recovery_payload_size_allowed,
-};
-use super::vfs::checked_atomic_write;
-use super::watch::watch_name_bytes;
-use super::{
-    DirectoryEntryKind, DirectoryService, ExplorerMutation, ExplorerWatchEntryKind,
-    ExplorerWatchError, ExplorerWatchPolicy, ExplorerWatchService, ProjectRootService,
-    ProjectRootStrategy, RecoveryRecord, VfsError, VfsResult, VfsWorker, WorkspaceSearchEvent,
-    WorkspaceSearchMatch, WorkspaceSearchPolicy, WorkspaceSearchService, WorkspaceSearchSummary,
-    WriteExpectation, atomic_write, cleanup_recovery, diff_explorer_fingerprints,
-    discover_recovery, explorer_directory_fingerprint, write_recovery,
-};
+use crate::files::directory::list_scoped_directory;
+
+use crate::files::directory::natural_name_key;
+use crate::files::recovery::RECOVERY_DIRECTORY_ENTRY_CEILING;
+use crate::files::recovery::RECOVERY_JOURNAL_BYTE_CEILING;
+use crate::files::recovery::RECOVERY_PAYLOAD_BYTE_CEILING;
+use crate::files::recovery::bounded_recovery_entries;
+use crate::files::recovery::read_bounded_bytes;
+use crate::files::recovery::recovery_journal_size_allowed;
+use crate::files::recovery::recovery_payload_size_allowed;
+use crate::files::vfs::checked_atomic_write;
+use crate::files::watch::watch_name_bytes;
+use crate::files::DirectoryEntryKind;
+use crate::files::DirectoryService;
+use crate::files::ExplorerMutation;
+use crate::files::ExplorerWatchEntryKind;
+use crate::files::ExplorerWatchError;
+use crate::files::ExplorerWatchPolicy;
+use crate::files::ExplorerWatchService;
+use crate::files::ProjectRootService;
+use crate::files::ProjectRootStrategy;
+use crate::files::RecoveryRecord;
+use crate::files::VfsError;
+use crate::files::VfsResult;
+use crate::files::VfsWorker;
+use crate::files::WorkspaceSearchEvent;
+use crate::files::WorkspaceSearchMatch;
+use crate::files::WorkspaceSearchPolicy;
+use crate::files::WorkspaceSearchService;
+use crate::files::WorkspaceSearchSummary;
+use crate::files::WriteExpectation;
+use crate::files::atomic_write;
+use crate::files::cleanup_recovery;
+use crate::files::diff_explorer_fingerprints;
+use crate::files::discover_recovery;
+use crate::files::explorer_directory_fingerprint;
+use crate::files::write_recovery;
 
 #[test]
 fn project_root_resolution_requires_valid_tool_evidence_and_prefers_the_nested_project() {
@@ -143,7 +163,8 @@ fn a_file_not_saved_yet_still_finds_its_project_root() {
 
 #[test]
 fn marker_reads_reject_fifos_symlinks_and_oversized_files() {
-    use super::project_root::{PROJECT_ROOT_MANIFEST_BYTE_CEILING, bounded_project_marker};
+    use crate::files::project_root::PROJECT_ROOT_MANIFEST_BYTE_CEILING;
+    use crate::files::project_root::bounded_project_marker;
     let root = tempdir().unwrap();
     let marker = root.path().join("Cargo.toml");
     nix::unistd::mkfifo(&marker, nix::sys::stat::Mode::S_IRUSR).unwrap();
@@ -171,7 +192,7 @@ fn marker_reads_reject_fifos_symlinks_and_oversized_files() {
 
 #[test]
 fn project_roots_accept_jsonc_configs_and_whitespace_separated_go_directives() {
-    use super::project_root::project_root_is_valid;
+    use crate::files::project_root::project_root_is_valid;
     let root = tempdir().unwrap();
     for marker in ["tsconfig.json", "jsconfig.json"] {
         fs::write(
@@ -224,7 +245,7 @@ fn project_roots_accept_bom_prefixed_node_manifests() {
     let root = tempdir().unwrap();
     for marker in ["tsconfig.json", "jsconfig.json", "package.json"] {
         fs::write(root.path().join(marker), "\u{feff}{\"name\":\"demo\"}").unwrap();
-        let resolution = super::project_root::resolve_project_root(
+        let resolution = crate::files::project_root::resolve_project_root(
             1,
             1,
             &root.path().join("src/new.ts"),
@@ -243,7 +264,7 @@ fn project_roots_accept_bom_prefixed_node_manifests() {
 
 #[test]
 fn project_roots_accept_jsonc_comments_with_all_line_endings() {
-    use super::project_root::project_root_is_valid;
+    use crate::files::project_root::project_root_is_valid;
     let root = tempdir().unwrap();
     for marker in ["tsconfig.json", "jsconfig.json"] {
         for newline in ["\r", "\n", "\r\n"] {
@@ -312,11 +333,11 @@ fn explorer_watch_reads_symlinked_ignore_files() {
         assert!(
             !events
                 .iter()
-                .any(|event| matches!(event, super::ExplorerWatchEvent::Failed { .. }))
+                .any(|event| matches!(event, crate::files::ExplorerWatchEvent::Failed { .. }))
         );
         if events
             .iter()
-            .any(|event| matches!(event, super::ExplorerWatchEvent::Batch(_)))
+            .any(|event| matches!(event, crate::files::ExplorerWatchEvent::Batch(_)))
         {
             break;
         }
@@ -383,7 +404,8 @@ fn explorer_watch_fingerprints_are_deterministic_metadata_only_and_bounded() {
 #[cfg(unix)]
 #[test]
 fn explorer_watch_preserves_non_utf8_names_and_never_follows_symlinks() {
-    use std::os::unix::{ffi::OsStringExt, fs::symlink};
+    use std::os::unix::ffi::OsStringExt;
+    use std::os::unix::fs::symlink;
     let root = tempdir().unwrap();
     let canonical = fs::canonicalize(root.path()).unwrap();
     let non_utf8 = std::ffi::OsString::from_vec(vec![b'x', 0xff]);
@@ -441,7 +463,9 @@ fn atomic_write_replaces_and_preserves_text_format_bytes() {
 
 #[test]
 fn atomic_write_preserves_destination_ownership_and_permissions() {
-    use std::os::unix::fs::{MetadataExt, PermissionsExt, chown};
+    use std::os::unix::fs::MetadataExt;
+    use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::fs::chown;
     let root = tempdir().unwrap();
     let path = root.path().join("shared.txt");
     fs::write(&path, b"before").unwrap();
@@ -578,10 +602,10 @@ fn recovery_paths_round_trip_native_bytes_and_read_legacy_journals() {
     )
     .unwrap();
     assert_eq!(discover_recovery(root.path()).records.len(), 3);
-    assert!(super::recovery_size_allowed(
+    assert!(crate::files::recovery_size_allowed(
         RECOVERY_PAYLOAD_BYTE_CEILING - 8192
     ));
-    assert!(!super::recovery_size_allowed(
+    assert!(!crate::files::recovery_size_allowed(
         RECOVERY_PAYLOAD_BYTE_CEILING - 8191
     ));
 }
@@ -629,18 +653,18 @@ fn recovery_reader_enforces_bytes_and_utf8_from_the_open_stream() {
     let root = tempdir().expect("tempdir");
     let path = root.path().join("invalid.toml");
     fs::write(&path, "1234").unwrap();
-    let exact = super::vfs::read_file_with_ceiling(&path, 4).expect("exact limit");
+    let exact = crate::files::vfs::read_file_with_ceiling(&path, 4).expect("exact limit");
     assert_eq!(exact, b"1234");
     fs::write(&path, "12345").unwrap();
     assert!(matches!(
-        super::vfs::read_file_with_ceiling(&path, 4),
+        crate::files::vfs::read_file_with_ceiling(&path, 4),
         Err(VfsError::DocumentTooLarge {
             maximum_bytes: 4,
             ..
         })
     ));
     fs::write(&path, [0xff]).expect("invalid journal");
-    let invalid = super::recovery::read_recovery_source(&path).expect_err("invalid UTF-8");
+    let invalid = crate::files::recovery::read_recovery_source(&path).expect_err("invalid UTF-8");
     assert!(invalid.starts_with("recovery journal is not UTF-8:"));
     let discovery = discover_recovery(root.path());
     assert!(discovery.records.is_empty());
@@ -663,14 +687,14 @@ fn recovery_discovery_bounds_records_and_aggregate_content() {
         )
         .unwrap();
     }
-    let limited = super::recovery::discover_recovery_bounded(root.path(), 1, 100);
+    let limited = crate::files::recovery::discover_recovery_bounded(root.path(), 1, 100);
     assert_eq!(limited.records.len(), 1);
-    let limited = super::recovery::discover_recovery_bounded(root.path(), 100, 8);
+    let limited = crate::files::recovery::discover_recovery_bounded(root.path(), 100, 8);
     assert_eq!(limited.records.len(), 2);
     assert_eq!(limited.diagnostics.len(), 1);
     assert!(limited.diagnostics[0].contains("byte safety ceiling"));
     assert!(
-        super::recovery::discover_recovery_bounded(root.path(), 0, 100)
+        crate::files::recovery::discover_recovery_bounded(root.path(), 0, 100)
             .records
             .is_empty()
     );
@@ -740,7 +764,7 @@ fn recovery_cleanup_obeys_count_and_age_without_deleting_corruption() {
 fn recovery_replacement_waits_for_the_directory_lock() {
     let root = tempdir().unwrap();
     let journal = root.path().join("buffer.toml");
-    let lock = super::vfs::lock_file(&root.path().join(".recovery.lock")).unwrap();
+    let lock = crate::files::vfs::lock_file(&root.path().join(".recovery.lock")).unwrap();
     let (started, starting) = std::sync::mpsc::channel();
     let (finished, completion) = std::sync::mpsc::channel();
     let worker = std::thread::spawn(move || {
@@ -777,7 +801,7 @@ fn recovery_cleanup_waits_for_replacement_before_deciding_retention() {
         .unwrap()
         .set_modified(now - Duration::from_secs(2 * 86_400))
         .unwrap();
-    let lock = super::vfs::lock_file(&root.path().join(".recovery.lock")).unwrap();
+    let lock = crate::files::vfs::lock_file(&root.path().join(".recovery.lock")).unwrap();
     let directory = root.path().to_path_buf();
     let (started, starting) = std::sync::mpsc::channel();
     let (finished, completion) = std::sync::mpsc::channel();
@@ -825,7 +849,7 @@ fn recovery_worker_fifo_order_makes_delete_the_revision_barrier() {
     let root = tempdir().expect("tempdir");
     let journal = root.path().join("buffer.toml");
     let mut worker = VfsWorker::start(4);
-    fn expect_completion(worker: &mut VfsWorker, id: super::RequestId, path: &Path, write: bool) {
+    fn expect_completion(worker: &mut VfsWorker, id: crate::files::RequestId, path: &Path, write: bool) {
         let deadline = Instant::now() + Duration::from_secs(2);
         loop {
             if let Some(reply) = worker.try_result().expect("worker") {
@@ -938,15 +962,15 @@ pub(super) fn collect_search(
 }
 
 fn collect_files(
-    policy: super::WorkspaceFilePolicy,
-) -> (Vec<super::WorkspaceFileEntry>, super::WorkspaceFileSummary) {
-    let mut service = super::WorkspaceFileService::default();
+    policy: crate::files::WorkspaceFilePolicy,
+) -> (Vec<crate::files::WorkspaceFileEntry>, crate::files::WorkspaceFileSummary) {
+    let mut service = crate::files::WorkspaceFileService::default();
     let generation = service.start(policy.clone()).expect("start finder");
     let deadline = Instant::now() + Duration::from_secs(5);
     let mut entries = Vec::new();
     loop {
         match service.try_event() {
-            Some(super::WorkspaceFileEvent::Batch {
+            Some(crate::files::WorkspaceFileEvent::Batch {
                 generation: actual,
                 root_revision,
                 entries: batch,
@@ -954,7 +978,7 @@ fn collect_files(
                 assert_eq!((actual, root_revision), (generation, policy.root_revision));
                 entries.extend(batch);
             }
-            Some(super::WorkspaceFileEvent::Complete {
+            Some(crate::files::WorkspaceFileEvent::Complete {
                 generation: actual,
                 root_revision,
                 summary,
@@ -992,17 +1016,17 @@ fn linked_worktree_metadata_rejects_nonregular_and_oversized_files() {
     let root = tempdir().unwrap();
     let git = root.path().join(".git");
     fs::write(&git, "x".repeat(4097)).unwrap();
-    assert_eq!(super::linked_worktree_repository(root.path()), None);
+    assert_eq!(crate::files::linked_worktree_repository(root.path()), None);
     fs::remove_file(&git).unwrap();
     symlink("/dev/zero", &git).unwrap();
-    assert_eq!(super::linked_worktree_repository(root.path()), None);
+    assert_eq!(crate::files::linked_worktree_repository(root.path()), None);
     fs::remove_file(&git).unwrap();
     nix::unistd::mkfifo(
         &git,
         nix::sys::stat::Mode::S_IRUSR | nix::sys::stat::Mode::S_IWUSR,
     )
     .unwrap();
-    assert_eq!(super::linked_worktree_repository(root.path()), None);
+    assert_eq!(crate::files::linked_worktree_repository(root.path()), None);
     let mut state = crate::editor::EditorState::new(root.path().into());
     assert_eq!(state.workspace_repository, None);
     state.set_workspace_root(root.path().join("other"));
@@ -1049,9 +1073,9 @@ fn a_root_shows_its_worktrees_and_a_worktree_shows_only_itself() {
     assert_eq!(searched(&worktree), ["feat.txt"]);
 
     let found = |root: &Path| {
-        let mut service = super::WorkspaceFileService::default();
+        let mut service = crate::files::WorkspaceFileService::default();
         service
-            .start(super::WorkspaceFilePolicy {
+            .start(crate::files::WorkspaceFilePolicy {
                 roots: vec![root.to_path_buf()],
                 root_revision: 1,
                 include_hidden: false,
@@ -1066,11 +1090,11 @@ fn a_root_shows_its_worktrees_and_a_worktree_shows_only_itself() {
         let mut entries = Vec::new();
         loop {
             match service.try_event() {
-                Some(super::WorkspaceFileEvent::Batch { entries: batch, .. }) => {
+                Some(crate::files::WorkspaceFileEvent::Batch { entries: batch, .. }) => {
                     entries.extend(batch)
                 }
-                Some(super::WorkspaceFileEvent::Complete { .. }) => break,
-                Some(super::WorkspaceFileEvent::Failed { error, .. }) => panic!("{error}"),
+                Some(crate::files::WorkspaceFileEvent::Complete { .. }) => break,
+                Some(crate::files::WorkspaceFileEvent::Failed { error, .. }) => panic!("{error}"),
                 _ => {}
             }
             assert!(Instant::now() < deadline);
@@ -1078,7 +1102,7 @@ fn a_root_shows_its_worktrees_and_a_worktree_shows_only_itself() {
         }
         entries
             .iter()
-            .map(|entry: &super::WorkspaceFileEntry| {
+            .map(|entry: &crate::files::WorkspaceFileEntry| {
                 entry.relative_path.to_string_lossy().into_owned()
             })
             .collect::<Vec<_>>()
@@ -1087,37 +1111,38 @@ fn a_root_shows_its_worktrees_and_a_worktree_shows_only_itself() {
     assert_eq!(found(&worktree), ["feat.txt"]);
 
     assert_eq!(
-        super::linked_worktree_repository(&worktree).as_deref(),
+        crate::files::linked_worktree_repository(&worktree).as_deref(),
         root.file_name().and_then(|name| name.to_str())
     );
-    assert_eq!(super::linked_worktree_repository(&root), None);
+    assert_eq!(crate::files::linked_worktree_repository(&root), None);
     fs::write(worktree.join(".git"), "gitdir: ../../.git/worktrees/feat\n").unwrap();
     assert_eq!(
-        super::linked_worktree_repository(&worktree).as_deref(),
+        crate::files::linked_worktree_repository(&worktree).as_deref(),
         root.file_name().and_then(|name| name.to_str())
     );
 }
 
 #[test]
 fn linked_worktree_metadata_accepts_valid_paths_and_rejects_nonregular_and_oversized_files() {
-    use nix::{sys::stat::Mode, unistd::mkfifo};
+    use nix::sys::stat::Mode;
+    use nix::unistd::mkfifo;
     let root = tempdir().unwrap();
     let git = root.path().join(".git");
     mkfifo(&git, Mode::S_IRUSR | Mode::S_IWUSR).unwrap();
-    assert_eq!(super::linked_worktree_repository(root.path()), None);
+    assert_eq!(crate::files::linked_worktree_repository(root.path()), None);
     fs::remove_file(&git).unwrap();
     std::os::unix::fs::symlink("/dev/zero", &git).unwrap();
-    assert_eq!(super::linked_worktree_repository(root.path()), None);
+    assert_eq!(crate::files::linked_worktree_repository(root.path()), None);
     fs::remove_file(&git).unwrap();
     fs::write(
         &git,
         format!("gitdir: /repo/.git/worktrees/{}", "x".repeat(16 * 1024)),
     )
     .unwrap();
-    assert_eq!(super::linked_worktree_repository(root.path()), None);
+    assert_eq!(crate::files::linked_worktree_repository(root.path()), None);
     fs::write(&git, "gitdir: /repo/.git/worktrees/feature\n").unwrap();
     assert_eq!(
-        super::linked_worktree_repository(root.path()).as_deref(),
+        crate::files::linked_worktree_repository(root.path()).as_deref(),
         Some("repo")
     );
 }
@@ -1132,7 +1157,7 @@ fn root_worktree_discovery_is_lazy_bounded_and_cancellable() {
     }
     let mut scanned = 0;
     assert!(
-        super::directory::root_worktrees(root.path(), || {
+        crate::files::directory::root_worktrees(root.path(), || {
             scanned += 1;
             true
         })
@@ -1144,11 +1169,11 @@ fn root_worktree_discovery_is_lazy_bounded_and_cancellable() {
         "asking for one worktree inspects only one candidate"
     );
     assert_eq!(
-        super::directory::root_worktrees(root.path(), || false).count(),
+        crate::files::directory::root_worktrees(root.path(), || false).count(),
         0
     );
     let mut remaining = 2;
-    let paths = super::directory::root_worktrees(root.path(), || {
+    let paths = crate::files::directory::root_worktrees(root.path(), || {
         if remaining == 0 {
             return false;
         }
@@ -1194,10 +1219,10 @@ fn worktree_symlinks_cannot_add_outside_files_to_finder_or_grep() {
             .unwrap();
         }
         assert_eq!(
-            super::directory::root_worktrees(root.path(), || true).count(),
+            crate::files::directory::root_worktrees(root.path(), || true).count(),
             0
         );
-        let (entries, summary) = collect_files(super::WorkspaceFilePolicy {
+        let (entries, summary) = collect_files(crate::files::WorkspaceFilePolicy {
             roots: vec![root.path().to_path_buf()],
             root_revision: 1,
             include_hidden: false,
@@ -1282,7 +1307,8 @@ fn scoped_directory_listing_is_lazy_sorted_hidden_aware_and_bounded() {
 #[cfg(unix)]
 #[test]
 fn scoped_directory_listing_does_not_traverse_symlink_escape_and_handles_non_utf8_name() {
-    use std::os::unix::{ffi::OsStringExt, fs::symlink};
+    use std::os::unix::ffi::OsStringExt;
+    use std::os::unix::fs::symlink;
     let root = tempdir().expect("root");
     let outside = tempdir().expect("outside");
     symlink(outside.path(), root.path().join("escape")).expect("symlink");
@@ -1338,8 +1364,8 @@ fn workspace_files_and_search_keep_distinct_non_utf8_path_identities() {
         paths[1].display().to_string()
     );
     assert_ne!(
-        super::workspace_files::file_id(&paths[0]),
-        super::workspace_files::file_id(&paths[1])
+        crate::files::workspace_files::file_id(&paths[0]),
+        crate::files::workspace_files::file_id(&paths[1])
     );
     for path in paths {
         if let Err(error) = fs::write(&path, "needle") {
@@ -1348,9 +1374,9 @@ fn workspace_files_and_search_keep_distinct_non_utf8_path_identities() {
             return;
         }
     }
-    let mut service = super::WorkspaceFileService::default();
+    let mut service = crate::files::WorkspaceFileService::default();
     service
-        .start(super::WorkspaceFilePolicy {
+        .start(crate::files::WorkspaceFilePolicy {
             roots: vec![root.path().to_path_buf()],
             root_revision: 1,
             include_hidden: true,
@@ -1365,9 +1391,9 @@ fn workspace_files_and_search_keep_distinct_non_utf8_path_identities() {
     let deadline = Instant::now() + Duration::from_secs(2);
     loop {
         match service.try_event() {
-            Some(super::WorkspaceFileEvent::Batch { entries: batch, .. }) => entries.extend(batch),
-            Some(super::WorkspaceFileEvent::Complete { .. }) => break,
-            Some(super::WorkspaceFileEvent::Failed { error, .. }) => panic!("{error}"),
+            Some(crate::files::WorkspaceFileEvent::Batch { entries: batch, .. }) => entries.extend(batch),
+            Some(crate::files::WorkspaceFileEvent::Complete { .. }) => break,
+            Some(crate::files::WorkspaceFileEvent::Failed { error, .. }) => panic!("{error}"),
             _ => {}
         }
         assert!(Instant::now() < deadline);
@@ -1388,13 +1414,12 @@ fn workspace_files_and_search_keep_distinct_non_utf8_path_identities() {
 
 #[test]
 fn workspace_event_senders_wake_when_cancel_drops_a_full_queue() {
-    use super::workspace_files::send_file_event;
-    use super::workspace_search::send_search_event;
-    use std::sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-        mpsc,
-    };
+    use crate::files::workspace_files::send_file_event;
+    use crate::files::workspace_search::send_search_event;
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicBool;
+    use std::sync::atomic::Ordering;
+    use std::sync::mpsc;
 
     let cancel = Arc::new(AtomicBool::new(false));
     let (sender, receiver) = mpsc::sync_channel(1);
@@ -1423,7 +1448,7 @@ fn workspace_event_senders_wake_when_cancel_drops_a_full_queue() {
     let cancel = Arc::new(AtomicBool::new(false));
     let (sender, receiver) = mpsc::sync_channel(1);
     sender
-        .send(super::WorkspaceFileEvent::Cancelled {
+        .send(crate::files::WorkspaceFileEvent::Cancelled {
             generation: 1,
             root_revision: 1,
         })
@@ -1434,7 +1459,7 @@ fn workspace_event_senders_wake_when_cancel_drops_a_full_queue() {
         let sent = send_file_event(
             &sender,
             &worker_cancel,
-            super::WorkspaceFileEvent::Cancelled {
+            crate::files::WorkspaceFileEvent::Cancelled {
                 generation: 2,
                 root_revision: 1,
             },
@@ -1453,7 +1478,9 @@ fn workspace_event_senders_wake_when_cancel_drops_a_full_queue() {
 
 #[test]
 fn workspace_search_streams_batches_before_reading_later_files_and_reports_read_failure() {
-    use std::sync::{Arc, atomic::AtomicBool, mpsc};
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicBool;
+    use std::sync::mpsc;
     let root = tempdir().unwrap();
     fs::write(root.path().join("a.txt"), "needle needle").unwrap();
     let later = root.path().join("b.txt");
@@ -1463,7 +1490,7 @@ fn workspace_search_streams_batches_before_reading_later_files_and_reports_read_
     // Each batch must be received before the worker proceeds to the next one.
     let (sender, receiver) = mpsc::sync_channel(0);
     let worker = std::thread::spawn(move || {
-        super::workspace_search::run_workspace_search(
+        crate::files::workspace_search::run_workspace_search(
             1,
             policy,
             Arc::new(AtomicBool::new(false)),
@@ -1834,7 +1861,7 @@ fn directory_completion_filters_names_before_capping_worker_results() {
     for name in &names {
         fs::write(root.path().join(name), b"").expect("file");
     }
-    let initial = super::vfs::list_directory(root.path(), "", 1000).expect("unfiltered listing");
+    let initial = crate::files::vfs::list_directory(root.path(), "", 1000).expect("unfiltered listing");
     assert_eq!(initial.len(), 1000);
     let target = names
         .iter()
@@ -1866,7 +1893,8 @@ fn directory_completion_filters_names_before_capping_worker_results() {
 
 #[test]
 fn explorer_copies_preserve_private_and_executable_permissions() {
-    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    use std::os::unix::fs::MetadataExt;
+    use std::os::unix::fs::PermissionsExt;
     let root = tempdir().unwrap();
     let roots = vec![fs::canonicalize(root.path()).unwrap()];
     for mode in [0o600, 0o751] {
@@ -1874,7 +1902,7 @@ fn explorer_copies_preserve_private_and_executable_permissions() {
         let target = root.path().join(format!("target-{mode:o}"));
         fs::write(&source, b"private content").unwrap();
         fs::set_permissions(&source, fs::Permissions::from_mode(mode)).unwrap();
-        super::vfs::apply_explorer_mutation(
+        crate::files::vfs::apply_explorer_mutation(
             &ExplorerMutation::Copy {
                 source,
                 target: target.clone(),
@@ -1999,14 +2027,13 @@ fn worker_reports_write_completion() {
 }
 #[test]
 fn workspace_file_delivery_waits_for_capacity_and_can_be_cancelled() {
-    use std::sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-        mpsc,
-    };
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicBool;
+    use std::sync::atomic::Ordering;
+    use std::sync::mpsc;
     let (sender, receiver) = mpsc::sync_channel(1);
     let cancel = Arc::new(AtomicBool::new(false));
-    let event = super::WorkspaceFileEvent::Cancelled {
+    let event = crate::files::WorkspaceFileEvent::Cancelled {
         generation: 1,
         root_revision: 2,
     };
@@ -2014,7 +2041,7 @@ fn workspace_file_delivery_waits_for_capacity_and_can_be_cancelled() {
     let worker_cancel = Arc::clone(&cancel);
     let (done, completed) = mpsc::channel();
     let worker = std::thread::spawn(move || {
-        done.send(super::workspace_files::send_file_event(
+        done.send(crate::files::workspace_files::send_file_event(
             &sender,
             &worker_cancel,
             event,
@@ -2042,9 +2069,9 @@ fn workspace_files_reject_worktrees_behind_a_symlinked_ancestor() {
         root.path().join(".worktree"),
     )
     .unwrap();
-    let mut service = super::WorkspaceFileService::default();
+    let mut service = crate::files::WorkspaceFileService::default();
     service
-        .start(super::WorkspaceFilePolicy {
+        .start(crate::files::WorkspaceFilePolicy {
             roots: vec![root.path().to_path_buf()],
             root_revision: 1,
             include_hidden: false,
@@ -2059,14 +2086,14 @@ fn workspace_files_reject_worktrees_behind_a_symlinked_ancestor() {
     let mut paths = Vec::new();
     loop {
         match service.try_event() {
-            Some(super::WorkspaceFileEvent::Batch { entries, .. }) => {
+            Some(crate::files::WorkspaceFileEvent::Batch { entries, .. }) => {
                 paths.extend(entries.into_iter().map(|entry| entry.relative_path));
             }
-            Some(super::WorkspaceFileEvent::Complete { summary, .. }) => {
+            Some(crate::files::WorkspaceFileEvent::Complete { summary, .. }) => {
                 assert_eq!(summary.files, 1);
                 break;
             }
-            Some(super::WorkspaceFileEvent::Failed { error, .. }) => panic!("{error}"),
+            Some(crate::files::WorkspaceFileEvent::Failed { error, .. }) => panic!("{error}"),
             _ => {}
         }
         assert!(Instant::now() < deadline);
@@ -2080,9 +2107,9 @@ fn workspace_files_report_a_missing_root_instead_of_partial_success() {
     let root = tempdir().unwrap();
     fs::write(root.path().join("present.txt"), b"present").unwrap();
     let missing = root.path().join("missing-root");
-    let mut service = super::WorkspaceFileService::default();
+    let mut service = crate::files::WorkspaceFileService::default();
     service
-        .start(super::WorkspaceFilePolicy {
+        .start(crate::files::WorkspaceFilePolicy {
             roots: vec![root.path().to_path_buf(), missing.clone()],
             root_revision: 7,
             include_hidden: false,
@@ -2096,7 +2123,7 @@ fn workspace_files_report_a_missing_root_instead_of_partial_success() {
     let deadline = Instant::now() + Duration::from_secs(2);
     loop {
         match service.try_event() {
-            Some(super::WorkspaceFileEvent::Failed {
+            Some(crate::files::WorkspaceFileEvent::Failed {
                 root_revision,
                 error,
                 ..
@@ -2131,9 +2158,9 @@ fn workspace_files_are_bounded_deterministic_and_ignore_symlink_escapes() {
         fs::write(outside.path().join("secret.txt"), "secret").unwrap();
         std::os::unix::fs::symlink(outside.path(), root.path().join("escape")).unwrap();
     }
-    let mut service = super::WorkspaceFileService::default();
+    let mut service = crate::files::WorkspaceFileService::default();
     let generation = service
-        .start(super::WorkspaceFilePolicy {
+        .start(crate::files::WorkspaceFilePolicy {
             roots: vec![root.path().to_path_buf()],
             root_revision: 7,
             include_hidden: false,
@@ -2149,7 +2176,7 @@ fn workspace_files_are_bounded_deterministic_and_ignore_symlink_escapes() {
     let summary = loop {
         if let Some(event) = service.try_event() {
             match event {
-                super::WorkspaceFileEvent::Batch {
+                crate::files::WorkspaceFileEvent::Batch {
                     generation: g,
                     root_revision,
                     entries: batch,
@@ -2157,8 +2184,8 @@ fn workspace_files_are_bounded_deterministic_and_ignore_symlink_escapes() {
                     assert_eq!((g, root_revision), (generation, 7));
                     entries.extend(batch)
                 }
-                super::WorkspaceFileEvent::Complete { summary, .. } => break summary,
-                super::WorkspaceFileEvent::Failed { error, .. } => panic!("{error}"),
+                crate::files::WorkspaceFileEvent::Complete { summary, .. } => break summary,
+                crate::files::WorkspaceFileEvent::Failed { error, .. } => panic!("{error}"),
                 _ => {}
             }
         }
@@ -2185,7 +2212,7 @@ fn workspace_file_count_and_path_byte_limits_report_truncation() {
     for name in ["a", "b", "c"] {
         fs::write(root.path().join(name), "text").unwrap();
     }
-    let mut policy = super::WorkspaceFilePolicy {
+    let mut policy = crate::files::WorkspaceFilePolicy {
         roots: vec![root.path().to_path_buf()],
         root_revision: 7,
         include_hidden: false,
@@ -2221,7 +2248,7 @@ fn workspace_file_count_and_path_byte_limits_report_truncation() {
 fn patterned_project_marker_detects_opam_project() {
     let root = tempfile::tempdir().unwrap();
     std::fs::write(root.path().join("example.opam"), "opam-version: \"2.0\"").unwrap();
-    let result = super::project_root::resolve_project_root(
+    let result = crate::files::project_root::resolve_project_root(
         1,
         1,
         &root.path().join("main.ml"),
@@ -2235,7 +2262,7 @@ fn patterned_project_marker_detects_opam_project() {
         Some(root.path().canonicalize().unwrap())
     );
     std::fs::remove_file(root.path().join("example.opam")).unwrap();
-    let result = super::project_root::resolve_project_root(
+    let result = crate::files::project_root::resolve_project_root(
         1,
         1,
         &root.path().join("main.ml"),

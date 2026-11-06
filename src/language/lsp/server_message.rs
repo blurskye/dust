@@ -1,22 +1,48 @@
-use std::{
-    collections::{HashMap, VecDeque},
-    time::Instant,
-};
+use std::collections::HashMap;
+use std::collections::VecDeque;
+use std::time::Instant;
 
-use serde_json::{Value, json};
+use serde_json::Value;
+
+use serde_json::json;
 
 use crate::process::write_content_length_message;
 
-use super::{
-    MAX_LOG_LINE_BYTES, MAX_LOG_LINES, MAX_PENDING_REQUESTS,
-    model::{LspCapabilities, LspDocument, LspEvent, LspServerConfiguration, ServerRequestId},
-    origins::{EditContext, EventSender},
-    protocol::{
-        diagnostics, lsp_progress_event, sanitize_log, send_cancel, send_event,
-        server_status_event, workspace_edit,
-    },
-    session::PendingRequest,
-};
+use crate::language::lsp::MAX_LOG_LINE_BYTES;
+
+use crate::language::lsp::MAX_LOG_LINES;
+
+use crate::language::lsp::MAX_PENDING_REQUESTS;
+
+use crate::language::lsp::model::LspCapabilities;
+
+use crate::language::lsp::model::LspDocument;
+
+use crate::language::lsp::model::LspEvent;
+
+use crate::language::lsp::model::LspServerConfiguration;
+
+use crate::language::lsp::model::ServerRequestId;
+
+use crate::language::lsp::origins::EditContext;
+
+use crate::language::lsp::origins::EventSender;
+
+use crate::language::lsp::protocol::diagnostics;
+
+use crate::language::lsp::protocol::lsp_progress_event;
+
+use crate::language::lsp::protocol::sanitize_log;
+
+use crate::language::lsp::protocol::send_cancel;
+
+use crate::language::lsp::protocol::send_event;
+
+use crate::language::lsp::protocol::server_status_event;
+
+use crate::language::lsp::protocol::workspace_edit;
+
+use crate::language::lsp::session::PendingRequest;
 
 pub(super) struct ServerMessageContext<'a> {
     pub server: &'a str,
@@ -29,7 +55,7 @@ pub(super) struct ServerMessageContext<'a> {
     pub registrations: &'a mut HashMap<String, (String, Value)>,
     pub configuration: &'a LspServerConfiguration,
     pub sources: &'a HashMap<String, (crate::editor::BufferId, crate::editor::text::TextVersion)>,
-    pub diagnostic_lineage: &'a super::origins::DiagnosticLineage,
+    pub diagnostic_lineage: &'a crate::language::lsp::origins::DiagnosticLineage,
     pub documents: &'a HashMap<String, LspDocument>,
     pub apply_requests: &'a mut HashMap<ServerRequestId, std::sync::Arc<()>>,
 }
@@ -87,7 +113,7 @@ pub(super) fn handle_server_message(context: ServerMessageContext<'_>, message: 
             };
             let disk = (!rejected && !diagnostic_lineage.tracked(uri))
                 .then(|| {
-                    let path = super::paths::path_from_file_uri(uri)?;
+                    let path = crate::language::lsp::paths::path_from_file_uri(uri)?;
                     let path = std::fs::canonicalize(path).ok()?;
                     let root = std::fs::canonicalize(root).ok()?;
                     if !path.starts_with(root) {
@@ -331,7 +357,7 @@ pub(super) fn handle_server_message(context: ServerMessageContext<'_>, message: 
                     .unwrap_or_default(),
             ),
             "workspace/workspaceFolders" => {
-                super::protocol::initialize_message(root, None)["params"]["workspaceFolders"]
+                crate::language::lsp::protocol::initialize_message(root, None)["params"]["workspaceFolders"]
                     .clone()
             }
             "window/workDoneProgress/create"

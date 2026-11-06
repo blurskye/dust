@@ -1,6 +1,15 @@
-use std::{collections::BTreeMap, sync::OnceLock};
+use std::collections::BTreeMap;
+use std::sync::OnceLock;
 
-use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
+use serde::Deserialize;
+
+use serde::Deserializer;
+
+use serde::Serialize;
+
+use serde::Serializer;
+
+use serde::de;
 
 use crate::language::syntax::Highlight;
 

@@ -1,22 +1,77 @@
-use std::{collections::HashSet, path::PathBuf};
+use std::collections::HashSet;
+use std::path::PathBuf;
 
-use slotmap::{Key, SlotMap};
+use slotmap::Key;
 
-use crate::editor::text::{BufferRevision, ByteOffset, TextBuffer};
+use slotmap::SlotMap;
 
-use super::{
-    MAXIMUM_LAYOUT_DEPTH, MAXIMUM_LAYOUT_PANES,
-    id::{BufferId, PaneId, TabId, ViewId},
-    layout::{
-        FocusRectangle, collect_focus_rectangles, focus_score, layout_depth,
-        layout_ratios_are_valid, offset_index, pane_depth, pane_ids, remove_leaf, resize_parent,
-        resize_parent_on_axis, split_between, split_leaf, swap_layout_leaves,
-    },
-    model::{
-        Axis, Buffer, BufferOrigin, EditingPolicy, EditorMode, FocusDirection, LayoutNode, Pane,
-        RegisterStore, Tab, View,
-    },
-};
+use crate::editor::text::BufferRevision;
+
+use crate::editor::text::ByteOffset;
+
+use crate::editor::text::TextBuffer;
+
+use crate::editor::state::MAXIMUM_LAYOUT_DEPTH;
+
+use crate::editor::state::MAXIMUM_LAYOUT_PANES;
+
+use crate::editor::state::id::BufferId;
+
+use crate::editor::state::id::PaneId;
+
+use crate::editor::state::id::TabId;
+
+use crate::editor::state::id::ViewId;
+
+use crate::editor::state::layout::FocusRectangle;
+
+use crate::editor::state::layout::collect_focus_rectangles;
+
+use crate::editor::state::layout::focus_score;
+
+use crate::editor::state::layout::layout_depth;
+
+use crate::editor::state::layout::layout_ratios_are_valid;
+
+use crate::editor::state::layout::offset_index;
+
+use crate::editor::state::layout::pane_depth;
+
+use crate::editor::state::layout::pane_ids;
+
+use crate::editor::state::layout::remove_leaf;
+
+use crate::editor::state::layout::resize_parent;
+
+use crate::editor::state::layout::resize_parent_on_axis;
+
+use crate::editor::state::layout::split_between;
+
+use crate::editor::state::layout::split_leaf;
+
+use crate::editor::state::layout::swap_layout_leaves;
+
+use crate::editor::state::model::Axis;
+
+use crate::editor::state::model::Buffer;
+
+use crate::editor::state::model::BufferOrigin;
+
+use crate::editor::state::model::EditingPolicy;
+
+use crate::editor::state::model::EditorMode;
+
+use crate::editor::state::model::FocusDirection;
+
+use crate::editor::state::model::LayoutNode;
+
+use crate::editor::state::model::Pane;
+
+use crate::editor::state::model::RegisterStore;
+
+use crate::editor::state::model::Tab;
+
+use crate::editor::state::model::View;
 
 /// Opaque identity/revision of editor-owned window topology. Transaction clones
 /// preserve identity; independently constructed editor states do not.

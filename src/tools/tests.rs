@@ -1,23 +1,60 @@
 use reqwest::Url;
 
-use super::{
-    catalog::{
-        ToolArchiveFormat, ToolInstall, ToolKind, bundled_tool_catalog, discover_executable,
-        managed_tool_installed_version_at, nix_lsp_launch_environment_at, nix_lsp_runtime_at,
-        nix_lsp_shell, nixos_os_release_at, tool_launch_environment_at, write_managed_tool_version,
-    },
-    compatibility::{elf_interpreter, runtime_artifact},
-    install::install_tool,
-    install_prepare::{
-        archive_entry_matches, prepare_nix_lsp_workspace_at, relative_catalog_path,
-        validate_tool_id,
-    },
-    installer_service::{ToolInstaller, ToolOperation},
-    mason_catalog::mason_snapshot_counts,
-    package_lock::valid_digest,
-    runtimes::{install_nix_lsp_profile, uninstall_managed_tool, uninstall_nix_lsp_profile},
-    version::{ToolVersionRequest, probe_tool_version},
-};
+use crate::tools::catalog::ToolArchiveFormat;
+
+use crate::tools::catalog::ToolInstall;
+
+use crate::tools::catalog::ToolKind;
+
+use crate::tools::catalog::bundled_tool_catalog;
+
+use crate::tools::catalog::discover_executable;
+
+use crate::tools::catalog::managed_tool_installed_version_at;
+
+use crate::tools::catalog::nix_lsp_launch_environment_at;
+
+use crate::tools::catalog::nix_lsp_runtime_at;
+
+use crate::tools::catalog::nix_lsp_shell;
+
+use crate::tools::catalog::nixos_os_release_at;
+
+use crate::tools::catalog::tool_launch_environment_at;
+
+use crate::tools::catalog::write_managed_tool_version;
+
+use crate::tools::compatibility::elf_interpreter;
+
+use crate::tools::compatibility::runtime_artifact;
+
+use crate::tools::install::install_tool;
+
+use crate::tools::install_prepare::archive_entry_matches;
+
+use crate::tools::install_prepare::prepare_nix_lsp_workspace_at;
+
+use crate::tools::install_prepare::relative_catalog_path;
+
+use crate::tools::install_prepare::validate_tool_id;
+
+use crate::tools::installer::ToolInstaller;
+
+use crate::tools::installer::ToolOperation;
+
+use crate::tools::mason_catalog::mason_snapshot_counts;
+
+use crate::tools::package_lock::valid_digest;
+
+use crate::tools::runtimes::install_nix_lsp_profile;
+
+use crate::tools::runtimes::uninstall_managed_tool;
+
+use crate::tools::runtimes::uninstall_nix_lsp_profile;
+
+use crate::tools::version::ToolVersionRequest;
+
+use crate::tools::version::probe_tool_version;
 
 #[test]
 fn archive_entry_matching_accepts_only_an_optional_leading_current_directory() {
@@ -244,8 +281,10 @@ fn bun_bootstrap_is_the_pinned_glibc_baseline_artifact() {
 
 #[test]
 fn cached_runtime_refreshes_when_the_nix_compatibility_loader_changes() {
-    use super::{catalog::NixCompatibilityRuntime, compatibility::MANAGED_RUNTIME_MARKER};
-    use std::{fs, sync::mpsc};
+    use crate::tools::catalog::NixCompatibilityRuntime;
+    use crate::tools::compatibility::MANAGED_RUNTIME_MARKER;
+    use std::fs;
+    use std::sync::mpsc;
 
     let directory = tempfile::tempdir().unwrap();
     let runtime = directory.path().join(".runtimes/bun");
@@ -280,7 +319,7 @@ fn cached_runtime_refreshes_when_the_nix_compatibility_loader_changes() {
         elf.push(0);
         fs::write(&executable, &elf).unwrap();
         let (cancel, cancellations) = mpsc::channel();
-        let result = super::runtimes::managed_runtime(
+        let result = crate::tools::runtimes::managed_runtime(
             directory.path(),
             "bun",
             &cancellations,
@@ -304,7 +343,7 @@ fn cached_runtime_refreshes_when_the_nix_compatibility_loader_changes() {
 #[test]
 #[ignore = "operator qualification: requires Nix plus upstream artifact network access"]
 fn nixos_runtime_installs_patches_and_runs_the_verified_upstream_artifact() {
-    if !super::is_nixos_host() {
+    if !crate::tools::is_nixos_host() {
         return;
     }
     let nix = discover_executable("nix").expect("Nix executable");
@@ -352,7 +391,7 @@ fn nixos_runtime_installs_patches_and_runs_the_verified_upstream_artifact() {
 #[test]
 #[ignore = "operator qualification: requires Nix and all catalog LSP upstream networks"]
 fn nixos_runtime_installs_and_probes_every_managed_catalog_lsp() {
-    if !super::is_nixos_host() {
+    if !crate::tools::is_nixos_host() {
         return;
     }
     let nix = discover_executable("nix").expect("Nix executable");
@@ -510,7 +549,7 @@ const MANAGED_LSP_FIXTURES: [(&str, &str, &str, &str); 24] = [
     ("ruff", "python", "main.py", "value = 1\nvalue\n"),
 ];
 
-fn managed_lsp_definitions() -> Vec<super::catalog::ToolDefinition> {
+fn managed_lsp_definitions() -> Vec<crate::tools::catalog::ToolDefinition> {
     let definitions = bundled_tool_catalog()
         .into_iter()
         .filter(|tool| tool.kind == ToolKind::Lsp && tool.install.is_some())
@@ -780,7 +819,7 @@ fn await_lsp_response(
 #[test]
 #[ignore = "operator qualification: installs all catalog LSPs and performs live protocol I/O"]
 fn nixos_runtime_completes_protocol_smoke_for_every_managed_catalog_lsp() {
-    if !super::is_nixos_host() {
+    if !crate::tools::is_nixos_host() {
         return;
     }
     let nix = discover_executable("nix").expect("Nix executable");
@@ -803,7 +842,7 @@ fn nixos_runtime_completes_protocol_smoke_for_every_managed_catalog_lsp() {
 }
 
 fn lsp_protocol_smoke(
-    definition: &super::catalog::ToolDefinition,
+    definition: &crate::tools::catalog::ToolDefinition,
     installed: &std::path::Path,
     store: &std::path::Path,
 ) {
@@ -1214,7 +1253,9 @@ fn installer_worker_can_explicitly_add_rust_analyzer_to_the_active_rustup_toolch
 #[cfg(unix)]
 #[test]
 fn failed_rustup_component_installation_reports_bounded_stderr() {
-    use std::{fs, os::unix::fs::PermissionsExt, sync::mpsc};
+    use std::fs;
+    use std::os::unix::fs::PermissionsExt;
+    use std::sync::mpsc;
 
     let directory = tempfile::tempdir().unwrap();
     let rustup = directory.path().join("rustup");
@@ -1234,7 +1275,7 @@ fn failed_rustup_component_installation_reports_bounded_stderr() {
         .find(|tool| tool.id == "rust-analyzer")
         .unwrap();
     let (_cancel, cancellations) = mpsc::channel();
-    let error = super::runtimes::install_path_rustup_component(
+    let error = crate::tools::runtimes::install_path_rustup_component(
         &definition,
         &rustup,
         &proxy,
@@ -1252,7 +1293,9 @@ fn failed_rustup_component_installation_reports_bounded_stderr() {
 #[cfg(unix)]
 #[test]
 fn rustup_install_adds_the_compiler_and_fails_when_rust_analyzer_still_cannot_run() {
-    use std::{fs, os::unix::fs::PermissionsExt, sync::mpsc};
+    use std::fs;
+    use std::os::unix::fs::PermissionsExt;
+    use std::sync::mpsc;
 
     let directory = tempfile::tempdir().unwrap();
     let rustup = directory.path().join("rustup");
@@ -1270,7 +1313,7 @@ fn rustup_install_adds_the_compiler_and_fails_when_rust_analyzer_still_cannot_ru
         .find(|tool| tool.id == "rust-analyzer")
         .unwrap();
     let (_cancel, cancellations) = mpsc::channel();
-    let error = super::runtimes::install_path_rustup_component(
+    let error = crate::tools::runtimes::install_path_rustup_component(
         &definition,
         &rustup,
         &proxy,
@@ -1291,7 +1334,10 @@ fn rustup_install_adds_the_compiler_and_fails_when_rust_analyzer_still_cannot_ru
 #[cfg(unix)]
 #[test]
 fn rustup_cancellation_terminates_its_process_group() {
-    use std::{fs, os::unix::fs::PermissionsExt, sync::mpsc, thread};
+    use std::fs;
+    use std::os::unix::fs::PermissionsExt;
+    use std::sync::mpsc;
+    use std::thread;
     let root = tempfile::tempdir().unwrap();
     let rustup = root.path().join("rustup");
     fs::write(
@@ -1309,7 +1355,7 @@ fn rustup_cancellation_terminates_its_process_group() {
     let (cancel, cancellations) = mpsc::channel();
     let cwd = root.path().to_path_buf();
     let worker = thread::spawn(move || {
-        super::runtimes::install_path_rustup_component(
+        crate::tools::runtimes::install_path_rustup_component(
             &definition,
             &rustup,
             &proxy,
@@ -1460,14 +1506,11 @@ fn assert_descendant_stopped(pid: nix::unistd::Pid) {
 #[cfg(unix)]
 #[test]
 fn version_probe_terminates_descendants_on_every_exit_path() {
-    use std::{
-        sync::{
-            Arc,
-            atomic::{AtomicBool, Ordering},
-        },
-        thread,
-        time::Duration,
-    };
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicBool;
+    use std::sync::atomic::Ordering;
+    use std::thread;
+    use std::time::Duration;
 
     for (action, expected_error) in [
         ("wait", Some("cancelled")),
@@ -1527,15 +1570,13 @@ fn version_probe_terminates_descendants_on_every_exit_path() {
 #[cfg(unix)]
 #[test]
 fn cancelled_queued_version_probes_do_not_spawn() {
-    use std::{
-        sync::{
-            Arc,
-            atomic::{AtomicBool, Ordering},
-        },
-        time::{Duration, Instant},
-    };
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicBool;
+    use std::sync::atomic::Ordering;
+    use std::time::Duration;
+    use std::time::Instant;
     let directory = tempfile::tempdir().unwrap();
-    let service = super::ToolVersionService::start();
+    let service = crate::tools::ToolVersionService::start();
     let request = |id: &str, script: &str, cancelled| ToolVersionRequest {
         id: id.into(),
         executable: "/bin/sh".into(),
@@ -1618,8 +1659,10 @@ fn current_test_process_is_discoverable_without_a_shell() {
 #[cfg(unix)]
 #[test]
 fn version_service_shutdown_with_full_results_is_bounded() {
-    use std::{sync::mpsc, thread, time::Duration};
-    let service = super::ToolVersionService::start();
+    use std::sync::mpsc;
+    use std::thread;
+    use std::time::Duration;
+    let service = crate::tools::ToolVersionService::start();
     let directory = tempfile::tempdir().unwrap();
     let deadline = std::time::Instant::now() + Duration::from_secs(15);
     for id in 0..40 {
@@ -1697,25 +1740,26 @@ fn version_probe_stops_continuous_oversized_output() {
 pub(super) fn package_fixture(
     name: &str,
 ) -> (
-    super::PackageManifest,
-    crate::extensions::PluginManifest,
+    crate::tools::PackageManifest,
+    crate::plugins::PluginManifest,
     Vec<u8>,
 ) {
-    use sha2::{Digest, Sha256};
+    use sha2::Digest;
+    use sha2::Sha256;
     let bytes = b"\0asm\x0d\0\x01\0".to_vec();
     let digest = format!("{:x}", Sha256::digest(&bytes));
-    let manifest = super::PackageManifest {
+    let manifest = crate::tools::PackageManifest {
         name: name.into(),
         version: "1.0.0".into(),
         component: "plugin.wasm".into(),
-        source: super::PackageSource::Registry {
+        source: crate::tools::PackageSource::Registry {
             registry: "https://example.invalid".into(),
             version: "1.0.0".into(),
             archive_sha256: digest.clone(),
         },
         dependencies: Vec::new(),
     };
-    let plugin = crate::extensions::PluginManifest {
+    let plugin = crate::plugins::PluginManifest {
         id: name.into(),
         version: "1.0.0".into(),
         component_sha256: digest,
@@ -1729,7 +1773,7 @@ pub(super) fn package_fixture(
 #[test]
 fn package_gc_preserves_removed_package_for_rollback() {
     let root = tempfile::tempdir().unwrap();
-    let manager = super::PackageManager::new(root.path().into(), 1024 * 1024, 1024).unwrap();
+    let manager = crate::tools::PackageManager::new(root.path().into(), 1024 * 1024, 1024).unwrap();
     let (manifest, plugin, bytes) = package_fixture("demo");
     let object = manager.stage_verified_object(&manifest, &bytes).unwrap();
     manager
@@ -1744,7 +1788,7 @@ fn package_gc_preserves_removed_package_for_rollback() {
 #[test]
 fn package_activation_identity_is_independent_of_component() {
     let root = tempfile::tempdir().unwrap();
-    let manager = super::PackageManager::new(root.path().into(), 1024 * 1024, 1024).unwrap();
+    let manager = crate::tools::PackageManager::new(root.path().into(), 1024 * 1024, 1024).unwrap();
     for name in ["one", "two"] {
         let (manifest, plugin, bytes) = package_fixture(name);
         let object = manager.stage_verified_object(&manifest, &bytes).unwrap();
@@ -1780,12 +1824,12 @@ fn package_resolver_and_verifier_accept_uppercase_digests() {
     let (manifest, _, bytes) = package_fixture("demo");
     let digest = manifest.source_digest().to_ascii_uppercase();
     for source in [
-        super::PackageSource::Registry {
+        crate::tools::PackageSource::Registry {
             registry: "https://example.invalid".into(),
             version: "1.0.0".into(),
             archive_sha256: digest.clone(),
         },
-        super::PackageSource::Git {
+        crate::tools::PackageSource::Git {
             url: "https://example.invalid/demo.git".into(),
             commit: "a".repeat(40),
             tree_sha256: digest.clone(),
@@ -1794,21 +1838,21 @@ fn package_resolver_and_verifier_accept_uppercase_digests() {
         let mut manifest = manifest.clone();
         manifest.source = source;
         let manifests = [(manifest.name.clone(), manifest)].into_iter().collect();
-        let mut lock = super::resolve_manifests(&manifests).unwrap();
+        let mut lock = crate::tools::resolve_manifests(&manifests).unwrap();
         assert_eq!(lock.packages[0].content_sha256, digest.to_ascii_lowercase());
         let store = root.path().join("store");
-        super::commit_store_bytes(&store, &digest, &bytes, 1024).unwrap();
+        crate::tools::commit_store_bytes(&store, &digest, &bytes, 1024).unwrap();
         let path = root.path().join("lock.json");
-        super::write_lock_atomic(&path, &lock, 4096).unwrap();
+        crate::tools::write_lock_atomic(&path, &lock, 4096).unwrap();
         assert_eq!(
-            super::verify_lock_store(&path, &store, 4096, 1024).unwrap(),
+            crate::tools::verify_lock_store(&path, &store, 4096, 1024).unwrap(),
             1
         );
         // Supplied locks may still use uppercase, even though generated locks do not.
         lock.packages[0].content_sha256.make_ascii_uppercase();
-        super::write_lock_atomic(&path, &lock, 4096).unwrap();
+        crate::tools::write_lock_atomic(&path, &lock, 4096).unwrap();
         assert_eq!(
-            super::verify_lock_store(&path, &store, 4096, 1024).unwrap(),
+            crate::tools::verify_lock_store(&path, &store, 4096, 1024).unwrap(),
             1
         );
     }
@@ -1816,14 +1860,14 @@ fn package_resolver_and_verifier_accept_uppercase_digests() {
 
 #[test]
 fn package_reader_accepts_exact_limit_and_rejects_excess_and_special_files() {
-    use super::package_lock::read_bounded_regular;
+    use crate::tools::package_lock::read_bounded_regular;
     let root = tempfile::tempdir().unwrap();
     let path = root.path().join("object");
     std::fs::write(&path, b"1234").unwrap();
     assert_eq!(read_bounded_regular(&path, 4).unwrap(), b"1234");
     assert!(matches!(
         read_bounded_regular(&path, 3),
-        Err(super::PackageError::InvalidManifest)
+        Err(crate::tools::PackageError::InvalidManifest)
     ));
     assert!(read_bounded_regular(root.path(), 4).is_err());
     let link = root.path().join("link");
@@ -1833,7 +1877,7 @@ fn package_reader_accepts_exact_limit_and_rejects_excess_and_special_files() {
     nix::unistd::mkfifo(&fifo, nix::sys::stat::Mode::S_IRUSR).unwrap();
     assert!(matches!(
         read_bounded_regular(&fifo, 4),
-        Err(super::PackageError::InvalidManifest)
+        Err(crate::tools::PackageError::InvalidManifest)
     ));
 }
 
@@ -1843,8 +1887,8 @@ fn package_reader_bounds_streams_whose_metadata_understates_their_size() {
     let path = std::path::Path::new("/proc/self/status");
     assert_eq!(std::fs::metadata(path).unwrap().len(), 0);
     assert!(matches!(
-        super::package_lock::read_bounded_regular(path, 8),
-        Err(super::PackageError::InvalidManifest)
+        crate::tools::package_lock::read_bounded_regular(path, 8),
+        Err(crate::tools::PackageError::InvalidManifest)
     ));
 }
 
@@ -1853,18 +1897,18 @@ fn package_verification_bounds_objects_and_rejects_non_regular_entries() {
     let root = tempfile::tempdir().unwrap();
     let (manifest, _, bytes) = package_fixture("demo");
     let store = root.path().join("store");
-    let object = super::commit_store_bytes(&store, manifest.source_digest(), &bytes, 1024).unwrap();
+    let object = crate::tools::commit_store_bytes(&store, manifest.source_digest(), &bytes, 1024).unwrap();
     let manifests = [(manifest.name.clone(), manifest)].into_iter().collect();
-    let lock = super::resolve_manifests(&manifests).unwrap();
+    let lock = crate::tools::resolve_manifests(&manifests).unwrap();
     let path = root.path().join("lock.json");
-    super::write_lock_atomic(&path, &lock, 4096).unwrap();
+    crate::tools::write_lock_atomic(&path, &lock, 4096).unwrap();
     assert_eq!(
-        super::verify_lock_store(&path, &store, 4096, bytes.len()).unwrap(),
+        crate::tools::verify_lock_store(&path, &store, 4096, bytes.len()).unwrap(),
         1
     );
     assert!(matches!(
-        super::verify_lock_store(&path, &store, 4096, bytes.len() - 1),
-        Err(super::PackageError::InvalidManifest)
+        crate::tools::verify_lock_store(&path, &store, 4096, bytes.len() - 1),
+        Err(crate::tools::PackageError::InvalidManifest)
     ));
     // Sparse objects must be rejected before allocating their contents.
     std::fs::File::create(&object)
@@ -1872,14 +1916,14 @@ fn package_verification_bounds_objects_and_rejects_non_regular_entries() {
         .set_len(1024 * 1024 * 1024)
         .unwrap();
     assert!(matches!(
-        super::verify_lock_store(&path, &store, 4096, 1024),
-        Err(super::PackageError::InvalidManifest)
+        crate::tools::verify_lock_store(&path, &store, 4096, 1024),
+        Err(crate::tools::PackageError::InvalidManifest)
     ));
     std::fs::remove_file(&object).unwrap();
     nix::unistd::mkfifo(&object, nix::sys::stat::Mode::S_IRUSR).unwrap();
     assert!(matches!(
-        super::verify_lock_store(&path, &store, 4096, 1024),
-        Err(super::PackageError::InvalidManifest)
+        crate::tools::verify_lock_store(&path, &store, 4096, 1024),
+        Err(crate::tools::PackageError::InvalidManifest)
     ));
 }
 
@@ -1888,16 +1932,16 @@ fn package_verification_rejects_content_that_differs_from_its_source_pin() {
     let root = tempfile::tempdir().unwrap();
     let (manifest, _, bytes) = package_fixture("demo");
     let store = root.path().join("store");
-    super::commit_store_bytes(&store, manifest.source_digest(), &bytes, 1024).unwrap();
+    crate::tools::commit_store_bytes(&store, manifest.source_digest(), &bytes, 1024).unwrap();
     let manifests = [(manifest.name.clone(), manifest)].into_iter().collect();
-    let mut lock = super::resolve_manifests(&manifests).unwrap();
+    let mut lock = crate::tools::resolve_manifests(&manifests).unwrap();
     for source in [
-        super::PackageSource::Registry {
+        crate::tools::PackageSource::Registry {
             registry: "https://example.invalid".into(),
             version: "1.0.0".into(),
             archive_sha256: "0".repeat(64),
         },
-        super::PackageSource::Git {
+        crate::tools::PackageSource::Git {
             url: "https://example.invalid/demo.git".into(),
             commit: "a".repeat(40),
             tree_sha256: "0".repeat(64),
@@ -1905,10 +1949,10 @@ fn package_verification_rejects_content_that_differs_from_its_source_pin() {
     ] {
         lock.packages[0].source = source;
         let path = root.path().join("lock.json");
-        super::write_lock_atomic(&path, &lock, 4096).unwrap();
+        crate::tools::write_lock_atomic(&path, &lock, 4096).unwrap();
         assert!(matches!(
-            super::verify_lock_store(&path, &store, 4096, 1024),
-            Err(super::PackageError::ChecksumMismatch)
+            crate::tools::verify_lock_store(&path, &store, 4096, 1024),
+            Err(crate::tools::PackageError::ChecksumMismatch)
         ));
     }
 }
@@ -1918,16 +1962,16 @@ fn package_store_reinstall_repairs_corrupted_objects() {
     let root = tempfile::tempdir().unwrap();
     let (manifest, _, bytes) = package_fixture("demo");
     let object =
-        super::commit_store_bytes(root.path(), manifest.source_digest(), &bytes, 1024).unwrap();
+        crate::tools::commit_store_bytes(root.path(), manifest.source_digest(), &bytes, 1024).unwrap();
     for corrupt in [vec![b'x'; bytes.len()], vec![b'x'; 2048]] {
         std::fs::write(&object, corrupt).unwrap();
         let repaired =
-            super::commit_store_bytes(root.path(), manifest.source_digest(), &bytes, 1024).unwrap();
+            crate::tools::commit_store_bytes(root.path(), manifest.source_digest(), &bytes, 1024).unwrap();
         assert_eq!(repaired, object);
         assert_eq!(std::fs::read(&object).unwrap(), bytes);
         assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 1);
     }
-    let manager = super::PackageManager::new(root.path().join("manager"), 4096, 1024).unwrap();
+    let manager = crate::tools::PackageManager::new(root.path().join("manager"), 4096, 1024).unwrap();
     let object = manager.stage_verified_object(&manifest, &bytes).unwrap();
     std::fs::write(&object, b"corrupt").unwrap();
     assert_eq!(
@@ -1943,16 +1987,16 @@ fn package_atomic_writes_remove_staging_files_when_rename_fails() {
     let manifests = [(manifest.name.clone(), manifest.clone())]
         .into_iter()
         .collect();
-    let lock = super::resolve_manifests(&manifests).unwrap();
+    let lock = crate::tools::resolve_manifests(&manifests).unwrap();
     // Staging succeeds in the directory, but the destination name cannot be installed.
     let path = root.path().join("x".repeat(300));
-    assert!(super::write_lock_atomic(&path, &lock, 4096).is_err());
-    assert!(super::package_lock::write_protected_atomic(&path, b"activation", 1024).is_err());
+    assert!(crate::tools::write_lock_atomic(&path, &lock, 4096).is_err());
+    assert!(crate::tools::package_lock::write_protected_atomic(&path, b"activation", 1024).is_err());
     assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 0);
     let target = root.path().join(manifest.source_digest());
     std::fs::create_dir(&target).unwrap();
     assert!(
-        super::commit_store_bytes(root.path(), manifest.source_digest(), &bytes, 1024).is_err()
+        crate::tools::commit_store_bytes(root.path(), manifest.source_digest(), &bytes, 1024).is_err()
     );
     assert!(target.is_dir());
     assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 1);
@@ -1961,7 +2005,7 @@ fn package_atomic_writes_remove_staging_files_when_rename_fails() {
 #[test]
 fn package_commits_preserve_plugin_ownership_and_identity() {
     let root = tempfile::tempdir().unwrap();
-    let manager = super::PackageManager::new(root.path().into(), 1024 * 1024, 1024).unwrap();
+    let manager = crate::tools::PackageManager::new(root.path().into(), 1024 * 1024, 1024).unwrap();
     let (manifest, plugin, bytes) = package_fixture("demo");
     let object = manager.stage_verified_object(&manifest, &bytes).unwrap();
     let installed = manager
@@ -1971,28 +2015,28 @@ fn package_commits_preserve_plugin_ownership_and_identity() {
     renamed.id = "other".into();
     assert!(matches!(
         manager.commit_prepared(&manifest, &renamed, &object),
-        Err(super::PackageError::Activation(_))
+        Err(crate::tools::PackageError::Activation(_))
     ));
     let mut unrelated = manifest.clone();
     unrelated.name = "other".into();
     assert!(matches!(
         manager.commit_prepared(&unrelated, &plugin, &object),
-        Err(super::PackageError::Activation(_))
+        Err(crate::tools::PackageError::Activation(_))
     ));
     assert_eq!(manager.read_lock().unwrap(), installed);
     assert_eq!(manager.activations().unwrap()[0].0.id, "demo");
     assert!(matches!(
         manager.rollback(),
-        Err(super::PackageError::NoRollback)
+        Err(crate::tools::PackageError::NoRollback)
     ));
 }
 
 #[test]
 fn package_commit_accepts_and_normalizes_uppercase_digest() {
     let root = tempfile::tempdir().unwrap();
-    let manager = super::PackageManager::new(root.path().into(), 1024 * 1024, 1024).unwrap();
+    let manager = crate::tools::PackageManager::new(root.path().into(), 1024 * 1024, 1024).unwrap();
     let (mut manifest, mut plugin, bytes) = package_fixture("demo");
-    if let super::PackageSource::Registry { archive_sha256, .. } = &mut manifest.source {
+    if let crate::tools::PackageSource::Registry { archive_sha256, .. } = &mut manifest.source {
         *archive_sha256 = archive_sha256.to_ascii_uppercase();
     }
     plugin.component_sha256 = plugin.component_sha256.to_ascii_uppercase();
@@ -2017,7 +2061,7 @@ fn package_managers_serialize_concurrent_lock_updates() {
             let root = root.path().to_path_buf();
             let barrier = barrier.clone();
             std::thread::spawn(move || {
-                let manager = super::PackageManager::new(root, 1024 * 1024, 1024).unwrap();
+                let manager = crate::tools::PackageManager::new(root, 1024 * 1024, 1024).unwrap();
                 let (manifest, plugin, bytes) = package_fixture(&format!("package-{id}"));
                 let object = manager.stage_verified_object(&manifest, &bytes).unwrap();
                 barrier.wait();
@@ -2031,13 +2075,13 @@ fn package_managers_serialize_concurrent_lock_updates() {
     for thread in threads {
         thread.join().unwrap();
     }
-    let manager = super::PackageManager::new(root.path().into(), 1024 * 1024, 1024).unwrap();
+    let manager = crate::tools::PackageManager::new(root.path().into(), 1024 * 1024, 1024).unwrap();
     assert_eq!(manager.activations().unwrap().len(), 8);
 }
 
 #[test]
 fn catalog_filetypes_preserve_exact_extension_case_before_fallback() {
-    use super::mason_filetype_for_path;
+    use crate::tools::mason_filetype_for_path;
     use std::path::Path;
     assert_eq!(
         mason_filetype_for_path(Path::new("module.EX")),
@@ -2059,22 +2103,21 @@ fn catalog_filetypes_preserve_exact_extension_case_before_fallback() {
 
 #[test]
 fn package_service_keeps_every_completion_under_backpressure() {
-    use std::{
-        thread,
-        time::{Duration, Instant},
-    };
+    use std::thread;
+    use std::time::Duration;
+    use std::time::Instant;
     let root = tempfile::tempdir().unwrap();
-    let mut service = super::PackageService::start(root.path().into(), 1, 1024, 1024);
+    let mut service = crate::tools::PackageService::start(root.path().into(), 1, 1024, 1024);
     let mut admitted = Vec::new();
     let deadline = Instant::now() + Duration::from_secs(10);
     for _ in 0..3 {
         loop {
-            match service.request(super::PackageOperation::List) {
+            match service.request(crate::tools::PackageOperation::List) {
                 Ok(id) => {
                     admitted.push(id);
                     break;
                 }
-                Err(super::PackageError::QueueFull) => {
+                Err(crate::tools::PackageError::QueueFull) => {
                     assert!(Instant::now() < deadline, "package admission timed out");
                     thread::sleep(Duration::from_millis(2));
                 }
@@ -2087,7 +2130,7 @@ fn package_service_keeps_every_completion_under_backpressure() {
     while service.pending_count() != 0 {
         for event in service.poll().unwrap() {
             match event {
-                super::PackageServiceEvent::Completed(result) => received.push(result.id),
+                crate::tools::PackageServiceEvent::Completed(result) => received.push(result.id),
                 event => panic!("unexpected {event:?}"),
             }
         }
@@ -2102,13 +2145,12 @@ fn package_service_keeps_every_completion_under_backpressure() {
 
 #[test]
 fn registry_service_keeps_every_result_under_backpressure() {
-    use std::{
-        thread,
-        time::{Duration, Instant},
-    };
+    use std::thread;
+    use std::time::Duration;
+    use std::time::Instant;
     let root = tempfile::tempdir().unwrap();
-    let service = super::RegistryService::start(
-        super::RegistryPolicy {
+    let service = crate::tools::RegistryService::start(
+        crate::tools::RegistryPolicy {
             offline: true,
             queue_capacity: 1,
             ..Default::default()
@@ -2120,14 +2162,14 @@ fn registry_service_keeps_every_result_under_backpressure() {
     let deadline = Instant::now() + Duration::from_secs(10);
     for _ in 0..3 {
         loop {
-            match service.request(super::RegistryRequest::Search {
+            match service.request(crate::tools::RegistryRequest::Search {
                 query: "fixture".into(),
             }) {
                 Ok(id) => {
                     admitted.push(id);
                     break;
                 }
-                Err(super::RegistryError::QueueFull) => {
+                Err(crate::tools::RegistryError::QueueFull) => {
                     assert!(Instant::now() < deadline, "registry admission timed out");
                     thread::sleep(Duration::from_millis(2));
                 }
@@ -2151,7 +2193,8 @@ fn registry_service_keeps_every_result_under_backpressure() {
 #[cfg(unix)]
 #[test]
 fn locked_uv_installation_rejects_another_process_and_uninstall() {
-    use std::{fs, sync::mpsc};
+    use std::fs;
+    use std::sync::mpsc;
     let definition = bundled_tool_catalog()
         .into_iter()
         .find(|tool| matches!(tool.install, Some(ToolInstall::UvTool { .. })))
@@ -2159,7 +2202,7 @@ fn locked_uv_installation_rejects_another_process_and_uninstall() {
     if let Some(root) = std::env::var_os("DUST_TEST_LOCKED_TOOL_ROOT") {
         let root = std::path::Path::new(&root);
         let (_cancel, cancellations) = mpsc::channel();
-        let error = super::runtimes::install_uv_tool(
+        let error = crate::tools::runtimes::install_uv_tool(
             &definition,
             root,
             &["fixture".into()],
@@ -2209,14 +2252,16 @@ fn locked_uv_installation_rejects_another_process_and_uninstall() {
 #[cfg(unix)]
 #[test]
 fn failed_uv_update_restores_previous_environment_and_shebang_paths() {
-    use std::{fs, os::unix::fs::PermissionsExt, sync::mpsc};
+    use std::fs;
+    use std::os::unix::fs::PermissionsExt;
+    use std::sync::mpsc;
     let root = tempfile::tempdir().unwrap();
     let runtime = root.path().join(".runtimes/uv");
     fs::create_dir_all(runtime.join("bin")).unwrap();
     fs::write(runtime.join("bin/uv"), "#!/bin/sh\nexit 1\n").unwrap();
     fs::set_permissions(runtime.join("bin/uv"), fs::Permissions::from_mode(0o700)).unwrap();
     fs::write(
-        runtime.join(super::compatibility::MANAGED_RUNTIME_MARKER),
+        runtime.join(crate::tools::compatibility::MANAGED_RUNTIME_MARKER),
         runtime_artifact("uv").unwrap().sha256,
     )
     .unwrap();
@@ -2229,7 +2274,7 @@ fn failed_uv_update_restores_previous_environment_and_shebang_paths() {
     let script = format!("#!{}/uv-tools/python\nprevious tool\n", old.display());
     fs::write(old.join("bin").join(&definition.executable), &script).unwrap();
     let (_cancel, cancellations) = mpsc::channel();
-    let result = super::runtimes::install_uv_tool(
+    let result = crate::tools::runtimes::install_uv_tool(
         &definition,
         root.path(),
         &["invalid-fixture".into()],
@@ -2247,16 +2292,15 @@ fn failed_uv_update_restores_previous_environment_and_shebang_paths() {
 #[cfg(unix)]
 #[test]
 fn installer_exit_terminates_helpers_and_finishes_reading_stderr() {
-    use std::{
-        fs,
-        sync::mpsc,
-        time::{Duration, Instant},
-    };
+    use std::fs;
+    use std::sync::mpsc;
+    use std::time::Duration;
+    use std::time::Instant;
     for exit in [0, 1] {
         let root = tempfile::tempdir().unwrap();
         let (_cancel, cancellations) = mpsc::channel();
         let started = Instant::now();
-        let result = super::runtimes::run_managed(
+        let result = crate::tools::runtimes::run_managed(
             std::path::Path::new("/bin/sh"),
             &[
                 "-c".into(),
@@ -2282,12 +2326,13 @@ fn installer_exit_terminates_helpers_and_finishes_reading_stderr() {
 #[cfg(unix)]
 #[test]
 fn installer_cancellation_terminates_descendant_processes() {
-    use std::{sync::mpsc, thread};
+    use std::sync::mpsc;
+    use std::thread;
     let root = tempfile::tempdir().unwrap();
     let (cancel, cancellations) = mpsc::channel();
     let cwd = root.path().to_path_buf();
     let worker = thread::spawn(move || {
-        super::runtimes::run_managed(
+        crate::tools::runtimes::run_managed(
             std::path::Path::new("/bin/sh"),
             &[
                 "-c".into(),
@@ -2318,7 +2363,7 @@ fn rustfmt_is_available_as_a_stdin_formatter() {
 #[test]
 fn package_failed_commit_preserves_rollback() {
     let root = tempfile::tempdir().unwrap();
-    let manager = super::PackageManager::new(root.path().into(), 1024 * 1024, 1024).unwrap();
+    let manager = crate::tools::PackageManager::new(root.path().into(), 1024 * 1024, 1024).unwrap();
     let (manifest, mut plugin, bytes) = package_fixture("demo");
     let object = manager.stage_verified_object(&manifest, &bytes).unwrap();
     manager
@@ -2330,7 +2375,7 @@ fn package_failed_commit_preserves_rollback() {
         .unwrap();
     let backup_path = root.path().join("dust-packages.lock.previous.json");
     let backup = std::fs::read(&backup_path).unwrap();
-    let limited = super::PackageManager::new(
+    let limited = crate::tools::PackageManager::new(
         root.path().into(),
         serde_json::to_vec_pretty(&current).unwrap().len(),
         1024,
@@ -2339,7 +2384,7 @@ fn package_failed_commit_preserves_rollback() {
     let (additional, plugin, _) = package_fixture("extra");
     assert!(matches!(
         limited.commit_prepared(&additional, &plugin, &object),
-        Err(super::PackageError::LockTooLarge)
+        Err(crate::tools::PackageError::LockTooLarge)
     ));
     assert_eq!(std::fs::read(backup_path).unwrap(), backup);
     assert_eq!(manager.activations().unwrap()[0].0.version, "2.0.0");
@@ -2350,7 +2395,7 @@ fn package_failed_commit_preserves_rollback() {
 #[test]
 fn package_missing_removal_preserves_rollback() {
     let root = tempfile::tempdir().unwrap();
-    let manager = super::PackageManager::new(root.path().into(), 1024 * 1024, 1024).unwrap();
+    let manager = crate::tools::PackageManager::new(root.path().into(), 1024 * 1024, 1024).unwrap();
     let (manifest, mut plugin, bytes) = package_fixture("demo");
     let object = manager.stage_verified_object(&manifest, &bytes).unwrap();
     manager
@@ -2362,7 +2407,7 @@ fn package_missing_removal_preserves_rollback() {
         .unwrap();
     assert!(matches!(
         manager.remove("typo"),
-        Err(super::PackageError::PackageNotFound(_))
+        Err(crate::tools::PackageError::PackageNotFound(_))
     ));
     manager.rollback().unwrap();
     assert_eq!(manager.activations().unwrap()[0].0.version, "1.0.0");
@@ -2371,14 +2416,14 @@ fn package_missing_removal_preserves_rollback() {
 #[test]
 fn package_removal_ignores_its_own_dependencies_but_not_other_packages() {
     let root = tempfile::tempdir().unwrap();
-    let manager = super::PackageManager::new(root.path().into(), 1024 * 1024, 1024).unwrap();
+    let manager = crate::tools::PackageManager::new(root.path().into(), 1024 * 1024, 1024).unwrap();
     let (manifest, plugin, bytes) = package_fixture("demo");
     let object = manager.stage_verified_object(&manifest, &bytes).unwrap();
     let mut lock = manager
         .commit_prepared(&manifest, &plugin, &object)
         .unwrap();
     lock.packages[0].dependencies.push("demo".into());
-    super::write_lock_atomic(
+    crate::tools::write_lock_atomic(
         &root.path().join("dust-packages.lock.json"),
         &lock,
         1024 * 1024,
@@ -2387,7 +2432,7 @@ fn package_removal_ignores_its_own_dependencies_but_not_other_packages() {
     let (other, plugin, _) = package_fixture("dependent");
     let mut lock = manager.commit_prepared(&other, &plugin, &object).unwrap();
     lock.packages[1].dependencies.push("demo".into());
-    super::write_lock_atomic(
+    crate::tools::write_lock_atomic(
         &root.path().join("dust-packages.lock.json"),
         &lock,
         1024 * 1024,
@@ -2395,7 +2440,7 @@ fn package_removal_ignores_its_own_dependencies_but_not_other_packages() {
     .unwrap();
     assert!(matches!(
         manager.remove("demo"),
-        Err(super::PackageError::PackageRequired(_))
+        Err(crate::tools::PackageError::PackageRequired(_))
     ));
     manager.remove("dependent").unwrap();
     assert!(manager.remove("demo").unwrap().packages.is_empty());
@@ -2404,7 +2449,7 @@ fn package_removal_ignores_its_own_dependencies_but_not_other_packages() {
 #[test]
 fn package_commit_rejects_changed_or_shared_plugin_ids() {
     let root = tempfile::tempdir().unwrap();
-    let manager = super::PackageManager::new(root.path().into(), 1024 * 1024, 1024).unwrap();
+    let manager = crate::tools::PackageManager::new(root.path().into(), 1024 * 1024, 1024).unwrap();
     let (manifest, mut plugin, bytes) = package_fixture("alpha");
     let object = manager.stage_verified_object(&manifest, &bytes).unwrap();
     manager
@@ -2435,12 +2480,11 @@ fn package_commit_rejects_changed_or_shared_plugin_ids() {
 #[cfg(unix)]
 #[test]
 fn go_install_preserves_non_utf8_environment_paths() {
-    use std::{
-        ffi::OsStr,
-        fs,
-        os::unix::{ffi::OsStrExt, fs::PermissionsExt},
-        sync::mpsc,
-    };
+    use std::ffi::OsStr;
+    use std::fs;
+    use std::os::unix::ffi::OsStrExt;
+    use std::os::unix::fs::PermissionsExt;
+    use std::sync::mpsc;
     // A ZFS temp directory may require UTF-8 names; tmpfs accepts raw bytes.
     let directory = if cfg!(target_os = "linux") {
         tempfile::tempdir_in("/dev/shm")
@@ -2455,7 +2499,7 @@ fn go_install_preserves_non_utf8_environment_paths() {
     fs::write(&go, "#!/bin/sh\nset -eu\n[ \"$GOBIN\" = \"$HOME/bin\" ]\n[ \"$GOPATH\" = \"$HOME/gopath\" ]\n[ \"$GOCACHE\" = \"$HOME/gocache\" ]\nprintf '#!/bin/sh\\nexit 0\\n' > \"$GOBIN/fixture\"\n").unwrap();
     fs::set_permissions(go, fs::Permissions::from_mode(0o700)).unwrap();
     fs::write(
-        runtime.join(super::compatibility::MANAGED_RUNTIME_MARKER),
+        runtime.join(crate::tools::compatibility::MANAGED_RUNTIME_MARKER),
         runtime_artifact("go").unwrap().sha256,
     )
     .unwrap();
@@ -2476,7 +2520,9 @@ fn go_install_preserves_non_utf8_environment_paths() {
 #[cfg(unix)]
 #[test]
 fn npm_install_patches_native_dependencies_before_activation() {
-    use std::{fs, os::unix::fs::PermissionsExt, sync::mpsc};
+    use std::fs;
+    use std::os::unix::fs::PermissionsExt;
+    use std::sync::mpsc;
     fn elf(interpreter: &str) -> Vec<u8> {
         let mut bytes = vec![0; 120];
         bytes[..6].copy_from_slice(b"\x7fELF\x02\x01");
@@ -2500,7 +2546,7 @@ fn npm_install_patches_native_dependencies_before_activation() {
     fs::write(&bun, format!("#!/bin/sh\nset -eu\nmkdir -p \"$BUN_INSTALL/node_modules/native\"\nprintf '{}' > \"$BUN_INSTALL/node_modules/native/fixture\"\nchmod 700 \"$BUN_INSTALL/node_modules/native/fixture\"\nln -s ../node_modules/native/fixture \"$BUN_INSTALL/bin/fixture\"\n", shell_bytes(&elf("/lib64/ld-linux-x86-64.so.2")))).unwrap();
     fs::set_permissions(&bun, fs::Permissions::from_mode(0o700)).unwrap();
     fs::write(
-        runtime.join(super::compatibility::MANAGED_RUNTIME_MARKER),
+        runtime.join(crate::tools::compatibility::MANAGED_RUNTIME_MARKER),
         runtime_artifact("bun").unwrap().sha256,
     )
     .unwrap();
@@ -2515,7 +2561,7 @@ fn npm_install_patches_native_dependencies_before_activation() {
     )
     .unwrap();
     fs::set_permissions(&patchelf, fs::Permissions::from_mode(0o700)).unwrap();
-    let compatibility = super::catalog::NixCompatibilityRuntime {
+    let compatibility = crate::tools::catalog::NixCompatibilityRuntime {
         loader: loader.into(),
         nix_ld: "/private/nix-ld".into(),
         patchelf,
@@ -2547,17 +2593,16 @@ fn npm_install_patches_native_dependencies_before_activation() {
 #[cfg(unix)]
 #[test]
 fn installer_cancellation_terminates_descendant_processes_slot5() {
-    use std::{
-        fs,
-        sync::mpsc,
-        thread,
-        time::{Duration, Instant},
-    };
+    use std::fs;
+    use std::sync::mpsc;
+    use std::thread;
+    use std::time::Duration;
+    use std::time::Instant;
     let root = tempfile::tempdir().unwrap();
     let (cancel, cancellations) = mpsc::channel();
     let cwd = root.path().to_path_buf();
     let worker = thread::spawn(move || {
-        super::runtimes::run_managed(
+        crate::tools::runtimes::run_managed(
             std::path::Path::new("/bin/sh"),
             &[
                 "-c".into(),

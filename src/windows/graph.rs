@@ -1,22 +1,73 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 
-use super::{
-    MAXIMUM_NON_TILED_WINDOWS_PER_TAB, MAXIMUM_OVERLAY_WINDOWS_PER_TAB,
-    error::{WindowError, increment, validate_identity, validate_owner, validate_title},
-    identity::{ContentId, ContentTypeId, ViewId, WindowId, WindowTarget, WorkspaceTabId},
-    layout::{
-        CompositorSnapshot, CompositorWindowSnapshot, ContentAdapterKind, TileAxis,
-        TiledLayoutNode, TiledLayoutSnapshot, WindowPlacement,
-    },
-    model::{
-        ContentCapabilities, ContentContract, ContentDescriptor, ContentLifecycle, ContentSnapshot,
-        ViewDescriptor, WindowDescriptor, WorkspaceTabDescriptor,
-    },
-    projection::{
-        append_tiled_window, remove_tiled_window, replace_tiled_window, resize_tiled_parent,
-        tiled_contains, validate_tiled_layout,
-    },
-};
+use crate::windows::MAXIMUM_NON_TILED_WINDOWS_PER_TAB;
+
+use crate::windows::MAXIMUM_OVERLAY_WINDOWS_PER_TAB;
+
+use crate::windows::error::WindowError;
+
+use crate::windows::error::increment;
+
+use crate::windows::error::validate_identity;
+
+use crate::windows::error::validate_owner;
+
+use crate::windows::error::validate_title;
+
+use crate::windows::identity::ContentId;
+
+use crate::windows::identity::ContentTypeId;
+
+use crate::windows::identity::ViewId;
+
+use crate::windows::identity::WindowId;
+
+use crate::windows::identity::WindowTarget;
+
+use crate::windows::identity::WorkspaceTabId;
+
+use crate::windows::layout::CompositorSnapshot;
+
+use crate::windows::layout::CompositorWindowSnapshot;
+
+use crate::windows::layout::ContentAdapterKind;
+
+use crate::windows::layout::TileAxis;
+
+use crate::windows::layout::TiledLayoutNode;
+
+use crate::windows::layout::TiledLayoutSnapshot;
+
+use crate::windows::layout::WindowPlacement;
+
+use crate::windows::content::ContentCapabilities;
+
+use crate::windows::content::ContentContract;
+
+use crate::windows::content::ContentDescriptor;
+
+use crate::windows::content::ContentLifecycle;
+
+use crate::windows::content::ContentSnapshot;
+
+use crate::windows::content::ViewDescriptor;
+
+use crate::windows::content::WindowDescriptor;
+
+use crate::windows::content::WorkspaceTabDescriptor;
+
+use crate::windows::projection::append_tiled_window;
+
+use crate::windows::projection::remove_tiled_window;
+
+use crate::windows::projection::replace_tiled_window;
+
+use crate::windows::projection::resize_tiled_parent;
+
+use crate::windows::projection::tiled_contains;
+
+use crate::windows::projection::validate_tiled_layout;
 
 #[cfg_attr(not(test), derive(Clone))]
 #[derive(Debug, Default, Eq, PartialEq)]

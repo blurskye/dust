@@ -1,5 +1,5 @@
 use crate::app::tests::*;
-use crate::app::clipboard::ClipboardSession;
+use crate::app::editing::clipboard::ClipboardSession;
 use crate::editor::CommandInvocation;
 use crate::editor::RegisterShape;
 use crate::editor::RegisterValue;

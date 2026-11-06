@@ -1,7 +1,6 @@
-use std::{
-    fs,
-    path::{Path, PathBuf},
-};
+use std::fs;
+use std::path::Path;
+use std::path::PathBuf;
 
 use thiserror::Error;
 
@@ -169,7 +168,9 @@ mod tests {
 
     use tempfile::tempdir;
 
-    use crate::app::startup::{StartupTarget, resolve_startup};
+    use crate::app::startup::StartupTarget;
+
+    use crate::app::startup::resolve_startup;
 
 
     #[test]
@@ -276,7 +277,11 @@ mod tests {
     }
 }
 
-use crate::editor::{EditorState, CommandError, TransactionError};
+use crate::editor::EditorState;
+
+use crate::editor::CommandError;
+
+use crate::editor::TransactionError;
 
 use crate::editor::text::EncodingError;
 pub(crate) fn build_state(startup: &StartupTarget) -> EditorState {
@@ -297,19 +302,34 @@ pub enum ApplicationError {
 
 
 use crate::app::configuration::resolve_configuration;
-use crate::app::{
-    CommandRegistry, ConfigurationSession, DebugSession, DocumentSession, ExplorerWatchService,
-    InputSession, App, InteractiveError, LoadedConfig,
-    PersistenceService, RegistryService, RootIdentity, SyntaxSession, TextBuffer,
-    UiState, VfsWorker, WindowSession, WorkspaceId, WorkspaceState,
-    register_app_commands, register_builtin_commands,
-};
+use crate::app::CommandRegistry;
+use crate::app::ConfigurationSession;
+use crate::app::DebugSession;
+use crate::app::DocumentSession;
+use crate::app::ExplorerWatchService;
+use crate::app::InputSession;
+use crate::app::App;
+use crate::app::InteractiveError;
+use crate::app::LoadedConfig;
+use crate::app::PersistenceService;
+use crate::app::RegistryService;
+use crate::app::RootIdentity;
+use crate::app::SyntaxSession;
+use crate::app::TextBuffer;
+use crate::app::UiState;
+use crate::app::VfsWorker;
+use crate::app::WindowSession;
+use crate::app::WorkspaceId;
+use crate::app::WorkspaceState;
+use crate::app::register_app_commands;
+use crate::app::register_builtin_commands;
 use crate::editor::input::ABSOLUTE_MAX_COUNT;
-use crate::app::diagnostics::{MAXIMUM_DIAGNOSTICS, MAXIMUM_DIAGNOSTICS_PER_URI};
+use crate::app::diagnostics::MAXIMUM_DIAGNOSTICS;
+use crate::app::diagnostics::MAXIMUM_DIAGNOSTICS_PER_URI;
 use crate::app::documents::VFS_QUEUE_CAPACITY;
-use crate::app::persistence::{
-    PERSISTENCE_QUEUE_CAPACITY, STATE_FILE, STATE_MAXIMUM_BYTES,
-};
+use crate::app::persistence::PERSISTENCE_QUEUE_CAPACITY;
+use crate::app::persistence::STATE_FILE;
+use crate::app::persistence::STATE_MAXIMUM_BYTES;
 use crate::app::syntax::SYNTAX_QUEUE_CAPACITY;
 use crate::app::workspace::TRUST_QUEUE_CAPACITY;
 
@@ -412,14 +432,14 @@ impl App {
         );
         let debugger_session =
             DebugSession::new(&configuration.settings.debug, workspace.version());
-        let tooling = crate::app::tooling::ToolingSession::new(
+        let tooling = crate::app::tools::ToolingSession::new(
             tool_inspection
                 .join()
                 .unwrap_or_else(|_| crate::tools::inspect_tools()),
         );
         let mut application = App {
             state: crate::app::Tracked::new(state),
-            extension: crate::app::extensions::ExtensionSession::new(
+            extension: crate::app::plugins::ExtensionSession::new(
                 plugin_storage_root,
                 plugin_queue_capacity,
                 state_directory.join("packages"),
@@ -427,7 +447,7 @@ impl App {
             ),
             workspace,
             diagnostics,
-            workspace_edits: crate::app::workspace_edits::WorkspaceEditSession::default(),
+            workspace_edits: crate::app::workspace::edits::WorkspaceEditSession::default(),
             commands,
             input: InputSession::new(ABSOLUTE_MAX_COUNT),
             configuration: ConfigurationSession::new(
@@ -445,7 +465,7 @@ impl App {
             last_key_at: None,
             flash: None,
             agent: crate::app::agent::AgentPanel::new(state_directory.join("agents")),
-            pull_requests: crate::app::pull_requests::PullRequests::default(),
+            pull_requests: crate::app::git::pull_requests::PullRequests::default(),
             tutor: crate::app::tutor::Tutor::new(&state_directory),
             palette_recent: Vec::new(),
             border_drag: None,
@@ -475,15 +495,15 @@ impl App {
             session_restore_notice: false,
             window_session: WindowSession::new(dashboard_visible, terminal_panel_height),
             tooling,
-            language: crate::app::lsp::LspSession::default(),
+            language: crate::app::language::LspSession::default(),
             debugger_session,
             debug_terminal: None,
-            recovery: crate::app::recovery::RecoverySession::new(
+            recovery: crate::app::documents::recovery::RecoverySession::new(
                 state_directory.join("recovery"),
             ),
             next_transaction: 1_000_000,
             git: crate::app::git::GitSession::default(),
-            clipboard: crate::app::clipboard::ClipboardSession::default(),
+            clipboard: crate::app::editing::clipboard::ClipboardSession::default(),
             macro_replays: Vec::new(),
             macro_running: false,
             explorer: crate::app::explorer::ExplorerSession::new(explorer_watch),

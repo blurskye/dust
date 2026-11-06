@@ -1,16 +1,21 @@
 //! The Settings page: a float with the sections down the left and every setting with its value
 //! on the right, laid out like VS Code's settings editor.
 
-use crate::config::{AmbiguousWidth, Config};
+use crate::config::AmbiguousWidth;
+
+use crate::config::Config;
 use crate::language::syntax::Highlight;
 use crate::ui::render::editor::PROMPT_CURSOR;
-use crate::ui::{Style, geometry::text_width};
+use crate::ui::Style;
+use crate::ui::geometry::text_width;
 
-use super::{
-    Frame,
-    editor::cursor_style,
-    surfaces::{ellipsized, prompt_viewport},
-};
+use crate::ui::render::Frame;
+
+use crate::ui::render::editor::cursor_style;
+
+use crate::ui::render::surfaces::ellipsized;
+
+use crate::ui::render::surfaces::prompt_viewport;
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct SettingsPageState {
@@ -178,7 +183,7 @@ fn about_lines(
         about.push_str(" Applies after a restart.");
     }
     let width = usize::from(layout.list_width.saturating_sub(3)).max(1);
-    super::wrap_plain_text(&about, width, ambiguous)
+    crate::ui::render::wrap_plain_text(&about, width, ambiguous)
 }
 
 /// Where the page's parts go on a screen of this size.
@@ -404,7 +409,7 @@ pub(super) fn render_settings(
     // The page covers the editor, so its cursor would show through; search and text fields set their own.
     frame.cursor = None;
     if let Some(setup) = &page.setup {
-        super::setup::render_setup(frame, setup, page.status.as_ref(), config, width, height);
+        crate::ui::render::setup::render_setup(frame, setup, page.status.as_ref(), config, width, height);
         return;
     }
     let Some(layout) = settings_layout(width, height) else {
@@ -806,7 +811,7 @@ pub(super) fn render_settings(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::ui::render::settings::*;
 
     #[test]
     fn small_settings_surfaces_show_how_to_close_and_hide_the_editor_cursor() {

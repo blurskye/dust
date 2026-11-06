@@ -1,4 +1,4 @@
-use super::*;
+use crate::debugger::*;
 use std::time::Instant;
 
 pub(crate) const ADAPTER: &str = r#"

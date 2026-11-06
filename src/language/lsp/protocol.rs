@@ -1,27 +1,88 @@
 use std::path::Path;
 
-use serde_json::{Value, json};
+use serde_json::Value;
 
-use crate::{
-    editor::text::{ByteOffset, PositionCodec, PositionEncoding, TextBuffer},
-    process::write_content_length_message,
-};
+use serde_json::json;
 
-use super::{
-    MAX_LOG_LINE_BYTES,
-    markdown::sanitize_markdown,
-    model::{
-        LspCapabilities, LspCodeAction, LspCodeLens, LspColor, LspCommand, LspCompletionItem,
-        LspDiagnostic, LspDocument, LspDocumentEdit, LspEvent, LspFeature, LspFeatureResult,
-        LspHover, LspInlayHint, LspLocation, LspMarkupContent, LspMarkupKind, LspPosition,
-        LspProgressKind, LspPullDiagnostics, LspRange, LspResourceOperation, LspSemanticTokenDelta,
-        LspSemanticTokenEdit, LspSemanticTokens, LspSymbol, LspTextEdit, LspWorkspaceEdit,
-        SyncKind,
-    },
-    origins::{EditContext, EventSender},
-    paths::file_uri,
-    session::PendingRequest,
-};
+use crate::editor::text::ByteOffset;
+
+use crate::editor::text::PositionCodec;
+
+use crate::editor::text::PositionEncoding;
+
+use crate::editor::text::TextBuffer;
+
+use crate::process::write_content_length_message;
+
+use crate::language::lsp::MAX_LOG_LINE_BYTES;
+
+use crate::language::lsp::markdown::sanitize_markdown;
+
+use crate::language::lsp::model::LspCapabilities;
+
+use crate::language::lsp::model::LspCodeAction;
+
+use crate::language::lsp::model::LspCodeLens;
+
+use crate::language::lsp::model::LspColor;
+
+use crate::language::lsp::model::LspCommand;
+
+use crate::language::lsp::model::LspCompletionItem;
+
+use crate::language::lsp::model::LspDiagnostic;
+
+use crate::language::lsp::model::LspDocument;
+
+use crate::language::lsp::model::LspDocumentEdit;
+
+use crate::language::lsp::model::LspEvent;
+
+use crate::language::lsp::model::LspFeature;
+
+use crate::language::lsp::model::LspFeatureResult;
+
+use crate::language::lsp::model::LspHover;
+
+use crate::language::lsp::model::LspInlayHint;
+
+use crate::language::lsp::model::LspLocation;
+
+use crate::language::lsp::model::LspMarkupContent;
+
+use crate::language::lsp::model::LspMarkupKind;
+
+use crate::language::lsp::model::LspPosition;
+
+use crate::language::lsp::model::LspProgressKind;
+
+use crate::language::lsp::model::LspPullDiagnostics;
+
+use crate::language::lsp::model::LspRange;
+
+use crate::language::lsp::model::LspResourceOperation;
+
+use crate::language::lsp::model::LspSemanticTokenDelta;
+
+use crate::language::lsp::model::LspSemanticTokenEdit;
+
+use crate::language::lsp::model::LspSemanticTokens;
+
+use crate::language::lsp::model::LspSymbol;
+
+use crate::language::lsp::model::LspTextEdit;
+
+use crate::language::lsp::model::LspWorkspaceEdit;
+
+use crate::language::lsp::model::SyncKind;
+
+use crate::language::lsp::origins::EditContext;
+
+use crate::language::lsp::origins::EventSender;
+
+use crate::language::lsp::paths::file_uri;
+
+use crate::language::lsp::session::PendingRequest;
 
 /// `tags` is in `resolveSupport` because rust-analyzer only advertises resolve, and with it
 /// auto-imports, when the client defers a field it recognises. Dust doesn't read tags.

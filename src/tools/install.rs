@@ -1,26 +1,50 @@
-use std::{
-    collections::BTreeMap,
-    fs,
-    path::{Path, PathBuf},
-    sync::mpsc::Receiver,
-};
+use std::collections::BTreeMap;
+use std::fs;
+use std::path::Path;
+use std::path::PathBuf;
+use std::sync::mpsc::Receiver;
 
 use thiserror::Error;
 
-use super::{
-    catalog::{NixCompatibilityRuntime, ToolDefinition, ToolInstall, write_managed_tool_version},
-    compatibility::patch_nix_compatibility_tree,
-    download::{
-        ToolProgressReporter, download_checked, extract_one, extract_zip_tree, prepare_executable,
-        replace_managed_directory,
-    },
-    install_prepare::{ensure_private_directory, validate_tool_id},
-    package_lock::next_temp_suffix,
-    runtimes::{
-        install_javascript_package, install_rustup_component, install_uv_tool, managed_runtime,
-        probe_downloaded_tool, run_managed,
-    },
-};
+use crate::tools::catalog::NixCompatibilityRuntime;
+
+use crate::tools::catalog::ToolDefinition;
+
+use crate::tools::catalog::ToolInstall;
+
+use crate::tools::catalog::write_managed_tool_version;
+
+use crate::tools::compatibility::patch_nix_compatibility_tree;
+
+use crate::tools::download::ToolProgressReporter;
+
+use crate::tools::download::download_checked;
+
+use crate::tools::download::extract_one;
+
+use crate::tools::download::extract_zip_tree;
+
+use crate::tools::download::prepare_executable;
+
+use crate::tools::download::replace_managed_directory;
+
+use crate::tools::install_prepare::ensure_private_directory;
+
+use crate::tools::install_prepare::validate_tool_id;
+
+use crate::tools::package_lock::next_temp_suffix;
+
+use crate::tools::runtimes::install_javascript_package;
+
+use crate::tools::runtimes::install_rustup_component;
+
+use crate::tools::runtimes::install_uv_tool;
+
+use crate::tools::runtimes::managed_runtime;
+
+use crate::tools::runtimes::probe_downloaded_tool;
+
+use crate::tools::runtimes::run_managed;
 
 pub(super) fn install_tool(
     definition: &ToolDefinition,

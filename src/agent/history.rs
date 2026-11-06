@@ -2,16 +2,23 @@
 //! the agent can load its old sessions. One file per conversation: the first line describes
 //! it, so listing reads only that, and the second line holds the transcript.
 
-use serde::{Deserialize, Serialize};
-use std::{
-    collections::{BTreeMap, VecDeque},
-    fs,
-    io::{BufRead, BufReader, Read},
-    path::{Path, PathBuf},
-    sync::{Arc, Condvar, Mutex, OnceLock},
-    thread,
-    time::Instant,
-};
+use serde::Deserialize;
+
+use serde::Serialize;
+use std::collections::BTreeMap;
+use std::collections::VecDeque;
+use std::fs;
+use std::io::BufRead;
+use std::io::BufReader;
+use std::io::Read;
+use std::path::Path;
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::Condvar;
+use std::sync::Mutex;
+use std::sync::OnceLock;
+use std::thread;
+use std::time::Instant;
 
 /// Saved transcripts must also fit the reader's byte limit.
 const FILE_BYTE_CEILING: u64 = 32 * 1024 * 1024;
@@ -29,7 +36,7 @@ pub enum Entry {
         text: String,
         context: Vec<String>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        attachments: Vec<super::PromptPart>,
+        attachments: Vec<crate::agent::PromptPart>,
     },
     Agent(String),
     Thought(String),
@@ -279,11 +286,11 @@ pub fn recap(entries: &[Entry], limit: usize) -> String {
                 }
                 for part in attachments {
                     match part {
-                        super::PromptPart::Text(content) => {
+                        crate::agent::PromptPart::Text(content) => {
                             text.push('\n');
                             text.push_str(content);
                         }
-                        super::PromptPart::File {
+                        crate::agent::PromptPart::File {
                             path,
                             text: content,
                         } => {
@@ -315,7 +322,7 @@ pub fn recap(entries: &[Entry], limit: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::agent::*;
 
     #[test]
     fn pending_history_saves_are_fair_and_coalesce_in_place() {
@@ -518,7 +525,7 @@ mod tests {
 
     #[test]
     fn history_round_trips_attachments_and_recaps_legacy_context() {
-        use super::super::PromptPart;
+        use crate::PromptPart;
         let directory = tempfile::tempdir().unwrap();
         let conversation = Conversation {
             id: "attached".into(),

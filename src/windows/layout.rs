@@ -1,12 +1,15 @@
-use super::{
-    MAXIMUM_PROTECTED_REGIONS,
-    error::WindowError,
-    identity::{WindowId, WorkspaceTabId},
-    projection::{
-        intersect_rect, project_dock, project_float, project_tiled_node, push_compositor_window,
-        rect_contains, spatial_score, tiled_contains,
-    },
-};
+use crate::windows::MAXIMUM_PROTECTED_REGIONS;
+use crate::windows::error::WindowError;
+use crate::windows::identity::WindowId;
+use crate::windows::identity::WorkspaceTabId;
+use crate::windows::projection::intersect_rect;
+use crate::windows::projection::project_dock;
+use crate::windows::projection::project_float;
+use crate::windows::projection::project_tiled_node;
+use crate::windows::projection::push_compositor_window;
+use crate::windows::projection::rect_contains;
+use crate::windows::projection::spatial_score;
+use crate::windows::projection::tiled_contains;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ContentAdapterKind {

@@ -1,15 +1,16 @@
 //! Branch and worktree listing, creation and removal. Check refusal conditions before writes;
 //! retain running mutations until their completion is handled.
-use std::{
-    path::{Path, PathBuf},
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-        mpsc::{self, Receiver, TryRecvError},
-    },
-    thread,
-    time::{Duration, Instant},
-};
+use std::path::Path;
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
+use std::sync::mpsc::self;
+use std::sync::mpsc::Receiver;
+use std::sync::mpsc::TryRecvError;
+use std::thread;
+use std::time::Duration;
+use std::time::Instant;
 
 use thiserror::Error;
 
@@ -450,14 +451,14 @@ fn has_changes(
     // libgit2's status scan can't be stopped, so `git status` runs as a job the deadline kills.
     // Its output is capped at a few lines: any change at all is enough to answer.
     let started = Instant::now();
-    let policy = super::status::GitStatusPolicy {
+    let policy = crate::git::status::GitStatusPolicy {
         root: workdir.to_path_buf(),
         root_revision: 0,
         maximum_files: 1,
         maximum_path_bytes: 512,
         deadline: expires.saturating_duration_since(started),
     };
-    let (output, truncated) = super::status::status_command(
+    let (output, truncated) = crate::git::status::status_command(
         workdir,
         &["status", "--porcelain", "--untracked-files=normal"],
         &policy,
@@ -465,8 +466,8 @@ fn has_changes(
         cancel,
     )
     .map_err(|error| match error {
-        super::status::GitStatusError::Deadline => GitBranchError::Deadline,
-        super::status::GitStatusError::Cancelled => GitBranchError::Cancelled,
+        crate::git::status::GitStatusError::Deadline => GitBranchError::Deadline,
+        crate::git::status::GitStatusError::Cancelled => GitBranchError::Cancelled,
         error => backend(error),
     })?;
     check_request(cancel, expires)?;
@@ -480,7 +481,8 @@ fn exclude_from_status(
     cancel: &AtomicBool,
     expires: Instant,
 ) -> Result<(), GitBranchError> {
-    use std::io::{Read, Write};
+    use std::io::Read;
+    use std::io::Write;
     let root = repository.workdir().ok_or(GitBranchError::NotRepository)?;
     let Ok(relative) = path.strip_prefix(root) else {
         return Ok(());
@@ -837,7 +839,7 @@ fn run(
 
 #[cfg(test)]
 mod exclude_tests {
-    use super::*;
+    use crate::git::branches::*;
 
     fn repository_with_commit(root: &Path) -> git2::Repository {
         let repository = git2::Repository::init(root).unwrap();

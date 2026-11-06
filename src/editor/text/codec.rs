@@ -1,4 +1,6 @@
-use crate::editor::text::{ByteOffset, PositionError, TextBuffer};
+use crate::editor::text::ByteOffset;
+use crate::editor::text::PositionError;
+use crate::editor::text::TextBuffer;
 
 #[derive(
     Clone, Copy, Debug, Default, Eq, Hash, PartialEq, serde::Serialize, serde::Deserialize,
@@ -140,7 +142,10 @@ impl<'a> PositionCodec<'a> {
 
 #[cfg(test)]
 mod tests {
-    use crate::editor::text::{ByteOffset, PositionCodec, PositionEncoding, TextBuffer};
+    use crate::editor::text::ByteOffset;
+    use crate::editor::text::PositionCodec;
+    use crate::editor::text::PositionEncoding;
+    use crate::editor::text::TextBuffer;
 
     #[test]
     fn unicode_point_round_trip() {

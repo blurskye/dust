@@ -2,10 +2,27 @@ use std::fmt;
 
 use ropey::Rope;
 
-use crate::editor::text::{
-    Affinity, BufferRevision, ByteOffset, ByteRange, DecodedText, EditDelta, EncodingError,
-    FileFormat, PositionError, decode_utf8, encode_utf8,
-};
+use crate::editor::text::Affinity;
+
+use crate::editor::text::BufferRevision;
+
+use crate::editor::text::ByteOffset;
+
+use crate::editor::text::ByteRange;
+
+use crate::editor::text::DecodedText;
+
+use crate::editor::text::EditDelta;
+
+use crate::editor::text::EncodingError;
+
+use crate::editor::text::FileFormat;
+
+use crate::editor::text::PositionError;
+
+use crate::editor::text::decode_utf8;
+
+use crate::editor::text::encode_utf8;
 
 /// How many recent edits a buffer remembers for moving highlights forward.
 const RECENT_EDITS: usize = 64;
@@ -136,7 +153,7 @@ impl TextBuffer {
         self.revision
     }
 
-    pub(crate) fn set_preferred_line_ending(&mut self, ending: super::LineEnding) {
+    pub(crate) fn set_preferred_line_ending(&mut self, ending: crate::editor::text::LineEnding) {
         self.format.preferred_line_ending = ending;
     }
 
@@ -184,7 +201,7 @@ impl TextBuffer {
     }
 
     /// Reconcile an explicit save policy without replacing text edited during the save.
-    pub(crate) fn set_line_ending(&mut self, ending: super::LineEnding) {
+    pub(crate) fn set_line_ending(&mut self, ending: crate::editor::text::LineEnding) {
         self.format.preferred_line_ending = ending;
         self.format.line_endings.fill(ending);
     }
@@ -274,7 +291,7 @@ impl TextBuffer {
         Ok(())
     }
 
-    pub(crate) fn line_endings(&self, range: ByteRange) -> Vec<super::LineEnding> {
+    pub(crate) fn line_endings(&self, range: ByteRange) -> Vec<crate::editor::text::LineEnding> {
         let first = self.byte_to_line(range.start).unwrap_or(0);
         let last = self.byte_to_line(range.end).unwrap_or(first);
         (first..last)
@@ -288,7 +305,7 @@ impl TextBuffer {
             .collect()
     }
 
-    pub(crate) fn set_line_endings(&mut self, first: usize, endings: &[super::LineEnding]) {
+    pub(crate) fn set_line_endings(&mut self, first: usize, endings: &[crate::editor::text::LineEnding]) {
         for (index, ending) in endings.iter().enumerate() {
             if let Some(target) = self.format.line_endings.get_mut(first + index) {
                 *target = *ending;
@@ -440,10 +457,12 @@ fn normalize_newlines(text: &str) -> String {
 
 #[cfg(test)]
 mod source_tests {
-    use super::*;
+    use crate::editor::text::rope::*;
     #[test]
     fn reversed_ranges_are_rejected_without_changing_text() {
-        use crate::editor::text::{EditError, TextEdit, TextEditSet};
+        use crate::editor::text::EditError;
+        use crate::editor::text::TextEdit;
+        use crate::editor::text::TextEditSet;
         let mut text = TextBuffer::from_text("abc");
         let revision = text.revision();
         let range = ByteRange {
@@ -495,7 +514,8 @@ mod source_tests {
 
     #[test]
     fn a_highlight_follows_the_edits_made_after_it() {
-        use crate::editor::text::{TextEdit, TextEditSet};
+        use crate::editor::text::TextEdit;
+        use crate::editor::text::TextEditSet;
         let mut text = TextBuffer::from_text("// note\nfn main() {}\n");
         let parsed = text.revision();
         let main = ByteRange::new(ByteOffset(11), ByteOffset(15)).unwrap();

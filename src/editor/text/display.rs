@@ -123,10 +123,10 @@ pub fn insertion_at_display_column(
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        DisplayWidthPolicy, byte_range_for_display_columns, display_column_at,
-        insertion_at_display_column,
-    };
+    use crate::editor::text::display::DisplayWidthPolicy;
+    use crate::editor::text::display::byte_range_for_display_columns;
+    use crate::editor::text::display::display_column_at;
+    use crate::editor::text::display::insertion_at_display_column;
 
     #[test]
     fn display_column_lookup_handles_long_lines_and_interior_offsets() {

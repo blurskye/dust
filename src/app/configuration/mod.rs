@@ -18,7 +18,7 @@ use crate::editor::CommandValue;
 use crate::editor::InvocationSource;
 use crate::app::register_app_commands;
 use crate::editor::register_builtin_commands;
-use crate::extensions::PluginContributionCatalog;
+use crate::plugins::PluginContributionCatalog;
 use crate::ui::DashboardAction;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -29,7 +29,7 @@ use std::sync::Arc;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
-mod model;
+mod keymaps;
 /// The enum name is needed by tests and by prose; production reaches it through the method it
 /// returns from, so the alias is gated rather than left to warn as an unused import.
 #[cfg(test)]
@@ -118,19 +118,19 @@ struct ZenRestore {
 pub(in crate::app) struct ConfigurationCandidate {
     resolved: ResolvedConfiguration,
     stamp: Arc<()>,
-    catalog: crate::extensions::PluginCatalogVersion,
+    catalog: crate::plugins::PluginCatalogVersion,
 }
 
 pub(in crate::app) struct ContributionCandidate {
     stamp: Arc<()>,
-    catalog: crate::extensions::PluginCatalogVersion,
+    catalog: crate::plugins::PluginCatalogVersion,
     keymaps: Option<ResolvedKeymaps>,
     windows: crate::config::WindowsConfig,
     deferred: bool,
 }
 pub(in crate::app) struct WindowRuleSource {
     stamp: Arc<()>,
-    catalog: crate::extensions::PluginCatalogVersion,
+    catalog: crate::plugins::PluginCatalogVersion,
     windows: crate::config::WindowsConfig,
 }
 pub(in crate::app) struct ContributionReceipt(WindowRuleSource);
@@ -345,7 +345,7 @@ impl ConfigurationSession {
             .map_err(|error| error.to_string())
     }
     fn check_catalog(
-        expected: &crate::extensions::PluginCatalogVersion,
+        expected: &crate::plugins::PluginCatalogVersion,
         current: &PluginContributionCatalog,
     ) -> Result<(), String> {
         if *expected == current.version() {

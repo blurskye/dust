@@ -1,7 +1,11 @@
 //! Exact buffer-path reconciliation after a separately completed filesystem operation.
-use super::{EditorDraft, EditorState, EditorWindowVersion};
-use crate::editor::{BufferId, text::TextVersion};
-use std::path::{Path, PathBuf};
+use crate::editor::transaction::EditorDraft;
+use crate::editor::transaction::EditorState;
+use crate::editor::transaction::EditorWindowVersion;
+use crate::editor::BufferId;
+use crate::editor::text::TextVersion;
+use std::path::Path;
+use std::path::PathBuf;
 
 pub(crate) struct BufferPathChange {
     editor: EditorWindowVersion,
@@ -160,7 +164,7 @@ impl EditorState {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::editor::transaction::paths::*;
     use crate::editor::text::TextBuffer;
     #[test]
     fn deleted_files_remain_unsaved_after_edits_are_undone() {

@@ -1,7 +1,6 @@
 //! Search worker admission, accepted results and interaction retirement.
 //! Selected opaque actions share the lifetime and bounds of their actual rows.
-mod picker;
-mod preview;
+use crate::app::picker;
 use crate::app::workspace::WorkspaceVersion;
 use crate::files::WorkspaceFileEntry;
 use crate::files::WorkspaceFileEvent;
@@ -11,19 +10,19 @@ use crate::files::WorkspaceSearchEvent;
 use crate::files::WorkspaceSearchMatch;
 use crate::files::WorkspaceSearchPolicy;
 use crate::files::WorkspaceSearchService;
-use crate::workspace::search_workflow::ABS_MAX_BYTES;
-use crate::workspace::search_workflow::SearchHostAction;
-use crate::workspace::search_workflow::SearchMatcherKind;
-use crate::workspace::search_workflow::SearchPresenterKind;
-use crate::workspace::search_workflow::SearchRequestId;
-use crate::workspace::search_workflow::SearchSourceKind;
-use crate::workspace::search_workflow::SearchStreamGeneration;
-use crate::workspace::search_workflow::SearchWorkflowBroker;
-use crate::workspace::search_workflow::SearchWorkflowChunk;
-use crate::workspace::search_workflow::SearchWorkflowError;
-use crate::workspace::search_workflow::SearchWorkflowId;
-use crate::workspace::search_workflow::SearchWorkflowItem;
-use crate::workspace::search_workflow::SearchWorkflowSpec;
+use crate::app::search::workflow::ABS_MAX_BYTES;
+use crate::app::search::workflow::SearchHostAction;
+use crate::app::search::workflow::SearchMatcherKind;
+use crate::app::search::workflow::SearchPresenterKind;
+use crate::app::search::workflow::SearchRequestId;
+use crate::app::search::workflow::SearchSourceKind;
+use crate::app::search::workflow::SearchStreamGeneration;
+use crate::app::search::workflow::SearchWorkflowBroker;
+use crate::app::search::workflow::SearchWorkflowChunk;
+use crate::app::search::workflow::SearchWorkflowError;
+use crate::app::search::workflow::SearchWorkflowId;
+use crate::app::search::workflow::SearchWorkflowItem;
+use crate::app::search::workflow::SearchWorkflowSpec;
 
 pub(crate) const MAXIMUM_PICKER_ITEMS: usize = 10_000;
 /// Bounds for walking the workspace in the file picker and project search.
@@ -32,15 +31,10 @@ pub(crate) const SEARCH_MAXIMUM_FILE_BYTES: usize = 8 * 1024 * 1024;
 pub(crate) const SEARCH_BATCH_SIZE: usize = 128;
 pub(crate) const SEARCH_QUEUE_CAPACITY: usize = 8;
 
-pub(in crate::app) use picker::MatcherSource;
 
-pub(in crate::app) use picker::PickerContent;
 
-pub(in crate::app) use picker::PickerEpoch;
 
-pub(in crate::app) use picker::PickerOrigin;
 
-pub(in crate::app) use picker::PickerPayload;
 
 type ByteNavigation = (crate::editor::text::ByteRange, Option<std::sync::Arc<[u8]>>);
 

@@ -2,12 +2,14 @@
 //! `assets/defaults/keymaps.toml` and the user's keymaps.toml, and how one binding is changed in
 //! keymaps.toml.
 
-use std::{collections::HashMap, path::Path};
+use std::collections::HashMap;
+
+use std::path::Path;
 
 use serde::Deserialize;
 
-use super::KeymapEntry;
-use super::catalog::UserFile;
+use crate::config::KeymapEntry;
+use crate::config::catalog::UserFile;
 
 /// A binding as the user's files leave it.
 #[derive(Clone, Debug)]
@@ -36,7 +38,7 @@ pub fn declared_keymaps(user: Option<&Path>) -> Vec<DeclaredKeymap> {
             .map(|file| file.keymap)
             .unwrap_or_default()
     };
-    let mut declared: Vec<Option<DeclaredKeymap>> = parse(super::load::BUNDLED_KEYMAPS)
+    let mut declared: Vec<Option<DeclaredKeymap>> = parse(crate::config::load::BUNDLED_KEYMAPS)
         .into_iter()
         .map(|entry| Some(DeclaredKeymap { entry, user: false }))
         .collect();
@@ -176,7 +178,7 @@ fn edit_user_keymaps(
         .parse::<toml_edit::DocumentMut>()
         .map_err(|error| format!("keymaps.toml has a mistake to fix first: {error}"))?;
     let edited = edit(&mut document)?;
-    if let Some(diagnostic) = super::load::parse_keymaps(&edited, path.to_path_buf()).diagnostic {
+    if let Some(diagnostic) = crate::config::load::parse_keymaps(&edited, path.to_path_buf()).diagnostic {
         return Err(diagnostic);
     }
     file.write(&edited)

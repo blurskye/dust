@@ -1,16 +1,36 @@
 //! The first-start setup: one question per page, its choices down the left and, on the right,
 //! a small Dust drawn in the theme's colours the way the highlighted choices would lay it out.
 
-use crate::config::{AgentConnection, Config, PanelSide, TerminalPlacement};
-use crate::language::syntax::Highlight;
-use crate::ui::{Style, geometry::text_width};
+use crate::config::AgentConnection;
 
-use super::{
-    Frame,
-    editor::{END_OF_BUFFER_MARKER, GIT_SIGN_ADDED, GIT_SIGN_UNCHANGED, GUTTER_PADDING},
-    settings::{SetupState, draw_box, fill, settings_layout},
-    surfaces::ellipsized,
-};
+use crate::config::Config;
+
+use crate::config::PanelSide;
+
+use crate::config::TerminalPlacement;
+use crate::language::syntax::Highlight;
+use crate::ui::Style;
+use crate::ui::geometry::text_width;
+
+use crate::ui::render::Frame;
+
+use crate::ui::render::editor::END_OF_BUFFER_MARKER;
+
+use crate::ui::render::editor::GIT_SIGN_ADDED;
+
+use crate::ui::render::editor::GIT_SIGN_UNCHANGED;
+
+use crate::ui::render::editor::GUTTER_PADDING;
+
+use crate::ui::render::settings::SetupState;
+
+use crate::ui::render::settings::draw_box;
+
+use crate::ui::render::settings::fill;
+
+use crate::ui::render::settings::settings_layout;
+
+use crate::ui::render::surfaces::ellipsized;
 
 /// The list of choices is at least this wide beside the preview, and at most the second.
 const LIST_WIDTH: (u16, u16) = (40, 60);

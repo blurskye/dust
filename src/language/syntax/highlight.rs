@@ -1,10 +1,10 @@
 //! Neovim's highlight groups, such as `@function.method` and `Comment`: the names syntax
 //! captures, language-server tokens and themes share. A theme colours them through
 //! `ThemeConfig::highlight`.
-use std::{
-    collections::{BTreeMap, HashMap},
-    sync::{OnceLock, RwLock},
-};
+use std::collections::BTreeMap;
+use std::collections::HashMap;
+use std::sync::OnceLock;
+use std::sync::RwLock;
 
 use serde::Deserialize;
 
@@ -172,7 +172,7 @@ fn registry() -> &'static Registry {
 
 #[cfg(test)]
 mod tests {
-    use super::Highlight;
+    use crate::language::syntax::highlight::Highlight;
 
     #[test]
     fn captures_fall_back_to_the_nearest_known_group() {

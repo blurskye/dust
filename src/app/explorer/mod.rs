@@ -11,11 +11,11 @@ use crate::ui::ExplorerSegmentRole;
 use crate::ui::ExplorerUiRow;
 use crate::ui::ExplorerUiSegment;
 use crate::ui::ExplorerUiState;
-use crate::workspace::ExplorerChild;
-use crate::workspace::ExplorerKind;
-use crate::workspace::ExplorerLoadState;
-use crate::workspace::ExplorerNodeId;
-use crate::workspace::ExplorerState;
+use crate::app::explorer::tree::ExplorerChild;
+use crate::app::explorer::tree::ExplorerKind;
+use crate::app::explorer::tree::ExplorerLoadState;
+use crate::app::explorer::tree::ExplorerNodeId;
+use crate::app::explorer::tree::ExplorerState;
 use crate::workspace::WorkspaceRoot;
 pub(in crate::app) use intent::MutationContext;
 pub(in crate::app) use intent::MutationUpdate;
@@ -409,7 +409,7 @@ impl ExplorerSession {
     pub(in crate::app) fn select_search_match(&mut self) {
         let tree = self.tree();
         let needle = tree.filter().to_lowercase();
-        let matches = |node: &crate::workspace::ExplorerNode| {
+        let matches = |node: &crate::app::explorer::tree::ExplorerNode| {
             node.kind != ExplorerKind::Root && node.name.to_lowercase().contains(&needle)
         };
         if needle.is_empty() || tree.selected_node().is_some_and(matches) {
@@ -1712,3 +1712,5 @@ mod tests {
         assert_eq!(rows, 2000);
     }
 }
+
+mod tree;

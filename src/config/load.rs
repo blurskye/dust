@@ -1,26 +1,37 @@
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    env, fs,
-    hash::{Hash, Hasher},
-    io::Read,
-    path::{Path, PathBuf},
-    sync::{
-        OnceLock,
-        mpsc::{self, Receiver, RecvTimeoutError, SyncSender, TryRecvError, TrySendError},
-    },
-    thread::{self, JoinHandle},
-    time::{Duration, Instant, SystemTime},
-};
+use std::collections::BTreeMap;
+use std::collections::BTreeSet;
+use std::env;
+use std::fs;
+use std::hash::Hash;
+use std::hash::Hasher;
+use std::io::Read;
+use std::path::Path;
+use std::path::PathBuf;
+use std::sync::OnceLock;
+use std::sync::mpsc::self;
+use std::sync::mpsc::Receiver;
+use std::sync::mpsc::RecvTimeoutError;
+use std::sync::mpsc::SyncSender;
+use std::sync::mpsc::TryRecvError;
+use std::sync::mpsc::TrySendError;
+use std::thread::self;
+use std::thread::JoinHandle;
+use std::time::Duration;
+use std::time::Instant;
+use std::time::SystemTime;
 
 use serde::Deserialize;
 use thiserror::Error;
 
-use super::settings::ThemeConfig;
-use super::themes::ThemeRead;
-use super::{
-    Config, DashboardConfig, KeyGroupEntry, KeymapEntry, LoadedConfig, LoadedKeymaps,
-    migrate_config_source,
-};
+use crate::config::settings::ThemeConfig;
+use crate::config::themes::ThemeRead;
+use crate::config::Config;
+use crate::config::DashboardConfig;
+use crate::config::KeyGroupEntry;
+use crate::config::KeymapEntry;
+use crate::config::LoadedConfig;
+use crate::config::LoadedKeymaps;
+use crate::config::migrate_config_source;
 
 pub fn user_state_directory() -> PathBuf {
     if let Some(root) = env::var_os("DUST_STATE_HOME") {
@@ -264,7 +275,7 @@ impl ConfigurationSourceBundle {
             loaded.theme = bundled.theme;
             loaded.theme_path = bundled.theme_path;
         } else if let Some(choice) = matches!(self.theme.text, CapturedText::Missing)
-            .then(|| super::themes::bundled_named(&self.selected_theme))
+            .then(|| crate::config::themes::bundled_named(&self.selected_theme))
             .flatten()
         {
             loaded.theme = choice.theme;
@@ -331,7 +342,8 @@ pub(super) fn capture_configuration_bundle(theme_hint: &str) -> ConfigurationSou
 }
 
 pub(super) fn installed_plugins(root: &Path) -> BTreeSet<String> {
-    use sha2::{Digest, Sha256};
+    use sha2::Digest;
+    use sha2::Sha256;
 
     let read = |path: &Path| -> Option<Vec<u8>> {
         let mut bytes = Vec::new();
@@ -367,7 +379,7 @@ pub(super) fn installed_plugins(root: &Path) -> BTreeSet<String> {
             {
                 return None;
             }
-            let manifest: crate::extensions::PluginManifest =
+            let manifest: crate::plugins::PluginManifest =
                 toml::from_str(std::str::from_utf8(&bytes).ok()?).ok()?;
             manifest
                 .component_sha256
@@ -746,7 +758,7 @@ fn remove_key(value: &mut toml::Value, key: &[String]) -> bool {
         return array.iter_mut().any(|value| {
             let rejected = value
                 .clone()
-                .try_into::<super::WindowRuleConfig>()
+                .try_into::<crate::config::WindowRuleConfig>()
                 .err()
                 .and_then(|error| unknown_field(&error.to_string()));
             rejected.as_deref() == Some(key) && remove_key(value, key)
@@ -775,7 +787,7 @@ fn remove_key(value: &mut toml::Value, key: &[String]) -> bool {
 /// A setting's bundled default value, by its dotted key.
 pub(super) fn bundled_setting(key: &str) -> Option<toml::Value> {
     let mut value = bundled_value();
-    for segment in super::config_key_segments(key)? {
+    for segment in crate::config::config_key_segments(key)? {
         value = value.get(&segment)?;
     }
     Some(value.clone())
@@ -910,7 +922,7 @@ impl ConfigurationWorker {
                     };
                     match request {
                         Ok(ConfigurationRequest::Themes(request)) => {
-                            super::themes::discover(request)
+                            crate::config::themes::discover(request)
                         }
                         Ok(ConfigurationRequest::Reload) => {
                             generation = generation.saturating_add(1);
@@ -1190,7 +1202,7 @@ impl Drop for ConfigurationWorker {
 
 #[cfg(test)]
 mod shutdown_tests {
-    use super::*;
+    use crate::config::load::*;
     #[test]
     fn dropping_configuration_worker_does_not_wait_for_a_full_queue_or_blocked_worker() {
         let (sender, requests) = mpsc::sync_channel(4);

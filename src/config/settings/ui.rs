@@ -1,8 +1,12 @@
 use std::collections::BTreeMap;
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
-use super::editor::{ColorMode, CursorShape};
+use serde::Serialize;
+
+use crate::config::settings::editor::ColorMode;
+
+use crate::config::settings::editor::CursorShape;
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]

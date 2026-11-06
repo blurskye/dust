@@ -2,25 +2,33 @@
 
 use serde_json::Value;
 #[cfg(test)]
-use std::time::{Duration, Instant};
-use std::{
-    collections::BTreeMap,
-    io::{self, BufRead, Write},
-    path::PathBuf,
-    sync::mpsc::{self, Receiver, SyncSender},
-    thread,
-};
+use std::time::Duration;
+use std::time::Instant;
+use std::collections::BTreeMap;
+use std::io::self;
+use std::io::BufRead;
+use std::io::Write;
+use std::path::PathBuf;
+use std::sync::mpsc::self;
+use std::sync::mpsc::Receiver;
+use std::sync::mpsc::SyncSender;
+use std::thread;
 use thiserror::Error;
 
 mod jobs;
-pub use jobs::{JobError, JobEvent, JobId, JobPolicy, JobRequest, JobStream, JobSupervisor};
+pub use jobs::JobError;
+pub use jobs::JobEvent;
+pub use jobs::JobId;
+pub use jobs::JobPolicy;
+pub use jobs::JobRequest;
+pub use jobs::JobStream;
+pub use jobs::JobSupervisor;
 
 #[cfg(unix)]
 pub(crate) fn terminate_process_group(id: u32) {
-    use nix::{
-        sys::signal::{Signal, killpg},
-        unistd::Pid,
-    };
+    use nix::sys::signal::Signal;
+    use nix::sys::signal::killpg;
+    use nix::unistd::Pid;
     let group = Pid::from_raw(id as i32);
     if killpg(group, Signal::SIGTERM).is_ok() {
         thread::sleep(std::time::Duration::from_millis(20));
@@ -113,15 +121,19 @@ pub enum ProtocolError {
 
 #[cfg(test)]
 mod tests {
-    use std::io::{BufReader, Cursor};
+    use std::io::BufReader;
+    use std::io::Cursor;
 
     use serde_json::json;
 
-    use super::{read_content_length_message, write_content_length_message};
+    use crate::process::read_content_length_message;
+
+    use crate::process::write_content_length_message;
     #[cfg(unix)]
     #[test]
     fn preflight_pins_symlinked_executable_and_cwd_targets() {
-        use std::os::unix::fs::{PermissionsExt, symlink};
+        use std::os::unix::fs::PermissionsExt;
+        use std::os::unix::fs::symlink;
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path().join("root");
         std::fs::create_dir(&root).unwrap();
@@ -134,9 +146,9 @@ mod tests {
         let cwd_link = temp.path().join("cwd");
         symlink(&executable, &executable_link).unwrap();
         symlink(&root, &cwd_link).unwrap();
-        let result = super::preflight(
-            super::PreflightId(1),
-            super::ExecutionPreflightRequest {
+        let result = crate::process::preflight(
+            crate::process::PreflightId(1),
+            crate::process::ExecutionPreflightRequest {
                 executable: executable_link,
                 cwd: cwd_link,
                 roots: vec![root.clone()],
@@ -162,9 +174,9 @@ mod tests {
         for mode in [0o641, 0o600, 0o700] {
             std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(mode)).unwrap();
             let can_execute = std::process::Command::new(&executable).status().is_ok();
-            let result = super::preflight(
-                super::PreflightId(1),
-                super::ExecutionPreflightRequest {
+            let result = crate::process::preflight(
+                crate::process::PreflightId(1),
+                crate::process::ExecutionPreflightRequest {
                     executable: executable.clone(),
                     cwd: root.path().into(),
                     roots: vec![root.path().into()],
@@ -207,7 +219,7 @@ mod tests {
         assert!(read_content_length_message(&mut missing).is_err());
         let source = format!(
             "Content-Length: {}\r\n\r\n",
-            super::PROTOCOL_MESSAGE_BYTE_CEILING + 1
+            crate::process::PROTOCOL_MESSAGE_BYTE_CEILING + 1
         );
         let mut oversized = BufReader::new(Cursor::new(source));
         assert!(read_content_length_message(&mut oversized).is_err());
@@ -468,7 +480,7 @@ pub enum PreflightError {
 
 #[cfg(test)]
 mod preflight_lifecycle_tests {
-    use super::*;
+    use crate::process::*;
     #[test]
     fn full_result_queue_retains_every_terminal_reply_and_exhaustion_fails_closed() {
         let root = tempfile::tempdir().unwrap();
@@ -533,7 +545,9 @@ impl<T> CancellablePipe<T> {
     where
         T: std::os::fd::AsFd,
     {
-        use nix::fcntl::{FcntlArg, OFlag, fcntl};
+        use nix::fcntl::FcntlArg;
+        use nix::fcntl::OFlag;
+        use nix::fcntl::fcntl;
         let flags = OFlag::from_bits_truncate(fcntl(&pipe, FcntlArg::F_GETFL)?);
         fcntl(&pipe, FcntlArg::F_SETFL(flags | OFlag::O_NONBLOCK))?;
         Ok(Self {
@@ -613,7 +627,7 @@ impl<T: Write> Write for CancellablePipe<T> {
 
 #[cfg(all(test, unix))]
 mod cancellable_pipe_tests {
-    use super::*;
+    use crate::process::*;
 
     #[test]
     fn partial_writes_share_one_deadline() {
@@ -655,10 +669,9 @@ mod cancellable_pipe_tests {
     #[test]
     fn cancellation_releases_blocked_child_reads_and_writes() {
         use std::io::Read;
-        use std::sync::{
-            Arc,
-            atomic::{AtomicBool, Ordering},
-        };
+        use std::sync::Arc;
+        use std::sync::atomic::AtomicBool;
+        use std::sync::atomic::Ordering;
         let mut child = std::process::Command::new("sleep")
             .arg("30")
             .stdin(std::process::Stdio::piped())

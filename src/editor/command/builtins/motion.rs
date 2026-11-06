@@ -1,19 +1,42 @@
 use unicode_segmentation::UnicodeSegmentation;
 
-use crate::editor::{
-    state::{EditingPolicy, RegisterShape, SelectionKind, View},
-    text::{
-        ByteOffset, ByteRange, DisplayWidthPolicy, TextBuffer, byte_range_for_display_columns,
-        display_column_at, insertion_at_display_column, next_grapheme_boundary,
-        previous_grapheme_boundary,
-    },
-};
+use crate::editor::state::EditingPolicy;
 
-use super::{
-    super::{CommandError, CommandInvocation},
-    text_object::text_object,
-    transaction::{failed, integer_argument, string_argument},
-};
+use crate::editor::state::RegisterShape;
+
+use crate::editor::state::SelectionKind;
+
+use crate::editor::state::View;
+
+use crate::editor::text::ByteOffset;
+
+use crate::editor::text::ByteRange;
+
+use crate::editor::text::DisplayWidthPolicy;
+
+use crate::editor::text::TextBuffer;
+
+use crate::editor::text::byte_range_for_display_columns;
+
+use crate::editor::text::display_column_at;
+
+use crate::editor::text::insertion_at_display_column;
+
+use crate::editor::text::next_grapheme_boundary;
+
+use crate::editor::text::previous_grapheme_boundary;
+
+use crate::editor::command::CommandError;
+
+use crate::editor::command::CommandInvocation;
+
+use crate::editor::command::builtins::text_object::text_object;
+
+use crate::editor::command::builtins::transaction::failed;
+
+use crate::editor::command::builtins::transaction::integer_argument;
+
+use crate::editor::command::builtins::transaction::string_argument;
 
 pub(super) fn motion_target(
     text: &TextBuffer,

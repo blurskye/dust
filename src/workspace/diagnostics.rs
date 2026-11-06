@@ -1,8 +1,15 @@
-use std::{collections::BTreeMap, time::SystemTime};
+use std::collections::BTreeMap;
+use std::time::SystemTime;
 
-use crate::editor::text::{BufferRevision, ByteOffset, ByteRange};
+use crate::editor::text::BufferRevision;
 
-use super::{ABSOLUTE_DIAGNOSTIC_LIMIT, edit::WorkspaceError};
+use crate::editor::text::ByteOffset;
+
+use crate::editor::text::ByteRange;
+
+use crate::workspace::ABSOLUTE_DIAGNOSTIC_LIMIT;
+
+use crate::workspace::edit::WorkspaceError;
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct DiagnosticOwner(pub String);

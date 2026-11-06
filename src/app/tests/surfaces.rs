@@ -1182,7 +1182,7 @@ fn health_virtual_dogfood_opens_refreshes_and_remains_read_only() {
 #[test]
 fn accepted_virtual_snapshot_publishes_through_the_tiled_editor_bridge() {
     let (_app_dirs, mut app) = app();
-    let snapshot = crate::extensions::PluginVirtualDocumentSnapshot {
+    let snapshot = crate::plugins::PluginVirtualDocumentSnapshot {
         plugin: "demo".into(),
         load: PluginLoadId(7),
         source: "plugin.demo.virtual.help".into(),
@@ -2443,7 +2443,7 @@ fn recovery_debounce_coalesces_revisions_and_clean_state_deletes_last_journal() 
     assert_eq!(app.recovery.scheduled()[&buffer].0, latest_revision);
     assert!(!app.recovery.writing(None));
     std::thread::sleep(Duration::from_millis(
-        crate::app::recovery::WRITE_DEBOUNCE_MS + 10,
+        crate::app::documents::recovery::WRITE_DEBOUNCE_MS + 10,
     ));
     app.schedule_recovery_work();
     wait_vfs(&mut app);
@@ -2547,7 +2547,7 @@ fn recovery_sessions_keep_distinct_journals_for_the_same_buffer() {
     wait_vfs(&mut app);
     let first = app.recovery.path(buffer);
     let directory = app.recovery.directory().to_path_buf();
-    app.recovery = crate::app::recovery::RecoverySession::new(directory.clone());
+    app.recovery = crate::app::documents::recovery::RecoverySession::new(directory.clone());
     app.recovery.skip_maintenance();
     let second = app.recovery.path(buffer);
     assert_ne!(first, second);
@@ -2731,7 +2731,7 @@ fn recovery_delete_completion_cannot_forget_a_newer_queued_write() {
     app.invoke_insert_text("A".into());
     app.schedule_recovery_work();
     std::thread::sleep(Duration::from_millis(
-        crate::app::recovery::WRITE_DEBOUNCE_MS + 10,
+        crate::app::documents::recovery::WRITE_DEBOUNCE_MS + 10,
     ));
     app.schedule_recovery_work();
     wait_vfs(&mut app);
@@ -2745,7 +2745,7 @@ fn recovery_delete_completion_cannot_forget_a_newer_queued_write() {
     let latest = app.state.buffers[buffer].text.revision();
     app.schedule_recovery_work();
     std::thread::sleep(Duration::from_millis(
-        crate::app::recovery::WRITE_DEBOUNCE_MS + 10,
+        crate::app::documents::recovery::WRITE_DEBOUNCE_MS + 10,
     ));
     app.schedule_recovery_work();
     assert_eq!(app.recovery.revisions().get(&buffer), Some(&latest));
@@ -7699,11 +7699,11 @@ fn startup_plugin_publication_waits_for_session_restoration() {
     let (worker, release) = PersistenceService::gated_for_test(1);
     app.persistence =
         crate::app::persistence::PersistenceSession::new(worker, state_path);
-    let (manager, fixture) = crate::extensions::ExecutionFixture::new(4);
+    let (manager, fixture) = crate::plugins::ExecutionFixture::new(4);
     app.extension.fixture_manager(manager);
     app.load_persistence();
     fixture.indexed(
-        crate::extensions::index_manifest_contributions(
+        crate::plugins::index_manifest_contributions(
             &plugin_manifest("demo", "plugin.demo.test", "x y"),
             1,
             "startup".into(),
@@ -7805,7 +7805,7 @@ fn restore_reads_preserve_newer_edits_capture_and_original_editor_identity() {
     wait_vfs(&mut app);
     assert_eq!(app.state.active_view, Some(view));
     let identity = app.state.window_version();
-    let (manager, plugin) = crate::extensions::ExecutionFixture::new(4);
+    let (manager, plugin) = crate::plugins::ExecutionFixture::new(4);
     app.extension.fixture_manager(manager);
     app.process_effect(AppEffect::PluginExecute {
         plugin: "demo".into(),
@@ -8308,7 +8308,7 @@ fn a_name_no_worktree_matches_is_the_name_of_a_new_one() {
         source: String::new(),
         action: crate::workspace::PickerAction::None,
     };
-    let payload = crate::app::search::PickerPayload::Command(
+    let payload = crate::app::picker::PickerPayload::Command(
         "workspace.git.worktree.create".into(),
     );
     app.install_picker("Git worktrees".into(), vec![(new_row, payload)]);

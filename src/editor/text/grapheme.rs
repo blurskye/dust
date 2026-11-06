@@ -1,7 +1,10 @@
-use unicode_segmentation::{GraphemeCursor, GraphemeIncomplete};
+use unicode_segmentation::GraphemeCursor;
+use unicode_segmentation::GraphemeIncomplete;
 use unicode_width::UnicodeWidthStr;
 
-use crate::editor::text::{ByteOffset, TextBuffer};
+use crate::editor::text::ByteOffset;
+
+use crate::editor::text::TextBuffer;
 
 #[must_use]
 pub fn next_grapheme_boundary(buffer: &TextBuffer, offset: ByteOffset) -> ByteOffset {
@@ -54,9 +57,10 @@ pub fn display_width(text: &str) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use crate::editor::text::{
-        ByteOffset, TextBuffer, next_grapheme_boundary, previous_grapheme_boundary,
-    };
+    use crate::editor::text::ByteOffset;
+    use crate::editor::text::TextBuffer;
+    use crate::editor::text::next_grapheme_boundary;
+    use crate::editor::text::previous_grapheme_boundary;
 
     #[test]
     fn navigates_large_rope_without_materializing_text() {

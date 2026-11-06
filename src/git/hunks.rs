@@ -1,21 +1,27 @@
-use std::{
-    hash::{Hash, Hasher},
-    path::PathBuf,
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-        mpsc::{self, Receiver, TryRecvError},
-    },
-    thread,
-    time::{Duration, Instant},
-};
+use std::hash::Hash;
+use std::hash::Hasher;
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
+use std::sync::mpsc::self;
+use std::sync::mpsc::Receiver;
+use std::sync::mpsc::TryRecvError;
+use std::thread;
+use std::time::Duration;
+use std::time::Instant;
 
 use thiserror::Error;
 
-use super::{
-    mutation::{GitIndexFingerprint, git_index_fingerprint, worktree_hash},
-    status::{GitChangeSource, GitRepositoryId},
-};
+use crate::git::mutation::GitIndexFingerprint;
+
+use crate::git::mutation::git_index_fingerprint;
+
+use crate::git::mutation::worktree_hash;
+
+use crate::git::status::GitChangeSource;
+
+use crate::git::status::GitRepositoryId;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum GitDiffLayer {
@@ -844,7 +850,11 @@ pub(super) fn read_buffer_hunks_owned(
 
 #[cfg(test)]
 mod staged_sign_tests {
-    use super::{GitDiffLine, GitDiffLineKind, GitHunk, GitHunkId, index_line_in_buffer};
+    use crate::git::hunks::GitDiffLine;
+    use crate::git::hunks::GitDiffLineKind;
+    use crate::git::hunks::GitHunk;
+    use crate::git::hunks::GitHunkId;
+    use crate::git::hunks::index_line_in_buffer;
 
     fn hunk(old: (u32, u32), new: (u32, u32), lines: Vec<GitDiffLine>) -> GitHunk {
         GitHunk {

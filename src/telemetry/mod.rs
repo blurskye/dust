@@ -1,13 +1,16 @@
 #![forbid(unsafe_code)]
-use serde::{Deserialize, Serialize};
-use std::{
-    collections::{BTreeMap, VecDeque},
-    fs,
-    path::PathBuf,
-    sync::mpsc::{self, Receiver, SyncSender, TrySendError},
-    thread,
-    time::UNIX_EPOCH,
-};
+use serde::Deserialize;
+use serde::Serialize;
+use std::collections::BTreeMap;
+use std::collections::VecDeque;
+use std::fs;
+use std::path::PathBuf;
+use std::sync::mpsc::self;
+use std::sync::mpsc::Receiver;
+use std::sync::mpsc::SyncSender;
+use std::sync::mpsc::TrySendError;
+use std::thread;
+use std::time::UNIX_EPOCH;
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LogLevel {
@@ -239,7 +242,7 @@ pub struct HealthSnapshot {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::telemetry::*;
 
     #[test]
     fn log_fields_are_limited_by_utf8_bytes() {

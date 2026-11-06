@@ -1,10 +1,15 @@
 #![forbid(unsafe_code)]
 mod registry;
-pub use registry::{
-    OFFICIAL_REGISTRY, RegistryError, RegistryEvent, RegistryPackageMetadata,
-    RegistryPackageSummary, RegistryPolicy, RegistryRequest, RegistryResult,
-    RegistrySearchResponse, RegistryService,
-};
+pub use registry::OFFICIAL_REGISTRY;
+pub use registry::RegistryError;
+pub use registry::RegistryEvent;
+pub use registry::RegistryPackageMetadata;
+pub use registry::RegistryPackageSummary;
+pub use registry::RegistryPolicy;
+pub use registry::RegistryRequest;
+pub use registry::RegistryResult;
+pub use registry::RegistrySearchResponse;
+pub use registry::RegistryService;
 
 use std::sync::OnceLock;
 
@@ -20,39 +25,71 @@ const MAXIMUM_NIX_RUNTIME_ENVIRONMENT_BYTES: u64 = 32 * 1024;
 const MAXIMUM_OS_RELEASE_BYTES: u64 = 16 * 1024;
 static NIXOS_HOST: OnceLock<bool> = OnceLock::new();
 mod package_lock;
-pub use package_lock::{
-    LockedPackage, PackageDependency, PackageError, PackageLock, PackageManifest, PackageSource,
-    commit_store_bytes, resolve_manifests, verify_lock_store, write_lock_atomic,
-};
+pub use package_lock::LockedPackage;
+pub use package_lock::PackageDependency;
+pub use package_lock::PackageError;
+pub use package_lock::PackageLock;
+pub use package_lock::PackageManifest;
+pub use package_lock::PackageSource;
+pub use package_lock::commit_store_bytes;
+pub use package_lock::resolve_manifests;
+pub use package_lock::verify_lock_store;
+pub use package_lock::write_lock_atomic;
 mod mason_catalog;
 pub use mason_catalog::mason_filetype_for_path;
 mod catalog;
-pub use catalog::{
-    DebugProgramPolicy, ManagedFormatter, ToolArchiveFormat, ToolDefinition, ToolEntry,
-    ToolInstall, ToolKind, ToolStatus, ToolVersionPin, bundled_tool_catalog, discover_executable,
-    inspect_tools, inspect_tools_at, is_nixos_host, managed_formatter, managed_tool_executable,
-    managed_tool_installed_version, nix_lsp_launch_environment, nix_lsp_profile_installed,
-    nix_lsp_shell, nix_lsp_tool_installed, nix_lsp_workspace_root, rust_analyzer_is_rustup_proxy,
-    tool_launch_environment, tool_store_root,
-};
-pub(crate) use catalog::{executable_file, nix_lsp_launch_environment_for_workspace_at};
-mod installer_service;
-pub use installer_service::{ToolInstallProgress, ToolInstallResult, ToolInstaller, ToolOperation};
+pub use catalog::DebugProgramPolicy;
+pub use catalog::ManagedFormatter;
+pub use catalog::ToolArchiveFormat;
+pub use catalog::ToolDefinition;
+pub use catalog::ToolEntry;
+pub use catalog::ToolInstall;
+pub use catalog::ToolKind;
+pub use catalog::ToolStatus;
+pub use catalog::ToolVersionPin;
+pub use catalog::bundled_tool_catalog;
+pub use catalog::discover_executable;
+pub use catalog::inspect_tools;
+pub use catalog::inspect_tools_at;
+pub use catalog::is_nixos_host;
+pub use catalog::managed_formatter;
+pub use catalog::managed_tool_executable;
+pub use catalog::managed_tool_installed_version;
+pub use catalog::nix_lsp_launch_environment;
+pub use catalog::nix_lsp_profile_installed;
+pub use catalog::nix_lsp_shell;
+pub use catalog::nix_lsp_tool_installed;
+pub use catalog::nix_lsp_workspace_root;
+pub use catalog::rust_analyzer_is_rustup_proxy;
+pub use catalog::tool_launch_environment;
+pub use catalog::tool_store_root;
+pub(crate) use catalog::executable_file;
+pub(crate) use catalog::nix_lsp_launch_environment_for_workspace_at;
+mod installer;
+pub use installer_service::ToolInstallProgress;
+pub use installer_service::ToolInstallResult;
+pub use installer_service::ToolInstaller;
+pub use installer_service::ToolOperation;
 mod version;
-pub use version::{ToolVersionRequest, ToolVersionResult, ToolVersionService};
+pub use version::ToolVersionRequest;
+pub use version::ToolVersionResult;
+pub use version::ToolVersionService;
 mod nix_workspace;
-pub use nix_workspace::{NixWorkspaceResult, NixWorkspaceService};
+pub use nix_workspace::NixWorkspaceResult;
+pub use nix_workspace::NixWorkspaceService;
 mod compatibility;
 mod download;
 mod install;
 mod install_prepare;
 mod runtimes;
 pub use install::ToolInstallerError;
-mod package_service;
-pub use package_service::{
-    PackageManager, PackageOperation, PackageOperationResult, PackageService, PackageServiceEvent,
-    PreparedPackage,
-};
+mod packages;
+pub use package_service::PackageManager;
+pub use package_service::PackageOperation;
+pub use package_service::PackageOperationResult;
+pub use package_service::PackageService;
+pub use package_service::PackageServiceEvent;
+pub use package_service::PreparedPackage;
 
 #[cfg(test)]
 mod tests;

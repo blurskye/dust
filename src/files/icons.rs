@@ -30,7 +30,14 @@ const fn icon(glyph: &'static str, color: ExplorerIconColor) -> ExplorerIcon {
 /// filesystem basename lookup.
 #[must_use]
 pub fn directory_icon(name: &str) -> Option<ExplorerIcon> {
-    use ExplorerIconColor::{Azure, Blue, Cyan, Green, Grey, Orange, Purple, Yellow};
+    use ExplorerIconColor::Azure;
+    use ExplorerIconColor::Blue;
+    use ExplorerIconColor::Cyan;
+    use ExplorerIconColor::Green;
+    use ExplorerIconColor::Grey;
+    use ExplorerIconColor::Orange;
+    use ExplorerIconColor::Purple;
+    use ExplorerIconColor::Yellow;
     Some(match name {
         ".cache" | ".local" => icon("󰪺", Cyan),
         ".config" => icon("󱁿", Cyan),
@@ -55,7 +62,15 @@ pub fn directory_icon(name: &str) -> Option<ExplorerIcon> {
 /// handled before the final extension.
 #[must_use]
 pub fn file_icon(name: &str) -> Option<ExplorerIcon> {
-    use ExplorerIconColor::{Azure, Blue, Cyan, Green, Grey, Orange, Purple, Red, Yellow};
+    use ExplorerIconColor::Azure;
+    use ExplorerIconColor::Blue;
+    use ExplorerIconColor::Cyan;
+    use ExplorerIconColor::Green;
+    use ExplorerIconColor::Grey;
+    use ExplorerIconColor::Orange;
+    use ExplorerIconColor::Purple;
+    use ExplorerIconColor::Red;
+    use ExplorerIconColor::Yellow;
 
     let named = match name {
         "Cargo.lock" | "Cargo.toml" => Some(icon("", Orange)),
@@ -183,7 +198,7 @@ pub fn file_icon(name: &str) -> Option<ExplorerIcon> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::files::icons::*;
 
     #[test]
     fn filename_overrides_win_over_extensions() {

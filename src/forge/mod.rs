@@ -3,16 +3,16 @@
 //! worker thread; replies arrive on a channel.
 
 use serde_json::Value;
-use std::{
-    path::{Path, PathBuf},
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-        mpsc::{self, Receiver, Sender},
-    },
-    thread,
-    time::Duration,
-};
+use std::path::Path;
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
+use std::sync::mpsc::self;
+use std::sync::mpsc::Receiver;
+use std::sync::mpsc::Sender;
+use std::thread;
+use std::time::Duration;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PullRequest {
@@ -644,7 +644,11 @@ impl ForgeCommands<'_> {
     }
 
     fn run_bytes(&self, cwd: &Path, program: &str, arguments: &[&str]) -> Result<Vec<u8>, String> {
-        use crate::process::{JobEvent, JobPolicy, JobRequest, JobStream, JobSupervisor};
+        use crate::process::JobEvent;
+        use crate::process::JobPolicy;
+        use crate::process::JobRequest;
+        use crate::process::JobStream;
+        use crate::process::JobSupervisor;
         if self.cancelled.load(Ordering::Acquire) {
             return Err("forge request cancelled".into());
         }
@@ -842,7 +846,7 @@ fn gitea_comments(items: &[Value], root: &Path) -> Vec<ReviewComment> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::forge::*;
 
     static CANCELLED: AtomicBool = AtomicBool::new(false);
     static COMMANDS: ForgeCommands<'static> = ForgeCommands {

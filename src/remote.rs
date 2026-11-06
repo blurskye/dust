@@ -5,28 +5,61 @@
 //! (the MCP server of an agent session) sends `agent\t<json>` to start a subagent and
 //! waits on the same connection for its answer.
 
-use std::{
-    fs,
-    io::{self, BufRead, BufReader, Read, Write},
-    net::Shutdown,
-    os::fd::AsFd,
-    os::unix::{
-        ffi::{OsStrExt, OsStringExt},
-        fs::PermissionsExt,
-        net::{UnixListener, UnixStream},
-    },
-    path::{Path, PathBuf},
-    sync::{
-        Arc, Mutex,
-        atomic::{AtomicBool, Ordering},
-        mpsc,
-    },
-    thread,
-    time::{Duration, Instant},
-};
+use std::fs;
 
-use nix::poll::{PollFd, PollFlags, PollTimeout, poll};
-use serde_json::{Value, json};
+use std::io::self;
+
+use std::io::BufRead;
+
+use std::io::BufReader;
+
+use std::io::Read;
+
+use std::io::Write;
+
+use std::net::Shutdown;
+
+use std::os::fd::AsFd;
+
+use std::os::unix::ffi::OsStrExt;
+
+use std::os::unix::ffi::OsStringExt;
+
+use std::os::unix::fs::PermissionsExt;
+
+use std::os::unix::net::UnixListener;
+
+use std::os::unix::net::UnixStream;
+
+use std::path::Path;
+
+use std::path::PathBuf;
+
+use std::sync::Arc;
+
+use std::sync::Mutex;
+
+use std::sync::atomic::AtomicBool;
+
+use std::sync::atomic::Ordering;
+
+use std::sync::mpsc;
+
+use std::thread;
+
+use std::time::Duration;
+
+use std::time::Instant;
+
+use nix::poll::PollFd;
+
+use nix::poll::PollFlags;
+
+use nix::poll::PollTimeout;
+
+use nix::poll::poll;
+use serde_json::Value;
+use serde_json::json;
 
 /// The variable terminals started by Dust find the socket in.
 pub const SERVER_VARIABLE: &str = "DUST_SERVER";
@@ -67,7 +100,10 @@ impl Reply {
     /// The MCP client cancels a call by closing its connection. The request reader
     /// has already finished, so this is the only reader of this socket now.
     pub fn is_cancelled(&self) -> bool {
-        use nix::poll::{PollFd, PollFlags, PollTimeout, poll};
+        use nix::poll::PollFd;
+        use nix::poll::PollFlags;
+        use nix::poll::PollTimeout;
+        use nix::poll::poll;
         let mut descriptors = [PollFd::new(self.stream.as_fd(), PollFlags::POLLIN)];
         if !matches!(poll(&mut descriptors, PollTimeout::ZERO), Ok(1)) {
             return false;
@@ -420,7 +456,7 @@ pub fn lazygit_config(directory: &Path, dust: &Path) -> io::Result<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::*;
 
     #[test]
     fn a_sent_file_arrives_with_its_line() {

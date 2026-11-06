@@ -1,18 +1,16 @@
 //! Bounded, data-only theme discovery on the existing configuration worker.
-use super::ThemeConfig;
-use std::sync::{
-    Arc,
-    atomic::{AtomicBool, Ordering},
-};
-use std::{
-    fs,
-    io::Read,
-    path::{Path, PathBuf},
-    sync::mpsc::SyncSender,
-};
+use crate::config::ThemeConfig;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
+use std::fs;
+use std::io::Read;
+use std::path::Path;
+use std::path::PathBuf;
+use std::sync::mpsc::SyncSender;
 
 pub(super) const BUNDLED: &[(&str, &str)] = &[
-    ("dust", super::load::BUNDLED_THEME),
+    ("dust", crate::config::load::BUNDLED_THEME),
     (
         "catppuccin-latte",
         include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/themes/catppuccin-latte.toml")),
@@ -303,13 +301,13 @@ fn read_theme(path: &Path) -> Result<ThemeConfig, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::config::themes::*;
     use std::sync::mpsc;
     #[test]
     fn discovery_replaces_bundled_names_and_rejects_unsavable_names() {
         let root = tempfile::tempdir().unwrap();
-        let mut installed = super::super::load::bundled_theme();
-        installed.styles.accent.foreground = super::super::ThemeColor::Red;
+        let mut installed = crate::config::load::bundled_theme();
+        installed.styles.accent.foreground = crate::config::ThemeColor::Red;
         fs::write(
             root.path().join("dust.toml"),
             toml::to_string(&installed).unwrap(),
@@ -323,7 +321,7 @@ mod tests {
                 toml::to_string(&theme).unwrap(),
             )
             .unwrap();
-            let mut config = super::super::load::load_bundled_config().config;
+            let mut config = crate::config::load::load_bundled_config().config;
             config.ui.theme = name.into();
             assert!(config.validate().is_err());
         }
@@ -349,7 +347,7 @@ mod tests {
     fn discovery_validates_bounds_names_styles_and_cancellation() {
         let root = tempfile::tempdir().unwrap();
         let valid =
-            super::super::load::BUNDLED_THEME.replace("name = \"dust\"", "name = \"valid\"");
+            crate::config::load::BUNDLED_THEME.replace("name = \"dust\"", "name = \"valid\"");
         fs::write(root.path().join("valid.toml"), &valid).unwrap();
         fs::write(root.path().join("mismatch.toml"), &valid).unwrap();
         fs::write(root.path().join("broken.toml"), "not toml").unwrap();
@@ -367,7 +365,7 @@ mod tests {
             )
             .unwrap();
         }
-        let mut broken_style = super::super::load::bundled_theme();
+        let mut broken_style = crate::config::load::bundled_theme();
         broken_style.name = "style".into();
         broken_style.styles.accent.foreground_16 = None;
         fs::write(

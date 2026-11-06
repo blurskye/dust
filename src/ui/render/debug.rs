@@ -11,7 +11,7 @@
 
 use unicode_segmentation::UnicodeSegmentation;
 
-use super::WindowRect;
+use crate::ui::render::WindowRect;
 
 /// The width at which inspectors are worth docking on BOTH sides of the source.
 pub(crate) const DEBUG_WIDE_MIN_WIDTH: u16 = 96;
@@ -142,7 +142,7 @@ pub fn debug_pane_tab_at(
 }
 
 /// Long values go on to the next rows, since a value's end is often the part being looked for.
-pub(super) fn wrap_rows(body: &[String], width: u16, grid: &super::CellGrid) -> Vec<String> {
+pub(super) fn wrap_rows(body: &[String], width: u16, grid: &crate::ui::render::CellGrid) -> Vec<String> {
     let width = usize::from(width).max(3);
     let mut wrapped = Vec::new();
     for line in body {
@@ -297,7 +297,7 @@ pub struct DebugPanesUiState {
 }
 
 /// Cuts text to the width, ending in an ellipsis so a cut line doesn't read as the whole value.
-fn clip(text: &str, width: u16, grid: &super::CellGrid) -> String {
+fn clip(text: &str, width: u16, grid: &crate::ui::render::CellGrid) -> String {
     let width = usize::from(width);
     if grid.display_width(text) <= width {
         return text.to_owned();
@@ -319,10 +319,10 @@ fn clip(text: &str, width: u16, grid: &super::CellGrid) -> String {
     result
 }
 
-fn fill(grid: &mut super::CellGrid, rect: WindowRect) {
+fn fill(grid: &mut crate::ui::render::CellGrid, rect: WindowRect) {
     for y in rect.y..rect.y.saturating_add(rect.height) {
         for x in rect.x..rect.x.saturating_add(rect.width) {
-            grid.set_cell(x, y, " ", super::Style::Default);
+            grid.set_cell(x, y, " ", crate::ui::render::Style::Default);
         }
     }
 }
@@ -339,14 +339,14 @@ fn rows(pane: DebugPane, panes: &DebugPanesUiState) -> Vec<String> {
     }
 }
 
-fn draw_region(grid: &mut super::CellGrid, rect: WindowRect, title: &str, body: &[String]) {
+fn draw_region(grid: &mut crate::ui::render::CellGrid, rect: WindowRect, title: &str, body: &[String]) {
     fill(grid, rect);
     let inner = rect.width.saturating_sub(2);
     grid.put_text_clipped(
         rect.x + 1,
         rect.y,
         &clip(title, inner, grid),
-        super::Style::Accent,
+        crate::ui::render::Style::Accent,
         rect.x.saturating_add(rect.width),
     );
     for (index, line) in body
@@ -362,7 +362,7 @@ fn draw_region(grid: &mut super::CellGrid, rect: WindowRect, title: &str, body: 
             rect.x + 1,
             y,
             &clip(line, inner, grid),
-            super::Style::Muted,
+            crate::ui::render::Style::Muted,
             rect.x.saturating_add(rect.width),
         );
     }
@@ -371,7 +371,7 @@ fn draw_region(grid: &mut super::CellGrid, rect: WindowRect, title: &str, body: 
 /// Draw the coordinated arrangement into the regions it reserved. The workspace content was
 /// rendered at `layout.source`, so these regions hold no source: the panels cannot cover it.
 pub(crate) fn render_debug_panes(
-    frame: &mut super::Frame,
+    frame: &mut crate::ui::render::Frame,
     layout: DebugLayout,
     panes: &DebugPanesUiState,
 ) {
@@ -433,7 +433,7 @@ pub(crate) fn render_debug_panes(
                         tab_x,
                         tab_y,
                         &label,
-                        super::Style::Default,
+                        crate::ui::render::Style::Default,
                         strip.x.saturating_add(strip.width),
                     );
                     x = tab_x.saturating_add(label.chars().count() as u16 + 1);
@@ -447,7 +447,7 @@ pub(crate) fn render_debug_panes(
                         x,
                         y,
                         NEXT_PANE_HINT,
-                        super::Style::Muted,
+                        crate::ui::render::Style::Muted,
                         strip.x.saturating_add(strip.width),
                     );
                 }
@@ -476,7 +476,7 @@ pub(crate) fn render_debug_panes(
                         strip.x + 1,
                         row,
                         &clip(line, inner, &frame.grid),
-                        super::Style::Muted,
+                        crate::ui::render::Style::Muted,
                         strip.x.saturating_add(strip.width),
                     );
                 }
@@ -487,13 +487,13 @@ pub(crate) fn render_debug_panes(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::ui::render::debug::*;
 
     #[test]
     fn wide_inspector_rows_stay_inside_their_region() {
-        let mut grid = super::super::CellGrid::new_with_policy(80, 10, "�", "◌", true);
+        let mut grid = crate::ui::render::CellGrid::new_with_policy(80, 10, "�", "◌", true);
         for x in 30..80 {
-            grid.set_cell(x, 1, "x", super::super::Style::Default);
+            grid.set_cell(x, 1, "x", crate::ui::render::Style::Default);
         }
         let rect = WindowRect {
             x: 0,
@@ -511,7 +511,7 @@ mod tests {
     #[test]
     fn narrow_wrapping_leaves_room_for_wide_graphemes() {
         for wide in [false, true] {
-            let grid = super::super::CellGrid::new_with_policy(3, 10, "�", "◌", wide);
+            let grid = crate::ui::render::CellGrid::new_with_policy(3, 10, "�", "◌", wide);
             let rows = wrap_rows(&["1. 界界".into()], 3, &grid);
             assert_eq!(rows, ["1.", " 界", " 界"]);
             assert!(rows.iter().all(|row| grid.display_width(row) <= 3));
@@ -540,8 +540,8 @@ mod tests {
 
     #[test]
     fn narrow_console_shows_the_newest_output() {
-        let mut frame = super::super::Frame {
-            grid: super::super::CellGrid::new(80, 24),
+        let mut frame = crate::ui::render::Frame {
+            grid: crate::ui::render::CellGrid::new(80, 24),
             cursor: None,
         };
         let layout = debug_layout(80, 24).unwrap();

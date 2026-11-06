@@ -1,20 +1,22 @@
 //! Private event origins and consuming replies bound to the producing session.
-use std::{
-    collections::HashMap,
-    sync::{
-        Arc,
-        mpsc::{self, Receiver, SyncSender, TryRecvError, TrySendError},
-    },
-};
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::sync::mpsc::self;
+use std::sync::mpsc::Receiver;
+use std::sync::mpsc::SyncSender;
+use std::sync::mpsc::TryRecvError;
+use std::sync::mpsc::TrySendError;
 
-use crate::editor::text::{PositionEncoding, TextVersion};
+use crate::editor::text::PositionEncoding;
+
+use crate::editor::text::TextVersion;
 
 #[cfg(test)]
-use super::model::{LspDiagnostic, LspWorkspaceEdit};
-use super::{
-    model::{LspEvent, ServerRequestId},
-    session::SessionCommand,
-};
+use crate::language::lsp::model::LspDiagnostic;
+use crate::language::lsp::model::LspWorkspaceEdit;
+use crate::language::lsp::model::LspEvent;
+use crate::language::lsp::model::ServerRequestId;
+use crate::language::lsp::session::SessionCommand;
 
 #[derive(Clone, Debug)]
 pub(crate) struct EditContext {
@@ -190,8 +192,8 @@ impl EditSourceFixture {
         &self,
         generation: u64,
         method: &str,
-        document: &super::model::LspDocument,
-        result: super::model::LspFeatureResult,
+        document: &crate::language::lsp::model::LspDocument,
+        result: crate::language::lsp::model::LspFeatureResult,
     ) {
         self.events.send(LspEvent::Result {
             server: self.events.context.server.to_string(),
@@ -202,7 +204,7 @@ impl EditSourceFixture {
             result,
         });
     }
-    pub(crate) fn synced_document(&self) -> Option<super::model::LspDocument> {
+    pub(crate) fn synced_document(&self) -> Option<crate::language::lsp::model::LspDocument> {
         match self.commands.try_recv().ok()? {
             SessionCommand::SyncOwned { document, .. } => Some(document),
             _ => panic!("expected owned document sync"),
@@ -219,7 +221,7 @@ impl EditSourceFixture {
     pub(crate) fn saved_uri(&self) -> Option<String> {
         self.saved_document().map(|document| document.uri())
     }
-    pub(crate) fn saved_document(&self) -> Option<super::model::LspDocument> {
+    pub(crate) fn saved_document(&self) -> Option<crate::language::lsp::model::LspDocument> {
         while let Ok(command) = self.commands.try_recv() {
             if let SessionCommand::Save(document) = command {
                 return Some(document);
@@ -227,13 +229,13 @@ impl EditSourceFixture {
         }
         None
     }
-    pub(crate) fn configured(&self) -> Option<super::model::LspServerConfiguration> {
+    pub(crate) fn configured(&self) -> Option<crate::language::lsp::model::LspServerConfiguration> {
         match self.commands.try_recv().ok()? {
             SessionCommand::Configure(configuration) => Some(configuration),
             _ => None,
         }
     }
-    pub(crate) fn requested_feature(&self) -> Option<super::model::LspFeature> {
+    pub(crate) fn requested_feature(&self) -> Option<crate::language::lsp::model::LspFeature> {
         while let Ok(command) = self.commands.try_recv() {
             if let SessionCommand::Request { feature, .. } = command {
                 return Some(feature);
@@ -244,7 +246,7 @@ impl EditSourceFixture {
     pub(crate) fn executed_command(&self) -> Option<String> {
         while let Ok(command) = self.commands.try_recv() {
             if let SessionCommand::Request {
-                feature: super::model::LspFeature::ExecuteCommand(command),
+                feature: crate::language::lsp::model::LspFeature::ExecuteCommand(command),
                 ..
             } = command
             {
@@ -396,7 +398,7 @@ impl DiagnosticLineage {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::language::lsp::origins::*;
     #[test]
     fn full_event_queue_retains_lifecycle_and_result_events() {
         let (channel, receiver) = mpsc::sync_channel(1);

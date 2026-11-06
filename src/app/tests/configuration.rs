@@ -220,7 +220,7 @@ fn theme_picker_replaces_the_current_choice_with_its_installed_override() {
     let rows = &app.ui.picker.as_ref().unwrap().rows;
     assert_eq!(rows.iter().filter(|row| row.label == label).count(), 1);
     let key = match app.selected_picker_payload().unwrap() {
-        crate::app::search::PickerPayload::Theme(key) => key.clone(),
+        crate::app::picker::PickerPayload::Theme(key) => key.clone(),
         _ => panic!("theme key"),
     };
     assert_eq!(app.configuration.apply_theme(&key).unwrap(), installed.name);
@@ -335,7 +335,7 @@ fn theme_picker_previews_cancels_applies_and_never_overwrites_a_newer_reload() {
     app.handle_configured_key("up".parse().unwrap()); // wrap back to installed amber
     assert_eq!(app.configuration.theme(), &amber);
     let old_key = match app.selected_picker_payload().unwrap() {
-        crate::app::search::PickerPayload::Theme(key) => key.clone(),
+        crate::app::picker::PickerPayload::Theme(key) => key.clone(),
         _ => panic!("theme key"),
     };
     app.handle_configured_key("escape".parse().unwrap());
@@ -1329,7 +1329,7 @@ fn confirmation_keys_and_hints_follow_accepted_remaps() {
     );
     assert!(diagnostic.is_none());
     app.configuration.install_bindings(keymaps, false);
-    let (manager, fixture) = crate::extensions::ExecutionFixture::new(4);
+    let (manager, fixture) = crate::plugins::ExecutionFixture::new(4);
     app.extension.fixture_manager(manager);
     let confirm = |app: &mut App, token| {
         app.process_effect(AppEffect::PluginExecute {
@@ -1340,11 +1340,11 @@ fn confirmation_keys_and_hints_follow_accepted_remaps() {
         let invocation = fixture.take();
         fixture.reply_confirmation_request(
             &invocation,
-            crate::extensions::PluginConfirmationRequest {
+            crate::plugins::PluginConfirmationRequest {
                 token,
                 title: "Delete?".into(),
                 message: "target".into(),
-                default_answer: crate::extensions::PluginConfirmationAnswer::No,
+                default_answer: crate::plugins::PluginConfirmationAnswer::No,
             },
         );
         app.process_plugin_events();
@@ -1369,10 +1369,10 @@ fn confirmation_keys_and_hints_follow_accepted_remaps() {
     let cancelled = fixture.take();
     assert_eq!(
         cancelled.confirmation_results(),
-        [crate::extensions::PluginConfirmationResult {
+        [crate::plugins::PluginConfirmationResult {
             request: 7,
-            outcome: crate::extensions::PluginConfirmationOutcome::Answered(
-                crate::extensions::PluginConfirmationAnswer::Cancelled
+            outcome: crate::plugins::PluginConfirmationOutcome::Answered(
+                crate::plugins::PluginConfirmationAnswer::Cancelled
             ),
         }]
     );
@@ -1387,10 +1387,10 @@ fn confirmation_keys_and_hints_follow_accepted_remaps() {
     let yes = fixture.take();
     assert_eq!(
         yes.confirmation_results(),
-        [crate::extensions::PluginConfirmationResult {
+        [crate::plugins::PluginConfirmationResult {
             request: 8,
-            outcome: crate::extensions::PluginConfirmationOutcome::Answered(
-                crate::extensions::PluginConfirmationAnswer::Yes
+            outcome: crate::plugins::PluginConfirmationOutcome::Answered(
+                crate::plugins::PluginConfirmationAnswer::Yes
             ),
         }]
     );
@@ -2188,7 +2188,7 @@ fn plugin_alias_reload_requires_a_safe_label_before_command_completion() {
 #[test]
 fn plugin_aliases_and_dashboard_actions_wait_for_indexed_declarations() {
     let (_app_dirs, mut app) = app();
-    let mut manifest = crate::app::extensions::fixture_manifest("0".repeat(64));
+    let mut manifest = crate::app::plugins::fixture_manifest("0".repeat(64));
     manifest
         .commands
         .get_mut("drive")
@@ -2196,13 +2196,13 @@ fn plugin_aliases_and_dashboard_actions_wait_for_indexed_declarations() {
         .arguments
         .insert(
             "text".into(),
-            crate::extensions::PluginArgumentDeclaration {
-                kind: crate::extensions::PluginArgumentKind::String,
+            crate::plugins::PluginArgumentDeclaration {
+                kind: crate::plugins::PluginArgumentKind::String,
                 required: true,
             },
         );
     let index =
-        crate::extensions::index_manifest_contributions(&manifest, 1, "fixture".into()).unwrap();
+        crate::plugins::index_manifest_contributions(&manifest, 1, "fixture".into()).unwrap();
     let mut loaded = crate::config::load_bundled_config();
     loaded.installed_plugins.insert("demo".into());
     loaded
@@ -2421,9 +2421,9 @@ fn installed_package_bindings_are_deferred_without_a_duplicate_plugin_entry() {
 #[test]
 fn reload_preserves_plugin_window_rules() {
     let (_app_dirs, mut app) = app();
-    let manifest = crate::app::extensions::fixture_manifest("0".repeat(64));
+    let manifest = crate::app::plugins::fixture_manifest("0".repeat(64));
     let index =
-        crate::extensions::index_manifest_contributions(&manifest, 1, "fixture".into()).unwrap();
+        crate::plugins::index_manifest_contributions(&manifest, 1, "fixture".into()).unwrap();
     app.extension.fixture_contribution(index.clone()).unwrap();
     let mut loaded = crate::config::load_bundled_config();
     loaded.installed_plugins.insert("demo".into());
@@ -2441,26 +2441,26 @@ fn reload_preserves_plugin_window_rules() {
     app.reconcile_editor_windows();
     let opened = app.apply_plugin_ui_request(
         &index,
-        crate::extensions::PluginUiRequest {
+        crate::plugins::PluginUiRequest {
             token: 1,
-            kind: crate::extensions::PluginUiRequestKind::OpenWindow {
+            kind: crate::plugins::PluginUiRequestKind::OpenWindow {
                 expected_graph_revision: app.window_session.graph().revision().unwrap(),
                 content_type: "plugin.demo.panel".into(),
                 title: "Demo".into(),
-                placement: crate::extensions::PluginRequestedPlacement::Floating {
+                placement: crate::plugins::PluginRequestedPlacement::Floating {
                     x: 1,
                     y: 1,
                     width: 20,
                     height: 8,
                 },
-                tree: Some(crate::extensions::PluginUiTree {
+                tree: Some(crate::plugins::PluginUiTree {
                     revision: 1,
                     root: 1,
-                    nodes: vec![crate::extensions::PluginUiNode {
+                    nodes: vec![crate::plugins::PluginUiNode {
                         id: 1,
-                        kind: crate::extensions::PluginUiNodeKind::Text,
+                        kind: crate::plugins::PluginUiNodeKind::Text,
                         text: "Demo panel".into(),
-                        style: crate::extensions::PluginUiStyle::Default,
+                        style: crate::plugins::PluginUiStyle::Default,
                         action: None,
                         children: Vec::new(),
                     }],

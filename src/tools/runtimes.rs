@@ -1,37 +1,67 @@
-use std::{
-    collections::BTreeMap,
-    env,
-    ffi::OsString,
-    fs,
-    path::{Path, PathBuf},
-    process::{Command, Stdio},
-    sync::mpsc::Receiver,
-    thread,
-    time::{Duration, Instant},
-};
+use std::collections::BTreeMap;
+use std::env;
+use std::ffi::OsString;
+use std::fs;
+use std::path::Path;
+use std::path::PathBuf;
+use std::process::Command;
+use std::process::Stdio;
+use std::sync::mpsc::Receiver;
+use std::thread;
+use std::time::Duration;
+use std::time::Instant;
 
-use super::{
-    NIX_COMPATIBILITY_FLAKE_PACKAGE,
-    catalog::{
-        NixCompatibilityRuntime, ToolArchiveFormat, ToolDefinition, discover_executable,
-        nix_lsp_shell, parse_nix_runtime_environment, rust_analyzer_is_rustup_proxy,
-        write_managed_tool_version,
-    },
-    compatibility::{
-        MANAGED_RUNTIME_MARKER, elf_interpreter, patch_nix_compatibility_tree,
-        patch_nix_compatible_executable, runtime_artifact,
-    },
-    download::{
-        ToolProgressReporter, download_checked, extract_one, extract_tar_gzip_tree,
-        prepare_executable, replace_managed_directory,
-    },
-    install::install_tool,
-    install_prepare::{
-        TOOL_INSTALL_TIMEOUT, ensure_private_directory, prepare_nix_lsp_workspace_at,
-        validate_tool_id,
-    },
-    package_lock::next_temp_suffix,
-};
+use crate::tools::NIX_COMPATIBILITY_FLAKE_PACKAGE;
+
+use crate::tools::catalog::NixCompatibilityRuntime;
+
+use crate::tools::catalog::ToolArchiveFormat;
+
+use crate::tools::catalog::ToolDefinition;
+
+use crate::tools::catalog::discover_executable;
+
+use crate::tools::catalog::nix_lsp_shell;
+
+use crate::tools::catalog::parse_nix_runtime_environment;
+
+use crate::tools::catalog::rust_analyzer_is_rustup_proxy;
+
+use crate::tools::catalog::write_managed_tool_version;
+
+use crate::tools::compatibility::MANAGED_RUNTIME_MARKER;
+
+use crate::tools::compatibility::elf_interpreter;
+
+use crate::tools::compatibility::patch_nix_compatibility_tree;
+
+use crate::tools::compatibility::patch_nix_compatible_executable;
+
+use crate::tools::compatibility::runtime_artifact;
+
+use crate::tools::download::ToolProgressReporter;
+
+use crate::tools::download::download_checked;
+
+use crate::tools::download::extract_one;
+
+use crate::tools::download::extract_tar_gzip_tree;
+
+use crate::tools::download::prepare_executable;
+
+use crate::tools::download::replace_managed_directory;
+
+use crate::tools::install::install_tool;
+
+use crate::tools::install_prepare::TOOL_INSTALL_TIMEOUT;
+
+use crate::tools::install_prepare::ensure_private_directory;
+
+use crate::tools::install_prepare::prepare_nix_lsp_workspace_at;
+
+use crate::tools::install_prepare::validate_tool_id;
+
+use crate::tools::package_lock::next_temp_suffix;
 
 pub(super) fn fhs_glibc_loader_available() -> bool {
     [
@@ -803,7 +833,7 @@ pub(super) fn uninstall_nix_lsp_tool(
 
 #[cfg(test)]
 mod installer_output_tests {
-    use super::*;
+    use crate::tools::runtimes::*;
 
     #[test]
     fn a_failed_installer_reports_the_end_of_what_it_printed() {

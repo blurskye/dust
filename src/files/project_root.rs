@@ -1,16 +1,21 @@
-use std::{
-    fs, io,
-    path::{Path, PathBuf},
-    sync::mpsc::{self, Receiver, TryRecvError},
-    thread,
-};
+use std::fs;
+use std::io;
+use std::path::Path;
+use std::path::PathBuf;
+use std::sync::mpsc::self;
+use std::sync::mpsc::Receiver;
+use std::sync::mpsc::TryRecvError;
+use std::thread;
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
-use super::{
-    error::VfsError,
-    vfs::{canonical_path, read_file_with_ceiling},
-};
+use serde::Serialize;
+
+use crate::files::error::VfsError;
+
+use crate::files::vfs::canonical_path;
+
+use crate::files::vfs::read_file_with_ceiling;
 
 pub const PROJECT_ROOT_MARKER_CEILING: usize = 16;
 pub const PROJECT_ROOT_ANCESTOR_CEILING: usize = 64;

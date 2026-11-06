@@ -1,29 +1,49 @@
-use std::{
-    fs,
-    io::{self, Read, Write},
-    path::{Path, PathBuf},
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-        mpsc::{self, Receiver, SyncSender, TryRecvError, TrySendError},
-    },
-    thread::{self, JoinHandle},
-    time::Duration,
-};
+use std::fs;
+use std::io::self;
+use std::io::Read;
+use std::io::Write;
+use std::path::Path;
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
+use std::sync::mpsc::self;
+use std::sync::mpsc::Receiver;
+use std::sync::mpsc::SyncSender;
+use std::sync::mpsc::TryRecvError;
+use std::sync::mpsc::TrySendError;
+use std::thread::self;
+use std::thread::JoinHandle;
+use std::time::Duration;
 
 #[cfg(unix)]
 use std::fs::File;
 
 use tempfile::NamedTempFile;
 
-use super::{
-    error::VfsError,
-    explorer_intent::{ExplorerIo, ExplorerIoReply, PreparedExplorerMutation},
-    recovery::{
-        DOCUMENT_BYTE_CEILING, RecoveryCleanup, RecoveryDiscovery, RecoveryRecord,
-        cleanup_recovery, discover_recovery_bounded, read_bounded_bytes, write_recovery,
-    },
-};
+use crate::files::error::VfsError;
+
+use crate::files::explorer_intent::ExplorerIo;
+
+use crate::files::explorer_intent::ExplorerIoReply;
+
+use crate::files::explorer_intent::PreparedExplorerMutation;
+
+use crate::files::recovery::DOCUMENT_BYTE_CEILING;
+
+use crate::files::recovery::RecoveryCleanup;
+
+use crate::files::recovery::RecoveryDiscovery;
+
+use crate::files::recovery::RecoveryRecord;
+
+use crate::files::recovery::cleanup_recovery;
+
+use crate::files::recovery::discover_recovery_bounded;
+
+use crate::files::recovery::read_bounded_bytes;
+
+use crate::files::recovery::write_recovery;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct RequestId(pub u64);
@@ -713,7 +733,7 @@ impl VfsWorker {
                                     let discovery = discover_recovery_bounded(
                                         &directory,
                                         maximum_records,
-                                        super::recovery::RECOVERY_JOURNAL_BYTE_CEILING,
+                                        crate::files::recovery::RECOVERY_JOURNAL_BYTE_CEILING,
                                     );
                                     VfsResult::RecoveryDiscovered { id, discovery }
                                 }
@@ -1352,7 +1372,10 @@ pub(super) fn open_scoped(
 }
 
 pub(crate) fn open_no_symlinks(path: &Path, flags: rustix::fs::OFlags) -> io::Result<fs::File> {
-    use rustix::fs::{CWD, Mode, OFlags, openat};
+    use rustix::fs::CWD;
+    use rustix::fs::Mode;
+    use rustix::fs::OFlags;
+    use rustix::fs::openat;
     let relative = path
         .strip_prefix("/")
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "expected an absolute path"))?;
@@ -1370,7 +1393,9 @@ fn open_beneath(
     relative: &Path,
     flags: rustix::fs::OFlags,
 ) -> io::Result<fs::File> {
-    use rustix::fs::{Mode, OFlags, openat};
+    use rustix::fs::Mode;
+    use rustix::fs::OFlags;
+    use rustix::fs::openat;
     use std::path::Component;
     let mut components = relative
         .components()
@@ -1499,9 +1524,14 @@ pub(super) fn apply_explorer_mutation(
     roots: &[PathBuf],
     maximum_bytes: u64,
 ) -> Result<(), VfsError> {
-    use rustix::fs::{
-        AtFlags, Mode, OFlags, RenameFlags, mkdirat, openat, renameat_with, unlinkat,
-    };
+    use rustix::fs::AtFlags;
+    use rustix::fs::Mode;
+    use rustix::fs::OFlags;
+    use rustix::fs::RenameFlags;
+    use rustix::fs::mkdirat;
+    use rustix::fs::openat;
+    use rustix::fs::renameat_with;
+    use rustix::fs::unlinkat;
     let error = |path: &Path, source: rustix::io::Errno| VfsError::Io {
         operation: "mutate explorer entry",
         path: path.into(),
@@ -1987,7 +2017,9 @@ fn persist_missing(path: &Path, temporary: NamedTempFile) -> Result<(), VfsError
 }
 
 fn replace_exact(path: &Path, temporary: NamedTempFile, expected: &[u8]) -> Result<(), VfsError> {
-    use rustix::fs::{CWD, RenameFlags, renameat_with};
+    use rustix::fs::CWD;
+    use rustix::fs::RenameFlags;
+    use rustix::fs::renameat_with;
     // Keep the displaced entry until its bytes have been checked as well: another
     // writer can replace the destination between final validation and this exchange.
     renameat_with(CWD, temporary.path(), CWD, path, RenameFlags::EXCHANGE).map_err(|source| {
@@ -2041,10 +2073,18 @@ pub(crate) fn lock_file(path: &Path) -> io::Result<nix::fcntl::Flock<File>> {
 /// Agent paths are already resolved. Open each directory without following
 /// symlinks and keep the parent descriptor for creation, rename and cleanup.
 fn agent_atomic_write(root: &Path, path: &Path, bytes: &[u8]) -> Result<(), VfsError> {
-    use rustix::fs::{
-        AtFlags, FileType, Mode, OFlags, fchmod, mkdirat, openat, renameat, statat, unlinkat,
-    };
-    use std::{path::Component, sync::atomic::AtomicU64};
+    use rustix::fs::AtFlags;
+    use rustix::fs::FileType;
+    use rustix::fs::Mode;
+    use rustix::fs::OFlags;
+    use rustix::fs::fchmod;
+    use rustix::fs::mkdirat;
+    use rustix::fs::openat;
+    use rustix::fs::renameat;
+    use rustix::fs::statat;
+    use rustix::fs::unlinkat;
+    use std::path::Component;
+    use std::sync::atomic::AtomicU64;
     static NEXT_TEMPORARY: AtomicU64 = AtomicU64::new(0);
 
     let relative = path
@@ -2191,7 +2231,8 @@ fn stage_atomic_write(path: &Path, bytes: &[u8]) -> Result<NamedTempFile, VfsErr
     })?;
     match fs::metadata(path) {
         Ok(metadata) => {
-            use std::os::unix::fs::{MetadataExt, fchown};
+            use std::os::unix::fs::MetadataExt;
+            use std::os::unix::fs::fchown;
             fchown(
                 temporary.as_file(),
                 Some(metadata.uid()),
@@ -2249,7 +2290,7 @@ pub(super) fn sync_parent(_parent: &Path) -> Result<(), VfsError> {
 
 #[cfg(test)]
 mod lifecycle_tests {
-    use super::*;
+    use crate::files::vfs::*;
     fn result(worker: &VfsWorker) -> VfsResult {
         let deadline = std::time::Instant::now() + Duration::from_secs(2);
         loop {
@@ -2504,7 +2545,9 @@ mod lifecycle_tests {
 
     #[test]
     fn scoped_descriptors_reject_swapped_ancestors_and_pin_mutation_parents() {
-        use rustix::fs::{AtFlags, OFlags, unlinkat};
+        use rustix::fs::AtFlags;
+        use rustix::fs::OFlags;
+        use rustix::fs::unlinkat;
         let root = tempfile::tempdir().unwrap();
         let outside = tempfile::tempdir().unwrap();
         let sub = root.path().join("sub");

@@ -1,6 +1,14 @@
 use std::num::NonZeroU64;
 
-use crate::editor::{CommandError, CommandInvocation, CommandValue, EditorMode, InvocationSource};
+use crate::editor::CommandError;
+
+use crate::editor::CommandInvocation;
+
+use crate::editor::CommandValue;
+
+use crate::editor::EditorMode;
+
+use crate::editor::InvocationSource;
 use thiserror::Error;
 
 pub const ABSOLUTE_MAX_COUNT: u64 = 1_000_000;
@@ -505,16 +513,24 @@ pub enum InputError {
 mod tests {
     use std::num::NonZeroU64;
 
-    use crate::editor::{CommandValue, EditorMode};
+    use crate::editor::CommandValue;
 
-    use super::{GrammarInput, InputAction, ModalResolver, PendingInputContext};
+    use crate::editor::EditorMode;
+
+    use crate::editor::input::grammar::GrammarInput;
+
+    use crate::editor::input::grammar::InputAction;
+
+    use crate::editor::input::grammar::ModalResolver;
+
+    use crate::editor::input::grammar::PendingInputContext;
 
     #[test]
     fn configured_count_limit_is_enforced_below_the_absolute_ceiling() {
         let mut resolver = ModalResolver::with_count_limit(2);
         assert!(matches!(
             resolver.feed(EditorMode::Normal, GrammarInput::Count(3)),
-            Err(super::InputError::CountOverflow(2))
+            Err(crate::editor::input::grammar::InputError::CountOverflow(2))
         ));
     }
 
@@ -564,7 +580,7 @@ mod tests {
     #[test]
     fn decorated_invocations_preserve_an_explicit_count_of_one() {
         let mut resolver = ModalResolver::default();
-        let mut invocation = super::command("view.cursor.move").unwrap();
+        let mut invocation = crate::editor::input::grammar::command("view.cursor.move").unwrap();
         resolver.decorate_invocation(&mut invocation);
         assert_eq!(invocation.count, None);
         resolver

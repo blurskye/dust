@@ -1322,7 +1322,7 @@ fn explorer_projection_formats_only_the_terminal_viewport() {
     });
     assert_eq!(
         app.explorer.tree().selected_id(),
-        Some(crate::workspace::ExplorerNodeId(first_viewport_node))
+        Some(crate::app::explorer::tree::ExplorerNodeId(first_viewport_node))
     );
     assert_eq!(
         app.explorer.tree().projection_generation(),
@@ -2493,8 +2493,8 @@ fn workspace_file_command_uses_bounded_picker_and_opens_selection() {
 
 #[test]
 fn file_preview_retries_after_capacity_returns_without_picker_input() {
-    use crate::app::search::MatcherSource;
-    use crate::app::search::PickerPayload;
+    use crate::app::picker::MatcherSource;
+    use crate::app::picker::PickerPayload;
     let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("preview.txt");
     fs::write(&path, "ready\n").unwrap();
@@ -5740,7 +5740,7 @@ fn a_previewed_replacement_writes_nothing_until_it_is_confirmed() {
                 source: "worktrees".into(),
                 action: crate::workspace::PickerAction::None,
             },
-            crate::app::search::PickerPayload::GitWorktree {
+            crate::app::picker::PickerPayload::GitWorktree {
                 main: false,
                 name: "missing-worktree".into(),
                 path: root.join("missing-worktree"),
@@ -6860,7 +6860,7 @@ fn palette_finds_plugin_titles_without_configured_labels_and_honors_overrides() 
     let mut manifest = crate::app::tests::plugin_manifest("demo", "plugin.demo.keymap.dashboard", "x");
     manifest.commands.get_mut("run").unwrap().title = "Print Hello".into();
     let index =
-        crate::extensions::index_manifest_contributions(&manifest, 1, "fixture".into()).unwrap();
+        crate::plugins::index_manifest_contributions(&manifest, 1, "fixture".into()).unwrap();
     app.register_indexed_plugin_commands(&index).unwrap();
     assert!(
         !app.configuration
@@ -7172,7 +7172,7 @@ fn matcher_navigation_uses_the_open_buffer_after_its_file_is_deleted() {
     app.state
         .open_text(TextBuffer::from_text("other"), None)
         .unwrap();
-    app.navigate_matcher_source(crate::app::search::MatcherSource {
+    app.navigate_matcher_source(crate::app::picker::MatcherSource {
         path,
         line: 1,
         column: 2,
@@ -7190,7 +7190,7 @@ fn deferred_navigation_does_not_replace_a_newer_buffer_choice() {
     let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("late.txt");
     fs::write(&path, "destination").unwrap();
-    app.navigate_matcher_source(crate::app::search::MatcherSource {
+    app.navigate_matcher_source(crate::app::picker::MatcherSource {
         path,
         line: 0,
         column: 0,
@@ -7453,8 +7453,8 @@ fn save_and_stage_refreshes_the_pre_save_hunk_snapshot() {
 
 #[test]
 fn file_picker_can_filter_an_entry_after_the_display_limit() {
-    use crate::app::search::PickerOrigin;
-    use crate::app::search::PickerPayload;
+    use crate::app::picker::PickerOrigin;
+    use crate::app::picker::PickerPayload;
     let (_app_dirs, mut app) = app();
     app.start_workspace_file_picker();
     let items = (0..10_001)
@@ -7584,7 +7584,7 @@ fn conflict_picker_resolves_paths_from_the_repository_root() {
         thread::yield_now();
     }
     app.open_git_conflicts();
-    let Some(crate::app::search::PickerPayload::MatcherSource(source)) =
+    let Some(crate::app::picker::PickerPayload::MatcherSource(source)) =
         app.selected_picker_payload()
     else {
         panic!("conflict row missing")

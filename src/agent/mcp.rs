@@ -7,16 +7,31 @@
 //! then uses `DUST_AGENT_TAB`, which Dust sets for every agent it starts. Outside Dust, or in
 //! a subagent, the server offers no tools.
 
-use std::{
-    io::{self, BufRead, Read, Write},
-    net::Shutdown,
-    os::unix::net::UnixStream,
-    path::{Path, PathBuf},
-    sync::{Arc, Mutex},
-    thread,
-};
+use std::io::self;
 
-use serde_json::{Value, json};
+use std::io::BufRead;
+
+use std::io::Read;
+
+use std::io::Write;
+
+use std::net::Shutdown;
+
+use std::os::unix::net::UnixStream;
+
+use std::path::Path;
+
+use std::path::PathBuf;
+
+use std::sync::Arc;
+
+use std::sync::Mutex;
+
+use std::thread;
+
+use serde_json::Value;
+
+use serde_json::json;
 
 use crate::remote;
 
@@ -243,16 +258,17 @@ fn call(stream: UnixStream, tab: u64, params: &Value) -> Value {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use std::{
-        io::{BufReader, Cursor},
-        os::unix::net::UnixListener,
-        time::{Duration, Instant},
-    };
+    use crate::agent::*;
+    use std::io::BufReader;
+    use std::io::Cursor;
+    use std::os::unix::net::UnixListener;
+    use std::time::Duration;
+    use std::time::Instant;
 
     #[test]
     fn mcp_server_entry_rejects_non_utf8_paths() {
-        use std::{ffi::OsStr, os::unix::ffi::OsStrExt};
+        use std::ffi::OsStr;
+        use std::os::unix::ffi::OsStrExt;
         let invalid = Path::new(OsStr::from_bytes(b"/invalid-\xff"));
         let valid = Path::new("/dust");
         assert!(

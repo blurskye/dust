@@ -1,42 +1,118 @@
-use std::{
-    cell::Cell,
-    fs::File,
-    io::{self, IsTerminal, Stdout, Write},
-    os::fd::AsFd,
-    panic,
-    sync::Once,
-    time::Duration,
-};
+use std::cell::Cell;
+use std::fs::File;
+use std::io::self;
+use std::io::IsTerminal;
+use std::io::Stdout;
+use std::io::Write;
+use std::os::fd::AsFd;
+use std::panic;
+use std::sync::Once;
+use std::time::Duration;
 
-use crossterm::{
-    cursor::{Hide, MoveTo, SetCursorStyle, Show},
-    event::{
-        self, DisableBracketedPaste, DisableFocusChange, DisableMouseCapture, EnableBracketedPaste,
-        EnableFocusChange, EnableMouseCapture, Event, KeyCode as CtKeyCode, KeyEventKind,
-        KeyModifiers, KeyboardEnhancementFlags, MouseButton, MouseEventKind,
-        PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
-    },
-    execute, queue,
-    style::{
-        Attribute, Color, Print, ResetColor, SetAttribute, SetBackgroundColor, SetForegroundColor,
-    },
-    terminal::{
-        self, BeginSynchronizedUpdate, Clear, ClearType, EndSynchronizedUpdate,
-        EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
-    },
-};
+use crossterm::cursor::Hide;
 
-use nix::{
-    errno::Errno,
-    poll::{PollFd, PollFlags, PollTimeout, poll},
-};
+use crossterm::cursor::MoveTo;
 
-use crate::config::{ColorMode, ThemeAttribute, ThemeColor, ThemeConfig, ThemeStyle};
-use crate::editor::input::{KeyCode, KeyEvent, Modifiers};
+use crossterm::cursor::SetCursorStyle;
+
+use crossterm::cursor::Show;
+
+use crossterm::event::self;
+
+use crossterm::event::DisableBracketedPaste;
+
+use crossterm::event::DisableFocusChange;
+
+use crossterm::event::DisableMouseCapture;
+
+use crossterm::event::EnableBracketedPaste;
+
+use crossterm::event::EnableFocusChange;
+
+use crossterm::event::EnableMouseCapture;
+
+use crossterm::event::Event;
+
+use crossterm::event::KeyCode as CtKeyCode;
+
+use crossterm::event::KeyEventKind;
+
+use crossterm::event::KeyModifiers;
+
+use crossterm::event::KeyboardEnhancementFlags;
+
+use crossterm::event::MouseButton;
+
+use crossterm::event::MouseEventKind;
+
+use crossterm::event::PopKeyboardEnhancementFlags;
+
+use crossterm::event::PushKeyboardEnhancementFlags;
+
+use crossterm::execute;
+
+use crossterm::queue;
+
+use crossterm::style::Attribute;
+
+use crossterm::style::Color;
+
+use crossterm::style::Print;
+
+use crossterm::style::ResetColor;
+
+use crossterm::style::SetAttribute;
+
+use crossterm::style::SetBackgroundColor;
+
+use crossterm::style::SetForegroundColor;
+
+use crossterm::terminal::self;
+
+use crossterm::terminal::BeginSynchronizedUpdate;
+
+use crossterm::terminal::Clear;
+
+use crossterm::terminal::ClearType;
+
+use crossterm::terminal::EndSynchronizedUpdate;
+
+use crossterm::terminal::EnterAlternateScreen;
+
+use crossterm::terminal::LeaveAlternateScreen;
+
+use crossterm::terminal::disable_raw_mode;
+
+use crossterm::terminal::enable_raw_mode;
+
+use nix::errno::Errno;
+
+use nix::poll::PollFd;
+
+use nix::poll::PollFlags;
+
+use nix::poll::PollTimeout;
+
+use nix::poll::poll;
+
+use crate::config::ColorMode;
+
+use crate::config::ThemeAttribute;
+
+use crate::config::ThemeColor;
+
+use crate::config::ThemeConfig;
+
+use crate::config::ThemeStyle;
+use crate::editor::input::KeyCode;
+use crate::editor::input::KeyEvent;
+use crate::editor::input::Modifiers;
 use crate::language::syntax::Highlight;
 use thiserror::Error;
 
-use crate::ui::{Frame, Style};
+use crate::ui::Frame;
+
+use crate::ui::Style;
 
 static PANIC_HOOK: Once = Once::new();
 
@@ -872,23 +948,44 @@ pub enum TerminalError {
 
 #[cfg(test)]
 mod tests {
-    use crate::editor::input::{KeyCode as DustKeyCode, Modifiers};
-    use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
+    use crate::editor::input::KeyCode as DustKeyCode;
+    use crate::editor::input::Modifiers;
+    use crossterm::event::Event;
+    use crossterm::event::KeyCode;
+    use crossterm::event::KeyEvent;
+    use crossterm::event::KeyModifiers;
+    use crossterm::event::MouseEvent;
+    use crossterm::event::MouseEventKind;
 
-    use super::{
-        ColorTier, KeyInputKind, UiEvent, configured_color_tier, normalize_event, queue_style,
-        terminal_color, tier_color,
-    };
+    use crate::ui::terminal::ColorTier;
+
+    use crate::ui::terminal::KeyInputKind;
+
+    use crate::ui::terminal::UiEvent;
+
+    use crate::ui::terminal::configured_color_tier;
+
+    use crate::ui::terminal::normalize_event;
+
+    use crate::ui::terminal::queue_style;
+
+    use crate::ui::terminal::terminal_color;
+
+    use crate::ui::terminal::tier_color;
 
     #[test]
     fn resize_events_are_serviced_without_tty_input() {
-        use portable_pty::{CommandBuilder, PtySize, native_pty_system};
-        use std::io::{Read, Write};
-        use std::time::{Duration, Instant};
+        use portable_pty::CommandBuilder;
+        use portable_pty::PtySize;
+        use portable_pty::native_pty_system;
+        use std::io::Read;
+        use std::io::Write;
+        use std::time::Duration;
+        use std::time::Instant;
 
         if std::env::var_os("DUST_TEST_RESIZE_CHILD").is_some() {
-            let terminal = super::TerminalSession::enter(
-                super::TerminalOptions {
+            let terminal = crate::ui::terminal::TerminalSession::enter(
+                crate::ui::terminal::TerminalOptions {
                     color_mode: crate::config::ColorMode::Ansi16,
                     alternate_screen: false,
                     bracketed_paste: false,
@@ -962,16 +1059,18 @@ mod tests {
 
     #[test]
     fn base64_matches_the_standard_alphabet_and_padding() {
-        assert_eq!(super::base64(b""), "");
-        assert_eq!(super::base64(b"f"), "Zg==");
-        assert_eq!(super::base64(b"fo"), "Zm8=");
-        assert_eq!(super::base64(b"foo"), "Zm9v");
-        assert_eq!(super::base64(b"hello\n"), "aGVsbG8K");
+        assert_eq!(crate::ui::terminal::base64(b""), "");
+        assert_eq!(crate::ui::terminal::base64(b"f"), "Zg==");
+        assert_eq!(crate::ui::terminal::base64(b"fo"), "Zm8=");
+        assert_eq!(crate::ui::terminal::base64(b"foo"), "Zm9v");
+        assert_eq!(crate::ui::terminal::base64(b"hello\n"), "aGVsbG8K");
     }
 
     #[test]
     fn frame_painting_hides_intermediate_cursor_moves_and_publishes_one_final_cursor() {
-        use crate::ui::{CellGrid, Frame, Style};
+        use crate::ui::CellGrid;
+        use crate::ui::Frame;
+        use crate::ui::Style;
         use crossterm::cursor::SetCursorStyle;
 
         let theme = crate::config::load_bundled_config().theme;
@@ -983,7 +1082,7 @@ mod tests {
         frame.grid.put_text(0, 3, "status", Style::Status);
         let mut output = Vec::new();
         assert!(
-            super::queue_frame(&mut output, &frame, None, &theme, ColorTier::TrueColor).unwrap()
+            crate::ui::terminal::queue_frame(&mut output, &frame, None, &theme, ColorTier::TrueColor).unwrap()
         );
         let emitted = String::from_utf8(output).unwrap();
         assert!(emitted.starts_with("\x1b[?2026h\x1b[?25l\x1b[2J"));
@@ -995,7 +1094,7 @@ mod tests {
         // An unchanged frame must not move/show the cursor or restart its blink/trail.
         let mut output = Vec::new();
         assert!(
-            !super::queue_frame(
+            !crate::ui::terminal::queue_frame(
                 &mut output,
                 &frame,
                 Some(&frame),
@@ -1009,7 +1108,7 @@ mod tests {
         // A background/status-only update keeps the real cursor in place.
         let previous = frame.clone();
         frame.grid.put_text(0, 3, "update", Style::Default);
-        super::queue_frame(
+        crate::ui::terminal::queue_frame(
             &mut output,
             &frame,
             Some(&previous),
@@ -1026,7 +1125,7 @@ mod tests {
         let previous = frame.clone();
         frame.cursor = Some((3, 2, SetCursorStyle::SteadyBar));
         let mut output = Vec::new();
-        super::queue_frame(
+        crate::ui::terminal::queue_frame(
             &mut output,
             &frame,
             Some(&previous),
@@ -1040,7 +1139,7 @@ mod tests {
         let previous = frame.clone();
         frame.cursor = None;
         let mut output = Vec::new();
-        super::queue_frame(
+        crate::ui::terminal::queue_frame(
             &mut output,
             &frame,
             Some(&previous),
@@ -1056,7 +1155,7 @@ mod tests {
         // Invalidated/resize frames still clear and redraw under the same protection.
         frame.grid = CellGrid::new(8, 3);
         let mut output = Vec::new();
-        super::queue_frame(
+        crate::ui::terminal::queue_frame(
             &mut output,
             &frame,
             Some(&previous),
@@ -1228,7 +1327,7 @@ mod tests {
             (PtyColor::Rgb(255, 0, 0), crossterm::style::Color::Red),
         ] {
             assert_eq!(
-                super::terminal_pty_color(input, ColorTier::Ansi16),
+                crate::ui::terminal::terminal_pty_color(input, ColorTier::Ansi16),
                 expected
             );
         }
@@ -1259,7 +1358,7 @@ mod tests {
         theme.styles.status.foreground_16 = Some(ThemeColor::White);
         theme.styles.selection.background_256 = Some(ThemeColor::Indexed(236));
         theme.styles.selection.background_16 = Some(ThemeColor::DarkGrey);
-        let section = super::status_bar_style(crate::ui::Style::StatusSection, &theme);
+        let section = crate::ui::terminal::status_bar_style(crate::ui::Style::StatusSection, &theme);
         assert_eq!(section.foreground, theme.styles.status.foreground);
         assert_eq!(section.foreground_256, theme.styles.status.foreground_256);
         assert_eq!(section.foreground_16, theme.styles.status.foreground_16);
@@ -1279,7 +1378,7 @@ mod tests {
     #[test]
     fn terminal_restoration_balances_enabled_modes_once() {
         for enabled in [false, true] {
-            let options = super::TerminalOptions {
+            let options = crate::ui::terminal::TerminalOptions {
                 color_mode: crate::config::ColorMode::Ansi16,
                 alternate_screen: enabled,
                 bracketed_paste: enabled,
@@ -1287,7 +1386,7 @@ mod tests {
                 mouse: enabled,
             };
             let mut output = Vec::new();
-            super::queue_terminal_restore(&mut output, options, true).unwrap();
+            crate::ui::terminal::queue_terminal_restore(&mut output, options, true).unwrap();
             let emitted = String::from_utf8(output).unwrap();
             assert_eq!(emitted.matches("\x1b[<1u").count(), 1);
             for sequence in ["\x1b[?1049l", "\x1b[?2004l", "\x1b[?1004l", "\x1b[?1000l"] {
@@ -1295,7 +1394,7 @@ mod tests {
             }
             assert!(emitted.contains("\x1b[?25h"));
             let mut before_keyboard_push = Vec::new();
-            super::queue_terminal_restore(&mut before_keyboard_push, options, false).unwrap();
+            crate::ui::terminal::queue_terminal_restore(&mut before_keyboard_push, options, false).unwrap();
             assert!(
                 !String::from_utf8(before_keyboard_push)
                     .unwrap()
@@ -1358,7 +1457,7 @@ mod tests {
 
     #[test]
     fn legacy_terminal_control_bytes_normalize_to_slash_and_backslash() {
-        use super::normalize_keyboard_event;
+        use crate::ui::terminal::normalize_keyboard_event;
         let slash = normalize_keyboard_event(
             Event::Key(KeyEvent::new(KeyCode::Char('7'), KeyModifiers::CONTROL)),
             true,

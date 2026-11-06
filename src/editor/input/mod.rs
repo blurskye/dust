@@ -8,17 +8,34 @@ mod keymap;
 mod search;
 
 pub(crate) use command_line::substitution_pattern;
-pub use command_line::{ExParseError, parse_ex, substitute_pattern, typed_substitution};
-pub use context::{
-    InputContextDescriptor, InputContextError, InputContextLayer, InputContextPolicy,
-    InputContextRegistry,
-};
-pub use grammar::{
-    ABSOLUTE_MAX_COUNT, GrammarInput, InputAction, InputError, ModalResolver, PendingInputContext,
-};
-pub use key::{
-    KeyCode, KeyEvent, KeyParseError, Modifiers, TerminalMouseInput, TerminalNavigationKey,
-};
-pub use keymap::{Keymap, KeymapLayer, KeymapResolver, MappingResolution};
-pub(crate) use keymap::{KeymapBindings, KeymapSequence};
-pub use search::{SearchPatternError, search_match, search_matches, substitution_regex};
+pub use command_line::ExParseError;
+pub use command_line::parse_ex;
+pub use command_line::substitute_pattern;
+pub use command_line::typed_substitution;
+pub use context::InputContextDescriptor;
+pub use context::InputContextError;
+pub use context::InputContextLayer;
+pub use context::InputContextPolicy;
+pub use context::InputContextRegistry;
+pub use grammar::ABSOLUTE_MAX_COUNT;
+pub use grammar::GrammarInput;
+pub use grammar::InputAction;
+pub use grammar::InputError;
+pub use grammar::ModalResolver;
+pub use grammar::PendingInputContext;
+pub use key::KeyCode;
+pub use key::KeyEvent;
+pub use key::KeyParseError;
+pub use key::Modifiers;
+pub use key::TerminalMouseInput;
+pub use key::TerminalNavigationKey;
+pub use keymap::Keymap;
+pub use keymap::KeymapLayer;
+pub use keymap::KeymapResolver;
+pub use keymap::MappingResolution;
+pub(crate) use keymap::KeymapBindings;
+pub(crate) use keymap::KeymapSequence;
+pub use search::SearchPatternError;
+pub use search::search_match;
+pub use search::search_matches;
+pub use search::substitution_regex;

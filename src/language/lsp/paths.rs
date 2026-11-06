@@ -1,4 +1,5 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::path::PathBuf;
 
 #[must_use]
 pub fn language_id_for_path(path: &Path) -> Option<&'static str> {

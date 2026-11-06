@@ -1,19 +1,41 @@
-use crate::ui::render::{CONTROL_CHARACTER_REPLACEMENT, ZERO_WIDTH_REPLACEMENT};
+use crate::ui::render::CONTROL_CHARACTER_REPLACEMENT;
+use crate::ui::render::ZERO_WIDTH_REPLACEMENT;
 
-use crate::{
-    config::{AmbiguousWidth, Config},
-    editor::EditorState,
-    ui::{
-        CellGrid, Style,
-        geometry::text_width,
-        window::{CompositorLayer, ProjectedCompositorWindow, WindowRect},
-    },
-};
+use crate::config::AmbiguousWidth;
 
-use super::{
-    CompositorLayoutState, Frame, KeyHintUiState, TerminalPanelGeometry, TerminalPanelMode,
-    TerminalPanelState, TerminalPhase, TerminalTabState, UiState,
-};
+use crate::config::Config;
+
+use crate::editor::EditorState;
+
+use crate::ui::CellGrid;
+
+use crate::ui::Style;
+
+use crate::ui::geometry::text_width;
+
+use crate::ui::window::CompositorLayer;
+
+use crate::ui::window::ProjectedCompositorWindow;
+
+use crate::ui::window::WindowRect;
+
+use crate::ui::render::CompositorLayoutState;
+
+use crate::ui::render::Frame;
+
+use crate::ui::render::KeyHintUiState;
+
+use crate::ui::render::TerminalPanelGeometry;
+
+use crate::ui::render::TerminalPanelMode;
+
+use crate::ui::render::TerminalPanelState;
+
+use crate::ui::render::TerminalPhase;
+
+use crate::ui::render::TerminalTabState;
+
+use crate::ui::render::UiState;
 
 pub(crate) const KEY_HINT_MAX_ROWS: u16 = 8;
 pub(crate) const KEY_HINT_MAX_COLUMNS: u16 = 3;
@@ -489,7 +511,7 @@ pub(super) fn render_key_hints(
         }
         // A label too long for its column ends in an ellipsis instead of stopping mid-word.
         let room = usize::from(column_right.saturating_sub(cursor.saturating_add(1)));
-        let label = super::surfaces::ellipsized(&row.label, room, ambiguous);
+        let label = crate::ui::render::surfaces::ellipsized(&row.label, room, ambiguous);
         frame.grid.put_text_clipped(
             cursor.saturating_add(1),
             y,

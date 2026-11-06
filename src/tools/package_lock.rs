@@ -1,13 +1,17 @@
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    fs,
-    io::{Read, Write},
-    os::unix::fs::OpenOptionsExt,
-    path::{Path, PathBuf},
-    sync::atomic::{AtomicU64, Ordering},
-};
+use std::collections::BTreeMap;
+use std::collections::BTreeSet;
+use std::fs;
+use std::io::Read;
+use std::io::Write;
+use std::os::unix::fs::OpenOptionsExt;
+use std::path::Path;
+use std::path::PathBuf;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+
+use serde::Serialize;
 use thiserror::Error;
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -251,7 +255,8 @@ pub fn verify_lock_store(
     maximum_bytes: usize,
     maximum_object_bytes: usize,
 ) -> Result<usize, PackageError> {
-    use sha2::{Digest, Sha256};
+    use sha2::Digest;
+    use sha2::Sha256;
     let parent = lock_path.parent().ok_or(PackageError::InvalidManifest)?;
     let transaction = fs::OpenOptions::new()
         .create(true)
@@ -319,7 +324,8 @@ pub fn commit_store_bytes(
     bytes: &[u8],
     maximum_bytes: usize,
 ) -> Result<PathBuf, PackageError> {
-    use sha2::{Digest, Sha256};
+    use sha2::Digest;
+    use sha2::Sha256;
     if bytes.len() > maximum_bytes || !valid_digest(expected_sha256) {
         return Err(PackageError::InvalidManifest);
     }

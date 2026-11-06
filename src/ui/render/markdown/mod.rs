@@ -8,16 +8,35 @@ use unicode_segmentation::UnicodeSegmentation;
 #[cfg(test)]
 mod tests;
 
-use crate::{
-    config::{AmbiguousWidth, EditorConfig, MarkdownGlyphs},
-    editor::{
-        EditorMode, View,
-        text::{ByteOffset, ByteRange, TextBuffer},
-    },
-    files::ExplorerIconColor,
-    language::syntax::{Highlight, MarkdownMark},
-    ui::{Style, UiMarkdownMark, UiState, geometry::text_width},
-};
+use crate::config::AmbiguousWidth;
+
+use crate::config::EditorConfig;
+
+use crate::config::MarkdownGlyphs;
+
+use crate::editor::EditorMode;
+
+use crate::editor::View;
+
+use crate::editor::text::ByteOffset;
+
+use crate::editor::text::ByteRange;
+
+use crate::editor::text::TextBuffer;
+
+use crate::files::ExplorerIconColor;
+
+use crate::language::syntax::Highlight;
+
+use crate::language::syntax::MarkdownMark;
+
+use crate::ui::Style;
+
+use crate::ui::UiMarkdownMark;
+
+use crate::ui::UiState;
+
+use crate::ui::geometry::text_width;
 
 /// A table's border pieces when the configured list is short, in render-markdown's order:
 /// the top, the row under the header, the bottom, then the line between cells and across.

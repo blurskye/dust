@@ -1,16 +1,21 @@
 //! Bounded PTY admission. All filesystem/PTY/process I/O runs on owned workers.
-use super::{PtyError, PtyEvent, PtyId, PtyRequest};
-use std::{
-    collections::HashMap,
-    io::{Read, Write},
-    sync::{
-        Arc, Mutex,
-        atomic::{AtomicBool, AtomicUsize, Ordering},
-        mpsc::{self, Receiver, SyncSender},
-    },
-    thread,
-    time::Duration,
-};
+use crate::process::PtyError;
+use crate::process::PtyEvent;
+use crate::process::PtyId;
+use crate::process::PtyRequest;
+use std::collections::HashMap;
+use std::io::Read;
+use std::io::Write;
+use std::sync::Arc;
+use std::sync::Mutex;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
+use std::sync::mpsc::self;
+use std::sync::mpsc::Receiver;
+use std::sync::mpsc::SyncSender;
+use std::thread;
+use std::time::Duration;
 
 struct Slot(Arc<AtomicUsize>);
 impl Slot {
@@ -340,7 +345,7 @@ impl Child {
         if !self.reaped {
             #[cfg(unix)]
             if let Some(group) = self.process.process_id() {
-                super::terminate_process_group(group);
+                crate::process::terminate_process_group(group);
             }
             let _ = self.process.kill();
         }
@@ -352,10 +357,10 @@ impl Child {
         #[cfg(unix)]
         {
             if let Some(group) = master.process_group_leader().filter(|group| *group > 0) {
-                super::terminate_process_group(group as u32);
+                crate::process::terminate_process_group(group as u32);
             }
             if let Some(group) = self.process.process_id() {
-                super::terminate_process_group(group);
+                crate::process::terminate_process_group(group);
             }
         }
         self.kill();
@@ -422,7 +427,9 @@ fn run(
     resident: Arc<Slot>,
 ) -> Result<(), PtyError> {
     let (input, resize) = controls;
-    use portable_pty::{CommandBuilder, PtySize, native_pty_system};
+    use portable_pty::CommandBuilder;
+    use portable_pty::PtySize;
+    use portable_pty::native_pty_system;
     let fail = |error: String| PtyError::Spawn(error);
     if cancel.load(Ordering::Acquire) {
         return Err(fail("PTY cancelled before spawn".into()));
@@ -481,7 +488,11 @@ fn run(
         .map_err(|e| fail(e.to_string()))?;
     #[cfg(target_os = "linux")]
     let readiness = {
-        use nix::sys::epoll::{Epoll, EpollCreateFlags, EpollEvent, EpollFlags, EpollOp};
+        use nix::sys::epoll::Epoll;
+        use nix::sys::epoll::EpollCreateFlags;
+        use nix::sys::epoll::EpollEvent;
+        use nix::sys::epoll::EpollFlags;
+        use nix::sys::epoll::EpollOp;
         use std::os::fd::AsRawFd;
         let readiness =
             Epoll::new(EpollCreateFlags::EPOLL_CLOEXEC).map_err(|e| fail(e.to_string()))?;

@@ -1,10 +1,10 @@
-use super::{
-    super::{
-        ArgumentSchema, ArgumentType, CommandError, CommandRegistry, CommandSpec,
-        ContextRequirement,
-    },
-    execute::execute_builtin,
-};
+use crate::editor::command::ArgumentSchema;
+use crate::editor::command::ArgumentType;
+use crate::editor::command::CommandError;
+use crate::editor::command::CommandRegistry;
+use crate::editor::command::CommandSpec;
+use crate::editor::command::ContextRequirement;
+use crate::editor::command::builtins::execute::execute_builtin;
 
 pub fn register_builtin_commands<E: 'static>(
     registry: &mut CommandRegistry<E>,

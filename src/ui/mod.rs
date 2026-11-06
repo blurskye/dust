@@ -8,45 +8,157 @@ mod pty_screen;
 pub(crate) mod render;
 mod terminal;
 
-pub use diff::{emphasise_changed_spans, parse_unified_patch};
-pub use grid::{Cell, CellGrid, Style};
-pub use pty_screen::{
-    PtyCell, PtyColor, PtyInputKey, PtyMouseEvent, PtyMouseMode, PtyScreen, PtyStyle,
-    TerminalMouseEncoding, encode_focus, encode_key, encode_paste, encode_sgr_mouse,
-    encode_terminal_mouse_event,
-};
-pub use render::{
-    AgentListRow, AgentPanelUi, DebugPane, DebugPanesUiState, DebugSign, DebugSignKind,
-    SettingsEdit, SettingsHit, SettingsLine, SettingsPageState, SettingsRow, SettingsValue,
-    SetupChoice, SetupPage, SetupState, TutorCard, debug_pane_insets, debug_pane_tab_at,
-    settings_hit, settings_layout, settings_lines_height, transcript_lines,
-};
-pub use render::{
-    CellAlign, CompletionItem, CompositorLayoutState, ConfirmationChoice, ConfirmationState,
-    ContentTabDiagnostic, ContentTabDiagnosticSeverity, ContentTabEntry, ContentTabIdentity,
-    ContentTabKind, DashboardAction, DiffHunk, DiffLayout, DiffLine, DiffLineKind, DiffPreview,
-    DiffSideCell, DiffSideRow, DiffSpan, DocumentationMarkupKind, DocumentationPopupKind,
-    DocumentationPopupState, DocumentationSection, EditorWindowBinding, EditorWindowLayoutState,
-    ExpandedDiagnosticState, ExplorerSegmentRole, ExplorerUiRow, ExplorerUiSegment,
-    ExplorerUiState, ExplorerWindowUiState, FlashOverlay, Frame, KeyHintUiRow, KeyHintUiState,
-    LanguageCompletionState, NativeSurfaceWindowBinding, OperationBarState, PaneViewport,
-    PickerCell, PickerPreview, PickerPreviewBody, PickerRow, PickerRowKind, PickerSurfaceKind,
-    PickerTextPreview, PickerUiState, PluginSurfaceRow, PluginSurfaceUiState, PrivateSurfaceCell,
-    PrivateSurfaceUiState, PromptGeometry, PromptKind, PromptState, TerminalPanelGeometry,
-    TerminalPanelMode, TerminalPanelState, TerminalPhase, TerminalTabState, ToolMenuRow,
-    ToolMenuState, ToolRuntimeOption, ToolRuntimePickerState, UiBreadcrumb, UiColorSpan,
-    UiDiagnostic, UiFold, UiGitSign, UiGitSignKind, UiInlayHint, UiLspProgress, UiMarkdownMark,
-    UiState, UiSyntaxSpan, VisualRowAnchor, VisualRowModel, YankHighlight,
-    active_editor_pane_viewport, active_pane_viewport, confirmation_fully_visible,
-    content_tab_at_column, editor_content_width, editor_gutter_width, editor_pane_viewport_at,
-    editor_state_content_width, editor_state_gutter_width, explorer_panel_width, pane_viewports,
-    picker_geometry, prompt_geometry, prompt_geometry_for_state, prompt_surface_dimensions, render,
-    screen_foot_rows, snap_display_column, snap_display_column_forward, terminal_panel_geometry,
-    terminal_tab_at_column, view_pane_viewport, workspace_top_rows,
-};
-pub use terminal::{
-    KeyInputKind, TerminalError, TerminalOptions, TerminalSession, UiEvent,
-    install_panic_restore_hook, normalize_event,
-};
+pub use diff::emphasise_changed_spans;
 
-pub(crate) use render::{explorer_segment_style, terminal_window_geometry, workspace_title};
+pub use diff::parse_unified_patch;
+pub use grid::Cell;
+pub use grid::CellGrid;
+pub use grid::Style;
+pub use pty_screen::PtyCell;
+pub use pty_screen::PtyColor;
+pub use pty_screen::PtyInputKey;
+pub use pty_screen::PtyMouseEvent;
+pub use pty_screen::PtyMouseMode;
+pub use pty_screen::PtyScreen;
+pub use pty_screen::PtyStyle;
+pub use pty_screen::TerminalMouseEncoding;
+pub use pty_screen::encode_focus;
+pub use pty_screen::encode_key;
+pub use pty_screen::encode_paste;
+pub use pty_screen::encode_sgr_mouse;
+pub use pty_screen::encode_terminal_mouse_event;
+pub use render::AgentListRow;
+pub use render::AgentPanelUi;
+pub use render::DebugPane;
+pub use render::DebugPanesUiState;
+pub use render::DebugSign;
+pub use render::DebugSignKind;
+pub use render::SettingsEdit;
+pub use render::SettingsHit;
+pub use render::SettingsLine;
+pub use render::SettingsPageState;
+pub use render::SettingsRow;
+pub use render::SettingsValue;
+pub use render::SetupChoice;
+pub use render::SetupPage;
+pub use render::SetupState;
+pub use render::TutorCard;
+pub use render::debug_pane_insets;
+pub use render::debug_pane_tab_at;
+pub use render::settings_hit;
+pub use render::settings_layout;
+pub use render::settings_lines_height;
+pub use render::transcript_lines;
+pub use render::CellAlign;
+pub use render::CompletionItem;
+pub use render::CompositorLayoutState;
+pub use render::ConfirmationChoice;
+pub use render::ConfirmationState;
+pub use render::ContentTabDiagnostic;
+pub use render::ContentTabDiagnosticSeverity;
+pub use render::ContentTabEntry;
+pub use render::ContentTabIdentity;
+pub use render::ContentTabKind;
+pub use render::DashboardAction;
+pub use render::DiffHunk;
+pub use render::DiffLayout;
+pub use render::DiffLine;
+pub use render::DiffLineKind;
+pub use render::DiffPreview;
+pub use render::DiffSideCell;
+pub use render::DiffSideRow;
+pub use render::DiffSpan;
+pub use render::DocumentationMarkupKind;
+pub use render::DocumentationPopupKind;
+pub use render::DocumentationPopupState;
+pub use render::DocumentationSection;
+pub use render::EditorWindowBinding;
+pub use render::EditorWindowLayoutState;
+pub use render::ExpandedDiagnosticState;
+pub use render::ExplorerSegmentRole;
+pub use render::ExplorerUiRow;
+pub use render::ExplorerUiSegment;
+pub use render::ExplorerUiState;
+pub use render::ExplorerWindowUiState;
+pub use render::FlashOverlay;
+pub use render::Frame;
+pub use render::KeyHintUiRow;
+pub use render::KeyHintUiState;
+pub use render::LanguageCompletionState;
+pub use render::NativeSurfaceWindowBinding;
+pub use render::OperationBarState;
+pub use render::PaneViewport;
+pub use render::PickerCell;
+pub use render::PickerPreview;
+pub use render::PickerPreviewBody;
+pub use render::PickerRow;
+pub use render::PickerRowKind;
+pub use render::PickerSurfaceKind;
+pub use render::PickerTextPreview;
+pub use render::PickerUiState;
+pub use render::PluginSurfaceRow;
+pub use render::PluginSurfaceUiState;
+pub use render::PrivateSurfaceCell;
+pub use render::PrivateSurfaceUiState;
+pub use render::PromptGeometry;
+pub use render::PromptKind;
+pub use render::PromptState;
+pub use render::TerminalPanelGeometry;
+pub use render::TerminalPanelMode;
+pub use render::TerminalPanelState;
+pub use render::TerminalPhase;
+pub use render::TerminalTabState;
+pub use render::ToolMenuRow;
+pub use render::ToolMenuState;
+pub use render::ToolRuntimeOption;
+pub use render::ToolRuntimePickerState;
+pub use render::UiBreadcrumb;
+pub use render::UiColorSpan;
+pub use render::UiDiagnostic;
+pub use render::UiFold;
+pub use render::UiGitSign;
+pub use render::UiGitSignKind;
+pub use render::UiInlayHint;
+pub use render::UiLspProgress;
+pub use render::UiMarkdownMark;
+pub use render::UiState;
+pub use render::UiSyntaxSpan;
+pub use render::VisualRowAnchor;
+pub use render::VisualRowModel;
+pub use render::YankHighlight;
+pub use render::active_editor_pane_viewport;
+pub use render::active_pane_viewport;
+pub use render::confirmation_fully_visible;
+pub use render::content_tab_at_column;
+pub use render::editor_content_width;
+pub use render::editor_gutter_width;
+pub use render::editor_pane_viewport_at;
+pub use render::editor_state_content_width;
+pub use render::editor_state_gutter_width;
+pub use render::explorer_panel_width;
+pub use render::pane_viewports;
+pub use render::picker_geometry;
+pub use render::prompt_geometry;
+pub use render::prompt_geometry_for_state;
+pub use render::prompt_surface_dimensions;
+pub use render::render;
+pub use render::screen_foot_rows;
+pub use render::snap_display_column;
+pub use render::snap_display_column_forward;
+pub use render::terminal_panel_geometry;
+pub use render::terminal_tab_at_column;
+pub use render::view_pane_viewport;
+pub use render::workspace_top_rows;
+pub use terminal::KeyInputKind;
+pub use terminal::TerminalError;
+pub use terminal::TerminalOptions;
+pub use terminal::TerminalSession;
+pub use terminal::UiEvent;
+pub use terminal::install_panic_restore_hook;
+pub use terminal::normalize_event;
+
+pub(crate) use render::explorer_segment_style;
+
+pub(crate) use render::terminal_window_geometry;
+
+pub(crate) use render::workspace_title;

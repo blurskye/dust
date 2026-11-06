@@ -1,4 +1,5 @@
-use std::{fmt, str::FromStr};
+use std::fmt;
+use std::str::FromStr;
 
 use thiserror::Error;
 
@@ -372,7 +373,7 @@ pub enum KeyParseError {
 mod tests {
     use std::str::FromStr;
 
-    use super::KeyEvent;
+    use crate::editor::input::key::KeyEvent;
 
     #[test]
     fn hyphenated_keys_accept_modifier_aliases_and_case() {

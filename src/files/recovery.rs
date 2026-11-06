@@ -1,18 +1,23 @@
-use std::{
-    ffi::OsString,
-    fs,
-    io::{self, Read},
-    os::unix::ffi::{OsStrExt, OsStringExt},
-    path::{Path, PathBuf},
-    time::{Duration, SystemTime},
-};
+use std::ffi::OsString;
+use std::fs;
+use std::io::self;
+use std::io::Read;
+use std::os::unix::ffi::OsStrExt;
+use std::os::unix::ffi::OsStringExt;
+use std::path::Path;
+use std::path::PathBuf;
+use std::time::Duration;
+use std::time::SystemTime;
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
-use super::{
-    error::VfsError,
-    vfs::{atomic_write, lock_file},
-};
+use serde::Serialize;
+
+use crate::files::error::VfsError;
+
+use crate::files::vfs::atomic_write;
+
+use crate::files::vfs::lock_file;
 
 pub const RECOVERY_VERSION: u32 = 2;
 pub const DOCUMENT_BYTE_CEILING: u64 = 256 * 1024 * 1024;
@@ -49,7 +54,7 @@ pub(super) fn read_bounded_bytes(
 }
 
 pub(super) fn read_recovery_source(path: &Path) -> Result<String, String> {
-    let bytes = super::vfs::read_file_with_ceiling(path, RECOVERY_JOURNAL_BYTE_CEILING)
+    let bytes = crate::files::vfs::read_file_with_ceiling(path, RECOVERY_JOURNAL_BYTE_CEILING)
         .map_err(|error| format!("cannot read recovery journal: {error}"))?;
     String::from_utf8(bytes).map_err(|error| format!("recovery journal is not UTF-8: {error}"))
 }

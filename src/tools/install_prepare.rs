@@ -1,17 +1,21 @@
-use std::{
-    fs,
-    io::Write,
-    path::{Component, Path, PathBuf},
-    time::Duration,
-};
+use std::fs;
+use std::io::Write;
+use std::path::Component;
+use std::path::Path;
+use std::path::PathBuf;
+use std::time::Duration;
 
 use reqwest::Url;
 
-use super::{
-    BUNDLED_NIX_LSP_FLAKE, BUNDLED_NIX_LSP_LOCK,
-    catalog::{ToolArchiveFormat, nix_lsp_workspace_root},
-    package_lock::next_temp_suffix,
-};
+use crate::tools::BUNDLED_NIX_LSP_FLAKE;
+
+use crate::tools::BUNDLED_NIX_LSP_LOCK;
+
+use crate::tools::catalog::ToolArchiveFormat;
+
+use crate::tools::catalog::nix_lsp_workspace_root;
+
+use crate::tools::package_lock::next_temp_suffix;
 
 pub(super) const MAXIMUM_TOOL_DOWNLOAD_BYTES: usize = 512 * 1024 * 1024;
 pub(super) const MAXIMUM_TOOL_UNPACKED_BYTES: u64 = 1024 * 1024 * 1024;

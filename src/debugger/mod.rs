@@ -1,19 +1,36 @@
 #![forbid(unsafe_code)]
 
-use std::{
-    collections::{BTreeMap, HashMap},
-    io::{BufReader, Read},
-    path::{Path, PathBuf},
-    process::{Command, Stdio},
-    sync::{
-        atomic::Ordering,
-        mpsc::{self, Receiver},
-    },
-    thread,
-    time::{Duration, Instant},
-};
+use std::collections::BTreeMap;
 
-use serde_json::{Value, json};
+use std::collections::HashMap;
+
+use std::io::BufReader;
+
+use std::io::Read;
+
+use std::path::Path;
+
+use std::path::PathBuf;
+
+use std::process::Command;
+
+use std::process::Stdio;
+
+use std::sync::atomic::Ordering;
+
+use std::sync::mpsc::self;
+
+use std::sync::mpsc::Receiver;
+
+use std::thread;
+
+use std::time::Duration;
+
+use std::time::Instant;
+
+use serde_json::Value;
+
+use serde_json::json;
 use thiserror::Error;
 
 use crate::process::read_content_length_message;
@@ -179,12 +196,15 @@ pub enum DapControl {
 
 mod reverse;
 pub(crate) use reverse::DapReplyReceipt;
-pub use reverse::{DapReplyOutcome, DapTerminalReply};
+pub use reverse::DapReplyOutcome;
+pub use reverse::DapTerminalReply;
 
 mod session;
 pub use session::DapService;
-pub(crate) use session::{DapContext, ExecutionScope};
-use session::{Events, Writer};
+pub(crate) use session::DapContext;
+pub(crate) use session::ExecutionScope;
+use session::Events;
+use session::Writer;
 
 pub struct DapLaunch {
     pub adapter: String,
@@ -371,7 +391,10 @@ fn frame_body_length(frame: &[u8]) -> usize {
 fn adapter_has_exited(adapter: &mut std::process::Child) -> bool {
     #[cfg(unix)]
     {
-        use nix::sys::wait::{Id, WaitPidFlag, WaitStatus, waitid};
+        use nix::sys::wait::Id;
+        use nix::sys::wait::WaitPidFlag;
+        use nix::sys::wait::WaitStatus;
+        use nix::sys::wait::waitid;
         matches!(waitid(Id::Pid(nix::unistd::Pid::from_raw(adapter.id() as i32)), WaitPidFlag::WEXITED | WaitPidFlag::WNOHANG | WaitPidFlag::WNOWAIT), Ok(status) if status != WaitStatus::StillAlive)
     }
     #[cfg(not(unix))]
@@ -555,7 +578,9 @@ fn run_adapter(
             .spawn(move || {
                 #[cfg(unix)]
                 {
-                    use nix::fcntl::{FcntlArg, OFlag, fcntl};
+                    use nix::fcntl::FcntlArg;
+                    use nix::fcntl::OFlag;
+                    use nix::fcntl::fcntl;
                     let Ok(flags) = fcntl(&stderr, FcntlArg::F_GETFL) else {
                         return;
                     };
@@ -1570,7 +1595,9 @@ pub enum DapError {
 
 #[cfg(test)]
 mod tests {
-    use super::{DapResponse, normalize_response, sanitize_output};
+    use crate::debugger::DapResponse;
+    use crate::debugger::normalize_response;
+    use crate::debugger::sanitize_output;
     use serde_json::json;
     use std::collections::BTreeMap;
 
@@ -1622,13 +1649,14 @@ pub(crate) fn terminal_reply_source_fixture() {
 }
 
 #[cfg(test)]
-pub(crate) use session::{TestAdapter, fixture as test_session};
+pub(crate) use session::TestAdapter;
+pub(crate) use session::fixture as test_session;
 #[cfg(test)]
 mod transport_tests;
 #[cfg(test)]
-pub(crate) use transport_tests::{
-    ADAPTER as TEST_ADAPTER, LOGGING_ADAPTER as TEST_LOGGING_ADAPTER, python as test_python,
-};
+pub(crate) use transport_tests::ADAPTER as TEST_ADAPTER;
+pub(crate) use transport_tests::LOGGING_ADAPTER as TEST_LOGGING_ADAPTER;
+pub(crate) use transport_tests::python as test_python;
 
 /// What is TRUE about a breakpoint, as opposed to what was asked for.
 ///
@@ -1733,7 +1761,7 @@ impl DapExecutionPoint {
 
 #[cfg(test)]
 mod disconnect_tests {
-    use super::disconnect_arguments;
+    use crate::debugger::disconnect_arguments;
 
     #[test]
     fn detach_and_terminate_send_different_requests() {
@@ -1759,9 +1787,11 @@ mod disconnect_tests {
 
 #[cfg(test)]
 mod breakpoint_state_tests {
-    use super::{
-        DapBreakpointState, DapExecutionPoint, DapResponse, DapSourceBreakpoint, breakpoint_states,
-    };
+    use crate::debugger::DapBreakpointState;
+    use crate::debugger::DapExecutionPoint;
+    use crate::debugger::DapResponse;
+    use crate::debugger::DapSourceBreakpoint;
+    use crate::debugger::breakpoint_states;
     use std::path::PathBuf;
 
     fn requested(lines: &[u64]) -> Vec<DapSourceBreakpoint> {

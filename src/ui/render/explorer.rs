@@ -1,11 +1,20 @@
-use crate::ui::render::{CONTROL_CHARACTER_REPLACEMENT, ZERO_WIDTH_REPLACEMENT};
+use crate::ui::render::CONTROL_CHARACTER_REPLACEMENT;
+use crate::ui::render::ZERO_WIDTH_REPLACEMENT;
 use crate::windows::PANE_MINIMUM_WIDTH;
-use crate::{
-    config::{AmbiguousWidth, Config},
-    ui::{CellGrid, Style, geometry::text_width, window::WindowRect},
-};
+use crate::config::AmbiguousWidth;
+use crate::config::Config;
+use crate::ui::CellGrid;
+use crate::ui::Style;
+use crate::ui::geometry::text_width;
+use crate::ui::window::WindowRect;
 
-use super::{ExplorerSegmentRole, ExplorerUiState, Frame, editor::cursor_style};
+use crate::ui::render::ExplorerSegmentRole;
+
+use crate::ui::render::ExplorerUiState;
+
+use crate::ui::render::Frame;
+
+use crate::ui::render::editor::cursor_style;
 use crate::language::syntax::Highlight;
 
 pub(crate) const EXPLORER_MAXIMUM_VISIBLE_ROWS: usize = 200;
@@ -295,7 +304,7 @@ fn render_explorer_search_box(
     let x = grid.put_text_clipped(2, 1, EXPLORER_FOCUS_MARKER, Style::ExplorerHeader, count_x);
     let right = count_x.saturating_sub(1);
     let start = x.saturating_add(1).min(right);
-    let (query, cursor) = super::surfaces::prompt_viewport(
+    let (query, cursor) = crate::ui::render::surfaces::prompt_viewport(
         &explorer.query,
         explorer.query.len(),
         usize::from(right.saturating_sub(start)),
@@ -328,7 +337,7 @@ pub(crate) fn explorer_segment_style(role: ExplorerSegmentRole) -> Style {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::ui::render::explorer::*;
 
     fn explorer(query: &str) -> ExplorerUiState {
         ExplorerUiState {

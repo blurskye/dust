@@ -1,15 +1,29 @@
 //! Workspace preview source capture and all-or-nothing editor draft preparation.
 use std::path::PathBuf;
 
-use crate::{
-    editor::{
-        state::{BufferId, EditorState, EditorWindowVersion, TransactionId},
-        text::{TextBuffer, TextEditSet, TextVersion},
-    },
-    workspace::WorkspaceEditProposal,
-};
+use crate::editor::state::BufferId;
 
-use super::{EditorDraft, EditorOperation, EditorTransaction, Precondition};
+use crate::editor::state::EditorState;
+
+use crate::editor::state::EditorWindowVersion;
+
+use crate::editor::state::TransactionId;
+
+use crate::editor::text::TextBuffer;
+
+use crate::editor::text::TextEditSet;
+
+use crate::editor::text::TextVersion;
+
+use crate::workspace::WorkspaceEditProposal;
+
+use crate::editor::transaction::EditorDraft;
+
+use crate::editor::transaction::EditorOperation;
+
+use crate::editor::transaction::EditorTransaction;
+
+use crate::editor::transaction::Precondition;
 
 #[derive(Clone)]
 pub(crate) struct WorkspaceEditSources {
@@ -54,7 +68,7 @@ impl EditorState {
         &self,
         sources: &WorkspaceEditSources,
         source: &std::path::Path,
-    ) -> Result<super::BufferPathChange, String> {
+    ) -> Result<crate::editor::transaction::BufferPathChange, String> {
         if !sources.editor.same_editor(&self.window_version()) {
             return Err("workspace resource belongs to another editor".into());
         }
@@ -410,18 +424,22 @@ impl WorkspaceSnapshot {
 
 #[cfg(test)]
 mod tests {
-    use super::changed_spans;
-    use crate::{
-        editor::{
-            state::{EditorState, TransactionId},
-            text::{ByteOffset, ByteRange, TextBuffer, TextEdit, TextEditSet},
-            transaction::{EditorOperation, EditorTransaction},
-        },
-        workspace::{
-            FileSnapshot, ProposalId, WorkspaceEditDraft, WorkspaceEditProposal, WorkspaceId,
-            WorkspaceState,
-        },
-    };
+    use crate::editor::transaction::workspace::changed_spans;
+    use crate::editor::state::EditorState;
+    use crate::editor::state::TransactionId;
+    use crate::editor::text::ByteOffset;
+    use crate::editor::text::ByteRange;
+    use crate::editor::text::TextBuffer;
+    use crate::editor::text::TextEdit;
+    use crate::editor::text::TextEditSet;
+    use crate::editor::transaction::EditorOperation;
+    use crate::editor::transaction::EditorTransaction;
+    use crate::workspace::FileSnapshot;
+    use crate::workspace::ProposalId;
+    use crate::workspace::WorkspaceEditDraft;
+    use crate::workspace::WorkspaceEditProposal;
+    use crate::workspace::WorkspaceId;
+    use crate::workspace::WorkspaceState;
 
     #[test]
     fn workspace_edits_preserve_preview_bytes_and_undo_mixed_endings() {

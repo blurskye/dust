@@ -1,9 +1,20 @@
-use std::{fs, path::Path};
+use std::fs;
+use std::path::Path;
 
-use crate::editor::text::{BufferRevision, ByteOffset, ByteRange, TextEdit};
+use crate::editor::text::BufferRevision;
 
-use super::trust::{TRUST_STATE_BYTE_LIMIT, load_trust_database, persist_trust_database};
-use super::*;
+use crate::editor::text::ByteOffset;
+
+use crate::editor::text::ByteRange;
+
+use crate::editor::text::TextEdit;
+
+use crate::workspace::trust::TRUST_STATE_BYTE_LIMIT;
+
+use crate::workspace::trust::load_trust_database;
+
+use crate::workspace::trust::persist_trust_database;
+use crate::workspace::*;
 use tempfile::tempdir;
 
 fn workspace(root: &Path) -> WorkspaceState {
@@ -836,7 +847,8 @@ fn picker_filtering_keeps_matching_entries_under_their_sections() {
         source: String::new(),
         action: PickerAction::None,
     };
-    use PickerItemKind::{Entry, Section};
+    use PickerItemKind::Entry;
+    use PickerItemKind::Section;
     assert!(picker.append(
         4,
         [

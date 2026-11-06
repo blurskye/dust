@@ -218,7 +218,7 @@ fn arguments(list: tree_sitter::Node<'_>, objects: &mut Vec<SyntaxObject>, remai
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::language::syntax::objects::*;
 
     fn objects(source: &str) -> Vec<SyntaxObject> {
         let mut parser = tree_sitter::Parser::new();

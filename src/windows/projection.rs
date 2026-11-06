@@ -1,16 +1,43 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 
-use super::{
-    MAXIMUM_TILED_DEPTH, MAXIMUM_TILED_WINDOWS,
-    error::WindowError,
-    identity::{WindowId, WorkspaceTabId},
-    layout::{
-        CompositorLayer, CompositorProjection, CompositorWindowSnapshot, DockEdge, ProjectedBorder,
-        ProjectedCompositorWindow, ProjectedWindow, SpatialDirection, TileAxis, TiledLayoutNode,
-        TiledLayoutProjection, WindowPlacement, WindowRect,
-    },
-    model::WindowDescriptor,
-};
+use crate::windows::MAXIMUM_TILED_DEPTH;
+
+use crate::windows::MAXIMUM_TILED_WINDOWS;
+
+use crate::windows::error::WindowError;
+
+use crate::windows::identity::WindowId;
+
+use crate::windows::identity::WorkspaceTabId;
+
+use crate::windows::layout::CompositorLayer;
+
+use crate::windows::layout::CompositorProjection;
+
+use crate::windows::layout::CompositorWindowSnapshot;
+
+use crate::windows::layout::DockEdge;
+
+use crate::windows::layout::ProjectedBorder;
+
+use crate::windows::layout::ProjectedCompositorWindow;
+
+use crate::windows::layout::ProjectedWindow;
+
+use crate::windows::layout::SpatialDirection;
+
+use crate::windows::layout::TileAxis;
+
+use crate::windows::layout::TiledLayoutNode;
+
+use crate::windows::layout::TiledLayoutProjection;
+
+use crate::windows::layout::WindowPlacement;
+
+use crate::windows::layout::WindowRect;
+
+use crate::windows::content::WindowDescriptor;
 
 pub(super) fn validate_tiled_layout(
     tab: WorkspaceTabId,

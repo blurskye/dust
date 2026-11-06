@@ -1,9 +1,13 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 
 use unicode_width::UnicodeWidthStr;
 
-use super::Config;
-use super::settings::{AmbiguousWidth, TaskConfig, TaskKind, WindowPlacementConfig};
+use crate::config::Config;
+use crate::config::settings::AmbiguousWidth;
+use crate::config::settings::TaskConfig;
+use crate::config::settings::TaskKind;
+use crate::config::settings::WindowPlacementConfig;
 
 fn task_graph_has_cycle(tasks: &BTreeMap<String, TaskConfig>) -> bool {
     let mut visiting = BTreeSet::new();
@@ -199,7 +203,7 @@ impl Config {
         if self.ui.key_hints.delay_ms > 60_000 {
             return Err("ui.key_hints.delay_ms exceeds 60 seconds".into());
         }
-        if self.schema_version > super::CONFIG_SCHEMA_VERSION {
+        if self.schema_version > crate::config::CONFIG_SCHEMA_VERSION {
             return Err("configuration schema is newer than this Dust build".into());
         }
         if self.debug.adapters.iter().any(|(id, adapter)| {
@@ -316,7 +320,7 @@ impl Config {
         {
             return Err("ui.buffer_line.extension_icons is invalid".into());
         }
-        if !super::themes::valid_theme_name(&self.ui.theme) {
+        if !crate::config::themes::valid_theme_name(&self.ui.theme) {
             return Err("ui.theme must be a safe lowercase theme identifier".into());
         }
         // A comment string is a line prefix like `//`, or a template like `<!-- %s -->`.

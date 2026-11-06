@@ -1,10 +1,14 @@
 #![cfg(unix)]
 
-use std::{
-    process::{Child, Command},
-    thread,
-    time::{Duration, Instant},
-};
+use std::process::Child;
+
+use std::process::Command;
+
+use std::thread;
+
+use std::time::Duration;
+
+use std::time::Instant;
 
 struct AdapterChild(Child);
 
@@ -64,8 +68,11 @@ fn a_missing_adapter_is_a_failure_rather_than_the_editor_starting() {
 
 #[test]
 fn an_adapter_that_only_speaks_over_a_socket_is_carried_over_stdio() {
-    use nix::fcntl::{FcntlArg, OFlag, fcntl};
-    use std::io::{Read, Write};
+    use nix::fcntl::FcntlArg;
+    use nix::fcntl::OFlag;
+    use nix::fcntl::fcntl;
+    use std::io::Read;
+    use std::io::Write;
 
     let script = r#"
 import socket, sys

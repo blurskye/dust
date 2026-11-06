@@ -1,11 +1,16 @@
 //! Original reverse requests: reserved one-shot mailboxes and actual pipe-write receipts.
-use super::{DapControl, DapError, session::Writer};
-use serde_json::{Value, json};
-use std::sync::{
-    Arc,
-    atomic::{AtomicBool, AtomicU8, Ordering},
-    mpsc::{self, Receiver, SyncSender},
-};
+use crate::debugger::DapControl;
+use crate::debugger::DapError;
+use crate::debugger::session::Writer;
+use serde_json::Value;
+use serde_json::json;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::AtomicU8;
+use std::sync::atomic::Ordering;
+use std::sync::mpsc::self;
+use std::sync::mpsc::Receiver;
+use std::sync::mpsc::SyncSender;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]

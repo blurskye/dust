@@ -1,6 +1,7 @@
-use super::*;
+use crate::process::pty::*;
 use crate::process::PtyPolicy;
-use std::{path::Path, time::Instant};
+use std::path::Path;
+use std::time::Instant;
 
 fn request(root: &Path, script: &str) -> PtyRequest {
     PtyRequest {
@@ -38,7 +39,9 @@ fn drain(service: &mut PtyService, id: PtyId) -> Vec<PtyEvent> {
 #[cfg(target_os = "linux")]
 #[test]
 fn pinned_pty_cwd_cannot_be_retargeted_or_fall_back_to_home() {
-    use portable_pty::{CommandBuilder, PtySize, native_pty_system};
+    use portable_pty::CommandBuilder;
+    use portable_pty::PtySize;
+    use portable_pty::native_pty_system;
     use std::os::fd::AsRawFd;
     let root = tempfile::tempdir().unwrap();
     let original = root.path().join("original");

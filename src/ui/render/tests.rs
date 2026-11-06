@@ -1,15 +1,35 @@
 use crate::ui::render::CONTROL_CHARACTER_REPLACEMENT;
-use crate::ui::render::overlays::{BUFFER_OVERFLOW_LEFT, BUFFER_OVERFLOW_RIGHT, BUFFER_SEPARATOR};
-use crate::windows::{PANE_MINIMUM_HEIGHT, PANE_MINIMUM_WIDTH};
-use std::path::{Path, PathBuf};
+use crate::ui::render::overlays::BUFFER_OVERFLOW_LEFT;
+use crate::ui::render::overlays::BUFFER_OVERFLOW_RIGHT;
+use crate::ui::render::overlays::BUFFER_SEPARATOR;
+use crate::windows::PANE_MINIMUM_HEIGHT;
+use crate::windows::PANE_MINIMUM_WIDTH;
+use std::path::Path;
+use std::path::PathBuf;
 
 use crate::editor::EditorState;
 
-use super::{
-    CompletionItem, DocumentationMarkupKind, DocumentationPopupKind, DocumentationPopupState,
-    DocumentationSection, EditorWindowBinding, EditorWindowLayoutState, PromptKind, PromptState,
-    UiState, prompt_geometry,
-};
+use crate::ui::render::CompletionItem;
+
+use crate::ui::render::DocumentationMarkupKind;
+
+use crate::ui::render::DocumentationPopupKind;
+
+use crate::ui::render::DocumentationPopupState;
+
+use crate::ui::render::DocumentationSection;
+
+use crate::ui::render::EditorWindowBinding;
+
+use crate::ui::render::EditorWindowLayoutState;
+
+use crate::ui::render::PromptKind;
+
+use crate::ui::render::PromptState;
+
+use crate::ui::render::UiState;
+
+use crate::ui::render::prompt_geometry;
 
 fn editor_layout(state: &EditorState) -> EditorWindowLayoutState {
     fn convert(
@@ -91,7 +111,7 @@ fn attach_test_compositor(
         .map(|_| crate::windows::WindowId(10_001));
     if let Some(window) = explorer_window {
         let size =
-            super::explorer_panel_width(config, width).map_or(1, |panel| panel.saturating_add(1));
+            crate::ui::render::explorer_panel_width(config, width).map_or(1, |panel| panel.saturating_add(1));
         windows.push(crate::windows::CompositorWindowSnapshot {
             window,
             placement: crate::windows::WindowPlacement::Docked {
@@ -107,7 +127,7 @@ fn attach_test_compositor(
         .as_ref()
         .map(|terminal| (terminal.id, crate::windows::WindowId(10_002)));
     if let Some((_, window)) = terminal_window {
-        let size = super::terminal_panel_geometry(
+        let size = crate::ui::render::terminal_panel_geometry(
             height,
             ui.terminal_panel
                 .as_ref()
@@ -187,8 +207,8 @@ fn attach_test_compositor(
         width,
         height,
     };
-    let top = super::workspace_top_rows(state, ui, config);
-    let screen_bottom = super::screen_foot_rows(state, ui, config, height);
+    let top = crate::ui::render::workspace_top_rows(state, ui, config);
+    let screen_bottom = crate::ui::render::screen_foot_rows(state, ui, config, height);
     let preliminary = snapshot.project_with_tiled_insets(
         bounds,
         PANE_MINIMUM_WIDTH,
@@ -203,14 +223,14 @@ fn attach_test_compositor(
         .as_ref()
         .filter(|_| !ui.dashboard && state.active_view.is_some())
         .and_then(|_| {
-            super::debug_pane_insets(
+            crate::ui::render::debug_pane_insets(
                 preliminary.workspace_bounds.width,
                 preliminary.workspace_bounds.height.saturating_sub(top),
             )
         })
         .unwrap_or_default();
     ui.window_graph_revision = Some(1);
-    ui.compositor_layout = Some(super::CompositorLayoutState {
+    ui.compositor_layout = Some(crate::ui::render::CompositorLayoutState {
         source_revision: state.window_revision().expect("test revision"),
         graph_revision: 1,
         projection: snapshot.project_with_tiled_insets(
@@ -225,7 +245,7 @@ fn attach_test_compositor(
                 bottom,
             },
         ),
-        surfaces: super::NativeSurfaceWindowBinding {
+        surfaces: crate::ui::render::NativeSurfaceWindowBinding {
             explorer: explorer_window,
             terminal: terminal_window,
             dashboard: dashboard_window,
@@ -241,10 +261,10 @@ fn render(
     dashboard: &crate::config::DashboardConfig,
     width: u16,
     height: u16,
-) -> super::Frame {
+) -> crate::ui::render::Frame {
     let mut ui = ui.clone();
     attach_test_compositor(state, &mut ui, config, width, height);
-    super::render(state, &ui, config, dashboard, width, height)
+    crate::ui::render::render(state, &ui, config, dashboard, width, height)
 }
 
 #[test]
@@ -253,8 +273,8 @@ fn workspace_frame_respects_nonzero_compositor_origin_for_side_and_top_docks() {
     let mut local = crate::ui::CellGrid::new(6, 3);
     local.set_cell(0, 0, "X", crate::ui::Style::Default);
     local.set_cell(5, 2, "Y", crate::ui::Style::Default);
-    let frame = super::place_workspace_frame(
-        super::Frame {
+    let frame = crate::ui::render::place_workspace_frame(
+        crate::ui::render::Frame {
             grid: local,
             cursor: Some((1, 1, crossterm::cursor::SetCursorStyle::SteadyBlock)),
         },
@@ -273,17 +293,17 @@ fn workspace_frame_respects_nonzero_compositor_origin_for_side_and_top_docks() {
     assert_eq!(frame.grid.get(0, 0).expect("outside").symbol, " ");
     assert!(frame.cursor.is_some_and(|(x, y, _)| (x, y) == (8, 5)));
 
-    let terminal = super::TerminalPanelState {
+    let terminal = crate::ui::render::TerminalPanelState {
         id: 1,
         profile: "side".into(),
-        tabs: vec![super::TerminalTabState {
-            phase: super::TerminalPhase::Running,
+        tabs: vec![crate::ui::render::TerminalTabState {
+            phase: crate::ui::render::TerminalPhase::Running,
             id: 1,
             profile: "side".into(),
             running: true,
             exit_code: None,
         }],
-        mode: super::TerminalPanelMode::Input,
+        mode: crate::ui::render::TerminalPanelMode::Input,
         running: true,
         exit_code: None,
         truncated: false,
@@ -298,10 +318,10 @@ fn workspace_frame_respects_nonzero_compositor_origin_for_side_and_top_docks() {
         scroll_offset: 0,
         requested_height: 5,
     };
-    let composed = super::dock_terminal_panel(
+    let composed = crate::ui::render::dock_terminal_panel(
         frame,
         &terminal,
-        super::TerminalPanelGeometry {
+        crate::ui::render::TerminalPanelGeometry {
             x: 0,
             width: 5,
             left_border: false,
@@ -692,9 +712,9 @@ fn editor_popups_are_suppressed_while_a_modal_owns_input() {
     for modal in 0..3 {
         let mut ui = ui_with_editor_layout(&state);
         match modal {
-            0 => ui.settings = Some(super::SettingsPageState::default()),
+            0 => ui.settings = Some(crate::ui::render::SettingsPageState::default()),
             1 => {
-                ui.tool_menu = Some(super::ToolMenuState {
+                ui.tool_menu = Some(crate::ui::render::ToolMenuState {
                     category: "lsp".into(),
                     selected: 0,
                     scroll: 0,
@@ -705,11 +725,11 @@ fn editor_popups_are_suppressed_while_a_modal_owns_input() {
                 })
             }
             _ => {
-                ui.picker = Some(super::PickerUiState {
+                ui.picker = Some(crate::ui::render::PickerUiState {
                     preview_side_scroll: (0, 0),
                     footer: None,
                     input_hint: String::new(),
-                    surface: super::PickerSurfaceKind::Generic,
+                    surface: crate::ui::render::PickerSurfaceKind::Generic,
                     title: "Picker".into(),
                     query: String::new(),
                     rows: Vec::new(),
@@ -722,7 +742,7 @@ fn editor_popups_are_suppressed_while_a_modal_owns_input() {
             }
         }
         let expected = render(&state, &ui, &loaded.config, &loaded.dashboard, 80, 24);
-        ui.language_completion = Some(super::LanguageCompletionState {
+        ui.language_completion = Some(crate::ui::render::LanguageCompletionState {
             typed: 0,
             items: vec![CompletionItem {
                 icon: None,
@@ -754,7 +774,9 @@ fn editor_popups_are_suppressed_while_a_modal_owns_input() {
 
 #[test]
 fn documentation_and_key_hints_stay_inside_an_offset_workspace() {
-    use crate::ui::{CellGrid, Style, window::WindowRect};
+    use crate::ui::CellGrid;
+    use crate::ui::Style;
+    use crate::ui::window::WindowRect;
     let config = crate::config::load_bundled_config().config;
     let bounds = WindowRect {
         x: 7,
@@ -776,17 +798,17 @@ fn documentation_and_key_hints_stay_inside_an_offset_workspace() {
         }],
     };
     for cursor_y in [12, 16, 22] {
-        let mut frame = super::Frame {
+        let mut frame = crate::ui::render::Frame {
             grid: CellGrid::new(80, 24),
             cursor: Some((10, cursor_y, crossterm::cursor::SetCursorStyle::SteadyBar)),
         };
-        super::overlays::render_documentation_popup(&mut frame, &popup, &config, bounds, None);
+        crate::ui::render::overlays::render_documentation_popup(&mut frame, &popup, &config, bounds, None);
         assert!((12..23).any(|y| frame.grid.row_text(y).contains("Hover")));
-        super::render_key_hints(
+        crate::ui::render::render_key_hints(
             &mut frame,
-            &super::KeyHintUiState {
+            &crate::ui::render::KeyHintUiState {
                 prefix: "Space f".into(),
-                rows: vec![super::KeyHintUiRow {
+                rows: vec![crate::ui::render::KeyHintUiRow {
                     next_key: "f".into(),
                     label: "Files".into(),
                     icon: None,
@@ -899,7 +921,7 @@ fn completion_attaches_below_globally_centered_prompt() {
 fn prompt_completion_viewport_follows_a_selected_item_beyond_its_first_page() {
     let state = EditorState::new(PathBuf::from("/tmp/dust-workspace"));
     let mut prompt = PromptState::new(PromptKind::Command);
-    let count = usize::from(super::COMPLETION_MAX_ROWS) * 2;
+    let count = usize::from(crate::ui::render::COMPLETION_MAX_ROWS) * 2;
     prompt.completions = (0..count)
         .map(|index| CompletionItem {
             icon: None,
@@ -928,10 +950,10 @@ fn prompt_completion_viewport_follows_a_selected_item_beyond_its_first_page() {
 
 #[test]
 fn visual_line_selection_paints_empty_lines() {
-    use crate::editor::{
-        Selection, SelectionKind,
-        text::{ByteOffset, TextBuffer},
-    };
+    use crate::editor::Selection;
+    use crate::editor::SelectionKind;
+    use crate::editor::text::ByteOffset;
+    use crate::editor::text::TextBuffer;
     let mut state = EditorState::new(PathBuf::from("/workspace"));
     let (_, view) = state
         .open_text(TextBuffer::from_text("a\n\nb"), None)
@@ -946,7 +968,7 @@ fn visual_line_selection_paints_empty_lines() {
     let mut config = crate::config::load_bundled_config().config;
     config.editor.line_numbers = crate::config::LineNumbers::Off;
     config.ui.status_line.enabled = false;
-    let frame = super::render_editor_view(&state, view, &UiState::default(), &config, 12, 3);
+    let frame = crate::ui::render::render_editor_view(&state, view, &UiState::default(), &config, 12, 3);
     assert_eq!(
         frame.grid.get(0, 1).unwrap().style,
         crate::ui::Style::Selection
@@ -977,7 +999,7 @@ fn search_highlights_preserve_word_boundaries_and_substitution_regex_flags() {
         search_whole_word: true,
         ..Default::default()
     };
-    let frame = super::render_editor_view(&state, view, &ui, &config, 32, 3);
+    let frame = crate::ui::render::render_editor_view(&state, view, &ui, &config, 32, 3);
     for (column, selected) in [(0, true), (4, false), (11, true)] {
         assert_eq!(
             frame.grid.get(column, 0).unwrap().style == Style::Search,
@@ -988,7 +1010,7 @@ fn search_highlights_preserve_word_boundaries_and_substitution_regex_flags() {
     let mut prompt = PromptState::new(PromptKind::SearchForward);
     prompt.input = "foo".into();
     ui.prompt = Some(prompt);
-    let frame = super::render_editor_view(&state, view, &ui, &config, 32, 3);
+    let frame = crate::ui::render::render_editor_view(&state, view, &ui, &config, 32, 3);
     assert_eq!(frame.grid.get(4, 0).unwrap().style, Style::Search);
     for (input, expected) in [
         ("%s/[0-9]+/x/g", [true, false, false]),
@@ -999,7 +1021,7 @@ fn search_highlights_preserve_word_boundaries_and_substitution_regex_flags() {
         let mut prompt = PromptState::new(PromptKind::Command);
         prompt.input = input.into();
         ui.prompt = Some(prompt);
-        let frame = super::render_editor_view(&state, view, &ui, &config, 32, 3);
+        let frame = crate::ui::render::render_editor_view(&state, view, &ui, &config, 32, 3);
         for row in [1, 2] {
             for (column, selected) in [0, 4, 8].into_iter().zip(expected) {
                 assert_eq!(
@@ -1031,7 +1053,7 @@ fn block_selection_projection_uses_shared_display_cell_ranges() {
     let loaded = crate::config::load_bundled_config();
     let ui = ui_with_editor_layout(&state);
     let frame = render(&state, &ui, &loaded.config, &loaded.dashboard, 20, 6);
-    let gutter = super::editor_state_gutter_width(
+    let gutter = crate::ui::render::editor_state_gutter_width(
         &state,
         &state.buffers[state.views[view].buffer].text,
         &loaded.config.editor,
@@ -1049,7 +1071,8 @@ fn block_selection_projection_uses_shared_display_cell_ranges() {
 
 #[test]
 fn block_selection_on_long_lines_is_resolved_once_per_line() {
-    use crate::editor::text::{ByteOffset, TextBuffer};
+    use crate::editor::text::ByteOffset;
+    use crate::editor::text::TextBuffer;
     let mut state = EditorState::new(PathBuf::from("/workspace"));
     let text = format!("{}\n0123456789", "x".repeat(500_000));
     let (_, view) = state.open_text(TextBuffer::from_text(&text), None).unwrap();
@@ -1065,7 +1088,7 @@ fn block_selection_on_long_lines_is_resolved_once_per_line() {
     config.editor.wrap = false;
     config.ui.status_line.enabled = false;
     let ui = UiState::default();
-    let frame = super::render_editor_view(&state, view, &ui, &config, 80, 2);
+    let frame = crate::ui::render::render_editor_view(&state, view, &ui, &config, 80, 2);
     for row in 0..2 {
         for column in 0..80 {
             assert_eq!(
@@ -1088,25 +1111,25 @@ fn missing_application_window_snapshot_fails_closed() {
         .unwrap();
     let loaded = crate::config::load_bundled_config();
     let ui = UiState::default();
-    assert!(super::pane_viewports(&state, &ui, &loaded.config, 40, 8).is_empty());
-    let frame = super::render(&state, &ui, &loaded.config, &loaded.dashboard, 40, 8);
+    assert!(crate::ui::render::pane_viewports(&state, &ui, &loaded.config, 40, 8).is_empty());
+    let frame = crate::ui::render::render(&state, &ui, &loaded.config, &loaded.dashboard, 40, 8);
     assert!(frame.cursor.is_none());
     assert!(!(0..8).any(|row| frame.grid.row_text(row).contains("not rendered")));
 
     let mut stale = ui_with_editor_layout(&state);
     attach_test_compositor(&state, &mut stale, &loaded.config, 40, 8);
     assert_eq!(
-        super::pane_viewports(&state, &stale, &loaded.config, 40, 7).len(),
+        crate::ui::render::pane_viewports(&state, &stale, &loaded.config, 40, 7).len(),
         1
     );
-    let valid = super::render(&state, &stale, &loaded.config, &loaded.dashboard, 40, 8);
+    let valid = crate::ui::render::render(&state, &stale, &loaded.config, &loaded.dashboard, 40, 8);
     assert!(valid.cursor.is_some());
     assert!((0..8).any(|row| valid.grid.row_text(row).contains("not rendered")));
     state
         .split_active(crate::editor::Axis::Horizontal, 500)
         .expect("change source layout");
-    assert!(super::pane_viewports(&state, &stale, &loaded.config, 40, 7).is_empty());
-    let frame = super::render(&state, &stale, &loaded.config, &loaded.dashboard, 40, 8);
+    assert!(crate::ui::render::pane_viewports(&state, &stale, &loaded.config, 40, 7).is_empty());
+    let frame = crate::ui::render::render(&state, &stale, &loaded.config, &loaded.dashboard, 40, 8);
     assert!(frame.cursor.is_none());
     assert!(!(0..8).any(|row| frame.grid.row_text(row).contains("not rendered")));
 }
@@ -1140,8 +1163,8 @@ fn split_tree_and_tab_line_render_real_independent_views() {
     let config = loaded.config;
     let mut ui = ui_with_editor_layout(&state);
     attach_test_compositor(&state, &mut ui, &config, 60, 8);
-    let panes = super::pane_viewports(&state, &ui, &config, 60, 7);
-    let frame = super::render(&state, &ui, &config, &loaded.dashboard, 60, 8);
+    let panes = crate::ui::render::pane_viewports(&state, &ui, &config, 60, 7);
+    let frame = crate::ui::render::render(&state, &ui, &config, &loaded.dashboard, 60, 8);
     assert!(frame.grid.row_text(0).contains("[main.rs]"));
     assert!(frame.grid.row_text(0).contains("other.rs"));
     for (view, label) in [(first_view, "left"), (second_view, "right")] {
@@ -1234,7 +1257,10 @@ fn workspace_tab_line_measures_sanitized_labels() {
 
 #[test]
 fn workspace_editor_cursor_follows_compositor_focus() {
-    use crate::windows::{CompositorLayer, ProjectedCompositorWindow, WindowId, WindowRect};
+    use crate::windows::CompositorLayer;
+    use crate::windows::ProjectedCompositorWindow;
+    use crate::windows::WindowId;
+    use crate::windows::WindowRect;
 
     let loaded = crate::config::load_bundled_config();
     for split in [false, true] {
@@ -1249,7 +1275,7 @@ fn workspace_editor_cursor_follows_compositor_focus() {
         }
         let mut ui = ui_with_editor_layout(&state);
         attach_test_compositor(&state, &mut ui, &loaded.config, 60, 8);
-        let frame = super::render(&state, &ui, &loaded.config, &loaded.dashboard, 60, 8);
+        let frame = crate::ui::render::render(&state, &ui, &loaded.config, &loaded.dashboard, 60, 8);
         assert!(frame.cursor.is_some());
 
         let windows = &mut ui.compositor_layout.as_mut().unwrap().projection.windows;
@@ -1269,12 +1295,12 @@ fn workspace_editor_cursor_follows_compositor_focus() {
             focused: true,
             focusable: true,
         });
-        ui.plugin_surfaces.push(super::PluginSurfaceUiState {
+        ui.plugin_surfaces.push(crate::ui::render::PluginSurfaceUiState {
             handle: 9,
             window: WindowId(99),
             tree_revision: 1,
             scroll: 0,
-            rows: vec![super::PluginSurfaceRow {
+            rows: vec![crate::ui::render::PluginSurfaceRow {
                 node: 1,
                 depth: 0,
                 text: "plugin".into(),
@@ -1283,7 +1309,7 @@ fn workspace_editor_cursor_follows_compositor_focus() {
                 focused: true,
             }],
         });
-        let frame = super::render(&state, &ui, &loaded.config, &loaded.dashboard, 60, 8);
+        let frame = crate::ui::render::render(&state, &ui, &loaded.config, &loaded.dashboard, 60, 8);
         assert!(frame.grid.row_text(0).contains("plugin"));
         assert!(frame.cursor.is_none());
     }
@@ -1308,7 +1334,7 @@ fn workspace_split_separators_stay_one_cell_under_wide_ambiguous_width() {
         state.split_active(axis, 500).unwrap();
         let mut ui = ui_with_editor_layout(&state);
         attach_test_compositor(&state, &mut ui, &config, 60, 10);
-        let frame = super::render(&state, &ui, &config, &loaded.dashboard, 60, 10);
+        let frame = crate::ui::render::render(&state, &ui, &config, &loaded.dashboard, 60, 10);
         let projection = &ui.compositor_layout.as_ref().unwrap().projection;
         assert!(!projection.borders.is_empty());
         for border in &projection.borders {
@@ -1322,7 +1348,7 @@ fn workspace_split_separators_stay_one_cell_under_wide_ambiguous_width() {
                 assert!(!cell.continuation);
             }
         }
-        for pane in super::pane_viewports(&state, &ui, &config, 60, 9) {
+        for pane in crate::ui::render::pane_viewports(&state, &ui, &config, 60, 9) {
             assert_eq!(frame.grid.get(pane.x, pane.y).unwrap().symbol, "p");
             assert!(!frame.grid.get(pane.x, pane.y).unwrap().continuation);
         }
@@ -1354,9 +1380,9 @@ fn buffer_line_lists_unique_dirty_content_and_follows_active_overflow() {
     let loaded = crate::config::load_bundled_config();
     let config = loaded.config;
     let entries = vec![
-        super::ContentTabEntry {
-            identity: super::ContentTabIdentity(crate::windows::ContentId(1)),
-            kind: super::ContentTabKind::Text,
+        crate::ui::render::ContentTabEntry {
+            identity: crate::ui::render::ContentTabIdentity(crate::windows::ContentId(1)),
+            kind: crate::ui::render::ContentTabKind::Text,
             title: "src/main.rs ·1".into(),
             active: false,
             dirty: true,
@@ -1365,9 +1391,9 @@ fn buffer_line_lists_unique_dirty_content_and_follows_active_overflow() {
             icon: "R".into(),
             closeable: true,
         },
-        super::ContentTabEntry {
-            identity: super::ContentTabIdentity(crate::windows::ContentId(2)),
-            kind: super::ContentTabKind::Text,
+        crate::ui::render::ContentTabEntry {
+            identity: crate::ui::render::ContentTabIdentity(crate::windows::ContentId(2)),
+            kind: crate::ui::render::ContentTabKind::Text,
             title: "tests/main.rs ·2".into(),
             active: false,
             dirty: false,
@@ -1376,9 +1402,9 @@ fn buffer_line_lists_unique_dirty_content_and_follows_active_overflow() {
             icon: "R".into(),
             closeable: true,
         },
-        super::ContentTabEntry {
-            identity: super::ContentTabIdentity(crate::windows::ContentId(3)),
-            kind: super::ContentTabKind::Text,
+        crate::ui::render::ContentTabEntry {
+            identity: crate::ui::render::ContentTabIdentity(crate::windows::ContentId(3)),
+            kind: crate::ui::render::ContentTabKind::Text,
             title: "very-long-active-buffer-name.rs".into(),
             active: true,
             dirty: false,
@@ -1411,23 +1437,23 @@ fn buffer_line_lists_unique_dirty_content_and_follows_active_overflow() {
 fn content_line_segment_width_and_hit_testing_share_exact_boundaries() {
     let loaded = crate::config::load_bundled_config();
     let config = loaded.config;
-    let entry = super::ContentTabEntry {
-        identity: super::ContentTabIdentity(crate::windows::ContentId(9)),
-        kind: super::ContentTabKind::Text,
+    let entry = crate::ui::render::ContentTabEntry {
+        identity: crate::ui::render::ContentTabIdentity(crate::windows::ContentId(9)),
+        kind: crate::ui::render::ContentTabKind::Text,
         title: "a.rs".into(),
         active: true,
         dirty: true,
         pinned: true,
-        diagnostic: Some(super::ContentTabDiagnostic {
-            severity: super::ContentTabDiagnosticSeverity::Error,
+        diagnostic: Some(crate::ui::render::ContentTabDiagnostic {
+            severity: crate::ui::render::ContentTabDiagnosticSeverity::Error,
             count: 2,
         }),
         icon: "R".into(),
         closeable: true,
     };
-    let width = super::content_tab_width(&entry, &config);
+    let width = crate::ui::render::content_tab_width(&entry, &config);
     let mut grid = crate::ui::CellGrid::new(u16::try_from(width).unwrap(), 1);
-    super::render_content_tab_line(&mut grid, std::slice::from_ref(&entry), &config, 0);
+    crate::ui::render::render_content_tab_line(&mut grid, std::slice::from_ref(&entry), &config, 0);
     let styles = (0..grid.width())
         .filter_map(|x| grid.get(x, 0).map(|cell| cell.style))
         .collect::<Vec<_>>();
@@ -1442,7 +1468,7 @@ fn content_line_segment_width_and_hit_testing_share_exact_boundaries() {
     }
     for column in 0..u16::try_from(width).unwrap() {
         assert_eq!(
-            super::content_tab_at_column(
+            crate::ui::render::content_tab_at_column(
                 std::slice::from_ref(&entry),
                 &config,
                 u16::try_from(width).unwrap(),
@@ -1452,7 +1478,7 @@ fn content_line_segment_width_and_hit_testing_share_exact_boundaries() {
         );
     }
     assert_eq!(
-        super::content_tab_at_column(
+        crate::ui::render::content_tab_at_column(
             std::slice::from_ref(&entry),
             &config,
             u16::try_from(width).unwrap(),
@@ -1462,14 +1488,14 @@ fn content_line_segment_width_and_hit_testing_share_exact_boundaries() {
     );
     let mut entries = vec![entry.clone(), entry.clone(), entry.clone()];
     for (index, entry) in entries.iter_mut().enumerate() {
-        entry.identity = super::ContentTabIdentity(crate::windows::ContentId(index as u64 + 1));
+        entry.identity = crate::ui::render::ContentTabIdentity(crate::windows::ContentId(index as u64 + 1));
         entry.title = char::from(b'a' + index as u8).to_string();
         entry.active = index == 2;
     }
-    let left = super::text_width(BUFFER_OVERFLOW_LEFT, config.editor.ambiguous_width);
+    let left = crate::ui::render::text_width(BUFFER_OVERFLOW_LEFT, config.editor.ambiguous_width);
     for column in 0..u16::try_from(left).unwrap() {
         assert_eq!(
-            super::content_tab_at_column(&entries, &config, 8, column),
+            crate::ui::render::content_tab_at_column(&entries, &config, 8, column),
             None
         )
     }
@@ -1481,9 +1507,9 @@ fn content_line_segment_width_and_hit_testing_share_exact_boundaries() {
         entry.dirty = false;
         entry.closeable = false;
     }
-    let first = super::content_tab_width(&right_entries[0], &config);
+    let first = crate::ui::render::content_tab_width(&right_entries[0], &config);
     assert_eq!(
-        super::content_tab_at_column(&right_entries, &config, 5, u16::try_from(first).unwrap()),
+        crate::ui::render::content_tab_at_column(&right_entries, &config, 5, u16::try_from(first).unwrap()),
         None
     );
 }
@@ -1506,9 +1532,9 @@ fn buffer_line_begins_after_the_explorer_dock() {
     let ui = UiState {
         editor_window_layout: Some(editor_layout(&state)),
         content_tabs: vec![
-            super::ContentTabEntry {
-                identity: super::ContentTabIdentity(crate::windows::ContentId(1)),
-                kind: super::ContentTabKind::Text,
+            crate::ui::render::ContentTabEntry {
+                identity: crate::ui::render::ContentTabIdentity(crate::windows::ContentId(1)),
+                kind: crate::ui::render::ContentTabKind::Text,
                 title: "one.rs".into(),
                 active: false,
                 dirty: false,
@@ -1517,9 +1543,9 @@ fn buffer_line_begins_after_the_explorer_dock() {
                 icon: "R".into(),
                 closeable: true,
             },
-            super::ContentTabEntry {
-                identity: super::ContentTabIdentity(crate::windows::ContentId(2)),
-                kind: super::ContentTabKind::Text,
+            crate::ui::render::ContentTabEntry {
+                identity: crate::ui::render::ContentTabIdentity(crate::windows::ContentId(2)),
+                kind: crate::ui::render::ContentTabKind::Text,
                 title: "two.rs".into(),
                 active: true,
                 dirty: false,
@@ -1529,7 +1555,7 @@ fn buffer_line_begins_after_the_explorer_dock() {
                 closeable: true,
             },
         ],
-        explorer: Some(super::ExplorerUiState {
+        explorer: Some(crate::ui::render::ExplorerUiState {
             title: "Explorer".into(),
             rows: Vec::new(),
             scroll: 0,
@@ -1544,7 +1570,7 @@ fn buffer_line_begins_after_the_explorer_dock() {
     };
     let loaded = crate::config::load_bundled_config();
     let frame = render(&state, &ui, &loaded.config, &loaded.dashboard, 80, 10);
-    let panel = super::explorer_panel_width(&loaded.config, 80).expect("explorer width");
+    let panel = crate::ui::render::explorer_panel_width(&loaded.config, 80).expect("explorer width");
     assert!(frame.grid.row_text(0).contains("Explorer"));
     let editor_line = (panel.saturating_add(1)..80)
         .map(|x| frame.grid.get(x, 0).map_or("", |cell| cell.symbol.as_str()))
@@ -1564,7 +1590,7 @@ fn lsp_progress_is_animated_right_aligned_and_hides_transport_identity() {
         .unwrap();
     let mut ui = UiState {
         editor_window_layout: Some(editor_layout(&state)),
-        explorer: Some(super::ExplorerUiState {
+        explorer: Some(crate::ui::render::ExplorerUiState {
             title: "Explorer".into(),
             rows: Vec::new(),
             scroll: 0,
@@ -1575,7 +1601,7 @@ fn lsp_progress_is_animated_right_aligned_and_hides_transport_identity() {
             searching: false,
         }),
         lsp_progress: vec![
-            super::UiLspProgress {
+            crate::ui::render::UiLspProgress {
                 server_key: "root:1:rust-analyzer".into(),
                 token: "roots".into(),
                 server: "rust-analyzer".into(),
@@ -1585,7 +1611,7 @@ fn lsp_progress_is_animated_right_aligned_and_hides_transport_identity() {
                 done: true,
                 completed_at: Some(std::time::Instant::now()),
             },
-            super::UiLspProgress {
+            crate::ui::render::UiLspProgress {
                 server_key: "root:1:rust-analyzer".into(),
                 token: "cargo-check".into(),
                 server: "rust-analyzer".into(),
@@ -1601,7 +1627,7 @@ fn lsp_progress_is_animated_right_aligned_and_hides_transport_identity() {
     };
     let loaded = crate::config::load_bundled_config();
     let frame = render(&state, &ui, &loaded.config, &loaded.dashboard, 80, 10);
-    let panel = super::explorer_panel_width(&loaded.config, 80).expect("explorer width");
+    let panel = crate::ui::render::explorer_panel_width(&loaded.config, 80).expect("explorer width");
     let row = (0..10)
         .find(|row| frame.grid.row_text(*row).contains("ring (lib)"))
         .unwrap_or_else(|| {
@@ -1655,7 +1681,7 @@ fn visual_row_model_is_reversible_fold_aware_and_unicode_width_exact() {
     config.editor.wrap = true;
     config.editor.line_numbers = crate::config::LineNumbers::Off;
     let ui = UiState {
-        lsp_folds: vec![super::UiFold {
+        lsp_folds: vec![crate::ui::render::UiFold {
             view,
             start_line: 1,
             end_line: 3,
@@ -1665,19 +1691,19 @@ fn visual_row_model_is_reversible_fold_aware_and_unicode_width_exact() {
     };
     let buffer = state.views[view].buffer;
     let model =
-        super::VisualRowModel::new(&state.buffers[buffer].text, view, &ui, &config, 4, true);
+        crate::ui::render::VisualRowModel::new(&state.buffers[buffer].text, view, &ui, &config, 4, true);
     assert_eq!(model.rows_for_line(0), 3);
     assert_eq!(
-        model.normalize(super::VisualRowAnchor {
+        model.normalize(crate::ui::render::VisualRowAnchor {
             line: 3,
             wrap_row: 8
         }),
-        super::VisualRowAnchor {
+        crate::ui::render::VisualRowAnchor {
             line: 1,
             wrap_row: 0
         }
     );
-    let start = super::VisualRowAnchor::default();
+    let start = crate::ui::render::VisualRowAnchor::default();
     let sequence = (0..7)
         .scan(start, |anchor, _| {
             let current = *anchor;
@@ -1706,24 +1732,24 @@ fn grapheme_atomic_rows_match_render_cursor_and_tiny_pane_policy() {
         .unwrap();
     let ui = ui_with_editor_layout(&state);
     let model =
-        super::VisualRowModel::new(&state.buffers[buffer].text, view, &ui, &config, 3, true);
+        crate::ui::render::VisualRowModel::new(&state.buffers[buffer].text, view, &ui, &config, 3, true);
     assert_eq!(model.rows_for_line(0), 3);
     assert_eq!(
         model.line_rows(0),
         vec![
-            super::VisualRowSlice {
+            crate::ui::render::VisualRowSlice {
                 byte_start: 0,
                 byte_end: 2,
                 source_column_start: 0,
                 used_cells: 2,
             },
-            super::VisualRowSlice {
+            crate::ui::render::VisualRowSlice {
                 byte_start: 2,
                 byte_end: 5,
                 source_column_start: 2,
                 used_cells: 2,
             },
-            super::VisualRowSlice {
+            crate::ui::render::VisualRowSlice {
                 byte_start: 5,
                 byte_end: 8,
                 source_column_start: 4,
@@ -1774,7 +1800,7 @@ fn grapheme_atomic_rows_match_render_cursor_and_tiny_pane_policy() {
     state.views[view].cursor = crate::editor::text::ByteOffset(0);
     let ui = ui_with_editor_layout(&state);
     let tiny_model =
-        super::VisualRowModel::new(&state.buffers[buffer].text, view, &ui, &config, 1, true);
+        crate::ui::render::VisualRowModel::new(&state.buffers[buffer].text, view, &ui, &config, 1, true);
     assert_eq!(tiny_model.rows_for_line(0), 2);
     let tiny = render(&state, &ui, &config, &loaded.dashboard, 1, 2);
     assert_eq!(
@@ -1809,7 +1835,7 @@ fn mixed_grapheme_row_sequences_are_partitioned_reversible_and_bounded() {
                 .open_text(crate::editor::text::TextBuffer::from_text(sample), None)
                 .unwrap();
             let ui = ui_with_editor_layout(&state);
-            let model = super::VisualRowModel::new(
+            let model = crate::ui::render::VisualRowModel::new(
                 &state.buffers[buffer].text,
                 view,
                 &ui,
@@ -1827,7 +1853,7 @@ fn mixed_grapheme_row_sequences_are_partitioned_reversible_and_bounded() {
                 assert!(boundaries.contains(&row.byte_end));
                 if let Some(next) = rows.get(index + 1) {
                     assert_eq!(row.byte_end, next.byte_start);
-                    let current = super::VisualRowAnchor {
+                    let current = crate::ui::render::VisualRowAnchor {
                         line: 0,
                         wrap_row: index,
                     };
@@ -1835,7 +1861,7 @@ fn mixed_grapheme_row_sequences_are_partitioned_reversible_and_bounded() {
                     assert_eq!(following.wrap_row, index + 1);
                     assert_eq!(model.previous(following), current);
                 }
-                let anchor = super::VisualRowAnchor {
+                let anchor = crate::ui::render::VisualRowAnchor {
                     line: 0,
                     wrap_row: index,
                 };
@@ -1847,13 +1873,13 @@ fn mixed_grapheme_row_sequences_are_partitioned_reversible_and_bounded() {
                     *byte >= row.byte_start && *byte <= row.byte_end && boundaries.contains(byte)
                 }));
             }
-            let last = super::VisualRowAnchor {
+            let last = crate::ui::render::VisualRowAnchor {
                 line: 0,
                 wrap_row: rows.len() - 1,
             };
             assert_eq!(
-                model.backward(model.forward(super::VisualRowAnchor::default(), 999), 999),
-                super::VisualRowAnchor::default()
+                model.backward(model.forward(crate::ui::render::VisualRowAnchor::default(), 999), 999),
+                crate::ui::render::VisualRowAnchor::default()
             );
             assert_eq!(model.forward(last, 1), last);
         }
@@ -1871,13 +1897,13 @@ fn overlapping_collapsed_folds_normalize_to_one_reversible_interval() {
         .unwrap();
     let loaded = crate::config::load_bundled_config();
     let ui = UiState {
-        lsp_folds: vec![super::UiFold {
+        lsp_folds: vec![crate::ui::render::UiFold {
             view,
             start_line: 1,
             end_line: 3,
             collapsed: true,
         }],
-        syntax_folds: vec![super::UiFold {
+        syntax_folds: vec![crate::ui::render::UiFold {
             view,
             start_line: 2,
             end_line: 4,
@@ -1885,7 +1911,7 @@ fn overlapping_collapsed_folds_normalize_to_one_reversible_interval() {
         }],
         ..ui_with_editor_layout(&state)
     };
-    let model = super::VisualRowModel::new(
+    let model = crate::ui::render::VisualRowModel::new(
         &state.buffers[buffer].text,
         view,
         &ui,
@@ -1893,11 +1919,11 @@ fn overlapping_collapsed_folds_normalize_to_one_reversible_interval() {
         20,
         true,
     );
-    let fold_start = super::VisualRowAnchor {
+    let fold_start = crate::ui::render::VisualRowAnchor {
         line: 1,
         wrap_row: 0,
     };
-    let frame = super::render_editor_view(&state, view, &ui, &loaded.config, 30, 5);
+    let frame = crate::ui::render::render_editor_view(&state, view, &ui, &loaded.config, 30, 5);
     assert!(frame.grid.row_text(1).contains("one ⋯ 3 lines"));
     assert!(frame.grid.row_text(2).contains("five"));
     let after = model.next(fold_start);
@@ -1905,7 +1931,7 @@ fn overlapping_collapsed_folds_normalize_to_one_reversible_interval() {
     assert_eq!(model.previous(after), fold_start);
     for hidden in 2..=4 {
         assert_eq!(
-            model.normalize(super::VisualRowAnchor {
+            model.normalize(crate::ui::render::VisualRowAnchor {
                 line: hidden,
                 wrap_row: 99,
             }),
@@ -1959,7 +1985,7 @@ fn inlay_hints_are_inline_virtual_text_that_shift_following_source_and_cursor() 
     config.ui.status_line.enabled = false;
     let ui = UiState {
         editor_window_layout: Some(editor_layout(&state)),
-        lsp_inlay_hints: vec![super::UiInlayHint {
+        lsp_inlay_hints: vec![crate::ui::render::UiInlayHint {
             buffer,
             revision: state.buffers[buffer].text.revision(),
             position: crate::editor::text::ByteOffset("let value".len()),
@@ -1999,7 +2025,8 @@ fn inlay_hints_are_inline_virtual_text_that_shift_following_source_and_cursor() 
 
 #[test]
 fn interior_grapheme_hints_snap_forward_without_blocking_later_hints() {
-    use crate::editor::text::{ByteOffset, TextBuffer};
+    use crate::editor::text::ByteOffset;
+    use crate::editor::text::TextBuffer;
     let mut state = EditorState::new(PathBuf::from("/workspace"));
     let (buffer, view) = state
         .open_text(TextBuffer::from_text("e\u{301} x!"), None)
@@ -2011,7 +2038,7 @@ fn interior_grapheme_hints_snap_forward_without_blocking_later_hints() {
     let ui = UiState {
         substitute_preview: [1, 5]
             .into_iter()
-            .map(|position| super::UiInlayHint {
+            .map(|position| crate::ui::render::UiInlayHint {
                 buffer,
                 revision: state.buffers[buffer].text.revision(),
                 position: ByteOffset(position),
@@ -2022,11 +2049,11 @@ fn interior_grapheme_hints_snap_forward_without_blocking_later_hints() {
     };
     for wrap in [false, true] {
         config.editor.wrap = wrap;
-        let frame = super::render_editor_view(&state, view, &ui, &config, 16, 2);
+        let frame = crate::ui::render::render_editor_view(&state, view, &ui, &config, 16, 2);
         assert_eq!(frame.grid.row_text(0).trim_end(), "e\u{301}> x>!");
         assert_eq!(frame.cursor.map(|(x, y, _)| (x, y)), Some((5, 0)));
         config.editor.wrap = true;
-        let frame = super::render_editor_view(&state, view, &ui, &config, 4, 3);
+        let frame = crate::ui::render::render_editor_view(&state, view, &ui, &config, 4, 3);
         assert_eq!(frame.grid.row_text(0).trim_end(), "e\u{301}> x");
         assert_eq!(frame.grid.row_text(1).trim_end(), ">!");
     }
@@ -2034,7 +2061,8 @@ fn interior_grapheme_hints_snap_forward_without_blocking_later_hints() {
 
 #[test]
 fn non_wrapped_cursor_counts_hints_at_unterminated_and_empty_line_ends() {
-    use crate::editor::text::{ByteOffset, TextBuffer};
+    use crate::editor::text::ByteOffset;
+    use crate::editor::text::TextBuffer;
     for text in ["", "a", "a\n"] {
         let mut state = EditorState::new(PathBuf::from("/workspace"));
         let (buffer, view) = state.open_text(TextBuffer::from_text(text), None).unwrap();
@@ -2045,7 +2073,7 @@ fn non_wrapped_cursor_counts_hints_at_unterminated_and_empty_line_ends() {
         config.editor.wrap = false;
         config.ui.status_line.enabled = false;
         let ui = UiState {
-            lsp_inlay_hints: vec![super::UiInlayHint {
+            lsp_inlay_hints: vec![crate::ui::render::UiInlayHint {
                 buffer,
                 revision: state.buffers[buffer].text.revision(),
                 position: ByteOffset(text.len()),
@@ -2053,7 +2081,7 @@ fn non_wrapped_cursor_counts_hints_at_unterminated_and_empty_line_ends() {
             }],
             ..Default::default()
         };
-        let frame = super::render_editor_view(&state, view, &ui, &config, 16, 3);
+        let frame = crate::ui::render::render_editor_view(&state, view, &ui, &config, 16, 3);
         let (column, row) = if text == "a" {
             (2, 0)
         } else if text.is_empty() {
@@ -2089,7 +2117,7 @@ fn non_wrapped_horizontal_projection_snaps_graphemes_and_preserves_source_tabs()
     state.views[view].cursor = crate::editor::text::ByteOffset("a\t界e\u{301}".len());
     let ui = UiState {
         editor_window_layout: Some(editor_layout(&state)),
-        syntax_spans: vec![super::UiSyntaxSpan {
+        syntax_spans: vec![crate::ui::render::UiSyntaxSpan {
             buffer,
             revision: state.buffers[buffer].text.revision(),
             range: crate::editor::text::ByteRange::new(
@@ -2099,7 +2127,7 @@ fn non_wrapped_horizontal_projection_snaps_graphemes_and_preserves_source_tabs()
             .expect("combining syntax range"),
             role: crate::language::syntax::Highlight::STRING,
         }],
-        lsp_inlay_hints: vec![super::UiInlayHint {
+        lsp_inlay_hints: vec![crate::ui::render::UiInlayHint {
             buffer,
             revision: state.buffers[buffer].text.revision(),
             position: crate::editor::text::ByteOffset("a\t界e\u{301}b".len()),
@@ -2151,12 +2179,12 @@ fn non_wrapped_horizontal_projection_snaps_graphemes_and_preserves_source_tabs()
 
     config.editor.ambiguous_width = crate::config::AmbiguousWidth::Narrow;
     assert_eq!(
-        super::snap_display_column("a·b", 2, 4, config.editor.ambiguous_width),
+        crate::ui::render::snap_display_column("a·b", 2, 4, config.editor.ambiguous_width),
         2
     );
     config.editor.ambiguous_width = crate::config::AmbiguousWidth::Wide;
     assert_eq!(
-        super::snap_display_column("a·b", 2, 4, config.editor.ambiguous_width),
+        crate::ui::render::snap_display_column("a·b", 2, 4, config.editor.ambiguous_width),
         1
     );
 }
@@ -2175,7 +2203,7 @@ fn configurable_indent_guides_follow_leading_space_and_tab_display_columns() {
     config.editor.line_numbers = crate::config::LineNumbers::Off;
     config.ui.status_line.enabled = false;
     let ui = ui_with_editor_layout(&state);
-    let frame = super::render_editor_view(&state, view, &ui, &config, 20, 5);
+    let frame = crate::ui::render::render_editor_view(&state, view, &ui, &config, 20, 5);
 
     assert_eq!(frame.grid.get(0, 1).unwrap().symbol, "│");
     assert_eq!(frame.grid.get(3, 1).unwrap().symbol, " ");
@@ -2192,14 +2220,14 @@ fn configurable_indent_guides_follow_leading_space_and_tab_display_columns() {
     assert_eq!(frame.grid.get(8, 3).unwrap().symbol, "t");
 
     config.editor.indent_guides.enabled = false;
-    let disabled = super::render_editor_view(&state, view, &ui, &config, 20, 5);
+    let disabled = crate::ui::render::render_editor_view(&state, view, &ui, &config, 20, 5);
     assert_eq!(disabled.grid.get(0, 1).unwrap().symbol, " ");
     assert_eq!(disabled.grid.get(4, 2).unwrap().symbol, " ");
     assert_eq!(disabled.grid.get(4, 3).unwrap().symbol, " ");
 
     config.editor.indent_guides.enabled = true;
     config.editor.ambiguous_width = crate::config::AmbiguousWidth::Wide;
-    let wide = super::render_editor_view(&state, view, &ui, &config, 20, 5);
+    let wide = crate::ui::render::render_editor_view(&state, view, &ui, &config, 20, 5);
     assert_eq!(wide.grid.get(4, 2).unwrap().symbol, "|");
     assert!(!wide.grid.get(4, 2).unwrap().continuation);
 }
@@ -2224,7 +2252,7 @@ fn active_indent_scope_guide_is_subtly_elevated_from_normal_guides() {
     config.editor.line_numbers = crate::config::LineNumbers::Off;
     config.ui.status_line.enabled = false;
     let ui = ui_with_editor_layout(&state);
-    let frame = super::render_editor_view(&state, view, &ui, &config, 30, 7);
+    let frame = crate::ui::render::render_editor_view(&state, view, &ui, &config, 30, 7);
 
     assert_eq!(
         frame.grid.get(0, 1).expect("inactive guide").style,
@@ -2258,7 +2286,7 @@ fn active_indent_scope_tracks_the_cursor_display_column() {
     let ui = ui_with_editor_layout(&state);
 
     state.views[view].cursor = crate::editor::text::ByteOffset(work_start.saturating_add(1));
-    let outer = super::render_editor_view(&state, view, &ui, &config, 30, 8);
+    let outer = crate::ui::render::render_editor_view(&state, view, &ui, &config, 30, 8);
     assert_eq!(
         outer.grid.get(0, 3).expect("outer guide").style,
         crate::ui::Style::Muted
@@ -2273,7 +2301,7 @@ fn active_indent_scope_tracks_the_cursor_display_column() {
     );
 
     state.views[view].cursor = crate::editor::text::ByteOffset(work_start.saturating_add(4));
-    let middle = super::render_editor_view(&state, view, &ui, &config, 30, 8);
+    let middle = crate::ui::render::render_editor_view(&state, view, &ui, &config, 30, 8);
     assert_eq!(
         middle.grid.get(0, 3).expect("outer guide").style,
         crate::ui::Style::Border
@@ -2288,7 +2316,7 @@ fn active_indent_scope_tracks_the_cursor_display_column() {
     );
 
     state.views[view].cursor = crate::editor::text::ByteOffset(work_start.saturating_add(8));
-    let inner = super::render_editor_view(&state, view, &ui, &config, 30, 8);
+    let inner = crate::ui::render::render_editor_view(&state, view, &ui, &config, 30, 8);
     assert_eq!(
         inner.grid.get(0, 3).expect("outer guide").style,
         crate::ui::Style::Border
@@ -2324,7 +2352,7 @@ fn closing_delimiter_scope_uses_cursor_column_before_the_delimiter() {
     let ui = ui_with_editor_layout(&state);
 
     state.views[view].cursor = crate::editor::text::ByteOffset(closing_start);
-    let before_delimiter = super::render_editor_view(&state, view, &ui, &config, 30, 8);
+    let before_delimiter = crate::ui::render::render_editor_view(&state, view, &ui, &config, 30, 8);
     assert_eq!(
         before_delimiter
             .grid
@@ -2343,7 +2371,7 @@ fn closing_delimiter_scope_uses_cursor_column_before_the_delimiter() {
     );
 
     state.views[view].cursor = crate::editor::text::ByteOffset(closing_start.saturating_add(8));
-    let on_delimiter = super::render_editor_view(&state, view, &ui, &config, 30, 8);
+    let on_delimiter = crate::ui::render::render_editor_view(&state, view, &ui, &config, 30, 8);
     assert_eq!(
         on_delimiter
             .grid
@@ -2367,40 +2395,40 @@ fn immutable_git_signs_use_the_reserved_gutter_and_exact_buffer_revision() {
     let mut ui = ui_with_editor_layout(&state);
     let revision = state.buffers[buffer].text.revision().0;
     ui.git_signs = vec![
-        super::UiGitSign {
+        crate::ui::render::UiGitSign {
             buffer,
             buffer_revision: revision,
             root_revision: 1,
             status_revision: 1,
             repository_id: crate::git::GitRepositoryId(1),
             line: 0,
-            kind: super::UiGitSignKind::Added,
+            kind: crate::ui::render::UiGitSignKind::Added,
             staged: false,
         },
-        super::UiGitSign {
+        crate::ui::render::UiGitSign {
             buffer,
             buffer_revision: revision,
             root_revision: 1,
             status_revision: 1,
             repository_id: crate::git::GitRepositoryId(1),
             line: 1,
-            kind: super::UiGitSignKind::Changed,
+            kind: crate::ui::render::UiGitSignKind::Changed,
             staged: false,
         },
-        super::UiGitSign {
+        crate::ui::render::UiGitSign {
             buffer,
             buffer_revision: revision,
             root_revision: 1,
             status_revision: 1,
             repository_id: crate::git::GitRepositoryId(1),
             line: 2,
-            kind: super::UiGitSignKind::Deleted,
+            kind: crate::ui::render::UiGitSignKind::Deleted,
             staged: false,
         },
     ];
     let frame = render(&state, &ui, &loaded.config, &loaded.dashboard, 20, 5);
-    let gutter = super::editor_gutter_width(&state.buffers[buffer].text, &loaded.config.editor, 20);
-    let sign_column = super::git_sign_column(gutter, &loaded.config.editor).unwrap();
+    let gutter = crate::ui::render::editor_gutter_width(&state.buffers[buffer].text, &loaded.config.editor, 20);
+    let sign_column = crate::ui::render::git_sign_column(gutter, &loaded.config.editor).unwrap();
     assert_eq!(
         (
             frame.grid.get(sign_column, 0).unwrap().symbol.as_str(),
@@ -2457,10 +2485,10 @@ fn git_signs_do_not_paint_over_text_when_the_gutter_is_disabled() {
     config.editor.line_numbers = crate::config::LineNumbers::Off;
     config.editor.git_signs.enabled = true;
     config.ui.status_line.enabled = false;
-    let frame = super::render_editor_view(&state, view, &UiState::default(), &config, 12, 2);
+    let frame = crate::ui::render::render_editor_view(&state, view, &UiState::default(), &config, 12, 2);
     assert_eq!(frame.grid.row_text(0).trim_end(), "");
     assert_eq!(frame.grid.row_text(1).trim_end(), "text");
-    assert_eq!(super::git_sign_column(0, &config.editor), None);
+    assert_eq!(crate::ui::render::git_sign_column(0, &config.editor), None);
 }
 
 #[test]
@@ -2477,15 +2505,15 @@ fn neutral_git_sign_column_continues_through_wraps_and_end_of_buffer_rows() {
     config.editor.wrap = true;
     config.ui.status_line.enabled = false;
     let ui = ui_with_editor_layout(&state);
-    let frame = super::render_editor_view(&state, view, &ui, &config, 10, 8);
-    let gutter = super::editor_state_gutter_width(
+    let frame = crate::ui::render::render_editor_view(&state, view, &ui, &config, 10, 8);
+    let gutter = crate::ui::render::editor_state_gutter_width(
         &state,
         &state.buffers[state.views[view].buffer].text,
         &config.editor,
         10,
     );
 
-    let sign_column = super::git_sign_column(gutter, &config.editor).unwrap();
+    let sign_column = crate::ui::render::git_sign_column(gutter, &config.editor).unwrap();
     assert!(
         (0..frame.grid.height()).all(|row| {
             frame
@@ -2512,16 +2540,16 @@ fn end_of_buffer_markers_right_align_with_line_number_digits() {
     let mut config = loaded.config;
     config.ui.status_line.enabled = false;
     let ui = ui_with_editor_layout(&state);
-    let frame = super::render_editor_view(&state, view, &ui, &config, 20, 4);
-    let gutter = super::editor_state_gutter_width(
+    let frame = crate::ui::render::render_editor_view(&state, view, &ui, &config, 20, 4);
+    let gutter = crate::ui::render::editor_state_gutter_width(
         &state,
         &state.buffers[state.views[view].buffer].text,
         &config.editor,
         20,
     );
 
-    assert_eq!(super::editor_line_number_digits(&state), 4);
-    let sign_column = super::git_sign_column(gutter, &config.editor).unwrap();
+    assert_eq!(crate::ui::render::editor_line_number_digits(&state), 4);
+    let sign_column = crate::ui::render::git_sign_column(gutter, &config.editor).unwrap();
     for row in 1..frame.grid.height() {
         assert_eq!(frame.grid.get(0, row).unwrap().symbol, " ");
         assert_eq!(frame.grid.get(3, row).unwrap().symbol, "~");
@@ -2548,14 +2576,14 @@ fn line_number_gutter_uses_the_largest_open_buffer_across_tabs() {
         )
         .unwrap();
     let loaded = crate::config::load_bundled_config();
-    assert_eq!(super::editor_line_number_digits(&state), 4);
-    let short_gutter = super::editor_state_gutter_width(
+    assert_eq!(crate::ui::render::editor_line_number_digits(&state), 4);
+    let short_gutter = crate::ui::render::editor_state_gutter_width(
         &state,
         &state.buffers[short].text,
         &loaded.config.editor,
         80,
     );
-    let long_gutter = super::editor_state_gutter_width(
+    let long_gutter = crate::ui::render::editor_state_gutter_width(
         &state,
         &state.buffers[long].text,
         &loaded.config.editor,
@@ -2566,9 +2594,9 @@ fn line_number_gutter_uses_the_largest_open_buffer_across_tabs() {
     state.focus_tab(-1, true).unwrap();
     assert_eq!(state.active_tab, Some(first_tab));
     let ui = ui_with_editor_layout(&state);
-    let frame = super::render_editor_view(&state, short_view, &ui, &loaded.config, 80, 4);
-    let short_sign = super::git_sign_column(short_gutter, &loaded.config.editor).unwrap();
-    let long_sign = super::git_sign_column(long_gutter, &loaded.config.editor).unwrap();
+    let frame = crate::ui::render::render_editor_view(&state, short_view, &ui, &loaded.config, 80, 4);
+    let short_sign = crate::ui::render::git_sign_column(short_gutter, &loaded.config.editor).unwrap();
+    let long_sign = crate::ui::render::git_sign_column(long_gutter, &loaded.config.editor).unwrap();
     assert_eq!(frame.grid.get(3, 0).unwrap().symbol, "1");
     assert_eq!(frame.grid.get(short_sign, 0).unwrap().symbol, "│");
     assert_eq!(
@@ -2577,7 +2605,7 @@ fn line_number_gutter_uses_the_largest_open_buffer_across_tabs() {
     );
     assert_eq!(frame.grid.get(short_sign + 1, 0).unwrap().symbol, " ");
     assert_eq!(frame.grid.get(short_gutter, 0).unwrap().symbol, "s");
-    let long_frame = super::render_editor_view(&state, long_view, &ui, &loaded.config, 80, 4);
+    let long_frame = crate::ui::render::render_editor_view(&state, long_view, &ui, &loaded.config, 80, 4);
     assert_eq!(long_frame.grid.get(long_sign, 0).unwrap().symbol, "│");
     assert_eq!(long_frame.grid.get(long_sign + 1, 0).unwrap().symbol, " ");
     assert_eq!(long_frame.grid.get(long_gutter, 0).unwrap().symbol, "l");
@@ -2598,11 +2626,11 @@ fn concrete_gutter_reserves_content_at_zero_one_and_two_cell_widths() {
     config.ui.status_line.enabled = false;
 
     assert_eq!(
-        super::editor_gutter_width(&state.buffers[buffer].text, &config.editor, 0),
+        crate::ui::render::editor_gutter_width(&state.buffers[buffer].text, &config.editor, 0),
         0
     );
     assert_eq!(
-        super::editor_content_width(&state.buffers[buffer].text, &config.editor, 0),
+        crate::ui::render::editor_content_width(&state.buffers[buffer].text, &config.editor, 0),
         0
     );
     let ui = ui_with_editor_layout(&state);
@@ -2620,7 +2648,7 @@ fn concrete_gutter_reserves_content_at_zero_one_and_two_cell_widths() {
     split_state.focus_pane(-1, false).expect("zero-width leaf");
     let mut split_ui = ui_with_editor_layout(&split_state);
     attach_test_compositor(&split_state, &mut split_ui, &config, 6, 2);
-    let zero_leaf = super::active_pane_viewport(&split_state, &split_ui, &config, 6, 2)
+    let zero_leaf = crate::ui::render::active_pane_viewport(&split_state, &split_ui, &config, 6, 2)
         .expect("focused tiny-layout fallback");
     assert_eq!(zero_leaf.width, 6);
     let split_frame = render(&split_state, &split_ui, &config, &loaded.dashboard, 6, 2);
@@ -2628,11 +2656,11 @@ fn concrete_gutter_reserves_content_at_zero_one_and_two_cell_widths() {
 
     for (width, expected_gutter) in [(1, 0), (2, 1)] {
         assert_eq!(
-            super::editor_gutter_width(&state.buffers[buffer].text, &config.editor, width,),
+            crate::ui::render::editor_gutter_width(&state.buffers[buffer].text, &config.editor, width,),
             expected_gutter
         );
         assert_eq!(
-            super::editor_content_width(&state.buffers[buffer].text, &config.editor, width,),
+            crate::ui::render::editor_content_width(&state.buffers[buffer].text, &config.editor, width,),
             1
         );
         let ui = ui_with_editor_layout(&state);
@@ -2654,11 +2682,11 @@ fn concrete_gutter_reserves_content_at_zero_one_and_two_cell_widths() {
 
     config.editor.line_numbers = crate::config::LineNumbers::Off;
     assert_eq!(
-        super::editor_gutter_width(&state.buffers[buffer].text, &config.editor, 2),
+        crate::ui::render::editor_gutter_width(&state.buffers[buffer].text, &config.editor, 2),
         0
     );
     assert_eq!(
-        super::editor_content_width(&state.buffers[buffer].text, &config.editor, 2),
+        crate::ui::render::editor_content_width(&state.buffers[buffer].text, &config.editor, 2),
         2
     );
 }
@@ -2684,16 +2712,16 @@ fn plain_text_wrapping_preserves_large_messages_and_graphemes() {
         crate::config::AmbiguousWidth::Narrow,
         crate::config::AmbiguousWidth::Wide,
     ] {
-        let lines = super::wrap_plain_text(&message, 40, ambiguous);
+        let lines = crate::ui::render::wrap_plain_text(&message, 40, ambiguous);
         assert_eq!(lines.concat(), message);
         assert!(
             lines
                 .iter()
-                .all(|line| super::text_width(line, ambiguous) <= 40)
+                .all(|line| crate::ui::render::text_width(line, ambiguous) <= 40)
         );
     }
     assert_eq!(
-        super::wrap_plain_text("\n", 40, crate::config::AmbiguousWidth::Narrow),
+        crate::ui::render::wrap_plain_text("\n", 40, crate::config::AmbiguousWidth::Narrow),
         ["", ""]
     );
 }
@@ -2722,7 +2750,7 @@ fn notification_newlines_and_literal_paths_are_preserved() {
     let frame = render(&state, &ui, &loaded.config, &loaded.dashboard, 60, 20);
     assert!((0..20).any(|y| frame.grid.row_text(y).contains("/workspace/a  b`c.rs")));
     for width in [1, 2, 8, 40] {
-        let lines = super::wrap_plain_text(&message, width, loaded.config.editor.ambiguous_width);
+        let lines = crate::ui::render::wrap_plain_text(&message, width, loaded.config.editor.ambiguous_width);
         assert_eq!(lines.concat(), message, "width {width}");
     }
     ui.notification = None;
@@ -2774,17 +2802,17 @@ fn wrapping_ignores_horizontal_offset() {
 
 #[test]
 fn retained_plugin_surface_rows_are_strictly_clipped_to_the_projected_window() {
-    let mut frame = super::Frame {
+    let mut frame = crate::ui::render::Frame {
         grid: crate::ui::CellGrid::new(12, 5),
         cursor: None,
     };
-    let surface = super::PluginSurfaceUiState {
+    let surface = crate::ui::render::PluginSurfaceUiState {
         handle: 9,
         window: crate::windows::WindowId(99),
         tree_revision: 1,
         scroll: 0,
         rows: vec![
-            super::PluginSurfaceRow {
+            crate::ui::render::PluginSurfaceRow {
                 node: 1,
                 depth: 0,
                 text: "abcdefgh".into(),
@@ -2792,7 +2820,7 @@ fn retained_plugin_surface_rows_are_strictly_clipped_to_the_projected_window() {
                 actionable: false,
                 focused: false,
             },
-            super::PluginSurfaceRow {
+            crate::ui::render::PluginSurfaceRow {
                 node: 2,
                 depth: 1,
                 text: "button".into(),
@@ -2802,7 +2830,7 @@ fn retained_plugin_surface_rows_are_strictly_clipped_to_the_projected_window() {
             },
         ],
     };
-    super::render_plugin_surface(
+    crate::ui::render::render_plugin_surface(
         &mut frame,
         &surface,
         crate::windows::WindowRect {
@@ -2820,7 +2848,10 @@ fn retained_plugin_surface_rows_are_strictly_clipped_to_the_projected_window() {
 
 #[test]
 fn theme_geometry_is_compact_and_bounded_without_resizing_other_pickers() {
-    use crate::ui::{PickerRow, PickerSurfaceKind, PickerUiState, window::WindowRect};
+    use crate::ui::PickerRow;
+    use crate::ui::PickerSurfaceKind;
+    use crate::ui::PickerUiState;
+    use crate::ui::window::WindowRect;
     let config = crate::config::load_bundled_config().config;
     let mut picker = PickerUiState {
         preview_side_scroll: (0, 0),
@@ -2863,7 +2894,7 @@ fn theme_geometry_is_compact_and_bounded_without_resizing_other_pickers() {
             picker.surface = PickerSurfaceKind::Generic;
             assert_eq!(
                 crate::ui::geometry::picker_window_geometry(&picker, bounds),
-                super::picker_geometry(bounds)
+                crate::ui::render::picker_geometry(bounds)
             );
         }
     }
@@ -2871,9 +2902,13 @@ fn theme_geometry_is_compact_and_bounded_without_resizing_other_pickers() {
 
 #[test]
 fn picker_sources_share_a_right_column_and_do_not_overwrite_labels_or_borders() {
-    use crate::ui::{
-        CellGrid, Frame, PickerRow, PickerSurfaceKind, PickerUiState, Style, window::WindowRect,
-    };
+    use crate::ui::CellGrid;
+    use crate::ui::Frame;
+    use crate::ui::PickerRow;
+    use crate::ui::PickerSurfaceKind;
+    use crate::ui::PickerUiState;
+    use crate::ui::Style;
+    use crate::ui::window::WindowRect;
     let config = crate::config::load_bundled_config().config;
     for surface in [PickerSurfaceKind::Generic, PickerSurfaceKind::Theme] {
         for width in [64, 20, 8] {
@@ -2905,7 +2940,7 @@ fn picker_sources_share_a_right_column_and_do_not_overwrite_labels_or_borders() 
                 grid: CellGrid::new(72, 12),
                 cursor: None,
             };
-            super::surfaces::render_picker(&mut frame, &picker, &config, rect, None);
+            crate::ui::render::surfaces::render_picker(&mut frame, &picker, &config, rect, None);
             for row in 5..8 {
                 assert_eq!(frame.grid.get(rect.x + width - 1, row).unwrap().symbol, "│");
                 assert_eq!(frame.grid.get(rect.x + width, row).unwrap().symbol, " ");
@@ -2931,14 +2966,14 @@ fn generic_picker_is_centered_filtered_presentation_with_configured_markers() {
     let state = EditorState::new(PathBuf::from("/tmp"));
     let ui = UiState {
         dashboard: true,
-        picker: Some(super::PickerUiState {
+        picker: Some(crate::ui::render::PickerUiState {
             preview_side_scroll: (0, 0),
             footer: None,
             input_hint: "Insert · escape normal".into(),
-            surface: super::PickerSurfaceKind::Generic,
+            surface: crate::ui::render::PickerSurfaceKind::Generic,
             title: "Commands".into(),
             query: "health".into(),
-            rows: vec![super::PickerRow::text(
+            rows: vec![crate::ui::render::PickerRow::text(
                 "health",
                 "health.open",
                 "Show health",
@@ -2948,9 +2983,9 @@ fn generic_picker_is_centered_filtered_presentation_with_configured_markers() {
             scroll: 0,
             total: 0,
             loading: false,
-            preview: Some(super::PickerPreview::text(
+            preview: Some(crate::ui::render::PickerPreview::text(
                 "health.rs",
-                super::PickerTextPreview::new(vec!["fn health() {}".to_string()], 0, Some(0), None),
+                crate::ui::render::PickerTextPreview::new(vec!["fn health() {}".to_string()], 0, Some(0), None),
             )),
         }),
         ..UiState::default()
@@ -2965,7 +3000,7 @@ fn generic_picker_is_centered_filtered_presentation_with_configured_markers() {
 
 #[test]
 fn picker_preview_highlighting_is_prepared_before_paint_and_replaced_with_its_text() {
-    let text = super::PickerTextPreview::new(
+    let text = crate::ui::render::PickerTextPreview::new(
         vec!["fn cached() {}".into()],
         0,
         None,
@@ -2977,7 +3012,7 @@ fn picker_preview_highlighting_is_prepared_before_paint_and_replaced_with_its_te
     let mut picker = diff_picker(crate::ui::diff::parse_unified_patch("", "test"))
         .picker
         .unwrap();
-    picker.preview = Some(super::PickerPreview::text("cached.rs", text));
+    picker.preview = Some(crate::ui::render::PickerPreview::text("cached.rs", text));
     let allocation = picker
         .preview
         .as_ref()
@@ -2992,13 +3027,13 @@ fn picker_preview_highlighting_is_prepared_before_paint_and_replaced_with_its_te
         width: 100,
         height: 24,
     };
-    let mut frame = super::Frame {
+    let mut frame = crate::ui::render::Frame {
         grid: crate::ui::CellGrid::new(100, 24),
         cursor: None,
     };
     for query in ["", "cached"] {
         picker.query = query.into();
-        super::surfaces::render_picker(&mut frame, &picker, &loaded.config, rect, None);
+        crate::ui::render::surfaces::render_picker(&mut frame, &picker, &loaded.config, rect, None);
         assert!((0..24).any(|y| (0..100).any(|x| matches!(
             frame.grid.get(x, y).unwrap().style,
             crate::ui::Style::Syntax(_)
@@ -3010,7 +3045,7 @@ fn picker_preview_highlighting_is_prepared_before_paint_and_replaced_with_its_te
     let text = picker.preview.as_mut().unwrap().as_text_mut().unwrap();
     text.set_content(vec!["x".into()], None);
     assert!(text.spans.is_empty());
-    super::surfaces::render_picker(&mut frame, &picker, &loaded.config, rect, None);
+    crate::ui::render::surfaces::render_picker(&mut frame, &picker, &loaded.config, rect, None);
     assert!((0..24).any(|y| frame.grid.row_text(y).contains("1 x")));
 }
 
@@ -3020,14 +3055,14 @@ fn picker_stacks_preview_when_two_readable_columns_do_not_fit() {
     let long = "x".repeat(80);
     let ui = UiState {
         dashboard: true,
-        picker: Some(super::PickerUiState {
+        picker: Some(crate::ui::render::PickerUiState {
             preview_side_scroll: (0, 0),
             footer: None,
             input_hint: "Insert · escape normal".into(),
-            surface: super::PickerSurfaceKind::Generic,
+            surface: crate::ui::render::PickerSurfaceKind::Generic,
             title: "Grep".into(),
             query: "needle".into(),
-            rows: vec![super::PickerRow::text(
+            rows: vec![crate::ui::render::PickerRow::text(
                 "match",
                 format!("src/long.rs:309:5 {long}"),
                 long.clone(),
@@ -3037,9 +3072,9 @@ fn picker_stacks_preview_when_two_readable_columns_do_not_fit() {
             scroll: 0,
             total: 0,
             loading: false,
-            preview: Some(super::PickerPreview::text(
+            preview: Some(crate::ui::render::PickerPreview::text(
                 "src/long.rs",
-                super::PickerTextPreview::new(
+                crate::ui::render::PickerTextPreview::new(
                     (300..320)
                         .map(|line| format!("preview line {line} {long}"))
                         .collect(),
@@ -3078,7 +3113,7 @@ fn active_pane_viewport_uses_exact_focused_split_rectangle() {
     let mut ui = ui_with_editor_layout(&state);
     attach_test_compositor(&state, &mut ui, &loaded.config, 79, 24);
     let viewport =
-        super::active_pane_viewport(&state, &ui, &loaded.config, 79, 23).expect("focused viewport");
+        crate::ui::render::active_pane_viewport(&state, &ui, &loaded.config, 79, 23).expect("focused viewport");
     assert_eq!(Some(viewport.view), state.active_view);
     assert!(viewport.x > 0 && viewport.y > 0);
     assert!(viewport.width < 79 && viewport.height < 23);
@@ -3099,7 +3134,7 @@ fn completion_is_clipped_to_the_focused_split() {
         .expect("split");
     let loaded = crate::config::load_bundled_config();
     let mut ui = ui_with_editor_layout(&state);
-    ui.language_completion = Some(super::LanguageCompletionState {
+    ui.language_completion = Some(crate::ui::render::LanguageCompletionState {
         typed: 0,
         items: vec![CompletionItem {
             icon: None,
@@ -3112,7 +3147,7 @@ fn completion_is_clipped_to_the_focused_split() {
     });
     attach_test_compositor(&state, &mut ui, &loaded.config, 80, 20);
     let pane =
-        super::active_pane_viewport(&state, &ui, &loaded.config, 80, 19).expect("active pane");
+        crate::ui::render::active_pane_viewport(&state, &ui, &loaded.config, 80, 19).expect("active pane");
     let frame = render(&state, &ui, &loaded.config, &loaded.dashboard, 80, 20);
     assert!(drawn_at(&frame, "selected-completion").is_some());
     let mut selected_cells = 0;
@@ -3146,63 +3181,63 @@ fn explorer_is_a_persistent_left_dock_that_reflows_the_editor() {
         .unwrap();
     let ui = UiState {
         editor_window_layout: Some(editor_layout(&state)),
-        explorer: Some(super::ExplorerUiState {
+        explorer: Some(crate::ui::render::ExplorerUiState {
             title: "Explorer".into(),
             rows: vec![
-                super::ExplorerUiRow {
+                crate::ui::render::ExplorerUiRow {
                     node_id: 1,
                     selected: false,
                     segments: vec![
-                        super::ExplorerUiSegment {
+                        crate::ui::render::ExplorerUiSegment {
                             text: "├─".into(),
-                            role: super::ExplorerSegmentRole::Tree,
+                            role: crate::ui::render::ExplorerSegmentRole::Tree,
                         },
-                        super::ExplorerUiSegment {
+                        crate::ui::render::ExplorerUiSegment {
                             text: "▾".into(),
-                            role: super::ExplorerSegmentRole::Icon,
+                            role: crate::ui::render::ExplorerSegmentRole::Icon,
                         },
-                        super::ExplorerUiSegment {
+                        crate::ui::render::ExplorerUiSegment {
                             text: " ".into(),
-                            role: super::ExplorerSegmentRole::Tree,
+                            role: crate::ui::render::ExplorerSegmentRole::Tree,
                         },
-                        super::ExplorerUiSegment {
+                        crate::ui::render::ExplorerUiSegment {
                             text: "src".into(),
-                            role: super::ExplorerSegmentRole::Directory,
+                            role: crate::ui::render::ExplorerSegmentRole::Directory,
                         },
                     ],
                     right_segments: vec![
-                        super::ExplorerUiSegment {
+                        crate::ui::render::ExplorerUiSegment {
                             text: "M".into(),
-                            role: super::ExplorerSegmentRole::Git,
+                            role: crate::ui::render::ExplorerSegmentRole::Git,
                         },
-                        super::ExplorerUiSegment {
+                        crate::ui::render::ExplorerUiSegment {
                             text: "E".into(),
-                            role: super::ExplorerSegmentRole::Diagnostic,
+                            role: crate::ui::render::ExplorerSegmentRole::Diagnostic,
                         },
                     ],
                 },
-                super::ExplorerUiRow {
+                crate::ui::render::ExplorerUiRow {
                     node_id: 2,
                     selected: true,
                     segments: vec![
-                        super::ExplorerUiSegment {
+                        crate::ui::render::ExplorerUiSegment {
                             text: "│ └─".into(),
-                            role: super::ExplorerSegmentRole::Tree,
+                            role: crate::ui::render::ExplorerSegmentRole::Tree,
                         },
-                        super::ExplorerUiSegment {
+                        crate::ui::render::ExplorerUiSegment {
                             text: "·".into(),
-                            role: super::ExplorerSegmentRole::Icon,
+                            role: crate::ui::render::ExplorerSegmentRole::Icon,
                         },
-                        super::ExplorerUiSegment {
+                        crate::ui::render::ExplorerUiSegment {
                             text:
                                 " main.rs-with-an-intentionally-overlong-name-that-must-not-spill"
                                     .into(),
-                            role: super::ExplorerSegmentRole::File,
+                            role: crate::ui::render::ExplorerSegmentRole::File,
                         },
                     ],
-                    right_segments: vec![super::ExplorerUiSegment {
+                    right_segments: vec![crate::ui::render::ExplorerUiSegment {
                         text: "?".into(),
-                        role: super::ExplorerSegmentRole::Diagnostic,
+                        role: crate::ui::render::ExplorerSegmentRole::Diagnostic,
                     }],
                 },
             ],
@@ -3217,10 +3252,10 @@ fn explorer_is_a_persistent_left_dock_that_reflows_the_editor() {
         ..UiState::default()
     };
     let loaded = crate::config::load_bundled_config();
-    let panel = super::explorer_panel_width(&loaded.config, 100).expect("dock width");
+    let panel = crate::ui::render::explorer_panel_width(&loaded.config, 100).expect("dock width");
     assert_eq!(panel, 40);
-    assert_eq!(super::explorer_panel_width(&loaded.config, 30), Some(14));
-    assert_eq!(super::explorer_panel_width(&loaded.config, 2), None);
+    assert_eq!(crate::ui::render::explorer_panel_width(&loaded.config, 30), Some(14));
+    assert_eq!(crate::ui::render::explorer_panel_width(&loaded.config, 2), None);
     let frame = render(&state, &ui, &loaded.config, &loaded.dashboard, 100, 20);
     assert!(frame.grid.row_text(0).contains("Explorer"));
     assert!(frame.grid.row_text(3).contains("src"));
@@ -3309,11 +3344,11 @@ fn explorer_is_a_persistent_left_dock_that_reflows_the_editor() {
 
 #[test]
 fn private_surface_cells_and_cursor_are_local_and_strictly_clipped() {
-    let mut frame = super::Frame {
+    let mut frame = crate::ui::render::Frame {
         grid: crate::ui::CellGrid::new_with_policy(10, 4, "�", "◌", true),
         cursor: None,
     };
-    let surface = super::PrivateSurfaceUiState {
+    let surface = crate::ui::render::PrivateSurfaceUiState {
         handle: 3,
         window: crate::windows::WindowId(7),
         dimensions_revision: 2,
@@ -3321,35 +3356,35 @@ fn private_surface_cells_and_cursor_are_local_and_strictly_clipped() {
         width: 4,
         height: 2,
         cells: vec![
-            super::PrivateSurfaceCell {
+            crate::ui::render::PrivateSurfaceCell {
                 x: 0,
                 y: 0,
                 grapheme: "界".into(),
                 continuation: false,
                 style: crate::ui::Style::Accent,
             },
-            super::PrivateSurfaceCell {
+            crate::ui::render::PrivateSurfaceCell {
                 x: 1,
                 y: 0,
                 grapheme: String::new(),
                 continuation: true,
                 style: crate::ui::Style::Accent,
             },
-            super::PrivateSurfaceCell {
+            crate::ui::render::PrivateSurfaceCell {
                 x: 0,
                 y: 1,
                 grapheme: "·".into(),
                 continuation: false,
                 style: crate::ui::Style::Accent,
             },
-            super::PrivateSurfaceCell {
+            crate::ui::render::PrivateSurfaceCell {
                 x: 1,
                 y: 1,
                 grapheme: "a".into(),
                 continuation: false,
                 style: crate::ui::Style::Accent,
             },
-            super::PrivateSurfaceCell {
+            crate::ui::render::PrivateSurfaceCell {
                 x: 3,
                 y: 1,
                 grapheme: "e\u{301}".into(),
@@ -3360,7 +3395,7 @@ fn private_surface_cells_and_cursor_are_local_and_strictly_clipped() {
         cursor: Some((3, 1)),
         focused: true,
     };
-    super::render_private_surface(
+    crate::ui::render::render_private_surface(
         &mut frame,
         &surface,
         crate::windows::WindowRect {
@@ -3393,7 +3428,7 @@ fn private_surface_cells_and_cursor_are_local_and_strictly_clipped() {
     let mut stale = surface.clone();
     stale.width = 5;
     let before = (frame.grid.row_text(1), frame.grid.row_text(2), frame.cursor);
-    super::render_private_surface(
+    crate::ui::render::render_private_surface(
         &mut frame,
         &stale,
         crate::windows::WindowRect {
@@ -3412,7 +3447,9 @@ fn private_surface_cells_and_cursor_are_local_and_strictly_clipped() {
 
 #[test]
 fn multiline_diagnostics_style_continuations_but_only_annotate_the_start() {
-    use crate::editor::text::{ByteOffset, ByteRange, TextBuffer};
+    use crate::editor::text::ByteOffset;
+    use crate::editor::text::ByteRange;
+    use crate::editor::text::TextBuffer;
     use crate::ui::Style;
     let path = PathBuf::from("/workspace/file.rs");
     let mut state = EditorState::new(PathBuf::from("/workspace"));
@@ -3425,7 +3462,7 @@ fn multiline_diagnostics_style_continuations_but_only_annotate_the_start() {
     let mut config = crate::config::load_bundled_config().config;
     config.ui.status_line.enabled = false;
     let ui = UiState {
-        diagnostics: vec![super::UiDiagnostic {
+        diagnostics: vec![crate::ui::render::UiDiagnostic {
             path,
             range: ByteRange::new(ByteOffset(1), ByteOffset(12)).unwrap(),
             severity: crate::workspace::DiagnosticSeverity::Error,
@@ -3435,8 +3472,8 @@ fn multiline_diagnostics_style_continuations_but_only_annotate_the_start() {
         }],
         ..Default::default()
     };
-    let frame = super::render_editor_view(&state, view, &ui, &config, 40, 4);
-    let gutter = super::editor_state_gutter_width(
+    let frame = crate::ui::render::render_editor_view(&state, view, &ui, &config, 40, 4);
+    let gutter = crate::ui::render::editor_state_gutter_width(
         &state,
         &state.buffers[state.views[view].buffer].text,
         &config.editor,
@@ -3459,7 +3496,7 @@ fn multiline_diagnostics_style_continuations_but_only_annotate_the_start() {
     // Starting the viewport inside the diagnostic still paints its continuation.
     state.views[view].cursor = ByteOffset(8);
     state.views[view].scroll_line = 1;
-    let frame = super::render_editor_view(&state, view, &ui, &config, 40, 2);
+    let frame = crate::ui::render::render_editor_view(&state, view, &ui, &config, 40, 2);
     assert_eq!(
         frame.grid.get(gutter, 0).unwrap().style,
         Style::DiagnosticError
@@ -3469,7 +3506,9 @@ fn multiline_diagnostics_style_continuations_but_only_annotate_the_start() {
 
 #[test]
 fn diagnostic_continuations_handle_unicode_ends_and_collapsed_lines() {
-    use crate::editor::text::{ByteOffset, ByteRange, TextBuffer};
+    use crate::editor::text::ByteOffset;
+    use crate::editor::text::ByteRange;
+    use crate::editor::text::TextBuffer;
     use crate::ui::Style;
     let path = PathBuf::from("/workspace/file.rs");
     let mut state = EditorState::new(PathBuf::from("/workspace"));
@@ -3484,7 +3523,7 @@ fn diagnostic_continuations_handle_unicode_ends_and_collapsed_lines() {
     config.ui.status_line.enabled = false;
     for end in [12, 13] {
         let ui = UiState {
-            diagnostics: vec![super::UiDiagnostic {
+            diagnostics: vec![crate::ui::render::UiDiagnostic {
                 path: path.clone(),
                 range: ByteRange::new(ByteOffset(1), ByteOffset(end)).unwrap(),
                 severity: crate::workspace::DiagnosticSeverity::Error,
@@ -3494,7 +3533,7 @@ fn diagnostic_continuations_handle_unicode_ends_and_collapsed_lines() {
             }],
             ..Default::default()
         };
-        let frame = super::render_editor_view(&state, view, &ui, &config, 40, 4);
+        let frame = crate::ui::render::render_editor_view(&state, view, &ui, &config, 40, 4);
         assert_eq!(
             frame.grid.get(2, 2).unwrap().style,
             Style::DiagnosticError,
@@ -3510,7 +3549,7 @@ fn diagnostic_continuations_handle_unicode_ends_and_collapsed_lines() {
     let buffer = state.views[view].buffer;
     state.buffers[buffer].text = TextBuffer::from_text(&source);
     let ui = UiState {
-        diagnostics: vec![super::UiDiagnostic {
+        diagnostics: vec![crate::ui::render::UiDiagnostic {
             path,
             range: ByteRange::new(ByteOffset(0), ByteOffset(source.len())).unwrap(),
             severity: crate::workspace::DiagnosticSeverity::Error,
@@ -3518,7 +3557,7 @@ fn diagnostic_continuations_handle_unicode_ends_and_collapsed_lines() {
             code: None,
             message: "problem".into(),
         }],
-        syntax_folds: vec![super::UiFold {
+        syntax_folds: vec![crate::ui::render::UiFold {
             view,
             start_line: 0,
             end_line: 10_000,
@@ -3526,7 +3565,7 @@ fn diagnostic_continuations_handle_unicode_ends_and_collapsed_lines() {
         }],
         ..Default::default()
     };
-    let frame = super::render_editor_view(&state, view, &ui, &config, 40, 2);
+    let frame = crate::ui::render::render_editor_view(&state, view, &ui, &config, 40, 2);
     assert!(frame.grid.row_text(1).starts_with("last"));
     assert_eq!(frame.grid.get(0, 1).unwrap().style, Style::DiagnosticError);
 }
@@ -3543,7 +3582,7 @@ fn language_diagnostics_and_completion_are_projected_without_service_calls() {
         .unwrap();
     let ui = UiState {
         editor_window_layout: Some(editor_layout(&state)),
-        diagnostics: vec![super::UiDiagnostic {
+        diagnostics: vec![crate::ui::render::UiDiagnostic {
             path,
             severity: crate::workspace::DiagnosticSeverity::Error,
             range: crate::editor::text::ByteRange::new(
@@ -3557,7 +3596,7 @@ fn language_diagnostics_and_completion_are_projected_without_service_calls() {
         }],
         git_branch: Some("lean".into()),
         running_tasks: 2,
-        language_completion: Some(super::LanguageCompletionState {
+        language_completion: Some(crate::ui::render::LanguageCompletionState {
             typed: 0,
             items: vec![CompletionItem {
                 icon: None,
@@ -3573,7 +3612,7 @@ fn language_diagnostics_and_completion_are_projected_without_service_calls() {
     let loaded = crate::config::load_bundled_config();
     let frame = render(&state, &ui, &loaded.config, &loaded.dashboard, 100, 10);
     let view = state.active_view.expect("active view");
-    let gutter = super::editor_state_gutter_width(
+    let gutter = crate::ui::render::editor_state_gutter_width(
         &state,
         &state.buffers[state.views[view].buffer].text,
         &loaded.config.editor,
@@ -3598,7 +3637,7 @@ fn status_line_names_the_symbols_around_the_cursor() {
             Some(PathBuf::from("/tmp/main.rs")),
         )
         .unwrap();
-    let symbol = |name: &str, start, end| super::UiBreadcrumb {
+    let symbol = |name: &str, start, end| crate::ui::render::UiBreadcrumb {
         name: name.into(),
         range: crate::editor::text::ByteRange::new(
             crate::editor::text::ByteOffset(start),
@@ -3631,7 +3670,7 @@ fn status_line_names_the_symbols_around_the_cursor() {
 
 #[test]
 fn wrapped_rows_end_at_words_and_break_only_long_ones() {
-    let rows = super::debug::wrap_rows(
+    let rows = crate::ui::render::debug::wrap_rows(
         &["one two three".into(), "abcdefghijkl".into()],
         8,
         &crate::ui::CellGrid::new(80, 24),
@@ -3649,7 +3688,7 @@ fn a_line_with_a_diagnostic_is_marked_in_the_gutter_with_its_worst_severity() {
             Some(path.clone()),
         )
         .unwrap();
-    let diagnostic = |severity, start, end| super::UiDiagnostic {
+    let diagnostic = |severity, start, end| crate::ui::render::UiDiagnostic {
         path: path.clone(),
         severity,
         range: crate::editor::text::ByteRange::new(
@@ -3661,7 +3700,8 @@ fn a_line_with_a_diagnostic_is_marked_in_the_gutter_with_its_worst_severity() {
         code: None,
         message: "problem".into(),
     };
-    use crate::workspace::DiagnosticSeverity::{Error, Warning};
+    use crate::workspace::DiagnosticSeverity::Error;
+    use crate::workspace::DiagnosticSeverity::Warning;
     let ui = UiState {
         editor_window_layout: Some(editor_layout(&state)),
         diagnostics: vec![
@@ -3686,11 +3726,11 @@ fn a_line_with_a_diagnostic_is_marked_in_the_gutter_with_its_worst_severity() {
     };
     assert_eq!(
         mark(row("bad")),
-        Some(super::Style::Error),
+        Some(crate::ui::render::Style::Error),
         "the worst severity on the line"
     );
     assert_eq!(mark(row("fine")), None);
-    assert_eq!(mark(row("odd")), Some(super::Style::Warning));
+    assert_eq!(mark(row("odd")), Some(crate::ui::render::Style::Warning));
 }
 
 #[test]
@@ -3708,7 +3748,7 @@ fn focused_diagnostic_expands_all_matching_messages_as_virtual_lines() {
         crate::editor::text::ByteOffset(3),
     )
     .expect("range");
-    let diagnostic = |message: &str, code: &str| super::UiDiagnostic {
+    let diagnostic = |message: &str, code: &str| crate::ui::render::UiDiagnostic {
         path: path.clone(),
         range,
         severity: crate::workspace::DiagnosticSeverity::Error,
@@ -3722,7 +3762,7 @@ fn focused_diagnostic_expands_all_matching_messages_as_virtual_lines() {
             diagnostic("first error", "E0001"),
             diagnostic("second error", "E0002"),
         ],
-        expanded_diagnostic: Some(super::ExpandedDiagnosticState {
+        expanded_diagnostic: Some(crate::ui::render::ExpandedDiagnosticState {
             path,
             line: 0,
             severities: vec![crate::workspace::DiagnosticSeverity::Error],
@@ -3752,7 +3792,7 @@ fn completion_documentation_never_covers_the_candidates_on_a_narrow_screen() {
     }
     let ui = UiState {
         editor_window_layout: Some(editor_layout(&state)),
-        language_completion: Some(super::LanguageCompletionState {
+        language_completion: Some(crate::ui::render::LanguageCompletionState {
             typed: 0,
             items: (0..6)
                 .map(|index| CompletionItem {
@@ -3806,7 +3846,7 @@ fn completion_documentation_wraps_to_the_room_beside_a_wide_menu() {
     }
     let ui = UiState {
         editor_window_layout: Some(editor_layout(&state)),
-        language_completion: Some(super::LanguageCompletionState {
+        language_completion: Some(crate::ui::render::LanguageCompletionState {
             typed: 0,
             items: ["color", "content", "column-gap", "contain-intrinsic-size"]
                 .into_iter()
@@ -3861,7 +3901,7 @@ fn language_completion_keeps_the_selected_item_inside_its_bounded_viewport() {
         .unwrap();
     let ui = UiState {
         editor_window_layout: Some(editor_layout(&state)),
-        language_completion: Some(super::LanguageCompletionState {
+        language_completion: Some(crate::ui::render::LanguageCompletionState {
             typed: 0,
             items: (0..20)
                 .map(|index| CompletionItem {
@@ -3909,26 +3949,26 @@ fn terminal_is_a_full_width_bottom_dock_with_direct_cells_and_focus_cursor() {
     let mut screen = crate::ui::PtyScreen::new(80, 4, 100);
     screen.feed_bytes("\u{1b}[31;1mRED\u{1b}[0m 界".as_bytes());
     let (cursor_column, cursor_row) = screen.cursor();
-    let terminal = super::TerminalPanelState {
+    let terminal = crate::ui::render::TerminalPanelState {
         id: 7,
         profile: "shell".into(),
         tabs: vec![
-            super::TerminalTabState {
-                phase: super::TerminalPhase::Running,
+            crate::ui::render::TerminalTabState {
+                phase: crate::ui::render::TerminalPhase::Running,
                 id: 7,
                 profile: "shell".into(),
                 running: true,
                 exit_code: None,
             },
-            super::TerminalTabState {
-                phase: super::TerminalPhase::Exited,
+            crate::ui::render::TerminalTabState {
+                phase: crate::ui::render::TerminalPhase::Exited,
                 id: 8,
                 profile: "logs".into(),
                 running: false,
                 exit_code: Some(2),
             },
         ],
-        mode: super::TerminalPanelMode::Input,
+        mode: crate::ui::render::TerminalPanelMode::Input,
         running: true,
         exit_code: None,
         truncated: false,
@@ -3943,21 +3983,21 @@ fn terminal_is_a_full_width_bottom_dock_with_direct_cells_and_focus_cursor() {
         scroll_offset: 0,
         requested_height: 6,
     };
-    let tab_geometry = super::terminal_panel_geometry(19, 6).unwrap();
-    let tab_geometry = super::TerminalPanelGeometry {
+    let tab_geometry = crate::ui::render::terminal_panel_geometry(19, 6).unwrap();
+    let tab_geometry = crate::ui::render::TerminalPanelGeometry {
         width: 80,
         ..tab_geometry
     };
     assert_eq!(
-        super::terminal_tab_at_column(&terminal, &config, tab_geometry, 2),
+        crate::ui::render::terminal_tab_at_column(&terminal, &config, tab_geometry, 2),
         Some(7)
     );
     assert_eq!(
-        super::terminal_tab_at_column(&terminal, &config, tab_geometry, 13),
+        crate::ui::render::terminal_tab_at_column(&terminal, &config, tab_geometry, 13),
         Some(8)
     );
     let mut ui = ui_with_editor_layout(&state);
-    ui.explorer = Some(super::ExplorerUiState {
+    ui.explorer = Some(crate::ui::render::ExplorerUiState {
         title: "Explorer".into(),
         rows: Vec::new(),
         scroll: 0,
@@ -3969,13 +4009,13 @@ fn terminal_is_a_full_width_bottom_dock_with_direct_cells_and_focus_cursor() {
     });
     ui.terminal_panel = Some(terminal.clone());
     // The status line keeps the screen's last row, so the panel ends one row above it.
-    let geometry = super::terminal_panel_geometry(19, 6).expect("terminal geometry");
+    let geometry = crate::ui::render::terminal_panel_geometry(19, 6).expect("terminal geometry");
     assert_eq!(geometry.top, 13);
     assert_eq!(geometry.body_height, 5);
-    let panel_width = super::explorer_panel_width(&config, 80).expect("explorer width");
+    let panel_width = crate::ui::render::explorer_panel_width(&config, 80).expect("explorer width");
     let editor_width = 80_u16.saturating_sub(panel_width).saturating_sub(1);
     attach_test_compositor(&state, &mut ui, &config, 80, 20);
-    let viewport = super::active_pane_viewport(&state, &ui, &config, editor_width, geometry.top)
+    let viewport = crate::ui::render::active_pane_viewport(&state, &ui, &config, editor_width, geometry.top)
         .expect("reduced editor viewport");
     assert!(viewport.height <= 13);
 
@@ -4058,19 +4098,19 @@ fn terminal_tabs_keep_the_active_title_visible_and_hit_targets_match_borders() {
         .unwrap();
     let mut screen = crate::ui::PtyScreen::new(40, 2, 10);
     screen.feed_bytes("·x界y".as_bytes());
-    let mut terminal = super::TerminalPanelState {
+    let mut terminal = crate::ui::render::TerminalPanelState {
         id: 1,
         profile: "shell".into(),
         tabs: (1..=6)
-            .map(|id| super::TerminalTabState {
+            .map(|id| crate::ui::render::TerminalTabState {
                 id,
                 profile: "shell".into(),
-                phase: super::TerminalPhase::Running,
+                phase: crate::ui::render::TerminalPhase::Running,
                 running: true,
                 exit_code: None,
             })
             .collect(),
-        mode: super::TerminalPanelMode::Input,
+        mode: crate::ui::render::TerminalPanelMode::Input,
         running: true,
         exit_code: None,
         truncated: false,
@@ -4096,7 +4136,7 @@ fn terminal_tabs_keep_the_active_title_visible_and_hit_targets_match_borders() {
             crate::windows::CompositorLayer::Floating,
         ] {
             let geometry =
-                super::terminal_window_geometry(crate::windows::ProjectedCompositorWindow {
+                crate::ui::render::terminal_window_geometry(crate::windows::ProjectedCompositorWindow {
                     window: crate::windows::WindowId(1),
                     rect: crate::windows::WindowRect {
                         x: 10,
@@ -4112,8 +4152,8 @@ fn terminal_tabs_keep_the_active_title_visible_and_hit_targets_match_borders() {
                 .unwrap();
             for active in [1, 6, 3] {
                 terminal.id = active;
-                let frame = super::terminal::dock_terminal_panel(
-                    super::Frame {
+                let frame = crate::ui::render::terminal::dock_terminal_panel(
+                    crate::ui::render::Frame {
                         grid: crate::ui::CellGrid::new(80, 8),
                         cursor: None,
                     },
@@ -4123,7 +4163,7 @@ fn terminal_tabs_keep_the_active_title_visible_and_hit_targets_match_borders() {
                     80,
                     8,
                 );
-                let title = super::terminal::terminal_tab_label(
+                let title = crate::ui::render::terminal::terminal_tab_label(
                     &terminal.tabs,
                     &terminal.tabs[(active - 1) as usize],
                 );
@@ -4134,14 +4174,14 @@ fn terminal_tabs_keep_the_active_title_visible_and_hit_targets_match_borders() {
                     if cell.style == crate::ui::Style::TerminalTitle {
                         title_cells += 1;
                         assert_eq!(
-                            super::terminal_tab_at_column(&terminal, &config, geometry, x),
+                            crate::ui::render::terminal_tab_at_column(&terminal, &config, geometry, x),
                             Some(active)
                         );
                     }
                 }
                 assert_eq!(title_cells, title.len());
                 assert_eq!(
-                    super::terminal_tab_at_column(&terminal, &config, geometry, geometry.x),
+                    crate::ui::render::terminal_tab_at_column(&terminal, &config, geometry, geometry.x),
                     None
                 );
                 for (offset, symbol, continuation) in [
@@ -4170,10 +4210,10 @@ fn key_hints_anchor_clip_and_preserve_protected_rows() {
     let config = loaded.config;
     let ui = UiState {
         dashboard: true,
-        key_hints: Some(super::KeyHintUiState {
+        key_hints: Some(crate::ui::render::KeyHintUiState {
             prefix: "space f".into(),
             rows: (0..30)
-                .map(|index| super::KeyHintUiRow {
+                .map(|index| crate::ui::render::KeyHintUiRow {
                     next_key: char::from(b'a' + index).to_string(),
                     label: format!("Action {index}"),
                     icon: (index == 0).then(|| "F".into()),
@@ -4216,10 +4256,10 @@ fn key_hints_anchor_clip_and_preserve_protected_rows() {
 
 #[test]
 fn key_hints_use_available_rows_and_stay_inside_a_lower_workspace() {
-    let hints = super::KeyHintUiState {
+    let hints = crate::ui::render::KeyHintUiState {
         prefix: "space".into(),
         rows: (0..8)
-            .map(|index| super::KeyHintUiRow {
+            .map(|index| crate::ui::render::KeyHintUiRow {
                 next_key: index.to_string(),
                 label: format!("Action {index}"),
                 icon: None,
@@ -4227,14 +4267,14 @@ fn key_hints_use_available_rows_and_stay_inside_a_lower_workspace() {
             })
             .collect(),
     };
-    let mut frame = super::Frame {
+    let mut frame = crate::ui::render::Frame {
         grid: crate::ui::CellGrid::new(80, 40),
         cursor: None,
     };
     for y in 0..40 {
         frame.grid.fill_row(y, crate::ui::Style::TerminalBackground);
     }
-    super::terminal::render_key_hints(
+    crate::ui::render::terminal::render_key_hints(
         &mut frame,
         &hints,
         crate::windows::WindowRect {
@@ -4259,9 +4299,9 @@ fn key_hints_use_available_rows_and_stay_inside_a_lower_workspace() {
 
 #[test]
 fn key_hints_measure_wide_labels_and_keep_borders_single_cell() {
-    let hints = super::KeyHintUiState {
+    let hints = crate::ui::render::KeyHintUiState {
         prefix: "space".into(),
-        rows: vec![super::KeyHintUiRow {
+        rows: vec![crate::ui::render::KeyHintUiRow {
             next_key: "a".into(),
             label: "·".repeat(20),
             icon: None,
@@ -4269,11 +4309,11 @@ fn key_hints_measure_wide_labels_and_keep_borders_single_cell() {
         }],
     };
     for (width, clipped) in [(60, false), (24, true)] {
-        let mut frame = super::Frame {
+        let mut frame = crate::ui::render::Frame {
             grid: crate::ui::CellGrid::new_with_policy(width, 10, "?", "?", true),
             cursor: None,
         };
-        super::terminal::render_key_hints(
+        crate::ui::render::terminal::render_key_hints(
             &mut frame,
             &hints,
             crate::windows::WindowRect {
@@ -4315,7 +4355,7 @@ fn dashboard_and_prompt_render_at_multiple_sizes() {
         let loaded = crate::config::load_bundled_config();
         let config = loaded.config;
         let dashboard_config = loaded.dashboard;
-        ui.dashboard_actions = vec![super::DashboardAction {
+        ui.dashboard_actions = vec![crate::ui::render::DashboardAction {
             command: "workspace.file.find".into(),
             label: "Find File".into(),
             icon: String::new(),
@@ -4356,16 +4396,17 @@ fn dashboard_and_prompt_render_at_multiple_sizes() {
 
 #[test]
 fn dashboard_respects_top_docks_and_floating_window_order() {
-    use crate::windows::{CompositorLayer, WindowRect};
+    use crate::windows::CompositorLayer;
+    use crate::windows::WindowRect;
     let state = EditorState::new(PathBuf::from("/workspace"));
     let loaded = crate::config::load_bundled_config();
     let mut ui = UiState {
         dashboard: true,
-        terminal_panel: Some(super::TerminalPanelState {
+        terminal_panel: Some(crate::ui::render::TerminalPanelState {
             id: 7,
             profile: "shell".into(),
             tabs: Vec::new(),
-            mode: super::TerminalPanelMode::Input,
+            mode: crate::ui::render::TerminalPanelMode::Input,
             running: true,
             exit_code: None,
             truncated: false,
@@ -4405,8 +4446,8 @@ fn dashboard_respects_top_docks_and_floating_window_order() {
         width: 80,
         height: 8,
     };
-    let actual = super::render(&state, &ui, &loaded.config, &loaded.dashboard, 80, 30);
-    let expected = super::render_dashboard(
+    let actual = crate::ui::render::render(&state, &ui, &loaded.config, &loaded.dashboard, 80, 30);
+    let expected = crate::ui::render::render_dashboard(
         &state.workspace_root,
         &[],
         0,
@@ -4442,7 +4483,7 @@ fn dashboard_respects_top_docks_and_floating_window_order() {
         width: 0,
         ..workspace
     };
-    let docked = super::render(&state, &ui, &loaded.config, &loaded.dashboard, 80, 30);
+    let docked = crate::ui::render::render(&state, &ui, &loaded.config, &loaded.dashboard, 80, 30);
     for y in 0..workspace.height {
         assert_eq!(
             docked.grid.row_text(workspace.y + y),
@@ -4470,8 +4511,8 @@ fn dashboard_respects_top_docks_and_floating_window_order() {
         compositor.projection.hit_test(rect.x + 1, rect.y + 1),
         Some(dashboard)
     );
-    let actual = super::render(&state, &ui, &loaded.config, &loaded.dashboard, 80, 30);
-    let expected = super::render_dashboard(
+    let actual = crate::ui::render::render(&state, &ui, &loaded.config, &loaded.dashboard, 80, 30);
+    let expected = crate::ui::render::render_dashboard(
         &state.workspace_root,
         &[],
         0,
@@ -4494,7 +4535,7 @@ fn dashboard_respects_top_docks_and_floating_window_order() {
         compositor.projection.hit_test(rect.x + 1, rect.y + 1),
         Some(terminal)
     );
-    let terminal_on_top = super::render(&state, &ui, &loaded.config, &loaded.dashboard, 80, 30);
+    let terminal_on_top = crate::ui::render::render(&state, &ui, &loaded.config, &loaded.dashboard, 80, 30);
     assert_ne!(
         terminal_on_top.grid.get(rect.x, rect.y),
         actual.grid.get(rect.x, rect.y)
@@ -4584,7 +4625,7 @@ fn the_operation_bar_renders_the_phase_at_width_and_never_loses_cancellation() {
 #[test]
 fn operation_bar_keeps_actions_before_blockers_and_fits_display_cells() {
     use crate::config::AmbiguousWidth;
-    let mut bar = super::OperationBarState {
+    let mut bar = crate::ui::render::OperationBarState {
         operation: "merge".into(),
         phase: "paused".into(),
         blockers: vec!["界".repeat(30)],
@@ -4600,7 +4641,7 @@ fn operation_bar_keeps_actions_before_blockers_and_fits_display_cells() {
         for width in 0..90 {
             let row = bar.row(width, ambiguous);
             assert!(
-                super::text_width(&row, ambiguous) <= usize::from(width),
+                crate::ui::render::text_width(&row, ambiguous) <= usize::from(width),
                 "{row:?} at {width}"
             );
             assert!(!row.contains("esc cancel"));
@@ -4612,7 +4653,7 @@ fn operation_bar_keeps_actions_before_blockers_and_fits_display_cells() {
         bar.blockers = vec!["·".repeat(25)];
         let row = bar.row(70, ambiguous);
         assert!(row.contains("resolve/ctrl-a abort"));
-        assert!(super::text_width(&row, ambiguous) <= 70);
+        assert!(crate::ui::render::text_width(&row, ambiguous) <= 70);
     }
 }
 
@@ -4793,10 +4834,12 @@ fn the_debug_arrangement_is_coordinated_and_the_source_is_never_squeezed_out() {
     // centre, lazily loaded variables and watches on the other, and an interactive console bound
     // to the selected frame. Narrow terminals replace panes with selectable inspectors rather
     // than compressing the source below a readable minimum."
-    use super::debug::{
-        DEBUG_SOURCE_MIN_WIDTH, DebugLayoutMode, DebugPane, DebugPanesUiState, debug_layout,
-        render_debug_panes,
-    };
+    use crate::ui::render::debug::DEBUG_SOURCE_MIN_WIDTH;
+    use crate::ui::render::debug::DebugLayoutMode;
+    use crate::ui::render::debug::DebugPane;
+    use crate::ui::render::debug::DebugPanesUiState;
+    use crate::ui::render::debug::debug_layout;
+    use crate::ui::render::debug::render_debug_panes;
     let panes = DebugPanesUiState {
         selected: DebugPane::Watches,
         target: "owned: attached to processId 4242".into(),
@@ -4846,8 +4889,8 @@ fn the_debug_arrangement_is_coordinated_and_the_source_is_never_squeezed_out() {
     );
 
     // And the panels are DRAWN in the regions the arrangement reserved, not over the source.
-    let mut frame = super::Frame {
-        grid: super::CellGrid::new(120, 40),
+    let mut frame = crate::ui::render::Frame {
+        grid: crate::ui::render::CellGrid::new(120, 40),
         cursor: None,
     };
     render_debug_panes(&mut frame, layout, &panes);
@@ -4883,8 +4926,8 @@ fn the_debug_arrangement_is_coordinated_and_the_source_is_never_squeezed_out() {
     assert_eq!(narrow.source.width, 60, "the source keeps its FULL width");
     assert!(narrow.source.width >= DEBUG_SOURCE_MIN_WIDTH);
     let strip = narrow.console.expect("one selectable inspector remains");
-    let mut frame = super::Frame {
-        grid: super::CellGrid::new(60, 24),
+    let mut frame = crate::ui::render::Frame {
+        grid: crate::ui::render::CellGrid::new(60, 24),
         cursor: None,
     };
     render_debug_panes(&mut frame, narrow, &panes);
@@ -4914,7 +4957,10 @@ fn the_debug_arrangement_is_coordinated_and_the_source_is_never_squeezed_out() {
 fn the_selected_inspector_decides_the_narrow_strip_content_not_only_its_marker() {
     // "Selectable inspectors" is only real if the CONTENT follows the selection: an assertion that
     // the marker moved would pass even if the strip kept showing the previous inspector.
-    use super::debug::{DebugPane, DebugPanesUiState, debug_layout, render_debug_panes};
+    use crate::ui::render::debug::DebugPane;
+    use crate::ui::render::debug::DebugPanesUiState;
+    use crate::ui::render::debug::debug_layout;
+    use crate::ui::render::debug::render_debug_panes;
     let layout = debug_layout(60, 24).expect("a narrow layout");
     let strip = layout.console.expect("the narrow strip");
     let base = DebugPanesUiState {
@@ -4928,13 +4974,13 @@ fn the_selected_inspector_decides_the_narrow_strip_content_not_only_its_marker()
         watches: vec!["count".into()],
         console: vec!["count = 1".into()],
     };
-    let mut watches = super::Frame {
-        grid: super::CellGrid::new(60, 24),
+    let mut watches = crate::ui::render::Frame {
+        grid: crate::ui::render::CellGrid::new(60, 24),
         cursor: None,
     };
     render_debug_panes(&mut watches, layout, &base);
-    let mut breakpoints = super::Frame {
-        grid: super::CellGrid::new(60, 24),
+    let mut breakpoints = crate::ui::render::Frame {
+        grid: crate::ui::render::CellGrid::new(60, 24),
         cursor: None,
     };
     render_debug_panes(
@@ -4945,7 +4991,7 @@ fn the_selected_inspector_decides_the_narrow_strip_content_not_only_its_marker()
             ..base.clone()
         },
     );
-    let rows_of = |frame: &super::Frame| -> String {
+    let rows_of = |frame: &crate::ui::render::Frame| -> String {
         (strip.y..strip.y + strip.height)
             .map(|y| frame.grid.row_text(y))
             .collect::<Vec<_>>()
@@ -4969,11 +5015,13 @@ fn the_selected_inspector_decides_the_narrow_strip_content_not_only_its_marker()
 
 #[test]
 fn a_breakpoint_condition_wraps_and_a_long_frame_ends_in_an_ellipsis() {
-    use super::debug::{DebugPanesUiState, debug_layout, render_debug_panes};
+    use crate::ui::render::debug::DebugPanesUiState;
+    use crate::ui::render::debug::debug_layout;
+    use crate::ui::render::debug::render_debug_panes;
     let layout = debug_layout(120, 40).unwrap();
     let inner = layout.left.unwrap().width as usize - 2;
     let panes = DebugPanesUiState {
-        selected: super::debug::DebugPane::Stack,
+        selected: crate::ui::render::debug::DebugPane::Stack,
         target: String::new(),
         status: String::new(),
         variables: Vec::new(),
@@ -4986,8 +5034,8 @@ fn a_breakpoint_condition_wraps_and_a_long_frame_ends_in_an_ellipsis() {
         watches: Vec::new(),
         console: Vec::new(),
     };
-    let mut frame = super::Frame {
-        grid: super::CellGrid::new(120, 40),
+    let mut frame = crate::ui::render::Frame {
+        grid: crate::ui::render::CellGrid::new(120, 40),
         cursor: None,
     };
     render_debug_panes(&mut frame, layout, &panes);
@@ -5023,8 +5071,8 @@ fn the_debug_console_and_the_terminal_panel_are_planned_together_rather_than_col
         editor_window_layout: Some(editor_layout(&state)),
         ..UiState::default()
     };
-    ui.debug_panes = Some(super::debug::DebugPanesUiState {
-        selected: super::debug::DebugPane::Sessions,
+    ui.debug_panes = Some(crate::ui::render::debug::DebugPanesUiState {
+        selected: crate::ui::render::debug::DebugPane::Sessions,
         target: "owned: launched debuggee".into(),
         status: String::new(),
         variables: Vec::new(),
@@ -5034,17 +5082,17 @@ fn the_debug_console_and_the_terminal_panel_are_planned_together_rather_than_col
         watches: vec!["count".into()],
         console: (1..=7).map(|n| format!("c{n}")).collect(),
     });
-    ui.terminal_panel = Some(super::TerminalPanelState {
+    ui.terminal_panel = Some(crate::ui::render::TerminalPanelState {
         id: 1,
         profile: "side".into(),
-        tabs: vec![super::TerminalTabState {
-            phase: super::TerminalPhase::Running,
+        tabs: vec![crate::ui::render::TerminalTabState {
+            phase: crate::ui::render::TerminalPhase::Running,
             id: 1,
             profile: "side".into(),
             running: true,
             exit_code: None,
         }],
-        mode: super::TerminalPanelMode::Input,
+        mode: crate::ui::render::TerminalPanelMode::Input,
         running: true,
         exit_code: None,
         truncated: false,
@@ -5061,16 +5109,16 @@ fn the_debug_console_and_the_terminal_panel_are_planned_together_rather_than_col
     });
 
     attach_test_compositor(&state, &mut ui, &config, width, height);
-    let frame = super::render(&state, &ui, &config, &dashboard, width, height);
+    let frame = crate::ui::render::render(&state, &ui, &config, &dashboard, width, height);
     let region = ui
         .compositor_layout
         .as_ref()
         .unwrap()
         .projection
         .workspace_bounds;
-    let layout = super::debug::debug_layout_in(region).expect("debug layout");
+    let layout = crate::ui::render::debug::debug_layout_in(region).expect("debug layout");
     let source = layout.source;
-    let pane = super::active_editor_pane_viewport(&state, &ui).expect("source viewport");
+    let pane = crate::ui::render::active_editor_pane_viewport(&state, &ui).expect("source viewport");
     assert_eq!(
         (pane.x, pane.y, pane.width, pane.height),
         (source.x, source.y, source.width, source.height)
@@ -5175,7 +5223,9 @@ fn drawn_at_locates_display_cells_after_wide_and_combining_graphemes() {
 /// each cell, so a rendering that drew the right characters in the wrong styles fails here.
 #[test]
 fn a_row_with_cells_draws_each_column_at_its_own_width_and_style() {
-    use crate::ui::{CellAlign, PickerCell, Style};
+    use crate::ui::CellAlign;
+    use crate::ui::PickerCell;
+    use crate::ui::Style;
 
     let state = EditorState::new(PathBuf::from("/tmp"));
     let mut row = super::PickerRow::text("row", "", "", "");
@@ -5263,7 +5313,10 @@ fn a_row_with_cells_draws_each_column_at_its_own_width_and_style() {
 /// the diff renderer's own work and are not claimed by this test.
 #[test]
 fn a_short_diff_box_opens_on_the_change_and_keeps_the_comparison_on_top() {
-    use crate::ui::{DiffHunk, DiffLine, DiffLineKind, DiffPreview};
+    use crate::ui::DiffHunk;
+    use crate::ui::DiffLine;
+    use crate::ui::DiffLineKind;
+    use crate::ui::DiffPreview;
 
     let line = |kind, text: &str| DiffLine {
         kind,
@@ -5299,7 +5352,12 @@ fn a_short_diff_box_opens_on_the_change_and_keeps_the_comparison_on_top() {
 
 #[test]
 fn a_structured_diff_preview_draws_provenance_hunks_and_classified_lines() {
-    use crate::ui::{DiffHunk, DiffLine, DiffLineKind, DiffPreview, PickerPreviewBody, Style};
+    use crate::ui::DiffHunk;
+    use crate::ui::DiffLine;
+    use crate::ui::DiffLineKind;
+    use crate::ui::DiffPreview;
+    use crate::ui::PickerPreviewBody;
+    use crate::ui::Style;
 
     let line = |kind, old_number, new_number, text: &str| DiffLine {
         kind,
@@ -5544,7 +5602,8 @@ fn a_parsed_diff_renders_every_element_the_requirement_names() {
 /// not, so a one-word change in a long line is visible.
 #[test]
 fn intra_line_emphasis_marks_the_changed_span_and_not_the_rest_of_the_line() {
-    use crate::ui::{Style, parse_unified_patch};
+    use crate::ui::Style;
+    use crate::ui::parse_unified_patch;
 
     let diff = parse_unified_patch(RENDER_PATCH, "unstaged = index -> disk");
     let state = EditorState::new(PathBuf::from("/tmp"));
@@ -5574,7 +5633,9 @@ fn intra_line_emphasis_marks_the_changed_span_and_not_the_rest_of_the_line() {
 /// U-16: side by side, the old and new sides occupy their own columns with a divider between.
 #[test]
 fn side_by_side_puts_the_two_sides_in_their_own_columns() {
-    use crate::ui::{DiffLayout, Style, parse_unified_patch};
+    use crate::ui::DiffLayout;
+    use crate::ui::Style;
+    use crate::ui::parse_unified_patch;
 
     let mut diff = parse_unified_patch(RENDER_PATCH, "unstaged = index -> disk");
     diff.layout = DiffLayout::SideBySide;
@@ -5609,7 +5670,11 @@ fn side_by_side_puts_the_two_sides_in_their_own_columns() {
 /// U-16: a bounded patch says what it is not showing, with the true total.
 #[test]
 fn a_bounded_patch_states_its_true_total() {
-    use crate::ui::{DiffHunk, DiffLayout, DiffLine, DiffLineKind, DiffPreview};
+    use crate::ui::DiffHunk;
+    use crate::ui::DiffLayout;
+    use crate::ui::DiffLine;
+    use crate::ui::DiffLineKind;
+    use crate::ui::DiffPreview;
 
     let diff = DiffPreview {
         provenance: "staged = HEAD -> index".into(),
@@ -5647,7 +5712,8 @@ fn a_bounded_patch_states_its_true_total() {
 /// the other side's content exactly where it was.
 #[test]
 fn side_by_side_halves_scroll_independently() {
-    use crate::ui::{DiffLayout, parse_unified_patch};
+    use crate::ui::DiffLayout;
+    use crate::ui::parse_unified_patch;
 
     // Four changes, so each side has its own sequence to scroll through.
     let patch = "@@ -1,4 +1,4 @@\n-old1\n+new1\n-old2\n+new2\n-old3\n+new3\n-old4\n+new4\n";
@@ -5722,7 +5788,7 @@ fn indent_guides_inside_a_multiline_string_keep_the_guide_colour() {
     let start = text.find("r\"").expect("string start");
     let end = text.find("\";").expect("string end") + 1;
     let mut ui = ui_with_editor_layout(&state);
-    ui.syntax_spans = vec![super::UiSyntaxSpan {
+    ui.syntax_spans = vec![crate::ui::render::UiSyntaxSpan {
         buffer,
         revision: state.buffers[buffer].text.revision(),
         range: crate::editor::text::ByteRange::new(
@@ -5732,7 +5798,7 @@ fn indent_guides_inside_a_multiline_string_keep_the_guide_colour() {
         .expect("string range"),
         role: crate::language::syntax::Highlight::STRING,
     }];
-    let frame = super::render_editor_view(&state, view, &ui, &config, 30, 5);
+    let frame = crate::ui::render::render_editor_view(&state, view, &ui, &config, 30, 5);
     let guide = frame.grid.get(4, 2).expect("guide inside the string");
     assert_ne!(guide.symbol, " ");
     assert!(
@@ -5747,17 +5813,18 @@ fn indent_guides_inside_a_multiline_string_keep_the_guide_colour() {
 
 #[test]
 fn ellipsized_text_reserves_the_measured_ellipsis_width() {
-    use crate::config::AmbiguousWidth::{Narrow, Wide};
+    use crate::config::AmbiguousWidth::Narrow;
+    use crate::config::AmbiguousWidth::Wide;
     for policy in [Narrow, Wide] {
         for maximum in 0..8 {
-            let text = super::surfaces::ellipsized("abcdef", maximum, policy);
+            let text = crate::ui::render::surfaces::ellipsized("abcdef", maximum, policy);
             assert!(crate::ui::geometry::text_width(&text, policy) <= maximum);
         }
     }
-    assert_eq!(super::surfaces::ellipsized("abcdef", 4, Wide), "ab…");
-    assert_eq!(super::surfaces::ellipsized("abcdef", 1, Wide), "");
-    assert_eq!(super::surfaces::ellipsized("abcdef", 2, Wide), "…");
-    assert_eq!(super::surfaces::ellipsized("abcdef", 4, Narrow), "abc…");
+    assert_eq!(crate::ui::render::surfaces::ellipsized("abcdef", 4, Wide), "ab…");
+    assert_eq!(crate::ui::render::surfaces::ellipsized("abcdef", 1, Wide), "");
+    assert_eq!(crate::ui::render::surfaces::ellipsized("abcdef", 2, Wide), "…");
+    assert_eq!(crate::ui::render::surfaces::ellipsized("abcdef", 4, Narrow), "abc…");
 }
 
 #[test]
@@ -5767,13 +5834,13 @@ fn a_long_path_in_a_picker_row_keeps_its_end() {
         .editor
         .ambiguous_width;
     let path = "/tmp/a/very/long/prefix/that/repeats/on/every/row/src/main.py:12";
-    let (label, detail) = super::surfaces::fitted_picker_row(path, "print(name)", 40, ambiguous);
+    let (label, detail) = crate::ui::render::surfaces::fitted_picker_row(path, "print(name)", 40, ambiguous);
     assert!(
         label.starts_with('…') && label.ends_with("main.py:12"),
         "{label}"
     );
     assert_eq!(detail, "print(name)");
-    let (label, detail) = super::surfaces::fitted_picker_row(
+    let (label, detail) = crate::ui::render::surfaces::fitted_picker_row(
         "main",
         "/tmp/a/very/long/prefix/main.go:7:2",
         24,
@@ -5785,7 +5852,7 @@ fn a_long_path_in_a_picker_row_keeps_its_end() {
         "{detail}"
     );
     let (label, _) =
-        super::surfaces::fitted_picker_row("Git: stage/unstage all", "", 12, ambiguous);
+        crate::ui::render::surfaces::fitted_picker_row("Git: stage/unstage all", "", 12, ambiguous);
     assert_eq!(
         label, "Git: stage/unstage all",
         "ordinary text is not a path"
@@ -5798,7 +5865,7 @@ fn key_help_breaks_between_items_and_keeps_its_end() {
         .config
         .editor
         .ambiguous_width;
-    let rows = super::surfaces::wrapped_key_help(
+    let rows = crate::ui::render::surfaces::wrapped_key_help(
         "j/k move · Enter install · r refresh · Esc close",
         26,
         ambiguous,
@@ -5825,8 +5892,8 @@ fn a_notification_too_long_to_show_points_at_the_messages_list() {
 
 #[test]
 fn terminal_tabs_are_named_by_profile_and_numbered_when_repeated() {
-    let tab = |id, profile: &str| super::TerminalTabState {
-        phase: super::TerminalPhase::Running,
+    let tab = |id, profile: &str| crate::ui::render::TerminalTabState {
+        phase: crate::ui::render::TerminalPhase::Running,
         id,
         profile: profile.into(),
         running: true,
@@ -5835,7 +5902,7 @@ fn terminal_tabs_are_named_by_profile_and_numbered_when_repeated() {
     let tabs = vec![tab(3, "shell"), tab(4, "lazygit"), tab(9, "shell")];
     let names = tabs
         .iter()
-        .map(|current| super::terminal::terminal_tab_label(&tabs, current))
+        .map(|current| crate::ui::render::terminal::terminal_tab_label(&tabs, current))
         .collect::<Vec<_>>();
     assert_eq!(names, ["shell", "lazygit", "shell 2"]);
 }
@@ -5849,7 +5916,7 @@ fn the_status_line_puts_the_server_and_root_on_the_right() {
     let loaded = crate::config::load_bundled_config();
     let mut ui = ui_with_editor_layout(&state);
     ui.lsp_server = Some("rust-analyzer".into());
-    let wide = super::render_editor_view(&state, view, &ui, &loaded.config, 80, 5);
+    let wide = crate::ui::render::render_editor_view(&state, view, &ui, &loaded.config, 80, 5);
     let status = wide.grid.row_text(4);
     assert!(status.contains("rust-analyzer  some-project"), "{status:?}");
     assert!(
@@ -5862,7 +5929,7 @@ fn the_status_line_puts_the_server_and_root_on_the_right() {
     );
 
     // The server goes first when the room runs out, then the progress; the root stays.
-    let narrow = super::render_editor_view(&state, view, &ui, &loaded.config, 42, 5);
+    let narrow = crate::ui::render::render_editor_view(&state, view, &ui, &loaded.config, 42, 5);
     let status = narrow.grid.row_text(4);
     assert!(
         status.trim_end().ends_with("some-project  \u{e0b2} 1:1"),
@@ -5875,7 +5942,7 @@ fn the_status_line_puts_the_server_and_root_on_the_right() {
 
     // Each mode shows in its own colour.
     state.views[view].mode = crate::editor::EditorMode::Insert;
-    let insert = super::render_editor_view(&state, view, &ui, &loaded.config, 80, 5);
+    let insert = crate::ui::render::render_editor_view(&state, view, &ui, &loaded.config, 80, 5);
     assert_eq!(
         insert.grid.get(1, 4).expect("mode").style,
         crate::ui::Style::StatusInsert
@@ -5891,11 +5958,11 @@ fn the_status_line_names_a_worktree_with_its_repository() {
         .unwrap();
     let loaded = crate::config::load_bundled_config();
     let ui = ui_with_editor_layout(&state);
-    let frame = super::render_editor_view(&state, view, &ui, &loaded.config, 80, 5);
+    let frame = crate::ui::render::render_editor_view(&state, view, &ui, &loaded.config, 80, 5);
     assert!(frame.grid.row_text(4).contains("repo › feature"));
     state.workspace_repository = Some("repo{worktree}{repository}".into());
     state.workspace_root = PathBuf::from("/tmp/repo/.worktree/feature{repository}");
-    let frame = super::render_editor_view(&state, view, &ui, &loaded.config, 120, 5);
+    let frame = crate::ui::render::render_editor_view(&state, view, &ui, &loaded.config, 120, 5);
     assert!(
         frame
             .grid
@@ -5912,7 +5979,7 @@ fn the_status_line_keeps_fields_from_running_into_the_position() {
         .unwrap();
     let loaded = crate::config::load_bundled_config();
     let ui = ui_with_editor_layout(&state);
-    let frame = super::render_editor_view(&state, view, &ui, &loaded.config, 22, 5);
+    let frame = crate::ui::render::render_editor_view(&state, view, &ui, &loaded.config, 22, 5);
     let status = frame.grid.row_text(4);
     assert!(status.trim_end().ends_with(" 1:1"), "{status:?}");
 }
@@ -5928,7 +5995,7 @@ fn eof_fold_stops_forward_scrolling() {
         .unwrap();
     let loaded = crate::config::load_bundled_config();
     let ui = UiState {
-        lsp_folds: vec![super::UiFold {
+        lsp_folds: vec![crate::ui::render::UiFold {
             view,
             start_line: 0,
             end_line: 1,
@@ -5936,7 +6003,7 @@ fn eof_fold_stops_forward_scrolling() {
         }],
         ..ui_with_editor_layout(&state)
     };
-    let model = super::VisualRowModel::new(
+    let model = crate::ui::render::VisualRowModel::new(
         &state.buffers[buffer].text,
         view,
         &ui,
@@ -5944,23 +6011,26 @@ fn eof_fold_stops_forward_scrolling() {
         80,
         true,
     );
-    let first = super::VisualRowAnchor::default();
+    let first = crate::ui::render::VisualRowAnchor::default();
     assert_eq!(model.next(first), first);
     assert_eq!(model.forward(first, 100), first);
 }
 
 #[test]
 fn picker_diff_geometry_does_not_count_line_numbers_twice() {
-    use crate::ui::{PickerPreview, PickerPreviewBody, PickerUiState, window::WindowRect};
+    use crate::ui::PickerPreview;
+    use crate::ui::PickerPreviewBody;
+    use crate::ui::PickerUiState;
+    use crate::ui::window::WindowRect;
     let config = crate::config::load_bundled_config().config;
-    let diff = super::DiffPreview {
-        hunks: vec![super::DiffHunk {
+    let diff = crate::ui::render::DiffPreview {
+        hunks: vec![crate::ui::render::DiffHunk {
             header: "@@".into(),
             collapsed_before: 0,
-            lines: vec![super::DiffLine {
+            lines: vec![crate::ui::render::DiffLine {
                 old_number: Some(100),
                 new_number: Some(100),
-                kind: super::DiffLineKind::Context,
+                kind: crate::ui::render::DiffLineKind::Context,
                 text: "x".repeat(30),
                 spans: Vec::new(),
             }],
@@ -5968,7 +6038,7 @@ fn picker_diff_geometry_does_not_count_line_numbers_twice() {
         provenance: String::new(),
         truncated: false,
         total_lines: 1,
-        layout: super::DiffLayout::Unified,
+        layout: crate::ui::render::DiffLayout::Unified,
     };
     assert_eq!(diff.content_width(config.editor.ambiguous_width), 40);
     let picker = PickerUiState {
@@ -6005,15 +6075,15 @@ fn picker_diff_geometry_does_not_count_line_numbers_twice() {
 
 #[test]
 fn large_diff_rows_share_number_width() {
-    let diff = super::DiffPreview {
-        hunks: vec![super::DiffHunk {
+    let diff = crate::ui::render::DiffPreview {
+        hunks: vec![crate::ui::render::DiffHunk {
             header: "@@".into(),
             collapsed_before: 0,
             lines: (1..=50_000)
-                .map(|n| super::DiffLine {
+                .map(|n| crate::ui::render::DiffLine {
                     old_number: None,
                     new_number: Some(n),
-                    kind: super::DiffLineKind::Added,
+                    kind: crate::ui::render::DiffLineKind::Added,
                     text: "x".into(),
                     spans: Vec::new(),
                 })
@@ -6022,7 +6092,7 @@ fn large_diff_rows_share_number_width() {
         provenance: String::new(),
         truncated: false,
         total_lines: 50_000,
-        layout: super::DiffLayout::Unified,
+        layout: crate::ui::render::DiffLayout::Unified,
     };
     assert_eq!(
         diff.content_width(crate::config::AmbiguousWidth::Narrow),
@@ -6036,7 +6106,8 @@ fn large_diff_rows_share_number_width() {
 
 #[test]
 fn inlay_budgets_survive_wrapped_scrolling_and_leave_source_visible() {
-    use crate::editor::text::{ByteOffset, TextBuffer};
+    use crate::editor::text::ByteOffset;
+    use crate::editor::text::TextBuffer;
     let mut state = EditorState::new("/tmp".into());
     let (buffer, view) = state
         .open_text(TextBuffer::from_text(&"x".repeat(40)), None)
@@ -6049,37 +6120,38 @@ fn inlay_budgets_survive_wrapped_scrolling_and_leave_source_visible() {
     state.views[view].cursor = ByteOffset(39);
     let mut ui = ui_with_editor_layout(&state);
     ui.lsp_inlay_hints = (0..40)
-        .map(|at| super::UiInlayHint {
+        .map(|at| crate::ui::render::UiInlayHint {
             buffer,
             revision: state.buffers[buffer].text.revision(),
             position: ByteOffset(at),
             label: "h".into(),
         })
         .collect();
-    let frame = super::editor::render_editor_view(&state, view, &ui, &config, 10, 1);
+    let frame = crate::ui::render::editor::render_editor_view(&state, view, &ui, &config, 10, 1);
     assert_eq!(frame.grid.row_text(0).trim(), "xx");
     assert_eq!(frame.cursor.map(|(x, y, _)| (x, y)), Some((1, 0)));
     state.buffers[buffer].text = TextBuffer::from_text("a");
     state.views[view].cursor = ByteOffset(0);
     state.views[view].scroll_wrap_row = 0;
-    ui.lsp_inlay_hints = vec![super::UiInlayHint {
+    ui.lsp_inlay_hints = vec![crate::ui::render::UiInlayHint {
         buffer,
         revision: state.buffers[buffer].text.revision(),
         position: ByteOffset(0),
         label: "hhhh".into(),
     }];
-    let frame = super::editor::render_editor_view(&state, view, &ui, &config, 4, 1);
+    let frame = crate::ui::render::editor::render_editor_view(&state, view, &ui, &config, 4, 1);
     assert_eq!(frame.grid.row_text(0), "hhha");
     assert_eq!(frame.cursor.map(|(x, y, _)| (x, y)), Some((3, 0)));
     ui.lsp_inlay_hints[0].label = "界界".into();
-    let frame = super::editor::render_editor_view(&state, view, &ui, &config, 4, 1);
+    let frame = crate::ui::render::editor::render_editor_view(&state, view, &ui, &config, 4, 1);
     assert_eq!(frame.grid.get(2, 0).unwrap().symbol, "a");
     assert_eq!(frame.cursor.map(|(x, y, _)| (x, y)), Some((2, 0)));
 }
 
 #[test]
 fn nonwrapped_cursor_uses_the_painted_inlay_budget_after_horizontal_scrolling() {
-    use crate::editor::text::{ByteOffset, TextBuffer};
+    use crate::editor::text::ByteOffset;
+    use crate::editor::text::TextBuffer;
     let mut state = EditorState::new("/tmp".into());
     let (buffer, view) = state
         .open_text(TextBuffer::from_text(&format!("{}Z", "x".repeat(50))), None)
@@ -6092,7 +6164,7 @@ fn nonwrapped_cursor_uses_the_painted_inlay_budget_after_horizontal_scrolling() 
     config.ui.status_line.enabled = false;
     let ui = UiState {
         lsp_inlay_hints: (0..40)
-            .map(|at| super::UiInlayHint {
+            .map(|at| crate::ui::render::UiInlayHint {
                 buffer,
                 revision: state.buffers[buffer].text.revision(),
                 position: ByteOffset(at),
@@ -6101,7 +6173,7 @@ fn nonwrapped_cursor_uses_the_painted_inlay_budget_after_horizontal_scrolling() 
             .collect(),
         ..UiState::default()
     };
-    let frame = super::render_editor_view(&state, view, &ui, &config, 64, 1);
+    let frame = crate::ui::render::render_editor_view(&state, view, &ui, &config, 64, 1);
     assert_eq!(frame.cursor.map(|(x, y, _)| (x, y)), Some((42, 0)));
     assert_eq!(frame.grid.get(42, 0).unwrap().symbol, "Z");
     assert_eq!(frame.grid.row_text(0).matches('h').count(), 12);
@@ -6109,7 +6181,9 @@ fn nonwrapped_cursor_uses_the_painted_inlay_budget_after_horizontal_scrolling() 
 
 #[test]
 fn expanded_diagnostics_share_painted_mouse_rows() {
-    use crate::editor::text::{ByteOffset, ByteRange, TextBuffer};
+    use crate::editor::text::ByteOffset;
+    use crate::editor::text::ByteRange;
+    use crate::editor::text::TextBuffer;
     let mut state = EditorState::new("/tmp".into());
     let path = PathBuf::from("/tmp/file");
     let (buffer, view) = state
@@ -6118,7 +6192,7 @@ fn expanded_diagnostics_share_painted_mouse_rows() {
     let mut config = crate::config::load_bundled_config().config;
     config.ui.status_line.enabled = false;
     let mut ui = ui_with_editor_layout(&state);
-    ui.diagnostics = vec![super::UiDiagnostic {
+    ui.diagnostics = vec![crate::ui::render::UiDiagnostic {
         path: path.clone(),
         range: ByteRange::empty(ByteOffset(0)),
         severity: crate::workspace::DiagnosticSeverity::Error,
@@ -6126,12 +6200,12 @@ fn expanded_diagnostics_share_painted_mouse_rows() {
         code: None,
         message: "bad".into(),
     }];
-    ui.expanded_diagnostic = Some(super::ExpandedDiagnosticState {
+    ui.expanded_diagnostic = Some(crate::ui::render::ExpandedDiagnosticState {
         path,
         line: 0,
         severities: vec![crate::workspace::DiagnosticSeverity::Error],
     });
-    let model = super::VisualRowModel::new_for_state(
+    let model = crate::ui::render::VisualRowModel::new_for_state(
         &state,
         &state.buffers[buffer].text,
         view,
@@ -6140,13 +6214,13 @@ fn expanded_diagnostics_share_painted_mouse_rows() {
         80,
         false,
     );
-    let first = super::VisualRowAnchor::default();
+    let first = crate::ui::render::VisualRowAnchor::default();
     assert_eq!(model.painted_row(first, 1).unwrap().line, 0);
     assert_eq!(model.painted_row(first, 3).unwrap().line, 1);
     assert_eq!(
         model.screen_row(
             first,
-            super::VisualRowAnchor {
+            crate::ui::render::VisualRowAnchor {
                 line: 1,
                 wrap_row: 0
             },
@@ -6154,7 +6228,7 @@ fn expanded_diagnostics_share_painted_mouse_rows() {
         ),
         Some(3)
     );
-    let frame = super::editor::render_editor_view(&state, view, &ui, &config, 80, 6);
+    let frame = crate::ui::render::editor::render_editor_view(&state, view, &ui, &config, 80, 6);
     assert!(frame.grid.row_text(3).contains('b'));
 }
 
@@ -6171,29 +6245,29 @@ fn debugger_markers_survive_disabled_git_signs() {
     let mut config = crate::config::load_bundled_config().config;
     config.editor.git_signs.enabled = false;
     let mut ui = ui_with_editor_layout(&state);
-    ui.debug_signs = vec![super::DebugSign {
+    ui.debug_signs = vec![crate::ui::render::DebugSign {
         path,
         line: 0,
-        kind: super::DebugSignKind::Breakpoint,
+        kind: crate::ui::render::DebugSignKind::Breakpoint,
     }];
-    let frame = super::editor::render_editor_view(&state, view, &ui, &config, 40, 4);
+    let frame = crate::ui::render::editor::render_editor_view(&state, view, &ui, &config, 40, 4);
     assert!(frame.grid.row_text(0).contains('●'));
-    ui.debug_signs[0].kind = super::DebugSignKind::DisabledBreakpoint;
-    let frame = super::editor::render_editor_view(&state, view, &ui, &config, 40, 4);
+    ui.debug_signs[0].kind = crate::ui::render::DebugSignKind::DisabledBreakpoint;
+    let frame = crate::ui::render::editor::render_editor_view(&state, view, &ui, &config, 40, 4);
     assert!(frame.grid.row_text(0).contains('○'));
     assert!(!frame.grid.row_text(0).contains('●'));
 }
 
 #[test]
 fn completion_height_fits_on_one_side_of_the_cursor() {
-    let mut frame = super::Frame {
+    let mut frame = crate::ui::render::Frame {
         grid: crate::ui::CellGrid::new(40, 10),
         cursor: Some((3, 5, crossterm::cursor::SetCursorStyle::SteadyBar)),
     };
     frame
         .grid
         .put_text(0, 5, "editing", crate::ui::Style::Default);
-    let completion = super::LanguageCompletionState {
+    let completion = crate::ui::render::LanguageCompletionState {
         typed: 0,
         items: (0..9)
             .map(|n| CompletionItem {
@@ -6207,7 +6281,7 @@ fn completion_height_fits_on_one_side_of_the_cursor() {
         scroll: 0,
     };
     let config = crate::config::load_bundled_config().config;
-    let rect = super::overlays::render_language_completion(
+    let rect = crate::ui::render::overlays::render_language_completion(
         &mut frame,
         &completion,
         &config,
@@ -6241,15 +6315,15 @@ fn diff_tabs_and_combining_marks_keep_text_and_emphasis_aligned() {
     assert!(!(0..30).any(|row| frame.grid.row_text(row).contains('◌')));
 }
 
-fn tool_menu_for_render() -> super::ToolMenuState {
-    super::ToolMenuState {
+fn tool_menu_for_render() -> crate::ui::render::ToolMenuState {
+    crate::ui::render::ToolMenuState {
         category: "lsp".into(),
         selected: 0,
         scroll: 0,
         query: String::new(),
         searching: false,
         runtime_picker: None,
-        rows: vec![super::ToolMenuRow {
+        rows: vec![crate::ui::render::ToolMenuRow {
             id: "rust-analyzer".into(),
             name: "Rust Analyzer".into(),
             kind: "lsp".into(),
@@ -6293,11 +6367,11 @@ fn tool_menu_title_and_wide_categories_stay_inside_the_modal() {
         .insert("dap".into(), "界".repeat(100));
     let mut menu = tool_menu_for_render();
     menu.query = "q".repeat(200);
-    let mut frame = super::Frame {
+    let mut frame = crate::ui::render::Frame {
         grid: crate::ui::CellGrid::new_with_policy(100, 30, "�", "◌", true),
         cursor: None,
     };
-    super::surfaces::render_tool_menu(&mut frame, &menu, &config, 100, 30);
+    crate::ui::render::surfaces::render_tool_menu(&mut frame, &menu, &config, 100, 30);
     // The 82-column modal begins at x=9 and ends at x=90.
     assert_eq!(frame.grid.get(90, 2).unwrap().symbol, "+");
     assert_eq!(frame.grid.get(91, 2).unwrap().symbol, " ");
@@ -6322,11 +6396,11 @@ fn tool_menu_failed_probe_offers_start_instead_of_stop_and_restart() {
     let mut menu = tool_menu_for_render();
     for can_start in [true, false] {
         menu.rows[0].can_start = can_start;
-        let mut frame = super::Frame {
+        let mut frame = crate::ui::render::Frame {
             grid: crate::ui::CellGrid::new(120, 40),
             cursor: None,
         };
-        super::surfaces::render_tool_menu(&mut frame, &menu, &config, 120, 40);
+        crate::ui::render::surfaces::render_tool_menu(&mut frame, &menu, &config, 120, 40);
         let screen = (0..40)
             .map(|y| frame.grid.row_text(y))
             .collect::<Vec<_>>()
@@ -6343,11 +6417,11 @@ fn tool_menu_failed_probe_offers_start_instead_of_stop_and_restart() {
     // A failed version probe does not imply an already-running server has stopped.
     for state in ["running", "running ×2", "starting", "restarting"] {
         menu.rows[0].session_state = state.into();
-        let mut frame = super::Frame {
+        let mut frame = crate::ui::render::Frame {
             grid: crate::ui::CellGrid::new(120, 40),
             cursor: None,
         };
-        super::surfaces::render_tool_menu(&mut frame, &menu, &config, 120, 40);
+        crate::ui::render::surfaces::render_tool_menu(&mut frame, &menu, &config, 120, 40);
         let screen = (0..40)
             .map(|y| frame.grid.row_text(y))
             .collect::<Vec<_>>()
@@ -6361,19 +6435,19 @@ fn tool_menu_failed_probe_offers_start_instead_of_stop_and_restart() {
 #[test]
 fn runtime_picker_keeps_selection_visible_when_navigation_used_a_taller_screen() {
     let loaded = crate::config::load_bundled_config();
-    let menu = super::ToolMenuState {
+    let menu = crate::ui::render::ToolMenuState {
         category: "lsp".into(),
         selected: 0,
         scroll: 0,
         rows: Vec::new(),
         query: String::new(),
         searching: false,
-        runtime_picker: Some(super::ToolRuntimePickerState {
+        runtime_picker: Some(crate::ui::render::ToolRuntimePickerState {
             server_id: "rust-analyzer".into(),
             selected: 5,
             scroll: 0,
             options: (0..8)
-                .map(|n| super::ToolRuntimeOption {
+                .map(|n| crate::ui::render::ToolRuntimeOption {
                     source: "path".into(),
                     version_pin: None,
                     label: "PATH".into(),
@@ -6390,18 +6464,18 @@ fn runtime_picker_keeps_selection_visible_when_navigation_used_a_taller_screen()
                 .collect(),
         }),
     };
-    let mut frame = super::Frame {
+    let mut frame = crate::ui::render::Frame {
         grid: crate::ui::CellGrid::new(80, 24),
         cursor: None,
     };
-    super::surfaces::render_tool_menu(&mut frame, &menu, &loaded.config, 80, 24);
+    crate::ui::render::surfaces::render_tool_menu(&mut frame, &menu, &loaded.config, 80, 24);
     assert!((0..24).any(|y| frame.grid.row_text(y).contains("VERSION5")));
     for height in 6..=10 {
-        let mut frame = super::Frame {
+        let mut frame = crate::ui::render::Frame {
             grid: crate::ui::CellGrid::new(80, height),
             cursor: None,
         };
-        super::surfaces::render_tool_menu(&mut frame, &menu, &loaded.config, 80, height);
+        crate::ui::render::surfaces::render_tool_menu(&mut frame, &menu, &loaded.config, 80, height);
         assert!((0..height).any(|y| frame.grid.row_text(y).contains("Resize to choose a build")));
         assert!(!(0..height).any(|y| frame.grid.row_text(y).contains("VERSION5")));
     }
@@ -6423,13 +6497,13 @@ fn documentation_scroll_reaches_the_tail_of_a_single_wrapped_line() {
         }],
         scroll: 20,
     };
-    let total = super::overlays::documentation_display_rows(&popup, &config, 80);
+    let total = crate::ui::render::overlays::documentation_display_rows(&popup, &config, 80);
     assert!(total > 20);
-    let mut frame = super::Frame {
+    let mut frame = crate::ui::render::Frame {
         grid: crate::ui::CellGrid::new(80, 40),
         cursor: Some((0, 0, crossterm::cursor::SetCursorStyle::SteadyBar)),
     };
-    super::overlays::render_documentation_popup(
+    crate::ui::render::overlays::render_documentation_popup(
         &mut frame,
         &popup,
         &config,
@@ -6443,7 +6517,7 @@ fn documentation_scroll_reaches_the_tail_of_a_single_wrapped_line() {
     );
     assert!((0..40).any(|y| frame.grid.row_text(y).contains("THE-END")));
     assert!(
-        super::overlays::wrap_ranges(&"·".repeat(6), 10, crate::config::AmbiguousWidth::Wide).len()
+        crate::ui::render::overlays::wrap_ranges(&"·".repeat(6), 10, crate::config::AmbiguousWidth::Wide).len()
             > 1
     );
 }
@@ -6452,11 +6526,11 @@ fn documentation_scroll_reaches_the_tail_of_a_single_wrapped_line() {
 fn terminal_wide_cells_are_clipped_to_the_window_during_resize() {
     let mut screen = crate::ui::PtyScreen::new(60, 2, 10);
     screen.feed_bytes(format!("{}界", " ".repeat(39)).as_bytes());
-    let terminal = super::TerminalPanelState {
+    let terminal = crate::ui::render::TerminalPanelState {
         id: 1,
         profile: "shell".into(),
         tabs: Vec::new(),
-        mode: super::TerminalPanelMode::Normal,
+        mode: crate::ui::render::TerminalPanelMode::Normal,
         running: true,
         exit_code: None,
         truncated: false,
@@ -6471,7 +6545,7 @@ fn terminal_wide_cells_are_clipped_to_the_window_during_resize() {
         scroll_offset: 0,
         requested_height: 3,
     };
-    let mut workspace = super::Frame {
+    let mut workspace = crate::ui::render::Frame {
         grid: crate::ui::CellGrid::new(80, 5),
         cursor: None,
     };
@@ -6479,10 +6553,10 @@ fn terminal_wide_cells_are_clipped_to_the_window_during_resize() {
         .grid
         .set_cell(50, 1, "z", crate::ui::Style::Default);
     let config = crate::config::load_bundled_config().config;
-    let frame = super::terminal::dock_terminal_panel(
+    let frame = crate::ui::render::terminal::dock_terminal_panel(
         workspace,
         &terminal,
-        super::TerminalPanelGeometry {
+        crate::ui::render::TerminalPanelGeometry {
             x: 10,
             width: 40,
             left_border: false,
@@ -6512,7 +6586,7 @@ fn floating_editor_uses_its_whole_body_below_the_screen_statusline() {
     let config = crate::config::load_bundled_config().config;
     let ui = ui_with_editor_layout(&state);
     let binding = ui.editor_window_layout.as_ref().unwrap().bindings[0];
-    let mut frame = super::Frame {
+    let mut frame = crate::ui::render::Frame {
         grid: crate::ui::CellGrid::new(40, 10),
         cursor: None,
     };
@@ -6529,7 +6603,7 @@ fn floating_editor_uses_its_whole_body_below_the_screen_statusline() {
         focused: true,
         focusable: true,
     };
-    assert!(super::workspace::render_non_tiled_editor_window(
+    assert!(crate::ui::render::workspace::render_non_tiled_editor_window(
         &mut frame, &state, &ui, &config, &projected
     ));
     assert!(frame.grid.row_text(2).contains("second"));
@@ -6544,8 +6618,8 @@ fn side_docked_terminal_keeps_the_debug_inspectors_visible() {
         .unwrap();
     let loaded = crate::config::load_bundled_config();
     let mut ui = ui_with_editor_layout(&state);
-    ui.debug_panes = Some(super::DebugPanesUiState {
-        selected: super::DebugPane::Console,
+    ui.debug_panes = Some(crate::ui::render::DebugPanesUiState {
+        selected: crate::ui::render::DebugPane::Console,
         target: String::new(),
         status: "Stopped".into(),
         threads: Vec::new(),
@@ -6557,11 +6631,11 @@ fn side_docked_terminal_keeps_the_debug_inspectors_visible() {
     });
     let mut screen = crate::ui::PtyScreen::new(40, 20, 0);
     screen.feed_bytes(b"terminal output");
-    ui.terminal_panel = Some(super::TerminalPanelState {
+    ui.terminal_panel = Some(crate::ui::render::TerminalPanelState {
         id: 1,
         profile: "shell".into(),
         tabs: Vec::new(),
-        mode: super::TerminalPanelMode::Normal,
+        mode: crate::ui::render::TerminalPanelMode::Normal,
         running: true,
         exit_code: None,
         truncated: false,
@@ -6596,7 +6670,7 @@ fn side_docked_terminal_keeps_the_debug_inspectors_visible() {
         width: 80,
         height: 39,
     };
-    let layout = super::debug::debug_layout_in(compositor.projection.workspace_bounds)
+    let layout = crate::ui::render::debug::debug_layout_in(compositor.projection.workspace_bounds)
         .expect("side-docked debug layout");
     // Moving the dock also changes the tiled source rectangle and debugger insets.
     let source_window = ui.editor_window_layout.as_ref().unwrap().bindings[0].window;
@@ -6607,7 +6681,7 @@ fn side_docked_terminal_keeps_the_debug_inspectors_visible() {
         .find(|window| window.window == source_window)
         .expect("source window")
         .rect = layout.source;
-    let frame = super::render(&state, &ui, &loaded.config, &loaded.dashboard, 120, 40);
+    let frame = crate::ui::render::render(&state, &ui, &loaded.config, &loaded.dashboard, 120, 40);
     let (x, y) = drawn_at(&frame, "source").expect("source remains visible beside the terminal");
     assert!(x >= layout.source.x && x + 6 <= layout.source.x + layout.source.width);
     assert!(y >= layout.source.y && y < layout.source.y + layout.source.height);
@@ -6625,8 +6699,11 @@ fn side_docked_terminal_keeps_the_debug_inspectors_visible() {
 
 #[test]
 fn insert_selection_highlighting_is_half_open_while_visual_selection_is_inclusive() {
-    use crate::editor::text::{ByteOffset, TextBuffer};
-    use crate::editor::{EditorMode, Selection, SelectionKind};
+    use crate::editor::text::ByteOffset;
+    use crate::editor::text::TextBuffer;
+    use crate::editor::EditorMode;
+    use crate::editor::Selection;
+    use crate::editor::SelectionKind;
     let mut state = EditorState::new("/workspace".into());
     let (_, view) = state.open_text(TextBuffer::from_text("abc"), None).unwrap();
     let mut config = crate::config::load_bundled_config().config;
@@ -6644,7 +6721,7 @@ fn insert_selection_highlighting_is_half_open_while_visual_selection_is_inclusiv
         ] {
             state.views[view].selection = selection;
             state.views[view].mode = mode;
-            let frame = super::render_editor_view(&state, view, &UiState::default(), &config, 8, 2);
+            let frame = crate::ui::render::render_editor_view(&state, view, &UiState::default(), &config, 8, 2);
             let selected = std::array::from_fn(|offset| {
                 frame.grid.get(offset as u16, 0).unwrap().style == crate::ui::Style::Selection
             });
@@ -6655,7 +6732,9 @@ fn insert_selection_highlighting_is_half_open_while_visual_selection_is_inclusiv
 
 #[test]
 fn concealed_markdown_preserves_source_tab_columns() {
-    use crate::editor::text::{ByteOffset, ByteRange, TextBuffer};
+    use crate::editor::text::ByteOffset;
+    use crate::editor::text::ByteRange;
+    use crate::editor::text::TextBuffer;
     use crate::language::syntax::MarkdownMark;
     let mut state = EditorState::new(PathBuf::from("/workspace"));
     let (buffer, view) = state
@@ -6669,7 +6748,7 @@ fn concealed_markdown_preserves_source_tab_columns() {
     let ui = UiState {
         markdown_marks: [0, 2]
             .into_iter()
-            .map(|at| super::UiMarkdownMark {
+            .map(|at| crate::ui::render::UiMarkdownMark {
                 buffer,
                 revision: state.buffers[buffer].text.revision(),
                 range: ByteRange::new(ByteOffset(at), ByteOffset(at + 1)).unwrap(),
@@ -6680,14 +6759,15 @@ fn concealed_markdown_preserves_source_tab_columns() {
     };
     for wrap in [true, false] {
         config.editor.wrap = wrap;
-        let frame = super::render_editor_view(&state, view, &ui, &config, 4, 2);
+        let frame = crate::ui::render::render_editor_view(&state, view, &ui, &config, 4, 2);
         assert_eq!(frame.grid.row_text(0).trim_end(), "a b");
     }
 }
 
 #[test]
 fn markdown_draws_in_place_except_on_the_cursor_line_and_outside_normal_mode() {
-    use crate::editor::text::{ByteOffset, ByteRange};
+    use crate::editor::text::ByteOffset;
+    use crate::editor::text::ByteRange;
     use crate::language::syntax::MarkdownMark;
     let text = "# Title\n- item [x](u)\nlast";
     let mut state = EditorState::new(PathBuf::from("/tmp"));
@@ -6701,7 +6781,7 @@ fn markdown_draws_in_place_except_on_the_cursor_line_and_outside_normal_mode() {
     config.ui.status_line.enabled = false;
     state.views[view].cursor = ByteOffset(text.find("last").expect("last line"));
     let revision = state.buffers[buffer].text.revision();
-    let mark = |start: &str, length: usize, mark| super::UiMarkdownMark {
+    let mark = |start: &str, length: usize, mark| crate::ui::render::UiMarkdownMark {
         buffer,
         revision,
         range: {
@@ -6761,7 +6841,9 @@ fn markdown_draws_in_place_except_on_the_cursor_line_and_outside_normal_mode() {
 
 #[test]
 fn markdown_background_fill_leaves_room_for_diagnostics_and_fold_labels() {
-    use crate::editor::text::{ByteOffset, ByteRange, TextBuffer};
+    use crate::editor::text::ByteOffset;
+    use crate::editor::text::ByteRange;
+    use crate::editor::text::TextBuffer;
     use crate::language::syntax::MarkdownMark;
     let text = "# Title\n```\nbody\nend\n```\nlast";
     let path = PathBuf::from("/tmp/test.md");
@@ -6773,7 +6855,7 @@ fn markdown_background_fill_leaves_room_for_diagnostics_and_fold_labels() {
     let mut config = crate::config::load_bundled_config().config;
     config.editor.line_numbers = crate::config::LineNumbers::Off;
     config.ui.status_line.enabled = false;
-    let mark = |start, end, mark| super::UiMarkdownMark {
+    let mark = |start, end, mark| crate::ui::render::UiMarkdownMark {
         buffer,
         revision: state.buffers[buffer].text.revision(),
         range: ByteRange::new(ByteOffset(start), ByteOffset(end)).unwrap(),
@@ -6785,7 +6867,7 @@ fn markdown_background_fill_leaves_room_for_diagnostics_and_fold_labels() {
             mark(0, 7, MarkdownMark::HeadingLine(1)),
             mark(8, text.find("last").unwrap(), MarkdownMark::Code),
         ],
-        diagnostics: vec![super::UiDiagnostic {
+        diagnostics: vec![crate::ui::render::UiDiagnostic {
             path,
             range: ByteRange::empty(ByteOffset(0)),
             severity: crate::workspace::DiagnosticSeverity::Warning,
@@ -6793,7 +6875,7 @@ fn markdown_background_fill_leaves_room_for_diagnostics_and_fold_labels() {
             code: None,
             message: "heading warning".into(),
         }],
-        syntax_folds: vec![super::UiFold {
+        syntax_folds: vec![crate::ui::render::UiFold {
             view,
             start_line: 2,
             end_line: 3,
@@ -6801,7 +6883,7 @@ fn markdown_background_fill_leaves_room_for_diagnostics_and_fold_labels() {
         }],
         ..UiState::default()
     };
-    let frame = super::render_editor_view(&state, view, &ui, &config, 60, 6);
+    let frame = crate::ui::render::render_editor_view(&state, view, &ui, &config, 60, 6);
     assert!(frame.grid.row_text(0).contains("Title  ●● heading warning"));
     assert!(frame.grid.row_text(2).contains("body ⋯ 1 lines"));
     assert!(matches!(
@@ -6816,7 +6898,9 @@ fn markdown_background_fill_leaves_room_for_diagnostics_and_fold_labels() {
 
 #[test]
 fn table_tabs_are_single_spaces_and_do_not_overwrite_column_borders() {
-    use crate::editor::text::{ByteOffset, ByteRange, TextBuffer};
+    use crate::editor::text::ByteOffset;
+    use crate::editor::text::ByteRange;
+    use crate::editor::text::TextBuffer;
     use crate::language::syntax::MarkdownMark;
     let text = "| a\tb |\n|---|\n| c\td |\nlast";
     let mut state = EditorState::new(PathBuf::from("/tmp"));
@@ -6827,7 +6911,7 @@ fn table_tabs_are_single_spaces_and_do_not_overwrite_column_borders() {
     config.editor.line_numbers = crate::config::LineNumbers::Off;
     config.editor.tab_width = 8;
     config.ui.status_line.enabled = false;
-    let mark = |start, end, mark| super::UiMarkdownMark {
+    let mark = |start, end, mark| crate::ui::render::UiMarkdownMark {
         buffer,
         revision: state.buffers[buffer].text.revision(),
         range: ByteRange::new(ByteOffset(start), ByteOffset(end)).unwrap(),
@@ -6845,7 +6929,7 @@ fn table_tabs_are_single_spaces_and_do_not_overwrite_column_borders() {
     for wrap in [false, true] {
         config.editor.wrap = wrap;
         for width in [7, 20] {
-            let frame = super::render_editor_view(&state, view, &ui, &config, width, 6);
+            let frame = crate::ui::render::render_editor_view(&state, view, &ui, &config, width, 6);
             let rows = (0..6)
                 .map(|row| frame.grid.row_text(row).trim_end().to_owned())
                 .collect::<Vec<_>>();
@@ -6867,7 +6951,8 @@ fn table_tabs_are_single_spaces_and_do_not_overwrite_column_borders() {
 
 #[test]
 fn a_table_too_wide_for_its_window_wraps_each_cell_inside_its_column_with_or_without_wrap() {
-    use crate::editor::text::{ByteOffset, ByteRange};
+    use crate::editor::text::ByteOffset;
+    use crate::editor::text::ByteRange;
     use crate::language::syntax::MarkdownMark;
     let text = "\n| a | long text here and more |\n|---|---|\n| b | c |\n\nlast";
     let mut state = EditorState::new(PathBuf::from("/tmp"));
@@ -6881,7 +6966,7 @@ fn a_table_too_wide_for_its_window_wraps_each_cell_inside_its_column_with_or_wit
     config.ui.status_line.enabled = false;
     state.views[view].cursor = ByteOffset(text.find("last").expect("last line"));
     let revision = state.buffers[buffer].text.revision();
-    let mark = |start: usize, end: usize, mark| super::UiMarkdownMark {
+    let mark = |start: usize, end: usize, mark| crate::ui::render::UiMarkdownMark {
         buffer,
         revision,
         range: ByteRange::new(ByteOffset(start), ByteOffset(end)).expect("mark range"),
@@ -6922,7 +7007,8 @@ fn a_table_too_wide_for_its_window_wraps_each_cell_inside_its_column_with_or_wit
 
 #[test]
 fn a_table_without_blank_lines_around_it_is_still_closed_and_its_borders_follow_settings() {
-    use crate::editor::text::{ByteOffset, ByteRange};
+    use crate::editor::text::ByteOffset;
+    use crate::editor::text::ByteRange;
     use crate::language::syntax::MarkdownMark;
     let text = "| a | b |\n|---|---|\n| c | d |\n| e | f |\nlast";
     let mut state = EditorState::new(PathBuf::from("/tmp"));
@@ -6937,7 +7023,7 @@ fn a_table_without_blank_lines_around_it_is_still_closed_and_its_borders_follow_
     let last = text.find("last").expect("last line");
     state.views[view].cursor = ByteOffset(last);
     let revision = state.buffers[buffer].text.revision();
-    let mark = |start: usize, end: usize, mark| super::UiMarkdownMark {
+    let mark = |start: usize, end: usize, mark| crate::ui::render::UiMarkdownMark {
         buffer,
         revision,
         range: ByteRange::new(ByteOffset(start), ByteOffset(end)).expect("mark range"),
@@ -6988,7 +7074,8 @@ fn a_table_without_blank_lines_around_it_is_still_closed_and_its_borders_follow_
 
 #[test]
 fn a_table_at_the_end_of_a_file_with_a_final_newline_is_closed() {
-    use crate::editor::text::{ByteOffset, ByteRange};
+    use crate::editor::text::ByteOffset;
+    use crate::editor::text::ByteRange;
     use crate::language::syntax::MarkdownMark;
     let text = "x\n| a | b |\n|---|---|\n| c | d |\n";
     let mut state = EditorState::new(PathBuf::from("/tmp"));
@@ -7002,7 +7089,7 @@ fn a_table_at_the_end_of_a_file_with_a_final_newline_is_closed() {
     config.ui.status_line.enabled = false;
     state.views[view].cursor = ByteOffset(0);
     let revision = state.buffers[buffer].text.revision();
-    let mark = |start: usize, end: usize, mark| super::UiMarkdownMark {
+    let mark = |start: usize, end: usize, mark| crate::ui::render::UiMarkdownMark {
         buffer,
         revision,
         range: ByteRange::new(ByteOffset(start), ByteOffset(end)).expect("mark range"),
@@ -7036,7 +7123,8 @@ fn a_table_at_the_end_of_a_file_with_a_final_newline_is_closed() {
 
 #[test]
 fn a_table_is_drawn_with_its_columns_lined_up_however_its_source_is_aligned() {
-    use crate::editor::text::{ByteOffset, ByteRange};
+    use crate::editor::text::ByteOffset;
+    use crate::editor::text::ByteRange;
     use crate::language::syntax::MarkdownMark;
     // Unaligned, the second row without its outer pipes and the last one short of a cell.
     let text = "\n| `a` | long head |\n|---|--:|\nwide cell | b\n| c |\n\nlast";
@@ -7051,7 +7139,7 @@ fn a_table_is_drawn_with_its_columns_lined_up_however_its_source_is_aligned() {
     config.ui.status_line.enabled = false;
     state.views[view].cursor = ByteOffset(text.find("last").expect("last line"));
     let revision = state.buffers[buffer].text.revision();
-    let mark = |start: usize, end: usize, mark| super::UiMarkdownMark {
+    let mark = |start: usize, end: usize, mark| crate::ui::render::UiMarkdownMark {
         buffer,
         revision,
         range: ByteRange::new(ByteOffset(start), ByteOffset(end)).expect("mark range"),
@@ -7116,11 +7204,11 @@ fn documentation_popup_clamps_scroll_after_widening() {
         }],
         scroll: 0,
     };
-    let mut frame = super::Frame {
+    let mut frame = crate::ui::render::Frame {
         grid: crate::ui::CellGrid::new(16, 24),
         cursor: None,
     };
-    let (visible, total) = super::overlays::render_documentation_popup(
+    let (visible, total) = crate::ui::render::overlays::render_documentation_popup(
         &mut frame,
         &popup,
         &config,
@@ -7135,11 +7223,11 @@ fn documentation_popup_clamps_scroll_after_widening() {
     .unwrap();
     popup.scroll = total - visible;
     assert!(popup.scroll > 0);
-    let mut frame = super::Frame {
+    let mut frame = crate::ui::render::Frame {
         grid: crate::ui::CellGrid::new(80, 24),
         cursor: None,
     };
-    super::overlays::render_documentation_popup(
+    crate::ui::render::overlays::render_documentation_popup(
         &mut frame,
         &popup,
         &config,
@@ -7171,11 +7259,11 @@ fn documentation_popup_wraps_visible_replacements_and_keeps_wide_borders_inside(
         }],
         scroll: 0,
     };
-    let mut frame = super::Frame {
+    let mut frame = crate::ui::render::Frame {
         grid: crate::ui::CellGrid::new_with_policy(30, 24, "�", "◌", true),
         cursor: Some((0, 0, crossterm::cursor::SetCursorStyle::SteadyBar)),
     };
-    let (_, total) = super::overlays::render_documentation_popup(
+    let (_, total) = crate::ui::render::overlays::render_documentation_popup(
         &mut frame,
         &popup,
         &config,
@@ -7208,9 +7296,9 @@ fn content_tabs_keep_literal_placeholders_and_measure_visible_replacements() {
     ]
     .into_iter()
     .enumerate()
-    .map(|(index, title)| super::ContentTabEntry {
-        identity: super::ContentTabIdentity(crate::windows::ContentId(index as u64)),
-        kind: super::ContentTabKind::Text,
+    .map(|(index, title)| crate::ui::render::ContentTabEntry {
+        identity: crate::ui::render::ContentTabIdentity(crate::windows::ContentId(index as u64)),
+        kind: crate::ui::render::ContentTabKind::Text,
         title,
         active: index == 0,
         dirty: false,
@@ -7221,7 +7309,7 @@ fn content_tabs_keep_literal_placeholders_and_measure_visible_replacements() {
     })
     .collect::<Vec<_>>();
     let mut grid = crate::ui::CellGrid::new(120, 1);
-    super::render_content_tab_line(&mut grid, &entries, &config, 0);
+    crate::ui::render::render_content_tab_line(&mut grid, &entries, &config, 0);
     assert!(grid.row_text(0).contains("a{dirty}.rs"));
     let separators = (0..120)
         .filter(|x| grid.get(*x, 0).unwrap().symbol == BUFFER_SEPARATOR)
@@ -7230,11 +7318,11 @@ fn content_tabs_keep_literal_placeholders_and_measure_visible_replacements() {
     for (entry, separator) in entries.iter().zip(separators) {
         assert_eq!(
             usize::from(separator + 1 - start),
-            super::content_tab_width(entry, &config)
+            crate::ui::render::content_tab_width(entry, &config)
         );
         for column in start..=separator {
             assert_eq!(
-                super::content_tab_at_column(&entries, &config, 120, column),
+                crate::ui::render::content_tab_at_column(&entries, &config, 120, column),
                 Some(entry.identity)
             );
         }
@@ -7242,11 +7330,11 @@ fn content_tabs_keep_literal_placeholders_and_measure_visible_replacements() {
     }
     // The last two cells are painted over the clipped first tab by the overflow marker.
     let mut grid = crate::ui::CellGrid::new(12, 1);
-    super::render_content_tab_line(&mut grid, &entries, &config, 0);
+    crate::ui::render::render_content_tab_line(&mut grid, &entries, &config, 0);
     assert!(grid.row_text(0).ends_with(BUFFER_OVERFLOW_RIGHT));
     for column in 10..12 {
         assert_eq!(
-            super::content_tab_at_column(&entries, &config, 12, column),
+            crate::ui::render::content_tab_at_column(&entries, &config, 12, column),
             None
         );
     }
@@ -7256,9 +7344,9 @@ fn content_tabs_keep_literal_placeholders_and_measure_visible_replacements() {
 fn content_tabs_follow_the_last_of_many_entries() {
     let config = crate::config::load_bundled_config().config;
     let entries = (0..1000)
-        .map(|index| super::ContentTabEntry {
-            identity: super::ContentTabIdentity(crate::windows::ContentId(index)),
-            kind: super::ContentTabKind::Text,
+        .map(|index| crate::ui::render::ContentTabEntry {
+            identity: crate::ui::render::ContentTabIdentity(crate::windows::ContentId(index)),
+            kind: crate::ui::render::ContentTabKind::Text,
             title: format!("file-{index}.rs"),
             active: index == 999,
             dirty: false,
@@ -7269,14 +7357,14 @@ fn content_tabs_follow_the_last_of_many_entries() {
         })
         .collect::<Vec<_>>();
     let mut grid = crate::ui::CellGrid::new(40, 1);
-    super::render_content_tab_line(&mut grid, &entries, &config, 0);
+    crate::ui::render::render_content_tab_line(&mut grid, &entries, &config, 0);
     assert!(grid.row_text(0).contains("file-999.rs"));
     let column = (0..40)
         .rev()
         .find(|x| grid.get(*x, 0).unwrap().symbol == "9")
         .unwrap();
     assert_eq!(
-        super::content_tab_at_column(&entries, &config, 40, column),
+        crate::ui::render::content_tab_at_column(&entries, &config, 40, column),
         Some(entries[999].identity)
     );
 }
@@ -7292,7 +7380,7 @@ fn lsp_progress_is_animated_right_aligned_and_hides_transport_identity_slot5() {
         .unwrap();
     let mut ui = UiState {
         editor_window_layout: Some(editor_layout(&state)),
-        explorer: Some(super::ExplorerUiState {
+        explorer: Some(crate::ui::render::ExplorerUiState {
             title: "Explorer".into(),
             rows: Vec::new(),
             scroll: 0,
@@ -7303,7 +7391,7 @@ fn lsp_progress_is_animated_right_aligned_and_hides_transport_identity_slot5() {
             searching: false,
         }),
         lsp_progress: vec![
-            super::UiLspProgress {
+            crate::ui::render::UiLspProgress {
                 server_key: "root:1:rust-analyzer".into(),
                 token: "roots".into(),
                 server: "rust-analyzer".into(),
@@ -7313,7 +7401,7 @@ fn lsp_progress_is_animated_right_aligned_and_hides_transport_identity_slot5() {
                 done: true,
                 completed_at: Some(std::time::Instant::now()),
             },
-            super::UiLspProgress {
+            crate::ui::render::UiLspProgress {
                 server_key: "root:1:rust-analyzer".into(),
                 token: "cargo-check".into(),
                 server: "rust-analyzer".into(),
@@ -7329,7 +7417,7 @@ fn lsp_progress_is_animated_right_aligned_and_hides_transport_identity_slot5() {
     };
     let loaded = crate::config::load_bundled_config();
     let frame = render(&state, &ui, &loaded.config, &loaded.dashboard, 80, 10);
-    let panel = super::explorer_panel_width(&loaded.config, 80).expect("explorer width");
+    let panel = crate::ui::render::explorer_panel_width(&loaded.config, 80).expect("explorer width");
     let row = (0..10)
         .find(|row| frame.grid.row_text(*row).contains("ring (lib)"))
         .unwrap_or_else(|| {
@@ -7389,11 +7477,11 @@ fn completion_documentation_reports_final_wrapping_and_suppresses_cursor_overlap
         }],
         scroll: usize::MAX,
     };
-    let mut frame = super::Frame {
+    let mut frame = crate::ui::render::Frame {
         grid: crate::ui::CellGrid::new(80, 24),
         cursor: Some((21, 20, crossterm::cursor::SetCursorStyle::SteadyBar)),
     };
-    let (visible, total) = super::overlays::render_documentation_popup(
+    let (visible, total) = crate::ui::render::overlays::render_documentation_popup(
         &mut frame,
         &popup,
         &config,
@@ -7411,7 +7499,7 @@ fn completion_documentation_reports_final_wrapping_and_suppresses_cursor_overlap
         }),
     )
     .unwrap();
-    let expected = super::overlays::wrap_ranges(
+    let expected = crate::ui::render::overlays::wrap_ranges(
         &popup.sections[0].lines[0],
         16,
         config.editor.ambiguous_width,
@@ -7426,12 +7514,12 @@ fn completion_documentation_reports_final_wrapping_and_suppresses_cursor_overlap
                 == crate::ui::Style::DocumentationBackground)
     );
 
-    let mut frame = super::Frame {
+    let mut frame = crate::ui::render::Frame {
         grid: crate::ui::CellGrid::new(80, 3),
         cursor: Some((21, 2, crossterm::cursor::SetCursorStyle::SteadyBar)),
     };
     assert!(
-        super::overlays::render_documentation_popup(
+        crate::ui::render::overlays::render_documentation_popup(
             &mut frame,
             &popup,
             &config,
@@ -7459,13 +7547,13 @@ fn dashboard_labels_leave_a_gap_before_shortcut_keys() {
     let mut dashboard = loaded.dashboard;
     dashboard.minimum_width = 1;
     dashboard.minimum_height = 1;
-    let actions = vec![super::DashboardAction {
+    let actions = vec![crate::ui::render::DashboardAction {
         command: "recovery.open".into(),
         icon: String::new(),
         label: "Recover Unsaved Work".into(),
         key: Some("R".into()),
     }];
-    let frame = super::overlays::render_dashboard(
+    let frame = crate::ui::render::overlays::render_dashboard(
         Path::new("/tmp"),
         &actions,
         0,
@@ -7481,7 +7569,8 @@ fn dashboard_labels_leave_a_gap_before_shortcut_keys() {
 
 #[test]
 fn inlay_budgets_include_visible_replacements_for_hints_and_previews() {
-    use crate::editor::text::{ByteOffset, TextBuffer};
+    use crate::editor::text::ByteOffset;
+    use crate::editor::text::TextBuffer;
     let mut state = EditorState::new("/tmp".into());
     let (buffer, view) = state.open_text(TextBuffer::from_text("x"), None).unwrap();
     let mut config = crate::config::load_bundled_config().config;
@@ -7494,7 +7583,7 @@ fn inlay_budgets_include_visible_replacements_for_hints_and_previews() {
             crate::config::AmbiguousWidth::Wide,
         ] {
             config.editor.ambiguous_width = ambiguous;
-            let hint = super::UiInlayHint {
+            let hint = crate::ui::render::UiInlayHint {
                 buffer,
                 revision: state.buffers[buffer].text.revision(),
                 position: ByteOffset(0),
@@ -7512,13 +7601,13 @@ fn inlay_budgets_include_visible_replacements_for_hints_and_previews() {
                 let mut expected = crate::ui::CellGrid::new_with_policy(
                     32,
                     1,
-                    super::CONTROL_CHARACTER_REPLACEMENT,
-                    super::ZERO_WIDTH_REPLACEMENT,
+                    crate::ui::render::CONTROL_CHARACTER_REPLACEMENT,
+                    crate::ui::render::ZERO_WIDTH_REPLACEMENT,
                     ambiguous == crate::config::AmbiguousWidth::Wide,
                 );
                 let end = expected.put_text(0, 0, "a\u{200b}\tb", crate::ui::Style::Muted);
                 expected.put_text(end, 0, "x", crate::ui::Style::Default);
-                let frame = super::editor::render_editor_view(&state, view, &ui, &config, 32, 1);
+                let frame = crate::ui::render::editor::render_editor_view(&state, view, &ui, &config, 32, 1);
                 assert_eq!(frame.grid.row_text(0), expected.row_text(0));
                 assert_eq!(frame.cursor.map(|(x, y, _)| (x, y)), Some((end, 0)));
             }
@@ -7528,7 +7617,8 @@ fn inlay_budgets_include_visible_replacements_for_hints_and_previews() {
 
 #[test]
 fn wrapped_inlays_reserve_only_the_following_tabs_actual_source_width() {
-    use crate::editor::text::{ByteOffset, TextBuffer};
+    use crate::editor::text::ByteOffset;
+    use crate::editor::text::TextBuffer;
     let mut state = EditorState::new("/tmp".into());
     let (buffer, view) = state
         .open_text(TextBuffer::from_text("aaa\tz"), None)
@@ -7540,13 +7630,13 @@ fn wrapped_inlays_reserve_only_the_following_tabs_actual_source_width() {
     config.editor.wrap = true;
     config.ui.status_line.enabled = false;
     let mut ui = ui_with_editor_layout(&state);
-    ui.lsp_inlay_hints.push(super::UiInlayHint {
+    ui.lsp_inlay_hints.push(crate::ui::render::UiInlayHint {
         buffer,
         revision: state.buffers[buffer].text.revision(),
         position: ByteOffset(3),
         label: "123456".into(),
     });
-    let frame = super::editor::render_editor_view(&state, view, &ui, &config, 8, 2);
+    let frame = crate::ui::render::editor::render_editor_view(&state, view, &ui, &config, 8, 2);
     assert_eq!(frame.grid.row_text(0).trim_end(), "aaa");
     assert_eq!(frame.grid.row_text(1), "123456 z");
     assert_eq!(frame.cursor.map(|(x, y, _)| (x, y)), Some((6, 1)));
@@ -7554,7 +7644,9 @@ fn wrapped_inlays_reserve_only_the_following_tabs_actual_source_width() {
 
 #[test]
 fn expanded_diagnostics_share_painted_mouse_rows_slot5() {
-    use crate::editor::text::{ByteOffset, ByteRange, TextBuffer};
+    use crate::editor::text::ByteOffset;
+    use crate::editor::text::ByteRange;
+    use crate::editor::text::TextBuffer;
     let mut state = EditorState::new("/tmp".into());
     let path = PathBuf::from("/tmp/file");
     let (buffer, view) = state
@@ -7563,7 +7655,7 @@ fn expanded_diagnostics_share_painted_mouse_rows_slot5() {
     let mut config = crate::config::load_bundled_config().config;
     config.ui.status_line.enabled = false;
     let mut ui = ui_with_editor_layout(&state);
-    ui.diagnostics = vec![super::UiDiagnostic {
+    ui.diagnostics = vec![crate::ui::render::UiDiagnostic {
         path: path.clone(),
         range: ByteRange::empty(ByteOffset(0)),
         severity: crate::workspace::DiagnosticSeverity::Error,
@@ -7571,12 +7663,12 @@ fn expanded_diagnostics_share_painted_mouse_rows_slot5() {
         code: None,
         message: "bad".into(),
     }];
-    ui.expanded_diagnostic = Some(super::ExpandedDiagnosticState {
+    ui.expanded_diagnostic = Some(crate::ui::render::ExpandedDiagnosticState {
         path,
         line: 0,
         severities: vec![crate::workspace::DiagnosticSeverity::Error],
     });
-    let model = super::VisualRowModel::new_for_state(
+    let model = crate::ui::render::VisualRowModel::new_for_state(
         &state,
         &state.buffers[buffer].text,
         view,
@@ -7585,10 +7677,10 @@ fn expanded_diagnostics_share_painted_mouse_rows_slot5() {
         80,
         false,
     );
-    let first = super::VisualRowAnchor::default();
+    let first = crate::ui::render::VisualRowAnchor::default();
     assert_eq!(model.painted_row(first, 1).unwrap().line, 0);
     assert_eq!(model.painted_row(first, 3).unwrap().line, 1);
-    let second = super::VisualRowAnchor {
+    let second = crate::ui::render::VisualRowAnchor {
         line: 1,
         wrap_row: 0,
     };
@@ -7599,7 +7691,7 @@ fn expanded_diagnostics_share_painted_mouse_rows_slot5() {
     assert_eq!(
         model.screen_row(
             first,
-            super::VisualRowAnchor {
+            crate::ui::render::VisualRowAnchor {
                 line: 1,
                 wrap_row: 0
             },
@@ -7607,13 +7699,14 @@ fn expanded_diagnostics_share_painted_mouse_rows_slot5() {
         ),
         Some(3)
     );
-    let frame = super::editor::render_editor_view(&state, view, &ui, &config, 80, 6);
+    let frame = crate::ui::render::editor::render_editor_view(&state, view, &ui, &config, 80, 6);
     assert!(frame.grid.row_text(3).contains('b'));
 }
 
 #[test]
 fn a_table_too_wide_for_its_window_wraps_each_cell_inside_its_column_with_or_without_wrap_slot5() {
-    use crate::editor::text::{ByteOffset, ByteRange};
+    use crate::editor::text::ByteOffset;
+    use crate::editor::text::ByteRange;
     use crate::language::syntax::MarkdownMark;
     let text = "\n| a | long text here and more |\n|---|---|\n| b | c |\n\nlast";
     let mut state = EditorState::new(PathBuf::from("/tmp"));
@@ -7627,7 +7720,7 @@ fn a_table_too_wide_for_its_window_wraps_each_cell_inside_its_column_with_or_wit
     config.ui.status_line.enabled = false;
     state.views[view].cursor = ByteOffset(text.find("last").expect("last line"));
     let revision = state.buffers[buffer].text.revision();
-    let mark = |start: usize, end: usize, mark| super::UiMarkdownMark {
+    let mark = |start: usize, end: usize, mark| crate::ui::render::UiMarkdownMark {
         buffer,
         revision,
         range: ByteRange::new(ByteOffset(start), ByteOffset(end)).expect("mark range"),
@@ -7645,7 +7738,7 @@ fn a_table_too_wide_for_its_window_wraps_each_cell_inside_its_column_with_or_wit
     // Neovim draws tables to fit the window even when lines don't wrap.
     for wrap in [true, false] {
         config.editor.wrap = wrap;
-        let model = super::VisualRowModel::new_for_state(
+        let model = crate::ui::render::VisualRowModel::new_for_state(
             &state,
             &state.buffers[buffer].text,
             view,
@@ -7655,7 +7748,7 @@ fn a_table_too_wide_for_its_window_wraps_each_cell_inside_its_column_with_or_wit
             wrap,
         );
         for (wrap_row, word) in [(0, "long"), (1, "here"), (2, "more")] {
-            let relative = model.byte_at_cell(super::VisualRowAnchor { line: 1, wrap_row }, 6);
+            let relative = model.byte_at_cell(crate::ui::render::VisualRowAnchor { line: 1, wrap_row }, 6);
             assert_eq!(&text[1 + relative..1 + relative + word.len()], word);
         }
         let frame = render(&state, &ui, &config, &loaded.dashboard, 20, 8);

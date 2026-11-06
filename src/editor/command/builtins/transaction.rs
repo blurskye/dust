@@ -1,20 +1,47 @@
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
 
 use unicode_segmentation::UnicodeSegmentation;
 
-use crate::editor::{
-    state::{BufferId, EditingPolicy, EditorMode, TransactionId, ViewId},
-    text::{
-        BufferRevision, ByteOffset, ByteRange, TextBuffer, TextEdit, TextEditSet,
-        next_grapheme_boundary, previous_grapheme_boundary,
-    },
-    transaction::{EditorOperation, EditorTransaction, Precondition},
-};
+use crate::editor::state::BufferId;
 
-use super::{
-    super::{CommandError, CommandInvocation},
-    motion::{first_nonblank, line_content_end},
-};
+use crate::editor::state::EditingPolicy;
+
+use crate::editor::state::EditorMode;
+
+use crate::editor::state::TransactionId;
+
+use crate::editor::state::ViewId;
+
+use crate::editor::text::BufferRevision;
+
+use crate::editor::text::ByteOffset;
+
+use crate::editor::text::ByteRange;
+
+use crate::editor::text::TextBuffer;
+
+use crate::editor::text::TextEdit;
+
+use crate::editor::text::TextEditSet;
+
+use crate::editor::text::next_grapheme_boundary;
+
+use crate::editor::text::previous_grapheme_boundary;
+
+use crate::editor::transaction::EditorOperation;
+
+use crate::editor::transaction::EditorTransaction;
+
+use crate::editor::transaction::Precondition;
+
+use crate::editor::command::CommandError;
+
+use crate::editor::command::CommandInvocation;
+
+use crate::editor::command::builtins::motion::first_nonblank;
+
+use crate::editor::command::builtins::motion::line_content_end;
 
 static NEXT_TRANSACTION: AtomicU64 = AtomicU64::new(1);
 

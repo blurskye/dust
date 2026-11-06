@@ -326,7 +326,7 @@ fn documentation_is_bounded_at_utf8_boundaries_and_scroll_accepts_explicit_conte
     assert_eq!(popup.sections[0].lines, ["éé", "line"]);
     // Three-byte characters straddle the 65,536-byte ceiling.
     let long = format!("{}\n", "界".repeat(4000)).repeat(40);
-    let mut end = crate::app::input::documentation::DOCUMENTATION_MAXIMUM_BYTES;
+    let mut end = crate::app::documentation::DOCUMENTATION_MAXIMUM_BYTES;
     while !long.is_char_boundary(end) {
         end -= 1;
     }
@@ -348,7 +348,7 @@ fn documentation_is_bounded_at_utf8_boundaries_and_scroll_accepts_explicit_conte
     let total = input.documentation().unwrap().line_count();
     input.scroll_documentation(
         1,
-        crate::app::input::documentation::DOCUMENTATION_MAXIMUM_LINES,
+        crate::app::documentation::DOCUMENTATION_MAXIMUM_LINES,
         1,
         total,
     );
@@ -356,7 +356,7 @@ fn documentation_is_bounded_at_utf8_boundaries_and_scroll_accepts_explicit_conte
     assert_eq!(popup.scroll, popup.line_count() - 1);
     input.scroll_documentation(
         -1,
-        crate::app::input::documentation::DOCUMENTATION_MAXIMUM_LINES,
+        crate::app::documentation::DOCUMENTATION_MAXIMUM_LINES,
         1,
         total,
     );

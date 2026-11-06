@@ -1,11 +1,13 @@
 //! Private explorer I/O protocol. Public VfsRequest/VfsResult remain unchanged.
-use super::vfs::roots_current;
-use super::{ExplorerMutation, RequestId, VfsError};
+use crate::files::vfs::roots_current;
+use crate::files::ExplorerMutation;
+use crate::files::RequestId;
+use crate::files::VfsError;
 use crate::workspace::RootIdentity;
-use std::{
-    fs, io,
-    path::{Path, PathBuf},
-};
+use std::fs;
+use std::io;
+use std::path::Path;
+use std::path::PathBuf;
 
 #[derive(Debug)]
 pub(crate) struct PreparedExplorerMutation {
@@ -110,22 +112,22 @@ fn prepare(
     let paths: Vec<_> = roots.iter().map(|r| r.canonical_path.clone()).collect();
     let operation = match operation {
         ExplorerMutation::Create { path, directory } => ExplorerMutation::Create {
-            path: super::vfs::scoped_missing_target(&path, &paths)?,
+            path: crate::files::vfs::scoped_missing_target(&path, &paths)?,
             directory,
         },
         ExplorerMutation::Rename { source, target } => ExplorerMutation::Rename {
-            source: super::vfs::scoped_existing_path(&source, &paths)?,
-            target: super::vfs::scoped_missing_target(&target, &paths)?,
+            source: crate::files::vfs::scoped_existing_path(&source, &paths)?,
+            target: crate::files::vfs::scoped_missing_target(&target, &paths)?,
         },
         ExplorerMutation::Copy { source, target } => ExplorerMutation::Copy {
-            source: super::vfs::scoped_existing_path(&source, &paths)?,
-            target: super::vfs::scoped_missing_target(&target, &paths)?,
+            source: crate::files::vfs::scoped_existing_path(&source, &paths)?,
+            target: crate::files::vfs::scoped_missing_target(&target, &paths)?,
         },
         ExplorerMutation::Delete { path } => ExplorerMutation::Delete {
-            path: super::vfs::scoped_existing_path(&path, &paths)?,
+            path: crate::files::vfs::scoped_existing_path(&path, &paths)?,
         },
     };
-    let roots = super::vfs::participating_roots(
+    let roots = crate::files::vfs::participating_roots(
         &requested.iter().map(PathBuf::as_path).collect::<Vec<_>>(),
         &operation
             .source()
@@ -233,10 +235,12 @@ fn apply(intent: PreparedExplorerMutation) -> Result<(), VfsError> {
         .iter()
         .map(|r| r.canonical_path.clone())
         .collect::<Vec<_>>();
-    super::vfs::apply_explorer_mutation(&intent.operation, &roots, intent.maximum)
+    crate::files::vfs::apply_explorer_mutation(&intent.operation, &roots, intent.maximum)
 }
 fn read_scoped_file(path: &Path, roots: &[RootIdentity]) -> Result<Vec<u8>, VfsError> {
-    use rustix::fs::{Mode, OFlags, openat};
+    use rustix::fs::Mode;
+    use rustix::fs::OFlags;
+    use rustix::fs::openat;
     use std::os::unix::fs::OpenOptionsExt;
     use std::path::Component;
 
@@ -277,7 +281,7 @@ fn read_scoped_file(path: &Path, roots: &[RootIdentity]) -> Result<Vec<u8>, VfsE
             openat(&file, name, flags, Mode::empty()).map_err(|e| error(path, e.to_string()))?,
         );
     }
-    super::vfs::read_open_file_with_ceiling(file, path, super::recovery::DOCUMENT_BYTE_CEILING)
+    crate::files::vfs::read_open_file_with_ceiling(file, path, crate::files::recovery::DOCUMENT_BYTE_CEILING)
 }
 
 impl ExplorerIo {
@@ -325,8 +329,8 @@ impl ExplorerIo {
                         result: Err(cancellation()),
                     };
                 }
-                match super::vfs::canonical_path(&path).and_then(|canonical| {
-                    let roots = super::vfs::participating_roots(&[&path], &[&canonical], &roots)?;
+                match crate::files::vfs::canonical_path(&path).and_then(|canonical| {
+                    let roots = crate::files::vfs::participating_roots(&[&path], &[&canonical], &roots)?;
                     roots_current(&roots)?;
                     Ok((canonical, roots))
                 }) {
@@ -368,9 +372,11 @@ impl ExplorerIo {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::files::{VfsReply, VfsWorker};
-    use std::time::{Duration, Instant};
+    use crate::files::explorer_intent::*;
+    use crate::files::VfsReply;
+    use crate::files::VfsWorker;
+    use std::time::Duration;
+    use std::time::Instant;
     fn reply(worker: &VfsWorker) -> ExplorerIoReply {
         let deadline = Instant::now() + Duration::from_secs(2);
         loop {

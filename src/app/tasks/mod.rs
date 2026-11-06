@@ -99,7 +99,7 @@ pub(in crate::app) struct TestCaseResult {
     pub(in crate::app) status: String,
     pub(in crate::app) duration: String,
     pub(in crate::app) message: String,
-    pub(in crate::app) source: Option<crate::app::search::MatcherSource>,
+    pub(in crate::app) source: Option<crate::app::picker::MatcherSource>,
 }
 
 pub(in crate::app) fn task_plan(
@@ -956,7 +956,7 @@ impl TaskSession {
         }
         failed
     }
-    pub(super) fn resolve_test(&self, key: &TestKey) -> Option<crate::app::search::MatcherSource> {
+    pub(super) fn resolve_test(&self, key: &TestKey) -> Option<crate::app::picker::MatcherSource> {
         let current = self.keys.get(&key.name)?;
         if !Arc::ptr_eq(&current.epoch, &key.run) {
             return None;
@@ -1161,7 +1161,7 @@ mod tests {
                 status: "failed".into(),
                 duration: String::new(),
                 message: "failure".into(),
-                source: Some(crate::app::search::MatcherSource {
+                source: Some(crate::app::picker::MatcherSource {
                     path: root.path().join("source"),
                     line: 0,
                     column: 0,
@@ -1361,7 +1361,7 @@ mod tests {
                 status: "ok".into(),
                 duration: String::new(),
                 message: String::new(),
-                source: Some(crate::app::search::MatcherSource {
+                source: Some(crate::app::picker::MatcherSource {
                     path: root.path().join("source"),
                     line: 0,
                     column: 0,

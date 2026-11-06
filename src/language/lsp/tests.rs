@@ -1,28 +1,61 @@
-use std::{
-    path::Path,
-    thread,
-    time::{Duration, Instant},
-};
+use std::path::Path;
+use std::thread;
+use std::time::Duration;
+use std::time::Instant;
 
-use serde_json::{Value, json};
+use serde_json::Value;
 
-use super::{
-    model::{
-        LspDocument, LspEvent, LspFeature, LspFeatureResult, LspMarkupKind, LspPolicy,
-        LspProgressKind, SyncKind,
-    },
-    paths::{file_uri, language_id_for_path, path_from_file_uri},
-    protocol::{
-        completion_items, hover_result, incremental_change, initialize_capabilities,
-        initialize_message, inlay_hints, lsp_progress_event, normalize_result, server_status_event,
-        workspace_edit,
-    },
-    session::{LspService, requested_executable_name},
-};
-use crate::{
-    editor::text::PositionEncoding,
-    tools::{ToolDefinition, ToolKind, tool_launch_environment},
-};
+use serde_json::json;
+
+use crate::language::lsp::model::LspDocument;
+
+use crate::language::lsp::model::LspEvent;
+
+use crate::language::lsp::model::LspFeature;
+
+use crate::language::lsp::model::LspFeatureResult;
+
+use crate::language::lsp::model::LspMarkupKind;
+
+use crate::language::lsp::model::LspPolicy;
+
+use crate::language::lsp::model::LspProgressKind;
+
+use crate::language::lsp::model::SyncKind;
+
+use crate::language::lsp::paths::file_uri;
+
+use crate::language::lsp::paths::language_id_for_path;
+
+use crate::language::lsp::paths::path_from_file_uri;
+
+use crate::language::lsp::protocol::completion_items;
+
+use crate::language::lsp::protocol::hover_result;
+
+use crate::language::lsp::protocol::incremental_change;
+
+use crate::language::lsp::protocol::initialize_capabilities;
+
+use crate::language::lsp::protocol::initialize_message;
+
+use crate::language::lsp::protocol::inlay_hints;
+
+use crate::language::lsp::protocol::lsp_progress_event;
+
+use crate::language::lsp::protocol::normalize_result;
+
+use crate::language::lsp::protocol::server_status_event;
+
+use crate::language::lsp::protocol::workspace_edit;
+
+use crate::language::lsp::session::LspService;
+
+use crate::language::lsp::session::requested_executable_name;
+use crate::editor::text::PositionEncoding;
+use crate::tools::ToolDefinition;
+use crate::tools::ToolKind;
+use crate::tools::tool_launch_environment;
 
 #[test]
 fn language_and_uri_mapping_are_deterministic() {
@@ -205,8 +238,8 @@ fn every_managed_catalog_lsp_language_has_a_reachable_document_mapping() {
 
 #[test]
 fn a_server_can_register_formatting_after_it_starts() {
-    let registered = super::server_message::effective_capabilities(
-        &super::LspCapabilities::default(),
+    let registered = crate::language::lsp::server_message::effective_capabilities(
+        &crate::language::lsp::LspCapabilities::default(),
         ["textDocument/formatting", "textDocument/rangeFormatting"]
             .into_iter()
             .map(|method| (method, &Value::Null)),
@@ -217,18 +250,19 @@ fn a_server_can_register_formatting_after_it_starts() {
 
 fn server_message_replies(
     message: Value,
-    base: &super::LspCapabilities,
-    capabilities: &mut super::LspCapabilities,
+    base: &crate::language::lsp::LspCapabilities,
+    capabilities: &mut crate::language::lsp::LspCapabilities,
     registrations: &mut std::collections::HashMap<String, (String, Value)>,
     documents: &std::collections::HashMap<String, LspDocument>,
 ) -> Vec<Value> {
-    use std::sync::{Arc, mpsc};
+    use std::sync::Arc;
+    use std::sync::mpsc;
     let (channel, _events) = mpsc::sync_channel(8);
     let (commands, _requests) = mpsc::sync_channel(1);
-    let events = super::origins::EventSender {
+    let events = crate::language::lsp::origins::EventSender {
         channel,
         commands,
-        context: super::origins::EditContext {
+        context: crate::language::lsp::origins::EditContext {
             session: Arc::new(()),
             server: Arc::from("fixture"),
             encoding: PositionEncoding::Utf16,
@@ -240,8 +274,8 @@ fn server_message_replies(
         stop_requested: Arc::new(false.into()),
     };
     let mut output = Vec::new();
-    super::server_message::handle_server_message(
-        super::server_message::ServerMessageContext {
+    crate::language::lsp::server_message::handle_server_message(
+        crate::language::lsp::server_message::ServerMessageContext {
             server: "fixture",
             root: Path::new("/fixture"),
             stdin: &mut output,
@@ -250,7 +284,7 @@ fn server_message_replies(
             base_capabilities: base,
             capabilities,
             registrations,
-            configuration: &super::LspServerConfiguration::standard(),
+            configuration: &crate::language::lsp::LspServerConfiguration::standard(),
             sources: &Default::default(),
             diagnostic_lineage: &Default::default(),
             documents,
@@ -265,13 +299,15 @@ fn server_message_replies(
 
 #[test]
 fn diagnostic_disk_snapshots_reject_nonregular_and_oversized_targets() {
-    use super::{
-        LspServerConfiguration,
-        origins::{EditContext, EventSender},
-        server_message::{ServerMessageContext, handle_server_message},
-    };
-    use nix::{sys::stat::Mode, unistd::mkfifo};
-    use std::sync::{Arc, mpsc};
+    use crate::language::lsp::LspServerConfiguration;
+    use crate::language::lsp::origins::EditContext;
+    use crate::language::lsp::origins::EventSender;
+    use crate::language::lsp::server_message::ServerMessageContext;
+    use crate::language::lsp::server_message::handle_server_message;
+    use nix::sys::stat::Mode;
+    use nix::unistd::mkfifo;
+    use std::sync::Arc;
+    use std::sync::mpsc;
     let root = tempfile::tempdir().unwrap();
     mkfifo(&root.path().join("fifo"), Mode::S_IRUSR | Mode::S_IWUSR).unwrap();
     std::fs::create_dir(root.path().join("directory")).unwrap();
@@ -333,7 +369,7 @@ fn diagnostic_disk_snapshots_reject_nonregular_and_oversized_targets() {
 
 #[test]
 fn oversized_dynamic_batches_are_rejected_without_changing_registrations() {
-    let base = super::LspCapabilities::default();
+    let base = crate::language::lsp::LspCapabilities::default();
     let mut capabilities = base.clone();
     let mut registrations = std::collections::HashMap::from([(
         "keep".into(),
@@ -364,7 +400,7 @@ fn oversized_dynamic_batches_are_rejected_without_changing_registrations() {
 
 #[test]
 fn configuration_replies_preserve_every_requested_position() {
-    let base = super::LspCapabilities::default();
+    let base = crate::language::lsp::LspCapabilities::default();
     let items = (0..257)
         .map(|_| json!({"section":"missing"}))
         .collect::<Vec<_>>();
@@ -387,10 +423,10 @@ fn dynamic_providers_match_document_selectors_and_keep_static_providers() {
         tab_size: 2,
         insert_spaces: true,
     };
-    let base = super::LspCapabilities::default();
+    let base = crate::language::lsp::LspCapabilities::default();
     let options =
         json!({"documentSelector":[{"language":"javascript","scheme":"file","pattern":"**/*.js"}]});
-    let capabilities = super::server_message::effective_capabilities(
+    let capabilities = crate::language::lsp::server_message::effective_capabilities(
         &base,
         [("textDocument/formatting", &options)].into_iter(),
     );
@@ -414,11 +450,11 @@ fn dynamic_providers_match_document_selectors_and_keep_static_providers() {
             ..js.clone()
         }
     ));
-    let static_base = super::LspCapabilities {
+    let static_base = crate::language::lsp::LspCapabilities {
         formatting: true,
         ..base.clone()
     };
-    let capabilities = super::server_message::effective_capabilities(
+    let capabilities = crate::language::lsp::server_message::effective_capabilities(
         &static_base,
         [("textDocument/formatting", &options)].into_iter(),
     );
@@ -429,7 +465,7 @@ fn dynamic_providers_match_document_selectors_and_keep_static_providers() {
     ] {
         let options =
             json!({"documentSelector":[{"pattern":{"baseUri":base_uri,"pattern":"*.js"}}]});
-        let capabilities = super::server_message::effective_capabilities(
+        let capabilities = crate::language::lsp::server_message::effective_capabilities(
             &base,
             [("textDocument/formatting", &options)].into_iter(),
         );
@@ -445,7 +481,7 @@ fn dynamic_providers_match_document_selectors_and_keep_static_providers() {
     }
     for selector in [json!([]), json!([{"scheme":"untitled"}])] {
         let options = json!({"documentSelector":selector});
-        let capabilities = super::server_message::effective_capabilities(
+        let capabilities = crate::language::lsp::server_message::effective_capabilities(
             &base,
             [("textDocument/formatting", &options)].into_iter(),
         );
@@ -455,7 +491,7 @@ fn dynamic_providers_match_document_selectors_and_keep_static_providers() {
 
 #[test]
 fn dynamic_change_sync_is_document_specific_and_unregistration_restores_static_policy() {
-    let base = super::LspCapabilities {
+    let base = crate::language::lsp::LspCapabilities {
         sync_kind: SyncKind::None,
         ..Default::default()
     };
@@ -497,14 +533,14 @@ fn dynamic_change_sync_is_document_specific_and_unregistration_restores_static_p
         ..old.clone()
     };
     let mut output = Vec::new();
-    super::protocol::send_change(&mut output, Some(&old), &new, &capabilities).unwrap();
+    crate::language::lsp::protocol::send_change(&mut output, Some(&old), &new, &capabilities).unwrap();
     let change = crate::process::read_content_length_message(&mut std::io::Cursor::new(output))
         .unwrap()
         .unwrap();
     assert_eq!(change["params"]["contentChanges"][0]["text"], "d");
     assert!(change["params"]["contentChanges"][0]["range"].is_object());
     let mut output = Vec::new();
-    super::protocol::send_change(
+    crate::language::lsp::protocol::send_change(
         &mut output,
         None,
         &LspDocument {
@@ -525,7 +561,7 @@ fn dynamic_change_sync_is_document_specific_and_unregistration_restores_static_p
     assert_eq!(replies.len(), 1);
     let reply = &replies[0];
     assert!(reply.get("result").is_some());
-    super::protocol::send_change(&mut output, Some(&old), &new, &capabilities).unwrap();
+    crate::language::lsp::protocol::send_change(&mut output, Some(&old), &new, &capabilities).unwrap();
     assert!(output.is_empty());
     assert_eq!(capabilities, base);
 }
@@ -688,7 +724,7 @@ fn astro_and_vue_initialization_own_the_typescript_sdk_beside_the_server() {
     std::fs::write(tsdk.join("typescript.js"), b"module").unwrap();
 
     for server in ["astro-language-server", "vue-language-server"] {
-        let configuration = super::LspServerConfiguration::for_server(server, &executable);
+        let configuration = crate::language::lsp::LspServerConfiguration::for_server(server, &executable);
         let initialize = initialize_message(
             directory.path(),
             configuration.initialization_options.as_ref(),
@@ -704,7 +740,7 @@ fn astro_and_vue_initialization_own_the_typescript_sdk_beside_the_server() {
 
 #[test]
 fn maximum_inlay_hint_profiles_are_adapter_specific_and_exhaustive() {
-    let rust = super::LspServerConfiguration::maximum_inlay_hints("rust-analyzer");
+    let rust = crate::language::lsp::LspServerConfiguration::maximum_inlay_hints("rust-analyzer");
     let initialize = initialize_message(
         Path::new("/tmp/project"),
         rust.initialization_options.as_ref(),
@@ -725,7 +761,7 @@ fn maximum_inlay_hint_profiles_are_adapter_specific_and_exhaustive() {
     );
 
     let typescript =
-        super::LspServerConfiguration::maximum_inlay_hints("typescript-language-server");
+        crate::language::lsp::LspServerConfiguration::maximum_inlay_hints("typescript-language-server");
     assert_eq!(
         typescript
             .initialization_options
@@ -740,7 +776,7 @@ fn maximum_inlay_hint_profiles_are_adapter_specific_and_exhaustive() {
         Some(&json!(true))
     );
 
-    let gopls = super::LspServerConfiguration::maximum_inlay_hints("gopls");
+    let gopls = crate::language::lsp::LspServerConfiguration::maximum_inlay_hints("gopls");
     assert_eq!(
         gopls
             .settings
@@ -748,18 +784,18 @@ fn maximum_inlay_hint_profiles_are_adapter_specific_and_exhaustive() {
         Some(&json!(true))
     );
     assert_eq!(
-        super::LspServerConfiguration::maximum_inlay_hints("clangd"),
-        super::LspServerConfiguration::standard()
+        crate::language::lsp::LspServerConfiguration::maximum_inlay_hints("clangd"),
+        crate::language::lsp::LspServerConfiguration::standard()
     );
     assert!(matches!(
         normalize_result(
             &LspFeature::InlayHints {
-                range: super::LspRange {
-                    start: super::LspPosition {
+                range: crate::language::lsp::LspRange {
+                    start: crate::language::lsp::LspPosition {
                         line: 0,
                         character: 0,
                     },
-                    end: super::LspPosition {
+                    end: crate::language::lsp::LspPosition {
                         line: 1,
                         character: 0,
                     },
@@ -803,7 +839,7 @@ fn absent_change_support_does_not_enable_document_changes() {
                 .unwrap();
         assert_eq!(capabilities.sync_kind, SyncKind::None);
         let mut output = Vec::new();
-        super::protocol::send_change(
+        crate::language::lsp::protocol::send_change(
             &mut output,
             None,
             &LspDocument {
@@ -827,12 +863,12 @@ fn absent_change_support_does_not_enable_document_changes() {
 
 #[test]
 fn formatting_parameters_use_the_requested_indentation_for_both_methods() {
-    let range = super::LspRange {
-        start: super::LspPosition {
+    let range = crate::language::lsp::LspRange {
+        start: crate::language::lsp::LspPosition {
             line: 0,
             character: 0,
         },
-        end: super::LspPosition {
+        end: crate::language::lsp::LspPosition {
             line: 2,
             character: 0,
         },
@@ -849,7 +885,7 @@ fn formatting_parameters_use_the_requested_indentation_for_both_methods() {
                 insert_spaces,
             },
         ] {
-            let params = super::protocol::feature_params(&feature, "file:///main.rs", 0, 0);
+            let params = crate::language::lsp::protocol::feature_params(&feature, "file:///main.rs", 0, 0);
             assert_eq!(
                 params["options"],
                 json!({"tabSize":tab_size,"insertSpaces":insert_spaces})
@@ -860,8 +896,10 @@ fn formatting_parameters_use_the_requested_indentation_for_both_methods() {
 
 #[test]
 fn failed_document_sync_keeps_the_last_sent_document_and_stops_the_session() {
-    use super::session::{SessionCommand, handle_command};
-    use crate::editor::{EditorState, text::TextBuffer};
+    use crate::language::lsp::session::SessionCommand;
+    use crate::language::lsp::session::handle_command;
+    use crate::editor::EditorState;
+    use crate::editor::text::TextBuffer;
     use std::collections::HashMap;
     let old = LspDocument {
         path: "/workspace/main.rs".into(),
@@ -903,7 +941,7 @@ fn failed_document_sync_keeps_the_last_sent_document_and_stops_the_session() {
                 Path::new("/server"),
                 &mut std::io::sink(),
                 true,
-                &super::LspCapabilities {
+                &crate::language::lsp::LspCapabilities {
                     sync_kind: SyncKind::Incremental,
                     ..Default::default()
                 },
@@ -918,7 +956,7 @@ fn failed_document_sync_keeps_the_last_sent_document_and_stops_the_session() {
                 0,
                 &endpoint.events,
                 &mut stopping,
-                &mut super::LspServerConfiguration::standard(),
+                &mut crate::language::lsp::LspServerConfiguration::standard(),
             )
             .unwrap_err();
             assert!(stopping);
@@ -970,7 +1008,7 @@ fn code_action_diagnostic_codes_keep_their_json_type_and_related_information() {
     let range = json!({"start":{"line":0,"character":0},"end":{"line":0,"character":1}});
     for code in [json!("001"), json!("123"), json!(123)] {
         let related = json!([{"location":{"uri":"file:///other.rs","range":range},"message":"other declaration"}]);
-        let diagnostics = super::protocol::diagnostics(&json!([{
+        let diagnostics = crate::language::lsp::protocol::diagnostics(&json!([{
             "range":range,"message":"duplicate","code":code,"relatedInformation":related,
         }]));
         assert_eq!(diagnostics[0].code, Some(code.clone()));
@@ -980,7 +1018,7 @@ fn code_action_diagnostic_codes_keep_their_json_type_and_related_information() {
             range: diagnostics[0].range.clone(),
             diagnostics,
         };
-        let params = super::protocol::feature_params(&feature, "file:///main.rs", 0, 0);
+        let params = crate::language::lsp::protocol::feature_params(&feature, "file:///main.rs", 0, 0);
         assert_eq!(params["context"]["diagnostics"][0]["code"], code);
     }
 }
@@ -1005,7 +1043,7 @@ fn signature_help_selects_the_active_overload_with_a_safe_fallback() {
         );
     }
     assert_eq!(
-        super::protocol::signature_text(&json!({"signatures":[]})),
+        crate::language::lsp::protocol::signature_text(&json!({"signatures":[]})),
         "no signature information"
     );
 }
@@ -1036,13 +1074,13 @@ fn null_results_clear_persistent_document_projections() {
 #[test]
 fn code_lenses_keep_resolve_data_and_accept_resolved_commands() {
     let item = json!({"range":{"start":{"line":1,"character":0},"end":{"line":1,"character":1}},"data":{"id":42}});
-    let lenses = super::protocol::code_lenses(&json!([item]));
+    let lenses = crate::language::lsp::protocol::code_lenses(&json!([item]));
     assert_eq!(lenses[0].resolve_item, Some(item.clone()));
     assert!(lenses[0].command.is_none());
     let feature = LspFeature::CodeLensResolve { item: item.clone() };
     assert_eq!(feature.method(), "codeLens/resolve");
     assert_eq!(
-        super::protocol::feature_params(&feature, "file:///main.rs", 0, 0),
+        crate::language::lsp::protocol::feature_params(&feature, "file:///main.rs", 0, 0),
         item
     );
     let caps = initialize_capabilities(Some(
@@ -1066,10 +1104,10 @@ fn code_lenses_keep_resolve_data_and_accept_resolved_commands() {
 fn completion_fallback_inserts_the_full_label_not_its_display_preview() {
     let label = "é".repeat(5000);
     for resolved in [false, true] {
-        let item = super::protocol::completion_item(&json!({"label":label}), resolved).unwrap();
+        let item = crate::language::lsp::protocol::completion_item(&json!({"label":label}), resolved).unwrap();
         assert_eq!(item.label.chars().count(), 4096);
         assert_eq!(item.insert_text, label);
-        let item = super::protocol::completion_item(
+        let item = crate::language::lsp::protocol::completion_item(
             &json!({"label":label,"insertText":"explicit"}),
             resolved,
         )
@@ -1082,7 +1120,7 @@ fn completion_fallback_inserts_the_full_label_not_its_display_preview() {
 fn completion_commands_survive_initial_and_resolved_items() {
     let item = json!({"label":"example","command":{"title":"Import","command":"add.import","arguments":["example"]}});
     for resolved in [false, true] {
-        let parsed = super::protocol::completion_item(&item, resolved).unwrap();
+        let parsed = crate::language::lsp::protocol::completion_item(&item, resolved).unwrap();
         let command = parsed.command.unwrap();
         assert_eq!(command.command, "add.import");
         assert_eq!(command.arguments, vec![json!("example")]);
@@ -1093,7 +1131,7 @@ fn completion_commands_survive_initial_and_resolved_items() {
 fn nested_document_symbols_keep_their_positions_and_children() {
     let range =
         |line: u64| json!({"start":{"line":line,"character":4},"end":{"line":line,"character":7}});
-    let found = super::protocol::symbols(&json!([{
+    let found = crate::language::lsp::protocol::symbols(&json!([{
         "name":"Person","kind":23,"range":range(1),"selectionRange":range(1),
         "children":[{"name":"Greet","kind":6,"range":range(5),"selectionRange":range(6)}]
     }]))
@@ -1239,7 +1277,7 @@ fn initialization_timeout_honors_the_one_second_minimum_and_longer_policy() {
         let mut service = LspService::new();
         let started = Instant::now();
         service
-            .start_session_absolute_with_policy(super::LspSessionLaunch {
+            .start_session_absolute_with_policy(crate::language::lsp::LspSessionLaunch {
                 session_key: &definition.id,
                 definition: &definition,
                 executable: sleep.clone(),
@@ -1250,7 +1288,7 @@ fn initialization_timeout_honors_the_one_second_minimum_and_longer_policy() {
                     request_timeout: requested,
                     maximum_log_lines: 20,
                 },
-                configuration: super::LspServerConfiguration::standard(),
+                configuration: crate::language::lsp::LspServerConfiguration::standard(),
                 environment: tool_launch_environment(&definition),
             })
             .expect("start");
@@ -1305,7 +1343,7 @@ fn stopping_does_not_wait_for_a_daemon_that_kept_the_servers_pipes() {
     };
     let mut service = LspService::new();
     service
-        .start_session_absolute_with_policy(super::LspSessionLaunch {
+        .start_session_absolute_with_policy(crate::language::lsp::LspSessionLaunch {
             session_key: &definition.id,
             definition: &definition,
             executable: shell.clone(),
@@ -1316,7 +1354,7 @@ fn stopping_does_not_wait_for_a_daemon_that_kept_the_servers_pipes() {
                 request_timeout: Duration::from_secs(10),
                 maximum_log_lines: 20,
             },
-            configuration: super::LspServerConfiguration::standard(),
+            configuration: crate::language::lsp::LspServerConfiguration::standard(),
             environment: tool_launch_environment(&definition),
         })
         .expect("start");
@@ -1499,7 +1537,7 @@ while True:
     };
     let mut service = LspService::new();
     service
-        .start_session_absolute_with_policy(super::LspSessionLaunch {
+        .start_session_absolute_with_policy(crate::language::lsp::LspSessionLaunch {
             session_key: &definition.id,
             definition: &definition,
             executable: python.clone(),
@@ -1510,7 +1548,7 @@ while True:
                 request_timeout: Duration::from_secs(5),
                 maximum_log_lines: 20,
             },
-            configuration: super::LspServerConfiguration::standard(),
+            configuration: crate::language::lsp::LspServerConfiguration::standard(),
             environment: tool_launch_environment(&definition),
         })
         .expect("start");
@@ -1583,12 +1621,12 @@ while True:
         .request(
             "fake",
             LspFeature::InlayHints {
-                range: super::LspRange {
-                    start: super::LspPosition {
+                range: crate::language::lsp::LspRange {
+                    start: crate::language::lsp::LspPosition {
                         line: 0,
                         character: 0,
                     },
-                    end: super::LspPosition {
+                    end: crate::language::lsp::LspPosition {
                         line: 0,
                         character: 5,
                     },
@@ -1669,7 +1707,7 @@ while True:
     service
         .configure(
             "fake",
-            super::LspServerConfiguration::maximum_inlay_hints("rust-analyzer"),
+            crate::language::lsp::LspServerConfiguration::maximum_inlay_hints("rust-analyzer"),
         )
         .expect("configure maximum inlay hints");
     thread::sleep(Duration::from_millis(30));
@@ -1807,7 +1845,7 @@ fn workspace_mutations_reject_oversized_documents_and_edit_lists() {
 }
 #[test]
 fn semantic_delta_support_and_response_modes_are_distinct() {
-    use super::protocol::normalize_result;
+    use crate::language::lsp::protocol::normalize_result;
     for (full, delta) in [
         (json!(true), false),
         (json!({"delta":true}), true),
@@ -1838,11 +1876,11 @@ fn semantic_delta_support_and_response_modes_are_distinct() {
 }
 #[test]
 fn maximum_hints_preserve_server_formatting_and_validation() {
-    let mut config = super::LspServerConfiguration::for_server(
+    let mut config = crate::language::lsp::LspServerConfiguration::for_server(
         "vscode-json-language-server",
         std::path::Path::new("/server"),
     );
-    config.overlay(super::LspServerConfiguration::maximum_inlay_hints(
+    config.overlay(crate::language::lsp::LspServerConfiguration::maximum_inlay_hints(
         "vscode-json-language-server",
     ));
     assert_eq!(
@@ -1887,7 +1925,7 @@ fn boundary_service_with_policy(
     };
     let mut service = LspService::new();
     service
-        .start_session_absolute_with_policy(super::LspSessionLaunch {
+        .start_session_absolute_with_policy(crate::language::lsp::LspSessionLaunch {
             session_key: "boundary",
             definition: &definition,
             executable: python,
@@ -1895,7 +1933,7 @@ fn boundary_service_with_policy(
             root: root.path().into(),
             document: Some(document.clone()),
             policy,
-            configuration: super::LspServerConfiguration::standard(),
+            configuration: crate::language::lsp::LspServerConfiguration::standard(),
             environment: Default::default(),
         })
         .unwrap();
@@ -2278,7 +2316,7 @@ fn server_that_never_initializes_fails_within_the_request_timeout() {
     };
     let mut service = LspService::new();
     service
-        .start_session_absolute_with_policy(super::LspSessionLaunch {
+        .start_session_absolute_with_policy(crate::language::lsp::LspSessionLaunch {
             session_key: &definition.id,
             definition: &definition,
             executable: sleep,
@@ -2289,7 +2327,7 @@ fn server_that_never_initializes_fails_within_the_request_timeout() {
                 request_timeout: Duration::from_millis(100),
                 maximum_log_lines: 20,
             },
-            configuration: super::LspServerConfiguration::standard(),
+            configuration: crate::language::lsp::LspServerConfiguration::standard(),
             environment: tool_launch_environment(&definition),
         })
         .expect("start");

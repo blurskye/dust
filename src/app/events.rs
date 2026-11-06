@@ -69,8 +69,8 @@ use crate::app::path_from_file_uri;
 use crate::app::rect_contains_point;
 use crate::app::terminal_tab_at_column;
 use crate::app::diagnostics::MAXIMUM_DIAGNOSTICS_PER_URI;
-use crate::app::lsp::LSP_MAXIMUM_LOG_LINES;
-use crate::app::lsp::ProjectionChange;
+use crate::app::language::LSP_MAXIMUM_LOG_LINES;
+use crate::app::language::ProjectionChange;
 use crate::ui::render::TERMINAL_PANEL_MAXIMUM_HEIGHT;
 use crate::ui::render::TERMINAL_PANEL_MINIMUM_HEIGHT;
 use crate::windows::PANE_DEFAULT_RATIO;
@@ -84,7 +84,7 @@ impl App {
         let Some(view) = self.state.active_view else {
             return;
         };
-        self.flash = Some(crate::app::flash::FlashState {
+        self.flash = Some(crate::app::editing::flash::FlashState {
             view,
             buffer: self.state.views[view].buffer,
             source: self.state.buffers[self.state.views[view].buffer]
@@ -179,7 +179,7 @@ impl App {
             Vec::new()
         };
         flash.targets =
-            crate::app::flash::flash_targets(text, &ranges, view.cursor, &flash.query);
+            crate::app::editing::flash::flash_targets(text, &ranges, view.cursor, &flash.query);
         match flash.targets.as_slice() {
             [] if !flash.query.is_empty() => {
                 self.sync_flash_ui();
@@ -634,7 +634,7 @@ impl App {
     pub(super) fn handle_event(&mut self, event: UiEvent) {
         if self.clipboard.waiting() && !matches!(event, UiEvent::Resize(_, _)) {
             self.clipboard
-                .defer(crate::app::clipboard::DeferredInput::Event(event));
+                .defer(crate::app::editing::clipboard::DeferredInput::Event(event));
             return;
         }
         if matches!(event, UiEvent::Key { .. }) {
@@ -1090,7 +1090,7 @@ impl App {
     pub(super) fn handle_configured_key(&mut self, key: KeyEvent) {
         if self.clipboard.waiting() {
             self.clipboard
-                .defer(crate::app::clipboard::DeferredInput::Event(
+                .defer(crate::app::editing::clipboard::DeferredInput::Event(
                     UiEvent::Key {
                         key,
                         kind: KeyInputKind::Press,
@@ -1504,11 +1504,11 @@ impl App {
             // Commands expanded by this input must finish before later queued input.
             let later = self.clipboard.take_deferred();
             match input {
-                crate::app::clipboard::DeferredInput::Event(event) => self.handle_event(event),
-                crate::app::clipboard::DeferredInput::Invocation(invocation) => {
+                crate::app::editing::clipboard::DeferredInput::Event(event) => self.handle_event(event),
+                crate::app::editing::clipboard::DeferredInput::Invocation(invocation) => {
                     self.invoke(invocation)
                 }
-                crate::app::clipboard::DeferredInput::MacroReplay(register, count) => {
+                crate::app::editing::clipboard::DeferredInput::MacroReplay(register, count) => {
                     self.replay_macro(register, count);
                 }
             }
@@ -1522,7 +1522,7 @@ impl App {
     pub(super) fn invoke_checked(&mut self, mut invocation: CommandInvocation) -> bool {
         if self.clipboard.waiting() {
             self.clipboard
-                .defer(crate::app::clipboard::DeferredInput::Invocation(
+                .defer(crate::app::editing::clipboard::DeferredInput::Invocation(
                     invocation,
                 ));
             return true;
@@ -2051,7 +2051,7 @@ impl App {
             };
             let result = match self.recovery.accept(result) {
                 Break(update) => {
-                    use crate::app::recovery::RecoveryUpdate;
+                    use crate::app::documents::recovery::RecoveryUpdate;
                     match update {
                         RecoveryUpdate::Quiet | RecoveryUpdate::Pruned(0) => {}
                         RecoveryUpdate::Error(error) => self.show_error(error),
@@ -4722,7 +4722,7 @@ impl App {
             .buffers
             .iter()
             .filter_map(|(id, buffer)| {
-                Some(crate::app::lsp_edits::EditDocument {
+                Some(crate::app::language::edits::EditDocument {
                     id,
                     path: buffer.path.as_deref()?,
                     text: &buffer.text,
@@ -4783,7 +4783,7 @@ impl App {
         let maximum = crate::app::search::SEARCH_MAXIMUM_FILE_BYTES;
         while let Some((index, file)) = self.workspace_edits.next_file() {
             let snapshot =
-                if let crate::app::workspace_edits::InputFile::Read(path) = file {
+                if let crate::app::workspace::edits::InputFile::Read(path) = file {
                     self.state.workspace_snapshot(
                         self.workspace_edits
                             .preparing_sources()
@@ -4847,7 +4847,7 @@ impl App {
             .buffers
             .iter()
             .filter_map(|(id, buffer)| {
-                Some(crate::app::lsp_edits::EditDocument {
+                Some(crate::app::language::edits::EditDocument {
                     id,
                     path: buffer.path.as_deref()?,
                     text: &buffer.text,
@@ -4909,7 +4909,7 @@ impl App {
     }
     fn finish_workspace_edit_origin(
         &mut self,
-        key: &crate::app::workspace_edits::OriginKey,
+        key: &crate::app::workspace::edits::OriginKey,
         applied: bool,
         reason: Option<String>,
     ) -> Result<(), String> {
@@ -5060,7 +5060,7 @@ impl App {
             .buffers
             .iter()
             .filter_map(|(id, buffer)| {
-                Some(crate::app::lsp_edits::EditDocument {
+                Some(crate::app::language::edits::EditDocument {
                     id,
                     path: buffer.path.as_deref()?,
                     text: &buffer.text,
@@ -5069,7 +5069,7 @@ impl App {
             })
             .collect::<Vec<_>>();
         let transaction =
-            crate::app::lsp_edits::LspEditSources::completion_transaction(
+            crate::app::language::edits::LspEditSources::completion_transaction(
                 edit, encoding, &documents, id,
             )?;
         let draft = self

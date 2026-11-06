@@ -1,16 +1,55 @@
 // SPDX-License-Identifier: Apache-2.0
 wit_bindgen::generate!({ path: "wit", world: "editor-plugin" });
 
-use std::{
-    cell::RefCell,
-    collections::{BTreeMap, BTreeSet},
-};
+use std::cell::RefCell;
 
-use dust::plugin::host::{
-    self, Cell, CellUpdate, CloseView, Dock, Edge, EventValue, ExecutionKind, Focus, Node,
-    NodeKind, Notice, OpenView, Place, Placement, Rect, ReplaceTree, Role, Severity,
-    SnapshotRequest, Tree, UiRequest,
-};
+use std::collections::BTreeMap;
+
+use std::collections::BTreeSet;
+
+use dust::plugin::host::self;
+
+use dust::plugin::host::Cell;
+
+use dust::plugin::host::CellUpdate;
+
+use dust::plugin::host::CloseView;
+
+use dust::plugin::host::Dock;
+
+use dust::plugin::host::Edge;
+
+use dust::plugin::host::EventValue;
+
+use dust::plugin::host::ExecutionKind;
+
+use dust::plugin::host::Focus;
+
+use dust::plugin::host::Node;
+
+use dust::plugin::host::NodeKind;
+
+use dust::plugin::host::Notice;
+
+use dust::plugin::host::OpenView;
+
+use dust::plugin::host::Place;
+
+use dust::plugin::host::Placement;
+
+use dust::plugin::host::Rect;
+
+use dust::plugin::host::ReplaceTree;
+
+use dust::plugin::host::Role;
+
+use dust::plugin::host::Severity;
+
+use dust::plugin::host::SnapshotRequest;
+
+use dust::plugin::host::Tree;
+
+use dust::plugin::host::UiRequest;
 
 #[derive(Clone, Copy)]
 enum BadPrivate {

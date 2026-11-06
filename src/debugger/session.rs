@@ -1,17 +1,24 @@
 //! Bounded adapter admission, original actor contexts and worker-owned pipe I/O.
-use super::{DapControl, DapError, DapEvent, DapLaunch, run_adapter};
+use crate::debugger::DapControl;
+use crate::debugger::DapError;
+use crate::debugger::DapEvent;
+use crate::debugger::DapLaunch;
+use crate::debugger::run_adapter;
 use crate::process::write_content_length_message;
 use serde_json::Value;
-use std::{
-    collections::VecDeque,
-    sync::{
-        Arc, Mutex, Weak,
-        atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering},
-        mpsc::{self, Receiver, SyncSender},
-    },
-    thread,
-    time::Duration,
-};
+use std::collections::VecDeque;
+use std::sync::Arc;
+use std::sync::Mutex;
+use std::sync::Weak;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::AtomicU8;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
+use std::sync::mpsc::self;
+use std::sync::mpsc::Receiver;
+use std::sync::mpsc::SyncSender;
+use std::thread;
+use std::time::Duration;
 
 const CAPACITY: usize = 32;
 const RESIDENT: usize = 8;
@@ -367,9 +374,9 @@ impl DapService {
                     let session_scoped = matches!(
                         &event,
                         DapEvent::Response {
-                            response: super::DapResponse::Breakpoints(_)
-                                | super::DapResponse::Disconnected { .. }
-                                | super::DapResponse::BreakpointChanged { .. },
+                            response: crate::debugger::DapResponse::Breakpoints(_)
+                                | crate::debugger::DapResponse::Disconnected { .. }
+                                | crate::debugger::DapResponse::BreakpointChanged { .. },
                             ..
                         }
                     ) || matches!(&event, DapEvent::RequestFailed { command, .. } if command == "setBreakpoints" || command == "disconnect");
@@ -394,7 +401,7 @@ impl DapService {
                         DapEvent::Terminated { .. }
                             | DapEvent::Failed { .. }
                             | DapEvent::Response {
-                                response: super::DapResponse::Disconnected { .. },
+                                response: crate::debugger::DapResponse::Disconnected { .. },
                                 ..
                             }
                     ) {
@@ -433,7 +440,7 @@ impl DapService {
 }
 fn append_stderr(message: &mut String, actor: &Actor) {
     if let Ok(stderr) = actor.stderr.lock() {
-        let detail = super::sanitize_output(&String::from_utf8_lossy(&stderr));
+        let detail = crate::debugger::sanitize_output(&String::from_utf8_lossy(&stderr));
         if !detail.trim().is_empty() {
             message.push_str("\nadapter stderr: ");
             message.push_str(detail.trim());
@@ -495,7 +502,7 @@ impl Writer {
                             if let Err(error) = write_content_length_message(&mut pipe, &value) {
                                 if let Some(receipt) = &receipt {
                                     receipt.store(
-                                        super::DapReplyOutcome::Failed as u8,
+                                        crate::debugger::DapReplyOutcome::Failed as u8,
                                         Ordering::Release,
                                     );
                                 }
@@ -508,7 +515,7 @@ impl Writer {
                             }
                             if let Some(receipt) = receipt {
                                 receipt.store(
-                                    super::DapReplyOutcome::Written as u8,
+                                    crate::debugger::DapReplyOutcome::Written as u8,
                                     Ordering::Release,
                                 );
                             }
@@ -529,7 +536,7 @@ impl Writer {
     }
     pub(super) fn reply(&mut self, value: Value, receipt: Arc<AtomicU8>) -> Result<(), Value> {
         if self.flush().is_err() {
-            receipt.store(super::DapReplyOutcome::Unknown as u8, Ordering::Release);
+            receipt.store(crate::debugger::DapReplyOutcome::Unknown as u8, Ordering::Release);
             return Err(value);
         }
         // Replies cannot overtake requests that already have wire sequence IDs.
@@ -545,8 +552,8 @@ impl Writer {
                 // Publish admission only after enqueue; do not overwrite a fast
                 // writer's already-completed receipt.
                 let _ = receipt.compare_exchange(
-                    super::DapReplyOutcome::Ready as u8,
-                    super::DapReplyOutcome::WriterQueued as u8,
+                    crate::debugger::DapReplyOutcome::Ready as u8,
+                    crate::debugger::DapReplyOutcome::WriterQueued as u8,
                     Ordering::AcqRel,
                     Ordering::Acquire,
                 );
@@ -559,12 +566,12 @@ impl Writer {
                     mpsc::TrySendError::Full((value, _)) => {
                         #[cfg(test)]
                         self.actor.reverse_retries.fetch_add(1, Ordering::AcqRel);
-                        (value, super::DapReplyOutcome::Ready)
+                        (value, crate::debugger::DapReplyOutcome::Ready)
                     }
                     mpsc::TrySendError::Disconnected((value, _)) => {
                         self.actor.live.store(false, Ordering::Release);
                         self.actor.cancel.store(true, Ordering::Release);
-                        (value, super::DapReplyOutcome::Unknown)
+                        (value, crate::debugger::DapReplyOutcome::Unknown)
                     }
                 };
                 receipt.store(state as u8, Ordering::Release);
@@ -611,8 +618,8 @@ pub(crate) struct TestAdapter {
 }
 #[cfg(test)]
 impl TestAdapter {
-    pub(crate) fn terminal_reply(&self) -> (impl Drop, super::DapTerminalReply) {
-        super::reverse::ReverseRequest::reserve(1, self.events.actor.live.clone())
+    pub(crate) fn terminal_reply(&self) -> (impl Drop, crate::debugger::DapTerminalReply) {
+        crate::debugger::reverse::ReverseRequest::reserve(1, self.events.actor.live.clone())
     }
     pub(crate) fn event(&self, generation: u64, event: DapEvent) {
         self.events
@@ -630,9 +637,9 @@ impl TestAdapter {
     pub(crate) fn control(&self) -> Option<DapControl> {
         self.controls.try_recv().ok().map(|c| c.value)
     }
-    pub(crate) fn with_terminal_reply(&self, test: impl FnOnce(super::DapTerminalReply)) {
+    pub(crate) fn with_terminal_reply(&self, test: impl FnOnce(crate::debugger::DapTerminalReply)) {
         let (_request, reply) =
-            super::reverse::ReverseRequest::reserve(1, self.events.actor.live.clone());
+            crate::debugger::reverse::ReverseRequest::reserve(1, self.events.actor.live.clone());
         test(reply);
     }
 }
@@ -771,8 +778,9 @@ impl ExecutionScope {
 
 #[cfg(test)]
 mod request_tests {
-    use super::*;
-    use crate::debugger::{DapResponse, DapSourceBreakpoint};
+    use crate::debugger::session::*;
+    use crate::debugger::DapResponse;
+    use crate::debugger::DapSourceBreakpoint;
     #[test]
     fn restart_requires_a_free_resident_slot_before_stopping() {
         let (mut service, _adapter) = fixture();
@@ -819,12 +827,12 @@ mod request_tests {
     }
     #[test]
     fn queued_session_controls_survive_new_stop_generations() {
-        use crate::debugger::transport_tests::{ADAPTER, python};
+        use crate::debugger::transport_tests::ADAPTER;
+        use crate::debugger::transport_tests::python;
         use serde_json::json;
-        use std::{
-            collections::{BTreeMap, HashMap},
-            time::Instant,
-        };
+        use std::collections::BTreeMap;
+        use std::collections::HashMap;
+        use std::time::Instant;
         let root = tempfile::tempdir().unwrap();
         let script = root.path().join("queued.py");
         let prefix = ADAPTER.split("while True:\n m=read()").next().unwrap();
@@ -1027,7 +1035,7 @@ while True:
         }
         assert_eq!(writer.pending.len(), CAPACITY * 2);
         assert!(!actor.cancel.load(Ordering::Acquire));
-        let receipt = Arc::new(AtomicU8::new(super::super::DapReplyOutcome::Ready as u8));
+        let receipt = Arc::new(AtomicU8::new(crate::debugger::DapReplyOutcome::Ready as u8));
         let reply = serde_json::json!({"seq": CAPACITY * 3});
         assert_eq!(
             writer.reply(reply.clone(), receipt.clone()),

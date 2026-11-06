@@ -1,16 +1,24 @@
-use std::{
-    collections::{BTreeMap, HashMap},
-    io::{self, BufRead, BufReader, Read, Write},
-    path::PathBuf,
-    process::{Child, Command, Stdio},
-    sync::{
-        Arc,
-        atomic::{AtomicBool, AtomicUsize, Ordering},
-        mpsc::{self, Receiver, SyncSender},
-    },
-    thread,
-    time::{Duration, Instant},
-};
+use std::collections::BTreeMap;
+use std::collections::HashMap;
+use std::io::self;
+use std::io::BufRead;
+use std::io::BufReader;
+use std::io::Read;
+use std::io::Write;
+use std::path::PathBuf;
+use std::process::Child;
+use std::process::Command;
+use std::process::Stdio;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
+use std::sync::mpsc::self;
+use std::sync::mpsc::Receiver;
+use std::sync::mpsc::SyncSender;
+use std::thread;
+use std::time::Duration;
+use std::time::Instant;
 use thiserror::Error;
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct JobId(pub u64);
@@ -428,17 +436,17 @@ impl JobEngine {
                 child
                     .stdin
                     .take()
-                    .map(|pipe| super::CancellablePipe::new(pipe, cancel.clone()))
+                    .map(|pipe| crate::process::CancellablePipe::new(pipe, cancel.clone()))
                     .transpose()?,
                 child
                     .stdout
                     .take()
-                    .map(|pipe| super::CancellablePipe::new(pipe, cancel.clone()))
+                    .map(|pipe| crate::process::CancellablePipe::new(pipe, cancel.clone()))
                     .transpose()?,
                 child
                     .stderr
                     .take()
-                    .map(|pipe| super::CancellablePipe::new(pipe, cancel.clone()))
+                    .map(|pipe| crate::process::CancellablePipe::new(pipe, cancel.clone()))
                     .transpose()?,
             ))
         })();
@@ -750,7 +758,10 @@ fn reserve_output(total: &AtomicUsize, ceiling: usize, requested: usize) -> usiz
 fn job_exit_status(child: &mut Child) -> io::Result<Option<Option<i32>>> {
     #[cfg(unix)]
     {
-        use nix::sys::wait::{Id, WaitPidFlag, WaitStatus, waitid};
+        use nix::sys::wait::Id;
+        use nix::sys::wait::WaitPidFlag;
+        use nix::sys::wait::WaitStatus;
+        use nix::sys::wait::waitid;
         // Keep the exited leader reserved while descendants can still hold pipes.
         match waitid(
             Id::Pid(nix::unistd::Pid::from_raw(child.id() as i32)),
@@ -774,7 +785,7 @@ fn job_exit_status(child: &mut Child) -> io::Result<Option<Option<i32>>> {
 fn terminate_tree(child: &mut Child, reaped: bool) {
     #[cfg(unix)]
     {
-        super::terminate_process_group(child.id());
+        crate::process::terminate_process_group(child.id());
     }
     if !reaped {
         let _ = child.kill();
@@ -802,7 +813,7 @@ pub enum JobError {
 
 #[cfg(all(test, unix))]
 mod tests {
-    use super::*;
+    use crate::process::jobs::*;
     fn request(root: &std::path::Path, command: &str) -> JobRequest {
         JobRequest {
             program: PathBuf::from("/bin/sh"),
@@ -1064,7 +1075,7 @@ mod tests {
         struct Escaped(u32);
         impl Drop for Escaped {
             fn drop(&mut self) {
-                super::super::terminate_process_group(self.0);
+                crate::process::terminate_process_group(self.0);
             }
         }
         let root = tempfile::tempdir().unwrap();
@@ -1192,7 +1203,9 @@ mod tests {
             assert!(Instant::now() < deadline, "descendant retained job readers");
             thread::sleep(Duration::from_millis(2));
         }
-        use nix::sys::wait::{Id, WaitPidFlag, waitid};
+        use nix::sys::wait::Id;
+        use nix::sys::wait::WaitPidFlag;
+        use nix::sys::wait::waitid;
         assert_eq!(
             waitid(Id::Pid(pid), WaitPidFlag::WEXITED | WaitPidFlag::WNOHANG),
             Err(nix::errno::Errno::ECHILD)

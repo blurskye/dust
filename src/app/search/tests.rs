@@ -878,7 +878,7 @@ fn crlf_previews_use_the_normalized_match_offset() {
     found.snapshot = Arc::from(source);
     found.range = 600_000..600_006;
     found.line = 300_000;
-    let preview = crate::app::search::preview::search_picker_preview(&found, 1024);
+    let preview = crate::app::picker::preview::search_picker_preview(&found, 1024);
     let text = preview.as_text().unwrap();
     assert!(text.lines().iter().any(|line| line == "needle"));
     assert_eq!(text.highlight_line, Some(300_000));

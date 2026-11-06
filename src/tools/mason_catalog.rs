@@ -1,17 +1,19 @@
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    path::Path,
-    sync::OnceLock,
-};
+use std::collections::BTreeMap;
+use std::collections::BTreeSet;
+use std::path::Path;
+use std::sync::OnceLock;
 
 use serde::Deserialize;
 
 use crate::files::ProjectRootStrategy;
 
-use super::{
-    catalog::{DebugProgramPolicy, ToolDefinition, ToolKind},
-    install_prepare::validate_tool_id,
-};
+use crate::tools::catalog::DebugProgramPolicy;
+
+use crate::tools::catalog::ToolDefinition;
+
+use crate::tools::catalog::ToolKind;
+
+use crate::tools::install_prepare::validate_tool_id;
 
 const MASON_LSP_CATALOG: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/tools/mason-lsp-catalog.json"));
 const MASON_LSP_SCHEMA_VERSION: u32 = 1;

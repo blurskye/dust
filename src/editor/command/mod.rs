@@ -3,11 +3,23 @@ mod builtins;
 pub use builtins::register_builtin_commands;
 pub(crate) use builtins::visual_ranges;
 
-use std::{collections::BTreeMap, fmt, num::NonZeroU64, sync::Arc};
+use std::collections::BTreeMap;
+
+use std::fmt;
+
+use std::num::NonZeroU64;
+
+use std::sync::Arc;
 
 use thiserror::Error;
 
-use crate::editor::{BufferId, EditorState, EditorTransaction, ViewId};
+use crate::editor::BufferId;
+
+use crate::editor::EditorState;
+
+use crate::editor::EditorTransaction;
+
+use crate::editor::ViewId;
 
 const BUILTIN_NAMESPACES: &[&str] = &[
     "editor",
@@ -460,10 +472,21 @@ pub enum CommandError {
 mod tests {
     use std::path::PathBuf;
 
-    use super::{
-        CommandError, CommandInvocation, CommandOutcome, CommandRegistry, CommandSource,
-        CommandSpec, ContextRequirement, InvocationSource,
-    };
+    use crate::editor::command::CommandError;
+
+    use crate::editor::command::CommandInvocation;
+
+    use crate::editor::command::CommandOutcome;
+
+    use crate::editor::command::CommandRegistry;
+
+    use crate::editor::command::CommandSource;
+
+    use crate::editor::command::CommandSpec;
+
+    use crate::editor::command::ContextRequirement;
+
+    use crate::editor::command::InvocationSource;
     use crate::editor::EditorState;
 
     #[test]

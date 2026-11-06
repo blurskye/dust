@@ -1,23 +1,29 @@
-use dust::{
-    process::{
-        ExecutionPreflightEvent, ExecutionPreflightRequest, ExecutionPreflightService, PtyEvent,
-        PtyId, PtyPolicy, PtyRequest, PtyService,
-    },
-    ui::{
-        PtyInputKey, PtyScreen, encode_key, encode_paste,
-        window::{
-            ContentAdapterKind, ContentLifecycle, ContentTypeId, WindowError, WindowGraph,
-            WindowPlacement, WindowRect,
-        },
-    },
-};
-use std::{
-    collections::BTreeMap,
-    io::{Read, Write},
-    path::PathBuf,
-    thread,
-    time::{Duration, Instant},
-};
+use dust::process::ExecutionPreflightEvent;
+use dust::process::ExecutionPreflightRequest;
+use dust::process::ExecutionPreflightService;
+use dust::process::PtyEvent;
+use dust::process::PtyId;
+use dust::process::PtyPolicy;
+use dust::process::PtyRequest;
+use dust::process::PtyService;
+use dust::ui::PtyInputKey;
+use dust::ui::PtyScreen;
+use dust::ui::encode_key;
+use dust::ui::encode_paste;
+use dust::ui::window::ContentAdapterKind;
+use dust::ui::window::ContentLifecycle;
+use dust::ui::window::ContentTypeId;
+use dust::ui::window::WindowError;
+use dust::ui::window::WindowGraph;
+use dust::ui::window::WindowPlacement;
+use dust::ui::window::WindowRect;
+use std::collections::BTreeMap;
+use std::io::Read;
+use std::io::Write;
+use std::path::PathBuf;
+use std::thread;
+use std::time::Duration;
+use std::time::Instant;
 
 // PtyService owns nonblocking cancellation on drop, including assertion unwinds.
 

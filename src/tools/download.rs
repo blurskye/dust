@@ -1,27 +1,39 @@
-use std::{
-    fs,
-    io::{Cursor, Read, Write},
-    path::Path,
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-        mpsc::{self, Receiver},
-    },
-    thread,
-    time::Duration,
-};
+use std::fs;
+use std::io::Cursor;
+use std::io::Read;
+use std::io::Write;
+use std::path::Path;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
+use std::sync::mpsc::self;
+use std::sync::mpsc::Receiver;
+use std::thread;
+use std::time::Duration;
 
-use reqwest::{blocking::Client, redirect::Policy};
-use sha2::{Digest, Sha256};
+use reqwest::blocking::Client;
 
-use super::{
-    catalog::ToolArchiveFormat,
-    install_prepare::{
-        MAXIMUM_TOOL_ARCHIVE_ENTRIES, MAXIMUM_TOOL_DOWNLOAD_BYTES, MAXIMUM_TOOL_UNPACKED_BYTES,
-        archive_entry_matches, checked_https_url, relative_catalog_path,
-    },
-    package_lock::{next_temp_suffix, valid_digest},
-};
+use reqwest::redirect::Policy;
+use sha2::Digest;
+use sha2::Sha256;
+
+use crate::tools::catalog::ToolArchiveFormat;
+
+use crate::tools::install_prepare::MAXIMUM_TOOL_ARCHIVE_ENTRIES;
+
+use crate::tools::install_prepare::MAXIMUM_TOOL_DOWNLOAD_BYTES;
+
+use crate::tools::install_prepare::MAXIMUM_TOOL_UNPACKED_BYTES;
+
+use crate::tools::install_prepare::archive_entry_matches;
+
+use crate::tools::install_prepare::checked_https_url;
+
+use crate::tools::install_prepare::relative_catalog_path;
+
+use crate::tools::package_lock::next_temp_suffix;
+
+use crate::tools::package_lock::valid_digest;
 
 pub(super) type ToolProgressReporter = dyn FnMut(&str, u64, Option<u64>);
 
@@ -420,7 +432,7 @@ pub(super) fn replace_managed_directory(staging: &Path, destination: &Path) -> R
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::tools::download::*;
 
     #[test]
     fn stalled_download_does_not_hold_installer_cancellation() {

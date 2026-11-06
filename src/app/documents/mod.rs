@@ -835,14 +835,14 @@ impl WorkspaceIoReply {
 impl DocumentSession {
     pub(in crate::app) fn submit_workspace_io(
         &mut self,
-        permit: crate::app::workspace_edits::IoPermit<'_>,
+        permit: crate::app::workspace::edits::IoPermit<'_>,
     ) -> Result<bool, String> {
         match self.check_admission() {
             Err(VfsError::QueueFull) => return Ok(false),
             result => result.map_err(|e| e.to_string())?,
         }
         let file = permit.file(&self.owner)?;
-        use crate::app::workspace_edits::InputFile;
+        use crate::app::workspace::edits::InputFile;
         let result = match file {
             InputFile::Read(path) | InputFile::ReadMatchingDisk { path, .. } => {
                 self.read_scoped_bounded(path, permit.roots().to_vec(), permit.maximum() as u64)
@@ -867,7 +867,7 @@ impl DocumentSession {
     }
     pub(in crate::app) fn submit_workspace_resource(
         &mut self,
-        permit: crate::app::workspace_edits::ResourcePermit<'_>,
+        permit: crate::app::workspace::edits::ResourcePermit<'_>,
     ) -> Result<bool, String> {
         match self.check_admission() {
             Err(VfsError::QueueFull) => return Ok(false),
@@ -1093,3 +1093,5 @@ mod tests {
         );
     }
 }
+
+pub(in crate::app) mod recovery;

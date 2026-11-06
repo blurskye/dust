@@ -1,18 +1,82 @@
 // SPDX-License-Identifier: Apache-2.0
 wit_bindgen::generate!({ path: "wit", world: "editor-plugin" });
 
-use dust::plugin::host::{
-    self, CheckedWindowRequest, ConfirmationAnswer, ConfirmationOutcome, ConfirmationRequest,
-    OpenWindowRequest, PatchPrivateRequest, PlaceWindowRequest,
-    PrivateCell, PrivateCursor, PrivateHitRegion, PrivatePatch, PrivateRect, PrivateSnapshot,
-    PickerProviderChunk, PickerProviderItem, PrivateStyle, ProviderTerminal,
-    ProviderTerminalKind, ReplacePrivateRequest, ReplaceUiRequest, StorageCasRequest,
-    StorageDeleteRequest, StorageListRequest, StorageRequest, UiNode, UiNodeKind, UiRequest,
-    UiStyle, UiTree, VirtualDocumentFull, VirtualDocumentPatch, VirtualDocumentPatchSet,
-    VirtualDocumentProposal, VirtualDocumentProposalKind, VirtualDocumentRequestKind,
-    WindowPlacement,
-};
-use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
+use dust::plugin::host::self;
+
+use dust::plugin::host::CheckedWindowRequest;
+
+use dust::plugin::host::ConfirmationAnswer;
+
+use dust::plugin::host::ConfirmationOutcome;
+
+use dust::plugin::host::ConfirmationRequest;
+
+use dust::plugin::host::OpenWindowRequest;
+
+use dust::plugin::host::PatchPrivateRequest;
+
+use dust::plugin::host::PlaceWindowRequest;
+
+use dust::plugin::host::PrivateCell;
+
+use dust::plugin::host::PrivateCursor;
+
+use dust::plugin::host::PrivateHitRegion;
+
+use dust::plugin::host::PrivatePatch;
+
+use dust::plugin::host::PrivateRect;
+
+use dust::plugin::host::PrivateSnapshot;
+
+use dust::plugin::host::PickerProviderChunk;
+
+use dust::plugin::host::PickerProviderItem;
+
+use dust::plugin::host::PrivateStyle;
+
+use dust::plugin::host::ProviderTerminal;
+
+use dust::plugin::host::ProviderTerminalKind;
+
+use dust::plugin::host::ReplacePrivateRequest;
+
+use dust::plugin::host::ReplaceUiRequest;
+
+use dust::plugin::host::StorageCasRequest;
+
+use dust::plugin::host::StorageDeleteRequest;
+
+use dust::plugin::host::StorageListRequest;
+
+use dust::plugin::host::StorageRequest;
+
+use dust::plugin::host::UiNode;
+
+use dust::plugin::host::UiNodeKind;
+
+use dust::plugin::host::UiRequest;
+
+use dust::plugin::host::UiStyle;
+
+use dust::plugin::host::UiTree;
+
+use dust::plugin::host::VirtualDocumentFull;
+
+use dust::plugin::host::VirtualDocumentPatch;
+
+use dust::plugin::host::VirtualDocumentPatchSet;
+
+use dust::plugin::host::VirtualDocumentProposal;
+
+use dust::plugin::host::VirtualDocumentProposalKind;
+
+use dust::plugin::host::VirtualDocumentRequestKind;
+
+use dust::plugin::host::WindowPlacement;
+use std::sync::atomic::AtomicU8;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
 
 static PHASE: AtomicU8 = AtomicU8::new(0);
 static PRIVATE_PHASE: AtomicU8 = AtomicU8::new(0);

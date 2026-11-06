@@ -3,13 +3,29 @@
 //! the smallest indent, as in Neovim. A comment string with `%s`, like `<!-- %s -->`, wraps
 //! each line in what comes before and after it.
 
-use crate::editor::{
-    state::{BufferId, EditorMode, ViewId},
-    text::{ByteOffset, ByteRange, TextBuffer, TextEdit, TextEditSet},
-    transaction::{EditorOperation, EditorTransaction},
-};
+use crate::editor::state::BufferId;
 
-use super::{super::CommandError, transaction::failed};
+use crate::editor::state::EditorMode;
+
+use crate::editor::state::ViewId;
+
+use crate::editor::text::ByteOffset;
+
+use crate::editor::text::ByteRange;
+
+use crate::editor::text::TextBuffer;
+
+use crate::editor::text::TextEdit;
+
+use crate::editor::text::TextEditSet;
+
+use crate::editor::transaction::EditorOperation;
+
+use crate::editor::transaction::EditorTransaction;
+
+use crate::editor::command::CommandError;
+
+use crate::editor::command::builtins::transaction::failed;
 
 pub(super) fn build_comment_toggle(
     transaction: &mut EditorTransaction,

@@ -665,7 +665,7 @@ pub(in crate::app) fn compile_keymap_entries(
 pub fn compile_keymaps_with_plugin_index(
     commands: &CommandRegistry<AppEffect>,
     loaded: &crate::config::LoadedKeymaps,
-    index: &crate::extensions::PluginContributionIndex,
+    index: &crate::plugins::PluginContributionIndex,
     policy: &crate::config::KeymapPolicyConfig,
 ) -> Result<ResolvedKeymaps, Vec<String>> {
     let mut contexts = InputContextRegistry::bundled();
@@ -784,7 +784,7 @@ pub fn compile_keymaps_with_plugin_index(
 pub fn compile_keymaps_with_plugin_catalog(
     commands: &CommandRegistry<AppEffect>,
     loaded: &crate::config::LoadedKeymaps,
-    catalog: &crate::extensions::PluginContributionCatalog,
+    catalog: &crate::plugins::PluginContributionCatalog,
     policy: &crate::config::KeymapPolicyConfig,
 ) -> Result<ResolvedKeymaps, Vec<String>> {
     let contexts = catalog

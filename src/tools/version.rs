@@ -1,19 +1,19 @@
-use std::{
-    collections::BTreeMap,
-    path::PathBuf,
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-        mpsc::{self, Receiver, SyncSender, TrySendError},
-    },
-    thread::{self, JoinHandle},
-    time::Duration,
-};
+use std::collections::BTreeMap;
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
+use std::sync::mpsc::self;
+use std::sync::mpsc::Receiver;
+use std::sync::mpsc::SyncSender;
+use std::sync::mpsc::TrySendError;
+use std::thread::self;
+use std::thread::JoinHandle;
+use std::time::Duration;
 #[cfg(unix)]
-use std::{
-    process::{Command, Stdio},
-    time::Instant,
-};
+use std::process::Command;
+use std::process::Stdio;
+use std::time::Instant;
 
 pub(super) const MAXIMUM_TOOL_VERSION_BYTES: u64 = 1024;
 pub(super) const MAXIMUM_TOOL_VERSION_CHARS: usize = 160;
@@ -154,7 +154,9 @@ pub(super) fn probe_tool_version(
     request: ToolVersionRequest,
     cancelled: &AtomicBool,
 ) -> Result<String, String> {
-    use nix::fcntl::{FcntlArg, OFlag, fcntl};
+    use nix::fcntl::FcntlArg;
+    use nix::fcntl::OFlag;
+    use nix::fcntl::fcntl;
     use std::os::unix::process::CommandExt;
 
     if cancelled.load(Ordering::Acquire) || request.cancelled.load(Ordering::Acquire) {

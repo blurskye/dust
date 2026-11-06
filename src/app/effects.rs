@@ -162,9 +162,9 @@ use crate::app::nix_workspace_shell_for_host;
 use crate::app::parse_ex;
 use crate::app::path_from_file_uri;
 use crate::app::tool_kind_key;
-use crate::app::extensions::VirtualContext;
-use crate::app::extensions::VirtualOpen;
-use crate::app::extensions::VirtualPublication;
+use crate::app::plugins::VirtualContext;
+use crate::app::plugins::VirtualOpen;
+use crate::app::plugins::VirtualPublication;
 use crate::app::git::GitHunkAction;
 use crate::app::workspace::leaves_root;
 use crate::ui::render::editor::STATUS_DIRTY_MARKER;
@@ -173,24 +173,24 @@ use crate::ui::render::surfaces::TOOL_CATEGORY_ORDER;
 use crate::ui::render::surfaces::TOOL_MANAGER_MINIMUM_HEIGHT;
 use crate::ui::CompletionItem;
 use crate::ui::LanguageCompletionState;
-use crate::workspace::search_workflow::ABS_MAX_BYTES;
-use crate::workspace::search_workflow::SearchMatcherKind;
-use crate::workspace::search_workflow::SearchPresenterKind;
-use crate::workspace::search_workflow::SearchRequestId;
-use crate::workspace::search_workflow::SearchSourceKind;
-use crate::workspace::search_workflow::SearchStreamGeneration;
-use crate::workspace::search_workflow::SearchWorkflowBroker;
-use crate::workspace::search_workflow::SearchWorkflowChunk;
-use crate::workspace::search_workflow::SearchWorkflowError;
-use crate::workspace::search_workflow::SearchWorkflowId;
-use crate::workspace::search_workflow::SearchWorkflowSpec;
-use crate::workspace::search_workflow::picker_item_adapter;
-use crate::workspace::search_workflow::plugin_item_adapter;
+use crate::app::search::workflow::ABS_MAX_BYTES;
+use crate::app::search::workflow::SearchMatcherKind;
+use crate::app::search::workflow::SearchPresenterKind;
+use crate::app::search::workflow::SearchRequestId;
+use crate::app::search::workflow::SearchSourceKind;
+use crate::app::search::workflow::SearchStreamGeneration;
+use crate::app::search::workflow::SearchWorkflowBroker;
+use crate::app::search::workflow::SearchWorkflowChunk;
+use crate::app::search::workflow::SearchWorkflowError;
+use crate::app::search::workflow::SearchWorkflowId;
+use crate::app::search::workflow::SearchWorkflowSpec;
+use crate::app::search::workflow::picker_item_adapter;
+use crate::app::search::workflow::plugin_item_adapter;
 use slotmap::Key;
 use unicode_segmentation::UnicodeSegmentation;
 
 fn compose_plugin_picker_items(
-    projection: &crate::extensions::PluginPickerProjection,
+    projection: &crate::plugins::PluginPickerProjection,
 ) -> Result<Vec<(PickerItem, PickerPayload)>, SearchWorkflowError> {
     let spec = SearchWorkflowSpec {
         id: SearchWorkflowId(projection.request),
@@ -423,7 +423,7 @@ impl App {
 
     pub(in crate::app) fn handle_plugin_worker_stopped(
         &mut self,
-        error: crate::extensions::PluginError,
+        error: crate::plugins::PluginError,
     ) {
         let Some(unregister) = self.extension.worker_stopped() else {
             return;
@@ -463,14 +463,14 @@ impl App {
 
     pub(in crate::app) fn register_indexed_plugin_commands(
         &mut self,
-        index: &crate::extensions::PluginContributionIndex,
+        index: &crate::plugins::PluginContributionIndex,
     ) -> Result<(), String> {
         self.register_plugin_commands(&index.owner, &index.commands)
     }
     fn register_plugin_commands(
         &mut self,
         plugin: &str,
-        declarations: &BTreeMap<String, crate::extensions::PluginCommandDeclaration>,
+        declarations: &BTreeMap<String, crate::plugins::PluginCommandDeclaration>,
     ) -> Result<(), String> {
         let plugin = plugin.to_owned();
         self.commands.unregister_plugin(&plugin);
@@ -482,13 +482,13 @@ impl App {
                 arguments = arguments.field(
                     name,
                     match field.kind {
-                        crate::extensions::PluginArgumentKind::String => {
+                        crate::plugins::PluginArgumentKind::String => {
                             crate::editor::ArgumentType::String
                         }
-                        crate::extensions::PluginArgumentKind::Boolean => {
+                        crate::plugins::PluginArgumentKind::Boolean => {
                             crate::editor::ArgumentType::Bool
                         }
-                        crate::extensions::PluginArgumentKind::Integer => {
+                        crate::plugins::PluginArgumentKind::Integer => {
                             crate::editor::ArgumentType::Integer
                         }
                     },
@@ -503,15 +503,15 @@ impl App {
                 description: declaration.description.clone(),
                 arguments,
                 context: match declaration.context {
-                    crate::extensions::PluginCommandContext::Application => {
+                    crate::plugins::PluginCommandContext::Application => {
                         ContextRequirement::Application
                     }
-                    crate::extensions::PluginCommandContext::Workspace => {
+                    crate::plugins::PluginCommandContext::Workspace => {
                         ContextRequirement::Workspace
                     }
-                    crate::extensions::PluginCommandContext::View => ContextRequirement::View,
-                    crate::extensions::PluginCommandContext::Buffer => ContextRequirement::Buffer,
-                    crate::extensions::PluginCommandContext::Selection => {
+                    crate::plugins::PluginCommandContext::View => ContextRequirement::View,
+                    crate::plugins::PluginCommandContext::Buffer => ContextRequirement::Buffer,
+                    crate::plugins::PluginCommandContext::Selection => {
                         ContextRequirement::Selection
                     }
                 },
@@ -822,11 +822,11 @@ impl App {
         let mut failure_diagnostic = None;
         for event in events {
             let event = match event {
-                crate::extensions::OwnedPluginEvent::Executed(reply) => {
+                crate::plugins::OwnedPluginEvent::Executed(reply) => {
                     self.apply_plugin_execution(reply);
                     continue;
                 }
-                crate::extensions::OwnedPluginEvent::Other(event) => event,
+                crate::plugins::OwnedPluginEvent::Other(event) => event,
             };
             match event {
                 PluginEvent::Indexed {
@@ -914,7 +914,7 @@ impl App {
                             self.apply_extension_updates(updates);
                             self.remove_plugin_contribution_generation(&plugin, load);
                             let _ = self.extension.disable_generation(&plugin, load);
-                            self.show_error(crate::extensions::PluginError::UndeclaredCommand);
+                            self.show_error(crate::plugins::PluginError::UndeclaredCommand);
                             continue;
                         }
                     }
@@ -1007,9 +1007,9 @@ impl App {
 impl App {
     pub(in crate::app) fn apply_plugin_ui_request(
         &mut self,
-        index: &crate::extensions::PluginContributionIndex,
-        request: crate::extensions::PluginUiRequest,
-    ) -> crate::extensions::PluginUiEvent {
+        index: &crate::plugins::PluginContributionIndex,
+        request: crate::plugins::PluginUiRequest,
+    ) -> crate::plugins::PluginUiEvent {
         match self.extension.prepare_window(
             index,
             request,
@@ -1032,7 +1032,7 @@ impl App {
 
     pub(in crate::app) fn apply_plugin_execution(
         &mut self,
-        reply: crate::extensions::PluginExecutionReply,
+        reply: crate::plugins::PluginExecutionReply,
     ) {
         let source = match self.extension.receive(
             reply,
@@ -1072,9 +1072,9 @@ impl App {
             let disallowed_ui = execution.ui_requests.iter().any(|request| {
                 !matches!(
                     request.kind,
-                    crate::extensions::PluginUiRequestKind::ReplaceUi { .. }
-                        | crate::extensions::PluginUiRequestKind::ReplacePrivate { .. }
-                        | crate::extensions::PluginUiRequestKind::PatchPrivate { .. }
+                    crate::plugins::PluginUiRequestKind::ReplaceUi { .. }
+                        | crate::plugins::PluginUiRequestKind::ReplacePrivate { .. }
+                        | crate::plugins::PluginUiRequestKind::PatchPrivate { .. }
                 )
             });
             if disallowed_ui
@@ -1113,7 +1113,7 @@ impl App {
             for proposal in std::mem::take(&mut execution.virtual_document_proposals) {
                 let closing = matches!(
                     proposal.kind,
-                    crate::extensions::PluginVirtualDocumentProposalKind::CloseAcknowledged
+                    crate::plugins::PluginVirtualDocumentProposalKind::CloseAcknowledged
                 );
                 let result = self
                     .extension
@@ -1239,7 +1239,7 @@ impl App {
     }
     fn begin_plugin_workspace_proposal(
         &mut self,
-        key: crate::app::workspace_edits::OriginKey,
+        key: crate::app::workspace::edits::OriginKey,
         label: String,
     ) {
         let result = (|| {
@@ -1268,7 +1268,7 @@ impl App {
                 label,
                 Some(key.clone()),
                 false,
-                vec![crate::app::workspace_edits::InputFile::Read(
+                vec![crate::app::workspace::edits::InputFile::Read(
                     path.clone(),
                 )],
                 (roots, maximum),
@@ -3287,7 +3287,7 @@ impl App {
                                     .statuses()
                                     .values()
                                     .filter(|status| {
-                                        matches!(status, crate::extensions::PluginStatus::Failed(_))
+                                        matches!(status, crate::plugins::PluginStatus::Failed(_))
                                     })
                                     .count()
                                     .to_string(),
@@ -3924,7 +3924,7 @@ impl App {
             }
         };
         match self.workspace_edits.build(
-            crate::app::workspace_edits::PreparedEdits {
+            crate::app::workspace::edits::PreparedEdits {
                 ticket: id,
                 label: self.message("workspace_replace_label", &[]),
                 drafts,
@@ -4539,7 +4539,7 @@ impl App {
     pub(super) fn replay_macro(&mut self, requested: char, count: u64) -> bool {
         if self.clipboard.waiting() {
             self.clipboard
-                .defer(crate::app::clipboard::DeferredInput::MacroReplay(
+                .defer(crate::app::editing::clipboard::DeferredInput::MacroReplay(
                     requested, count,
                 ));
             return true;
@@ -5330,7 +5330,7 @@ impl App {
             .is_some_and(|prompt| prompt.kind == PromptKind::PluginConfirmation)
         {
             self.extension
-                .answer_confirmation(crate::extensions::PluginConfirmationAnswer::Cancelled);
+                .answer_confirmation(crate::plugins::PluginConfirmationAnswer::Cancelled);
         }
         if self
             .input
@@ -5405,9 +5405,9 @@ impl App {
             return;
         };
         let selected = match request.default_answer {
-            crate::extensions::PluginConfirmationAnswer::Yes => crate::ui::ConfirmationChoice::Yes,
-            crate::extensions::PluginConfirmationAnswer::No
-            | crate::extensions::PluginConfirmationAnswer::Cancelled => {
+            crate::plugins::PluginConfirmationAnswer::Yes => crate::ui::ConfirmationChoice::Yes,
+            crate::plugins::PluginConfirmationAnswer::No
+            | crate::plugins::PluginConfirmationAnswer::Cancelled => {
                 crate::ui::ConfirmationChoice::No
             }
         };
@@ -5565,8 +5565,8 @@ impl App {
 
     pub(super) fn submit_plugin_confirmation(&mut self, selected: crate::ui::ConfirmationChoice) {
         let answer = match selected {
-            crate::ui::ConfirmationChoice::Yes => crate::extensions::PluginConfirmationAnswer::Yes,
-            crate::ui::ConfirmationChoice::No => crate::extensions::PluginConfirmationAnswer::No,
+            crate::ui::ConfirmationChoice::Yes => crate::plugins::PluginConfirmationAnswer::Yes,
+            crate::ui::ConfirmationChoice::No => crate::plugins::PluginConfirmationAnswer::No,
         };
         self.extension.answer_confirmation(answer);
         self.close_prompt();
@@ -7804,7 +7804,7 @@ impl App {
     }
     /// Remove the selected worktree and its directory. This never deletes a branch.
     pub(in crate::app) fn request_git_worktree_remove(&mut self) {
-        let Some(crate::app::search::PickerPayload::GitWorktree { name, main, .. }) =
+        let Some(crate::app::picker::PickerPayload::GitWorktree { name, main, .. }) =
             self.search.selected_picker_payload().cloned()
         else {
             self.show_error("select a worktree first");
@@ -7913,7 +7913,7 @@ impl App {
                 source: String::new(),
                 action: PickerAction::None,
             },
-            crate::app::search::PickerPayload::Command(
+            crate::app::picker::PickerPayload::Command(
                 "workspace.git.worktree.create".into(),
             ),
         );
@@ -7956,7 +7956,7 @@ impl App {
                         source: "worktrees".into(),
                         action: PickerAction::None,
                     },
-                    crate::app::search::PickerPayload::GitWorktree {
+                    crate::app::picker::PickerPayload::GitWorktree {
                         name: worktree.name.clone(),
                         main: worktree.main,
                         path: worktree.path.clone(),
@@ -9919,7 +9919,7 @@ impl App {
 
     /// Read the focused change's diff on the preview's own hunk worker.
     fn sync_changes_diff_preview(&mut self) {
-        let Some(crate::app::search::PickerPayload::MatcherSource(source)) =
+        let Some(crate::app::picker::PickerPayload::MatcherSource(source)) =
             self.selected_picker_payload().cloned()
         else {
             self.clear_picker_preview();
@@ -9964,7 +9964,7 @@ impl App {
         if self.search.picker_surface() != PickerSurfaceKind::Changes {
             return None;
         }
-        let crate::app::search::PickerPayload::MatcherSource(source) =
+        let crate::app::picker::PickerPayload::MatcherSource(source) =
             self.selected_picker_payload()?
         else {
             return None;
@@ -10157,11 +10157,11 @@ impl App {
         arguments: Vec<String>,
     ) -> bool {
         let Some(load) = self.extension.load_id(&plugin) else {
-            self.show_error(crate::extensions::PluginError::NotActive);
+            self.show_error(crate::plugins::PluginError::NotActive);
             return false;
         };
         if !self.extension.is_active_generation(&plugin, load) {
-            self.show_error(crate::extensions::PluginError::NotActive);
+            self.show_error(crate::plugins::PluginError::NotActive);
             return false;
         }
         self.refresh_plugin_host_events();
@@ -10181,7 +10181,7 @@ impl App {
         let result = self.extension.execute(
             &plugin,
             &command,
-            crate::app::extensions::InvocationContext {
+            crate::app::plugins::InvocationContext {
                 editor: &self.state,
                 workspace: &self.workspace,
                 configuration: self.configuration.binding_revision_ref(),
@@ -10306,7 +10306,7 @@ impl App {
                     .buffers
                     .iter()
                     .filter_map(|(id, buffer)| {
-                        Some(crate::app::lsp_edits::EditDocument {
+                        Some(crate::app::language::edits::EditDocument {
                             id,
                             path: buffer.path.as_deref()?,
                             text: &buffer.text,
@@ -11162,7 +11162,7 @@ impl App {
     /// tree, pickers, LSP servers and git signs follow. The worktree gets its own trust
     /// decision. Files with unsaved changes in the current root block the switch.
     pub(in crate::app) fn open_git_worktree(&mut self) {
-        let Some(crate::app::search::PickerPayload::GitWorktree { path, .. }) =
+        let Some(crate::app::picker::PickerPayload::GitWorktree { path, .. }) =
             self.search.selected_picker_payload().cloned()
         else {
             self.show_error("select a worktree first");
@@ -11601,18 +11601,18 @@ impl App {
     }
 
     pub(in crate::app) fn rust_analyzer_is_rustup_proxy(path: &Path) -> bool {
-        crate::app::tooling::ToolingSession::rust_analyzer_is_rustup_proxy(path)
+        crate::app::tools::ToolingSession::rust_analyzer_is_rustup_proxy(path)
     }
 
     pub(in crate::app) fn unavailable_rust_analyzer_message() -> String {
-        crate::app::tooling::ToolingSession::unavailable_rust_analyzer_message()
+        crate::app::tools::ToolingSession::unavailable_rust_analyzer_message()
     }
 
     pub(in crate::app) fn rust_analyzer_path_version(
         version: &str,
         rustup_bundled: bool,
     ) -> (String, String) {
-        crate::app::tooling::ToolingSession::rust_analyzer_path_version(
+        crate::app::tools::ToolingSession::rust_analyzer_path_version(
             version,
             rustup_bundled,
         )
@@ -13372,7 +13372,7 @@ impl App {
         }
     }
     pub(super) fn process_registry_events(&mut self) {
-        use crate::app::extensions::RegistryUpdate;
+        use crate::app::plugins::RegistryUpdate;
         for update in self.extension.poll_registry() {
             match update {
                 RegistryUpdate::Present(_, ref picker)
@@ -13455,9 +13455,9 @@ impl App {
     }
     pub(in crate::app) fn apply_extension_updates(
         &mut self,
-        updates: Vec<crate::app::extensions::ExtensionUpdate>,
+        updates: Vec<crate::app::plugins::ExtensionUpdate>,
     ) {
-        use crate::app::extensions::ExtensionUpdate;
+        use crate::app::plugins::ExtensionUpdate;
         for update in updates {
             match update {
                 ExtensionUpdate::Remove(plugin, load) => {
@@ -14350,7 +14350,7 @@ impl App {
             self.show_error(error);
             return;
         }
-        let context = crate::app::lsp::LaunchContext {
+        let context = crate::app::language::LaunchContext {
             editor: &self.state,
             workspace: self.workspace.version(),
             configuration: self.configuration.binding_revision(),
@@ -14379,7 +14379,7 @@ impl App {
         else {
             return;
         };
-        let context = crate::app::lsp::LaunchContext {
+        let context = crate::app::language::LaunchContext {
             editor: &self.state,
             workspace: self.workspace.version(),
             configuration: self.configuration.binding_revision(),
@@ -14394,7 +14394,7 @@ impl App {
         }
     }
     pub(in crate::app) fn process_nix_lsp_workspace(&mut self) {
-        let context = crate::app::lsp::LaunchContext {
+        let context = crate::app::language::LaunchContext {
             editor: &self.state,
             workspace: self.workspace.version(),
             configuration: self.configuration.binding_revision(),
@@ -14408,7 +14408,7 @@ impl App {
         }
     }
     pub(in crate::app) fn queue_lsp_preflight(&mut self, pending: LspLaunchRequest) {
-        let context = crate::app::lsp::LaunchContext {
+        let context = crate::app::language::LaunchContext {
             editor: &self.state,
             workspace: self.workspace.version(),
             configuration: self.configuration.binding_revision(),

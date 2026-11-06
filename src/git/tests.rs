@@ -1,13 +1,16 @@
-use std::{
-    hash::{Hash, Hasher},
-    path::{Path, PathBuf},
-    sync::atomic::AtomicBool,
-    thread,
-    time::{Duration, Instant},
-};
+use std::hash::Hash;
+use std::hash::Hasher;
+use std::path::Path;
+use std::path::PathBuf;
+use std::sync::atomic::AtomicBool;
+use std::thread;
+use std::time::Duration;
+use std::time::Instant;
 
-use super::mutation::{stage_hunk, worktree_hash};
-use super::*;
+use crate::git::mutation::stage_hunk;
+
+use crate::git::mutation::worktree_hash;
+use crate::git::*;
 use tempfile::tempdir;
 fn commit(repo: &git2::Repository, path: &str, text: &str) {
     let root = repo.workdir().unwrap();
@@ -158,7 +161,7 @@ fn status_policy(root: &Path) -> GitStatusPolicy {
 }
 
 fn read_status(root: &Path) -> GitStatusSnapshot {
-    super::status::read_status(
+    crate::git::status::read_status(
         GitStatusGeneration(1),
         &status_policy(root),
         &[],
@@ -252,7 +255,7 @@ fn status_path_budget_includes_rename_source() {
     index.write().unwrap();
     let mut policy = status_policy(dir.path());
     policy.maximum_path_bytes = 1;
-    let snapshot = super::status::read_status(
+    let snapshot = crate::git::status::read_status(
         GitStatusGeneration(1),
         &policy,
         &[],
@@ -314,7 +317,7 @@ fn status_keeps_index_and_worktree_codes_independent() {
     index.add_path(Path::new("added.txt")).unwrap();
     index.write().unwrap();
     std::fs::write(dir.path().join("added.txt"), "modified after staging\n").unwrap();
-    let snapshot = super::status::read_status(
+    let snapshot = crate::git::status::read_status(
         GitStatusGeneration(1),
         &GitStatusPolicy {
             root: dir.path().into(),
@@ -2500,7 +2503,8 @@ fn conflicted_fixture_with_extra(root: &Path, extra: Option<&Path>) -> (git2::Oi
 #[cfg(unix)]
 #[test]
 fn conflict_paths_preserve_native_bytes_and_do_not_follow_worktree_symlinks() {
-    use std::os::unix::{ffi::OsStrExt, fs::symlink};
+    use std::os::unix::ffi::OsStrExt;
+    use std::os::unix::fs::symlink;
     let dir = tempdir().unwrap();
     let native = Path::new(std::ffi::OsStr::from_bytes(b"bad\xff.txt"));
     conflicted_fixture(dir.path());
@@ -2664,7 +2668,8 @@ fn continue_reports_committed_revision_when_cleanup_fails_and_retry_only_cleans_
 
 #[test]
 fn continue_refuses_while_conflicts_remain_and_then_records_two_parents() {
-    use crate::git::{GitRecoveryRefusal, continue_operation};
+    use crate::git::GitRecoveryRefusal;
+    use crate::git::continue_operation;
     let dir = tempdir().unwrap();
     let root = dir.path().join("work");
     std::fs::create_dir_all(&root).unwrap();
@@ -2832,7 +2837,9 @@ fn abort_rebase_restores_original_branch_attachment_and_tip() {
 
 #[test]
 fn abort_returns_to_the_recorded_start_and_refuses_to_discard_work() {
-    use crate::git::{GitRecoveryRefusal, abort_operation, read_conflict_state};
+    use crate::git::GitRecoveryRefusal;
+    use crate::git::abort_operation;
+    use crate::git::read_conflict_state;
     let dir = tempdir().unwrap();
     let root = dir.path().join("work");
     std::fs::create_dir_all(&root).unwrap();
@@ -2900,7 +2907,9 @@ fn abort_returns_to_the_recorded_start_and_refuses_to_discard_work() {
 
 #[test]
 fn recovery_refuses_when_nothing_is_paused() {
-    use crate::git::{GitRecoveryRefusal, abort_operation, continue_operation};
+    use crate::git::GitRecoveryRefusal;
+    use crate::git::abort_operation;
+    use crate::git::continue_operation;
     let dir = tempdir().unwrap();
     let repo = git2::Repository::init(dir.path()).unwrap();
     commit(&repo, "only.txt", "one\n");
@@ -2921,9 +2930,10 @@ fn recovery_refuses_when_nothing_is_paused() {
 
 #[test]
 fn the_operation_bar_lists_only_the_actions_valid_in_the_repositorys_real_state() {
-    use crate::git::{
-        GitConflictChoice, GitOperationAction, GitOperationBar, read_conflict_state,
-    };
+    use crate::git::GitConflictChoice;
+    use crate::git::GitOperationAction;
+    use crate::git::GitOperationBar;
+    use crate::git::read_conflict_state;
     let dir = tempdir().unwrap();
     let root = dir.path().join("work");
     std::fs::create_dir_all(&root).unwrap();
@@ -3100,9 +3110,10 @@ fn conflict_replacement_failure_reports_files_already_written() {
 
 #[test]
 fn whole_file_replacement_previews_cancels_and_applies_exactly_its_file_list() {
-    use crate::git::{
-        GitConflictChoice, apply_replacement, git_index_fingerprint, plan_replacement,
-    };
+    use crate::git::GitConflictChoice;
+    use crate::git::apply_replacement;
+    use crate::git::git_index_fingerprint;
+    use crate::git::plan_replacement;
     let dir = tempdir().unwrap();
     let root = dir.path().join("work");
     std::fs::create_dir_all(&root).unwrap();
@@ -3174,7 +3185,9 @@ fn whole_file_replacement_previews_cancels_and_applies_exactly_its_file_list() {
 
 #[test]
 fn the_bar_names_every_paused_operation_the_contract_lists() {
-    use crate::git::{GitOperationAction, GitOperationBar, read_conflict_state};
+    use crate::git::GitOperationAction;
+    use crate::git::GitOperationBar;
+    use crate::git::read_conflict_state;
     // Each pause is constructed from the marker state GIT ITSELF leaves behind, so the bar is
     // proved against real repository state rather than against a hand-made operation name.
     let cases: [(&str, Option<&str>, &str); 4] = [
@@ -3466,7 +3479,10 @@ fn a_new_worktree_creates_its_branch_at_head_and_stays_out_of_status() {
 
 #[test]
 fn staging_file_lines_takes_each_added_line_with_the_removed_line_it_replaces() {
-    use super::{GitDiffLine, GitDiffLineKind, GitHunk, GitHunkId};
+    use crate::git::GitDiffLine;
+    use crate::git::GitDiffLineKind;
+    use crate::git::GitHunk;
+    use crate::git::GitHunkId;
     let line = |kind, new_line| GitDiffLine {
         kind,
         old_line: None,
@@ -3821,7 +3837,7 @@ fn hunk_mutations_quote_paths_and_leave_similarly_named_files_unchanged() {
         assert_eq!(index_text(dir.path(), name), "old\n");
         let snapshot = read_hunks(&policy).unwrap();
         let hunk = snapshot.hunks[0].clone();
-        super::mutation::reset_hunk(
+        crate::git::mutation::reset_hunk(
             GitMutationGeneration(1),
             &GitResetHunkRequest {
                 policy,
@@ -3876,7 +3892,7 @@ fn hunk_mutations_preserve_missing_final_newlines() {
         assert_eq!(index_text(dir.path(), "eof.txt"), old);
         let snapshot = read_hunks(&unstaged).unwrap();
         let hunk = snapshot.hunks[0].clone();
-        super::mutation::reset_hunk(
+        crate::git::mutation::reset_hunk(
             GitMutationGeneration(1),
             &GitResetHunkRequest {
                 policy: unstaged,
@@ -4172,9 +4188,10 @@ fn nested_worktree_exclusion_does_not_hide_siblings() {
 
 #[test]
 fn conflict_replacement_is_atomic_and_restores_missing_working_copies() {
-    use super::conflict::{
-        GitConflictChoice, GitReplacementPlan, apply_replacement, plan_replacement,
-    };
+    use crate::git::conflict::GitConflictChoice;
+    use crate::git::conflict::GitReplacementPlan;
+    use crate::git::conflict::apply_replacement;
+    use crate::git::conflict::plan_replacement;
     let dir = tempdir().unwrap();
     conflicted_fixture(dir.path());
     let path = dir.path().join("shared.txt");
@@ -4344,8 +4361,8 @@ fn abort_preserves_unrelated_tracked_worktree_edits() {
     let path = dir.path().join("untouched.txt");
     std::fs::write(&path, "saved edits\n").unwrap();
     assert!(matches!(
-        super::conflict::abort_operation(dir.path()),
-        Err(super::conflict::GitRecoveryRefusal::WouldDiscard(_))
+        crate::git::conflict::abort_operation(dir.path()),
+        Err(crate::git::conflict::GitRecoveryRefusal::WouldDiscard(_))
     ));
     assert_eq!(std::fs::read_to_string(path).unwrap(), "saved edits\n");
     assert_eq!(
@@ -4375,7 +4392,7 @@ fn abort_restores_clean_merge_deletions() {
     index.remove_path(Path::new("untouched.txt")).unwrap();
     index.write().unwrap();
     std::fs::remove_file(dir.path().join("untouched.txt")).unwrap();
-    super::conflict::abort_operation(dir.path()).unwrap();
+    crate::git::conflict::abort_operation(dir.path()).unwrap();
     assert_eq!(
         std::fs::read_to_string(dir.path().join("untouched.txt")).unwrap(),
         "original\n"
@@ -4384,9 +4401,10 @@ fn abort_restores_clean_merge_deletions() {
 
 #[test]
 fn unsupported_continuation_refuses_before_writing() {
-    use super::conflict::{
-        GitOperationAction, GitOperationBar, continue_operation, read_conflict_state,
-    };
+    use crate::git::conflict::GitOperationAction;
+    use crate::git::conflict::GitOperationBar;
+    use crate::git::conflict::continue_operation;
+    use crate::git::conflict::read_conflict_state;
     let dir = tempdir().unwrap();
     let repo = git2::Repository::init(dir.path()).unwrap();
     commit(&repo, "file", "old\n");
@@ -4481,7 +4499,7 @@ fn partial_reset_validates_selections_and_handles_large_selected_runs() {
     for invalid in [vec![0, 0], vec![1, 0], vec![hunk.lines.len() as u32]] {
         request.selected_lines = invalid;
         assert_eq!(
-            super::mutation::reset_hunk(
+            crate::git::mutation::reset_hunk(
                 GitMutationGeneration(1),
                 &request,
                 &AtomicBool::new(false),
@@ -4506,7 +4524,7 @@ fn partial_reset_validates_selections_and_handles_large_selected_runs() {
         })
         .collect();
     assert_eq!(request.selected_lines.len(), 30_000);
-    super::mutation::reset_hunk(GitMutationGeneration(1), &request, &AtomicBool::new(false))
+    crate::git::mutation::reset_hunk(GitMutationGeneration(1), &request, &AtomicBool::new(false))
         .unwrap();
     assert_eq!(
         std::fs::read_to_string(&file).unwrap(),
@@ -4532,7 +4550,7 @@ fn partial_reset_preserves_unselected_replacement_lines() {
             matches!(line.text.as_str(), "a\n" | "A\n").then_some(index as u32)
         })
         .collect();
-    super::mutation::reset_hunk(
+    crate::git::mutation::reset_hunk(
         GitMutationGeneration(1),
         &GitResetHunkRequest {
             policy,

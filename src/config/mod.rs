@@ -4,46 +4,120 @@ mod catalog;
 mod load;
 mod shortcuts;
 pub(crate) use load::SourceFingerprint;
-pub use shortcuts::{DeclaredKeymap, declared_keymaps, remove_user_keymap, write_user_keymap};
+pub use shortcuts::DeclaredKeymap;
+pub use shortcuts::declared_keymaps;
+pub use shortcuts::remove_user_keymap;
+pub use shortcuts::write_user_keymap;
 mod themes;
-pub use catalog::{
-    SettingInfo, SettingsCatalog, SettingsSection, SetupCatalog, SetupChoiceInfo, SetupPageInfo,
-    default_setting, settings_catalog, setup_catalog, write_user_setting,
-};
+pub use catalog::SettingInfo;
+pub use catalog::SettingsCatalog;
+pub use catalog::SettingsSection;
+pub use catalog::SetupCatalog;
+pub use catalog::SetupChoiceInfo;
+pub use catalog::SetupPageInfo;
+pub use catalog::default_setting;
+pub use catalog::settings_catalog;
+pub use catalog::setup_catalog;
+pub use catalog::write_user_setting;
 #[cfg(test)]
 pub(crate) use load::setting_spans;
-pub use load::{
-    ConfigurationWorker, ConfigurationWorkerError, ConfigurationWorkerResult, load_bundled_config,
-    load_config, load_keymaps, load_user_config, user_config_path, user_dashboard_path,
-    user_keymaps_path, user_state_directory, user_theme_path,
-};
-pub(crate) use themes::{
-    ThemeCatalog, ThemeChoice, ThemeRead, ThemeReadSource, snapshot as theme_snapshot,
-    theme_display_name,
-};
+pub use load::ConfigurationWorker;
+pub use load::ConfigurationWorkerError;
+pub use load::ConfigurationWorkerResult;
+pub use load::load_bundled_config;
+pub use load::load_config;
+pub use load::load_keymaps;
+pub use load::load_user_config;
+pub use load::user_config_path;
+pub use load::user_dashboard_path;
+pub use load::user_keymaps_path;
+pub use load::user_state_directory;
+pub use load::user_theme_path;
+pub(crate) use themes::ThemeCatalog;
+pub(crate) use themes::ThemeChoice;
+pub(crate) use themes::ThemeRead;
+pub(crate) use themes::ThemeReadSource;
+pub(crate) use themes::snapshot as theme_snapshot;
+pub(crate) use themes::theme_display_name;
 
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    path::PathBuf,
-};
+use std::collections::BTreeMap;
 
-use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
+
+use std::path::PathBuf;
+
+use serde::Deserialize;
+
+use serde::Serialize;
 mod settings;
-pub use settings::{
-    AgentConnection, AgentProfileConfig, AgentsConfig, AmbiguousWidth, BorderStyle,
-    BufferLineConfig, ClipboardSync, ColorMode, CommandLineConfig, CursorConfig, CursorShape,
-    DebugAdapterConfig, DebugConfig, DebugRequestKind, DebugSessionConfig,
-    DocumentationPopupConfig, EditorConfig, EditorViewportConfig, ExplorerConfig, ExplorerGlyphSet,
-    ExplorerGlyphs, ExplorerIconMode, FinalNewlinePolicy, GitSignsConfig, HighlightDefinition,
-    IndentGuideConfig, InlayHintLevel, InputConfig, KeyHintConfig, KeymapPolicyConfig,
-    LargeFileConfig, LineEndingPolicy, LineNumbers, LspConfig, LspProgressConfig, MarkdownCallout,
-    MarkdownConfig, MarkdownGlyphs, PanelSide, PersistenceConfig, PluginEntryConfig, PluginsConfig,
-    ProblemMatcherConfig, PromptTextConfig, RecoveryConfig, RegisterConfig, SearchConfig,
-    StartupConfig, StatusLineConfig, SyntaxConfig, TaskConfig, TaskKind, TerminalPanelConfig,
-    TerminalPlacement, TerminalProfileConfig, TerminalsConfig, ThemeAttribute, ThemeColor,
-    ThemeConfig, ThemeStyle, ThemeStyles, ToolManagerConfig, UiConfig, WindowPlacementConfig,
-    WindowRuleConfig, WindowsConfig, WorkspaceConfig, WorkspaceSearchConfig,
-};
+pub use settings::AgentConnection;
+pub use settings::AgentProfileConfig;
+pub use settings::AgentsConfig;
+pub use settings::AmbiguousWidth;
+pub use settings::BorderStyle;
+pub use settings::BufferLineConfig;
+pub use settings::ClipboardSync;
+pub use settings::ColorMode;
+pub use settings::CommandLineConfig;
+pub use settings::CursorConfig;
+pub use settings::CursorShape;
+pub use settings::DebugAdapterConfig;
+pub use settings::DebugConfig;
+pub use settings::DebugRequestKind;
+pub use settings::DebugSessionConfig;
+pub use settings::DocumentationPopupConfig;
+pub use settings::EditorConfig;
+pub use settings::EditorViewportConfig;
+pub use settings::ExplorerConfig;
+pub use settings::ExplorerGlyphSet;
+pub use settings::ExplorerGlyphs;
+pub use settings::ExplorerIconMode;
+pub use settings::FinalNewlinePolicy;
+pub use settings::GitSignsConfig;
+pub use settings::HighlightDefinition;
+pub use settings::IndentGuideConfig;
+pub use settings::InlayHintLevel;
+pub use settings::InputConfig;
+pub use settings::KeyHintConfig;
+pub use settings::KeymapPolicyConfig;
+pub use settings::LargeFileConfig;
+pub use settings::LineEndingPolicy;
+pub use settings::LineNumbers;
+pub use settings::LspConfig;
+pub use settings::LspProgressConfig;
+pub use settings::MarkdownCallout;
+pub use settings::MarkdownConfig;
+pub use settings::MarkdownGlyphs;
+pub use settings::PanelSide;
+pub use settings::PersistenceConfig;
+pub use settings::PluginEntryConfig;
+pub use settings::PluginsConfig;
+pub use settings::ProblemMatcherConfig;
+pub use settings::PromptTextConfig;
+pub use settings::RecoveryConfig;
+pub use settings::RegisterConfig;
+pub use settings::SearchConfig;
+pub use settings::StartupConfig;
+pub use settings::StatusLineConfig;
+pub use settings::SyntaxConfig;
+pub use settings::TaskConfig;
+pub use settings::TaskKind;
+pub use settings::TerminalPanelConfig;
+pub use settings::TerminalPlacement;
+pub use settings::TerminalProfileConfig;
+pub use settings::TerminalsConfig;
+pub use settings::ThemeAttribute;
+pub use settings::ThemeColor;
+pub use settings::ThemeConfig;
+pub use settings::ThemeStyle;
+pub use settings::ThemeStyles;
+pub use settings::ToolManagerConfig;
+pub use settings::UiConfig;
+pub use settings::WindowPlacementConfig;
+pub use settings::WindowRuleConfig;
+pub use settings::WindowsConfig;
+pub use settings::WorkspaceConfig;
+pub use settings::WorkspaceSearchConfig;
 mod validation;
 
 pub(crate) const CONFIG_SCHEMA_VERSION: u32 = 1;

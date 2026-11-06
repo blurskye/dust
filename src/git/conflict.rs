@@ -5,7 +5,8 @@
 //!
 //! Nothing here is cached. A conflict is a state of the repository that changes underneath the
 //! editor, so every read goes back to the index and to the repository's own operation state.
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::path::PathBuf;
 
 use thiserror::Error;
 

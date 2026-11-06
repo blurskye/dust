@@ -1,28 +1,22 @@
 //! Live editor composition and feature-private owners.
-mod clipboard;
 mod configuration;
 mod debugger;
 mod diagnostics;
 mod documents;
 mod explorer;
-mod extensions;
-mod flash;
+mod plugins;
 mod git;
 mod input;
-mod lsp;
-mod lsp_edits;
+mod language;
 mod notifications;
 mod persistence;
-mod plugin_edits;
-mod recovery;
 mod search;
 mod syntax;
 mod tasks;
 mod terminal;
-mod tooling;
+mod tools;
 mod windows;
 mod workspace;
-mod workspace_edits;
 
 #[derive(Clone, Debug)]
 pub(in crate::app) enum TrustedAction {
@@ -59,124 +53,281 @@ pub(in crate::app) enum TrustedAction {
     },
 }
 
-pub use configuration::{
-    ConfigurationSources, KeymapInspection, ResolvedConfiguration, ResolvedKeymaps, ViewToggle,
-    compile_keymaps, compile_keymaps_with_plugin_catalog, compile_keymaps_with_plugin_index,
-    reload_keymaps, validate_loaded_configuration,
-};
+pub use configuration::ConfigurationSources;
+
+pub use configuration::KeymapInspection;
+
+pub use configuration::ResolvedConfiguration;
+
+pub use configuration::ResolvedKeymaps;
+
+pub use configuration::ViewToggle;
+
+pub use configuration::compile_keymaps;
+
+pub use configuration::compile_keymaps_with_plugin_catalog;
+
+pub use configuration::compile_keymaps_with_plugin_index;
+
+pub use configuration::reload_keymaps;
+
+pub use configuration::validate_loaded_configuration;
 pub use agent::commands::AgentCommand;
 
 use crate::app::configuration::ConfigurationSession;
 #[cfg(test)]
-use crate::app::configuration::{
-    KeymapOperation,
-    configuration_generation_is_newer, resolve_configuration,
-    validate_configured_commands,
-};
-use crate::app::documents::{DocumentEvent, DocumentSession, LargeFileOverride, mode_name_large};
+use crate::app::configuration::KeymapOperation;
+use crate::app::configuration::configuration_generation_is_newer;
+use crate::app::configuration::resolve_configuration;
+use crate::app::configuration::validate_configured_commands;
+use crate::app::documents::DocumentEvent;
+use crate::app::documents::DocumentSession;
+use crate::app::documents::LargeFileOverride;
+use crate::app::documents::mode_name_large;
 use crate::app::input::InputSession;
-use crate::app::lsp::{LspAutostartObservation, LspLaunch};
-use crate::app::lsp::{LspLaunchRequest, LspLaunchSource, PendingLspProjectRoot};
+use crate::app::language::LspAutostartObservation;
+use crate::app::language::LspLaunch;
+use crate::app::language::LspLaunchRequest;
+use crate::app::language::LspLaunchSource;
+use crate::app::language::PendingLspProjectRoot;
 #[cfg(test)]
-use crate::app::lsp::{LspProjectionOwner, LspRuntimeState};
-use crate::app::persistence::{RestoreContext, RestorePrepared, RestoreReady, RestoreUpdate};
-use crate::app::search::{MatcherSource, PickerContent, PickerOrigin, PickerPayload};
-use crate::app::terminal::{TerminalInput, TerminalUpdate};
-use crate::app::tooling::{
-    LspRuntimeSource, ToolInstall, lsp_runtime_source_allowed_on_host,
-    nix_workspace_shell_for_host, tool_kind_key,
-};
-use crate::app::windows::{
-    EditorCloseSave, EditorCloseStep, EditorCloseTarget, EditorWindowBridge, LayoutPlanError,
-    NativeDescriptions, NativeSurfaceSignature, NativeSurfaceTarget, ProjectionRequest,
-    RestoreWindowPolicy, WindowCandidate, WindowSession,
-};
+use crate::app::language::LspProjectionOwner;
+use crate::app::language::LspRuntimeState;
+use crate::app::persistence::RestoreContext;
+use crate::app::persistence::RestorePrepared;
+use crate::app::persistence::RestoreReady;
+use crate::app::persistence::RestoreUpdate;
+use crate::app::picker::MatcherSource;
+use crate::app::picker::PickerContent;
+use crate::app::picker::PickerOrigin;
+use crate::app::picker::PickerPayload;
+use crate::app::terminal::TerminalInput;
+use crate::app::terminal::TerminalUpdate;
+use crate::app::tools::LspRuntimeSource;
+use crate::app::tools::ToolInstall;
+use crate::app::tools::lsp_runtime_source_allowed_on_host;
+use crate::app::tools::nix_workspace_shell_for_host;
+use crate::app::tools::tool_kind_key;
+use crate::app::windows::EditorCloseSave;
+use crate::app::windows::EditorCloseStep;
+use crate::app::windows::EditorCloseTarget;
+use crate::app::windows::EditorWindowBridge;
+use crate::app::windows::LayoutPlanError;
+use crate::app::windows::NativeDescriptions;
+use crate::app::windows::NativeSurfaceSignature;
+use crate::app::windows::NativeSurfaceTarget;
+use crate::app::windows::ProjectionRequest;
+use crate::app::windows::RestoreWindowPolicy;
+use crate::app::windows::WindowCandidate;
+use crate::app::windows::WindowSession;
 pub(super) mod commands;
 use crate::app::debugger::DebugSession;
 pub(super) mod agent;
-mod conflict_markers;
 mod effects;
 mod events;
-mod palette;
-mod pull_requests;
 mod remote;
 mod settings;
-mod setup;
-mod shortcuts;
-mod substitute;
 
 #[cfg(test)]
 use crate::app::persistence::capture_persisted_layout;
-use crate::app::syntax::{IndentError, SyntaxDocument, SyntaxSession};
+use crate::app::syntax::IndentError;
+use crate::app::syntax::SyntaxDocument;
+use crate::app::syntax::SyntaxSession;
 use crate::app::windows::rect_contains_point;
-use crate::app::tasks::{AdapterContext, RunningTask};
+use crate::app::tasks::AdapterContext;
+use crate::app::tasks::RunningTask;
 #[cfg(test)]
 use crate::editor::transaction::build_restored_layout;
 
-pub use commands::{AppEffect, LayoutAction, PickerKind, PromptMove, register_app_commands};
+pub use commands::AppEffect;
+
+pub use commands::LayoutAction;
+
+pub use commands::PickerKind;
+
+pub use commands::PromptMove;
+
+pub use commands::register_app_commands;
 use commands::DiagnosticFilter;
 
-use std::{
-    collections::{BTreeMap, BTreeSet, HashSet},
-    path::{Path, PathBuf},
-    time::{Duration, Instant},
-};
+use std::collections::BTreeMap;
+
+use std::collections::BTreeSet;
+
+use std::collections::HashSet;
+
+use std::path::Path;
+
+use std::path::PathBuf;
+
+use std::time::Duration;
+
+use std::time::Instant;
 
 use crate::app::workspace::WorkspacePreflightEvent as ExecutionPreflightEvent;
 use crate::config::LoadedConfig;
-use crate::debugger::{DapControl, DapEvent, DapResponse, DapSourceBreakpoint};
-use crate::editor::input::{InputAction, KeyEvent, MappingResolution, parse_ex};
-use crate::editor::text::{
-    BufferRevision, ByteOffset, ByteRange, DisplayWidthPolicy, PositionCodec, PositionEncoding,
-    TextBuffer, TextEdit, TextEditSet,
-};
-use crate::editor::{ArgumentSchema, CommandError, CommandId, CommandInvocation, CommandOutcome, CommandRegistry, CommandSource, CommandSpec, CommandValue, ContextRequirement, EditorMode, EditorOperation, EditorState, EditorTransaction, FocusDirection, InvocationSource, Precondition, RegisterShape, RegisterValue, TransactionId, UndoPolicy, ViewId, register_builtin_commands};
+use crate::debugger::DapControl;
+use crate::debugger::DapEvent;
+use crate::debugger::DapResponse;
+use crate::debugger::DapSourceBreakpoint;
+use crate::editor::input::InputAction;
+use crate::editor::input::KeyEvent;
+use crate::editor::input::MappingResolution;
+use crate::editor::input::parse_ex;
+use crate::editor::text::BufferRevision;
+use crate::editor::text::ByteOffset;
+use crate::editor::text::ByteRange;
+use crate::editor::text::DisplayWidthPolicy;
+use crate::editor::text::PositionCodec;
+use crate::editor::text::PositionEncoding;
+use crate::editor::text::TextBuffer;
+use crate::editor::text::TextEdit;
+use crate::editor::text::TextEditSet;
+use crate::editor::ArgumentSchema;
+use crate::editor::CommandError;
+use crate::editor::CommandId;
+use crate::editor::CommandInvocation;
+use crate::editor::CommandOutcome;
+use crate::editor::CommandRegistry;
+use crate::editor::CommandSource;
+use crate::editor::CommandSpec;
+use crate::editor::CommandValue;
+use crate::editor::ContextRequirement;
+use crate::editor::EditorMode;
+use crate::editor::EditorOperation;
+use crate::editor::EditorState;
+use crate::editor::EditorTransaction;
+use crate::editor::FocusDirection;
+use crate::editor::InvocationSource;
+use crate::editor::Precondition;
+use crate::editor::RegisterShape;
+use crate::editor::RegisterValue;
+use crate::editor::TransactionId;
+use crate::editor::UndoPolicy;
+use crate::editor::ViewId;
+use crate::editor::register_builtin_commands;
 
-use crate::extensions::{PluginEvent, PluginLimits, PluginLoadId, PluginStatus};
-use crate::files::{
-    ExplorerMutation, ExplorerWatchService, ResourceIntentKind, VfsError, VfsResult, VfsWorker,
-    WorkspaceFilePolicy, WorkspaceSearchMatch, WorkspaceSearchPolicy,
-};
-use crate::language::lsp::{
-    LspDocument, LspEvent, LspFeature, LspFeatureResult, LspMarkupContent, LspMarkupKind,
-    LspProgressKind, LspWorkspaceEdit, file_uri, language_id_for_path, path_from_file_uri,
-};
-use crate::language::syntax::{SyntaxSupport, builtin_languages, language_for_document};
-use crate::persistence::{
-    PersistedLargeFileOverride, PersistedLocation, PersistedSession, PersistedState,
-    PersistedWindowRule, PersistencePolicy, PersistenceService, STATE_VERSION,
-};
+use crate::plugins::PluginEvent;
+
+use crate::plugins::PluginLimits;
+
+use crate::plugins::PluginLoadId;
+
+use crate::plugins::PluginStatus;
+use crate::files::ExplorerMutation;
+use crate::files::ExplorerWatchService;
+use crate::files::ResourceIntentKind;
+use crate::files::VfsError;
+use crate::files::VfsResult;
+use crate::files::VfsWorker;
+use crate::files::WorkspaceFilePolicy;
+use crate::files::WorkspaceSearchMatch;
+use crate::files::WorkspaceSearchPolicy;
+use crate::language::lsp::LspDocument;
+use crate::language::lsp::LspEvent;
+use crate::language::lsp::LspFeature;
+use crate::language::lsp::LspFeatureResult;
+use crate::language::lsp::LspMarkupContent;
+use crate::language::lsp::LspMarkupKind;
+use crate::language::lsp::LspProgressKind;
+use crate::language::lsp::LspWorkspaceEdit;
+use crate::language::lsp::file_uri;
+use crate::language::lsp::language_id_for_path;
+use crate::language::lsp::path_from_file_uri;
+use crate::language::syntax::SyntaxSupport;
+use crate::language::syntax::builtin_languages;
+use crate::language::syntax::language_for_document;
+use crate::persistence::PersistedLargeFileOverride;
+use crate::persistence::PersistedLocation;
+use crate::persistence::PersistedSession;
+use crate::persistence::PersistedState;
+use crate::persistence::PersistedWindowRule;
+use crate::persistence::PersistencePolicy;
+use crate::persistence::PersistenceService;
+use crate::persistence::STATE_VERSION;
 use crate::process::PtyId;
-use crate::telemetry::{LiveCrashSnapshot, LogLevel};
-use crate::tools::{
-    PackageOperation, RegistryRequest, RegistryResult, RegistryService, ToolDefinition, ToolKind,
-    ToolOperation, ToolStatus, discover_executable, is_nixos_host, managed_formatter,
-    managed_tool_executable, nix_lsp_launch_environment, nix_lsp_profile_installed,
-};
-use crate::ui::{
-    DocumentationMarkupKind, DocumentationPopupKind, EditorWindowBinding as UiEditorWindowBinding,
-    EditorWindowLayoutState, KeyInputKind, NativeSurfaceWindowBinding, PickerSurfaceKind,
-    PromptKind, TerminalError, TerminalOptions, TerminalPanelMode, TerminalSession, ToolMenuRow,
-    ToolMenuState, ToolRuntimeOption, ToolRuntimePickerState, UiEvent, UiFold, UiInlayHint,
-    UiState, UiSyntaxSpan, VisualRowAnchor, VisualRowModel, active_editor_pane_viewport,
-    editor_pane_viewport_at, editor_state_content_width, editor_state_gutter_width,
-    explorer_panel_width, render as render_frame, screen_foot_rows, snap_display_column,
-    snap_display_column_forward, terminal_panel_geometry, terminal_tab_at_column,
-    workspace_top_rows,
-};
-use crate::workspace::{
-    DiagnosticOwner, ExecutionSource, ExplorerKind, FileSnapshot, PickerAction, PickerItem,
-    PickerItemId, PickerState, RootIdentity, WorkspaceEditDraft, WorkspaceId, WorkspaceState,
-    WorkspaceTrust,
-};
+use crate::telemetry::LiveCrashSnapshot;
+use crate::telemetry::LogLevel;
+use crate::tools::PackageOperation;
+use crate::tools::RegistryRequest;
+use crate::tools::RegistryResult;
+use crate::tools::RegistryService;
+use crate::tools::ToolDefinition;
+use crate::tools::ToolKind;
+use crate::tools::ToolOperation;
+use crate::tools::ToolStatus;
+use crate::tools::discover_executable;
+use crate::tools::is_nixos_host;
+use crate::tools::managed_formatter;
+use crate::tools::managed_tool_executable;
+use crate::tools::nix_lsp_launch_environment;
+use crate::tools::nix_lsp_profile_installed;
+use crate::ui::DocumentationMarkupKind;
+use crate::ui::DocumentationPopupKind;
+use crate::ui::EditorWindowBinding as UiEditorWindowBinding;
+use crate::ui::EditorWindowLayoutState;
+use crate::ui::KeyInputKind;
+use crate::ui::NativeSurfaceWindowBinding;
+use crate::ui::PickerSurfaceKind;
+use crate::ui::PromptKind;
+use crate::ui::TerminalError;
+use crate::ui::TerminalOptions;
+use crate::ui::TerminalPanelMode;
+use crate::ui::TerminalSession;
+use crate::ui::ToolMenuRow;
+use crate::ui::ToolMenuState;
+use crate::ui::ToolRuntimeOption;
+use crate::ui::ToolRuntimePickerState;
+use crate::ui::UiEvent;
+use crate::ui::UiFold;
+use crate::ui::UiInlayHint;
+use crate::ui::UiState;
+use crate::ui::UiSyntaxSpan;
+use crate::ui::VisualRowAnchor;
+use crate::ui::VisualRowModel;
+use crate::ui::active_editor_pane_viewport;
+use crate::ui::editor_pane_viewport_at;
+use crate::ui::editor_state_content_width;
+use crate::ui::editor_state_gutter_width;
+use crate::ui::explorer_panel_width;
+use crate::ui::render as render_frame;
+use crate::ui::screen_foot_rows;
+use crate::ui::snap_display_column;
+use crate::ui::snap_display_column_forward;
+use crate::ui::terminal_panel_geometry;
+use crate::ui::terminal_tab_at_column;
+use crate::ui::workspace_top_rows;
+use crate::workspace::DiagnosticOwner;
+use crate::workspace::ExecutionSource;
+use crate::app::explorer::tree::ExplorerKind;
+use crate::workspace::FileSnapshot;
+use crate::workspace::PickerAction;
+use crate::workspace::PickerItem;
+use crate::workspace::PickerItemId;
+use crate::workspace::PickerState;
+use crate::workspace::RootIdentity;
+use crate::workspace::WorkspaceEditDraft;
+use crate::workspace::WorkspaceId;
+use crate::workspace::WorkspaceState;
+use crate::workspace::WorkspaceTrust;
 use thiserror::Error;
 
-use crate::app::extensions::{PluginUiInteraction, WindowUpdate};
-use crate::app::startup::{ApplicationError, StartupTarget, build_state};
+use crate::app::plugins::PluginUiInteraction;
 
-use crate::windows::{
-    CompositorProjection, DockEdge, SpatialDirection, WindowPlacement, WindowRect,
-};
+use crate::app::plugins::WindowUpdate;
+use crate::app::startup::ApplicationError;
+use crate::app::startup::StartupTarget;
+use crate::app::startup::build_state;
+
+use crate::windows::CompositorProjection;
+
+use crate::windows::DockEdge;
+
+use crate::windows::SpatialDirection;
+
+use crate::windows::WindowPlacement;
+
+use crate::windows::WindowRect;
 
 pub(crate) const EVENT_POLL_MS: u64 = 16;
 pub(crate) const MACRO_RECURSION_LIMIT: usize = 16;
@@ -273,10 +424,10 @@ struct App {
     notices: crate::app::notifications::NoticeSession,
     clock: std::sync::Arc<dyn crate::clock::Clock>,
     state: Tracked<EditorState>,
-    extension: crate::app::extensions::ExtensionSession,
+    extension: crate::app::plugins::ExtensionSession,
     workspace: crate::app::workspace::WorkspaceSession,
     diagnostics: crate::app::diagnostics::DiagnosticSession,
-    workspace_edits: crate::app::workspace_edits::WorkspaceEditSession,
+    workspace_edits: crate::app::workspace::edits::WorkspaceEditSession,
     commands: CommandRegistry<AppEffect>,
     input: InputSession,
     configuration: ConfigurationSession,
@@ -287,7 +438,7 @@ struct App {
     /// When the last key arrived, so automatic prompts wait until typing pauses.
     last_key_at: Option<Instant>,
     /// The `s` jump while its labels are shown.
-    flash: Option<crate::app::flash::FlashState>,
+    flash: Option<crate::app::editing::flash::FlashState>,
     /// The ACP agent session and its transcript panel.
     agent: agent::AgentPanel,
     pull_requests: pull_requests::PullRequests,
@@ -321,15 +472,15 @@ struct App {
         )>,
     >,
     window_session: WindowSession,
-    tooling: crate::app::tooling::ToolingSession,
-    language: crate::app::lsp::LspSession,
+    tooling: crate::app::tools::ToolingSession,
+    language: crate::app::language::LspSession,
 
     debugger_session: DebugSession,
     debug_terminal: Option<PtyId>,
-    recovery: crate::app::recovery::RecoverySession,
+    recovery: crate::app::documents::recovery::RecoverySession,
     next_transaction: u64,
     git: crate::app::git::GitSession,
-    clipboard: crate::app::clipboard::ClipboardSession,
+    clipboard: crate::app::editing::clipboard::ClipboardSession,
     macro_replays: Vec<(Vec<CommandInvocation>, usize, u64)>,
     macro_running: bool,
     explorer: crate::app::explorer::ExplorerSession,
@@ -614,3 +765,8 @@ mod render;
 mod shutdown;
 pub mod startup;
 pub(super) mod tutor;
+
+mod editing;
+mod picker;
+mod prompt;
+mod documentation;

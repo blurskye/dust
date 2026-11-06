@@ -35,7 +35,7 @@ pub fn sanitize_markdown(source: &str, maximum_chars: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::sanitize_markdown;
+    use crate::language::lsp::markdown::sanitize_markdown;
 
     #[test]
     fn markdown_limit_counts_emitted_unicode_characters_only() {

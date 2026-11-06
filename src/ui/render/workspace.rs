@@ -1,17 +1,26 @@
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::ui::render::editor::END_OF_BUFFER_MARKER;
-use crate::ui::render::{CONTROL_CHARACTER_REPLACEMENT, SCRATCH_LABEL, ZERO_WIDTH_REPLACEMENT};
-use crate::{
-    config::{AmbiguousWidth, Config},
-    editor::EditorState,
-    ui::{CellGrid, Style, geometry::text_width, window::TileAxis},
-};
+use crate::ui::render::CONTROL_CHARACTER_REPLACEMENT;
+use crate::ui::render::SCRATCH_LABEL;
+use crate::ui::render::ZERO_WIDTH_REPLACEMENT;
+use crate::config::AmbiguousWidth;
+use crate::config::Config;
+use crate::editor::EditorState;
+use crate::ui::CellGrid;
+use crate::ui::Style;
+use crate::ui::geometry::text_width;
+use crate::ui::window::TileAxis;
 
-use super::{
-    Frame, UiState, editor::render_editor_view, overlays::render_content_tab_line,
-    visual_rows::one_cell_symbol,
-};
+use crate::ui::render::Frame;
+
+use crate::ui::render::UiState;
+
+use crate::ui::render::editor::render_editor_view;
+
+use crate::ui::render::overlays::render_content_tab_line;
+
+use crate::ui::render::visual_rows::one_cell_symbol;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PaneViewport {

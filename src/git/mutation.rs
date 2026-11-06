@@ -1,29 +1,48 @@
-use std::{
-    hash::{Hash, Hasher},
-    path::{Path, PathBuf},
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-        mpsc::{self, Receiver, TryRecvError},
-    },
-    thread,
-    time::{Duration, Instant},
-};
+use std::hash::Hash;
+use std::hash::Hasher;
+use std::path::Path;
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
+use std::sync::mpsc::self;
+use std::sync::mpsc::Receiver;
+use std::sync::mpsc::TryRecvError;
+use std::thread;
+use std::time::Duration;
+use std::time::Instant;
 
 use thiserror::Error;
 
-use super::{
-    hunks::{
-        GitDiffLayer, GitDiffLineKind, GitHunk, GitHunkError, GitHunkGeneration, GitHunkId,
-        GitHunkPolicy, read_hunks_owned, validate_hunk_policy,
-    },
-    status::{GitRepositoryId, GitUnsavedDocument, unsaved_document_revision},
-};
+use crate::git::hunks::GitDiffLayer;
+
+use crate::git::hunks::GitDiffLineKind;
+
+use crate::git::hunks::GitHunk;
+
+use crate::git::hunks::GitHunkError;
+
+use crate::git::hunks::GitHunkGeneration;
+
+use crate::git::hunks::GitHunkId;
+
+use crate::git::hunks::GitHunkPolicy;
+
+use crate::git::hunks::read_hunks_owned;
+
+use crate::git::hunks::validate_hunk_policy;
+
+use crate::git::status::GitRepositoryId;
+
+use crate::git::status::GitUnsavedDocument;
+
+use crate::git::status::unsaved_document_revision;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct GitIndexFingerprint(pub [u8; 32]);
 pub fn git_index_fingerprint(repository: &Path) -> Result<GitIndexFingerprint, GitMutationError> {
-    use sha2::{Digest, Sha256};
+    use sha2::Digest;
+    use sha2::Sha256;
     let repo = git2::Repository::open(repository).map_err(|_| GitMutationError::Backend)?;
     let index = repo.index().map_err(|_| GitMutationError::Backend)?;
     let mut entries = index.iter().collect::<Vec<_>>();
@@ -334,7 +353,8 @@ impl Drop for GitMutationService {
 }
 /// Hash one worktree file so a caller can capture it before planning a mutation.
 pub fn worktree_hash(path: &Path) -> Result<([u8; 32], Vec<u8>), GitMutationError> {
-    use sha2::{Digest, Sha256};
+    use sha2::Digest;
+    use sha2::Sha256;
     let bytes =
         crate::files::read_file_with_ceiling(path, 8 * 1024 * 1024).map_err(
             |error| match error {
@@ -666,7 +686,7 @@ pub(super) fn validate_change_plan(plan: &GitChangePlanRequest) -> Result<(), Gi
         || plan.deadline > Duration::from_secs(5)
         || plan.expected_index.is_none()
         || validate_hunk_policy(&plan.policy).is_err()
-        || super::status::validate_unsaved_documents(
+        || crate::git::status::validate_unsaved_documents(
             &plan.unsaved_documents,
             plan.unsaved_documents.len(),
             16 * 1024 * 1024,
@@ -1270,7 +1290,7 @@ pub(super) fn apply_change_plan(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::git::mutation::*;
 
     #[test]
     fn worktree_hash_rejects_special_files_and_bounds_regular_reads() {

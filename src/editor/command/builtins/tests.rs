@@ -2,10 +2,17 @@ use std::path::PathBuf;
 
 use crate::editor::text::TextBuffer;
 
-use crate::editor::{
-    CommandInvocation, CommandRegistry, CommandValue, EditorState, InvocationSource,
-    register_builtin_commands,
-};
+use crate::editor::CommandInvocation;
+
+use crate::editor::CommandRegistry;
+
+use crate::editor::CommandValue;
+
+use crate::editor::EditorState;
+
+use crate::editor::InvocationSource;
+
+use crate::editor::register_builtin_commands;
 
 #[test]
 fn movement_and_edit_commands_apply_through_registry_transactions() {
@@ -102,7 +109,8 @@ fn editing(
 
 #[test]
 fn linewise_put_separates_an_unterminated_last_line() {
-    use crate::editor::{RegisterShape, RegisterValue};
+    use crate::editor::RegisterShape;
+    use crate::editor::RegisterValue;
     let (mut state, buffer, view) = editing("one\ntwo", 4);
     state.registers.set(
         '"',
@@ -120,7 +128,8 @@ fn linewise_put_separates_an_unterminated_last_line() {
 
 #[test]
 fn characterwise_put_after_stays_on_an_empty_line() {
-    use crate::editor::{RegisterShape, RegisterValue};
+    use crate::editor::RegisterShape;
+    use crate::editor::RegisterValue;
     for (text, cursor, expected) in [
         ("\nabc", 0, "X\nabc"),
         ("a\n\nb", 2, "a\nX\nb"),
@@ -144,7 +153,8 @@ fn characterwise_put_after_stays_on_an_empty_line() {
 
 #[test]
 fn characterwise_put_lands_on_the_last_inserted_grapheme() {
-    use crate::editor::{RegisterShape, RegisterValue};
+    use crate::editor::RegisterShape;
+    use crate::editor::RegisterValue;
     for before in ["true", "false"] {
         for (text, count, expected, cursor) in [
             ("XY", 1, "XY", 1),
@@ -190,7 +200,8 @@ fn characterwise_put_lands_on_the_last_inserted_grapheme() {
 
 #[test]
 fn block_put_extends_eof_and_repeats_rows_horizontally() {
-    use crate::editor::{RegisterShape, RegisterValue};
+    use crate::editor::RegisterShape;
+    use crate::editor::RegisterValue;
     for (text, cursor, expected) in [
         ("x", 0, "aax\nbb\ncc"),
         ("xx", 1, "xaax\n bb\n cc"),
@@ -213,7 +224,10 @@ fn block_put_extends_eof_and_repeats_rows_horizontally() {
 
 #[test]
 fn counted_block_put_preserves_short_rows_and_display_width() {
-    use crate::editor::{RegisterShape, Selection, SelectionKind, text::ByteOffset};
+    use crate::editor::RegisterShape;
+    use crate::editor::Selection;
+    use crate::editor::SelectionKind;
+    use crate::editor::text::ByteOffset;
     for (source, register, expected) in [
         ("ab\nx\ncd", "ab\nx\ncd", "abab|\nx x |\ncdcd|"),
         ("界\nx\nab", "界\nx\nab", "界界|\nx x |\nabab|"),
@@ -260,7 +274,8 @@ fn counted_block_put_preserves_short_rows_and_display_width() {
 
 #[test]
 fn counted_block_put_pads_empty_rows_and_expands_tabs_at_the_destination() {
-    use crate::editor::{RegisterShape, RegisterValue};
+    use crate::editor::RegisterShape;
+    use crate::editor::RegisterValue;
     let (mut state, buffer, view) = editing("a|\nb|\nc|", 1);
     state.registers.set(
         '"',
@@ -427,7 +442,8 @@ fn normal_deletions_stay_on_the_last_remaining_character() {
 
 #[test]
 fn switching_visual_modes_preserves_endpoints_and_updates_the_operator_shape() {
-    use crate::editor::{SelectionKind, text::ByteOffset};
+    use crate::editor::SelectionKind;
+    use crate::editor::text::ByteOffset;
     let (mut state, buffer, view) = editing("abc\ndef\n", 1);
     apply(&mut state, "mode.visual_char", &[], 1);
     apply(&mut state, "view.cursor.move", &[("motion", "right")], 1);
@@ -532,7 +548,10 @@ fn normal_linewise_yank_keeps_the_cursor_column() {
 
 #[test]
 fn visual_yank_returns_to_the_start_of_the_selection() {
-    use crate::editor::{EditorMode, Selection, SelectionKind, text::ByteOffset};
+    use crate::editor::EditorMode;
+    use crate::editor::Selection;
+    use crate::editor::SelectionKind;
+    use crate::editor::text::ByteOffset;
     for (mode, kind, anchor, head, expected_cursor, expected_text) in [
         (
             EditorMode::VisualChar,
@@ -1111,7 +1130,7 @@ fn counted_text_objects_materialize_the_document_once() {
     ] {
         let text = TextBuffer::from_text(&unit.repeat(10_000));
         let before = TextBuffer::test_materializations().1;
-        let range = super::text_object::text_object(&text, &[], ByteOffset(0), motion, 10_000)
+        let range = crate::editor::command::builtins::text_object::text_object(&text, &[], ByteOffset(0), motion, 10_000)
             .unwrap()
             .unwrap();
         assert_eq!(
@@ -1125,10 +1144,10 @@ fn counted_text_objects_materialize_the_document_once() {
 
 #[test]
 fn syntax_objects_do_not_fall_forward_when_an_enclosing_count_is_missing() {
-    use crate::{
-        editor::text::{ByteOffset, ByteRange},
-        language::syntax::{SyntaxObject, SyntaxObjectKind},
-    };
+    use crate::editor::text::ByteOffset;
+    use crate::editor::text::ByteRange;
+    use crate::language::syntax::SyntaxObject;
+    use crate::language::syntax::SyntaxObjectKind;
     let text = TextBuffer::from_text(" (a) (b)");
     for (kind, motion) in [
         (SyntaxObjectKind::Function, "inner_function"),
@@ -1148,11 +1167,11 @@ fn syntax_objects_do_not_fall_forward_when_an_enclosing_count_is_missing() {
             },
         ];
         assert!(
-            super::text_object::text_object(&text, &objects, ByteOffset(2), motion, 2).is_err()
+            crate::editor::command::builtins::text_object::text_object(&text, &objects, ByteOffset(2), motion, 2).is_err()
         );
         for cursor in [0, 2] {
             assert_eq!(
-                super::text_object::text_object(&text, &objects, ByteOffset(cursor), motion, 1)
+                crate::editor::command::builtins::text_object::text_object(&text, &objects, ByteOffset(cursor), motion, 1)
                     .unwrap(),
                 Some(ByteRange::new(ByteOffset(2), ByteOffset(3)).unwrap()),
             );
@@ -1166,7 +1185,7 @@ fn syntax_objects_do_not_fall_forward_when_an_enclosing_count_is_missing() {
             },
         ];
         assert_eq!(
-            super::text_object::text_object(&text, &nested, ByteOffset(2), motion, 2).unwrap(),
+            crate::editor::command::builtins::text_object::text_object(&text, &nested, ByteOffset(2), motion, 2).unwrap(),
             Some(ByteRange::new(ByteOffset(1), ByteOffset(8)).unwrap()),
         );
     }
@@ -1185,7 +1204,7 @@ fn bracket_objects_do_not_fall_forward_when_an_enclosing_count_is_missing() {
     ] {
         let (state, buffer, _) = editing(text, cursor);
         assert!(
-            super::text_object::text_object(
+            crate::editor::command::builtins::text_object::text_object(
                 &state.buffers[buffer].text,
                 &[],
                 ByteOffset(cursor),
@@ -1235,7 +1254,10 @@ fn multi_word_matches_keep_combining_graphemes_whole() {
 
 #[test]
 fn multi_visual_matches_remain_literal_after_marking() {
-    use crate::editor::{EditorMode, Selection, SelectionKind, text::ByteOffset};
+    use crate::editor::EditorMode;
+    use crate::editor::Selection;
+    use crate::editor::SelectionKind;
+    use crate::editor::text::ByteOffset;
     for command in ["multi.add_next", "multi.add_all", "multi.skip"] {
         let (mut state, _, view) = editing("foobar xfoo yfoo", 0);
         state.views[view].mode = EditorMode::VisualChar;
@@ -1295,10 +1317,9 @@ fn multi_line_additions_keep_the_requested_column_across_short_lines() {
 
 #[test]
 fn multi_vertical_motion_keeps_each_cursors_wanted_column() {
-    use crate::editor::{
-        EditorMode,
-        text::{ByteOffset, ByteRange},
-    };
+    use crate::editor::EditorMode;
+    use crate::editor::text::ByteOffset;
+    use crate::editor::text::ByteRange;
     let (mut state, _, view) = editing("abcdef\nx\nabcdef\nabcdef\nx\nabcdef", 4);
     state.views[view].mode = EditorMode::Multi;
     state.views[view].multi_marks = vec![
@@ -1336,10 +1357,9 @@ fn multi_vertical_motion_keeps_each_cursors_wanted_column() {
 
 #[test]
 fn adjacent_multi_character_deletions_deduplicate_collapsed_cursors() {
-    use crate::editor::{
-        EditorMode,
-        text::{ByteOffset, ByteRange},
-    };
+    use crate::editor::EditorMode;
+    use crate::editor::text::ByteOffset;
+    use crate::editor::text::ByteRange;
     let (mut state, buffer, view) = editing("::x", 0);
     state.views[view].mode = EditorMode::Multi;
     state.views[view].multi_marks = vec![
@@ -1358,7 +1378,10 @@ fn adjacent_multi_character_deletions_deduplicate_collapsed_cursors() {
 
 #[test]
 fn multi_block_append_pads_short_rows_to_the_rectangle_edge() {
-    use crate::editor::{EditorMode, Selection, SelectionKind, text::ByteOffset};
+    use crate::editor::EditorMode;
+    use crate::editor::Selection;
+    use crate::editor::SelectionKind;
+    use crate::editor::text::ByteOffset;
     for (source, expected) in [
         ("abc\nx\nabc", "abc!\nx  !\nabc!"),
         ("x\nabc\nabc", "x  !\nabc!\nabc!"),
@@ -1380,7 +1403,10 @@ fn multi_block_append_pads_short_rows_to_the_rectangle_edge() {
 
 #[test]
 fn multi_block_change_deletes_the_supplied_visual_ranges() {
-    use crate::editor::{EditorMode, Selection, SelectionKind, text::ByteOffset};
+    use crate::editor::EditorMode;
+    use crate::editor::Selection;
+    use crate::editor::SelectionKind;
+    use crate::editor::text::ByteOffset;
     let (mut state, buffer, view) = editing("abc\nx\nabc", 0);
     state.views[view].mode = EditorMode::VisualBlock;
     state.views[view].selection = Some(Selection {
@@ -1396,7 +1422,8 @@ fn multi_block_change_deletes_the_supplied_visual_ranges() {
 
 #[test]
 fn adjacent_multi_changes_keep_one_insertion_at_each_resulting_position() {
-    use crate::editor::text::{ByteOffset, ByteRange};
+    use crate::editor::text::ByteOffset;
+    use crate::editor::text::ByteRange;
     let (mut state, buffer, view) = editing("::x", 0);
     state.views[view].mode = crate::editor::EditorMode::Multi;
     state.views[view].multi_marks = vec![

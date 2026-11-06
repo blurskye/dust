@@ -6,20 +6,29 @@
 //! JSON object per line on stdin/stdout.
 
 use crate::language::lsp::file_uri;
-use serde_json::{Value, json};
+use serde_json::Value;
+use serde_json::json;
 #[cfg(unix)]
 use std::os::unix::process::CommandExt;
-use std::{
-    collections::{BTreeMap, VecDeque},
-    io::{self, BufRead, BufReader, Read, Write},
-    path::{Path, PathBuf},
-    process::{Child, Command, Stdio},
-    sync::{
-        Arc, Mutex,
-        mpsc::{self, Receiver, SyncSender, TrySendError},
-    },
-    thread,
-};
+use std::collections::BTreeMap;
+use std::collections::VecDeque;
+use std::io::self;
+use std::io::BufRead;
+use std::io::BufReader;
+use std::io::Read;
+use std::io::Write;
+use std::path::Path;
+use std::path::PathBuf;
+use std::process::Child;
+use std::process::Command;
+use std::process::Stdio;
+use std::sync::Arc;
+use std::sync::Mutex;
+use std::sync::mpsc::self;
+use std::sync::mpsc::Receiver;
+use std::sync::mpsc::SyncSender;
+use std::sync::mpsc::TrySendError;
+use std::thread;
 
 pub mod history;
 pub mod mcp;
@@ -832,7 +841,7 @@ pub fn slice_lines(text: &str, line: Option<u64>, limit: Option<u64>) -> String 
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::agent::*;
 
     #[cfg(unix)]
     fn fixture(script: &str) -> AgentProcess {

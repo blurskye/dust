@@ -136,7 +136,7 @@ pub(in crate::app) struct WindowCandidate {
 
 pub(in crate::app) struct EditorWindowCandidate {
     proposal: crate::editor::EditorDraft,
-    catalog: crate::extensions::PluginCatalogVersion,
+    catalog: crate::plugins::PluginCatalogVersion,
     candidate: WindowCandidate,
 }
 

@@ -181,7 +181,7 @@ impl WindowSession {
         &self,
         proposal: crate::editor::EditorDraft,
         current: &crate::editor::EditorVersion,
-        catalog: crate::extensions::PluginCatalogVersion,
+        catalog: crate::plugins::PluginCatalogVersion,
         scratch: &str,
         descriptions: Option<NativeDescriptions<'_>>,
     ) -> Result<EditorWindowCandidate, String> {
@@ -199,7 +199,7 @@ impl WindowSession {
         proposal: crate::editor::EditorDraft,
         source: (
             &crate::editor::EditorVersion,
-            crate::extensions::PluginCatalogVersion,
+            crate::plugins::PluginCatalogVersion,
         ),
         scratch: &str,
         mut descriptions: NativeDescriptions<'_>,
@@ -303,7 +303,7 @@ impl WindowSession {
         &self,
         proposal: crate::editor::EditorDraft,
         current: &crate::editor::EditorVersion,
-        catalog: crate::extensions::PluginCatalogVersion,
+        catalog: crate::plugins::PluginCatalogVersion,
         scratch: &str,
         mut descriptions: NativeDescriptions<'_>,
     ) -> Result<EditorWindowCandidate, String> {
@@ -322,7 +322,7 @@ impl WindowSession {
         &self,
         proposal: crate::editor::EditorDraft,
         candidate: WindowCandidate,
-        catalog: crate::extensions::PluginCatalogVersion,
+        catalog: crate::plugins::PluginCatalogVersion,
     ) -> Result<EditorWindowCandidate, String> {
         if !Arc::ptr_eq(&self.origin, &candidate.origin) || self.epoch != candidate.epoch {
             return Err("window candidate is stale or belongs to another session".into());
@@ -362,7 +362,7 @@ impl WindowSession {
         &mut self,
         transition: EditorWindowCandidate,
         current: &crate::editor::EditorVersion,
-        catalog: &crate::extensions::PluginCatalogVersion,
+        catalog: &crate::plugins::PluginCatalogVersion,
     ) -> Result<crate::editor::EditorState, String> {
         if &transition.catalog != catalog {
             return Err("editor transition source changed before acceptance".into());

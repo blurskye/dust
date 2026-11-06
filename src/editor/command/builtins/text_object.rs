@@ -3,10 +3,19 @@
 
 use unicode_segmentation::UnicodeSegmentation;
 
-use crate::editor::text::{ByteOffset, ByteRange, TextBuffer};
-use crate::language::syntax::{SyntaxObject, SyntaxObjectKind};
+use crate::editor::text::ByteOffset;
 
-use super::{super::CommandError, motion::word_class, transaction::failed};
+use crate::editor::text::ByteRange;
+
+use crate::editor::text::TextBuffer;
+use crate::language::syntax::SyntaxObject;
+use crate::language::syntax::SyntaxObjectKind;
+
+use crate::editor::command::CommandError;
+
+use crate::editor::command::builtins::motion::word_class;
+
+use crate::editor::command::builtins::transaction::failed;
 
 /// Returns `None` when `motion` is not a text object.
 pub(super) fn text_object(

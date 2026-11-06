@@ -32,7 +32,7 @@ pub(super) struct TerminalCloneState {
 pub(super) struct PluginCloneState {
     graph: String,
     editor: crate::editor::EditorWindowVersion,
-    catalog: crate::extensions::PluginCatalogVersion,
+    catalog: crate::plugins::PluginCatalogVersion,
     host: String,
     retained: Vec<crate::ui::PluginSurfaceUiState>,
     private: Vec<crate::ui::PrivateSurfaceUiState>,
@@ -100,7 +100,7 @@ impl TestSession {
     pub(super) fn copy_counts(&self) -> (usize, usize, usize) {
         (
             crate::windows::WindowGraph::test_clone_count(),
-            crate::app::extensions::ExtensionSession::fixture_window_clone_count(),
+            crate::app::plugins::ExtensionSession::fixture_window_clone_count(),
             self.application.window_session.content_builds(),
         )
     }
@@ -132,7 +132,7 @@ impl TestSession {
     }
     pub(super) fn install_plugin_fixture(
         &mut self,
-        index: crate::extensions::PluginContributionIndex,
+        index: crate::plugins::PluginContributionIndex,
     ) {
         self.application
             .extension
@@ -143,7 +143,7 @@ impl TestSession {
         assert!(
             self.application
                 .extension
-                .remove_contribution(owner, crate::extensions::PluginLoadId(load))
+                .remove_contribution(owner, crate::plugins::PluginLoadId(load))
         );
     }
     pub(super) fn plugin_window_target(&self, owner: &str) -> String {
@@ -216,14 +216,14 @@ impl TestSession {
     }
     pub(super) fn plugin_request(
         &mut self,
-        index: &crate::extensions::PluginContributionIndex,
-        request: crate::extensions::PluginUiRequest,
-    ) -> crate::extensions::PluginUiEvent {
+        index: &crate::plugins::PluginContributionIndex,
+        request: crate::plugins::PluginUiRequest,
+    ) -> crate::plugins::PluginUiEvent {
         self.application.apply_plugin_ui_request(index, request)
     }
     pub(super) fn reject_catalog_contribution(
         &mut self,
-        index: crate::extensions::PluginContributionIndex,
+        index: crate::plugins::PluginContributionIndex,
     ) -> Result<(), String> {
         let candidate = self
             .application

@@ -3,22 +3,46 @@
 //! `View::block_insert`, the same as Visual block insert.
 use unicode_segmentation::UnicodeSegmentation;
 
-use crate::editor::{
-    ViewId,
-    state::{EditingPolicy, EditorMode, View},
-    text::{
-        ByteOffset, ByteRange, DisplayWidthPolicy, TextBuffer, TextEdit, TextEditSet,
-        display_column_at, insertion_at_display_column, next_grapheme_boundary,
-    },
-    transaction::{EditorOperation, EditorTransaction, UndoPolicy},
-};
+use crate::editor::ViewId;
 
-use super::super::CommandError;
-use super::motion::{
-    cursor_display_column, first_nonblank, line_content_end, motion_target, on_last_character,
-    word_class,
-};
-use super::transaction::failed;
+use crate::editor::state::EditingPolicy;
+
+use crate::editor::state::EditorMode;
+
+use crate::editor::state::View;
+
+use crate::editor::text::ByteOffset;
+
+use crate::editor::text::ByteRange;
+
+use crate::editor::text::DisplayWidthPolicy;
+
+use crate::editor::text::TextBuffer;
+
+use crate::editor::text::TextEdit;
+
+use crate::editor::text::TextEditSet;
+
+use crate::editor::text::display_column_at;
+
+use crate::editor::text::insertion_at_display_column;
+
+use crate::editor::text::next_grapheme_boundary;
+
+use crate::editor::transaction::EditorOperation;
+
+use crate::editor::transaction::EditorTransaction;
+
+use crate::editor::transaction::UndoPolicy;
+
+use crate::editor::command::CommandError;
+use crate::editor::command::builtins::motion::cursor_display_column;
+use crate::editor::command::builtins::motion::first_nonblank;
+use crate::editor::command::builtins::motion::line_content_end;
+use crate::editor::command::builtins::motion::motion_target;
+use crate::editor::command::builtins::motion::on_last_character;
+use crate::editor::command::builtins::motion::word_class;
+use crate::editor::command::builtins::transaction::failed;
 
 fn is_word(grapheme: &str) -> bool {
     grapheme

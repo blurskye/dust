@@ -1,36 +1,107 @@
-use std::{
-    collections::{BTreeMap, HashMap, VecDeque},
-    io::{BufReader, Read},
-    path::{Path, PathBuf},
-    process::{Command, Stdio},
-    sync::mpsc::{self, Receiver, SyncSender, TryRecvError, TrySendError},
-    thread::{self, JoinHandle},
-    time::{Duration, Instant},
-};
+use std::collections::BTreeMap;
+use std::collections::HashMap;
+use std::collections::VecDeque;
+use std::io::BufReader;
+use std::io::Read;
+use std::path::Path;
+use std::path::PathBuf;
+use std::process::Command;
+use std::process::Stdio;
+use std::sync::mpsc::self;
+use std::sync::mpsc::Receiver;
+use std::sync::mpsc::SyncSender;
+use std::sync::mpsc::TryRecvError;
+use std::sync::mpsc::TrySendError;
+use std::thread::self;
+use std::thread::JoinHandle;
+use std::time::Duration;
+use std::time::Instant;
 
-use serde_json::{Value, json};
+use serde_json::Value;
 
-use crate::{
-    editor::text::{ByteOffset, PositionCodec, PositionEncoding, TextBuffer},
-    process::{read_content_length_message, write_content_length_message},
-    tools::{ToolDefinition, ToolKind},
-};
+use serde_json::json;
 
-use super::{
-    COMMAND_QUEUE, EVENT_QUEUE, MAX_LOG_LINE_BYTES, MAX_LOG_LINES, MAX_PENDING_REQUESTS,
-    MESSAGE_QUEUE,
-    error::LspError,
-    model::{
-        LspCapabilities, LspDocument, LspEvent, LspFeature, LspHealth, LspPolicy,
-        LspServerConfiguration, ServerRequestId,
-    },
-    origins::{EditContext, EventSender, OwnedLspEvent},
-    protocol::{
-        fail_child, feature_params, handle_response, initialize_capabilities, initialize_message,
-        sanitize_log, send_cancel, send_change, send_close, send_event, send_open, send_save,
-    },
-    server_message::{ServerMessageContext, expire_requests, handle_server_message},
-};
+use crate::editor::text::ByteOffset;
+
+use crate::editor::text::PositionCodec;
+
+use crate::editor::text::PositionEncoding;
+
+use crate::editor::text::TextBuffer;
+
+use crate::process::read_content_length_message;
+
+use crate::process::write_content_length_message;
+
+use crate::tools::ToolDefinition;
+
+use crate::tools::ToolKind;
+
+use crate::language::lsp::COMMAND_QUEUE;
+
+use crate::language::lsp::EVENT_QUEUE;
+
+use crate::language::lsp::MAX_LOG_LINE_BYTES;
+
+use crate::language::lsp::MAX_LOG_LINES;
+
+use crate::language::lsp::MAX_PENDING_REQUESTS;
+
+use crate::language::lsp::MESSAGE_QUEUE;
+
+use crate::language::lsp::error::LspError;
+
+use crate::language::lsp::model::LspCapabilities;
+
+use crate::language::lsp::model::LspDocument;
+
+use crate::language::lsp::model::LspEvent;
+
+use crate::language::lsp::model::LspFeature;
+
+use crate::language::lsp::model::LspHealth;
+
+use crate::language::lsp::model::LspPolicy;
+
+use crate::language::lsp::model::LspServerConfiguration;
+
+use crate::language::lsp::model::ServerRequestId;
+
+use crate::language::lsp::origins::EditContext;
+
+use crate::language::lsp::origins::EventSender;
+
+use crate::language::lsp::origins::OwnedLspEvent;
+
+use crate::language::lsp::protocol::fail_child;
+
+use crate::language::lsp::protocol::feature_params;
+
+use crate::language::lsp::protocol::handle_response;
+
+use crate::language::lsp::protocol::initialize_capabilities;
+
+use crate::language::lsp::protocol::initialize_message;
+
+use crate::language::lsp::protocol::sanitize_log;
+
+use crate::language::lsp::protocol::send_cancel;
+
+use crate::language::lsp::protocol::send_change;
+
+use crate::language::lsp::protocol::send_close;
+
+use crate::language::lsp::protocol::send_event;
+
+use crate::language::lsp::protocol::send_open;
+
+use crate::language::lsp::protocol::send_save;
+
+use crate::language::lsp::server_message::ServerMessageContext;
+
+use crate::language::lsp::server_message::expire_requests;
+
+use crate::language::lsp::server_message::handle_server_message;
 
 #[derive(Clone, Debug)]
 pub(super) enum SessionCommand {
@@ -556,7 +627,7 @@ pub(super) fn run_session(
                 message: error.to_string(),
             },
         );
-        super::protocol::terminate_server(&mut child);
+        crate::language::lsp::protocol::terminate_server(&mut child);
         return;
     }
 
@@ -566,7 +637,7 @@ pub(super) fn run_session(
     let mut dynamic_registrations = HashMap::<String, (String, Value)>::new();
     let mut documents = HashMap::<String, LspDocument>::new();
     let mut document_sources = HashMap::new();
-    let mut diagnostic_lineage = super::origins::DiagnosticLineage::default();
+    let mut diagnostic_lineage = crate::language::lsp::origins::DiagnosticLineage::default();
     if let Some(document) = initial_document {
         if let Some(source) = initial_source {
             diagnostic_lineage.observe(document.uri(), &source);
@@ -810,7 +881,7 @@ pub(super) fn run_session(
         }
     }
     cancelled.store(true, std::sync::atomic::Ordering::Release);
-    super::protocol::terminate_server(&mut child);
+    crate::language::lsp::protocol::terminate_server(&mut child);
     let _ = reader.join();
     if let Some(reader) = log_reader {
         let _ = reader.join();
@@ -879,10 +950,11 @@ fn shutdown_server(
 fn server_exit_status(child: &mut std::process::Child) -> std::io::Result<Option<bool>> {
     #[cfg(unix)]
     {
-        use nix::{
-            sys::wait::{Id, WaitPidFlag, WaitStatus, waitid},
-            unistd::Pid,
-        };
+        use nix::sys::wait::Id;
+        use nix::sys::wait::WaitPidFlag;
+        use nix::sys::wait::WaitStatus;
+        use nix::sys::wait::waitid;
+        use nix::unistd::Pid;
         match waitid(
             Id::Pid(Pid::from_raw(child.id() as i32)),
             WaitPidFlag::WEXITED | WaitPidFlag::WNOHANG | WaitPidFlag::WNOWAIT,
@@ -912,7 +984,7 @@ pub(super) fn handle_command(
         String,
         (crate::editor::BufferId, crate::editor::text::TextVersion),
     >,
-    diagnostic_lineage: &mut super::origins::DiagnosticLineage,
+    diagnostic_lineage: &mut crate::language::lsp::origins::DiagnosticLineage,
     apply_requests: &mut HashMap<ServerRequestId, std::sync::Arc<()>>,
     opened_documents: &mut HashMap<String, u64>,
     pending: &mut HashMap<i64, PendingRequest>,
@@ -1278,7 +1350,7 @@ fn sync_document(
                 previous.version != document.version || previous.text != document.text
             }) {
                 send_change(stdin, previous, document, capabilities)?;
-                if capabilities.sync_kind_for_document(document) != super::model::SyncKind::None {
+                if capabilities.sync_kind_for_document(document) != crate::language::lsp::model::SyncKind::None {
                     opened_documents.insert(uri.clone(), document.version);
                 }
             }
@@ -1317,7 +1389,7 @@ impl LspService {
         uri: String,
         source: (crate::editor::BufferId, crate::editor::text::TextVersion),
         encoding: PositionEncoding,
-    ) -> super::origins::EditSourceFixture {
+    ) -> crate::language::lsp::origins::EditSourceFixture {
         self.replace_edit_source_fixture_for("owned-edit-fixture", uri, source, encoding, 1)
     }
     pub(crate) fn replace_edit_source_fixture_for(
@@ -1327,7 +1399,7 @@ impl LspService {
         source: (crate::editor::BufferId, crate::editor::text::TextVersion),
         encoding: PositionEncoding,
         capacity: usize,
-    ) -> super::origins::EditSourceFixture {
+    ) -> crate::language::lsp::origins::EditSourceFixture {
         let (sender, commands) = mpsc::sync_channel(capacity);
         let origin = std::sync::Arc::new(());
         let server = server.to_owned();
@@ -1357,7 +1429,7 @@ impl LspService {
                 stop_requested,
             },
         );
-        super::origins::EditSourceFixture {
+        crate::language::lsp::origins::EditSourceFixture {
             events,
             commands,
             pending: HashMap::new(),
@@ -1367,15 +1439,14 @@ impl LspService {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::language::lsp::session::*;
 
     #[test]
     fn continuous_document_commands_do_not_starve_server_responses() {
-        use std::sync::{
-            Arc,
-            atomic::{AtomicBool, Ordering},
-        };
-        let script = super::super::tests::BOUNDARY_SERVER
+        use std::sync::Arc;
+        use std::sync::atomic::AtomicBool;
+        use std::sync::atomic::Ordering;
+        let script = crate::language::lsp::tests::BOUNDARY_SERVER
             .split("m=read()\nsend(")
             .next()
             .unwrap()
@@ -1390,7 +1461,7 @@ while True:
   time.sleep(.05)
   send({'jsonrpc':'2.0','id':m['id'],'result':{'contents':'alive'}})
 "#;
-        let (_root, mut service, document) = super::super::tests::boundary_service(&script);
+        let (_root, mut service, document) = crate::language::lsp::tests::boundary_service(&script);
         let deadline = Instant::now() + Duration::from_secs(5);
         while !matches!(service.try_event(), Some(LspEvent::Running { .. })) {
             assert!(Instant::now() < deadline);
@@ -1466,7 +1537,7 @@ while True:
         let mut documents = HashMap::new();
         let mut opened = HashMap::new();
         let capabilities = LspCapabilities {
-            sync_kind: super::super::SyncKind::Incremental,
+            sync_kind: crate::language::lsp::SyncKind::Incremental,
             ..Default::default()
         };
         let mut wire = Vec::new();
@@ -1566,7 +1637,7 @@ while True:
         let mut documents = HashMap::from([(document.uri(), document.clone())]);
         let mut opened = HashMap::from([(document.uri(), document.version)]);
         let mut sources = HashMap::new();
-        let mut lineage = super::super::origins::DiagnosticLineage::default();
+        let mut lineage = crate::language::lsp::origins::DiagnosticLineage::default();
         let mut apply = HashMap::new();
         let mut pending = HashMap::new();
         for id in 0..MAX_PENDING_REQUESTS as i64 {
@@ -1653,7 +1724,7 @@ while True:
                 "workspace/symbol",
             ),
             (
-                LspFeature::ExecuteCommand(super::super::LspCommand {
+                LspFeature::ExecuteCommand(crate::language::lsp::LspCommand {
                     command: "fix".into(),
                     arguments: Vec::new(),
                 }),
@@ -1739,7 +1810,7 @@ while True:
         let mut opened = HashMap::new();
         let mut pending = HashMap::new();
         let mut apply = HashMap::new();
-        let mut lineage = super::super::origins::DiagnosticLineage::default();
+        let mut lineage = crate::language::lsp::origins::DiagnosticLineage::default();
         let mut stopping = false;
         for index in (0..4097).chain(std::iter::once(0)) {
             let document = LspDocument {
@@ -1806,7 +1877,7 @@ while True:
         let mut opened = HashMap::new();
         let mut pending = HashMap::new();
         let mut apply = HashMap::new();
-        let mut lineage = super::super::origins::DiagnosticLineage::default();
+        let mut lineage = crate::language::lsp::origins::DiagnosticLineage::default();
         let mut stopping = false;
         let mut next = 2;
         let mut config = LspServerConfiguration::standard();
@@ -1871,17 +1942,17 @@ while True:
                 PositionEncoding::Utf16,
             );
             let base = LspCapabilities {
-                sync_kind: super::super::model::SyncKind::None,
+                sync_kind: crate::language::lsp::model::SyncKind::None,
                 ..Default::default()
             };
             let options = json!({"documentSelector":[{"language":"rust"}],"syncKind":2});
-            let active = super::super::server_message::effective_capabilities(
+            let active = crate::language::lsp::server_message::effective_capabilities(
                 &base,
                 [("textDocument/didChange", &options)].into_iter(),
             );
             let mut documents = HashMap::new();
             let mut sources = HashMap::new();
-            let mut lineage = super::super::origins::DiagnosticLineage::default();
+            let mut lineage = crate::language::lsp::origins::DiagnosticLineage::default();
             let mut apply = HashMap::new();
             let mut opened = HashMap::new();
             let mut pending = HashMap::new();
@@ -1946,7 +2017,8 @@ while True:
 
     #[test]
     fn reopening_a_document_retires_the_old_diagnostic_transport() {
-        use crate::editor::{EditorState, text::TextBuffer};
+        use crate::editor::EditorState;
+        use crate::editor::text::TextBuffer;
         let mut editor = EditorState::new("/fixture".into());
         let first = TextBuffer::from_text("first");
         let (buffer, _) = editor
@@ -1964,7 +2036,7 @@ while True:
             (buffer, first.source_version()),
             PositionEncoding::Utf16,
         );
-        let mut lineage = super::super::origins::DiagnosticLineage::default();
+        let mut lineage = crate::language::lsp::origins::DiagnosticLineage::default();
         let mut documents = HashMap::new();
         let mut sources = HashMap::new();
         let mut opened = HashMap::new();

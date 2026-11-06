@@ -1,4 +1,4 @@
-use super::*;
+use crate::windows::*;
 
 fn balanced_layout(windows: &[WindowId]) -> TiledLayoutNode {
     if windows.len() == 1 {
@@ -580,7 +580,7 @@ fn docks_reserve_tiled_minimum_and_chrome_on_both_axes() {
             .unwrap();
     }
     let snapshot = graph.compositor_snapshot(tab).unwrap();
-    let insets = super::TiledInsets {
+    let insets = crate::windows::TiledInsets {
         screen_bottom: 1,
         top: 1,
         bottom: 2,
@@ -1530,10 +1530,10 @@ fn panes_below_a_wide_pane_are_not_its_left_neighbor() {
         height: 10,
     };
     assert_eq!(
-        super::projection::spatial_score(top, bottom, SpatialDirection::Left),
+        crate::windows::projection::spatial_score(top, bottom, SpatialDirection::Left),
         None
     );
-    assert!(super::projection::spatial_score(top, bottom, SpatialDirection::Down).is_some());
+    assert!(crate::windows::projection::spatial_score(top, bottom, SpatialDirection::Down).is_some());
 }
 
 #[test]

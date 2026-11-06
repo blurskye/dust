@@ -19,19 +19,39 @@ const MAXIMUM_NON_TILED_WINDOWS_PER_TAB: usize = 128;
 const MAXIMUM_OVERLAY_WINDOWS_PER_TAB: usize = 32;
 const MAXIMUM_PROTECTED_REGIONS: usize = 16;
 mod identity;
-pub use identity::{ContentId, ContentTypeId, ViewId, WindowId, WindowTarget, WorkspaceTabId};
+pub use identity::ContentId;
+pub use identity::ContentTypeId;
+pub use identity::ViewId;
+pub use identity::WindowId;
+pub use identity::WindowTarget;
+pub use identity::WorkspaceTabId;
 mod layout;
-pub use layout::{
-    CompositorLayer, CompositorProjection, CompositorSnapshot, CompositorWindowSnapshot,
-    ContentAdapterKind, DockEdge, ProjectedBorder, ProjectedCompositorWindow, ProjectedWindow,
-    SpatialDirection, TileAxis, TiledInsets, TiledLayoutNode, TiledLayoutProjection,
-    TiledLayoutSnapshot, WindowPlacement, WindowRect,
-};
-mod model;
-pub use model::{
-    ContentCapabilities, ContentContract, ContentDescriptor, ContentLifecycle, ContentSnapshot,
-    ViewDescriptor, WindowDescriptor, WorkspaceTabDescriptor,
-};
+pub use layout::CompositorLayer;
+pub use layout::CompositorProjection;
+pub use layout::CompositorSnapshot;
+pub use layout::CompositorWindowSnapshot;
+pub use layout::ContentAdapterKind;
+pub use layout::DockEdge;
+pub use layout::ProjectedBorder;
+pub use layout::ProjectedCompositorWindow;
+pub use layout::ProjectedWindow;
+pub use layout::SpatialDirection;
+pub use layout::TileAxis;
+pub use layout::TiledInsets;
+pub use layout::TiledLayoutNode;
+pub use layout::TiledLayoutProjection;
+pub use layout::TiledLayoutSnapshot;
+pub use layout::WindowPlacement;
+pub use layout::WindowRect;
+mod content;
+pub use model::ContentCapabilities;
+pub use model::ContentContract;
+pub use model::ContentDescriptor;
+pub use model::ContentLifecycle;
+pub use model::ContentSnapshot;
+pub use model::ViewDescriptor;
+pub use model::WindowDescriptor;
+pub use model::WorkspaceTabDescriptor;
 mod graph;
 pub use graph::WindowGraph;
 mod error;

@@ -18,7 +18,7 @@ pub mod editor;
 /// Application composition and ordered event loop.
 pub mod app;
 /// Bounded asynchronous WebAssembly Component Model extension ownership.
-pub mod extensions;
+pub mod plugins;
 /// Bounded filesystem effects, checked atomic persistence, and recovery journals.
 pub mod files;
 /// Pull requests through the GitHub CLI.

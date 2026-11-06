@@ -1,16 +1,47 @@
-use std::{cell::Cell, collections::BTreeSet, fs, path::PathBuf};
+use std::cell::Cell;
+use std::collections::BTreeSet;
+use std::fs;
+use std::path::PathBuf;
 
 use tempfile::tempdir;
 
-use super::load::{
-    BUNDLED_CONFIG, BUNDLED_THEME, CapturedSource, CapturedText, ConfigurationSourceBundle,
-    SourceFingerprint, WATCH_FINGERPRINT_BYTE_CEILING, capture_configuration_bundle_with,
-    capture_consistent_configuration_bundle_with, captured_bundle_is_stable, hash_source_bytes,
-    load_consistent_configuration, load_theme, setting_keys, setting_spans, source_fingerprint,
-};
-use super::{
-    AmbiguousWidth, ExplorerIconMode, LineNumbers, load_bundled_config, load_config, load_keymaps,
-};
+use crate::config::load::BUNDLED_CONFIG;
+
+use crate::config::load::BUNDLED_THEME;
+
+use crate::config::load::CapturedSource;
+
+use crate::config::load::CapturedText;
+
+use crate::config::load::ConfigurationSourceBundle;
+
+use crate::config::load::SourceFingerprint;
+
+use crate::config::load::WATCH_FINGERPRINT_BYTE_CEILING;
+
+use crate::config::load::capture_configuration_bundle_with;
+
+use crate::config::load::capture_consistent_configuration_bundle_with;
+
+use crate::config::load::captured_bundle_is_stable;
+
+use crate::config::load::hash_source_bytes;
+
+use crate::config::load::load_consistent_configuration;
+
+use crate::config::load::load_theme;
+
+use crate::config::load::setting_keys;
+
+use crate::config::load::setting_spans;
+
+use crate::config::load::source_fingerprint;
+use crate::config::AmbiguousWidth;
+use crate::config::ExplorerIconMode;
+use crate::config::LineNumbers;
+use crate::config::load_bundled_config;
+use crate::config::load_config;
+use crate::config::load_keymaps;
 
 #[test]
 fn bundled_theme_ports_validate_and_load_by_name_without_installed_files() {
@@ -56,8 +87,8 @@ fn bundled_theme_ports_validate_and_load_by_name_without_installed_files() {
             "themes need distinct backgrounds"
         );
     }
-    let mut installed = super::themes::bundled_named("nord").unwrap().theme;
-    installed.styles.default.foreground = super::ThemeColor::Red;
+    let mut installed = crate::config::themes::bundled_named("nord").unwrap().theme;
+    installed.styles.default.foreground = crate::config::ThemeColor::Red;
     for (theme_source, valid) in [
         (toml::to_string(&installed).unwrap(), true),
         ("invalid toml".into(), false),
@@ -74,7 +105,7 @@ fn bundled_theme_ports_validate_and_load_by_name_without_installed_files() {
         if valid {
             assert!(loaded.diagnostic.is_none());
             assert_eq!(loaded.theme, installed);
-            assert_eq!(loaded.theme_path, super::user_theme_path("nord"));
+            assert_eq!(loaded.theme_path, crate::config::user_theme_path("nord"));
         } else {
             assert!(
                 loaded.diagnostic.is_some(),
@@ -96,7 +127,7 @@ fn absent_file_uses_defaults_without_error() {
 fn inlay_hint_level_defaults_to_standard_and_accepts_maximum_testing_mode() {
     assert_eq!(
         load_bundled_config().config.lsp.inlay_hint_level,
-        super::InlayHintLevel::Standard
+        crate::config::InlayHintLevel::Standard
     );
     let root = tempdir().expect("tempdir");
     let path = root.path().join("config.toml");
@@ -105,7 +136,7 @@ fn inlay_hint_level_defaults_to_standard_and_accepts_maximum_testing_mode() {
     assert!(loaded.diagnostic.is_none());
     assert_eq!(
         loaded.config.lsp.inlay_hint_level,
-        super::InlayHintLevel::Max
+        crate::config::InlayHintLevel::Max
     );
 }
 
@@ -254,7 +285,7 @@ fn a_bad_task_is_named_with_what_to_fix() {
 #[test]
 fn migrated_config_spans_still_address_the_original_file() {
     let source = "[editor]\ntab_width = 3\n";
-    let loaded = super::load::parse_config_source(std::path::Path::new("config.toml"), source);
+    let loaded = crate::config::load::parse_config_source(std::path::Path::new("config.toml"), source);
     assert!(loaded.diagnostic.is_none(), "{:?}", loaded.diagnostic);
     let span = &loaded.user_setting_spans["editor.tab_width"];
     assert_eq!(&source[span.clone()], "3");
@@ -305,10 +336,10 @@ fn config_key_segments_decode_toml_quoted_keys() {
             vec!["dashboard", "action", "0", "label"],
         ),
     ] {
-        assert_eq!(super::config_key_segments(key).unwrap(), expected, "{key}");
+        assert_eq!(crate::config::config_key_segments(key).unwrap(), expected, "{key}");
     }
     for invalid in ["", "a..b", "a.", "\"unterminated", r#"a."\q""#] {
-        assert!(super::config_key_segments(invalid).is_none(), "{invalid}");
+        assert!(crate::config::config_key_segments(invalid).is_none(), "{invalid}");
     }
 }
 
@@ -503,12 +534,12 @@ fn captured_bundle_identity_exposes_aba_and_uses_the_same_text_for_spans() {
 #[test]
 fn captured_bundle_identity_detects_missing_created_and_deleted_sources() {
     let config = captured(
-        super::user_config_path(),
+        crate::config::user_config_path(),
         CapturedText::Text("[ui]\ntheme='dust'\n".into()),
     );
-    let missing = captured(super::user_keymaps_path(), CapturedText::Missing);
+    let missing = captured(crate::config::user_keymaps_path(), CapturedText::Missing);
     let created = captured(
-            super::user_keymaps_path(),
+            crate::config::user_keymaps_path(),
             CapturedText::Text(
                 "[[keymap]]\nid='user.test.created-x'\ncontext='dashboard'\nkeys='x'\ncommand='file.new'\n".into(),
             ),
@@ -582,7 +613,7 @@ fn consistent_loader_rejects_transient_captures_even_when_before_and_after_match
         result.is_err(),
         "a transient capture must never be accepted"
     );
-    assert_eq!(loads.get(), super::load::CONFIGURATION_CONSISTENCY_ATTEMPTS);
+    assert_eq!(loads.get(), crate::config::load::CONFIGURATION_CONSISTENCY_ATTEMPTS);
 }
 
 #[test]
@@ -647,7 +678,7 @@ fn accepted_candidate_fingerprint_matches_all_four_loaded_surfaces() {
     assert_eq!(candidate.dashboard.identity, "dashboard-1");
     assert_eq!(
         candidate.theme.styles.default.foreground,
-        super::ThemeColor::Rgb(0xc9, 0xd1, 0xd8)
+        crate::config::ThemeColor::Rgb(0xc9, 0xd1, 0xd8)
     );
 }
 
@@ -664,10 +695,11 @@ fn clean_consistent_load_never_fingerprints_user_sources() {
 
 #[test]
 fn installed_plugin_discovery_uses_and_verifies_activation_digests() {
-    use sha2::{Digest, Sha256};
+    use sha2::Digest;
+    use sha2::Sha256;
     let root = tempdir().unwrap();
     fs::create_dir(root.path().join("activations")).unwrap();
-    let manifest = crate::extensions::PluginManifest {
+    let manifest = crate::plugins::PluginManifest {
         id: "test-plugin".into(),
         version: "1.0.0".into(),
         component_sha256: "a".repeat(64),
@@ -709,20 +741,21 @@ fn installed_plugin_discovery_uses_and_verifies_activation_digests() {
         .unwrap();
         fs::write(&path, &source).unwrap();
         assert_eq!(
-            super::load::installed_plugins(root.path()),
+            crate::config::load::installed_plugins(root.path()),
             BTreeSet::from([manifest.id.clone()])
         );
         if verifies_digest {
             fs::write(&path, source.replace("1.0.0", "2.0.0")).unwrap();
-            assert!(super::load::installed_plugins(root.path()).is_empty());
+            assert!(crate::config::load::installed_plugins(root.path()).is_empty());
         }
     }
 }
 
 #[test]
 fn configuration_worker_tracks_disk_sources_across_startup_and_acknowledgments() {
-    use super::ConfigurationWorker;
-    use std::time::{Duration, Instant};
+    use crate::config::ConfigurationWorker;
+    use std::time::Duration;
+    use std::time::Instant;
 
     if std::env::var_os("DUST_CONFIG_WORKER_TEST_CHILD").is_none() {
         let root = tempdir().unwrap();
@@ -736,7 +769,7 @@ fn configuration_worker_tracks_disk_sources_across_startup_and_acknowledgments()
         return;
     }
 
-    fn next(worker: &ConfigurationWorker) -> super::ConfigurationWorkerResult {
+    fn next(worker: &ConfigurationWorker) -> crate::config::ConfigurationWorkerResult {
         let deadline = Instant::now() + Duration::from_secs(6);
         loop {
             if let Some(result) = worker.try_result().unwrap() {
@@ -757,9 +790,9 @@ fn configuration_worker_tracks_disk_sources_across_startup_and_acknowledgments()
         }
     }
 
-    let path = super::user_config_path();
+    let path = crate::config::user_config_path();
     fs::write(&path, "[editor]\ntab_width=2\n").unwrap();
-    let loaded = super::load_user_config();
+    let loaded = crate::config::load_user_config();
     let unchanged = ConfigurationWorker::start_with_fingerprint(
         true,
         loaded.config.ui.theme.clone(),
@@ -784,7 +817,7 @@ fn configuration_worker_tracks_disk_sources_across_startup_and_acknowledgments()
     worker.verify_watch().unwrap();
     no_reload(&worker);
 
-    let theme_path = super::user_theme_path("night");
+    let theme_path = crate::config::user_theme_path("night");
     fs::create_dir_all(theme_path.parent().unwrap()).unwrap();
     fs::write(&theme_path, "malformed").unwrap();
     fs::write(&path, "[ui]\ntheme='night'\n").unwrap();
@@ -819,15 +852,15 @@ fn configuration_reads_reject_fifos_and_devices_without_blocking() {
         nix::unistd::mkfifo(&path, nix::sys::stat::Mode::S_IRUSR).unwrap();
         assert!(source_fingerprint(path.clone()).content_hash.is_none());
         assert!(matches!(
-            super::load::capture_source(path).text,
+            crate::config::load::capture_source(path).text,
             CapturedText::Error(_)
         ));
     }
-    assert!(super::load::installed_plugins(root.path()).is_empty());
+    assert!(crate::config::load::installed_plugins(root.path()).is_empty());
     let device = PathBuf::from("/dev/zero");
     assert!(source_fingerprint(device.clone()).content_hash.is_none());
     assert!(matches!(
-        super::load::capture_source(device).text,
+        crate::config::load::capture_source(device).text,
         CapturedText::Error(_)
     ));
 
@@ -938,7 +971,7 @@ fn themes_are_typed_and_require_capability_fallbacks() {
     let theme = load_theme(&path).expect("valid typed theme");
     assert_eq!(
         theme.styles.accent.foreground,
-        super::ThemeColor::Indexed(201)
+        crate::config::ThemeColor::Indexed(201)
     );
 }
 
@@ -1141,7 +1174,7 @@ fn keymaps_parse_typed_arguments_and_fail_transactionally() {
 
 #[test]
 fn global_explorer_identity_can_be_disabled_without_disabling_just_one_surface() {
-    let user = super::load::parse_keymaps(
+    let user = crate::config::load::parse_keymaps(
         "[[keymap]]\nid='builtin.global.explorer'\ndisable=true\n",
         PathBuf::from("keymaps.toml"),
     );
@@ -1161,7 +1194,7 @@ fn global_explorer_identity_can_be_disabled_without_disabling_just_one_surface()
     );
     assert!(diagnostic.is_none(), "{diagnostic:?}");
 
-    let surface = super::load::parse_keymaps(
+    let surface = crate::config::load::parse_keymaps(
         "[[keymap]]\nid='builtin.global.explorer.explorer'\ndisable=true\n",
         PathBuf::from("keymaps.toml"),
     );
@@ -1175,7 +1208,7 @@ fn global_keymaps_respect_surface_overrides_with_equivalent_key_spellings() {
         ("z esc", "z escape"),
         ("<leader> control-a", "<leader> ctrl-a"),
     ] {
-        let loaded = super::load::parse_keymaps(
+        let loaded = crate::config::load::parse_keymaps(
             &format!(
                 "[[keymap]]\nid='user.global.alias'\ncontext='global'\nkeys='{global}'\ncommand='explorer.refresh'\n\n[[keymap]]\nid='user.explorer.alias'\ncontext='explorer'\nkeys='{local}'\ncommand='explorer.refresh'\n"
             ),
@@ -1205,7 +1238,7 @@ fn global_keymaps_respect_surface_overrides_with_equivalent_key_spellings() {
 
 #[test]
 fn global_keymaps_expand_to_every_command_surface_unless_the_surface_declares_the_keys() {
-    let loaded = super::load::parse_keymaps(
+    let loaded = crate::config::load::parse_keymaps(
         r#"
 [[keymap]]
 id = "user.global.files"
@@ -1322,14 +1355,14 @@ label = "Files"
 fn highlight_groups_resolve_like_neovim() {
     use crate::language::syntax::Highlight;
     let group = |name| Highlight::named(name).expect(name);
-    let colour = |theme: &super::ThemeConfig, name| {
+    let colour = |theme: &crate::config::ThemeConfig, name| {
         theme.highlight(group(name)).map(|style| style.foreground)
     };
 
     // Every bundled link lands on a group with a definition, so ports keep their colours.
     let mut unresolved = Vec::new();
-    for (name, _) in super::themes::BUNDLED {
-        let theme = super::themes::bundled_named(name).unwrap().theme;
+    for (name, _) in crate::config::themes::BUNDLED {
+        let theme = crate::config::themes::bundled_named(name).unwrap().theme;
         for (group, definition) in &theme.highlights {
             if let Some(link) = &definition.link
                 && theme.resolve(link).is_none()
@@ -1339,20 +1372,20 @@ fn highlight_groups_resolve_like_neovim() {
         }
     }
     assert!(unresolved.is_empty(), "{}", unresolved.join("\n"));
-    let tokyo = super::themes::bundled_named("tokyo-night").unwrap().theme;
+    let tokyo = crate::config::themes::bundled_named("tokyo-night").unwrap().theme;
     // `@function.method.call` links to `@function.method`, which links to `Function`.
     assert_eq!(
         colour(&tokyo, "@function.method.call"),
-        Some(super::ThemeColor::Rgb(0x7a, 0xa2, 0xf7))
+        Some(crate::config::ThemeColor::Rgb(0x7a, 0xa2, 0xf7))
     );
     let keyword = tokyo.highlight(Highlight::KEYWORD).unwrap();
-    assert!(keyword.attributes.contains(&super::ThemeAttribute::Italic));
+    assert!(keyword.attributes.contains(&crate::config::ThemeAttribute::Italic));
     assert_eq!(
         keyword.foreground_256,
-        Some(super::ThemeColor::Indexed(140))
+        Some(crate::config::ThemeColor::Indexed(140))
     );
 
-    let mut dust = super::themes::bundled_named("dust").unwrap().theme;
+    let mut dust = crate::config::themes::bundled_named("dust").unwrap().theme;
     assert!(dust.resolve("@missing.nonexistent").is_none());
     assert_eq!(
         dust.resolve("@function.custom.child"),
@@ -1360,7 +1393,7 @@ fn highlight_groups_resolve_like_neovim() {
     );
     dust.highlights.insert(
         "@test.broken".into(),
-        super::HighlightDefinition {
+        crate::config::HighlightDefinition {
             link: Some("@missing.nonexistent".into()),
             ..Default::default()
         },
@@ -1368,14 +1401,14 @@ fn highlight_groups_resolve_like_neovim() {
     assert!(dust.resolve("@test.broken").is_none());
     dust.highlights.insert(
         "@function".into(),
-        super::HighlightDefinition {
+        crate::config::HighlightDefinition {
             link: Some("@function.method".into()),
             ..Default::default()
         },
     );
     dust.highlights.insert(
         "@function.method".into(),
-        super::HighlightDefinition {
+        crate::config::HighlightDefinition {
             link: Some("@function".into()),
             ..Default::default()
         },
@@ -1383,7 +1416,7 @@ fn highlight_groups_resolve_like_neovim() {
     // Nothing defines `@markup.heading.1`, so it takes `@markup.heading`, which Neovim links to `Title`.
     assert_eq!(
         colour(&dust, "@markup.heading.1"),
-        Some(super::ThemeColor::Rgb(0x58, 0xa6, 0xff))
+        Some(crate::config::ThemeColor::Rgb(0x58, 0xa6, 0xff))
     );
     // A theme that leaves a token type out keeps tree-sitter's colour.
     assert_eq!(dust.highlight(group("@lsp.type.derive")), None);
@@ -1398,19 +1431,21 @@ fn highlight_groups_resolve_like_neovim() {
 
 #[test]
 fn theme_defined_language_captures_are_selected_and_inherit_in_other_themes() {
-    use crate::language::syntax::{Highlight, SyntaxLanguage, highlight};
-    let fallback = super::themes::bundled_named("dust").unwrap().theme;
+    use crate::language::syntax::Highlight;
+    use crate::language::syntax::SyntaxLanguage;
+    use crate::language::syntax::highlight;
+    let fallback = crate::config::themes::bundled_named("dust").unwrap().theme;
     let expected = fallback.highlight(Highlight::FUNCTION).unwrap().clone();
     // Existing syntax spans must honor a theme loaded later without another edit.
     let spans = highlight(SyntaxLanguage::Rust, "fn custom() {}\n");
     let mut value = serde_json::to_value(&fallback).unwrap();
     value["highlights"]["@function.rust"] = serde_json::json!({ "fg": "#123456" });
-    let theme: super::ThemeConfig = serde_json::from_value(value).unwrap();
+    let theme: crate::config::ThemeConfig = serde_json::from_value(value).unwrap();
     let group = Highlight::named("@function.rust").unwrap();
     assert!(spans.iter().any(|span| span.role == group));
     assert_eq!(
         theme.highlight(group).unwrap().foreground,
-        super::ThemeColor::Rgb(0x12, 0x34, 0x56)
+        crate::config::ThemeColor::Rgb(0x12, 0x34, 0x56)
     );
     assert_eq!(fallback.highlight(group), Some(&expected));
     // Use a unique group so parallel syntax tests cannot register it before the cache.
@@ -1423,8 +1458,8 @@ fn a_saved_bundled_theme_restores_from_this_build() {
     let (reply, receiver) = std::sync::mpsc::sync_channel(1);
     // Saved by an older build, with a style field that no longer exists.
     let saved = r##"{"bundled":true,"name":"tokyo-night","styles":{"syntax_comment":{"foreground":"#a9b1d6"}}}"##;
-    super::themes::discover(super::themes::ThemeRead {
-        source: super::themes::ThemeReadSource::Saved(saved.into()),
+    crate::config::themes::discover(crate::config::themes::ThemeRead {
+        source: crate::config::themes::ThemeReadSource::Saved(saved.into()),
         cancelled: Default::default(),
         reply,
     });
@@ -1432,7 +1467,7 @@ fn a_saved_bundled_theme_restores_from_this_build() {
     assert!(catalog.diagnostics.is_empty(), "{:?}", catalog.diagnostics);
     assert_eq!(
         catalog.choices[0].theme,
-        super::themes::bundled_named("tokyo-night").unwrap().theme
+        crate::config::themes::bundled_named("tokyo-night").unwrap().theme
     );
 }
 
@@ -1441,18 +1476,18 @@ fn rebinding_a_shortcut_writes_one_entry_and_reset_removes_it() {
     let root = tempdir().unwrap();
     let path = root.path().join("keymaps.toml");
     fs::write(&path, "# my keys\n").unwrap();
-    let declared = super::declared_keymaps(Some(&path));
+    let declared = crate::config::declared_keymaps(Some(&path));
     let save = declared
         .iter()
         .find(|keymap| keymap.entry.id == "builtin.global.search-keymaps")
         .unwrap();
     assert!(!save.user);
-    super::write_user_keymap(&path, &save.entry, "<leader> s K").unwrap();
-    super::write_user_keymap(&path, &save.entry, "ctrl-g").unwrap();
+    crate::config::write_user_keymap(&path, &save.entry, "<leader> s K").unwrap();
+    crate::config::write_user_keymap(&path, &save.entry, "ctrl-g").unwrap();
     let source = fs::read_to_string(&path).unwrap();
     assert!(source.starts_with("# my keys\n"), "{source}");
     assert_eq!(source.matches("[[keymap]]").count(), 1, "{source}");
-    let declared = super::declared_keymaps(Some(&path));
+    let declared = crate::config::declared_keymaps(Some(&path));
     let rebound: Vec<_> = declared
         .iter()
         .filter(|keymap| keymap.entry.id == "builtin.global.search-keymaps")
@@ -1469,21 +1504,21 @@ fn rebinding_a_shortcut_writes_one_entry_and_reset_removes_it() {
         .iter()
         .find(|keymap| keymap.entry.id == "builtin.settings.move.k")
         .unwrap();
-    super::write_user_keymap(&path, &moving.entry, "ctrl-k").unwrap();
-    let moved = super::declared_keymaps(Some(&path))
+    crate::config::write_user_keymap(&path, &moving.entry, "ctrl-k").unwrap();
+    let moved = crate::config::declared_keymaps(Some(&path))
         .into_iter()
         .find(|keymap| keymap.entry.id == "builtin.settings.move.k")
         .unwrap();
     assert_eq!(moved.entry.arguments, moving.entry.arguments);
-    super::remove_user_keymap(&path, "builtin.global.search-keymaps").unwrap();
-    super::remove_user_keymap(&path, "builtin.settings.move.k").unwrap();
+    crate::config::remove_user_keymap(&path, "builtin.global.search-keymaps").unwrap();
+    crate::config::remove_user_keymap(&path, "builtin.settings.move.k").unwrap();
     assert_eq!(fs::read_to_string(&path).unwrap(), "# my keys\n");
 }
 
 #[test]
 fn every_setup_choice_sets_a_real_setting_to_a_valid_value() {
     let bundled = setting_keys(&toml::from_str::<toml::Value>(BUNDLED_CONFIG).unwrap());
-    for page in &super::setup_catalog().pages {
+    for page in &crate::config::setup_catalog().pages {
         if let Some(key) = &page.key {
             assert!(
                 bundled.contains(key),
@@ -1505,8 +1540,8 @@ fn every_setup_choice_sets_a_real_setting_to_a_valid_value() {
         for choice in &page.choices {
             for (key, value) in &choice.settings {
                 assert!(bundled.contains(key), "{} sets unknown {key}", choice.label);
-                let source = super::catalog::edited_source("", key, Some(value.clone())).unwrap();
-                super::load::settings_from_source(&source)
+                let source = crate::config::catalog::edited_source("", key, Some(value.clone())).unwrap();
+                crate::config::load::settings_from_source(&source)
                     .unwrap_or_else(|error| panic!("{}: {key}: {error}", choice.label));
             }
         }
@@ -1515,7 +1550,7 @@ fn every_setup_choice_sets_a_real_setting_to_a_valid_value() {
 
 #[test]
 fn settings_catalog_lists_every_bundled_setting_once() {
-    let catalog = super::settings_catalog();
+    let catalog = crate::config::settings_catalog();
     let bundled = setting_keys(&toml::from_str::<toml::Value>(BUNDLED_CONFIG).unwrap());
     let in_collection = |key: &str| {
         catalog
@@ -1572,19 +1607,19 @@ fn settings_catalog_lists_every_bundled_setting_once() {
         );
         if let Some(table) = &setting.choices_from {
             assert!(
-                super::default_setting(table).is_some_and(|value| value.is_table()),
+                crate::config::default_setting(table).is_some_and(|value| value.is_table()),
                 "{table}"
             );
         }
         for choice in &setting.choices {
-            let source = super::catalog::edited_source(
+            let source = crate::config::catalog::edited_source(
                 "",
                 &setting.key,
                 Some(toml::Value::String(choice.clone())),
             )
             .unwrap();
             assert!(
-                super::load::settings_from_source(&source).is_ok(),
+                crate::config::load::settings_from_source(&source).is_ok(),
                 "{} = {choice} is offered but rejected",
                 setting.key
             );
@@ -1596,7 +1631,7 @@ fn settings_catalog_lists_every_bundled_setting_once() {
 fn resetting_the_last_inline_setting_preserves_parent_comments() {
     for tail in ["", "wrap = true\n"] {
         let source = format!("# keep this\neditor = {{ tab_width = 2 }} # explanation\n{tail}");
-        let reset = super::catalog::edited_source(&source, "editor.tab_width", None).unwrap();
+        let reset = crate::config::catalog::edited_source(&source, "editor.tab_width", None).unwrap();
         assert_eq!(reset, format!("# keep this\n# explanation\n{tail}"));
     }
 }
@@ -1604,7 +1639,7 @@ fn resetting_the_last_inline_setting_preserves_parent_comments() {
 #[test]
 fn a_setting_is_changed_in_place_and_reset_removes_it_but_keeps_its_comments() {
     let edited = |source: &str, key: &str, value: Option<toml::Value>| {
-        super::catalog::edited_source(source, key, value).unwrap()
+        crate::config::catalog::edited_source(source, key, value).unwrap()
     };
     let source = "# my settings\n[editor]\n# wrap long lines\nwrap = false # for now\n";
     let wrapped = edited(source, "editor.wrap", Some(toml::Value::Boolean(true)));
@@ -1638,12 +1673,12 @@ fn a_setting_is_changed_in_place_and_reset_removes_it_but_keeps_its_comments() {
     assert_eq!(plain, "");
     let file = tempdir().unwrap();
     let path = file.path().join("dust").join("config.toml");
-    super::write_user_setting(&path, "editor.tab_width", Some(toml::Value::Integer(2))).unwrap();
+    crate::config::write_user_setting(&path, "editor.tab_width", Some(toml::Value::Integer(2))).unwrap();
     assert_eq!(
         fs::read_to_string(&path).unwrap(),
         "[editor]\ntab_width = 2\n"
     );
-    let rejected = super::write_user_setting(
+    let rejected = crate::config::write_user_setting(
         &path,
         "editor.tab_width",
         Some(toml::Value::String("x".into())),
@@ -1662,12 +1697,12 @@ fn settings_save_rejects_growth_past_the_configuration_byte_ceiling() {
     let mut source = "[editor]\ntab_width = 2\n#".to_owned();
     source.extend(std::iter::repeat_n(
         ' ',
-        super::load::WATCH_FINGERPRINT_BYTE_CEILING as usize - source.len() - 1,
+        crate::config::load::WATCH_FINGERPRINT_BYTE_CEILING as usize - source.len() - 1,
     ));
     source.push('\n');
     fs::write(&path, &source).unwrap();
     let error =
-        super::write_user_setting(&path, "editor.tab_width", Some(toml::Value::Integer(32)))
+        crate::config::write_user_setting(&path, "editor.tab_width", Some(toml::Value::Integer(32)))
             .unwrap_err();
     assert!(error.contains("byte ceiling"), "{error}");
     assert_eq!(fs::read_to_string(path).unwrap(), source);
@@ -1675,7 +1710,7 @@ fn settings_save_rejects_growth_past_the_configuration_byte_ceiling() {
 
 #[test]
 fn deep_task_dependencies_are_validated_without_recursion() {
-    let task: super::settings::TaskConfig = toml::from_str("executable = '/bin/true'").unwrap();
+    let task: crate::config::settings::TaskConfig = toml::from_str("executable = '/bin/true'").unwrap();
     let mut config = load_bundled_config().config;
     for index in 0..50_000 {
         let mut task = task.clone();
@@ -1701,7 +1736,7 @@ fn settings_save_preserves_a_symlink() {
     let path = root.path().join("config.toml");
     fs::write(&target, "# preserved\n[editor]\ntab_width = 4\n").unwrap();
     std::os::unix::fs::symlink(&target, &path).unwrap();
-    super::write_user_setting(&path, "editor.tab_width", Some(toml::Value::Integer(3))).unwrap();
+    crate::config::write_user_setting(&path, "editor.tab_width", Some(toml::Value::Integer(3))).unwrap();
     assert!(
         fs::symlink_metadata(&path)
             .unwrap()
@@ -1732,7 +1767,7 @@ fn unknown_fields_in_window_rule_arrays_preserve_valid_settings() {
         ),
     ] {
         let source = format!("[editor]\ntab_width=3\n{rules}");
-        let (config, _, _, ignored) = super::load::settings_from_source(&source).unwrap();
+        let (config, _, _, ignored) = crate::config::load::settings_from_source(&source).unwrap();
         assert_eq!(config.editor.tab_width, 3);
         assert_eq!(config.windows.rules.len(), expected_count);
         assert_eq!(config.windows.rules[0].content_type, "builtin.problems");
@@ -1744,11 +1779,11 @@ fn unknown_fields_in_window_rule_arrays_preserve_valid_settings() {
 #[test]
 fn unknown_fields_in_window_rules_do_not_remove_valid_fields_from_other_variants() {
     let source = "[[windows.rule]]\ncontent_type='builtin.problems'\nplacement={kind='floating',x=1,y=2,width=30,height=10}\n[[windows.rule]]\ncontent_type='builtin.output'\nplacement={kind='docked',edge='bottom',size=5,x=99}\n";
-    let (config, _, _, ignored) = super::load::settings_from_source(source).unwrap();
+    let (config, _, _, ignored) = crate::config::load::settings_from_source(source).unwrap();
     assert_eq!(config.windows.rules.len(), 2);
     assert_eq!(
         config.windows.rules[0].placement,
-        super::WindowPlacementConfig::Floating {
+        crate::config::WindowPlacementConfig::Floating {
             x: 1,
             y: 2,
             width: 30,
@@ -1757,7 +1792,7 @@ fn unknown_fields_in_window_rules_do_not_remove_valid_fields_from_other_variants
     );
     assert_eq!(
         config.windows.rules[1].placement,
-        super::WindowPlacementConfig::Docked {
+        crate::config::WindowPlacementConfig::Docked {
             edge: "bottom".into(),
             size: 5,
         }
@@ -1767,7 +1802,7 @@ fn unknown_fields_in_window_rules_do_not_remove_valid_fields_from_other_variants
 
 #[test]
 fn unknown_fields_under_dotted_task_names_preserve_valid_settings() {
-    let (config, _, _, ignored) = super::load::settings_from_source(
+    let (config, _, _, ignored) = crate::config::load::settings_from_source(
         "[editor]\ntab_width=3\n[tasks.'build.all']\nexecutable='/bin/true'\nunknown=true\n",
     )
     .unwrap();
@@ -1779,7 +1814,7 @@ fn unknown_fields_under_dotted_task_names_preserve_valid_settings() {
 #[test]
 fn installed_dust_overrides_and_saved_namesakes_keep_their_colours() {
     let mut installed = load_bundled_config().theme;
-    installed.styles.default.foreground = super::ThemeColor::Red;
+    installed.styles.default.foreground = crate::config::ThemeColor::Red;
     let theme_source = toml::to_string(&installed).unwrap();
     let bundle = capture_configuration_bundle_with("dust", |path| {
         captured(
@@ -1792,13 +1827,13 @@ fn installed_dust_overrides_and_saved_namesakes_keep_their_colours() {
         )
     });
     assert_eq!(bundle.into_loaded().theme, installed);
-    let choice = super::themes::ThemeChoice {
+    let choice = crate::config::themes::ThemeChoice {
         theme: installed.clone(),
         path: "/themes/dust.toml".into(),
     };
     let (reply, receiver) = std::sync::mpsc::sync_channel(1);
-    super::themes::discover(super::themes::ThemeRead {
-        source: super::themes::ThemeReadSource::Saved(super::themes::snapshot(&choice).unwrap()),
+    crate::config::themes::discover(crate::config::themes::ThemeRead {
+        source: crate::config::themes::ThemeReadSource::Saved(crate::config::themes::snapshot(&choice).unwrap()),
         cancelled: Default::default(),
         reply,
     });
@@ -1807,10 +1842,11 @@ fn installed_dust_overrides_and_saved_namesakes_keep_their_colours() {
 
 #[test]
 fn terminal_highlights_prefer_explicit_cterm_over_rgb_for_ansi16() {
-    use super::{HighlightDefinition, ThemeColor};
+    use crate::config::HighlightDefinition;
+    use crate::config::ThemeColor;
     use crate::language::syntax::Highlight;
     for (index, expected) in [(1, ThemeColor::DarkRed), (196, ThemeColor::Red)] {
-        let mut theme: super::ThemeConfig = toml::from_str(BUNDLED_THEME).unwrap();
+        let mut theme: crate::config::ThemeConfig = toml::from_str(BUNDLED_THEME).unwrap();
         theme.highlights.insert(
             "@function".into(),
             HighlightDefinition {
@@ -1833,10 +1869,11 @@ fn terminal_highlights_prefer_explicit_cterm_over_rgb_for_ansi16() {
 
 #[test]
 fn markdown_code_recomputes_both_background_fallbacks() {
-    use super::{HighlightDefinition, ThemeColor};
+    use crate::config::HighlightDefinition;
+    use crate::config::ThemeColor;
     use crate::language::syntax::Highlight;
     for background in [ThemeColor::DarkRed, ThemeColor::Indexed(9)] {
-        let mut theme: super::ThemeConfig = toml::from_str(BUNDLED_THEME).unwrap();
+        let mut theme: crate::config::ThemeConfig = toml::from_str(BUNDLED_THEME).unwrap();
         theme.styles.default.foreground = ThemeColor::Rgb(255, 255, 255);
         theme.styles.default.background = ThemeColor::Rgb(0, 0, 0);
         theme.highlights.insert(
@@ -1855,7 +1892,8 @@ fn markdown_code_recomputes_both_background_fallbacks() {
 
 #[test]
 fn terminal_highlights_keep_cterm_only_and_ansi_palette_colours() {
-    use super::{HighlightDefinition, ThemeColor};
+    use crate::config::HighlightDefinition;
+    use crate::config::ThemeColor;
     use crate::language::syntax::Highlight;
     for (index, expected) in [
         ThemeColor::Black,
@@ -1878,7 +1916,7 @@ fn terminal_highlights_keep_cterm_only_and_ansi_palette_colours() {
     .into_iter()
     .enumerate()
     {
-        let mut theme: super::ThemeConfig = toml::from_str(BUNDLED_THEME).unwrap();
+        let mut theme: crate::config::ThemeConfig = toml::from_str(BUNDLED_THEME).unwrap();
         theme.highlights.insert(
             "@function".into(),
             HighlightDefinition {
@@ -1890,7 +1928,7 @@ fn terminal_highlights_keep_cterm_only_and_ansi_palette_colours() {
         let style = theme.highlight(Highlight::FUNCTION).unwrap();
         assert_eq!(style.foreground_256, Some(ThemeColor::Indexed(index as u8)));
         assert_eq!(style.background_16, Some(expected));
-        let mut theme: super::ThemeConfig = toml::from_str(BUNDLED_THEME).unwrap();
+        let mut theme: crate::config::ThemeConfig = toml::from_str(BUNDLED_THEME).unwrap();
         theme.highlights.insert(
             "@function".into(),
             HighlightDefinition {
@@ -1916,7 +1954,7 @@ fn config_migration_rejects_noninteger_schema_versions() {
         "schema_version = []\n",
         "[schema_version]\n",
     ] {
-        let error = super::migrate_config_source(source).unwrap_err();
+        let error = crate::config::migrate_config_source(source).unwrap_err();
         assert!(
             error.contains("schema_version must be an integer"),
             "{error}"
@@ -1932,16 +1970,16 @@ fn config_migration_rejects_noninteger_schema_versions() {
         assert_eq!(fs::read_to_string(&path).unwrap(), source);
     }
     for source in ["", "schema_version = 0\n"] {
-        let (migrated, changed) = super::migrate_config_source(source).unwrap();
+        let (migrated, changed) = crate::config::migrate_config_source(source).unwrap();
         assert!(changed);
         assert!(migrated.contains("schema_version = 1"));
     }
     let current = "schema_version = 1\n";
     assert_eq!(
-        super::migrate_config_source(current).unwrap(),
+        crate::config::migrate_config_source(current).unwrap(),
         (current.into(), false)
     );
-    assert!(super::migrate_config_source("schema_version = 999\n").is_err());
+    assert!(crate::config::migrate_config_source("schema_version = 999\n").is_err());
 }
 
 #[test]
@@ -1950,10 +1988,10 @@ fn config_migration_rejects_changes_since_the_source_was_read() {
     let path = directory.path().join("config.toml");
     std::fs::write(&path, "# original\n").unwrap();
     let source = std::fs::read_to_string(&path).unwrap();
-    let (migrated, _) = super::migrate_config_source(&source).unwrap();
+    let (migrated, _) = crate::config::migrate_config_source(&source).unwrap();
     std::fs::write(&path, "# edited elsewhere\n").unwrap();
     assert!(matches!(
-        super::apply_config_migration(&path, &source, &migrated),
+        crate::config::apply_config_migration(&path, &source, &migrated),
         Err(crate::files::VfsError::ExternalModification(_))
     ));
     assert_eq!(
@@ -1971,8 +2009,8 @@ fn config_migration_preserves_symlinks_and_updates_their_target() {
     std::fs::write(&target, "# original\n").unwrap();
     std::os::unix::fs::symlink(&target, &link).unwrap();
     let source = std::fs::read_to_string(&link).unwrap();
-    let (migrated, _) = super::migrate_config_source(&source).unwrap();
-    super::apply_config_migration(&link, &source, &migrated).unwrap();
+    let (migrated, _) = crate::config::migrate_config_source(&source).unwrap();
+    crate::config::apply_config_migration(&link, &source, &migrated).unwrap();
     assert!(
         std::fs::symlink_metadata(&link)
             .unwrap()

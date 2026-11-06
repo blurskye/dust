@@ -1,12 +1,14 @@
-use std::{
-    path::{Path, PathBuf},
-    sync::mpsc::{self, Receiver},
-    thread,
-};
+use std::path::Path;
+use std::path::PathBuf;
+use std::sync::mpsc::self;
+use std::sync::mpsc::Receiver;
+use std::thread;
 
 use ignore::WalkBuilder;
 
-use super::{error::VfsError, vfs::canonical_path};
+use crate::files::error::VfsError;
+
+use crate::files::vfs::canonical_path;
 
 pub(super) const WORKTREE_DIRECTORY: &str = ".worktree";
 
@@ -74,7 +76,7 @@ impl DirectoryService {
                             filesystem_identity: None,
                         })
                         .collect::<Vec<_>>();
-                    let relevant = super::vfs::participating_roots(
+                    let relevant = crate::files::vfs::participating_roots(
                         &[&worker_directory],
                         &[&canonical],
                         &allowed,
@@ -226,7 +228,7 @@ pub(super) fn root_worktrees(
 /// `<repository>/.git/worktrees/<name>`.
 #[must_use]
 pub fn linked_worktree_repository(root: &Path) -> Option<String> {
-    let bytes = super::vfs::read_file_with_ceiling(&root.join(".git"), 16 * 1024).ok()?;
+    let bytes = crate::files::vfs::read_file_with_ceiling(&root.join(".git"), 16 * 1024).ok()?;
     let link = std::str::from_utf8(&bytes).ok()?;
     let git_directory = Path::new(link.strip_prefix("gitdir:")?.trim());
     let git_directory = std::path::absolute(root.join(git_directory)).ok()?;

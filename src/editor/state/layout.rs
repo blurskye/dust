@@ -1,7 +1,7 @@
-use super::{
-    id::PaneId,
-    model::{Axis, FocusDirection, LayoutNode},
-};
+use crate::editor::state::id::PaneId;
+use crate::editor::state::model::Axis;
+use crate::editor::state::model::FocusDirection;
+use crate::editor::state::model::LayoutNode;
 
 pub(super) fn layout_ratios_are_valid(node: &LayoutNode) -> bool {
     match node {

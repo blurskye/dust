@@ -6,7 +6,17 @@
 
 use unicode_segmentation::UnicodeSegmentation;
 
-use super::{DiffHunk, DiffLayout, DiffLine, DiffLineKind, DiffPreview, DiffSpan};
+use crate::ui::DiffHunk;
+
+use crate::ui::DiffLayout;
+
+use crate::ui::DiffLine;
+
+use crate::ui::DiffLineKind;
+
+use crate::ui::DiffPreview;
+
+use crate::ui::DiffSpan;
 
 /// Parse unified diff text into a `DiffPreview`.
 ///
@@ -226,7 +236,7 @@ fn byte_of(text: &str, char_index: usize) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::ui::diff::*;
 
     #[test]
     fn changed_accents_emphasise_the_whole_grapheme() {

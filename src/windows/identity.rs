@@ -1,4 +1,5 @@
-use super::{MAXIMUM_CONTENT_TYPE_ID_BYTES, error::WindowError};
+use crate::windows::MAXIMUM_CONTENT_TYPE_ID_BYTES;
+use crate::windows::error::WindowError;
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct ContentTypeId(String);

@@ -1,8 +1,16 @@
 use thiserror::Error;
 
-use crate::editor::text::{
-    BufferRevision, ByteRange, DeltaSpan, EditDelta, PositionError, TextBuffer,
-};
+use crate::editor::text::BufferRevision;
+
+use crate::editor::text::ByteRange;
+
+use crate::editor::text::DeltaSpan;
+
+use crate::editor::text::EditDelta;
+
+use crate::editor::text::PositionError;
+
+use crate::editor::text::TextBuffer;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TextEdit {
@@ -189,9 +197,12 @@ fn normalize_replacement(text: String) -> String {
 
 #[cfg(test)]
 mod tests {
-    use crate::editor::text::{
-        BufferRevision, ByteOffset, ByteRange, TextBuffer, TextEdit, TextEditSet,
-    };
+    use crate::editor::text::BufferRevision;
+    use crate::editor::text::ByteOffset;
+    use crate::editor::text::ByteRange;
+    use crate::editor::text::TextBuffer;
+    use crate::editor::text::TextEdit;
+    use crate::editor::text::TextEditSet;
 
     #[test]
     fn applies_unsorted_edits_atomically() {

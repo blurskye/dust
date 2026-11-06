@@ -1,18 +1,41 @@
 //! A terminal tab's screen. alacritty_terminal reads the program's output as a real terminal
 //! would; this module hands its grid and scrollback to the panel in Dust's own cell types.
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use std::sync::Mutex;
 
-use alacritty_terminal::{
-    event::{Event, EventListener},
-    grid::Dimensions,
-    index::{Column, Line, Point, Side},
-    selection::{Selection, SelectionType},
-    term::{
-        Config, Term, TermMode,
-        cell::{Cell, Flags},
-    },
-    vte::ansi::{Color, NamedColor, Processor},
-};
+use alacritty_terminal::event::Event;
+
+use alacritty_terminal::event::EventListener;
+
+use alacritty_terminal::grid::Dimensions;
+
+use alacritty_terminal::index::Column;
+
+use alacritty_terminal::index::Line;
+
+use alacritty_terminal::index::Point;
+
+use alacritty_terminal::index::Side;
+
+use alacritty_terminal::selection::Selection;
+
+use alacritty_terminal::selection::SelectionType;
+
+use alacritty_terminal::term::Config;
+
+use alacritty_terminal::term::Term;
+
+use alacritty_terminal::term::TermMode;
+
+use alacritty_terminal::term::cell::Cell;
+
+use alacritty_terminal::term::cell::Flags;
+
+use alacritty_terminal::vte::ansi::Color;
+
+use alacritty_terminal::vte::ansi::NamedColor;
+
+use alacritty_terminal::vte::ansi::Processor;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PtyColor {
@@ -708,12 +731,18 @@ fn render_row(row: &[PtyCell]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        PtyColor, PtyInputKey, PtyMouseEvent, PtyMouseMode, PtyScreen, PtyStyle, encode_focus,
-        encode_key, encode_paste, encode_sgr_mouse,
-    };
+    use crate::ui::pty_screen::PtyColor;
+    use crate::ui::pty_screen::PtyInputKey;
+    use crate::ui::pty_screen::PtyMouseEvent;
+    use crate::ui::pty_screen::PtyMouseMode;
+    use crate::ui::pty_screen::PtyScreen;
+    use crate::ui::pty_screen::PtyStyle;
+    use crate::ui::pty_screen::encode_focus;
+    use crate::ui::pty_screen::encode_key;
+    use crate::ui::pty_screen::encode_paste;
+    use crate::ui::pty_screen::encode_sgr_mouse;
 
-    fn row(screen: &PtyScreen, row: usize) -> Vec<super::PtyCell> {
+    fn row(screen: &PtyScreen, row: usize) -> Vec<crate::ui::pty_screen::PtyCell> {
         screen.history_row(screen.scrollback_len() + row).unwrap()
     }
 
@@ -843,7 +872,8 @@ mod tests {
 
     #[test]
     fn mouse_modifiers_survive_clicks_releases_drags_and_wheel_reports() {
-        use crate::editor::input::{Modifiers, TerminalMouseInput};
+        use crate::editor::input::Modifiers;
+        use crate::editor::input::TerminalMouseInput;
         for (event, mode, button, suffix) in [
             (TerminalMouseInput::LeftDown, PtyMouseMode::Click, 0, 'M'),
             (TerminalMouseInput::RightUp, PtyMouseMode::Click, 2, 'm'),
@@ -881,7 +911,7 @@ mod tests {
                     28,
                 ),
             ] {
-                let report = super::encode_terminal_mouse_event(super::TerminalMouseEncoding {
+                let report = crate::ui::pty_screen::encode_terminal_mouse_event(crate::ui::pty_screen::TerminalMouseEncoding {
                     event: event.clone(),
                     modifiers,
                     column: 12,
@@ -1210,7 +1240,7 @@ mod tests {
             .is_none()
         );
         assert_eq!(
-            super::encode_terminal_mouse_event(super::TerminalMouseEncoding {
+            crate::ui::pty_screen::encode_terminal_mouse_event(crate::ui::pty_screen::TerminalMouseEncoding {
                 event: crate::editor::input::TerminalMouseInput::LeftDown,
                 modifiers: Default::default(),
                 column: 12,
@@ -1227,7 +1257,7 @@ mod tests {
             b"\x1b[<0;3;4M"
         );
         assert!(
-            super::encode_terminal_mouse_event(super::TerminalMouseEncoding {
+            crate::ui::pty_screen::encode_terminal_mouse_event(crate::ui::pty_screen::TerminalMouseEncoding {
                 event: crate::editor::input::TerminalMouseInput::Move,
                 modifiers: Default::default(),
                 column: 9,

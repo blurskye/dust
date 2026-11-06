@@ -1,12 +1,23 @@
-use std::{collections::HashMap, path::PathBuf};
+use std::collections::HashMap;
+use std::path::PathBuf;
 
-use crate::editor::{
-    command::CommandInvocation,
-    text::{BufferRevision, ByteOffset, FileFormat, TextBuffer},
-    transaction::UndoTree,
-};
+use crate::editor::command::CommandInvocation;
 
-use super::id::{BufferId, PaneId, ViewId};
+use crate::editor::text::BufferRevision;
+
+use crate::editor::text::ByteOffset;
+
+use crate::editor::text::FileFormat;
+
+use crate::editor::text::TextBuffer;
+
+use crate::editor::transaction::UndoTree;
+
+use crate::editor::state::id::BufferId;
+
+use crate::editor::state::id::PaneId;
+
+use crate::editor::state::id::ViewId;
 
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 pub enum EditorMode {
@@ -137,7 +148,7 @@ impl Buffer {
             || self.text.format().line_endings != self.saved_format.line_endings;
     }
 
-    pub(crate) fn restored_view(&self, buffer: super::BufferId) -> View {
+    pub(crate) fn restored_view(&self, buffer: crate::editor::state::BufferId) -> View {
         let mut view = self.saved_view.clone().unwrap_or_else(|| View::new(buffer));
         view.cursor = view.cursor.min(ByteOffset(self.text.len_bytes()));
         while !self.text.is_char_boundary(view.cursor) {

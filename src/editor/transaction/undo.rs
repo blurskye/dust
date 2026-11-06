@@ -1,12 +1,14 @@
-use std::{
-    fs,
-    path::{Path, PathBuf},
-    sync::Arc,
-    thread,
-};
+use std::fs;
+use std::path::Path;
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::thread;
 
-use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
+use serde::Deserialize;
+
+use serde::Serialize;
+use sha2::Digest;
+use sha2::Sha256;
 
 use crate::editor::text::TextBuffer;
 
@@ -331,7 +333,8 @@ fn remove_undo_file(path: &Path) -> std::io::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Change, UndoTree};
+    use crate::editor::transaction::undo::Change;
+    use crate::editor::transaction::undo::UndoTree;
 
     fn apply(text: &mut String, changes: &[Change]) {
         for change in changes {
@@ -355,11 +358,11 @@ mod tests {
     fn history_save_reports_failure_and_removes_partial_files() {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("file");
-        let file = super::undo_file(root.path(), &path);
+        let file = crate::editor::transaction::undo::undo_file(root.path(), &path);
         std::fs::create_dir(&file).unwrap(); // Publishing over a directory must fail.
         let mut tree = UndoTree::default();
         tree.record(insert(0, "x"), false);
-        let reply = super::save_undo_history(
+        let reply = crate::editor::transaction::undo::save_undo_history(
             root.path().into(),
             path,
             crate::editor::text::TextBuffer::from_text("x"),
@@ -386,7 +389,7 @@ mod tests {
         for count in 1..=20 {
             let mut tree = UndoTree::default();
             tree.record(insert(0, &"x".repeat(count)), false);
-            super::save_undo_history(
+            crate::editor::transaction::undo::save_undo_history(
                 root.path().into(),
                 path.clone(),
                 crate::editor::text::TextBuffer::from_text(&"x".repeat(count)),
@@ -397,7 +400,7 @@ mod tests {
         let text = crate::editor::text::TextBuffer::from_text(&"x".repeat(20));
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         loop {
-            if let Some(mut tree) = super::load_undo_history(root.path(), &path, &text, 1 << 20) {
+            if let Some(mut tree) = crate::editor::transaction::undo::load_undo_history(root.path(), &path, &text, 1 << 20) {
                 assert_eq!(tree.undo().unwrap()[0].removed, "x".repeat(20));
                 break;
             }

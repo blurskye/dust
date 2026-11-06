@@ -1,32 +1,80 @@
-use crate::ui::render::{CONTROL_CHARACTER_REPLACEMENT, SCRATCH_LABEL, ZERO_WIDTH_REPLACEMENT};
+use crate::ui::render::CONTROL_CHARACTER_REPLACEMENT;
+use crate::ui::render::SCRATCH_LABEL;
+use crate::ui::render::ZERO_WIDTH_REPLACEMENT;
 use std::collections::BTreeMap;
 
 use crossterm::cursor::SetCursorStyle;
 use unicode_segmentation::UnicodeSegmentation;
 
-use crate::{
-    config::{AmbiguousWidth, Config, CursorShape, ExplorerIconMode, LineNumbers},
-    editor::{
-        EditorMode, EditorState, SelectionKind,
-        text::{
-            ByteOffset, ByteRange, DisplayWidthPolicy, PositionCodec,
-            byte_range_for_display_columns, display_column_at,
-        },
-    },
-    ui::{
-        CellGrid, Style,
-        geometry::{cell_text_width, text_width},
-    },
-};
+use crate::config::AmbiguousWidth;
 
-use super::{
-    DebugSignKind, Frame, TerminalPanelMode, UiDiagnostic, UiGitSignKind, UiState,
-    visual_rows::{
-        VisualRowAnchor, VisualRowModel, active_indent_guide, editor_line_number_digits,
-        editor_state_content_width, editor_state_gutter_width, git_sign_column,
-        is_indent_guide_column, leading_indentation_width, one_cell_symbol, projected_inlay_hints,
-    },
-};
+use crate::config::Config;
+
+use crate::config::CursorShape;
+
+use crate::config::ExplorerIconMode;
+
+use crate::config::LineNumbers;
+
+use crate::editor::EditorMode;
+
+use crate::editor::EditorState;
+
+use crate::editor::SelectionKind;
+
+use crate::editor::text::ByteOffset;
+
+use crate::editor::text::ByteRange;
+
+use crate::editor::text::DisplayWidthPolicy;
+
+use crate::editor::text::PositionCodec;
+
+use crate::editor::text::byte_range_for_display_columns;
+
+use crate::editor::text::display_column_at;
+
+use crate::ui::CellGrid;
+
+use crate::ui::Style;
+
+use crate::ui::geometry::cell_text_width;
+
+use crate::ui::geometry::text_width;
+
+use crate::ui::render::DebugSignKind;
+
+use crate::ui::render::Frame;
+
+use crate::ui::render::TerminalPanelMode;
+
+use crate::ui::render::UiDiagnostic;
+
+use crate::ui::render::UiGitSignKind;
+
+use crate::ui::render::UiState;
+
+use crate::ui::render::visual_rows::VisualRowAnchor;
+
+use crate::ui::render::visual_rows::VisualRowModel;
+
+use crate::ui::render::visual_rows::active_indent_guide;
+
+use crate::ui::render::visual_rows::editor_line_number_digits;
+
+use crate::ui::render::visual_rows::editor_state_content_width;
+
+use crate::ui::render::visual_rows::editor_state_gutter_width;
+
+use crate::ui::render::visual_rows::git_sign_column;
+
+use crate::ui::render::visual_rows::is_indent_guide_column;
+
+use crate::ui::render::visual_rows::leading_indentation_width;
+
+use crate::ui::render::visual_rows::one_cell_symbol;
+
+use crate::ui::render::visual_rows::projected_inlay_hints;
 
 pub(crate) const END_OF_BUFFER_MARKER: &str = "~";
 pub(crate) const LINE_NUMBER_SEPARATOR: &str = " ";
@@ -129,7 +177,7 @@ pub(super) fn expanded_diagnostic_rows(
         let text = format!("{}. {}", index + 1, diagnostic_label(diagnostic));
         let lines = text.lines().map(str::to_owned).collect::<Vec<_>>();
         rows.extend(
-            super::debug::wrap_rows(&lines, content_width, &grid)
+            crate::ui::render::debug::wrap_rows(&lines, content_width, &grid)
                 .into_iter()
                 .map(|row| (row, diagnostic_style(diagnostic.severity))),
         );
@@ -154,7 +202,7 @@ pub(super) fn render_editor_view(
         // Alone on screen the panel keeps the status line under it, like any editor view.
         let status = config.ui.status_line.enabled && height > 1;
         let mut frame =
-            super::agent::render_agent_panel(panel, focused, config, width, height, status);
+            crate::ui::render::agent::render_agent_panel(panel, focused, config, width, height, status);
         if status {
             render_status_line(
                 &mut frame.grid,
@@ -773,8 +821,8 @@ pub(super) fn render_editor_view(
                     x = grid.put_text_clipped(x, screen_row, text, style, width);
                 }
                 match markdown.at(global) {
-                    Some(super::markdown::Drawn::Hidden) => continue,
-                    Some(super::markdown::Drawn::Glyph(glyph, style)) => {
+                    Some(crate::ui::render::markdown::Drawn::Hidden) => continue,
+                    Some(crate::ui::render::markdown::Drawn::Glyph(glyph, style)) => {
                         x = grid.put_text_clipped(x, screen_row, glyph, style, width);
                         continue;
                     }
@@ -823,7 +871,7 @@ pub(super) fn render_editor_view(
                     .copied()
                     .filter(|span| span.range.contains(global))
             } {
-                super::overlays::color_swatch_style(span.rgb)
+                crate::ui::render::overlays::color_swatch_style(span.rgb)
             } else if let Some(span) = {
                 while highlight_spans
                     .get(highlight_cursor)

@@ -308,7 +308,7 @@ impl std::fmt::Display for InputContextError {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::editor::input::context::*;
 
     #[test]
     fn bundled_registry_preserves_all_contexts_aliases_and_modes() {

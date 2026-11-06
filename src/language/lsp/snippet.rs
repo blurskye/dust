@@ -625,7 +625,7 @@ fn change_case(value: &str, case: &str) -> Result<String, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::language::lsp::snippet::*;
     #[test]
     fn snippet_tabstops_use_normalized_line_endings() {
         let parsed = parse_snippet("a\r\n${1:b}$0", 1024).unwrap();

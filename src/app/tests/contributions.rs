@@ -4,27 +4,27 @@ use crate::app::tests::*;
 fn indexed_plugin_defaults_install_before_activation_and_roll_back_on_failure() {
     let (_app_dirs, mut app) = app();
     let root = tempfile::tempdir().expect("plugin store");
-    let manifest = crate::extensions::PluginManifest {
+    let manifest = crate::plugins::PluginManifest {
         id: "demo".into(),
         version: "1.0.0".into(),
         component_sha256: "0".repeat(64),
         capabilities: std::collections::BTreeSet::new(),
         commands: [(
             "run".into(),
-            crate::extensions::PluginCommandDeclaration {
+            crate::plugins::PluginCommandDeclaration {
                 title: "Run demo".into(),
                 description: String::new(),
                 arguments: BTreeMap::new(),
-                context: crate::extensions::PluginCommandContext::Application,
-                activation: crate::extensions::PluginActivationBehavior::ActiveOnly,
+                context: crate::plugins::PluginCommandContext::Application,
+                activation: crate::plugins::PluginActivationBehavior::ActiveOnly,
             },
         )]
         .into_iter()
         .collect(),
-        contributions: crate::extensions::PluginContributions {
+        contributions: crate::plugins::PluginContributions {
             schema_version: 1,
             input_contexts: Vec::new(),
-            keymaps: vec![crate::extensions::PluginKeymapContribution {
+            keymaps: vec![crate::plugins::PluginKeymapContribution {
                 id: "plugin.demo.keymap.dashboard".into(),
                 context: "dashboard".into(),
                 mode: String::new(),
@@ -32,7 +32,7 @@ fn indexed_plugin_defaults_install_before_activation_and_roll_back_on_failure() 
                 command: "plugin.demo.run".into(),
                 arguments: BTreeMap::new(),
             }],
-            key_groups: vec![crate::extensions::PluginKeyGroupContribution {
+            key_groups: vec![crate::plugins::PluginKeyGroupContribution {
                 id: "plugin.demo.group.dashboard".into(),
                 context: "dashboard".into(),
                 mode: String::new(),
@@ -118,32 +118,32 @@ fn typed_plugin_defaults_compile_between_bundled_and_user_contributions() {
             |_, _| Ok(crate::editor::CommandOutcome::empty()),
         )
         .expect("plugin command");
-    let manifest = crate::extensions::PluginManifest {
+    let manifest = crate::plugins::PluginManifest {
         id: "demo".into(),
         version: "1.0.0".into(),
         component_sha256: "0".repeat(64),
         capabilities: std::collections::BTreeSet::new(),
         commands: [(
             "run".into(),
-            crate::extensions::PluginCommandDeclaration {
+            crate::plugins::PluginCommandDeclaration {
                 title: "Run demo".into(),
                 description: String::new(),
                 arguments: BTreeMap::new(),
-                context: crate::extensions::PluginCommandContext::Application,
-                activation: crate::extensions::PluginActivationBehavior::ActiveOnly,
+                context: crate::plugins::PluginCommandContext::Application,
+                activation: crate::plugins::PluginActivationBehavior::ActiveOnly,
             },
         )]
         .into_iter()
         .collect(),
-        contributions: crate::extensions::PluginContributions {
+        contributions: crate::plugins::PluginContributions {
             schema_version: 1,
-            input_contexts: vec![crate::extensions::PluginInputContextContribution {
+            input_contexts: vec![crate::plugins::PluginInputContextContribution {
                 id: "plugin.demo.chat".into(),
                 title: "Chat".into(),
                 parent_surface: Some("panel".into()),
             }],
             keymaps: vec![
-                crate::extensions::PluginKeymapContribution {
+                crate::plugins::PluginKeymapContribution {
                     id: "plugin.demo.keymap.action".into(),
                     context: "editor".into(),
                     mode: "normal".into(),
@@ -151,7 +151,7 @@ fn typed_plugin_defaults_compile_between_bundled_and_user_contributions() {
                     command: "plugin.demo.run".into(),
                     arguments: BTreeMap::new(),
                 },
-                crate::extensions::PluginKeymapContribution {
+                crate::plugins::PluginKeymapContribution {
                     id: "plugin.demo.keymap.buffer-shadow".into(),
                     context: "editor".into(),
                     mode: "normal".into(),
@@ -159,7 +159,7 @@ fn typed_plugin_defaults_compile_between_bundled_and_user_contributions() {
                     command: "plugin.demo.run".into(),
                     arguments: BTreeMap::new(),
                 },
-                crate::extensions::PluginKeymapContribution {
+                crate::plugins::PluginKeymapContribution {
                     id: "plugin.demo.keymap.chat".into(),
                     context: "plugin.demo.chat".into(),
                     mode: String::new(),
@@ -168,7 +168,7 @@ fn typed_plugin_defaults_compile_between_bundled_and_user_contributions() {
                     arguments: BTreeMap::new(),
                 },
             ],
-            key_groups: vec![crate::extensions::PluginKeyGroupContribution {
+            key_groups: vec![crate::plugins::PluginKeyGroupContribution {
                 id: "plugin.demo.group.action".into(),
                 context: "editor".into(),
                 mode: "normal".into(),
@@ -185,11 +185,11 @@ fn typed_plugin_defaults_compile_between_bundled_and_user_contributions() {
         },
     };
     let index =
-        crate::extensions::index_manifest_contributions(&manifest, 4, "demo-manifest.toml".into())
+        crate::plugins::index_manifest_contributions(&manifest, 4, "demo-manifest.toml".into())
             .expect("index");
     let mut loaded = crate::config::load_bundled_config().keymaps;
     loaded.path = PathBuf::from("keymaps.toml");
-    let mut catalog = crate::extensions::PluginContributionCatalog::default();
+    let mut catalog = crate::plugins::PluginContributionCatalog::default();
     catalog.install(index).expect("catalog install");
     let plugin_defaults = crate::app::tests::compile_keymaps_with_plugin_catalog(
         &app.commands,

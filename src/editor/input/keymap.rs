@@ -226,9 +226,14 @@ impl KeymapResolver {
 
 #[cfg(test)]
 mod tests {
-    use crate::editor::{CommandInvocation, InvocationSource};
+    use crate::editor::CommandInvocation;
+    use crate::editor::InvocationSource;
 
-    use super::{KeymapLayer, KeymapResolver, MappingResolution};
+    use crate::editor::input::keymap::KeymapLayer;
+
+    use crate::editor::input::keymap::KeymapResolver;
+
+    use crate::editor::input::keymap::MappingResolution;
     use crate::editor::input::KeyEvent;
 
     #[test]

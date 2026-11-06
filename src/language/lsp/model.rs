@@ -1,14 +1,20 @@
-use std::{
-    path::{Path, PathBuf},
-    time::Duration,
-};
+use std::path::Path;
+use std::path::PathBuf;
+use std::time::Duration;
 
-use serde_json::{Value, json};
-use sha2::{Digest, Sha256};
+use serde_json::Value;
+
+use serde_json::json;
+use sha2::Digest;
+use sha2::Sha256;
 
 use crate::editor::text::PositionEncoding;
 
-use super::{MAX_LOG_LINES, REQUEST_TIMEOUT, paths::file_uri};
+use crate::language::lsp::MAX_LOG_LINES;
+
+use crate::language::lsp::REQUEST_TIMEOUT;
+
+use crate::language::lsp::paths::file_uri;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct LspPolicy {
@@ -342,7 +348,7 @@ fn registration_matches(options: &Value, document: &LspDocument) -> bool {
                         let Some(base) = base
                             .as_str()
                             .or_else(|| base.get("uri").and_then(Value::as_str))
-                            .and_then(super::paths::path_from_file_uri)
+                            .and_then(crate::language::lsp::paths::path_from_file_uri)
                         else {
                             return false;
                         };

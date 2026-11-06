@@ -1,6 +1,8 @@
-use super::*;
-use crate::{editor::EditorState, ui::render::editor::render_editor_view};
-use std::{ops::Range, path::PathBuf};
+use crate::ui::render::markdown::*;
+use crate::editor::EditorState;
+use crate::ui::render::editor::render_editor_view;
+use std::ops::Range;
+use std::path::PathBuf;
 
 fn fixture(source: &str, spans: Vec<(Range<usize>, MarkdownMark)>) -> (EditorState, UiState) {
     let mut state = EditorState::new(PathBuf::from("/tmp"));

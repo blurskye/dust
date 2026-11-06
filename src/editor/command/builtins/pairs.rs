@@ -1,17 +1,33 @@
 //! Bracket and quote pairs: `gsa`/`gsd`/`gsr` surround edits (mini.surround keys) and
 //! Insert-mode autopairs (mini.pairs rules).
 
-use crate::editor::{
-    state::{BufferId, EditorMode, ViewId},
-    text::{ByteOffset, ByteRange, TextBuffer, TextEdit, TextEditSet},
-    transaction::{EditorOperation, EditorTransaction},
-};
+use crate::editor::state::BufferId;
 
-use super::{
-    super::CommandError,
-    text_object::{pair_for, surrounding},
-    transaction::failed,
-};
+use crate::editor::state::EditorMode;
+
+use crate::editor::state::ViewId;
+
+use crate::editor::text::ByteOffset;
+
+use crate::editor::text::ByteRange;
+
+use crate::editor::text::TextBuffer;
+
+use crate::editor::text::TextEdit;
+
+use crate::editor::text::TextEditSet;
+
+use crate::editor::transaction::EditorOperation;
+
+use crate::editor::transaction::EditorTransaction;
+
+use crate::editor::command::CommandError;
+
+use crate::editor::command::builtins::text_object::pair_for;
+
+use crate::editor::command::builtins::text_object::surrounding;
+
+use crate::editor::command::builtins::transaction::failed;
 
 /// An opening bracket adds inner spaces, a closing one or `b`/`B` does not; any other
 /// character surrounds with itself.

@@ -1,9 +1,11 @@
 //! Content rectangles shared by surface painting and interaction.
-use crate::{
-    config::{AmbiguousWidth, Config},
-    ui::render::{explorer::EXPLORER_MAXIMUM_VISIBLE_ROWS, overlays::DOCUMENTATION_MAX_HEIGHT},
-    ui::{PickerSurfaceKind, PickerUiState, window::WindowRect},
-};
+use crate::config::AmbiguousWidth;
+use crate::config::Config;
+use crate::ui::render::explorer::EXPLORER_MAXIMUM_VISIBLE_ROWS;
+use crate::ui::render::overlays::DOCUMENTATION_MAX_HEIGHT;
+use crate::ui::PickerSurfaceKind;
+use crate::ui::PickerUiState;
+use crate::ui::window::WindowRect;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 

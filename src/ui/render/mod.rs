@@ -1,21 +1,29 @@
 pub(crate) mod terminal;
-use terminal::{active_compositor, dock_terminal_panel, render_key_hints};
+use terminal::active_compositor;
+use terminal::dock_terminal_panel;
+use terminal::render_key_hints;
 mod debug;
 pub(crate) mod explorer;
-pub use debug::{DebugPane, DebugPanesUiState, debug_pane_insets, debug_pane_tab_at};
-use debug::{debug_layout_in, render_debug_panes};
+pub use debug::DebugPane;
+pub use debug::DebugPanesUiState;
+pub use debug::debug_pane_insets;
+pub use debug::debug_pane_tab_at;
+use debug::debug_layout_in;
+use debug::render_debug_panes;
 pub(crate) use explorer::explorer_segment_style;
-use explorer::{place_workspace_frame, render_explorer_window};
+use explorer::place_workspace_frame;
+use explorer::render_explorer_window;
 pub(crate) mod overlays;
-use super::geometry::text_width;
-use overlays::{
-    render_dashboard, render_documentation_popup, render_language_completion, render_lsp_loading,
-    render_lsp_progress,
-};
+use crate::ui::geometry::text_width;
+use overlays::render_dashboard;
+use overlays::render_documentation_popup;
+use overlays::render_language_completion;
+use overlays::render_lsp_loading;
+use overlays::render_lsp_progress;
 mod workspace;
-use workspace::{
-    render_non_tiled_editor_window, render_non_tiled_editor_windows, render_workspace,
-};
+use workspace::render_non_tiled_editor_window;
+use workspace::render_non_tiled_editor_windows;
+use workspace::render_workspace;
 mod agent;
 pub(crate) mod editor;
 mod markdown;
@@ -27,45 +35,79 @@ mod visual_rows;
 use editor::render_editor_view;
 pub(crate) use editor::workspace_title;
 #[cfg(test)]
-use overlays::{content_tab_width, render_content_tab_line};
-use surfaces::{
-    render_picker, render_plugin_surface, render_private_surface, render_prompt, render_tool_menu,
-};
+use overlays::content_tab_width;
+use overlays::render_content_tab_line;
+use surfaces::render_picker;
+use surfaces::render_plugin_surface;
+use surfaces::render_private_surface;
+use surfaces::render_prompt;
+use surfaces::render_tool_menu;
 #[cfg(test)]
-use visual_rows::{VisualRowSlice, editor_line_number_digits, git_sign_column};
+use visual_rows::VisualRowSlice;
+use visual_rows::editor_line_number_digits;
+use visual_rows::git_sign_column;
 
-pub use agent::{AgentListRow, AgentPanelUi, transcript_lines};
-pub use editor::{snap_display_column, snap_display_column_forward};
+pub use agent::AgentListRow;
+
+pub use agent::AgentPanelUi;
+
+pub use agent::transcript_lines;
+pub use editor::snap_display_column;
+pub use editor::snap_display_column_forward;
 pub use explorer::explorer_panel_width;
 pub use overlays::content_tab_at_column;
-pub use settings::{
-    SettingsEdit, SettingsHit, SettingsLine, SettingsPageState, SettingsRow, SettingsValue,
-    SetupChoice, SetupPage, SetupState, settings_hit, settings_layout, settings_lines_height,
-};
+pub use settings::SettingsEdit;
+pub use settings::SettingsHit;
+pub use settings::SettingsLine;
+pub use settings::SettingsPageState;
+pub use settings::SettingsRow;
+pub use settings::SettingsValue;
+pub use settings::SetupChoice;
+pub use settings::SetupPage;
+pub use settings::SetupState;
+pub use settings::settings_hit;
+pub use settings::settings_layout;
+pub use settings::settings_lines_height;
 pub use surfaces::picker_geometry;
 pub use terminal::terminal_tab_at_column;
 pub(crate) use terminal::terminal_window_geometry;
-pub use visual_rows::{
-    VisualRowAnchor, VisualRowModel, editor_content_width, editor_gutter_width,
-    editor_state_content_width, editor_state_gutter_width,
-};
-pub use workspace::{
-    PaneViewport, active_editor_pane_viewport, active_pane_viewport, editor_pane_viewport_at,
-    pane_viewports, view_pane_viewport,
-};
+pub use visual_rows::VisualRowAnchor;
+pub use visual_rows::VisualRowModel;
+pub use visual_rows::editor_content_width;
+pub use visual_rows::editor_gutter_width;
+pub use visual_rows::editor_state_content_width;
+pub use visual_rows::editor_state_gutter_width;
+pub use workspace::PaneViewport;
+pub use workspace::active_editor_pane_viewport;
+pub use workspace::active_pane_viewport;
+pub use workspace::editor_pane_viewport_at;
+pub use workspace::pane_viewports;
+pub use workspace::view_pane_viewport;
 
 use std::time::Instant;
 
-use crate::config::{AmbiguousWidth, Config, DashboardConfig, PromptTextConfig};
+use crate::config::AmbiguousWidth;
+
+use crate::config::Config;
+
+use crate::config::DashboardConfig;
+
+use crate::config::PromptTextConfig;
 use crate::editor::EditorState;
-use crate::editor::text::{ByteOffset, ByteRange};
-use crate::windows::{
-    CompositorProjection, ContentAdapterKind, ContentId, TiledLayoutSnapshot, WindowId, WindowRect,
-};
+use crate::editor::text::ByteOffset;
+use crate::editor::text::ByteRange;
+use crate::windows::CompositorProjection;
+use crate::windows::ContentAdapterKind;
+use crate::windows::ContentId;
+use crate::windows::TiledLayoutSnapshot;
+use crate::windows::WindowId;
+use crate::windows::WindowRect;
 use crossterm::cursor::SetCursorStyle;
 use unicode_segmentation::UnicodeSegmentation;
 
-use crate::ui::{CellGrid, Style};
+use crate::ui::CellGrid;
+
+use crate::ui::Style;
 
 pub(crate) const CONTROL_CHARACTER_REPLACEMENT: &str = "�";
 pub(crate) const ZERO_WIDTH_REPLACEMENT: &str = "◌";
@@ -1270,7 +1312,7 @@ pub struct TerminalPanelState {
     pub focused: bool,
     pub columns: u16,
     pub rows: u16,
-    pub cells: Vec<Vec<super::pty_screen::PtyCell>>,
+    pub cells: Vec<Vec<crate::ui::pty_screen::PtyCell>>,
     pub cells_start: usize,
     pub cursor: Option<(usize, usize)>,
     pub selection: Option<TerminalSelection>,
@@ -1905,7 +1947,7 @@ fn render_error_notification(
     height: u16,
     at_bottom: bool,
 ) {
-    let Some(mut rect) = super::geometry::error_notification_geometry(width, height) else {
+    let Some(mut rect) = crate::ui::geometry::error_notification_geometry(width, height) else {
         return;
     };
     // A long message wraps instead of losing its end, which is usually the part that says why.

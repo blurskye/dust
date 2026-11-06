@@ -718,20 +718,20 @@ fn prompt_and_documentation_capture_preserve_explicit_focus_changes_and_closed_t
 
 #[test]
 fn plugin_admission_counts_all_graph_and_host_copies_in_invalid_unchanged_valid_and_idle_cases() {
-    use crate::extensions::PluginRequestedPlacement;
-    use crate::extensions::PluginUiErrorCode;
-    use crate::extensions::PluginUiNode;
-    use crate::extensions::PluginUiNodeKind;
-    use crate::extensions::PluginUiRequest;
-    use crate::extensions::PluginUiRequestKind;
-    use crate::extensions::PluginUiStyle;
-    use crate::extensions::PluginUiTree;
+    use crate::plugins::PluginRequestedPlacement;
+    use crate::plugins::PluginUiErrorCode;
+    use crate::plugins::PluginUiNode;
+    use crate::plugins::PluginUiNodeKind;
+    use crate::plugins::PluginUiRequest;
+    use crate::plugins::PluginUiRequestKind;
+    use crate::plugins::PluginUiStyle;
+    use crate::plugins::PluginUiTree;
     let mut session = TestSession::new(crate::config::load_bundled_config());
     session.new_buffer();
     session.resize(100, 30);
     let manifest = crate::app::tests::plugin_manifest("demo", "plugin.demo.keymap.dashboard", "x y");
     let index =
-        crate::extensions::index_manifest_contributions(&manifest, 77, "admission fixture".into())
+        crate::plugins::index_manifest_contributions(&manifest, 77, "admission fixture".into())
             .unwrap();
     session.install_plugin_fixture(index.clone());
     let tree = |revision| PluginUiTree {
@@ -849,14 +849,14 @@ fn plugin_admission_counts_all_graph_and_host_copies_in_invalid_unchanged_valid_
 
 #[test]
 fn production_02_retained_and_private_clone_refusals_do_not_touch_host_tokens_or_graph() {
-    use crate::extensions::PluginPrivateCellPolicy;
-    use crate::extensions::PluginRequestedPlacement;
-    use crate::extensions::PluginUiNode;
-    use crate::extensions::PluginUiNodeKind;
-    use crate::extensions::PluginUiRequest;
-    use crate::extensions::PluginUiRequestKind;
-    use crate::extensions::PluginUiStyle;
-    use crate::extensions::PluginUiTree;
+    use crate::plugins::PluginPrivateCellPolicy;
+    use crate::plugins::PluginRequestedPlacement;
+    use crate::plugins::PluginUiNode;
+    use crate::plugins::PluginUiNodeKind;
+    use crate::plugins::PluginUiRequest;
+    use crate::plugins::PluginUiRequestKind;
+    use crate::plugins::PluginUiStyle;
+    use crate::plugins::PluginUiTree;
     for private in [false, true] {
         let mut session = TestSession::new(crate::config::load_bundled_config());
         session.new_buffer();
@@ -865,9 +865,9 @@ fn production_02_retained_and_private_clone_refusals_do_not_touch_host_tokens_or
         if private {
             manifest
                 .capabilities
-                .insert(crate::extensions::PluginCapability::PrivateCells);
+                .insert(crate::plugins::PluginCapability::PrivateCells);
             let contribution = &mut manifest.contributions.content_types[0];
-            contribution.presenter = crate::extensions::PluginPresenterKind::PrivateCells;
+            contribution.presenter = crate::plugins::PluginPresenterKind::PrivateCells;
             contribution.private_cells = Some(PluginPrivateCellPolicy {
                 maximum_cells: 128,
                 maximum_patch_cells: 32,
@@ -878,7 +878,7 @@ fn production_02_retained_and_private_clone_refusals_do_not_touch_host_tokens_or
                 cursor: true,
             });
         }
-        let index = crate::extensions::index_manifest_contributions(
+        let index = crate::plugins::index_manifest_contributions(
             &manifest,
             77,
             "clone refusal fixture".into(),
@@ -932,7 +932,7 @@ fn production_02_retained_and_private_clone_refusals_do_not_touch_host_tokens_or
         session.clone_plugin_window(target.clone());
         assert_eq!(session.plugin_clone_state(), unloaded);
 
-        let replacement = crate::extensions::index_manifest_contributions(
+        let replacement = crate::plugins::index_manifest_contributions(
             &manifest,
             78,
             "replacement fixture".into(),
@@ -952,7 +952,7 @@ fn catalog_change_without_configuration_change_rejects_before_host_or_graph_stag
     session.frame();
     let manifest = crate::app::tests::plugin_manifest("demo", "plugin.demo.keymap.dashboard", "x y");
     let index =
-        crate::extensions::index_manifest_contributions(&manifest, 77, "catalog fixture".into())
+        crate::plugins::index_manifest_contributions(&manifest, 77, "catalog fixture".into())
             .unwrap();
     let policy = session.window_policy_snapshot();
     let copies = session.copy_counts();

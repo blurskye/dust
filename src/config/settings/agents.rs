@@ -1,5 +1,7 @@
-use serde::{Deserialize, Serialize};
-use std::{collections::BTreeMap, path::PathBuf};
+use serde::Deserialize;
+use serde::Serialize;
+use std::collections::BTreeMap;
+use std::path::PathBuf;
 
 /// One ACP agent: a program that speaks the Agent Client Protocol on stdin/stdout.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -59,7 +61,7 @@ pub struct AgentsConfig {
     pub panel_width: u16,
     /// The side the agent panel, or a terminal agent, opens on.
     #[serde(default = "default_agent_side")]
-    pub side: super::ui::PanelSide,
+    pub side: crate::config::settings::ui::PanelSide,
     /// Run each profile's `add_tools` command, which changes the agent's own config.
     #[serde(default = "default_add_tools")]
     pub add_tools: bool,
@@ -75,8 +77,8 @@ const fn default_add_tools() -> bool {
     true
 }
 
-const fn default_agent_side() -> super::ui::PanelSide {
-    super::ui::PanelSide::Right
+const fn default_agent_side() -> crate::config::settings::ui::PanelSide {
+    crate::config::settings::ui::PanelSide::Right
 }
 
 impl Default for AgentsConfig {

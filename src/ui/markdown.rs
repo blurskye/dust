@@ -4,10 +4,14 @@
 
 use std::ops::Range;
 
-use crate::{config::AmbiguousWidth, ui::geometry::text_width};
+use crate::config::AmbiguousWidth;
+
+use crate::ui::geometry::text_width;
 use unicode_segmentation::UnicodeSegmentation;
 
-use crate::language::syntax::{self, Highlight};
+use crate::language::syntax::self;
+
+use crate::language::syntax::Highlight;
 
 /// Code blocks larger than this are shown without highlighting.
 const HIGHLIGHT_BYTE_CEILING: usize = 64 * 1024;
@@ -752,7 +756,7 @@ fn wrap(out: &mut Styled, segments: &[Segment], width: usize, first: Prefix, res
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::ui::markdown::*;
 
     fn rendered(source: &str, width: usize) -> Styled {
         let mut out = Styled::default();

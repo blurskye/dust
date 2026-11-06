@@ -2,37 +2,83 @@ mod branches;
 mod browse;
 pub use browse::git_browse_url;
 mod conflict;
-pub use conflict::{
-    GitConflictChoice, GitConflictEntry, GitConflictError, GitConflictResolveError,
-    GitConflictSide, GitConflictState, GitOperationAction, GitOperationBar, GitRecoveryOutcome,
-    GitRecoveryRefusal, GitReplacementError, GitReplacementPlan, abort_operation,
-    apply_replacement, continue_operation, plan_replacement, read_conflict_state,
-    read_side_content,
-};
+pub use conflict::GitConflictChoice;
+pub use conflict::GitConflictEntry;
+pub use conflict::GitConflictError;
+pub use conflict::GitConflictResolveError;
+pub use conflict::GitConflictSide;
+pub use conflict::GitConflictState;
+pub use conflict::GitOperationAction;
+pub use conflict::GitOperationBar;
+pub use conflict::GitRecoveryOutcome;
+pub use conflict::GitRecoveryRefusal;
+pub use conflict::GitReplacementError;
+pub use conflict::GitReplacementPlan;
+pub use conflict::abort_operation;
+pub use conflict::apply_replacement;
+pub use conflict::continue_operation;
+pub use conflict::plan_replacement;
+pub use conflict::read_conflict_state;
+pub use conflict::read_side_content;
 mod status;
-pub use status::{
-    GitChangeSource, GitChangeSources, GitFileStatus, GitRepositoryId, GitStatusEntry,
-    GitStatusError, GitStatusGeneration, GitStatusPolicy, GitStatusService, GitStatusSnapshot,
-    GitUnsavedDocument, aggregate_git_status, unsaved_document_revision,
-    validate_unsaved_documents,
-};
+pub use status::GitChangeSource;
+pub use status::GitChangeSources;
+pub use status::GitFileStatus;
+pub use status::GitRepositoryId;
+pub use status::GitStatusEntry;
+pub use status::GitStatusError;
+pub use status::GitStatusGeneration;
+pub use status::GitStatusPolicy;
+pub use status::GitStatusService;
+pub use status::GitStatusSnapshot;
+pub use status::GitUnsavedDocument;
+pub use status::aggregate_git_status;
+pub use status::unsaved_document_revision;
+pub use status::validate_unsaved_documents;
 mod hunks;
-pub use branches::{
-    GitBranchEntry, GitBranchError, GitBranchGeneration, GitBranchList, GitBranchListRequest,
-    GitBranchRequest, GitBranchResult, GitBranchService, GitWorktreeEntry,
-};
-pub use hunks::{
-    GitDiffLayer, GitDiffLine, GitDiffLineKind, GitHunk, GitHunkBufferInput, GitHunkError,
-    GitHunkGeneration, GitHunkId, GitHunkPolicy, GitHunkService, GitHunkSign, GitHunkSignKind,
-    GitHunkSnapshot, git_hunk_signs, git_staged_signs, index_line_in_buffer, read_hunks,
-};
+pub use branches::GitBranchEntry;
+pub use branches::GitBranchError;
+pub use branches::GitBranchGeneration;
+pub use branches::GitBranchList;
+pub use branches::GitBranchListRequest;
+pub use branches::GitBranchRequest;
+pub use branches::GitBranchResult;
+pub use branches::GitBranchService;
+pub use branches::GitWorktreeEntry;
+pub use hunks::GitDiffLayer;
+pub use hunks::GitDiffLine;
+pub use hunks::GitDiffLineKind;
+pub use hunks::GitHunk;
+pub use hunks::GitHunkBufferInput;
+pub use hunks::GitHunkError;
+pub use hunks::GitHunkGeneration;
+pub use hunks::GitHunkId;
+pub use hunks::GitHunkPolicy;
+pub use hunks::GitHunkService;
+pub use hunks::GitHunkSign;
+pub use hunks::GitHunkSignKind;
+pub use hunks::GitHunkSnapshot;
+pub use hunks::git_hunk_signs;
+pub use hunks::git_staged_signs;
+pub use hunks::index_line_in_buffer;
+pub use hunks::read_hunks;
 mod mutation;
-pub use mutation::{
-    GitChangePlanRequest, GitHeadExpectation, GitHeadId, GitIndexFingerprint, GitMutationError,
-    GitMutationGeneration, GitMutationKind, GitMutationRequest, GitMutationResult,
-    GitMutationService, GitResetHunkRequest, GitStageHunkRequest, git_branch_name, git_head_id,
-    git_index_fingerprint, worktree_hash,
-};
+pub use mutation::GitChangePlanRequest;
+pub use mutation::GitHeadExpectation;
+pub use mutation::GitHeadId;
+pub use mutation::GitIndexFingerprint;
+pub use mutation::GitMutationError;
+pub use mutation::GitMutationGeneration;
+pub use mutation::GitMutationKind;
+pub use mutation::GitMutationRequest;
+pub use mutation::GitMutationResult;
+pub use mutation::GitMutationService;
+pub use mutation::GitResetHunkRequest;
+pub use mutation::GitStageHunkRequest;
+pub use mutation::git_branch_name;
+pub use mutation::git_head_id;
+pub use mutation::git_index_fingerprint;
+pub use mutation::worktree_hash;
 
 #[cfg(test)]
 mod tests;

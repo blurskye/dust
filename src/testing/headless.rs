@@ -1,6 +1,9 @@
 use crate::editor::*;
 use crate::editor::text::TextBuffer;
-use crate::app::startup::{ApplicationError, StartupTarget, build_state, new_file_path};
+use crate::app::startup::ApplicationError;
+use crate::app::startup::StartupTarget;
+use crate::app::startup::build_state;
+use crate::app::startup::new_file_path;
 
 /// Headless composition used by tests and automation. The terminal application
 /// uses the same state construction and deterministic editing command registration.
@@ -85,8 +88,9 @@ mod tests {
 
     use tempfile::tempdir;
 
-    use super::HeadlessApplication;
-    use crate::app::startup::{StartupTarget, build_state};
+    use crate::testing::headless::HeadlessApplication;
+    use crate::app::startup::StartupTarget;
+    use crate::app::startup::build_state;
 
     #[test]
     fn multiple_startup_files_keep_a_live_active_view() {

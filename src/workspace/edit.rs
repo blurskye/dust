@@ -1,16 +1,26 @@
-use std::{
-    collections::{HashMap, HashSet},
-    path::PathBuf,
-};
+use std::collections::HashMap;
+use std::collections::HashSet;
+use std::path::PathBuf;
 
 use thiserror::Error;
 
-use crate::editor::text::{BufferRevision, TextBuffer, TextEdit, TextEditSet};
+use crate::editor::text::BufferRevision;
 
-use super::{
-    ABSOLUTE_PROPOSAL_EDIT_LIMIT, ABSOLUTE_PROPOSAL_FILE_LIMIT,
-    root::{ExecutionSource, RootId, WorkspaceState},
-};
+use crate::editor::text::TextBuffer;
+
+use crate::editor::text::TextEdit;
+
+use crate::editor::text::TextEditSet;
+
+use crate::workspace::ABSOLUTE_PROPOSAL_EDIT_LIMIT;
+
+use crate::workspace::ABSOLUTE_PROPOSAL_FILE_LIMIT;
+
+use crate::workspace::root::ExecutionSource;
+
+use crate::workspace::root::RootId;
+
+use crate::workspace::root::WorkspaceState;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct ProposalId(pub u64);

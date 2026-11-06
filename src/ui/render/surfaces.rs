@@ -1,18 +1,52 @@
 use crate::ui::render::editor::PROMPT_CURSOR;
-use crate::ui::render::{COMPLETION_DETAIL_GAP, COMPLETION_MAX_ROWS};
+use crate::ui::render::COMPLETION_DETAIL_GAP;
+use crate::ui::render::COMPLETION_MAX_ROWS;
 use crossterm::cursor::SetCursorStyle;
 use unicode_segmentation::UnicodeSegmentation;
 
-use crate::{
-    config::{BorderStyle, Config},
-    ui::{CellGrid, Style, geometry::text_width, window::WindowRect},
-};
+use crate::config::BorderStyle;
 
-use super::{
-    CellAlign, DiffLayout, DiffPreview, DiffRow, DiffRowKind, DiffSideRow, Frame,
-    PickerPreviewBody, PickerRowKind, PickerUiState, PluginSurfaceUiState, PrivateSurfaceUiState,
-    PromptState, ToolMenuState, editor::cursor_style, overlays::truncate_content_title,
-};
+use crate::config::Config;
+
+use crate::ui::CellGrid;
+
+use crate::ui::Style;
+
+use crate::ui::geometry::text_width;
+
+use crate::ui::window::WindowRect;
+
+use crate::ui::render::CellAlign;
+
+use crate::ui::render::DiffLayout;
+
+use crate::ui::render::DiffPreview;
+
+use crate::ui::render::DiffRow;
+
+use crate::ui::render::DiffRowKind;
+
+use crate::ui::render::DiffSideRow;
+
+use crate::ui::render::Frame;
+
+use crate::ui::render::PickerPreviewBody;
+
+use crate::ui::render::PickerRowKind;
+
+use crate::ui::render::PickerUiState;
+
+use crate::ui::render::PluginSurfaceUiState;
+
+use crate::ui::render::PrivateSurfaceUiState;
+
+use crate::ui::render::PromptState;
+
+use crate::ui::render::ToolMenuState;
+
+use crate::ui::render::editor::cursor_style;
+
+use crate::ui::render::overlays::truncate_content_title;
 
 pub(crate) const PICKER_MAXIMUM_PREVIEW_BYTES: usize = 256 * 1024;
 pub(crate) const PROMPT_INPUT_PADDING: u16 = 2;
@@ -1220,7 +1254,7 @@ pub(super) fn render_tool_menu(
         .filter(|row| tool_state_glyph(row).1 == Style::Error)
         .map_or(0, |row| {
             let note =
-                super::wrap_plain_text(&row.note, usize::from(content_width), ambiguous).len();
+                crate::ui::render::wrap_plain_text(&row.note, usize::from(content_width), ambiguous).len();
             usual_detail_rows - 2 + u16::try_from(note).unwrap_or(u16::MAX)
         })
         .min(remaining.saturating_sub(2));
@@ -1384,7 +1418,7 @@ pub(super) fn render_tool_menu(
             };
             // Install failures explain themselves here, so the note wraps above the keys.
             let keys_row = bottom.saturating_sub(1);
-            for line in super::wrap_plain_text(&row.note, usize::from(content_width), ambiguous) {
+            for line in crate::ui::render::wrap_plain_text(&row.note, usize::from(content_width), ambiguous) {
                 if y >= keys_row {
                     break;
                 }
@@ -1512,9 +1546,9 @@ pub(super) fn render_prompt(
     let confirmation_layout = prompt
         .confirmation
         .as_ref()
-        .map(|_| super::confirmation_layout(width, height, config, prompt));
+        .map(|_| crate::ui::render::confirmation_layout(width, height, config, prompt));
     let geometry = confirmation_layout.as_ref().map_or_else(
-        || super::prompt_geometry_for_state(width, height, config, prompt),
+        || crate::ui::render::prompt_geometry_for_state(width, height, config, prompt),
         |layout| layout.geometry,
     );
     if geometry.width == 0 || geometry.height == 0 {
@@ -1802,7 +1836,7 @@ pub(super) fn render_prompt(
             .saturating_sub(geometry.left)
             .saturating_sub(padding.saturating_mul(2));
         let ambiguous = config.editor.ambiguous_width;
-        let lines = super::wrap_plain_text(error, usize::from(inner).max(1), ambiguous);
+        let lines = crate::ui::render::wrap_plain_text(error, usize::from(inner).max(1), ambiguous);
         for (row, line) in (error_y..height).zip(lines) {
             for x in geometry.left..right {
                 frame.grid.set_cell(x, row, " ", Style::Default);
@@ -1880,7 +1914,7 @@ pub(super) fn render_prompt(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::ui::render::surfaces::*;
 
     #[test]
     fn emphasized_diff_stops_at_a_wide_grapheme_that_cannot_fit() {
@@ -1899,7 +1933,7 @@ mod tests {
             &DiffRow {
                 kind: DiffRowKind::Added,
                 text: "ab界z".into(),
-                spans: vec![super::super::DiffSpan { start: 0, end: 6 }],
+                spans: vec![crate::ui::render::DiffSpan { start: 0, end: 6 }],
             },
         );
         assert_eq!(frame.grid.row_text(0), "ab |");

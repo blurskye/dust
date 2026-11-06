@@ -1,15 +1,17 @@
-use std::{
-    collections::BTreeMap,
-    hash::{Hash, Hasher},
-    path::{Path, PathBuf},
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-        mpsc::{self, Receiver, TryRecvError},
-    },
-    thread,
-    time::{Duration, Instant},
-};
+use std::collections::BTreeMap;
+use std::hash::Hash;
+use std::hash::Hasher;
+use std::path::Path;
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
+use std::sync::mpsc::self;
+use std::sync::mpsc::Receiver;
+use std::sync::mpsc::TryRecvError;
+use std::thread;
+use std::time::Duration;
+use std::time::Instant;
 
 use thiserror::Error;
 
@@ -503,7 +505,11 @@ pub(super) fn status_command(
     started: Instant,
     cancel: &AtomicBool,
 ) -> Result<(Vec<u8>, bool), GitStatusError> {
-    use crate::process::{JobEvent, JobPolicy, JobRequest, JobStream, JobSupervisor};
+    use crate::process::JobEvent;
+    use crate::process::JobPolicy;
+    use crate::process::JobRequest;
+    use crate::process::JobStream;
+    use crate::process::JobSupervisor;
     check_status_deadline(policy, started, cancel)?;
     let program = crate::tools::discover_executable("git")
         .ok_or_else(|| backend("git executable not found"))?;
@@ -773,7 +779,7 @@ pub(super) fn read_status(
                     let Some(destination) = fields.next() else {
                         break;
                     };
-                    (destination, super::conflict::git_path(first))
+                    (destination, crate::git::conflict::git_path(first))
                 } else {
                     (first, None)
                 };
@@ -787,7 +793,7 @@ pub(super) fn read_status(
                 };
                 (path, original, status)
             };
-            let path = super::conflict::git_path(path)
+            let path = crate::git::conflict::git_path(path)
                 .ok_or_else(|| backend("unsupported Git path encoding"))?;
             if !add(path, original, status, source) {
                 break;
@@ -841,7 +847,7 @@ pub(super) fn read_status(
 
 #[cfg(all(test, unix))]
 mod tests {
-    use super::*;
+    use crate::git::status::*;
 
     fn policy(root: &Path) -> GitStatusPolicy {
         GitStatusPolicy {

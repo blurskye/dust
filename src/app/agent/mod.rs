@@ -44,7 +44,7 @@ use crate::editor::Axis;
 use crate::editor::BufferId;
 use crate::editor::EditorMode;
 use crate::app::LayoutAction;
-use crate::app::search::PickerPayload;
+use crate::app::picker::PickerPayload;
 use crate::editor::text::TextBuffer;
 use crate::language::syntax::Highlight;
 use crate::remote::AgentRequest;

@@ -1,22 +1,47 @@
 use crate::ui::geometry::cell_text_width;
-use crate::ui::render::{
-    COMPLETION_DETAIL_GAP, COMPLETION_MAX_ROWS, CONTROL_CHARACTER_REPLACEMENT,
-    ZERO_WIDTH_REPLACEMENT,
-};
+use crate::ui::render::COMPLETION_DETAIL_GAP;
+use crate::ui::render::COMPLETION_MAX_ROWS;
+use crate::ui::render::CONTROL_CHARACTER_REPLACEMENT;
+use crate::ui::render::ZERO_WIDTH_REPLACEMENT;
 use std::path::Path;
 
 use unicode_segmentation::UnicodeSegmentation;
 
-use crate::{
-    config::{AmbiguousWidth, BorderStyle, Config, DashboardConfig},
-    ui::{CellGrid, Style, geometry::text_width, window::WindowRect},
-};
+use crate::config::AmbiguousWidth;
 
-use super::{
-    ContentTabDiagnosticSeverity, ContentTabEntry, ContentTabIdentity, DashboardAction,
-    DocumentationPopupKind, DocumentationPopupState, Frame, LanguageCompletionState, UiLspProgress,
-    editor::cursor_style,
-};
+use crate::config::BorderStyle;
+
+use crate::config::Config;
+
+use crate::config::DashboardConfig;
+
+use crate::ui::CellGrid;
+
+use crate::ui::Style;
+
+use crate::ui::geometry::text_width;
+
+use crate::ui::window::WindowRect;
+
+use crate::ui::render::ContentTabDiagnosticSeverity;
+
+use crate::ui::render::ContentTabEntry;
+
+use crate::ui::render::ContentTabIdentity;
+
+use crate::ui::render::DashboardAction;
+
+use crate::ui::render::DocumentationPopupKind;
+
+use crate::ui::render::DocumentationPopupState;
+
+use crate::ui::render::Frame;
+
+use crate::ui::render::LanguageCompletionState;
+
+use crate::ui::render::UiLspProgress;
+
+use crate::ui::render::editor::cursor_style;
 
 pub(crate) const BUFFER_NAME_MAX_WIDTH: u16 = 32;
 pub(crate) const BUFFER_TAB_FORMAT: &str = " {title}{dirty}  ";
@@ -1081,7 +1106,7 @@ fn dashboard_path(root: &Path, width: usize, ambiguous_width: AmbiguousWidth) ->
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::ui::render::overlays::*;
 
     #[test]
     fn dashboard_paths_keep_their_suffix_within_display_columns() {

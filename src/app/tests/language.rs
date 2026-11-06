@@ -1433,7 +1433,7 @@ fn background_tool_install_updates_preserve_the_selected_row() {
         .unwrap();
     let selected = menu.rows[menu.selected].id.clone();
     app.tooling
-        .install(crate::app::tooling::ToolInstall::Rustup {
+        .install(crate::app::tools::ToolInstall::Rustup {
             definition,
             rustup,
             proxy,
@@ -1487,7 +1487,7 @@ fn finished_tool_install_progress_cannot_restore_the_installing_state() {
         .definition
         .clone();
     app.tooling
-        .install(crate::app::tooling::ToolInstall::Rustup {
+        .install(crate::app::tools::ToolInstall::Rustup {
             definition,
             rustup,
             proxy,
@@ -1916,11 +1916,11 @@ fn lsp_status_never_labels_failed_or_backing_off_sessions_as_starting() {
     let now = Instant::now();
     app.language.request_start(&key, None);
     let mut due = now;
-    for attempt in 0..crate::app::lsp::LSP_RESTART_LIMIT {
+    for attempt in 0..crate::app::language::LSP_RESTART_LIMIT {
         assert!(app.language.schedule_restart(&key, due).is_none());
         assert!(app.language.restart_due(due).is_none());
         due +=
-            Duration::from_millis(crate::app::lsp::LSP_RESTART_BACKOFF_MS << attempt);
+            Duration::from_millis(crate::app::language::LSP_RESTART_BACKOFF_MS << attempt);
         assert_eq!(app.language.restart_due(due), Some(key.clone()));
     }
     assert_eq!(
@@ -2436,9 +2436,9 @@ fn lsp_tool_menu_is_registry_driven_filterable_and_configurable() {
 
 #[test]
 fn plugin_workspace_preview_uses_invocation_source_and_retires_on_dismissal() {
-    use crate::extensions::ExecutionFixture;
-    use crate::extensions::PluginEdit;
-    use crate::extensions::PluginEditProposal;
+    use crate::plugins::ExecutionFixture;
+    use crate::plugins::PluginEdit;
+    use crate::plugins::PluginEditProposal;
     use slotmap::Key;
     let root = tempfile::tempdir().unwrap();
     let saved = tempfile::tempdir().unwrap();
@@ -2803,12 +2803,12 @@ pub(super) fn fixture_owned_lsp(
             .fixture_transport(key, &document, (buffer, state.text.source_version()));
     app.language.fixture_session(
         key.into(),
-        crate::app::lsp::LspRuntimeState {
+        crate::app::language::LspRuntimeState {
             root: app.workspace.active_root().unwrap(),
             root_path: app.state.workspace_root.clone(),
             server_id: definition.id.clone(),
             definition,
-            launch: crate::app::lsp::LspLaunch::Direct {
+            launch: crate::app::language::LspLaunch::Direct {
                 executable: "/bin/false".into(),
                 managed: false,
             },

@@ -89,7 +89,7 @@ use crate::app::validate_configured_commands;
 use crate::app::AppEffect;
 use crate::app::PickerKind;
 use crate::app::startup::StartupTarget;
-use crate::extensions::PluginLoadId;
+use crate::plugins::PluginLoadId;
 use crate::persistence::PersistedWindowPlacement;
 use crate::persistence::PersistedWindowRule;
 use crate::process::PtyId;
@@ -199,32 +199,32 @@ fn application_fixture_cleans_up_workspace_and_state_after_drop() {
     assert!(!state.exists());
 }
 
-fn plugin_manifest(owner: &str, mapping_id: &str, keys: &str) -> crate::extensions::PluginManifest {
-    crate::extensions::PluginManifest {
+fn plugin_manifest(owner: &str, mapping_id: &str, keys: &str) -> crate::plugins::PluginManifest {
+    crate::plugins::PluginManifest {
         id: owner.into(),
         version: "1.0.0".into(),
         component_sha256: "0".repeat(64),
         capabilities: BTreeSet::new(),
         commands: [(
             "run".into(),
-            crate::extensions::PluginCommandDeclaration {
+            crate::plugins::PluginCommandDeclaration {
                 title: format!("Run {owner}"),
                 description: String::new(),
                 arguments: BTreeMap::new(),
-                context: crate::extensions::PluginCommandContext::Application,
-                activation: crate::extensions::PluginActivationBehavior::ActiveOnly,
+                context: crate::plugins::PluginCommandContext::Application,
+                activation: crate::plugins::PluginActivationBehavior::ActiveOnly,
             },
         )]
         .into_iter()
         .collect(),
-        contributions: crate::extensions::PluginContributions {
+        contributions: crate::plugins::PluginContributions {
             schema_version: 1,
-            input_contexts: vec![crate::extensions::PluginInputContextContribution {
+            input_contexts: vec![crate::plugins::PluginInputContextContribution {
                 id: format!("plugin.{owner}.chat"),
                 title: format!("{owner} chat"),
                 parent_surface: Some("panel".into()),
             }],
-            keymaps: vec![crate::extensions::PluginKeymapContribution {
+            keymaps: vec![crate::plugins::PluginKeymapContribution {
                 id: mapping_id.into(),
                 context: "dashboard".into(),
                 mode: String::new(),
@@ -233,14 +233,14 @@ fn plugin_manifest(owner: &str, mapping_id: &str, keys: &str) -> crate::extensio
                 arguments: BTreeMap::new(),
             }],
             key_groups: Vec::new(),
-            content_types: vec![crate::extensions::PluginContentTypeContribution {
+            content_types: vec![crate::plugins::PluginContentTypeContribution {
                 id: format!("plugin.{owner}.panel"),
                 title: format!("{owner} panel"),
-                presenter: crate::extensions::PluginPresenterKind::RetainedDeclarative,
-                default_placement: crate::extensions::PluginWindowPlacementKind::Floating,
+                presenter: crate::plugins::PluginPresenterKind::RetainedDeclarative,
+                default_placement: crate::plugins::PluginWindowPlacementKind::Floating,
                 allowed_placements: [
-                    crate::extensions::PluginWindowPlacementKind::Floating,
-                    crate::extensions::PluginWindowPlacementKind::Hidden,
+                    crate::plugins::PluginWindowPlacementKind::Floating,
+                    crate::plugins::PluginWindowPlacementKind::Hidden,
                 ]
                 .into_iter()
                 .collect(),
@@ -259,7 +259,7 @@ fn plugin_manifest(owner: &str, mapping_id: &str, keys: &str) -> crate::extensio
     }
 }
 
-fn write_plugin_manifest(root: &std::path::Path, manifest: &crate::extensions::PluginManifest) {
+fn write_plugin_manifest(root: &std::path::Path, manifest: &crate::plugins::PluginManifest) {
     fs::write(
         root.join("manifest.toml"),
         toml::to_string(manifest).expect("manifest TOML"),

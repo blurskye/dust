@@ -51,7 +51,7 @@ pub fn substitution_regex(pattern: &str, flags: &str) -> Result<regex::Regex, St
     if flags.chars().any(|flag| !"gicn".contains(flag)) {
         return Err("unsupported substitute flag".into());
     }
-    let pattern = super::substitution_pattern(pattern);
+    let pattern = crate::editor::input::substitution_pattern(pattern);
     RegexBuilder::new(&pattern)
         .case_insensitive(flags.contains('i'))
         .build()
@@ -108,32 +108,32 @@ pub fn search_match(
 
 #[cfg(test)]
 mod tests {
-    use super::search_matches;
+    use crate::editor::input::search::search_matches;
 
     #[test]
     fn navigation_finds_one_match_in_repetitive_large_text() {
         let source = "a".repeat(16 * 1024 * 1024);
         assert_eq!(
-            super::search_match(&source, "a", true, false, 1, true, false).unwrap(),
+            crate::editor::input::search::search_match(&source, "a", true, false, 1, true, false).unwrap(),
             Some(1..2)
         );
         assert_eq!(
-            super::search_match("foo foobar foo", "foo", true, true, 1, true, false).unwrap(),
+            crate::editor::input::search::search_match("foo foobar foo", "foo", true, true, 1, true, false).unwrap(),
             Some(11..14)
         );
         assert_eq!(
-            super::search_match("foo foobar foo", "foo", true, true, 11, false, true).unwrap(),
+            crate::editor::input::search::search_match("foo foobar foo", "foo", true, true, 11, false, true).unwrap(),
             Some(0..3)
         );
     }
     #[test]
     fn whole_word_search_includes_combining_marks() {
         assert_eq!(
-            super::search_match("e\u{301} e", "e", true, true, 0, true, false).unwrap(),
+            crate::editor::input::search::search_match("e\u{301} e", "e", true, true, 0, true, false).unwrap(),
             Some(4..5)
         );
         assert_eq!(
-            super::search_match(
+            crate::editor::input::search::search_match(
                 "e\u{301} e e\u{301}",
                 "e\u{301}",
                 true,
@@ -150,15 +150,15 @@ mod tests {
     #[test]
     fn navigation_uses_unicode_smart_case() {
         assert_eq!(
-            super::search_match("É é", "é", true, false, 0, true, false).unwrap(),
+            crate::editor::input::search::search_match("É é", "é", true, false, 0, true, false).unwrap(),
             Some(0..2)
         );
         assert_eq!(
-            super::search_match("É é", "é", false, false, 0, true, false).unwrap(),
+            crate::editor::input::search::search_match("É é", "é", false, false, 0, true, false).unwrap(),
             Some(3..5)
         );
         assert_eq!(
-            super::search_match("é É", "É", true, false, 0, true, false).unwrap(),
+            crate::editor::input::search::search_match("é É", "É", true, false, 0, true, false).unwrap(),
             Some(3..5)
         );
     }
@@ -167,12 +167,12 @@ mod tests {
     fn backward_navigation_keeps_overlapping_literal_starts() {
         for offset in [5, 0] {
             assert_eq!(
-                super::search_match("banana", "ana", true, false, offset, false, true).unwrap(),
+                crate::editor::input::search::search_match("banana", "ana", true, false, offset, false, true).unwrap(),
                 Some(3..6)
             );
         }
         assert_eq!(
-            super::search_match("banana", "ana", true, false, 3, false, false).unwrap(),
+            crate::editor::input::search::search_match("banana", "ana", true, false, 3, false, false).unwrap(),
             Some(1..4)
         );
     }

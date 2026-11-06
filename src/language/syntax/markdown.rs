@@ -3,7 +3,9 @@
 //! brackets. The marks come from the same trees that colour the text.
 use std::collections::BTreeMap;
 
-use tree_sitter::{Node, Tree};
+use tree_sitter::Node;
+
+use tree_sitter::Tree;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MarkdownMark {

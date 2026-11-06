@@ -1,6 +1,12 @@
 use std::collections::BTreeMap;
 
-use crate::editor::{CommandError, CommandInvocation, CommandValue, InvocationSource};
+use crate::editor::CommandError;
+
+use crate::editor::CommandInvocation;
+
+use crate::editor::CommandValue;
+
+use crate::editor::InvocationSource;
 use thiserror::Error;
 
 /// The range and the delimited parts of `:s/a/b/g`, with an optional range: `%`, `'<,'>`, `5,9`,
@@ -531,7 +537,7 @@ mod tests {
 
     use crate::editor::CommandValue;
 
-    use super::parse_ex;
+    use crate::editor::input::command_line::parse_ex;
 
     fn aliases() -> BTreeMap<String, String> {
         [
@@ -572,7 +578,7 @@ mod tests {
             (r"\\\<cat", r"\\\b{start}cat"),
         ] {
             assert_eq!(
-                super::substitute_pattern(&format!("s/{pattern}/x/")),
+                crate::editor::input::command_line::substitute_pattern(&format!("s/{pattern}/x/")),
                 Some(expected.into())
             );
         }
@@ -582,7 +588,7 @@ mod tests {
     fn substitute_execution_keeps_the_preview_replacement_whitespace() {
         for input in [":s/a/b ", "  : s/a/b  ", "s/a/ ", "s/a/b\t"] {
             let invocation = parse_ex(input, &aliases()).unwrap();
-            let (_, _, replacement, _) = super::typed_substitution(input).unwrap();
+            let (_, _, replacement, _) = crate::editor::input::command_line::typed_substitution(input).unwrap();
             assert_eq!(
                 invocation.arguments["replacement"],
                 CommandValue::String(replacement)
@@ -599,7 +605,7 @@ mod tests {
         for input in ["", "  ", ":  "] {
             assert!(matches!(
                 parse_ex(input, &aliases()),
-                Err(super::ExParseError::Empty)
+                Err(crate::editor::input::command_line::ExParseError::Empty)
             ));
         }
     }

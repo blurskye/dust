@@ -1,23 +1,41 @@
 #![forbid(unsafe_code)]
 
-use std::{
-    collections::{HashMap, HashSet},
-    path::Path,
-    sync::{
-        Arc, Mutex,
-        mpsc::{self, Receiver, SyncSender, TryRecvError, TrySendError},
-    },
-    thread,
-};
+use std::collections::HashMap;
+
+use std::collections::HashSet;
+
+use std::path::Path;
+
+use std::sync::Arc;
+
+use std::sync::Mutex;
+
+use std::sync::mpsc::self;
+
+use std::sync::mpsc::Receiver;
+
+use std::sync::mpsc::SyncSender;
+
+use std::sync::mpsc::TryRecvError;
+
+use std::sync::mpsc::TrySendError;
+
+use std::thread;
 use thiserror::Error;
-use tree_sitter::{Language, Parser, Query, QueryCursor, StreamingIterator};
+use tree_sitter::Language;
+use tree_sitter::Parser;
+use tree_sitter::Query;
+use tree_sitter::QueryCursor;
+use tree_sitter::StreamingIterator;
 
 mod highlight;
 mod markdown;
 mod objects;
 pub use highlight::Highlight;
-pub use markdown::{MarkdownMark, MarkdownSpan};
-pub use objects::{SyntaxObject, SyntaxObjectKind};
+pub use markdown::MarkdownMark;
+pub use markdown::MarkdownSpan;
+pub use objects::SyntaxObject;
+pub use objects::SyntaxObjectKind;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct SyntaxDocumentId(pub u64);
@@ -1566,7 +1584,7 @@ fn failed(request: &Request, diagnostic: String) -> SyntaxEvent {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::language::syntax::*;
     #[test]
     fn full_queue_does_not_materialize_source_or_replace_accepted_generation() {
         let (sender, _requests) = mpsc::sync_channel(1);

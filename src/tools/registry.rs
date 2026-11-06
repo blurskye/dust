@@ -1,23 +1,30 @@
-use super::{PackageManifest, PackageSource};
-use crate::extensions::PluginManifest;
-use reqwest::{
-    Url,
-    blocking::{Client, Response},
-    header::{ACCEPT, CONTENT_LENGTH, CONTENT_TYPE},
-};
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
-use sha2::{Digest, Sha256};
-use std::{
-    fs,
-    io::{Read, Write},
-    path::{Path, PathBuf},
-    sync::{
-        Arc,
-        mpsc::{self, Receiver, SyncSender, TryRecvError, TrySendError},
-    },
-    thread,
-    time::Duration,
-};
+use crate::tools::PackageManifest;
+use crate::tools::PackageSource;
+use crate::plugins::PluginManifest;
+use reqwest::Url;
+use reqwest::blocking::Client;
+use reqwest::blocking::Response;
+use reqwest::header::ACCEPT;
+use reqwest::header::CONTENT_LENGTH;
+use reqwest::header::CONTENT_TYPE;
+use serde::Deserialize;
+use serde::Serialize;
+use serde::de::DeserializeOwned;
+use sha2::Digest;
+use sha2::Sha256;
+use std::fs;
+use std::io::Read;
+use std::io::Write;
+use std::path::Path;
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::mpsc::self;
+use std::sync::mpsc::Receiver;
+use std::sync::mpsc::SyncSender;
+use std::sync::mpsc::TryRecvError;
+use std::sync::mpsc::TrySendError;
+use std::thread;
+use std::time::Duration;
 use thiserror::Error;
 
 pub const OFFICIAL_REGISTRY: &str = "https://dust.blurskye.dev/registry/v1";
@@ -440,7 +447,7 @@ fn validate_metadata(
 }
 #[cfg(test)]
 mod metadata_tests {
-    use super::*;
+    use crate::tools::registry::*;
 
     #[test]
     fn artifact_scope_is_checked_after_url_normalization() {
@@ -548,7 +555,7 @@ fn read_cache(path: &Path, maximum: usize) -> Result<Vec<u8>, RegistryError> {
 }
 #[cfg(test)]
 mod cache_tests {
-    use super::*;
+    use crate::tools::registry::*;
 
     #[test]
     fn independent_cache_clients_serialize_publication_reads_and_pruning() {

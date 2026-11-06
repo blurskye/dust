@@ -1,8 +1,4 @@
-mod documentation;
 mod mouse;
-mod prompts;
-mod replay;
-mod snippets;
 
 pub(crate) const COMPLETION_LIMIT: usize = 1000;
 pub(crate) const HISTORY_LIMIT: usize = 100;

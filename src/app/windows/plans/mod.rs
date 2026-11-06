@@ -16,7 +16,7 @@ use crate::editor::LayoutNode;
 use crate::editor::PaneId;
 use crate::editor::TabId;
 use crate::editor::ViewId;
-use crate::extensions::PluginCatalogVersion;
+use crate::plugins::PluginCatalogVersion;
 use crate::windows::ContentId;
 use crate::windows::ViewId as WindowViewId;
 use crate::windows::WindowId;

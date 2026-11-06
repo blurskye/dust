@@ -159,7 +159,9 @@ pub fn encode_utf8(text: &str, format: &FileFormat) -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
-    use super::{LineEnding, decode_utf8, encode_utf8};
+    use crate::editor::text::encoding::LineEnding;
+    use crate::editor::text::encoding::decode_utf8;
+    use crate::editor::text::encoding::encode_utf8;
 
     #[test]
     fn preserves_bom_mixed_endings_and_final_newline() {
@@ -181,7 +183,7 @@ mod tests {
         for input in [b"\xEF\xBB\xBF\xFF".as_slice(), b"\xEF\xBB\xBFabc\xFF"] {
             assert_eq!(
                 decode_utf8(input),
-                Err(super::EncodingError::InvalidUtf8 {
+                Err(crate::editor::text::encoding::EncodingError::InvalidUtf8 {
                     valid_up_to: input.len() - 1,
                 })
             );

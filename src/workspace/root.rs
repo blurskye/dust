@@ -1,12 +1,15 @@
-use std::{
-    collections::HashSet,
-    fs,
-    path::{Path, PathBuf},
-};
+use std::collections::HashSet;
+use std::fs;
+use std::path::Path;
+use std::path::PathBuf;
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
-use super::{ABSOLUTE_ROOT_LIMIT, edit::WorkspaceError};
+use serde::Serialize;
+
+use crate::workspace::ABSOLUTE_ROOT_LIMIT;
+
+use crate::workspace::edit::WorkspaceError;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct WorkspaceId(pub u64);

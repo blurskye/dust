@@ -1,25 +1,41 @@
-use std::{
-    collections::{BTreeMap, BTreeSet, HashMap},
-    env,
-    ffi::{OsStr, OsString},
-    fs,
-    io::{Read, Write},
-    path::{Component, Path, PathBuf},
-};
+use std::collections::BTreeMap;
+use std::collections::BTreeSet;
+use std::collections::HashMap;
+use std::env;
+use std::ffi::OsStr;
+use std::ffi::OsString;
+use std::fs;
+use std::io::Read;
+use std::io::Write;
+use std::path::Component;
+use std::path::Path;
+use std::path::PathBuf;
 
 use serde::Deserialize;
 
 use crate::files::ProjectRootStrategy;
 
-use super::{
-    MAXIMUM_NIX_RUNTIME_ENVIRONMENT_BYTES, MAXIMUM_OS_RELEASE_BYTES, NIX_COMPATIBILITY_RUNTIME_ID,
-    NIX_RUNTIME_ENVIRONMENT_FILE, NIXOS_HOST,
-    compatibility::runtime_artifact,
-    install_prepare::validate_tool_id,
-    mason_catalog::mason_lsp_definitions,
-    package_lock::BUNDLED_TOOL_CATALOG,
-    runtimes::{fhs_glibc_loader_available, nix_profile_installed_at},
-};
+use crate::tools::MAXIMUM_NIX_RUNTIME_ENVIRONMENT_BYTES;
+
+use crate::tools::MAXIMUM_OS_RELEASE_BYTES;
+
+use crate::tools::NIX_COMPATIBILITY_RUNTIME_ID;
+
+use crate::tools::NIX_RUNTIME_ENVIRONMENT_FILE;
+
+use crate::tools::NIXOS_HOST;
+
+use crate::tools::compatibility::runtime_artifact;
+
+use crate::tools::install_prepare::validate_tool_id;
+
+use crate::tools::mason_catalog::mason_lsp_definitions;
+
+use crate::tools::package_lock::BUNDLED_TOOL_CATALOG;
+
+use crate::tools::runtimes::fhs_glibc_loader_available;
+
+use crate::tools::runtimes::nix_profile_installed_at;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "snake_case")]
@@ -801,7 +817,7 @@ pub fn inspect_tools() -> Vec<ToolEntry> {
 
 #[cfg(all(test, unix))]
 mod tests {
-    use super::*;
+    use crate::tools::catalog::*;
     use std::os::unix::fs::PermissionsExt;
 
     #[test]

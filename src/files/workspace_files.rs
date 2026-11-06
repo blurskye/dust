@@ -1,20 +1,24 @@
-use std::{
-    collections::HashSet,
-    fs, io,
-    path::{Path, PathBuf},
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-        mpsc::{self, Receiver, SyncSender, TrySendError},
-    },
-    thread,
-    time::Duration,
-};
+use std::collections::HashSet;
+use std::fs;
+use std::io;
+use std::path::Path;
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
+use std::sync::mpsc::self;
+use std::sync::mpsc::Receiver;
+use std::sync::mpsc::SyncSender;
+use std::sync::mpsc::TrySendError;
+use std::thread;
+use std::time::Duration;
 
 use ignore::WalkBuilder;
 use thiserror::Error;
 
-use super::workspace_search::{ABSOLUTE_WORKSPACE_SEARCH_FILES, owner_root};
+use crate::files::workspace_search::ABSOLUTE_WORKSPACE_SEARCH_FILES;
+
+use crate::files::workspace_search::owner_root;
 
 pub(super) const ABSOLUTE_WORKSPACE_FILE_PATH_BYTES: usize = 16 * 1024 * 1024;
 

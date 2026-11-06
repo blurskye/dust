@@ -19,7 +19,7 @@ pub(in crate::app) struct PluginWindowDraft {
     origin: Arc<()>,
     epoch: u64,
     source: Option<crate::editor::EditorWindowVersion>,
-    catalog: crate::extensions::PluginCatalogVersion,
+    catalog: crate::plugins::PluginCatalogVersion,
     owner: String,
     generation: u64,
     graph: WindowGraph,
@@ -53,7 +53,7 @@ impl WindowSession {
         &mut self,
         transition: PluginWindowTransition,
         current: &crate::editor::EditorWindowVersion,
-        catalog: &crate::extensions::PluginCatalogVersion,
+        catalog: &crate::plugins::PluginCatalogVersion,
     ) -> Result<PluginWindowReceipt, String> {
         self.commit_plugin(transition.draft, current, catalog)?;
         Ok(PluginWindowReceipt(transition.key))
@@ -69,7 +69,7 @@ impl WindowSession {
             plugin,
             generation,
             None,
-            crate::extensions::PluginCatalogVersion::default(),
+            crate::plugins::PluginCatalogVersion::default(),
         )
     }
     #[cfg(test)]
@@ -85,7 +85,7 @@ impl WindowSession {
         generation: u64,
         versions: (
             &crate::editor::EditorWindowVersion,
-            &crate::extensions::PluginCatalogVersion,
+            &crate::plugins::PluginCatalogVersion,
         ),
     ) -> Result<PluginWindowDraft, String> {
         self.require_editor_source(versions.0)?;
@@ -104,7 +104,7 @@ impl WindowSession {
         plugin: &str,
         generation: u64,
         source: Option<crate::editor::EditorWindowVersion>,
-        catalog: crate::extensions::PluginCatalogVersion,
+        catalog: crate::plugins::PluginCatalogVersion,
     ) -> PluginWindowDraft {
         PluginWindowDraft {
             origin: self.origin.clone(),
@@ -120,7 +120,7 @@ impl WindowSession {
         &mut self,
         draft: PluginWindowDraft,
         current: &crate::editor::EditorWindowVersion,
-        catalog: &crate::extensions::PluginCatalogVersion,
+        catalog: &crate::plugins::PluginCatalogVersion,
     ) -> Result<(), String> {
         if draft.source.as_ref() != Some(current) || &draft.catalog != catalog {
             return Err("plugin window editor or catalog source is stale".into());
