@@ -421,7 +421,7 @@ impl Debugger {
         let Some(launch) = self.launch.as_mut() else {
             return Ok(());
         };
-        let Phase::Discovering(generation) = launch.phase else {
+        let Phase::Discovering(request_id) = launch.phase else {
             return Ok(());
         };
         let result = result?;
@@ -429,7 +429,7 @@ impl Debugger {
             .tool
             .as_ref()
             .ok_or("debug discovery has no original tool")?;
-        if result.generation != generation
+        if result.request_id != request_id
             || result.document != tool.document
             || result.workspace_root != tool.workspace_root
         {
@@ -522,13 +522,13 @@ impl Debugger {
                     return Ok(None);
                 }
                 let tool = launch.tool.as_ref().ok_or("debug tool discovery missing")?;
-                let generation = lane.discover(
+                let request_id = lane.discover(
                     tool.document.clone(),
                     tool.root,
                     tool.definition.project_root_markers.clone(),
                     tool.definition.project_root_strategy,
                 )?;
-                launch.phase = Phase::Discovering(generation);
+                launch.phase = Phase::Discovering(request_id);
             }
             Phase::Adapter | Phase::Program => {
                 if !lane.preflight_available()? {

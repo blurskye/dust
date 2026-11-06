@@ -6,6 +6,7 @@ use crate::app::workspace::WorkspaceVersion;
 use crate::config::DebugConfig;
 use crate::config::TerminalProfileConfig;
 use crate::config::TerminalsConfig;
+use crate::debugger::DapClient;
 use crate::debugger::DapContext;
 use crate::debugger::DapControl;
 use crate::debugger::DapError;
@@ -13,7 +14,6 @@ use crate::debugger::DapEvent;
 use crate::debugger::DapReplyOutcome;
 use crate::debugger::DapReplyReceipt;
 use crate::debugger::DapResponse;
-use crate::debugger::DapClient;
 use crate::debugger::DapSourceBreakpoint;
 use crate::debugger::DapStackFrame;
 use crate::debugger::DapTerminalReply;
@@ -1828,11 +1828,7 @@ impl Debugger {
     }
 }
 
-
-
 pub(in crate::app) mod commands;
-
-
 
 use crate::app::App;
 use crate::app::TrustedAction;

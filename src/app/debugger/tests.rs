@@ -1,21 +1,21 @@
 //! Debugger behavior and application integration tests.
 
-use crate::app::tests::*;
-use crate::editor::text::TextBuffer;
 use crate::app::AppEffect;
 use crate::app::PickerKind;
+use crate::app::debugger::*;
+use crate::app::tests::*;
+use crate::editor::EditorState;
 use crate::editor::text::ByteOffset;
+use crate::editor::text::TextBuffer;
+use crate::files::RootIdentity;
 use crate::ui::PickerSurfaceKind;
+use crate::workspace::WorkspaceId;
+use crate::workspace::WorkspaceState;
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
 use std::time::Duration;
 use std::time::Instant;
-use crate::app::debugger::*;
-use crate::editor::EditorState;
-use crate::files::RootIdentity;
-use crate::workspace::WorkspaceId;
-use crate::workspace::WorkspaceState;
 
 #[test]
 fn breakpoint_toggle_uses_disabled_state_after_another_breakpoint_is_added() {
@@ -45,8 +45,7 @@ fn breakpoint_toggle_uses_disabled_state_after_another_breakpoint_is_added() {
 }
 
 #[test]
-fn breakpoint_condition_prompt_preserves_its_original_target_and_other_settings()
-{
+fn breakpoint_condition_prompt_preserves_its_original_target_and_other_settings() {
     let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("original.rs");
     let (_, view) = app
