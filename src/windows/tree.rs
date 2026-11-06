@@ -166,36 +166,13 @@ pub(super) fn split_between(
     }
 }
 
-pub(super) fn resize_parent(node: &mut TiledLayoutNode, target: WindowId, delta: i16) -> bool {
-    let TiledLayoutNode::Split {
-        ratio,
-        first,
-        second,
-        ..
-    } = node
-    else {
-        return false;
-    };
-    if resize_parent(first, target, delta) || resize_parent(second, target, delta) {
-        return true;
-    }
-    let signed = if contains_window(first, target) {
-        i32::from(delta)
-    } else if contains_window(second, target) {
-        -i32::from(delta)
-    } else {
-        return false;
-    };
-    let adjusted = i32::from(*ratio) + signed;
-    *ratio = u16::try_from(adjusted.clamp(100, 900)).unwrap_or(*ratio);
-    true
-}
-
-pub(super) fn resize_parent_on_axis(
+pub(super) fn resize_parent(
     node: &mut TiledLayoutNode,
     target: WindowId,
-    requested_axis: TileAxis,
+    requested_axis: Option<TileAxis>,
     delta: i16,
+    minimum: u16,
+    maximum: u16,
 ) -> bool {
     let TiledLayoutNode::Split {
         axis,
@@ -212,10 +189,10 @@ pub(super) fn resize_parent_on_axis(
         return false;
     }
     let child = if in_first { first } else { second };
-    if resize_parent_on_axis(child, target, requested_axis, delta) {
+    if resize_parent(child, target, requested_axis, delta, minimum, maximum) {
         return true;
     }
-    if *axis != requested_axis {
+    if requested_axis.is_some_and(|requested| *axis != requested) {
         return false;
     }
     let signed = if in_first {
@@ -224,7 +201,8 @@ pub(super) fn resize_parent_on_axis(
         -i32::from(delta)
     };
     let adjusted = i32::from(*ratio) + signed;
-    *ratio = u16::try_from(adjusted.clamp(100, 900)).unwrap_or(*ratio);
+    *ratio =
+        u16::try_from(adjusted.clamp(i32::from(minimum), i32::from(maximum))).unwrap_or(*ratio);
     true
 }
 

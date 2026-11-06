@@ -140,10 +140,7 @@ impl WindowGraph {
                 .get_mut(&tab)
                 .and_then(|tab| tab.tiled_root.as_mut())
                 .ok_or(WindowError::MissingTiledLayout)?;
-            let changed = match axis {
-                Some(axis) => tree::resize_parent_on_axis(root, id, axis, delta),
-                None => tree::resize_parent(root, id, delta),
-            };
+            let changed = tree::resize_parent(root, id, axis, delta, 100, 900);
             if changed {
                 Ok(())
             } else {
@@ -222,7 +219,7 @@ impl WindowGraph {
         let tab = self.window(window)?.tab;
         let before = self.tiled_layout_snapshot(tab)?.root;
         let mut after = before.clone();
-        if !tree::resize_parent_on_axis(&mut after, window, axis, delta) {
+        if !tree::resize_parent(&mut after, window, Some(axis), delta, 100, 900) {
             return None;
         }
         changed(&before, &after).or_else(|| {

@@ -1,4 +1,4 @@
-//! Private graph, native/editor identity bridges and accepted geometry.
+//! Checked window operations, native surfaces and accepted geometry.
 pub(in crate::app) mod content;
 mod focus;
 mod native;

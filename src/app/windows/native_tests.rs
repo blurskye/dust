@@ -201,7 +201,7 @@ fn editor_reconciliation_preserves_foreign_tiled_windows_and_identity() {
 }
 
 #[test]
-fn pane_close_retires_only_its_view_and_keeps_shared_content() {
+fn pane_close_removes_only_its_view_and_keeps_shared_content() {
     let mut state = EditorState::new(PathBuf::from("/workspace"));
     let (buffer, _) = state.open_text(TextBuffer::from_text("one"), None).unwrap();
     state.split_active(TileAxis::Vertical, 500).expect("split");

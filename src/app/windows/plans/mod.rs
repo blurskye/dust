@@ -771,7 +771,7 @@ impl Windows {
         let mut candidate = self.prepare_reconcile(&source, scratch, descriptions)?;
         if let Some(native) = plan.native {
             match native {
-                commands::NativeAction::PlaceEditor(_pane, window, placement) => {
+                commands::NativeAction::PlaceEditor(window, placement) => {
                     candidate
                         .core
                         .graph
@@ -781,7 +781,7 @@ impl Windows {
                         candidate.dashboard = Some(true);
                     }
                 }
-                commands::NativeAction::ShowEditor(_pane, window) => {
+                commands::NativeAction::ShowEditor(window) => {
                     candidate
                         .core
                         .graph
@@ -792,7 +792,7 @@ impl Windows {
                     candidate
                         .core
                         .graph
-                        .swap_non_tiled_placements(first.1, second.1)
+                        .swap_non_tiled_placements(first, second)
                         .map_err(|error| error.to_string())?;
                 }
                 _ => return Err("editor transition carries an invalid window action".into()),

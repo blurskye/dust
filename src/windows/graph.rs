@@ -65,9 +65,9 @@ use crate::windows::projection::remove_tiled_window;
 
 use crate::windows::projection::replace_tiled_window;
 
-use crate::windows::projection::resize_tiled_parent;
+use crate::windows::tree::resize_parent;
 
-use crate::windows::projection::tiled_contains;
+use crate::windows::tree::contains_window;
 
 use crate::windows::projection::validate_tiled_layout;
 
@@ -459,7 +459,7 @@ impl WindowGraph {
                 .tiled_root
                 .as_mut()
                 .ok_or(WindowError::MissingTiledLayout)?;
-            if !resize_tiled_parent(root, window, delta) {
+            if !resize_parent(root, window, None, delta, 1, 999) {
                 return Err(WindowError::WindowNotInTiledLayout);
             }
             Ok(())
@@ -483,7 +483,7 @@ impl WindowGraph {
                 .tiled_root
                 .as_mut()
                 .ok_or(WindowError::MissingTiledLayout)?;
-            if !tiled_contains(root, first) || !tiled_contains(root, second) {
+            if !contains_window(root, first) || !contains_window(root, second) {
                 return Err(WindowError::WindowNotInTiledLayout);
             }
             replace_tiled_window(root, first, WindowId(0));
@@ -640,7 +640,7 @@ impl WindowGraph {
             && workspace_tab
                 .tiled_root
                 .as_ref()
-                .is_none_or(|root| !tiled_contains(root, window))
+                .is_none_or(|root| !contains_window(root, window))
         {
             workspace_tab.tiled_root = append_tiled_window(workspace_tab.tiled_root.take(), window);
         }
@@ -792,7 +792,7 @@ impl WindowGraph {
             && workspace_tab
                 .tiled_root
                 .as_ref()
-                .is_none_or(|root| !tiled_contains(root, window))
+                .is_none_or(|root| !contains_window(root, window))
         {
             workspace_tab.tiled_root = append_tiled_window(workspace_tab.tiled_root.take(), window);
         }
@@ -1452,7 +1452,7 @@ fn replace_tiled_leaf(
         }
         TiledLayoutNode::Window(_) => false,
         TiledLayoutNode::Split { first, second, .. } => {
-            if tiled_contains(first, target) {
+            if contains_window(first, target) {
                 replace_tiled_leaf(first, target, replacement)
             } else {
                 replace_tiled_leaf(second, target, replacement)

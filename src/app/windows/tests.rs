@@ -1327,7 +1327,7 @@ fn editor_lifecycle_reconciles_into_window_graph_and_drives_content_tabs() {
 }
 
 #[test]
-fn editor_layout_commands_commit_state_bridge_and_graph_as_one_authoritative_transaction() {
+fn editor_layout_commands_publish_document_views_and_graph_together() {
     let (_app_dirs, mut app) = app();
     app.state
         .open_text(TextBuffer::from_text("editor"), None)
@@ -2188,7 +2188,7 @@ fn editor_fixture() -> (crate::editor::EditorState, Windows) {
 }
 
 #[test]
-fn session_restore_retires_plugin_windows_before_replacing_their_tabs() {
+fn session_restore_removes_plugin_windows_before_replacing_their_tabs() {
     use crate::persistence::PersistedLayout;
     use crate::persistence::PersistedPane;
     use crate::persistence::PersistedSession;
@@ -2368,7 +2368,7 @@ fn candidates_are_bound_to_the_session_and_owner_epoch_not_only_graph_revision()
 }
 
 #[test]
-fn failed_explorer_reconstruction_does_not_publish_a_partial_graph_or_bridge() {
+fn failed_explorer_reconstruction_does_not_publish_a_partial_graph_or_resources() {
     let (state, windows) = editor_fixture();
     let graph = windows.graph().clone();
     let native = windows.core.native.clone();
@@ -3184,7 +3184,7 @@ fn startup_document_and_dashboard_publish_together_only_for_the_accepted_proposa
     assert!(!windows.dashboard_visible());
     windows.epoch = u64::MAX;
     let copies = crate::windows::WindowGraph::test_clone_count();
-    assert!(windows.check_editor_admission(&(&accepted).into()).is_err());
+    assert!(windows.check_editor_source(&(&accepted).into()).is_err());
     assert_eq!(crate::windows::WindowGraph::test_clone_count(), copies);
 }
 

@@ -47,16 +47,9 @@ pub(super) enum NativeAction {
     None,
     CloneExplorer(NativeSurfaceTarget, u64, crate::windows::TileAxis),
     Place(NativeSurfaceTarget, WindowPlacement),
-    PlaceEditor(
-        crate::windows::WindowId,
-        crate::windows::WindowId,
-        WindowPlacement,
-    ),
-    ShowEditor(crate::windows::WindowId, crate::windows::WindowId),
-    SwapEditors(
-        (crate::windows::WindowId, crate::windows::WindowId),
-        (crate::windows::WindowId, crate::windows::WindowId),
-    ),
+    PlaceEditor(crate::windows::WindowId, WindowPlacement),
+    ShowEditor(crate::windows::WindowId),
+    SwapEditors(crate::windows::WindowId, crate::windows::WindowId),
     Close(NativeSurfaceTarget),
     Swap(NativeSurfaceTarget, NativeSurfaceTarget),
 }
@@ -95,7 +88,7 @@ impl Windows {
         catalog: PluginCatalogVersion,
     ) -> Result<WindowPlan, CommandError> {
         self.require_projected_graph()?;
-        self.check_editor_admission(source)?;
+        self.check_editor_source(source)?;
         let mut plan = self.plan(source.version(), catalog)?;
         let target = |name| self.resolve_graph_target(name, policy.selected_terminal);
         let pane = |window| {
@@ -223,7 +216,7 @@ impl Windows {
                                 .push(EditorOperation::FocusPaneId { pane: fallback });
                         }
                     }
-                    plan.native = Some(NativeAction::PlaceEditor(target_pane, window, placement));
+                    plan.native = Some(NativeAction::PlaceEditor(target_pane, placement));
                 }
             }
             WindowCommand::Show(name) => {
@@ -263,7 +256,7 @@ impl Windows {
                         plan.target = Some(window);
                     }
                     plan.hide_dashboard = true;
-                    plan.native = Some(NativeAction::ShowEditor(pane, window));
+                    plan.native = Some(NativeAction::ShowEditor(pane));
                 }
             }
             WindowCommand::Move(name, x, y) => {
@@ -290,7 +283,6 @@ impl Windows {
                 } else {
                     plan.native = Some(NativeAction::PlaceEditor(
                         pane(window)?,
-                        window,
                         WindowPlacement::Floating(placement),
                     ));
                 }
@@ -321,7 +313,6 @@ impl Windows {
                         WindowPlacement::Docked { edge, size } => {
                             plan.native = Some(NativeAction::PlaceEditor(
                                 pane,
-                                window,
                                 WindowPlacement::Docked {
                                     edge,
                                     size: size.saturating_add_signed(amount).max(1),
@@ -333,7 +324,6 @@ impl Windows {
                             rect.height = rect.height.saturating_add_signed(amount).max(1);
                             plan.native = Some(NativeAction::PlaceEditor(
                                 pane,
-                                window,
                                 WindowPlacement::Floating(rect),
                             ));
                         }
@@ -457,7 +447,6 @@ impl Windows {
                             };
                             plan.native = Some(NativeAction::PlaceEditor(
                                 pane,
-                                window,
                                 WindowPlacement::Docked {
                                     edge,
                                     size: size
@@ -489,7 +478,6 @@ impl Windows {
                             }
                             plan.native = Some(NativeAction::PlaceEditor(
                                 pane,
-                                window,
                                 WindowPlacement::Floating(rect),
                             ));
                         }
@@ -602,10 +590,7 @@ impl Windows {
                                         plan.target = Some(window);
                                         plan.focus_editor = true;
                                     }
-                                    Some(NativeAction::SwapEditors(
-                                        (first_pane, first),
-                                        (second_pane, second),
-                                    ))
+                                    Some(NativeAction::SwapEditors(first_pane, second_pane))
                                 }
                             }
                         }
@@ -646,7 +631,7 @@ impl Windows {
             NativeAction::Place(target, placement) => {
                 self.place_native(target, placement, state)?
             }
-            NativeAction::PlaceEditor(_pane, window, placement) => {
+            NativeAction::PlaceEditor(window, placement) => {
                 let mut candidate = self.candidate()?;
                 candidate
                     .core
@@ -658,7 +643,7 @@ impl Windows {
                 }
                 self.commit(candidate, state)?;
             }
-            NativeAction::ShowEditor(_pane, window) => {
+            NativeAction::ShowEditor(window) => {
                 let mut candidate = self.candidate()?;
                 candidate
                     .core
@@ -674,7 +659,7 @@ impl Windows {
                 candidate
                     .core
                     .graph
-                    .swap_non_tiled_placements(first.1, second.1)
+                    .swap_non_tiled_placements(first, second)
                     .map_err(|error| error.to_string())?;
                 self.commit(candidate, state)?;
             }

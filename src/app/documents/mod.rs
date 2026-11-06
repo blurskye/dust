@@ -2218,7 +2218,7 @@ impl App {
             .and_then(|buffer| buffer.path.clone());
         if let Err(error) = self
             .window_session
-            .check_editor_admission(&(&*self.state).into())
+            .check_editor_source(&(&*self.state).into())
         {
             self.show_error(error);
             return;
@@ -2264,7 +2264,7 @@ impl App {
         let close_save = reply.close_save().cloned();
         if let Err(error) = self
             .window_session
-            .check_editor_admission(&(&*self.state).into())
+            .check_editor_source(&(&*self.state).into())
         {
             if let Some(token) = &close_save {
                 self.window_session.fail_editor_close_save(token);

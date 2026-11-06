@@ -1386,7 +1386,7 @@ impl App {
             };
             if let Err(error) = self
                 .window_session
-                .check_editor_admission(&(&*self.state).into())
+                .check_editor_source(&(&*self.state).into())
             {
                 self.show_error(error);
                 return;
@@ -1482,7 +1482,7 @@ impl App {
             MutationUpdate::Complete { operation, change } => {
                 let reconciliation = (|| -> Result<(), String> {
                     self.window_session
-                        .check_editor_admission(&(&*self.state).into())?;
+                        .check_editor_source(&(&*self.state).into())?;
                     if let Some(change) = change {
                         let target = match &operation {
                             ExplorerMutation::Rename { target, .. } => Some(target.as_path()),

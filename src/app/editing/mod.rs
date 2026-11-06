@@ -239,7 +239,7 @@ impl App {
             )?;
         }
         self.window_session
-            .check_editor_admission(&(&*self.state).into())?;
+            .check_editor_source(&(&*self.state).into())?;
         let candidate = self
             .state
             .prepare_transaction(transaction)
@@ -256,7 +256,7 @@ impl App {
         activate_document: bool,
     ) -> Result<(), String> {
         self.window_session
-            .check_editor_admission(&(&*self.state).into())?;
+            .check_editor_source(&(&*self.state).into())?;
         let current = self.state.version();
         candidate.check_current(&current)?;
         if !activate_document

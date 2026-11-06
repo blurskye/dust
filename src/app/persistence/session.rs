@@ -61,7 +61,7 @@ impl RestoreSource {
         self.editor == context.editor.version()
             && context
                 .windows
-                .check_editor_admission(&context.editor.into())
+                .check_editor_source(&context.editor.into())
                 .is_ok()
             && self.workspace == context.workspace.version()
             && self.configuration == context.configuration

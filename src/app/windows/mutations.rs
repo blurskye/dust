@@ -131,7 +131,12 @@ impl Windows {
         if !Arc::ptr_eq(&self.origin, &candidate.origin) || self.epoch != candidate.epoch {
             return Err("window candidate is stale or belongs to another session".into());
         }
-        if candidate.core.source.as_ref().is_some_and(|source| source != &state.window_version()) {
+        if candidate
+            .core
+            .source
+            .as_ref()
+            .is_some_and(|source| source != &state.window_version())
+        {
             return Err("window candidate editor source is stale".into());
         }
         candidate
@@ -222,7 +227,7 @@ impl Windows {
         descriptions.signature.dashboard_visible = false;
         let restored_descriptions = descriptions.clone();
         proposal.check_current(source.0)?;
-        self.check_editor_admission(&proposal.topology())?;
+        self.check_editor_source(&proposal.topology())?;
         let mut candidate = self.prepare_editor(&proposal.topology(), scratch)?;
         for (plugin, load) in generations {
             candidate
@@ -451,7 +456,7 @@ impl Windows {
             .map_err(|error| error.to_string())?;
         Ok(candidate)
     }
-    pub(in crate::app) fn check_editor_admission(
+    pub(in crate::app) fn check_editor_source(
         &self,
         state: &EditorTopology<'_>,
     ) -> Result<(), String> {
@@ -474,7 +479,7 @@ impl Windows {
         state: &EditorTopology<'_>,
         scratch: &str,
     ) -> Result<WindowCandidate, String> {
-        self.check_editor_admission(state)?;
+        self.check_editor_source(state)?;
         let mut candidate = self.candidate()?;
         candidate.core.graph = state.graph().clone();
         for (buffer, title) in crate::app::windows::content::editor_buffer_titles(state, scratch) {

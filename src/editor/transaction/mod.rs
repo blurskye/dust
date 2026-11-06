@@ -789,7 +789,9 @@ impl EditorState {
     }
 }
 impl EditorDraft {
-    pub(crate) fn before_graph_revision(&self) -> Option<u64> { self.before_graph_revision }
+    pub(crate) fn before_graph_revision(&self) -> Option<u64> {
+        self.before_graph_revision
+    }
 
     pub(crate) fn version(&self) -> EditorVersion {
         self.state.version()

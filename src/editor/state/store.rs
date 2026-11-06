@@ -328,7 +328,9 @@ impl EditorState {
         if let Err(error) = self.show_view(view) {
             self.remove_view(view)?;
             if let Some(content) = self.buffer_contents.remove(&buffer) {
-                self.graph.remove_content(content).map_err(|_| "new buffer content is still viewed")?;
+                self.graph
+                    .remove_content(content)
+                    .map_err(|_| "new buffer content is still viewed")?;
             }
             self.buffers.remove(buffer);
             return Err(error);
@@ -441,7 +443,9 @@ impl EditorState {
         if let Err(error) = self.show_view(view) {
             self.remove_view(view)?;
             if let Some(content) = self.buffer_contents.remove(&buffer) {
-                self.graph.remove_content(content).map_err(|_| "new buffer content is still viewed")?;
+                self.graph
+                    .remove_content(content)
+                    .map_err(|_| "new buffer content is still viewed")?;
             }
             self.buffers.remove(buffer);
             return Err(error);

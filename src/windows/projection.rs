@@ -159,15 +159,6 @@ pub(super) fn validate_logical_layout(
     validate_tiled_layout(tab, tiled.as_ref(), windows, expected)
 }
 
-pub(super) fn tiled_contains(node: &TiledLayoutNode, target: WindowId) -> bool {
-    match node {
-        TiledLayoutNode::Window(window) => *window == target,
-        TiledLayoutNode::Split { first, second, .. } => {
-            tiled_contains(first, target) || tiled_contains(second, target)
-        }
-    }
-}
-
 pub(super) fn append_tiled_window(
     root: Option<TiledLayoutNode>,
     window: WindowId,
@@ -186,7 +177,9 @@ pub(super) fn append_tiled_window(
                 first,
                 second,
             } => {
-                if depth(&first) <= depth(&second) {
+                if crate::windows::tree::layout_depth(&first)
+                    <= crate::windows::tree::layout_depth(&second)
+                {
                     TiledLayoutNode::Split {
                         axis,
                         ratio,
@@ -204,12 +197,7 @@ pub(super) fn append_tiled_window(
             }
         }
     }
-    fn depth(node: &TiledLayoutNode) -> usize {
-        match node {
-            TiledLayoutNode::Window(_) => 1,
-            TiledLayoutNode::Split { first, second, .. } => 1 + depth(first).max(depth(second)),
-        }
-    }
+
     Some(root.map_or(TiledLayoutNode::Window(window), |root| append(root, window)))
 }
 
@@ -249,35 +237,6 @@ pub(super) fn replace_tiled_window(node: &mut TiledLayoutNode, from: WindowId, t
             replace_tiled_window(second, from, to);
         }
     }
-}
-
-pub(super) fn resize_tiled_parent(
-    node: &mut TiledLayoutNode,
-    target: WindowId,
-    delta: i16,
-) -> bool {
-    let TiledLayoutNode::Split {
-        ratio,
-        first,
-        second,
-        ..
-    } = node
-    else {
-        return false;
-    };
-    if resize_tiled_parent(first, target, delta) || resize_tiled_parent(second, target, delta) {
-        return true;
-    }
-    let signed = if tiled_contains(first, target) {
-        i32::from(delta)
-    } else if tiled_contains(second, target) {
-        -i32::from(delta)
-    } else {
-        return false;
-    };
-    let adjusted = i32::from(*ratio) + signed;
-    *ratio = u16::try_from(adjusted.clamp(1, 999)).unwrap_or(*ratio);
-    true
 }
 
 pub(super) fn push_compositor_window(
