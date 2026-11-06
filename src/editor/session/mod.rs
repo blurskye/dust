@@ -6,12 +6,10 @@ mod diagnostics;
 mod dispatch;
 mod documents;
 mod explorer;
-#[path = "extensions/session.rs"]
 mod extensions;
 mod flash;
 mod git;
 mod input;
-#[path = "lsp/session.rs"]
 mod lsp;
 mod lsp_edits;
 mod notifications;
@@ -22,7 +20,6 @@ mod search;
 mod syntax;
 mod tasks;
 mod terminal;
-#[path = "tooling/session.rs"]
 mod tooling;
 mod windows;
 mod workspace;

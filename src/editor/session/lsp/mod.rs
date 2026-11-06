@@ -1,4 +1,3 @@
-#[path = "launch.rs"]
 mod launch;
 
 pub(crate) const LSP_REQUEST_TIMEOUT_MS: u64 = 10_000;
@@ -9,7 +8,6 @@ pub(crate) const LSP_MAXIMUM_LOG_LINES: usize = 200;
 pub(in crate::editor::session) use launch::{
     LaunchContext, LspLaunchRequest, LspLaunchSource, PendingLspProjectRoot,
 };
-#[path = "projection.rs"]
 mod projection;
 pub(in crate::editor::session) use projection::ProjectionChange;
 // LSP runtime bookkeeping and accepted document lineage. No mutable editor authority.

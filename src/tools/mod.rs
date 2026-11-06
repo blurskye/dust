@@ -8,8 +8,8 @@ pub use registry::{
 
 use std::sync::OnceLock;
 
-const BUNDLED_NIX_LSP_FLAKE: &str = include_str!("../../assets/tools/nix-workspace/flake.nix");
-const BUNDLED_NIX_LSP_LOCK: &str = include_str!("../../assets/tools/nix-workspace/flake.lock");
+const BUNDLED_NIX_LSP_FLAKE: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/tools/nix-workspace/flake.nix"));
+const BUNDLED_NIX_LSP_LOCK: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/tools/nix-workspace/flake.lock"));
 /// Exact nixpkgs revision locked by Dust's bundled Linux compatibility runtime.
 pub const NIX_LSP_NIXPKGS_REVISION: &str = "b6018f87da91d19d0ab4cf979885689b469cdd41";
 const NIX_COMPATIBILITY_FLAKE_PACKAGE: &str = "compat-runtime";

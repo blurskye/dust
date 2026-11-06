@@ -15,52 +15,52 @@ pub(super) const BUNDLED: &[(&str, &str)] = &[
     ("dust", super::load::BUNDLED_THEME),
     (
         "catppuccin-latte",
-        include_str!("../../assets/themes/catppuccin-latte.toml"),
+        include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/themes/catppuccin-latte.toml")),
     ),
     (
         "catppuccin-frappe",
-        include_str!("../../assets/themes/catppuccin-frappe.toml"),
+        include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/themes/catppuccin-frappe.toml")),
     ),
     (
         "catppuccin-macchiato",
-        include_str!("../../assets/themes/catppuccin-macchiato.toml"),
+        include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/themes/catppuccin-macchiato.toml")),
     ),
     (
         "catppuccin-mocha",
-        include_str!("../../assets/themes/catppuccin-mocha.toml"),
+        include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/themes/catppuccin-mocha.toml")),
     ),
     (
         "gruvbox-dark",
-        include_str!("../../assets/themes/gruvbox-dark.toml"),
+        include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/themes/gruvbox-dark.toml")),
     ),
-    ("nord", include_str!("../../assets/themes/nord.toml")),
+    ("nord", include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/themes/nord.toml"))),
     (
         "tokyo-night",
-        include_str!("../../assets/themes/tokyo-night.toml"),
+        include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/themes/tokyo-night.toml")),
     ),
     (
         "tokyo-night-storm",
-        include_str!("../../assets/themes/tokyo-night-storm.toml"),
+        include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/themes/tokyo-night-storm.toml")),
     ),
     (
         "tokyo-night-moon",
-        include_str!("../../assets/themes/tokyo-night-moon.toml"),
+        include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/themes/tokyo-night-moon.toml")),
     ),
     (
         "tokyo-night-day",
-        include_str!("../../assets/themes/tokyo-night-day.toml"),
+        include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/themes/tokyo-night-day.toml")),
     ),
     (
         "rose-pine",
-        include_str!("../../assets/themes/rose-pine.toml"),
+        include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/themes/rose-pine.toml")),
     ),
     (
         "rose-pine-moon",
-        include_str!("../../assets/themes/rose-pine-moon.toml"),
+        include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/themes/rose-pine-moon.toml")),
     ),
     (
         "rose-pine-dawn",
-        include_str!("../../assets/themes/rose-pine-dawn.toml"),
+        include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/themes/rose-pine-dawn.toml")),
     ),
 ];
 pub(super) fn bundled_named(name: &str) -> Option<ThemeChoice> {

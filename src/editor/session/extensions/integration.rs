@@ -700,7 +700,7 @@ mod tests {
         let mut owner =
             ExtensionSession::new(root.path().join("storage"), 8, packages.clone(), registry);
         let core =
-            include_bytes!("../../../../tests/fixtures/retained-guest/retained-guest.core.wasm");
+            include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/retained-guest/retained-guest.core.wasm"));
         let bytes = wit_component::ComponentEncoder::default()
             .module(core)
             .unwrap()

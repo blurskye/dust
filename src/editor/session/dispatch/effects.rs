@@ -16134,9 +16134,9 @@ pub(super) fn create_user_file(path: &std::path::Path) -> std::io::Result<()> {
         .create(true)
         .open(path)?;
     let starter = if path.file_name().is_some_and(|name| name == "keymaps.toml") {
-        include_str!("../../../../assets/defaults/keymaps-starter.toml")
+        include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/defaults/keymaps-starter.toml"))
     } else {
-        include_str!("../../../../assets/defaults/settings-starter.toml")
+        include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/defaults/settings-starter.toml"))
     };
     if std::fs::metadata(path)?.len() == 0 {
         std::fs::write(path, starter)?;

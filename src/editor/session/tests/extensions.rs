@@ -856,7 +856,7 @@ fn confirmation_capacity_is_reserved_before_the_guest_call() {
 #[test]
 fn real_component_observes_queue_full_from_aggregate_confirmation_ownership() {
     use sha2::{Digest, Sha256};
-    let core = include_bytes!("../../../../tests/fixtures/retained-guest/retained-guest.core.wasm");
+    let core = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/retained-guest/retained-guest.core.wasm"));
     let component = wit_component::ComponentEncoder::default()
         .module(core)
         .expect("fixture metadata")
@@ -996,7 +996,7 @@ fn real_component_observes_queue_full_from_aggregate_confirmation_ownership() {
 #[test]
 fn packaged_production_02_component_clone_refusal_never_enqueues_a_guest_callback() {
     use sha2::{Digest, Sha256};
-    let core = include_bytes!("../../../../tests/fixtures/retained-guest/retained-guest.core.wasm");
+    let core = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/retained-guest/retained-guest.core.wasm"));
     assert_eq!(
         format!("{:x}", Sha256::digest(core)),
         "9f17af443ca9a4150f940656ef2edb11a48c1d59b7430d4e029f1b1cf951bc48"
@@ -1170,7 +1170,7 @@ fn packaged_production_02_component_clone_refusal_never_enqueues_a_guest_callbac
 #[test]
 fn packaged_real_guest_confirmation_updates_its_custom_view() {
     use sha2::{Digest, Sha256};
-    let core = include_bytes!("../../../../tests/fixtures/retained-guest/retained-guest.core.wasm");
+    let core = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/retained-guest/retained-guest.core.wasm"));
     let component = wit_component::ComponentEncoder::default()
         .module(core)
         .expect("fixture metadata")

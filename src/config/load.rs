@@ -97,10 +97,10 @@ pub fn user_theme_path(name: &str) -> PathBuf {
         .join(format!("{name}.toml"))
 }
 
-pub(super) const BUNDLED_CONFIG: &str = include_str!("../../assets/defaults/config.toml");
-pub(super) const BUNDLED_KEYMAPS: &str = include_str!("../../assets/defaults/keymaps.toml");
-pub(super) const BUNDLED_DASHBOARD: &str = include_str!("../../assets/defaults/dashboard.toml");
-pub(super) const BUNDLED_THEME: &str = include_str!("../../assets/themes/dust.toml");
+pub(super) const BUNDLED_CONFIG: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/defaults/config.toml"));
+pub(super) const BUNDLED_KEYMAPS: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/defaults/keymaps.toml"));
+pub(super) const BUNDLED_DASHBOARD: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/defaults/dashboard.toml"));
+pub(super) const BUNDLED_THEME: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/themes/dust.toml"));
 
 /// The bundled defaults, parsed once. Startup and every reload need them several times, and
 /// parsing about 170 KB of TOML is most of the startup time.

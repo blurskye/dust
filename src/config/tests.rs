@@ -430,7 +430,7 @@ fn configuration_bundle(theme: &str, revision: u8, valid: bool) -> Configuration
             Some("keymaps.toml") => format!(
                 "[[keymap]]\nid='user.revision-{revision}'\ncontext='dashboard'\nkeys='x'\ncommand='file.new'\n"
             ),
-            Some("dashboard.toml") => include_str!("../../assets/defaults/dashboard.toml")
+            Some("dashboard.toml") => include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/defaults/dashboard.toml"))
                 .replace("D U S T", &format!("dashboard-{revision}")),
             Some(_) => BUNDLED_THEME
                 .replace("name = \"dust\"", &format!("name = \"{theme}\""))
@@ -446,8 +446,8 @@ fn captured_bundle_identity_exposes_aba_and_uses_the_same_text_for_spans() {
     let config = "[ui]\ntheme='night'\n";
     let keymaps_b = "[[keymap]]\nid='user.test.captured-b'\ncontext='dashboard'\nkeys='b'\ncommand='file.new'\n";
     let dashboard =
-        include_str!("../../assets/defaults/dashboard.toml").replace("D U S T", "CAPTURED DASH");
-    let theme = include_str!("../../assets/themes/dust.toml")
+        include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/defaults/dashboard.toml")).replace("D U S T", "CAPTURED DASH");
+    let theme = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/themes/dust.toml"))
         .replace("name = \"dust\"", "name = \"night\"");
     let reads = Cell::new(0_usize);
     let bundle = capture_configuration_bundle_with("dust", |path| {
@@ -1984,7 +1984,7 @@ fn config_migration_preserves_symlinks_and_updates_their_target() {
 
 #[test]
 fn product_plan_terminal_profile_and_keymap_are_accepted() {
-    let plan = include_str!("../../docs/product-plan.md");
+    let plan = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/docs/product-plan.md"));
     let profile = plan
         .split("Example profile in `config.toml`:")
         .nth(1)

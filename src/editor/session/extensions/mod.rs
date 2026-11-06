@@ -21,23 +21,17 @@ use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
     path::PathBuf,
 };
-#[path = "confirmations.rs"]
 mod confirmations;
-#[path = "hosting.rs"]
 mod hosting;
 pub(super) use confirmations::ConfirmationPresentation;
-#[path = "integration.rs"]
 mod integration;
-#[path = "windows/mod.rs"]
 mod windows;
 pub(super) use hosting::WindowUpdate;
 pub(super) use integration::{ExtensionUpdate, RegistryUpdate};
 pub(super) use windows::PluginUiInteraction;
 #[cfg(test)]
 pub(in crate::editor::session) use windows::tests::fixture_manifest;
-#[path = "content.rs"]
 mod content;
-#[path = "documents.rs"]
 mod documents;
 pub(super) use content::{VirtualContext, VirtualOpen, VirtualPublication};
 

@@ -527,14 +527,14 @@ fn resolved_explain_reports_exact_layered_and_replacement_provenance() {
     let mut loaded = crate::config::load_config(&config_path);
 
     let dashboard_path = root.path().join("dashboard.toml");
-    let dashboard_source = include_str!("../../../../assets/defaults/dashboard.toml")
+    let dashboard_source = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/defaults/dashboard.toml"))
         .replace("D U S T", "PROVENANCE DASH");
     loaded.dashboard = toml::from_str(&dashboard_source).expect("dashboard");
     loaded.dashboard_path = dashboard_path.clone();
     loaded.dashboard_spans = crate::config::setting_spans(&dashboard_source);
 
     let theme_path = root.path().join("provenance.toml");
-    let theme_source = include_str!("../../../../assets/themes/dust.toml")
+    let theme_source = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/themes/dust.toml"))
         .replace("name = \"dust\"", "name = \"provenance\"");
     loaded.theme = toml::from_str(&theme_source).expect("theme");
     loaded.theme_path = theme_path.clone();

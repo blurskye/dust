@@ -5,8 +5,8 @@ use std::{path::Path, sync::OnceLock};
 
 use serde::Deserialize;
 
-const CATALOG: &str = include_str!("../../assets/defaults/settings.toml");
-const SETUP: &str = include_str!("../../assets/defaults/setup.toml");
+const CATALOG: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/defaults/settings.toml"));
+const SETUP: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/defaults/setup.toml"));
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]

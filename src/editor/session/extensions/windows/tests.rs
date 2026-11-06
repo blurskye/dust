@@ -625,7 +625,7 @@ fn target03_dimensions_invalidates_hidden_views_and_updates_visible_siblings() {
     use crate::extensions::target03::{TargetAdmission, api::dust::plugin::host as wire};
 
     let mut admission = TargetAdmission::parse(
-        include_str!("../../../../../tests/fixtures/target03-clone-guest/manifest.toml"),
+        include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/target03-clone-guest/manifest.toml")),
         9,
     )
     .unwrap();
@@ -783,7 +783,7 @@ fn target03_dimensions_invalidates_hidden_views_and_updates_visible_siblings() {
 fn real_component_drives_the_retained_window_protocol_without_wasi() {
     use sha2::{Digest, Sha256};
     let core =
-        include_bytes!("../../../../../tests/fixtures/retained-guest/retained-guest.core.wasm");
+        include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/retained-guest/retained-guest.core.wasm"));
     assert_eq!(
         format!("{:x}", Sha256::digest(core)),
         "9f17af443ca9a4150f940656ef2edb11a48c1d59b7430d4e029f1b1cf951bc48"
@@ -1602,12 +1602,12 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
         "fd96d2ac94bc372426094dfc535cadc00e1ca471abd5431529f3c8cec7e7b3e5"
     );
     assert_eq!(
-        include_str!("../../../../../docs/plugin-abi-next.wit"),
-        include_str!("../../../../../tests/fixtures/target03-clone-guest/wit/dust-plugin.wit")
+        include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/docs/plugin-abi-next.wit")),
+        include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/target03-clone-guest/wit/dust-plugin.wit"))
     );
 
     let manifest_source =
-        include_str!("../../../../../tests/fixtures/target03-clone-guest/manifest.toml");
+        include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/target03-clone-guest/manifest.toml"));
     let admission =
         TargetAdmission::parse(manifest_source, 9).expect("strict target manifest admission");
     assert!(TargetAdmission::parse(&manifest_source.replace("0.3.0", "0.4.0"), 9).is_err());

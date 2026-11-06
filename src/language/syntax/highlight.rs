@@ -10,7 +10,7 @@ use serde::Deserialize;
 
 use crate::config::HighlightDefinition;
 
-const DEFAULTS: &str = include_str!("../../../assets/defaults/highlights.toml");
+const DEFAULTS: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/defaults/highlights.toml"));
 
 /// Groups Dust's own surfaces draw with, registered first so each has a fixed id.
 const BUILTIN: [&str; 16] = [

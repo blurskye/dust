@@ -994,7 +994,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let manager = PackageManager::new(root.path().into(), 1024 * 1024, 1024 * 1024).unwrap();
         let (mut manifest, mut plugin, _) = super::super::tests::package_fixture("demo");
-        let core = include_bytes!("../../tests/fixtures/retained-guest/retained-guest.core.wasm");
+        let core = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/retained-guest/retained-guest.core.wasm"));
         let bytes = wit_component::ComponentEncoder::default()
             .module(core)
             .unwrap()

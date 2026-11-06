@@ -136,7 +136,7 @@ fn component_host() -> ComponentHostState {
 fn completed_component_execution_cancels_its_epoch_timer() {
     use sha2::{Digest, Sha256};
     let root = tempfile::tempdir().unwrap();
-    let core = include_bytes!("../../tests/fixtures/retained-guest/retained-guest.core.wasm");
+    let core = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/retained-guest/retained-guest.core.wasm"));
     let bytes = wit_component::ComponentEncoder::default()
         .module(core)
         .unwrap()
@@ -1607,7 +1607,7 @@ fn retained_runtime_with_activation(
             }
         }
     }
-    let original = include_bytes!("../../tests/fixtures/retained-guest/retained-guest.core.wasm");
+    let original = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/retained-guest/retained-guest.core.wasm"));
     let mut core = original.to_vec();
     if let Some(activation_body) = activation_body {
         let mut at = 8;

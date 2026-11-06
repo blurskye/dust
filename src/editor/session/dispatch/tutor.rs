@@ -20,9 +20,9 @@ use crate::editor::text::{ByteOffset, ByteRange};
 use crate::editor::{BufferId, CommandInvocation, CommandValue, EditorMode, InvocationSource};
 use crate::ui::UiSyntaxSpan;
 
-const LESSONS: &str = include_str!("../../../../assets/defaults/tutor.toml");
+const LESSONS: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/defaults/tutor.toml"));
 /// The editing practice lines, the same in every language, inside a comment of the practice file.
-const PRACTICE_LINES: &str = include_str!("../../../../assets/defaults/tutor/practice.txt");
+const PRACTICE_LINES: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/defaults/tutor/practice.txt"));
 const FOOTER: &str = ":TutorNext skip · :TutorBack back · :TutorQuit quit";
 /// How long the card says a step is done before the next one comes.
 const PRAISE: Duration = Duration::from_millis(1200);

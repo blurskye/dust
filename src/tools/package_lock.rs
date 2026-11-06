@@ -382,4 +382,4 @@ pub enum PackageError {
     Io(#[source] std::io::Error),
 }
 
-pub(super) const BUNDLED_TOOL_CATALOG: &str = include_str!("../../assets/tools/catalog.toml");
+pub(super) const BUNDLED_TOOL_CATALOG: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/tools/catalog.toml"));
