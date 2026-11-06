@@ -725,7 +725,7 @@ impl App {
                         (&current, catalog.clone()),
                         SCRATCH_LABEL,
                         descriptions,
-                        &self.extension.window_generations(),
+                        &self.extension.window_loads(),
                         RestoreWindowPolicy {
                             rules: &window_rules,
                             descriptors: &content_descriptors,

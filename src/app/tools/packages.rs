@@ -163,7 +163,7 @@ impl App {
         for update in updates {
             match update {
                 ExtensionUpdate::Remove(plugin, load) => {
-                    self.remove_plugin_contribution_generation(&plugin, load)
+                    self.remove_plugin_contributions(&plugin, load)
                 }
                 ExtensionUpdate::Error(error) => self.show_error(error),
                 ExtensionUpdate::Conflict(plugin) => {

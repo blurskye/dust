@@ -117,7 +117,7 @@ impl PluginWindowHost {
     ) -> PluginUiEvent {
         mutation_event(token, graph_revision, Err(ui_error(code, detail)))
     }
-    /// Admission runs against immutable live state, before graph/host staging.
+    /// Validation runs against immutable live state, before graph/host staging.
     /// Structural graph validation still runs on the accepted mutation candidate.
     pub(in crate::app) fn admit_window_request(
         &self,
@@ -165,7 +165,7 @@ impl PluginWindowHost {
                     .ok_or_else(|| {
                         ui_error(
                             PluginUiErrorCode::UndeclaredContent,
-                            "content type is not owned by this plugin generation",
+                            "content type is not owned by this plugin load",
                         )
                     })?;
                 let placement = self
@@ -187,15 +187,15 @@ impl PluginWindowHost {
                     .values()
                     .filter(|i| {
                         i.plugin == index.owner
-                            && i.load == index.generation
+                            && i.load == index.plugin_load
                             && i.content_type == *content_type
                     })
                     .count()
                     >= usize::from(declaration.maximum_instances)
                 {
                     return Err(ui_error(
-                        PluginUiErrorCode::InstanceCeiling,
-                        "plugin content instance ceiling reached",
+                        PluginUiErrorCode::InstanceLimit,
+                        "plugin content instance limit reached",
                     ));
                 }
                 match declaration.presenter {
@@ -253,7 +253,7 @@ impl PluginWindowHost {
                     .find(|d| d.id == instance.content_type)
                     .ok_or_else(|| {
                         ui_error(
-                            PluginUiErrorCode::GenerationLost,
+                            PluginUiErrorCode::LoadUnavailable,
                             "content declaration is stale",
                         )
                     })?;
@@ -300,7 +300,7 @@ impl PluginWindowHost {
             }
             _ => Err(ui_error(
                 PluginUiErrorCode::InternalRejected,
-                "retained update used window admission",
+                "retained update used window validation",
             )),
         }
     }
@@ -338,7 +338,7 @@ impl PluginWindowHost {
                     .ok_or_else(|| {
                         ui_error(
                             PluginUiErrorCode::UndeclaredContent,
-                            "content type is not owned by this plugin generation",
+                            "content type is not owned by this plugin load",
                         )
                     })?;
                 let placement = self
@@ -358,14 +358,14 @@ impl PluginWindowHost {
                     .values()
                     .filter(|instance| {
                         instance.plugin == index.owner
-                            && instance.load == index.generation
+                            && instance.load == index.plugin_load
                             && instance.content_type == content_type
                     })
                     .count();
                 if count >= usize::from(declaration.maximum_instances) {
                     return Err(ui_error(
-                        PluginUiErrorCode::InstanceCeiling,
-                        "plugin content instance ceiling reached",
+                        PluginUiErrorCode::InstanceLimit,
+                        "plugin content instance limit reached",
                     ));
                 }
                 let (adapter, focused_node, private) = match declaration.presenter {
@@ -436,11 +436,11 @@ impl PluginWindowHost {
                         },
                         false,
                         &owner,
-                        index.generation,
+                        index.plugin_load,
                     )
                     .map_err(map_graph_error)?;
                 let view = candidate
-                    .create_view(content, &owner, index.generation)
+                    .create_view(content, &owner, index.plugin_load)
                     .map_err(map_graph_error)?;
                 let window = candidate
                     .open_window(
@@ -449,7 +449,7 @@ impl PluginWindowHost {
                         placement,
                         declaration.focusable,
                         &owner,
-                        index.generation,
+                        index.plugin_load,
                     )
                     .map_err(map_graph_error)?;
                 candidate.validate().map_err(map_graph_error)?;
@@ -459,7 +459,7 @@ impl PluginWindowHost {
                     handle,
                     PluginWindowInstance {
                         plugin: index.owner.clone(),
-                        load: index.generation,
+                        load: index.plugin_load,
                         checksum: index.checksum.clone(),
                         content_type,
                         content,
@@ -489,7 +489,7 @@ impl PluginWindowHost {
                     .find(|declaration| declaration.id == instance.content_type)
                     .ok_or_else(|| {
                         ui_error(
-                            PluginUiErrorCode::GenerationLost,
+                            PluginUiErrorCode::LoadUnavailable,
                             "content declaration is stale",
                         )
                     })?;
@@ -698,18 +698,18 @@ impl PluginWindowHost {
             )
         })?;
         if instance.plugin != index.owner
-            || instance.load != index.generation
+            || instance.load != index.plugin_load
             || instance.checksum != index.checksum
         {
             return Err(ui_error(
-                PluginUiErrorCode::ForeignGeneration,
-                "plugin window handle belongs to another generation",
+                PluginUiErrorCode::ForeignLoad,
+                "plugin window handle belongs to another plugin load",
             ));
         }
         Ok(instance)
     }
 
-    pub(in crate::app) fn generations(&self) -> Vec<(String, u64)> {
+    pub(in crate::app) fn loads(&self) -> Vec<(String, u64)> {
         self.instances
             .values()
             .map(|instance| (instance.plugin.clone(), instance.load))
@@ -720,7 +720,7 @@ impl PluginWindowHost {
     pub(in crate::app) fn clear_runtime(&mut self) {
         self.instances.clear();
     }
-    pub(in crate::app) fn remove_generation(&mut self, plugin: &str, load: u64) -> bool {
+    pub(in crate::app) fn remove_load(&mut self, plugin: &str, load: u64) -> bool {
         let before = self.instances.len();
         self.instances
             .retain(|_, instance| !(instance.plugin == plugin && instance.load == load));
@@ -737,7 +737,7 @@ impl PluginWindowHost {
             .values()
             .find(|instance| instance.window == window)?;
         let index = catalog.get(&instance.plugin).filter(|index| {
-            index.generation == instance.load && index.checksum == instance.checksum
+            index.plugin_load == instance.load && index.checksum == instance.checksum
         })?;
         index
             .content_types
@@ -829,12 +829,12 @@ impl PluginWindowHost {
         let index = catalog
             .get(&instance.plugin)
             .filter(|index| {
-                index.generation == instance.load && index.checksum == instance.checksum
+                index.plugin_load == instance.load && index.checksum == instance.checksum
             })
             .ok_or_else(|| {
                 ui_error(
-                    PluginUiErrorCode::GenerationLost,
-                    "plugin contribution generation is unavailable",
+                    PluginUiErrorCode::LoadUnavailable,
+                    "plugin contribution load is unavailable",
                 )
             })?;
         require_active_window(graph, instance.window)?;
@@ -1016,12 +1016,12 @@ impl PluginWindowHost {
         let index = catalog
             .get(&instance.plugin)
             .filter(|index| {
-                index.generation == instance.load && index.checksum == instance.checksum
+                index.plugin_load == instance.load && index.checksum == instance.checksum
             })
             .ok_or_else(|| {
                 ui_error(
-                    PluginUiErrorCode::GenerationLost,
-                    "private surface generation is unavailable",
+                    PluginUiErrorCode::LoadUnavailable,
+                    "private surface load is unavailable",
                 )
             })?;
         let action = snapshot

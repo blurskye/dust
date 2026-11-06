@@ -563,7 +563,7 @@ fn static_manifest_contribution_index_is_namespaced_deterministic_and_pure() {
     let index =
         index_manifest_contributions(&manifest, 9, "manifest.toml".into()).expect("static index");
     assert_eq!(index.owner, "demo");
-    assert_eq!(index.generation, 9);
+    assert_eq!(index.plugin_load, 9);
     assert_eq!(index.contexts[0].id, "plugin.demo.chat");
     assert_eq!(index.keymaps[0].id, "plugin.demo.keymap.open-chat");
     assert_eq!(index.content_types[0].id, "plugin.demo.chat-panel");
@@ -668,7 +668,7 @@ fn renamed_manifest(owner: &str) -> PluginManifest {
 }
 
 #[test]
-fn contribution_catalog_orders_plugins_and_removes_exact_generations() {
+fn contribution_catalog_orders_plugins_and_removes_exact_loads() {
     let demo = index_manifest_contributions(&manifest(), 3, "demo.toml".into()).expect("demo");
     let mut other_manifest = renamed_manifest("other");
     other_manifest.contributions.keymaps[0].keys = "<leader> b".into();
@@ -686,9 +686,9 @@ fn contribution_catalog_orders_plugins_and_removes_exact_generations() {
         vec!["demo", "other"]
     );
     assert!(catalog.context_snapshot().is_ok());
-    assert!(!catalog.remove_generation("demo", 2));
+    assert!(!catalog.remove_load("demo", 2));
     assert!(catalog.get("demo").is_some());
-    assert!(catalog.remove_generation("demo", 3));
+    assert!(catalog.remove_load("demo", 3));
     assert!(catalog.get("demo").is_none());
 
     let mut demo_manifest = manifest();
@@ -807,7 +807,7 @@ fn index_worker_does_not_touch_component_and_requires_host_acceptance() {
         .as_ref()
         .expect("content provenance");
     assert_eq!(provenance.owner, "demo");
-    assert_eq!(provenance.generation, load.0);
+    assert_eq!(provenance.plugin_load, load.0);
     assert!(provenance.span.is_some());
     manager
         .activate_indexed("demo", load, index.checksum)
@@ -1037,7 +1037,7 @@ fn static_events_providers_and_storage_are_capability_gated_and_bounded() {
             .provenance
             .as_ref()
             .unwrap()
-            .generation,
+            .plugin_load,
         7
     );
     assert_eq!(indexed.providers[0].kind, PluginProviderKind::PickerSource);
@@ -1129,7 +1129,7 @@ fn coalesced_host_events_keep_observation_order() {
 }
 
 #[test]
-fn host_events_coalesce_acknowledge_and_remove_exact_generation() {
+fn host_events_coalesce_acknowledge_and_remove_exact_load() {
     let mut candidate = manifest();
     candidate
         .capabilities
@@ -1240,8 +1240,8 @@ fn host_events_coalesce_acknowledge_and_remove_exact_generation() {
         );
     }
     assert_eq!(queue, stable);
-    assert!(!queue.remove_generation("demo", PluginLoadId(8)));
-    assert!(queue.remove_generation("demo", PluginLoadId(9)));
+    assert!(!queue.remove_load("demo", PluginLoadId(8)));
+    assert!(queue.remove_load("demo", PluginLoadId(9)));
 }
 
 #[test]
@@ -1265,7 +1265,7 @@ fn failed_enqueue_does_not_publish_loading() {
     assert!(manager.stopped);
 }
 #[test]
-fn stale_failure_and_unload_cannot_replace_current_generation() {
+fn stale_failure_and_unload_cannot_replace_current_load() {
     let (tx, _rx) = mpsc::sync_channel(4);
     let (etx, erx) = mpsc::sync_channel(4);
     let mut manager = manager(tx, erx);
@@ -1281,11 +1281,11 @@ fn stale_failure_and_unload_cannot_replace_current_generation() {
     .unwrap();
     assert!(manager.poll().unwrap().is_empty());
     assert_eq!(manager.load_id("demo"), Some(PluginLoadId(2)));
-    manager.unload_generation("demo", PluginLoadId(1)).unwrap();
+    manager.unload_load("demo", PluginLoadId(1)).unwrap();
     assert_eq!(manager.load_id("demo"), Some(PluginLoadId(2)));
 }
 #[test]
-fn active_load_ceiling_bounds_disable_ownership() {
+fn active_load_limit_bounds_disable_ownership() {
     let (tx, _rx) = mpsc::sync_channel(4);
     let (_etx, erx) = mpsc::sync_channel(1);
     let mut manager = manager(tx, erx);
@@ -1301,7 +1301,7 @@ fn active_load_ceiling_bounds_disable_ownership() {
         ),
         Err(PluginError::LoadLimit)
     ));
-    manager.unload_generation("one", PluginLoadId(1)).unwrap();
+    manager.unload_load("one", PluginLoadId(1)).unwrap();
     assert!(manager.pending_disables.len() <= manager.maximum_loads);
 }
 #[test]
@@ -1315,7 +1315,7 @@ fn queue_full_cancellation_stays_pending_and_suppresses_events() {
     manager
         .statuses
         .insert("demo".into(), PluginStatus::Loading);
-    manager.unload_generation("demo", PluginLoadId(1)).unwrap();
+    manager.unload_load("demo", PluginLoadId(1)).unwrap();
     assert_eq!(manager.pending_disables.len(), 1);
     assert!(matches!(
         manager.load_from_store(
@@ -1359,7 +1359,7 @@ fn disable_is_ordered_before_same_id_replacement_and_duplicates_are_rejected() {
         ),
         Err(PluginError::AlreadyActive)
     ));
-    manager.unload_generation("demo", PluginLoadId(1)).unwrap();
+    manager.unload_load("demo", PluginLoadId(1)).unwrap();
     let replacement = manager
         .load_from_store(
             "demo".into(),
@@ -1457,7 +1457,7 @@ impl ExecutionFixture {
     pub(crate) fn indexed(&self, index: PluginContributionIndex) {
         self.events
             .try_send(WorkerEvent::Indexed {
-                load: PluginLoadId(index.generation),
+                load: PluginLoadId(index.plugin_load),
                 plugin: index.owner.clone(),
                 index,
             })
@@ -1479,7 +1479,7 @@ impl ExecutionFixture {
         let mut execution = PluginExecution {
             plugin: captured.request.plugin.clone(),
             command: captured.request.command.clone(),
-            generation: captured.request.generation,
+            request_id: captured.request.request_id,
             result: String::new(),
             messages: Vec::new(),
             proposals: Vec::new(),
@@ -1511,7 +1511,7 @@ impl ExecutionFixture {
                 execution: PluginExecution {
                     plugin: captured.request.plugin.clone(),
                     command: captured.request.command.clone(),
-                    generation: captured.request.generation,
+                    request_id: captured.request.request_id,
                     result: String::new(),
                     messages: Vec::new(),
                     proposals: Vec::new(),
@@ -1537,7 +1537,7 @@ impl ExecutionFixture {
                 execution: PluginExecution {
                     plugin: captured.request.plugin.clone(),
                     command: captured.request.command.clone(),
-                    generation: captured.request.generation,
+                    request_id: captured.request.request_id,
                     result: String::new(),
                     messages: Vec::new(),
                     proposals: Vec::new(),
@@ -1566,7 +1566,7 @@ pub(crate) fn empty_execution_request() -> PluginExecutionRequest {
         runtime_epoch: 0,
         plugin: "demo".into(),
         command: "run".into(),
-        generation: 7,
+        request_id: 7,
         arguments: Vec::new(),
         snapshot: None,
         config: BTreeMap::new(),
@@ -1740,7 +1740,7 @@ fn component_activation_checks_counts_and_strings_before_copying() {
             }
         }
     }
-    for (count, length, expected) in [(4096, i32::MAX, "count ceiling"), (2, 257, "byte ceiling")] {
+    for (count, length, expected) in [(4096, i32::MAX, "count limit"), (2, 257, "byte limit")] {
         // Replace activate with a result whose list entries alias one guest string.
         let mut body = vec![0]; // no locals
         for (address, value) in [
@@ -1991,7 +1991,7 @@ fn component_storage_inbox_retains_unread_results_and_reserves_capacity() {
 }
 
 #[test]
-fn component_ui_queue_reserves_receipts_until_guest_drain() {
+fn component_ui_queue_reserves_result_slots_until_guest_drain() {
     use component_api::dust::plugin::host::Host;
     use component_api::dust::plugin::host::OpenWindowRequest;
     use component_api::dust::plugin::host::UiEvent;

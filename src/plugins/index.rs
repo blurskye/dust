@@ -172,15 +172,15 @@ pub(super) fn valid_contributed_sequence(source: &str) -> bool {
 
 pub fn index_manifest_contributions(
     manifest: &PluginManifest,
-    generation: u64,
+    plugin_load: u64,
     source: String,
 ) -> Result<PluginContributionIndex, PluginError> {
-    index_manifest_contributions_with_text(manifest, generation, source, None)
+    index_manifest_contributions_with_text(manifest, plugin_load, source, None)
 }
 
 pub(super) fn index_manifest_contributions_with_text(
     manifest: &PluginManifest,
-    generation: u64,
+    plugin_load: u64,
     source: String,
     source_text: Option<&str>,
 ) -> Result<PluginContributionIndex, PluginError> {
@@ -241,7 +241,7 @@ pub(super) fn index_manifest_contributions_with_text(
                 local,
                 &context.title,
                 context.parent_surface.clone(),
-                generation,
+                plugin_load,
                 source.clone(),
             )
             .map_err(|_| PluginError::InvalidManifest)?;
@@ -252,7 +252,7 @@ pub(super) fn index_manifest_contributions_with_text(
     for (declaration, content) in content_types.iter_mut().enumerate() {
         content.provenance = Some(PluginContributionProvenance {
             owner: manifest.id.clone(),
-            generation,
+            plugin_load,
             source: source.clone(),
             declaration,
             span: source_text.and_then(|text| {
@@ -309,7 +309,7 @@ pub(super) fn index_manifest_contributions_with_text(
     for (declaration, subscription) in subscriptions.iter_mut().enumerate() {
         subscription.provenance = Some(PluginContributionProvenance {
             owner: manifest.id.clone(),
-            generation,
+            plugin_load,
             source: source.clone(),
             declaration,
             span: source_text.and_then(|text| {
@@ -348,7 +348,7 @@ pub(super) fn index_manifest_contributions_with_text(
     for (declaration, provider) in providers.iter_mut().enumerate() {
         provider.provenance = Some(PluginContributionProvenance {
             owner: manifest.id.clone(),
-            generation,
+            plugin_load,
             source: source.clone(),
             declaration,
             span: source_text.and_then(|text| {
@@ -395,7 +395,7 @@ pub(super) fn index_manifest_contributions_with_text(
     for (declaration, document) in virtual_documents.iter_mut().enumerate() {
         document.provenance = Some(PluginContributionProvenance {
             owner: manifest.id.clone(),
-            generation,
+            plugin_load,
             source: source.clone(),
             declaration,
             span: source_text.and_then(|text| {
@@ -553,7 +553,7 @@ pub(super) fn index_manifest_contributions_with_text(
         owner: manifest.id.clone(),
         version: manifest.version.clone(),
         checksum: manifest.component_sha256.clone(),
-        generation,
+        plugin_load,
         source,
         commands: manifest.commands.clone(),
         contexts: indexed_contexts,
@@ -744,7 +744,7 @@ pub(crate) fn load_component(
         let commands = match result {
             Ok(list) => {
                 if list.len() > limits.maximum_commands {
-                    return Err("activation exceeds command count ceiling".into());
+                    return Err("activation exceeds command count limit".into());
                 }
                 let mut commands = Vec::with_capacity(list.len());
                 for index in 0..list.len() {
@@ -756,7 +756,7 @@ pub(crate) fn load_component(
                         .to_str(&store)
                         .map_err(|error| format!("{error:#}"))?;
                     if command.len() > 256 {
-                        return Err("activation command exceeds byte ceiling".into());
+                        return Err("activation command exceeds byte limit".into());
                     }
                     commands.push(command.into_owned());
                 }
@@ -819,7 +819,7 @@ pub(crate) fn execute_component(
         storage_results,
         provider_requests,
         virtual_document_requests,
-        generation,
+        request_id,
     } = invocation;
     if !runtime.commands.contains(&command) {
         return Err(PluginError::UndeclaredCommand);
@@ -987,7 +987,7 @@ pub(crate) fn execute_component(
     Ok(PluginExecution {
         plugin,
         command,
-        generation,
+        request_id,
         result,
         messages,
         proposals,
@@ -1026,7 +1026,7 @@ pub enum PluginError {
     InvalidInvocation,
     #[error("plugin already has a current load")]
     AlreadyActive,
-    #[error("plugin active-load ceiling reached")]
+    #[error("plugin active-load limit reached")]
     LoadLimit,
     #[error("plugin is not active")]
     NotActive,

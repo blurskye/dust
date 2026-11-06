@@ -135,8 +135,6 @@ pub use index::index_manifest_contributions;
 
 #[cfg(test)]
 mod host_tests;
-#[cfg(test)]
-pub(crate) mod target03;
 
 #[cfg(test)]
 #[cfg(test)]

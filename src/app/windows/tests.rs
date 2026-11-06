@@ -2765,7 +2765,7 @@ fn staged_window_work_rejects_editor_and_catalog_changes_without_a_window_epoch_
             owner: "demo".into(),
             version: "1.0.0".into(),
             checksum: "0".repeat(64),
-            generation: 7,
+            plugin_load: 7,
             source: "source fixture".into(),
             commands: Default::default(),
             contexts: Vec::new(),

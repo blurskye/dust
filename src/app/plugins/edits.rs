@@ -1,5 +1,4 @@
-//! Extension-source facet: invocation snapshots and one-way edit proposal lifetimes.
-//! Other extension runtime/provider ownership has not yet migrated here.
+//! Plugin invocation snapshots and edit proposal lifetimes.
 use crate::app::input::InputState;
 use crate::app::windows::NavigationStamp;
 use crate::app::windows::Windows;
@@ -99,7 +98,7 @@ pub(super) struct PluginEditSources {
 }
 pub(super) struct InvocationLoan<'a> {
     pending: &'a mut Vec<Invocation>,
-    admission: PluginInvocation<'a>,
+    reservation: PluginInvocation<'a>,
     invocation: Invocation,
     editor: &'a EditorState,
     _workspace: &'a Workspace,
@@ -110,7 +109,9 @@ impl InvocationLoan<'_> {
         &self.invocation.origin
     }
     pub(in crate::app) fn submit(self, mut request: PluginExecutionRequest) -> Result<(), String> {
-        self.admission.check(&request).map_err(|e| e.to_string())?;
+        self.reservation
+            .check(&request)
+            .map_err(|e| e.to_string())?;
         // Only this source serializes the snapshot attached to its provenance.
         request.snapshot = self
             .invocation
@@ -121,7 +122,9 @@ impl InvocationLoan<'_> {
                 revision: document.revision.0,
                 utf8: self.editor.buffers[document.id].text.to_string(),
             });
-        self.admission.submit(request).map_err(|e| e.to_string())?;
+        self.reservation
+            .submit(request)
+            .map_err(|e| e.to_string())?;
         self.pending.push(self.invocation);
         Ok(())
     }
@@ -247,7 +250,7 @@ impl PluginEditSources {
         let (plugin, command) = invocation;
         let (maximum, input_capture, navigation, interaction_available) = interaction;
         if self.closed || self.pending.len() >= 128 || *configuration == u64::MAX || maximum == 0 {
-            return Err("plugin source admission is closed, full or exhausted".into());
+            return Err("plugin request queue is closed, full or exhausted".into());
         }
         if editor.window_version().revision().is_none() {
             return Err("plugin editor source exhausted".into());
@@ -259,7 +262,7 @@ impl PluginEditSources {
             return Err("plugin snapshot exceeds its admitted byte limit".into());
         }
         // Reserves actual bounded queue capacity before snapshot/metadata materialization.
-        let admission = manager
+        let reservation = manager
             .prepare_execution(plugin, command)
             .map_err(|e| e.to_string())?;
         let sources = document
@@ -267,7 +270,7 @@ impl PluginEditSources {
             .map(|(id, _)| editor.workspace_edit_source(id))
             .transpose()?;
         let invocation = Invocation {
-            origin: admission.origin().clone(),
+            origin: reservation.origin().clone(),
             editor: editor.window_version(),
             workspace: workspace.version(),
             configuration: *configuration,
@@ -285,7 +288,7 @@ impl PluginEditSources {
         };
         Ok(InvocationLoan {
             pending: &mut self.pending,
-            admission,
+            reservation,
             invocation,
             editor,
             _workspace: workspace,
@@ -305,10 +308,10 @@ impl PluginEditSources {
             .pending
             .iter()
             .position(|p| p.origin.same(&origin))
-            .ok_or("plugin invocation retired or result duplicated")?;
+            .ok_or("plugin invocation discarded or result duplicated")?;
         let invocation = self.pending.remove(index);
         if self.closed || !invocation.origin.current(manager) {
-            return Err("plugin invocation load retired".into());
+            return Err("plugin invocation load unavailable".into());
         }
         let load = origin.load();
         let confirmation_source = ConfirmationSource {
@@ -323,11 +326,11 @@ impl PluginEditSources {
         };
         let source_actions_admitted = invocation.current(manager, workspace, configuration);
         if !source_actions_admitted && execution.confirmation_requests.is_empty() {
-            return Err("plugin invocation workspace or configuration retired".into());
+            return Err("plugin invocation workspace or configuration changed".into());
         }
         let proposals = std::mem::take(&mut execution.proposals);
         let preview = if !source_actions_admitted {
-            Err("plugin invocation source retired before its reply".into())
+            Err("plugin invocation source changed before its reply".into())
         } else if proposals.is_empty() {
             Ok(None)
         } else if self.ready.is_some() {
@@ -374,9 +377,9 @@ impl PluginEditSources {
             .ready
             .as_ref()
             .filter(|r| r.key.same(key))
-            .ok_or("plugin preview source retired")?;
+            .ok_or("plugin preview source changed")?;
         if self.closed || !ready.invocation.current(manager, workspace, configuration) {
-            return Err("plugin preview load, workspace or configuration retired".into());
+            return Err("plugin preview load, workspace or configuration changed".into());
         }
         ready.invocation.document(editor)?;
         Ok(())
@@ -453,12 +456,12 @@ impl PluginEditSources {
     }
     pub(in crate::app) fn finish(&mut self, key: &OriginKey) -> Result<(), String> {
         if !self.owns(key) {
-            return Err("plugin proposal decision duplicated or retired".into());
+            return Err("plugin proposal decision duplicated or discarded".into());
         }
         self.ready = None; // One-way proposal: no invented applied/failed wire acknowledgement.
         Ok(())
     }
-    pub(in crate::app) fn retire(
+    pub(in crate::app) fn discard_stale(
         &mut self,
         manager: &PluginHost,
         editor: &EditorState,
@@ -502,7 +505,7 @@ mod tests {
         reply
     }
     #[test]
-    fn plugin_invocation_owns_snapshot_queue_admission_and_preview_incarnation() {
+    fn plugin_invocation_owns_snapshot_queue_reservation_and_preview_incarnation() {
         let root = tempfile::tempdir().unwrap();
         let scope = crate::workspace::WorkspaceState::new(
             crate::workspace::WorkspaceId(1),
@@ -573,7 +576,7 @@ mod tests {
         let second = endpoint.take();
         assert!(
             !first.same(&second),
-            "same public generation is not invocation identity"
+            "same request ID is not invocation identity"
         );
         let proposal = || {
             vec![PluginEditProposal {
@@ -685,7 +688,10 @@ mod tests {
         let failed = replacement_endpoint.take();
         replacement_endpoint.fail(&failed);
         replacement.poll_owned().unwrap();
-        assert_eq!(source.retire(&replacement, &editor, &version, 1).0, 1);
+        assert_eq!(
+            source.discard_stale(&replacement, &editor, &version, 1).0,
+            1
+        );
         source.close();
         assert!(
             source

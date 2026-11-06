@@ -96,7 +96,7 @@ impl App {
             self.reject_workspace_proposal();
         }
         self.cancel_workspace_resources("configuration changed");
-        self.retire_plugin_edit_sources();
+        self.discard_stale_plugin_edits();
         self.input.reconfigure();
         self.terminal_session
             .configure(&self.configuration.settings().terminals);

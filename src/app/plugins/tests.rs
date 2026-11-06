@@ -121,17 +121,17 @@ fn plugin_confirmation_is_typed_one_shot_and_source_owned() {
     app.configuration.install_fixture(accepted);
     app.process_plugin_events();
     assert!(app.input.prompt().is_none());
-    let retired = fixture.take();
+    let invalidated = fixture.take();
     assert!(matches!(
-        retired.confirmation_results()[0].outcome,
+        invalidated.confirmation_results()[0].outcome,
         crate::plugins::PluginConfirmationOutcome::Failed(
             crate::plugins::PluginConfirmationError {
-                code: crate::plugins::PluginConfirmationErrorCode::SourceRetired,
+                code: crate::plugins::PluginConfirmationErrorCode::StaleSource,
                 ..
             }
         )
     ));
-    fixture.reply(&retired, Vec::new());
+    fixture.reply(&invalidated, Vec::new());
     app.process_plugin_events();
     assert_eq!(app.extension.confirmation_count(), 0);
 
@@ -341,12 +341,12 @@ fn delayed_confirmation_cannot_replace_a_newer_native_interaction() {
     );
     assert_eq!(app.input.prompt().unwrap().input, "newer");
     app.process_plugin_events();
-    let retired = fixture.take();
+    let invalidated = fixture.take();
     assert!(matches!(
-        retired.confirmation_results()[0].outcome,
+        invalidated.confirmation_results()[0].outcome,
         crate::plugins::PluginConfirmationOutcome::Failed(
             crate::plugins::PluginConfirmationError {
-                code: crate::plugins::PluginConfirmationErrorCode::SourceRetired,
+                code: crate::plugins::PluginConfirmationErrorCode::StaleSource,
                 ..
             }
         )
@@ -379,13 +379,13 @@ fn delayed_initial_confirmation_reply_gets_terminal_failure_after_config_reload(
     app.process_plugin_events();
     assert!(app.input.prompt().is_none());
     app.process_plugin_events();
-    let retired = fixture.take();
-    assert_eq!(retired.confirmation_results()[0].request, 50);
+    let invalidated = fixture.take();
+    assert_eq!(invalidated.confirmation_results()[0].request, 50);
     assert!(matches!(
-        retired.confirmation_results()[0].outcome,
+        invalidated.confirmation_results()[0].outcome,
         crate::plugins::PluginConfirmationOutcome::Failed(
             crate::plugins::PluginConfirmationError {
-                code: crate::plugins::PluginConfirmationErrorCode::SourceRetired,
+                code: crate::plugins::PluginConfirmationErrorCode::StaleSource,
                 ..
             }
         )
@@ -425,13 +425,13 @@ fn accepted_confirmation_cannot_wait_past_a_newer_prompt_capture() {
         crate::ui::PromptKind::PluginConfirmation
     );
     app.process_plugin_events();
-    let retired = fixture.take();
-    assert_eq!(retired.confirmation_results()[0].request, 52);
+    let invalidated = fixture.take();
+    assert_eq!(invalidated.confirmation_results()[0].request, 52);
     assert!(matches!(
-        retired.confirmation_results()[0].outcome,
+        invalidated.confirmation_results()[0].outcome,
         crate::plugins::PluginConfirmationOutcome::Failed(
             crate::plugins::PluginConfirmationError {
-                code: crate::plugins::PluginConfirmationErrorCode::SourceRetired,
+                code: crate::plugins::PluginConfirmationErrorCode::StaleSource,
                 ..
             }
         )
@@ -439,7 +439,7 @@ fn accepted_confirmation_cannot_wait_past_a_newer_prompt_capture() {
 }
 
 #[test]
-fn tool_menu_blocks_background_and_retires_delayed_confirmation() {
+fn tool_menu_blocks_background_and_invalidates_delayed_confirmation() {
     for delayed in [false, true] {
         let (_app_dirs, mut app) = app();
         let (manager, fixture) = crate::plugins::ExecutionFixture::new(8);
@@ -475,12 +475,12 @@ fn tool_menu_blocks_background_and_retires_delayed_confirmation() {
         assert!(app.input.prompt().is_none());
         assert!(app.ui.tool_menu.is_some());
         app.process_plugin_events();
-        let retired = fixture.take();
+        let invalidated = fixture.take();
         assert!(matches!(
-            retired.confirmation_results()[0].outcome,
+            invalidated.confirmation_results()[0].outcome,
             crate::plugins::PluginConfirmationOutcome::Failed(
                 crate::plugins::PluginConfirmationError {
-                    code: crate::plugins::PluginConfirmationErrorCode::SourceRetired,
+                    code: crate::plugins::PluginConfirmationErrorCode::StaleSource,
                     ..
                 }
             )
@@ -489,7 +489,7 @@ fn tool_menu_blocks_background_and_retires_delayed_confirmation() {
 }
 
 #[test]
-fn pending_key_capture_blocks_background_and_retires_delayed_confirmation() {
+fn pending_key_capture_blocks_background_and_invalidates_delayed_confirmation() {
     for delayed in [false, true] {
         let (_app_dirs, mut app) = app();
         let (manager, fixture) = crate::plugins::ExecutionFixture::new(8);
@@ -525,12 +525,12 @@ fn pending_key_capture_blocks_background_and_retires_delayed_confirmation() {
         assert!(app.input.prompt().is_none());
         assert!(app.input.mapping_pending());
         app.process_plugin_events();
-        let retired = fixture.take();
+        let invalidated = fixture.take();
         assert!(matches!(
-            retired.confirmation_results()[0].outcome,
+            invalidated.confirmation_results()[0].outcome,
             crate::plugins::PluginConfirmationOutcome::Failed(
                 crate::plugins::PluginConfirmationError {
-                    code: crate::plugins::PluginConfirmationErrorCode::SourceRetired,
+                    code: crate::plugins::PluginConfirmationErrorCode::StaleSource,
                     ..
                 }
             )
@@ -591,12 +591,12 @@ fn unfinished_modal_grammar_blocks_and_survives_confirmation_rejection() {
                 "confirmation rejection erased gesture {keys:?}"
             );
             app.process_plugin_events();
-            let retired = fixture.take();
+            let invalidated = fixture.take();
             assert!(matches!(
-                retired.confirmation_results()[0].outcome,
+                invalidated.confirmation_results()[0].outcome,
                 crate::plugins::PluginConfirmationOutcome::Failed(
                     crate::plugins::PluginConfirmationError {
-                        code: crate::plugins::PluginConfirmationErrorCode::SourceRetired,
+                        code: crate::plugins::PluginConfirmationErrorCode::StaleSource,
                         ..
                     }
                 )
@@ -643,12 +643,12 @@ fn background_confirmation_during_documentation_fails_without_overlay() {
     assert!(app.input.prompt().is_none());
     assert!(app.input.documentation().is_some());
     app.process_plugin_events();
-    let retired = fixture.take();
+    let invalidated = fixture.take();
     assert!(matches!(
-        retired.confirmation_results()[0].outcome,
+        invalidated.confirmation_results()[0].outcome,
         crate::plugins::PluginConfirmationOutcome::Failed(
             crate::plugins::PluginConfirmationError {
-                code: crate::plugins::PluginConfirmationErrorCode::SourceRetired,
+                code: crate::plugins::PluginConfirmationErrorCode::StaleSource,
                 ..
             }
         )
@@ -680,12 +680,12 @@ fn background_confirmation_during_picker_fails_without_overlay() {
     assert!(app.input.prompt().is_none());
     assert_eq!(app.ui.picker.as_ref().unwrap().title, "Newer picker");
     app.process_plugin_events();
-    let retired = fixture.take();
+    let invalidated = fixture.take();
     assert!(matches!(
-        retired.confirmation_results()[0].outcome,
+        invalidated.confirmation_results()[0].outcome,
         crate::plugins::PluginConfirmationOutcome::Failed(
             crate::plugins::PluginConfirmationError {
-                code: crate::plugins::PluginConfirmationErrorCode::SourceRetired,
+                code: crate::plugins::PluginConfirmationErrorCode::StaleSource,
                 ..
             }
         )
@@ -769,13 +769,13 @@ fn changed_confirmation_document_gets_a_terminal_failure() {
             .replace_buffer_from_disk(buffer, TextBuffer::from_text("changed A"), path,)
     );
     app.handle_configured_key("enter".parse().unwrap());
-    let retired = fixture.take();
-    assert!(retired.snapshot().is_none());
+    let invalidated = fixture.take();
+    assert!(invalidated.snapshot().is_none());
     assert!(matches!(
-        retired.confirmation_results()[0].outcome,
+        invalidated.confirmation_results()[0].outcome,
         crate::plugins::PluginConfirmationOutcome::Failed(
             crate::plugins::PluginConfirmationError {
-                code: crate::plugins::PluginConfirmationErrorCode::SourceRetired,
+                code: crate::plugins::PluginConfirmationErrorCode::StaleSource,
                 ..
             }
         )
@@ -828,13 +828,13 @@ fn stale_ordinary_reply_releases_only_its_exact_confirmation_reservation() {
         },
     );
     app.process_plugin_events();
-    let retired = fixture.take();
-    assert_eq!(retired.confirmation_results()[0].request, 61);
+    let invalidated = fixture.take();
+    assert_eq!(invalidated.confirmation_results()[0].request, 61);
     assert!(matches!(
-        retired.confirmation_results()[0].outcome,
+        invalidated.confirmation_results()[0].outcome,
         crate::plugins::PluginConfirmationOutcome::Failed(
             crate::plugins::PluginConfirmationError {
-                code: crate::plugins::PluginConfirmationErrorCode::SourceRetired,
+                code: crate::plugins::PluginConfirmationErrorCode::StaleSource,
                 ..
             }
         )
@@ -919,7 +919,7 @@ fn real_component_observes_queue_full_from_aggregate_confirmation_ownership() {
         )
         .expect("index request");
     let deadline = Instant::now() + Duration::from_secs(15);
-    while !app.extension.is_active_generation("demo", load) {
+    while !app.extension.is_active_load("demo", load) {
         app.process_plugin_events();
         assert!(
             Instant::now() < deadline,
@@ -951,7 +951,7 @@ fn real_component_observes_queue_full_from_aggregate_confirmation_ownership() {
     assert_eq!(app.extension.confirmation_count(), 64);
 
     // Transfer reservations to pending confirmations before opening a modal changes capture.
-    // This keeps the ordinary probe separate from SourceRetired result-only callbacks.
+    // This keeps the ordinary probe separate from stale-source result-only callbacks.
     let reply_deadline = Instant::now() + Duration::from_secs(15);
     while !app
         .notices
@@ -1020,7 +1020,7 @@ fn real_component_observes_queue_full_from_aggregate_confirmation_ownership() {
     app.process_plugin_events();
     assert!(app.input.prompt().is_some());
     // Opening the first prompt changes capture. Pending requests may now finish through bounded
-    // SourceRetired result-only callbacks, so ownership can legitimately decline after polling.
+    // stale-source result-only callbacks, so ownership can legitimately decline after polling.
     assert!(app.extension.confirmation_count() <= 64);
 }
 
@@ -1066,7 +1066,7 @@ fn packaged_production_02_component_clone_refusal_never_enqueues_a_guest_callbac
             )
             .expect("index request");
         let deadline = Instant::now() + Duration::from_secs(15);
-        while !app.extension.is_active_generation("demo", load) {
+        while !app.extension.is_active_load("demo", load) {
             app.process_plugin_events();
             assert!(
                 Instant::now() < deadline,
@@ -1151,9 +1151,9 @@ fn packaged_production_02_component_clone_refusal_never_enqueues_a_guest_callbac
         assert_eq!(app.extension.fixture_delivery_state(), delivery);
 
         app.extension
-            .disable_generation("demo", load)
-            .expect("disable actual component generation");
-        app.remove_plugin_contribution_generation("demo", load);
+            .disable_load("demo", load)
+            .expect("disable actual component load");
+        app.remove_plugin_contributions("demo", load);
         while app.extension.fixture_queued() != 0 {
             app.process_plugin_events();
             assert!(Instant::now() < deadline, "fixture unload timed out");
@@ -1181,7 +1181,7 @@ fn packaged_production_02_component_clone_refusal_never_enqueues_a_guest_callbac
             .expect("replacement index request");
         assert_ne!(replacement, load);
         let replacement_deadline = Instant::now() + Duration::from_secs(15);
-        while !app.extension.is_active_generation("demo", replacement) {
+        while !app.extension.is_active_load("demo", replacement) {
             app.process_plugin_events();
             assert!(
                 Instant::now() < replacement_deadline,
@@ -1238,7 +1238,7 @@ fn packaged_real_guest_confirmation_updates_its_custom_view() {
         )
         .expect("index request");
     let deadline = Instant::now() + Duration::from_secs(15);
-    while !app.extension.is_active_generation("demo", load) {
+    while !app.extension.is_active_load("demo", load) {
         app.process_plugin_events();
         assert!(
             Instant::now() < deadline,
@@ -1354,7 +1354,7 @@ fn packaged_real_guest_confirmation_updates_its_custom_view() {
 }
 
 #[test]
-fn retained_plugin_window_projection_is_idle_and_generation_owned() {
+fn retained_plugin_window_projection_is_idle_and_load_owned() {
     let (_app_dirs, mut app) = app();
     app.state
         .open_text(TextBuffer::from_text("editor"), None)
@@ -1409,14 +1409,14 @@ fn retained_plugin_window_projection_is_idle_and_generation_owned() {
         panic!("expected staged window");
     };
     app.window_session.invalidate_native();
-    let receipt = app.window_session.accept_plugin_transition(
+    let accepted = app.window_session.accept_plugin_transition(
         *transition,
         &app.state.window_version(),
         source.catalog(),
     );
     assert!(
         source
-            .finish(receipt, app.window_session.graph().revision())
+            .finish(accepted, app.window_session.graph().revision())
             .error
             .is_some()
     );
@@ -1436,19 +1436,19 @@ fn retained_plugin_window_projection_is_idle_and_generation_owned() {
         .window_session
         .begin_plugin(
             &index.owner,
-            index.generation,
+            index.plugin_load,
             (&app.state.window_version(), source.catalog()),
         )
         .unwrap()
         .seal();
-    let receipt = app.window_session.accept_plugin_transition(
+    let accepted = app.window_session.accept_plugin_transition(
         other,
         &app.state.window_version(),
         source.catalog(),
     );
     assert!(
         source
-            .finish(receipt, app.window_session.graph().revision())
+            .finish(accepted, app.window_session.graph().revision())
             .error
             .is_some()
     );
@@ -1476,7 +1476,7 @@ fn retained_plugin_window_projection_is_idle_and_generation_owned() {
         reconciliation_count
     );
     assert_eq!(app.window_session.graph(), &graph);
-    app.remove_plugin_contribution_generation("demo", PluginLoadId(77));
+    app.remove_plugin_contributions("demo", PluginLoadId(77));
     assert!(app.ui.plugin_surfaces.is_empty());
     assert!(app.window_session.graph().window(window).is_none());
 }
@@ -1547,7 +1547,7 @@ fn plugin_host_events_are_snapshot_owned_coalesced_and_idle() {
     assert_eq!(empty.payload, "buffer=none");
     app.refresh_plugin_host_events();
     assert_eq!(app.extension.events().pending("demo", PluginLoadId(77)), 1);
-    app.remove_plugin_contribution_generation("demo", PluginLoadId(77));
+    app.remove_plugin_contributions("demo", PluginLoadId(77));
     assert_eq!(app.extension.events().pending("demo", PluginLoadId(77)), 0);
 }
 
@@ -1724,7 +1724,7 @@ fn plugin_picker_provider_uses_the_generic_presenter_and_cancels_exactly() {
         crate::plugins::PluginProviderErrorCode::UnknownRequest
     );
     // Reopening a one-request provider reserves new metadata without destroying
-    // the displayed source if subsequent picker admission is refused.
+    // the displayed source if subsequent picker acceptance is refused.
     let mut broker = crate::plugins::PluginProviderBroker::default();
     broker.install(&index).unwrap();
     let start = || crate::plugins::PluginProviderStart {
@@ -2041,7 +2041,7 @@ fn invalid_plugin_arguments_leave_pending_deliveries_intact() {
 }
 
 #[test]
-fn runtime_reset_retires_pending_invocations_without_disabling_new_calls() {
+fn runtime_reset_discards_pending_invocations_without_disabling_new_calls() {
     let (_app_dirs, mut app) = app();
     let (manager, fixture) = crate::plugins::ExecutionFixture::new(4);
     app.extension.fixture_manager(manager);
@@ -2069,8 +2069,8 @@ fn runtime_reset_retires_pending_invocations_without_disabling_new_calls() {
             app.configuration.binding_revision(),
         )
         .err()
-        .expect("pre-reset invocation must be retired");
-    assert!(error.contains("retired"), "{error}");
+        .expect("pre-reset invocation must be discarded");
+    assert!(error.contains("discarded"), "{error}");
     assert_eq!(app.extension.confirmation_count(), 0);
     invoke(&mut app);
     let current = fixture.take();
@@ -2092,7 +2092,7 @@ fn runtime_reset_retires_pending_invocations_without_disabling_new_calls() {
 }
 
 #[test]
-fn stale_generation_cleanup_preserves_replacement_ui_events() {
+fn stale_load_cleanup_preserves_replacement_ui_events() {
     let (_app_dirs, mut app) = app();
     let event = |token| crate::plugins::PluginUiEvent {
         token,
@@ -2128,7 +2128,7 @@ fn stale_generation_cleanup_preserves_replacement_ui_events() {
     app.extension
         .fixture_contribution(replacement)
         .expect("replacement catalog");
-    app.remove_plugin_contribution_generation("demo", PluginLoadId(77));
+    app.remove_plugin_contributions("demo", PluginLoadId(77));
     assert!(
         !app.extension
             .ui_events()
@@ -2146,7 +2146,7 @@ fn stale_generation_cleanup_preserves_replacement_ui_events() {
         app.extension
             .contributions()
             .get("demo")
-            .map(|index| index.generation),
+            .map(|index| index.plugin_load),
         Some(78)
     );
     assert!(
@@ -2236,8 +2236,8 @@ fn expected_index_failure_before_sibling_index_aborts_the_complete_batch() {
             .is_none()
     );
     assert!(app.extension.pending_indexes().is_empty());
-    assert!(!app.extension.is_active_generation("bad", bad_load));
-    assert!(!app.extension.is_active_generation("good", good_load));
+    assert!(!app.extension.is_active_load("bad", bad_load));
+    assert!(!app.extension.is_active_load("good", good_load));
 }
 
 #[test]
@@ -2345,7 +2345,7 @@ fn deferred_user_plugin_move_compiles_after_index_then_falls_back_after_activati
         assert!(Instant::now() < deadline, "activation rollback timed out");
         thread::yield_now();
     }
-    assert!(!app.extension.is_active_generation("demo", load));
+    assert!(!app.extension.is_active_load("demo", load));
     assert!(
         app.configuration
             .keymaps()
@@ -2505,13 +2505,13 @@ fn enabled_plugin_references_are_deferred_but_unknown_namespaces_still_reject() 
 fn deferred_batch_abort_and_worker_loss_clear_static_ownership() {
     pub(in crate::app) fn index(
         owner: &str,
-        generation: u64,
+        plugin_load: u64,
     ) -> crate::plugins::PluginContributionIndex {
         crate::plugins::PluginContributionIndex {
             owner: owner.into(),
             version: "1.0.0".into(),
             checksum: "0".repeat(64),
-            generation,
+            plugin_load,
             source: format!("test:{owner}"),
             commands: BTreeMap::new(),
             contexts: Vec::new(),
@@ -2630,7 +2630,7 @@ fn provider_chunks_use_the_revision_after_virtual_publication() {
             .push(crate::plugins::PluginVirtualDocumentProposal {
                 request: virtual_request.request,
                 document: virtual_request.document,
-                cancellation_generation: virtual_request.cancellation_generation,
+                cancellation_id: virtual_request.cancellation_id,
                 kind: crate::plugins::PluginVirtualDocumentProposalKind::Full(
                     crate::plugins::PluginVirtualDocumentFull {
                         expected_revision: None,
@@ -2701,7 +2701,7 @@ fn virtual_publication_keeps_original_request_until_checked_window_acceptance() 
     let proposal = crate::plugins::PluginVirtualDocumentProposal {
         request: request.request,
         document: request.document,
-        cancellation_generation: request.cancellation_generation,
+        cancellation_id: request.cancellation_id,
         kind: crate::plugins::PluginVirtualDocumentProposalKind::Full(
             crate::plugins::PluginVirtualDocumentFull {
                 expected_revision: None,
@@ -2797,7 +2797,7 @@ fn virtual_publication_keeps_original_request_until_checked_window_acceptance() 
     app.set_dashboard_visibility(false);
     app.reconcile_editor_windows();
     let focus = app.window_session.graph().focused();
-    app.remove_plugin_contribution_generation("demo", PluginLoadId(7));
+    app.remove_plugin_contributions("demo", PluginLoadId(7));
     assert!(!app.state.buffers.contains_key(virtual_buffer));
     assert_eq!(app.state.active_buffer_id(), Some(ordinary));
     assert_eq!(app.state.active_view, Some(view));
@@ -2943,7 +2943,7 @@ fn provider_selection_delivers_request_item_and_action_data() {
 }
 
 #[test]
-fn plugin_surface_observations_include_counts_and_geometry_preserves_receipts() {
+fn plugin_surface_observations_include_counts_and_geometry_preserves_results() {
     let (_app_dirs, mut app) = app();
     let mut manifest = plugin_manifest("demo", "plugin.demo.keymap.dashboard", "x y");
     manifest
@@ -3105,7 +3105,7 @@ fn virtual_open_deduplicates_requests_and_cancels_after_navigation() {
     let proposal = crate::plugins::PluginVirtualDocumentProposal {
         request: request.request,
         document: request.document,
-        cancellation_generation: request.cancellation_generation,
+        cancellation_id: request.cancellation_id,
         kind: crate::plugins::PluginVirtualDocumentProposalKind::Full(
             crate::plugins::PluginVirtualDocumentFull {
                 expected_revision: None,
@@ -3147,7 +3147,7 @@ fn virtual_open_deduplicates_requests_and_cancels_after_navigation() {
 }
 
 #[test]
-fn deferred_activation_admission_failure_aborts_unsubmitted_siblings() {
+fn deferred_activation_queue_failure_aborts_unsubmitted_siblings() {
     let (_app_dirs, mut app) = app();
     let (mut manager, fixture) = crate::plugins::ExecutionFixture::new(1);
     manager
@@ -3226,7 +3226,7 @@ fn rejected_package_commands_schedule_the_installed_version_for_reload() {
             .take_prepared("demo", PluginLoadId(1))
             .is_none()
     );
-    assert!(!app.extension.is_active_generation("demo", PluginLoadId(1)));
+    assert!(!app.extension.is_active_load("demo", PluginLoadId(1)));
     assert!(app.extension.contributions().get("demo").is_none());
 }
 
@@ -3258,7 +3258,7 @@ fn active_plugin_failure_does_not_abort_a_siblings_index() {
 }
 
 #[test]
-fn synchronous_plugin_load_refusal_retires_the_deferred_batch() {
+fn synchronous_plugin_load_refusal_cancels_the_deferred_batch() {
     let (_app_dirs, mut app) = app_with_plugin_queue(1);
     let root = tempfile::tempdir().unwrap();
     for owner in ["one", "two"] {
@@ -3503,7 +3503,7 @@ fn plugin_picker_provider_uses_the_generic_presenter_and_cancels_exactly_slot5()
         crate::plugins::PluginProviderErrorCode::UnknownRequest
     );
     // Reopening a one-request provider reserves new metadata without destroying
-    // the displayed source if subsequent picker admission is refused.
+    // the displayed source if subsequent picker acceptance is refused.
     let mut broker = crate::plugins::PluginProviderBroker::default();
     broker.install(&index).unwrap();
     let start = || crate::plugins::PluginProviderStart {
@@ -3737,7 +3737,7 @@ pub(in crate::app) fn publish_virtual_fixture(
             crate::plugins::PluginVirtualDocumentProposal {
                 request: request.request,
                 document: request.document,
-                cancellation_generation: request.cancellation_generation,
+                cancellation_id: request.cancellation_id,
                 kind: crate::plugins::PluginVirtualDocumentProposalKind::Full(
                     crate::plugins::PluginVirtualDocumentFull {
                         expected_revision: None,
@@ -3765,7 +3765,7 @@ pub(in crate::app) fn publish_virtual_fixture(
 }
 
 #[test]
-fn virtual_open_can_retry_immediately_after_execution_admission_fails() {
+fn virtual_open_can_retry_immediately_after_execution_reservation_fails() {
     let (_app_dirs, mut app, fixture, _) = virtual_document_fixture(1);
     app.process_effect(AppEffect::PluginExecute {
         plugin: "demo".into(),
@@ -3788,7 +3788,7 @@ fn virtual_open_can_retry_immediately_after_execution_admission_fails() {
 }
 
 #[test]
-fn virtual_refresh_can_retry_immediately_after_execution_admission_fails() {
+fn virtual_refresh_can_retry_immediately_after_execution_reservation_fails() {
     let (_app_dirs, mut app, fixture, _) = virtual_document_fixture(1);
     app.process_effect(AppEffect::VirtualDocumentOpen {
         source: "plugin.demo.virtual.help".into(),
@@ -3840,7 +3840,7 @@ fn closing_a_virtual_buffer_delivers_close_notice_and_accepts_its_acknowledgemen
         crate::plugins::PluginVirtualDocumentProposal {
             request: close.request,
             document: close.document,
-            cancellation_generation: close.cancellation_generation,
+            cancellation_id: close.cancellation_id,
             kind: crate::plugins::PluginVirtualDocumentProposalKind::CloseAcknowledged,
         },
     );
@@ -3871,7 +3871,7 @@ fn virtual_error_returns_the_broker_error_and_releases_the_open_request() {
         crate::plugins::PluginVirtualDocumentProposal {
             request: request.request,
             document: request.document,
-            cancellation_generation: request.cancellation_generation,
+            cancellation_id: request.cancellation_id,
             kind: crate::plugins::PluginVirtualDocumentProposalKind::Error(
                 crate::plugins::PluginVirtualDocumentError::new(
                     crate::plugins::PluginVirtualDocumentErrorCode::Internal,
@@ -4069,7 +4069,7 @@ fn health_virtual_dogfood_opens_refreshes_and_remains_read_only() {
         app.reconcile_editor_windows();
         assert_eq!(app.window_session.graph().focused(), ids.2);
     }
-    app.remove_plugin_contribution_generation("builtin.health", PluginLoadId(1));
+    app.remove_plugin_contributions("builtin.health", PluginLoadId(1));
     assert!(!app.state.buffers.contains_key(buffer));
     assert!(app.state.active_view.is_none());
     assert!(app.window_session.dashboard_visible());

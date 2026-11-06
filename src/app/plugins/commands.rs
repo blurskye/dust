@@ -98,7 +98,7 @@ impl App {
                     self.show_error(error)
                 } else {
                     if let Some(load) = load {
-                        self.remove_plugin_contribution_generation(&id, load);
+                        self.remove_plugin_contributions(&id, load);
                     }
                     self.commands.unregister_plugin(&id);
                     self.notify_message(self.message("plugin_disabled", &[("id", id)]), false);

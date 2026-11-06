@@ -28,14 +28,14 @@ pub enum PluginProviderErrorCode {
     QueueFull,
     UnknownRequest,
     UnknownProvider,
-    StaleGeneration,
+    StaleLoad,
     StaleRevision,
     Cancelled,
     Expired,
     InvalidSequence,
     DuplicateItem,
-    ItemCeiling,
-    ByteCeiling,
+    ItemLimit,
+    ByteLimit,
     Malformed,
     Unavailable,
     Internal,
@@ -70,7 +70,7 @@ pub struct PluginPickerRequestEnvelope {
     pub workspace_revision: Option<u64>,
     pub buffer_revision: Option<u64>,
     pub deadline_milliseconds: u32,
-    pub cancellation_generation: u64,
+    pub cancellation_id: u64,
     pub maximum_items: u16,
     pub maximum_bytes: u32,
 }
@@ -140,7 +140,7 @@ struct ProviderSession {
     buffer_revision: Option<u64>,
     deadline: Instant,
     deadline_milliseconds: u32,
-    cancellation_generation: u64,
+    cancellation_id: u64,
     maximum_items: u16,
     maximum_bytes: u32,
     expected_sequence: u64,
@@ -181,7 +181,7 @@ impl PluginProviderBroker {
             let action_command = declaration.command.clone();
             let key = (
                 index.owner.clone(),
-                PluginLoadId(index.generation),
+                PluginLoadId(index.plugin_load),
                 declaration.id.clone(),
             );
             if self
@@ -197,7 +197,7 @@ impl PluginProviderBroker {
             {
                 return Err(PluginProviderError::new(
                     PluginProviderErrorCode::UnknownProvider,
-                    "provider generation is already installed",
+                    "provider load is already installed",
                 ));
             }
         }
@@ -208,11 +208,11 @@ impl PluginProviderBroker {
         self.reserve_replacing(request, None)
     }
     // Reserve replacement metadata without cancelling the displayed request.
-    // The owner cancels either reservation after picker admission, before execution.
+    // The owner cancels either reservation after picker acceptance, before execution.
     pub(crate) fn reserve_replacing(
         &mut self,
         request: PluginProviderStart,
-        retiring: Option<u64>,
+        replacing: Option<u64>,
     ) -> Result<u64, PluginProviderError> {
         let PluginProviderStart {
             plugin,
@@ -231,7 +231,7 @@ impl PluginProviderBroker {
             .ok_or_else(|| {
                 PluginProviderError::new(
                     PluginProviderErrorCode::UnknownProvider,
-                    "picker provider is not owned by this generation",
+                    "picker provider is not owned by this plugin load",
                 )
             })?
             .clone();
@@ -240,7 +240,7 @@ impl PluginProviderBroker {
             .sessions
             .iter()
             .filter(|(id, session)| {
-                Some(**id) != retiring
+                Some(**id) != replacing
                     && session.plugin == plugin
                     && session.load == load
                     && session.provider == provider
@@ -251,7 +251,7 @@ impl PluginProviderBroker {
         if concurrent >= usize::from(owner.declaration.maximum_concurrent_requests) {
             return Err(PluginProviderError::new(
                 PluginProviderErrorCode::QueueFull,
-                "picker provider concurrent request ceiling reached",
+                "picker provider concurrent request limit reached",
             ));
         }
         let request = self.next_request.max(1);
@@ -261,11 +261,11 @@ impl PluginProviderBroker {
                 "provider request ID exhausted",
             )
         })?;
-        let cancellation_generation = self.next_cancellation.max(1);
-        self.next_cancellation = cancellation_generation.checked_add(1).ok_or_else(|| {
+        let cancellation_id = self.next_cancellation.max(1);
+        self.next_cancellation = cancellation_id.checked_add(1).ok_or_else(|| {
             PluginProviderError::new(
                 PluginProviderErrorCode::Internal,
-                "provider cancellation generation exhausted",
+                "provider cancellation ID exhausted",
             )
         })?;
         let deadline_milliseconds = owner.declaration.deadline_milliseconds;
@@ -282,7 +282,7 @@ impl PluginProviderBroker {
                 buffer_revision,
                 deadline: now + Duration::from_millis(u64::from(deadline_milliseconds)),
                 deadline_milliseconds,
-                cancellation_generation,
+                cancellation_id,
                 maximum_items: owner.declaration.maximum_items,
                 maximum_bytes: owner.declaration.maximum_bytes,
                 expected_sequence: 1,
@@ -322,7 +322,7 @@ impl PluginProviderBroker {
                 workspace_revision: session.workspace_revision,
                 buffer_revision: session.buffer_revision,
                 deadline_milliseconds: session.deadline_milliseconds,
-                cancellation_generation: session.cancellation_generation,
+                cancellation_id: session.cancellation_id,
                 maximum_items: session.maximum_items,
                 maximum_bytes: session.maximum_bytes,
             })
@@ -363,8 +363,8 @@ impl PluginProviderBroker {
         })?;
         if current.plugin != plugin || current.load != load {
             return Err(PluginProviderError::new(
-                PluginProviderErrorCode::StaleGeneration,
-                "provider request belongs to another generation",
+                PluginProviderErrorCode::StaleLoad,
+                "provider request belongs to another plugin load",
             ));
         }
         if current.status == PluginProviderSessionStatus::Cancelled {
@@ -412,8 +412,8 @@ impl PluginProviderBroker {
         }
         if candidate.items.len() > usize::from(candidate.maximum_items) {
             return Err(PluginProviderError::new(
-                PluginProviderErrorCode::ItemCeiling,
-                "provider item ceiling exceeded",
+                PluginProviderErrorCode::ItemLimit,
+                "provider item limit exceeded",
             ));
         }
         let aggregate = candidate.items.values().try_fold(0_usize, |total, item| {
@@ -425,8 +425,8 @@ impl PluginProviderBroker {
         });
         if aggregate.is_none_or(|bytes| bytes > candidate.maximum_bytes as usize) {
             return Err(PluginProviderError::new(
-                PluginProviderErrorCode::ByteCeiling,
-                "provider aggregate byte ceiling exceeded",
+                PluginProviderErrorCode::ByteLimit,
+                "provider aggregate byte limit exceeded",
             ));
         }
         candidate.expected_sequence =
@@ -513,9 +513,9 @@ impl PluginProviderBroker {
         self.sessions.clear();
     }
 
-    pub fn remove_generation(&mut self, plugin: &str, load: PluginLoadId) {
+    pub fn remove_load(&mut self, plugin: &str, load: PluginLoadId) {
         self.owners
-            .retain(|(owner, generation, _), _| owner != plugin || *generation != load);
+            .retain(|(owner, plugin_load, _), _| owner != plugin || *plugin_load != load);
         self.sessions
             .retain(|_, session| session.plugin != plugin || session.load != load);
     }
@@ -541,7 +541,7 @@ fn validate_text(
 pub fn validate_chunk(chunk: &PluginPickerChunk) -> Result<(), PluginProviderError> {
     if chunk.request == 0 || chunk.sequence == 0 || chunk.items.len() > PROVIDER_CHUNK_ITEM_LIMIT {
         return Err(PluginProviderError::new(
-            PluginProviderErrorCode::ItemCeiling,
+            PluginProviderErrorCode::ItemLimit,
             "provider chunk count or identity is invalid",
         ));
     }
@@ -594,12 +594,12 @@ mod tests {
     use crate::plugins::PluginCommandDeclaration;
     use crate::plugins::providers::*;
 
-    fn index(generation: u64, maximum_items: u16, maximum_bytes: u32) -> PluginContributionIndex {
+    fn index(plugin_load: u64, maximum_items: u16, maximum_bytes: u32) -> PluginContributionIndex {
         PluginContributionIndex {
             owner: "demo".into(),
             version: "1".into(),
             checksum: "0".repeat(64),
-            generation,
+            plugin_load,
             source: "test".into(),
             commands: [(
                 "run".into(),
@@ -653,7 +653,7 @@ mod tests {
     }
 
     #[test]
-    fn picker_chunks_are_revisioned_ranked_atomic_and_generation_owned() {
+    fn picker_chunks_are_revisioned_ranked_atomic_and_load_owned() {
         let mut broker = PluginProviderBroker::default();
         broker.install(&index(7, 4, 4_096)).unwrap();
         let request = broker
@@ -725,14 +725,14 @@ mod tests {
                 .code,
             PluginProviderErrorCode::UnknownRequest
         );
-        broker.remove_generation("demo", PluginLoadId(6));
+        broker.remove_load("demo", PluginLoadId(6));
         assert!(broker.projection(request).is_none());
-        broker.remove_generation("demo", PluginLoadId(7));
+        broker.remove_load("demo", PluginLoadId(7));
         assert!(broker.projection(request).is_none());
     }
 
     #[test]
-    fn hostile_sequences_revisions_ceilings_and_idle_are_bounded() {
+    fn hostile_sequences_revisions_limits_and_idle_are_bounded() {
         let mut broker = PluginProviderBroker::default();
         broker.install(&index(2, 1, 16)).unwrap();
         let request = broker
@@ -813,7 +813,7 @@ mod tests {
                 )
                 .unwrap_err()
                 .code,
-            PluginProviderErrorCode::StaleGeneration
+            PluginProviderErrorCode::StaleLoad
         );
         assert_eq!(
             broker
@@ -831,7 +831,7 @@ mod tests {
                 )
                 .unwrap_err()
                 .code,
-            PluginProviderErrorCode::ItemCeiling
+            PluginProviderErrorCode::ItemLimit
         );
         assert_eq!(
             broker
@@ -849,7 +849,7 @@ mod tests {
                 )
                 .unwrap_err()
                 .code,
-            PluginProviderErrorCode::ByteCeiling
+            PluginProviderErrorCode::ByteLimit
         );
         broker.sessions.get_mut(&request).unwrap().deadline =
             crate::clock::monotonic() - Duration::from_millis(1);
