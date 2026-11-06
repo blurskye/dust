@@ -1,3 +1,5 @@
+//! Application effects and command registration.
+
 use std::path::PathBuf;
 
 use crate::editor::ArgumentSchema;
