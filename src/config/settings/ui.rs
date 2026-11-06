@@ -1,3 +1,5 @@
+//! Ui configuration records and validation.
+
 use std::collections::BTreeMap;
 
 use serde::Deserialize;

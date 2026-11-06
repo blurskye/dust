@@ -1,3 +1,5 @@
+//! Configuration records and bundled policy.
+
 mod theme;
 pub use theme::HighlightDefinition;
 pub use theme::ThemeAttribute;

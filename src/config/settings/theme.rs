@@ -1,3 +1,5 @@
+//! Theme configuration records and validation.
+
 use std::collections::BTreeMap;
 use std::sync::OnceLock;
 

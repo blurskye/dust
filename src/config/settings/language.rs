@@ -1,3 +1,5 @@
+//! Language configuration records and validation.
+
 use serde::Deserialize;
 use serde::Serialize;
 

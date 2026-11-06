@@ -1,3 +1,5 @@
+//! Debugger configuration records and validation.
+
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 

@@ -1,3 +1,5 @@
+//! Tests for configuration loading and validation.
+
 use std::cell::Cell;
 use std::collections::BTreeSet;
 use std::fs;
