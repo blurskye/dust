@@ -98,6 +98,8 @@ pub(super) struct AgentPanel {
     started: u64,
     /// Agents whose `add_tools` command ran in this run of Dust.
     tools_added: HashSet<String>,
+    /// What went wrong running those commands, shown by the next event pass.
+    tool_failures: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
     buffer: Option<BufferId>,
     /// Files, selections and diagnostics to send with the next question.
     context: Vec<PromptPart>,
@@ -498,7 +500,8 @@ impl InteractiveApplication {
         self.agent.sessions.get_mut(self.agent.active)
     }
 
-    /// `<leader>aa`: in Visual mode the selection goes along with the question.
+    /// `<leader>aa` in Visual mode: show the agent with the selection going along with the
+    /// next question.
     pub(super) fn begin_agent_question(&mut self) {
         if self.configuration.settings().agents.connection
             == crate::config::AgentConnection::Terminal
@@ -1261,34 +1264,9 @@ impl InteractiveApplication {
         }
     }
 
-    /// Start `name` in a tab. A tab of the same agent nobody asked anything yet is shown
-    /// instead, and other such tabs give way, so empty tabs never pile up.
+    /// Start `name` in a new tab, as many as are asked for, empty or not.
     fn open_agent_tab(&mut self, name: &str) -> Result<(), String> {
-        let unused = |session: &AgentSession| {
-            session.parent.is_none()
-                && session.queued.is_empty()
-                && !session
-                    .entries
-                    .iter()
-                    .any(|entry| matches!(entry, Entry::User { .. }))
-        };
-        if let Some(index) = self.agent.sessions.iter().position(|session| {
-            unused(session) && session.name == name && session.root == self.state.workspace_root
-        }) {
-            self.agent.active = index;
-        } else {
-            self.start_agent_session(name)?;
-            let shown = self.agent.sessions[self.agent.active].number;
-            self.agent
-                .sessions
-                .retain(|session| session.number == shown || !unused(session));
-            self.agent.active = self
-                .agent
-                .sessions
-                .iter()
-                .position(|session| session.number == shown)
-                .unwrap_or(0);
-        }
+        self.start_agent_session(name)?;
         self.agent.scroll = 0;
         self.agent.normal = false;
         self.show_agent_panel();
@@ -1553,16 +1531,24 @@ impl InteractiveApplication {
         let Some((program, arguments)) = command.split_first() else {
             return;
         };
-        let output = std::process::Command::new(program)
-            .args(arguments)
-            .stdin(std::process::Stdio::null())
-            .output();
-        let error = match output {
-            Ok(output) if output.status.success() => return,
-            Ok(output) => String::from_utf8_lossy(&output.stderr).trim().to_owned(),
-            Err(error) => error.to_string(),
-        };
-        self.show_error(format!("could not add Dust's tools to {name}: {error}"));
+        let (program, arguments) = (program.clone(), arguments.to_vec());
+        let (name, failures) = (name.to_owned(), self.agent.tool_failures.clone());
+        // In the background, so the agent starts at once. The command saves the tools in the
+        // agent's own config, where every later start finds them.
+        std::thread::spawn(move || {
+            let output = std::process::Command::new(program)
+                .args(arguments)
+                .stdin(std::process::Stdio::null())
+                .output();
+            let error = match output {
+                Ok(output) if output.status.success() => return,
+                Ok(output) => String::from_utf8_lossy(&output.stderr).trim().to_owned(),
+                Err(error) => error.to_string(),
+            };
+            if let Ok(mut failures) = failures.lock() {
+                failures.push(format!("could not add Dust's tools to {name}: {error}"));
+            }
+        });
     }
 
     fn spawn_agent(&self, name: &str, root: &Path, tab: Option<u64>) -> Result<Spawned, String> {
@@ -1664,7 +1650,13 @@ impl InteractiveApplication {
     }
 
     pub(super) fn process_agent_events(&mut self) {
-        for error in history::take_errors() {
+        let failures = self
+            .agent
+            .tool_failures
+            .lock()
+            .map(|mut failures| std::mem::take(&mut *failures))
+            .unwrap_or_default();
+        for error in history::take_errors().into_iter().chain(failures) {
             self.show_error(error);
         }
         let mut changed = false;
@@ -3416,6 +3408,12 @@ mod tests {
         app.add_agent_tools("pi");
         app.add_agent_tools("claude");
         let dust = std::env::current_exe().unwrap().display().to_string();
+        // The command runs in the background.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while !file.exists() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(200));
         assert_eq!(std::fs::read_to_string(&file).unwrap(), format!("{dust}\n"));
 
         std::fs::remove_file(&file).unwrap();
@@ -3962,11 +3960,8 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn agent_unused_tabs_are_reused_only_in_the_current_worktree() {
+    fn each_new_agent_tab_is_its_own_even_while_the_others_are_empty() {
         let (_directories, mut app) = test_app();
-        let old = tab(&mut app);
-        let number = app.agent.sessions[old].number;
-        app.agent.sessions[old].root = app.state.workspace_root.join("other-worktree");
         let mut config = app.configuration.fixture_snapshot();
         let mut profile = config
             .settings
@@ -3984,15 +3979,11 @@ mod tests {
             .profiles
             .insert("fixture".into(), profile);
         app.configuration.install_fixture(config);
-        app.open_agent_tab("fixture").unwrap();
-        assert_ne!(app.agent.sessions[app.agent.active].number, number);
-        assert_eq!(
-            app.agent.sessions[app.agent.active].root,
-            app.state.workspace_root
-        );
-        let number = app.agent.sessions[app.agent.active].number;
-        app.open_agent_tab("fixture").unwrap();
-        assert_eq!(app.agent.sessions[app.agent.active].number, number);
+        for _ in 0..3 {
+            app.open_agent_tab("fixture").unwrap();
+        }
+        assert_eq!(app.agent.sessions.len(), 3);
+        assert_eq!(app.agent.active, 2, "the newest tab is shown");
     }
 
     #[cfg(unix)]

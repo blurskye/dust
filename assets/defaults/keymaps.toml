@@ -5055,8 +5055,8 @@ desc = "Previous Tab"
 id = "builtin.global.agent-ask"
 context = "global"
 keys = "<leader> a a"
-command = "agent.ask"
-desc = "Ask Agent"
+command = "agent.toggle"
+desc = "Toggle Agent"
 
 [[keymap]]
 id = "builtin.global.agent-toggle"

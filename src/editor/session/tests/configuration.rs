@@ -1446,7 +1446,7 @@ fn the_agent_keys_each_reach_their_command() {
     let (_app_dirs, app) = app();
     let keymaps = bundled_keymaps(&app);
     for (keys, command) in [
-        ("<leader> a a", "agent.ask"),
+        ("<leader> a a", "agent.toggle"),
         ("<leader> a n", "agent.new"),
         ("<leader> a s", "agent.sessions"),
         ("<leader> a ]", "agent.session.next"),
