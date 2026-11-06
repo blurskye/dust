@@ -1,9 +1,9 @@
 //! Editor resource storage and active views.
 
 use crate::editor::EditorEvent;
-use crate::editor::state::events::EditorEvents;
 use crate::editor::state::EditingPolicy;
 use crate::editor::state::buffer::{Buffer, BufferOrigin};
+use crate::editor::state::events::EditorEvents;
 use crate::editor::state::id::{BufferId, ViewId};
 use crate::editor::state::registers::RegisterStore;
 use crate::editor::state::view::{EditorMode, View};

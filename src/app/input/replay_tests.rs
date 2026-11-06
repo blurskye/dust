@@ -99,13 +99,17 @@ fn dot_records_the_completed_pending_command_and_waits_again_when_replayed() {
     assert_eq!(plan[0].id.as_str(), "test.pending_edit");
     assert!(app.input.command_pending());
     assert_eq!(
-        app.state.views[app.state.active_view().unwrap()].cursor.get(),
+        app.state.views[app.state.active_view().unwrap()]
+            .cursor
+            .get(),
         0
     );
     complete_edit(app, 2);
     assert!(!app.input.command_pending());
     assert_eq!(
-        app.state.views[app.state.active_view().unwrap()].cursor.get(),
+        app.state.views[app.state.active_view().unwrap()]
+            .cursor
+            .get(),
         1
     );
     assert_eq!(
@@ -131,13 +135,17 @@ fn macro_records_completion_and_pauses_its_remaining_steps_during_replay() {
     assert!(app.input.command_pending());
     assert_eq!(app.input.replay_depth(), 1);
     assert_eq!(
-        app.state.views[app.state.active_view().unwrap()].cursor.get(),
+        app.state.views[app.state.active_view().unwrap()]
+            .cursor
+            .get(),
         1
     );
     complete_edit(app, 2);
     assert_eq!(app.input.replay_depth(), 0);
     assert_eq!(
-        app.state.views[app.state.active_view().unwrap()].cursor.get(),
+        app.state.views[app.state.active_view().unwrap()]
+            .cursor
+            .get(),
         2
     );
     assert_eq!(
