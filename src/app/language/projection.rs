@@ -771,11 +771,7 @@ impl LspSession {
                     .as_ref()
                     .is_some_and(|owner| owner.buffer == buffer)
     }
-    pub(in crate::app) fn inlay_ready(
-        &mut self,
-        config: &LspConfig,
-        now: Instant,
-    ) -> bool {
+    pub(in crate::app) fn inlay_ready(&mut self, config: &LspConfig, now: Instant) -> bool {
         if !config.inlay_hints {
             self.disable_inlays();
             return false;
@@ -820,11 +816,7 @@ impl LspSession {
             },
         );
     }
-    pub(in crate::app) fn retry_inlays(
-        &mut self,
-        config: &LspConfig,
-        now: Instant,
-    ) -> bool {
+    pub(in crate::app) fn retry_inlays(&mut self, config: &LspConfig, now: Instant) -> bool {
         if !config.inlay_hints || self.projection.inlay_retries >= INLAY_RETRY_LIMIT {
             return false;
         }
@@ -903,11 +895,7 @@ impl LspSession {
     pub(in crate::app) fn take_typed(&mut self) -> Option<char> {
         self.projection.typed.take()
     }
-    pub(in crate::app) fn is_completion_trigger(
-        &self,
-        servers: &[String],
-        typed: char,
-    ) -> bool {
+    pub(in crate::app) fn is_completion_trigger(&self, servers: &[String], typed: char) -> bool {
         let typed = typed.to_string();
         servers.iter().any(|server| {
             self.sessions
@@ -916,11 +904,7 @@ impl LspSession {
                 .is_some_and(|capabilities| capabilities.completion_triggers.contains(&typed))
         })
     }
-    pub(in crate::app) fn begin_completion(
-        &mut self,
-        start: Option<ByteOffset>,
-        automatic: bool,
-    ) {
+    pub(in crate::app) fn begin_completion(&mut self, start: Option<ByteOffset>, automatic: bool) {
         self.projection.completion_start = start;
         self.projection.completion_automatic = automatic;
     }
@@ -1399,11 +1383,7 @@ impl LspSession {
             .completion_scroll
             .min(self.projection.completion_selected);
     }
-    pub(in crate::app) fn retire_projection_document(
-        &mut self,
-        server: &str,
-        uri: &str,
-    ) {
+    pub(in crate::app) fn retire_projection_document(&mut self, server: &str, uri: &str) {
         let key = (server.into(), uri.into());
         self.projection.semantic.remove(&key);
         self.projection.pull_ids.remove(&key);
@@ -1548,11 +1528,7 @@ impl LspSession {
         }
     }
 
-    pub(in crate::app) fn animate_progress(
-        &mut self,
-        policy: &LspProgressConfig,
-        now: Instant,
-    ) {
+    pub(in crate::app) fn animate_progress(&mut self, policy: &LspProgressConfig, now: Instant) {
         if self.projection.progress.is_empty() {
             return;
         }
@@ -1597,10 +1573,7 @@ impl LspSession {
     pub(in crate::app) fn fixture_generation(&mut self, generation: u64) {
         self.projection.generation = generation;
     }
-    pub(in crate::app) fn fixture_projection(
-        &mut self,
-        owner: Option<LspProjectionOwner>,
-    ) {
+    pub(in crate::app) fn fixture_projection(&mut self, owner: Option<LspProjectionOwner>) {
         self.projection.owner = owner;
     }
     pub(in crate::app) fn fixture_completion_source(
@@ -1609,10 +1582,7 @@ impl LspSession {
     ) {
         self.projection.completion_owner = owner;
     }
-    pub(in crate::app) fn fixture_completion_items(
-        &mut self,
-        items: Vec<LspCompletionItem>,
-    ) {
+    pub(in crate::app) fn fixture_completion_items(&mut self, items: Vec<LspCompletionItem>) {
         self.projection.completion_items = items;
     }
     pub(in crate::app) fn fixture_documentation(
@@ -1648,16 +1618,16 @@ impl LspSession {
 
 #[cfg(test)]
 mod tests {
-    use crate::editor::text::ByteOffset;
-    use crate::editor::EditorState;
-    use crate::language::lsp::LspCompletionItem;
     use crate::app::language::LspProjectionOwner;
-    use crate::language::lsp::LspSemanticTokenDelta;
-    use crate::language::lsp::LspSemanticTokens;
     use crate::app::language::LspSession;
+    use crate::editor::EditorState;
+    use crate::editor::text::ByteOffset;
     use crate::editor::text::TextBuffer;
+    use crate::language::lsp::LspCompletionItem;
     use crate::language::lsp::LspDocument;
+    use crate::language::lsp::LspSemanticTokenDelta;
     use crate::language::lsp::LspSemanticTokenEdit;
+    use crate::language::lsp::LspSemanticTokens;
     use std::collections::HashMap;
     use std::time::Duration;
     use std::time::Instant;
@@ -2277,7 +2247,11 @@ mod tests {
         owner.install_completions("owned", vec![item("abX"), item("aXb")], false, 3);
         owner.projection.resolve =
             Some((3, owner.projection.owner.clone().unwrap(), 0, ByteOffset(0)));
-        owner.narrow_completions(vec![None, Some(2)], ByteOffset(0), crate::editor::text::BufferRevision(0));
+        owner.narrow_completions(
+            vec![None, Some(2)],
+            ByteOffset(0),
+            crate::editor::text::BufferRevision(0),
+        );
         assert!(!owner.accept_resolved(3, item("resolved abX"), &editor));
         assert_eq!(owner.completion_items()[0].label, "aXb");
     }
@@ -2291,7 +2265,11 @@ mod tests {
         owner.move_completion(1, 10);
         owner.move_completion(1, 10);
         owner.install_completions("third", vec![item("aaa")], false, 0);
-        owner.narrow_completions(vec![Some(1); 4], ByteOffset(0), crate::editor::text::BufferRevision(0));
+        owner.narrow_completions(
+            vec![Some(1); 4],
+            ByteOffset(0),
+            crate::editor::text::BufferRevision(0),
+        );
         let selected = owner.completion_position().0;
         assert_eq!(owner.completion_server(selected), Some("second"));
         assert_eq!(owner.completion_items()[selected], overload);

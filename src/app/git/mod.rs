@@ -2,8 +2,6 @@
 use crate::editor::BufferId;
 use crate::editor::EditorState;
 use crate::editor::text::TextVersion;
-use crate::ui::UiGitSign;
-use crate::ui::UiGitSignKind;
 use crate::git::GitBranchGeneration;
 use crate::git::GitBranchList;
 use crate::git::GitBranchListRequest;
@@ -41,6 +39,8 @@ use crate::git::git_hunk_signs;
 use crate::git::git_index_fingerprint;
 use crate::git::git_staged_signs;
 use crate::git::index_line_in_buffer;
+use crate::ui::UiGitSign;
+use crate::ui::UiGitSignKind;
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::path::PathBuf;
@@ -158,10 +158,7 @@ impl GitSession {
         self.branch.as_deref()
     }
     /// Hold the previewed replacement until its confirmation is answered.
-    pub(in crate::app) fn set_pending_replacement(
-        &mut self,
-        plan: crate::git::GitReplacementPlan,
-    ) {
+    pub(in crate::app) fn set_pending_replacement(&mut self, plan: crate::git::GitReplacementPlan) {
         self.pending_destructive = None;
         self.pending_replacement = Some(plan);
     }
@@ -636,7 +633,10 @@ impl GitSession {
         self.hunk_selection_line = selection_line;
         Ok(())
     }
-    pub(in crate::app) fn poll_hunks(&mut self, editor: &EditorState) -> Result<Option<HunkReady>, String> {
+    pub(in crate::app) fn poll_hunks(
+        &mut self,
+        editor: &EditorState,
+    ) -> Result<Option<HunkReady>, String> {
         if self.hunk_source.as_ref().is_some_and(|(id, version)| {
             editor
                 .buffers
@@ -804,7 +804,11 @@ impl GitSession {
         self.selected = Some((snapshot.clone(), hunk.clone(), path));
     }
     /// Select the hunk with changes on these one-based lines and return those changes.
-    pub(in crate::app) fn select_lines(&mut self, start: u32, end: u32) -> Result<Vec<u32>, String> {
+    pub(in crate::app) fn select_lines(
+        &mut self,
+        start: u32,
+        end: u32,
+    ) -> Result<Vec<u32>, String> {
         let snapshot = self
             .hunk_snapshot
             .as_ref()
@@ -1516,7 +1520,8 @@ mod regression_tests {
         assert!(!removed.spans.is_empty());
     }
 
-    pub(in crate::app) fn fixture() -> (tempfile::TempDir, git2::Repository, EditorState, GitSession) {
+    pub(in crate::app) fn fixture() -> (tempfile::TempDir, git2::Repository, EditorState, GitSession)
+    {
         let dir = tempfile::tempdir().unwrap();
         let repo = git2::Repository::init(dir.path()).unwrap();
         let original = (1..=40).map(|n| format!("line {n}\n")).collect::<String>();
@@ -2181,7 +2186,6 @@ pub(in crate::app) mod commands;
 
 #[cfg(test)]
 pub(in crate::app) mod project_tests;
-
 
 #[cfg(test)]
 pub(in crate::app) mod surfaces_tests;

@@ -1,7 +1,4 @@
 use crate::app::input::InputSession;
-use crate::editor::text::BufferRevision;
-use crate::editor::text::ByteOffset;
-use crate::editor::text::TextBuffer;
 use crate::editor::BufferId;
 use crate::editor::EditorMode;
 use crate::editor::EditorOperation;
@@ -13,6 +10,9 @@ use crate::editor::TransactionId;
 use crate::editor::UndoPolicy;
 use crate::editor::View;
 use crate::editor::ViewId;
+use crate::editor::text::BufferRevision;
+use crate::editor::text::ByteOffset;
+use crate::editor::text::TextBuffer;
 use crate::ui::VisualRowAnchor;
 use crate::ui::VisualRowModel;
 

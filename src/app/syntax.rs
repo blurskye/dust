@@ -653,27 +653,21 @@ mod tests {
     }
 }
 
+use crate::app::App;
+use crate::editor::EditorOperation;
+use crate::editor::EditorTransaction;
+use crate::editor::Precondition;
 use crate::editor::text::ByteOffset;
 use crate::editor::text::ByteRange;
-use crate::editor::EditorOperation;
-use crate::editor::EditorState;
-use crate::editor::EditorTransaction;
-use std::collections::HashSet;
-use crate::app::App;
-use crate::editor::Precondition;
 use crate::editor::text::TextEdit;
-
-
-
+use std::collections::HashSet;
 
 use crate::editor::text::TextEditSet;
+use crate::language::syntax::language_for_document;
 use crate::ui::UiFold;
 use crate::ui::UiSyntaxSpan;
-use crate::language::syntax::language_for_document;
-
 
 impl App {
-
     pub(in crate::app) fn syntax_support_label(&self, support: SyntaxSupport) -> String {
         self.message(
             match support {
@@ -687,8 +681,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn apply_syntax_indent_line(&mut self) {
         let Some(view_id) = self.state.active_view else {
             return;
@@ -787,8 +779,6 @@ impl App {
 }
 
 impl App {
-
-
     /// A file that was just opened is drawn once it has its colours and, when they are on,
     /// its inlay hints, unless those take longer than a moment.
     pub(in crate::app) fn hold_first_frame(&mut self) -> bool {
@@ -811,8 +801,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn process_syntax(&mut self) {
         // Move old fold rows with their text before matching them to a new parse.
         let mut folds_changed = false;
@@ -930,8 +918,6 @@ impl App {
 }
 
 impl App {
-
-
     fn rebuild_syntax_rows(&mut self) {
         let collapsed = self
             .ui
@@ -1030,8 +1016,6 @@ impl App {
     }
 }
 
-
-
 /// Where the `count`th non-blank character (from zero) of `text` starts, or its end.
 pub(in crate::app) fn nth_non_blank(text: &str, count: usize) -> usize {
     text.char_indices()
@@ -1039,7 +1023,6 @@ pub(in crate::app) fn nth_non_blank(text: &str, count: usize) -> usize {
         .nth(count)
         .map_or(text.len(), |(at, _)| at)
 }
-
 
 fn move_spans_onto_current_text(
     spans: &mut Vec<UiSyntaxSpan>,
@@ -1074,7 +1057,6 @@ fn move_spans_onto_current_text(
     true
 }
 
-
 #[cfg(test)]
 mod formatter_cursor_tests {
     #[test]
@@ -1092,21 +1074,22 @@ mod formatter_cursor_tests {
         assert_eq!(crate::app::syntax::nth_non_blank("a b", 9), 3);
     }
 }
-use crate::app::commands::SyntaxFoldAction;
 use crate::app::commands::AppEffect;
+use crate::app::commands::SyntaxFoldAction;
 
+use crate::app::picker::PickerPayload;
+use crate::language::syntax::builtin_languages;
 use crate::workspace::PickerAction;
 use crate::workspace::PickerItem;
 use crate::workspace::PickerItemId;
-use crate::app::picker::PickerPayload;
-use crate::language::syntax::builtin_languages;
-
-
 
 impl App {
-    pub(in crate::app) fn process_syntax_effect(&mut self, effect: AppEffect) -> Result<(), AppEffect> {
+    pub(in crate::app) fn process_syntax_effect(
+        &mut self,
+        effect: AppEffect,
+    ) -> Result<(), AppEffect> {
         match effect {
-AppEffect::SyntaxFold(action) => {
+            AppEffect::SyntaxFold(action) => {
                 if let Some(view) = self.state.active_view {
                     let line = self.state.views.get(view).and_then(|view| {
                         self.state.buffers[view.buffer]
@@ -1146,8 +1129,8 @@ AppEffect::SyntaxFold(action) => {
                     }
                 }
             }
-AppEffect::SyntaxIndentLine => self.apply_syntax_indent_line(),
-AppEffect::SyntaxStatus => {
+            AppEffect::SyntaxIndentLine => self.apply_syntax_indent_line(),
+            AppEffect::SyntaxStatus => {
                 let active = self.state.active_buffer_id();
                 let active_language = active
                     .and_then(|buffer| self.state.buffers.get(buffer))

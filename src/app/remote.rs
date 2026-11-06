@@ -5,11 +5,11 @@
 use std::collections::BTreeMap;
 
 use crate::app::App;
-use crate::windows::WindowPlacement;
 use crate::remote::RemoteRequest;
 use crate::remote::RemoteServer;
 use crate::remote::SERVER_VARIABLE;
 use crate::remote::lazygit_config;
+use crate::windows::WindowPlacement;
 
 impl App {
     /// Listen for `dust --remote` and tell terminals where to find this session. Without a

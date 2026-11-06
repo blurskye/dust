@@ -1,15 +1,11 @@
-use std::path::PathBuf;
 use crate::editor::text::BufferRevision;
 use crate::editor::text::ByteOffset;
 use crate::editor::text::FileFormat;
 use crate::editor::text::TextBuffer;
 use crate::editor::transaction::UndoTree;
-use crate::editor::state::id::BufferId;
+use std::path::PathBuf;
 
 use crate::editor::state::view::View;
-
-
-
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum BufferOrigin {
@@ -21,7 +17,6 @@ pub enum BufferOrigin {
         revision: u64,
     },
 }
-
 
 #[derive(Clone, Debug)]
 pub struct Buffer {
@@ -45,7 +40,6 @@ pub struct Buffer {
         std::sync::Arc<Vec<crate::editor::SyntaxObject>>,
     )>,
 }
-
 
 impl Buffer {
     /// The owner of a virtual document, shown where a file would show its name.

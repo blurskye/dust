@@ -1,24 +1,21 @@
-
-use crate::app::tasks::AdapterContext;
-use crate::app::commands::AppEffect;
 use crate::app::App;
 use crate::app::TrustedAction;
+use crate::app::commands::AppEffect;
+use crate::app::tasks::AdapterContext;
 
-
-
-
+use crate::app::commands::SyntaxFoldAction;
+use crate::app::commands::register;
+use crate::app::commands::string_arg;
 use crate::editor::ArgumentSchema;
 use crate::editor::ArgumentType;
 use crate::editor::CommandError;
 use crate::editor::CommandRegistry;
 use crate::editor::ContextRequirement;
-use crate::app::commands::register;
-use crate::app::commands::string_arg;
 use crate::ui::PromptKind;
-use crate::app::commands::SyntaxFoldAction;
 
-pub(in crate::app) fn register_commands(registry: &mut CommandRegistry<AppEffect>) -> Result<(), CommandError> {
-
+pub(in crate::app) fn register_commands(
+    registry: &mut CommandRegistry<AppEffect>,
+) -> Result<(), CommandError> {
     register(
         registry,
         "format.run",
@@ -212,49 +209,18 @@ pub(in crate::app) fn register_commands(registry: &mut CommandRegistry<AppEffect
             ))
         },
     )?;
-Ok(())
+    Ok(())
 }
-
-
-#[cfg(test)]
-mod tests {
-    use crate::app::tasks::commands::*;
-    use crate::editor::CommandInvocation;
-    use crate::editor::EditorState;
-    use crate::editor::InvocationSource;
-
-    #[test]
-    fn test_prompts_use_stable_command_ids() {
-        let root = tempfile::tempdir().unwrap();
-        let state = EditorState::new(root.path().into());
-        let mut registry = CommandRegistry::default();
-        register_commands(&mut registry).unwrap();
-        for command in ["test.run", "test.list", "test.stop"] {
-            let invocation =
-                CommandInvocation::new(&format!("{command}.prompt"), InvocationSource::Test)
-                    .unwrap();
-            let outcome = registry.execute(&state, &invocation).unwrap();
-            assert!(
-                matches!(outcome.effects.as_slice(), [AppEffect::OpenPrompt { kind: PromptKind::Command, initial }] if initial == &format!("{command} name="))
-            );
-        }
-    }
-}
-
-
-
-
-
-
-
 
 use crate::workspace::DiagnosticOwner;
 
-
 impl App {
-    pub(in crate::app) fn process_tasks_effect(&mut self, effect: AppEffect) -> Result<(), AppEffect> {
+    pub(in crate::app) fn process_tasks_effect(
+        &mut self,
+        effect: AppEffect,
+    ) -> Result<(), AppEffect> {
         match effect {
-AppEffect::TestRun(name) => {
+            AppEffect::TestRun(name) => {
                 let Some(task) = self.configuration.settings().tasks.get(&name) else {
                     self.show_error(self.message("task_unknown", &[("name", name)]));
                     return Ok(());
@@ -265,10 +231,10 @@ AppEffect::TestRun(name) => {
                     None => self.run_trusted(TrustedAction::RunTask(name)),
                 }
             }
-AppEffect::TestStop(name) => self.stop_task(&name),
-AppEffect::TestList(name) => self.show_test_picker(&name),
-AppEffect::TaskList => self.show_task_picker(),
-AppEffect::TaskRestart(name) => {
+            AppEffect::TestStop(name) => self.stop_task(&name),
+            AppEffect::TestList(name) => self.show_test_picker(&name),
+            AppEffect::TaskList => self.show_task_picker(),
+            AppEffect::TaskRestart(name) => {
                 let adapter = self.tasks.last_adapter(&name).cloned();
                 // A finished task has nothing to stop: restarting just runs it again.
                 if self.tasks.is_running(&name) {
@@ -296,10 +262,10 @@ AppEffect::TaskRestart(name) => {
                     _ => self.run_trusted(TrustedAction::RunTask(name)),
                 }
             }
-AppEffect::TaskRun(name) => self.run_trusted(TrustedAction::RunTask(name)),
-AppEffect::TaskStop(name) => self.stop_task(&name),
-AppEffect::TaskOutput(name) => self.show_output_picker(&name),
-AppEffect::LintRun(name) => {
+            AppEffect::TaskRun(name) => self.run_trusted(TrustedAction::RunTask(name)),
+            AppEffect::TaskStop(name) => self.stop_task(&name),
+            AppEffect::TaskOutput(name) => self.show_output_picker(&name),
+            AppEffect::LintRun(name) => {
                 let Some(task) = self.configuration.settings().tasks.get(&name) else {
                     self.show_error(self.message("task_unknown", &[("name", name)]));
                     return Ok(());
@@ -310,13 +276,13 @@ AppEffect::LintRun(name) => {
                 };
                 self.run_trusted(TrustedAction::RunLinter { name, matcher });
             }
-AppEffect::LintClear(name) => {
+            AppEffect::LintClear(name) => {
                 if let Ok(owner) = DiagnosticOwner::new(format!("task:{name}")) {
                     self.diagnostics.clear_owner(&owner);
                     self.sync_ui_diagnostics();
                 }
             }
-AppEffect::FormatRun(name) => {
+            AppEffect::FormatRun(name) => {
                 let Some(view_id) = self.state.active_view else {
                     return Ok(());
                 };
@@ -332,5 +298,30 @@ AppEffect::FormatRun(name) => {
             effect => return Err(effect),
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::app::tasks::commands::*;
+    use crate::editor::CommandInvocation;
+    use crate::editor::EditorState;
+    use crate::editor::InvocationSource;
+
+    #[test]
+    fn test_prompts_use_stable_command_ids() {
+        let root = tempfile::tempdir().unwrap();
+        let state = EditorState::new(root.path().into());
+        let mut registry = CommandRegistry::default();
+        register_commands(&mut registry).unwrap();
+        for command in ["test.run", "test.list", "test.stop"] {
+            let invocation =
+                CommandInvocation::new(&format!("{command}.prompt"), InvocationSource::Test)
+                    .unwrap();
+            let outcome = registry.execute(&state, &invocation).unwrap();
+            assert!(
+                matches!(outcome.effects.as_slice(), [AppEffect::OpenPrompt { kind: PromptKind::Command, initial }] if initial == &format!("{command} name="))
+            );
+        }
     }
 }

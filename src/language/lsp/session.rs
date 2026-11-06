@@ -7,12 +7,12 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::process::Command;
 use std::process::Stdio;
-use std::sync::mpsc::self;
+use std::sync::mpsc;
 use std::sync::mpsc::Receiver;
 use std::sync::mpsc::SyncSender;
 use std::sync::mpsc::TryRecvError;
 use std::sync::mpsc::TrySendError;
-use std::thread::self;
+use std::thread;
 use std::thread::JoinHandle;
 use std::time::Duration;
 use std::time::Instant;
@@ -1350,7 +1350,9 @@ fn sync_document(
                 previous.version != document.version || previous.text != document.text
             }) {
                 send_change(stdin, previous, document, capabilities)?;
-                if capabilities.sync_kind_for_document(document) != crate::language::lsp::server::SyncKind::None {
+                if capabilities.sync_kind_for_document(document)
+                    != crate::language::lsp::server::SyncKind::None
+                {
                     opened_documents.insert(uri.clone(), document.version);
                 }
             }

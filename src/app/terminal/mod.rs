@@ -104,10 +104,7 @@ pub(super) struct TerminalSession {
     environment: BTreeMap<String, String>,
 }
 impl TerminalSession {
-    pub(in crate::app) fn set_environment(
-        &mut self,
-        environment: BTreeMap<String, String>,
-    ) {
+    pub(in crate::app) fn set_environment(&mut self, environment: BTreeMap<String, String>) {
         self.environment = environment;
     }
 
@@ -1169,10 +1166,7 @@ impl TerminalSession {
                 .back()
                 .is_some_and(|pending| &pending.source == source)
     }
-    pub(in crate::app) fn fixture_screen_state(
-        &self,
-        id: PtyId,
-    ) -> TerminalScreenState {
+    pub(in crate::app) fn fixture_screen_state(&self, id: PtyId) -> TerminalScreenState {
         let screen = &self.tabs[&id].screen;
         TerminalScreenState {
             cursor: screen.cursor(),
@@ -1872,7 +1866,6 @@ pub(in crate::app) mod commands;
 
 #[cfg(test)]
 pub(in crate::app) mod project_tests;
-
 
 #[cfg(test)]
 pub(in crate::app) mod surfaces_tests;

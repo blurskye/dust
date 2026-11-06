@@ -1,9 +1,9 @@
 //! Exact buffer-path reconciliation after a separately completed filesystem operation.
-use crate::editor::transaction::EditorDraft;
+use crate::editor::BufferId;
 use crate::editor::EditorState;
 use crate::editor::EditorWindowVersion;
-use crate::editor::BufferId;
 use crate::editor::text::TextVersion;
+use crate::editor::transaction::EditorDraft;
 use std::path::Path;
 use std::path::PathBuf;
 
@@ -164,8 +164,8 @@ impl EditorState {
 
 #[cfg(test)]
 mod tests {
-    use crate::editor::transaction::paths::*;
     use crate::editor::text::TextBuffer;
+    use crate::editor::transaction::paths::*;
     #[test]
     fn deleted_files_remain_unsaved_after_edits_are_undone() {
         let mut state = EditorState::new("/workspace".into());

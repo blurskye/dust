@@ -729,7 +729,8 @@ fn plugin_admission_counts_all_graph_and_host_copies_in_invalid_unchanged_valid_
     let mut session = TestSession::new(crate::config::load_bundled_config());
     session.new_buffer();
     session.resize(100, 30);
-    let manifest = crate::app::tests::plugin_manifest("demo", "plugin.demo.keymap.dashboard", "x y");
+    let manifest =
+        crate::app::tests::plugin_manifest("demo", "plugin.demo.keymap.dashboard", "x y");
     let index =
         crate::plugins::index_manifest_contributions(&manifest, 77, "admission fixture".into())
             .unwrap();
@@ -861,7 +862,8 @@ fn production_02_retained_and_private_clone_refusals_do_not_touch_host_tokens_or
         let mut session = TestSession::new(crate::config::load_bundled_config());
         session.new_buffer();
         session.resize(100, 30);
-        let mut manifest = crate::app::tests::plugin_manifest("demo", "plugin.demo.keymap.dashboard", "x y");
+        let mut manifest =
+            crate::app::tests::plugin_manifest("demo", "plugin.demo.keymap.dashboard", "x y");
         if private {
             manifest
                 .capabilities
@@ -950,7 +952,8 @@ fn catalog_change_without_configuration_change_rejects_before_host_or_graph_stag
     let mut session = TestSession::new(crate::config::load_bundled_config());
     session.new_buffer();
     session.frame();
-    let manifest = crate::app::tests::plugin_manifest("demo", "plugin.demo.keymap.dashboard", "x y");
+    let manifest =
+        crate::app::tests::plugin_manifest("demo", "plugin.demo.keymap.dashboard", "x y");
     let index =
         crate::plugins::index_manifest_contributions(&manifest, 77, "catalog fixture".into())
             .unwrap();

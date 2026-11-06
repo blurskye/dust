@@ -2,7 +2,6 @@ use crate::app::tests::*;
 
 use crate::app::workspace::project_tests::wait_root_operation;
 
-
 #[test]
 pub(in crate::app) fn a_pending_root_switch_rechecks_new_edits_and_terminals() {
     for terminal in [None, Some(false), Some(true)] {
@@ -50,7 +49,6 @@ pub(in crate::app) fn a_pending_root_switch_rechecks_new_edits_and_terminals() {
     }
 }
 
-
 #[test]
 pub(in crate::app) fn saving_an_existing_empty_file_detects_external_deletion() {
     let (_app_dirs, mut app) = app();
@@ -74,7 +72,6 @@ pub(in crate::app) fn saving_an_existing_empty_file_detects_external_deletion() 
     assert!(app.state.buffers[buffer].dirty);
 }
 
-
 /// The page keys have names a keymap can use, and a focused terminal receives them.
 #[test]
 pub(in crate::app) fn page_keys_parse_and_count_as_terminal_navigation() {
@@ -95,7 +92,6 @@ pub(in crate::app) fn page_keys_parse_and_count_as_terminal_navigation() {
     );
 }
 
-
 #[test]
 pub(in crate::app) fn an_empty_plugin_list_says_how_to_get_one() {
     let (_app_dirs, mut app) = app();
@@ -105,7 +101,6 @@ pub(in crate::app) fn an_empty_plugin_list_says_how_to_get_one() {
         Some("No plugins yet · :pkgsearch <name> finds one · Esc Esc Close")
     );
 }
-
 
 #[test]
 pub(in crate::app) fn switching_folders_with_open_terminals_warns_before_ending_them() {
@@ -158,7 +153,6 @@ pub(in crate::app) fn switching_folders_with_open_terminals_warns_before_ending_
     assert_eq!(app.terminal_session.running_count(), 0);
 }
 
-
 #[test]
 pub(in crate::app) fn reloading_terminal_settings_keeps_running_terminals() {
     let (_app_dirs, mut app) = app();
@@ -192,7 +186,6 @@ pub(in crate::app) fn reloading_terminal_settings_keeps_running_terminals() {
             .contains_key("another")
     );
 }
-
 
 #[test]
 pub(in crate::app) fn removing_a_root_preserves_terminals_and_updates_relative_paths() {
@@ -240,19 +233,16 @@ pub(in crate::app) fn removing_a_root_preserves_terminals_and_updates_relative_p
     app.process_pty_events();
     assert!(app.terminal_session.contains(PtyId(101)));
 }
-use std::time::Duration;
-use std::time::Instant;
-use crate::editor::input::KeyEvent;
-use crate::editor::text::TextBuffer;
-use crate::editor::CommandInvocation;
-use crate::editor::InvocationSource;
-use crate::process::PtyId;
-use crate::files::RootIdentity;
-use crate::app::startup::StartupTarget;
-use std::fs;
-use std::thread;
-use crate::ui::PtyScreen;
-use tempfile::tempdir;
 use crate::app::App;
 use crate::app::AppEffect;
-
+use crate::app::startup::StartupTarget;
+use crate::editor::InvocationSource;
+use crate::editor::input::KeyEvent;
+use crate::editor::text::TextBuffer;
+use crate::process::PtyId;
+use crate::ui::PtyScreen;
+use std::fs;
+use std::thread;
+use std::time::Duration;
+use std::time::Instant;
+use tempfile::tempdir;

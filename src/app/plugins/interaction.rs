@@ -1,18 +1,18 @@
-use crate::app::search::SEARCH_MAXIMUM_FILE_BYTES;
-use crate::app::commands::AppEffect;
 use crate::app::App;
+use crate::app::commands::AppEffect;
 use crate::app::picker::PickerOrigin;
-use crate::ui::PickerSurfaceKind;
 use crate::app::plugins::PluginUiInteraction;
+use crate::app::search::SEARCH_MAXIMUM_FILE_BYTES;
+use crate::ui::PickerSurfaceKind;
 use crate::ui::PromptKind;
-use crate::app::command;
 
 use crate::app::plugins::integration::compose_plugin_picker_items;
 
 impl App {
-
-
-    pub(in crate::app) fn apply_retained_ui_interaction(&mut self, interaction: PluginUiInteraction) {
+    pub(in crate::app) fn apply_retained_ui_interaction(
+        &mut self,
+        interaction: PluginUiInteraction,
+    ) {
         match self
             .extension
             .window_interaction(self.window_session.graph(), interaction)
@@ -29,8 +29,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn select_retained_ui_at_mouse(&mut self) {
         let Some((column, row)) = self.input.mouse_position() else {
             return;
@@ -56,8 +54,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn activate_private_surface_action(&mut self, at_mouse: bool) {
         let Some(projection) = self.compositor_projection() else {
             return;
@@ -93,7 +89,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn present_next_plugin_confirmation(&mut self) {
         if self.input.prompt().is_some() {
             return;
@@ -129,9 +124,10 @@ impl App {
 }
 
 impl App {
-
-
-    pub(in crate::app) fn submit_plugin_confirmation(&mut self, selected: crate::ui::ConfirmationChoice) {
+    pub(in crate::app) fn submit_plugin_confirmation(
+        &mut self,
+        selected: crate::ui::ConfirmationChoice,
+    ) {
         let answer = match selected {
             crate::ui::ConfirmationChoice::Yes => crate::plugins::PluginConfirmationAnswer::Yes,
             crate::ui::ConfirmationChoice::No => crate::plugins::PluginConfirmationAnswer::No,
@@ -148,12 +144,7 @@ impl App {
 }
 
 impl App {
-
-    pub(in crate::app) fn open_plugin_picker(
-        &mut self,
-        provider: String,
-        query: String,
-    ) {
+    pub(in crate::app) fn open_plugin_picker(&mut self, provider: String, query: String) {
         let invocation = match self.extension.start_provider(
             &provider,
             query,
@@ -188,8 +179,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn execute_plugin_command(
         &mut self,
         plugin: String,
@@ -243,8 +232,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn present_plugin_picker(&mut self, request: u64) {
         if !self.extension.provider_visible(request) {
             return;

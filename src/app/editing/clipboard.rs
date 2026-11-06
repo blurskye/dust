@@ -95,6 +95,22 @@ pub(in crate::app) struct ClipboardSession {
     paste_ready: bool,
 }
 
+impl crate::app::App {
+    pub(in crate::app) fn process_clipboard(&mut self) -> Option<String> {
+        self.process_clipboard_paste();
+        let generation = self.state.registers.generation();
+        let output = if self.clipboard_shared() {
+            self.clipboard.push(&mut self.state.value.registers)
+        } else {
+            None
+        };
+        if self.state.registers.generation() != generation {
+            self.state.revision = self.state.revision.wrapping_add(1);
+        }
+        output
+    }
+}
+
 impl ClipboardSession {
     /// Turn sync on for a real terminal session. Tests never call this, so they never touch
     /// the developer's clipboard.
@@ -365,10 +381,7 @@ mod tests {
     use crate::app::editing::clipboard::*;
 
     impl ClipboardSession {
-        pub(in crate::app) fn pending_copy_fixture(
-            generation: u64,
-            text: &str,
-        ) -> Self {
+        pub(in crate::app) fn pending_copy_fixture(generation: u64, text: &str) -> Self {
             let (_, receiver) = mpsc::channel();
             Self {
                 enabled: true,

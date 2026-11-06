@@ -1,11 +1,11 @@
 use crate::app::commands::AppEffect;
-use std::collections::BTreeSet;
+use crate::config::LoadedConfig;
 use crate::editor::CommandError;
 use crate::editor::CommandInvocation;
 use crate::editor::CommandRegistry;
 use crate::editor::CommandValue;
 use crate::editor::InvocationSource;
-use crate::config::LoadedConfig;
+use std::collections::BTreeSet;
 
 pub(in crate::app) fn validate_configured_commands(
     commands: &CommandRegistry<AppEffect>,
@@ -31,7 +31,8 @@ pub(in crate::app) fn validate_configured_commands(
     let enabled_plugins = crate::app::configuration::resolve::enabled_plugin_owners(loaded);
     for extra in loaded.config.command_labels.keys().filter(|id| {
         !command_ids.contains(*id)
-            && !crate::app::configuration::plugin_owner_from_id(id).is_some_and(|owner| enabled_plugins.contains(owner))
+            && !crate::app::configuration::plugin_owner_from_id(id)
+                .is_some_and(|owner| enabled_plugins.contains(owner))
     }) {
         errors.push(format!(
             "command label references unknown command `{extra}`"
@@ -93,7 +94,8 @@ pub(super) fn validate_command_references(
         .collect::<BTreeSet<_>>();
     let deferred = |id: &str| {
         !registered.contains(id)
-            && crate::app::configuration::plugin_owner_from_id(id).is_some_and(|owner| deferred_plugins.contains(owner))
+            && crate::app::configuration::plugin_owner_from_id(id)
+                .is_some_and(|owner| deferred_plugins.contains(owner))
     };
     for (alias, command_id) in &config.input.command_aliases {
         if alias.is_empty() || alias.chars().any(char::is_whitespace) || alias.contains('.') {
@@ -145,9 +147,7 @@ pub(super) fn validate_command_references(
     }
 }
 
-pub(in crate::app) fn configuration_value(
-    value: &toml::Value,
-) -> Result<CommandValue, ()> {
+pub(in crate::app) fn configuration_value(value: &toml::Value) -> Result<CommandValue, ()> {
     match value {
         toml::Value::String(value) => Ok(CommandValue::String(value.clone())),
         toml::Value::Boolean(value) => Ok(CommandValue::Bool(*value)),

@@ -1,14 +1,13 @@
-use std::path::PathBuf;
 use crate::editor::EditorState;
 use crate::ui::render::DocumentationMarkupKind;
 use crate::ui::render::DocumentationPopupKind;
 use crate::ui::render::DocumentationPopupState;
 use crate::ui::render::DocumentationSection;
 use crate::ui::render::UiState;
+use std::path::PathBuf;
 
 use crate::ui::render::composition_tests::attach_test_compositor;
 use crate::ui::render::composition_tests::render;
-
 
 #[test]
 fn notice_popup_shows_on_the_dashboard_without_a_cursor() {
@@ -43,7 +42,6 @@ fn notice_popup_shows_on_the_dashboard_without_a_cursor() {
     assert!(screen.iter().any(|line| line.contains("Notification")));
     assert!(screen.iter().any(|line| line.contains("the whole message")));
 }
-
 
 #[test]
 fn dashboard_respects_top_docks_and_floating_window_order() {
@@ -186,17 +184,14 @@ fn dashboard_respects_top_docks_and_floating_window_order() {
         compositor.projection.hit_test(rect.x + 1, rect.y + 1),
         Some(terminal)
     );
-    let terminal_on_top = crate::ui::render::render(&state, &ui, &loaded.config, &loaded.dashboard, 80, 30);
+    let terminal_on_top =
+        crate::ui::render::render(&state, &ui, &loaded.config, &loaded.dashboard, 80, 30);
     assert_ne!(
         terminal_on_top.grid.get(rect.x, rect.y),
         actual.grid.get(rect.x, rect.y)
     );
 }
 use std::path::Path;
-
-
-
-
 
 #[test]
 fn dashboard_labels_leave_a_gap_before_shortcut_keys() {

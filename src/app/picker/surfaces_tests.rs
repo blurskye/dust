@@ -1,8 +1,5 @@
 use crate::app::tests::*;
 
-
-
-
 #[test]
 pub(in crate::app) fn dashboard_and_picker_are_stable_graph_overlays_with_projected_geometry() {
     let (_app_dirs, mut app) = app();
@@ -100,9 +97,9 @@ pub(in crate::app) fn dashboard_and_picker_are_stable_graph_overlays_with_projec
     );
 }
 
-
 #[test]
-pub(in crate::app) fn live_logs_and_output_refresh_preserve_picker_normal_without_leaking_it_to_new_sources() {
+pub(in crate::app) fn live_logs_and_output_refresh_preserve_picker_normal_without_leaking_it_to_new_sources()
+ {
     let (_app_dirs, mut app) = app();
     for logs in [false, true] {
         app.close_picker();
@@ -136,9 +133,9 @@ pub(in crate::app) fn live_logs_and_output_refresh_preserve_picker_normal_withou
     }
 }
 
-
 #[test]
-pub(in crate::app) fn closed_picker_surfaces_leave_the_content_line_but_keep_their_graph_identity() {
+pub(in crate::app) fn closed_picker_surfaces_leave_the_content_line_but_keep_their_graph_identity()
+{
     let (_app_dirs, mut app) = app();
     app.state
         .open_text(TextBuffer::from_text("editor"), None)
@@ -169,7 +166,6 @@ pub(in crate::app) fn closed_picker_surfaces_leave_the_content_line_but_keep_the
         );
     }
 }
-
 
 #[test]
 pub(in crate::app) fn picker_title_changes_update_the_retained_window_content() {
@@ -207,9 +203,8 @@ pub(in crate::app) fn picker_title_changes_update_the_retained_window_content() 
             .any(|row| row.label.contains("Commands"))
     );
 }
+use crate::app::AppEffect;
+use crate::app::PickerKind;
 use crate::editor::text::TextBuffer;
 use crate::ui::PickerSurfaceKind;
 use crate::windows::WindowRect;
-use crate::app::AppEffect;
-use crate::app::PickerKind;
-

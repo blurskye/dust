@@ -8,7 +8,7 @@ use crate::config::ThemeReadSource;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
-use std::sync::mpsc::self;
+use std::sync::mpsc;
 use std::sync::mpsc::Receiver;
 use std::sync::mpsc::TryRecvError;
 
@@ -113,10 +113,7 @@ impl ConfigurationSession {
             .is_none()
             .then(|| self.stamp.clone());
     }
-    pub(in crate::app) fn restore_theme(
-        &mut self,
-        snapshot: Option<&str>,
-    ) -> Result<(), String> {
+    pub(in crate::app) fn restore_theme(&mut self, snapshot: Option<&str>) -> Result<(), String> {
         let Some(source) = self
             .themes
             .restore_source
@@ -266,10 +263,7 @@ impl ConfigurationSession {
             interaction.selected = selected;
         }
     }
-    pub(in crate::app) fn apply_theme(
-        &mut self,
-        key: &ThemeKey,
-    ) -> Result<String, String> {
+    pub(in crate::app) fn apply_theme(&mut self, key: &ThemeKey) -> Result<String, String> {
         if !self.theme_key_current(key) {
             return Err("Theme selection belongs to a retired configuration or picker".into());
         }
@@ -301,7 +295,10 @@ impl ConfigurationSession {
             .map(Arc::as_ref)
             .or(self.themes.applied.as_deref())
     }
-    pub(in crate::app) fn explain_theme(&self, key: &str) -> Option<crate::config::ConfigExplanation> {
+    pub(in crate::app) fn explain_theme(
+        &self,
+        key: &str,
+    ) -> Option<crate::config::ConfigExplanation> {
         let choice = self.theme_override()?;
         let value = if key == "ui.theme" {
             toml::Value::String(choice.theme.name.clone())

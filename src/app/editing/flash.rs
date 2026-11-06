@@ -92,74 +92,13 @@ pub(super) fn flash_targets(
     targets
 }
 
-#[cfg(test)]
-mod tests {
-    use crate::app::editing::flash::*;
-
-    fn labels(text: &str, cursor: usize, query: &str) -> Vec<(usize, Option<char>)> {
-        let text = TextBuffer::from_bytes(text.as_bytes()).unwrap();
-        let visible = ByteRange::new(ByteOffset(0), ByteOffset(text.len_bytes())).unwrap();
-        flash_targets(&text, &[visible], ByteOffset(cursor), query)
-            .into_iter()
-            .map(|target| (target.range.start.get(), target.label))
-            .collect()
-    }
-
-    #[test]
-    fn hidden_matches_do_not_consume_labels_or_exclude_continuations() {
-        let text = TextBuffer::from_text("xa xs xa");
-        let targets = flash_targets(
-            &text,
-            &[ByteRange::new(ByteOffset(3), ByteOffset(5)).unwrap()],
-            ByteOffset(99),
-            "x",
-        );
-        assert_eq!(
-            targets,
-            vec![FlashTarget {
-                range: ByteRange::new(ByteOffset(3), ByteOffset(4)).unwrap(),
-                label: Some('a'),
-            }]
-        );
-    }
-
-    #[test]
-    fn matches_never_start_inside_joined_emoji() {
-        assert!(labels("👩‍💻 👨‍💻", 0, "💻").is_empty());
-        assert_eq!(labels("👩‍💻 x", 99, "👩‍💻")[0].0, 0);
-    }
-
-    #[test]
-    fn matches_are_labelled_nearest_first_and_skip_continuations() {
-        // "ab" is followed by 'c' and 'd', so neither can be a label.
-        assert_eq!(
-            labels("abc abd\nxab\n", 8, "ab"),
-            vec![(0, Some('f')), (4, Some('s')), (9, Some('a'))]
-        );
-    }
-
-    #[test]
-    fn a_capital_makes_the_match_case_sensitive() {
-        assert_eq!(labels("Foo foo", 3, "f").len(), 2);
-        assert_eq!(labels("Foo foo", 3, "F"), vec![(0, Some('a'))]);
-    }
-}
-
-
+use crate::app::App;
 use crate::editor::EditorOperation;
 use crate::editor::EditorTransaction;
-use crate::app::App;
 use crate::editor::UndoPolicy;
-use crate::ui::VisualRowAnchor;
-use crate::ui::VisualRowModel;
-use crate::ui::active_editor_pane_viewport;
-use crate::ui::editor_state_content_width;
 use crate::editor::input::KeyEvent;
 
-
-
 impl App {
-
     pub(in crate::app) fn begin_flash(&mut self) {
         self.reconcile_editor_windows();
         let Some(view) = self.state.active_view else {
@@ -179,8 +118,6 @@ impl App {
 }
 
 impl App {
-
-
     /// While flash is active every key goes here: characters extend the query or pick a
     /// label, Backspace edits, and anything else cancels.
     pub(in crate::app) fn handle_flash_key(&mut self, key: &KeyEvent) {
@@ -280,8 +217,6 @@ impl App {
 }
 
 impl App {
-
-
     fn flash_jump(&mut self, view: crate::editor::ViewId, target: ByteOffset) {
         self.record_jump();
         let transaction = EditorTransaction::new(self.transaction_id())
@@ -299,8 +234,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn sync_flash_ui(&mut self) {
         if self.flash.as_ref().is_some_and(|flash| {
             self.state.active_view != Some(flash.view)
@@ -323,5 +256,58 @@ impl App {
                 .filter_map(|target| Some((target.range.start, target.label?)))
                 .collect(),
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::app::editing::flash::*;
+
+    fn labels(text: &str, cursor: usize, query: &str) -> Vec<(usize, Option<char>)> {
+        let text = TextBuffer::from_bytes(text.as_bytes()).unwrap();
+        let visible = ByteRange::new(ByteOffset(0), ByteOffset(text.len_bytes())).unwrap();
+        flash_targets(&text, &[visible], ByteOffset(cursor), query)
+            .into_iter()
+            .map(|target| (target.range.start.get(), target.label))
+            .collect()
+    }
+
+    #[test]
+    fn hidden_matches_do_not_consume_labels_or_exclude_continuations() {
+        let text = TextBuffer::from_text("xa xs xa");
+        let targets = flash_targets(
+            &text,
+            &[ByteRange::new(ByteOffset(3), ByteOffset(5)).unwrap()],
+            ByteOffset(99),
+            "x",
+        );
+        assert_eq!(
+            targets,
+            vec![FlashTarget {
+                range: ByteRange::new(ByteOffset(3), ByteOffset(4)).unwrap(),
+                label: Some('a'),
+            }]
+        );
+    }
+
+    #[test]
+    fn matches_never_start_inside_joined_emoji() {
+        assert!(labels("👩‍💻 👨‍💻", 0, "💻").is_empty());
+        assert_eq!(labels("👩‍💻 x", 99, "👩‍💻")[0].0, 0);
+    }
+
+    #[test]
+    fn matches_are_labelled_nearest_first_and_skip_continuations() {
+        // "ab" is followed by 'c' and 'd', so neither can be a label.
+        assert_eq!(
+            labels("abc abd\nxab\n", 8, "ab"),
+            vec![(0, Some('f')), (4, Some('s')), (9, Some('a'))]
+        );
+    }
+
+    #[test]
+    fn a_capital_makes_the_match_case_sensitive() {
+        assert_eq!(labels("Foo foo", 3, "f").len(), 2);
+        assert_eq!(labels("Foo foo", 3, "F"), vec![(0, Some('a'))]);
     }
 }

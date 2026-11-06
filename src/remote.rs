@@ -7,7 +7,7 @@
 
 use std::fs;
 
-use std::io::self;
+use std::io;
 
 use std::io::BufRead;
 
@@ -788,5 +788,3 @@ mod tests {
         assert_eq!(asking.join().unwrap().unwrap(), json!({"text": "found"}));
     }
 }
-
-

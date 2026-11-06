@@ -109,10 +109,7 @@ impl LspLaunch {
             }
         }
     }
-    pub(in crate::app) fn with_preflighted_executable(
-        self,
-        executable: PathBuf,
-    ) -> Self {
+    pub(in crate::app) fn with_preflighted_executable(self, executable: PathBuf) -> Self {
         match self {
             Self::Direct { managed, .. } => Self::Direct {
                 executable,
@@ -247,7 +244,12 @@ impl LspSession {
     pub(in crate::app) fn clear_detached(&mut self, buffer: BufferId) {
         self.detached.retain(|(_, id)| *id != buffer);
     }
-    pub(in crate::app) fn set_detached(&mut self, server: String, buffer: BufferId, detached: bool) {
+    pub(in crate::app) fn set_detached(
+        &mut self,
+        server: String,
+        buffer: BufferId,
+        detached: bool,
+    ) {
         if detached {
             self.detached.insert((server, buffer));
         } else {
@@ -757,7 +759,12 @@ impl LspSession {
         state.restart_due = None;
         Some(key.clone())
     }
-    pub(in crate::app) fn synced(&self, key: &str, buffer: BufferId, version: &TextVersion) -> bool {
+    pub(in crate::app) fn synced(
+        &self,
+        key: &str,
+        buffer: BufferId,
+        version: &TextVersion,
+    ) -> bool {
         self.synced.get(&(key.into(), buffer)) == Some(version)
     }
     fn document_synced(
@@ -792,7 +799,12 @@ impl LspSession {
         self.install_hinted.insert(language.to_owned())
     }
     /// Records a server's status and says whether it is a new problem worth reporting.
-    pub(in crate::app) fn status_changed(&mut self, key: &str, healthy: bool, message: &str) -> bool {
+    pub(in crate::app) fn status_changed(
+        &mut self,
+        key: &str,
+        healthy: bool,
+        message: &str,
+    ) -> bool {
         if healthy {
             self.statuses.remove(key);
             return false;

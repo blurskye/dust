@@ -13,6 +13,7 @@ use crate::workspace::trust::TRUST_STATE_BYTE_LIMIT;
 
 use crate::workspace::trust::load_trust_database;
 
+use crate::files::RootIdentity;
 use crate::workspace::trust::persist_trust_database;
 use crate::workspace::*;
 use tempfile::tempdir;

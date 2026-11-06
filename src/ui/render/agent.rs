@@ -216,10 +216,7 @@ pub(super) fn render_agent_panel(
         for (offset, row) in rows.into_iter().enumerate() {
             let y = list_top + u16::try_from(offset).unwrap_or(0);
             let (mark, style) = if row.shown {
-                (
-                    "● ",
-                    Style::Syntax(crate::config::Highlight::STRONG),
-                )
+                ("● ", Style::Syntax(crate::config::Highlight::STRONG))
             } else {
                 ("○ ", Style::Muted)
             };

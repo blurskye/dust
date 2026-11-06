@@ -7,8 +7,8 @@ use crate::config::Config;
 
 use crate::config::PanelSide;
 
-use crate::config::TerminalPlacement;
 use crate::config::Highlight;
+use crate::config::TerminalPlacement;
 use crate::ui::Style;
 use crate::ui::geometry::text_width;
 

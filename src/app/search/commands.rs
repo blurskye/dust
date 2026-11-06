@@ -1,15 +1,15 @@
-
 use crate::app::commands::AppEffect;
+use crate::app::commands::bool_arg;
+use crate::app::commands::register;
 use crate::editor::ArgumentSchema;
 use crate::editor::ArgumentType;
 use crate::editor::CommandError;
 use crate::editor::CommandRegistry;
 use crate::editor::ContextRequirement;
-use crate::app::commands::register;
-use crate::app::commands::bool_arg;
 
-pub(in crate::app) fn register_commands(registry: &mut CommandRegistry<AppEffect>) -> Result<(), CommandError> {
-
+pub(in crate::app) fn register_commands(
+    registry: &mut CommandRegistry<AppEffect>,
+) -> Result<(), CommandError> {
     register(
         registry,
         "search.word",
@@ -48,32 +48,28 @@ pub(in crate::app) fn register_commands(registry: &mut CommandRegistry<AppEffect
             })
         },
     )?;
-Ok(())
+    Ok(())
 }
-
 
 use crate::app::App;
 
-
-
-
-
-
-
 impl App {
-    pub(in crate::app) fn process_search_effect(&mut self, effect: AppEffect) -> Result<(), AppEffect> {
+    pub(in crate::app) fn process_search_effect(
+        &mut self,
+        effect: AppEffect,
+    ) -> Result<(), AppEffect> {
         match effect {
-AppEffect::WorkspaceSearchPrompt => self.open_live_workspace_search(),
-AppEffect::WorkspaceSearch(query) => self.start_workspace_search(query, None),
-AppEffect::WorkspaceSearchCancel => {
+            AppEffect::WorkspaceSearchPrompt => self.open_live_workspace_search(),
+            AppEffect::WorkspaceSearch(query) => self.start_workspace_search(query, None),
+            AppEffect::WorkspaceSearchCancel => {
                 self.search.cancel_grep();
                 self.notify_message(self.message("workspace_search_cancelled", &[]), false);
             }
-AppEffect::WorkspaceReplace { query, replacement } => {
+            AppEffect::WorkspaceReplace { query, replacement } => {
                 self.start_workspace_search(query, Some(replacement));
             }
-AppEffect::TodoSearch => self.start_todo_search(),
-AppEffect::SearchRepeat { .. }
+            AppEffect::TodoSearch => self.start_todo_search(),
+            AppEffect::SearchRepeat { .. }
             | AppEffect::SearchWord { .. }
             | AppEffect::SearchSelectNext(_) => {
                 unreachable!("search effects return their status through process_effect_checked")

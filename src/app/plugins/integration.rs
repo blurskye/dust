@@ -23,10 +23,7 @@ pub(in crate::app) enum ExtensionUpdate {
     Failed { operation: String, error: String },
 }
 pub(in crate::app) enum RegistryUpdate {
-    Present(
-        Box<RegistryResult>,
-        Option<crate::app::picker::PickerEpoch>,
-    ),
+    Present(Box<RegistryResult>, Option<crate::app::picker::PickerEpoch>),
     ValidateArtifact,
     Error(String),
 }
@@ -50,18 +47,10 @@ impl ExtensionSession {
         self.providers.install(&index).map_err(|e| e.detail)?;
         self.virtual_documents.install(&index).map_err(|e| e.detail)
     }
-    pub(in crate::app) fn remove_contribution(
-        &mut self,
-        plugin: &str,
-        load: PluginLoadId,
-    ) -> bool {
+    pub(in crate::app) fn remove_contribution(&mut self, plugin: &str, load: PluginLoadId) -> bool {
         self.plugin_contributions.remove_generation(plugin, load.0)
     }
-    pub(in crate::app) fn take_rejected(
-        &mut self,
-        plugin: &str,
-        load: PluginLoadId,
-    ) -> bool {
+    pub(in crate::app) fn take_rejected(&mut self, plugin: &str, load: PluginLoadId) -> bool {
         self.rejected_plugin_loads.remove(&(plugin.into(), load))
     }
     pub(in crate::app) fn index_pending(&self, plugin: &str) -> bool {
@@ -661,9 +650,7 @@ impl ExtensionSession {
     ) {
         self.queue_index(plugin, source.0, source.1);
     }
-    pub(in crate::app) fn pending_indexes(
-        &self,
-    ) -> &BTreeMap<String, (PluginLoadId, String)> {
+    pub(in crate::app) fn pending_indexes(&self) -> &BTreeMap<String, (PluginLoadId, String)> {
         &self.pending_index_activation
     }
     pub(in crate::app) fn rejected_indexes(
@@ -673,19 +660,1192 @@ impl ExtensionSession {
     }
 }
 
+use crate::app::commands::AppEffect;
+use crate::app::search::SEARCH_MAXIMUM_FILE_BYTES;
+use crate::editor::ArgumentSchema;
+use crate::editor::CommandValue;
+use crate::ui::render::SCRATCH_LABEL;
+
+use crate::app::App;
+use crate::app::picker::PickerPayload;
+use crate::app::windows::NativeDescriptions;
+use crate::editor::CommandId;
+use crate::editor::CommandOutcome;
+use crate::editor::CommandSource;
+use crate::editor::CommandSpec;
+use crate::editor::ContextRequirement;
+use crate::editor::EditorState;
+use crate::plugins::PluginEvent;
+use crate::telemetry::LogLevel;
+use crate::workspace::PickerAction;
+use crate::workspace::PickerItem;
+use crate::workspace::PickerItemId;
+use std::collections::BTreeSet;
+
+use crate::app::plugins::VirtualContext;
+use crate::app::plugins::VirtualOpen;
+use crate::app::plugins::VirtualPublication;
+use crate::app::plugins::WindowUpdate;
+use crate::app::search::workflow::ABS_MAX_BYTES;
+use crate::app::search::workflow::SearchMatcherKind;
+use crate::app::search::workflow::SearchPresenterKind;
+use crate::app::search::workflow::SearchRequestId;
+use crate::app::search::workflow::SearchSourceKind;
+use crate::app::search::workflow::SearchStreamGeneration;
+use crate::app::search::workflow::SearchWorkflowBroker;
+use crate::app::search::workflow::SearchWorkflowChunk;
+use crate::app::search::workflow::SearchWorkflowError;
+use crate::app::search::workflow::SearchWorkflowId;
+use crate::app::search::workflow::SearchWorkflowSpec;
+use crate::app::search::workflow::picker_item_adapter;
+use crate::app::search::workflow::plugin_item_adapter;
+use crate::ui::PromptKind;
+
+pub(in crate::app) fn compose_plugin_picker_items(
+    projection: &crate::plugins::PluginPickerProjection,
+) -> Result<Vec<(PickerItem, PickerPayload)>, SearchWorkflowError> {
+    let spec = SearchWorkflowSpec {
+        id: SearchWorkflowId(projection.request),
+        source: SearchSourceKind::PluginProvider {
+            provider: projection.provider.clone(),
+        },
+        matcher: SearchMatcherKind::Fuzzy,
+        presenter: SearchPresenterKind::Picker,
+        maximum_items: projection.items.len().max(1),
+        maximum_bytes: ABS_MAX_BYTES,
+    };
+    let mut broker = SearchWorkflowBroker::try_new(spec)?;
+    broker.begin(
+        SearchRequestId(projection.request),
+        SearchStreamGeneration(projection.revision),
+        &projection.query,
+    )?;
+    let workflow = projection
+        .items
+        .iter()
+        .map(|item| plugin_item_adapter(&item.id, &item.primary, item.secondary.as_deref()))
+        .collect();
+    broker.accept(SearchWorkflowChunk {
+        request: SearchRequestId(projection.request),
+        generation: SearchStreamGeneration(projection.revision),
+        sequence: 0,
+        items: workflow,
+        complete: true,
+    })?;
+    let snapshot = broker
+        .snapshot_if_changed(0)
+        .ok_or(SearchWorkflowError::Stale)?;
+    let mut source = projection
+        .items
+        .iter()
+        .map(|item| (item.id.clone(), item))
+        .collect::<BTreeMap<_, _>>();
+    Ok(snapshot
+        .items
+        .into_iter()
+        .filter_map(|ranked| {
+            source.remove(&ranked.stable_key).map(|item| {
+                let id = PickerItemId(format!(
+                    "plugin-provider:{}:{}",
+                    projection.request, item.id
+                ));
+                (
+                    PickerItem {
+                        badge: String::new(),
+                        kind: crate::workspace::PickerItemKind::Entry,
+                        id,
+                        label: item.primary.clone(),
+                        detail: item.secondary.clone().unwrap_or_default(),
+                        source: projection.provider.clone(),
+                        action: PickerAction::None,
+                    },
+                    PickerPayload::PluginProviderItem {
+                        plugin: projection.plugin.clone(),
+                        load: projection.load,
+                        request: projection.request,
+                        item: item.id.clone(),
+                        action_command: projection.action_command.clone(),
+                    },
+                )
+            })
+        })
+        .collect())
+}
+
+pub(in crate::app) fn compose_command_picker_items(
+    items: Vec<(PickerItem, PickerPayload)>,
+) -> Result<Vec<(PickerItem, PickerPayload)>, SearchWorkflowError> {
+    let spec = SearchWorkflowSpec {
+        id: SearchWorkflowId(1),
+        source: SearchSourceKind::Commands,
+        matcher: SearchMatcherKind::Fuzzy,
+        presenter: SearchPresenterKind::Picker,
+        maximum_items: items.len().max(1),
+        maximum_bytes: ABS_MAX_BYTES,
+    };
+    let mut broker = SearchWorkflowBroker::try_new(spec)?;
+    broker.begin(SearchRequestId(1), SearchStreamGeneration(1), "")?;
+    let workflow = items
+        .iter()
+        .map(|(item, payload)| {
+            let mut item = item.clone();
+            if let PickerPayload::Command(command) = payload {
+                item.action = PickerAction::InvokeCommand {
+                    command: command.clone(),
+                }
+            }
+            picker_item_adapter(&item)
+        })
+        .collect();
+    broker.accept(SearchWorkflowChunk {
+        request: SearchRequestId(1),
+        generation: SearchStreamGeneration(1),
+        sequence: 0,
+        items: workflow,
+        complete: true,
+    })?;
+    let order = broker
+        .snapshot_if_changed(0)
+        .ok_or(SearchWorkflowError::Stale)?
+        .items
+        .into_iter()
+        .map(|item| item.stable_key)
+        .collect::<Vec<_>>();
+    let mut by_id = items
+        .into_iter()
+        .map(|pair| (pair.0.id.0.clone(), pair))
+        .collect::<BTreeMap<_, _>>();
+    Ok(order
+        .into_iter()
+        .filter_map(|id| by_id.remove(&id))
+        .collect())
+}
+impl App {
+    pub(in crate::app) fn plugin_limits(&self) -> PluginLimits {
+        let policy = &self.configuration.settings().plugins;
+        PluginLimits {
+            maximum_component_bytes: policy.maximum_component_bytes,
+            maximum_commands: policy.maximum_commands,
+            fuel: policy.fuel,
+            epoch_deadline_ticks: policy.epoch_deadline_ticks,
+            maximum_memory_bytes: policy.maximum_memory_bytes,
+            maximum_table_elements: policy.maximum_table_elements,
+            maximum_instances: policy.maximum_instances,
+        }
+    }
+}
+
+impl App {
+    pub(in crate::app) fn load_configured_plugins(&mut self) {
+        if self.workspace.safe_mode() {
+            self.show_error(self.message("safe_mode_blocked", &[]));
+            return;
+        }
+        let policy = self.configuration.settings().plugins.clone();
+        let store = if policy.store.is_absolute() {
+            policy.store
+        } else {
+            crate::config::user_state_directory().join(policy.store)
+        };
+        let limits = self.plugin_limits();
+        for (id, entry) in policy.entries.iter().filter(|(_, entry)| entry.enabled) {
+            if let Err(error) = self.extension.index_from_store(
+                id.clone(),
+                store.clone(),
+                entry.manifest.clone(),
+                entry.component.clone(),
+                limits.clone(),
+            ) {
+                if self.configuration.deferred_plugin_keymaps() {
+                    let expected = self
+                        .configuration
+                        .expected_plugin_indexes()
+                        .iter()
+                        .cloned()
+                        .collect::<Vec<_>>();
+                    self.extension.reject_expected(expected.into_iter(), None);
+                    self.abort_pending_index_batch(error);
+                    break;
+                }
+                self.show_error(self.message(
+                    "plugin_load_failed",
+                    &[("id", id.clone()), ("diagnostic", error.to_string())],
+                ));
+            }
+        }
+    }
+}
+
+impl App {
+    pub(in crate::app) fn handle_plugin_worker_stopped(
+        &mut self,
+        error: crate::plugins::PluginError,
+    ) {
+        let Some(unregister) = self.extension.worker_stopped() else {
+            return;
+        };
+        for plugin in unregister {
+            self.commands.unregister_plugin(&plugin);
+        }
+        let owned_generations = self
+            .extension
+            .contributions()
+            .ordered()
+            .map(|index| (index.owner.clone(), PluginLoadId(index.generation)))
+            .collect::<Vec<_>>();
+        for (plugin, load) in owned_generations {
+            self.remove_plugin_contribution_generation(&plugin, load);
+        }
+        self.extension.clear_contributions();
+        if let Ok(candidate) = self.configuration.prepare_base_bindings(
+            &self.commands,
+            self.extension.contributions(),
+            true,
+        ) && let Err(error) = self.commit_contribution_candidate(candidate)
+        {
+            self.show_error(error);
+        }
+        self.health.record(
+            LogLevel::Error,
+            "plugins",
+            "worker-stopped",
+            BTreeMap::from([("error".into(), error.to_string())]),
+        );
+        self.show_error(self.message(
+            "plugin_worker_stopped",
+            &[("diagnostic", error.to_string())],
+        ));
+    }
+}
+
+impl App {
+    pub(in crate::app) fn register_indexed_plugin_commands(
+        &mut self,
+        index: &crate::plugins::PluginContributionIndex,
+    ) -> Result<(), String> {
+        self.register_plugin_commands(&index.owner, &index.commands)
+    }
+}
+
+impl App {
+    fn register_plugin_commands(
+        &mut self,
+        plugin: &str,
+        declarations: &BTreeMap<String, crate::plugins::PluginCommandDeclaration>,
+    ) -> Result<(), String> {
+        let plugin = plugin.to_owned();
+        self.commands.unregister_plugin(&plugin);
+        for (command, declaration) in declarations {
+            let id = format!("plugin.{plugin}.{command}");
+            let id = CommandId::new(&id).map_err(|error| error.to_string())?;
+            let mut arguments = ArgumentSchema::default();
+            for (name, field) in &declaration.arguments {
+                arguments = arguments.field(
+                    name,
+                    match field.kind {
+                        crate::plugins::PluginArgumentKind::String => {
+                            crate::editor::ArgumentType::String
+                        }
+                        crate::plugins::PluginArgumentKind::Boolean => {
+                            crate::editor::ArgumentType::Bool
+                        }
+                        crate::plugins::PluginArgumentKind::Integer => {
+                            crate::editor::ArgumentType::Integer
+                        }
+                    },
+                    field.required,
+                );
+            }
+            let effect_plugin = plugin.clone();
+            let effect_command = command.clone();
+            let spec = CommandSpec {
+                id,
+                title: declaration.title.clone(),
+                description: declaration.description.clone(),
+                arguments,
+                context: match declaration.context {
+                    crate::plugins::PluginCommandContext::Application => {
+                        ContextRequirement::Application
+                    }
+                    crate::plugins::PluginCommandContext::Workspace => {
+                        ContextRequirement::Workspace
+                    }
+                    crate::plugins::PluginCommandContext::View => ContextRequirement::View,
+                    crate::plugins::PluginCommandContext::Buffer => ContextRequirement::Buffer,
+                    crate::plugins::PluginCommandContext::Selection => {
+                        ContextRequirement::Selection
+                    }
+                },
+                source: CommandSource::Plugin(plugin.clone()),
+            };
+            if let Err(error) = self.commands.register(spec, move |_, invocation| {
+                Ok(CommandOutcome {
+                    transaction: None,
+                    effects: vec![AppEffect::PluginExecute {
+                        plugin: effect_plugin.clone(),
+                        command: effect_command.clone(),
+                        arguments: invocation
+                            .arguments
+                            .values()
+                            .map(|value| match value {
+                                CommandValue::String(value) => value.clone(),
+                                CommandValue::Bool(value) => value.to_string(),
+                                CommandValue::Integer(value) => value.to_string(),
+                            })
+                            .collect(),
+                    }],
+                    message: None,
+                    follow_up: Vec::new(),
+                })
+            }) {
+                self.commands.unregister_plugin(&plugin);
+                return Err(error.to_string());
+            }
+        }
+        Ok(())
+    }
+}
+
+impl App {
+    pub(in crate::app) fn recompile_plugin_contributions(&mut self) -> Result<(), String> {
+        let candidate = self
+            .configuration
+            .prepare_plugin_contributions(&self.commands, self.extension.contributions())?;
+        self.commit_contribution_candidate(candidate)
+    }
+}
+
+impl App {
+    pub(in crate::app) fn commit_contribution_candidate(
+        &mut self,
+        candidate: crate::app::configuration::ContributionCandidate,
+    ) -> Result<(), String> {
+        // Both owners are checked before publication. There is no callback, wait,
+        // or configuration mutation between this check and the two accepts.
+        self.configuration
+            .check_contributions(&candidate, self.extension.contributions())?;
+        let native_windows = crate::config::WindowsConfig {
+            rules: candidate
+                .windows()
+                .rules
+                .iter()
+                .filter(|rule| !rule.content_type.starts_with("plugin."))
+                .cloned()
+                .collect(),
+        };
+        let windows = self.prepare_configured_window_rules(&native_windows)?;
+        let (rules, catalog) = self.extension.prepare_window_rules(&candidate)?;
+        self.window_session
+            .accept_current(windows, &self.state.window_version())?;
+        let receipt = self
+            .configuration
+            .commit_contributions(candidate, catalog)?;
+        rules.finish(receipt)?;
+        self.cancel_pending_mapping();
+        self.reconcile_editor_windows();
+        Ok(())
+    }
+}
+
+impl App {
+    pub(in crate::app) fn remove_plugin_contribution_generation(
+        &mut self,
+        plugin: &str,
+        load: PluginLoadId,
+    ) {
+        match self
+            .window_session
+            .remove_plugin_generation(plugin, load.0)
+            .map(|()| self.extension.remove_windows(plugin, load.0))
+        {
+            Ok(removed) => {
+                if removed {
+                    self.ui.plugin_surfaces = self.extension.window_snapshots();
+                    self.window_session.invalidate_native();
+                    self.reconcile_editor_windows();
+                }
+            }
+            Err(error) => {
+                self.show_error(error);
+                return;
+            }
+        }
+        let removed_active_confirmation = self.extension.remove_generation(plugin, load);
+        if removed_active_confirmation
+            && self
+                .input
+                .prompt()
+                .is_some_and(|prompt| prompt.kind == PromptKind::PluginConfirmation)
+        {
+            self.close_prompt();
+        }
+        let terminals = self.terminal_session.descriptions();
+        let title = self.message("explorer_title", &[]);
+        let descriptions = NativeDescriptions {
+            signature: self.native_surface_signature(self.window_session.editor_ids()),
+            explorer_title: &title,
+            dashboard_title: &self.configuration.dashboard().identity,
+            picker_title: self
+                .ui
+                .picker
+                .as_ref()
+                .map_or("Picker", |picker| &picker.title),
+            terminals: &terminals,
+        };
+        let result = self
+            .extension
+            .retire_virtual(
+                plugin,
+                load,
+                VirtualContext {
+                    editor: &self.state,
+                    windows: &self.window_session,
+                    scratch: SCRATCH_LABEL,
+                },
+                descriptions,
+            )
+            .and_then(|staged| {
+                staged
+                    .map(|staged| {
+                        Self::accept_virtual_publication(&mut self.window_session, staged)
+                    })
+                    .transpose()
+            });
+        match result {
+            Ok(Some(state)) => {
+                *self.state = state;
+                if self.state.active_view.is_none() {
+                    self.set_dashboard_visibility(true);
+                }
+                self.reconcile_editor_windows();
+            }
+            Ok(None) => {}
+            Err(error) => self.show_error(error),
+        }
+        if self.extension.retire_provider_generation(plugin, load) {
+            self.close_picker();
+        }
+
+        if self.extension.remove_contribution(plugin, load) {
+            self.commands.unregister_plugin(plugin);
+            if let Err(error) = self.recompile_plugin_contributions() {
+                match self
+                    .configuration
+                    .prepare_builtin_contributions(
+                        &self.commands,
+                        self.extension.contributions(),
+                        true,
+                    )
+                    .and_then(|candidate| self.commit_contribution_candidate(candidate))
+                {
+                    Ok(()) => self.show_error(error),
+                    Err(fallback) => self.show_error(fallback),
+                }
+            }
+        }
+    }
+}
+
+impl App {
+    pub(in crate::app) fn abort_pending_index_batch(&mut self, diagnostic: impl std::fmt::Display) {
+        for (owner, load) in self.extension.abort_indexes() {
+            self.remove_plugin_contribution_generation(&owner, load);
+            self.commands.unregister_plugin(&owner);
+        }
+        let candidate = self
+            .configuration
+            .prepare_builtin_contributions(
+                &self.commands,
+                self.extension.contributions(),
+                self.configuration.deferred_plugin_keymaps(),
+            )
+            .unwrap_or_else(|_| {
+                self.configuration
+                    .prepare_builtin_rules(self.extension.contributions())
+            });
+        if let Err(error) = self.commit_contribution_candidate(candidate) {
+            self.show_error(error);
+        }
+        self.show_error(diagnostic);
+    }
+}
+
+impl App {
+    pub(in crate::app) fn abort_expected_index_batch(
+        &mut self,
+        failed_plugin: String,
+        failed_load: PluginLoadId,
+        diagnostic: impl std::fmt::Display,
+    ) {
+        let expected = self
+            .configuration
+            .expected_plugin_indexes()
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>();
+        self.extension
+            .reject_expected(expected.into_iter(), Some((&failed_plugin, failed_load)));
+        self.abort_pending_index_batch(diagnostic);
+    }
+}
+
+impl App {
+    pub(in crate::app) fn process_plugin_storage_events(&mut self) {
+        self.extension.poll_storage();
+    }
+}
+
+impl App {
+    pub(in crate::app) fn refresh_plugin_host_events(&mut self) {
+        let active_surface = if self.window_session.terminal_focused() {
+            "terminal"
+        } else if self.window_session.explorer_focused() {
+            "explorer"
+        } else if self
+            .ui
+            .private_surfaces
+            .iter()
+            .any(|surface| surface.focused)
+        {
+            "plugin"
+        } else {
+            "editor"
+        }
+        .to_string();
+        let buffer = self.state.active_view.and_then(|view_id| {
+            let view = self.state.views.get(view_id)?;
+            let buffer = self.state.buffers.get(view.buffer)?;
+            let (anchor, head, kind) =
+                view.selection
+                    .map_or((view.cursor.0, view.cursor.0, 0), |selection| {
+                        (
+                            selection.anchor.0,
+                            selection.head.0,
+                            match selection.kind {
+                                crate::editor::SelectionKind::Character => 1,
+                                crate::editor::SelectionKind::Line => 2,
+                                crate::editor::SelectionKind::Block => 3,
+                            },
+                        )
+                    });
+            Some((
+                view.buffer.data().as_ffi(),
+                buffer.text.revision().0,
+                view.cursor.0,
+                anchor,
+                head,
+                kind,
+            ))
+        });
+        let graph_revision = self.window_session.graph().revision().unwrap_or(0);
+        let observation = (
+            self.workspace.root_revision(),
+            active_surface.clone(),
+            buffer,
+            graph_revision,
+        );
+        self.extension.observe(
+            observation,
+            self.workspace.roots().len(),
+            self.ui.plugin_surfaces.len(),
+            self.ui.private_surfaces.len(),
+        );
+    }
+}
+
+impl App {
+    pub(in crate::app) fn process_plugin_events(&mut self) {
+        if let Some(request) = self.extension.expire_providers() {
+            self.present_plugin_picker(request);
+        }
+        if self.persistence.restoring() {
+            return;
+        }
+        if self.extension.retire_stale_confirmations(
+            &self.state,
+            &self.workspace.version(),
+            self.configuration.binding_revision(),
+            &self.input,
+            &self.window_session,
+        ) && self
+            .input
+            .prompt()
+            .is_some_and(|prompt| prompt.kind == PromptKind::PluginConfirmation)
+        {
+            self.close_prompt();
+        }
+        let _ = self.extension.dispatch_confirmation_results(
+            &self.state,
+            &self.workspace.version(),
+            self.configuration.binding_revision(),
+        );
+        self.present_next_plugin_confirmation();
+        self.retire_plugin_edit_sources();
+        let events = match self.extension.poll_owned() {
+            Ok(events) => events,
+            Err(error) => {
+                self.retire_plugin_edit_sources();
+                self.handle_plugin_worker_stopped(error);
+                return;
+            }
+        };
+        let mut failure_diagnostic = None;
+        for event in events {
+            let event = match event {
+                crate::plugins::OwnedPluginEvent::Executed(reply) => {
+                    self.apply_plugin_execution(reply);
+                    continue;
+                }
+                crate::plugins::OwnedPluginEvent::Other(event) => event,
+            };
+            match event {
+                PluginEvent::Indexed {
+                    load,
+                    plugin,
+                    index,
+                } => {
+                    if self.extension.take_rejected(&plugin, load) {
+                        let _ = self.extension.disable_generation(&plugin, load);
+                        continue;
+                    }
+                    let checksum = index.checksum.clone();
+                    let mut accepted = self
+                        .extension
+                        .install_index(index.clone())
+                        .and_then(|()| self.register_indexed_plugin_commands(&index));
+                    self.extension.reset_observation();
+                    if accepted.is_ok() && index.storage.is_some() {
+                        self.extension.install_storage(&plugin, load);
+                    }
+                    self.extension.queue_index(plugin.clone(), load, checksum);
+                    let waiting_for_deferred = self.configuration.deferred_plugin_keymaps()
+                        && !self
+                            .configuration
+                            .expected_plugin_indexes()
+                            .iter()
+                            .all(|owner| self.extension.contributions().get(owner).is_some());
+                    if accepted.is_ok() && waiting_for_deferred {
+                        continue;
+                    }
+                    if accepted.is_ok() {
+                        accepted = self.recompile_plugin_contributions();
+                    }
+                    if let Err(error) = accepted {
+                        self.abort_pending_index_batch(error);
+                        continue;
+                    }
+                    if let Err((failed_plugin, failed_load, error)) =
+                        self.extension.activate_pending(
+                            self.configuration.deferred_plugin_keymaps(),
+                            &plugin,
+                            load,
+                        )
+                    {
+                        self.remove_plugin_contribution_generation(&failed_plugin, failed_load);
+                        let _ = self
+                            .extension
+                            .disable_generation(&failed_plugin, failed_load);
+                        self.extension.abort_prepared(&failed_plugin, failed_load);
+                        self.abort_pending_index_batch(error);
+                        continue;
+                    }
+                    self.configuration.complete_plugin_indexes();
+                    self.health.record(
+                        LogLevel::Info,
+                        "plugins",
+                        "indexed-and-accepted",
+                        BTreeMap::from([
+                            ("plugin".into(), plugin),
+                            ("load".into(), load.0.to_string()),
+                            ("contexts".into(), index.contexts.len().to_string()),
+                        ]),
+                    );
+                }
+                PluginEvent::Loaded { load, component } => {
+                    let plugin = component.manifest.id.clone();
+                    if self.extension.take_rejected(&plugin, load) {
+                        let _ = self.extension.disable_generation(&plugin, load);
+                        continue;
+                    }
+                    if let Some(index) = self
+                        .extension
+                        .contributions()
+                        .get(&plugin)
+                        .filter(|index| index.generation == load.0)
+                    {
+                        let declared = index.commands.keys().cloned().collect::<BTreeSet<_>>();
+                        let activated = component
+                            .activated_commands
+                            .iter()
+                            .cloned()
+                            .collect::<BTreeSet<_>>();
+                        if declared != activated {
+                            let updates = self.extension.failed_package_load(&plugin, load);
+                            self.apply_extension_updates(updates);
+                            self.remove_plugin_contribution_generation(&plugin, load);
+                            let _ = self.extension.disable_generation(&plugin, load);
+                            self.show_error(crate::plugins::PluginError::UndeclaredCommand);
+                            continue;
+                        }
+                    }
+                    let prepared = self.extension.take_prepared(&plugin, load);
+                    let declarations = component
+                        .manifest
+                        .commands
+                        .iter()
+                        .filter(|(command, _)| component.activated_commands.contains(command))
+                        .map(|(command, declaration)| (command.clone(), declaration.clone()))
+                        .collect();
+                    if let Err(error) = self.register_plugin_commands(&plugin, &declarations) {
+                        self.show_error(error);
+                        continue;
+                    }
+                    if let Some(token) = prepared
+                        && let Err(error) =
+                            self.extension.commit_package(plugin.clone(), load, token)
+                    {
+                        self.remove_plugin_contribution_generation(&plugin, load);
+                        self.show_error(error);
+                    }
+                    self.health.record(
+                        LogLevel::Info,
+                        "plugins",
+                        "active",
+                        BTreeMap::from([
+                            ("plugin".into(), plugin),
+                            (
+                                "commands".into(),
+                                component.activated_commands.len().to_string(),
+                            ),
+                        ]),
+                    );
+                }
+                PluginEvent::Executed(_) => self.show_error("unowned plugin execution event"),
+                PluginEvent::Failed {
+                    load,
+                    plugin,
+                    error,
+                } => {
+                    if self.extension.take_rejected(&plugin, load) {
+                        continue;
+                    }
+                    if self.configuration.deferred_plugin_keymaps()
+                        && !self.extension.is_active_generation(&plugin, load)
+                        && self
+                            .configuration
+                            .expected_plugin_indexes()
+                            .contains(&plugin)
+                    {
+                        self.abort_expected_index_batch(plugin, load, error);
+                        continue;
+                    }
+                    if self.extension.index_pending(&plugin) {
+                        self.extension.reject_index(plugin, load);
+                        self.abort_pending_index_batch(error);
+                        continue;
+                    }
+                    let updates = self.extension.failed_package_load(&plugin, load);
+                    self.apply_extension_updates(updates);
+                    self.remove_plugin_contribution_generation(&plugin, load);
+                    self.commands.unregister_plugin(&plugin);
+                    failure_diagnostic = Some(format!("Plugin {plugin}: {error}"));
+                    self.health.record(
+                        LogLevel::Error,
+                        "plugins",
+                        "failed",
+                        BTreeMap::from([
+                            ("plugin".into(), plugin),
+                            ("error".into(), error.to_string()),
+                        ]),
+                    );
+                }
+            }
+        }
+        self.retire_plugin_edit_sources();
+        let _ = self.extension.dispatch_confirmation_results(
+            &self.state,
+            &self.workspace.version(),
+            self.configuration.binding_revision(),
+        );
+        self.present_next_plugin_confirmation();
+        if let Some(diagnostic) = failure_diagnostic {
+            self.show_error(diagnostic);
+        }
+    }
+}
+
+impl App {
+    pub(in crate::app) fn apply_plugin_ui_request(
+        &mut self,
+        index: &crate::plugins::PluginContributionIndex,
+        request: crate::plugins::PluginUiRequest,
+    ) -> crate::plugins::PluginUiEvent {
+        match self.extension.prepare_window(
+            index,
+            request,
+            &self.state,
+            &self.window_session,
+            self.configuration.settings().editor.ambiguous_width
+                == crate::config::AmbiguousWidth::Wide,
+        ) {
+            WindowUpdate::Ready(event) => event,
+            WindowUpdate::Publish(source, transition) => {
+                let receipt = self.window_session.accept_plugin_transition(
+                    *transition,
+                    &self.state.window_version(),
+                    source.catalog(),
+                );
+                source.finish(receipt, self.window_session.graph().revision())
+            }
+        }
+    }
+}
+
+impl App {
+    pub(in crate::app) fn apply_plugin_execution(
+        &mut self,
+        reply: crate::plugins::PluginExecutionReply,
+    ) {
+        let source = match self.extension.receive(
+            reply,
+            &self.workspace.version(),
+            self.configuration.binding_revision(),
+        ) {
+            Ok(source) => source,
+            Err(error) => {
+                self.show_error(error);
+                return;
+            }
+        };
+        let confirmation_source = source.confirmation_source.clone();
+        let navigation_current =
+            confirmation_source.navigation_current(&self.state, &self.window_session);
+        let confirmation_result = source.confirmation_result;
+        let source_actions_admitted = source.source_actions_admitted;
+        let mut execution = source.execution;
+        let load = source.load;
+        let confirmation_requests = std::mem::take(&mut execution.confirmation_requests);
+        if let Err(error) = self
+            .extension
+            .admit_confirmations(confirmation_source, confirmation_requests)
+        {
+            self.show_error(error);
+        }
+        if !source_actions_admitted {
+            execution.messages.clear();
+            execution.ui_requests.clear();
+            execution.host_event_acknowledgements.clear();
+            execution.storage_requests.clear();
+            execution.provider_chunks.clear();
+            execution.virtual_document_proposals.clear();
+        }
+        let plugin = execution.plugin.clone();
+        if confirmation_result {
+            let disallowed_ui = execution.ui_requests.iter().any(|request| {
+                !matches!(
+                    request.kind,
+                    crate::plugins::PluginUiRequestKind::ReplaceUi { .. }
+                        | crate::plugins::PluginUiRequestKind::ReplacePrivate { .. }
+                        | crate::plugins::PluginUiRequestKind::PatchPrivate { .. }
+                )
+            });
+            if disallowed_ui
+                || !execution.storage_requests.is_empty()
+                || !execution.provider_chunks.is_empty()
+                || !execution.virtual_document_proposals.is_empty()
+            {
+                execution.ui_requests.clear();
+                execution.storage_requests.clear();
+                execution.provider_chunks.clear();
+                execution.virtual_document_proposals.clear();
+                self.show_error(
+                    "plugin confirmation result may update existing plugin UI only".to_owned(),
+                );
+            }
+        }
+        let mut provider_continuations = Vec::new();
+        if self.extension.is_active_generation(&plugin, load) {
+            self.extension
+                .acknowledge(&plugin, load, &execution.host_event_acknowledgements);
+            if let Some(policy) = self
+                .extension
+                .contributions()
+                .get(&plugin)
+                .filter(|index| index.generation == load.0)
+                .and_then(|index| index.storage.clone())
+            {
+                self.extension.request_storage(
+                    &plugin,
+                    load,
+                    &policy,
+                    std::mem::take(&mut execution.storage_requests),
+                );
+            }
+            let workspace_revision = Some(self.workspace.root_revision());
+            for proposal in std::mem::take(&mut execution.virtual_document_proposals) {
+                let closing = matches!(
+                    proposal.kind,
+                    crate::plugins::PluginVirtualDocumentProposalKind::CloseAcknowledged
+                );
+                let result = self
+                    .extension
+                    .prepare_virtual(
+                        &plugin,
+                        load,
+                        proposal,
+                        navigation_current,
+                        VirtualContext {
+                            editor: &self.state,
+                            windows: &self.window_session,
+                            scratch: SCRATCH_LABEL,
+                        },
+                    )
+                    .and_then(|staged| {
+                        Self::accept_virtual_publication(&mut self.window_session, staged)
+                    });
+                match result {
+                    Ok(state) => {
+                        *self.state = state;
+                        if !closing {
+                            self.set_dashboard_visibility(false);
+                        }
+                        self.reconcile_editor_windows();
+                    }
+                    Err(error) => self.show_error(error),
+                }
+            }
+            let buffer_revision = self
+                .state
+                .active_buffer_id()
+                .and_then(|buffer| self.state.buffers.get(buffer))
+                .map(|buffer| buffer.text.revision().0);
+            for chunk in std::mem::take(&mut execution.provider_chunks) {
+                match self.extension.provider_chunk(
+                    &plugin,
+                    load,
+                    (workspace_revision, buffer_revision),
+                    chunk,
+                ) {
+                    Ok(update) => {
+                        if let Some(request) = update.refresh {
+                            self.present_plugin_picker(request);
+                        }
+                        if let Some(command) = update.command {
+                            provider_continuations.push(command);
+                        }
+                    }
+                    Err(error) => self.show_error(error.detail),
+                }
+            }
+        }
+        for command in provider_continuations {
+            self.process_effect(AppEffect::PluginExecute {
+                plugin: plugin.clone(),
+                command,
+                arguments: Vec::new(),
+            });
+        }
+        if !execution.ui_requests.is_empty()
+            && self.extension.is_active_generation(&plugin, load)
+            && let Some(index) = self
+                .extension
+                .contributions()
+                .get(&plugin)
+                .filter(|index| index.generation == load.0)
+                .cloned()
+        {
+            let requests = std::mem::take(&mut execution.ui_requests);
+            let events = requests
+                .into_iter()
+                .map(|request| self.apply_plugin_ui_request(&index, request))
+                .collect::<Vec<_>>();
+            self.extension.queue_ui(plugin.clone(), load, events);
+            self.ui.plugin_surfaces = self.extension.window_snapshots();
+            self.window_session.invalidate_native();
+            self.reconcile_editor_windows();
+        }
+        for message in execution.messages {
+            self.notify_message(message, false);
+        }
+        match source.preview {
+            Ok(Some(key)) => self.begin_plugin_workspace_proposal(
+                key,
+                format!("plugin {}: {}", execution.plugin, execution.command),
+            ),
+            Ok(None) => {}
+            Err(error) => self.show_error(error),
+        }
+        self.health.record(
+            LogLevel::Info,
+            "plugins",
+            "executed",
+            BTreeMap::from([
+                ("plugin".into(), execution.plugin),
+                ("command".into(), execution.command),
+                ("generation".into(), execution.generation.to_string()),
+            ]),
+        );
+    }
+}
+
+impl App {
+    pub(in crate::app) fn retire_plugin_edit_sources(&mut self) {
+        let (retired, key) = self.extension.retire_edits(
+            &self.state,
+            &self.workspace.version(),
+            self.configuration.binding_revision(),
+        );
+        if retired != 0 {
+            self.show_error(format!(
+                "{retired} plugin invocations retired before their results were accepted"
+            ));
+        }
+        if let Some(key) = key {
+            if self
+                .workspace_edits
+                .origin()
+                .is_some_and(|origin| origin.same(&key))
+            {
+                self.abort_workspace_edit("plugin proposal source retired".into());
+            } else {
+                let _ = self.extension.finish_edit(&key);
+            }
+        }
+    }
+}
+
+impl App {
+    fn begin_plugin_workspace_proposal(
+        &mut self,
+        key: crate::app::workspace::edits::OriginKey,
+        label: String,
+    ) {
+        let result = (|| {
+            self.workspace_edits.check_begin()?;
+            let prepared = self.extension.prepare_edit(
+                &key,
+                &self.state,
+                &self.workspace.version(),
+                self.configuration.binding_revision(),
+            )?;
+            let path = prepared.draft.canonical_path.clone();
+            let ticket = self.workspace_edits.begin(
+                self.workspace.version(),
+                self.configuration.binding_revision(),
+                prepared.sources,
+            )?;
+            let maximum = SEARCH_MAXIMUM_FILE_BYTES;
+            let roots = self
+                .workspace
+                .roots()
+                .iter()
+                .map(|r| r.identity.canonical_path.clone())
+                .collect();
+            self.workspace_edits.start_files(
+                ticket,
+                label,
+                Some(key.clone()),
+                false,
+                vec![crate::app::workspace::edits::InputFile::Read(path.clone())],
+                (roots, maximum),
+            )?;
+            let snapshot = self
+                .state
+                .workspace_snapshot(
+                    self.workspace_edits
+                        .preparing_sources()
+                        .ok_or("plugin workspace preparation missing")?,
+                    &path,
+                    maximum,
+                )?
+                .ok_or("plugin snapshot document closed")?;
+            self.workspace_edits.open_snapshot(0, snapshot)?;
+            self.workspace_edits.finish_preparation(
+                vec![prepared.draft],
+                self.workspace.edit_scope(),
+                &self.workspace.version(),
+                self.configuration.binding_revision(),
+            )
+        })();
+        match result {
+            Ok(()) => self.show_workspace_proposal(),
+            Err(error) => {
+                if self
+                    .workspace_edits
+                    .origin()
+                    .is_some_and(|origin| origin.same(&key))
+                {
+                    self.abort_workspace_edit(error);
+                } else {
+                    let _ = self.extension.finish_edit(&key);
+                    self.show_error(error);
+                }
+            }
+        }
+    }
+}
+
+impl App {
+    pub(in crate::app) fn accept_virtual_publication(
+        windows: &mut crate::app::windows::WindowSession,
+        (source, transition): (
+            VirtualPublication<'_>,
+            crate::app::windows::EditorWindowCandidate,
+        ),
+    ) -> Result<EditorState, String> {
+        let accepted =
+            windows.accept_editor_transition(transition, source.before(), source.catalog())?;
+        source.finish(accepted)
+    }
+}
+
+impl App {
+    pub(in crate::app) fn route_virtual_open(&mut self, result: Result<VirtualOpen, String>) {
+        match result {
+            Ok(VirtualOpen::Execute {
+                plugin,
+                load,
+                command,
+                document,
+            }) => {
+                if !self.execute_plugin_command(plugin.clone(), command, Vec::new()) {
+                    self.extension
+                        .cancel_virtual_request(&plugin, load, document);
+                }
+            }
+            Ok(VirtualOpen::Existing(buffer)) => {
+                let mut draft = self.state.draft();
+                if let Err(error) = draft
+                    .show_document(buffer)
+                    .map_err(str::to_owned)
+                    .and_then(|_| self.commit_editor_draft(draft, None, false))
+                {
+                    self.show_error(error);
+                } else {
+                    self.set_dashboard_visibility(false);
+                    self.reconcile_editor_windows();
+                }
+            }
+            Err(error) => self.show_error(error),
+        }
+    }
+}
+
+use slotmap::Key;
+
 #[cfg(test)]
 mod tests {
     use crate::app::plugins::ExtensionSession;
     use crate::app::plugins::integration::ExtensionUpdate;
+    use crate::app::plugins::integration::RegistryUpdate;
     use crate::plugins::PluginLimits;
     use crate::plugins::PluginLoadId;
-    use crate::tools::RegistryEvent;
-    use crate::tools::RegistryResult;
-    use crate::app::plugins::integration::RegistryUpdate;
     use crate::plugins::PluginManifest;
     use crate::tools::PackageManifest;
     use crate::tools::PackageSource;
+    use crate::tools::RegistryEvent;
     use crate::tools::RegistryPackageMetadata;
+    use crate::tools::RegistryResult;
     use crate::tools::RegistryService;
     use std::time::Duration;
     use std::time::Instant;
@@ -710,8 +1870,10 @@ mod tests {
         .unwrap();
         let mut owner =
             ExtensionSession::new(root.path().join("storage"), 8, packages.clone(), registry);
-        let core =
-            include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/retained-guest/retained-guest.core.wasm"));
+        let core = include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/retained-guest/retained-guest.core.wasm"
+        ));
         let bytes = wit_component::ComponentEncoder::default()
             .module(core)
             .unwrap()
@@ -1385,1224 +2547,3 @@ mod tests {
         );
     }
 }
-
-use crate::editor::CommandValue;
-use crate::app::search::SEARCH_MAXIMUM_FILE_BYTES;
-use crate::ui::render::SCRATCH_LABEL;
-use crate::app::commands::AppEffect;
-use crate::editor::ArgumentSchema;
-
-use std::collections::BTreeSet;
-use crate::editor::CommandId;
-use crate::editor::CommandOutcome;
-use crate::editor::CommandSource;
-use crate::editor::CommandSpec;
-use crate::editor::ContextRequirement;
-use crate::editor::EditorState;
-use crate::app::App;
-use crate::telemetry::LogLevel;
-use crate::app::windows::NativeDescriptions;
-use crate::workspace::PickerAction;
-use crate::workspace::PickerItem;
-use crate::workspace::PickerItemId;
-use crate::app::picker::PickerPayload;
-use crate::plugins::PluginEvent;
-
-
-use crate::ui::PromptKind;
-use crate::app::plugins::WindowUpdate;
-use crate::app::plugins::VirtualContext;
-use crate::app::plugins::VirtualOpen;
-use crate::app::plugins::VirtualPublication;
-use crate::app::search::workflow::ABS_MAX_BYTES;
-use crate::app::search::workflow::SearchMatcherKind;
-use crate::app::search::workflow::SearchPresenterKind;
-use crate::app::search::workflow::SearchRequestId;
-use crate::app::search::workflow::SearchSourceKind;
-use crate::app::search::workflow::SearchStreamGeneration;
-use crate::app::search::workflow::SearchWorkflowBroker;
-use crate::app::search::workflow::SearchWorkflowChunk;
-use crate::app::search::workflow::SearchWorkflowError;
-use crate::app::search::workflow::SearchWorkflowId;
-use crate::app::search::workflow::SearchWorkflowSpec;
-use crate::app::search::workflow::picker_item_adapter;
-use crate::app::search::workflow::plugin_item_adapter;
-
-use crate::app::command;
-
-
-
-
-
-
-
-pub(in crate::app) fn compose_plugin_picker_items(
-    projection: &crate::plugins::PluginPickerProjection,
-) -> Result<Vec<(PickerItem, PickerPayload)>, SearchWorkflowError> {
-    let spec = SearchWorkflowSpec {
-        id: SearchWorkflowId(projection.request),
-        source: SearchSourceKind::PluginProvider {
-            provider: projection.provider.clone(),
-        },
-        matcher: SearchMatcherKind::Fuzzy,
-        presenter: SearchPresenterKind::Picker,
-        maximum_items: projection.items.len().max(1),
-        maximum_bytes: ABS_MAX_BYTES,
-    };
-    let mut broker = SearchWorkflowBroker::try_new(spec)?;
-    broker.begin(
-        SearchRequestId(projection.request),
-        SearchStreamGeneration(projection.revision),
-        &projection.query,
-    )?;
-    let workflow = projection
-        .items
-        .iter()
-        .map(|item| plugin_item_adapter(&item.id, &item.primary, item.secondary.as_deref()))
-        .collect();
-    broker.accept(SearchWorkflowChunk {
-        request: SearchRequestId(projection.request),
-        generation: SearchStreamGeneration(projection.revision),
-        sequence: 0,
-        items: workflow,
-        complete: true,
-    })?;
-    let snapshot = broker
-        .snapshot_if_changed(0)
-        .ok_or(SearchWorkflowError::Stale)?;
-    let mut source = projection
-        .items
-        .iter()
-        .map(|item| (item.id.clone(), item))
-        .collect::<BTreeMap<_, _>>();
-    Ok(snapshot
-        .items
-        .into_iter()
-        .filter_map(|ranked| {
-            source.remove(&ranked.stable_key).map(|item| {
-                let id = PickerItemId(format!(
-                    "plugin-provider:{}:{}",
-                    projection.request, item.id
-                ));
-                (
-                    PickerItem {
-                        badge: String::new(),
-                        kind: crate::workspace::PickerItemKind::Entry,
-                        id,
-                        label: item.primary.clone(),
-                        detail: item.secondary.clone().unwrap_or_default(),
-                        source: projection.provider.clone(),
-                        action: PickerAction::None,
-                    },
-                    PickerPayload::PluginProviderItem {
-                        plugin: projection.plugin.clone(),
-                        load: projection.load,
-                        request: projection.request,
-                        item: item.id.clone(),
-                        action_command: projection.action_command.clone(),
-                    },
-                )
-            })
-        })
-        .collect())
-}
-
-
-pub(in crate::app) fn compose_command_picker_items(
-    items: Vec<(PickerItem, PickerPayload)>,
-) -> Result<Vec<(PickerItem, PickerPayload)>, SearchWorkflowError> {
-    let spec = SearchWorkflowSpec {
-        id: SearchWorkflowId(1),
-        source: SearchSourceKind::Commands,
-        matcher: SearchMatcherKind::Fuzzy,
-        presenter: SearchPresenterKind::Picker,
-        maximum_items: items.len().max(1),
-        maximum_bytes: ABS_MAX_BYTES,
-    };
-    let mut broker = SearchWorkflowBroker::try_new(spec)?;
-    broker.begin(SearchRequestId(1), SearchStreamGeneration(1), "")?;
-    let workflow = items
-        .iter()
-        .map(|(item, payload)| {
-            let mut item = item.clone();
-            if let PickerPayload::Command(command) = payload {
-                item.action = PickerAction::InvokeCommand {
-                    command: command.clone(),
-                }
-            }
-            picker_item_adapter(&item)
-        })
-        .collect();
-    broker.accept(SearchWorkflowChunk {
-        request: SearchRequestId(1),
-        generation: SearchStreamGeneration(1),
-        sequence: 0,
-        items: workflow,
-        complete: true,
-    })?;
-    let order = broker
-        .snapshot_if_changed(0)
-        .ok_or(SearchWorkflowError::Stale)?
-        .items
-        .into_iter()
-        .map(|item| item.stable_key)
-        .collect::<Vec<_>>();
-    let mut by_id = items
-        .into_iter()
-        .map(|pair| (pair.0.id.0.clone(), pair))
-        .collect::<BTreeMap<_, _>>();
-    Ok(order
-        .into_iter()
-        .filter_map(|id| by_id.remove(&id))
-        .collect())
-}
-impl App {
-
-
-    pub(in crate::app) fn plugin_limits(&self) -> PluginLimits {
-        let policy = &self.configuration.settings().plugins;
-        PluginLimits {
-            maximum_component_bytes: policy.maximum_component_bytes,
-            maximum_commands: policy.maximum_commands,
-            fuel: policy.fuel,
-            epoch_deadline_ticks: policy.epoch_deadline_ticks,
-            maximum_memory_bytes: policy.maximum_memory_bytes,
-            maximum_table_elements: policy.maximum_table_elements,
-            maximum_instances: policy.maximum_instances,
-        }
-    }
-}
-
-impl App {
-
-
-    pub(in crate::app) fn load_configured_plugins(&mut self) {
-        if self.workspace.safe_mode() {
-            self.show_error(self.message("safe_mode_blocked", &[]));
-            return;
-        }
-        let policy = self.configuration.settings().plugins.clone();
-        let store = if policy.store.is_absolute() {
-            policy.store
-        } else {
-            crate::config::user_state_directory().join(policy.store)
-        };
-        let limits = self.plugin_limits();
-        for (id, entry) in policy.entries.iter().filter(|(_, entry)| entry.enabled) {
-            if let Err(error) = self.extension.index_from_store(
-                id.clone(),
-                store.clone(),
-                entry.manifest.clone(),
-                entry.component.clone(),
-                limits.clone(),
-            ) {
-                if self.configuration.deferred_plugin_keymaps() {
-                    let expected = self
-                        .configuration
-                        .expected_plugin_indexes()
-                        .iter()
-                        .cloned()
-                        .collect::<Vec<_>>();
-                    self.extension.reject_expected(expected.into_iter(), None);
-                    self.abort_pending_index_batch(error);
-                    break;
-                }
-                self.show_error(self.message(
-                    "plugin_load_failed",
-                    &[("id", id.clone()), ("diagnostic", error.to_string())],
-                ));
-            }
-        }
-    }
-}
-
-impl App {
-
-
-    pub(in crate::app) fn handle_plugin_worker_stopped(
-        &mut self,
-        error: crate::plugins::PluginError,
-    ) {
-        let Some(unregister) = self.extension.worker_stopped() else {
-            return;
-        };
-        for plugin in unregister {
-            self.commands.unregister_plugin(&plugin);
-        }
-        let owned_generations = self
-            .extension
-            .contributions()
-            .ordered()
-            .map(|index| (index.owner.clone(), PluginLoadId(index.generation)))
-            .collect::<Vec<_>>();
-        for (plugin, load) in owned_generations {
-            self.remove_plugin_contribution_generation(&plugin, load);
-        }
-        self.extension.clear_contributions();
-        if let Ok(candidate) = self.configuration.prepare_base_bindings(
-            &self.commands,
-            self.extension.contributions(),
-            true,
-        ) && let Err(error) = self.commit_contribution_candidate(candidate)
-        {
-            self.show_error(error);
-        }
-        self.health.record(
-            LogLevel::Error,
-            "plugins",
-            "worker-stopped",
-            BTreeMap::from([("error".into(), error.to_string())]),
-        );
-        self.show_error(self.message(
-            "plugin_worker_stopped",
-            &[("diagnostic", error.to_string())],
-        ));
-    }
-}
-
-impl App {
-
-
-    pub(in crate::app) fn register_indexed_plugin_commands(
-        &mut self,
-        index: &crate::plugins::PluginContributionIndex,
-    ) -> Result<(), String> {
-        self.register_plugin_commands(&index.owner, &index.commands)
-    }
-}
-
-impl App {
-
-    fn register_plugin_commands(
-        &mut self,
-        plugin: &str,
-        declarations: &BTreeMap<String, crate::plugins::PluginCommandDeclaration>,
-    ) -> Result<(), String> {
-        let plugin = plugin.to_owned();
-        self.commands.unregister_plugin(&plugin);
-        for (command, declaration) in declarations {
-            let id = format!("plugin.{plugin}.{command}");
-            let id = CommandId::new(&id).map_err(|error| error.to_string())?;
-            let mut arguments = ArgumentSchema::default();
-            for (name, field) in &declaration.arguments {
-                arguments = arguments.field(
-                    name,
-                    match field.kind {
-                        crate::plugins::PluginArgumentKind::String => {
-                            crate::editor::ArgumentType::String
-                        }
-                        crate::plugins::PluginArgumentKind::Boolean => {
-                            crate::editor::ArgumentType::Bool
-                        }
-                        crate::plugins::PluginArgumentKind::Integer => {
-                            crate::editor::ArgumentType::Integer
-                        }
-                    },
-                    field.required,
-                );
-            }
-            let effect_plugin = plugin.clone();
-            let effect_command = command.clone();
-            let spec = CommandSpec {
-                id,
-                title: declaration.title.clone(),
-                description: declaration.description.clone(),
-                arguments,
-                context: match declaration.context {
-                    crate::plugins::PluginCommandContext::Application => {
-                        ContextRequirement::Application
-                    }
-                    crate::plugins::PluginCommandContext::Workspace => {
-                        ContextRequirement::Workspace
-                    }
-                    crate::plugins::PluginCommandContext::View => ContextRequirement::View,
-                    crate::plugins::PluginCommandContext::Buffer => ContextRequirement::Buffer,
-                    crate::plugins::PluginCommandContext::Selection => {
-                        ContextRequirement::Selection
-                    }
-                },
-                source: CommandSource::Plugin(plugin.clone()),
-            };
-            if let Err(error) = self.commands.register(spec, move |_, invocation| {
-                Ok(CommandOutcome {
-                    transaction: None,
-                    effects: vec![AppEffect::PluginExecute {
-                        plugin: effect_plugin.clone(),
-                        command: effect_command.clone(),
-                        arguments: invocation
-                            .arguments
-                            .values()
-                            .map(|value| match value {
-                                CommandValue::String(value) => value.clone(),
-                                CommandValue::Bool(value) => value.to_string(),
-                                CommandValue::Integer(value) => value.to_string(),
-                            })
-                            .collect(),
-                    }],
-                    message: None,
-                    follow_up: Vec::new(),
-                })
-            }) {
-                self.commands.unregister_plugin(&plugin);
-                return Err(error.to_string());
-            }
-        }
-        Ok(())
-    }
-}
-
-impl App {
-
-
-    pub(in crate::app) fn recompile_plugin_contributions(
-        &mut self,
-    ) -> Result<(), String> {
-        let candidate = self
-            .configuration
-            .prepare_plugin_contributions(&self.commands, self.extension.contributions())?;
-        self.commit_contribution_candidate(candidate)
-    }
-}
-
-impl App {
-
-
-    pub(in crate::app) fn commit_contribution_candidate(
-        &mut self,
-        candidate: crate::app::configuration::ContributionCandidate,
-    ) -> Result<(), String> {
-        // Both owners are checked before publication. There is no callback, wait,
-        // or configuration mutation between this check and the two accepts.
-        self.configuration
-            .check_contributions(&candidate, self.extension.contributions())?;
-        let native_windows = crate::config::WindowsConfig {
-            rules: candidate
-                .windows()
-                .rules
-                .iter()
-                .filter(|rule| !rule.content_type.starts_with("plugin."))
-                .cloned()
-                .collect(),
-        };
-        let windows = self.prepare_configured_window_rules(&native_windows)?;
-        let (rules, catalog) = self.extension.prepare_window_rules(&candidate)?;
-        self.window_session
-            .accept_current(windows, &self.state.window_version())?;
-        let receipt = self
-            .configuration
-            .commit_contributions(candidate, catalog)?;
-        rules.finish(receipt)?;
-        self.cancel_pending_mapping();
-        self.reconcile_editor_windows();
-        Ok(())
-    }
-}
-
-impl App {
-
-
-    pub(in crate::app) fn remove_plugin_contribution_generation(
-        &mut self,
-        plugin: &str,
-        load: PluginLoadId,
-    ) {
-        match self
-            .window_session
-            .remove_plugin_generation(plugin, load.0)
-            .map(|()| self.extension.remove_windows(plugin, load.0))
-        {
-            Ok(removed) => {
-                if removed {
-                    self.ui.plugin_surfaces = self.extension.window_snapshots();
-                    self.window_session.invalidate_native();
-                    self.reconcile_editor_windows();
-                }
-            }
-            Err(error) => {
-                self.show_error(error);
-                return;
-            }
-        }
-        let removed_active_confirmation = self.extension.remove_generation(plugin, load);
-        if removed_active_confirmation
-            && self
-                .input
-                .prompt()
-                .is_some_and(|prompt| prompt.kind == PromptKind::PluginConfirmation)
-        {
-            self.close_prompt();
-        }
-        let terminals = self.terminal_session.descriptions();
-        let title = self.message("explorer_title", &[]);
-        let descriptions = NativeDescriptions {
-            signature: self.native_surface_signature(self.window_session.editor_ids()),
-            explorer_title: &title,
-            dashboard_title: &self.configuration.dashboard().identity,
-            picker_title: self
-                .ui
-                .picker
-                .as_ref()
-                .map_or("Picker", |picker| &picker.title),
-            terminals: &terminals,
-        };
-        let result = self
-            .extension
-            .retire_virtual(
-                plugin,
-                load,
-                VirtualContext {
-                    editor: &self.state,
-                    windows: &self.window_session,
-                    scratch: SCRATCH_LABEL,
-                },
-                descriptions,
-            )
-            .and_then(|staged| {
-                staged
-                    .map(|staged| {
-                        Self::accept_virtual_publication(&mut self.window_session, staged)
-                    })
-                    .transpose()
-            });
-        match result {
-            Ok(Some(state)) => {
-                *self.state = state;
-                if self.state.active_view.is_none() {
-                    self.set_dashboard_visibility(true);
-                }
-                self.reconcile_editor_windows();
-            }
-            Ok(None) => {}
-            Err(error) => self.show_error(error),
-        }
-        if self.extension.retire_provider_generation(plugin, load) {
-            self.close_picker();
-        }
-
-        if self.extension.remove_contribution(plugin, load) {
-            self.commands.unregister_plugin(plugin);
-            if let Err(error) = self.recompile_plugin_contributions() {
-                match self
-                    .configuration
-                    .prepare_builtin_contributions(
-                        &self.commands,
-                        self.extension.contributions(),
-                        true,
-                    )
-                    .and_then(|candidate| self.commit_contribution_candidate(candidate))
-                {
-                    Ok(()) => self.show_error(error),
-                    Err(fallback) => self.show_error(fallback),
-                }
-            }
-        }
-    }
-}
-
-impl App {
-
-
-    pub(in crate::app) fn abort_pending_index_batch(
-        &mut self,
-        diagnostic: impl std::fmt::Display,
-    ) {
-        for (owner, load) in self.extension.abort_indexes() {
-            self.remove_plugin_contribution_generation(&owner, load);
-            self.commands.unregister_plugin(&owner);
-        }
-        let candidate = self
-            .configuration
-            .prepare_builtin_contributions(
-                &self.commands,
-                self.extension.contributions(),
-                self.configuration.deferred_plugin_keymaps(),
-            )
-            .unwrap_or_else(|_| {
-                self.configuration
-                    .prepare_builtin_rules(self.extension.contributions())
-            });
-        if let Err(error) = self.commit_contribution_candidate(candidate) {
-            self.show_error(error);
-        }
-        self.show_error(diagnostic);
-    }
-}
-
-impl App {
-
-
-    pub(in crate::app) fn abort_expected_index_batch(
-        &mut self,
-        failed_plugin: String,
-        failed_load: PluginLoadId,
-        diagnostic: impl std::fmt::Display,
-    ) {
-        let expected = self
-            .configuration
-            .expected_plugin_indexes()
-            .iter()
-            .cloned()
-            .collect::<Vec<_>>();
-        self.extension
-            .reject_expected(expected.into_iter(), Some((&failed_plugin, failed_load)));
-        self.abort_pending_index_batch(diagnostic);
-    }
-}
-
-impl App {
-
-    pub(in crate::app) fn process_plugin_storage_events(&mut self) {
-        self.extension.poll_storage();
-    }
-}
-
-impl App {
-
-
-    pub(in crate::app) fn refresh_plugin_host_events(&mut self) {
-        let active_surface = if self.window_session.terminal_focused() {
-            "terminal"
-        } else if self.window_session.explorer_focused() {
-            "explorer"
-        } else if self
-            .ui
-            .private_surfaces
-            .iter()
-            .any(|surface| surface.focused)
-        {
-            "plugin"
-        } else {
-            "editor"
-        }
-        .to_string();
-        let buffer = self.state.active_view.and_then(|view_id| {
-            let view = self.state.views.get(view_id)?;
-            let buffer = self.state.buffers.get(view.buffer)?;
-            let (anchor, head, kind) =
-                view.selection
-                    .map_or((view.cursor.0, view.cursor.0, 0), |selection| {
-                        (
-                            selection.anchor.0,
-                            selection.head.0,
-                            match selection.kind {
-                                crate::editor::SelectionKind::Character => 1,
-                                crate::editor::SelectionKind::Line => 2,
-                                crate::editor::SelectionKind::Block => 3,
-                            },
-                        )
-                    });
-            Some((
-                view.buffer.data().as_ffi(),
-                buffer.text.revision().0,
-                view.cursor.0,
-                anchor,
-                head,
-                kind,
-            ))
-        });
-        let graph_revision = self.window_session.graph().revision().unwrap_or(0);
-        let observation = (
-            self.workspace.root_revision(),
-            active_surface.clone(),
-            buffer,
-            graph_revision,
-        );
-        self.extension.observe(
-            observation,
-            self.workspace.roots().len(),
-            self.ui.plugin_surfaces.len(),
-            self.ui.private_surfaces.len(),
-        );
-    }
-}
-
-impl App {
-
-
-    pub(in crate::app) fn process_plugin_events(&mut self) {
-        if let Some(request) = self.extension.expire_providers() {
-            self.present_plugin_picker(request);
-        }
-        if self.persistence.restoring() {
-            return;
-        }
-        if self.extension.retire_stale_confirmations(
-            &self.state,
-            &self.workspace.version(),
-            self.configuration.binding_revision(),
-            &self.input,
-            &self.window_session,
-        ) && self
-            .input
-            .prompt()
-            .is_some_and(|prompt| prompt.kind == PromptKind::PluginConfirmation)
-        {
-            self.close_prompt();
-        }
-        let _ = self.extension.dispatch_confirmation_results(
-            &self.state,
-            &self.workspace.version(),
-            self.configuration.binding_revision(),
-        );
-        self.present_next_plugin_confirmation();
-        self.retire_plugin_edit_sources();
-        let events = match self.extension.poll_owned() {
-            Ok(events) => events,
-            Err(error) => {
-                self.retire_plugin_edit_sources();
-                self.handle_plugin_worker_stopped(error);
-                return;
-            }
-        };
-        let mut failure_diagnostic = None;
-        for event in events {
-            let event = match event {
-                crate::plugins::OwnedPluginEvent::Executed(reply) => {
-                    self.apply_plugin_execution(reply);
-                    continue;
-                }
-                crate::plugins::OwnedPluginEvent::Other(event) => event,
-            };
-            match event {
-                PluginEvent::Indexed {
-                    load,
-                    plugin,
-                    index,
-                } => {
-                    if self.extension.take_rejected(&plugin, load) {
-                        let _ = self.extension.disable_generation(&plugin, load);
-                        continue;
-                    }
-                    let checksum = index.checksum.clone();
-                    let mut accepted = self
-                        .extension
-                        .install_index(index.clone())
-                        .and_then(|()| self.register_indexed_plugin_commands(&index));
-                    self.extension.reset_observation();
-                    if accepted.is_ok() && index.storage.is_some() {
-                        self.extension.install_storage(&plugin, load);
-                    }
-                    self.extension.queue_index(plugin.clone(), load, checksum);
-                    let waiting_for_deferred = self.configuration.deferred_plugin_keymaps()
-                        && !self
-                            .configuration
-                            .expected_plugin_indexes()
-                            .iter()
-                            .all(|owner| self.extension.contributions().get(owner).is_some());
-                    if accepted.is_ok() && waiting_for_deferred {
-                        continue;
-                    }
-                    if accepted.is_ok() {
-                        accepted = self.recompile_plugin_contributions();
-                    }
-                    if let Err(error) = accepted {
-                        self.abort_pending_index_batch(error);
-                        continue;
-                    }
-                    if let Err((failed_plugin, failed_load, error)) =
-                        self.extension.activate_pending(
-                            self.configuration.deferred_plugin_keymaps(),
-                            &plugin,
-                            load,
-                        )
-                    {
-                        self.remove_plugin_contribution_generation(&failed_plugin, failed_load);
-                        let _ = self
-                            .extension
-                            .disable_generation(&failed_plugin, failed_load);
-                        self.extension.abort_prepared(&failed_plugin, failed_load);
-                        self.abort_pending_index_batch(error);
-                        continue;
-                    }
-                    self.configuration.complete_plugin_indexes();
-                    self.health.record(
-                        LogLevel::Info,
-                        "plugins",
-                        "indexed-and-accepted",
-                        BTreeMap::from([
-                            ("plugin".into(), plugin),
-                            ("load".into(), load.0.to_string()),
-                            ("contexts".into(), index.contexts.len().to_string()),
-                        ]),
-                    );
-                }
-                PluginEvent::Loaded { load, component } => {
-                    let plugin = component.manifest.id.clone();
-                    if self.extension.take_rejected(&plugin, load) {
-                        let _ = self.extension.disable_generation(&plugin, load);
-                        continue;
-                    }
-                    if let Some(index) = self
-                        .extension
-                        .contributions()
-                        .get(&plugin)
-                        .filter(|index| index.generation == load.0)
-                    {
-                        let declared = index.commands.keys().cloned().collect::<BTreeSet<_>>();
-                        let activated = component
-                            .activated_commands
-                            .iter()
-                            .cloned()
-                            .collect::<BTreeSet<_>>();
-                        if declared != activated {
-                            let updates = self.extension.failed_package_load(&plugin, load);
-                            self.apply_extension_updates(updates);
-                            self.remove_plugin_contribution_generation(&plugin, load);
-                            let _ = self.extension.disable_generation(&plugin, load);
-                            self.show_error(crate::plugins::PluginError::UndeclaredCommand);
-                            continue;
-                        }
-                    }
-                    let prepared = self.extension.take_prepared(&plugin, load);
-                    let declarations = component
-                        .manifest
-                        .commands
-                        .iter()
-                        .filter(|(command, _)| component.activated_commands.contains(command))
-                        .map(|(command, declaration)| (command.clone(), declaration.clone()))
-                        .collect();
-                    if let Err(error) = self.register_plugin_commands(&plugin, &declarations) {
-                        self.show_error(error);
-                        continue;
-                    }
-                    if let Some(token) = prepared
-                        && let Err(error) =
-                            self.extension.commit_package(plugin.clone(), load, token)
-                    {
-                        self.remove_plugin_contribution_generation(&plugin, load);
-                        self.show_error(error);
-                    }
-                    self.health.record(
-                        LogLevel::Info,
-                        "plugins",
-                        "active",
-                        BTreeMap::from([
-                            ("plugin".into(), plugin),
-                            (
-                                "commands".into(),
-                                component.activated_commands.len().to_string(),
-                            ),
-                        ]),
-                    );
-                }
-                PluginEvent::Executed(_) => self.show_error("unowned plugin execution event"),
-                PluginEvent::Failed {
-                    load,
-                    plugin,
-                    error,
-                } => {
-                    if self.extension.take_rejected(&plugin, load) {
-                        continue;
-                    }
-                    if self.configuration.deferred_plugin_keymaps()
-                        && !self.extension.is_active_generation(&plugin, load)
-                        && self
-                            .configuration
-                            .expected_plugin_indexes()
-                            .contains(&plugin)
-                    {
-                        self.abort_expected_index_batch(plugin, load, error);
-                        continue;
-                    }
-                    if self.extension.index_pending(&plugin) {
-                        self.extension.reject_index(plugin, load);
-                        self.abort_pending_index_batch(error);
-                        continue;
-                    }
-                    let updates = self.extension.failed_package_load(&plugin, load);
-                    self.apply_extension_updates(updates);
-                    self.remove_plugin_contribution_generation(&plugin, load);
-                    self.commands.unregister_plugin(&plugin);
-                    failure_diagnostic = Some(format!("Plugin {plugin}: {error}"));
-                    self.health.record(
-                        LogLevel::Error,
-                        "plugins",
-                        "failed",
-                        BTreeMap::from([
-                            ("plugin".into(), plugin),
-                            ("error".into(), error.to_string()),
-                        ]),
-                    );
-                }
-            }
-        }
-        self.retire_plugin_edit_sources();
-        let _ = self.extension.dispatch_confirmation_results(
-            &self.state,
-            &self.workspace.version(),
-            self.configuration.binding_revision(),
-        );
-        self.present_next_plugin_confirmation();
-        if let Some(diagnostic) = failure_diagnostic {
-            self.show_error(diagnostic);
-        }
-    }
-}
-
-impl App {
-
-    pub(in crate::app) fn apply_plugin_ui_request(
-        &mut self,
-        index: &crate::plugins::PluginContributionIndex,
-        request: crate::plugins::PluginUiRequest,
-    ) -> crate::plugins::PluginUiEvent {
-        match self.extension.prepare_window(
-            index,
-            request,
-            &self.state,
-            &self.window_session,
-            self.configuration.settings().editor.ambiguous_width
-                == crate::config::AmbiguousWidth::Wide,
-        ) {
-            WindowUpdate::Ready(event) => event,
-            WindowUpdate::Publish(source, transition) => {
-                let receipt = self.window_session.accept_plugin_transition(
-                    *transition,
-                    &self.state.window_version(),
-                    source.catalog(),
-                );
-                source.finish(receipt, self.window_session.graph().revision())
-            }
-        }
-    }
-}
-
-impl App {
-
-
-    pub(in crate::app) fn apply_plugin_execution(
-        &mut self,
-        reply: crate::plugins::PluginExecutionReply,
-    ) {
-        let source = match self.extension.receive(
-            reply,
-            &self.workspace.version(),
-            self.configuration.binding_revision(),
-        ) {
-            Ok(source) => source,
-            Err(error) => {
-                self.show_error(error);
-                return;
-            }
-        };
-        let confirmation_source = source.confirmation_source.clone();
-        let navigation_current =
-            confirmation_source.navigation_current(&self.state, &self.window_session);
-        let confirmation_result = source.confirmation_result;
-        let source_actions_admitted = source.source_actions_admitted;
-        let mut execution = source.execution;
-        let load = source.load;
-        let confirmation_requests = std::mem::take(&mut execution.confirmation_requests);
-        if let Err(error) = self
-            .extension
-            .admit_confirmations(confirmation_source, confirmation_requests)
-        {
-            self.show_error(error);
-        }
-        if !source_actions_admitted {
-            execution.messages.clear();
-            execution.ui_requests.clear();
-            execution.host_event_acknowledgements.clear();
-            execution.storage_requests.clear();
-            execution.provider_chunks.clear();
-            execution.virtual_document_proposals.clear();
-        }
-        let plugin = execution.plugin.clone();
-        if confirmation_result {
-            let disallowed_ui = execution.ui_requests.iter().any(|request| {
-                !matches!(
-                    request.kind,
-                    crate::plugins::PluginUiRequestKind::ReplaceUi { .. }
-                        | crate::plugins::PluginUiRequestKind::ReplacePrivate { .. }
-                        | crate::plugins::PluginUiRequestKind::PatchPrivate { .. }
-                )
-            });
-            if disallowed_ui
-                || !execution.storage_requests.is_empty()
-                || !execution.provider_chunks.is_empty()
-                || !execution.virtual_document_proposals.is_empty()
-            {
-                execution.ui_requests.clear();
-                execution.storage_requests.clear();
-                execution.provider_chunks.clear();
-                execution.virtual_document_proposals.clear();
-                self.show_error(
-                    "plugin confirmation result may update existing plugin UI only".to_owned(),
-                );
-            }
-        }
-        let mut provider_continuations = Vec::new();
-        if self.extension.is_active_generation(&plugin, load) {
-            self.extension
-                .acknowledge(&plugin, load, &execution.host_event_acknowledgements);
-            if let Some(policy) = self
-                .extension
-                .contributions()
-                .get(&plugin)
-                .filter(|index| index.generation == load.0)
-                .and_then(|index| index.storage.clone())
-            {
-                self.extension.request_storage(
-                    &plugin,
-                    load,
-                    &policy,
-                    std::mem::take(&mut execution.storage_requests),
-                );
-            }
-            let workspace_revision = Some(self.workspace.root_revision());
-            for proposal in std::mem::take(&mut execution.virtual_document_proposals) {
-                let closing = matches!(
-                    proposal.kind,
-                    crate::plugins::PluginVirtualDocumentProposalKind::CloseAcknowledged
-                );
-                let result = self
-                    .extension
-                    .prepare_virtual(
-                        &plugin,
-                        load,
-                        proposal,
-                        navigation_current,
-                        VirtualContext {
-                            editor: &self.state,
-                            windows: &self.window_session,
-                            scratch: SCRATCH_LABEL,
-                        },
-                    )
-                    .and_then(|staged| {
-                        Self::accept_virtual_publication(&mut self.window_session, staged)
-                    });
-                match result {
-                    Ok(state) => {
-                        *self.state = state;
-                        if !closing {
-                            self.set_dashboard_visibility(false);
-                        }
-                        self.reconcile_editor_windows();
-                    }
-                    Err(error) => self.show_error(error),
-                }
-            }
-            let buffer_revision = self
-                .state
-                .active_buffer_id()
-                .and_then(|buffer| self.state.buffers.get(buffer))
-                .map(|buffer| buffer.text.revision().0);
-            for chunk in std::mem::take(&mut execution.provider_chunks) {
-                match self.extension.provider_chunk(
-                    &plugin,
-                    load,
-                    (workspace_revision, buffer_revision),
-                    chunk,
-                ) {
-                    Ok(update) => {
-                        if let Some(request) = update.refresh {
-                            self.present_plugin_picker(request);
-                        }
-                        if let Some(command) = update.command {
-                            provider_continuations.push(command);
-                        }
-                    }
-                    Err(error) => self.show_error(error.detail),
-                }
-            }
-        }
-        for command in provider_continuations {
-            self.process_effect(AppEffect::PluginExecute {
-                plugin: plugin.clone(),
-                command,
-                arguments: Vec::new(),
-            });
-        }
-        if !execution.ui_requests.is_empty()
-            && self.extension.is_active_generation(&plugin, load)
-            && let Some(index) = self
-                .extension
-                .contributions()
-                .get(&plugin)
-                .filter(|index| index.generation == load.0)
-                .cloned()
-        {
-            let requests = std::mem::take(&mut execution.ui_requests);
-            let events = requests
-                .into_iter()
-                .map(|request| self.apply_plugin_ui_request(&index, request))
-                .collect::<Vec<_>>();
-            self.extension.queue_ui(plugin.clone(), load, events);
-            self.ui.plugin_surfaces = self.extension.window_snapshots();
-            self.window_session.invalidate_native();
-            self.reconcile_editor_windows();
-        }
-        for message in execution.messages {
-            self.notify_message(message, false);
-        }
-        match source.preview {
-            Ok(Some(key)) => self.begin_plugin_workspace_proposal(
-                key,
-                format!("plugin {}: {}", execution.plugin, execution.command),
-            ),
-            Ok(None) => {}
-            Err(error) => self.show_error(error),
-        }
-        self.health.record(
-            LogLevel::Info,
-            "plugins",
-            "executed",
-            BTreeMap::from([
-                ("plugin".into(), execution.plugin),
-                ("command".into(), execution.command),
-                ("generation".into(), execution.generation.to_string()),
-            ]),
-        );
-    }
-}
-
-impl App {
-
-    pub(in crate::app) fn retire_plugin_edit_sources(&mut self) {
-        let (retired, key) = self.extension.retire_edits(
-            &self.state,
-            &self.workspace.version(),
-            self.configuration.binding_revision(),
-        );
-        if retired != 0 {
-            self.show_error(format!(
-                "{retired} plugin invocations retired before their results were accepted"
-            ));
-        }
-        if let Some(key) = key {
-            if self
-                .workspace_edits
-                .origin()
-                .is_some_and(|origin| origin.same(&key))
-            {
-                self.abort_workspace_edit("plugin proposal source retired".into());
-            } else {
-                let _ = self.extension.finish_edit(&key);
-            }
-        }
-    }
-}
-
-impl App {
-
-    fn begin_plugin_workspace_proposal(
-        &mut self,
-        key: crate::app::workspace::edits::OriginKey,
-        label: String,
-    ) {
-        let result = (|| {
-            self.workspace_edits.check_begin()?;
-            let prepared = self.extension.prepare_edit(
-                &key,
-                &self.state,
-                &self.workspace.version(),
-                self.configuration.binding_revision(),
-            )?;
-            let path = prepared.draft.canonical_path.clone();
-            let ticket = self.workspace_edits.begin(
-                self.workspace.version(),
-                self.configuration.binding_revision(),
-                prepared.sources,
-            )?;
-            let maximum = SEARCH_MAXIMUM_FILE_BYTES;
-            let roots = self
-                .workspace
-                .roots()
-                .iter()
-                .map(|r| r.identity.canonical_path.clone())
-                .collect();
-            self.workspace_edits.start_files(
-                ticket,
-                label,
-                Some(key.clone()),
-                false,
-                vec![crate::app::workspace::edits::InputFile::Read(
-                    path.clone(),
-                )],
-                (roots, maximum),
-            )?;
-            let snapshot = self
-                .state
-                .workspace_snapshot(
-                    self.workspace_edits
-                        .preparing_sources()
-                        .ok_or("plugin workspace preparation missing")?,
-                    &path,
-                    maximum,
-                )?
-                .ok_or("plugin snapshot document closed")?;
-            self.workspace_edits.open_snapshot(0, snapshot)?;
-            self.workspace_edits.finish_preparation(
-                vec![prepared.draft],
-                self.workspace.edit_scope(),
-                &self.workspace.version(),
-                self.configuration.binding_revision(),
-            )
-        })();
-        match result {
-            Ok(()) => self.show_workspace_proposal(),
-            Err(error) => {
-                if self
-                    .workspace_edits
-                    .origin()
-                    .is_some_and(|origin| origin.same(&key))
-                {
-                    self.abort_workspace_edit(error);
-                } else {
-                    let _ = self.extension.finish_edit(&key);
-                    self.show_error(error);
-                }
-            }
-        }
-    }
-}
-
-impl App {
-
-    pub(in crate::app) fn accept_virtual_publication(
-        windows: &mut crate::app::windows::WindowSession,
-        (source, transition): (
-            VirtualPublication<'_>,
-            crate::app::windows::EditorWindowCandidate,
-        ),
-    ) -> Result<EditorState, String> {
-        let accepted =
-            windows.accept_editor_transition(transition, source.before(), source.catalog())?;
-        source.finish(accepted)
-    }
-}
-
-impl App {
-
-    pub(in crate::app) fn route_virtual_open(&mut self, result: Result<VirtualOpen, String>) {
-        match result {
-            Ok(VirtualOpen::Execute {
-                plugin,
-                load,
-                command,
-                document,
-            }) => {
-                if !self.execute_plugin_command(plugin.clone(), command, Vec::new()) {
-                    self.extension
-                        .cancel_virtual_request(&plugin, load, document);
-                }
-            }
-            Ok(VirtualOpen::Existing(buffer)) => {
-                let mut draft = self.state.draft();
-                if let Err(error) = draft
-                    .show_document(buffer)
-                    .map_err(str::to_owned)
-                    .and_then(|_| self.commit_editor_draft(draft, None, false))
-                {
-                    self.show_error(error);
-                } else {
-                    self.set_dashboard_visibility(false);
-                    self.reconcile_editor_windows();
-                }
-            }
-            Err(error) => self.show_error(error),
-        }
-    }
-}
-
-use slotmap::Key;

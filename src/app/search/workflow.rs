@@ -21,10 +21,16 @@ pub struct SearchStreamGeneration(pub u64);
 pub struct SearchPreviewRevision(pub u64);
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SearchSourceKind {
+    #[expect(
+        dead_code,
+        reason = "File enumeration currently uses the file picker rather than a workflow stream."
+    )]
     Files,
     Grep,
     Commands,
-    PluginProvider { provider: String },
+    PluginProvider {
+        provider: String,
+    },
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SearchMatcherKind {
@@ -151,9 +157,20 @@ impl SearchWorkflowBroker {
         self.revision = self.revision.saturating_add(1);
         Ok(())
     }
+    #[expect(
+        dead_code,
+        reason = "Retain the workflow revision query alongside its snapshot contract."
+    )]
     pub fn revision(&self) -> u64 {
         self.revision
     }
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "The picker owns current preview requests; retain the tested workflow contract."
+        )
+    )]
     pub fn cancel(&mut self) {
         self.active = None;
         self.revision = self.revision.saturating_add(1)
@@ -218,6 +235,13 @@ impl SearchWorkflowBroker {
         self.revision = revision;
         Ok(())
     }
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "The picker owns current preview requests; retain the tested workflow contract."
+        )
+    )]
     pub fn request_preview(
         &mut self,
         key: &str,
@@ -237,6 +261,13 @@ impl SearchWorkflowBroker {
         self.revision = self.revision.saturating_add(1);
         Ok(())
     }
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "The picker owns current preview requests; retain the tested workflow contract."
+        )
+    )]
     pub fn accept_preview(
         &mut self,
         key: &str,

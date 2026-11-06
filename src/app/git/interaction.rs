@@ -1,41 +1,27 @@
+use crate::app::App;
 use crate::app::commands::AppEffect;
-use crate::editor::text::ByteOffset;
-use crate::editor::text::ByteRange;
-use crate::ui::DocumentationPopupKind;
+use crate::app::git::GitHunkAction;
+use crate::app::picker::MatcherSource;
+use crate::app::picker::PickerPayload;
 use crate::editor::EditorOperation;
 use crate::editor::EditorTransaction;
-use crate::app::App;
+use crate::editor::Precondition;
+use crate::editor::RegisterShape;
+use crate::editor::RegisterValue;
+use crate::editor::text::ByteOffset;
+use crate::editor::text::PositionEncoding;
 use crate::language::lsp::LspMarkupContent;
 use crate::language::lsp::LspMarkupKind;
-use crate::app::picker::MatcherSource;
-use std::path::Path;
-use std::path::PathBuf;
+use crate::ui::DocumentationPopupKind;
+use crate::ui::PickerSurfaceKind;
+use crate::ui::PromptKind;
 use crate::workspace::PickerAction;
 use crate::workspace::PickerItem;
 use crate::workspace::PickerItemId;
-use crate::app::picker::PickerPayload;
-use crate::ui::PickerSurfaceKind;
-use crate::editor::text::PositionEncoding;
-use crate::editor::Precondition;
-use crate::ui::PromptKind;
-use crate::editor::text::TextEdit;
 use crate::workspace::WorkspaceTrust;
-use crate::app::git::GitHunkAction;
-use crate::editor::RegisterShape;
-use crate::editor::RegisterValue;
-use crate::editor::text::BufferRevision;
-use crate::editor::text::TextEditSet;
-
-
-
-
-
-
-
+use std::path::Path;
 
 impl App {
-
-
     pub(in crate::app) fn clear_git_status(&mut self) {
         self.git.clear();
         self.ui.git_signs.clear();
@@ -43,8 +29,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn reconcile_git_signs(&mut self) {
         if self.git.status().is_none()
             && self
@@ -66,8 +50,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn process_git_sign_events(&mut self) {
         if let Some(signs) = self.git.poll_signs(
             &self.state,
@@ -80,25 +62,18 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn start_git_hunks(&mut self) {
         self.start_git_hunks_with_action(None);
     }
 }
 
 impl App {
-
-    pub(in crate::app) fn start_git_hunks_with_action(
-        &mut self,
-        action: Option<GitHunkAction>,
-    ) {
+    pub(in crate::app) fn start_git_hunks_with_action(&mut self, action: Option<GitHunkAction>) {
         self.start_git_hunks_with_layer(action, crate::git::GitDiffLayer::Unstaged);
     }
 }
 
 impl App {
-
     pub(in crate::app) fn start_git_hunks_with_layer(
         &mut self,
         action: Option<GitHunkAction>,
@@ -121,7 +96,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn start_git_worktrees(&mut self) {
         let Some(status) = self.git.status().cloned() else {
             if self.git.status_pending() {
@@ -141,7 +115,6 @@ impl App {
 }
 
 impl App {
-
     /// Remove the selected worktree and its directory. This never deletes a branch.
     pub(in crate::app) fn request_git_worktree_remove(&mut self) {
         let Some(crate::app::picker::PickerPayload::GitWorktree { name, main, .. }) =
@@ -154,9 +127,10 @@ impl App {
             self.show_error("the primary worktree (main checkout) cannot be removed");
             return;
         }
-        self.git.set_pending_destructive(
-            crate::app::git::GitDestructiveAction::RemoveWorktree(name.clone()),
-        );
+        self.git
+            .set_pending_destructive(crate::app::git::GitDestructiveAction::RemoveWorktree(
+                name.clone(),
+            ));
         self.open_confirmation(
             PromptKind::GitDestructive,
             "Remove worktree".into(),
@@ -167,7 +141,6 @@ impl App {
 }
 
 impl App {
-
     fn git_repository(&mut self) -> Option<std::path::PathBuf> {
         match self.git.status() {
             Some(status) => Some(status.repository.clone()),
@@ -180,7 +153,6 @@ impl App {
 }
 
 impl App {
-
     fn report_branch_request(&mut self, result: Result<(), String>) {
         if let Err(error) = result {
             self.show_error(error);
@@ -189,7 +161,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn create_git_worktree(
         &mut self,
         branch: String,
@@ -212,7 +183,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn confirm_git_destructive(
         &mut self,
         action: Option<crate::app::git::GitDestructiveAction>,
@@ -237,7 +207,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn process_git_branch_events(&mut self) {
         // One poll per handler call: the service is one shot.
         let outcome = match self
@@ -273,9 +242,7 @@ impl App {
                 source: String::new(),
                 action: PickerAction::None,
             },
-            crate::app::picker::PickerPayload::Command(
-                "workspace.git.worktree.create".into(),
-            ),
+            crate::app::picker::PickerPayload::Command("workspace.git.worktree.create".into()),
         );
         let items = std::iter::once(new_worktree)
             .chain(list.worktrees.iter().map(|worktree| {
@@ -333,7 +300,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn unstage_selected_git_hunk(&mut self) {
         self.git.reconcile_hunk_path(&self.state);
         use crate::git::GitDiffLayer;
@@ -361,7 +327,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn process_git_hunk_events(&mut self) {
         if self.search.poll_diff_preview(
             self.workspace.version(),
@@ -474,7 +439,6 @@ impl App {
 }
 
 impl App {
-
     /// Conflict markers are in the text itself, so this works in any file, staged or not.
     pub(in crate::app) fn navigate_git_conflict(&mut self, direction: i8) {
         let Some(view) = self.state.active_view.map(|id| &self.state.views[id]) else {
@@ -511,7 +475,6 @@ impl App {
 }
 
 impl App {
-
     fn active_git_hunks(&self, layer: crate::git::GitDiffLayer) -> bool {
         self.state
             .active_buffer_id()
@@ -524,7 +487,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn navigate_git_hunk(&mut self, direction: i8) {
         self.git.reconcile_hunk_path(&self.state);
         if !self.active_git_hunks(crate::git::GitDiffLayer::Unstaged) {
@@ -544,7 +506,6 @@ impl App {
 }
 
 impl App {
-
     /// The one-based line under the cursor in the active window.
     fn cursor_line_number(&self) -> u32 {
         self.state
@@ -562,7 +523,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn preview_selected_git_hunk(&mut self) {
         self.git.reconcile_hunk_path(&self.state);
         if !self.active_git_hunks(crate::git::GitDiffLayer::Unstaged) {
@@ -587,7 +547,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn request_reset_selected_git_hunk(&mut self) {
         self.git.reconcile_hunk_path(&self.state);
         if self.workspace.trust() != WorkspaceTrust::Trusted {
@@ -610,7 +569,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn confirm_reset_selected_git_hunk(&mut self, phrase: String) {
         let same_target = self.git.take_reset_target();
         if !same_target || !self.active_git_hunks(crate::git::GitDiffLayer::Unstaged) {
@@ -633,7 +591,6 @@ impl App {
 }
 
 impl App {
-
     /// Stage these one-based file lines. With no lines given, the selection or the cursor's line.
     pub(in crate::app) fn stage_git_lines(&mut self, start: i64, end: i64) {
         self.git.reconcile_hunk_path(&self.state);
@@ -686,7 +643,6 @@ impl App {
 }
 
 impl App {
-
     /// The one-based lines of the active selection, or of the cursor, and whether it's a selection.
     fn active_selected_lines(&self) -> Option<(u32, u32, bool)> {
         let view = self.state.views.get(self.state.active_view?)?;
@@ -706,7 +662,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn stage_selected_git_hunk(&mut self) {
         self.git.reconcile_hunk_path(&self.state);
         if !self.active_git_hunks(crate::git::GitDiffLayer::Unstaged) {
@@ -727,7 +682,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn process_git_mutation_events(&mut self) {
         match self.git.poll_mutation() {
             Ok(Some(crate::app::git::GitMutationOutcome::Reset)) => {
@@ -769,7 +723,6 @@ impl App {
 }
 
 impl App {
-
     /// Answer the save-and-stage choice. The staging effect is replayed only after the save
     /// completes, so the plan is rebuilt against the saved bytes.
     pub(in crate::app) fn retry_saved_stage(
@@ -849,7 +802,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn confirm_stage_unsaved(&mut self) {
         let path = self
             .git
@@ -879,14 +831,12 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn start_git_status_refresh(&mut self) {
         self.start_git_status_refresh_with_feedback(true);
     }
 }
 
 impl App {
-
     pub(in crate::app) fn start_git_status_refresh_silent(&mut self) {
         let root = self
             .workspace
@@ -900,11 +850,7 @@ impl App {
 }
 
 impl App {
-
-    pub(in crate::app) fn start_git_status_refresh_with_feedback(
-        &mut self,
-        report_errors: bool,
-    ) {
+    pub(in crate::app) fn start_git_status_refresh_with_feedback(&mut self, report_errors: bool) {
         let root = self
             .workspace
             .active_root()
@@ -923,7 +869,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn process_git_status_events(&mut self) {
         match self.git.poll_status(self.workspace.root_revision()) {
             Ok(false) => return,
@@ -960,7 +905,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn open_git_status_picker(&mut self) {
         self.git.reconcile_status_documents(&self.state);
         self.git.open_changes_when_ready = false;
@@ -1000,8 +944,7 @@ impl App {
             .entries
             .iter()
             .filter(|entry| {
-                entry.status != crate::git::GitFileStatus::Conflicted
-                    && entry.sources.staged
+                entry.status != crate::git::GitFileStatus::Conflicted && entry.sources.staged
             })
             .collect();
         let total = conflicted.len() + unstaged.len() + staged.len();
@@ -1090,8 +1033,6 @@ impl App {
 }
 
 impl App {
-
-
     /// Open the current line on the forge, or copy its URL, as LazyVim's `<leader>gB`/`gY`.
     pub(in crate::app) fn browse_git_line(&mut self, copy: bool) {
         let file = self.state.active_view.and_then(|view| {
@@ -1152,8 +1093,6 @@ impl App {
 }
 
 impl App {
-
-
     /// The two-character index/worktree code a change row shows. Unmerged and untracked have
     /// their own codes; everything else names which side differs.
     fn change_code(entry: &crate::git::GitStatusEntry) -> String {
@@ -1162,8 +1101,6 @@ impl App {
 }
 
 impl App {
-
-
     /// Accept one side of the active conflict into the RESULT BUFFER, through an ordinary
     /// transaction so the change is undoable by the editor's own undo.
     ///
@@ -1251,7 +1188,6 @@ impl App {
 }
 
 impl App {
-
     /// Preview replacing whole files with one side, then ask. Nothing is written until the
     /// confirmation is answered, and the plan is REBUILT when it is, so a preview taken against
     /// one repository state is never applied to another.
@@ -1300,7 +1236,6 @@ impl App {
 }
 
 impl App {
-
     /// Apply the previewed replacement once it is confirmed. The plan is rebuilt from the same
     /// list and side, so the write is decided by current repository state rather than by a plan
     /// captured before the question was asked.
@@ -1321,14 +1256,13 @@ impl App {
             .iter()
             .map(|(path, _, _)| path.clone())
             .collect::<Vec<_>>();
-        let plan =
-            match crate::git::plan_replacement(&repository, &paths, previewed.choice) {
-                Ok(plan) => plan,
-                Err(error) => {
-                    self.show_error(error.to_string());
-                    return;
-                }
-            };
+        let plan = match crate::git::plan_replacement(&repository, &paths, previewed.choice) {
+            Ok(plan) => plan,
+            Err(error) => {
+                self.show_error(error.to_string());
+                return;
+            }
+        };
         match crate::git::apply_replacement(&plan) {
             Ok(written) => self.notify_message(
                 format!(
@@ -1343,7 +1277,6 @@ impl App {
 }
 
 impl App {
-
     /// Stage the resolved conflict in the active buffer, through the SAME file-staging plan the
     /// ordinary staging surface uses rather than a second staging path.
     pub(in crate::app) fn stage_git_conflict(&mut self) {
@@ -1362,7 +1295,6 @@ impl App {
 }
 
 impl App {
-
     /// Continue the paused operation. Refuses while any conflict remains, and refuses when no
     /// operation is paused, both before any write.
     pub(in crate::app) fn continue_git_conflict(&mut self) {
@@ -1393,7 +1325,6 @@ impl App {
 }
 
 impl App {
-
     /// Abandon the paused operation. There is no hard-reset fallback: when the working tree holds
     /// changes the abort would destroy, it is refused and names them.
     pub(in crate::app) fn abort_git_conflict(&mut self) {
@@ -1421,7 +1352,6 @@ impl App {
 }
 
 impl App {
-
     fn conflict_repository(&mut self) -> Option<std::path::PathBuf> {
         match self.git.status() {
             Some(status) => Some(status.repository.clone()),
@@ -1434,7 +1364,6 @@ impl App {
 }
 
 impl App {
-
     /// After a recovery the repository state changed underneath every open buffer, so the
     /// status is refreshed rather than left stale.
     fn after_conflict_recovery(&mut self) {
@@ -1447,7 +1376,6 @@ impl App {
 }
 
 impl App {
-
     /// The conflict surface. The operation bar names the paused operation and its phase, and
     /// each conflicted path reports its three sides with a side that does not exist shown as
     /// ABSENT rather than as content.
@@ -1499,7 +1427,6 @@ impl App {
 }
 
 impl App {
-
     /// Move the editor into the selected worktree: it replaces the current root, so the file
     /// tree, pickers, LSP servers and git signs follow. The worktree gets its own trust
     /// decision. Files with unsaved changes in the current root block the switch.

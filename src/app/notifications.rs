@@ -1,12 +1,7 @@
+use crate::app::App;
 use std::collections::VecDeque;
 use std::time::Duration;
 use std::time::Instant;
-use crate::app::App;
-use std::path::Path;
-
-
-
-
 
 /// Owns notification insertion, expiry, history and telemetry writers.
 /// The renderer receives a projection, never this owner's mutable state.
@@ -18,17 +13,26 @@ pub(super) struct NoticeSession {
     warning: bool,
     history: VecDeque<(bool, String)>,
     deadline: Option<Instant>,
-
 }
-
 
 impl NoticeSession {
-pub(in crate::app) fn new() -> Self {
-    Self { current: None, passing: None, warning: false, history: VecDeque::new(), deadline: None }
-}
+    pub(in crate::app) fn new() -> Self {
+        Self {
+            current: None,
+            passing: None,
+            warning: false,
+            history: VecDeque::new(),
+            deadline: None,
+        }
+    }
 
-
-    pub(in crate::app) fn notify(&mut self, message: String, error: bool, now: Instant, timeout: Duration) {
+    pub(in crate::app) fn notify(
+        &mut self,
+        message: String,
+        error: bool,
+        now: Instant,
+        timeout: Duration,
+    ) {
         // Repeated status messages do not perpetually postpone expiry.
         if self
             .current
@@ -55,29 +59,24 @@ pub(in crate::app) fn new() -> Self {
         self.warning = false;
     }
 
-
     pub(super) fn warn(&mut self, message: String, now: Instant, timeout: Duration) {
         self.notify(message, false, now, timeout);
         self.warning = true;
     }
 
-
     pub(super) fn is_warning(&self) -> bool {
         self.current.is_some() && self.warning
     }
-
 
     pub(in crate::app) fn clear(&mut self) {
         self.current = None;
         self.deadline = None;
     }
 
-
     /// Remembers the current notice as one that stops being true, such as "starting".
     pub(in crate::app) fn mark_current_passing(&mut self) {
         self.passing = self.current.as_ref().map(|(_, message)| message.clone());
     }
-
 
     /// Takes down the passing notice once it has passed, unless another has replaced it.
     pub(in crate::app) fn clear_passing(&mut self) {
@@ -90,7 +89,6 @@ pub(in crate::app) fn new() -> Self {
         }
     }
 
-
     pub(in crate::app) fn tick(&mut self, now: Instant) -> bool {
         if self.deadline.is_some_and(|deadline| now >= deadline) {
             self.clear();
@@ -100,28 +98,138 @@ pub(in crate::app) fn new() -> Self {
         }
     }
 
-
     pub(in crate::app) fn current(&self) -> Option<(bool, &str)> {
         self.current
             .as_ref()
             .map(|(error, message)| (*error, message.as_str()))
     }
 
-
     pub(in crate::app) fn history(&self) -> impl DoubleEndedIterator<Item = &(bool, String)> {
         self.history.iter()
     }
 }
 
+/// How long a notice stays on screen.
+const NOTICE_TIMEOUT: Duration = Duration::from_secs(4);
 
+impl App {
+    pub(in crate::app) fn notify_message(&mut self, message: String, error: bool) {
+        self.notices
+            .notify(message, error, self.clock.monotonic(), NOTICE_TIMEOUT);
+        self.project_notice();
+    }
+}
+
+impl App {
+    /// A small yellow notice: something is missing, but what could be shown is shown.
+    pub(in crate::app) fn notify_warning(&mut self, message: String) {
+        self.notices
+            .warn(message, self.clock.monotonic(), NOTICE_TIMEOUT);
+        self.project_notice();
+    }
+}
+
+impl App {
+    pub(in crate::app) fn clear_notice(&mut self) {
+        self.notices.clear();
+        self.project_notice();
+    }
+}
+
+impl App {
+    pub(in crate::app) fn project_notice(&mut self) {
+        let current = self.notices.current();
+        self.ui.notification = current.map(|(_, message)| message.to_owned());
+        self.ui.notification_error = current.is_some_and(|(error, _)| error);
+        self.ui.notification_warning = self.notices.is_warning();
+    }
+}
+
+impl App {
+    pub(in crate::app) fn update_notification_timer(&mut self) {
+        if self.notices.tick(self.clock.monotonic()) {
+            self.project_notice();
+        }
+    }
+}
+
+impl App {
+    /// A path as the reader knows it in the project, or whole when it lies outside.
+    /// A short name for a notification: outside the workspace a full path would fill the toast.
+    pub(in crate::app) fn notice_file_label(&self, path: &std::path::Path) -> String {
+        let label = self.workspace_relative_label(path);
+        if std::path::Path::new(&label).is_absolute() {
+            path.file_name()
+                .map_or(label, |name| name.to_string_lossy().into_owned())
+        } else {
+            label
+        }
+    }
+}
+
+impl App {
+    pub(in crate::app) fn show_error(&mut self, error: impl std::fmt::Display) {
+        self.notify_message(error.to_string(), true);
+    }
+}
+use crate::app::commands::AppEffect;
+
+use crate::app::picker::PickerPayload;
+use crate::workspace::PickerAction;
+use crate::workspace::PickerItem;
+use crate::workspace::PickerItemId;
+
+impl App {
+    pub(in crate::app) fn process_notifications_effect(
+        &mut self,
+        effect: AppEffect,
+    ) -> Result<(), AppEffect> {
+        match effect {
+            AppEffect::NotificationHistory => {
+                let items = self
+                    .notices
+                    .history()
+                    .rev()
+                    .enumerate()
+                    .map(|(index, (error, message))| {
+                        (
+                            PickerItem {
+                                badge: String::new(),
+                                kind: crate::workspace::PickerItemKind::Entry,
+                                id: PickerItemId(format!("notification:{index}")),
+                                label: message.clone(),
+                                detail: if *error {
+                                    "error".into()
+                                } else {
+                                    "info".into()
+                                },
+                                source: "application".into(),
+                                action: PickerAction::None,
+                            },
+                            PickerPayload::Notice {
+                                title: "Notification".into(),
+                                text: message.clone(),
+                            },
+                        )
+                    })
+                    .collect();
+                self.clear_notice();
+                self.install_picker("Notifications".into(), items);
+            }
+            AppEffect::NotificationDismiss => {
+                self.clear_notice();
+            }
+            effect => return Err(effect),
+        }
+        Ok(())
+    }
+}
 
 #[cfg(test)]
 mod tests {
     use crate::app::notifications::NoticeSession;
     use std::time::Duration;
     use std::time::Instant;
-
-
 
     #[test]
     fn explicit_insertion_owns_history_and_expiry_without_observing_ui() {
@@ -180,138 +288,5 @@ mod tests {
         assert_eq!(notices.history().count(), 200);
         assert_eq!(notices.history().next().unwrap().1, "5");
         assert_eq!(notices.history().next_back().unwrap().1, "204");
-    }
-}
-
-
-
-
-
-/// How long a notice stays on screen.
-const NOTICE_TIMEOUT: Duration = Duration::from_secs(4);
-
-impl App {
-
-    pub(in crate::app) fn notify_message(&mut self, message: String, error: bool) {
-        self.notices
-            .notify(message, error, self.clock.monotonic(), NOTICE_TIMEOUT);
-        self.project_notice();
-    }
-}
-
-
-impl App {
-
-    /// A small yellow notice: something is missing, but what could be shown is shown.
-    pub(in crate::app) fn notify_warning(&mut self, message: String) {
-        self.notices
-            .warn(message, self.clock.monotonic(), NOTICE_TIMEOUT);
-        self.project_notice();
-    }
-}
-
-
-impl App {
-
-    pub(in crate::app) fn clear_notice(&mut self) {
-        self.notices.clear();
-        self.project_notice();
-    }
-}
-
-
-impl App {
-
-    pub(in crate::app) fn project_notice(&mut self) {
-        let current = self.notices.current();
-        self.ui.notification = current.map(|(_, message)| message.to_owned());
-        self.ui.notification_error = current.is_some_and(|(error, _)| error);
-        self.ui.notification_warning = self.notices.is_warning();
-    }
-}
-
-
-impl App {
-
-
-    pub(in crate::app) fn update_notification_timer(&mut self) {
-        if self.notices.tick(self.clock.monotonic()) {
-            self.project_notice();
-        }
-    }
-}
-
-
-impl App {
-
-    /// A path as the reader knows it in the project, or whole when it lies outside.
-    /// A short name for a notification: outside the workspace a full path would fill the toast.
-    pub(in crate::app) fn notice_file_label(&self, path: &std::path::Path) -> String {
-        let label = self.workspace_relative_label(path);
-        if std::path::Path::new(&label).is_absolute() {
-            path.file_name()
-                .map_or(label, |name| name.to_string_lossy().into_owned())
-        } else {
-            label
-        }
-    }
-}
-
-
-impl App {
-
-
-    pub(in crate::app) fn show_error(&mut self, error: impl std::fmt::Display) {
-        self.notify_message(error.to_string(), true);
-    }
-}
-use crate::app::commands::AppEffect;
-
-use crate::workspace::PickerAction;
-use crate::workspace::PickerItem;
-use crate::workspace::PickerItemId;
-use crate::app::picker::PickerPayload;
-
-
-impl App {
-    pub(in crate::app) fn process_notifications_effect(&mut self, effect: AppEffect) -> Result<(), AppEffect> {
-        match effect {
-AppEffect::NotificationHistory => {
-                let items = self
-                    .notices
-                    .history()
-                    .rev()
-                    .enumerate()
-                    .map(|(index, (error, message))| {
-                        (
-                            PickerItem {
-                                badge: String::new(),
-                                kind: crate::workspace::PickerItemKind::Entry,
-                                id: PickerItemId(format!("notification:{index}")),
-                                label: message.clone(),
-                                detail: if *error {
-                                    "error".into()
-                                } else {
-                                    "info".into()
-                                },
-                                source: "application".into(),
-                                action: PickerAction::None,
-                            },
-                            PickerPayload::Notice {
-                                title: "Notification".into(),
-                                text: message.clone(),
-                            },
-                        )
-                    })
-                    .collect();
-                self.clear_notice();
-                self.install_picker("Notifications".into(), items);
-            }
-AppEffect::NotificationDismiss => {
-                self.clear_notice();
-            }
-            effect => return Err(effect),
-        }
-        Ok(())
     }
 }

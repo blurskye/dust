@@ -1,8 +1,5 @@
 use crate::app::tests::*;
 
-
-
-
 #[test]
 pub(in crate::app) fn help_preserves_a_draft_and_a_pending_confirmation() {
     let (_app_dirs, mut app) = app();
@@ -76,7 +73,6 @@ pub(in crate::app) fn help_preserves_a_draft_and_a_pending_confirmation() {
     );
 }
 
-
 #[test]
 pub(in crate::app) fn form_help_captures_keys_without_changing_the_prompt_draft() {
     let (_app_dirs, mut app) = app();
@@ -92,8 +88,5 @@ pub(in crate::app) fn form_help_captures_keys_without_changing_the_prompt_draft(
     app.handle_configured_key(KeyEvent::character('x'));
     assert_eq!(app.input.prompt().unwrap().input, "write draftx");
 }
-use crate::editor::input::KeyEvent;
-use crate::editor::CommandInvocation;
 use crate::editor::InvocationSource;
-use crate::ui::PromptKind;
-
+use crate::editor::input::KeyEvent;

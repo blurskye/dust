@@ -1,6 +1,6 @@
+use crate::plugins::PluginManifest;
 use crate::tools::PackageManifest;
 use crate::tools::PackageSource;
-use crate::plugins::PluginManifest;
 use reqwest::Url;
 use reqwest::blocking::Client;
 use reqwest::blocking::Response;
@@ -18,7 +18,7 @@ use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::mpsc::self;
+use std::sync::mpsc;
 use std::sync::mpsc::Receiver;
 use std::sync::mpsc::SyncSender;
 use std::sync::mpsc::TryRecvError;

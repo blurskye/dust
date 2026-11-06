@@ -6,12 +6,6 @@
 
 use unicode_segmentation::UnicodeSegmentation;
 
-
-
-
-
-
-
 /// Parse unified diff text into a `DiffPreview`.
 ///
 /// Deliberately not represented in the model, and therefore not produced here: file headers
@@ -402,11 +396,6 @@ index 9792656..89d6f9e 100644
     }
 }
 
-use crate::ui::geometry::text_width;
-use crate::config::AmbiguousWidth;
-
-
-
 /// How a diff line relates to the comparison.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DiffLineKind {
@@ -415,14 +404,12 @@ pub enum DiffLineKind {
     Removed,
 }
 
-
 /// A byte range inside a diff line's text that changed, for intra-line emphasis.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct DiffSpan {
     pub start: usize,
     pub end: usize,
 }
-
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DiffLine {
@@ -435,7 +422,6 @@ pub struct DiffLine {
     pub spans: Vec<DiffSpan>,
 }
 
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DiffHunk {
     /// The `@@` header, including the enclosing section where the language provides one.
@@ -444,7 +430,6 @@ pub struct DiffHunk {
     /// Unchanged lines omitted immediately before this hunk, with the exact count.
     pub collapsed_before: usize,
 }
-
 
 /// How a diff is laid out.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -456,7 +441,6 @@ pub enum DiffLayout {
     SideBySide,
 }
 
-
 /// One unified diff row, ready to paint: its text and the spans inside that text that
 /// changed, already in the text's own coordinates.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -466,7 +450,6 @@ pub struct DiffRow {
     pub spans: Vec<DiffSpan>,
 }
 
-
 /// One half of a side-by-side row.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DiffSideCell {
@@ -474,7 +457,6 @@ pub struct DiffSideCell {
     pub text: String,
     pub spans: Vec<DiffSpan>,
 }
-
 
 /// One side-by-side row: what the old side shows and what the new side shows.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -485,7 +467,6 @@ pub struct DiffSideRow {
     pub old: Option<DiffSideCell>,
     pub new: Option<DiffSideCell>,
 }
-
 
 /// A diff carried as structure: hunks of classified lines with both line numbers and the
 /// spans that changed inside a line.
@@ -501,7 +482,6 @@ pub struct DiffPreview {
     pub layout: DiffLayout,
 }
 
-
 /// What a rendered diff row is, so painting and measurement read the same row set.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DiffRowKind {
@@ -513,7 +493,6 @@ pub enum DiffRowKind {
     Removed,
     Truncated,
 }
-
 
 impl DiffPreview {
     /// The widest line number, so both numbers align in their own columns.
@@ -619,7 +598,10 @@ impl DiffPreview {
         Self::side_cell_text_with_width(cell, self.number_width())
     }
 
-    pub(crate) fn side_cell_text_with_width(cell: &DiffSideCell, width: usize) -> (String, Vec<DiffSpan>) {
+    pub(crate) fn side_cell_text_with_width(
+        cell: &DiffSideCell,
+        width: usize,
+    ) -> (String, Vec<DiffSpan>) {
         let number = cell.number.map_or_else(String::new, |n| n.to_string());
         let prefix = format!("{number:>width$} ", width = width);
         let offset = prefix.len();

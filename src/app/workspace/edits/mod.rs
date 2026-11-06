@@ -2,6 +2,7 @@
 mod preparation;
 use crate::app::workspace::WorkspaceVersion;
 use crate::editor::BufferPathChange;
+use crate::editor::DocumentSnapshot as FileSnapshot;
 use crate::editor::EditorDraft;
 use crate::editor::EditorPublication;
 use crate::editor::WorkspaceCommitCheck;
@@ -9,14 +10,13 @@ use crate::editor::WorkspaceEditSources;
 use crate::files::CheckedResourceIntent;
 use crate::files::RequestId;
 use crate::files::ResourceIntentKind;
-use crate::editor::DocumentSnapshot as FileSnapshot;
 use crate::workspace::ProposalId;
 use crate::workspace::WorkspaceEditDraft;
 use crate::workspace::WorkspaceEditProposal;
 use crate::workspace::WorkspaceState;
-use preparation::Preparation;
 pub(in crate::app) use preparation::InputFile;
 pub(in crate::app) use preparation::IoPermit;
+use preparation::Preparation;
 pub(in crate::app) use preparation::PreparationTicket;
 pub(in crate::app) use preparation::PreparedFiles;
 use std::collections::HashMap;
@@ -99,7 +99,10 @@ pub(in crate::app) struct ResourcePermit<'a> {
     _editor: &'a crate::editor::EditorState,
 }
 impl ResourcePermit<'_> {
-    pub(in crate::app) fn intent(&self, worker: &Arc<()>) -> Result<&CheckedResourceIntent, String> {
+    pub(in crate::app) fn intent(
+        &self,
+        worker: &Arc<()>,
+    ) -> Result<&CheckedResourceIntent, String> {
         if self
             .applying
             .values()
@@ -360,8 +363,13 @@ impl WorkspaceEditSession {
                 .iter()
                 .any(|file| file.selected && file.base_revision.is_none());
         if !needs_history {
-            return crate::app::workspace::edits::prepare_workspace_edit(&editor, sources, proposal, transaction)
-                .map(|draft| Some((draft, changes)));
+            return crate::app::workspace::edits::prepare_workspace_edit(
+                editor,
+                sources,
+                proposal,
+                transaction,
+            )
+            .map(|draft| Some((draft, changes)));
         }
         // Unopened files restore persistent undo while constructing the draft.
         // Keep that disk access and parsing off the input thread.
@@ -370,7 +378,14 @@ impl WorkspaceEditSession {
         let proposal = proposal.clone();
         let worker = std::thread::Builder::new()
             .name("dust-workspace-edit".into())
-            .spawn(move || crate::app::workspace::edits::prepare_workspace_edit(&editor, &sources, &proposal, transaction))
+            .spawn(move || {
+                crate::app::workspace::edits::prepare_workspace_edit(
+                    &editor,
+                    &sources,
+                    &proposal,
+                    transaction,
+                )
+            })
             .map_err(|error| error.to_string())?;
         self.pending_approval = Some(PendingApproval { worker, changes });
         Ok(None)
@@ -410,7 +425,7 @@ impl WorkspaceEditSession {
         }
         self.approval = Some(Approval {
             key: p.source.key.clone(),
-            check: crate::app::workspace::edits::workspace_commit_check(&draft, &p.proposal)?,
+            check: crate::app::workspace::edits::workspace_commit_check(draft, &p.proposal)?,
             changes,
         });
         Ok(())
@@ -544,7 +559,10 @@ impl WorkspaceEditSession {
             })
             .collect()
     }
-    pub(in crate::app) fn retire_resources(&mut self, reason: &str) -> (Vec<String>, Vec<RequestId>) {
+    pub(in crate::app) fn retire_resources(
+        &mut self,
+        reason: &str,
+    ) -> (Vec<String>, Vec<RequestId>) {
         let notices = self.discard_staged_resources(reason);
         let requests = self
             .applying
@@ -590,14 +608,21 @@ mod tests;
 
 pub(in crate::app) mod interaction;
 
-fn selected_edits(proposal: &crate::workspace::WorkspaceEditProposal) -> Vec<crate::editor::DraftEdit<'_>> {
-    proposal.files.iter().filter(|file| file.selected).map(|file| crate::editor::DraftEdit {
-        canonical_path: &file.canonical_path,
-        base_revision: file.base_revision,
-        original_bytes: &file.original_bytes,
-        edits: &file.edits,
-        preferred_line_ending: file.preferred_line_ending,
-    }).collect()
+fn selected_edits(
+    proposal: &crate::workspace::WorkspaceEditProposal,
+) -> Vec<crate::editor::DraftEdit<'_>> {
+    proposal
+        .files
+        .iter()
+        .filter(|file| file.selected)
+        .map(|file| crate::editor::DraftEdit {
+            canonical_path: &file.canonical_path,
+            base_revision: file.base_revision,
+            original_bytes: &file.original_bytes,
+            edits: &file.edits,
+            preferred_line_ending: file.preferred_line_ending,
+        })
+        .collect()
 }
 pub(in crate::app) fn prepare_workspace_edit(
     state: &crate::editor::EditorState,
@@ -612,13 +637,29 @@ pub(in crate::app) fn prepare_workspace_edit(
     if proposal.state != crate::workspace::ProposalState::Preview {
         return Err("workspace preview is closed".into());
     }
-    state.prepare_document_edits(sources, &proposal.label, &selected_edits(proposal), transaction)
+    state.prepare_document_edits(
+        sources,
+        &proposal.label,
+        &selected_edits(proposal),
+        transaction,
+    )
 }
 pub(in crate::app) fn workspace_commit_check(
     draft: &crate::editor::EditorDraft,
     proposal: &crate::workspace::WorkspaceEditProposal,
 ) -> Result<crate::editor::WorkspaceCommitCheck, String> {
-    draft.check_document_edits(proposal.files.iter().filter(|file| file.selected).map(|file| (file.canonical_path.as_path(), file.proposed_bytes.as_slice())))
+    draft.check_document_edits(
+        proposal
+            .files
+            .iter()
+            .filter(|file| file.selected)
+            .map(|file| {
+                (
+                    file.canonical_path.as_path(),
+                    file.proposed_bytes.as_slice(),
+                )
+            }),
+    )
 }
 
 #[cfg(test)]

@@ -18,7 +18,7 @@ use std::process::Stdio;
 
 use std::sync::atomic::Ordering;
 
-use std::sync::mpsc::self;
+use std::sync::mpsc;
 
 use std::sync::mpsc::Receiver;
 
@@ -195,15 +195,15 @@ pub enum DapControl {
 }
 
 mod reverse;
-pub(crate) use reverse::DapReplyReceipt;
 pub use reverse::DapReplyOutcome;
+pub(crate) use reverse::DapReplyReceipt;
 pub use reverse::DapTerminalReply;
 
 mod session;
-pub use session::DapService;
 pub(crate) use session::DapContext;
-pub(crate) use session::ExecutionScope;
+pub use session::DapService;
 use session::Events;
+pub(crate) use session::ExecutionScope;
 use session::Writer;
 
 pub struct DapLaunch {

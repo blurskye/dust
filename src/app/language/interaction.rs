@@ -1,51 +1,43 @@
-use crate::ui::render::COMPLETION_MAX_ROWS;
+use crate::app::App;
 use crate::app::commands::AppEffect;
-use crate::editor::text::ByteOffset;
-use crate::editor::text::ByteRange;
-use crate::ui::DocumentationPopupKind;
+use crate::app::diagnostics::MAXIMUM_DIAGNOSTICS_PER_URI;
+use crate::app::language::LSP_MAXIMUM_LOG_LINES;
+use crate::app::language::LspLaunch;
+use crate::app::language::ProjectionChange;
+use crate::app::picker::MatcherSource;
+use crate::app::picker::PickerPayload;
+use crate::app::tools::LspRuntimeSource;
 use crate::editor::EditorOperation;
 use crate::editor::EditorTransaction;
-use std::time::Instant;
-use crate::app::App;
-use crate::language::lsp::LspFeature;
-use crate::app::tools::LspRuntimeSource;
-use crate::language::lsp::LspWorkspaceEdit;
-use crate::app::picker::MatcherSource;
-use std::path::Path;
-use std::path::PathBuf;
-use crate::persistence::PersistedLocation;
-use crate::workspace::PickerAction;
-use crate::workspace::PickerItem;
-use crate::workspace::PickerItemId;
-use crate::app::picker::PickerPayload;
-use crate::ui::PickerSurfaceKind;
+use crate::editor::UndoPolicy;
+use crate::editor::text::ByteOffset;
+use crate::editor::text::ByteRange;
 use crate::editor::text::PositionCodec;
 use crate::editor::text::PositionEncoding;
 use crate::editor::text::TextBuffer;
 use crate::editor::text::TextEdit;
-use crate::editor::UndoPolicy;
-use crate::tools::discover_executable;
-use crate::language::lsp::path_from_file_uri;
-use std::time::Duration;
 use crate::language::lsp::LspEvent;
+use crate::language::lsp::LspFeature;
 use crate::language::lsp::LspFeatureResult;
-use crate::app::language::LspLaunch;
 use crate::language::lsp::LspProgressKind;
+use crate::language::lsp::LspWorkspaceEdit;
+use crate::language::lsp::path_from_file_uri;
+use crate::persistence::PersistedLocation;
+use crate::tools::discover_executable;
+use crate::ui::DocumentationPopupKind;
+use crate::ui::PickerSurfaceKind;
 use crate::ui::UiFold;
 use crate::ui::UiInlayHint;
 use crate::ui::UiSyntaxSpan;
-use crate::app::command;
-use crate::app::diagnostics::MAXIMUM_DIAGNOSTICS_PER_URI;
-use crate::app::language::LSP_MAXIMUM_LOG_LINES;
-use crate::app::language::ProjectionChange;
-
-
-
-
-
+use crate::ui::render::COMPLETION_MAX_ROWS;
+use crate::workspace::PickerAction;
+use crate::workspace::PickerItem;
+use crate::workspace::PickerItemId;
+use std::path::PathBuf;
+use std::time::Duration;
+use std::time::Instant;
 
 impl App {
-
     pub(in crate::app) fn show_lsp_logs(&mut self) {
         let previous = if self.search.picker_surface() == PickerSurfaceKind::Logs {
             self.search.picker_bookmark()
@@ -89,8 +81,9 @@ impl App {
 }
 
 impl App {
-
-    pub(in crate::app) fn lsp_completion_kind(item: &crate::language::lsp::LspCompletionItem) -> &'static str {
+    pub(in crate::app) fn lsp_completion_kind(
+        item: &crate::language::lsp::LspCompletionItem,
+    ) -> &'static str {
         match item.kind {
             Some(1) => "Text",
             Some(2) => "Method",
@@ -123,8 +116,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn refresh_lsp_completion_documentation(&mut self) {
         let Some(selected) = self
             .ui
@@ -152,8 +143,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn move_lsp_completion(&mut self, direction: i8) {
         let rows = usize::from(COMPLETION_MAX_ROWS.max(1));
         if let Some((selected, scroll)) = self.language.move_completion(direction, rows)
@@ -167,8 +156,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn accept_lsp_completion(&mut self) {
         if !self.language.completion_current(&self.state) {
             self.language.clear_completion();
@@ -435,8 +422,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn execute_lsp_command(
         &mut self,
         server: &str,
@@ -458,8 +443,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn select_snippet_current(&mut self) {
         let source = self.state.window_version();
         let document = self.input.snippet_buffer().and_then(|id| {
@@ -492,7 +475,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn navigate_snippet(&mut self, direction: i8) {
         let buffer = self.input.snippet_buffer();
         if self.input.navigate_snippet(direction)
@@ -514,7 +496,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn lsp_position_encoding(&self) -> PositionEncoding {
         self.language
             .capabilities()
@@ -522,14 +503,11 @@ impl App {
     }
 }
 
-
-
 /// How often, and how far apart, a request answered "content modified" before its server
 /// reported loading is sent again: rust-analyzer does this for a file opened a moment ago.
 const LSP_CONTENT_MODIFIED_RETRIES: u8 = 10;
 
 const LSP_CONTENT_MODIFIED_DELAY: Duration = Duration::from_millis(500);
-
 
 pub(in crate::app) enum NavigationRead {
     Matcher(MatcherSource),
@@ -545,7 +523,6 @@ pub(in crate::app) enum NavigationRead {
     Recovered(std::path::PathBuf, String),
 }
 impl App {
-
     fn clear_lsp_ui_rows(&mut self) {
         if self.ui.language_completion.is_some() {
             self.ui.language_completion = None;
@@ -568,7 +545,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn clear_lsp_ui_projection(&mut self) {
         self.language.clear_projection();
         self.clear_lsp_ui_rows();
@@ -576,7 +552,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn refresh_lsp_projection_owner(&mut self) {
         let document = self.active_lsp_document_without_text();
         let change = self.language.refresh_projection(
@@ -620,7 +595,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn clear_lsp_session_state(&mut self) {
         if let Some(server) = self.language.active().cloned() {
             self.clear_lsp_server_ownership(&server);
@@ -632,7 +606,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn schedule_lsp_inlay_startup_refresh(&mut self) {
         self.language
             .startup_inlays(&self.configuration.settings().lsp, Instant::now());
@@ -640,7 +613,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn schedule_lsp_inlay_warmup_retry(&mut self) -> bool {
         self.language
             .retry_inlays(&self.configuration.settings().lsp, Instant::now())
@@ -648,7 +620,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn schedule_lsp_inlay_refresh(&mut self, immediate: bool) {
         self.language.schedule_inlays(
             &self.configuration.settings().lsp,
@@ -662,7 +633,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn process_lsp_inlay_refresh(&mut self) {
         if self
             .language
@@ -677,7 +647,6 @@ impl App {
 }
 
 impl App {
-
     fn reprobe_failed_path_runtime(&mut self, server: &str) {
         let Some(definition) = self.language.sessions().get(server).and_then(|state| {
             matches!(&state.launch, LspLaunch::Direct { managed: false, .. })
@@ -695,8 +664,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn append_lsp_log(&mut self, line: String) {
         self.language.append_log(line, LSP_MAXIMUM_LOG_LINES);
         if self.search.picker_surface() == PickerSurfaceKind::Logs && self.ui.picker.is_some() {
@@ -706,16 +673,12 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn lsp_server_label(&self, server_key: &str) -> String {
         self.language.server_label(server_key)
     }
 }
 
 impl App {
-
-
     pub(in crate::app) fn update_lsp_progress(
         &mut self,
         server: String,
@@ -739,7 +702,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn clear_lsp_progress(&mut self, server: &str) {
         self.language.clear_progress(server);
         self.project_lsp_progress();
@@ -747,7 +709,6 @@ impl App {
 }
 
 impl App {
-
     fn project_lsp_progress(&mut self) {
         let (rows, frame) = self.language.progress();
         if self.ui.lsp_progress != rows {
@@ -771,7 +732,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn update_lsp_progress_animation(&mut self, now: Instant) {
         self.language
             .animate_progress(&self.configuration.settings().ui.lsp_progress, now);
@@ -780,7 +740,6 @@ impl App {
 }
 
 impl App {
-
     /// Whether the server is still working through its project.
     /// Sends the waiting request again once a "content modified" retry is due.
     pub(in crate::app) fn process_lsp_retry(&mut self) {
@@ -796,21 +755,18 @@ impl App {
 }
 
 impl App {
-
     fn lsp_server_loading(&self, server: &str) -> bool {
         self.language.server_loading(server)
     }
 }
 
 impl App {
-
     fn show_lsp_loading(&mut self) {
         self.ui.lsp_loading = Some(self.message("lsp_loading", &[]));
     }
 }
 
 impl App {
-
     /// An empty answer from a server still loading its project says nothing about the code.
     pub(in crate::app) fn show_lsp_no_result(&mut self, server: &str) {
         if self.lsp_server_loading(server) {
@@ -824,7 +780,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn handle_lsp_request_failure(
         &mut self,
         server: String,
@@ -939,8 +894,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn process_lsp_events(&mut self) {
         for error in self.language.retry_configurations() {
             self.show_error(error);
@@ -1228,8 +1181,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn schedule_lsp_restart(&mut self, key: String) {
         if let Some(server) = self.language.schedule_restart(&key, Instant::now()) {
             self.show_error(self.message("lsp_restart_disabled", &[("server", server)]));
@@ -1238,8 +1189,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn restart_lsp_if_due(&mut self) {
         if let Some(key) = self.language.restart_due(Instant::now()) {
             self.restart_lsp_session(key);
@@ -1248,7 +1197,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn request_lsp_inlay_hints(&mut self) {
         self.refresh_lsp_projection_owner();
         let Some(owner) = self.language.projection() else {
@@ -1277,8 +1225,6 @@ impl App {
 }
 
 impl App {
-
-
     /// Keeps the symbols of the document on screen fresh for the status line.
     pub(in crate::app) fn process_lsp_breadcrumbs(&mut self) {
         let settings = self.configuration.settings();
@@ -1308,7 +1254,6 @@ impl App {
 }
 
 impl App {
-
     /// The symbols a cursor can be inside, in the server's order: outer ones before inner ones.
     fn install_lsp_breadcrumbs(
         &mut self,
@@ -1340,8 +1285,6 @@ impl App {
 }
 
 impl App {
-
-
     /// Asks every attached server with a colour provider for the active document's colours.
     pub(in crate::app) fn request_lsp_colors(&mut self) {
         let Some((buffer, document)) = self.active_lsp_document() else {
@@ -1354,7 +1297,6 @@ impl App {
 }
 
 impl App {
-
     fn install_lsp_colors(
         &mut self,
         server: &str,
@@ -1411,8 +1353,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn request_lsp(&mut self, mut feature: LspFeature) {
         if matches!(feature, LspFeature::Formatting { .. })
             && let Some(tool) = self.active_formatter()
@@ -1631,8 +1571,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn open_lsp_completion_documentation(&mut self, asked: bool) {
         let Some(selected) = self
             .ui
@@ -1674,8 +1612,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn present_lsp_result(
         &mut self,
         server: &str,
@@ -1689,7 +1625,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn present_lsp_result_owned(
         &mut self,
         server: &str,
@@ -2169,28 +2104,26 @@ impl App {
 }
 
 use crate::app::configuration::configured_text_width;
-use crate::workspace::DiagnosticOwner;
-use crate::editor::EditorMode;
-use crate::workspace::ExecutionSource;
 use crate::app::language::LspAutostartObservation;
-use crate::language::lsp::LspDocument;
 use crate::app::language::LspLaunchRequest;
 use crate::app::language::LspLaunchSource;
 use crate::app::language::PendingLspProjectRoot;
-use crate::ui::PromptKind;
-use crate::app::tools::ToolInstall;
+use crate::app::tools::nix_workspace_shell_for_host;
+use crate::editor::EditorMode;
+use crate::language::lsp::LspDocument;
+use crate::language::lsp::language_id_for_path;
 use crate::tools::ToolKind;
 use crate::tools::ToolStatus;
 use crate::tools::is_nixos_host;
-use crate::language::lsp::language_id_for_path;
 use crate::tools::nix_lsp_launch_environment;
 use crate::tools::nix_lsp_profile_installed;
-use crate::app::tools::nix_workspace_shell_for_host;
 use crate::ui::CompletionItem;
 use crate::ui::LanguageCompletionState;
+use crate::ui::PromptKind;
+use crate::workspace::DiagnosticOwner;
+use crate::workspace::ExecutionSource;
 
 impl App {
-
     pub(in crate::app) fn sync_lsp_status_ui(&mut self) {
         let running = self.language.running_servers();
         let server = self
@@ -2243,8 +2176,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn reconcile_lsp_autostart(
         &mut self,
         buffer: crate::editor::BufferId,
@@ -2401,8 +2332,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn sync_lsp_document(&mut self) {
         let mut changed = self.language.retry_documents(&self.state);
         let Some(buffer) = self.state.active_buffer_id() else {
@@ -2545,8 +2474,6 @@ impl App {
 }
 
 impl App {
-
-
     /// Whether a typed character opens the menu: a server's trigger character, or a letter that
     /// starts or continues a word. Numbers don't, and a request already out will show its answer.
     fn lsp_completion_should_open(&self, typed: Option<char>, trigger: bool) -> bool {
@@ -2566,8 +2493,6 @@ impl App {
 }
 
 impl App {
-
-
     fn lsp_completion_in_insert(&self) -> bool {
         self.state
             .active_view
@@ -2577,8 +2502,6 @@ impl App {
 }
 
 impl App {
-
-
     /// The word the cursor is at the end of, with where it starts.
     fn lsp_word_before_cursor(&self) -> Option<String> {
         let start = self.lsp_word_start()?;
@@ -2589,8 +2512,6 @@ impl App {
 }
 
 impl App {
-
-
     fn lsp_word_start(&self) -> Option<ByteOffset> {
         let view = &self.state.views[self.state.active_view?];
         let text = &self.state.buffers.get(view.buffer)?.text;
@@ -2611,8 +2532,6 @@ impl App {
 }
 
 impl App {
-
-
     /// Notes where this completion starts, which later typing is measured from.
     pub(in crate::app) fn mark_lsp_completion_start(&mut self, automatic: bool) {
         let start = self.lsp_word_start();
@@ -2621,8 +2540,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn cancel_lsp_completion(&mut self) {
         self.language.cancel_completion();
         self.ui.language_completion = None;
@@ -2630,8 +2547,6 @@ impl App {
 }
 
 impl App {
-
-
     /// Shows the items matching what was typed since the request, best first. The menu closes
     /// when the cursor leaves the word or nothing matches.
     pub(in crate::app) fn narrow_lsp_completion(&mut self) {
@@ -2686,8 +2601,6 @@ impl App {
 }
 
 impl App {
-
-
     /// Mirrors the current items into the menu the renderer draws.
     pub(in crate::app) fn project_lsp_completion(&mut self) {
         let icons = &self
@@ -2733,8 +2646,6 @@ impl App {
 }
 
 impl App {
-
-
     /// How much of the word being completed is already on the line.
     fn lsp_completion_typed_columns(&self) -> u16 {
         let Some(view) = self
@@ -2773,8 +2684,6 @@ impl App {
 }
 
 impl App {
-
-
     /// `<leader>cr` and F2: the command line, ready with the name under the cursor.
     fn word_at_cursor(&self) -> Option<String> {
         self.state
@@ -2799,8 +2708,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn open_rename_prompt(&mut self) {
         let word = self.word_at_cursor();
         self.open_prompt(
@@ -2811,8 +2718,6 @@ impl App {
 }
 
 impl App {
-
-
     /// Servers list nothing for an empty query, so `<leader>sS` asks for one.
     pub(in crate::app) fn open_workspace_symbols_prompt(&mut self) {
         let word = self.word_at_cursor().unwrap_or_default();
@@ -2820,17 +2725,11 @@ impl App {
     }
 }
 
-
-
 /// Where a conflicted file's first marker is, so opening it lands there.
-
-
-
 fn completion_word_char(character: char) -> bool {
     character.is_alphanumeric() || character == '_' || character == '$'
 }
 impl App {
-
     pub(in crate::app) fn active_lsp_document(
         &self,
     ) -> Option<(crate::editor::BufferId, LspDocument)> {
@@ -2841,8 +2740,6 @@ impl App {
 }
 
 impl App {
-
-
     /// The active document's path, language and version, with empty text.
     pub(in crate::app) fn active_lsp_document_without_text(
         &self,
@@ -2864,16 +2761,12 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn start_lsp(&mut self, requested: Option<String>) {
         self.launch_lsp(requested, false);
     }
 }
 
 impl App {
-
-
     /// `asked` is a person starting this server, who is told when the project can't have it.
     pub(in crate::app) fn launch_lsp(&mut self, requested: Option<String>, asked: bool) {
         if let Some(id) = requested.as_ref().filter(|_| asked) {
@@ -3082,7 +2975,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn process_lsp_project_root(&mut self) {
         let Some(result) = self
             .workspace
@@ -3107,7 +2999,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn process_nix_lsp_workspace(&mut self) {
         let context = crate::app::language::LaunchContext {
             editor: &self.state,
@@ -3125,7 +3016,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn queue_lsp_preflight(&mut self, pending: LspLaunchRequest) {
         let context = crate::app::language::LaunchContext {
             editor: &self.state,
@@ -3144,8 +3034,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn restart_lsp_session(&mut self, key: String) {
         self.language.retire_documents(&self.state);
         let Some(state) = self.language.sessions().get(&key) else {
@@ -3187,8 +3075,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn select_lsp_session(&mut self, key: &str) {
         if self.language.select(key) {
             self.ui.lsp_inlay_hints.clear();
@@ -3198,8 +3084,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn show_lsp_sessions(&mut self) {
         let active = self.language.active().map(String::as_str);
         let home = std::env::var_os("HOME").map(PathBuf::from);
@@ -3258,8 +3142,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn clear_lsp_server_ownership(&mut self, server: &str) {
         for prefix in ["lsp.", "lsp-pull:"] {
             if let Ok(owner) = DiagnosticOwner::new(format!("{prefix}{server}")) {
@@ -3273,8 +3155,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn detach_lsp_documents(
         &mut self,
         buffer: crate::editor::BufferId,

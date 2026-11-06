@@ -7,9 +7,9 @@ use crate::editor::text::TextBuffer;
 use crate::editor::text::TextEdit;
 #[test]
 fn workspace_approval_restores_unopened_file_history_on_a_worker() {
-    use crate::editor::text::TextEditSet;
     use crate::editor::EditorOperation;
     use crate::editor::EditorTransaction;
+    use crate::editor::text::TextEditSet;
     let root = tempfile::tempdir().unwrap();
     let path = root.path().join("file.txt");
     let history = root.path().join("undo");
@@ -43,9 +43,7 @@ fn workspace_approval_restores_unopened_file_history_on_a_worker() {
         maximum,
     );
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-    while crate::editor::load_undo_history(&history, &path, &recorded.text, maximum)
-        .is_none()
-    {
+    while crate::editor::load_undo_history(&history, &path, &recorded.text, maximum).is_none() {
         assert!(
             std::time::Instant::now() < deadline,
             "history save did not finish"
@@ -236,8 +234,13 @@ fn workspace_preview_owns_selection_and_rejects_retired_or_replaced_sources_befo
     let copies = EditorState::test_clone_count();
     let materializations = TextBuffer::test_materializations();
     assert!(
-        crate::app::workspace::edits::prepare_workspace_edit(&editor, sources, preview, TransactionId(1))
-            .is_err()
+        crate::app::workspace::edits::prepare_workspace_edit(
+            &editor,
+            sources,
+            preview,
+            TransactionId(1)
+        )
+        .is_err()
     );
     assert_eq!(editor.buffers.len(), 1); // earlier unopened target never leaks into live state
     assert_eq!(EditorState::test_clone_count(), copies);
@@ -252,13 +255,23 @@ fn workspace_preview_owns_selection_and_rejects_retired_or_replaced_sources_befo
             .is_err()
     );
     assert!(
-        crate::app::workspace::edits::prepare_workspace_edit(&editor, sources, preview, TransactionId(2))
-            .is_err()
+        crate::app::workspace::edits::prepare_workspace_edit(
+            &editor,
+            sources,
+            preview,
+            TransactionId(2)
+        )
+        .is_err()
     );
     editor.replace_buffer_from_disk(buffer, TextBuffer::from_text("old"), path.clone());
     assert!(
-        crate::app::workspace::edits::prepare_workspace_edit(&editor, sources, preview, TransactionId(3))
-            .is_err()
+        crate::app::workspace::edits::prepare_workspace_edit(
+            &editor,
+            sources,
+            preview,
+            TransactionId(3)
+        )
+        .is_err()
     );
     assert!(editor.workspace_resource_change(sources, &path).is_err());
     assert_eq!(EditorState::test_clone_count(), copies);
@@ -271,11 +284,21 @@ fn workspace_preview_owns_selection_and_rejects_retired_or_replaced_sources_befo
     let (sources, preview) = owner.approval(&version, 1).unwrap();
     let foreign = EditorState::new(root.path().into());
     assert!(
-        crate::app::workspace::edits::prepare_workspace_edit(&foreign, sources, preview, TransactionId(4))
-            .is_err()
+        crate::app::workspace::edits::prepare_workspace_edit(
+            &foreign,
+            sources,
+            preview,
+            TransactionId(4)
+        )
+        .is_err()
     );
-    let draft = crate::app::workspace::edits::prepare_workspace_edit(&editor, sources, preview, TransactionId(5))
-        .unwrap();
+    let draft = crate::app::workspace::edits::prepare_workspace_edit(
+        &editor,
+        sources,
+        preview,
+        TransactionId(5),
+    )
+    .unwrap();
     owner.stage_approval(&draft, Vec::new()).unwrap();
     assert!(owner.accepted(editor.publication()).is_err());
     editor = draft.accept(&editor.version()).unwrap();
@@ -293,9 +316,9 @@ fn workspace_preview_owns_selection_and_rejects_retired_or_replaced_sources_befo
     assert!(owner.accepted(editor.publication()).is_err());
     // A single real bounded document lane proves read/create admission, queue
     // refusal, cancellation, and a late terminal without reviving old preparation.
-    use crate::app::startup::StartupTarget;
     use crate::app::documents::DocumentEvent;
     use crate::app::documents::DocumentSession;
+    use crate::app::startup::StartupTarget;
     use crate::files::VfsWorker;
     let disk = root.path().join("on-disk");
     std::fs::write(&disk, b"abc").unwrap();
@@ -705,8 +728,13 @@ fn stage_resource(
         .unwrap();
     let (sources, proposal) = owner.approval(&version, 1).unwrap();
     let change = editor.workspace_resource_change(sources, source).unwrap();
-    let draft = crate::app::workspace::edits::prepare_workspace_edit(&editor, sources, proposal, TransactionId(1))
-        .unwrap();
+    let draft = crate::app::workspace::edits::prepare_workspace_edit(
+        editor,
+        sources,
+        proposal,
+        TransactionId(1),
+    )
+    .unwrap();
     owner.stage_approval(&draft, vec![change]).unwrap();
     let published = draft.accept(&editor.version()).unwrap();
     owner.accepted(published.publication()).unwrap();
@@ -793,8 +821,13 @@ fn new_file_text_uses_one_creation_snapshot_and_one_draft() {
     let (sources, proposal) = owner.approval(&workspace.version(), 1).unwrap();
     assert_eq!(proposal.files.len(), 1);
     assert_eq!(proposal.files[0].proposed_bytes, b"fn main() {}\n");
-    let draft = crate::app::workspace::edits::prepare_workspace_edit(&editor, sources, proposal, TransactionId(1))
-        .unwrap();
+    let draft = crate::app::workspace::edits::prepare_workspace_edit(
+        &editor,
+        sources,
+        proposal,
+        TransactionId(1),
+    )
+    .unwrap();
     let published = draft.accept(&editor.version()).unwrap();
     let buffer = published
         .buffers

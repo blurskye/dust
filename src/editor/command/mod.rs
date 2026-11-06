@@ -486,8 +486,8 @@ mod tests {
 
     use crate::editor::command::ContextRequirement;
 
-    use crate::editor::command::InvocationSource;
     use crate::editor::EditorState;
+    use crate::editor::command::InvocationSource;
 
     #[test]
     fn rejects_duplicates_and_plugin_namespace_theft() {

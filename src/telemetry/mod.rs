@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use std::collections::VecDeque;
 use std::fs;
 use std::path::PathBuf;
-use std::sync::mpsc::self;
+use std::sync::mpsc;
 use std::sync::mpsc::Receiver;
 use std::sync::mpsc::SyncSender;
 use std::sync::mpsc::TrySendError;

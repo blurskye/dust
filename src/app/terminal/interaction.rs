@@ -1,24 +1,17 @@
-use crate::windows::DockEdge;
 use crate::app::App;
+use crate::app::TrustedAction;
+use crate::app::terminal::TerminalUpdate;
 use crate::app::windows::NativeSurfaceTarget;
 use crate::ui::PromptKind;
-use crate::app::terminal::TerminalUpdate;
-use crate::app::TrustedAction;
+use crate::windows::DockEdge;
 use crate::windows::WindowPlacement;
 use crate::windows::WindowRect;
 // Remaining editor/window routing; terminal data and algorithms live in the owner.
-use crate::process::PtyId;
 use crate::editor::RegisterShape;
 use crate::editor::RegisterValue;
-
-
-
-
-
-
+use crate::process::PtyId;
 
 impl App {
-
     /// Shows a terminal and gives it the keys, bringing its window back if it was hidden.
     pub(in crate::app) fn reveal_terminal(&mut self, id: PtyId) {
         self.terminal_session.select(id);
@@ -36,7 +29,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn close_terminal(&mut self, id: PtyId) {
         if self.terminal_session.stopping(id) {
             self.show_error("terminal stop is already pending");
@@ -61,9 +53,10 @@ impl App {
 }
 
 impl App {
-
-
-    pub(in crate::app) fn submit_terminal_close(&mut self, selected: crate::ui::ConfirmationChoice) {
+    pub(in crate::app) fn submit_terminal_close(
+        &mut self,
+        selected: crate::ui::ConfirmationChoice,
+    ) {
         let source = self.terminal_session.take_close();
         // Restore the pre-prompt focus first; Hide or Stop then performs the
         // accepted final focus transition without the prompt lease undoing it.
@@ -102,7 +95,6 @@ impl App {
 }
 
 impl App {
-
     fn terminal_command_target(&self) -> Option<PtyId> {
         self.keyboard_terminal()
             .or(self.terminal_session.selected())
@@ -110,15 +102,12 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn reject_terminal_responses(&mut self, reason: &str) {
         self.debugger_session.reject_terminals(reason);
     }
 }
 
 impl App {
-
-
     /// Shows the terminal as a centered float covering most of the screen, like LazyVim's
     /// lazygit window.
     fn float_terminal(&mut self, id: PtyId) {
@@ -136,8 +125,6 @@ impl App {
 }
 
 impl App {
-
-
     /// A terminal running an agent profile's own program, for `agents.connection = "terminal"`.
     pub(in crate::app) fn agent_terminal(&self, id: PtyId) -> bool {
         self.terminal_session.is_agent(id)
@@ -145,8 +132,6 @@ impl App {
 }
 
 impl App {
-
-
     /// An agent's terminal opens at the agent panel's width on its side, where the ACP panel goes.
     fn dock_agent_terminal(&mut self, id: PtyId) {
         self.terminal_session.set_side(id);
@@ -168,8 +153,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn retire_terminal(&mut self, id: PtyId, request_close: bool) {
         let focused = self.window_session.focused_terminal() == Some(id.0);
         if request_close {
@@ -207,7 +190,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn enter_terminal_normal_mode(&mut self) {
         if let Some(id) = self.terminal_command_target() {
             self.terminal_session.enter_terminal_normal_mode(id);
@@ -218,7 +200,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn enter_terminal_input_mode(&mut self) {
         if let Some(id) = self.terminal_command_target() {
             self.terminal_session.enter_terminal_input_mode(id);
@@ -229,7 +210,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn move_terminal_normal_cursor(&mut self, motion: &str) {
         let Some(id) = self.terminal_command_target() else {
             return;
@@ -245,7 +225,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn start_terminal_visual(&mut self, linewise: bool) {
         if let Some(id) = self.terminal_command_target() {
             self.terminal_session.start_terminal_visual(id, linewise);
@@ -255,7 +234,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn yank_terminal_text(&mut self, line: bool) {
         let Some(id) = self.terminal_command_target() else {
             return;
@@ -284,7 +262,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn sync_terminal_panel(&mut self) {
         let focused = self.window_session.focused_terminal();
         let height = self.window_session.terminal_height();
@@ -309,8 +286,6 @@ impl App {
 }
 
 impl App {
-
-
     /// Every terminal with a window on screen, the active one first.
     pub(in crate::app) fn shown_terminal_windows(&self) -> Vec<(PtyId, crate::windows::WindowId)> {
         let Some(projection) = self.compositor_projection() else {
@@ -336,7 +311,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn request_terminal_open(
         &mut self,
         profile: &str,
@@ -379,8 +353,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn open_terminal_with_response(
         &mut self,
         intent: crate::app::terminal::TerminalIntent,
@@ -468,8 +440,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn process_pty_events(&mut self) {
         self.terminal_session.set_theme(self.configuration.theme());
         let windows = &self.window_session;
@@ -544,7 +514,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn set_terminal_focus(&mut self, focused: bool) {
         if focused {
             if let Some(id) = self.terminal_session.selected() {
@@ -561,8 +530,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn displayed_terminal(&self) -> Option<PtyId> {
         self.window_session
             .focused_terminal()
@@ -573,7 +540,6 @@ impl App {
 }
 
 impl App {
-
     /// Where the terminal's window is, if it is on screen.
     pub(in crate::app) fn terminal_rect(&self, id: PtyId) -> Option<WindowRect> {
         let window = self.window_session.native_ids().terminal(id.0)?.window;
@@ -584,7 +550,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn terminal_window_rect(&self) -> Option<WindowRect> {
         let layout = self.window_session.layout()?;
         let (_, window) = layout.surfaces.terminal?;
@@ -595,8 +560,6 @@ impl App {
 }
 
 impl App {
-
-
     #[cfg(test)]
     pub(in crate::app) fn terminal_body_dimensions(&self) -> Option<(u16, u16)> {
         self.compositor_projection()?;
@@ -606,8 +569,6 @@ impl App {
 }
 
 impl App {
-
-
     /// Sizes each terminal on screen to its window.
     pub(in crate::app) fn resize_active_terminal_to_panel(&mut self) {
         self.reconcile_editor_windows();
@@ -635,8 +596,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn place_active_terminal(&mut self, placement: WindowPlacement) {
         let Some(id) = self.displayed_terminal() else {
             self.show_error(self.message("terminal_missing", &[]));

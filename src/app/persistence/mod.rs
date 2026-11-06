@@ -18,12 +18,12 @@ pub(in crate::app) const STATE_FILE: &str = "session.json";
 pub(in crate::app) const PERSISTENCE_QUEUE_CAPACITY: usize = 4;
 
 mod session;
-#[cfg(test)]
-pub(in crate::app) use session::capture_persisted_layout;
 pub(in crate::app) use session::RestoreContext;
 pub(in crate::app) use session::RestorePrepared;
 pub(in crate::app) use session::RestoreReady;
 pub(in crate::app) use session::RestoreUpdate;
+#[cfg(test)]
+pub(in crate::app) use session::capture_persisted_layout;
 
 pub(in crate::app) struct PersistenceSession {
     load_source: Option<session::RestoreSource>,
@@ -142,10 +142,7 @@ impl PersistenceSession {
     ) -> Option<crate::persistence::PersistedLocation> {
         self.navigation_reads.remove(&id)
     }
-    pub(in crate::app) fn retire_document_request(
-        &mut self,
-        id: crate::files::RequestId,
-    ) {
+    pub(in crate::app) fn retire_document_request(&mut self, id: crate::files::RequestId) {
         self.navigation_reads.remove(&id);
     }
     pub(in crate::app) fn request_save_notice(&mut self) {
@@ -165,10 +162,7 @@ impl PersistenceSession {
     pub(in crate::app) fn pending(&self) -> bool {
         self.pending.is_some()
     }
-    pub(in crate::app) fn load(
-        &mut self,
-        policy: PersistencePolicy,
-    ) -> Result<(), String> {
+    pub(in crate::app) fn load(&mut self, policy: PersistencePolicy) -> Result<(), String> {
         if self.pending() || self.closing {
             return Err("persistence is busy or closing".into());
         }
@@ -206,9 +200,7 @@ impl PersistenceSession {
         self.failure = Some(message.clone());
         message
     }
-    pub(in crate::app) fn poll(
-        &mut self,
-    ) -> Option<Result<Box<PersistedState>, String>> {
+    pub(in crate::app) fn poll(&mut self) -> Option<Result<Box<PersistedState>, String>> {
         loop {
             let event = match self.worker.try_event() {
                 Ok(Some(event)) => event,

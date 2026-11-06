@@ -10,10 +10,10 @@ mod lifecycle;
 #[cfg(test)]
 pub(in crate::app) use lifecycle::configured_file_bytes;
 mod task_io;
-use crate::editor::text::TextBuffer;
+use crate::app::startup::StartupTarget;
 use crate::editor::BufferId;
 use crate::editor::EditorWindowVersion;
-use crate::app::startup::StartupTarget;
+use crate::editor::text::TextBuffer;
 use crate::files::CheckedResourceIntent;
 use crate::files::ExplorerMutation;
 use crate::files::RecoveryRecord;
@@ -369,10 +369,7 @@ impl DocumentSession {
             self.primary.take()
         }
     }
-    pub(in crate::app) fn configured_mode(
-        &self,
-        buffer: BufferId,
-    ) -> LargeFileOverride {
+    pub(in crate::app) fn configured_mode(&self, buffer: BufferId) -> LargeFileOverride {
         self.overrides
             .get(&buffer)
             .copied()
@@ -461,11 +458,7 @@ impl DocumentSession {
             .collect();
     }
     #[cfg(test)]
-    pub(in crate::app) fn enqueue_startup_fixture(
-        &mut self,
-        path: PathBuf,
-        primary: bool,
-    ) {
+    pub(in crate::app) fn enqueue_startup_fixture(&mut self, path: PathBuf, primary: bool) {
         self.startup.push_back((path, primary));
     }
     #[cfg(test)]
@@ -533,10 +526,7 @@ impl DocumentSession {
         }
     }
     #[cfg(test)]
-    pub(in crate::app) fn read(
-        &mut self,
-        path: PathBuf,
-    ) -> Result<RequestId, VfsError> {
+    pub(in crate::app) fn read(&mut self, path: PathBuf) -> Result<RequestId, VfsError> {
         self.check_admission()?;
         let id = self.vfs.read(path)?;
         self.pending_legacy.insert(id);
@@ -766,10 +756,7 @@ impl RecoveryIo<'_> {
     ) -> Result<RequestId, VfsError> {
         self.submit(|vfs| vfs.cleanup_recovery(path.to_owned(), maximum, days, protected))
     }
-    pub(in crate::app) fn delete(
-        &mut self,
-        path: &Path,
-    ) -> Result<RequestId, VfsError> {
+    pub(in crate::app) fn delete(&mut self, path: &Path) -> Result<RequestId, VfsError> {
         self.submit(|vfs| vfs.delete(path.to_owned()))
     }
     pub(in crate::app) fn write(
@@ -1104,7 +1091,6 @@ pub(in crate::app) mod commands;
 
 #[cfg(test)]
 pub(in crate::app) mod project_tests;
-
 
 #[cfg(test)]
 pub(in crate::app) mod surfaces_tests;

@@ -1,24 +1,21 @@
-
-use crate::app::commands::AppEffect;
 use crate::app::App;
+use crate::app::commands::AppEffect;
 use crate::workspace::WorkspaceTrust;
 
-
-
-
+use crate::app::commands::integer_arg;
+use crate::app::commands::register;
+use crate::app::commands::string_arg;
 use crate::editor::ArgumentSchema;
 use crate::editor::ArgumentType;
 use crate::editor::CommandError;
 use crate::editor::CommandRegistry;
 use crate::editor::ContextRequirement;
-use crate::app::commands::integer_arg;
-use crate::app::commands::register;
-use crate::app::commands::string_arg;
-use std::path::PathBuf;
 use crate::ui::PromptKind;
+use std::path::PathBuf;
 
-pub(in crate::app) fn register_commands(registry: &mut CommandRegistry<AppEffect>) -> Result<(), CommandError> {
-
+pub(in crate::app) fn register_commands(
+    registry: &mut CommandRegistry<AppEffect>,
+) -> Result<(), CommandError> {
     register(
         registry,
         "workspace.root.add",
@@ -169,23 +166,18 @@ pub(in crate::app) fn register_commands(registry: &mut CommandRegistry<AppEffect
         ArgumentSchema::default(),
         |_| AppEffect::HistoryClear,
     )?;
-Ok(())
+    Ok(())
 }
 
-
-
-
-
-
-
-
-
 impl App {
-    pub(in crate::app) fn process_workspace_effect(&mut self, effect: AppEffect) -> Result<(), AppEffect> {
+    pub(in crate::app) fn process_workspace_effect(
+        &mut self,
+        effect: AppEffect,
+    ) -> Result<(), AppEffect> {
         match effect {
-AppEffect::WorkspaceTrust => self.request_workspace_trust(),
-AppEffect::WorkspaceUntrust => self.revoke_workspace_trust(),
-AppEffect::WorkspaceStatus => {
+            AppEffect::WorkspaceTrust => self.request_workspace_trust(),
+            AppEffect::WorkspaceUntrust => self.revoke_workspace_trust(),
+            AppEffect::WorkspaceStatus => {
                 let state = if self.workspace.trust() == WorkspaceTrust::Trusted {
                     self.message("workspace_trust_trusted", &[])
                 } else {
@@ -196,14 +188,14 @@ AppEffect::WorkspaceStatus => {
                     false,
                 );
             }
-AppEffect::WorkspaceRootAdd(path) => self.add_workspace_root(path),
-AppEffect::WorkspaceRootActivate(id) => {
+            AppEffect::WorkspaceRootAdd(path) => self.add_workspace_root(path),
+            AppEffect::WorkspaceRootActivate(id) => {
                 self.activate_workspace_root(crate::workspace::RootId(id));
             }
-AppEffect::WorkspaceRootRemove(id) => {
+            AppEffect::WorkspaceRootRemove(id) => {
                 self.remove_workspace_root(crate::workspace::RootId(id));
             }
-AppEffect::WorkspaceRootStatus => {
+            AppEffect::WorkspaceRootStatus => {
                 if let Some(root) = self
                     .workspace
                     .active_root()
@@ -221,7 +213,7 @@ AppEffect::WorkspaceRootStatus => {
                     );
                 }
             }
-AppEffect::SafeModeStatus => {
+            AppEffect::SafeModeStatus => {
                 self.notify_message(
                     self.message(
                         "safe_mode_status",

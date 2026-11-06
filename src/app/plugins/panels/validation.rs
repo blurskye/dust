@@ -1,34 +1,34 @@
-use std::collections::BTreeMap;
-use std::collections::BTreeSet;
-use crate::windows::DockEdge;
 use crate::app::plugins::panels::MAXIMUM_PLUGIN_UI_CHILDREN;
 use crate::app::plugins::panels::MAXIMUM_PLUGIN_UI_DEPTH;
 use crate::app::plugins::panels::MAXIMUM_PLUGIN_UI_NODE_TEXT_BYTES;
 use crate::app::plugins::panels::MAXIMUM_PLUGIN_UI_NODES;
 use crate::app::plugins::panels::MAXIMUM_PLUGIN_UI_TEXT_BYTES;
+use crate::app::plugins::panels::PluginPrivateState;
+use crate::app::plugins::panels::PluginWindowInstance;
 use crate::plugins::PluginContributionIndex;
 use crate::plugins::PluginPresenterKind;
 use crate::plugins::PluginPrivatePatch;
 use crate::plugins::PluginPrivateRect;
 use crate::plugins::PluginPrivateSnapshot;
-use crate::app::plugins::panels::PluginPrivateState;
 use crate::plugins::PluginPrivateStyle;
 use crate::plugins::PluginRequestedPlacement;
-use crate::ui::PluginSurfaceRow;
 use crate::plugins::PluginUiError;
 use crate::plugins::PluginUiErrorCode;
 use crate::plugins::PluginUiNodeKind;
 use crate::plugins::PluginUiStyle;
 use crate::plugins::PluginUiTree;
-use crate::app::plugins::panels::PluginWindowInstance;
 use crate::plugins::PluginWindowPlacementKind;
-use unicode_segmentation::UnicodeSegmentation;
-use unicode_width::UnicodeWidthStr;
+use crate::ui::PluginSurfaceRow;
+use crate::windows::DockEdge;
 use crate::windows::WindowError;
 use crate::windows::WindowGraph;
 use crate::windows::WindowId;
 use crate::windows::WindowPlacement;
 use crate::windows::WindowRect;
+use std::collections::BTreeMap;
+use std::collections::BTreeSet;
+use unicode_segmentation::UnicodeSegmentation;
+use unicode_width::UnicodeWidthStr;
 
 pub(in crate::app) fn instance_revisions(
     handle: u64,
@@ -219,21 +219,14 @@ pub(in crate::app) fn rect_contains(
         && py < y.saturating_add(height)
 }
 
-pub(in crate::app) fn rects_overlap(
-    left: PluginPrivateRect,
-    right: PluginPrivateRect,
-) -> bool {
+pub(in crate::app) fn rects_overlap(left: PluginPrivateRect, right: PluginPrivateRect) -> bool {
     left.x < right.x.saturating_add(right.width)
         && right.x < left.x.saturating_add(left.width)
         && left.y < right.y.saturating_add(right.height)
         && right.y < left.y.saturating_add(left.height)
 }
 
-pub(in crate::app) fn rect_in_bounds(
-    rect: PluginPrivateRect,
-    width: u16,
-    height: u16,
-) -> bool {
+pub(in crate::app) fn rect_in_bounds(rect: PluginPrivateRect, width: u16, height: u16) -> bool {
     rect.width > 0
         && rect.height > 0
         && rect

@@ -242,8 +242,6 @@ pub fn discover_executable(executable: &str) -> Option<PathBuf> {
     })
 }
 
-
-
 /// The executables on `PATH`, read with one listing per directory. Looking up every catalog
 /// tool in every directory separately costs thousands of `stat` calls at startup.
 struct PathExecutables(HashMap<OsString, PathBuf>);

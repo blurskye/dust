@@ -1,27 +1,21 @@
-
-use crate::app::commands::AppEffect;
 use crate::app::App;
+use crate::app::commands::AppEffect;
 
-
-
-
-
-
-
+use crate::app::commands::bool_arg;
+use crate::app::commands::one_character_arg;
+use crate::app::commands::optional_bool_arg;
+use crate::app::commands::register;
+use crate::app::commands::string_arg;
+use crate::app::configuration::ViewToggle;
 use crate::editor::ArgumentSchema;
 use crate::editor::ArgumentType;
 use crate::editor::CommandError;
 use crate::editor::CommandRegistry;
 use crate::editor::ContextRequirement;
-use crate::app::commands::register;
-use crate::app::commands::string_arg;
-use crate::app::commands::optional_bool_arg;
-use crate::app::commands::bool_arg;
-use crate::app::configuration::ViewToggle;
-use crate::app::commands::one_character_arg;
 
-pub(in crate::app) fn register_commands(registry: &mut CommandRegistry<AppEffect>) -> Result<(), CommandError> {
-
+pub(in crate::app) fn register_commands(
+    registry: &mut CommandRegistry<AppEffect>,
+) -> Result<(), CommandError> {
     register(
         registry,
         "editor.quit",
@@ -176,27 +170,22 @@ pub(in crate::app) fn register_commands(registry: &mut CommandRegistry<AppEffect
         ArgumentSchema::default(),
         |_| Ok(AppEffect::SubstituteAll),
     )?;
-Ok(())
+    Ok(())
 }
 
-
-
-
-
-
-
-
-
 impl App {
-    pub(in crate::app) fn process_editing_effect(&mut self, effect: AppEffect) -> Result<(), AppEffect> {
+    pub(in crate::app) fn process_editing_effect(
+        &mut self,
+        effect: AppEffect,
+    ) -> Result<(), AppEffect> {
         match effect {
-AppEffect::FlashBegin => self.begin_flash(),
-AppEffect::SubstituteAll => {
+            AppEffect::FlashBegin => self.begin_flash(),
+            AppEffect::SubstituteAll => {
                 if self.substitute_confirm.is_some() {
                     self.answer_substitution(true, true);
                 }
             }
-AppEffect::Scroll {
+            AppEffect::Scroll {
                 kind,
                 count,
                 at_mouse,
@@ -206,15 +195,15 @@ AppEffect::Scroll {
                 }
                 self.scroll_view(&kind, count);
             }
-AppEffect::RepeatLast(count) => self.repeat_last_change(count),
-AppEffect::MacroRecordStart(register) => {
+            AppEffect::RepeatLast(count) => self.repeat_last_change(count),
+            AppEffect::MacroRecordStart(register) => {
                 self.input.start_macro_recording(register);
                 self.notify_message(
                     self.message("macro_recording", &[("register", register.to_string())]),
                     false,
                 );
             }
-AppEffect::MacroRecordStop => {
+            AppEffect::MacroRecordStop => {
                 if let Some((register, invocations)) = self.input.finish_macro_recording() {
                     self.state.registers.set_macro(register, invocations);
                     self.state.mark_editor_changed();
@@ -226,17 +215,17 @@ AppEffect::MacroRecordStop => {
                     self.show_error(self.message("no_macro_recording", &[]));
                 }
             }
-AppEffect::MacroReplay { .. } => {
+            AppEffect::MacroReplay { .. } => {
                 unreachable!("macro effects return their status through process_effect_checked")
             }
-AppEffect::Grammar(input) => self.process_grammar_input(input),
-AppEffect::Substitute {
+            AppEffect::Grammar(input) => self.process_grammar_input(input),
+            AppEffect::Substitute {
                 range,
                 pattern,
                 replacement,
                 flags,
             } => self.run_substitute(&range, &pattern, &replacement, &flags),
-AppEffect::GlobalDelete {
+            AppEffect::GlobalDelete {
                 range,
                 pattern,
                 invert,

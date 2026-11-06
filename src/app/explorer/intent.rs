@@ -1,10 +1,10 @@
 //! Explorer operations retain their exact request, confirmation and reconciliation context.
-use crate::app::explorer::tree::ExplorerKind;
 use crate::app::explorer::ExplorerSession;
-use crate::app::workspace::WorkspaceVersion;
+use crate::app::explorer::tree::ExplorerKind;
 use crate::app::windows::NavigationStamp;
-use crate::editor::EditorWindowVersion;
+use crate::app::workspace::WorkspaceVersion;
 use crate::editor::BufferPathChange;
+use crate::editor::EditorWindowVersion;
 use crate::files::ExplorerIoReply;
 use crate::files::ExplorerMutation;
 use crate::files::PreparedExplorerMutation;
@@ -138,10 +138,7 @@ impl ExplorerSession {
         }
         Ok(node.path.clone())
     }
-    pub(in crate::app) fn create(
-        &self,
-        input: &str,
-    ) -> Result<ExplorerMutation, String> {
+    pub(in crate::app) fn create(&self, input: &str) -> Result<ExplorerMutation, String> {
         let directory = input.ends_with('/') || input.ends_with(std::path::MAIN_SEPARATOR);
         let input = input.trim_end_matches(['/', std::path::MAIN_SEPARATOR]);
         if input.is_empty() {
@@ -203,9 +200,7 @@ impl ExplorerSession {
             roots: self.operation_roots(roots),
         })
     }
-    pub(in crate::app) fn rename_inspection(
-        &mut self,
-    ) -> Result<RenameInspection<'_>, String> {
+    pub(in crate::app) fn rename_inspection(&mut self) -> Result<RenameInspection<'_>, String> {
         self.rename
             .as_mut()
             .filter(|rename| {
@@ -298,9 +293,7 @@ impl ExplorerSession {
             target,
         })
     }
-    pub(in crate::app) fn submitted_rename_source(
-        &mut self,
-    ) -> crate::files::ExplorerRenameSource {
+    pub(in crate::app) fn submitted_rename_source(&mut self) -> crate::files::ExplorerRenameSource {
         let rename = self.rename.as_mut().expect("validated rename prompt");
         rename.submitted = self.mutation.as_ref().map(|intent| intent.key.clone());
         rename
@@ -327,10 +320,7 @@ impl ExplorerSession {
         }
         ids
     }
-    pub(in crate::app) fn rename(
-        &self,
-        target: &str,
-    ) -> Result<ExplorerMutation, String> {
+    pub(in crate::app) fn rename(&self, target: &str) -> Result<ExplorerMutation, String> {
         if target.trim().is_empty() {
             return Err("rename target must not be empty".into());
         }
@@ -743,10 +733,7 @@ impl ExplorerSession {
             split: open.split,
         }))
     }
-    pub(in crate::app) fn retire_buffer_path(
-        &mut self,
-        path: &Path,
-    ) -> Option<RequestId> {
+    pub(in crate::app) fn retire_buffer_path(&mut self, path: &Path) -> Option<RequestId> {
         let open = self.open.as_mut()?;
         if open.path == path || open.excluded.len() >= 64 {
             return self

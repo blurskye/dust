@@ -1,20 +1,14 @@
-use crate::editor::text::ByteOffset;
+use crate::app::App;
+use crate::app::commands::PromptMove;
 use crate::editor::EditorMode;
 use crate::editor::EditorOperation;
 use crate::editor::EditorTransaction;
-use crate::app::App;
-use crate::ui::PromptKind;
-use crate::app::commands::PromptMove;
 use crate::editor::UndoPolicy;
-use crate::workspace::WorkspaceTrust;
 use crate::editor::input::parse_ex;
-use crate::app::command;
-use crate::editor::ViewId;
-
-
+use crate::editor::text::ByteOffset;
+use crate::ui::PromptKind;
 
 impl App {
-
     pub(in crate::app) fn open_prompt(&mut self, kind: PromptKind, initial: String) {
         if self
             .input
@@ -53,7 +47,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn open_confirmation(
         &mut self,
         kind: PromptKind,
@@ -66,7 +59,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn open_confirmation_actions(
         &mut self,
         kind: PromptKind,
@@ -121,14 +113,12 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn close_prompt(&mut self) {
         self.close_prompt_with_editor_close(true);
     }
 }
 
 impl App {
-
     pub(in crate::app) fn close_prompt_with_editor_close(&mut self, cancel_editor_close: bool) {
         if self
             .input
@@ -221,7 +211,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn prompt_insert(&mut self, text: &str) {
         self.input.prompt_insert(text);
         self.refresh_completions();
@@ -230,14 +219,12 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn prompt_backspace(&mut self) {
         self.prompt_delete(|input| input.prompt_backspace());
     }
 }
 
 impl App {
-
     pub(in crate::app) fn prompt_delete(
         &mut self,
         delete: impl FnOnce(&mut crate::app::input::InputSession),
@@ -249,7 +236,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn prompt_move(&mut self, movement: PromptMove) {
         self.input.prompt_move(movement);
         self.project_input_prompt();
@@ -257,7 +243,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn prompt_history(&mut self, direction: i8) {
         self.input.prompt_history(direction);
         self.refresh_completions();
@@ -266,7 +251,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn prompt_complete(&mut self, direction: i8) {
         self.input.prompt_complete(direction);
         self.project_input_prompt();
@@ -274,7 +258,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn accept_completion(&mut self) -> bool {
         let accepted = self.input.accept_completion(self.configuration.settings());
         if accepted {
@@ -285,14 +268,12 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn record_prompt_history(&mut self, kind: PromptKind, input: &str) {
         self.input.record_prompt_history(kind, input);
     }
 }
 
 impl App {
-
     pub(in crate::app) fn refresh_completions(&mut self) {
         if let Some(request) = self.input.refresh_completions(
             self.configuration.settings(),
@@ -316,8 +297,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn submit_prompt(&mut self) {
         if self.accept_completion() {
             // A chosen command runs at once, as Enter does in Vim's wildmenu; a chosen path
@@ -522,8 +501,6 @@ impl App {
 }
 
 impl App {
-
-
     /// Selects `start..end` in character Visual mode, with the cursor on its last character.
     pub(in crate::app) fn select_text(
         &mut self,
@@ -578,8 +555,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn project_input_prompt(&mut self) {
         let prompt = self.input.prompt().cloned();
         self.ui.set(prompt, |ui| &mut ui.prompt);
@@ -588,7 +563,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn prompt_help(&mut self, help: String) {
         self.input.prompt_help(help);
         self.project_input_prompt();
@@ -596,7 +570,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn prompt_error(&mut self, error: String) {
         self.input.prompt_error(error);
         self.project_input_prompt();

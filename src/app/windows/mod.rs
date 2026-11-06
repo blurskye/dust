@@ -6,7 +6,6 @@ pub(in crate::app) use focus::FocusTarget;
 mod mutations;
 mod plans;
 mod plugin;
-use crate::windows::WindowGraph;
 use crate::config::Config;
 use crate::ui::CompositorLayoutState;
 use crate::ui::NativeSurfaceWindowBinding;
@@ -18,6 +17,7 @@ use crate::ui::render::picker::picker_content_geometry;
 use crate::windows::CompositorProjection;
 use crate::windows::ContentId;
 use crate::windows::ViewId;
+use crate::windows::WindowGraph;
 use crate::windows::WindowId;
 use crate::windows::WindowPlacement;
 use crate::windows::WindowRect;
@@ -28,7 +28,6 @@ pub(in crate::app) use bridge::NativeSurfaceSignature;
 pub(in crate::app) use bridge::NativeSurfaceTarget;
 pub(in crate::app) use mutations::NativeDescriptions;
 pub(in crate::app) use mutations::RestoreWindowPolicy;
-pub use plans::LayoutAction;
 pub(in crate::app) use plans::CommandEffect;
 pub(in crate::app) use plans::CommandError;
 pub(in crate::app) use plans::CommandPolicy;
@@ -36,6 +35,7 @@ pub(in crate::app) use plans::EditorCloseSave;
 pub(in crate::app) use plans::EditorCloseStep;
 pub(in crate::app) use plans::EditorCloseTarget;
 pub(in crate::app) use plans::FocusLease;
+pub use plans::LayoutAction;
 pub(in crate::app) use plans::LayoutPlanError;
 pub(in crate::app) use plans::NavigationStamp;
 pub(in crate::app) use plans::TargetError;
@@ -54,7 +54,6 @@ pub(super) struct ProjectionRequest {
     pub surfaces: NativeSurfaceWindowBinding,
     pub protected: Option<WindowRect>,
 }
-
 
 #[derive(Clone, Debug)]
 pub(in crate::app) struct TerminalGeometrySource {
@@ -239,7 +238,11 @@ impl WindowSession {
         &self.content
     }
 
-    pub(in crate::app) fn project_content(&mut self, picker: Option<&PickerUiState>, config: &Config) {
+    pub(in crate::app) fn project_content(
+        &mut self,
+        picker: Option<&PickerUiState>,
+        config: &Config,
+    ) {
         let Some(layout) = &self.layout else {
             return;
         };
@@ -276,11 +279,7 @@ impl WindowSession {
 #[cfg(test)]
 mod tests;
 
-pub(in crate::app) fn rect_contains_point(
-    rect: WindowRect,
-    column: u16,
-    row: u16,
-) -> bool {
+pub(in crate::app) fn rect_contains_point(rect: WindowRect, column: u16, row: u16) -> bool {
     column >= rect.x
         && column < rect.x.saturating_add(rect.width)
         && row >= rect.y

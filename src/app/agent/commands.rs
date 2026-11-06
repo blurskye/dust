@@ -10,9 +10,9 @@ use crate::app::commands::integer_arg;
 
 use crate::app::commands::register;
 
-use crate::app::commands::string_arg;
 use crate::app::App;
 use crate::app::agent::THINKING;
+use crate::app::commands::string_arg;
 use crate::editor::ArgumentSchema;
 use crate::editor::ArgumentType;
 use crate::editor::CommandError;
@@ -154,10 +154,7 @@ pub(in crate::app) fn register_commands(
 }
 
 impl App {
-    pub(in crate::app) fn run_agent_command(
-        &mut self,
-        command: AgentCommand,
-    ) {
+    pub(in crate::app) fn run_agent_command(&mut self, command: AgentCommand) {
         match command {
             AgentCommand::Ask => self.begin_agent_question(),
             AgentCommand::Toggle => self.toggle_agent_panel(),
@@ -183,22 +180,13 @@ impl App {
     }
 }
 
-
-
-use crate::app::command;
-
-
-
-
-
-
-
-
-
 impl App {
-    pub(in crate::app) fn process_agent_effect(&mut self, effect: AppEffect) -> Result<(), AppEffect> {
+    pub(in crate::app) fn process_agent_effect(
+        &mut self,
+        effect: AppEffect,
+    ) -> Result<(), AppEffect> {
         match effect {
-AppEffect::Agent(command) => self.run_agent_command(command),
+            AppEffect::Agent(command) => self.run_agent_command(command),
             effect => return Err(effect),
         }
         Ok(())

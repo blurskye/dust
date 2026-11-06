@@ -1,27 +1,20 @@
-
-use crate::app::tasks::AdapterContext;
-use crate::workspace::DiagnosticOwner;
-use crate::app::workspace::WorkspacePreflightEvent as ExecutionPreflightEvent;
-use crate::workspace::ExecutionSource;
-use std::collections::HashSet;
 use crate::app::App;
-use std::path::Path;
-use std::path::PathBuf;
-use crate::ui::PromptKind;
+use crate::app::TrustedAction;
+use crate::app::tasks::AdapterContext;
+use crate::app::workspace::WorkspaceFailure;
+use crate::app::workspace::WorkspacePreflightEvent as ExecutionPreflightEvent;
+use crate::app::workspace::WorkspaceUpdate;
+use crate::app::workspace::leaves_root;
 use crate::tools::RegistryRequest;
 use crate::tools::ToolStatus;
-use crate::app::TrustedAction;
-use crate::workspace::WorkspaceTrust;
-use crate::app::workspace::leaves_root;
-use std::time::Duration;
-use crate::app::workspace::WorkspaceFailure;
-use crate::app::workspace::WorkspaceUpdate;
+use crate::ui::PromptKind;
+use crate::workspace::DiagnosticOwner;
+use crate::workspace::ExecutionSource;
+use std::collections::HashSet;
+use std::path::Path;
+use std::path::PathBuf;
 
 impl App {
-
-
-
-
     pub(in crate::app) fn pending_preflight_count(&self) -> usize {
         self.tasks.preflight_count()
             + self.terminal_session.preflight_count()
@@ -30,9 +23,6 @@ impl App {
 }
 
 impl App {
-
-
-
     pub(in crate::app) fn process_execution_preflight(&mut self) {
         let events = self.workspace.preflight_events();
         for event in events {
@@ -178,9 +168,6 @@ impl App {
 }
 
 impl App {
-
-
-
     pub(in crate::app) fn add_workspace_root(&mut self, path: PathBuf) {
         let requested_path = if path.is_absolute() {
             path
@@ -195,10 +182,6 @@ impl App {
 }
 
 impl App {
-
-
-
-
     pub(in crate::app) fn switch_workspace_root(&mut self, path: PathBuf) {
         let current = self.workspace.active_root().and_then(|id| {
             self.workspace
@@ -275,9 +258,6 @@ impl App {
 }
 
 impl App {
-
-
-
     /// After a worktree switch: close the old root's clean buffers, move the editor's root and
     /// reopen the file that was in front at the same place in the new worktree.
     pub(in crate::app) fn finish_root_switch(&mut self, path: PathBuf, old: &Path) {
@@ -379,8 +359,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn root_removal_blocker(
         &self,
         root: crate::workspace::RootId,
@@ -430,9 +408,6 @@ impl App {
 }
 
 impl App {
-
-
-
     pub(in crate::app) fn invalidate_root_scoped_operations(&mut self) {
         self.documents.retire_startup();
         self.documents.retire_workspace(&self.workspace.version());
@@ -498,13 +473,7 @@ impl App {
 }
 
 impl App {
-
-
-
-    pub(in crate::app) fn remove_workspace_root(
-        &mut self,
-        id: crate::workspace::RootId,
-    ) {
+    pub(in crate::app) fn remove_workspace_root(&mut self, id: crate::workspace::RootId) {
         if let Some(blocker) = self.root_removal_blocker(id) {
             self.show_error(blocker);
             return;
@@ -534,13 +503,7 @@ impl App {
 }
 
 impl App {
-
-
-
-    pub(in crate::app) fn activate_workspace_root(
-        &mut self,
-        id: crate::workspace::RootId,
-    ) {
+    pub(in crate::app) fn activate_workspace_root(&mut self, id: crate::workspace::RootId) {
         let before = self.workspace.version();
         match self.workspace.set_active_root(id) {
             Ok(()) => {
@@ -573,8 +536,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn show_workspace_failure(&mut self, failure: WorkspaceFailure) {
         let message = match failure {
             WorkspaceFailure::Message(key) => self.message(key, &[]),
@@ -588,8 +549,6 @@ impl App {
 }
 
 impl App {
-
-
     /// Run a project-defined command if the workspace is trusted.
     pub(in crate::app) fn run_trusted(&mut self, action: TrustedAction) {
         if let Err(failure) = self.workspace.execution_allowed() {
@@ -662,9 +621,6 @@ impl App {
 }
 
 impl App {
-
-
-
     #[cfg(test)]
     pub(in crate::app) fn reconcile_workspace_trust(&mut self) {
         self.workspace.reconcile_trust();
@@ -672,8 +628,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn process_trust_events(&mut self) {
         if let Some((old, new)) = self.workspace.pending_root_switch() {
             let dirty = self.state.buffers.values().any(|buffer| {
@@ -727,8 +681,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn maybe_prompt_for_unseen_workspace(&mut self) {
         // Never open under the user's fingers: keys typed a moment ago would answer it.
         let typing = self
@@ -747,8 +699,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn request_workspace_trust(&mut self) {
         if self.input.prompt().is_some() {
             return;
@@ -777,8 +727,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn confirm_workspace_trust(&mut self) {
         match self.workspace.confirm() {
             Ok(()) => self.notify_message(self.message("workspace_trust_saving", &[]), false),
@@ -788,8 +736,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn revoke_workspace_trust(&mut self) {
         match self.workspace.revoke() {
             Ok(()) => self.notify_message(self.message("workspace_trust_saving", &[]), false),
@@ -799,10 +745,6 @@ impl App {
 }
 
 impl App {
-
-
-
-
     pub(in crate::app) fn workspace_relative_label(&self, path: &std::path::Path) -> String {
         self.workspace
             .roots()

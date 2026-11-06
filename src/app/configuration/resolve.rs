@@ -1,13 +1,6 @@
 use crate::app::commands::AppEffect;
-use std::collections::BTreeSet;
-use crate::editor::CommandRegistry;
-use crate::ui::DashboardAction;
-use crate::editor::input::InputContextRegistry;
+use crate::app::commands::register_app_commands;
 use crate::app::configuration::KeymapCompilation;
-use crate::config::LoadedConfig;
-use std::path::PathBuf;
-use unicode_segmentation::UnicodeSegmentation;
-use unicode_width::UnicodeWidthStr;
 use crate::app::configuration::compile::expanded_key_sequence;
 use crate::app::configuration::compile_keymap_entries;
 use crate::app::configuration::compile_keymaps;
@@ -15,9 +8,16 @@ use crate::app::configuration::configured_context;
 use crate::app::configuration::keymap_entries;
 use crate::app::configuration::literal_key_sequence;
 use crate::app::configuration::plugin_owner_from_id;
-use crate::app::commands::register_app_commands;
-use crate::editor::register_builtin_commands;
 use crate::app::configuration::validate_configured_commands;
+use crate::config::LoadedConfig;
+use crate::editor::CommandRegistry;
+use crate::editor::input::InputContextRegistry;
+use crate::editor::register_builtin_commands;
+use crate::ui::DashboardAction;
+use std::collections::BTreeSet;
+use std::path::PathBuf;
+use unicode_segmentation::UnicodeSegmentation;
+use unicode_width::UnicodeWidthStr;
 
 pub(super) fn enabled_plugin_owners(loaded: &LoadedConfig) -> BTreeSet<String> {
     let mut enabled = loaded
@@ -295,9 +295,6 @@ pub(in crate::app) fn configured_text_width(
 
 use std::collections::BTreeMap;
 
-
-
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ConfigurationSources {
     pub settings: PathBuf,
@@ -409,6 +406,5 @@ impl ResolvedConfiguration {
         })
     }
 }
-
 
 use crate::app::configuration::ResolvedKeymaps;

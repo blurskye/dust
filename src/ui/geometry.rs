@@ -4,9 +4,6 @@ use crate::config::AmbiguousWidth;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
-
-
-
 pub(crate) fn text_width(text: &str, ambiguous_width: AmbiguousWidth) -> usize {
     if ambiguous_width == AmbiguousWidth::Wide {
         UnicodeWidthStr::width_cjk(text)
@@ -14,7 +11,6 @@ pub(crate) fn text_width(text: &str, ambiguous_width: AmbiguousWidth) -> usize {
         UnicodeWidthStr::width(text)
     }
 }
-
 
 /// Width of text painted by CellGrid, including its visible replacements.
 pub(crate) fn cell_text_width(text: &str, ambiguous: AmbiguousWidth) -> usize {
@@ -33,11 +29,6 @@ pub(crate) fn cell_text_width(text: &str, ambiguous: AmbiguousWidth) -> usize {
         })
         .sum()
 }
-
-
-
-
-
 
 /// What fits of `text`, ending in an ellipsis when some had to go.
 pub(super) fn ellipsized(
@@ -68,8 +59,6 @@ pub(super) fn ellipsized(
     format!("{kept}…")
 }
 
-
-
 /// Key hints broken between items into at most two rows, so narrow screens keep them all.
 pub(super) fn wrapped_key_help(
     help: &str,
@@ -97,8 +86,6 @@ pub(super) fn wrapped_key_help(
     }
     rows
 }
-
-
 
 /// A footer legend shortened to whole entries that fit.
 ///

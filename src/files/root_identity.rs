@@ -1,6 +1,9 @@
-use std::{fs, path::{Path, PathBuf}};
-use serde::{Deserialize, Serialize};
 use crate::files::VfsError;
+use serde::{Deserialize, Serialize};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 #[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct RootIdentity {

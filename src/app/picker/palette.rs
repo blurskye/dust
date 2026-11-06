@@ -10,9 +10,9 @@ use crate::app::App;
 
 use crate::editor::InvocationSource;
 
-use crate::ui::PromptKind;
-use crate::editor::ArgumentType;
 use crate::app::picker::PickerPayload;
+use crate::editor::ArgumentType;
+use crate::ui::PromptKind;
 use crate::workspace::PickerAction;
 use crate::workspace::PickerItem;
 use crate::workspace::PickerItemId;
@@ -158,7 +158,13 @@ impl App {
 mod tests {
     #[test]
     fn leader_reads_as_space() {
-        assert_eq!(crate::app::picker::palette::readable_keys("<leader> g w"), "Space g w");
-        assert_eq!(crate::app::picker::palette::readable_keys("ctrl-o"), "ctrl-o");
+        assert_eq!(
+            crate::app::picker::palette::readable_keys("<leader> g w"),
+            "Space g w"
+        );
+        assert_eq!(
+            crate::app::picker::palette::readable_keys("ctrl-o"),
+            "ctrl-o"
+        );
     }
 }

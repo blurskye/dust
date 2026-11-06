@@ -92,17 +92,18 @@ fn session_restore_retires_plugin_windows_before_replacing_their_tabs() {
         pinned: Vec::new(),
     };
     let mut draft = state.draft();
-    crate::app::persistence::restore::restore_layout(&mut draft, 
-            &session,
-            &std::collections::HashMap::from([(
+    crate::app::persistence::restore::restore_layout(
+        &mut draft,
+        &session,
+        &std::collections::HashMap::from([(
+            path.clone(),
+            (
                 path.clone(),
-                (
-                    path.clone(),
-                    crate::editor::text::TextBuffer::from_text("restored"),
-                ),
-            )]),
-        )
-        .unwrap();
+                crate::editor::text::TextBuffer::from_text("restored"),
+            ),
+        )]),
+    )
+    .unwrap();
     let catalog = crate::plugins::PluginCatalogVersion::default();
     let transition = windows
         .prepare_restore_transition(
@@ -503,11 +504,14 @@ fn body_and_notice_bounds_fail_closed_at_tiny_sizes() {
             let body = crate::ui::render::explorer::explorer_body_geometry(rect);
             assert!(body.y >= rect.y && body.y + body.height <= rect.y + height);
             assert!(body.width <= width);
-            if let Some(notice) = crate::ui::render::overlays::error_notification_geometry(width, height) {
+            if let Some(notice) =
+                crate::ui::render::overlays::error_notification_geometry(width, height)
+            {
                 assert!(notice.x + notice.width <= width);
                 assert!(notice.y + notice.height <= height);
             }
-            let rows = crate::ui::render::documentation::documentation_page_rows(&config, width, height);
+            let rows =
+                crate::ui::render::documentation::documentation_page_rows(&config, width, height);
             assert!(rows <= usize::from(height.saturating_sub(2)));
         }
     }
@@ -829,11 +833,11 @@ fn invalid_editor_sources_reject_before_graph_copy() {
 #[test]
 #[ignore = "explicit admission cost probe; prints bounded fixture counters/timing"]
 fn window_admission_cost_probe() {
-    use crate::editor::text::TextBuffer;
     use crate::editor::EditorOperation;
     use crate::editor::EditorState;
     use crate::editor::EditorTransaction;
     use crate::editor::TransactionId;
+    use crate::editor::text::TextBuffer;
     use crate::windows::WindowGraph;
     let case = std::env::var("DUST_COST_CASE").unwrap_or_else(|_| "idle".into());
     let iterations: usize = std::env::var("DUST_COST_ITERATIONS")

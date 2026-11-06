@@ -588,7 +588,8 @@ mod tests {
     fn substitute_execution_keeps_the_preview_replacement_whitespace() {
         for input in [":s/a/b ", "  : s/a/b  ", "s/a/ ", "s/a/b\t"] {
             let invocation = parse_ex(input, &aliases()).unwrap();
-            let (_, _, replacement, _) = crate::editor::input::command_line::typed_substitution(input).unwrap();
+            let (_, _, replacement, _) =
+                crate::editor::input::command_line::typed_substitution(input).unwrap();
             assert_eq!(
                 invocation.arguments["replacement"],
                 CommandValue::String(replacement)

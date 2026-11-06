@@ -6,21 +6,19 @@ use serde::Serialize;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fs;
-use std::io::self;
+use std::io;
 use std::io::Read;
 use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::mpsc::self;
+use std::sync::mpsc;
 use std::sync::mpsc::Receiver;
 use std::sync::mpsc::SyncSender;
 use std::sync::mpsc::TryRecvError;
 use std::sync::mpsc::TrySendError;
 use std::thread;
 use thiserror::Error;
-
-
 
 pub const STATE_VERSION: u32 = 2;
 const MAXIMUM_SCROLL_COLUMN: usize = 1_000_000_000;

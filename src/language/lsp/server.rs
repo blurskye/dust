@@ -1,25 +1,20 @@
-use std::path::Path;
-use std::path::PathBuf;
-use std::time::Duration;
-use serde_json::Value;
-use serde_json::json;
-use sha2::Sha256;
 use crate::editor::text::PositionEncoding;
 use crate::language::lsp::MAX_LOG_LINES;
 use crate::language::lsp::REQUEST_TIMEOUT;
+use serde_json::Value;
+use serde_json::json;
+use sha2::Sha256;
+use std::path::Path;
+use std::path::PathBuf;
+use std::time::Duration;
 
 use crate::language::lsp::messages::LspDocument;
-
-
-
-
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct LspPolicy {
     pub request_timeout: Duration,
     pub maximum_log_lines: usize,
 }
-
 
 impl Default for LspPolicy {
     fn default() -> Self {
@@ -30,13 +25,11 @@ impl Default for LspPolicy {
     }
 }
 
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LspServerConfiguration {
     pub(super) initialization_options: Option<Value>,
     pub(super) settings: Value,
 }
-
 
 impl LspServerConfiguration {
     #[must_use]
@@ -195,7 +188,6 @@ impl LspServerConfiguration {
     }
 }
 
-
 fn typescript_sdk_for_executable(executable: &Path) -> Option<PathBuf> {
     let executable = std::fs::canonicalize(executable).ok()?;
     for ancestor in executable.ancestors().take(12) {
@@ -214,13 +206,11 @@ fn typescript_sdk_for_executable(executable: &Path) -> Option<PathBuf> {
     None
 }
 
-
 impl Default for LspServerConfiguration {
     fn default() -> Self {
         Self::standard()
     }
 }
-
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct LspSessionKey {
@@ -242,7 +232,6 @@ impl LspSessionKey {
     }
 }
 
-
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum SyncKind {
     None,
@@ -250,7 +239,6 @@ pub enum SyncKind {
     Full,
     Incremental,
 }
-
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct LspCapabilities {
@@ -289,7 +277,6 @@ pub struct LspCapabilities {
     pub sync_registrations: Vec<Value>,
 }
 
-
 impl LspCapabilities {
     pub fn supports_document(&self, method: &str, document: &LspDocument) -> bool {
         self.document_selectors.get(method).is_none_or(|options| {
@@ -316,7 +303,6 @@ impl LspCapabilities {
         })
     }
 }
-
 
 fn registration_matches(options: &Value, document: &LspDocument) -> bool {
     let selector = options.get("documentSelector").unwrap_or(&Value::Null);

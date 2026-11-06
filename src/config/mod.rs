@@ -19,8 +19,6 @@ pub use catalog::default_setting;
 pub use catalog::settings_catalog;
 pub use catalog::setup_catalog;
 pub use catalog::write_user_setting;
-#[cfg(test)]
-pub(crate) use load::setting_spans;
 pub use load::ConfigurationWorker;
 pub use load::ConfigurationWorkerError;
 pub use load::ConfigurationWorkerResult;
@@ -28,6 +26,8 @@ pub use load::load_bundled_config;
 pub use load::load_config;
 pub use load::load_keymaps;
 pub use load::load_user_config;
+#[cfg(test)]
+pub(crate) use load::setting_spans;
 pub use load::user_config_path;
 pub use load::user_dashboard_path;
 pub use load::user_keymaps_path;

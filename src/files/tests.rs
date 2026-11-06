@@ -9,16 +9,6 @@ use tempfile::tempdir;
 
 use crate::files::directory::list_scoped_directory;
 
-use crate::files::directory::natural_name_key;
-use crate::files::recovery::RECOVERY_DIRECTORY_ENTRY_CEILING;
-use crate::files::recovery::RECOVERY_JOURNAL_BYTE_CEILING;
-use crate::files::recovery::RECOVERY_PAYLOAD_BYTE_CEILING;
-use crate::files::recovery::bounded_recovery_entries;
-use crate::files::recovery::read_bounded_bytes;
-use crate::files::recovery::recovery_journal_size_allowed;
-use crate::files::recovery::recovery_payload_size_allowed;
-use crate::files::vfs::checked_atomic_write;
-use crate::files::watch::watch_name_bytes;
 use crate::files::DirectoryEntryKind;
 use crate::files::DirectoryService;
 use crate::files::ExplorerMutation;
@@ -41,8 +31,18 @@ use crate::files::WriteExpectation;
 use crate::files::atomic_write;
 use crate::files::cleanup_recovery;
 use crate::files::diff_explorer_fingerprints;
+use crate::files::directory::natural_name_key;
 use crate::files::discover_recovery;
 use crate::files::explorer_directory_fingerprint;
+use crate::files::recovery::RECOVERY_DIRECTORY_ENTRY_CEILING;
+use crate::files::recovery::RECOVERY_JOURNAL_BYTE_CEILING;
+use crate::files::recovery::RECOVERY_PAYLOAD_BYTE_CEILING;
+use crate::files::recovery::bounded_recovery_entries;
+use crate::files::recovery::read_bounded_bytes;
+use crate::files::recovery::recovery_journal_size_allowed;
+use crate::files::recovery::recovery_payload_size_allowed;
+use crate::files::vfs::checked_atomic_write;
+use crate::files::watch::watch_name_bytes;
 use crate::files::write_recovery;
 
 #[test]
@@ -849,7 +849,12 @@ fn recovery_worker_fifo_order_makes_delete_the_revision_barrier() {
     let root = tempdir().expect("tempdir");
     let journal = root.path().join("buffer.toml");
     let mut worker = VfsWorker::start(4);
-    fn expect_completion(worker: &mut VfsWorker, id: crate::files::RequestId, path: &Path, write: bool) {
+    fn expect_completion(
+        worker: &mut VfsWorker,
+        id: crate::files::RequestId,
+        path: &Path,
+        write: bool,
+    ) {
         let deadline = Instant::now() + Duration::from_secs(2);
         loop {
             if let Some(reply) = worker.try_result().expect("worker") {
@@ -963,7 +968,10 @@ pub(super) fn collect_search(
 
 fn collect_files(
     policy: crate::files::WorkspaceFilePolicy,
-) -> (Vec<crate::files::WorkspaceFileEntry>, crate::files::WorkspaceFileSummary) {
+) -> (
+    Vec<crate::files::WorkspaceFileEntry>,
+    crate::files::WorkspaceFileSummary,
+) {
     let mut service = crate::files::WorkspaceFileService::default();
     let generation = service.start(policy.clone()).expect("start finder");
     let deadline = Instant::now() + Duration::from_secs(5);
@@ -1391,7 +1399,9 @@ fn workspace_files_and_search_keep_distinct_non_utf8_path_identities() {
     let deadline = Instant::now() + Duration::from_secs(2);
     loop {
         match service.try_event() {
-            Some(crate::files::WorkspaceFileEvent::Batch { entries: batch, .. }) => entries.extend(batch),
+            Some(crate::files::WorkspaceFileEvent::Batch { entries: batch, .. }) => {
+                entries.extend(batch)
+            }
             Some(crate::files::WorkspaceFileEvent::Complete { .. }) => break,
             Some(crate::files::WorkspaceFileEvent::Failed { error, .. }) => panic!("{error}"),
             _ => {}
@@ -1861,7 +1871,8 @@ fn directory_completion_filters_names_before_capping_worker_results() {
     for name in &names {
         fs::write(root.path().join(name), b"").expect("file");
     }
-    let initial = crate::files::vfs::list_directory(root.path(), "", 1000).expect("unfiltered listing");
+    let initial =
+        crate::files::vfs::list_directory(root.path(), "", 1000).expect("unfiltered listing");
     assert_eq!(initial.len(), 1000);
     let target = names
         .iter()

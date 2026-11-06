@@ -8,7 +8,7 @@ use std::collections::BTreeSet;
 use std::collections::VecDeque;
 use std::fs;
 use std::path::PathBuf;
-use std::sync::mpsc::self;
+use std::sync::mpsc;
 use std::sync::mpsc::Receiver;
 use std::sync::mpsc::SyncSender;
 use std::time::Duration;
@@ -141,7 +141,10 @@ fn completed_component_execution_cancels_its_epoch_timer() {
     use sha2::Digest;
     use sha2::Sha256;
     let root = tempfile::tempdir().unwrap();
-    let core = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/retained-guest/retained-guest.core.wasm"));
+    let core = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/retained-guest/retained-guest.core.wasm"
+    ));
     let bytes = wit_component::ComponentEncoder::default()
         .module(core)
         .unwrap()
@@ -174,7 +177,8 @@ fn completed_component_execution_cancels_its_epoch_timer() {
         epoch_deadline_ticks: 100,
         ..Default::default()
     };
-    let mut outcome = crate::plugins::index::load_component(root.path(), &object, plugin, &limits).unwrap();
+    let mut outcome =
+        crate::plugins::index::load_component(root.path(), &object, plugin, &limits).unwrap();
     let mut invocation = empty_execution_request();
     invocation.command = "confirmationprobe".into();
     crate::plugins::index::execute_component(invocation, &mut outcome.runtime).unwrap();
@@ -1627,7 +1631,10 @@ fn retained_runtime_with_activation(
             }
         }
     }
-    let original = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/retained-guest/retained-guest.core.wasm"));
+    let original = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/retained-guest/retained-guest.core.wasm"
+    ));
     let mut core = original.to_vec();
     if let Some(activation_body) = activation_body {
         let mut at = 8;

@@ -1,6 +1,6 @@
 use std::path::Path;
 use std::path::PathBuf;
-use std::sync::mpsc::self;
+use std::sync::mpsc;
 use std::sync::mpsc::Receiver;
 use std::thread;
 
@@ -81,24 +81,25 @@ impl DirectoryService {
                         &[&canonical],
                         &allowed,
                     )?;
-                    let capture = || {
-                        relevant
-                            .iter()
-                            .map(|root| &root.canonical_path)
-                            .map(|path| {
-                                let observed = crate::files::RootIdentity::capture(path)
-                                    .map_err(|error| VfsError::Io {
-                                        operation: "inspect directory scope",
-                                        path: path.clone(),
-                                        source: std::io::Error::other(error.to_string()),
-                                    })?;
-                                if &observed.canonical_path != path {
-                                    return Err(VfsError::OutsideScope(path.clone()));
-                                }
-                                Ok(observed)
-                            })
-                            .collect::<Result<Vec<_>, _>>()
-                    };
+                    let capture =
+                        || {
+                            relevant
+                                .iter()
+                                .map(|root| &root.canonical_path)
+                                .map(|path| {
+                                    let observed = crate::files::RootIdentity::capture(path)
+                                        .map_err(|error| VfsError::Io {
+                                            operation: "inspect directory scope",
+                                            path: path.clone(),
+                                            source: std::io::Error::other(error.to_string()),
+                                        })?;
+                                    if &observed.canonical_path != path {
+                                        return Err(VfsError::OutsideScope(path.clone()));
+                                    }
+                                    Ok(observed)
+                                })
+                                .collect::<Result<Vec<_>, _>>()
+                        };
                     let roots = capture()?;
                     let listing = list_scoped_directory(
                         generation,

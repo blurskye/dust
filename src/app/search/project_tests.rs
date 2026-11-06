@@ -2,7 +2,6 @@ use crate::app::tests::*;
 
 use crate::app::workspace::project_tests::wait_workspace_search;
 
-
 #[test]
 pub(in crate::app) fn search_moves_forward_wraps_and_repeats() {
     let (_app_dirs, mut app) = app();
@@ -32,7 +31,6 @@ pub(in crate::app) fn search_moves_forward_wraps_and_repeats() {
     );
 }
 
-
 #[test]
 pub(in crate::app) fn help_filters_do_not_restart_the_suspended_live_grep() {
     let (_app_dirs, mut app) = app();
@@ -61,7 +59,6 @@ pub(in crate::app) fn help_filters_do_not_restart_the_suspended_live_grep() {
     );
 }
 
-
 #[test]
 pub(in crate::app) fn grep_rows_draw_the_icon_location_and_highlighted_text_as_lazyvim_does() {
     let (_app_dirs, mut app) = app();
@@ -86,7 +83,4 @@ pub(in crate::app) fn grep_rows_draw_the_icon_location_and_highlighted_text_as_l
     assert!(matches!(keyword.style, crate::ui::Style::Syntax(_)));
 }
 use crate::editor::text::ByteOffset;
-use crate::editor::text::TextBuffer;
-use crate::ui::PickerSurfaceKind;
 use std::fs;
-

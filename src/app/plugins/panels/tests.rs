@@ -131,9 +131,7 @@ fn open_request_for(owner: &str, revision: u64, mut tree: PluginUiTree) -> Plugi
     }
 }
 
-pub(in crate::app) fn fixture_manifest(
-    checksum: String,
-) -> crate::plugins::PluginManifest {
+pub(in crate::app) fn fixture_manifest(checksum: String) -> crate::plugins::PluginManifest {
     let mut indexed = index("demo", 1);
     let contribution = indexed.content_types.remove(0);
     let command = |title: &str| PluginCommandDeclaration {
@@ -626,7 +624,10 @@ fn target03_dimensions_invalidates_hidden_views_and_updates_visible_siblings() {
     use crate::plugins::target03::api::dust::plugin::host as wire;
 
     let mut admission = TargetAdmission::parse(
-        include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/target03-clone-guest/manifest.toml")),
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/target03-clone-guest/manifest.toml"
+        )),
         9,
     )
     .unwrap();
@@ -784,8 +785,10 @@ fn target03_dimensions_invalidates_hidden_views_and_updates_visible_siblings() {
 fn real_component_drives_the_retained_window_protocol_without_wasi() {
     use sha2::Digest;
     use sha2::Sha256;
-    let core =
-        include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/retained-guest/retained-guest.core.wasm"));
+    let core = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/retained-guest/retained-guest.core.wasm"
+    ));
     assert_eq!(
         format!("{:x}", Sha256::digest(core)),
         "9f17af443ca9a4150f940656ef2edb11a48c1d59b7430d4e029f1b1cf951bc48"
@@ -1121,10 +1124,7 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
             )
             .expect("provider chunk");
         if phase < 2 {
-            assert_eq!(
-                status,
-                crate::plugins::PluginProviderSessionStatus::Active
-            );
+            assert_eq!(status, crate::plugins::PluginProviderSessionStatus::Active);
         }
     }
     let projection = providers.projection(provider_request).expect("projection");
@@ -1599,18 +1599,29 @@ fn actual_target03_component_opens_and_clones_through_checked_existing_owners() 
     use sha2::Digest;
     use sha2::Sha256;
 
-    let core = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/target03-clone-guest/target03-clone-guest.core.wasm"));
+    let core = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/target03-clone-guest/target03-clone-guest.core.wasm"
+    ));
     assert_eq!(
         format!("{:x}", Sha256::digest(core)),
         "fd96d2ac94bc372426094dfc535cadc00e1ca471abd5431529f3c8cec7e7b3e5"
     );
     assert_eq!(
-        include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/docs/plugin-abi-next.wit")),
-        include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/target03-clone-guest/wit/dust-plugin.wit"))
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/docs/plugin-abi-next.wit"
+        )),
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/target03-clone-guest/wit/dust-plugin.wit"
+        ))
     );
 
-    let manifest_source =
-        include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/target03-clone-guest/manifest.toml"));
+    let manifest_source = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/target03-clone-guest/manifest.toml"
+    ));
     let admission =
         TargetAdmission::parse(manifest_source, 9).expect("strict target manifest admission");
     assert!(TargetAdmission::parse(&manifest_source.replace("0.3.0", "0.4.0"), 9).is_err());
@@ -4295,8 +4306,7 @@ fn process_fixture(
     index: &PluginContributionIndex,
     request: PluginUiRequest,
 ) -> PluginUiEvent {
-    let mut windows =
-        crate::app::windows::WindowSession::from_test_graph(graph.clone());
+    let mut windows = crate::app::windows::WindowSession::from_test_graph(graph.clone());
     let mut draft = windows.begin_plugin_fixture(&index.owner, index.generation);
     let mut candidate = host.clone();
     let event = candidate.process(&mut draft, index, request);
@@ -4315,8 +4325,7 @@ fn remove_fixture(
     plugin: &str,
     load: u64,
 ) -> Result<bool, String> {
-    let mut windows =
-        crate::app::windows::WindowSession::from_test_graph(graph.clone());
+    let mut windows = crate::app::windows::WindowSession::from_test_graph(graph.clone());
     windows.remove_plugin_generation(plugin, load)?;
     *graph = windows.graph().clone();
     Ok(host.remove_generation(plugin, load))

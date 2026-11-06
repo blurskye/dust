@@ -14,7 +14,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicU8;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
-use std::sync::mpsc::self;
+use std::sync::mpsc;
 use std::sync::mpsc::Receiver;
 use std::sync::mpsc::SyncSender;
 use std::thread;
@@ -536,7 +536,10 @@ impl Writer {
     }
     pub(super) fn reply(&mut self, value: Value, receipt: Arc<AtomicU8>) -> Result<(), Value> {
         if self.flush().is_err() {
-            receipt.store(crate::debugger::DapReplyOutcome::Unknown as u8, Ordering::Release);
+            receipt.store(
+                crate::debugger::DapReplyOutcome::Unknown as u8,
+                Ordering::Release,
+            );
             return Err(value);
         }
         // Replies cannot overtake requests that already have wire sequence IDs.
@@ -778,9 +781,9 @@ impl ExecutionScope {
 
 #[cfg(test)]
 mod request_tests {
-    use crate::debugger::session::*;
     use crate::debugger::DapResponse;
     use crate::debugger::DapSourceBreakpoint;
+    use crate::debugger::session::*;
     #[test]
     fn restart_requires_a_free_resident_slot_before_stopping() {
         let (mut service, _adapter) = fixture();

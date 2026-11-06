@@ -9,15 +9,8 @@ fn scope(root: &std::path::Path) -> WorkspaceVersion {
         [("root".into(), identity)],
     )
     .unwrap();
-    crate::app::workspace::WorkspaceSession::new(
-        state,
-        root.join("trust.json"),
-        1,
-        false,
-        false,
-        1,
-    )
-    .version()
+    crate::app::workspace::WorkspaceSession::new(state, root.join("trust.json"), 1, false, false, 1)
+        .version()
 }
 fn found() -> WorkspaceSearchMatch {
     WorkspaceSearchMatch {

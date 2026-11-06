@@ -1,5 +1,5 @@
-use crate::process::pty::*;
 use crate::process::PtyPolicy;
+use crate::process::pty::*;
 use std::path::Path;
 use std::time::Instant;
 

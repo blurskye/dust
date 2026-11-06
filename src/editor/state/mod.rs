@@ -13,24 +13,24 @@ pub use id::ViewId;
 pub const MAXIMUM_LAYOUT_DEPTH: usize = crate::UNIVERSAL_LAYOUT_DEPTH_CEILING;
 pub const MAXIMUM_LAYOUT_PANES: usize = crate::UNIVERSAL_LAYOUT_WINDOW_CEILING;
 mod buffer;
-mod view;
 mod registers;
-pub use layout::Axis;
+mod view;
 pub use buffer::Buffer;
 pub use buffer::BufferOrigin;
+pub use layout::Axis;
 
-pub use view::EditorMode;
 pub use layout::FocusDirection;
-pub use view::InsertRepeat;
 pub use layout::LayoutNode;
 pub use layout::Pane;
+pub use layout::Tab;
 pub use registers::RegisterShape;
 pub use registers::RegisterStore;
 pub use registers::RegisterValue;
+pub use view::EditorMode;
+pub use view::InsertRepeat;
 pub use view::ReplaceRecord;
 pub use view::Selection;
 pub use view::SelectionKind;
-pub use layout::Tab;
 pub use view::View;
 mod store;
 pub use store::EditorState;
@@ -41,11 +41,6 @@ mod layout;
 
 #[cfg(test)]
 mod tests;
-
-
-
-
-
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct EditingPolicy {

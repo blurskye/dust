@@ -1,18 +1,19 @@
 #![forbid(unsafe_code)]
 
 use serde_json::Value;
-#[cfg(test)]
-use std::time::Duration;
-use std::time::Instant;
 use std::collections::BTreeMap;
-use std::io::self;
+use std::io;
 use std::io::BufRead;
 use std::io::Write;
 use std::path::PathBuf;
-use std::sync::mpsc::self;
+use std::sync::mpsc;
 use std::sync::mpsc::Receiver;
 use std::sync::mpsc::SyncSender;
 use std::thread;
+#[cfg(test)]
+use std::time::Duration;
+#[cfg(test)]
+use std::time::Instant;
 use thiserror::Error;
 
 mod jobs;
@@ -358,10 +359,9 @@ impl ExecutionPreflightService {
                     let event = preflight(command.id, command.request)
                         .and_then(|result| {
                             for expected in command.identities {
-                                let actual = crate::files::RootIdentity::capture(
-                                    &expected.canonical_path,
-                                )
-                                .map_err(|e| e.to_string())?;
+                                let actual =
+                                    crate::files::RootIdentity::capture(&expected.canonical_path)
+                                        .map_err(|e| e.to_string())?;
                                 if actual != expected {
                                     return Err("execution root filesystem identity changed".into());
                                 }

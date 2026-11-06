@@ -23,9 +23,9 @@ use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::path::Path;
 use std::path::PathBuf;
-use std::sync::mpsc::TrySendError;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
+use std::sync::mpsc::TrySendError;
 use std::time::Duration;
 
 pub(super) struct ToolingSession {
@@ -259,7 +259,11 @@ impl ToolingSession {
         }
         (changed, unavailable)
     }
-    pub(in crate::app) fn select_version(&mut self, id: &str, version: String) -> Result<(), String> {
+    pub(in crate::app) fn select_version(
+        &mut self,
+        id: &str,
+        version: String,
+    ) -> Result<(), String> {
         if !self.entries.iter().any(|e| {
             e.definition.id == id
                 && e.definition.kind == ToolKind::Lsp
@@ -563,10 +567,7 @@ impl ToolingSession {
             .flatten()
     }
 
-    pub(in crate::app) fn path_executable(
-        &self,
-        executable: &str,
-    ) -> Option<(PathBuf, bool)> {
+    pub(in crate::app) fn path_executable(&self, executable: &str) -> Option<(PathBuf, bool)> {
         self.path_lookups
             .borrow_mut()
             .entry(executable.to_owned())
@@ -728,10 +729,7 @@ impl ToolingSession {
         }
     }
 
-    pub(in crate::app) fn set_probe_cancellation(
-        &mut self,
-        cancelled: Arc<AtomicBool>,
-    ) {
+    pub(in crate::app) fn set_probe_cancellation(&mut self, cancelled: Arc<AtomicBool>) {
         self.probe_cancelled = cancelled;
     }
 

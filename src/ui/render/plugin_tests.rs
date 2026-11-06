@@ -1,8 +1,3 @@
-
-
-use crate::ui::render::composition_tests::render;
-
-
 #[test]
 fn retained_plugin_surface_rows_are_strictly_clipped_to_the_projected_window() {
     let mut frame = crate::ui::grid::Frame {

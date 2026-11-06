@@ -1,5 +1,5 @@
 use std::fs;
-use std::io::self;
+use std::io;
 use std::io::Read;
 use std::io::Write;
 use std::path::Path;
@@ -7,12 +7,12 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
-use std::sync::mpsc::self;
+use std::sync::mpsc;
 use std::sync::mpsc::Receiver;
 use std::sync::mpsc::SyncSender;
 use std::sync::mpsc::TryRecvError;
 use std::sync::mpsc::TrySendError;
-use std::thread::self;
+use std::thread;
 use std::thread::JoinHandle;
 use std::time::Duration;
 

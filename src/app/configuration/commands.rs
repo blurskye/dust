@@ -1,24 +1,21 @@
-
-use crate::app::commands::AppEffect;
 use crate::app::App;
+use crate::app::commands::AppEffect;
 
-
-
-
+use crate::app::commands::PromptMove;
+use crate::app::commands::optional_string_arg;
+use crate::app::commands::register;
+use crate::app::commands::register_grammar_commands;
+use crate::app::commands::string_arg;
 use crate::editor::ArgumentSchema;
 use crate::editor::ArgumentType;
 use crate::editor::CommandError;
 use crate::editor::CommandRegistry;
 use crate::editor::ContextRequirement;
-use crate::app::commands::register;
-use crate::app::commands::string_arg;
 use crate::ui::PromptKind;
-use crate::app::commands::optional_string_arg;
-use crate::app::commands::PromptMove;
-use crate::app::commands::register_grammar_commands;
 
-pub(in crate::app) fn register_commands(registry: &mut CommandRegistry<AppEffect>) -> Result<(), CommandError> {
-
+pub(in crate::app) fn register_commands(
+    registry: &mut CommandRegistry<AppEffect>,
+) -> Result<(), CommandError> {
     register(
         registry,
         "theme.select",
@@ -252,30 +249,24 @@ pub(in crate::app) fn register_commands(registry: &mut CommandRegistry<AppEffect
         )?;
     }
     register_grammar_commands(registry)?;
-Ok(())
+    Ok(())
 }
 
 use crate::app::windows::LayoutAction;
 
-
-
-
-
-
-use crate::app::command;
-use crate::app::configuration::ViewToggle;
-
-
 impl App {
-    pub(in crate::app) fn process_configuration_effect(&mut self, effect: AppEffect) -> Result<(), AppEffect> {
+    pub(in crate::app) fn process_configuration_effect(
+        &mut self,
+        effect: AppEffect,
+    ) -> Result<(), AppEffect> {
         match effect {
-AppEffect::ReloadConfiguration => match self.configuration.request_reload() {
+            AppEffect::ReloadConfiguration => match self.configuration.request_reload() {
                 Ok(()) => {
                     self.notify_message(self.message("config_reload_queued", &[]), false);
                 }
                 Err(error) => self.show_error(error),
             },
-AppEffect::Zen => {
+            AppEffect::Zen => {
                 let explorer_open = self.ui.explorer.is_some();
                 match self
                     .configuration
@@ -300,7 +291,7 @@ AppEffect::Zen => {
                 }
                 self.ensure_cursor_visible();
             }
-AppEffect::SelectTheme | AppEffect::SetTheme(_) => {
+            AppEffect::SelectTheme | AppEffect::SetTheme(_) => {
                 self.close_picker();
                 match self.configuration.begin_theme_picker() {
                     Ok(rows) => self.present_theme_picker(rows),
@@ -311,7 +302,7 @@ AppEffect::SelectTheme | AppEffect::SetTheme(_) => {
                     _ => None,
                 });
             }
-AppEffect::ViewToggle(toggle) => {
+            AppEffect::ViewToggle(toggle) => {
                 let enabled = self.configuration.toggle_view(toggle);
                 let name = match toggle {
                     crate::app::configuration::ViewToggle::Wrap => "wrap",
@@ -327,7 +318,7 @@ AppEffect::ViewToggle(toggle) => {
                     false,
                 );
             }
-AppEffect::ExplainConfig(key) => {
+            AppEffect::ExplainConfig(key) => {
                 if let Some(explanation) = self.configuration.explain(&key) {
                     self.notify_message(
                         self.message(
@@ -344,7 +335,7 @@ AppEffect::ExplainConfig(key) => {
                     self.show_error(self.message("unknown_config_key", &[("key", key)]));
                 }
             }
-AppEffect::InspectKeymap {
+            AppEffect::InspectKeymap {
                 id,
                 context,
                 key,
@@ -400,7 +391,7 @@ AppEffect::InspectKeymap {
                     self.show_error(self.message("no_keymap_binding", &[("context", context)]));
                 }
             }
-AppEffect::ShowKeymapConflicts => {
+            AppEffect::ShowKeymapConflicts => {
                 let conflicts = self
                     .configuration
                     .rejected_keymaps()

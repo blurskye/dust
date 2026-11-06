@@ -146,10 +146,7 @@ impl LspSession {
                     && *revision == configuration
             })
     }
-    pub(in crate::app) fn stop_document_launches(
-        &mut self,
-        buffer: crate::editor::BufferId,
-    ) {
+    pub(in crate::app) fn stop_document_launches(&mut self, buffer: crate::editor::BufferId) {
         let mut definitions = Vec::new();
         if let Some((_, pending)) = &self.preparation.root
             && pending.source.buffer == buffer
@@ -720,9 +717,16 @@ mod tests {
                 .execution_lane(crate::app::workspace::DiscoveryKind::Language,)
                 .current(&context.workspace)
         );
-        assert!(owner.discover_launch(value, context, workspace.execution_lane(
-            crate::app::workspace::DiscoveryKind::Language,
-        )).unwrap_err().contains("busy"));
+        assert!(
+            owner
+                .discover_launch(
+                    value,
+                    context,
+                    workspace.execution_lane(crate::app::workspace::DiscoveryKind::Language,)
+                )
+                .unwrap_err()
+                .contains("busy")
+        );
         owner.preparation.root = None;
         assert_eq!(
             owner.observe(observation, false).as_deref(),

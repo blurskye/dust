@@ -395,7 +395,12 @@ impl App {
         result
     }
 
-    pub(in crate::app) fn settings_mouse(&mut self, key: &crate::editor::input::KeyEvent, column: u16, row: u16) {
+    pub(in crate::app) fn settings_mouse(
+        &mut self,
+        key: &crate::editor::input::KeyEvent,
+        column: u16,
+        row: u16,
+    ) {
         use crate::editor::input::TerminalMouseInput;
         let (width, height) = (self.window_session.width(), self.settings_height());
         let ambiguous = self.configuration.settings().editor.ambiguous_width;
@@ -570,9 +575,9 @@ fn parsed_text(
         }
         // Keys are checked here because a bad one only fails when the keymaps are rebuilt.
         _ if matches!(key, "input.keymaps.leader" | "input.keymaps.local_leader") => {
-            crate::app::configuration::literal_key_sequence(key, text).map_err(
-                |_| "Enter a key such as space or , (up to 4, separated by spaces)".to_owned(),
-            )?;
+            crate::app::configuration::literal_key_sequence(key, text).map_err(|_| {
+                "Enter a key such as space or , (up to 4, separated by spaces)".to_owned()
+            })?;
             toml::Value::String(text.into())
         }
         _ => toml::Value::String(text.into()),

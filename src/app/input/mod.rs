@@ -6,8 +6,8 @@ pub(in crate::app) const HISTORY_LIMIT: usize = 100;
 
 pub(in crate::app) use mouse::MouseDocument;
 
+use crate::app::editing::replay::ReplayError;
 pub(in crate::app) use mouse::MouseGeometry;
-pub(in crate::app) use crate::app::editing::replay::ReplayError;
 #[cfg(test)]
 mod tests;
 use crate::app::configuration::KeymapOperation;
@@ -106,10 +106,7 @@ impl InputSession {
     pub(in crate::app) fn completion_read_pending(&self) -> bool {
         !self.completion_reads.is_empty()
     }
-    pub(in crate::app) fn retire_document_request(
-        &mut self,
-        id: crate::files::RequestId,
-    ) {
+    pub(in crate::app) fn retire_document_request(&mut self, id: crate::files::RequestId) {
         self.completion_reads.remove(&id);
         if self.stage_save == Some(id) {
             self.clear_pending_stage();
@@ -174,17 +171,12 @@ impl InputSession {
             completion_reads: HashMap::new(),
         }
     }
-    pub(in crate::app) fn hold_focus(
-        &mut self,
-        capture: Option<crate::app::windows::FocusLease>,
-    ) {
+    pub(in crate::app) fn hold_focus(&mut self, capture: Option<crate::app::windows::FocusLease>) {
         if self.capture.is_none() {
             self.capture = capture;
         }
     }
-    pub(in crate::app) fn released_focus(
-        &mut self,
-    ) -> Option<crate::app::windows::FocusLease> {
+    pub(in crate::app) fn released_focus(&mut self) -> Option<crate::app::windows::FocusLease> {
         if self.capture_context().is_none() {
             self.capture.take()
         } else {
@@ -341,7 +333,11 @@ impl InputSession {
             .as_ref()
             .map(|pending| pending.context.as_str())
     }
-    pub(in crate::app) fn finish_mapping(&mut self, context: &str, revision: u64) -> MappingResolution {
+    pub(in crate::app) fn finish_mapping(
+        &mut self,
+        context: &str,
+        revision: u64,
+    ) -> MappingResolution {
         let Some(pending) = self.pending.take() else {
             return MappingResolution::Missing;
         };
@@ -459,15 +455,11 @@ impl InputSession {
 
 pub(in crate::app) mod interaction;
 
-
 use crate::editor::CommandValue;
 use crate::editor::InvocationSource;
 
 use crate::app::editing::replay::repeated;
 use crate::app::editing::replay::replayed;
-
-
-
 
 /// Semantic recording and replay limits belong to input, not command dispatch.
 impl InputSession {
@@ -647,10 +639,7 @@ impl InputSession {
         self.recording_macro.take()
     }
 
-    pub(in crate::app) fn macro_register(
-        &self,
-        requested: char,
-    ) -> Result<char, ReplayError> {
+    pub(in crate::app) fn macro_register(&self, requested: char) -> Result<char, ReplayError> {
         if requested == '@' {
             self.last_macro.ok_or(ReplayError::NoMacro)
         } else {
@@ -703,7 +692,6 @@ impl InputSession {
         self.replay_depth
     }
 }
-
 
 impl InputSession {
     pub(in crate::app) fn normalized_visual_repeat(
@@ -790,7 +778,6 @@ impl InputSession {
     }
 }
 
-
 use crate::app::commands::PromptMove;
 use crate::editor::ViewId;
 use crate::ui::CompletionItem;
@@ -804,9 +791,6 @@ use std::path::PathBuf;
 
 use crate::app::prompt::command_completions;
 use crate::app::prompt::takes_path;
-
-
-
 
 impl InputSession {
     pub(in crate::app) fn prompt(&self) -> Option<&PromptState> {
@@ -927,11 +911,7 @@ impl InputSession {
         self.history_index = None;
         self.history_draft = None;
     }
-    pub(in crate::app) fn restore_history(
-        &mut self,
-        commands: Vec<String>,
-        searches: Vec<String>,
-    ) {
+    pub(in crate::app) fn restore_history(&mut self, commands: Vec<String>, searches: Vec<String>) {
         if self.history_cleared {
             return;
         }
@@ -943,7 +923,9 @@ impl InputSession {
         merge(commands, &mut self.command_history);
         merge(searches, &mut self.search_history);
         for history in [&mut self.command_history, &mut self.search_history] {
-            let excess = history.len().saturating_sub(crate::app::input::HISTORY_LIMIT);
+            let excess = history
+                .len()
+                .saturating_sub(crate::app::input::HISTORY_LIMIT);
             history.drain(..excess);
         }
         self.history_index = None;
@@ -1212,10 +1194,7 @@ impl InputSession {
         });
     }
 
-    pub(in crate::app) fn accept_completion(
-        &mut self,
-        policy: &crate::config::Config,
-    ) -> bool {
+    pub(in crate::app) fn accept_completion(&mut self, policy: &crate::config::Config) -> bool {
         let Some(prompt) = &mut self.prompt else {
             return false;
         };
@@ -1362,11 +1341,7 @@ impl InputSession {
         request
     }
 
-    pub(in crate::app) fn record_prompt_history(
-        &mut self,
-        kind: PromptKind,
-        input: &str,
-    ) {
+    pub(in crate::app) fn record_prompt_history(&mut self, kind: PromptKind, input: &str) {
         if input.is_empty() {
             return;
         }
@@ -1391,26 +1366,25 @@ impl InputSession {
             return;
         }
         history.push(input.into());
-        let excess = history.len().saturating_sub(crate::app::input::HISTORY_LIMIT);
+        let excess = history
+            .len()
+            .saturating_sub(crate::app::input::HISTORY_LIMIT);
         if excess > 0 {
             history.drain(..excess);
         }
     }
 }
 
+use crate::app::documentation::DOCUMENTATION_MAXIMUM_BYTES;
+use crate::app::documentation::DOCUMENTATION_MAXIMUM_LINES;
+use crate::app::documentation::DOCUMENTATION_MAXIMUM_SECTIONS;
+use crate::app::documentation::markdown_rows;
+use crate::app::documentation::wrap_prose;
 use crate::editor::text::ByteRange;
 use crate::ui::DocumentationMarkupKind;
 use crate::ui::DocumentationPopupKind;
 use crate::ui::DocumentationPopupState;
 use crate::ui::DocumentationSection;
-use crate::app::documentation::DOCUMENTATION_MAXIMUM_SECTIONS;
-use crate::app::documentation::DOCUMENTATION_MAXIMUM_LINES;
-use crate::app::documentation::DOCUMENTATION_MAXIMUM_BYTES;
-use crate::app::documentation::markdown_rows;
-use crate::app::documentation::wrap_prose;
-
-
-
 
 impl InputSession {
     pub(in crate::app) fn documentation(&self) -> Option<&DocumentationPopupState> {
@@ -1562,24 +1536,12 @@ impl InputSession {
     }
 }
 
-use crate::editor::text::ByteOffset;
-
-use crate::editor::Selection;
-use crate::editor::SelectionKind;
-
-use std::sync::Arc;
-
-use crate::app::language::snippets::SnippetSession;
-
-
-
 #[derive(Clone, Debug)]
 pub(in crate::app) struct PromptCompletionKey {
     generation: u64,
     prompt_input: String,
     pub(in crate::app) prefix: String,
 }
-
 
 pub(in crate::app) struct PromptCompletionRequest {
     pub(in crate::app) key: PromptCompletionKey,

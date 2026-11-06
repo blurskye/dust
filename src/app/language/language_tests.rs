@@ -133,7 +133,8 @@ pub(in crate::app) fn installed_language_server_autostarts_after_workspace_trust
 }
 
 #[test]
-pub(in crate::app) fn autostart_waits_for_other_languages_and_skips_servers_without_a_project_root() {
+pub(in crate::app) fn autostart_waits_for_other_languages_and_skips_servers_without_a_project_root()
+{
     let (_app_dirs, mut app) = app();
     fs::create_dir(app.state.workspace_root.join(".git")).unwrap();
     let template = app
@@ -620,7 +621,6 @@ pub(in crate::app) fn workspace_edit_preparation_retries_unopened_files_after_qu
     use crate::language::lsp::LspPosition;
     use crate::language::lsp::LspRange;
     use crate::language::lsp::LspTextEdit;
-    use crate::language::lsp::LspWorkspaceEdit;
     let (_app_dirs, mut app) = app();
     let paths = (0..17)
         .map(|index| app.state.workspace_root.join(format!("file-{index}.rs")))
@@ -682,7 +682,6 @@ pub(in crate::app) fn workspace_edit_preparation_retries_unopened_files_after_qu
 #[test]
 pub(in crate::app) fn staged_workspace_resources_survive_queue_backpressure_and_can_be_retried() {
     use crate::language::lsp::LspResourceOperation;
-    use crate::language::lsp::LspWorkspaceEdit;
     let (_app_dirs, mut app) = app();
     let paths = (0..9)
         .map(|index| {
@@ -731,7 +730,8 @@ pub(in crate::app) fn staged_workspace_resources_survive_queue_backpressure_and_
 }
 
 #[test]
-pub(in crate::app) fn unopened_multifile_workspace_edit_previews_then_applies_only_to_editor_buffers() {
+pub(in crate::app) fn unopened_multifile_workspace_edit_previews_then_applies_only_to_editor_buffers()
+ {
     let (_app_dirs, mut app) = app();
     let first = app.state.workspace_root.join("first.rs");
     let second = app.state.workspace_root.join("second.rs");
@@ -925,7 +925,8 @@ pub(in crate::app) fn lsp_progress_hides_transport_keys_preserves_begin_titles_a
 }
 
 #[test]
-pub(in crate::app) fn completion_executes_its_command_on_the_offering_server_only_after_insertion() {
+pub(in crate::app) fn completion_executes_its_command_on_the_offering_server_only_after_insertion()
+{
     use crate::language::lsp::*;
     for invalid_edit in [false, true] {
         let (_app_dirs, mut app) = app();
@@ -1395,14 +1396,10 @@ pub(in crate::app) fn rust_analyzer_rustup_proxy_detection_accepts_symlinks_and_
     fs::set_permissions(&rustup, fs::Permissions::from_mode(0o700)).unwrap();
     let hardlink = directory.path().join("rust-analyzer");
     fs::hard_link(&rustup, &hardlink).expect("rustup hardlink proxy");
-    assert!(App::rust_analyzer_is_rustup_proxy(
-        &hardlink
-    ));
+    assert!(App::rust_analyzer_is_rustup_proxy(&hardlink));
     fs::remove_file(&hardlink).expect("remove hardlink proxy");
     std::os::unix::fs::symlink(&rustup, &hardlink).expect("rustup symlink proxy");
-    assert!(App::rust_analyzer_is_rustup_proxy(
-        &hardlink
-    ));
+    assert!(App::rust_analyzer_is_rustup_proxy(&hardlink));
 }
 
 #[cfg(unix)]
@@ -1772,8 +1769,6 @@ pub(in crate::app) fn symbol_picker_uses_the_session_key_to_resolve_position_enc
 pub(in crate::app) fn typing_narrows_the_completion_menu_instead_of_closing_it() {
     use crate::editor::text::ByteOffset;
     use crate::editor::text::ByteRange;
-    use crate::editor::text::TextEdit;
-    use crate::editor::text::TextEditSet;
     let (_app_dirs, mut app) = app();
     let definition = app
         .tooling
@@ -1919,8 +1914,7 @@ pub(in crate::app) fn lsp_status_never_labels_failed_or_backing_off_sessions_as_
     for attempt in 0..crate::app::language::LSP_RESTART_LIMIT {
         assert!(app.language.schedule_restart(&key, due).is_none());
         assert!(app.language.restart_due(due).is_none());
-        due +=
-            Duration::from_millis(crate::app::language::LSP_RESTART_BACKOFF_MS << attempt);
+        due += Duration::from_millis(crate::app::language::LSP_RESTART_BACKOFF_MS << attempt);
         assert_eq!(app.language.restart_due(due), Some(key.clone()));
     }
     assert_eq!(
@@ -2989,10 +2983,9 @@ pub(in crate::app) fn active_document_retries_preserve_automatic_completion_afte
 }
 
 #[test]
-pub(in crate::app) fn waiting_lsp_requests_resume_when_their_server_finishes_even_without_progress_ui() {
-    use crate::language::lsp::LspFeature;
+pub(in crate::app) fn waiting_lsp_requests_resume_when_their_server_finishes_even_without_progress_ui()
+ {
     use crate::language::lsp::LspPosition;
-    use crate::language::lsp::LspProgressKind;
     use crate::language::lsp::LspRange;
     for display_progress in [true, false] {
         let (_app_dirs, mut app) = app();
@@ -3302,7 +3295,8 @@ pub(in crate::app) fn code_action_command_waits_for_approval_of_its_edits() {
 }
 
 #[test]
-pub(in crate::app) fn code_action_command_waits_for_approval_and_closes_the_consumed_preview_on_failure() {
+pub(in crate::app) fn code_action_command_waits_for_approval_and_closes_the_consumed_preview_on_failure()
+ {
     use crate::language::lsp::*;
     for disconnect in [false, true] {
         let (_app_dirs, mut app) = app();
@@ -3527,7 +3521,6 @@ pub(in crate::app) fn deferred_code_action_commands_belong_to_their_own_resource
 
 #[test]
 pub(in crate::app) fn selection_expansion_requests_ranges_and_finishes_when_they_arrive() {
-    use crate::language::lsp::LspFeatureResult;
     use crate::language::lsp::LspPosition;
     use crate::language::lsp::LspRange;
     let (_app_dirs, mut app) = app();
@@ -3676,48 +3669,32 @@ pub(in crate::app) fn stopping_a_starting_server_retires_its_launch() {
     assert!(!app.language.project_pending());
 }
 
-use crate::app::language::LspLaunch;
-use crate::app::language::LspProjectionOwner;
-use crate::app::language::LspRuntimeState;
 use crate::app::tools::LspRuntimeSource;
-use crate::app::tools::ToolInstall;
 use crate::app::tools::lsp_runtime_source_allowed_on_host;
-use std::path::Path;
-use std::time::Duration;
-use std::time::Instant;
 use crate::editor::input::KeyEvent;
 use crate::editor::text::ByteOffset;
 use crate::editor::text::ByteRange;
+use std::time::Duration;
+use std::time::Instant;
 
+use crate::app::App;
+use crate::app::startup::StartupTarget;
 use crate::editor::text::TextBuffer;
+use crate::tools::ToolKind;
+use crate::tools::ToolStatus;
+use crate::tools::is_nixos_host;
+use crate::workspace::WorkspaceTrust;
+use std::collections::HashMap;
+use std::fs;
+use std::thread;
+use tempfile::tempdir;
+
+use crate::app::AppEffect;
+use crate::workspace::DiagnosticSeverity;
+
 use crate::editor::text::TextEdit;
 use crate::editor::text::TextEditSet;
-use crate::editor::EditorMode;
-use crate::language::lsp::LspDocument;
 use crate::language::lsp::LspFeature;
 use crate::language::lsp::LspFeatureResult;
 use crate::language::lsp::LspProgressKind;
 use crate::language::lsp::LspWorkspaceEdit;
-use crate::language::lsp::file_uri;
-use crate::tools::ToolDefinition;
-use crate::tools::ToolKind;
-use crate::tools::ToolOperation;
-use crate::tools::ToolStatus;
-use crate::tools::discover_executable;
-use crate::tools::is_nixos_host;
-use crate::workspace::WorkspaceTrust;
-use thiserror::Error;
-use crate::app::startup::StartupTarget;
-use std::collections::HashMap;
-use std::fs;
-use std::thread;
-use crate::ui::render;
-use tempfile::tempdir;
-use crate::app::App;
-
-
-
-use crate::app::AppEffect;
-use crate::app::PickerKind;
-use crate::workspace::DiagnosticSeverity;
-

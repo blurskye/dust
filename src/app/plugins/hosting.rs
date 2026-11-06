@@ -1,15 +1,15 @@
 //! Extension-owned retained/private presenters; graph publication stays with WindowSession.
-use crate::app::plugins::ExtensionSession;
-use crate::app::plugins::panels::PluginUiInteraction;
-use crate::app::plugins::panels::PluginWindowHost;
 use crate::app::configuration::ContributionCandidate;
 use crate::app::configuration::ContributionReceipt;
 use crate::app::configuration::WindowRuleSource;
-use crate::editor::EditorState;
+use crate::app::plugins::ExtensionSession;
+use crate::app::plugins::panels::PluginUiInteraction;
+use crate::app::plugins::panels::PluginWindowHost;
 use crate::app::windows::PluginWindowKey;
 use crate::app::windows::PluginWindowReceipt;
 use crate::app::windows::PluginWindowTransition;
 use crate::app::windows::WindowSession;
+use crate::editor::EditorState;
 use crate::plugins::PluginCatalogVersion;
 use crate::plugins::PluginContributionCatalog;
 use crate::plugins::PluginContributionIndex;
@@ -72,10 +72,7 @@ pub(in crate::app) struct WindowRules<'a> {
     expected: WindowRuleSource,
 }
 impl WindowRules<'_> {
-    pub(in crate::app) fn finish(
-        self,
-        accepted: ContributionReceipt,
-    ) -> Result<(), String> {
+    pub(in crate::app) fn finish(self, accepted: ContributionReceipt) -> Result<(), String> {
         if !self.expected.accepts(&accepted) {
             return Err("plugin window rules do not match accepted configuration".into());
         }

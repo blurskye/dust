@@ -1,25 +1,25 @@
 use crate::app::commands::AppEffect;
-use std::collections::BTreeMap;
-use crate::editor::CommandInvocation;
-use crate::editor::CommandRegistry;
-use crate::editor::CommandValue;
-use std::str::FromStr;
-use std::collections::HashMap;
-use crate::editor::input::InputContextLayer;
-use crate::editor::input::InputContextRegistry;
-use crate::editor::InvocationSource;
-use crate::editor::input::KeyEvent;
 use crate::app::configuration::KeymapInspection;
-use crate::editor::input::KeymapLayer;
 use crate::app::configuration::KeymapOperation;
-use crate::editor::input::KeymapSequence;
-use crate::editor::input::MappingResolution;
 use crate::app::configuration::ResolvedKeyGroup;
 use crate::app::configuration::ResolvedKeymaps;
 use crate::app::configuration::ReverseBinding;
 use crate::app::configuration::configured_context;
 use crate::app::configuration::invocation_fingerprint;
 use crate::app::configuration::keymap_entries;
+use crate::editor::CommandInvocation;
+use crate::editor::CommandRegistry;
+use crate::editor::CommandValue;
+use crate::editor::InvocationSource;
+use crate::editor::input::InputContextLayer;
+use crate::editor::input::InputContextRegistry;
+use crate::editor::input::KeyEvent;
+use crate::editor::input::KeymapLayer;
+use crate::editor::input::KeymapSequence;
+use crate::editor::input::MappingResolution;
+use std::collections::BTreeMap;
+use std::collections::HashMap;
+use std::str::FromStr;
 
 pub fn reload_keymaps(
     commands: &CommandRegistry<AppEffect>,
@@ -283,9 +283,7 @@ pub(in crate::app) fn regular_keymap_declaration(
     })
 }
 
-pub(in crate::app) fn identity_disable_is_well_formed(
-    entry: &crate::config::KeymapEntry,
-) -> bool {
+pub(in crate::app) fn identity_disable_is_well_formed(entry: &crate::config::KeymapEntry) -> bool {
     entry.disable
         && entry.command.is_none()
         && !entry.unmap

@@ -1,6 +1,5 @@
 #![forbid(unsafe_code)]
 
-
 const ABSOLUTE_ROOT_LIMIT: usize = 64;
 const ABSOLUTE_DIAGNOSTIC_LIMIT: usize = 100_000;
 pub(crate) const ABSOLUTE_PICKER_ITEM_LIMIT: usize = 100_000;
@@ -9,7 +8,6 @@ const ABSOLUTE_PROPOSAL_EDIT_LIMIT: usize = 100_000;
 mod root;
 pub use root::ExecutionSource;
 pub use root::RootId;
-pub use crate::files::RootIdentity;
 pub use root::WorkspaceId;
 pub use root::WorkspaceRoot;
 pub use root::WorkspaceState;
@@ -22,9 +20,9 @@ pub use trust::TrustStateError;
 pub use trust::TrustStore;
 pub use trust::WorkspaceTrustService;
 mod diagnostics;
-pub(crate) use diagnostics::DiagnosticProducer;
 pub use diagnostics::Diagnostic;
 pub use diagnostics::DiagnosticOwner;
+pub(crate) use diagnostics::DiagnosticProducer;
 pub use diagnostics::DiagnosticSeverity;
 pub use diagnostics::DiagnosticStore;
 pub use diagnostics::ProblemRow;

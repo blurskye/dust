@@ -1,13 +1,9 @@
-use crossterm::cursor::SetCursorStyle;
 use crate::ui::Style;
-use crate::windows::WindowRect;
 use crate::ui::grid::Frame;
 use crate::ui::render::PluginSurfaceUiState;
 use crate::ui::render::PrivateSurfaceUiState;
-
-
-
-
+use crate::windows::WindowRect;
+use crossterm::cursor::SetCursorStyle;
 
 pub(super) fn render_plugin_surface(
     frame: &mut Frame,
@@ -54,7 +50,6 @@ pub(super) fn render_plugin_surface(
         );
     }
 }
-
 
 pub(super) fn render_private_surface(
     frame: &mut Frame,

@@ -770,9 +770,7 @@ fn a_late_result_updates_its_own_record_and_leaves_a_newer_draft_untouched() {
     assert_eq!(owner.pending_submissions.len(), 1);
 }
 
-pub(in crate::app) fn attach_adapter(
-    owner: &mut DebugSession,
-) -> crate::debugger::TestAdapter {
+pub(in crate::app) fn attach_adapter(owner: &mut DebugSession) -> crate::debugger::TestAdapter {
     let (service, adapter) = crate::debugger::test_session();
     owner.service = service;
     prime_for(owner, &adapter);

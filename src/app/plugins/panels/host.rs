@@ -1,29 +1,7 @@
-use std::collections::BTreeMap;
-use std::collections::BTreeSet;
-use crate::windows::ContentAdapterKind;
-use crate::windows::ContentCapabilities;
-use crate::windows::ContentContract;
-use crate::windows::ContentTypeId;
-use crate::plugins::PluginContributionIndex;
-use crate::plugins::PluginPresenterKind;
 use crate::app::plugins::panels::PluginPrivateState;
-use crate::plugins::PluginRequestedPlacement;
-use crate::plugins::PluginSurfaceGeometry;
-use crate::ui::PluginSurfaceUiState;
-use crate::plugins::PluginUiError;
-use crate::plugins::PluginUiErrorCode;
-use crate::plugins::PluginUiEvent;
 use crate::app::plugins::panels::PluginUiInteraction;
-use crate::plugins::PluginUiRequest;
-use crate::plugins::PluginUiRequestKind;
 use crate::app::plugins::panels::PluginWindowHost;
 use crate::app::plugins::panels::PluginWindowInstance;
-use crate::plugins::PluginWindowPlacementKind;
-use crate::ui::PrivateSurfaceCell;
-use crate::ui::PrivateSurfaceUiState;
-use crate::windows::WindowGraph;
-use crate::windows::WindowId;
-use crate::windows::WindowPlacement;
 use crate::app::plugins::panels::apply_private_patch;
 use crate::app::plugins::panels::ensure_focused_visible;
 use crate::app::plugins::panels::first_focusable_node;
@@ -43,6 +21,28 @@ use crate::app::plugins::panels::ui_error;
 use crate::app::plugins::panels::validate_private_action;
 use crate::app::plugins::panels::validate_private_snapshot;
 use crate::app::plugins::panels::validate_tree;
+use crate::plugins::PluginContributionIndex;
+use crate::plugins::PluginPresenterKind;
+use crate::plugins::PluginRequestedPlacement;
+use crate::plugins::PluginSurfaceGeometry;
+use crate::plugins::PluginUiError;
+use crate::plugins::PluginUiErrorCode;
+use crate::plugins::PluginUiEvent;
+use crate::plugins::PluginUiRequest;
+use crate::plugins::PluginUiRequestKind;
+use crate::plugins::PluginWindowPlacementKind;
+use crate::ui::PluginSurfaceUiState;
+use crate::ui::PrivateSurfaceCell;
+use crate::ui::PrivateSurfaceUiState;
+use crate::windows::ContentAdapterKind;
+use crate::windows::ContentCapabilities;
+use crate::windows::ContentContract;
+use crate::windows::ContentTypeId;
+use crate::windows::WindowGraph;
+use crate::windows::WindowId;
+use crate::windows::WindowPlacement;
+use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 
 type WindowMutationRevisions = (Option<u64>, Option<u64>, Option<u64>);
 
@@ -718,11 +718,7 @@ impl PluginWindowHost {
     pub(in crate::app) fn clear_runtime(&mut self) {
         self.instances.clear();
     }
-    pub(in crate::app) fn remove_generation(
-        &mut self,
-        plugin: &str,
-        load: u64,
-    ) -> bool {
+    pub(in crate::app) fn remove_generation(&mut self, plugin: &str, load: u64) -> bool {
         let before = self.instances.len();
         self.instances
             .retain(|_, instance| !(instance.plugin == plugin && instance.load == load));

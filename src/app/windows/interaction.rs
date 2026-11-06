@@ -1,25 +1,24 @@
-use crate::ui::render::SCRATCH_LABEL;
-use std::collections::BTreeMap;
-use crate::windows::DockEdge;
+use crate::app::App;
 use crate::app::windows::EditorCloseStep;
 use crate::app::windows::EditorCloseTarget;
-use crate::editor::EditorTransaction;
-use crate::editor::FocusDirection;
-use crate::app::App;
 use crate::app::windows::LayoutAction;
 use crate::app::windows::LayoutPlanError;
-use crate::telemetry::LogLevel;
 use crate::app::windows::NativeDescriptions;
 use crate::app::windows::NativeSurfaceTarget;
-use crate::ui::PromptKind;
-use crate::windows::SpatialDirection;
+use crate::editor::EditorTransaction;
+use crate::editor::FocusDirection;
 use crate::editor::UndoPolicy;
+use crate::telemetry::LogLevel;
+use crate::ui::PromptKind;
+use crate::ui::render::SCRATCH_LABEL;
+use crate::windows::DockEdge;
+use crate::windows::SpatialDirection;
 use crate::windows::WindowPlacement;
 use crate::windows::WindowRect;
+use std::collections::BTreeMap;
 // Remaining editor/window routing; terminal data and algorithms live in the owner.
 use crate::process::PtyId;
 
-use crate::app::command;
 use crate::windows::PANE_DEFAULT_RATIO;
 use crate::windows::PANE_MINIMUM_HEIGHT;
 use crate::windows::PANE_MINIMUM_WIDTH;
@@ -27,25 +26,22 @@ use crate::windows::PANE_MINIMUM_WIDTH;
 use crate::app::windows::CommandEffect;
 use crate::app::windows::CommandError;
 use crate::app::windows::CommandPolicy;
-use crate::app::windows::WindowCommand;
 use crate::app::windows::EditorWindowBridge;
-use crate::ui::EditorWindowLayoutState;
 use crate::app::windows::NativeSurfaceSignature;
-use crate::ui::NativeSurfaceWindowBinding;
 use crate::app::windows::ProjectionRequest;
+use crate::app::windows::WindowCommand;
 use crate::ui::EditorWindowBinding as UiEditorWindowBinding;
+use crate::ui::EditorWindowLayoutState;
+use crate::ui::NativeSurfaceWindowBinding;
+use crate::ui::explorer_panel_width;
+use crate::ui::render::TERMINAL_PANEL_RESIZE_STEP;
 use crate::ui::screen_foot_rows;
 use crate::ui::terminal_panel_geometry;
 use crate::ui::workspace_top_rows;
 use crate::windows::CompositorProjection;
-use crate::ui::explorer_panel_width;
-use crate::ui::render::TERMINAL_PANEL_RESIZE_STEP;
 use crate::windows::PANE_RESIZE_STEP;
 
-
-
 impl App {
-
     pub(in crate::app) fn apply_window_plan(
         &mut self,
         plan: crate::app::windows::WindowPlan,
@@ -87,8 +83,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn focus_surface(&mut self, direction: FocusDirection) {
         self.reconcile_editor_windows();
         let direction = match direction {
@@ -120,8 +114,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn apply_layout_action(&mut self, action: LayoutAction) {
         self.reconcile_editor_windows();
         if matches!(action, LayoutAction::ClosePane | LayoutAction::CloseTab) {
@@ -160,7 +152,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn handle_editor_close_step(&mut self, step: EditorCloseStep) {
         match step {
             EditorCloseStep::Prompt { title, message } => self.open_confirmation_actions(
@@ -190,8 +181,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn submit_dirty_close(&mut self, selected: crate::ui::ConfirmationChoice) {
         let step = self.window_session.choose_editor_close(
             selected == crate::ui::ConfirmationChoice::Yes,
@@ -209,8 +198,6 @@ impl App {
 }
 
 impl App {
-
-
     fn apply_accepted_editor_close(
         &mut self,
         target: EditorCloseTarget,
@@ -258,7 +245,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn set_explorer_focus(&mut self, focused: bool) {
         if focused {
             self.window_session.focus_explorer();
@@ -270,7 +256,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn project_window_activation(&mut self) {
         if let Some(id) = self
             .window_session
@@ -291,7 +276,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn project_window_content_tabs(&mut self) {
         self.sync_ui_diagnostics();
         self.window_session.project_content_tabs(
@@ -305,7 +289,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn project_window_geometry(&mut self) {
         self.project_window_activation();
         self.ui.compositor_layout = self.window_session.layout().cloned();
@@ -315,8 +298,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn refresh_window_content(&mut self) {
         self.sync_ui_diagnostics();
         self.retire_stale_picker();
@@ -342,7 +323,6 @@ impl App {
 }
 
 impl App {
-
     pub(super) fn sync_plugin_window_ui(&mut self) {
         let projection = self.compositor_projection().cloned();
         self.extension.synchronize_windows(
@@ -358,8 +338,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn compositor_projection(&self) -> Option<&CompositorProjection> {
         self.window_session.current_for_editor(
             &self.state.window_version(),
@@ -369,8 +347,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn workspace_bounds(&self) -> Option<WindowRect> {
         self.compositor_projection()
             .map(|projection| projection.workspace_bounds)
@@ -378,8 +354,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn explorer_window_rect(&self) -> Option<WindowRect> {
         let layout = self.window_session.layout()?;
         let window = layout.surfaces.explorer?;
@@ -390,8 +364,6 @@ impl App {
 }
 
 impl App {
-
-
     #[cfg(test)]
     pub(in crate::app) fn workspace_render_height(&self) -> u16 {
         self.workspace_bounds()
@@ -400,12 +372,7 @@ impl App {
 }
 
 impl App {
-
-
-    pub(super) fn window_target_error(
-        &self,
-        error: crate::app::windows::TargetError,
-    ) -> String {
+    pub(super) fn window_target_error(&self, error: crate::app::windows::TargetError) -> String {
         match error {
             crate::app::windows::TargetError::MissingTerminal => {
                 self.message("terminal_missing", &[])
@@ -416,8 +383,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn apply_native_window_placement(
         &mut self,
         target: NativeSurfaceTarget,
@@ -442,9 +407,10 @@ impl App {
 }
 
 impl App {
-
-
-    pub(in crate::app) fn show_native_window(&mut self, target: NativeSurfaceTarget) -> Result<(), String> {
+    pub(in crate::app) fn show_native_window(
+        &mut self,
+        target: NativeSurfaceTarget,
+    ) -> Result<(), String> {
         if self.compositor_projection().is_none() {
             return Err("universal compositor projection is missing or stale".into());
         }
@@ -470,8 +436,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn current_native_placement(
         &self,
         target: NativeSurfaceTarget,
@@ -481,8 +445,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn clone_graph_window(
         &mut self,
         target: &str,
@@ -540,8 +502,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn place_graph_window(
         &mut self,
         target: &str,
@@ -561,8 +521,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn show_graph_window(&mut self, target: &str) -> Result<(), String> {
         let selected = self.terminal_session.selected().map(|id| id.0);
         let window = self
@@ -578,16 +536,16 @@ impl App {
 }
 
 impl App {
-
-
-    pub(in crate::app) fn resize_graph_window(&mut self, target: &str, amount: i16) -> Result<(), String> {
+    pub(in crate::app) fn resize_graph_window(
+        &mut self,
+        target: &str,
+        amount: i16,
+    ) -> Result<(), String> {
         self.run_window_command(WindowCommand::Resize(target, amount))
     }
 }
 
 impl App {
-
-
     pub(in crate::app) fn resize_focused_window(
         &mut self,
         direction: FocusDirection,
@@ -599,8 +557,6 @@ impl App {
 }
 
 impl App {
-
-
     #[cfg(test)]
     pub(in crate::app) fn resize_native_window_direction(
         &mut self,
@@ -612,8 +568,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn close_graph_window(&mut self, target: &str) -> Result<(), String> {
         let selected = self.terminal_session.selected().map(|id| id.0);
         let window = self
@@ -643,9 +597,12 @@ impl App {
 }
 
 impl App {
-
-
-    pub(in crate::app) fn move_graph_window(&mut self, target: &str, x: u16, y: u16) -> Result<(), String> {
+    pub(in crate::app) fn move_graph_window(
+        &mut self,
+        target: &str,
+        x: u16,
+        y: u16,
+    ) -> Result<(), String> {
         let selected = self.terminal_session.selected().map(|id| id.0);
         let window = self
             .window_session
@@ -665,15 +622,16 @@ impl App {
 }
 
 impl App {
-
-
-    pub(in crate::app) fn swap_graph_windows(&mut self, first: &str, second: &str) -> Result<(), String> {
+    pub(in crate::app) fn swap_graph_windows(
+        &mut self,
+        first: &str,
+        second: &str,
+    ) -> Result<(), String> {
         self.run_window_command(WindowCommand::Swap(first, second))
     }
 }
 
 impl App {
-
     fn run_window_command(&mut self, command: WindowCommand<'_>) -> Result<(), String> {
         let plan = self
             .window_session
@@ -744,8 +702,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn native_surface_signature(
         &self,
         editor: &EditorWindowBridge,
@@ -860,8 +816,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn reconcile_editor_windows(&mut self) {
         let scratch_label = &SCRATCH_LABEL;
         let editor_current = self

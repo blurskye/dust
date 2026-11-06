@@ -13,4 +13,3 @@ pub struct SyntaxObject {
     /// Byte range of the `i` object.
     pub inner: (usize, usize),
 }
-

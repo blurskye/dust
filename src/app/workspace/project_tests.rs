@@ -1,8 +1,5 @@
 use crate::app::tests::*;
 
-
-
-
 #[test]
 pub(in crate::app) fn workspace_trust_is_one_key_cancels_on_focus_loss_and_persists() {
     let key = |name: &str| name.parse::<KeyEvent>().expect("key");
@@ -64,7 +61,6 @@ pub(in crate::app) fn workspace_trust_is_one_key_cancels_on_focus_loss_and_persi
     assert!(source.contains("[[seen]]"));
 }
 
-
 #[test]
 pub(in crate::app) fn shutdown_waits_for_a_queued_workspace_revocation() {
     let (_app_dirs, mut app) = app();
@@ -106,7 +102,6 @@ pub(in crate::app) fn shutdown_waits_for_a_queued_workspace_revocation() {
     );
 }
 
-
 #[test]
 pub(in crate::app) fn shutdown_reports_failed_workspace_trust_writes() {
     let (_app_dirs, mut app) = app();
@@ -124,7 +119,6 @@ pub(in crate::app) fn shutdown_reports_failed_workspace_trust_writes() {
         ))
     ));
 }
-
 
 #[test]
 pub(in crate::app) fn shutdown_reports_workspace_trust_writes_that_exceed_its_deadline() {
@@ -151,7 +145,6 @@ pub(in crate::app) fn shutdown_reports_workspace_trust_writes_that_exceed_its_de
     wait_trust(&mut app);
 }
 
-
 #[test]
 pub(in crate::app) fn unseen_workspace_prompts_once_after_identity_and_database_are_ready() {
     let (_app_dirs, mut app) = app();
@@ -176,7 +169,6 @@ pub(in crate::app) fn unseen_workspace_prompts_once_after_identity_and_database_
     app.maybe_prompt_for_unseen_workspace();
     assert!(app.ui.prompt.is_none());
 }
-
 
 #[test]
 pub(in crate::app) fn workspace_history_records_visits_without_trust_prompts() {
@@ -223,9 +215,9 @@ pub(in crate::app) fn workspace_history_records_visits_without_trust_prompts() {
     );
 }
 
-
 #[test]
-pub(in crate::app) fn automatic_workspace_trust_prompt_never_steals_an_active_prompt_or_safe_mode() {
+pub(in crate::app) fn automatic_workspace_trust_prompt_never_steals_an_active_prompt_or_safe_mode()
+{
     let (_app_dirs, mut app) = app();
     prepare_trust_identity(&mut app);
     app.open_prompt(crate::ui::PromptKind::Command, String::new());
@@ -240,7 +232,6 @@ pub(in crate::app) fn automatic_workspace_trust_prompt_never_steals_an_active_pr
     assert!(app.ui.prompt.is_none());
 }
 
-
 #[test]
 pub(in crate::app) fn workspace_trust_never_activates_before_identity_and_database_are_ready() {
     let (_app_dirs, mut app) = app();
@@ -252,7 +243,6 @@ pub(in crate::app) fn workspace_trust_never_activates_before_identity_and_databa
     assert!(app.ui.notification_error);
 }
 
-
 pub(in crate::app) fn wait_root_operation(app: &mut App) {
     let deadline = Instant::now() + Duration::from_secs(2);
     while app.workspace.root_operation_pending() {
@@ -261,7 +251,6 @@ pub(in crate::app) fn wait_root_operation(app: &mut App) {
         thread::yield_now();
     }
 }
-
 
 #[test]
 pub(in crate::app) fn async_root_add_activation_and_dirty_removal_preflight_are_real() {
@@ -306,7 +295,6 @@ pub(in crate::app) fn async_root_add_activation_and_dirty_removal_preflight_are_
     assert_eq!(app.workspace.roots().len(), 1);
 }
 
-
 #[test]
 pub(in crate::app) fn workspace_switch_rechecks_dirty_buffers_before_publishing() {
     let (_app_dirs, mut app) = app();
@@ -342,7 +330,6 @@ pub(in crate::app) fn workspace_switch_rechecks_dirty_buffers_before_publishing(
     );
 }
 
-
 #[test]
 pub(in crate::app) fn stale_async_root_add_and_pending_service_removal_are_rejected() {
     let (_app_dirs, mut app) = app();
@@ -368,7 +355,6 @@ pub(in crate::app) fn stale_async_root_add_and_pending_service_removal_are_rejec
     assert!(app.ui.notification_error);
 }
 
-
 pub(in crate::app) fn wait_workspace_search(app: &mut App) {
     let deadline = Instant::now() + Duration::from_secs(5);
     while app.search.pending() || app.workspace_edits.preparing() {
@@ -378,7 +364,6 @@ pub(in crate::app) fn wait_workspace_search(app: &mut App) {
         thread::yield_now();
     }
 }
-
 
 #[test]
 pub(in crate::app) fn workspace_file_picker_publishes_the_full_discovery_byte_budget() {
@@ -430,7 +415,6 @@ pub(in crate::app) fn workspace_file_picker_publishes_the_full_discovery_byte_bu
     assert_eq!(picker.rows.len(), count);
 }
 
-
 #[test]
 pub(in crate::app) fn workspace_file_command_uses_bounded_picker_and_opens_selection() {
     let (_app_dirs, mut app) = app();
@@ -477,7 +461,6 @@ pub(in crate::app) fn workspace_file_command_uses_bounded_picker_and_opens_selec
         Some(&path)
     );
 }
-
 
 #[test]
 pub(in crate::app) fn workspace_search_uses_generic_picker_and_opens_unopened_match() {
@@ -541,7 +524,6 @@ pub(in crate::app) fn workspace_search_uses_generic_picker_and_opens_unopened_ma
     );
 }
 
-
 #[test]
 pub(in crate::app) fn workspace_search_accepts_normalized_open_buffers() {
     for open in [false, true] {
@@ -566,7 +548,6 @@ pub(in crate::app) fn workspace_search_accepts_normalized_open_buffers() {
         assert!(!app.ui.notification_error);
     }
 }
-
 
 #[test]
 pub(in crate::app) fn workspace_search_rejects_stale_open_and_closed_file_offsets() {
@@ -600,7 +581,6 @@ pub(in crate::app) fn workspace_search_rejects_stale_open_and_closed_file_offset
     }
 }
 
-
 #[test]
 pub(in crate::app) fn workspace_search_streams_exact_batches_and_root_changes_cancel() {
     let (_app_dirs, mut app) = app();
@@ -632,7 +612,6 @@ pub(in crate::app) fn workspace_search_streams_exact_batches_and_root_changes_ca
     assert!(app.search.matches().is_empty());
 }
 
-
 #[test]
 pub(in crate::app) fn workspace_replacement_groups_many_matches_from_shared_snapshots() {
     let (_app_dirs, mut app) = app();
@@ -655,9 +634,9 @@ pub(in crate::app) fn workspace_replacement_groups_many_matches_from_shared_snap
     assert_eq!(fs::read_to_string(path).unwrap(), before);
 }
 
-
 #[test]
-pub(in crate::app) fn workspace_replacement_rejects_open_buffer_that_differs_from_search_snapshot() {
+pub(in crate::app) fn workspace_replacement_rejects_open_buffer_that_differs_from_search_snapshot()
+{
     let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("stale.txt");
     fs::write(&path, "needle\n").expect("disk");
@@ -678,7 +657,6 @@ pub(in crate::app) fn workspace_replacement_rejects_open_buffer_that_differs_fro
     );
     assert!(app.ui.notification_error);
 }
-
 
 #[test]
 pub(in crate::app) fn truncated_workspace_search_does_not_offer_partial_replacement() {
@@ -720,7 +698,6 @@ pub(in crate::app) fn truncated_workspace_search_does_not_offer_partial_replacem
     );
 }
 
-
 #[test]
 pub(in crate::app) fn workspace_search_rejects_changed_disk_and_open_buffer_snapshots() {
     for open in [false, true] {
@@ -750,7 +727,6 @@ pub(in crate::app) fn workspace_search_rejects_changed_disk_and_open_buffer_snap
         assert!(app.search.workflow().is_none());
     }
 }
-
 
 #[test]
 pub(in crate::app) fn workspace_search_revalidates_buffers_opened_while_navigation_is_pending() {
@@ -788,7 +764,6 @@ pub(in crate::app) fn workspace_search_revalidates_buffers_opened_while_navigati
     }
 }
 
-
 #[test]
 pub(in crate::app) fn workspace_search_accepts_unchanged_encoded_snapshots() {
     for open in [false, true] {
@@ -813,7 +788,6 @@ pub(in crate::app) fn workspace_search_accepts_unchanged_encoded_snapshots() {
         );
     }
 }
-
 
 #[test]
 pub(in crate::app) fn workspace_search_presentation_limit_keeps_matches_and_blocks_replacement() {
@@ -853,22 +827,13 @@ pub(in crate::app) fn workspace_search_presentation_limit_keeps_matches_and_bloc
         }
     }
 }
-use std::time::Duration;
-use std::time::Instant;
+use crate::app::App;
+use crate::app::AppEffect;
 use crate::editor::input::KeyEvent;
 use crate::editor::text::ByteOffset;
 use crate::editor::text::TextBuffer;
-use crate::files::VfsError;
-use crate::files::WorkspaceFilePolicy;
-use crate::files::WorkspaceSearchMatch;
-use crate::ui::PromptKind;
-use crate::ui::UiEvent;
-use crate::files::RootIdentity;
-use crate::workspace::WorkspaceTrust;
 use std::fs;
 use std::thread;
-use crate::ui::render;
+use std::time::Duration;
+use std::time::Instant;
 use tempfile::tempdir;
-use crate::app::App;
-use crate::app::AppEffect;
-

@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 use std::collections::HashMap;
-use std::io::self;
+use std::io;
 use std::io::BufRead;
 use std::io::BufReader;
 use std::io::Read;
@@ -13,7 +13,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
-use std::sync::mpsc::self;
+use std::sync::mpsc;
 use std::sync::mpsc::Receiver;
 use std::sync::mpsc::SyncSender;
 use std::thread;

@@ -1,6 +1,6 @@
 use std::ffi::OsString;
 use std::fs;
-use std::io::self;
+use std::io;
 use std::io::Read;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::ffi::OsStringExt;

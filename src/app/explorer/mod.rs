@@ -1,5 +1,10 @@
 //! Explorer tree, directory lane, watch and viewport ownership.
 mod intent;
+use crate::app::explorer::tree::ExplorerChild;
+use crate::app::explorer::tree::ExplorerKind;
+use crate::app::explorer::tree::ExplorerLoadState;
+use crate::app::explorer::tree::ExplorerNodeId;
+use crate::app::explorer::tree::ExplorerState;
 use crate::app::workspace::WorkspaceVersion;
 use crate::files::DirectoryEntryKind;
 use crate::files::DirectoryService;
@@ -11,11 +16,6 @@ use crate::ui::ExplorerSegmentRole;
 use crate::ui::ExplorerUiRow;
 use crate::ui::ExplorerUiSegment;
 use crate::ui::ExplorerUiState;
-use crate::app::explorer::tree::ExplorerChild;
-use crate::app::explorer::tree::ExplorerKind;
-use crate::app::explorer::tree::ExplorerLoadState;
-use crate::app::explorer::tree::ExplorerNodeId;
-use crate::app::explorer::tree::ExplorerState;
 use crate::workspace::WorkspaceRoot;
 pub(in crate::app) use intent::MutationContext;
 pub(in crate::app) use intent::MutationUpdate;
@@ -229,10 +229,7 @@ impl ExplorerSession {
                 .values()
                 .any(|view| view.tree.is_watched_directory(id))
     }
-    pub(in crate::app) fn remove_view(
-        &mut self,
-        view: ExplorerViewId,
-    ) -> Result<(), &'static str> {
+    pub(in crate::app) fn remove_view(&mut self, view: ExplorerViewId) -> Result<(), &'static str> {
         if view == PRIMARY_EXPLORER_VIEW || self.cloned_views.remove(&view).is_none() {
             return Err("explorer view is unavailable");
         }
@@ -332,11 +329,7 @@ impl ExplorerSession {
     pub(in crate::app) fn pending(&self) -> bool {
         self.pending.is_some()
     }
-    pub(in crate::app) fn reset_roots(
-        &mut self,
-        roots: &[WorkspaceRoot],
-        revision: u64,
-    ) {
+    pub(in crate::app) fn reset_roots(&mut self, roots: &[WorkspaceRoot], revision: u64) {
         self.epoch = Arc::new(());
         self.observed_roots.clear();
         self.next_loads.clear();
@@ -648,9 +641,7 @@ impl ExplorerSession {
         self.follow = Some((self.active_view, path));
         self.mark_view_changed();
     }
-    pub(in crate::app) fn continue_follow(
-        &mut self,
-    ) -> Result<Option<DirectoryLoad>, String> {
+    pub(in crate::app) fn continue_follow(&mut self) -> Result<Option<DirectoryLoad>, String> {
         if self.pending() || !self.next_loads.is_empty() {
             return Ok(None);
         }
@@ -701,10 +692,7 @@ impl ExplorerSession {
             _ => Ok(self.load_request_for(view, id)),
         }
     }
-    pub(in crate::app) fn reconcile_watch(
-        &mut self,
-        visible: bool,
-    ) -> Result<(), String> {
+    pub(in crate::app) fn reconcile_watch(&mut self, visible: bool) -> Result<(), String> {
         if self.watch_visible && !visible {
             self.epoch = Arc::new(());
             self.follow = None;
@@ -742,11 +730,7 @@ impl ExplorerSession {
             }
         }
     }
-    pub(in crate::app) fn accept_watch(
-        &mut self,
-        batch: ExplorerWatchBatch,
-        visible: bool,
-    ) {
+    pub(in crate::app) fn accept_watch(&mut self, batch: ExplorerWatchBatch, visible: bool) {
         if !visible
             || Some(batch.generation) != self.watch_generation
             || batch.root_revision != self.tree().root_revision()
@@ -1721,7 +1705,6 @@ pub(in crate::app) mod commands;
 
 #[cfg(test)]
 pub(in crate::app) mod project_tests;
-
 
 #[cfg(test)]
 pub(in crate::app) mod surfaces_tests;

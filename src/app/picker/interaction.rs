@@ -1,42 +1,33 @@
-use crate::app::search::MAXIMUM_PICKER_ITEMS;
-use crate::app::search::SEARCH_MAXIMUM_FILES;
-use crate::ui::render::SCRATCH_LABEL;
-use std::collections::BTreeMap;
-use std::collections::BTreeSet;
-use crate::editor::text::ByteOffset;
-use crate::ui::DocumentationPopupKind;
 use crate::app::App;
-use crate::language::lsp::LspFeature;
-use crate::language::lsp::LspMarkupContent;
-use crate::language::lsp::LspMarkupKind;
-use crate::app::picker::MatcherSource;
-use std::path::Path;
-use std::path::PathBuf;
-use crate::persistence::PersistedLocation;
-use crate::workspace::PickerAction;
-use crate::app::picker::PickerContent;
-use crate::workspace::PickerItem;
-use crate::workspace::PickerItemId;
 use crate::app::commands::PickerKind;
+use crate::app::picker::MatcherSource;
+use crate::app::picker::PickerContent;
 use crate::app::picker::PickerOrigin;
 use crate::app::picker::PickerPayload;
-use crate::workspace::PickerState;
-use crate::ui::PickerSurfaceKind;
+use crate::app::search::MAXIMUM_PICKER_ITEMS;
+use crate::app::search::SEARCH_MAXIMUM_FILES;
+use crate::editor::text::ByteOffset;
 use crate::editor::text::PositionEncoding;
-use crate::tools::RegistryRequest;
 use crate::editor::text::TextBuffer;
+use crate::language::lsp::LspFeature;
+use crate::language::lsp::LspMarkupContent;
 use crate::language::lsp::path_from_file_uri;
+use crate::persistence::PersistedLocation;
+use crate::tools::RegistryRequest;
+use crate::ui::DocumentationPopupKind;
+use crate::ui::PickerSurfaceKind;
+use crate::ui::render::SCRATCH_LABEL;
 use crate::ui::render::editor::STATUS_DIRTY_MARKER;
 use crate::ui::render::picker::PICKER_MAXIMUM_PREVIEW_BYTES;
-use crate::app::command;
-
-
-
+use crate::workspace::PickerAction;
+use crate::workspace::PickerItem;
+use crate::workspace::PickerItemId;
+use crate::workspace::PickerState;
+use std::path::PathBuf;
 
 use crate::app::documents::coordination::RECOVERY_PREVIEW_LINES;
 
 impl App {
-
     pub(in crate::app) fn install_picker(
         &mut self,
         title: String,
@@ -47,8 +38,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn install_surface_picker(
         &mut self,
         surface: PickerSurfaceKind,
@@ -67,8 +56,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn install_surface_picker_state(
         &mut self,
         surface: PickerSurfaceKind,
@@ -139,8 +126,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn retire_stale_picker(&mut self) {
         if self.search.picker_is_stale(
             self.workspace.version(),
@@ -152,16 +137,12 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn selected_picker_payload(&self) -> Option<&PickerPayload> {
         self.search.selected_picker_payload()
     }
 }
 
 impl App {
-
-
     pub(in crate::app) fn open_lsp_locations_picker(
         &mut self,
         locations: Vec<crate::language::lsp::LspLocation>,
@@ -202,8 +183,6 @@ impl App {
 }
 
 impl App {
-
-
     /// Read each reference file once and retain only the requested, bounded excerpts.
     pub(in crate::app) fn reference_excerpts(
         &self,
@@ -270,8 +249,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn open_lsp_symbols_picker(
         &mut self,
         server: &str,
@@ -315,8 +292,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn open_lsp_code_actions_picker(&mut self, server: &str) {
         let choices = match self.language.install_offered_actions(MAXIMUM_PICKER_ITEMS) {
             Ok(choices) => choices,
@@ -352,8 +327,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn open_builtin_picker(&mut self, kind: PickerKind) {
         match kind {
             PickerKind::Diagnostics => {
@@ -609,14 +582,9 @@ impl App {
 }
 
 impl App {
-
-
     /// A saved location as `file:line`; its byte offset means nothing to a person. A file that
     /// isn't open is read only for a nearby offset, because this runs for every row.
-    pub(in crate::app) fn persisted_location_label(
-        &self,
-        location: &PersistedLocation,
-    ) -> String {
+    pub(in crate::app) fn persisted_location_label(&self, location: &PersistedLocation) -> String {
         const READ_CEILING: usize = 1024 * 1024;
         let name = self.workspace_relative_label(&location.path);
         let open = self
@@ -666,8 +634,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn sync_picker_ui(&mut self) {
         self.retire_stale_picker();
         let explorer = &self.configuration.settings().ui.explorer;
@@ -761,8 +727,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn picker_insert(&mut self, text: &str) {
         self.retire_stale_picker();
         let query = self.search.picker_insert(text);
@@ -776,8 +740,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn picker_backspace(&mut self) {
         self.retire_stale_picker();
         let query = self.search.picker_backspace();
@@ -791,8 +753,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn picker_move(&mut self, direction: i8) {
         self.retire_stale_picker();
         self.search.picker_move(direction, true);
@@ -801,8 +761,6 @@ impl App {
 }
 
 impl App {
-
-
     /// Read the focused change's diff on the preview's own hunk worker.
     fn sync_changes_diff_preview(&mut self) {
         let Some(crate::app::picker::PickerPayload::MatcherSource(source)) =
@@ -822,8 +780,7 @@ impl App {
             self.clear_picker_preview();
             return;
         };
-        let policy =
-            crate::app::git::GitSession::policy(&status, relative.to_owned(), layer);
+        let policy = crate::app::git::GitSession::policy(&status, relative.to_owned(), layer);
         if let Some(id) = self.search.prepare_diff_preview(
             policy,
             self.workspace.version(),
@@ -836,8 +793,6 @@ impl App {
 }
 
 impl App {
-
-
     fn clear_picker_preview(&mut self) {
         if let Some(id) = self.search.clear_preview() {
             self.documents.cancel_request(id);
@@ -846,8 +801,6 @@ impl App {
 }
 
 impl App {
-
-
     /// The change surface's focused row as a path RELATIVE to the scope root, when that
     /// surface is open.
     ///
@@ -873,8 +826,6 @@ impl App {
 }
 
 impl App {
-
-
     fn sync_picker_preview(&mut self) {
         if self.search.picker_surface() == PickerSurfaceKind::Changes {
             self.sync_changes_diff_preview();
@@ -890,13 +841,11 @@ impl App {
                         .file_name()
                         .map(|name| name.to_string_lossy().into_owned())
                         .unwrap_or_default(),
-                    body: crate::ui::PickerPreviewBody::Diff(
-                        crate::app::git::text_diff_preview(
-                            &file.original_bytes,
-                            &file.proposed_bytes,
-                            "current -> proposed",
-                        ),
-                    ),
+                    body: crate::ui::PickerPreviewBody::Diff(crate::app::git::text_diff_preview(
+                        &file.original_bytes,
+                        &file.proposed_bytes,
+                        "current -> proposed",
+                    )),
                 })
             });
             match preview {
@@ -1014,8 +963,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn close_picker(&mut self) {
         if self.search.help_is_open() {
             self.search.close_picker();
@@ -1047,8 +994,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn accept_picker(&mut self) {
         // A help page documents; it does not act. Accepting inside help closes the page and
         // returns the surface it was opened over, exactly like Escape, instead of running the

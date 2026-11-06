@@ -1,29 +1,21 @@
+use crate::app::App;
+use crate::app::TrustedAction;
+use crate::app::picker::PickerPayload;
 use crate::debugger::DapControl;
 use crate::debugger::DapEvent;
 use crate::debugger::DapResponse;
 use crate::debugger::DapSourceBreakpoint;
-use crate::app::App;
-use std::path::PathBuf;
-use crate::workspace::PickerAction;
-use crate::workspace::PickerItem;
-use crate::workspace::PickerItemId;
-use crate::app::picker::PickerPayload;
-use crate::ui::PickerSurfaceKind;
 use crate::editor::text::PositionCodec;
 use crate::editor::text::PositionEncoding;
 use crate::editor::text::TextBuffer;
-use crate::app::TrustedAction;
-use crate::language::lsp::file_uri;
 use crate::language::lsp::language_id_for_path;
-use crate::app::command;
-
-
-
-
-
+use crate::ui::PickerSurfaceKind;
+use crate::workspace::PickerAction;
+use crate::workspace::PickerItem;
+use crate::workspace::PickerItemId;
+use std::path::PathBuf;
 
 impl App {
-
     pub(in crate::app) fn start_dap_configuration(&mut self, name: &str) {
         match self.debugger_session.request_debug(
             (Some(name), None),
@@ -44,8 +36,11 @@ impl App {
 }
 
 impl App {
-
-    pub(in crate::app) fn start_dap(&mut self, requested: Option<String>, program: Option<PathBuf>) {
+    pub(in crate::app) fn start_dap(
+        &mut self,
+        requested: Option<String>,
+        program: Option<PathBuf>,
+    ) {
         let document = self
             .state
             .active_buffer_id()
@@ -75,7 +70,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn authorize_debug_launch(
         &mut self,
         intent: crate::app::debugger::DebugIntent,
@@ -92,7 +86,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn advance_debug_launch(&mut self) {
         match self.debugger_session.advance_debug(
             self.workspace
@@ -116,7 +109,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn process_dap_project_root(&mut self) {
         if let Some(result) = self
             .workspace
@@ -131,7 +123,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn process_dap_events(&mut self) {
         for error in self.debugger_session.reply_failures() {
             self.show_error(error);
@@ -364,8 +355,6 @@ impl App {
 }
 
 impl App {
-
-
     /// The program's terminal from the last run. It stays after a run ends so its output can be
     /// read, and goes when the user stops the program or runs it again.
     pub(in crate::app) fn close_debug_terminal(&mut self) {
@@ -379,8 +368,6 @@ impl App {
 }
 
 impl App {
-
-
     fn open_adapter_terminal(
         &mut self,
         program: crate::config::TerminalProfileConfig,
@@ -405,8 +392,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn navigate_debug_location(
         &mut self,
         location: crate::app::debugger::DebugLocation,
@@ -430,8 +415,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn open_dap_picker(
         &mut self,
         kind: &str,
@@ -473,7 +456,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn install_debug_rows(
         &mut self,
         kind: &str,
@@ -506,7 +488,6 @@ impl App {
 }
 
 impl App {
-
     /// Show what is TRUE about each breakpoint. The rows carry the adapter's verdict, so a
     /// request is never presented as a fact.
     pub(in crate::app) fn cursor_breakpoint_place(&self) -> Option<(PathBuf, u64)> {
@@ -518,7 +499,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn configure_breakpoint(
         &mut self,
         condition: Option<String>,
@@ -545,7 +525,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn open_breakpoint_states(&mut self) {
         let rows = self.debugger_session.persisted_breakpoints();
         let items = rows
@@ -583,7 +562,6 @@ impl App {
 }
 
 impl App {
-
     /// Enable or disable the breakpoint on the cursor line. Disabling is SESSION state, so it
     /// survives whatever the adapter later says about that breakpoint.
     pub(in crate::app) fn toggle_breakpoint_disabled(&mut self) {
@@ -629,7 +607,6 @@ impl App {
 }
 
 impl App {
-
     /// TERMINATE: ask for the debuggee to end with the session.
     pub(in crate::app) fn terminate_debug_session(&mut self) {
         if let Err(error) = self.debugger_session.terminate_debuggee() {
@@ -639,7 +616,6 @@ impl App {
 }
 
 impl App {
-
     /// Leave the debuggee running after the adapter accepts disconnect.
     pub(in crate::app) fn detach_debug_session(&mut self) {
         if let Err(error) = self.debugger_session.detach_debuggee() {
@@ -649,7 +625,6 @@ impl App {
 }
 
 impl App {
-
     /// Project the operation bar from the repository's REAL state. It is projected whenever the
     /// status is refreshed rather than per frame, and it is cleared when nothing is paused, so
     /// its presence always means an operation is genuinely in progress.
@@ -744,7 +719,6 @@ impl App {
 }
 
 impl App {
-
     fn project_debug_signs(&mut self) {
         let mut signs: Vec<crate::ui::DebugSign> = self
             .debugger_session

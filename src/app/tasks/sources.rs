@@ -16,15 +16,8 @@ use std::path::PathBuf;
 pub(in crate::app) struct TaskDiagnosticRun {
     producer: crate::workspace::DiagnosticProducer,
     editor: crate::editor::EditorWindowVersion,
-    documents: std::sync::Arc<
-        BTreeMap<
-            PathBuf,
-            (
-                crate::app::diagnostics::DiagnosticDocument,
-                bool,
-            ),
-        >,
-    >,
+    documents:
+        std::sync::Arc<BTreeMap<PathBuf, (crate::app::diagnostics::DiagnosticDocument, bool)>>,
     workspace: crate::app::workspace::WorkspaceVersion,
     configuration: u64,
 }
@@ -58,9 +51,7 @@ impl TaskDiagnosticRun {
                         Some((
                             source_path(buffer.path.as_deref()?),
                             (
-                                crate::app::diagnostics::DiagnosticDocument::capture(
-                                    state, id,
-                                )?,
+                                crate::app::diagnostics::DiagnosticDocument::capture(state, id)?,
                                 !buffer.dirty,
                             ),
                         ))
@@ -225,10 +216,7 @@ impl FormatterSource {
     pub(in crate::app) fn buffer(&self) -> BufferId {
         self.buffer
     }
-    pub(in crate::app) fn capture(
-        editor: &EditorState,
-        buffer: BufferId,
-    ) -> Result<Self, String> {
+    pub(in crate::app) fn capture(editor: &EditorState, buffer: BufferId) -> Result<Self, String> {
         let state = editor
             .buffers
             .get(buffer)
@@ -257,7 +245,11 @@ impl FormatterSource {
             Err("formatter document incarnation, content or ownership changed".into())
         }
     }
-    pub(in crate::app) fn stdin(&self, editor: &EditorState, maximum: usize) -> Result<Vec<u8>, String> {
+    pub(in crate::app) fn stdin(
+        &self,
+        editor: &EditorState,
+        maximum: usize,
+    ) -> Result<Vec<u8>, String> {
         self.check(editor)?;
         let text = &editor.buffers[self.buffer].text;
         if text.len_bytes() > maximum {

@@ -1,22 +1,19 @@
-
-use crate::app::commands::AppEffect;
-use crate::workspace::DiagnosticOwner;
 use crate::app::App;
+use crate::app::commands::AppEffect;
 use crate::language::lsp::LspFeature;
+use crate::workspace::DiagnosticOwner;
 
-
-
-
+use crate::app::commands::register;
+use crate::app::commands::string_arg;
 use crate::editor::ArgumentSchema;
 use crate::editor::ArgumentType;
 use crate::editor::CommandError;
 use crate::editor::CommandRegistry;
 use crate::editor::ContextRequirement;
-use crate::app::commands::register;
-use crate::app::commands::string_arg;
 
-pub(in crate::app) fn register_commands(registry: &mut CommandRegistry<AppEffect>) -> Result<(), CommandError> {
-
+pub(in crate::app) fn register_commands(
+    registry: &mut CommandRegistry<AppEffect>,
+) -> Result<(), CommandError> {
     for (id, title, category) in [
         (
             "tools.menu.open",
@@ -466,29 +463,23 @@ pub(in crate::app) fn register_commands(registry: &mut CommandRegistry<AppEffect
             ))
         },
     )?;
-Ok(())
+    Ok(())
 }
 
-
-
-
-
-
-
-
-
-
 impl App {
-    pub(in crate::app) fn process_language_effect(&mut self, effect: AppEffect) -> Result<(), AppEffect> {
+    pub(in crate::app) fn process_language_effect(
+        &mut self,
+        effect: AppEffect,
+    ) -> Result<(), AppEffect> {
         match effect {
-AppEffect::LspStart => {
+            AppEffect::LspStart => {
                 self.language.clear_all_stopped();
                 if let Some(key) = self.language.active().cloned() {
                     self.language.request_start(&key, None);
                 }
                 self.start_lsp(None);
             }
-AppEffect::LspStop => {
+            AppEffect::LspStop => {
                 if let Some(buffer) = self.state.active_buffer_id() {
                     self.language.stop_document_launches(buffer);
                 }
@@ -511,14 +502,14 @@ AppEffect::LspStop => {
                     self.clear_lsp_session_state();
                 }
             }
-AppEffect::LspRestart => {
+            AppEffect::LspRestart => {
                 if let Some(server) = self.language.active().cloned() {
                     self.restart_lsp(&server);
                 } else {
                     self.start_lsp(None);
                 }
             }
-AppEffect::LspStatus => {
+            AppEffect::LspStatus => {
                 let mut servers = self
                     .language
                     .running_servers()
@@ -545,7 +536,7 @@ AppEffect::LspStatus => {
                     let _ = self.language.health(server);
                 }
             }
-AppEffect::LspAttach => {
+            AppEffect::LspAttach => {
                 if let Some(buffer) = self.state.active_buffer_id() {
                     self.language.clear_detached(buffer);
                 }
@@ -571,7 +562,7 @@ AppEffect::LspAttach => {
                     self.start_lsp(None);
                 }
             }
-AppEffect::LspDetach => {
+            AppEffect::LspDetach => {
                 if let (Some(server), Some((buffer, document))) =
                     (self.language.active().cloned(), self.active_lsp_document())
                 {
@@ -595,10 +586,10 @@ AppEffect::LspDetach => {
                     self.sync_ui_diagnostics();
                 }
             }
-AppEffect::LspSessions => self.show_lsp_sessions(),
-AppEffect::LspSessionSelect(key) => self.select_lsp_session(&key),
-AppEffect::LspLogs => self.show_lsp_logs(),
-AppEffect::LspInlayHintsToggle => {
+            AppEffect::LspSessions => self.show_lsp_sessions(),
+            AppEffect::LspSessionSelect(key) => self.select_lsp_session(&key),
+            AppEffect::LspLogs => self.show_lsp_logs(),
+            AppEffect::LspInlayHintsToggle => {
                 let enabled = self.configuration.toggle_inlay_hints();
                 self.schedule_lsp_inlay_refresh(true);
                 self.notify_message(
@@ -609,36 +600,36 @@ AppEffect::LspInlayHintsToggle => {
                     false,
                 );
             }
-AppEffect::LspRequest(feature) => {
+            AppEffect::LspRequest(feature) => {
                 if matches!(feature, LspFeature::Completion) {
                     self.mark_lsp_completion_start(false);
                 }
                 self.request_lsp(feature);
             }
-AppEffect::LspCompletionDocumentationOpen => {
+            AppEffect::LspCompletionDocumentationOpen => {
                 self.open_lsp_completion_documentation(true)
             }
-AppEffect::LspCompletionMove(direction) => self.move_lsp_completion(direction),
-AppEffect::LspCompletionAccept => self.accept_lsp_completion(),
-AppEffect::LspRenamePrompt => self.open_rename_prompt(),
-AppEffect::LspCompletionLeave => {
+            AppEffect::LspCompletionMove(direction) => self.move_lsp_completion(direction),
+            AppEffect::LspCompletionAccept => self.accept_lsp_completion(),
+            AppEffect::LspRenamePrompt => self.open_rename_prompt(),
+            AppEffect::LspCompletionLeave => {
                 self.cancel_lsp_completion();
                 self.invoke_mapped_command("input.cancel");
             }
-AppEffect::LspCompletionCancel => self.cancel_lsp_completion(),
-AppEffect::SnippetNavigate(direction) => self.navigate_snippet(direction),
-AppEffect::SnippetLeave => {
+            AppEffect::LspCompletionCancel => self.cancel_lsp_completion(),
+            AppEffect::SnippetNavigate(direction) => self.navigate_snippet(direction),
+            AppEffect::SnippetLeave => {
                 self.input.clear_snippet();
                 self.invoke_mapped_command("input.cancel");
             }
-AppEffect::SnippetCancel => {
+            AppEffect::SnippetCancel => {
                 self.input.clear_snippet();
                 if let Some(view) = self.state.active_view {
                     self.state.views[view].selection = None;
                     self.state.mark_editor_changed();
                 }
             }
-AppEffect::LspFoldToggle => {
+            AppEffect::LspFoldToggle => {
                 if let Some(view) = self.state.active_view {
                     let line = self.state.views.get(view).and_then(|view| {
                         self.state.buffers[view.buffer]
@@ -673,7 +664,7 @@ AppEffect::LspFoldToggle => {
                     }
                 }
             }
-AppEffect::LspSelectionExpand => {
+            AppEffect::LspSelectionExpand => {
                 if self.active_lsp_document_without_text().is_some() {
                     self.refresh_lsp_projection_owner();
                 }

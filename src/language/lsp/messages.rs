@@ -1,12 +1,9 @@
-use std::path::PathBuf;
+use crate::language::lsp::paths::file_uri;
 use serde_json::Value;
 use serde_json::json;
-use crate::language::lsp::paths::file_uri;
+use std::path::PathBuf;
 
 use crate::language::lsp::server::LspCapabilities;
-
-
-
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LspDocument {
@@ -16,7 +13,6 @@ pub struct LspDocument {
     pub text: String,
 }
 
-
 impl LspDocument {
     #[must_use]
     pub fn uri(&self) -> String {
@@ -24,13 +20,11 @@ impl LspDocument {
     }
 }
 
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LspPosition {
     pub line: usize,
     pub character: usize,
 }
-
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LspRange {
@@ -38,13 +32,11 @@ pub struct LspRange {
     pub end: LspPosition,
 }
 
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LspTextEdit {
     pub range: LspRange,
     pub new_text: String,
 }
-
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LspDocumentEdit {
@@ -52,7 +44,6 @@ pub struct LspDocumentEdit {
     pub version: Option<u64>,
     pub edits: Vec<LspTextEdit>,
 }
-
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum LspResourceOperation {
@@ -80,7 +71,6 @@ pub struct LspWorkspaceEdit {
     pub resources: Vec<LspResourceOperation>,
 }
 
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LspDiagnostic {
     pub range: LspRange,
@@ -93,13 +83,11 @@ pub struct LspDiagnostic {
     pub data: Option<Value>,
 }
 
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LspLocation {
     pub uri: String,
     pub range: LspRange,
 }
-
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LspMarkupKind {
@@ -107,20 +95,17 @@ pub enum LspMarkupKind {
     Markdown,
 }
 
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LspMarkupContent {
     pub kind: LspMarkupKind,
     pub value: String,
 }
 
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LspHover {
     pub sections: Vec<LspMarkupContent>,
     pub range: Option<LspRange>,
 }
-
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LspCompletionItem {
@@ -140,7 +125,6 @@ pub struct LspCompletionItem {
     pub resolve_item: Option<Value>,
     pub resolved: bool,
 }
-
 
 impl LspCompletionItem {
     /// What the menu row has no room for: a signature that says more than the label.
@@ -163,7 +147,6 @@ impl LspCompletionItem {
             .or_else(|| css_color(&self.detail))
     }
 }
-
 
 /// The first `#rgb`, `#rrggbb` or `rgb()`/`rgba()` colour in `text`.
 pub(crate) fn css_color(text: &str) -> Option<(u8, u8, u8)> {
@@ -207,7 +190,6 @@ pub(crate) fn css_color(text: &str) -> Option<(u8, u8, u8)> {
     Some((channels.next()??, channels.next()??, channels.next()??))
 }
 
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LspSymbol {
     pub name: String,
@@ -216,7 +198,6 @@ pub struct LspSymbol {
     /// All of the symbol, where `location` is only its name when the server gives both.
     pub extent: Option<LspRange>,
 }
-
 
 /// The name LSP gives a symbol kind number.
 #[must_use]
@@ -255,7 +236,6 @@ pub fn lsp_symbol_kind_name(kind: u8) -> &'static str {
         .copied()
         .unwrap_or("Symbol")
 }
-
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LspInlayHint {
@@ -311,7 +291,6 @@ pub struct LspPullDiagnostics {
     pub unchanged: bool,
 }
 
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LspCodeAction {
     pub title: String,
@@ -320,7 +299,6 @@ pub struct LspCodeAction {
     pub edit: Option<LspWorkspaceEdit>,
     pub command: Option<LspCommand>,
 }
-
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum LspFeature {
@@ -375,7 +353,6 @@ pub enum LspFeature {
     SelectionRanges,
     DocumentColors,
 }
-
 
 impl LspFeature {
     pub(crate) fn method(&self) -> &'static str {
@@ -478,7 +455,6 @@ impl LspFeature {
     }
 }
 
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[allow(clippy::large_enum_variant)]
 pub enum LspFeatureResult {
@@ -504,7 +480,6 @@ pub enum LspFeatureResult {
     Empty,
 }
 
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LspHealth {
     pub root: PathBuf,
@@ -515,13 +490,11 @@ pub struct LspHealth {
     pub recent_logs: usize,
 }
 
-
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum ServerRequestId {
     Number(i64),
     String(String),
 }
-
 
 impl ServerRequestId {
     pub(super) fn from_value(value: &Value) -> Option<Self> {
@@ -539,14 +512,12 @@ impl ServerRequestId {
     }
 }
 
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LspProgressKind {
     Begin,
     Report,
     End,
 }
-
 
 #[derive(Clone, Debug)]
 pub enum LspEvent {

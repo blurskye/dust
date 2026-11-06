@@ -8,15 +8,15 @@
 use crate::language::lsp::file_uri;
 use serde_json::Value;
 use serde_json::json;
-#[cfg(unix)]
-use std::os::unix::process::CommandExt;
 use std::collections::BTreeMap;
 use std::collections::VecDeque;
-use std::io::self;
+use std::io;
 use std::io::BufRead;
 use std::io::BufReader;
 use std::io::Read;
 use std::io::Write;
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::Child;
@@ -24,7 +24,7 @@ use std::process::Command;
 use std::process::Stdio;
 use std::sync::Arc;
 use std::sync::Mutex;
-use std::sync::mpsc::self;
+use std::sync::mpsc;
 use std::sync::mpsc::Receiver;
 use std::sync::mpsc::SyncSender;
 use std::sync::mpsc::TrySendError;

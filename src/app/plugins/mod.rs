@@ -5,29 +5,29 @@ use crate::app::plugins::edits::SourceExecution;
 use crate::app::workspace::WorkspaceSession;
 use crate::app::workspace::WorkspaceVersion;
 use crate::app::workspace::edits::OriginKey;
+use crate::editor::EditorState;
+use crate::plugins::OwnedPluginEvent;
 use crate::plugins::PluginContributionCatalog;
 use crate::plugins::PluginContributionIndex;
 use crate::plugins::PluginError;
+use crate::plugins::PluginExecutionReply;
+use crate::plugins::PluginExecutionRequest;
 use crate::plugins::PluginHostEventQueue;
+use crate::plugins::PluginLimits;
 use crate::plugins::PluginLoadId;
 use crate::plugins::PluginManager;
+use crate::plugins::PluginProviderBroker;
+use crate::plugins::PluginStatus;
 use crate::plugins::PluginStorageContribution;
 use crate::plugins::PluginStorageRequest;
 use crate::plugins::PluginStorageResult;
 use crate::plugins::PluginStorageService;
 use crate::plugins::PluginSubscriptionKind;
 use crate::plugins::PluginUiEvent;
+use crate::plugins::PluginVirtualDocumentBroker;
 use crate::tools::PackageService;
 use crate::tools::RegistryPackageMetadata;
 use crate::tools::RegistryService;
-use crate::editor::EditorState;
-use crate::plugins::OwnedPluginEvent;
-use crate::plugins::PluginExecutionReply;
-use crate::plugins::PluginExecutionRequest;
-use crate::plugins::PluginLimits;
-use crate::plugins::PluginProviderBroker;
-use crate::plugins::PluginStatus;
-use crate::plugins::PluginVirtualDocumentBroker;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
@@ -259,7 +259,7 @@ impl ExtensionSession {
             loan.submit(request)
         })
     }
-    pub(in crate::app) fn receive(
+    fn receive(
         &mut self,
         reply: PluginExecutionReply,
         workspace: &WorkspaceVersion,
@@ -291,7 +291,7 @@ impl ExtensionSession {
         }
         received
     }
-    pub(in crate::app) fn admit_confirmations(
+    fn admit_confirmations(
         &mut self,
         source: crate::app::plugins::edits::ConfirmationSource,
         requests: Vec<crate::plugins::PluginConfirmationRequest>,
@@ -368,7 +368,7 @@ impl ExtensionSession {
         self.edits
             .check(key, &self.manager, editor, workspace, configuration)
     }
-    pub(in crate::app) fn prepare_edit(
+    fn prepare_edit(
         &mut self,
         key: &OriginKey,
         editor: &EditorState,
@@ -425,7 +425,11 @@ impl ExtensionSession {
         }
     }
     #[cfg(test)]
-    pub(in crate::app) fn take_ui(&mut self, plugin: &str, load: PluginLoadId) -> Vec<PluginUiEvent> {
+    pub(in crate::app) fn take_ui(
+        &mut self,
+        plugin: &str,
+        load: PluginLoadId,
+    ) -> Vec<PluginUiEvent> {
         self.ui.remove(&(plugin.into(), load)).unwrap_or_default()
     }
     #[cfg(test)]
@@ -594,7 +598,9 @@ impl ExtensionSession {
     pub(in crate::app) fn observation(&self) -> &Option<HostObservation> {
         &self.observation
     }
-    pub(in crate::app) fn ui_events(&self) -> &BTreeMap<(String, PluginLoadId), Vec<PluginUiEvent>> {
+    pub(in crate::app) fn ui_events(
+        &self,
+    ) -> &BTreeMap<(String, PluginLoadId), Vec<PluginUiEvent>> {
         &self.ui
     }
     pub(in crate::app) fn storage_results(

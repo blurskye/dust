@@ -2,11 +2,11 @@
 use crate::app::workspace::edits::OriginKey;
 use crate::app::workspace::edits::Source;
 use crate::app::workspace::edits::WorkspaceEditSession;
+use crate::editor::DocumentSnapshot as FileSnapshot;
 use crate::editor::WorkspaceEditSources;
 use crate::files::CheckedResourceIntent;
 use crate::files::RequestId;
 use crate::files::VfsResult;
-use crate::editor::DocumentSnapshot as FileSnapshot;
 use crate::workspace::ProposalId;
 use std::collections::HashMap;
 use std::path::Path;

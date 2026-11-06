@@ -1,13 +1,12 @@
-use std::path::PathBuf;
 use crate::editor::EditorState;
 use crate::ui::render::PromptKind;
 use crate::ui::render::PromptState;
 use crate::ui::render::UiState;
 use crate::ui::render::prompt_geometry;
+use std::path::PathBuf;
 
 use crate::ui::render::composition_tests::editor_layout;
 use crate::ui::render::composition_tests::render;
-
 
 #[test]
 fn prompt_is_globally_centered_and_clamped() {
@@ -19,7 +18,6 @@ fn prompt_is_globally_centered_and_clamped() {
     assert_eq!(narrow.left, 1);
     assert_eq!(narrow.width, 28);
 }
-
 
 #[test]
 fn workspace_trust_prompt_is_one_centered_confirmation_panel() {
@@ -67,7 +65,6 @@ fn workspace_trust_prompt_is_one_centered_confirmation_panel() {
     assert!(frame.grid.row_text(geometry.top + 2).contains("> "));
     assert!(frame.grid.row_text(geometry.top + 3).contains('└'));
 }
-
 
 #[test]
 fn prompt_clears_and_clips_the_editor_layer_beneath_its_box() {
@@ -134,7 +131,6 @@ fn prompt_clears_and_clips_the_editor_layer_beneath_its_box() {
         base.grid.get(outside_x, probe_y)
     );
 }
-
 
 #[test]
 fn dashboard_and_prompt_render_at_multiple_sizes() {

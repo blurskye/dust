@@ -7,10 +7,9 @@ use crate::ui::render::ToolMenuState;
 use crate::ui::render::overlays::truncate_content_title;
 
 use crate::ui::geometry::ellipsized;
-use crate::ui::render::picker::looks_like_path;
-use crate::ui::render::picker::clip_path_tail;
 use crate::ui::geometry::wrapped_key_help;
-
+use crate::ui::render::picker::clip_path_tail;
+use crate::ui::render::picker::looks_like_path;
 
 pub(crate) const TOOL_MANAGER_MINIMUM_HEIGHT: u16 = 14;
 
@@ -29,7 +28,6 @@ pub(crate) const TOOL_LANGUAGE_SEPARATOR: &str = ", ";
 
 pub(crate) const TOOL_CATEGORY_ORDER: &[&str] =
     &["all", "lsp", "dap", "linter", "formatter", "agent"];
-
 
 pub(super) fn render_tool_menu(
     frame: &mut Frame,
@@ -360,8 +358,12 @@ pub(super) fn render_tool_menu(
         .get(menu.selected)
         .filter(|row| tool_state_glyph(row).1 == Style::Error)
         .map_or(0, |row| {
-            let note =
-                crate::ui::render::wrap_plain_text(&row.note, usize::from(content_width), ambiguous).len();
+            let note = crate::ui::render::wrap_plain_text(
+                &row.note,
+                usize::from(content_width),
+                ambiguous,
+            )
+            .len();
             usual_detail_rows - 2 + u16::try_from(note).unwrap_or(u16::MAX)
         })
         .min(remaining.saturating_sub(2));
@@ -525,7 +527,9 @@ pub(super) fn render_tool_menu(
             };
             // Install failures explain themselves here, so the note wraps above the keys.
             let keys_row = bottom.saturating_sub(1);
-            for line in crate::ui::render::wrap_plain_text(&row.note, usize::from(content_width), ambiguous) {
+            for line in
+                crate::ui::render::wrap_plain_text(&row.note, usize::from(content_width), ambiguous)
+            {
                 if y >= keys_row {
                     break;
                 }
@@ -545,7 +549,6 @@ pub(super) fn render_tool_menu(
     frame.cursor = None;
 }
 
-
 /// Whether the state is a transient install phase (downloading, verifying, installing 40%…).
 fn tool_busy(state: &str) -> bool {
     !matches!(
@@ -560,7 +563,6 @@ fn tool_busy(state: &str) -> bool {
     ) && !state.starts_with("running")
 }
 
-
 /// The glyph and colour for a tool's state: filled when installed, half while busy, a cross
 /// when broken, hollow when not installed.
 fn tool_state_glyph(row: &crate::ui::ToolMenuRow) -> (&'static str, Style) {
@@ -572,7 +574,6 @@ fn tool_state_glyph(row: &crate::ui::ToolMenuRow) -> (&'static str, Style) {
         _ => ("●", Style::GitSignAdded),
     }
 }
-
 
 /// The keys that do something for this row right now.
 fn tool_row_keys(row: &crate::ui::ToolMenuRow) -> Vec<&'static str> {

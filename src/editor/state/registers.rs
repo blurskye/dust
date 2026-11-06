@@ -1,8 +1,5 @@
-use std::collections::HashMap;
 use crate::editor::CommandInvocation;
-
-
-
+use std::collections::HashMap;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RegisterShape {
@@ -11,13 +8,11 @@ pub enum RegisterShape {
     Block,
 }
 
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RegisterValue {
     pub text: String,
     pub shape: RegisterShape,
 }
-
 
 #[derive(Clone, Debug, Default)]
 pub struct RegisterStore {
@@ -26,7 +21,6 @@ pub struct RegisterStore {
     /// Bumped on every stored value, so the clipboard sync notices a yank cheaply.
     generation: u64,
 }
-
 
 impl RegisterStore {
     pub fn set(

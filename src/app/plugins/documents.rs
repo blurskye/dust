@@ -147,11 +147,7 @@ impl VirtualDocumentEditorBridge {
             .values()
             .find(|e| e.plugin == plugin && e.load == load && e.source == source && e.key == key)
     }
-    pub(in crate::app) fn has_generation(
-        &self,
-        plugin: &str,
-        load: PluginLoadId,
-    ) -> bool {
+    pub(in crate::app) fn has_generation(&self, plugin: &str, load: PluginLoadId) -> bool {
         self.entries
             .keys()
             .any(|(owner, generation, _)| owner == plugin && *generation == load)
@@ -204,9 +200,7 @@ impl VirtualDocumentEditorBridge {
 
     /// Semantic provider coordinates only. Load generations, document handles,
     /// revisions, and retained content are deliberately not exposed to persistence.
-    pub(in crate::app) fn descriptor_sources(
-        &self,
-    ) -> Vec<(BufferId, String, String, String)> {
+    pub(in crate::app) fn descriptor_sources(&self) -> Vec<(BufferId, String, String, String)> {
         self.entries
             .values()
             .map(|entry| {
@@ -223,14 +217,14 @@ impl VirtualDocumentEditorBridge {
 
 #[cfg(test)]
 mod tests {
-    use crate::plugins::PluginLoadId;
-    use crate::plugins::PluginVirtualDocumentSnapshot;
     use crate::app::plugins::documents::VirtualDocumentEditorBridge;
     use crate::app::plugins::documents::VirtualDocumentEditorError;
-    use crate::editor::text::ByteOffset;
-    use crate::editor::text::TextBuffer;
     use crate::editor::BufferId;
     use crate::editor::EditorState;
+    use crate::editor::text::ByteOffset;
+    use crate::editor::text::TextBuffer;
+    use crate::plugins::PluginLoadId;
+    use crate::plugins::PluginVirtualDocumentSnapshot;
     use std::path::PathBuf;
     fn snap(revision: u64, text: &str) -> PluginVirtualDocumentSnapshot {
         PluginVirtualDocumentSnapshot {

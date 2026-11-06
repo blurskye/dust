@@ -1,9 +1,4 @@
 //! Linter interpretation and bounded source-read obligations belong to their original job.
-use crate::app::tasks::AdapterContext;
-use crate::app::tasks::RunKey;
-use crate::app::tasks::RunningTask;
-use crate::app::tasks::TaskDiagnosticRun;
-use crate::app::tasks::TaskSession;
 use crate::app::diagnostics::DiagnosticBatch;
 use crate::app::diagnostics::DiagnosticSession;
 use crate::app::diagnostics::DiagnosticValidity;
@@ -12,6 +7,11 @@ use crate::app::documents::TaskReadKey;
 use crate::app::documents::TaskReadReply;
 use crate::app::documents::TaskReadStopped;
 use crate::app::documents::TaskSubmission;
+use crate::app::tasks::AdapterContext;
+use crate::app::tasks::RunKey;
+use crate::app::tasks::RunningTask;
+use crate::app::tasks::TaskDiagnosticRun;
+use crate::app::tasks::TaskSession;
 use crate::app::workspace::WorkspaceSession;
 use crate::editor::EditorState;
 use crate::editor::text::ByteRange;
@@ -118,10 +118,7 @@ impl LinterReadLoan<'_> {
             self.build.maximum,
         ))
     }
-    pub(in crate::app) fn finish(
-        self,
-        submission: TaskSubmission,
-    ) -> Result<bool, String> {
+    pub(in crate::app) fn finish(self, submission: TaskSubmission) -> Result<bool, String> {
         match submission.into_result() {
             Ok(None) => Ok(false),
             Ok(Some(key)) => {

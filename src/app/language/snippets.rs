@@ -1,10 +1,4 @@
 use crate::app::input::InputSession;
-use crate::editor::text::BufferRevision;
-use crate::editor::text::ByteOffset;
-use crate::editor::text::ByteRange;
-use crate::editor::text::TextBuffer;
-use crate::editor::text::TextEdit;
-use crate::editor::text::TextEditSet;
 use crate::editor::BufferId;
 use crate::editor::EditorOperation;
 use crate::editor::EditorTransaction;
@@ -12,6 +6,12 @@ use crate::editor::EditorWindowVersion;
 use crate::editor::Selection;
 use crate::editor::SelectionKind;
 use crate::editor::ViewId;
+use crate::editor::text::BufferRevision;
+use crate::editor::text::ByteOffset;
+use crate::editor::text::ByteRange;
+use crate::editor::text::TextBuffer;
+use crate::editor::text::TextEdit;
+use crate::editor::text::TextEditSet;
 use crate::language::lsp::SnippetTabstop;
 use crate::language::lsp::SnippetTransform;
 use std::collections::BTreeMap;
@@ -55,7 +55,10 @@ type OrderedEdit = (TextEdit, (usize, u8));
 
 /// Builds one edit set from edits ordered by position and then by their key, joining
 /// insertions at the same position in that order.
-pub(in crate::app) fn merge_edits(revision: BufferRevision, mut edits: Vec<OrderedEdit>) -> TextEditSet {
+pub(in crate::app) fn merge_edits(
+    revision: BufferRevision,
+    mut edits: Vec<OrderedEdit>,
+) -> TextEditSet {
     edits.sort_by_key(|(edit, key)| (edit.range().start, edit.range().end, *key));
     let mut merged: Vec<TextEdit> = Vec::new();
     for (edit, _) in edits {
@@ -180,6 +183,390 @@ pub(in crate::app) fn follow_transforms(
         transforms.push(transform);
     }
     Some((transforms, rewrites))
+}
+
+impl InputSession {
+    pub(in crate::app) fn snippet_buffer(&self) -> Option<BufferId> {
+        self.snippet.as_ref().map(|s| s.buffer)
+    }
+    pub(in crate::app) fn clear_snippet(&mut self) {
+        self.snippet = None;
+    }
+    pub(in crate::app) fn install_snippet(
+        &mut self,
+        document: SnippetDocument<'_>,
+        insertion: ByteOffset,
+        stops: impl IntoIterator<Item = SnippetTabstop>,
+    ) {
+        let mut grouped = BTreeMap::<u32, Vec<SnippetTabstop>>::new();
+        for mut stop in stops {
+            let start = ByteOffset(insertion.get().saturating_add(stop.start));
+            let end = ByteOffset(insertion.get().saturating_add(stop.end));
+            let Ok(_) = ByteRange::new(start, end) else {
+                self.clear_snippet();
+                return;
+            };
+            if end.get() > document.text.len_bytes()
+                || !document.text.is_char_boundary(start)
+                || !document.text.is_char_boundary(end)
+            {
+                self.clear_snippet();
+                return;
+            }
+            stop.start = start.get();
+            stop.end = end.get();
+            grouped.entry(stop.index).or_default().push(stop);
+        }
+        let mut groups = grouped.into_iter().collect::<Vec<_>>();
+        groups.sort_by_key(|(index, _)| (*index == 0, *index));
+        self.snippet = (!groups.is_empty()).then(|| SnippetSession {
+            identity: Arc::new(()),
+            editor: document.editor.clone(),
+            buffer: document.buffer,
+            revision: document.text.revision(),
+            groups: groups.into_iter().map(|(_, ranges)| ranges).collect(),
+            transforms: Vec::new(),
+            current: 0,
+        });
+    }
+    /// Adds the transformed copies of the snippet just installed at `insertion`.
+    pub(in crate::app) fn install_snippet_transforms(
+        &mut self,
+        insertion: ByteOffset,
+        transforms: Vec<SnippetTransform>,
+    ) {
+        if let Some(session) = &mut self.snippet {
+            session.transforms = transforms
+                .into_iter()
+                .map(|mut transform| {
+                    transform.start = transform.start.saturating_add(insertion.get());
+                    transform.end = transform.end.saturating_add(insertion.get());
+                    transform
+                })
+                .collect();
+        }
+    }
+    pub(in crate::app) fn accept_snippet_edit(
+        &mut self,
+        update: SnippetUpdate,
+        document: Option<SnippetDocument<'_>>,
+    ) -> bool {
+        let Some(session) = &mut self.snippet else {
+            return false;
+        };
+        let Some(document) = document else {
+            self.clear_snippet();
+            return false;
+        };
+        if !Arc::ptr_eq(&update.identity, &session.identity) {
+            return false;
+        }
+        if !session.editor.same_editor(document.editor)
+            || document.buffer != update.buffer
+            || session.buffer != update.buffer
+            || session.revision != update.before
+            || update.before.0.checked_add(1) != Some(document.text.revision().0)
+        {
+            self.clear_snippet();
+            return false;
+        }
+        session.groups = update.groups;
+        session.transforms = update.transforms;
+        session.current = update.current;
+        session.revision = document.text.revision();
+        true
+    }
+    pub(in crate::app) fn snippet_selection(
+        &mut self,
+        document: Option<SnippetDocument<'_>>,
+    ) -> Option<[EditorOperation; 2]> {
+        let session = self.snippet.as_ref()?;
+        let Some(document) = document else {
+            self.clear_snippet();
+            return None;
+        };
+        if !session.matches(&document) {
+            self.clear_snippet();
+            return None;
+        }
+        let view = document.view?;
+        let range = session.groups.get(session.current)?.first()?.range();
+        Some([
+            EditorOperation::SetCursor {
+                view,
+                position: range.end,
+            },
+            EditorOperation::SetSelection {
+                view,
+                // An empty placeholder selects nothing, or typing there would grow a selection.
+                selection: (!range.is_empty()).then_some(Selection {
+                    anchor: range.start,
+                    head: range.end,
+                    kind: SelectionKind::Character,
+                }),
+            },
+        ])
+    }
+    pub(in crate::app) fn navigate_snippet(&mut self, direction: i8) -> bool {
+        let Some(session) = &mut self.snippet else {
+            return false;
+        };
+        if direction > 0 {
+            if session.current + 1 >= session.groups.len() {
+                self.clear_snippet();
+                return true;
+            }
+            session.current += 1;
+        } else if direction < 0 {
+            session.current = session.current.saturating_sub(1);
+        }
+        false
+    }
+    pub(in crate::app) fn prepare_snippet_mirror(
+        &mut self,
+        document: Option<SnippetDocument<'_>>,
+        transaction: &mut EditorTransaction,
+    ) -> Option<SnippetUpdate> {
+        let session = self.snippet.as_ref()?;
+        let Some(document) = document else {
+            self.snippet = None;
+            return None;
+        };
+        if !session.matches(&document) {
+            self.snippet = None;
+            return None;
+        }
+        let Some(primary) = session
+            .groups
+            .get(session.current)
+            .and_then(|group| group.first())
+            .cloned()
+        else {
+            self.snippet = None;
+            return None;
+        };
+        let primary = primary.range();
+        let mut target = None;
+        for operation in &mut transaction.operations {
+            if let EditorOperation::ApplyEdits { buffer, edits } = operation {
+                if *buffer != session.buffer || target.is_some() {
+                    self.snippet = None;
+                    return None;
+                }
+                target = Some(edits.clone());
+            }
+        }
+        let edits = target?;
+        if edits.base_revision() != session.revision
+            || edits.edits().is_empty()
+            || edits
+                .edits()
+                .iter()
+                .any(|edit| edit.range().start < primary.start || edit.range().end > primary.end)
+        {
+            self.snippet = None;
+            return None;
+        }
+        // Keep the primary edits intact: replacing the entire placeholder would map an
+        // interior cursor to its end. Copy those edits to linked occurrences instead.
+        let contains = |outer: ByteRange, inner: ByteRange| {
+            outer.start <= inner.start && inner.end <= outer.end
+        };
+        let is_ancestor = |outer: &SnippetTabstop, inner: &SnippetTabstop| {
+            outer.depth < inner.depth
+                && outer.order < inner.order
+                && contains(outer.range(), inner.range())
+                && !session.groups.iter().flatten().any(|stop| {
+                    outer.order < stop.order
+                        && stop.order <= inner.order
+                        && stop.depth <= outer.depth
+                })
+        };
+        let mut copies = Vec::new();
+        let mut affected = Vec::new();
+        for (occurrence, stop) in session.groups[session.current].iter().enumerate() {
+            let range = stop.range();
+            affected.push((session.current, occurrence));
+            for edit in edits.edits() {
+                let start = range.start.get() + edit.range().start.get() - primary.start.get();
+                let end = range.start.get() + edit.range().end.get() - primary.start.get();
+                copies.push((
+                    TextEdit::new(
+                        ByteRange::new(ByteOffset(start), ByteOffset(end)).ok()?,
+                        edit.replacement(),
+                    ),
+                    (session.current, occurrence),
+                ));
+            }
+        }
+        // Work outwards so a parent's mirrors include changes to all child mirrors
+        // inside its defining occurrence, not just the edited child.
+        let mut parents = session
+            .groups
+            .iter()
+            .enumerate()
+            .filter_map(|(index, group)| {
+                if index == session.current {
+                    return None;
+                }
+                group
+                    .iter()
+                    .enumerate()
+                    .find(|(_, stop)| {
+                        session.groups[session.current]
+                            .iter()
+                            .any(|child| is_ancestor(stop, child))
+                    })
+                    .map(|(occurrence, stop)| (index, occurrence, stop.clone()))
+            })
+            .collect::<Vec<_>>();
+        parents.sort_by_key(|(_, _, stop)| std::cmp::Reverse(stop.depth));
+        for (index, defining, stop) in parents {
+            let parent = stop.range();
+            let local = copies
+                .iter()
+                .filter(|(edit, owner)| {
+                    contains(parent, edit.range())
+                        && is_ancestor(&stop, &session.groups[owner.0][owner.1])
+                })
+                .map(|(edit, _)| edit.clone())
+                .collect::<Vec<_>>();
+            for (occurrence, stop) in session.groups[index].iter().enumerate() {
+                let range = stop.range();
+                affected.push((index, occurrence));
+                if occurrence == defining {
+                    continue;
+                }
+                for edit in &local {
+                    let start = range.start.get() + edit.range().start.get() - parent.start.get();
+                    let end = range.start.get() + edit.range().end.get() - parent.start.get();
+                    copies.push((
+                        TextEdit::new(
+                            ByteRange::new(ByteOffset(start), ByteOffset(end)).ok()?,
+                            edit.replacement(),
+                        ),
+                        (index, occurrence),
+                    ));
+                }
+            }
+        }
+        let ordered = copies
+            .iter()
+            .map(|(edit, (group, occurrence))| {
+                (edit.clone(), (session.groups[*group][*occurrence].order, 1))
+            })
+            .collect::<Vec<_>>();
+        let replacement_edits = merge_edits(session.revision, ordered.clone());
+        if document.text.validate_edits(&replacement_edits).is_err() {
+            self.clear_snippet();
+            return None;
+        }
+        let mut groups = Vec::with_capacity(session.groups.len());
+        let mut current = 0;
+        for (index, group) in session.groups.iter().enumerate() {
+            let mut updated = Vec::with_capacity(group.len());
+            for (occurrence, stop) in group.iter().enumerate() {
+                let range = stop.range();
+                let key = (index, occurrence);
+                let grows = affected.contains(&key);
+                // Stops overwritten by an edit no longer describe placeholders.
+                if !grows
+                    && copies.iter().any(|(edit, owner)| {
+                        !edit.range().is_empty()
+                            && if range.is_empty() {
+                                edit.range().start <= range.start
+                                    && (range.end < edit.range().end
+                                        || (range.end == edit.range().end
+                                            && is_ancestor(
+                                                &session.groups[owner.0][owner.1],
+                                                stop,
+                                            )))
+                            } else {
+                                edit.range().start < range.end && range.start < edit.range().end
+                            }
+                    })
+                {
+                    continue;
+                }
+                let shift = |position: ByteOffset, end: bool| {
+                    let mut value = position.get() as i128;
+                    for (edit, owner) in &copies {
+                        let edited = edit.range();
+                        let owner_stop = &session.groups[owner.0][owner.1];
+                        let after = if key == *owner || is_ancestor(stop, owner_stop) {
+                            end
+                        } else {
+                            stop.order > owner_stop.order
+                        };
+                        if edited.is_empty() {
+                            if edited.start < position || (edited.start == position && after) {
+                                value += edit.replacement().len() as i128;
+                            }
+                        } else if edited.end <= position {
+                            value += edit.replacement().len() as i128 - edited.len() as i128;
+                        }
+                    }
+                    ByteOffset(value.max(0) as usize)
+                };
+                let range =
+                    ByteRange::new(shift(range.start, false), shift(range.end, true)).ok()?;
+                let mut stop = stop.clone();
+                stop.start = range.start.get();
+                stop.end = range.end.get();
+                updated.push(stop);
+            }
+            if !updated.is_empty() {
+                if index == session.current {
+                    current = groups.len();
+                }
+                groups.push(updated);
+            }
+        }
+        let Some((transforms, transform_edits)) = follow_transforms(
+            session,
+            document.text,
+            &copies,
+            &replacement_edits,
+            &mut groups,
+        ) else {
+            self.clear_snippet();
+            return None;
+        };
+        let replacement_edits = if transform_edits.is_empty() {
+            replacement_edits
+        } else {
+            let edits = merge_edits(session.revision, [ordered, transform_edits].concat());
+            if document.text.validate_edits(&edits).is_err() {
+                self.clear_snippet();
+                return None;
+            }
+            edits
+        };
+        let cursor_shift = groups[current][0].start as i128 - primary.start.get() as i128;
+        let mut applied = false;
+        for operation in &mut transaction.operations {
+            match operation {
+                EditorOperation::ApplyEdits { buffer, edits } if *buffer == session.buffer => {
+                    *edits = replacement_edits.clone();
+                    applied = true;
+                }
+                EditorOperation::SetCursor { position, .. } if applied => {
+                    // Commands position the cursor after their primary edits, not after
+                    // extra mirrors inserted earlier in the document.
+                    *position = ByteOffset((position.get() as i128 + cursor_shift).max(0) as usize);
+                }
+                _ => {}
+            }
+        }
+        Some(SnippetUpdate {
+            identity: session.identity.clone(),
+            buffer: session.buffer,
+            before: session.revision,
+            groups,
+            transforms,
+            current,
+        })
+    }
 }
 
 #[cfg(test)]
@@ -852,393 +1239,5 @@ mod tests {
                 ByteRange::new(ByteOffset(2), ByteOffset(3)).unwrap()
             ]
         );
-    }
-}
-
-
-
-
-
-impl InputSession {
-    pub(in crate::app) fn snippet_buffer(&self) -> Option<BufferId> {
-        self.snippet.as_ref().map(|s| s.buffer)
-    }
-    pub(in crate::app) fn clear_snippet(&mut self) {
-        self.snippet = None;
-    }
-    pub(in crate::app) fn install_snippet(
-        &mut self,
-        document: SnippetDocument<'_>,
-        insertion: ByteOffset,
-        stops: impl IntoIterator<Item = SnippetTabstop>,
-    ) {
-        let mut grouped = BTreeMap::<u32, Vec<SnippetTabstop>>::new();
-        for mut stop in stops {
-            let start = ByteOffset(insertion.get().saturating_add(stop.start));
-            let end = ByteOffset(insertion.get().saturating_add(stop.end));
-            let Ok(_) = ByteRange::new(start, end) else {
-                self.clear_snippet();
-                return;
-            };
-            if end.get() > document.text.len_bytes()
-                || !document.text.is_char_boundary(start)
-                || !document.text.is_char_boundary(end)
-            {
-                self.clear_snippet();
-                return;
-            }
-            stop.start = start.get();
-            stop.end = end.get();
-            grouped.entry(stop.index).or_default().push(stop);
-        }
-        let mut groups = grouped.into_iter().collect::<Vec<_>>();
-        groups.sort_by_key(|(index, _)| (*index == 0, *index));
-        self.snippet = (!groups.is_empty()).then(|| SnippetSession {
-            identity: Arc::new(()),
-            editor: document.editor.clone(),
-            buffer: document.buffer,
-            revision: document.text.revision(),
-            groups: groups.into_iter().map(|(_, ranges)| ranges).collect(),
-            transforms: Vec::new(),
-            current: 0,
-        });
-    }
-    /// Adds the transformed copies of the snippet just installed at `insertion`.
-    pub(in crate::app) fn install_snippet_transforms(
-        &mut self,
-        insertion: ByteOffset,
-        transforms: Vec<SnippetTransform>,
-    ) {
-        if let Some(session) = &mut self.snippet {
-            session.transforms = transforms
-                .into_iter()
-                .map(|mut transform| {
-                    transform.start = transform.start.saturating_add(insertion.get());
-                    transform.end = transform.end.saturating_add(insertion.get());
-                    transform
-                })
-                .collect();
-        }
-    }
-    pub(in crate::app) fn accept_snippet_edit(
-        &mut self,
-        update: SnippetUpdate,
-        document: Option<SnippetDocument<'_>>,
-    ) -> bool {
-        let Some(session) = &mut self.snippet else {
-            return false;
-        };
-        let Some(document) = document else {
-            self.clear_snippet();
-            return false;
-        };
-        if !Arc::ptr_eq(&update.identity, &session.identity) {
-            return false;
-        }
-        if !session.editor.same_editor(document.editor)
-            || document.buffer != update.buffer
-            || session.buffer != update.buffer
-            || session.revision != update.before
-            || update.before.0.checked_add(1) != Some(document.text.revision().0)
-        {
-            self.clear_snippet();
-            return false;
-        }
-        session.groups = update.groups;
-        session.transforms = update.transforms;
-        session.current = update.current;
-        session.revision = document.text.revision();
-        true
-    }
-    pub(in crate::app) fn snippet_selection(
-        &mut self,
-        document: Option<SnippetDocument<'_>>,
-    ) -> Option<[EditorOperation; 2]> {
-        let session = self.snippet.as_ref()?;
-        let Some(document) = document else {
-            self.clear_snippet();
-            return None;
-        };
-        if !session.matches(&document) {
-            self.clear_snippet();
-            return None;
-        }
-        let view = document.view?;
-        let range = session.groups.get(session.current)?.first()?.range();
-        Some([
-            EditorOperation::SetCursor {
-                view,
-                position: range.end,
-            },
-            EditorOperation::SetSelection {
-                view,
-                // An empty placeholder selects nothing, or typing there would grow a selection.
-                selection: (!range.is_empty()).then_some(Selection {
-                    anchor: range.start,
-                    head: range.end,
-                    kind: SelectionKind::Character,
-                }),
-            },
-        ])
-    }
-    pub(in crate::app) fn navigate_snippet(&mut self, direction: i8) -> bool {
-        let Some(session) = &mut self.snippet else {
-            return false;
-        };
-        if direction > 0 {
-            if session.current + 1 >= session.groups.len() {
-                self.clear_snippet();
-                return true;
-            }
-            session.current += 1;
-        } else if direction < 0 {
-            session.current = session.current.saturating_sub(1);
-        }
-        false
-    }
-    pub(in crate::app) fn prepare_snippet_mirror(
-        &mut self,
-        document: Option<SnippetDocument<'_>>,
-        transaction: &mut EditorTransaction,
-    ) -> Option<SnippetUpdate> {
-        let session = self.snippet.as_ref()?;
-        let Some(document) = document else {
-            self.snippet = None;
-            return None;
-        };
-        if !session.matches(&document) {
-            self.snippet = None;
-            return None;
-        }
-        let Some(primary) = session
-            .groups
-            .get(session.current)
-            .and_then(|group| group.first())
-            .cloned()
-        else {
-            self.snippet = None;
-            return None;
-        };
-        let primary = primary.range();
-        let mut target = None;
-        for operation in &mut transaction.operations {
-            if let EditorOperation::ApplyEdits { buffer, edits } = operation {
-                if *buffer != session.buffer || target.is_some() {
-                    self.snippet = None;
-                    return None;
-                }
-                target = Some(edits.clone());
-            }
-        }
-        let edits = target?;
-        if edits.base_revision() != session.revision
-            || edits.edits().is_empty()
-            || edits
-                .edits()
-                .iter()
-                .any(|edit| edit.range().start < primary.start || edit.range().end > primary.end)
-        {
-            self.snippet = None;
-            return None;
-        }
-        // Keep the primary edits intact: replacing the entire placeholder would map an
-        // interior cursor to its end. Copy those edits to linked occurrences instead.
-        let contains = |outer: ByteRange, inner: ByteRange| {
-            outer.start <= inner.start && inner.end <= outer.end
-        };
-        let is_ancestor = |outer: &SnippetTabstop, inner: &SnippetTabstop| {
-            outer.depth < inner.depth
-                && outer.order < inner.order
-                && contains(outer.range(), inner.range())
-                && !session.groups.iter().flatten().any(|stop| {
-                    outer.order < stop.order
-                        && stop.order <= inner.order
-                        && stop.depth <= outer.depth
-                })
-        };
-        let mut copies = Vec::new();
-        let mut affected = Vec::new();
-        for (occurrence, stop) in session.groups[session.current].iter().enumerate() {
-            let range = stop.range();
-            affected.push((session.current, occurrence));
-            for edit in edits.edits() {
-                let start = range.start.get() + edit.range().start.get() - primary.start.get();
-                let end = range.start.get() + edit.range().end.get() - primary.start.get();
-                copies.push((
-                    TextEdit::new(
-                        ByteRange::new(ByteOffset(start), ByteOffset(end)).ok()?,
-                        edit.replacement(),
-                    ),
-                    (session.current, occurrence),
-                ));
-            }
-        }
-        // Work outwards so a parent's mirrors include changes to all child mirrors
-        // inside its defining occurrence, not just the edited child.
-        let mut parents = session
-            .groups
-            .iter()
-            .enumerate()
-            .filter_map(|(index, group)| {
-                if index == session.current {
-                    return None;
-                }
-                group
-                    .iter()
-                    .enumerate()
-                    .find(|(_, stop)| {
-                        session.groups[session.current]
-                            .iter()
-                            .any(|child| is_ancestor(stop, child))
-                    })
-                    .map(|(occurrence, stop)| (index, occurrence, stop.clone()))
-            })
-            .collect::<Vec<_>>();
-        parents.sort_by_key(|(_, _, stop)| std::cmp::Reverse(stop.depth));
-        for (index, defining, stop) in parents {
-            let parent = stop.range();
-            let local = copies
-                .iter()
-                .filter(|(edit, owner)| {
-                    contains(parent, edit.range())
-                        && is_ancestor(&stop, &session.groups[owner.0][owner.1])
-                })
-                .map(|(edit, _)| edit.clone())
-                .collect::<Vec<_>>();
-            for (occurrence, stop) in session.groups[index].iter().enumerate() {
-                let range = stop.range();
-                affected.push((index, occurrence));
-                if occurrence == defining {
-                    continue;
-                }
-                for edit in &local {
-                    let start = range.start.get() + edit.range().start.get() - parent.start.get();
-                    let end = range.start.get() + edit.range().end.get() - parent.start.get();
-                    copies.push((
-                        TextEdit::new(
-                            ByteRange::new(ByteOffset(start), ByteOffset(end)).ok()?,
-                            edit.replacement(),
-                        ),
-                        (index, occurrence),
-                    ));
-                }
-            }
-        }
-        let ordered = copies
-            .iter()
-            .map(|(edit, (group, occurrence))| {
-                (edit.clone(), (session.groups[*group][*occurrence].order, 1))
-            })
-            .collect::<Vec<_>>();
-        let replacement_edits = merge_edits(session.revision, ordered.clone());
-        if document.text.validate_edits(&replacement_edits).is_err() {
-            self.clear_snippet();
-            return None;
-        }
-        let mut groups = Vec::with_capacity(session.groups.len());
-        let mut current = 0;
-        for (index, group) in session.groups.iter().enumerate() {
-            let mut updated = Vec::with_capacity(group.len());
-            for (occurrence, stop) in group.iter().enumerate() {
-                let range = stop.range();
-                let key = (index, occurrence);
-                let grows = affected.contains(&key);
-                // Stops overwritten by an edit no longer describe placeholders.
-                if !grows
-                    && copies.iter().any(|(edit, owner)| {
-                        !edit.range().is_empty()
-                            && if range.is_empty() {
-                                edit.range().start <= range.start
-                                    && (range.end < edit.range().end
-                                        || (range.end == edit.range().end
-                                            && is_ancestor(
-                                                &session.groups[owner.0][owner.1],
-                                                stop,
-                                            )))
-                            } else {
-                                edit.range().start < range.end && range.start < edit.range().end
-                            }
-                    })
-                {
-                    continue;
-                }
-                let shift = |position: ByteOffset, end: bool| {
-                    let mut value = position.get() as i128;
-                    for (edit, owner) in &copies {
-                        let edited = edit.range();
-                        let owner_stop = &session.groups[owner.0][owner.1];
-                        let after = if key == *owner || is_ancestor(stop, owner_stop) {
-                            end
-                        } else {
-                            stop.order > owner_stop.order
-                        };
-                        if edited.is_empty() {
-                            if edited.start < position || (edited.start == position && after) {
-                                value += edit.replacement().len() as i128;
-                            }
-                        } else if edited.end <= position {
-                            value += edit.replacement().len() as i128 - edited.len() as i128;
-                        }
-                    }
-                    ByteOffset(value.max(0) as usize)
-                };
-                let range =
-                    ByteRange::new(shift(range.start, false), shift(range.end, true)).ok()?;
-                let mut stop = stop.clone();
-                stop.start = range.start.get();
-                stop.end = range.end.get();
-                updated.push(stop);
-            }
-            if !updated.is_empty() {
-                if index == session.current {
-                    current = groups.len();
-                }
-                groups.push(updated);
-            }
-        }
-        let Some((transforms, transform_edits)) = follow_transforms(
-            session,
-            document.text,
-            &copies,
-            &replacement_edits,
-            &mut groups,
-        ) else {
-            self.clear_snippet();
-            return None;
-        };
-        let replacement_edits = if transform_edits.is_empty() {
-            replacement_edits
-        } else {
-            let edits = merge_edits(session.revision, [ordered, transform_edits].concat());
-            if document.text.validate_edits(&edits).is_err() {
-                self.clear_snippet();
-                return None;
-            }
-            edits
-        };
-        let cursor_shift = groups[current][0].start as i128 - primary.start.get() as i128;
-        let mut applied = false;
-        for operation in &mut transaction.operations {
-            match operation {
-                EditorOperation::ApplyEdits { buffer, edits } if *buffer == session.buffer => {
-                    *edits = replacement_edits.clone();
-                    applied = true;
-                }
-                EditorOperation::SetCursor { position, .. } if applied => {
-                    // Commands position the cursor after their primary edits, not after
-                    // extra mirrors inserted earlier in the document.
-                    *position = ByteOffset((position.get() as i128 + cursor_shift).max(0) as usize);
-                }
-                _ => {}
-            }
-        }
-        Some(SnippetUpdate {
-            identity: session.identity.clone(),
-            buffer: session.buffer,
-            before: session.revision,
-            groups,
-            transforms,
-            current,
-        })
     }
 }

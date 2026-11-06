@@ -7,8 +7,14 @@ use std::sync::OnceLock;
 
 use serde::Deserialize;
 
-const CATALOG: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/defaults/settings.toml"));
-const SETUP: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/defaults/setup.toml"));
+const CATALOG: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/assets/defaults/settings.toml"
+));
+const SETUP: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/assets/defaults/setup.toml"
+));
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -232,7 +238,8 @@ pub(super) fn edited_source(
     let mut document = source
         .parse::<toml_edit::DocumentMut>()
         .map_err(|error| format!("config.toml has a mistake to fix first: {error}"))?;
-    let segments = crate::config::config_key_segments(key).ok_or_else(|| format!("bad key {key}"))?;
+    let segments =
+        crate::config::config_key_segments(key).ok_or_else(|| format!("bad key {key}"))?;
     let Some(value) = value else {
         if let Some(comments) = remove_setting(document.as_table_mut(), &segments) {
             let trailing = document.trailing().as_str().unwrap_or("").to_owned();

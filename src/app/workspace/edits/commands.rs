@@ -1,13 +1,14 @@
-
-use crate::app::commands::AppEffect;
 use crate::app::App;
+use crate::app::commands::AppEffect;
 use crate::app::picker::PickerPayload;
 
-
 impl App {
-    pub(in crate::app) fn process_workspace_edits_effect(&mut self, effect: AppEffect) -> Result<(), AppEffect> {
+    pub(in crate::app) fn process_workspace_edits_effect(
+        &mut self,
+        effect: AppEffect,
+    ) -> Result<(), AppEffect> {
         match effect {
-AppEffect::WorkspaceEditToggle => {
+            AppEffect::WorkspaceEditToggle => {
                 self.retire_stale_picker();
                 let selected = self
                     .selected_picker_payload()
@@ -21,9 +22,9 @@ AppEffect::WorkspaceEditToggle => {
                     self.show_workspace_proposal();
                 }
             }
-AppEffect::WorkspaceEditAccept => self.accept_workspace_proposal(),
-AppEffect::WorkspaceEditReject => self.reject_workspace_proposal(),
-AppEffect::WorkspaceResourceApply => loop {
+            AppEffect::WorkspaceEditAccept => self.accept_workspace_proposal(),
+            AppEffect::WorkspaceEditReject => self.reject_workspace_proposal(),
+            AppEffect::WorkspaceResourceApply => loop {
                 let proposal = self.workspace_edits.next_resource_proposal();
                 let result = match self.workspace_edits.prepare_resource(
                     &self.workspace,

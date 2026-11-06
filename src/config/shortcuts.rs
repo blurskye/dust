@@ -178,7 +178,9 @@ fn edit_user_keymaps(
         .parse::<toml_edit::DocumentMut>()
         .map_err(|error| format!("keymaps.toml has a mistake to fix first: {error}"))?;
     let edited = edit(&mut document)?;
-    if let Some(diagnostic) = crate::config::load::parse_keymaps(&edited, path.to_path_buf()).diagnostic {
+    if let Some(diagnostic) =
+        crate::config::load::parse_keymaps(&edited, path.to_path_buf()).diagnostic
+    {
         return Err(diagnostic);
     }
     file.write(&edited)

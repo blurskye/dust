@@ -7,10 +7,10 @@ use crate::editor::text::BufferRevision;
 use crate::files::RecoveryRecord;
 use crate::files::RequestId;
 use crate::files::VfsResult;
-use std::ops::ControlFlow::self;
+use std::collections::HashMap;
+use std::ops::ControlFlow;
 use std::ops::ControlFlow::Break;
 use std::ops::ControlFlow::Continue;
-use std::collections::HashMap;
 use std::path::Path;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -352,7 +352,7 @@ impl RecoverySession {
                     }))
         }).count()
     }
-    pub(in crate::app) fn accept(&mut self, result: VfsResult) -> ControlFlow<RecoveryUpdate, VfsResult> {
+    pub(super) fn accept(&mut self, result: VfsResult) -> ControlFlow<RecoveryUpdate, VfsResult> {
         let id = match &result {
             VfsResult::RecoveryDiscovered { id, .. }
             | VfsResult::RecoveryCleaned { id, .. }

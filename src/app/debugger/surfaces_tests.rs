@@ -1,10 +1,8 @@
 use crate::app::tests::*;
 
-
-
-
 #[test]
-pub(in crate::app) fn breakpoint_condition_prompt_preserves_its_original_target_and_other_settings() {
+pub(in crate::app) fn breakpoint_condition_prompt_preserves_its_original_target_and_other_settings()
+{
     let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("original.rs");
     let (_, view) = app
@@ -45,7 +43,6 @@ pub(in crate::app) fn breakpoint_condition_prompt_preserves_its_original_target_
     );
 }
 
-
 #[test]
 pub(in crate::app) fn saved_watches_are_listed_without_a_debugger() {
     let (_app_dirs, mut app) = app();
@@ -57,7 +54,6 @@ pub(in crate::app) fn saved_watches_are_listed_without_a_debugger() {
     app.accept_picker();
     assert_eq!(app.debugger_session.watches(), ["counter"]);
 }
-
 
 #[test]
 pub(in crate::app) fn problems_logs_output_and_debug_keep_distinct_graph_surface_identities() {
@@ -196,7 +192,6 @@ pub(in crate::app) fn problems_logs_output_and_debug_keep_distinct_graph_surface
     assert_eq!(app.window_session.graph(), &idle_graph);
 }
 
-
 #[test]
 pub(in crate::app) fn breakpoint_gutter_signs_distinguish_disabled_breakpoints() {
     let (_app_dirs, mut app) = app();
@@ -243,7 +238,6 @@ pub(in crate::app) fn breakpoint_gutter_signs_distinguish_disabled_breakpoints()
         crate::ui::DebugSignKind::ConditionalBreakpoint
     );
 }
-
 
 #[cfg(unix)]
 #[test]
@@ -423,10 +417,13 @@ pub(in crate::app) fn debugger_protected_launch_source_capture_refusal_and_fresh
     }
 }
 
-
 pub(in crate::app) fn logging_adapter_fixture(
     request: crate::config::DebugRequestKind,
-) -> (tempfile::TempDir, PathBuf, crate::app::tests::driver::TestSession) {
+) -> (
+    tempfile::TempDir,
+    PathBuf,
+    crate::app::tests::driver::TestSession,
+) {
     let files = tempfile::tempdir().unwrap();
     let adapter = files.path().join("logging-adapter.py");
     // The adapter runs in the workspace, not in the fixture directory.
@@ -468,7 +465,6 @@ pub(in crate::app) fn logging_adapter_fixture(
     driver.trust_owned_terminal_fixture();
     (files, log_path, driver)
 }
-
 
 #[test]
 pub(in crate::app) fn a_started_session_makes_the_debug_arrangement_appear_with_its_own_identity() {
@@ -542,19 +538,13 @@ pub(in crate::app) fn a_started_session_makes_the_debug_arrangement_appear_with_
         "a LAUNCH must not claim to be attached to anything: {status:?}"
     );
 }
+use crate::app::AppEffect;
+use crate::app::PickerKind;
+use crate::editor::text::ByteOffset;
+use crate::editor::text::TextBuffer;
+use crate::ui::PickerSurfaceKind;
 use std::collections::BTreeMap;
+use std::fs;
 use std::path::PathBuf;
 use std::time::Duration;
 use std::time::Instant;
-use crate::debugger::DapSourceBreakpoint;
-use crate::editor::text::ByteOffset;
-use crate::editor::text::TextBuffer;
-use crate::editor::CommandInvocation;
-use crate::editor::InvocationSource;
-use crate::ui::PickerSurfaceKind;
-use std::fs;
-use std::thread;
-use tempfile::tempdir;
-use crate::app::AppEffect;
-use crate::app::PickerKind;
-

@@ -1,11 +1,11 @@
-use crate::ui::grid::CONTROL_CHARACTER_REPLACEMENT;
-use crate::ui::grid::ZERO_WIDTH_REPLACEMENT;
-use crate::windows::PANE_MINIMUM_WIDTH;
 use crate::config::AmbiguousWidth;
 use crate::config::Config;
 use crate::ui::CellGrid;
 use crate::ui::Style;
 use crate::ui::geometry::text_width;
+use crate::ui::grid::CONTROL_CHARACTER_REPLACEMENT;
+use crate::ui::grid::ZERO_WIDTH_REPLACEMENT;
+use crate::windows::PANE_MINIMUM_WIDTH;
 use crate::windows::WindowRect;
 
 use crate::ui::render::ExplorerSegmentRole;
@@ -14,8 +14,8 @@ use crate::ui::render::ExplorerUiState;
 
 use crate::ui::grid::Frame;
 
-use crate::ui::render::editor::cursor_style;
 use crate::config::Highlight;
+use crate::ui::render::editor::cursor_style;
 
 pub(crate) const EXPLORER_MAXIMUM_VISIBLE_ROWS: usize = 200;
 pub(crate) const EXPLORER_MINIMUM_WIDTH: u16 = 28;
@@ -335,6 +335,25 @@ pub(crate) fn explorer_segment_style(role: ExplorerSegmentRole) -> Style {
     }
 }
 
+/// The box around the explorer's search row.
+const EXPLORER_SEARCH_ROWS: u16 = 3;
+
+#[must_use]
+pub fn explorer_body_geometry(rect: WindowRect) -> WindowRect {
+    WindowRect {
+        x: rect.x,
+        y: rect
+            .y
+            .saturating_add(EXPLORER_SEARCH_ROWS)
+            .min(rect.y.saturating_add(rect.height)),
+        width: rect.width.saturating_sub(1),
+        height: rect
+            .height
+            .saturating_sub(EXPLORER_SEARCH_ROWS)
+            .min(u16::try_from(EXPLORER_MAXIMUM_VISIBLE_ROWS).unwrap_or(u16::MAX)),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::ui::render::explorer::*;
@@ -424,31 +443,5 @@ mod tests {
                 );
             }
         }
-    }
-}
-
-
-
-
-
-
-
-/// The box around the explorer's search row.
-const EXPLORER_SEARCH_ROWS: u16 = 3;
-
-
-#[must_use]
-pub fn explorer_body_geometry(rect: WindowRect) -> WindowRect {
-    WindowRect {
-        x: rect.x,
-        y: rect
-            .y
-            .saturating_add(EXPLORER_SEARCH_ROWS)
-            .min(rect.y.saturating_add(rect.height)),
-        width: rect.width.saturating_sub(1),
-        height: rect
-            .height
-            .saturating_sub(EXPLORER_SEARCH_ROWS)
-            .min(u16::try_from(EXPLORER_MAXIMUM_VISIBLE_ROWS).unwrap_or(u16::MAX)),
     }
 }

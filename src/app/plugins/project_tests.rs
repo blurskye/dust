@@ -2,11 +2,11 @@ use crate::app::tests::*;
 
 use crate::app::picker::project_tests::palette_row_for;
 
-
 #[test]
 pub(in crate::app) fn palette_finds_plugin_titles_without_configured_labels_and_honors_overrides() {
     let (_app_dirs, mut app) = app();
-    let mut manifest = crate::app::tests::plugin_manifest("demo", "plugin.demo.keymap.dashboard", "x");
+    let mut manifest =
+        crate::app::tests::plugin_manifest("demo", "plugin.demo.keymap.dashboard", "x");
     manifest.commands.get_mut("run").unwrap().title = "Print Hello".into();
     let index =
         crate::plugins::index_manifest_contributions(&manifest, 1, "fixture".into()).unwrap();
@@ -34,5 +34,3 @@ pub(in crate::app) fn palette_finds_plugin_titles_without_configured_labels_and_
         "Plugins: Say Goodbye"
     );
 }
-
-

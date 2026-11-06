@@ -588,10 +588,10 @@ fn rank(query: &str, items: &BTreeMap<String, PluginPickerItem>) -> Vec<String> 
 
 #[cfg(test)]
 mod tests {
-    use crate::plugins::providers::*;
     use crate::plugins::PluginActivationBehavior;
     use crate::plugins::PluginCommandContext;
     use crate::plugins::PluginCommandDeclaration;
+    use crate::plugins::providers::*;
 
     fn index(generation: u64, maximum_items: u16, maximum_bytes: u32) -> PluginContributionIndex {
         PluginContributionIndex {

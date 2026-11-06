@@ -1,27 +1,15 @@
-
-use crate::ui::PromptKind;
-use crate::app::commands::AppEffect;
 use crate::app::App;
-
-use crate::workspace::WorkspaceTrust;
-use crate::app::command;
-use crate::app::commands::PromptMove;
-
-
-
-
-
-
-
-
-
-
+use crate::app::commands::AppEffect;
+use crate::ui::PromptKind;
 
 impl App {
-    pub(in crate::app) fn process_prompt_effect(&mut self, effect: AppEffect) -> Result<(), AppEffect> {
+    pub(in crate::app) fn process_prompt_effect(
+        &mut self,
+        effect: AppEffect,
+    ) -> Result<(), AppEffect> {
         match effect {
-AppEffect::OpenPrompt { kind, initial } => self.open_prompt(kind, initial),
-AppEffect::OpenFilePrompt => {
+            AppEffect::OpenPrompt { kind, initial } => self.open_prompt(kind, initial),
+            AppEffect::OpenFilePrompt => {
                 let alias = self
                     .configuration
                     .settings()
@@ -32,25 +20,25 @@ AppEffect::OpenFilePrompt => {
                     .map_or("file.open", |(alias, _)| alias.as_str());
                 self.open_prompt(PromptKind::Command, format!("{alias} "));
             }
-AppEffect::PromptInsert(text) => self.prompt_insert(&text),
-AppEffect::PromptBackspace => self.prompt_backspace(),
-AppEffect::PromptDeleteWord => self.prompt_delete(|input| input.prompt_delete_word()),
-AppEffect::PromptDeleteToStart => {
+            AppEffect::PromptInsert(text) => self.prompt_insert(&text),
+            AppEffect::PromptBackspace => self.prompt_backspace(),
+            AppEffect::PromptDeleteWord => self.prompt_delete(|input| input.prompt_delete_word()),
+            AppEffect::PromptDeleteToStart => {
                 self.prompt_delete(|input| input.prompt_delete_to_start());
             }
-AppEffect::PromptMove(movement) => self.prompt_move(movement),
-AppEffect::PromptHistory(direction) => self.prompt_history(direction),
-AppEffect::PromptComplete(direction) => self.prompt_complete(direction),
-AppEffect::PromptConfirmationSelect(choice) => {
+            AppEffect::PromptMove(movement) => self.prompt_move(movement),
+            AppEffect::PromptHistory(direction) => self.prompt_history(direction),
+            AppEffect::PromptComplete(direction) => self.prompt_complete(direction),
+            AppEffect::PromptConfirmationSelect(choice) => {
                 self.input.select_confirmation(choice);
                 self.submit_prompt();
             }
-AppEffect::PromptConfirmationToggle => {
+            AppEffect::PromptConfirmationToggle => {
                 self.input.toggle_confirmation();
                 self.project_input_prompt();
             }
-AppEffect::PromptSubmit => self.submit_prompt(),
-AppEffect::PromptCancel => {
+            AppEffect::PromptSubmit => self.submit_prompt(),
+            AppEffect::PromptCancel => {
                 let declined_trust = self
                     .input
                     .prompt()

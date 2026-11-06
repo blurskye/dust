@@ -4,12 +4,12 @@ mod debugger;
 mod diagnostics;
 mod documents;
 mod explorer;
-mod plugins;
 mod git;
 mod input;
 mod language;
 mod notifications;
 mod persistence;
+mod plugins;
 mod search;
 mod syntax;
 mod tasks;
@@ -71,8 +71,8 @@ pub use configuration::compile_keymaps_with_plugin_index;
 
 pub use configuration::reload_keymaps;
 
-pub use configuration::validate_loaded_configuration;
 pub use agent::commands::AgentCommand;
+pub use configuration::validate_loaded_configuration;
 
 use crate::app::configuration::ConfigurationSession;
 use crate::app::documents::DocumentSession;
@@ -88,7 +88,7 @@ use crate::app::syntax::SyntaxSession;
 
 pub use commands::AppEffect;
 
-pub use commands::LayoutAction;
+pub use windows::LayoutAction;
 
 pub use commands::PickerKind;
 
@@ -98,9 +98,6 @@ pub use commands::register_app_commands;
 
 use std::collections::BTreeMap;
 
-
-
-
 use std::path::PathBuf;
 
 use std::time::Duration;
@@ -108,21 +105,16 @@ use std::time::Duration;
 use std::time::Instant;
 
 use crate::config::LoadedConfig;
-use crate::editor::text::BufferRevision;
-use crate::editor::text::ByteRange;
 use crate::editor::CommandError;
 use crate::editor::CommandInvocation;
 use crate::editor::CommandRegistry;
 use crate::editor::EditorMode;
 use crate::editor::EditorState;
 use crate::editor::InvocationSource;
-use crate::editor::ViewId;
-
-
-
+use crate::editor::text::BufferRevision;
+use crate::editor::text::ByteRange;
 
 use crate::files::VfsError;
-use crate::language::lsp::LspFeature;
 use crate::process::PtyId;
 use crate::telemetry::LogLevel;
 use crate::ui::TerminalError;
@@ -133,14 +125,8 @@ use crate::ui::UiState;
 use crate::ui::render as render_frame;
 use thiserror::Error;
 
-
 use crate::app::startup::ApplicationError;
 use crate::app::startup::StartupTarget;
-
-
-
-
-
 
 pub(in crate::app) const EVENT_POLL_MS: u64 = 16;
 pub(in crate::app) const MACRO_RECURSION_LIMIT: usize = 16;
@@ -378,7 +364,9 @@ pub fn run_interactive(
         },
         application.configuration.theme().clone(),
     )?;
-    application.health.set_terminal_capabilities(terminal.capability_summary());
+    application
+        .health
+        .set_terminal_capabilities(terminal.capability_summary());
     application.window_session.observe_size(terminal.size()?);
     application.clipboard.enable(&application.state.registers);
 
@@ -453,7 +441,9 @@ pub fn run_interactive(
         terminal.set_mouse(application.configuration.settings().ui.mouse)?;
         terminal.set_color_mode(application.configuration.settings().ui.color_mode);
         terminal.set_theme(application.configuration.theme());
-        application.health.set_terminal_capabilities(terminal.capability_summary());
+        application
+            .health
+            .set_terminal_capabilities(terminal.capability_summary());
         // The frame is a pure function of these, so it is only rebuilt when one moved.
         let inputs = (
             application.state.revision,
@@ -517,22 +507,6 @@ pub fn run_interactive(
     application.finish_shutdown()
 }
 
-impl App {
-    pub(in crate::app) fn process_clipboard(&mut self) -> Option<String> {
-        self.process_clipboard_paste();
-        let generation = self.state.registers.generation();
-        let output = if self.clipboard_shared() {
-            self.clipboard.push(&mut self.state.value.registers)
-        } else {
-            None
-        };
-        if self.state.registers.generation() != generation {
-            self.state.revision = self.state.revision.wrapping_add(1);
-        }
-        output
-    }
-}
-
 fn mode_name(mode: EditorMode) -> &'static str {
     match mode {
         EditorMode::Normal => "normal",
@@ -575,10 +549,10 @@ mod shutdown;
 pub mod startup;
 pub(super) mod tutor;
 
+mod documentation;
 mod editing;
 mod picker;
 mod prompt;
-mod documentation;
 
 mod help;
 

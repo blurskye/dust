@@ -1,36 +1,29 @@
-
-use crate::ui::PromptKind;
+use crate::app::App;
 use crate::app::commands::AppEffect;
+use crate::app::picker::PickerPayload;
 use crate::debugger::DapControl;
 use crate::debugger::DapSourceBreakpoint;
-use crate::app::App;
+use crate::ui::PromptKind;
 use crate::workspace::PickerAction;
 use crate::workspace::PickerItem;
 use crate::workspace::PickerItemId;
-use crate::app::picker::PickerPayload;
 
 use crate::app::TrustedAction;
-use std::ops::ControlFlow::Continue;
 
-
-
-
-
-
-
+use crate::app::commands::optional_integer_arg;
+use crate::app::commands::optional_string_arg;
+use crate::app::commands::register;
+use crate::app::commands::string_arg;
 use crate::editor::ArgumentSchema;
 use crate::editor::ArgumentType;
 use crate::editor::CommandError;
 use crate::editor::CommandRegistry;
 use crate::editor::ContextRequirement;
-use crate::app::commands::register;
-use crate::app::commands::string_arg;
 use std::path::PathBuf;
-use crate::app::commands::optional_integer_arg;
-use crate::app::commands::optional_string_arg;
 
-pub(in crate::app) fn register_commands(registry: &mut CommandRegistry<AppEffect>) -> Result<(), CommandError> {
-
+pub(in crate::app) fn register_commands(
+    registry: &mut CommandRegistry<AppEffect>,
+) -> Result<(), CommandError> {
     register(
         registry,
         "dap.breakpoints.states",
@@ -205,39 +198,26 @@ pub(in crate::app) fn register_commands(registry: &mut CommandRegistry<AppEffect
             AppEffect::DapStart(optional_string_arg(invocation, "program").map(PathBuf::from))
         },
     )?;
-Ok(())
+    Ok(())
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 impl App {
-    pub(in crate::app) fn process_debugger_effect(&mut self, effect: AppEffect) -> Result<(), AppEffect> {
+    pub(in crate::app) fn process_debugger_effect(
+        &mut self,
+        effect: AppEffect,
+    ) -> Result<(), AppEffect> {
         match effect {
-AppEffect::DebuggerBreakpointStates => self.open_breakpoint_states(),
-AppEffect::DebuggerBreakpointDisable => self.toggle_breakpoint_disabled(),
-AppEffect::DebuggerTerminate => self.terminate_debug_session(),
-AppEffect::DebuggerDetach => self.detach_debug_session(),
-AppEffect::DapStart(program) => self.start_dap(None, program),
-AppEffect::DapConfigurationStart(name) => self.start_dap_configuration(&name),
-AppEffect::DapWatchAdd(expression) => self.debugger_session.add_watch(expression),
-AppEffect::DapWatchRemove(expression) => {
+            AppEffect::DebuggerBreakpointStates => self.open_breakpoint_states(),
+            AppEffect::DebuggerBreakpointDisable => self.toggle_breakpoint_disabled(),
+            AppEffect::DebuggerTerminate => self.terminate_debug_session(),
+            AppEffect::DebuggerDetach => self.detach_debug_session(),
+            AppEffect::DapStart(program) => self.start_dap(None, program),
+            AppEffect::DapConfigurationStart(name) => self.start_dap_configuration(&name),
+            AppEffect::DapWatchAdd(expression) => self.debugger_session.add_watch(expression),
+            AppEffect::DapWatchRemove(expression) => {
                 self.debugger_session.remove_watch(&expression)
             }
-AppEffect::DapWatchList => self.open_dap_picker(
+            AppEffect::DapWatchList => self.open_dap_picker(
                 "watches",
                 self.debugger_session
                     .watches()
@@ -261,13 +241,13 @@ AppEffect::DapWatchList => self.open_dap_picker(
                     })
                     .collect(),
             ),
-AppEffect::DapStop => {
+            AppEffect::DapStop => {
                 if let Err(error) = self.debugger_session.stop() {
                     self.show_error(error);
                 }
                 self.close_debug_terminal();
             }
-AppEffect::DapContinue => {
+            AppEffect::DapContinue => {
                 // With nothing to continue, start one, as F5 does in VS Code.
                 match self.debugger_session.control(DapControl::Continue) {
                     Err(crate::debugger::DapError::NotRunning) => self.start_dap(None, None),
@@ -275,27 +255,27 @@ AppEffect::DapContinue => {
                     Ok(_) => {}
                 }
             }
-AppEffect::DapPause => {
+            AppEffect::DapPause => {
                 if let Err(error) = self.debugger_session.control(DapControl::Pause) {
                     self.show_error(error);
                 }
             }
-AppEffect::DapNext => {
+            AppEffect::DapNext => {
                 if let Err(error) = self.debugger_session.control(DapControl::Next) {
                     self.show_error(error);
                 }
             }
-AppEffect::DapStepIn => {
+            AppEffect::DapStepIn => {
                 if let Err(error) = self.debugger_session.control(DapControl::StepIn) {
                     self.show_error(error);
                 }
             }
-AppEffect::DapStepOut => {
+            AppEffect::DapStepOut => {
                 if let Err(error) = self.debugger_session.control(DapControl::StepOut) {
                     self.show_error(error);
                 }
             }
-AppEffect::DapConsole => {
+            AppEffect::DapConsole => {
                 let items = self
                     .debugger_session
                     .console()
@@ -323,7 +303,7 @@ AppEffect::DapConsole => {
                     .collect();
                 self.install_picker(self.message("dap_console_title", &[]), items);
             }
-AppEffect::DapSessions => {
+            AppEffect::DapSessions => {
                 let adapter = self
                     .debugger_session
                     .active_adapter()
@@ -352,12 +332,12 @@ AppEffect::DapSessions => {
                 )];
                 self.install_picker(self.message("dap_sessions_title", &[]), items);
             }
-AppEffect::DapThreads => {
+            AppEffect::DapThreads => {
                 if let Err(error) = self.debugger_session.control(DapControl::Threads) {
                     self.show_error(error)
                 }
             }
-AppEffect::DapStack(thread) => {
+            AppEffect::DapStack(thread) => {
                 let Some(thread_id) = thread.or(self.debugger_session.stopped_thread()) else {
                     self.show_error(self.message("dap_not_paused", &[]));
                     return Ok(());
@@ -370,7 +350,7 @@ AppEffect::DapStack(thread) => {
                     self.show_error(error)
                 }
             }
-AppEffect::DapScopes(frame) | AppEffect::DapVariables(frame @ None) => {
+            AppEffect::DapScopes(frame) | AppEffect::DapVariables(frame @ None) => {
                 let Some(frame_id) = frame.or(self.debugger_session.current_frame()) else {
                     self.show_error(self.message("dap_not_paused", &[]));
                     return Ok(());
@@ -382,7 +362,7 @@ AppEffect::DapScopes(frame) | AppEffect::DapVariables(frame @ None) => {
                     self.show_error(error)
                 }
             }
-AppEffect::DapVariables(Some(reference)) => {
+            AppEffect::DapVariables(Some(reference)) => {
                 if let Err(error) = self.debugger_session.control(DapControl::Variables {
                     reference,
                     start: 0,
@@ -391,7 +371,7 @@ AppEffect::DapVariables(Some(reference)) => {
                     self.show_error(error)
                 }
             }
-AppEffect::DapEvaluate(expression) => {
+            AppEffect::DapEvaluate(expression) => {
                 // What the user typed is recorded as a COMMAND, distinct from what comes back.
                 self.debugger_session
                     .record_console_command(expression.clone());
@@ -404,7 +384,7 @@ AppEffect::DapEvaluate(expression) => {
                     self.show_error(error)
                 }
             }
-AppEffect::DapRestart => {
+            AppEffect::DapRestart => {
                 match self.debugger_session.request_restart(
                     (
                         &self.configuration.settings().debug,
@@ -418,7 +398,7 @@ AppEffect::DapRestart => {
                     Err(error) => self.show_error(error),
                 }
             }
-AppEffect::DapBreakpointConfigure {
+            AppEffect::DapBreakpointConfigure {
                 condition: None,
                 hit_condition: None,
                 log_message: None,
@@ -444,12 +424,12 @@ AppEffect::DapBreakpointConfigure {
                 );
                 self.input.set_pending_breakpoint(row);
             }
-AppEffect::DapBreakpointConfigure {
+            AppEffect::DapBreakpointConfigure {
                 condition,
                 hit_condition,
                 log_message,
             } => self.configure_breakpoint(condition, hit_condition, log_message),
-AppEffect::DapBreakpointToggle => {
+            AppEffect::DapBreakpointToggle => {
                 let Some(view) = self.state.active_view else {
                     return Ok(());
                 };
@@ -480,7 +460,7 @@ AppEffect::DapBreakpointToggle => {
                     Err(error) => self.show_error(error),
                 }
             }
-AppEffect::DapInspectorNext => {
+            AppEffect::DapInspectorNext => {
                 // Narrow terminals replace panes with SELECTABLE inspectors, one at a time: this
                 // is that selection. Without a session there are no panes to select.
                 if let Some(panes) = self.ui.debug_panes.as_mut() {
@@ -492,7 +472,7 @@ AppEffect::DapInspectorNext => {
                     panes.selected = all[(index + 1) % all.len()];
                 }
             }
-AppEffect::DapStatus => {
+            AppEffect::DapStatus => {
                 let adapter = self
                     .debugger_session
                     .active_adapter()

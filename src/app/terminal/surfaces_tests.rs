@@ -1,8 +1,5 @@
-use crate::app::tests::*;
 use crate::app::agent::commands::AgentCommand;
-
-
-
+use crate::app::tests::*;
 
 #[test]
 pub(in crate::app) fn floating_terminal_receives_clicks_above_underlying_buffer_tabs() {
@@ -65,7 +62,6 @@ pub(in crate::app) fn floating_terminal_receives_clicks_above_underlying_buffer_
     assert!(app.window_session.terminal_focused());
 }
 
-
 #[test]
 pub(in crate::app) fn closing_an_explicit_terminal_window_keeps_the_focused_terminal() {
     for running in [false, true] {
@@ -113,7 +109,6 @@ pub(in crate::app) fn closing_an_explicit_terminal_window_keeps_the_focused_term
         assert_eq!(app.displayed_terminal(), Some(PtyId(1)));
     }
 }
-
 
 #[test]
 pub(in crate::app) fn debug_tabs_remain_clickable_beside_a_right_docked_terminal() {
@@ -188,7 +183,6 @@ pub(in crate::app) fn debug_tabs_remain_clickable_beside_a_right_docked_terminal
     );
 }
 
-
 #[test]
 pub(in crate::app) fn the_terminal_opens_where_its_placement_setting_says() {
     use crate::app::tests::driver::TestSession;
@@ -228,7 +222,6 @@ pub(in crate::app) fn the_terminal_opens_where_its_placement_setting_says() {
         );
     }
 }
-
 
 #[test]
 pub(in crate::app) fn showing_a_terminal_with_a_hidden_semantic_default_uses_a_visible_fallback() {
@@ -288,7 +281,6 @@ pub(in crate::app) fn showing_a_terminal_with_a_hidden_semantic_default_uses_a_v
     );
 }
 
-
 #[test]
 pub(in crate::app) fn default_terminal_float_handles_dimensions_larger_than_u16_multiplication() {
     let (_app_dirs, mut app) = app();
@@ -336,7 +328,6 @@ pub(in crate::app) fn default_terminal_float_handles_dimensions_larger_than_u16_
         })
     );
 }
-
 
 #[test]
 pub(in crate::app) fn terminal_panel_focus_cycle_resize_and_close_preserve_independent_sessions() {
@@ -398,9 +389,8 @@ pub(in crate::app) fn terminal_panel_focus_cycle_resize_and_close_preserve_indep
             .is_err()
     );
     assert_eq!(app.terminal_session.fixture_dimensions(PtyId(1)), (80, 8));
-    let mut foreign = crate::app::terminal::TerminalSession::new(
-        &app.configuration.settings().terminals,
-    );
+    let mut foreign =
+        crate::app::terminal::TerminalSession::new(&app.configuration.settings().terminals);
     foreign.fixture(
         PtyId(1),
         crate::app::terminal::TerminalFixture {
@@ -608,7 +598,9 @@ pub(in crate::app) fn terminal_panel_focus_cycle_resize_and_close_preserve_indep
     );
     assert!(app.terminal_session.contains(PtyId(1)));
     assert!(app.terminal_window_rect().is_none());
-    app.process_effect(crate::app::commands::AppEffect::WindowShow("terminal".into()));
+    app.process_effect(crate::app::commands::AppEffect::WindowShow(
+        "terminal".into(),
+    ));
     assert_eq!(
         app.window_session.native_ids().terminal(1),
         Some(terminal_ids)
@@ -839,7 +831,6 @@ pub(in crate::app) fn terminal_panel_focus_cycle_resize_and_close_preserve_indep
     assert!(app.ui.terminal_panel.is_none());
 }
 
-
 #[cfg(unix)]
 #[test]
 pub(in crate::app) fn live_pty_clone_refusal_preserves_process_screen_geometry_focus_and_sources() {
@@ -916,7 +907,6 @@ pub(in crate::app) fn live_pty_clone_refusal_preserves_process_screen_geometry_f
     }
 }
 
-
 #[cfg(unix)]
 #[test]
 pub(in crate::app) fn ordinary_terminal_profile_names_do_not_make_agent_terminals() {
@@ -939,17 +929,20 @@ pub(in crate::app) fn ordinary_terminal_profile_names_do_not_make_agent_terminal
     assert!(!app.agent_terminal(shell));
     assert!(!app.terminal_session.side(shell));
     app.process_effect(AppEffect::TerminalUnfocus);
-    app.process_effect(AppEffect::Agent(crate::app::agent::commands::AgentCommand::Ask));
+    app.process_effect(AppEffect::Agent(
+        crate::app::agent::commands::AgentCommand::Ask,
+    ));
     let agent = app.terminal_session.selected().unwrap();
     assert_ne!(shell, agent, "an ordinary shell is not reused as an agent");
     assert!(app.agent_terminal(agent));
     assert!(app.terminal_session.side(agent));
     app.process_effect(AppEffect::TerminalUnfocus);
-    app.process_effect(AppEffect::Agent(crate::app::agent::commands::AgentCommand::Ask));
+    app.process_effect(AppEffect::Agent(
+        crate::app::agent::commands::AgentCommand::Ask,
+    ));
     assert_eq!(app.terminal_session.selected(), Some(agent));
     assert_eq!(app.terminal_session.descriptions().len(), 2);
 }
-
 
 #[cfg(unix)]
 #[test]
@@ -1008,10 +1001,10 @@ pub(in crate::app) fn a_terminal_profile_named_like_an_agent_is_not_reused_as_th
     assert_eq!(app.terminal_session.descriptions().len(), 2);
 }
 
-
 #[cfg(unix)]
 #[test]
-pub(in crate::app) fn a_terminal_agent_accepts_selections_from_normal_mode_and_preserves_rejected_ones() {
+pub(in crate::app) fn a_terminal_agent_accepts_selections_from_normal_mode_and_preserves_rejected_ones()
+ {
     use crate::app::tests::driver::TestSession;
     let mut loaded = crate::config::load_bundled_config();
     loaded.config.agents.connection = crate::config::AgentConnection::Terminal;
@@ -1092,7 +1085,6 @@ pub(in crate::app) fn a_terminal_agent_accepts_selections_from_normal_mode_and_p
     assert_eq!(app.terminal_session.descriptions().len(), 1);
 }
 
-
 #[cfg(unix)]
 #[test]
 pub(in crate::app) fn a_terminal_agent_opens_on_the_right_where_the_agent_panel_goes() {
@@ -1154,10 +1146,10 @@ pub(in crate::app) fn a_terminal_agent_opens_on_the_right_where_the_agent_panel_
     assert_eq!(app.terminal_session.descriptions().len(), 1);
 }
 
-
 #[cfg(unix)]
 #[test]
-pub(in crate::app) fn ctrl_slash_beside_a_terminal_agent_opens_a_shell_and_both_keep_their_windows_and_sizes() {
+pub(in crate::app) fn ctrl_slash_beside_a_terminal_agent_opens_a_shell_and_both_keep_their_windows_and_sizes()
+ {
     use crate::app::tests::driver::TestSession;
     let mut loaded = crate::config::load_bundled_config();
     loaded.config.terminals.profiles.insert(
@@ -1301,7 +1293,6 @@ pub(in crate::app) fn ctrl_slash_beside_a_terminal_agent_opens_a_shell_and_both_
     );
 }
 
-
 #[cfg(unix)]
 #[test]
 pub(in crate::app) fn resizing_a_terminal_that_is_stopping_is_not_an_error() {
@@ -1336,7 +1327,6 @@ pub(in crate::app) fn resizing_a_terminal_that_is_stopping_is_not_an_error() {
     }
     assert_eq!(driver.stop_terminal_then_resize(), Ok(()));
 }
-
 
 #[cfg(unix)]
 #[test]
@@ -1596,7 +1586,6 @@ pub(in crate::app) fn real_pty_geometry_ack_focus_placement_and_cross_tab_keep_o
     }
 }
 
-
 #[cfg(unix)]
 #[test]
 pub(in crate::app) fn terminal_preflight_close_and_capture_keep_original_pty_and_geometry() {
@@ -1743,10 +1732,10 @@ pub(in crate::app) fn terminal_preflight_close_and_capture_keep_original_pty_and
     }
 }
 
-
 #[cfg(unix)]
 #[test]
-pub(in crate::app) fn debugger_terminal_displays_without_focus_and_its_exit_keeps_another_terminal_focused() {
+pub(in crate::app) fn debugger_terminal_displays_without_focus_and_its_exit_keeps_another_terminal_focused()
+ {
     use crate::app::tests::driver::TestSession;
     let mut loaded = crate::config::load_bundled_config();
     let mut program = loaded.config.terminals.profiles["shell"].clone();
@@ -1806,7 +1795,6 @@ pub(in crate::app) fn debugger_terminal_displays_without_focus_and_its_exit_keep
     );
 }
 
-
 #[cfg(unix)]
 #[test]
 pub(in crate::app) fn retired_debugger_terminal_preflight_never_launches_the_program() {
@@ -1841,7 +1829,6 @@ pub(in crate::app) fn retired_debugger_terminal_preflight_never_launches_the_pro
     assert!(!driver.application_mut().terminal_session.contains(debug));
     assert!(!root.join("retired-debug-started").exists());
 }
-
 
 #[cfg(unix)]
 #[test]
@@ -1972,7 +1959,6 @@ pub(in crate::app) fn real_pty_reports_exit_io_failure_and_shared_deadline_unkno
     }));
 }
 
-
 #[cfg(unix)]
 #[test]
 pub(in crate::app) fn successful_terminal_exit_keeps_output_unless_profile_closes_on_exit() {
@@ -2033,7 +2019,6 @@ pub(in crate::app) fn successful_terminal_exit_keeps_output_unless_profile_close
     }
 }
 
-
 #[cfg(unix)]
 #[test]
 pub(in crate::app) fn oversized_terminal_paste_reports_its_rejection() {
@@ -2073,7 +2058,6 @@ pub(in crate::app) fn oversized_terminal_paste_reports_its_rejection() {
     );
     driver.terminal_close();
 }
-
 
 #[test]
 pub(in crate::app) fn configured_terminal_navigation_bindings_run_before_pty_encoding() {
@@ -2117,7 +2101,6 @@ pub(in crate::app) fn configured_terminal_navigation_bindings_run_before_pty_enc
         Some(crate::ui::TerminalPanelMode::Normal)
     );
 }
-
 
 #[test]
 pub(in crate::app) fn hiding_another_terminal_preserves_the_focused_terminal() {
@@ -2164,7 +2147,6 @@ pub(in crate::app) fn hiding_another_terminal_preserves_the_focused_terminal() {
     assert_eq!(app.window_session.focused_terminal(), Some(1));
     assert_eq!(app.keyboard_terminal(), Some(PtyId(1)));
 }
-
 
 #[cfg(unix)]
 #[test]
@@ -2294,35 +2276,24 @@ pub(in crate::app) fn real_pty_reports_nonzero_exit_and_shared_deadline_unknown_
             && message.contains("shared shutdown deadline expired")
     }));
 }
-use crate::app::windows::NativeSurfaceTarget;
-use std::time::Duration;
-use std::time::Instant;
-use crate::editor::input::KeyEvent;
-use crate::editor::text::ByteOffset;
-use crate::editor::text::TextBuffer;
-use crate::editor::CommandInvocation;
+use crate::app::App;
+use crate::app::AppEffect;
+use crate::app::compile_keymaps;
+use crate::app::startup::StartupTarget;
 use crate::editor::CommandValue;
-use crate::editor::FocusDirection;
 use crate::editor::InvocationSource;
+use crate::editor::input::KeyEvent;
+use crate::editor::text::TextBuffer;
+use crate::persistence::PersistedWindowPlacement;
 use crate::persistence::PersistedWindowRule;
 use crate::process::PtyId;
-use crate::ui::PromptKind;
-use crate::ui::TerminalPanelMode;
-use crate::ui::TerminalSession;
+use crate::ui::ContentTabKind;
+use crate::ui::PtyScreen;
 use crate::ui::UiEvent;
-use crate::ui::workspace_top_rows;
-use crate::app::startup::StartupTarget;
 use crate::windows::DockEdge;
 use crate::windows::WindowPlacement;
 use crate::windows::WindowRect;
-use std::fs;
 use std::thread;
-use crate::ui::ContentTabKind;
-use crate::ui::PtyScreen;
-use crate::ui::render;
+use std::time::Duration;
+use std::time::Instant;
 use tempfile::tempdir;
-use crate::app::App;
-use crate::app::compile_keymaps;
-use crate::app::AppEffect;
-use crate::persistence::PersistedWindowPlacement;
-

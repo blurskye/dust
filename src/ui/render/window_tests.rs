@@ -1,11 +1,9 @@
-use std::path::PathBuf;
 use crate::editor::EditorState;
 use crate::ui::render::UiState;
+use std::path::PathBuf;
 
-use crate::ui::render::composition_tests::ui_with_editor_layout;
 use crate::ui::render::composition_tests::attach_test_compositor;
-use crate::ui::render::composition_tests::render;
-
+use crate::ui::render::composition_tests::ui_with_editor_layout;
 
 #[test]
 fn missing_application_window_snapshot_fails_closed() {

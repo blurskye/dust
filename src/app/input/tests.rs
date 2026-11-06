@@ -1,9 +1,9 @@
-use crate::app::input::InputSession;
-use crate::editor::input::ABSOLUTE_MAX_COUNT;
-use crate::config::load_bundled_config;
-use crate::editor::CommandRegistry;
 use crate::app::commands::PromptMove;
 use crate::app::commands::register_app_commands;
+use crate::app::input::InputSession;
+use crate::config::load_bundled_config;
+use crate::editor::CommandRegistry;
+use crate::editor::input::ABSOLUTE_MAX_COUNT;
 use crate::editor::register_builtin_commands;
 use crate::ui::DocumentationMarkupKind;
 use crate::ui::DocumentationPopupKind;

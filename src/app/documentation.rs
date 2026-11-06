@@ -1,4 +1,3 @@
-use crate::app::input::InputSession;
 use crate::editor::text::ByteRange;
 use crate::ui::DocumentationMarkupKind;
 use crate::ui::DocumentationPopupKind;
@@ -123,6 +122,133 @@ fn without_data_images(line: &str) -> String {
     kept
 }
 
+use crate::app::App;
+use crate::language::lsp::LspMarkupContent;
+use crate::language::lsp::LspMarkupKind;
+
+impl App {
+    pub(in crate::app) fn present_documentation_popup(
+        &mut self,
+        kind: DocumentationPopupKind,
+        title: String,
+        provider: String,
+        source_range: Option<ByteRange>,
+        source_sections: Vec<LspMarkupContent>,
+    ) {
+        if kind != DocumentationPopupKind::Completion {
+            self.reconcile_editor_windows();
+            self.input.hold_focus(self.window_session.capture_focus());
+        }
+        let config = self.configuration.settings();
+        let available = usize::from(self.window_session.width());
+        let available = if kind == DocumentationPopupKind::Completion {
+            available / 2
+        } else {
+            available
+        };
+        let text_width = available
+            .min(usize::from(
+                crate::ui::render::documentation::DOCUMENTATION_MAX_WIDTH,
+            ))
+            .saturating_sub(
+                2 + 2 * usize::from(crate::ui::render::documentation::DOCUMENTATION_PADDING),
+            );
+        self.input.present_documentation(
+            kind,
+            title,
+            provider,
+            source_range,
+            source_sections.into_iter().map(|source| {
+                (
+                    match source.kind {
+                        LspMarkupKind::PlainText => DocumentationMarkupKind::PlainText,
+                        LspMarkupKind::Markdown => DocumentationMarkupKind::Markdown,
+                    },
+                    source.value,
+                )
+            }),
+            config,
+            text_width,
+        );
+        self.restore_input_focus();
+        self.project_input_documentation();
+    }
+}
+
+impl App {
+    pub(in crate::app) fn hover_is_showing(&self) -> bool {
+        self.input
+            .documentation()
+            .is_some_and(|popup| popup.kind == DocumentationPopupKind::Hover)
+    }
+}
+
+impl App {
+    pub(in crate::app) fn project_input_documentation(&mut self) {
+        let popup = self.input.documentation().cloned();
+        self.ui.set(popup, |ui| &mut ui.documentation_popup);
+        if self.ui.documentation_popup.is_some() {
+            let (_, geometry) = crate::ui::render::render_with_documentation_geometry(
+                &self.state,
+                &self.ui,
+                self.configuration.settings(),
+                self.configuration.dashboard(),
+                self.window_session.width(),
+                self.window_session.height(),
+            );
+            if let Some((visible, total)) = geometry {
+                self.input.scroll_documentation(0, 0, visible, total);
+                let popup = self.input.documentation().cloned();
+                self.ui.set(popup, |ui| &mut ui.documentation_popup);
+            }
+        }
+    }
+}
+
+impl App {
+    pub(in crate::app) fn close_documentation(&mut self) {
+        self.input.close_documentation();
+        self.restore_input_focus();
+        self.project_input_documentation();
+    }
+}
+
+use crate::app::commands::AppEffect;
+
+impl App {
+    pub(in crate::app) fn process_documentation_effect(
+        &mut self,
+        effect: AppEffect,
+    ) -> Result<(), AppEffect> {
+        match effect {
+            AppEffect::LspDocumentationScroll(direction) => {
+                self.reconcile_editor_windows();
+                // Use the same final layout as painting, including a narrowed completion box.
+                let (_, geometry) = crate::ui::render::render_with_documentation_geometry(
+                    &self.state,
+                    &self.ui,
+                    self.configuration.settings(),
+                    self.configuration.dashboard(),
+                    self.window_session.width(),
+                    self.window_session.height(),
+                );
+                if let Some((visible, total)) = geometry {
+                    self.input.scroll_documentation(
+                        direction,
+                        crate::ui::render::documentation::DOCUMENTATION_SCROLL_STEP,
+                        visible,
+                        total,
+                    );
+                }
+                self.project_input_documentation();
+            }
+            AppEffect::LspDocumentationClose => self.close_documentation(),
+            effect => return Err(effect),
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::app::documentation::markdown_rows;
@@ -162,7 +288,9 @@ mod tests {
         let line = "![logo](https://example.org/logo.png) Important text [download](data:text/plain;base64,AA==)";
         assert_eq!(crate::app::documentation::without_data_images(line), line);
         assert_eq!(
-            crate::app::documentation::without_data_images("before ![badge](data:image/png;base64,AA==) after"),
+            crate::app::documentation::without_data_images(
+                "before ![badge](data:image/png;base64,AA==) after"
+            ),
             "before  after"
         );
         assert_eq!(
@@ -199,7 +327,8 @@ mod tests {
         }));
         let source = format!(
             "{}outside line limit",
-            "![badge](data:image/png,AA)\n".repeat(crate::app::documentation::DOCUMENTATION_MAXIMUM_LINES)
+            "![badge](data:image/png,AA)\n"
+                .repeat(crate::app::documentation::DOCUMENTATION_MAXIMUM_LINES)
         );
         input.present_documentation(
             crate::ui::DocumentationPopupKind::Hover,
@@ -275,150 +404,5 @@ mod tests {
         input.scroll_documentation(1, 10, 10, 30);
         input.scroll_documentation(0, 0, 10, 5);
         assert_eq!(input.documentation().unwrap().scroll, 0);
-    }
-}
-
-
-
-use crate::app::App;
-use crate::language::lsp::LspMarkupContent;
-use crate::language::lsp::LspMarkupKind;
-
-
-
-impl App {
-
-
-    pub(in crate::app) fn present_documentation_popup(
-        &mut self,
-        kind: DocumentationPopupKind,
-        title: String,
-        provider: String,
-        source_range: Option<ByteRange>,
-        source_sections: Vec<LspMarkupContent>,
-    ) {
-        if kind != DocumentationPopupKind::Completion {
-            self.reconcile_editor_windows();
-            self.input.hold_focus(self.window_session.capture_focus());
-        }
-        let config = self.configuration.settings();
-        let available = usize::from(self.window_session.width());
-        let available = if kind == DocumentationPopupKind::Completion {
-            available / 2
-        } else {
-            available
-        };
-        let text_width = available
-            .min(usize::from(
-                crate::ui::render::documentation::DOCUMENTATION_MAX_WIDTH,
-            ))
-            .saturating_sub(
-                2 + 2 * usize::from(crate::ui::render::documentation::DOCUMENTATION_PADDING),
-            );
-        self.input.present_documentation(
-            kind,
-            title,
-            provider,
-            source_range,
-            source_sections.into_iter().map(|source| {
-                (
-                    match source.kind {
-                        LspMarkupKind::PlainText => DocumentationMarkupKind::PlainText,
-                        LspMarkupKind::Markdown => DocumentationMarkupKind::Markdown,
-                    },
-                    source.value,
-                )
-            }),
-            config,
-            text_width,
-        );
-        self.restore_input_focus();
-        self.project_input_documentation();
-    }
-}
-
-impl App {
-
-
-    pub(in crate::app) fn hover_is_showing(&self) -> bool {
-        self.input
-            .documentation()
-            .is_some_and(|popup| popup.kind == DocumentationPopupKind::Hover)
-    }
-}
-
-impl App {
-
-    pub(in crate::app) fn project_input_documentation(&mut self) {
-        let popup = self.input.documentation().cloned();
-        self.ui.set(popup, |ui| &mut ui.documentation_popup);
-        if self.ui.documentation_popup.is_some() {
-            let (_, geometry) = crate::ui::render::render_with_documentation_geometry(
-                &self.state,
-                &self.ui,
-                self.configuration.settings(),
-                self.configuration.dashboard(),
-                self.window_session.width(),
-                self.window_session.height(),
-            );
-            if let Some((visible, total)) = geometry {
-                self.input.scroll_documentation(0, 0, visible, total);
-                let popup = self.input.documentation().cloned();
-                self.ui.set(popup, |ui| &mut ui.documentation_popup);
-            }
-        }
-    }
-}
-
-impl App {
-
-    pub(in crate::app) fn close_documentation(&mut self) {
-        self.input.close_documentation();
-        self.restore_input_focus();
-        self.project_input_documentation();
-    }
-}
-
-use crate::app::commands::AppEffect;
-
-
-
-
-
-
-
-
-
-
-
-
-impl App {
-    pub(in crate::app) fn process_documentation_effect(&mut self, effect: AppEffect) -> Result<(), AppEffect> {
-        match effect {
-AppEffect::LspDocumentationScroll(direction) => {
-                self.reconcile_editor_windows();
-                // Use the same final layout as painting, including a narrowed completion box.
-                let (_, geometry) = crate::ui::render::render_with_documentation_geometry(
-                    &self.state,
-                    &self.ui,
-                    self.configuration.settings(),
-                    self.configuration.dashboard(),
-                    self.window_session.width(),
-                    self.window_session.height(),
-                );
-                if let Some((visible, total)) = geometry {
-                    self.input.scroll_documentation(
-                        direction,
-                        crate::ui::render::documentation::DOCUMENTATION_SCROLL_STEP,
-                        visible,
-                        total,
-                    );
-                }
-                self.project_input_documentation();
-            }
-AppEffect::LspDocumentationClose => self.close_documentation(),
-            effect => return Err(effect),
-        }
-        Ok(())
     }
 }

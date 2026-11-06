@@ -356,10 +356,10 @@ pub(super) fn handle_server_message(context: ServerMessageContext<'_>, message: 
                     })
                     .unwrap_or_default(),
             ),
-            "workspace/workspaceFolders" => {
-                crate::language::lsp::protocol::initialize_message(root, None)["params"]["workspaceFolders"]
-                    .clone()
-            }
+            "workspace/workspaceFolders" => crate::language::lsp::protocol::initialize_message(
+                root, None,
+            )["params"]["workspaceFolders"]
+                .clone(),
             "window/workDoneProgress/create"
             | "client/registerCapability"
             | "client/unregisterCapability" => Value::Null,

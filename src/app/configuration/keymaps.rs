@@ -1,17 +1,17 @@
-use std::collections::BTreeMap;
+use crate::app::configuration::configuration_value;
+use crate::app::configuration::display_key_sequence;
+use crate::app::configuration::invocation_fingerprint;
 use crate::editor::CommandInvocation;
 use crate::editor::CommandValue;
-use std::str::FromStr;
-use std::collections::HashMap;
-use crate::editor::input::InputContextLayer;
 use crate::editor::InvocationSource;
+use crate::editor::input::InputContextLayer;
 use crate::editor::input::KeyEvent;
 use crate::editor::input::KeymapBindings;
 use crate::editor::input::KeymapSequence;
 use crate::editor::input::MappingResolution;
-use crate::app::configuration::configuration_value;
-use crate::app::configuration::display_key_sequence;
-use crate::app::configuration::invocation_fingerprint;
+use std::collections::BTreeMap;
+use std::collections::HashMap;
+use std::str::FromStr;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum KeymapOperation {
@@ -156,7 +156,7 @@ impl EffectiveBinding {
 }
 
 impl ResolvedKeymaps {
-    pub(in crate::app) fn resolve(
+    pub(crate) fn resolve(
         &self,
         sequence: &mut KeymapSequence,
         context: &str,

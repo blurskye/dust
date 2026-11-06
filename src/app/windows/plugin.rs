@@ -297,10 +297,7 @@ impl PluginWindowDraft {
         }
         self.graph.place(window, placement)
     }
-    pub(in crate::app) fn focus(
-        &mut self,
-        window: WindowId,
-    ) -> Result<(), WindowError> {
+    pub(in crate::app) fn focus(&mut self, window: WindowId) -> Result<(), WindowError> {
         let target = self
             .graph
             .window(window)
@@ -308,25 +305,16 @@ impl PluginWindowDraft {
         self.require_owner(&target.owner, target.generation)?;
         self.graph.focus(window)
     }
-    pub(in crate::app) fn close_window(
-        &mut self,
-        window: WindowId,
-    ) -> Result<(), WindowError> {
+    pub(in crate::app) fn close_window(&mut self, window: WindowId) -> Result<(), WindowError> {
         self.require_window(window)?;
         self.graph.close_window(window)
     }
-    pub(in crate::app) fn remove_view(
-        &mut self,
-        view: ViewId,
-    ) -> Result<(), WindowError> {
+    pub(in crate::app) fn remove_view(&mut self, view: ViewId) -> Result<(), WindowError> {
         let existing = self.graph.view(view).ok_or(WindowError::UnknownView)?;
         self.require_owner(&existing.owner, existing.generation)?;
         self.graph.remove_view(view)
     }
-    pub(in crate::app) fn remove_content(
-        &mut self,
-        content: ContentId,
-    ) -> Result<(), WindowError> {
+    pub(in crate::app) fn remove_content(&mut self, content: ContentId) -> Result<(), WindowError> {
         let existing = self
             .graph
             .content(content)

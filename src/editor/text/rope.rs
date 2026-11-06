@@ -305,7 +305,11 @@ impl TextBuffer {
             .collect()
     }
 
-    pub(crate) fn set_line_endings(&mut self, first: usize, endings: &[crate::editor::text::LineEnding]) {
+    pub(crate) fn set_line_endings(
+        &mut self,
+        first: usize,
+        endings: &[crate::editor::text::LineEnding],
+    ) {
         for (index, ending) in endings.iter().enumerate() {
             if let Some(target) = self.format.line_endings.get_mut(first + index) {
                 *target = *ending;

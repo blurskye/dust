@@ -2,7 +2,6 @@ use crate::app::tests::*;
 
 use crate::app::debugger::surfaces_tests::logging_adapter_fixture;
 
-
 #[test]
 pub(in crate::app) fn placement_swap_moves_editing_focus_to_the_visible_editor() {
     let (_app_dirs, mut app) = app();
@@ -58,7 +57,6 @@ pub(in crate::app) fn placement_swap_moves_editing_focus_to_the_visible_editor()
     assert_eq!(app.window_session.graph().focused(), Some(second));
 }
 
-
 #[test]
 pub(in crate::app) fn fullscreen_editor_swap_moves_editing_focus_to_the_fullscreen_recipient() {
     let (_app_dirs, mut app) = app();
@@ -107,7 +105,6 @@ pub(in crate::app) fn fullscreen_editor_swap_moves_editing_focus_to_the_fullscre
     app.reconcile_editor_windows();
     assert_eq!(app.window_session.graph().focused(), Some(second));
 }
-
 
 #[test]
 pub(in crate::app) fn fullscreen_placement_swaps_keep_graph_and_editor_focus_together() {
@@ -170,7 +167,6 @@ pub(in crate::app) fn fullscreen_placement_swaps_keep_graph_and_editor_focus_tog
     }
 }
 
-
 #[test]
 pub(in crate::app) fn tiled_window_resize_accepts_the_minimum_delta() {
     let (_app_dirs, mut app) = app();
@@ -187,7 +183,6 @@ pub(in crate::app) fn tiled_window_resize_accepts_the_minimum_delta() {
         crate::editor::LayoutNode::Split { ratio: 900, .. }
     ));
 }
-
 
 #[test]
 pub(in crate::app) fn nonwrapped_mouse_uses_the_same_snapped_tab_origin_as_rendering() {
@@ -226,7 +221,6 @@ pub(in crate::app) fn nonwrapped_mouse_uses_the_same_snapped_tab_origin_as_rende
         );
     }
 }
-
 
 #[test]
 pub(in crate::app) fn mouse_click_focuses_the_real_target_pane_before_placing_cursor() {
@@ -302,9 +296,9 @@ pub(in crate::app) fn mouse_click_focuses_the_real_target_pane_before_placing_cu
     assert_eq!(app.state.views[flash_view].cursor, ByteOffset(0));
 }
 
-
 #[test]
-pub(in crate::app) fn universal_window_clone_refuses_native_noncloneable_content_without_mutation() {
+pub(in crate::app) fn universal_window_clone_refuses_native_noncloneable_content_without_mutation()
+{
     let (_app_dirs, mut app) = app();
     app.state
         .open_text(TextBuffer::from_text("editor"), None)
@@ -395,7 +389,6 @@ pub(in crate::app) fn universal_window_clone_refuses_native_noncloneable_content
     );
 }
 
-
 #[test]
 pub(in crate::app) fn window_clone_rejects_an_exhausted_editor_source_before_graph_mutation() {
     let (_app_dirs, mut app) = app();
@@ -427,7 +420,6 @@ pub(in crate::app) fn window_clone_rejects_an_exhausted_editor_source_before_gra
     );
 }
 
-
 #[test]
 pub(in crate::app) fn ordinary_read_only_files_can_reload_without_becoming_writable() {
     let (_app_dirs, mut app) = app();
@@ -446,9 +438,9 @@ pub(in crate::app) fn ordinary_read_only_files_can_reload_without_becoming_writa
     assert!(app.state.buffers[buffer].read_only);
 }
 
-
 #[test]
-pub(in crate::app) fn shared_dirty_buffers_do_not_block_view_only_tab_close_or_forced_buffer_close() {
+pub(in crate::app) fn shared_dirty_buffers_do_not_block_view_only_tab_close_or_forced_buffer_close()
+{
     let (_app_dirs, mut app) = app();
     let (dirty, _) = app
         .state
@@ -481,7 +473,6 @@ pub(in crate::app) fn shared_dirty_buffers_do_not_block_view_only_tab_close_or_f
     assert_eq!(app.state.active_buffer_id(), Some(dirty));
     app.state.validate_layout().expect("reopened layout valid");
 }
-
 
 #[test]
 pub(in crate::app) fn exact_dirty_window_close_rejects_stale_focus_then_discards_only_its_target() {
@@ -523,7 +514,6 @@ pub(in crate::app) fn exact_dirty_window_close_rejects_stale_focus_then_discards
     assert!(!app.state.buffers.contains_key(dirty));
     assert!(app.window_session.graph().window(window).is_none());
 }
-
 
 #[test]
 pub(in crate::app) fn tab_close_reviews_every_last_dirty_reference_before_one_publication() {
@@ -677,7 +667,6 @@ pub(in crate::app) fn tab_close_reviews_every_last_dirty_reference_before_one_pu
     assert!(app.state.buffers.contains_key(b));
 }
 
-
 #[test]
 pub(in crate::app) fn editor_lifecycle_reconciles_into_window_graph_and_drives_content_tabs() {
     let (_app_dirs, mut app) = app();
@@ -798,9 +787,9 @@ pub(in crate::app) fn editor_lifecycle_reconciles_into_window_graph_and_drives_c
         .expect("valid reconciled graph");
 }
 
-
 #[test]
-pub(in crate::app) fn editor_layout_commands_commit_state_bridge_and_graph_as_one_authoritative_transaction() {
+pub(in crate::app) fn editor_layout_commands_commit_state_bridge_and_graph_as_one_authoritative_transaction()
+ {
     let (_app_dirs, mut app) = app();
     app.state
         .open_text(TextBuffer::from_text("editor"), None)
@@ -911,14 +900,15 @@ pub(in crate::app) fn editor_layout_commands_commit_state_bridge_and_graph_as_on
     let active_view_before_rejected = app.state.active_view;
     let pane_count_before_rejected = app.state.panes.len();
     let graph_before_rejected = app.window_session.graph().clone();
-    app.process_effect(crate::app::commands::AppEffect::WindowClose("focused".into()));
+    app.process_effect(crate::app::commands::AppEffect::WindowClose(
+        "focused".into(),
+    ));
     assert_eq!(app.state.window_revision(), state_revision_before_rejected);
     assert_eq!(app.state.active_view, active_view_before_rejected);
     assert_eq!(app.state.panes.len(), pane_count_before_rejected);
     assert_eq!(app.window_session.graph(), &graph_before_rejected);
     assert!(app.ui.notification_error);
 }
-
 
 #[test]
 pub(in crate::app) fn overlapping_mixed_floats_paint_and_focus_in_compositor_z_order() {
@@ -1003,7 +993,6 @@ pub(in crate::app) fn overlapping_mixed_floats_paint_and_focus_in_compositor_z_o
     assert!(app.state.buffers[buffer].text.to_string().starts_with('x'));
 }
 
-
 #[test]
 pub(in crate::app) fn editor_window_swap_rejects_mixed_and_cross_tab_targets_atomically() {
     let (_app_dirs, mut app) = app();
@@ -1073,7 +1062,6 @@ pub(in crate::app) fn editor_window_swap_rejects_mixed_and_cross_tab_targets_ato
         app.ui.notification
     );
 }
-
 
 #[test]
 pub(in crate::app) fn editor_window_revision_skips_idle_rebuilds_and_tracks_projection_changes() {
@@ -1156,9 +1144,9 @@ pub(in crate::app) fn editor_window_revision_skips_idle_rebuilds_and_tracks_proj
         .expect("revision-driven graph is valid");
 }
 
-
 #[test]
-pub(in crate::app) fn generic_native_window_operations_are_revision_checked_atomic_and_identity_preserving() {
+pub(in crate::app) fn generic_native_window_operations_are_revision_checked_atomic_and_identity_preserving()
+ {
     let (_app_dirs, mut app) = app();
     app.state
         .open_text(TextBuffer::from_text("editor"), None)
@@ -1331,7 +1319,9 @@ pub(in crate::app) fn generic_native_window_operations_are_revision_checked_atom
         edge: "left".into(),
         size: 31,
     });
-    app.process_effect(crate::app::commands::AppEffect::WindowHide("explorer".into()));
+    app.process_effect(crate::app::commands::AppEffect::WindowHide(
+        "explorer".into(),
+    ));
     assert_eq!(
         app.window_session
             .graph()
@@ -1340,7 +1330,9 @@ pub(in crate::app) fn generic_native_window_operations_are_revision_checked_atom
             .placement,
         WindowPlacement::Hidden
     );
-    app.process_effect(crate::app::commands::AppEffect::WindowShow("explorer".into()));
+    app.process_effect(crate::app::commands::AppEffect::WindowShow(
+        "explorer".into(),
+    ));
     assert_eq!(
         app.window_session
             .graph()
@@ -1391,7 +1383,9 @@ pub(in crate::app) fn generic_native_window_operations_are_revision_checked_atom
         .is_err()
     );
     assert_eq!(app.window_session.terminal_height(), height_before);
-    app.process_effect(crate::app::commands::AppEffect::WindowHide("terminal".into()));
+    app.process_effect(crate::app::commands::AppEffect::WindowHide(
+        "terminal".into(),
+    ));
     assert_eq!(app.window_session.graph(), &graph_stale);
     app.reconcile_editor_windows();
     assert!(app.compositor_projection().is_some());
@@ -1410,7 +1404,9 @@ pub(in crate::app) fn generic_native_window_operations_are_revision_checked_atom
     // still refuses the operation and preserves graph atomicity.
     assert!(app.compositor_projection().is_some());
     app.window_session.invalidate();
-    app.process_effect(crate::app::commands::AppEffect::WindowHide("terminal".into()));
+    app.process_effect(crate::app::commands::AppEffect::WindowHide(
+        "terminal".into(),
+    ));
     assert_eq!(app.window_session.graph(), &before_stale);
     assert!(app.ui.notification_error);
     app.reconcile_editor_windows();
@@ -1426,7 +1422,9 @@ pub(in crate::app) fn generic_native_window_operations_are_revision_checked_atom
         idle_reconciliations
     );
 
-    app.process_effect(crate::app::commands::AppEffect::WindowClose("explorer".into()));
+    app.process_effect(crate::app::commands::AppEffect::WindowClose(
+        "explorer".into(),
+    ));
     assert!(
         app.window_session
             .graph()
@@ -1438,9 +1436,9 @@ pub(in crate::app) fn generic_native_window_operations_are_revision_checked_atom
     assert!(app.terminal_session.contains(PtyId(7)));
 }
 
-
 #[test]
-pub(in crate::app) fn configured_window_rule_candidate_is_cloned_validated_and_published_atomically() {
+pub(in crate::app) fn configured_window_rule_candidate_is_cloned_validated_and_published_atomically()
+ {
     let (_app_dirs, mut app) = app();
     app.state
         .open_text(TextBuffer::from_text("editor"), None)
@@ -1517,7 +1515,6 @@ pub(in crate::app) fn configured_window_rule_candidate_is_cloned_validated_and_p
     assert_eq!(app.window_session.native_ids(), &surfaces_before);
 }
 
-
 #[test]
 pub(in crate::app) fn a_stop_fills_the_panes_and_makes_room_for_them_without_opening_anything() {
     use crate::app::tests::driver::TestSession;
@@ -1572,7 +1569,6 @@ pub(in crate::app) fn a_stop_fills_the_panes_and_makes_room_for_them_without_ope
     );
     assert_eq!(tiled(&driver), before, "the editor gets its room back");
 }
-
 
 #[test]
 pub(in crate::app) fn zoom_and_zen_show_the_pane_alone_and_put_everything_back() {
@@ -1642,31 +1638,21 @@ pub(in crate::app) fn zoom_and_zen_show_the_pane_alone_and_put_everything_back()
     ));
     assert_eq!(app.configuration.settings().editor.line_numbers, numbers);
 }
-use crate::app::language::LspLaunch;
-use crate::app::language::LspRuntimeState;
-use crate::app::windows::NativeSurfaceTarget;
-use std::collections::BTreeSet;
-use std::path::PathBuf;
-use std::time::Duration;
-use std::time::Instant;
+use crate::app::AppEffect;
 use crate::editor::input::KeyEvent;
 use crate::editor::text::ByteOffset;
 use crate::editor::text::TextBuffer;
-use crate::editor::FocusDirection;
 use crate::process::PtyId;
-use crate::tools::discover_executable;
-use crate::ui::KeyInputKind;
-use crate::ui::PromptKind;
+use crate::ui::PtyScreen;
 use crate::ui::UiEvent;
-use crate::ui::editor_state_gutter_width;
+use crate::ui::active_pane_viewport;
+use crate::ui::render;
 use crate::windows::DockEdge;
 use crate::windows::WindowPlacement;
 use crate::windows::WindowRect;
+use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::fs;
-use std::thread;
-use crate::ui::PtyScreen;
-use crate::ui::active_pane_viewport;
-use crate::ui::render;
-use crate::app::AppEffect;
-
+use std::path::PathBuf;
+use std::time::Duration;
+use std::time::Instant;

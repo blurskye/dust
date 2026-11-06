@@ -124,10 +124,7 @@ impl WindowSession {
             }
         }
     }
-    pub(in crate::app) fn spatial_target(
-        &self,
-        direction: SpatialDirection,
-    ) -> Option<WindowId> {
+    pub(in crate::app) fn spatial_target(&self, direction: SpatialDirection) -> Option<WindowId> {
         let layout = self.layout.as_ref()?;
         let current = match self.focus {
             FocusTarget::Explorer(view) => {
@@ -169,11 +166,7 @@ impl WindowSession {
         self.debugging = debugging;
         self.terminal_shrunk = debugging && self.height() < SHORT_SCREEN_HEIGHT;
     }
-    pub(in crate::app) fn resize_terminal(
-        &mut self,
-        id: u64,
-        rows: i16,
-    ) -> Result<(), String> {
+    pub(in crate::app) fn resize_terminal(&mut self, id: u64, rows: i16) -> Result<(), String> {
         self.require_projected_graph()?;
         let target = NativeSurfaceTarget::Terminal(id);
         let current = match self.native_placement(target)? {
@@ -193,8 +186,7 @@ impl WindowSession {
         let placement = match self.native_placement(target)? {
             // A terminal on the left or right, such as an agent, grows in columns.
             crate::windows::WindowPlacement::Docked {
-                edge:
-                    edge @ (crate::windows::DockEdge::Left | crate::windows::DockEdge::Right),
+                edge: edge @ (crate::windows::DockEdge::Left | crate::windows::DockEdge::Right),
                 size,
             } => {
                 let step =
@@ -224,11 +216,7 @@ impl WindowSession {
         self.terminal_shrunk = false;
         Ok(())
     }
-    pub(in crate::app) fn constrain_terminal_height(
-        &mut self,
-        minimum: u16,
-        maximum: u16,
-    ) {
+    pub(in crate::app) fn constrain_terminal_height(&mut self, minimum: u16, maximum: u16) {
         self.terminal_height = self.terminal_height.clamp(minimum, maximum);
     }
 }

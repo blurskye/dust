@@ -1,17 +1,18 @@
 //! Original debugger intent and its discovery/preflight/actor lifecycle.
 use crate::app::debugger::DebugSession;
 use crate::app::debugger::TerminalPolicy;
+use crate::app::workspace::ExecutionLane;
+use crate::app::workspace::ExecutionReady;
+use crate::app::workspace::WorkspaceSession;
+use crate::app::workspace::WorkspaceVersion;
 use crate::config::DebugAdapterConfig;
 use crate::config::DebugConfig;
 use crate::config::DebugRequestKind;
 use crate::config::DebugSessionConfig;
 use crate::debugger::DapLaunch;
 use crate::debugger::ExecutionScope;
-use crate::app::workspace::ExecutionLane;
-use crate::app::workspace::ExecutionReady;
-use crate::app::workspace::WorkspaceSession;
-use crate::app::workspace::WorkspaceVersion;
 use crate::files::ProjectRootResolution;
+use crate::files::RootIdentity;
 use crate::process::ExecutionPreflightRequest;
 use crate::process::PreflightId;
 use crate::tools::DebugProgramPolicy;
@@ -20,7 +21,6 @@ use crate::tools::ToolEntry;
 use crate::tools::ToolKind;
 use crate::tools::ToolStatus;
 use crate::workspace::RootId;
-use crate::files::RootIdentity;
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::path::PathBuf;
@@ -442,10 +442,7 @@ impl DebugSession {
         launch.phase = Phase::Adapter;
         Ok(())
     }
-    pub(in crate::app) fn debug_preflight(
-        &mut self,
-        ready: ExecutionReady,
-    ) -> Result<(), String> {
+    pub(in crate::app) fn debug_preflight(&mut self, ready: ExecutionReady) -> Result<(), String> {
         let Some(launch) = self.launch.as_mut() else {
             return Err("debug launch closed".into());
         };

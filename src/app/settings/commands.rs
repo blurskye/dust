@@ -1,24 +1,21 @@
-
-use crate::app::commands::AppEffect;
 use crate::app::App;
+use crate::app::commands::AppEffect;
 
-
-
-
+use crate::app::commands::PromptMove;
+use crate::app::commands::SettingsAction;
+use crate::app::commands::SetupAction;
+use crate::app::commands::integer_arg;
+use crate::app::commands::register;
+use crate::app::commands::string_arg;
 use crate::editor::ArgumentSchema;
 use crate::editor::ArgumentType;
 use crate::editor::CommandError;
 use crate::editor::CommandRegistry;
 use crate::editor::ContextRequirement;
-use crate::app::commands::integer_arg;
-use crate::app::commands::register;
-use crate::app::commands::string_arg;
-use crate::app::commands::PromptMove;
-use crate::app::commands::SettingsAction;
-use crate::app::commands::SetupAction;
 
-pub(in crate::app) fn register_commands(registry: &mut CommandRegistry<AppEffect>) -> Result<(), CommandError> {
-
+pub(in crate::app) fn register_commands(
+    registry: &mut CommandRegistry<AppEffect>,
+) -> Result<(), CommandError> {
     for (id, title, action) in [
         ("settings.open", "Open Settings", SettingsAction::Open),
         (
@@ -187,21 +184,17 @@ pub(in crate::app) fn register_commands(registry: &mut CommandRegistry<AppEffect
             )))
         },
     )?;
-Ok(())
+    Ok(())
 }
 
-
-
-
-
-
-
-
 impl App {
-    pub(in crate::app) fn process_settings_effect(&mut self, effect: AppEffect) -> Result<(), AppEffect> {
+    pub(in crate::app) fn process_settings_effect(
+        &mut self,
+        effect: AppEffect,
+    ) -> Result<(), AppEffect> {
         match effect {
-AppEffect::Settings(action) => self.settings_action(action),
-AppEffect::Setup(action) => self.setup_action(action),
+            AppEffect::Settings(action) => self.settings_action(action),
+            AppEffect::Setup(action) => self.setup_action(action),
             effect => return Err(effect),
         }
         Ok(())

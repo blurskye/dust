@@ -1,18 +1,18 @@
-use crate::editor::EditorTopology;
-use crate::app::windows::bridge::EditorWindowBridge;
-use crate::app::windows::bridge::NativeSurfaceBridge;
 use crate::app::windows::EditorWindowCandidate;
 use crate::app::windows::NativeSurfaceSignature;
 use crate::app::windows::NativeSurfaceTarget;
 use crate::app::windows::TerminalGeometrySource;
 use crate::app::windows::WindowCandidate;
 use crate::app::windows::WindowSession;
+use crate::app::windows::bridge::EditorWindowBridge;
+use crate::app::windows::bridge::NativeSurfaceBridge;
+use crate::editor::EditorTopology;
+use crate::editor::FocusDirection;
 use crate::windows::ContentLifecycle;
+use crate::windows::DockEdge;
 use crate::windows::WindowGraph;
 use crate::windows::WindowId;
 use crate::windows::WindowPlacement;
-use crate::editor::FocusDirection;
-use crate::windows::DockEdge;
 use crate::windows::WindowRect;
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -695,8 +695,10 @@ impl WindowSession {
         plugin_generations: &[(String, u64)],
     ) -> Result<(), String> {
         let semantic_focus = match self.focus {
-            crate::app::windows::FocusTarget::Explorer(_) | crate::app::windows::FocusTarget::Terminal(_) => Some(self.focus),
-            crate::app::windows::FocusTarget::Editor | crate::app::windows::FocusTarget::Plugin(_) => None,
+            crate::app::windows::FocusTarget::Explorer(_)
+            | crate::app::windows::FocusTarget::Terminal(_) => Some(self.focus),
+            crate::app::windows::FocusTarget::Editor
+            | crate::app::windows::FocusTarget::Plugin(_) => None,
         };
         let mut candidate = self.candidate()?;
         let core = &mut candidate.core;

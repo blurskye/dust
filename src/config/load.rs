@@ -8,13 +8,13 @@ use std::io::Read;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::OnceLock;
-use std::sync::mpsc::self;
+use std::sync::mpsc;
 use std::sync::mpsc::Receiver;
 use std::sync::mpsc::RecvTimeoutError;
 use std::sync::mpsc::SyncSender;
 use std::sync::mpsc::TryRecvError;
 use std::sync::mpsc::TrySendError;
-use std::thread::self;
+use std::thread;
 use std::thread::JoinHandle;
 use std::time::Duration;
 use std::time::Instant;
@@ -23,8 +23,6 @@ use std::time::SystemTime;
 use serde::Deserialize;
 use thiserror::Error;
 
-use crate::config::settings::ThemeConfig;
-use crate::config::themes::ThemeRead;
 use crate::config::Config;
 use crate::config::DashboardConfig;
 use crate::config::KeyGroupEntry;
@@ -32,6 +30,8 @@ use crate::config::KeymapEntry;
 use crate::config::LoadedConfig;
 use crate::config::LoadedKeymaps;
 use crate::config::migrate_config_source;
+use crate::config::settings::ThemeConfig;
+use crate::config::themes::ThemeRead;
 
 pub fn user_state_directory() -> PathBuf {
     if let Some(root) = env::var_os("DUST_STATE_HOME") {
@@ -108,10 +108,22 @@ pub fn user_theme_path(name: &str) -> PathBuf {
         .join(format!("{name}.toml"))
 }
 
-pub(super) const BUNDLED_CONFIG: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/defaults/config.toml"));
-pub(super) const BUNDLED_KEYMAPS: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/defaults/keymaps.toml"));
-pub(super) const BUNDLED_DASHBOARD: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/defaults/dashboard.toml"));
-pub(super) const BUNDLED_THEME: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/themes/dust.toml"));
+pub(super) const BUNDLED_CONFIG: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/assets/defaults/config.toml"
+));
+pub(super) const BUNDLED_KEYMAPS: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/assets/defaults/keymaps.toml"
+));
+pub(super) const BUNDLED_DASHBOARD: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/assets/defaults/dashboard.toml"
+));
+pub(super) const BUNDLED_THEME: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/assets/themes/dust.toml"
+));
 
 /// The bundled defaults, parsed once. Startup and every reload need them several times, and
 /// parsing about 170 KB of TOML is most of the startup time.
@@ -339,8 +351,6 @@ pub(super) fn capture_configuration_bundle_with(
 pub(super) fn capture_configuration_bundle(theme_hint: &str) -> ConfigurationSourceBundle {
     capture_configuration_bundle_with(theme_hint, capture_source)
 }
-
-
 
 #[must_use]
 pub fn load_user_config() -> LoadedConfig {

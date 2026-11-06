@@ -393,13 +393,9 @@ mod tests {
 
 use crossterm::cursor::SetCursorStyle;
 
-
-
-
 pub(crate) const CONTROL_CHARACTER_REPLACEMENT: &str = "�";
 
 pub(crate) const ZERO_WIDTH_REPLACEMENT: &str = "◌";
-
 
 #[derive(Clone, Debug)]
 pub struct Frame {

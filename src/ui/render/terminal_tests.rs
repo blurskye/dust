@@ -1,21 +1,11 @@
-use crate::ui::grid::CONTROL_CHARACTER_REPLACEMENT;
-use crate::ui::render::overlays::BUFFER_OVERFLOW_RIGHT;
-use crate::ui::render::overlays::BUFFER_SEPARATOR;
-use std::path::Path;
-use std::path::PathBuf;
 use crate::editor::EditorState;
-use crate::ui::render::CompletionItem;
-use crate::ui::render::DocumentationMarkupKind;
-use crate::ui::render::DocumentationPopupKind;
-use crate::ui::render::DocumentationPopupState;
-use crate::ui::render::DocumentationSection;
 use crate::ui::render::UiState;
+use std::path::PathBuf;
 
-use crate::ui::render::composition_tests::editor_layout;
-use crate::ui::render::composition_tests::ui_with_editor_layout;
 use crate::ui::render::composition_tests::attach_test_compositor;
+use crate::ui::render::composition_tests::editor_layout;
 use crate::ui::render::composition_tests::render;
-
+use crate::ui::render::composition_tests::ui_with_editor_layout;
 
 #[test]
 fn terminal_is_a_full_width_bottom_dock_with_direct_cells_and_focus_cursor() {
@@ -101,8 +91,9 @@ fn terminal_is_a_full_width_bottom_dock_with_direct_cells_and_focus_cursor() {
     let panel_width = crate::ui::render::explorer_panel_width(&config, 80).expect("explorer width");
     let editor_width = 80_u16.saturating_sub(panel_width).saturating_sub(1);
     attach_test_compositor(&state, &mut ui, &config, 80, 20);
-    let viewport = crate::ui::render::active_pane_viewport(&state, &ui, &config, editor_width, geometry.top)
-        .expect("reduced editor viewport");
+    let viewport =
+        crate::ui::render::active_pane_viewport(&state, &ui, &config, editor_width, geometry.top)
+            .expect("reduced editor viewport");
     assert!(viewport.height <= 13);
 
     let frame = render(&state, &ui, &config, &loaded.dashboard, 80, 20);
@@ -176,7 +167,6 @@ fn terminal_is_a_full_width_bottom_dock_with_direct_cells_and_focus_cursor() {
     assert!(tab_row.contains("logs [exit 2]"));
 }
 
-
 #[test]
 fn terminal_tabs_keep_the_active_title_visible_and_hit_targets_match_borders() {
     let mut state = EditorState::new(PathBuf::from("/workspace"));
@@ -222,8 +212,8 @@ fn terminal_tabs_keep_the_active_title_visible_and_hit_targets_match_borders() {
             crate::windows::CompositorLayer::Docked,
             crate::windows::CompositorLayer::Floating,
         ] {
-            let geometry =
-                crate::ui::render::terminal_window_geometry(crate::windows::ProjectedCompositorWindow {
+            let geometry = crate::ui::render::terminal_window_geometry(
+                crate::windows::ProjectedCompositorWindow {
                     window: crate::windows::WindowId(1),
                     rect: crate::windows::WindowRect {
                         x: 10,
@@ -235,8 +225,9 @@ fn terminal_tabs_keep_the_active_title_visible_and_hit_targets_match_borders() {
                     z_index: 0,
                     focused: true,
                     focusable: true,
-                })
-                .unwrap();
+                },
+            )
+            .unwrap();
             for active in [1, 6, 3] {
                 terminal.id = active;
                 let frame = crate::ui::render::terminal::dock_terminal_panel(
@@ -261,14 +252,18 @@ fn terminal_tabs_keep_the_active_title_visible_and_hit_targets_match_borders() {
                     if cell.style == crate::ui::Style::TerminalTitle {
                         title_cells += 1;
                         assert_eq!(
-                            crate::ui::render::terminal_tab_at_column(&terminal, &config, geometry, x),
+                            crate::ui::render::terminal_tab_at_column(
+                                &terminal, &config, geometry, x
+                            ),
                             Some(active)
                         );
                     }
                 }
                 assert_eq!(title_cells, title.len());
                 assert_eq!(
-                    crate::ui::render::terminal_tab_at_column(&terminal, &config, geometry, geometry.x),
+                    crate::ui::render::terminal_tab_at_column(
+                        &terminal, &config, geometry, geometry.x
+                    ),
                     None
                 );
                 for (offset, symbol, continuation) in [
@@ -289,7 +284,6 @@ fn terminal_tabs_keep_the_active_title_visible_and_hit_targets_match_borders() {
         }
     }
 }
-
 
 #[test]
 fn the_debug_console_and_the_terminal_panel_are_planned_together_rather_than_colliding() {
@@ -359,7 +353,8 @@ fn the_debug_console_and_the_terminal_panel_are_planned_together_rather_than_col
         .workspace_bounds;
     let layout = crate::ui::render::debug::debug_layout_in(region).expect("debug layout");
     let source = layout.source;
-    let pane = crate::ui::render::active_editor_pane_viewport(&state, &ui).expect("source viewport");
+    let pane =
+        crate::ui::render::active_editor_pane_viewport(&state, &ui).expect("source viewport");
     assert_eq!(
         (pane.x, pane.y, pane.width, pane.height),
         (source.x, source.y, source.width, source.height)
@@ -422,32 +417,6 @@ fn the_debug_console_and_the_terminal_panel_are_planned_together_rather_than_col
         frame.grid.row_text(panel_row - 1)
     );
 }
-
-/// Verbatim `git diff` output, the same real patch text the parser tests use, so these render
-/// tests exercise the whole chain: real patch text -> parser -> rendered cells.
-const RENDER_PATCH: &str = "\
-diff --git a/f.txt b/f.txt
-index 9792656..89d6f9e 100644
---- a/f.txt
-+++ b/f.txt
-@@ -1,6 +1,6 @@
- line one
- line two
--line three
-+line three changed
- line four
- line five
- line six
-@@ -32,7 +32,7 @@ line thirty-one
- line thirty-two
- line thirty-three
- line thirty-four
--line thirty-five
-+line thirty-five modified
- line thirty-six
- line thirty-seven
- line thirty-eight
-";
 
 #[test]
 fn terminal_tabs_are_named_by_profile_and_numbered_when_repeated() {
@@ -603,7 +572,5 @@ fn side_docked_terminal_keeps_the_debug_inspectors_visible() {
     let (x, y) = drawn_at(&frame, "terminal output").expect("terminal body is rendered");
     assert!((80..120).contains(&x) && y < 39);
 }
-
-use crate::ui::render::overlays::render_content_tab_line;
 
 use crate::ui::render::composition_tests::drawn_at;

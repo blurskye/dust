@@ -1,15 +1,15 @@
-use crate::editor::EditorTopology;
 use crate::app::windows::WindowSession;
-use crate::ui::render::overlays::CUSTOM_ICON;
-use crate::ui::render::overlays::SCRATCH_ICON;
-use crate::ui::render::overlays::TERMINAL_ICON;
-use crate::ui::render::overlays::VIRTUAL_ICON;
 use crate::config::Config;
 use crate::editor::BufferId;
+use crate::editor::EditorTopology;
 use crate::ui::ContentTabDiagnostic;
 use crate::ui::ContentTabEntry;
 use crate::ui::ContentTabIdentity;
 use crate::ui::ContentTabKind;
+use crate::ui::render::overlays::CUSTOM_ICON;
+use crate::ui::render::overlays::SCRATCH_ICON;
+use crate::ui::render::overlays::TERMINAL_ICON;
+use crate::ui::render::overlays::VIRTUAL_ICON;
 use std::collections::BTreeSet;
 
 #[derive(Default)]

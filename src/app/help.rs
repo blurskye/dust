@@ -1,23 +1,14 @@
-use crate::app::search::MAXIMUM_PICKER_ITEMS;
-use crate::editor::CommandInvocation;
 use crate::app::App;
-use crate::workspace::PickerAction;
 use crate::app::picker::PickerContent;
-use crate::workspace::PickerItem;
-use crate::workspace::PickerItemId;
 use crate::app::picker::PickerOrigin;
 use crate::app::picker::PickerPayload;
+use crate::app::search::MAXIMUM_PICKER_ITEMS;
 use crate::ui::PickerSurfaceKind;
-use crate::app::command;
-
-
-
-
-
+use crate::workspace::PickerAction;
+use crate::workspace::PickerItem;
+use crate::workspace::PickerItemId;
 
 impl App {
-
-
     /// Show a help page without losing the surface the user was looking at. Help replaces the
     /// picker while it is open, and closing it returns the suspended surface with its query,
     /// its rows and its selected row exactly as they were.
@@ -46,7 +37,6 @@ impl App {
 }
 
 impl App {
-
     /// Contextual help: what is available on the focused surface, read from the command
     /// registry through the dispatcher's own context check, so help can never advertise a
     /// command the dispatcher would refuse and can never drift from a renamed command.
@@ -83,7 +73,6 @@ impl App {
 }
 
 impl App {
-
     /// Help for the form or confirmation in front of the user. It names the surface by its own
     /// title and message, so the help is about the question actually being asked, and it leaves
     /// that question untouched: opening help is not answering it.
@@ -151,7 +140,6 @@ impl App {
 }
 
 impl App {
-
     /// The reference for the selected command, assembled from the registry entry itself: its
     /// title, its description, where it is available and every argument the schema declares,
     /// marked required or optional. Nothing here is a second copy of the truth.
@@ -230,14 +218,15 @@ impl App {
 }
 
 use crate::app::commands::AppEffect;
+use crate::app::commands::register;
 use crate::editor::ArgumentSchema;
 use crate::editor::CommandError;
 use crate::editor::CommandRegistry;
 use crate::editor::ContextRequirement;
-use crate::app::commands::register;
 
-pub(in crate::app) fn register_commands(registry: &mut CommandRegistry<AppEffect>) -> Result<(), CommandError> {
-
+pub(in crate::app) fn register_commands(
+    registry: &mut CommandRegistry<AppEffect>,
+) -> Result<(), CommandError> {
     register(
         registry,
         "overlay.help.contextual",
@@ -262,25 +251,18 @@ pub(in crate::app) fn register_commands(registry: &mut CommandRegistry<AppEffect
         ArgumentSchema::default(),
         |_invocation| Ok(AppEffect::HelpCommandReference),
     )?;
-Ok(())
+    Ok(())
 }
 
-
-
-
-
-
-
-
-
-
-
 impl App {
-    pub(in crate::app) fn process_help_effect(&mut self, effect: AppEffect) -> Result<(), AppEffect> {
+    pub(in crate::app) fn process_help_effect(
+        &mut self,
+        effect: AppEffect,
+    ) -> Result<(), AppEffect> {
         match effect {
-AppEffect::HelpForForm => self.open_form_help(),
-AppEffect::HelpContextual => self.open_contextual_help(),
-AppEffect::HelpCommandReference => self.open_command_reference(),
+            AppEffect::HelpForForm => self.open_form_help(),
+            AppEffect::HelpContextual => self.open_contextual_help(),
+            AppEffect::HelpCommandReference => self.open_command_reference(),
             effect => return Err(effect),
         }
         Ok(())

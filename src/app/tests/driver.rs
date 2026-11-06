@@ -2,10 +2,10 @@
 //! offers no mutable application, editor, configuration, registry or UI access.
 use crate::app::App;
 use crate::app::persistence::STATE_FILE;
+use crate::app::startup::StartupTarget;
 use crate::clock::Clock;
 use crate::clock::ManualClock;
 use crate::config::LoadedConfig;
-use crate::app::startup::StartupTarget;
 use crate::ui::KeyInputKind;
 use crate::ui::UiEvent;
 use crate::ui::UiState;
@@ -16,7 +16,7 @@ use std::time::UNIX_EPOCH;
 use tempfile::TempDir;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(super) struct TerminalCloneState {
+pub(in crate::app) struct TerminalCloneState {
     pub(in crate::app) graph: crate::windows::WindowGraph,
     pub(in crate::app) editor: crate::editor::EditorWindowVersion,
     pub(in crate::app) descriptions: Vec<(u64, String, crate::windows::ContentLifecycle)>,
@@ -203,7 +203,7 @@ impl TestSession {
             self.application.process_effect(effect);
         }
     }
-    pub(in crate::app) fn plugin_clone_state(&self) -> PluginCloneState {
+    pub(super) fn plugin_clone_state(&self) -> PluginCloneState {
         PluginCloneState {
             graph: format!("{:?}", self.application.window_session.graph()),
             editor: self.application.state.window_version(),
@@ -403,7 +403,9 @@ impl TestSession {
     pub(in crate::app) fn explorer_focus(&self) -> Option<u64> {
         self.application.window_session.focused_explorer()
     }
-    pub(in crate::app) fn explorer_selections(&self) -> std::collections::BTreeMap<u64, Option<u64>> {
+    pub(in crate::app) fn explorer_selections(
+        &self,
+    ) -> std::collections::BTreeMap<u64, Option<u64>> {
         let mut selections = std::collections::BTreeMap::new();
         selections.insert(
             1,
@@ -544,7 +546,12 @@ impl TestSession {
             row,
         });
     }
-    pub(in crate::app) fn mouse(&mut self, code: crate::editor::input::KeyCode, column: u16, row: u16) {
+    pub(in crate::app) fn mouse(
+        &mut self,
+        code: crate::editor::input::KeyCode,
+        column: u16,
+        row: u16,
+    ) {
         self.application.handle_event(UiEvent::Mouse {
             key: crate::editor::input::KeyEvent::mouse(code, Default::default()),
             column,
@@ -841,7 +848,9 @@ impl TestSession {
     }
     pub(in crate::app) fn terminal_request(&mut self, profile: &str) {
         self.application
-            .process_effect(crate::app::commands::AppEffect::TerminalOpen(Some(profile.into())));
+            .process_effect(crate::app::commands::AppEffect::TerminalOpen(Some(
+                profile.into(),
+            )));
     }
     pub(in crate::app) fn terminal_open(&mut self, profile: &str) {
         self.terminal_request(profile);
@@ -1112,14 +1121,18 @@ impl TestSession {
     }
     pub(in crate::app) fn debug_request(&mut self, name: &str) {
         self.application
-            .process_effect(crate::app::commands::AppEffect::DapConfigurationStart(name.into()));
+            .process_effect(crate::app::commands::AppEffect::DapConfigurationStart(
+                name.into(),
+            ));
     }
     pub(in crate::app) fn debug_preflights(&self) -> usize {
         self.application.workspace.preflight_pending()
     }
     pub(in crate::app) fn debug_start(&mut self, name: &str) {
         self.application
-            .process_effect(crate::app::commands::AppEffect::DapConfigurationStart(name.into()));
+            .process_effect(crate::app::commands::AppEffect::DapConfigurationStart(
+                name.into(),
+            ));
     }
     pub(in crate::app) fn debug_stop(&mut self) {
         self.application

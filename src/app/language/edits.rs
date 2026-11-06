@@ -3,6 +3,9 @@ use crate::app::workspace::edits::InputFile;
 use crate::app::workspace::edits::OriginKey;
 use crate::app::workspace::edits::PreparedFiles;
 use crate::editor::BufferId;
+use crate::editor::EditorOperation;
+use crate::editor::EditorTransaction;
+use crate::editor::Precondition;
 use crate::editor::TransactionId;
 use crate::editor::text::BufferRevision;
 use crate::editor::text::ByteOffset;
@@ -12,9 +15,6 @@ use crate::editor::text::PositionEncoding;
 use crate::editor::text::TextBuffer;
 use crate::editor::text::TextEdit;
 use crate::editor::text::TextEditSet;
-use crate::editor::EditorOperation;
-use crate::editor::EditorTransaction;
-use crate::editor::Precondition;
 use crate::language::lsp::ApplyEditReply;
 use crate::language::lsp::EditContext;
 use crate::language::lsp::LspDocumentEdit;
@@ -562,11 +562,11 @@ fn decode_edits(
 mod tests {
     use crate::app::language::edits::*;
     use crate::editor::EditorState;
+    use crate::files::RootIdentity;
     use crate::language::lsp::LspEvent;
     use crate::language::lsp::LspPosition;
     use crate::language::lsp::LspRange;
     use crate::language::lsp::ServerRequestId;
-    use crate::files::RootIdentity;
     use crate::workspace::WorkspaceId;
     use crate::workspace::WorkspaceState;
     fn documents(editor: &EditorState) -> Vec<EditDocument<'_>> {
@@ -667,9 +667,9 @@ mod tests {
     }
     #[test]
     fn untracked_clean_buffers_are_checked_against_disk_for_workspace_edits() {
-        use crate::app::startup::StartupTarget;
         use crate::app::documents::DocumentEvent;
         use crate::app::documents::DocumentSession;
+        use crate::app::startup::StartupTarget;
         use crate::app::workspace::edits::WorkspaceEditSession;
         use crate::files::VfsWorker;
         for (disk, dirty, succeeds) in [
@@ -794,8 +794,13 @@ mod tests {
                     .finish_preparation(drafts, &scope, &version, 1)
                     .unwrap();
                 let (captured, preview) = owner.approval(&version, 1).unwrap();
-                let draft = crate::app::workspace::edits::prepare_workspace_edit(&editor, captured, preview, TransactionId(1))
-                    .unwrap();
+                let draft = crate::app::workspace::edits::prepare_workspace_edit(
+                    &editor,
+                    captured,
+                    preview,
+                    TransactionId(1),
+                )
+                .unwrap();
                 editor = draft.accept(&editor.version()).unwrap();
                 assert_eq!(editor.buffers[buffer].text.to_string(), "aXc");
             }
@@ -1124,8 +1129,13 @@ mod tests {
         );
         assert_eq!(TextBuffer::test_materializations(), before);
         let (captured, preview) = owner.approval(&version, 1).unwrap();
-        let draft = crate::app::workspace::edits::prepare_workspace_edit(&editor, captured, preview, TransactionId(1))
-            .unwrap();
+        let draft = crate::app::workspace::edits::prepare_workspace_edit(
+            &editor,
+            captured,
+            preview,
+            TransactionId(1),
+        )
+        .unwrap();
         owner.stage_approval(&draft, Vec::new()).unwrap();
         assert!(owner.accepted(editor.publication()).is_err());
         editor = draft.accept(&editor.version()).unwrap();
@@ -1463,7 +1473,8 @@ impl LspEditSources {
         Ok(crate::app::diagnostics::DiagnosticBatch {
             producer,
             uri: uri.into(),
-            document: id.and_then(|id| crate::app::diagnostics::DiagnosticDocument::capture(editor, id)),
+            document: id
+                .and_then(|id| crate::app::diagnostics::DiagnosticDocument::capture(editor, id)),
             validity: if id.is_none() {
                 crate::app::diagnostics::DiagnosticValidity::DiskReport
             } else if pull {
@@ -1480,10 +1491,10 @@ impl LspEditSources {
 
 #[cfg(test)]
 mod diagnostic_tests {
-    use crate::app::language::edits::*;
-    use crate::editor::EditorState;
     use crate::app::diagnostics::DiagnosticSession;
     use crate::app::diagnostics::DiagnosticValidity;
+    use crate::app::language::edits::*;
+    use crate::editor::EditorState;
     use crate::language::lsp::DiagnosticLineage;
     use crate::language::lsp::LspDiagnostic;
     use crate::language::lsp::LspEvent;

@@ -1,31 +1,24 @@
+use crate::app::App;
+use crate::app::explorer::tree::ExplorerKind;
 use crate::app::search::MAXIMUM_PICKER_ITEMS;
 use crate::app::search::SEARCH_MAXIMUM_FILE_BYTES;
-use crate::windows::DockEdge;
-use crate::app::explorer::tree::ExplorerKind;
-use crate::files::ExplorerMutation;
-use crate::app::App;
 use crate::app::windows::NativeSurfaceTarget;
-use std::path::Path;
-use std::path::PathBuf;
-use crate::ui::PromptKind;
-use crate::editor::text::TextBuffer;
-use crate::windows::WindowRect;
+use crate::app::windows::rect_contains_point;
 use crate::editor::RegisterShape;
 use crate::editor::RegisterValue;
-use crate::app::windows::rect_contains_point;
+use crate::editor::text::TextBuffer;
+use crate::files::ExplorerMutation;
+use crate::ui::PromptKind;
+use crate::windows::DockEdge;
 use crate::windows::PANE_DEFAULT_RATIO;
-
-
+use crate::windows::WindowRect;
 
 use crate::ui::ExplorerUiState;
 
 use crate::app::explorer::tree::ExplorerLoadState;
 use crate::app::explorer::tree::ExplorerNodeId;
 
-
-
 impl App {
-
     pub(in crate::app) fn explorer_open_file(&mut self, split: bool) {
         if self
             .explorer
@@ -81,7 +74,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn cancel_explorer_confirmation(&mut self) {
         if let Some(id) = self.explorer.cancel_confirmation() {
             self.documents.cancel_request(id);
@@ -90,7 +82,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn retire_stale_explorer_intents(&mut self) {
         let ids = self.explorer.retire_stale_intents(
             self.workspace.version(),
@@ -124,7 +115,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn retire_explorer_intents(&mut self) {
         for id in self.explorer.retire_intents() {
             self.documents.cancel_request(id);
@@ -133,7 +123,6 @@ impl App {
 }
 
 impl App {
-
     fn queue_explorer_mutation(
         &mut self,
         operation: Result<ExplorerMutation, String>,
@@ -192,7 +181,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn create_explorer_path(&mut self, input: String) {
         if let Err(error) = self.queue_explorer_mutation(self.explorer.create(&input), false, false)
         {
@@ -202,7 +190,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn rename_explorer_path(&mut self, target: String) {
         if let Err(error) =
             self.queue_explorer_mutation(self.explorer.rename(&target), false, false)
@@ -213,7 +200,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn open_explorer_rename_prompt(&mut self) {
         self.close_prompt();
         let request = match self.explorer.begin_rename(
@@ -254,7 +240,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn submit_explorer_rename_prompt(&mut self, value: &str) {
         let operation = self.explorer.rename_value(
             value,
@@ -271,7 +256,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn cancel_explorer_rename_prompt(&mut self) {
         for id in self.explorer.cancel_rename() {
             self.documents.cancel_request(id);
@@ -280,7 +264,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn request_explorer_delete(&mut self) {
         self.close_prompt();
         if let Err(error) = self.queue_explorer_mutation(self.explorer.delete(), true, false) {
@@ -290,7 +273,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn confirm_explorer_delete(&mut self) {
         match self.explorer.confirm_delete(
             self.workspace.version(),
@@ -304,7 +286,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn apply_prepared_explorer(
         &mut self,
         prepared: crate::files::PreparedExplorerMutation,
@@ -328,7 +309,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn set_explorer_clipboard(&mut self, cut: bool) {
         match self.explorer.clipboard(cut, self.workspace.version()) {
             Ok(message) => self.notify_message(message, false),
@@ -338,7 +318,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn paste_explorer_clipboard(&mut self) {
         if let Err(error) = self.queue_explorer_mutation(
             self.explorer.paste(&self.workspace.version()),
@@ -351,11 +330,7 @@ impl App {
 }
 
 impl App {
-
-    pub(in crate::app) fn process_explorer_io(
-        &mut self,
-        reply: crate::files::ExplorerIoReply,
-    ) {
+    pub(in crate::app) fn process_explorer_io(&mut self, reply: crate::files::ExplorerIoReply) {
         use crate::app::explorer::MutationUpdate;
         if let crate::files::ExplorerIoReply::RenameInspected { id, result } = reply {
             match self.explorer.accept_rename_inspection(
@@ -528,19 +503,15 @@ impl App {
     }
 }
 
-
-
 fn explorer_delete_message(path: &std::path::Path) -> String {
     format!("Permanently delete {path:?}?")
 }
-
 
 #[cfg(all(test, unix))]
 #[test]
 fn explorer_delete_message_uses_truthful_path_debug_escaping() {
     use std::ffi::OsString;
     use std::os::unix::ffi::OsStringExt;
-    use std::path::PathBuf;
     assert_eq!(
         explorer_delete_message(std::path::Path::new("a  界\n\\b")),
         "Permanently delete \"a  界\\n\\\\b\"?"
@@ -552,7 +523,6 @@ fn explorer_delete_message_uses_truthful_path_debug_escaping() {
     );
 }
 impl App {
-
     pub(in crate::app) fn move_explorer_selection(&mut self, delta: isize) {
         self.explorer.navigate(delta);
         self.sync_explorer_ui();
@@ -560,8 +530,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn page_explorer_selection(&mut self, direction: isize) {
         let viewport = self
             .window_session
@@ -578,8 +546,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn explorer_collapse_or_parent(&mut self) {
         self.explorer.parent();
         self.sync_explorer_ui();
@@ -587,8 +553,6 @@ impl App {
 }
 
 impl App {
-
-
     // EXPLORER_WATCH_FOREGROUND_BEGIN: typed event coordination only.
 
     pub(in crate::app) fn reconcile_explorer_watch(&mut self) {
@@ -602,8 +566,6 @@ impl App {
 }
 
 impl App {
-
-
     #[cfg(test)]
     pub(in crate::app) fn accept_explorer_watch_batch(
         &mut self,
@@ -615,8 +577,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn process_explorer_watch_events(&mut self) {
         if let Err(error) = self.explorer.poll_watch(self.ui.explorer.is_some()) {
             self.show_error(error);
@@ -626,8 +586,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn start_next_explorer_watch_reload(&mut self) {
         if let Some(request) = self.explorer.next_reload() {
             self.load_explorer_request(request);
@@ -636,8 +594,6 @@ impl App {
 }
 
 impl App {
-
-
     // EXPLORER_WATCH_FOREGROUND_END
 
     pub(in crate::app) fn sync_explorer_ui(&mut self) {
@@ -723,8 +679,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn open_explorer(&mut self) {
         self.window_session.allow_explorer();
         if self.explorer.tree().root_revision() != self.workspace.root_revision()
@@ -759,8 +713,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn load_explorer_node(&mut self, node: ExplorerNodeId) {
         match self.explorer.load(
             node,
@@ -775,8 +727,6 @@ impl App {
 }
 
 impl App {
-
-
     fn load_explorer_request(&mut self, request: crate::app::explorer::DirectoryLoad) {
         match self.explorer.load_request(
             request,
@@ -791,8 +741,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn follow_active_file_in_explorer(&mut self) {
         let Some(path) = self
             .state
@@ -815,8 +763,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn continue_explorer_follow(&mut self) {
         match self.explorer.continue_follow() {
             Ok(Some(request)) => self.load_explorer_request(request),
@@ -828,8 +774,6 @@ impl App {
 }
 
 impl App {
-
-
     /// Filter the tree by `query`; the folders not read yet are read in the background so
     /// the whole project is searched.
     pub(in crate::app) fn search_explorer(&mut self, query: String) {
@@ -840,8 +784,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn explorer_toggle(&mut self) {
         let Some(node) = self.explorer.tree().selected_node().cloned() else {
             return;
@@ -860,8 +802,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn process_explorer_result(&mut self) {
         let Some(result) = self.explorer.poll(
             self.workspace.version(),
@@ -880,8 +820,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn yank_explorer_path(&mut self) {
         let Some(node) = self.explorer.tree().selected_node() else {
             self.show_error("select an explorer path first");
@@ -906,8 +844,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn explorer_mouse_select(&mut self) {
         let Some(id) = self.explorer.take_clicked() else {
             return;
@@ -923,8 +859,6 @@ impl App {
 }
 
 impl App {
-
-
     /// The tree row under the pointer in the layout now on screen.
     pub(in crate::app) fn explorer_row_at(
         &self,
@@ -960,8 +894,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn refresh_explorer(&mut self) {
         self.retire_explorer_intents();
         self.explorer
@@ -978,7 +910,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn explorer_edge(&self) -> DockEdge {
         match self.configuration.settings().ui.explorer.side {
             crate::config::PanelSide::Left => DockEdge::Left,
@@ -986,3 +917,6 @@ impl App {
         }
     }
 }
+
+#[cfg(all(test, unix))]
+use std::path::PathBuf;

@@ -1,12 +1,7 @@
 use crate::app::tests::*;
 
-
-
-
 #[test]
 pub(in crate::app) fn file_preview_retries_after_capacity_returns_without_picker_input() {
-    use crate::app::picker::MatcherSource;
-    use crate::app::picker::PickerPayload;
     let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("preview.txt");
     fs::write(&path, "ready\n").unwrap();
@@ -65,7 +60,6 @@ pub(in crate::app) fn file_preview_retries_after_capacity_returns_without_picker
     assert_eq!(text.lines(), ["ready"]);
     assert!(!app.search.preview_needs_retry());
 }
-
 
 #[test]
 pub(in crate::app) fn closing_help_returns_the_palette_with_its_query_and_selection_intact() {
@@ -134,7 +128,6 @@ pub(in crate::app) fn closing_help_returns_the_palette_with_its_query_and_select
     );
 }
 
-
 pub(in crate::app) fn palette_row_for(app: &mut App, query: &str) -> String {
     app.open_builtin_picker(crate::app::commands::PickerKind::Commands);
     app.picker_insert(query);
@@ -144,7 +137,6 @@ pub(in crate::app) fn palette_row_for(app: &mut App, query: &str) -> String {
         .unwrap_or_else(|| panic!("no row for `{query}`"));
     palette.rows[selected].label.clone()
 }
-
 
 #[test]
 pub(in crate::app) fn palette_finds_commands_by_the_words_people_type() {
@@ -165,7 +157,6 @@ pub(in crate::app) fn palette_finds_commands_by_the_words_people_type() {
     }
 }
 
-
 #[test]
 pub(in crate::app) fn palette_runs_flagged_commands_with_the_flag_off() {
     let (_app_dirs, mut app) = app();
@@ -179,7 +170,6 @@ pub(in crate::app) fn palette_runs_flagged_commands_with_the_flag_off() {
     assert!(!app.should_quit, "ordinary quit refuses unsaved changes");
     assert!(app.ui.notification_error);
 }
-
 
 #[test]
 pub(in crate::app) fn palette_rows_that_need_text_open_a_command_line_that_runs_them() {
@@ -213,11 +203,8 @@ pub(in crate::app) fn palette_rows_that_need_text_open_a_command_line_that_runs_
     }
 }
 
-
 #[test]
 pub(in crate::app) fn file_picker_can_filter_an_entry_after_the_display_limit() {
-    use crate::app::picker::PickerOrigin;
-    use crate::app::picker::PickerPayload;
     let (_app_dirs, mut app) = app();
     app.start_workspace_file_picker();
     let items = (0..10_001)
@@ -247,23 +234,15 @@ pub(in crate::app) fn file_picker_can_filter_an_entry_after_the_display_limit() 
     app.picker_insert("file-10000");
     assert_eq!(app.ui.picker.as_ref().unwrap().rows[0].label, "file-10000");
 }
+use crate::app::App;
+use crate::editor::InvocationSource;
+use crate::editor::text::TextBuffer;
+use crate::ui::PickerSurfaceKind;
+use std::fs;
+use std::thread;
+use std::time::Duration;
+use std::time::Instant;
+
 use crate::app::picker::MatcherSource;
 use crate::app::picker::PickerOrigin;
 use crate::app::picker::PickerPayload;
-use std::time::Duration;
-use std::time::Instant;
-use crate::editor::input::parse_ex;
-use crate::editor::text::PositionEncoding;
-use crate::editor::text::TextBuffer;
-use crate::editor::CommandInvocation;
-use crate::editor::InvocationSource;
-use crate::files::VfsError;
-use crate::ui::PickerSurfaceKind;
-use crate::workspace::PickerAction;
-use crate::workspace::PickerItem;
-use crate::workspace::PickerItemId;
-use std::fs;
-use std::thread;
-use crate::app::App;
-use crate::app::PickerKind;
-

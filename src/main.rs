@@ -15,10 +15,10 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::Parser;
+use dust::app::run_interactive;
+use dust::app::startup::resolve_startup;
 use dust::config::load_bundled_config;
 use dust::config::load_user_config;
-use dust::app::startup::resolve_startup;
-use dust::app::run_interactive;
 
 #[derive(Debug, Parser)]
 #[command(name = "dust", version, about = "Dust modal terminal IDE")]

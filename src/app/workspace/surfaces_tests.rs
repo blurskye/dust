@@ -1,8 +1,5 @@
 use crate::app::tests::*;
 
-
-
-
 #[test]
 pub(in crate::app) fn remote_files_outside_the_workspace_open_writable_at_the_requested_line() {
     let (_app_dirs, mut app) = app();
@@ -29,8 +26,6 @@ pub(in crate::app) fn remote_files_outside_the_workspace_open_writable_at_the_re
     assert!(!app.state.buffers[view.buffer].read_only);
     assert_eq!(view.cursor.get(), 4);
 }
-use std::time::Duration;
 use std::fs;
 use std::thread;
-use tempfile::tempdir;
-
+use std::time::Duration;

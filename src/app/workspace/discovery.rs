@@ -1,16 +1,16 @@
 //! Root discovery and execution metadata belong to workspace, not protocol adapters.
-use crate::workspace::RootId;
-use crate::files::RootIdentity;
 use crate::app::workspace::WorkspaceSession;
 use crate::app::workspace::WorkspaceVersion;
 use crate::files::ProjectRootResolution;
 use crate::files::ProjectRootService;
 use crate::files::ProjectRootStrategy;
+use crate::files::RootIdentity;
 use crate::process::ExecutionPreflightEvent;
 use crate::process::ExecutionPreflightRequest;
 use crate::process::ExecutionPreflightService;
 use crate::process::PreflightError;
 use crate::process::PreflightId;
+use crate::workspace::RootId;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -227,10 +227,7 @@ pub(in crate::app) struct ExecutionLane<'a> {
     allowed: bool,
 }
 impl WorkspaceSession {
-    pub(in crate::app) fn execution_lane(
-        &mut self,
-        kind: DiscoveryKind,
-    ) -> ExecutionLane<'_> {
+    pub(in crate::app) fn execution_lane(&mut self, kind: DiscoveryKind) -> ExecutionLane<'_> {
         let discovery = match kind {
             DiscoveryKind::Language => &mut self.language_roots,
             DiscoveryKind::Debugger => &mut self.debugger_roots,

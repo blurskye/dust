@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
-use std::sync::mpsc::self;
+use std::sync::mpsc;
 use std::sync::mpsc::Receiver;
 use std::sync::mpsc::SyncSender;
 use std::thread;
@@ -556,10 +556,10 @@ pub(super) fn run_workspace_search(
 
 #[cfg(test)]
 mod tests {
-    use crate::files::workspace_search::*;
     use crate::files::tests::collect_search;
     use crate::files::tests::isolated_git_test;
     use crate::files::tests::search_policy;
+    use crate::files::workspace_search::*;
     use std::time::Duration;
     use std::time::Instant;
 

@@ -1,23 +1,21 @@
-use crate::ui::render::editor::PROMPT_CURSOR;
-use crate::ui::render::COMPLETION_DETAIL_GAP;
-use crate::ui::render::COMPLETION_MAX_ROWS;
 use crate::config::BorderStyle;
 use crate::config::Config;
 use crate::ui::CellGrid;
 use crate::ui::Style;
 use crate::ui::geometry::text_width;
 use crate::ui::grid::Frame;
+use crate::ui::render::COMPLETION_DETAIL_GAP;
+use crate::ui::render::COMPLETION_MAX_ROWS;
 use crate::ui::render::PromptState;
+use crate::ui::render::editor::PROMPT_CURSOR;
 use crate::ui::render::editor::cursor_style;
 
 use crate::ui::geometry::ellipsized;
 use crate::ui::geometry::fitted_footer;
 
-
 pub(crate) const PROMPT_INPUT_PADDING: u16 = 2;
 
 pub(crate) const PROMPT_TITLE_MIN_WIDTH: u16 = 10;
-
 
 pub(super) fn prompt_viewport<'a>(
     input: &'a str,
@@ -49,7 +47,6 @@ pub(super) fn prompt_viewport<'a>(
     }
     (&input[start..], cells)
 }
-
 
 pub(super) fn render_prompt(
     frame: &mut Frame,

@@ -1,15 +1,6 @@
 //! Search worker admission, accepted results and interaction retirement.
 //! Selected opaque actions share the lifetime and bounds of their actual rows.
 use crate::app::picker;
-use crate::app::workspace::WorkspaceVersion;
-use crate::files::WorkspaceFileEntry;
-use crate::files::WorkspaceFileEvent;
-use crate::files::WorkspaceFilePolicy;
-use crate::files::WorkspaceFileService;
-use crate::files::WorkspaceSearchEvent;
-use crate::files::WorkspaceSearchMatch;
-use crate::files::WorkspaceSearchPolicy;
-use crate::files::WorkspaceSearchService;
 use crate::app::search::workflow::ABS_MAX_BYTES;
 use crate::app::search::workflow::SearchHostAction;
 use crate::app::search::workflow::SearchMatcherKind;
@@ -23,6 +14,15 @@ use crate::app::search::workflow::SearchWorkflowError;
 use crate::app::search::workflow::SearchWorkflowId;
 use crate::app::search::workflow::SearchWorkflowItem;
 use crate::app::search::workflow::SearchWorkflowSpec;
+use crate::app::workspace::WorkspaceVersion;
+use crate::files::WorkspaceFileEntry;
+use crate::files::WorkspaceFileEvent;
+use crate::files::WorkspaceFilePolicy;
+use crate::files::WorkspaceFileService;
+use crate::files::WorkspaceSearchEvent;
+use crate::files::WorkspaceSearchMatch;
+use crate::files::WorkspaceSearchPolicy;
+use crate::files::WorkspaceSearchService;
 
 pub(in crate::app) const MAXIMUM_PICKER_ITEMS: usize = 10_000;
 /// Bounds for walking the workspace in the file picker and project search.
@@ -31,18 +31,14 @@ pub(in crate::app) const SEARCH_MAXIMUM_FILE_BYTES: usize = 8 * 1024 * 1024;
 pub(in crate::app) const SEARCH_BATCH_SIZE: usize = 128;
 pub(in crate::app) const SEARCH_QUEUE_CAPACITY: usize = 8;
 
-
-
-
-
-
 type ByteNavigation = (crate::editor::text::ByteRange, Option<std::sync::Arc<[u8]>>);
 
 #[derive(Default)]
 pub(in crate::app) struct SearchSession {
     pub(in crate::app) picker: picker::PickerSession,
     pub(in crate::app) preview: Option<crate::ui::PickerPreview>,
-    pub(in crate::app) preview_snapshot_key: Option<(std::sync::Arc<[u8]>, std::ops::Range<usize>, usize)>,
+    pub(in crate::app) preview_snapshot_key:
+        Option<(std::sync::Arc<[u8]>, std::ops::Range<usize>, usize)>,
     pub(in crate::app) preview_path: Option<std::path::PathBuf>,
     pub(in crate::app) preview_scope: Option<(WorkspaceVersion, u64)>,
     pub(in crate::app) preview_epoch: std::sync::Arc<()>,
@@ -115,10 +111,7 @@ impl SearchSession {
     ) -> Option<ByteNavigation> {
         self.byte_navigation.remove(&id)
     }
-    pub(in crate::app) fn retire_document_request(
-        &mut self,
-        id: crate::files::RequestId,
-    ) {
+    pub(in crate::app) fn retire_document_request(&mut self, id: crate::files::RequestId) {
         self.matcher_navigation.remove(&id);
         self.byte_navigation.remove(&id);
     }
@@ -475,17 +468,5 @@ pub(in crate::app) mod commands;
 #[cfg(test)]
 pub(in crate::app) mod project_tests;
 
-
 use crate::app::picker::MatcherSource;
 pub(in crate::app) mod workflow;
-
-
-
-use std::collections::HashMap;
-use std::sync::Arc;
-
-
-use crate::files::RequestId;
-use crate::ui::PickerPreview;
-use std::path::PathBuf;
-

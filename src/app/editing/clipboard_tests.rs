@@ -1,5 +1,5 @@
-use crate::app::tests::*;
 use crate::app::editing::clipboard::ClipboardSession;
+use crate::app::tests::*;
 use crate::editor::CommandInvocation;
 use crate::editor::RegisterShape;
 use crate::editor::RegisterValue;
@@ -152,10 +152,7 @@ pub(in crate::app) fn clipboard_recursive_macros_keep_the_recursion_limit_across
     assert!(app.ui.notification_error);
     assert_eq!(
         app.state.buffers[buffer].text.to_string(),
-        format!(
-            "a{}",
-            "X".repeat(crate::app::MACRO_RECURSION_LIMIT)
-        )
+        format!("a{}", "X".repeat(crate::app::MACRO_RECURSION_LIMIT))
     );
 }
 
@@ -298,8 +295,5 @@ use crate::editor::text::TextBuffer;
 use crate::editor::CommandValue;
 use crate::editor::InvocationSource;
 
-
-use crate::ui::KeyInputKind;
-use crate::ui::UiEvent;
 use crate::app::App;
-
+use crate::ui::UiEvent;

@@ -1,12 +1,6 @@
 use crate::app::tests::*;
-use crate::editor::EditorOperation;
-use crate::editor::EditorTransaction;
-use crate::editor::TransactionId;
 use crate::ui::render::overlays::SCRATCH_ICON;
 use crate::ui::render::overlays::VIRTUAL_ICON;
-
-
-
 
 #[test]
 pub(in crate::app) fn health_virtual_dogfood_opens_refreshes_and_remains_read_only() {
@@ -157,7 +151,6 @@ pub(in crate::app) fn health_virtual_dogfood_opens_refreshes_and_remains_read_on
     app.window_session.graph().validate().unwrap();
 }
 
-
 #[test]
 pub(in crate::app) fn accepted_virtual_snapshot_publishes_through_the_tiled_editor_bridge() {
     let (_app_dirs, mut app) = app();
@@ -229,9 +222,9 @@ pub(in crate::app) fn accepted_virtual_snapshot_publishes_through_the_tiled_edit
     ));
 }
 
-
 #[test]
-pub(in crate::app) fn universal_window_clone_uses_editor_owned_independent_text_and_virtual_views() {
+pub(in crate::app) fn universal_window_clone_uses_editor_owned_independent_text_and_virtual_views()
+{
     let (_app_dirs, mut app) = app();
     let (buffer, original_view) = app
         .state
@@ -440,7 +433,6 @@ pub(in crate::app) fn universal_window_clone_uses_editor_owned_independent_text_
     );
 }
 
-
 #[test]
 pub(in crate::app) fn virtual_read_only_origin_never_queues_save_reload_or_recovery_io() {
     let (_app_dirs, mut app) = app();
@@ -480,7 +472,6 @@ pub(in crate::app) fn virtual_read_only_origin_never_queues_save_reload_or_recov
     assert!(app.capture_session().is_none());
 }
 
-
 #[test]
 pub(in crate::app) fn content_line_uses_filename_icons_for_extensionless_files() {
     let (_app_dirs, mut app) = app();
@@ -506,9 +497,9 @@ pub(in crate::app) fn content_line_uses_filename_icons_for_extensionless_files()
     }
 }
 
-
 #[test]
-pub(in crate::app) fn text_and_virtual_windows_project_input_and_preserve_identity_across_ordinary_placements() {
+pub(in crate::app) fn text_and_virtual_windows_project_input_and_preserve_identity_across_ordinary_placements()
+ {
     let (_app_dirs, mut app) = app();
     app.window_session.observe_size((80, 24));
     app.state
@@ -854,15 +845,11 @@ pub(in crate::app) fn text_and_virtual_windows_project_input_and_preserve_identi
     assert_eq!(virtual_app.state.buffers.len(), 1);
 }
 
-
 #[test]
 pub(in crate::app) fn startup_plugin_publication_waits_for_session_restoration() {
     use crate::persistence::PersistedLayout;
     use crate::persistence::PersistedPane;
-    use crate::persistence::PersistedSession;
-    use crate::persistence::PersistedState;
     use crate::persistence::PersistedTab;
-    use crate::persistence::PersistenceService;
     let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("restored.txt");
     fs::write(&path, "restored text\n").unwrap();
@@ -898,8 +885,7 @@ pub(in crate::app) fn startup_plugin_publication_waits_for_session_restoration()
     )
     .unwrap();
     let (worker, release) = PersistenceService::gated_for_test(1);
-    app.persistence =
-        crate::app::persistence::PersistenceSession::new(worker, state_path);
+    app.persistence = crate::app::persistence::PersistenceSession::new(worker, state_path);
     let (manager, fixture) = crate::plugins::ExecutionFixture::new(4);
     app.extension.fixture_manager(manager);
     app.load_persistence();
@@ -941,36 +927,22 @@ pub(in crate::app) fn startup_plugin_publication_waits_for_session_restoration()
     assert!(app.extension.contributions().get("demo").is_some());
     assert!(app.configuration.binding_revision() > revision);
 }
-use crate::app::persistence::RestoreContext;
-use std::collections::BTreeSet;
+use crate::editor::text::ByteOffset;
+use crate::editor::text::TextBuffer;
 use std::path::PathBuf;
 use std::time::Duration;
 use std::time::Instant;
-use crate::editor::text::ByteOffset;
-use crate::editor::text::ByteRange;
-use crate::editor::text::TextBuffer;
-use crate::editor::text::TextEdit;
-use crate::editor::text::TextEditSet;
-use crate::editor::CommandInvocation;
-use crate::editor::CommandValue;
-use crate::editor::EditorMode;
 
-
-use crate::editor::InvocationSource;
-
+use crate::app::AppEffect;
 use crate::plugins::PluginLoadId;
-use crate::persistence::PersistedSession;
-use crate::persistence::PersistedState;
-use crate::persistence::PersistedWindowRule;
-use crate::persistence::PersistenceService;
+use crate::ui::ContentTabKind;
 use crate::windows::DockEdge;
 use crate::windows::WindowPlacement;
 use crate::windows::WindowRect;
 use std::fs;
 use std::thread;
-use crate::ui::ContentTabKind;
-use crate::ui::render;
 use tempfile::tempdir;
-use crate::app::AppEffect;
-use crate::persistence::PersistedWindowPlacement;
 
+use crate::persistence::PersistedSession;
+use crate::persistence::PersistedState;
+use crate::persistence::PersistenceService;

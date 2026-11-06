@@ -1,17 +1,14 @@
-use crate::ui::grid::CONTROL_CHARACTER_REPLACEMENT;
-use crate::ui::render::overlays::BUFFER_OVERFLOW_LEFT;
-use crate::windows::PANE_MINIMUM_HEIGHT;
-use crate::windows::PANE_MINIMUM_WIDTH;
-use std::path::PathBuf;
 use crate::editor::EditorState;
+use crate::ui::grid::CONTROL_CHARACTER_REPLACEMENT;
 use crate::ui::render::EditorWindowBinding;
 use crate::ui::render::EditorWindowLayoutState;
 use crate::ui::render::PromptKind;
 use crate::ui::render::PromptState;
 use crate::ui::render::UiState;
-
-
-
+use crate::ui::render::overlays::BUFFER_OVERFLOW_LEFT;
+use crate::windows::PANE_MINIMUM_HEIGHT;
+use crate::windows::PANE_MINIMUM_WIDTH;
+use std::path::PathBuf;
 
 pub(super) fn editor_layout(state: &EditorState) -> EditorWindowLayoutState {
     fn convert(
@@ -62,14 +59,12 @@ pub(super) fn editor_layout(state: &EditorState) -> EditorWindowLayoutState {
     }
 }
 
-
 pub(super) fn ui_with_editor_layout(state: &EditorState) -> UiState {
     UiState {
         editor_window_layout: Some(editor_layout(state)),
         ..UiState::default()
     }
 }
-
 
 pub(super) fn attach_test_compositor(
     state: &EditorState,
@@ -94,8 +89,8 @@ pub(super) fn attach_test_compositor(
         .as_ref()
         .map(|_| crate::windows::WindowId(10_001));
     if let Some(window) = explorer_window {
-        let size =
-            crate::ui::render::explorer_panel_width(config, width).map_or(1, |panel| panel.saturating_add(1));
+        let size = crate::ui::render::explorer_panel_width(config, width)
+            .map_or(1, |panel| panel.saturating_add(1));
         windows.push(crate::windows::CompositorWindowSnapshot {
             window,
             placement: crate::windows::WindowPlacement::Docked {
@@ -238,7 +233,6 @@ pub(super) fn attach_test_compositor(
     });
 }
 
-
 pub(super) fn render(
     state: &EditorState,
     ui: &UiState,
@@ -251,7 +245,6 @@ pub(super) fn render(
     attach_test_compositor(state, &mut ui, config, width, height);
     crate::ui::render::render(state, &ui, config, dashboard, width, height)
 }
-
 
 #[test]
 fn workspace_frame_respects_nonzero_compositor_origin_for_side_and_top_docks() {
@@ -330,7 +323,6 @@ fn workspace_frame_respects_nonzero_compositor_origin_for_side_and_top_docks() {
     );
 }
 
-
 #[test]
 fn ordinary_confirmation_wraps_unicode_and_uses_safe_default_geometry() {
     let state = EditorState::new(PathBuf::from("/tmp/dust-workspace"));
@@ -373,7 +365,6 @@ fn ordinary_confirmation_wraps_unicode_and_uses_safe_default_geometry() {
     assert!(frame.cursor.is_none());
 }
 
-
 #[test]
 fn confirmation_uses_custom_action_labels_for_geometry_and_paint() {
     let state = EditorState::new(PathBuf::from("/tmp/dust-workspace"));
@@ -413,7 +404,6 @@ fn confirmation_uses_custom_action_labels_for_geometry_and_paint() {
     assert!(screen.contains("[ Hide ]"));
     assert!(!screen.contains("[ Yes ]"));
 }
-
 
 #[test]
 fn confirmation_visibility_uses_render_workspace_and_button_width() {
@@ -464,7 +454,6 @@ fn confirmation_visibility_uses_render_workspace_and_button_width() {
     assert!(screen.contains("Resize to review"));
     assert!(!screen.contains("[ Yes ]"));
 }
-
 
 #[test]
 fn confirmation_fails_closed_when_the_full_target_cannot_be_shown() {
@@ -522,7 +511,6 @@ fn confirmation_fails_closed_when_the_full_target_cannot_be_shown() {
     );
 }
 
-
 #[test]
 fn visual_line_selection_paints_empty_lines() {
     use crate::editor::Selection;
@@ -543,7 +531,8 @@ fn visual_line_selection_paints_empty_lines() {
     let mut config = crate::config::load_bundled_config().config;
     config.editor.line_numbers = crate::config::LineNumbers::Off;
     config.ui.status_line.enabled = false;
-    let frame = crate::ui::render::render_editor_view(&state, view, &UiState::default(), &config, 12, 3);
+    let frame =
+        crate::ui::render::render_editor_view(&state, view, &UiState::default(), &config, 12, 3);
     assert_eq!(
         frame.grid.get(0, 1).unwrap().style,
         crate::ui::Style::Selection
@@ -553,7 +542,6 @@ fn visual_line_selection_paints_empty_lines() {
         crate::ui::Style::Default
     );
 }
-
 
 #[test]
 fn search_highlights_preserve_word_boundaries_and_substitution_regex_flags() {
@@ -610,7 +598,6 @@ fn search_highlights_preserve_word_boundaries_and_substitution_regex_flags() {
     }
 }
 
-
 #[test]
 fn block_selection_projection_uses_shared_display_cell_ranges() {
     let mut state = EditorState::new(PathBuf::from("/workspace"));
@@ -646,7 +633,6 @@ fn block_selection_projection_uses_shared_display_cell_ranges() {
     );
 }
 
-
 #[test]
 fn block_selection_on_long_lines_is_resolved_once_per_line() {
     use crate::editor::text::ByteOffset;
@@ -677,7 +663,6 @@ fn block_selection_on_long_lines_is_resolved_once_per_line() {
         }
     }
 }
-
 
 #[test]
 fn workspace_split_separators_stay_one_cell_under_wide_ambiguous_width() {
@@ -718,7 +703,6 @@ fn workspace_split_separators_stay_one_cell_under_wide_ambiguous_width() {
         }
     }
 }
-
 
 #[test]
 fn buffer_line_lists_unique_dirty_content_and_follows_active_overflow() {
@@ -798,7 +782,6 @@ fn buffer_line_lists_unique_dirty_content_and_follows_active_overflow() {
     }
 }
 
-
 #[test]
 fn content_line_segment_width_and_hit_testing_share_exact_boundaries() {
     let loaded = crate::config::load_bundled_config();
@@ -819,7 +802,12 @@ fn content_line_segment_width_and_hit_testing_share_exact_boundaries() {
     };
     let width = crate::ui::render::content_tab_width(&entry, &config);
     let mut grid = crate::ui::CellGrid::new(u16::try_from(width).unwrap(), 1);
-    crate::ui::render::overlays::render_content_tab_line(&mut grid, std::slice::from_ref(&entry), &config, 0);
+    crate::ui::render::overlays::render_content_tab_line(
+        &mut grid,
+        std::slice::from_ref(&entry),
+        &config,
+        0,
+    );
     let styles = (0..grid.width())
         .filter_map(|x| grid.get(x, 0).map(|cell| cell.style))
         .collect::<Vec<_>>();
@@ -854,7 +842,8 @@ fn content_line_segment_width_and_hit_testing_share_exact_boundaries() {
     );
     let mut entries = vec![entry.clone(), entry.clone(), entry.clone()];
     for (index, entry) in entries.iter_mut().enumerate() {
-        entry.identity = crate::ui::render::ContentTabIdentity(crate::windows::ContentId(index as u64 + 1));
+        entry.identity =
+            crate::ui::render::ContentTabIdentity(crate::windows::ContentId(index as u64 + 1));
         entry.title = char::from(b'a' + index as u8).to_string();
         entry.active = index == 2;
     }
@@ -875,11 +864,15 @@ fn content_line_segment_width_and_hit_testing_share_exact_boundaries() {
     }
     let first = crate::ui::render::content_tab_width(&right_entries[0], &config);
     assert_eq!(
-        crate::ui::render::content_tab_at_column(&right_entries, &config, 5, u16::try_from(first).unwrap()),
+        crate::ui::render::content_tab_at_column(
+            &right_entries,
+            &config,
+            5,
+            u16::try_from(first).unwrap()
+        ),
         None
     );
 }
-
 
 #[test]
 fn lsp_progress_is_animated_right_aligned_and_hides_transport_identity() {
@@ -929,7 +922,8 @@ fn lsp_progress_is_animated_right_aligned_and_hides_transport_identity() {
     };
     let loaded = crate::config::load_bundled_config();
     let frame = render(&state, &ui, &loaded.config, &loaded.dashboard, 80, 10);
-    let panel = crate::ui::render::explorer_panel_width(&loaded.config, 80).expect("explorer width");
+    let panel =
+        crate::ui::render::explorer_panel_width(&loaded.config, 80).expect("explorer width");
     let row = (0..10)
         .find(|row| frame.grid.row_text(*row).contains("ring (lib)"))
         .unwrap_or_else(|| {
@@ -967,7 +961,6 @@ fn lsp_progress_is_animated_right_aligned_and_hides_transport_identity() {
     );
 }
 
-
 #[test]
 fn visual_row_model_is_reversible_fold_aware_and_unicode_width_exact() {
     let mut state = EditorState::new(PathBuf::from("/tmp"));
@@ -993,8 +986,14 @@ fn visual_row_model_is_reversible_fold_aware_and_unicode_width_exact() {
         ..ui_with_editor_layout(&state)
     };
     let buffer = state.views[view].buffer;
-    let model =
-        crate::ui::render::VisualRowModel::new(&state.buffers[buffer].text, view, &ui, &config, 4, true);
+    let model = crate::ui::render::VisualRowModel::new(
+        &state.buffers[buffer].text,
+        view,
+        &ui,
+        &config,
+        4,
+        true,
+    );
     assert_eq!(model.rows_for_line(0), 3);
     assert_eq!(
         model.normalize(crate::ui::render::VisualRowAnchor {
@@ -1021,7 +1020,6 @@ fn visual_row_model_is_reversible_fold_aware_and_unicode_width_exact() {
     assert_eq!(model.backward(model.forward(start, 5), 5), start);
 }
 
-
 #[test]
 fn grapheme_atomic_rows_match_render_cursor_and_tiny_pane_policy() {
     let loaded = crate::config::load_bundled_config();
@@ -1035,8 +1033,14 @@ fn grapheme_atomic_rows_match_render_cursor_and_tiny_pane_policy() {
         .open_text(crate::editor::text::TextBuffer::from_text("aa界界"), None)
         .unwrap();
     let ui = ui_with_editor_layout(&state);
-    let model =
-        crate::ui::render::VisualRowModel::new(&state.buffers[buffer].text, view, &ui, &config, 3, true);
+    let model = crate::ui::render::VisualRowModel::new(
+        &state.buffers[buffer].text,
+        view,
+        &ui,
+        &config,
+        3,
+        true,
+    );
     assert_eq!(model.rows_for_line(0), 3);
     assert_eq!(
         model.line_rows(0),
@@ -1103,8 +1107,14 @@ fn grapheme_atomic_rows_match_render_cursor_and_tiny_pane_policy() {
     state.buffers[buffer].text = crate::editor::text::TextBuffer::from_text("界a");
     state.views[view].cursor = crate::editor::text::ByteOffset(0);
     let ui = ui_with_editor_layout(&state);
-    let tiny_model =
-        crate::ui::render::VisualRowModel::new(&state.buffers[buffer].text, view, &ui, &config, 1, true);
+    let tiny_model = crate::ui::render::VisualRowModel::new(
+        &state.buffers[buffer].text,
+        view,
+        &ui,
+        &config,
+        1,
+        true,
+    );
     assert_eq!(tiny_model.rows_for_line(0), 2);
     let tiny = render(&state, &ui, &config, &loaded.dashboard, 1, 2);
     assert_eq!(
@@ -1113,7 +1123,6 @@ fn grapheme_atomic_rows_match_render_cursor_and_tiny_pane_policy() {
     );
     assert_eq!(tiny.grid.get(0, 1).unwrap().symbol, "a");
 }
-
 
 #[test]
 fn mixed_grapheme_row_sequences_are_partitioned_reversible_and_bounded() {
@@ -1183,14 +1192,16 @@ fn mixed_grapheme_row_sequences_are_partitioned_reversible_and_bounded() {
                 wrap_row: rows.len() - 1,
             };
             assert_eq!(
-                model.backward(model.forward(crate::ui::render::VisualRowAnchor::default(), 999), 999),
+                model.backward(
+                    model.forward(crate::ui::render::VisualRowAnchor::default(), 999),
+                    999
+                ),
                 crate::ui::render::VisualRowAnchor::default()
             );
             assert_eq!(model.forward(last, 1), last);
         }
     }
 }
-
 
 #[test]
 fn overlapping_collapsed_folds_normalize_to_one_reversible_interval() {
@@ -1246,7 +1257,6 @@ fn overlapping_collapsed_folds_normalize_to_one_reversible_interval() {
     }
 }
 
-
 #[test]
 fn configured_wrapping_uses_visual_rows() {
     let mut state = EditorState::new(PathBuf::from("/tmp"));
@@ -1276,7 +1286,6 @@ fn configured_wrapping_uses_visual_rows() {
     assert!(frame.cursor.is_some_and(|(_, y, _)| y < 3));
     assert!(frame.grid.row_text(2).contains('z'));
 }
-
 
 #[test]
 fn inlay_hints_are_inline_virtual_text_that_shift_following_source_and_cursor() {
@@ -1331,7 +1340,6 @@ fn inlay_hints_are_inline_virtual_text_that_shift_following_source_and_cursor() 
     );
 }
 
-
 #[test]
 fn interior_grapheme_hints_snap_forward_without_blocking_later_hints() {
     use crate::editor::text::ByteOffset;
@@ -1367,7 +1375,6 @@ fn interior_grapheme_hints_snap_forward_without_blocking_later_hints() {
         assert_eq!(frame.grid.row_text(1).trim_end(), ">!");
     }
 }
-
 
 #[test]
 fn non_wrapped_cursor_counts_hints_at_unterminated_and_empty_line_ends() {
@@ -1408,7 +1415,6 @@ fn non_wrapped_cursor_counts_hints_at_unterminated_and_empty_line_ends() {
     }
 }
 
-
 #[test]
 fn active_indent_scope_guide_is_subtly_elevated_from_normal_guides() {
     let mut state = EditorState::new(PathBuf::from("/workspace"));
@@ -1441,7 +1447,6 @@ fn active_indent_scope_guide_is_subtly_elevated_from_normal_guides() {
     );
     assert_eq!(frame.grid.get(0, 5).expect("closing brace").symbol, "}");
 }
-
 
 #[test]
 fn active_indent_scope_tracks_the_cursor_display_column() {
@@ -1509,7 +1514,6 @@ fn active_indent_scope_tracks_the_cursor_display_column() {
     );
 }
 
-
 #[test]
 fn closing_delimiter_scope_uses_cursor_column_before_the_delimiter() {
     let mut state = EditorState::new(PathBuf::from("/workspace"));
@@ -1561,7 +1565,6 @@ fn closing_delimiter_scope_uses_cursor_column_before_the_delimiter() {
     );
 }
 
-
 #[test]
 fn git_signs_do_not_paint_over_text_when_the_gutter_is_disabled() {
     let mut state = EditorState::new(PathBuf::from("/workspace"));
@@ -1572,12 +1575,15 @@ fn git_signs_do_not_paint_over_text_when_the_gutter_is_disabled() {
     config.editor.line_numbers = crate::config::LineNumbers::Off;
     config.editor.git_signs.enabled = true;
     config.ui.status_line.enabled = false;
-    let frame = crate::ui::render::render_editor_view(&state, view, &UiState::default(), &config, 12, 2);
+    let frame =
+        crate::ui::render::render_editor_view(&state, view, &UiState::default(), &config, 12, 2);
     assert_eq!(frame.grid.row_text(0).trim_end(), "");
     assert_eq!(frame.grid.row_text(1).trim_end(), "text");
-    assert_eq!(crate::ui::render::visual_rows::git_sign_column(0, &config.editor), None);
+    assert_eq!(
+        crate::ui::render::visual_rows::git_sign_column(0, &config.editor),
+        None
+    );
 }
-
 
 #[test]
 fn neutral_git_sign_column_continues_through_wraps_and_end_of_buffer_rows() {
@@ -1601,7 +1607,8 @@ fn neutral_git_sign_column_continues_through_wraps_and_end_of_buffer_rows() {
         10,
     );
 
-    let sign_column = crate::ui::render::visual_rows::git_sign_column(gutter, &config.editor).unwrap();
+    let sign_column =
+        crate::ui::render::visual_rows::git_sign_column(gutter, &config.editor).unwrap();
     assert!(
         (0..frame.grid.height()).all(|row| {
             frame
@@ -1612,7 +1619,6 @@ fn neutral_git_sign_column_continues_through_wraps_and_end_of_buffer_rows() {
         "the neutral sign rule must span content, wrapped, and end-of-buffer rows"
     );
 }
-
 
 #[test]
 fn end_of_buffer_markers_right_align_with_line_number_digits() {
@@ -1637,15 +1643,18 @@ fn end_of_buffer_markers_right_align_with_line_number_digits() {
         20,
     );
 
-    assert_eq!(crate::ui::render::visual_rows::editor_line_number_digits(&state), 4);
-    let sign_column = crate::ui::render::visual_rows::git_sign_column(gutter, &config.editor).unwrap();
+    assert_eq!(
+        crate::ui::render::visual_rows::editor_line_number_digits(&state),
+        4
+    );
+    let sign_column =
+        crate::ui::render::visual_rows::git_sign_column(gutter, &config.editor).unwrap();
     for row in 1..frame.grid.height() {
         assert_eq!(frame.grid.get(0, row).unwrap().symbol, " ");
         assert_eq!(frame.grid.get(3, row).unwrap().symbol, "~");
         assert_eq!(frame.grid.get(sign_column, row).unwrap().symbol, "│");
     }
 }
-
 
 #[test]
 fn concrete_gutter_reserves_content_at_zero_one_and_two_cell_widths() {
@@ -1692,11 +1701,19 @@ fn concrete_gutter_reserves_content_at_zero_one_and_two_cell_widths() {
 
     for (width, expected_gutter) in [(1, 0), (2, 1)] {
         assert_eq!(
-            crate::ui::render::editor_gutter_width(&state.buffers[buffer].text, &config.editor, width,),
+            crate::ui::render::editor_gutter_width(
+                &state.buffers[buffer].text,
+                &config.editor,
+                width,
+            ),
             expected_gutter
         );
         assert_eq!(
-            crate::ui::render::editor_content_width(&state.buffers[buffer].text, &config.editor, width,),
+            crate::ui::render::editor_content_width(
+                &state.buffers[buffer].text,
+                &config.editor,
+                width,
+            ),
             1
         );
         let ui = ui_with_editor_layout(&state);
@@ -1727,7 +1744,6 @@ fn concrete_gutter_reserves_content_at_zero_one_and_two_cell_widths() {
     );
 }
 
-
 #[test]
 fn a_long_notification_wraps_so_its_end_stays_readable() {
     let mut state = EditorState::new(PathBuf::from("/tmp"));
@@ -1741,7 +1757,6 @@ fn a_long_notification_wraps_so_its_end_stays_readable() {
     let text: Vec<String> = (0..20).map(|row| frame.grid.row_text(row)).collect();
     assert!(text.iter().any(|row| row.contains("very end")), "{text:#?}");
 }
-
 
 #[test]
 fn plain_text_wrapping_preserves_large_messages_and_graphemes() {
@@ -1763,7 +1778,6 @@ fn plain_text_wrapping_preserves_large_messages_and_graphemes() {
         ["", ""]
     );
 }
-
 
 #[test]
 fn notification_newlines_and_literal_paths_are_preserved() {
@@ -1789,7 +1803,11 @@ fn notification_newlines_and_literal_paths_are_preserved() {
     let frame = render(&state, &ui, &loaded.config, &loaded.dashboard, 60, 20);
     assert!((0..20).any(|y| frame.grid.row_text(y).contains("/workspace/a  b`c.rs")));
     for width in [1, 2, 8, 40] {
-        let lines = crate::ui::render::wrap_plain_text(&message, width, loaded.config.editor.ambiguous_width);
+        let lines = crate::ui::render::wrap_plain_text(
+            &message,
+            width,
+            loaded.config.editor.ambiguous_width,
+        );
         assert_eq!(lines.concat(), message, "width {width}");
     }
     ui.notification = None;
@@ -1799,7 +1817,6 @@ fn notification_newlines_and_literal_paths_are_preserved() {
     let frame = render(&state, &ui, &loaded.config, &loaded.dashboard, 80, 24);
     assert!((0..24).any(|y| frame.grid.row_text(y).contains("/workspace/a  b`c.rs")));
 }
-
 
 #[test]
 fn a_long_path_in_a_notification_breaks_so_its_name_stays_readable() {
@@ -1817,7 +1834,6 @@ fn a_long_path_in_a_notification_breaks_so_its_name_stays_readable() {
     let text: Vec<String> = (0..20).map(|row| frame.grid.row_text(row)).collect();
     assert!(text.iter().any(|row| row.contains("name.txt")), "{text:#?}");
 }
-
 
 #[test]
 fn wrapping_ignores_horizontal_offset() {
@@ -1841,7 +1857,6 @@ fn wrapping_ignores_horizontal_offset() {
     assert!(frame.cursor.is_some_and(|(x, y, _)| x == 0 && y == 0));
 }
 
-
 #[test]
 fn active_pane_viewport_uses_exact_focused_split_rectangle() {
     let mut state = EditorState::new(PathBuf::from("/workspace"));
@@ -1857,14 +1872,13 @@ fn active_pane_viewport_uses_exact_focused_split_rectangle() {
     let loaded = crate::config::load_bundled_config();
     let mut ui = ui_with_editor_layout(&state);
     attach_test_compositor(&state, &mut ui, &loaded.config, 79, 24);
-    let viewport =
-        crate::ui::render::active_pane_viewport(&state, &ui, &loaded.config, 79, 23).expect("focused viewport");
+    let viewport = crate::ui::render::active_pane_viewport(&state, &ui, &loaded.config, 79, 23)
+        .expect("focused viewport");
     assert_eq!(Some(viewport.view), state.active_view);
     assert!(viewport.x > 0 && viewport.y > 0);
     assert!(viewport.width < 79 && viewport.height < 23);
     assert!(viewport.y.saturating_add(viewport.height) <= 23);
 }
-
 
 #[test]
 fn private_surface_cells_and_cursor_are_local_and_strictly_clipped() {
@@ -1969,7 +1983,6 @@ fn private_surface_cells_and_cursor_are_local_and_strictly_clipped() {
     );
 }
 
-
 #[test]
 fn multiline_diagnostics_style_continuations_but_only_annotate_the_start() {
     use crate::editor::text::ByteOffset;
@@ -2028,7 +2041,6 @@ fn multiline_diagnostics_style_continuations_but_only_annotate_the_start() {
     );
     assert!(!frame.grid.row_text(0).contains("problem"));
 }
-
 
 #[test]
 fn diagnostic_continuations_handle_unicode_ends_and_collapsed_lines() {
@@ -2096,7 +2108,6 @@ fn diagnostic_continuations_handle_unicode_ends_and_collapsed_lines() {
     assert_eq!(frame.grid.get(0, 1).unwrap().style, Style::DiagnosticError);
 }
 
-
 #[test]
 fn status_line_names_the_symbols_around_the_cursor() {
     let mut state = EditorState::new(PathBuf::from("/tmp"));
@@ -2137,7 +2148,6 @@ fn status_line_names_the_symbols_around_the_cursor() {
     assert!(!status.contains("elsewhere"), "{status}");
 }
 
-
 #[test]
 fn wrapped_rows_end_at_words_and_break_only_long_ones() {
     let rows = crate::ui::render::debug::wrap_rows(
@@ -2147,7 +2157,6 @@ fn wrapped_rows_end_at_words_and_break_only_long_ones() {
     );
     assert_eq!(rows, ["one two", "  three", "abcdefgh", "  ijkl"]);
 }
-
 
 #[test]
 fn a_line_with_a_diagnostic_is_marked_in_the_gutter_with_its_worst_severity() {
@@ -2204,7 +2213,6 @@ fn a_line_with_a_diagnostic_is_marked_in_the_gutter_with_its_worst_severity() {
     assert_eq!(mark(row("odd")), Some(crate::ui::Style::Warning));
 }
 
-
 #[test]
 fn focused_diagnostic_expands_all_matching_messages_as_virtual_lines() {
     let mut state = EditorState::new(PathBuf::from("/tmp"));
@@ -2249,7 +2257,6 @@ fn focused_diagnostic_expands_all_matching_messages_as_virtual_lines() {
     assert!(frame.grid.row_text(3).contains("2. second error [E0002]"));
     assert!(frame.grid.row_text(4).contains("next"));
 }
-
 
 #[test]
 fn key_hints_anchor_clip_and_preserve_protected_rows() {
@@ -2302,7 +2309,6 @@ fn key_hints_anchor_clip_and_preserve_protected_rows() {
     assert!(!(0..3).any(|row| tiny.grid.row_text(row).contains("space f")));
 }
 
-
 #[test]
 fn key_hints_use_available_rows_and_stay_inside_a_lower_workspace() {
     let hints = crate::ui::render::KeyHintUiState {
@@ -2345,7 +2351,6 @@ fn key_hints_use_available_rows_and_stay_inside_a_lower_workspace() {
         );
     }
 }
-
 
 #[test]
 fn key_hints_measure_wide_labels_and_keep_borders_single_cell() {
@@ -2393,7 +2398,6 @@ fn key_hints_measure_wide_labels_and_keep_borders_single_cell() {
         }
     }
 }
-
 
 #[test]
 fn the_operation_bar_renders_the_phase_at_width_and_never_loses_cancellation() {
@@ -2475,7 +2479,6 @@ fn the_operation_bar_renders_the_phase_at_width_and_never_loses_cancellation() {
     );
 }
 
-
 #[test]
 fn operation_bar_keeps_actions_before_blockers_and_fits_display_cells() {
     use crate::config::AmbiguousWidth;
@@ -2510,7 +2513,6 @@ fn operation_bar_keeps_actions_before_blockers_and_fits_display_cells() {
         assert!(crate::ui::geometry::text_width(&row, ambiguous) <= 70);
     }
 }
-
 
 #[test]
 fn a_conflict_free_pause_still_shows_the_bar() {
@@ -2549,7 +2551,6 @@ fn a_conflict_free_pause_still_shows_the_bar() {
         "and offers the action that is now valid: {rows:?}"
     );
 }
-
 
 #[test]
 fn the_operation_bar_takes_no_focus_and_opens_nothing_by_itself() {
@@ -2616,7 +2617,6 @@ fn the_operation_bar_takes_no_focus_and_opens_nothing_by_itself() {
     );
 }
 
-
 #[test]
 fn the_selected_inspector_decides_the_narrow_strip_content_not_only_its_marker() {
     // "Selectable inspectors" is only real if the CONTENT follows the selection: an assertion that
@@ -2677,7 +2677,6 @@ fn the_selected_inspector_decides_the_narrow_strip_content_not_only_its_marker()
     );
 }
 
-
 #[test]
 fn a_breakpoint_condition_wraps_and_a_long_frame_ends_in_an_ellipsis() {
     use crate::ui::render::debug::DebugPanesUiState;
@@ -2714,17 +2713,6 @@ fn a_breakpoint_condition_wraps_and_a_long_frame_ends_in_an_ellipsis() {
         "{text}"
     );
 }
-use crate::ui::render::overlays::render_content_tab_line;
-use crate::ui::render::visual_rows::editor_line_number_digits;
-use crate::ui::render::visual_rows::git_sign_column;
-
-
-
-
-
-
-
-
 
 /// The column at which `needle` starts on the row where it is drawn, and that row.
 pub(super) fn drawn_at(frame: &super::Frame, needle: &str) -> Option<(u16, u16)> {
@@ -2747,7 +2735,6 @@ pub(super) fn drawn_at(frame: &super::Frame, needle: &str) -> Option<(u16, u16)>
     None
 }
 
-
 #[test]
 fn drawn_at_locates_display_cells_after_wide_and_combining_graphemes() {
     for wide in [false, true] {
@@ -2760,7 +2747,6 @@ fn drawn_at_locates_display_cells_after_wide_and_combining_graphemes() {
         assert_eq!(frame.grid.get(expected, 0).unwrap().symbol, "t");
     }
 }
-
 
 #[test]
 fn key_help_breaks_between_items_and_keeps_its_end() {
@@ -2775,7 +2761,6 @@ fn key_help_breaks_between_items_and_keeps_its_end() {
     );
     assert_eq!(rows, ["j/k move · Enter install", "r refresh · Esc close"]);
 }
-
 
 #[test]
 fn a_notification_too_long_to_show_points_at_the_messages_list() {
@@ -2793,7 +2778,6 @@ fn a_notification_too_long_to_show_points_at_the_messages_list() {
         "{text:#?}"
     );
 }
-
 
 #[test]
 fn the_status_line_puts_the_server_and_root_on_the_right() {
@@ -2837,7 +2821,6 @@ fn the_status_line_puts_the_server_and_root_on_the_right() {
     );
 }
 
-
 #[test]
 fn the_status_line_names_a_worktree_with_its_repository() {
     let mut state = EditorState::new(PathBuf::from("/tmp/repo/.worktree/feature"));
@@ -2860,7 +2843,6 @@ fn the_status_line_names_a_worktree_with_its_repository() {
     );
 }
 
-
 #[test]
 fn the_status_line_keeps_fields_from_running_into_the_position() {
     let mut state = EditorState::new(PathBuf::from("/tmp/a-rather-long-project-name"));
@@ -2873,7 +2855,6 @@ fn the_status_line_keeps_fields_from_running_into_the_position() {
     let status = frame.grid.row_text(4);
     assert!(status.trim_end().ends_with(" 1:1"), "{status:?}");
 }
-
 
 #[test]
 fn lsp_progress_is_animated_right_aligned_and_hides_transport_identity_slot5() {
@@ -2923,7 +2904,8 @@ fn lsp_progress_is_animated_right_aligned_and_hides_transport_identity_slot5() {
     };
     let loaded = crate::config::load_bundled_config();
     let frame = render(&state, &ui, &loaded.config, &loaded.dashboard, 80, 10);
-    let panel = crate::ui::render::explorer_panel_width(&loaded.config, 80).expect("explorer width");
+    let panel =
+        crate::ui::render::explorer_panel_width(&loaded.config, 80).expect("explorer width");
     let row = (0..10)
         .find(|row| frame.grid.row_text(*row).contains("ring (lib)"))
         .unwrap_or_else(|| {

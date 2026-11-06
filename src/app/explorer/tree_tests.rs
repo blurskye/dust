@@ -1,11 +1,10 @@
+use crate::files::RootIdentity;
+use crate::workspace::*;
 use std::fs;
 use std::path::Path;
-use crate::workspace::*;
 use tempfile::tempdir;
 
-
-use crate::app::explorer::tree::{ExplorerState,ExplorerChild,ExplorerKind,ExplorerLoadState};
-
+use crate::app::explorer::tree::{ExplorerChild, ExplorerKind, ExplorerLoadState, ExplorerState};
 
 fn workspace(root: &Path) -> WorkspaceState {
     WorkspaceState::new(
@@ -17,7 +16,6 @@ fn workspace(root: &Path) -> WorkspaceState {
     )
     .expect("workspace")
 }
-
 
 #[test]
 fn explorer_state_is_lazy_stable_and_rejects_stale_loads() {
@@ -100,7 +98,6 @@ fn explorer_state_is_lazy_stable_and_rejects_stale_loads() {
     assert_eq!(explorer.selected_node().map(|node| node.id), Some(root_id));
 }
 
-
 #[test]
 fn explorer_rejects_children_from_a_replaced_directory() {
     let root = tempdir().unwrap();
@@ -150,7 +147,6 @@ fn explorer_rejects_children_from_a_replaced_directory() {
     assert_eq!(explorer.selected_node().unwrap().path, child_path);
     assert_eq!(explorer.selected_node().unwrap().children.len(), 1);
 }
-
 
 #[test]
 fn explorer_replaces_large_listings_and_prunes_removed_expansions() {
@@ -207,7 +203,6 @@ fn explorer_replaces_large_listings_and_prunes_removed_expansions() {
     assert!(explorer.id_for_path(&root.path().join("new9999")).is_some());
     assert!(explorer.is_expanded(root_id));
 }
-
 
 #[test]
 fn explorer_child_expands_collapsed_directories_and_selects_only_visible_children() {
@@ -267,7 +262,6 @@ fn explorer_child_expands_collapsed_directories_and_selects_only_visible_childre
     assert_eq!(explorer.selected_id(), Some(directory));
 }
 
-
 #[test]
 fn explorer_keeps_multi_roots_selectable() {
     let first = tempdir().expect("first");
@@ -295,7 +289,6 @@ fn explorer_keeps_multi_roots_selectable() {
     explorer.move_selection(-1);
     assert_eq!(explorer.selected_id(), Some(roots[0]));
 }
-
 
 #[test]
 fn nested_explorer_roots_keep_their_identity_and_children() {
@@ -346,7 +339,6 @@ fn nested_explorer_roots_keep_their_identity_and_children() {
     assert_eq!(explorer.node(inner), Some(&before));
     assert!(explorer.node(outer).unwrap().children.is_empty());
 }
-
 
 #[test]
 fn explorer_refresh_preserves_a_later_collapse() {

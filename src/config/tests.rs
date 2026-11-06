@@ -35,10 +35,10 @@ use crate::config::load::setting_keys;
 
 use crate::config::load::setting_spans;
 
-use crate::config::load::source_fingerprint;
 use crate::config::AmbiguousWidth;
 use crate::config::ExplorerIconMode;
 use crate::config::LineNumbers;
+use crate::config::load::source_fingerprint;
 use crate::config::load_bundled_config;
 use crate::config::load_config;
 use crate::config::load_keymaps;
@@ -285,7 +285,8 @@ fn a_bad_task_is_named_with_what_to_fix() {
 #[test]
 fn migrated_config_spans_still_address_the_original_file() {
     let source = "[editor]\ntab_width = 3\n";
-    let loaded = crate::config::load::parse_config_source(std::path::Path::new("config.toml"), source);
+    let loaded =
+        crate::config::load::parse_config_source(std::path::Path::new("config.toml"), source);
     assert!(loaded.diagnostic.is_none(), "{:?}", loaded.diagnostic);
     let span = &loaded.user_setting_spans["editor.tab_width"];
     assert_eq!(&source[span.clone()], "3");
@@ -336,10 +337,17 @@ fn config_key_segments_decode_toml_quoted_keys() {
             vec!["dashboard", "action", "0", "label"],
         ),
     ] {
-        assert_eq!(crate::config::config_key_segments(key).unwrap(), expected, "{key}");
+        assert_eq!(
+            crate::config::config_key_segments(key).unwrap(),
+            expected,
+            "{key}"
+        );
     }
     for invalid in ["", "a..b", "a.", "\"unterminated", r#"a."\q""#] {
-        assert!(crate::config::config_key_segments(invalid).is_none(), "{invalid}");
+        assert!(
+            crate::config::config_key_segments(invalid).is_none(),
+            "{invalid}"
+        );
     }
 }
 
@@ -461,8 +469,11 @@ fn configuration_bundle(theme: &str, revision: u8, valid: bool) -> Configuration
             Some("keymaps.toml") => format!(
                 "[[keymap]]\nid='user.revision-{revision}'\ncontext='dashboard'\nkeys='x'\ncommand='file.new'\n"
             ),
-            Some("dashboard.toml") => include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/defaults/dashboard.toml"))
-                .replace("D U S T", &format!("dashboard-{revision}")),
+            Some("dashboard.toml") => include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/assets/defaults/dashboard.toml"
+            ))
+            .replace("D U S T", &format!("dashboard-{revision}")),
             Some(_) => BUNDLED_THEME
                 .replace("name = \"dust\"", &format!("name = \"{theme}\""))
                 .replace("#c9d1d9", if revision == 0 { "#c9d1d9" } else { "#c9d1d8" }),
@@ -476,10 +487,16 @@ fn configuration_bundle(theme: &str, revision: u8, valid: bool) -> Configuration
 fn captured_bundle_identity_exposes_aba_and_uses_the_same_text_for_spans() {
     let config = "[ui]\ntheme='night'\n";
     let keymaps_b = "[[keymap]]\nid='user.test.captured-b'\ncontext='dashboard'\nkeys='b'\ncommand='file.new'\n";
-    let dashboard =
-        include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/defaults/dashboard.toml")).replace("D U S T", "CAPTURED DASH");
-    let theme = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/themes/dust.toml"))
-        .replace("name = \"dust\"", "name = \"night\"");
+    let dashboard = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/assets/defaults/dashboard.toml"
+    ))
+    .replace("D U S T", "CAPTURED DASH");
+    let theme = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/assets/themes/dust.toml"
+    ))
+    .replace("name = \"dust\"", "name = \"night\"");
     let reads = Cell::new(0_usize);
     let bundle = capture_configuration_bundle_with("dust", |path| {
         reads.set(reads.get() + 1);
@@ -613,7 +630,10 @@ fn consistent_loader_rejects_transient_captures_even_when_before_and_after_match
         result.is_err(),
         "a transient capture must never be accepted"
     );
-    assert_eq!(loads.get(), crate::config::load::CONFIGURATION_CONSISTENCY_ATTEMPTS);
+    assert_eq!(
+        loads.get(),
+        crate::config::load::CONFIGURATION_CONSISTENCY_ATTEMPTS
+    );
 }
 
 #[test]
@@ -1342,14 +1362,20 @@ fn highlight_groups_resolve_like_neovim() {
         }
     }
     assert!(unresolved.is_empty(), "{}", unresolved.join("\n"));
-    let tokyo = crate::config::themes::bundled_named("tokyo-night").unwrap().theme;
+    let tokyo = crate::config::themes::bundled_named("tokyo-night")
+        .unwrap()
+        .theme;
     // `@function.method.call` links to `@function.method`, which links to `Function`.
     assert_eq!(
         colour(&tokyo, "@function.method.call"),
         Some(crate::config::ThemeColor::Rgb(0x7a, 0xa2, 0xf7))
     );
     let keyword = tokyo.highlight(Highlight::KEYWORD).unwrap();
-    assert!(keyword.attributes.contains(&crate::config::ThemeAttribute::Italic));
+    assert!(
+        keyword
+            .attributes
+            .contains(&crate::config::ThemeAttribute::Italic)
+    );
     assert_eq!(
         keyword.foreground_256,
         Some(crate::config::ThemeColor::Indexed(140))
@@ -1437,7 +1463,9 @@ fn a_saved_bundled_theme_restores_from_this_build() {
     assert!(catalog.diagnostics.is_empty(), "{:?}", catalog.diagnostics);
     assert_eq!(
         catalog.choices[0].theme,
-        crate::config::themes::bundled_named("tokyo-night").unwrap().theme
+        crate::config::themes::bundled_named("tokyo-night")
+            .unwrap()
+            .theme
     );
 }
 
@@ -1510,7 +1538,8 @@ fn every_setup_choice_sets_a_real_setting_to_a_valid_value() {
         for choice in &page.choices {
             for (key, value) in &choice.settings {
                 assert!(bundled.contains(key), "{} sets unknown {key}", choice.label);
-                let source = crate::config::catalog::edited_source("", key, Some(value.clone())).unwrap();
+                let source =
+                    crate::config::catalog::edited_source("", key, Some(value.clone())).unwrap();
                 crate::config::load::settings_from_source(&source)
                     .unwrap_or_else(|error| panic!("{}: {key}: {error}", choice.label));
             }
@@ -1601,7 +1630,8 @@ fn settings_catalog_lists_every_bundled_setting_once() {
 fn resetting_the_last_inline_setting_preserves_parent_comments() {
     for tail in ["", "wrap = true\n"] {
         let source = format!("# keep this\neditor = {{ tab_width = 2 }} # explanation\n{tail}");
-        let reset = crate::config::catalog::edited_source(&source, "editor.tab_width", None).unwrap();
+        let reset =
+            crate::config::catalog::edited_source(&source, "editor.tab_width", None).unwrap();
         assert_eq!(reset, format!("# keep this\n# explanation\n{tail}"));
     }
 }
@@ -1643,7 +1673,8 @@ fn a_setting_is_changed_in_place_and_reset_removes_it_but_keeps_its_comments() {
     assert_eq!(plain, "");
     let file = tempdir().unwrap();
     let path = file.path().join("dust").join("config.toml");
-    crate::config::write_user_setting(&path, "editor.tab_width", Some(toml::Value::Integer(2))).unwrap();
+    crate::config::write_user_setting(&path, "editor.tab_width", Some(toml::Value::Integer(2)))
+        .unwrap();
     assert_eq!(
         fs::read_to_string(&path).unwrap(),
         "[editor]\ntab_width = 2\n"
@@ -1671,16 +1702,20 @@ fn settings_save_rejects_growth_past_the_configuration_byte_ceiling() {
     ));
     source.push('\n');
     fs::write(&path, &source).unwrap();
-    let error =
-        crate::config::write_user_setting(&path, "editor.tab_width", Some(toml::Value::Integer(32)))
-            .unwrap_err();
+    let error = crate::config::write_user_setting(
+        &path,
+        "editor.tab_width",
+        Some(toml::Value::Integer(32)),
+    )
+    .unwrap_err();
     assert!(error.contains("byte ceiling"), "{error}");
     assert_eq!(fs::read_to_string(path).unwrap(), source);
 }
 
 #[test]
 fn deep_task_dependencies_are_validated_without_recursion() {
-    let task: crate::config::settings::TaskConfig = toml::from_str("executable = '/bin/true'").unwrap();
+    let task: crate::config::settings::TaskConfig =
+        toml::from_str("executable = '/bin/true'").unwrap();
     let mut config = load_bundled_config().config;
     for index in 0..50_000 {
         let mut task = task.clone();
@@ -1706,7 +1741,8 @@ fn settings_save_preserves_a_symlink() {
     let path = root.path().join("config.toml");
     fs::write(&target, "# preserved\n[editor]\ntab_width = 4\n").unwrap();
     std::os::unix::fs::symlink(&target, &path).unwrap();
-    crate::config::write_user_setting(&path, "editor.tab_width", Some(toml::Value::Integer(3))).unwrap();
+    crate::config::write_user_setting(&path, "editor.tab_width", Some(toml::Value::Integer(3)))
+        .unwrap();
     assert!(
         fs::symlink_metadata(&path)
             .unwrap()
@@ -1803,7 +1839,9 @@ fn installed_dust_overrides_and_saved_namesakes_keep_their_colours() {
     };
     let (reply, receiver) = std::sync::mpsc::sync_channel(1);
     crate::config::themes::discover(crate::config::themes::ThemeRead {
-        source: crate::config::themes::ThemeReadSource::Saved(crate::config::themes::snapshot(&choice).unwrap()),
+        source: crate::config::themes::ThemeReadSource::Saved(
+            crate::config::themes::snapshot(&choice).unwrap(),
+        ),
         cancelled: Default::default(),
         reply,
     });
@@ -1812,9 +1850,9 @@ fn installed_dust_overrides_and_saved_namesakes_keep_their_colours() {
 
 #[test]
 fn terminal_highlights_prefer_explicit_cterm_over_rgb_for_ansi16() {
+    use crate::config::Highlight;
     use crate::config::HighlightDefinition;
     use crate::config::ThemeColor;
-    use crate::config::Highlight;
     for (index, expected) in [(1, ThemeColor::DarkRed), (196, ThemeColor::Red)] {
         let mut theme: crate::config::ThemeConfig = toml::from_str(BUNDLED_THEME).unwrap();
         theme.highlights.insert(
@@ -1839,9 +1877,9 @@ fn terminal_highlights_prefer_explicit_cterm_over_rgb_for_ansi16() {
 
 #[test]
 fn markdown_code_recomputes_both_background_fallbacks() {
+    use crate::config::Highlight;
     use crate::config::HighlightDefinition;
     use crate::config::ThemeColor;
-    use crate::config::Highlight;
     for background in [ThemeColor::DarkRed, ThemeColor::Indexed(9)] {
         let mut theme: crate::config::ThemeConfig = toml::from_str(BUNDLED_THEME).unwrap();
         theme.styles.default.foreground = ThemeColor::Rgb(255, 255, 255);
@@ -1862,9 +1900,9 @@ fn markdown_code_recomputes_both_background_fallbacks() {
 
 #[test]
 fn terminal_highlights_keep_cterm_only_and_ansi_palette_colours() {
+    use crate::config::Highlight;
     use crate::config::HighlightDefinition;
     use crate::config::ThemeColor;
-    use crate::config::Highlight;
     for (index, expected) in [
         ThemeColor::Black,
         ThemeColor::DarkRed,

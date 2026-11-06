@@ -1,13 +1,13 @@
+use crate::app::commands::AppEffect;
 use crate::config::ConfigurationWorker;
 use crate::config::ConfigurationWorkerError;
 use crate::config::ConfigurationWorkerResult;
 use crate::config::LineNumbers;
 use crate::config::LoadedConfig;
-use crate::editor::input::InputContextRegistry;
-use crate::app::commands::AppEffect;
 use crate::editor::CommandInvocation;
 use crate::editor::CommandRegistry;
 use crate::editor::InvocationSource;
+use crate::editor::input::InputContextRegistry;
 use crate::plugins::PluginContributionCatalog;
 use crate::ui::DashboardAction;
 use std::collections::BTreeSet;
@@ -19,20 +19,20 @@ pub(in crate::app) mod keymaps;
 /// returns from, so the alias is gated rather than left to warn as an unused import.
 #[cfg(test)]
 pub(in crate::app) use keymaps::EffectiveBinding;
-pub(in crate::app) use keymaps::ReverseBinding;
-pub use resolve::ConfigurationSources;
 pub use keymaps::KeymapInspection;
 pub use keymaps::KeymapOperation;
-pub use resolve::ResolvedConfiguration;
 pub use keymaps::ResolvedKeyGroup;
 pub use keymaps::ResolvedKeymaps;
+pub(in crate::app) use keymaps::ReverseBinding;
+pub use resolve::ConfigurationSources;
+pub use resolve::ResolvedConfiguration;
 pub(in crate::app) mod resolve;
-pub use resolve::validate_loaded_configuration;
 pub(in crate::app) use resolve::configuration_generation_is_newer;
 pub(in crate::app) use resolve::configured_grapheme_width;
 pub(in crate::app) use resolve::configured_text_width;
 pub(in crate::app) use resolve::dashboard_actions;
 pub(in crate::app) use resolve::resolve_configuration;
+pub use resolve::validate_loaded_configuration;
 mod validation;
 pub(in crate::app) use validation::configuration_value;
 pub(in crate::app) use validation::invocation_fingerprint;
@@ -41,11 +41,11 @@ pub(in crate::app) use validation::validate_configured_commands;
 mod compile;
 pub(in crate::app) use compile::KeymapCompilation;
 pub(in crate::app) use compile::compile_keymap_entries;
-pub(in crate::app) use compile::display_key_sequence;
-pub(in crate::app) use compile::literal_key_sequence;
 pub use compile::compile_keymaps;
 pub use compile::compile_keymaps_with_plugin_catalog;
 pub use compile::compile_keymaps_with_plugin_index;
+pub(in crate::app) use compile::display_key_sequence;
+pub(in crate::app) use compile::literal_key_sequence;
 pub use compile::reload_keymaps;
 mod contributions;
 mod themes;
@@ -422,7 +422,11 @@ impl ConfigurationSession {
     }
     /// Enter zen mode, hiding line numbers, git signs and indent guides, or leave it and put
     /// them back. Leaving returns whether to reopen the explorer and undo zen's zoom.
-    pub(in crate::app) fn toggle_zen(&mut self, explorer_open: bool, zoomed: bool) -> Option<(bool, bool)> {
+    pub(in crate::app) fn toggle_zen(
+        &mut self,
+        explorer_open: bool,
+        zoomed: bool,
+    ) -> Option<(bool, bool)> {
         self.stamp = Arc::new(());
         let editor = &mut self.accepted.settings.editor;
         if let Some(zen) = self.zen.take() {

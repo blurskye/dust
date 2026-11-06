@@ -9,12 +9,12 @@ use crate::app::workspace::edits::OriginKey;
 use crate::editor::BufferId;
 use crate::editor::EditorState;
 use crate::editor::EditorWindowVersion;
+use crate::editor::WorkspaceEditSources;
 use crate::editor::text::BufferRevision;
 use crate::editor::text::ByteOffset;
 use crate::editor::text::ByteRange;
 use crate::editor::text::TextEdit;
 use crate::editor::text::TextVersion;
-use crate::editor::WorkspaceEditSources;
 use crate::plugins::PluginEditProposal;
 use crate::plugins::PluginExecution;
 use crate::plugins::PluginExecutionReply;
@@ -164,7 +164,11 @@ impl ConfirmationSource {
                 })
             })
     }
-    pub(in crate::app) fn navigation_current(&self, editor: &EditorState, windows: &WindowSession) -> bool {
+    pub(in crate::app) fn navigation_current(
+        &self,
+        editor: &EditorState,
+        windows: &WindowSession,
+    ) -> bool {
         self.navigation.as_ref().is_none_or(|navigation| {
             windows.navigation_current(navigation, &editor.window_version(), editor.active_view)
         })

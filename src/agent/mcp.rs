@@ -7,7 +7,7 @@
 //! then uses `DUST_AGENT_TAB`, which Dust sets for every agent it starts. Outside Dust, or in
 //! a subagent, the server offers no tools.
 
-use std::io::self;
+use std::io;
 
 use std::io::BufRead;
 

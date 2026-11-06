@@ -1,14 +1,11 @@
-use crate::app::tests::*;
 use crate::app::agent::commands::AgentCommand;
+use crate::app::tests::*;
 use crate::editor::EditorOperation;
 use crate::editor::EditorState;
 use crate::editor::EditorTransaction;
 use crate::editor::TransactionId;
 use crate::ui::render::overlays::CUSTOM_ICON;
 use crate::ui::render::overlays::SCRATCH_ICON;
-
-
-
 
 #[test]
 pub(in crate::app) fn perpendicular_docked_editor_resizes_do_nothing() {
@@ -34,7 +31,6 @@ pub(in crate::app) fn perpendicular_docked_editor_resizes_do_nothing() {
         assert_eq!(app.window_session.graph(), &graph);
     }
 }
-
 
 #[test]
 pub(in crate::app) fn directional_editor_resize_skips_hidden_splits_and_reaches_the_visible_dock() {
@@ -108,7 +104,6 @@ pub(in crate::app) fn directional_editor_resize_skips_hidden_splits_and_reaches_
     assert!(!app.ui.notification_error, "{:?}", app.ui.notification);
 }
 
-
 #[test]
 pub(in crate::app) fn notifications_expire_but_remain_available_in_bounded_history() {
     let (_app_dirs, mut app) = app();
@@ -148,7 +143,6 @@ pub(in crate::app) fn notifications_expire_but_remain_available_in_bounded_histo
     assert_eq!(picker.rows.last().unwrap().label, "notice 5");
 }
 
-
 #[test]
 pub(in crate::app) fn log_selection_survives_eviction_of_an_earlier_entry() {
     let (_app_dirs, mut app) = app();
@@ -167,7 +161,6 @@ pub(in crate::app) fn log_selection_survives_eviction_of_an_earlier_entry() {
     let picker = app.ui.picker.as_ref().unwrap();
     assert_eq!(picker.rows[picker.selected.unwrap()].label, "selected");
 }
-
 
 #[test]
 pub(in crate::app) fn normalized_mouse_position_invokes_real_cursor_placement() {
@@ -218,7 +211,6 @@ pub(in crate::app) fn normalized_mouse_position_invokes_real_cursor_placement() 
     assert_eq!(selection.head, crate::editor::text::ByteOffset(4));
 }
 
-
 pub(in crate::app) fn gate_document_worker(app: &mut App) -> std::sync::mpsc::Sender<()> {
     let (worker, gate) = crate::files::VfsWorker::start_gated_for_test(8);
     app.documents = crate::app::documents::DocumentSession::new(
@@ -232,7 +224,6 @@ pub(in crate::app) fn gate_document_worker(app: &mut App) -> std::sync::mpsc::Se
     );
     gate
 }
-
 
 #[test]
 pub(in crate::app) fn a_pending_open_reserves_its_save_destination() {
@@ -261,7 +252,6 @@ pub(in crate::app) fn a_pending_open_reserves_its_save_destination() {
     }
 }
 
-
 #[test]
 pub(in crate::app) fn an_alternate_spelling_of_the_current_file_uses_its_saved_bytes() {
     let (_app_dirs, mut app) = app();
@@ -285,7 +275,6 @@ pub(in crate::app) fn an_alternate_spelling_of_the_current_file_uses_its_saved_b
     wait_vfs(&mut app);
     assert_eq!(fs::read(&path).unwrap(), b"external");
 }
-
 
 #[cfg(unix)]
 #[test]
@@ -314,7 +303,6 @@ pub(in crate::app) fn save_alias_identity_is_resolved_by_the_worker_before_writi
     assert!(app.state.buffers[buffer].dirty);
     assert_eq!(app.state.buffers[buffer].path.as_ref(), Some(&original));
 }
-
 
 #[test]
 pub(in crate::app) fn saved_line_ending_policy_updates_the_live_buffer_without_losing_new_edits() {
@@ -359,7 +347,6 @@ pub(in crate::app) fn saved_line_ending_policy_updates_the_live_buffer_without_l
         assert!(!app.state.buffers[buffer].dirty);
     }
 }
-
 
 #[test]
 pub(in crate::app) fn shutdown_saves_normalized_text_with_resumable_undo_history() {
@@ -410,7 +397,6 @@ pub(in crate::app) fn shutdown_saves_normalized_text_with_resumable_undo_history
     }
 }
 
-
 #[test]
 pub(in crate::app) fn undo_history_failures_are_notified_and_fail_shutdown() {
     let (_app_dirs, mut app) = app();
@@ -442,7 +428,6 @@ pub(in crate::app) fn undo_history_failures_are_notified_and_fail_shutdown() {
     assert!(app.finish_shutdown_before(deadline).is_err());
 }
 
-
 #[test]
 pub(in crate::app) fn configured_file_format_policy_is_applied_at_save_boundary() {
     let (_app_dirs, mut app) = app();
@@ -461,7 +446,6 @@ pub(in crate::app) fn configured_file_format_policy_is_applied_at_save_boundary(
     assert!(!app.state.buffers[buffer].dirty);
     assert_eq!(fs::read(path).unwrap(), b"a\nb\n");
 }
-
 
 #[test]
 pub(in crate::app) fn dirty_buffer_close_save_discard_cancel_and_stale_ack_are_source_bound() {
@@ -537,7 +521,6 @@ pub(in crate::app) fn dirty_buffer_close_save_discard_cancel_and_stale_ack_are_s
     assert_eq!(std::fs::read_to_string(path).unwrap(), "discard me\n");
 }
 
-
 #[test]
 pub(in crate::app) fn dirty_close_save_waits_for_exact_vfs_ack_and_failure_preserves_arrangement() {
     let (_app_dirs, mut app) = app();
@@ -604,7 +587,6 @@ pub(in crate::app) fn dirty_close_save_waits_for_exact_vfs_ack_and_failure_prese
     );
 }
 
-
 #[test]
 pub(in crate::app) fn recovery_debounce_coalesces_revisions_and_clean_state_deletes_last_journal() {
     let (_app_dirs, mut app) = app();
@@ -649,7 +631,6 @@ pub(in crate::app) fn recovery_debounce_coalesces_revisions_and_clean_state_dele
     assert!(!app.recovery.path(buffer).exists());
 }
 
-
 #[test]
 pub(in crate::app) fn recovery_retention_keeps_all_live_dirty_journals() {
     let (_app_dirs, mut app) = app();
@@ -685,7 +666,6 @@ pub(in crate::app) fn recovery_retention_keeps_all_live_dirty_journals() {
     );
 }
 
-
 #[test]
 pub(in crate::app) fn recovery_save_and_close_removes_the_older_journal() {
     let (_app_dirs, mut app) = app();
@@ -717,7 +697,6 @@ pub(in crate::app) fn recovery_save_and_close_removes_the_older_journal() {
     assert!(!journal.exists());
 }
 
-
 #[test]
 pub(in crate::app) fn recovery_rewrites_the_path_without_a_text_revision_change() {
     let (_app_dirs, mut app) = app();
@@ -740,7 +719,6 @@ pub(in crate::app) fn recovery_rewrites_the_path_without_a_text_revision_change(
     assert_eq!(discovery.records.len(), 1);
     assert_eq!(discovery.records[0].1.path(), Some(renamed));
 }
-
 
 #[test]
 pub(in crate::app) fn shutdown_returns_the_reason_dirty_buffers_cannot_be_recovered() {
@@ -767,7 +745,6 @@ pub(in crate::app) fn shutdown_returns_the_reason_dirty_buffers_cannot_be_recove
         "{error}"
     );
 }
-
 
 #[test]
 pub(in crate::app) fn shutdown_retries_recovery_after_document_admission_drains() {
@@ -807,7 +784,6 @@ pub(in crate::app) fn shutdown_retries_recovery_after_document_admission_drains(
         app.state.buffers[buffer].text.to_string()
     );
 }
-
 
 #[test]
 pub(in crate::app) fn recovery_dialog_discards_one_journal_and_recovers_another() {
@@ -876,7 +852,6 @@ pub(in crate::app) fn recovery_dialog_discards_one_journal_and_recovers_another(
     assert_eq!(app.state.buffers[buffer].text.to_bytes(), b"saved\n");
 }
 
-
 #[test]
 pub(in crate::app) fn disabled_recovery_policy_schedules_no_work() {
     let (_app_dirs, mut app) = app();
@@ -893,7 +868,6 @@ pub(in crate::app) fn disabled_recovery_policy_schedules_no_work() {
     assert!(app.recovery.scheduled().is_empty());
     assert_eq!(app.documents.legacy_count(), 0);
 }
-
 
 #[test]
 pub(in crate::app) fn bundled_upper_h_and_l_cycle_open_buffers_in_normal_mode() {
@@ -920,7 +894,6 @@ pub(in crate::app) fn bundled_upper_h_and_l_cycle_open_buffers_in_normal_mode() 
     app.handle_key_in_context("editor.normal", KeyEvent::character('L'));
     assert_eq!(app.state.active_buffer_id(), Some(second));
 }
-
 
 #[test]
 pub(in crate::app) fn buffer_line_mouse_selects_and_right_click_closes_with_dirty_safety() {
@@ -1006,7 +979,6 @@ pub(in crate::app) fn buffer_line_mouse_selects_and_right_click_closes_with_dirt
     );
     assert_eq!(app.state.active_buffer_id(), Some(second));
 }
-
 
 #[test]
 pub(in crate::app) fn content_line_pins_reorder_middle_mouse_and_survive_bridge_reset() {
@@ -1114,7 +1086,6 @@ pub(in crate::app) fn content_line_pins_reorder_middle_mouse_and_survive_bridge_
     );
 }
 
-
 #[test]
 pub(in crate::app) fn content_line_diagnostics_custom_entries_and_idle_projection_are_pure() {
     let (_app_dirs, mut app) = app();
@@ -1138,8 +1109,7 @@ pub(in crate::app) fn content_line_diagnostics_custom_entries_and_idle_projectio
                     &app.state,
                     app.state.active_buffer_id().unwrap(),
                 ),
-                validity:
-                    crate::app::diagnostics::DiagnosticValidity::RequestedSnapshot,
+                validity: crate::app::diagnostics::DiagnosticValidity::RequestedSnapshot,
                 items: vec![crate::workspace::Diagnostic {
                     uri,
                     version: None,
@@ -1284,7 +1254,6 @@ pub(in crate::app) fn content_line_diagnostics_custom_entries_and_idle_projectio
     }
 }
 
-
 #[cfg(unix)]
 #[test]
 pub(in crate::app) fn ctrl_arrows_in_a_lone_editor_resize_the_agent_docked_beside_it() {
@@ -1335,16 +1304,12 @@ pub(in crate::app) fn ctrl_arrows_in_a_lone_editor_resize_the_agent_docked_besid
     assert_eq!(app.terminal_rect(agent).map(|rect| rect.width), Some(start));
 }
 
-
 #[test]
 pub(in crate::app) fn a_late_result_updates_its_own_record_and_leaves_a_newer_draft_untouched() {
-    use crate::debugger::DapControl;
-    use crate::debugger::DapEvent;
-    use crate::debugger::DapResponse;
-    use crate::debugger::DapStackFrame;
-    use crate::debugger::DapVariable;
     use crate::app::debugger::DebugResponse;
     use crate::app::debugger::tests::attach_adapter;
+    use crate::debugger::DapStackFrame;
+    use crate::debugger::DapVariable;
 
     let (_app_dirs, mut app) = app();
     let owner = &mut app.debugger_session;
@@ -1463,7 +1428,6 @@ pub(in crate::app) fn a_late_result_updates_its_own_record_and_leaves_a_newer_dr
     assert_eq!(prompt.cursor, draft.cursor);
 }
 
-
 #[test]
 pub(in crate::app) fn live_marks_follow_command_edits_before_saving_and_jumping() {
     let (_app_dirs, mut app) = app();
@@ -1500,7 +1464,6 @@ pub(in crate::app) fn live_marks_follow_command_edits_before_saving_and_jumping(
     );
     assert_eq!(app.persistence.marks()[0].location.anchor, 182);
 }
-
 
 #[test]
 pub(in crate::app) fn an_agent_edit_of_a_file_with_unsaved_changes_warns_in_its_approval() {
@@ -1547,7 +1510,6 @@ pub(in crate::app) fn an_agent_edit_of_a_file_with_unsaved_changes_warns_in_its_
     );
 }
 
-
 #[test]
 pub(in crate::app) fn a_saved_location_reads_as_file_and_line() {
     let (_app_dirs, mut app) = app();
@@ -1591,7 +1553,6 @@ pub(in crate::app) fn a_saved_location_reads_as_file_and_line() {
     );
 }
 
-
 #[test]
 pub(in crate::app) fn buffer_cycling_follows_the_buffer_line_order() {
     let (_app_dirs, mut app) = app();
@@ -1621,7 +1582,6 @@ pub(in crate::app) fn buffer_cycling_follows_the_buffer_line_order() {
     }
 }
 
-
 #[test]
 pub(in crate::app) fn nested_border_drag_uses_the_border_axis_on_both_sides() {
     fn drag(right: bool) -> u16 {
@@ -1642,9 +1602,7 @@ pub(in crate::app) fn nested_border_drag_uses_the_border_axis_on_both_sides() {
         let border = projection
             .borders
             .iter()
-            .find(|border| {
-                border.axis == crate::windows::TileAxis::Vertical && border.length > 100
-            })
+            .find(|border| border.axis == crate::windows::TileAxis::Vertical && border.length > 100)
             .unwrap();
         let (x, y) = (
             border.x + border.length * if right { 3 } else { 1 } / 4,
@@ -1674,7 +1632,6 @@ pub(in crate::app) fn nested_border_drag_uses_the_border_axis_on_both_sides() {
     assert_eq!(drag(false), drag(true));
 }
 
-
 #[test]
 pub(in crate::app) fn clipped_dirty_close_cannot_save_or_discard() {
     let (_app_dirs, mut app) = app();
@@ -1700,7 +1657,6 @@ pub(in crate::app) fn clipped_dirty_close_cannot_save_or_discard() {
     app.close_prompt();
     assert!(app.input.prompt().is_none());
 }
-
 
 #[test]
 pub(in crate::app) fn recovered_missing_file_can_be_saved_without_force() {
@@ -1729,7 +1685,6 @@ pub(in crate::app) fn recovered_missing_file_can_be_saved_without_force() {
     assert!(!app.state.buffers[buffer].dirty);
     assert!(!app.state.buffers[buffer].new_file);
 }
-
 
 #[test]
 pub(in crate::app) fn recovered_scratch_keeps_its_unsaved_baseline_and_durable_journal() {
@@ -1778,42 +1733,31 @@ pub(in crate::app) fn recovered_scratch_keeps_its_unsaved_baseline_and_durable_j
     app.invoke_mapped_command("history.undo");
     assert_eq!(app.state.buffers[buffer].text.to_string(), "");
 }
-use crate::app::documents::DocumentSession;
-use std::path::PathBuf;
-use std::time::Duration;
-use std::time::Instant;
-use crate::debugger::DapControl;
-use crate::debugger::DapEvent;
-use crate::debugger::DapResponse;
 use crate::editor::input::KeyEvent;
 use crate::editor::text::ByteOffset;
 use crate::editor::text::ByteRange;
 use crate::editor::text::TextBuffer;
+use std::path::PathBuf;
+use std::time::Duration;
+use std::time::Instant;
 
-
-
-
-use crate::files::VfsWorker;
-use crate::language::lsp::file_uri;
-use crate::persistence::PersistedLocation;
-use crate::process::PtyId;
-use crate::ui::PromptKind;
-use crate::ui::UiEvent;
-use crate::ui::editor_state_gutter_width;
-use crate::workspace::DiagnosticOwner;
-use thiserror::Error;
+use crate::app::App;
+use crate::app::AppEffect;
 use crate::app::startup::StartupTarget;
-use crate::windows::DockEdge;
-use crate::windows::WindowPlacement;
-use std::fs;
-use std::thread;
+use crate::process::PtyId;
 use crate::ui::ContentTabDiagnostic;
 use crate::ui::ContentTabDiagnosticSeverity;
 use crate::ui::ContentTabKind;
 use crate::ui::PtyScreen;
+use crate::ui::UiEvent;
 use crate::ui::active_pane_viewport;
 use crate::ui::render;
-use crate::app::App;
-use crate::app::AppEffect;
+use crate::windows::DockEdge;
+use crate::windows::WindowPlacement;
 use crate::workspace::DiagnosticSeverity;
+use std::fs;
+use std::thread;
 
+use crate::debugger::DapControl;
+use crate::debugger::DapEvent;
+use crate::debugger::DapResponse;

@@ -7,6 +7,8 @@ pub(crate) const UNIVERSAL_LAYOUT_WINDOW_CEILING: usize = 1_024;
 pub mod agent;
 /// Public command, configuration, persistence, tool, and WIT API versions.
 pub mod api;
+/// Application composition and ordered event loop.
+pub mod app;
 /// Injectable production and deterministic clock/ID providers.
 pub mod clock;
 /// Bundled/user TOML settings, keymaps, dashboard declarations, and platform paths.
@@ -15,10 +17,6 @@ pub mod config;
 pub mod debugger;
 /// Editing state, text, commands, input, transactions, startup, and live session composition.
 pub mod editor;
-/// Application composition and ordered event loop.
-pub mod app;
-/// Bounded asynchronous WebAssembly Component Model extension ownership.
-pub mod plugins;
 /// Bounded filesystem effects, checked atomic persistence, and recovery journals.
 pub mod files;
 /// Pull requests through the GitHub CLI.
@@ -27,6 +25,8 @@ pub mod forge;
 pub mod language;
 /// Versioned bounded session, navigation, and history persistence.
 pub mod persistence;
+/// Bounded asynchronous WebAssembly Component Model extension ownership.
+pub mod plugins;
 /// Bounded process supervision and protocol framing shared by built-in features.
 pub mod process;
 /// Opening files in a running Dust from programs it starts.
@@ -43,7 +43,7 @@ pub mod ui;
 /// Workspace roots, trust, diagnostics, pickers, Git, and revision-safe edit proposals.
 pub mod workspace;
 
-/// Window topology and contracts.
-pub mod windows;
 /// Git operations.
 pub mod git;
+/// Window topology and contracts.
+pub mod windows;

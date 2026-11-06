@@ -1,4 +1,3 @@
-use std::path::PathBuf;
 use crate::editor::EditorState;
 use crate::ui::render::CompletionItem;
 use crate::ui::render::DocumentationMarkupKind;
@@ -6,10 +5,10 @@ use crate::ui::render::DocumentationPopupKind;
 use crate::ui::render::DocumentationPopupState;
 use crate::ui::render::DocumentationSection;
 use crate::ui::render::UiState;
+use std::path::PathBuf;
 
 use crate::ui::render::composition_tests::editor_layout;
 use crate::ui::render::composition_tests::render;
-
 
 #[test]
 fn documentation_popup_preserves_lines_clamps_and_protects_status_row() {
@@ -57,7 +56,6 @@ fn documentation_popup_preserves_lines_clamps_and_protects_status_row() {
     assert!(screen.last().is_some_and(|line| line.contains("NORMAL")));
 }
 
-
 #[test]
 fn documentation_and_key_hints_stay_inside_an_offset_workspace() {
     use crate::ui::CellGrid;
@@ -88,7 +86,9 @@ fn documentation_and_key_hints_stay_inside_an_offset_workspace() {
             grid: CellGrid::new(80, 24),
             cursor: Some((10, cursor_y, crossterm::cursor::SetCursorStyle::SteadyBar)),
         };
-        crate::ui::render::documentation::render_documentation_popup(&mut frame, &popup, &config, bounds, None);
+        crate::ui::render::documentation::render_documentation_popup(
+            &mut frame, &popup, &config, bounds, None,
+        );
         assert!((12..23).any(|y| frame.grid.row_text(y).contains("Hover")));
         crate::ui::render::render_key_hints(
             &mut frame,
@@ -122,7 +122,6 @@ fn documentation_and_key_hints_stay_inside_an_offset_workspace() {
         }
     }
 }
-
 
 #[test]
 fn completion_documentation_never_covers_the_candidates_on_a_narrow_screen() {
@@ -177,7 +176,6 @@ fn completion_documentation_never_covers_the_candidates_on_a_narrow_screen() {
     }
     assert!(text.contains("#eff6ff"), "{text}");
 }
-
 
 #[test]
 fn completion_documentation_wraps_to_the_room_beside_a_wide_menu() {
@@ -237,14 +235,6 @@ fn completion_documentation_wraps_to_the_room_beside_a_wide_menu() {
     }
 }
 
-
-
-
-
-
-
-
-
 #[test]
 fn documentation_scroll_reaches_the_tail_of_a_single_wrapped_line() {
     let config = crate::config::load_bundled_config().config;
@@ -281,11 +271,15 @@ fn documentation_scroll_reaches_the_tail_of_a_single_wrapped_line() {
     );
     assert!((0..40).any(|y| frame.grid.row_text(y).contains("THE-END")));
     assert!(
-        crate::ui::render::documentation::wrap_ranges(&"·".repeat(6), 10, crate::config::AmbiguousWidth::Wide).len()
+        crate::ui::render::documentation::wrap_ranges(
+            &"·".repeat(6),
+            10,
+            crate::config::AmbiguousWidth::Wide
+        )
+        .len()
             > 1
     );
 }
-
 
 #[test]
 fn documentation_popup_clamps_scroll_after_widening() {
@@ -340,7 +334,6 @@ fn documentation_popup_clamps_scroll_after_widening() {
     );
     assert!((0..24).any(|y| frame.grid.row_text(y).contains("THE-END")));
 }
-
 
 #[test]
 fn documentation_popup_wraps_visible_replacements_and_keeps_wide_borders_inside() {

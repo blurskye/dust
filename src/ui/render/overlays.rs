@@ -1,29 +1,27 @@
-use crate::ui::geometry::cell_text_width;
-use crate::ui::render::COMPLETION_DETAIL_GAP;
-use crate::ui::render::COMPLETION_MAX_ROWS;
-use crate::ui::grid::CONTROL_CHARACTER_REPLACEMENT;
-use crate::ui::grid::ZERO_WIDTH_REPLACEMENT;
-use std::path::Path;
 use crate::config::AmbiguousWidth;
 use crate::config::Config;
 use crate::config::DashboardConfig;
 use crate::ui::CellGrid;
 use crate::ui::Style;
+use crate::ui::geometry::cell_text_width;
 use crate::ui::geometry::text_width;
-use crate::windows::WindowRect;
+use crate::ui::grid::CONTROL_CHARACTER_REPLACEMENT;
+use crate::ui::grid::Frame;
+use crate::ui::grid::ZERO_WIDTH_REPLACEMENT;
+use crate::ui::render::COMPLETION_DETAIL_GAP;
+use crate::ui::render::COMPLETION_MAX_ROWS;
 use crate::ui::render::ContentTabDiagnosticSeverity;
 use crate::ui::render::ContentTabEntry;
 use crate::ui::render::ContentTabIdentity;
 use crate::ui::render::DashboardAction;
-use crate::ui::grid::Frame;
 use crate::ui::render::LanguageCompletionState;
 use crate::ui::render::UiLspProgress;
 use crate::ui::render::editor::cursor_style;
+use crate::windows::WindowRect;
+use std::path::Path;
 
 use crate::ui::render::documentation::SWATCH_WIDTH;
 use crate::ui::render::documentation::color_swatch_style;
-
-
 
 pub(crate) const BUFFER_NAME_MAX_WIDTH: u16 = 32;
 
@@ -70,7 +68,6 @@ pub(crate) const SPINNER_INTERVAL_MS: u64 = 80;
 pub(crate) const LSP_PROGRESS_DONE: &str = "✓";
 
 pub(crate) const LSP_PROGRESS_DONE_TIMEOUT_MS: u64 = 3_000;
-
 
 /// Draws the menu and returns where it went, so its documentation can sit clear of it.
 pub(super) fn render_language_completion(
@@ -224,7 +221,6 @@ pub(super) fn render_language_completion(
     })
 }
 
-
 /// A small box on the row below the cursor, or above it on the bottom row.
 pub(super) fn render_lsp_loading(frame: &mut Frame, text: &str, config: &Config) {
     let Some((cursor_x, cursor_y, _)) = frame.cursor else {
@@ -249,7 +245,6 @@ pub(super) fn render_lsp_loading(frame: &mut Frame, text: &str, config: &Config)
         .grid
         .put_text(left.saturating_add(1), y, text, Style::DocumentationText);
 }
-
 
 pub(super) fn render_dashboard(
     root: &Path,
@@ -375,7 +370,6 @@ pub(super) fn render_dashboard(
     Frame { grid, cursor }
 }
 
-
 pub(super) fn center_text(
     grid: &mut CellGrid,
     y: u16,
@@ -390,7 +384,6 @@ pub(super) fn center_text(
     let x = grid.width().saturating_sub(text_width) / 2;
     grid.put_text(x, y, text, style);
 }
-
 
 pub(super) fn truncate_content_title(
     title: &str,
@@ -422,7 +415,6 @@ pub(super) fn truncate_content_title(
     suffix.reverse();
     format!("{ellipsis}{}", suffix.concat())
 }
-
 
 pub(super) fn render_lsp_progress(
     frame: &mut Frame,
@@ -512,7 +504,6 @@ pub(super) fn render_lsp_progress(
     }
 }
 
-
 pub(super) fn formatted_content_tab(
     entry: &ContentTabEntry,
     config: &Config,
@@ -540,7 +531,6 @@ pub(super) fn formatted_content_tab(
         },
     )
 }
-
 
 pub(super) fn content_tab_segments(
     entry: &ContentTabEntry,
@@ -586,7 +576,6 @@ pub(super) fn content_tab_width(entry: &ContentTabEntry, config: &Config) -> usi
         .sum()
 }
 
-
 #[must_use]
 pub fn content_tab_at_column(
     entries: &[ContentTabEntry],
@@ -631,7 +620,6 @@ pub fn content_tab_at_column(
     None
 }
 
-
 fn visible_content_tabs(
     widths: &[usize],
     active: usize,
@@ -665,7 +653,6 @@ fn visible_content_tabs(
     }
     start..end
 }
-
 
 pub(super) fn render_content_tab_line(
     grid: &mut CellGrid,
@@ -727,7 +714,6 @@ pub(super) fn render_content_tab_line(
     }
 }
 
-
 /// The workspace path for the dashboard: home as `~`, and the end kept when it is too wide.
 fn dashboard_path(root: &Path, width: usize, ambiguous_width: AmbiguousWidth) -> String {
     let mut text = root.display().to_string();
@@ -738,7 +724,20 @@ fn dashboard_path(root: &Path, width: usize, ambiguous_width: AmbiguousWidth) ->
     }
     truncate_content_title(&text, width, ambiguous_width)
 }
+use unicode_segmentation::UnicodeSegmentation;
 
+pub(crate) const NOTIFICATION_MAX_WIDTH: u16 = 120;
+
+pub(crate) fn error_notification_geometry(width: u16, height: u16) -> Option<WindowRect> {
+    let margin = 1_u16.min(width / 2);
+    let available = NOTIFICATION_MAX_WIDTH.min(width.saturating_sub(margin.saturating_mul(2)));
+    (available >= 4 && height >= 3).then_some(WindowRect {
+        x: width.saturating_sub(margin).saturating_sub(available),
+        y: 1.min(height.saturating_sub(3)),
+        width: available,
+        height: 3,
+    })
+}
 
 #[cfg(test)]
 mod tests {
@@ -759,25 +758,3 @@ mod tests {
         }
     }
 }
-use unicode_segmentation::UnicodeSegmentation;
-
-
-
-
-
-pub(crate) const NOTIFICATION_MAX_WIDTH: u16 = 120;
-
-
-
-pub(crate) fn error_notification_geometry(width: u16, height: u16) -> Option<WindowRect> {
-    let margin = 1_u16.min(width / 2);
-    let available = NOTIFICATION_MAX_WIDTH.min(width.saturating_sub(margin.saturating_mul(2)));
-    (available >= 4 && height >= 3).then_some(WindowRect {
-        x: width.saturating_sub(margin).saturating_sub(available),
-        y: 1.min(height.saturating_sub(3)),
-        width: available,
-        height: 3,
-    })
-}
-
-

@@ -60,11 +60,11 @@ mod settings;
 
 mod setup;
 
+pub(crate) mod documentation;
 pub(crate) mod picker;
-pub(crate) mod tools;
 pub(crate) mod plugins;
 pub(crate) mod prompt;
-pub(crate) mod documentation;
+pub(crate) mod tools;
 
 mod visual_rows;
 
@@ -75,7 +75,6 @@ pub(crate) use editor::workspace_title;
 
 #[cfg(test)]
 use overlays::content_tab_width;
-
 
 use picker::render_picker;
 
@@ -90,14 +89,9 @@ use tools::render_tool_menu;
 #[cfg(test)]
 use visual_rows::VisualRowSlice;
 
-
-
-
 pub use agent::AgentListRow;
 
-
 pub use agent::AgentPanelUi;
-
 
 pub use agent::transcript_lines;
 
@@ -163,18 +157,13 @@ pub use workspace::pane_viewports;
 
 pub use workspace::view_pane_viewport;
 
-
 use std::time::Instant;
-
 
 use crate::config::AmbiguousWidth;
 
-
 use crate::config::Config;
 
-
 use crate::config::DashboardConfig;
-
 
 use crate::config::PromptTextConfig;
 
@@ -196,12 +185,9 @@ use crate::windows::WindowId;
 
 use crate::windows::WindowRect;
 
-
 use unicode_segmentation::UnicodeSegmentation;
 
-
 use crate::ui::CellGrid;
-
 
 use crate::ui::Style;
 
@@ -218,7 +204,6 @@ pub(crate) const TERMINAL_PANEL_RESIZE_STEP: u16 = 2;
 pub(crate) const COMPLETION_MAX_ROWS: u16 = 12;
 
 pub(crate) const COMPLETION_DETAIL_GAP: u16 = 2;
-
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PromptKind {
@@ -241,7 +226,6 @@ pub enum PromptKind {
     ReplaceWith,
     SubstituteConfirm,
 }
-
 
 impl PromptKind {
     #[must_use]
@@ -291,7 +275,6 @@ impl PromptKind {
     }
 }
 
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CompletionItem {
     /// The kind's glyph, drawn before the label.
@@ -302,13 +285,11 @@ pub struct CompletionItem {
     pub color: Option<(u8, u8, u8)>,
 }
 
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ConfirmationChoice {
     Yes,
     No,
 }
-
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ConfirmationState {
@@ -319,7 +300,6 @@ pub struct ConfirmationState {
     pub negative_label: String,
     pub hint: String,
 }
-
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PromptState {
@@ -332,7 +312,6 @@ pub struct PromptState {
     pub completions: Vec<CompletionItem>,
     pub selected_completion: Option<usize>,
 }
-
 
 impl PromptState {
     #[must_use]
@@ -350,7 +329,6 @@ impl PromptState {
     }
 }
 
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DashboardAction {
     pub command: String,
@@ -358,7 +336,6 @@ pub struct DashboardAction {
     pub icon: String,
     pub key: Option<String>,
 }
-
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ToolMenuRow {
@@ -385,7 +362,6 @@ pub struct ToolMenuRow {
     pub update: Option<String>,
 }
 
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ToolRuntimeOption {
     pub source: String,
@@ -403,7 +379,6 @@ pub struct ToolRuntimeOption {
     pub uninstallable: bool,
 }
 
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ToolRuntimePickerState {
     pub server_id: String,
@@ -411,7 +386,6 @@ pub struct ToolRuntimePickerState {
     pub scroll: usize,
     pub options: Vec<ToolRuntimeOption>,
 }
-
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UiSyntaxSpan {
@@ -456,7 +430,6 @@ pub struct UiFold {
     pub collapsed: bool,
 }
 
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UiDiagnostic {
     pub path: std::path::PathBuf,
@@ -467,14 +440,12 @@ pub struct UiDiagnostic {
     pub message: String,
 }
 
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ExpandedDiagnosticState {
     pub path: std::path::PathBuf,
     pub line: usize,
     pub severities: Vec<crate::workspace::DiagnosticSeverity>,
 }
-
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DocumentationPopupKind {
@@ -486,13 +457,11 @@ pub enum DocumentationPopupKind {
     Notice,
 }
 
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DocumentationMarkupKind {
     PlainText,
     Markdown,
 }
-
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DocumentationSection {
@@ -504,7 +473,6 @@ pub struct DocumentationSection {
     pub spans: Vec<Vec<(std::ops::Range<usize>, crate::config::Highlight)>>,
 }
 
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DocumentationPopupState {
     pub kind: DocumentationPopupKind,
@@ -514,7 +482,6 @@ pub struct DocumentationPopupState {
     pub sections: Vec<DocumentationSection>,
     pub scroll: usize,
 }
-
 
 impl DocumentationPopupState {
     #[must_use]
@@ -552,10 +519,7 @@ impl DocumentationPopupState {
     fn at(
         &self,
         mut index: usize,
-    ) -> Option<(
-        &str,
-        &[(std::ops::Range<usize>, crate::config::Highlight)],
-    )> {
+    ) -> Option<(&str, &[(std::ops::Range<usize>, crate::config::Highlight)])> {
         for section in &self.sections {
             if let Some(heading) = &section.heading {
                 if index == 0 {
@@ -575,7 +539,6 @@ impl DocumentationPopupState {
     }
 }
 
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LanguageCompletionState {
     /// Columns already typed of the word being completed, so labels line up with it.
@@ -585,7 +548,6 @@ pub struct LanguageCompletionState {
     pub scroll: usize,
 }
 
-
 /// What a picker row is. A section header groups the entries under it and is drawn as a
 /// header rather than as an entry.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -594,7 +556,6 @@ pub enum PickerRowKind {
     Entry,
     Section,
 }
-
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PickerRow {
@@ -611,7 +572,6 @@ pub struct PickerRow {
     /// coloured independently of its neighbours.
     pub cells: Vec<PickerCell>,
 }
-
 
 impl PickerRow {
     /// A row rendered from its `label`, `detail` and `source` text, as every existing
@@ -647,7 +607,6 @@ impl PickerRow {
     }
 }
 
-
 /// How a cell's text sits inside its declared width.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum CellAlign {
@@ -655,7 +614,6 @@ pub enum CellAlign {
     Left,
     Right,
 }
-
 
 /// One column of a row: its own text, its own style and its own declared width.
 ///
@@ -669,7 +627,6 @@ pub struct PickerCell {
     pub width: u16,
     pub align: CellAlign,
 }
-
 
 impl PickerCell {
     #[must_use]
@@ -706,7 +663,6 @@ impl PickerCell {
     }
 }
 
-
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum PickerSurfaceKind {
     #[default]
@@ -728,7 +684,6 @@ pub enum PickerSurfaceKind {
     Grep,
 }
 
-
 /// What a preview pane draws.
 ///
 /// A preview carries the structure of what it previews rather than flattened text, so a diff
@@ -740,7 +695,6 @@ pub enum PickerPreviewBody {
     Diff(DiffPreview),
 }
 
-
 /// Plain preview lines with a starting line number and one emphasised line.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PickerTextPreview {
@@ -751,7 +705,6 @@ pub struct PickerTextPreview {
     language: Option<crate::language::syntax::SyntaxLanguage>,
     spans: Vec<Vec<(std::ops::Range<usize>, crate::config::Highlight)>>,
 }
-
 
 impl PickerTextPreview {
     #[must_use]
@@ -841,13 +794,11 @@ impl PickerTextPreview {
     }
 }
 
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PickerPreview {
     pub title: String,
     pub body: PickerPreviewBody,
 }
-
 
 impl PickerPreview {
     /// A preview of plain text lines.
@@ -877,7 +828,6 @@ impl PickerPreview {
     }
 }
 
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PickerUiState {
     /// Effective interaction mode and hints derived from the accepted keymaps.
@@ -904,7 +854,6 @@ pub struct PickerUiState {
     pub preview: Option<PickerPreview>,
 }
 
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PluginSurfaceRow {
     pub node: u64,
@@ -915,7 +864,6 @@ pub struct PluginSurfaceRow {
     pub focused: bool,
 }
 
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PluginSurfaceUiState {
     pub handle: u64,
@@ -925,7 +873,6 @@ pub struct PluginSurfaceUiState {
     pub rows: Vec<PluginSurfaceRow>,
 }
 
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PrivateSurfaceCell {
     pub x: u16,
@@ -934,7 +881,6 @@ pub struct PrivateSurfaceCell {
     pub continuation: bool,
     pub style: Style,
 }
-
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PrivateSurfaceUiState {
@@ -949,7 +895,6 @@ pub struct PrivateSurfaceUiState {
     pub focused: bool,
 }
 
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct KeyHintUiRow {
     pub next_key: String,
@@ -958,13 +903,11 @@ pub struct KeyHintUiRow {
     pub group: bool,
 }
 
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct KeyHintUiState {
     pub prefix: String,
     pub rows: Vec<KeyHintUiRow>,
 }
-
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ExplorerSegmentRole {
@@ -987,13 +930,11 @@ pub enum ExplorerSegmentRole {
     Diagnostic,
 }
 
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ExplorerUiSegment {
     pub text: String,
     pub role: ExplorerSegmentRole,
 }
-
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ExplorerUiRow {
@@ -1002,7 +943,6 @@ pub struct ExplorerUiRow {
     pub segments: Vec<ExplorerUiSegment>,
     pub right_segments: Vec<ExplorerUiSegment>,
 }
-
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ExplorerUiState {
@@ -1019,14 +959,12 @@ pub struct ExplorerUiState {
     pub searching: bool,
 }
 
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TerminalPanelMode {
     Input,
     Normal,
     Visual,
 }
-
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TerminalPhase {
@@ -1039,7 +977,6 @@ pub enum TerminalPhase {
     Unknown,
 }
 
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TerminalTabState {
     pub phase: TerminalPhase,
@@ -1049,9 +986,7 @@ pub struct TerminalTabState {
     pub exit_code: Option<u32>,
 }
 
-
 pub type TerminalSelection = ((usize, usize), (usize, usize), bool);
-
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TerminalPanelState {
@@ -1074,7 +1009,6 @@ pub struct TerminalPanelState {
     pub requested_height: u16,
 }
 
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct TerminalPanelGeometry {
     pub x: u16,
@@ -1086,7 +1020,6 @@ pub struct TerminalPanelGeometry {
     pub body_top: u16,
     pub body_height: u16,
 }
-
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ToolMenuState {
@@ -1100,10 +1033,8 @@ pub struct ToolMenuState {
     pub searching: bool,
 }
 
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ContentTabIdentity(pub ContentId);
-
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ContentTabKind {
@@ -1114,7 +1045,6 @@ pub enum ContentTabKind {
     PrivateCellSurface,
     ExternalTui,
 }
-
 
 impl From<ContentAdapterKind> for ContentTabKind {
     fn from(adapter: ContentAdapterKind) -> Self {
@@ -1129,7 +1059,6 @@ impl From<ContentAdapterKind> for ContentTabKind {
     }
 }
 
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ContentTabDiagnosticSeverity {
     Error,
@@ -1141,7 +1070,6 @@ pub struct ContentTabDiagnostic {
     pub severity: ContentTabDiagnosticSeverity,
     pub count: u16,
 }
-
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ContentTabEntry {
@@ -1156,14 +1084,12 @@ pub struct ContentTabEntry {
     pub closeable: bool,
 }
 
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct EditorWindowBinding {
     pub window: WindowId,
     pub pane: crate::editor::PaneId,
     pub view: crate::editor::ViewId,
 }
-
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ExplorerWindowUiState {
@@ -1173,14 +1099,12 @@ pub struct ExplorerWindowUiState {
     pub focused: bool,
 }
 
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct EditorWindowLayoutState {
     pub source_revision: u64,
     pub layout: TiledLayoutSnapshot,
     pub bindings: Vec<EditorWindowBinding>,
 }
-
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct NativeSurfaceWindowBinding {
@@ -1190,7 +1114,6 @@ pub struct NativeSurfaceWindowBinding {
     pub picker: Option<WindowId>,
 }
 
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CompositorLayoutState {
     pub source_revision: u64,
@@ -1199,12 +1122,10 @@ pub struct CompositorLayoutState {
     pub surfaces: NativeSurfaceWindowBinding,
 }
 
-
 enum PluginRenderable<'a> {
     Retained(&'a PluginSurfaceUiState),
     Private(&'a PrivateSurfaceUiState),
 }
-
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DebugSignKind {
@@ -1214,14 +1135,12 @@ pub enum DebugSignKind {
     Execution,
 }
 
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DebugSign {
     pub path: std::path::PathBuf,
     pub line: usize,
     pub kind: DebugSignKind,
 }
-
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum UiGitSignKind {
@@ -1230,14 +1149,12 @@ pub enum UiGitSignKind {
     Deleted,
 }
 
-
 /// A symbol the status line can name when the cursor is on one of its lines.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UiBreadcrumb {
     pub name: String,
     pub range: crate::editor::text::ByteRange,
 }
-
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct UiGitSign {
@@ -1251,7 +1168,6 @@ pub struct UiGitSign {
     pub staged: bool,
 }
 
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UiLspProgress {
     pub(crate) server_key: String,
@@ -1264,7 +1180,6 @@ pub struct UiLspProgress {
     pub(crate) completed_at: Option<Instant>,
 }
 
-
 /// What the operation bar shows. The actions are the ones VALID in the repository's real state,
 /// so a bar can never offer an action the repository would refuse.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1275,7 +1190,6 @@ pub struct OperationBarState {
     pub actions: Vec<String>,
     pub abort_binding: Option<String>,
 }
-
 
 impl OperationBarState {
     /// The compact indicator the statusline carries, so the state survives where the bar cannot
@@ -1362,14 +1276,12 @@ impl OperationBarState {
     }
 }
 
-
 #[derive(Clone, Debug)]
 pub struct FlashOverlay {
     pub view: crate::editor::ViewId,
     pub matches: Vec<crate::editor::text::ByteRange>,
     pub labels: Vec<(crate::editor::text::ByteOffset, char)>,
 }
-
 
 /// Text just yanked, drawn in the search colour until `until`, as LazyVim's highlight on yank.
 #[derive(Clone, Debug)]
@@ -1380,7 +1292,6 @@ pub struct YankHighlight {
     pub ranges: Vec<crate::editor::text::ByteRange>,
     pub until: std::time::Instant,
 }
-
 
 #[derive(Clone, Debug, Default)]
 pub struct UiState {
@@ -1459,7 +1370,6 @@ pub struct UiState {
     pub tutor: Option<TutorCard>,
 }
 
-
 /// One tutor step on a card at the bottom right, above the status line. Text in `backticks` is
 /// drawn as keys.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1482,7 +1392,6 @@ pub struct TutorCard {
     pub line: Option<(crate::editor::BufferId, usize)>,
 }
 
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PromptGeometry {
     pub left: u16,
@@ -1490,7 +1399,6 @@ pub struct PromptGeometry {
     pub width: u16,
     pub height: u16,
 }
-
 
 #[must_use]
 pub fn prompt_geometry(
@@ -1521,12 +1429,10 @@ pub fn prompt_geometry(
     }
 }
 
-
 #[derive(Clone, Debug)]
 pub(crate) struct ConfirmationLine {
     pub units: Vec<(String, u16)>,
 }
-
 
 #[derive(Clone, Debug)]
 pub(crate) struct ConfirmationLayout {
@@ -1534,7 +1440,6 @@ pub(crate) struct ConfirmationLayout {
     pub lines: Vec<ConfirmationLine>,
     pub fully_visible: bool,
 }
-
 
 fn confirmation_lines(text: &str, width: u16, config: &Config) -> (Vec<ConfirmationLine>, bool) {
     let policy = CellGrid::new_with_policy(
@@ -1586,7 +1491,6 @@ fn confirmation_lines(text: &str, width: u16, config: &Config) -> (Vec<Confirmat
     (lines, oversized)
 }
 
-
 #[must_use]
 pub(crate) fn confirmation_layout(
     terminal_width: u16,
@@ -1636,7 +1540,6 @@ pub(crate) fn confirmation_layout(
     }
 }
 
-
 #[must_use]
 pub fn prompt_geometry_for_state(
     terminal_width: u16,
@@ -1647,7 +1550,6 @@ pub fn prompt_geometry_for_state(
     confirmation_layout(terminal_width, terminal_height, config, prompt).geometry
 }
 
-
 #[must_use]
 pub fn confirmation_fully_visible(
     terminal_width: u16,
@@ -1657,7 +1559,6 @@ pub fn confirmation_fully_visible(
 ) -> bool {
     confirmation_layout(terminal_width, terminal_height, config, prompt).fully_visible
 }
-
 
 #[must_use]
 pub fn prompt_surface_dimensions(
@@ -1673,7 +1574,6 @@ pub fn prompt_surface_dimensions(
     (terminal_width, height)
 }
 
-
 /// Rows at the foot of the screen, under every dock: the status line, and above it the bar of a
 /// paused operation. The dashboard has neither.
 #[must_use]
@@ -1684,7 +1584,6 @@ pub fn screen_foot_rows(state: &EditorState, ui: &UiState, config: &Config, heig
     1 + u16::from(ui.operation_bar.is_some() && height > 2)
 }
 
-
 #[must_use]
 pub fn workspace_top_rows(state: &EditorState, ui: &UiState, config: &Config) -> u16 {
     let tab_line = state.tabs.len() > 1;
@@ -1692,7 +1591,6 @@ pub fn workspace_top_rows(state: &EditorState, ui: &UiState, config: &Config) ->
         && ui.content_tabs.len() > usize::from(config.ui.buffer_line.hide_when_single);
     u16::from(tab_line).saturating_add(u16::from(buffer_line))
 }
-
 
 #[must_use]
 pub fn terminal_panel_geometry(
@@ -1721,9 +1619,7 @@ pub fn terminal_panel_geometry(
     })
 }
 
-
 const NOTIFICATION_MAX_LINES: usize = 5;
-
 
 fn render_error_notification(
     frame: &mut Frame,
@@ -1734,7 +1630,8 @@ fn render_error_notification(
     height: u16,
     at_bottom: bool,
 ) {
-    let Some(mut rect) = crate::ui::render::overlays::error_notification_geometry(width, height) else {
+    let Some(mut rect) = crate::ui::render::overlays::error_notification_geometry(width, height)
+    else {
         return;
     };
     // A long message wraps instead of losing its end, which is usually the part that says why.
@@ -1802,7 +1699,6 @@ fn render_error_notification(
     }
 }
 
-
 fn wrap_plain_text(text: &str, width: usize, ambiguous: AmbiguousWidth) -> Vec<String> {
     text.split('\n')
         .flat_map(|line| {
@@ -1812,7 +1708,6 @@ fn wrap_plain_text(text: &str, width: usize, ambiguous: AmbiguousWidth) -> Vec<S
         })
         .collect()
 }
-
 
 /// Tutor text wrapped to `width`, each line a list of (piece, is a key) runs.
 fn wrap_card_text(text: &str, width: usize, ambiguous: AmbiguousWidth) -> Vec<Vec<(String, bool)>> {
@@ -1875,7 +1770,6 @@ fn wrap_card_text(text: &str, width: usize, ambiguous: AmbiguousWidth) -> Vec<Ve
     }
     lines
 }
-
 
 /// The tutor card at the bottom right, above the status line: the step's title in its border,
 /// the instruction and the tutor's commands. It moves to the top while the key hints fill the
@@ -2023,7 +1917,6 @@ fn render_tutor_card(
     }
 }
 
-
 #[must_use]
 pub fn render(
     state: &EditorState,
@@ -2035,7 +1928,6 @@ pub fn render(
 ) -> Frame {
     render_with_documentation_geometry(state, ui, config, dashboard, width, height).0
 }
-
 
 /// Also returns the documentation's visible and wrapped row counts for scrolling.
 pub(crate) fn render_with_documentation_geometry(
@@ -2554,40 +2446,35 @@ pub(crate) fn render_with_documentation_geometry(
     (frame, documentation_geometry)
 }
 
-
+#[cfg(test)]
+mod completion_tests;
 #[cfg(test)]
 mod composition_tests;
 #[cfg(test)]
-mod prompt_tests;
+mod dashboard_tests;
+#[cfg(test)]
+mod debug_tests;
 #[cfg(test)]
 mod documentation_tests;
 #[cfg(test)]
 mod editor_tests;
 #[cfg(test)]
-mod dashboard_tests;
-#[cfg(test)]
-mod completion_tests;
-#[cfg(test)]
-mod window_tests;
-#[cfg(test)]
-mod tab_tests;
-#[cfg(test)]
 mod explorer_tests;
-#[cfg(test)]
-mod plugin_tests;
 #[cfg(test)]
 mod picker_tests;
 #[cfg(test)]
+mod plugin_tests;
+#[cfg(test)]
+mod prompt_tests;
+#[cfg(test)]
+mod tab_tests;
+#[cfg(test)]
 mod terminal_tests;
 #[cfg(test)]
-mod debug_tests;
+mod window_tests;
 use crate::ui::grid::Frame;
-use crate::ui::diff::{DiffLineKind,DiffSpan,DiffLine,DiffHunk,DiffLayout,DiffRow,DiffSideCell,DiffSideRow,DiffPreview,DiffRowKind};
 
-use crate::ui::grid::{CONTROL_CHARACTER_REPLACEMENT,ZERO_WIDTH_REPLACEMENT};
-
-
-
+use crate::ui::grid::{CONTROL_CHARACTER_REPLACEMENT, ZERO_WIDTH_REPLACEMENT};
 
 #[derive(Clone, Debug, Default)]
 pub struct SurfaceContentGeometry {
@@ -2599,6 +2486,7 @@ pub struct SurfaceContentGeometry {
 
 use crate::ui::render::picker::PickerContentGeometry;
 
-
 #[cfg(test)]
 mod tools_tests;
+
+use crate::ui::diff::DiffPreview;

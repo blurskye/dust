@@ -1,9 +1,9 @@
 //! Private explorer I/O protocol. Public VfsRequest/VfsResult remain unchanged.
-use crate::files::vfs::roots_current;
 use crate::files::ExplorerMutation;
 use crate::files::RequestId;
-use crate::files::VfsError;
 use crate::files::RootIdentity;
+use crate::files::VfsError;
+use crate::files::vfs::roots_current;
 use std::fs;
 use std::io;
 use std::path::Path;
@@ -281,7 +281,11 @@ fn read_scoped_file(path: &Path, roots: &[RootIdentity]) -> Result<Vec<u8>, VfsE
             openat(&file, name, flags, Mode::empty()).map_err(|e| error(path, e.to_string()))?,
         );
     }
-    crate::files::vfs::read_open_file_with_ceiling(file, path, crate::files::recovery::DOCUMENT_BYTE_CEILING)
+    crate::files::vfs::read_open_file_with_ceiling(
+        file,
+        path,
+        crate::files::recovery::DOCUMENT_BYTE_CEILING,
+    )
 }
 
 impl ExplorerIo {
@@ -330,7 +334,8 @@ impl ExplorerIo {
                     };
                 }
                 match crate::files::vfs::canonical_path(&path).and_then(|canonical| {
-                    let roots = crate::files::vfs::participating_roots(&[&path], &[&canonical], &roots)?;
+                    let roots =
+                        crate::files::vfs::participating_roots(&[&path], &[&canonical], &roots)?;
                     roots_current(&roots)?;
                     Ok((canonical, roots))
                 }) {
@@ -372,9 +377,9 @@ impl ExplorerIo {
 
 #[cfg(test)]
 mod tests {
-    use crate::files::explorer_intent::*;
     use crate::files::VfsReply;
     use crate::files::VfsWorker;
+    use crate::files::explorer_intent::*;
     use std::time::Duration;
     use std::time::Instant;
     fn reply(worker: &VfsWorker) -> ExplorerIoReply {

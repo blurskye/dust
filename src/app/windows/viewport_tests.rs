@@ -1,5 +1,5 @@
-use crate::app::tests::*;
 use crate::app::FULL_PAGE_PERCENT;
+use crate::app::tests::*;
 use crate::ui::render::documentation::DOCUMENTATION_SCROLL_STEP;
 
 #[test]
@@ -120,7 +120,8 @@ pub(in crate::app) fn adversarial_grapheme_rows_make_render_mouse_and_reversed_p
 }
 
 #[test]
-pub(in crate::app) fn wrapped_visual_rows_drive_margin_paging_resize_folds_and_mouse_consistently() {
+pub(in crate::app) fn wrapped_visual_rows_drive_margin_paging_resize_folds_and_mouse_consistently()
+{
     let (_app_dirs, mut app) = app();
     app.window_session.observe_size((12, 8));
     {
@@ -933,8 +934,7 @@ pub(in crate::app) fn the_agent_panel_opens_narrow_and_ctrl_arrows_move_by_word_
         app.handle_configured_key(KeyEvent::character(key));
     }
     app.handle_configured_key("ctrl-left".parse::<KeyEvent>().expect("ctrl-left"));
-    let cursor =
-        |app: &App| app.ui.agent_panel.as_ref().map(|panel| panel.cursor);
+    let cursor = |app: &App| app.ui.agent_panel.as_ref().map(|panel| panel.cursor);
     assert_eq!(cursor(&app), Some(4));
     assert_eq!(border(&app).0, opened);
     app.handle_configured_key("ctrl-right".parse::<KeyEvent>().expect("ctrl-right"));
@@ -1420,33 +1420,23 @@ pub(in crate::app) fn mouse_hits_use_painted_inlay_replacement_widths() {
     }
 }
 
+use crate::app::App;
 use crate::app::persistence::capture_persisted_layout;
 use crate::app::persistence::restore::build_restored_layout;
-use std::path::PathBuf;
 use crate::editor::input::KeyEvent;
 use crate::editor::text::ByteOffset;
 use crate::editor::text::ByteRange;
 use crate::editor::text::TextBuffer;
-use crate::editor::EditorMode;
-use crate::editor::EditorState;
-use crate::language::lsp::LspMarkupContent;
-use crate::language::lsp::LspMarkupKind;
 use crate::ui::DocumentationPopupKind;
-use crate::ui::UiEvent;
+use crate::ui::ExplorerUiState;
 use crate::ui::UiFold;
-use crate::ui::UiInlayHint;
 use crate::ui::VisualRowAnchor;
 use crate::ui::VisualRowModel;
-use crate::ui::active_editor_pane_viewport;
-use crate::ui::explorer_panel_width;
-use crate::ui::snap_display_column;
-use thiserror::Error;
-use std::collections::HashMap;
-use crate::ui::ExplorerUiState;
 use crate::ui::active_pane_viewport;
+use crate::ui::explorer_panel_width;
 use crate::ui::render;
-use crate::app::App;
-
+use crate::ui::snap_display_column;
+use std::collections::HashMap;
+use std::path::PathBuf;
 
 use crate::workspace::DiagnosticSeverity;
-

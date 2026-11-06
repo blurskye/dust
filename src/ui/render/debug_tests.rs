@@ -1,7 +1,3 @@
-
-
-
-
 #[test]
 fn the_debug_arrangement_is_coordinated_and_the_source_is_never_squeezed_out() {
     // W-25: "sessions, threads, stack and breakpoints on one side, the dominant source in the

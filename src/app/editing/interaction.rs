@@ -1,40 +1,40 @@
+use crate::app::App;
 use crate::app::FULL_PAGE_PERCENT;
 use crate::app::HALF_PAGE_PERCENT;
 use crate::app::MACRO_RECURSION_LIMIT;
 use crate::app::MACRO_STEP_LIMIT;
 use crate::app::REPEAT_STEP_LIMIT;
-use crate::ui::render::SCRATCH_LABEL;
 use crate::app::configuration::configured_grapheme_width;
 use crate::app::configuration::configured_text_width;
-use crate::editor::text::ByteOffset;
-use crate::editor::text::ByteRange;
+use crate::app::windows::NativeDescriptions;
 use crate::editor::CommandInvocation;
-use crate::editor::text::DisplayWidthPolicy;
 use crate::editor::EditorMode;
 use crate::editor::EditorOperation;
 use crate::editor::EditorTransaction;
-use crate::editor::input::InputAction;
-use crate::app::App;
-use crate::app::windows::NativeDescriptions;
 use crate::editor::Precondition;
-use crate::editor::text::TextBuffer;
 use crate::editor::TransactionId;
 use crate::editor::UndoPolicy;
+use crate::editor::ViewId;
+use crate::editor::input::InputAction;
+use crate::editor::text::ByteOffset;
+use crate::editor::text::ByteRange;
+use crate::editor::text::DisplayWidthPolicy;
+use crate::editor::text::TextBuffer;
 use crate::ui::VisualRowAnchor;
 use crate::ui::VisualRowModel;
 use crate::ui::active_editor_pane_viewport;
 use crate::ui::editor_state_content_width;
-use crate::editor::text::BufferRevision;
-use std::time::Duration;
-use crate::editor::ViewId;
+use crate::ui::render::SCRATCH_LABEL;
 use crate::ui::snap_display_column;
 use crate::ui::snap_display_column_forward;
 
 use crate::app::syntax::nth_non_blank;
 
 impl App {
-
-    pub(in crate::app) fn process_grammar_input(&mut self, input: crate::editor::input::GrammarInput) {
+    pub(in crate::app) fn process_grammar_input(
+        &mut self,
+        input: crate::editor::input::GrammarInput,
+    ) {
         let mode = self
             .state
             .active_view
@@ -79,8 +79,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn normalized_visual_repeat(
         &self,
         invocation: &CommandInvocation,
@@ -102,8 +100,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn repeat_last_change(&mut self, count: Option<std::num::NonZeroU64>) {
         let limit = REPEAT_STEP_LIMIT;
         match self.input.repeat_plan(limit, count) {
@@ -125,8 +121,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn replay_macro(&mut self, requested: char, count: u64) -> bool {
         if self.clipboard.waiting() {
             self.clipboard
@@ -160,8 +154,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(super) fn cancel_macro_replay(&mut self) {
         for _ in self.macro_replays.drain(..) {
             self.input.finish_macro_replay();
@@ -170,8 +162,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(super) fn continue_macro_replay(&mut self) -> bool {
         if self.macro_running || self.clipboard.waiting() {
             return true;
@@ -215,8 +205,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn apply_authoritative_editor_transaction(
         &mut self,
         transaction: &EditorTransaction,
@@ -226,7 +214,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn commit_editor_transaction(
         &mut self,
         transaction: &EditorTransaction,
@@ -250,7 +237,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn commit_editor_draft(
         &mut self,
         candidate: crate::editor::EditorDraft,
@@ -322,8 +308,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn scroll_view(&mut self, kind: &str, count: u64) {
         self.reconcile_editor_windows();
         let Some(view_id) = self.state.active_view else {
@@ -481,8 +465,6 @@ impl App {
 }
 
 impl App {
-
-
     /// Vim never leaves the Normal-mode cursor on the empty line after a final newline; `dd`
     /// on the last line lands on the line above instead.
     /// Where views stand on lines a formatter is replacing. The edit alone would send each to
@@ -518,7 +500,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn restore_view_positions(
         &mut self,
         positions: Vec<(
@@ -561,7 +542,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn keep_cursor_off_final_newline(&mut self) {
         let Some(view_id) = self.state.active_view else {
             return;
@@ -571,9 +551,10 @@ impl App {
 }
 
 impl App {
-
-
-    pub(in crate::app) fn keep_view_cursor_off_final_newline(&mut self, view_id: crate::editor::ViewId) {
+    pub(in crate::app) fn keep_view_cursor_off_final_newline(
+        &mut self,
+        view_id: crate::editor::ViewId,
+    ) {
         let Some(view) = self.state.views.get(view_id) else {
             return;
         };
@@ -597,8 +578,6 @@ impl App {
 }
 
 impl App {
-
-
     /// Whether yanks and pastes go through the system clipboard (`clipboard = "unnamedplus"`).
     pub(in crate::app) fn clipboard_shared(&self) -> bool {
         self.configuration.settings().editor.registers.clipboard
@@ -607,8 +586,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn process_clipboard_paste(&mut self) {
         let source = self.state.window_version();
         let enabled = self.state.policy.registers_enabled;
@@ -641,7 +618,9 @@ impl App {
             // Commands expanded by this input must finish before later queued input.
             let later = self.clipboard.take_deferred();
             match input {
-                crate::app::editing::clipboard::DeferredInput::Event(event) => self.handle_event(event),
+                crate::app::editing::clipboard::DeferredInput::Event(event) => {
+                    self.handle_event(event)
+                }
                 crate::app::editing::clipboard::DeferredInput::Invocation(invocation) => {
                     self.invoke(invocation)
                 }
@@ -655,9 +634,11 @@ impl App {
 }
 
 impl App {
-
     /// Light up what a transaction yanked for a moment, as LazyVim does.
-    pub(in crate::app) fn highlight_yank(&mut self, transaction: &crate::editor::EditorTransaction) {
+    pub(in crate::app) fn highlight_yank(
+        &mut self,
+        transaction: &crate::editor::EditorTransaction,
+    ) {
         const SHOWN: std::time::Duration = std::time::Duration::from_millis(150);
         let Some((view, ranges)) =
             transaction
@@ -690,8 +671,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn update_yank_highlight(&mut self) {
         if self
             .ui
@@ -705,7 +684,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn set_mode(&mut self, mode: EditorMode) {
         if let Some(view) = self.state.active_view {
             self.set_specific_mode(view, mode);
@@ -714,8 +692,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn set_specific_mode(&mut self, view: ViewId, mode: EditorMode) {
         let transaction = EditorTransaction::new(self.transaction_id())
             .with_precondition(Precondition::ViewExists(view))
@@ -728,8 +704,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn ensure_cursor_visible(&mut self) {
         self.reconcile_editor_windows();
         self.sync_flash_ui();
@@ -918,8 +892,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn transaction_id(&mut self) -> TransactionId {
         let id = TransactionId(self.next_transaction);
         self.next_transaction = self.next_transaction.saturating_add(1);

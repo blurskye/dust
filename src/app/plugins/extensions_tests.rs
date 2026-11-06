@@ -325,7 +325,8 @@ pub(in crate::app) fn delayed_confirmation_cannot_replace_a_newer_native_interac
 }
 
 #[test]
-pub(in crate::app) fn delayed_initial_confirmation_reply_gets_terminal_failure_after_config_reload() {
+pub(in crate::app) fn delayed_initial_confirmation_reply_gets_terminal_failure_after_config_reload()
+{
     let (_app_dirs, mut app) = app();
     let (manager, fixture) = crate::plugins::ExecutionFixture::new(8);
     app.extension.fixture_manager(manager);
@@ -857,7 +858,10 @@ pub(in crate::app) fn confirmation_capacity_is_reserved_before_the_guest_call() 
 pub(in crate::app) fn real_component_observes_queue_full_from_aggregate_confirmation_ownership() {
     use sha2::Digest;
     use sha2::Sha256;
-    let core = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/retained-guest/retained-guest.core.wasm"));
+    let core = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/retained-guest/retained-guest.core.wasm"
+    ));
     let component = wit_component::ComponentEncoder::default()
         .module(core)
         .expect("fixture metadata")
@@ -866,10 +870,8 @@ pub(in crate::app) fn real_component_observes_queue_full_from_aggregate_confirma
         .expect("component");
     let store = tempfile::tempdir().expect("plugin store");
     fs::write(store.path().join("fixture.wasm"), &component).unwrap();
-    let manifest = crate::app::plugins::fixture_manifest(format!(
-        "{:x}",
-        Sha256::digest(&component)
-    ));
+    let manifest =
+        crate::app::plugins::fixture_manifest(format!("{:x}", Sha256::digest(&component)));
     write_plugin_manifest(store.path(), &manifest);
 
     let (_app_dirs, mut app) = app_with_plugin_queue(64);
@@ -995,10 +997,14 @@ pub(in crate::app) fn real_component_observes_queue_full_from_aggregate_confirma
 }
 
 #[test]
-pub(in crate::app) fn packaged_production_02_component_clone_refusal_never_enqueues_a_guest_callback() {
+pub(in crate::app) fn packaged_production_02_component_clone_refusal_never_enqueues_a_guest_callback()
+ {
     use sha2::Digest;
     use sha2::Sha256;
-    let core = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/retained-guest/retained-guest.core.wasm"));
+    let core = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/retained-guest/retained-guest.core.wasm"
+    ));
     assert_eq!(
         format!("{:x}", Sha256::digest(core)),
         "9f17af443ca9a4150f940656ef2edb11a48c1d59b7430d4e029f1b1cf951bc48"
@@ -1011,10 +1017,8 @@ pub(in crate::app) fn packaged_production_02_component_clone_refusal_never_enque
         .expect("component");
     let store = tempfile::tempdir().expect("plugin store");
     fs::write(store.path().join("fixture.wasm"), &component).unwrap();
-    let manifest = crate::app::plugins::fixture_manifest(format!(
-        "{:x}",
-        Sha256::digest(&component)
-    ));
+    let manifest =
+        crate::app::plugins::fixture_manifest(format!("{:x}", Sha256::digest(&component)));
     write_plugin_manifest(store.path(), &manifest);
 
     for (command, private) in [("drive", false), ("private", true)] {
@@ -1173,7 +1177,10 @@ pub(in crate::app) fn packaged_production_02_component_clone_refusal_never_enque
 pub(in crate::app) fn packaged_real_guest_confirmation_updates_its_custom_view() {
     use sha2::Digest;
     use sha2::Sha256;
-    let core = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/retained-guest/retained-guest.core.wasm"));
+    let core = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/retained-guest/retained-guest.core.wasm"
+    ));
     let component = wit_component::ComponentEncoder::default()
         .module(core)
         .expect("fixture metadata")
@@ -1182,10 +1189,8 @@ pub(in crate::app) fn packaged_real_guest_confirmation_updates_its_custom_view()
         .expect("component");
     let store = tempfile::tempdir().expect("plugin store");
     fs::write(store.path().join("fixture.wasm"), &component).unwrap();
-    let manifest = crate::app::plugins::fixture_manifest(format!(
-        "{:x}",
-        Sha256::digest(&component)
-    ));
+    let manifest =
+        crate::app::plugins::fixture_manifest(format!("{:x}", Sha256::digest(&component)));
     write_plugin_manifest(store.path(), &manifest);
 
     let (_app_dirs, mut app) = app();
@@ -1298,9 +1303,7 @@ pub(in crate::app) fn packaged_real_guest_confirmation_updates_its_custom_view()
         ("escape", "Confirmed: Cancelled"),
     ] {
         let outcome_deadline = Instant::now() + Duration::from_secs(4);
-        app.apply_retained_ui_interaction(
-            crate::app::plugins::PluginUiInteraction::Activate,
-        );
+        app.apply_retained_ui_interaction(crate::app::plugins::PluginUiInteraction::Activate);
         while app.input.prompt().is_none() {
             app.process_plugin_events();
             assert!(Instant::now() < outcome_deadline, "later request timed out");
@@ -1463,15 +1466,14 @@ pub(in crate::app) fn plugin_host_events_are_snapshot_owned_coalesced_and_idle()
     manifest
         .capabilities
         .insert(crate::plugins::PluginCapability::EventSubscriptions);
-    manifest.contributions.subscriptions =
-        vec![crate::plugins::PluginSubscriptionContribution {
-            id: "plugin.demo.subscription.buffer".into(),
-            kind: crate::plugins::PluginSubscriptionKind::BufferSummaryChanged,
-            maximum_queued: 8,
-            maximum_rate_per_second: 120,
-            coalesce: true,
-            provenance: None,
-        }];
+    manifest.contributions.subscriptions = vec![crate::plugins::PluginSubscriptionContribution {
+        id: "plugin.demo.subscription.buffer".into(),
+        kind: crate::plugins::PluginSubscriptionKind::BufferSummaryChanged,
+        maximum_queued: 8,
+        maximum_rate_per_second: 120,
+        coalesce: true,
+        provenance: None,
+    }];
     let index =
         crate::plugins::index_manifest_contributions(&manifest, 77, "event manifest".into())
             .expect("event index");
@@ -1725,7 +1727,8 @@ pub(in crate::app) fn plugin_picker_provider_uses_the_generic_presenter_and_canc
 }
 
 #[test]
-pub(in crate::app) fn private_plugin_surface_geometry_snapshot_and_idle_projection_are_application_owned() {
+pub(in crate::app) fn private_plugin_surface_geometry_snapshot_and_idle_projection_are_application_owned()
+ {
     let (_app_dirs, mut app) = app();
     app.state
         .open_text(TextBuffer::from_text("editor"), None)
@@ -1843,9 +1846,8 @@ pub(in crate::app) fn retained_interaction_commands_use_host_focus_scroll_and_mo
     app.set_dashboard_visibility(false);
     app.reconcile_editor_windows();
     let manifest = plugin_manifest("demo", "plugin.demo.keymap.dashboard", "x y");
-    let index =
-        crate::plugins::index_manifest_contributions(&manifest, 77, "manifest.toml".into())
-            .expect("index");
+    let index = crate::plugins::index_manifest_contributions(&manifest, 77, "manifest.toml".into())
+        .expect("index");
     app.extension
         .fixture_contribution(index.clone())
         .expect("catalog");
@@ -2094,12 +2096,9 @@ pub(in crate::app) fn stale_generation_cleanup_preserves_replacement_ui_events()
     app.extension.queue_storage(storage_result(78, 2));
     app.extension.install_storage("demo", PluginLoadId(78));
     let manifest = plugin_manifest("demo", "plugin.demo.keymap.dashboard", "x y");
-    let replacement = crate::plugins::index_manifest_contributions(
-        &manifest,
-        78,
-        "replacement manifest".into(),
-    )
-    .expect("replacement index");
+    let replacement =
+        crate::plugins::index_manifest_contributions(&manifest, 78, "replacement manifest".into())
+            .expect("replacement index");
     app.extension
         .fixture_contribution(replacement)
         .expect("replacement catalog");
@@ -2216,7 +2215,8 @@ pub(in crate::app) fn expected_index_failure_before_sibling_index_aborts_the_com
 }
 
 #[test]
-pub(in crate::app) fn deferred_user_plugin_move_compiles_after_index_then_falls_back_after_activation_failure() {
+pub(in crate::app) fn deferred_user_plugin_move_compiles_after_index_then_falls_back_after_activation_failure()
+ {
     let (_app_dirs, mut app) = app();
     let root = tempfile::tempdir().expect("plugin store");
     write_plugin_manifest(
@@ -2268,7 +2268,8 @@ pub(in crate::app) fn deferred_user_plugin_move_compiles_after_index_then_falls_
         },
     ]);
     let (configuration, diagnostic) =
-        crate::app::configuration::resolve_configuration(&app.commands, loaded, true).expect("deferred config");
+        crate::app::configuration::resolve_configuration(&app.commands, loaded, true)
+            .expect("deferred config");
     assert!(diagnostic.is_none());
     assert!(configuration.deferred_plugin_keymaps);
     assert!(configuration.settings.windows.rules.is_empty());
@@ -2393,8 +2394,9 @@ pub(in crate::app) fn enabled_plugin_references_are_deferred_but_unknown_namespa
             desc: None,
         },
     ]);
-    let (resolved, diagnostic) = crate::app::configuration::resolve_configuration(&app.commands, loaded, true)
-        .expect("deferred plugin references");
+    let (resolved, diagnostic) =
+        crate::app::configuration::resolve_configuration(&app.commands, loaded, true)
+            .expect("deferred plugin references");
     assert!(diagnostic.is_none());
     assert!(resolved.deferred_plugin_keymaps);
     assert!(resolved.expected_plugin_indexes.contains("demo"));
@@ -2439,7 +2441,9 @@ pub(in crate::app) fn enabled_plugin_references_are_deferred_but_unknown_namespa
         pass_through: false,
         desc: None,
     });
-    assert!(crate::app::configuration::resolve_configuration(&app.commands, unknown, true).is_err());
+    assert!(
+        crate::app::configuration::resolve_configuration(&app.commands, unknown, true).is_err()
+    );
     let mut unknown_window = crate::config::load_bundled_config();
     unknown_window
         .config
@@ -2449,7 +2453,10 @@ pub(in crate::app) fn enabled_plugin_references_are_deferred_but_unknown_namespa
             content_type: "plugin.unknown.panel".into(),
             placement: crate::config::WindowPlacementConfig::Hidden,
         });
-    assert!(crate::app::configuration::resolve_configuration(&app.commands, unknown_window, true).is_err());
+    assert!(
+        crate::app::configuration::resolve_configuration(&app.commands, unknown_window, true)
+            .is_err()
+    );
 
     let (_running_dirs, mut running) = self::app();
     let previous = running.configuration.settings().plugins.clone();
@@ -2471,7 +2478,10 @@ pub(in crate::app) fn enabled_plugin_references_are_deferred_but_unknown_namespa
 
 #[test]
 pub(in crate::app) fn deferred_batch_abort_and_worker_loss_clear_static_ownership() {
-    pub(in crate::app) fn index(owner: &str, generation: u64) -> crate::plugins::PluginContributionIndex {
+    pub(in crate::app) fn index(
+        owner: &str,
+        generation: u64,
+    ) -> crate::plugins::PluginContributionIndex {
         crate::plugins::PluginContributionIndex {
             owner: owner.into(),
             version: "1.0.0".into(),
@@ -2565,8 +2575,7 @@ pub(in crate::app) fn provider_chunks_use_the_revision_after_virtual_publication
         deadline_milliseconds: 30_000,
         provenance: None,
     }];
-    let index =
-        crate::plugins::index_manifest_contributions(&manifest, 1, "test".into()).unwrap();
+    let index = crate::plugins::index_manifest_contributions(&manifest, 1, "test".into()).unwrap();
     app.extension.fixture_contribution(index.clone()).unwrap();
     app.extension.fixture_provider_install(&index).unwrap();
     let virtual_request = app.extension.fixture_virtual_request(&index);
@@ -2591,8 +2600,9 @@ pub(in crate::app) fn provider_chunks_use_the_revision_after_virtual_publication
         arguments: Vec::new(),
     });
     fixture.reply_with(&fixture.take(), |execution| {
-        execution.virtual_document_proposals.push(
-            crate::plugins::PluginVirtualDocumentProposal {
+        execution
+            .virtual_document_proposals
+            .push(crate::plugins::PluginVirtualDocumentProposal {
                 request: virtual_request.request,
                 document: virtual_request.document,
                 cancellation_generation: virtual_request.cancellation_generation,
@@ -2605,8 +2615,7 @@ pub(in crate::app) fn provider_chunks_use_the_revision_after_virtual_publication
                         text: "new virtual text".into(),
                     },
                 ),
-            },
-        );
+            });
         execution
             .provider_chunks
             .push(crate::plugins::PluginPickerChunk {
@@ -2861,9 +2870,8 @@ pub(in crate::app) fn provider_selection_delivers_request_item_and_action_data()
         deadline_milliseconds: 30_000,
         provenance: None,
     }];
-    let index =
-        crate::plugins::index_manifest_contributions(&manifest, 1, "picker fixture".into())
-            .unwrap();
+    let index = crate::plugins::index_manifest_contributions(&manifest, 1, "picker fixture".into())
+        .unwrap();
     app.extension.fixture_contribution(index.clone()).unwrap();
     app.extension.fixture_provider_install(&index).unwrap();
     let request = app
@@ -2916,15 +2924,14 @@ pub(in crate::app) fn plugin_surface_observations_include_counts_and_geometry_pr
     manifest
         .capabilities
         .insert(crate::plugins::PluginCapability::EventSubscriptions);
-    manifest.contributions.subscriptions =
-        vec![crate::plugins::PluginSubscriptionContribution {
-            id: "plugin.demo.subscription.surface".into(),
-            kind: crate::plugins::PluginSubscriptionKind::PluginSurfaceChanged,
-            maximum_queued: 1,
-            maximum_rate_per_second: 30,
-            coalesce: true,
-            provenance: None,
-        }];
+    manifest.contributions.subscriptions = vec![crate::plugins::PluginSubscriptionContribution {
+        id: "plugin.demo.subscription.surface".into(),
+        kind: crate::plugins::PluginSubscriptionKind::PluginSurfaceChanged,
+        maximum_queued: 1,
+        maximum_rate_per_second: 30,
+        coalesce: true,
+        provenance: None,
+    }];
     let index =
         crate::plugins::index_manifest_contributions(&manifest, 1, "surface fixture".into())
             .unwrap();
@@ -3278,8 +3285,7 @@ pub(in crate::app) fn plugin_command_arguments_reach_the_existing_execution_requ
     manifest.contributions.keymaps[0]
         .arguments
         .insert("value".into(), toml::Value::String("configured".into()));
-    let index =
-        crate::plugins::index_manifest_contributions(&manifest, 1, "test".into()).unwrap();
+    let index = crate::plugins::index_manifest_contributions(&manifest, 1, "test".into()).unwrap();
     app.register_indexed_plugin_commands(&index).unwrap();
     app.invoke(
         crate::editor::CommandInvocation::new("plugin.demo.run", InvocationSource::Test)
@@ -3329,7 +3335,8 @@ pub(in crate::app) fn repeated_virtual_open_does_not_dispatch_an_empty_callback(
 }
 
 #[test]
-pub(in crate::app) fn plugin_picker_provider_uses_the_generic_presenter_and_cancels_exactly_slot5() {
+pub(in crate::app) fn plugin_picker_provider_uses_the_generic_presenter_and_cancels_exactly_slot5()
+{
     let (_app_dirs, mut app) = app();
     let mut manifest = plugin_manifest("demo", "plugin.demo.keymap.dashboard", "x y");
     manifest
@@ -3528,9 +3535,8 @@ pub(in crate::app) fn provider_selection_fixture() -> (
         deadline_milliseconds: 30_000,
         provenance: None,
     }];
-    let index =
-        crate::plugins::index_manifest_contributions(&manifest, 1, "picker fixture".into())
-            .unwrap();
+    let index = crate::plugins::index_manifest_contributions(&manifest, 1, "picker fixture".into())
+        .unwrap();
     app.extension.fixture_contribution(index.clone()).unwrap();
     app.extension.fixture_provider_install(&index).unwrap();
     let request = app
@@ -3783,7 +3789,8 @@ pub(in crate::app) fn virtual_refresh_can_retry_immediately_after_execution_admi
 }
 
 #[test]
-pub(in crate::app) fn closing_a_virtual_buffer_delivers_close_notice_and_accepts_its_acknowledgement() {
+pub(in crate::app) fn closing_a_virtual_buffer_delivers_close_notice_and_accepts_its_acknowledgement()
+ {
     let (_app_dirs, mut app, fixture, _) = virtual_document_fixture(4);
     app.process_effect(AppEffect::VirtualDocumentOpen {
         source: "plugin.demo.virtual.help".into(),
@@ -3864,38 +3871,20 @@ pub(in crate::app) fn virtual_error_returns_the_broker_error_and_releases_the_op
     assert_eq!(fixture.take().virtual_documents().len(), 1);
 }
 
-use crate::app::configuration::resolve_configuration;
-use std::collections::BTreeMap;
-use std::path::PathBuf;
-use std::time::Duration;
-use std::time::Instant;
-use crate::config::LoadedConfig;
-use crate::editor::input::KeyEvent;
-use crate::editor::text::ByteOffset;
-use crate::editor::text::TextBuffer;
-use crate::editor::CommandInvocation;
+use crate::app::App;
 use crate::editor::CommandSource;
 use crate::editor::CommandValue;
 use crate::editor::InvocationSource;
-use crate::plugins::PluginLoadId;
-use crate::plugins::PluginStatus;
-use crate::ui::DocumentationMarkupKind;
-use crate::ui::DocumentationPopupKind;
-use crate::ui::PickerSurfaceKind;
-use crate::ui::PromptKind;
-use crate::ui::UiEvent;
-use crate::workspace::PickerState;
-use thiserror::Error;
-use crate::app::plugins::PluginUiInteraction;
-use crate::app::plugins::WindowUpdate;
-use crate::windows::WindowRect;
-use std::fs;
-use std::thread;
 use crate::editor::input::InputContextLayer;
-use crate::ui::render;
-use tempfile::tempdir;
-use crate::app::App;
-use crate::app::compile_keymaps_with_plugin_catalog;
+use crate::editor::text::ByteOffset;
+use crate::editor::text::TextBuffer;
+use crate::plugins::PluginLoadId;
+use crate::ui::PickerSurfaceKind;
+use std::collections::BTreeMap;
+use std::fs;
+use std::path::PathBuf;
+use std::thread;
+use std::time::Duration;
+use std::time::Instant;
 
 use crate::app::AppEffect;
-

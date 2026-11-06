@@ -44,6 +44,9 @@ pub use state::BufferOrigin;
 pub use state::EditingPolicy;
 pub use state::EditorMode;
 pub use state::EditorState;
+pub(crate) use state::EditorTopology;
+pub(crate) use state::EditorVersion;
+pub(crate) use state::EditorWindowVersion;
 pub use state::FocusDirection;
 pub use state::LayoutNode;
 pub use state::MAXIMUM_LAYOUT_DEPTH;
@@ -61,25 +64,24 @@ pub use state::TabId;
 pub use state::TransactionId;
 pub use state::View;
 pub use state::ViewId;
-pub(crate) use state::EditorTopology;
-pub(crate) use state::EditorVersion;
-pub(crate) use state::EditorWindowVersion;
 pub(crate) use transaction::EditorDraft;
-pub(crate) use transaction::save_undo_history;
 pub use transaction::EditorOperation;
 pub use transaction::EditorTransaction;
 pub use transaction::Precondition;
 pub use transaction::TransactionError;
 pub use transaction::UndoPolicy;
 pub use transaction::UndoTree;
-
+pub(crate) use transaction::save_undo_history;
 
 mod objects;
 pub use objects::{SyntaxObject, SyntaxObjectKind};
 
-pub(crate) use transaction::{DraftEdit,DocumentSnapshot,WorkspaceEditSources,WorkspaceCommitCheck,RestoredPane,RestoredLayout,RestoredTab};
 #[cfg(test)]
 pub(crate) use transaction::build_layout_for_test;
+pub(crate) use transaction::{
+    DocumentSnapshot, DraftEdit, RestoredLayout, RestoredPane, RestoredTab, WorkspaceCommitCheck,
+    WorkspaceEditSources,
+};
 
 pub(crate) use transaction::BufferPathChange;
 
@@ -89,4 +91,5 @@ pub(crate) use transaction::WorkspaceSnapshot;
 
 pub(crate) use command::visual_ranges;
 
+#[cfg(test)]
 pub(crate) use transaction::load_undo_history;

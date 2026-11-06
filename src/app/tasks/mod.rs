@@ -14,15 +14,15 @@ const MAXIMUM_RUNNING: usize = 16;
 use crate::config::Config;
 use crate::config::TaskConfig;
 use crate::editor::BufferId;
+use crate::editor::EditorOperation;
 use crate::editor::EditorState;
+use crate::editor::EditorTransaction;
+use crate::editor::Precondition;
 use crate::editor::TransactionId;
 use crate::editor::text::ByteOffset;
 use crate::editor::text::ByteRange;
 use crate::editor::text::TextEdit;
 use crate::editor::text::TextEditSet;
-use crate::editor::EditorOperation;
-use crate::editor::EditorTransaction;
-use crate::editor::Precondition;
 use crate::process::ExecutionPreflightRequest;
 use crate::process::ExecutionPreflightResult;
 use crate::process::JobEvent;
@@ -621,7 +621,10 @@ impl TaskSession {
             let _ = self.stop(name);
         }
     }
-    pub(in crate::app) fn stop(&mut self, name: &str) -> Result<Option<DiagnosticProducer>, String> {
+    pub(in crate::app) fn stop(
+        &mut self,
+        name: &str,
+    ) -> Result<Option<DiagnosticProducer>, String> {
         let pending = self.launch_pending(name);
         let current = self.keys.get(name).cloned();
         let mut producer = current.as_ref().and_then(|key| self.linters.stop_run(key));
@@ -956,7 +959,10 @@ impl TaskSession {
         }
         failed
     }
-    pub(in crate::app) fn resolve_test(&self, key: &TestKey) -> Option<crate::app::picker::MatcherSource> {
+    pub(in crate::app) fn resolve_test(
+        &self,
+        key: &TestKey,
+    ) -> Option<crate::app::picker::MatcherSource> {
         let current = self.keys.get(&key.name)?;
         if !Arc::ptr_eq(&current.epoch, &key.run) {
             return None;

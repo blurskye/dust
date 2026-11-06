@@ -239,7 +239,13 @@ impl<'a> VisualRowModel<'a> {
             inlay_widths,
         });
         model.markdown = state.views.get(view).and_then(|view| {
-            crate::ui::render::markdown::MarkdownMarks::new(ui, view, text, &config.editor, model.content_width)
+            crate::ui::render::markdown::MarkdownMarks::new(
+                ui,
+                view,
+                text,
+                &config.editor,
+                model.content_width,
+            )
         });
         if let Some(buffer) = state
             .views
@@ -313,7 +319,10 @@ impl<'a> VisualRowModel<'a> {
     }
 
     /// What a markdown line draws in place of its source, `None` when it shows its source.
-    pub(super) fn markdown_line(&self, line: usize) -> Option<crate::ui::render::markdown::MarkdownLine<'a>> {
+    pub(super) fn markdown_line(
+        &self,
+        line: usize,
+    ) -> Option<crate::ui::render::markdown::MarkdownLine<'a>> {
         self.markdown.as_ref()?.line(line)
     }
 

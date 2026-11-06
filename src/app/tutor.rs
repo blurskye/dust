@@ -28,18 +28,24 @@ use crate::workspace::PickerItemId;
 use crate::app::picker::PickerPayload;
 
 use crate::app::persistence::RestoreContext;
-use crate::editor::text::ByteOffset;
-use crate::editor::text::ByteRange;
 use crate::editor::BufferId;
 use crate::editor::CommandInvocation;
 use crate::editor::CommandValue;
 use crate::editor::EditorMode;
 use crate::editor::InvocationSource;
+use crate::editor::text::ByteOffset;
+use crate::editor::text::ByteRange;
 use crate::ui::UiSyntaxSpan;
 
-const LESSONS: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/defaults/tutor.toml"));
+const LESSONS: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/assets/defaults/tutor.toml"
+));
 /// The editing practice lines, the same in every language, inside a comment of the practice file.
-const PRACTICE_LINES: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/defaults/tutor/practice.txt"));
+const PRACTICE_LINES: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/assets/defaults/tutor/practice.txt"
+));
 const FOOTER: &str = ":TutorNext skip · :TutorBack back · :TutorQuit quit";
 /// How long the card says a step is done before the next one comes.
 const PRAISE: Duration = Duration::from_millis(1200);
@@ -99,7 +105,11 @@ impl Language {
             ($name:literal, $path:literal) => {
                 (
                     $name,
-                    include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/defaults/tutor/", $path)),
+                    include_str!(concat!(
+                        env!("CARGO_MANIFEST_DIR"),
+                        "/assets/defaults/tutor/",
+                        $path
+                    )),
                 )
             };
         }
@@ -1063,6 +1073,43 @@ impl App {
     }
 }
 
+use crate::app::commands::AppEffect;
+use crate::app::commands::register;
+use crate::editor::ArgumentSchema;
+use crate::editor::CommandError;
+use crate::editor::CommandRegistry;
+use crate::editor::ContextRequirement;
+
+pub(in crate::app) fn register_commands(
+    registry: &mut CommandRegistry<AppEffect>,
+) -> Result<(), CommandError> {
+    register(
+        registry,
+        "session.tutor",
+        "Start the interactive tutor, or pick up where you left it",
+        ContextRequirement::Application,
+        ArgumentSchema::default(),
+        |_invocation| Ok(AppEffect::Tutor),
+    )?;
+    Ok(())
+}
+
+impl App {
+    pub(in crate::app) fn process_tutor_effect(
+        &mut self,
+        effect: AppEffect,
+    ) -> Result<(), AppEffect> {
+        match effect {
+            AppEffect::Tutor => self.open_tutor(),
+            AppEffect::TutorNext => self.tutor_next(),
+            AppEffect::TutorBack => self.tutor_back(),
+            AppEffect::TutorQuit => self.tutor_quit(),
+            effect => return Err(effect),
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::app::tutor::*;
@@ -1197,7 +1244,10 @@ mod tests {
             .unwrap();
         let (scratch, _) = app
             .state
-            .open_text(crate::editor::text::TextBuffer::from_text("unsaved notes"), None)
+            .open_text(
+                crate::editor::text::TextBuffer::from_text("unsaved notes"),
+                None,
+            )
             .unwrap();
         app.state.set_buffer_dirty(scratch, true);
         app.start_tutor(TutorStart {
@@ -1325,7 +1375,8 @@ mod tests {
             .unwrap()
             .root
             .join("practice.rs");
-        let text = crate::editor::text::TextBuffer::from_text(&std::fs::read_to_string(&path).unwrap());
+        let text =
+            crate::editor::text::TextBuffer::from_text(&std::fs::read_to_string(&path).unwrap());
         let (buffer, _) = app.state.open_text(text, Some(path)).unwrap();
         app.tutor_command("mode.insert");
         app.handle_key_in_context(
@@ -1534,48 +1585,5 @@ mod tests {
         ));
         assert!(!invocation_matches("input.motion motion=up", &invocation));
         assert!(!invocation_matches("input.find.begin", &invocation));
-    }
-}
-
-use crate::app::commands::AppEffect;
-use crate::editor::ArgumentSchema;
-use crate::editor::CommandError;
-use crate::editor::CommandRegistry;
-use crate::editor::ContextRequirement;
-use crate::app::commands::register;
-
-pub(in crate::app) fn register_commands(registry: &mut CommandRegistry<AppEffect>) -> Result<(), CommandError> {
-
-    register(
-        registry,
-        "session.tutor",
-        "Start the interactive tutor, or pick up where you left it",
-        ContextRequirement::Application,
-        ArgumentSchema::default(),
-        |_invocation| Ok(AppEffect::Tutor),
-    )?;
-Ok(())
-}
-
-
-
-
-
-
-
-
-
-
-
-impl App {
-    pub(in crate::app) fn process_tutor_effect(&mut self, effect: AppEffect) -> Result<(), AppEffect> {
-        match effect {
-AppEffect::Tutor => self.open_tutor(),
-AppEffect::TutorNext => self.tutor_next(),
-AppEffect::TutorBack => self.tutor_back(),
-AppEffect::TutorQuit => self.tutor_quit(),
-            effect => return Err(effect),
-        }
-        Ok(())
     }
 }

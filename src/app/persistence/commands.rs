@@ -1,21 +1,18 @@
-
-use crate::app::persistence::MARK_LIMIT;
-use crate::app::commands::AppEffect;
 use crate::app::App;
+use crate::app::commands::AppEffect;
+use crate::app::persistence::MARK_LIMIT;
 
-
-
-
+use crate::app::commands::register;
+use crate::app::commands::string_arg;
 use crate::editor::ArgumentSchema;
 use crate::editor::ArgumentType;
 use crate::editor::CommandError;
 use crate::editor::CommandRegistry;
 use crate::editor::ContextRequirement;
-use crate::app::commands::register;
-use crate::app::commands::string_arg;
 
-pub(in crate::app) fn register_commands(registry: &mut CommandRegistry<AppEffect>) -> Result<(), CommandError> {
-
+pub(in crate::app) fn register_commands(
+    registry: &mut CommandRegistry<AppEffect>,
+) -> Result<(), CommandError> {
     register(
         registry,
         "navigation.mark.set",
@@ -84,25 +81,20 @@ pub(in crate::app) fn register_commands(registry: &mut CommandRegistry<AppEffect
         ArgumentSchema::default(),
         |_| AppEffect::SessionLoad,
     )?;
-Ok(())
+    Ok(())
 }
 
-
-
-
-
-
-
-
-
 impl App {
-    pub(in crate::app) fn process_persistence_effect(&mut self, effect: AppEffect) -> Result<(), AppEffect> {
+    pub(in crate::app) fn process_persistence_effect(
+        &mut self,
+        effect: AppEffect,
+    ) -> Result<(), AppEffect> {
         match effect {
-AppEffect::HistoryClear => {
+            AppEffect::HistoryClear => {
                 self.input.clear_history();
                 self.notify_message(self.message("history_cleared", &[]), false);
             }
-AppEffect::SessionSave => {
+            AppEffect::SessionSave => {
                 if self.configuration.settings().persistence.enabled {
                     self.persistence.request_save_notice();
                     self.write_persistence();
@@ -110,8 +102,8 @@ AppEffect::SessionSave => {
                     self.show_error(self.message("session_disabled", &[]));
                 }
             }
-AppEffect::SessionLoad => self.load_session_on_request(),
-AppEffect::MarkJump(name) => {
+            AppEffect::SessionLoad => self.load_session_on_request(),
+            AppEffect::MarkJump(name) => {
                 self.persistence.reconcile_marks(&self.state);
                 let location = self
                     .persistence
@@ -124,7 +116,7 @@ AppEffect::MarkJump(name) => {
                     None => self.show_error(self.message("mark_unset", &[("name", name)])),
                 }
             }
-AppEffect::MarkSet(name) => {
+            AppEffect::MarkSet(name) => {
                 if let Some(location) = self.current_persisted_location() {
                     self.persistence
                         .set_mark(name, location, MARK_LIMIT, &self.state);

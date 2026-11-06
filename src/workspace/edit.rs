@@ -33,7 +33,6 @@ pub struct WorkspaceEditDraft {
     pub edits: Vec<TextEdit>,
 }
 
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProposedFileEdit {
     pub canonical_path: PathBuf,

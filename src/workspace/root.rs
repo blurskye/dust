@@ -1,8 +1,6 @@
 use std::collections::HashSet;
 use std::path::Path;
 
-
-
 use crate::workspace::ABSOLUTE_ROOT_LIMIT;
 
 use crate::workspace::edit::WorkspaceError;
@@ -12,8 +10,6 @@ pub struct WorkspaceId(pub u64);
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct RootId(pub u64);
-
-
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct WorkspaceRoot {

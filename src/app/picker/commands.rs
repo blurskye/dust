@@ -1,23 +1,20 @@
-
-use crate::app::commands::AppEffect;
 use crate::app::App;
+use crate::app::commands::AppEffect;
 use crate::app::picker::PickerPayload;
 use crate::ui::PickerSurfaceKind;
 
-
-
-
+use crate::app::commands::register;
+use crate::app::commands::string_arg;
 use crate::editor::ArgumentSchema;
 use crate::editor::ArgumentType;
 use crate::editor::CommandError;
 use crate::editor::CommandRegistry;
-use crate::editor::ContextRequirement;
-use crate::app::commands::register;
-use crate::app::commands::string_arg;
 use crate::editor::CommandValue;
+use crate::editor::ContextRequirement;
 
-pub(in crate::app) fn register_commands(registry: &mut CommandRegistry<AppEffect>) -> Result<(), CommandError> {
-
+pub(in crate::app) fn register_commands(
+    registry: &mut CommandRegistry<AppEffect>,
+) -> Result<(), CommandError> {
     for (id, title, effect) in [
         (
             "picker.backspace",
@@ -133,36 +130,30 @@ pub(in crate::app) fn register_commands(registry: &mut CommandRegistry<AppEffect
             })
         },
     )?;
-Ok(())
+    Ok(())
 }
 
-
-
-
-
-
-
-
-
-
 impl App {
-    pub(in crate::app) fn process_picker_effect(&mut self, effect: AppEffect) -> Result<(), AppEffect> {
+    pub(in crate::app) fn process_picker_effect(
+        &mut self,
+        effect: AppEffect,
+    ) -> Result<(), AppEffect> {
         match effect {
-AppEffect::OpenWorkspaceFilePicker => self.start_workspace_file_picker(),
-AppEffect::OpenPicker(kind) => self.open_builtin_picker(kind),
-AppEffect::PickerInsert(text) => self.picker_insert(&text),
-AppEffect::PickerBackspace => self.picker_backspace(),
-AppEffect::PickerMove(direction) => self.picker_move(direction),
-AppEffect::PickerPreviewPage(direction) => {
+            AppEffect::OpenWorkspaceFilePicker => self.start_workspace_file_picker(),
+            AppEffect::OpenPicker(kind) => self.open_builtin_picker(kind),
+            AppEffect::PickerInsert(text) => self.picker_insert(&text),
+            AppEffect::PickerBackspace => self.picker_backspace(),
+            AppEffect::PickerMove(direction) => self.picker_move(direction),
+            AppEffect::PickerPreviewPage(direction) => {
                 self.search.picker_preview_page(direction);
                 self.sync_picker_ui();
             }
-AppEffect::PickerResults => {
+            AppEffect::PickerResults => {
                 if self.search.set_picker_surface(PickerSurfaceKind::Problems) {
                     self.sync_picker_ui();
                 }
             }
-AppEffect::PickerRemove => match self.search.selected_picker_payload().cloned() {
+            AppEffect::PickerRemove => match self.search.selected_picker_payload().cloned() {
                 Some(PickerPayload::Recovery(journal)) => {
                     if let Err(error) =
                         self.recovery
@@ -174,10 +165,10 @@ AppEffect::PickerRemove => match self.search.selected_picker_payload().cloned() 
                 Some(PickerPayload::GitWorktree { .. }) => self.request_git_worktree_remove(),
                 _ => {}
             },
-AppEffect::PickerAccept => self.accept_picker(),
-AppEffect::PickerCancel => self.close_picker(),
-AppEffect::PickerNormal if self.palette_is_open() => self.close_picker(),
-AppEffect::PickerNormal | AppEffect::PickerInsertMode => {
+            AppEffect::PickerAccept => self.accept_picker(),
+            AppEffect::PickerCancel => self.close_picker(),
+            AppEffect::PickerNormal if self.palette_is_open() => self.close_picker(),
+            AppEffect::PickerNormal | AppEffect::PickerInsertMode => {
                 if self.search.picker().is_some() && self.search.workspace_picker().is_none() {
                     self.input
                         .set_picker_normal(matches!(effect, AppEffect::PickerNormal));

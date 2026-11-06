@@ -1,7 +1,7 @@
-use crate::editor::text::TextBuffer;
 use crate::editor::EditorTopology;
 use crate::editor::EditorVersion;
 use crate::editor::EditorWindowVersion;
+use crate::editor::text::TextBuffer;
 mod paths;
 mod restore;
 #[cfg(test)]
@@ -1168,6 +1168,11 @@ impl EditorState {
     }
 }
 
+pub use workspace::DocumentSnapshot;
+pub(crate) use workspace::DraftEdit;
+
+pub(crate) use restore::{RestoredLayout, RestoredPane, RestoredTab};
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
@@ -1646,8 +1651,3 @@ mod tests {
         assert_eq!(state.buffers[buffer].text.to_string(), "abc");
     }
 }
-
-pub(crate) use workspace::DraftEdit;
-pub use workspace::DocumentSnapshot;
-
-pub(crate) use restore::{RestoredPane, RestoredLayout, RestoredTab};

@@ -1,8 +1,5 @@
 use crate::app::tests::*;
 
-
-
-
 #[test]
 pub(in crate::app) fn directional_resize_uses_the_focused_explorer_clone() {
     let (_app_dirs, mut app) = app();
@@ -56,7 +53,6 @@ pub(in crate::app) fn directional_resize_uses_the_focused_explorer_clone() {
     );
 }
 
-
 #[test]
 pub(in crate::app) fn dashboard_exposes_and_dispatches_the_file_explorer_without_picker_fallback() {
     let (_app_dirs, mut app) = app();
@@ -77,7 +73,6 @@ pub(in crate::app) fn dashboard_exposes_and_dispatches_the_file_explorer_without
     assert!(app.ui.explorer_focused);
     assert!(app.ui.picker.is_none());
 }
-
 
 #[test]
 pub(in crate::app) fn clicking_explorer_cancels_flash_without_swallowing_the_next_key() {
@@ -115,7 +110,6 @@ pub(in crate::app) fn clicking_explorer_cancels_flash_without_swallowing_the_nex
     assert_eq!(app.state.views[view].cursor, ByteOffset(0));
 }
 
-
 #[test]
 pub(in crate::app) fn explorer_is_a_graph_dock_and_bundled_disable_is_transactional() {
     let (_app_dirs, mut app) = app();
@@ -145,7 +139,6 @@ pub(in crate::app) fn explorer_is_a_graph_dock_and_bundled_disable_is_transactio
     assert!(rect.width > 1 && rect.height == app.window_session.height() - 1);
 }
 
-
 #[test]
 pub(in crate::app) fn the_explorer_moves_to_the_side_its_setting_names_while_open() {
     let (_app_dirs, mut app) = app();
@@ -167,7 +160,6 @@ pub(in crate::app) fn the_explorer_moves_to_the_side_its_setting_names_while_ope
     );
     assert_eq!(right.width, left.width);
 }
-
 
 #[test]
 pub(in crate::app) fn swapping_a_configured_explorer_into_hidden_retains_its_actual_placement() {
@@ -240,7 +232,6 @@ pub(in crate::app) fn swapping_a_configured_explorer_into_hidden_retains_its_act
     );
 }
 
-
 #[test]
 pub(in crate::app) fn hiding_the_terminal_goes_back_to_the_file_not_the_explorer() {
     let (_app_dirs, mut app) = app();
@@ -292,7 +283,6 @@ pub(in crate::app) fn hiding_the_terminal_goes_back_to_the_file_not_the_explorer
     assert!(app.window_session.explorer_focused());
 }
 
-
 #[test]
 pub(in crate::app) fn picker_mouse_input_does_not_scroll_the_background_explorer() {
     let (_app_dirs, mut app) = app();
@@ -304,7 +294,9 @@ pub(in crate::app) fn picker_mouse_input_does_not_scroll_the_background_explorer
     app.reconcile_editor_windows();
     let explorer = app.explorer_window_rect().unwrap();
     let before = app.ui.explorer.clone();
-    app.process_effect(AppEffect::OpenPicker(crate::app::commands::PickerKind::Buffers));
+    app.process_effect(AppEffect::OpenPicker(
+        crate::app::commands::PickerKind::Buffers,
+    ));
     app.handle_event(UiEvent::Mouse {
         key: "mouse-scroll-down".parse().unwrap(),
         column: explorer.x,
@@ -312,18 +304,14 @@ pub(in crate::app) fn picker_mouse_input_does_not_scroll_the_background_explorer
     });
     assert_eq!(app.ui.explorer, before);
 }
+use crate::app::AppEffect;
 use crate::editor::input::KeyEvent;
 use crate::editor::text::ByteOffset;
 use crate::editor::text::TextBuffer;
-use crate::editor::FocusDirection;
 use crate::process::PtyId;
-use crate::ui::KeyInputKind;
+use crate::ui::PtyScreen;
 use crate::ui::UiEvent;
 use crate::windows::DockEdge;
 use crate::windows::WindowPlacement;
 use crate::windows::WindowRect;
 use std::fs;
-use crate::ui::PtyScreen;
-use crate::app::AppEffect;
-use crate::app::PickerKind;
-

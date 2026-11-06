@@ -2,9 +2,9 @@
 //! Feature execution payloads remain with their callers, not in this owner.
 mod discovery;
 use crate::editor::EditorState;
+use crate::files::RootIdentity;
 use crate::workspace::ExecutionSource;
 use crate::workspace::RootId;
-use crate::files::RootIdentity;
 use crate::workspace::TrustEvent;
 use crate::workspace::TrustStore;
 use crate::workspace::WorkspaceError;
@@ -195,16 +195,10 @@ impl WorkspaceSession {
     pub(in crate::app) fn trust_shutdown_result(&self) -> Result<(), String> {
         self.service.shutdown_result()
     }
-    pub(in crate::app) fn require_path(
-        &self,
-        path: &Path,
-    ) -> Result<RootId, WorkspaceError> {
+    pub(in crate::app) fn require_path(&self, path: &Path) -> Result<RootId, WorkspaceError> {
         self.state.require_path(path)
     }
-    pub(in crate::app) fn root_for_canonical_path(
-        &self,
-        path: &Path,
-    ) -> Option<&WorkspaceRoot> {
+    pub(in crate::app) fn root_for_canonical_path(&self, path: &Path) -> Option<&WorkspaceRoot> {
         self.state.root_for_canonical_path(path)
     }
     pub(in crate::app) fn authorize_execution(
@@ -293,10 +287,7 @@ impl WorkspaceSession {
         self.reconcile_trust();
         Ok(root)
     }
-    pub(in crate::app) fn set_active_root(
-        &mut self,
-        id: RootId,
-    ) -> Result<(), WorkspaceError> {
+    pub(in crate::app) fn set_active_root(&mut self, id: RootId) -> Result<(), WorkspaceError> {
         let changed = self.state.active_root() != Some(id);
         self.state.set_active_root(id)?;
         if changed {
@@ -344,9 +335,7 @@ impl WorkspaceSession {
     pub(in crate::app) fn cancel_confirmation(&mut self) {
         self.confirmation = None;
     }
-    pub(in crate::app) fn request_confirmation(
-        &mut self,
-    ) -> Result<(), WorkspaceFailure> {
+    pub(in crate::app) fn request_confirmation(&mut self) -> Result<(), WorkspaceFailure> {
         if !self.database_ready || !self.identity_ready {
             return Err(WorkspaceFailure::Message("workspace_trust_not_ready"));
         }
@@ -419,10 +408,7 @@ impl WorkspaceSession {
         self.persist_state(Some(WorkspaceTrust::Untrusted))
     }
     /// Forget a folder that is going away, so the trust file doesn't collect dead entries.
-    pub(in crate::app) fn forget_folder(
-        &mut self,
-        path: &Path,
-    ) -> Result<(), WorkspaceFailure> {
+    pub(in crate::app) fn forget_folder(&mut self, path: &Path) -> Result<(), WorkspaceFailure> {
         self.store.forget(path);
         // Before the trust file has loaded, writing it would drop what it holds.
         if !self.database_ready {
@@ -510,10 +496,7 @@ impl WorkspaceSession {
             .authorize_execution(ExecutionSource::ProjectLocal)
             .map_err(WorkspaceFailure::from)
     }
-    pub(in crate::app) fn poll(
-        &mut self,
-        editor: &EditorState,
-    ) -> Vec<WorkspaceUpdate> {
+    pub(in crate::app) fn poll(&mut self, editor: &EditorState) -> Vec<WorkspaceUpdate> {
         let before = self.version();
         let mut updates = Vec::new();
         loop {
@@ -583,9 +566,13 @@ impl WorkspaceSession {
                             self.identity_ready = true;
                             self.changed();
                         }
-                        Err(e) => updates.push(WorkspaceUpdate::Failure(WorkspaceFailure::Plain(e.to_string()))),
+                        Err(e) => updates.push(WorkspaceUpdate::Failure(WorkspaceFailure::Plain(
+                            e.to_string(),
+                        ))),
                     },
-                    Err(e) => updates.push(WorkspaceUpdate::Failure(WorkspaceFailure::Plain(e.to_string()))),
+                    Err(e) => updates.push(WorkspaceUpdate::Failure(WorkspaceFailure::Plain(
+                        e.to_string(),
+                    ))),
                 }
                 self.reconcile_trust();
             }
@@ -633,7 +620,9 @@ impl WorkspaceSession {
                                         path: identity.canonical_path,
                                         old,
                                     }),
-                                    Err(e) => updates.push(WorkspaceUpdate::Failure(WorkspaceFailure::Plain(e.to_string()))),
+                                    Err(e) => updates.push(WorkspaceUpdate::Failure(
+                                        WorkspaceFailure::Plain(e.to_string()),
+                                    )),
                                 }
                             }
                             None => match self.state.add_root(name, identity.clone()) {
@@ -643,7 +632,9 @@ impl WorkspaceSession {
                                     updates
                                         .push(WorkspaceUpdate::RootAdded(identity.canonical_path));
                                 }
-                                Err(e) => updates.push(WorkspaceUpdate::Failure(WorkspaceFailure::Plain(e.to_string()))),
+                                Err(e) => updates.push(WorkspaceUpdate::Failure(
+                                    WorkspaceFailure::Plain(e.to_string()),
+                                )),
                             },
                         }
                     }
@@ -1086,7 +1077,6 @@ pub(in crate::app) mod commands;
 
 #[cfg(test)]
 pub(in crate::app) mod project_tests;
-
 
 #[cfg(test)]
 pub(in crate::app) mod surfaces_tests;

@@ -1,45 +1,18 @@
 use std::collections::BTreeMap;
 
-
-
 use crate::plugins::PluginPresenterKind;
-
-
 
 use crate::plugins::PluginPrivateSnapshot;
 
-
 use crate::plugins::PluginRequestedPlacement;
-
-
-
-
-
-
-
-
 
 use crate::plugins::PluginUiTree;
 
-
-
-
-
 use crate::windows::ContentId;
-
-
 
 use crate::windows::ViewId;
 
-
-
 use crate::windows::WindowId;
-
-
-
-
-
-
 
 mod host;
 #[cfg(test)]

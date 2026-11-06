@@ -3,7 +3,6 @@ use crate::app::tests::*;
 use crate::app::git::project_tests::settle_git_work;
 use crate::app::tasks::project_tests::check_task_diagnostics;
 
-
 #[test]
 pub(in crate::app) fn diagnostic_navigation_filters_severity_wraps_and_expands_the_landed_line() {
     let root = tempfile::tempdir().unwrap();
@@ -55,11 +54,8 @@ pub(in crate::app) fn diagnostic_navigation_filters_severity_wraps_and_expands_t
             crate::app::diagnostics::DiagnosticBatch {
                 producer,
                 uri: uri.clone(),
-                document: crate::app::diagnostics::DiagnosticDocument::capture(
-                    &app.state, buffer,
-                ),
-                validity:
-                    crate::app::diagnostics::DiagnosticValidity::UnversionedReport,
+                document: crate::app::diagnostics::DiagnosticDocument::capture(&app.state, buffer),
+                validity: crate::app::diagnostics::DiagnosticValidity::UnversionedReport,
                 items: vec![
                     diagnostic(
                         ByteRange::new(ByteOffset(3), ByteOffset(8)).unwrap(),
@@ -147,7 +143,6 @@ pub(in crate::app) fn diagnostic_navigation_filters_severity_wraps_and_expands_t
     assert!(next.document(&path, &app.state).is_err());
 }
 
-
 #[test]
 pub(in crate::app) fn accepting_a_disk_diagnostic_opens_its_file_and_validates_the_range() {
     let (_app_dirs, mut app) = app();
@@ -202,7 +197,6 @@ pub(in crate::app) fn accepting_a_disk_diagnostic_opens_its_file_and_validates_t
     assert!(app.ui.notification_error);
 }
 
-
 #[test]
 pub(in crate::app) fn operation_state_read_failure_is_reported_as_unavailable_not_idle() {
     let (_app_dirs, mut app) = app();
@@ -230,7 +224,6 @@ pub(in crate::app) fn operation_state_read_failure_is_reported_as_unavailable_no
     app.project_operation_bar();
     assert!(app.ui.operation_bar.is_none());
 }
-
 
 #[test]
 pub(in crate::app) fn soft_reset_refreshes_status_even_when_index_and_head_files_do_not_change() {
@@ -282,7 +275,6 @@ pub(in crate::app) fn soft_reset_refreshes_status_even_when_index_and_head_files
     );
 }
 
-
 /// A trusted repository with one file whose two changes are close enough to share a hunk.
 pub(in crate::app) fn near_changes_fixture() -> (
     (tempfile::TempDir, tempfile::TempDir),
@@ -325,7 +317,6 @@ pub(in crate::app) fn near_changes_fixture() -> (
     (dirs, app, repo, path)
 }
 
-
 #[test]
 pub(in crate::app) fn save_all_retries_documents_beyond_the_request_capacity() {
     let (_app_dirs, mut app) = app();
@@ -355,7 +346,6 @@ pub(in crate::app) fn save_all_retries_documents_beyond_the_request_capacity() {
     }
     assert!(app.should_quit);
 }
-
 
 #[test]
 pub(in crate::app) fn save_as_reload_close_and_external_change_protection_work() {
@@ -412,7 +402,6 @@ pub(in crate::app) fn save_as_reload_close_and_external_change_protection_work()
     assert!(app.state.active_view.is_none());
 }
 
-
 #[test]
 pub(in crate::app) fn dirty_quit_is_blocked_but_forced_quit_succeeds() {
     let (_app_dirs, mut app) = app();
@@ -433,7 +422,6 @@ pub(in crate::app) fn dirty_quit_is_blocked_but_forced_quit_succeeds() {
     app.invoke(force);
     assert!(app.should_quit);
 }
-
 
 #[cfg(unix)]
 #[test]
@@ -533,12 +521,10 @@ pub(in crate::app) fn a_failed_test_is_listed_in_problems_and_jumps_to_its_line(
     assert_eq!(rows[0].label, "a.txt:3  adds: wrong sum");
 }
 
-
 #[test]
 pub(in crate::app) fn successful_dependency_diagnostics_keep_separate_stream_records() {
     check_task_diagnostics(true);
 }
-
 
 pub(in crate::app) fn index_bytes(root: &std::path::Path, name: &str) -> String {
     let repo = git2::Repository::open(root).unwrap();
@@ -546,7 +532,6 @@ pub(in crate::app) fn index_bytes(root: &std::path::Path, name: &str) -> String 
     let entry = index.get_path(std::path::Path::new(name), 0).unwrap();
     String::from_utf8(repo.find_blob(entry.id).unwrap().content().to_vec()).unwrap()
 }
-
 
 #[test]
 pub(in crate::app) fn named_staging_commands_change_only_the_index() {
@@ -691,7 +676,6 @@ pub(in crate::app) fn named_staging_commands_change_only_the_index() {
     assert_eq!(fs::read_to_string(&path).unwrap(), changed);
 }
 
-
 #[test]
 pub(in crate::app) fn staging_an_unsaved_buffer_offers_an_explicit_choice() {
     fn index_bytes(root: &std::path::Path, name: &str) -> String {
@@ -816,7 +800,6 @@ pub(in crate::app) fn staging_an_unsaved_buffer_offers_an_explicit_choice() {
     assert!(!app.state.buffers[id].dirty);
 }
 
-
 #[test]
 pub(in crate::app) fn status_reports_a_path_whose_only_change_is_an_unsaved_buffer() {
     let (_app_dirs, mut app) = app();
@@ -869,7 +852,6 @@ pub(in crate::app) fn status_reports_a_path_whose_only_change_is_an_unsaved_buff
     assert!(!entry.sources.staged);
     assert!(!entry.sources.unstaged);
 }
-
 
 #[test]
 pub(in crate::app) fn staging_one_of_two_changed_lines_keeps_the_file_in_order() {
@@ -930,9 +912,11 @@ pub(in crate::app) fn staging_one_of_two_changed_lines_keeps_the_file_in_order()
     );
 }
 
-
 /// Build a repository with distinct commit subjects and a configured identity.
-pub(in crate::app) fn history_fixture(root: &std::path::Path, subjects: &[&str]) -> git2::Repository {
+pub(in crate::app) fn history_fixture(
+    root: &std::path::Path,
+    subjects: &[&str],
+) -> git2::Repository {
     let repo = git2::Repository::init(root).unwrap();
     {
         let mut config = repo.config().unwrap();
@@ -957,7 +941,6 @@ pub(in crate::app) fn history_fixture(root: &std::path::Path, subjects: &[&str])
     // A clone so the caller keeps a handle whose index is not cached stale.
     git2::Repository::open(root).unwrap()
 }
-
 
 #[test]
 pub(in crate::app) fn help_preserves_a_buffer_selection_byte_for_byte() {
@@ -997,7 +980,6 @@ pub(in crate::app) fn help_preserves_a_buffer_selection_byte_for_byte() {
         "help does not drop the editor out of visual mode"
     );
 }
-
 
 #[test]
 pub(in crate::app) fn the_advertised_help_key_is_the_key_that_resolves() {
@@ -1051,7 +1033,6 @@ pub(in crate::app) fn the_advertised_help_key_is_the_key_that_resolves() {
     assert_eq!(resolved.command.as_deref(), Some("overlay.help.form"));
 }
 
-
 #[test]
 pub(in crate::app) fn accepting_inside_help_closes_the_page_and_invokes_nothing() {
     let (_app_dirs, mut app) = app();
@@ -1092,7 +1073,6 @@ pub(in crate::app) fn accepting_inside_help_closes_the_page_and_invokes_nothing(
     );
 }
 
-
 #[test]
 pub(in crate::app) fn a_surface_installed_over_help_discards_the_snapshot() {
     let (_app_dirs, mut app) = app();
@@ -1117,7 +1097,6 @@ pub(in crate::app) fn a_surface_installed_over_help_discards_the_snapshot() {
         "closing the new surface leaves nothing: it did not restore the palette help was over"
     );
 }
-
 
 #[test]
 pub(in crate::app) fn help_opened_over_help_keeps_the_original_surface() {
@@ -1166,7 +1145,6 @@ pub(in crate::app) fn help_opened_over_help_keeps_the_original_surface() {
         "the intermediate help page was dropped rather than stacked"
     );
 }
-
 
 #[test]
 pub(in crate::app) fn choosing_a_side_edits_the_result_buffer_and_leaves_save_and_stage_separate() {
@@ -1260,12 +1238,9 @@ pub(in crate::app) fn choosing_a_side_edits_the_result_buffer_and_leaves_save_an
         .with_argument("side", CommandValue::String("theirs".into())),
     );
     assert!(!app.ui.notification_error, "{:?}", app.ui.notification);
-    let content = crate::git::read_side_content(
-        &root,
-        &conflicted,
-        crate::git::GitConflictChoice::Theirs,
-    )
-    .expect("the theirs side is readable");
+    let content =
+        crate::git::read_side_content(&root, &conflicted, crate::git::GitConflictChoice::Theirs)
+            .expect("the theirs side is readable");
     assert_eq!(
         app.state.buffers[buffer].text.to_string(),
         crate::editor::text::decode_utf8(content.as_bytes())
@@ -1310,7 +1285,6 @@ pub(in crate::app) fn choosing_a_side_edits_the_result_buffer_and_leaves_save_an
         "undo restored the conflict markers, so the change was an ordinary transaction"
     );
 }
-
 
 #[test]
 pub(in crate::app) fn a_previewed_replacement_writes_nothing_until_it_is_confirmed() {
@@ -1522,7 +1496,6 @@ pub(in crate::app) fn a_previewed_replacement_writes_nothing_until_it_is_confirm
     assert!(!app.git.has_pending_replacement());
     let _ = (our_tip, index_before);
 }
-
 
 /// W-26: the Changes surface renders as section 7.1 draws it — labelled sections, status and
 /// provenance columns, an unsaved badge and its own footer — proved from the rendered grid.
@@ -1752,7 +1725,6 @@ pub(in crate::app) fn the_changes_surface_renders_its_sections_columns_badge_and
     );
 }
 
-
 pub(in crate::app) fn wait_changes_preview(app: &mut App) {
     let deadline = Instant::now() + Duration::from_secs(3);
     while !app
@@ -1766,7 +1738,6 @@ pub(in crate::app) fn wait_changes_preview(app: &mut App) {
         thread::yield_now();
     }
 }
-
 
 /// `:e` on a path with nothing there starts that file, and the first save creates it.
 #[test]
@@ -1797,7 +1768,6 @@ pub(in crate::app) fn editing_a_missing_path_starts_a_new_file_that_saving_creat
     assert!(saved.contains('o'), "{saved:?}");
     assert!(!app.state.buffers[buffer].new_file);
 }
-
 
 /// W-26: a refresh does not move the selection or reorder the list under the cursor.
 #[test]
@@ -1852,7 +1822,6 @@ pub(in crate::app) fn a_change_refresh_keeps_the_selection_on_the_same_row() {
         "the refresh left the cursor on the same row rather than moving it"
     );
 }
-
 
 /// W-26: staging a path whose buffer has unsaved edits is refused with the explicit
 /// save-and-stage choice, and the index is not written — for the FOCUSED row, which is not
@@ -1927,7 +1896,6 @@ pub(in crate::app) fn staging_a_row_moves_it_to_the_staged_section_of_the_open_l
     );
 }
 
-
 /// W-26: `Ctrl-q` sends the changed-path list to the shared Results surface.
 #[test]
 pub(in crate::app) fn ctrl_q_sends_the_change_rows_to_the_results_surface() {
@@ -1982,7 +1950,6 @@ pub(in crate::app) fn ctrl_q_sends_the_change_rows_to_the_results_surface() {
     );
 }
 
-
 #[test]
 pub(in crate::app) fn opening_changes_before_status_arrives_opens_them_when_it_does() {
     let (_app_dirs, mut app) = app();
@@ -2011,9 +1978,9 @@ pub(in crate::app) fn opening_changes_before_status_arrives_opens_them_when_it_d
     );
 }
 
-
 #[test]
-pub(in crate::app) fn command_line_completes_commands_without_an_alias_and_fills_in_their_arguments() {
+pub(in crate::app) fn command_line_completes_commands_without_an_alias_and_fills_in_their_arguments()
+ {
     let (_app_dirs, mut app) = app();
     app.open_prompt(crate::ui::PromptKind::Command, "wor".into());
     app.refresh_completions();
@@ -2054,7 +2021,6 @@ pub(in crate::app) fn command_line_completes_commands_without_an_alias_and_fills
     );
 }
 
-
 #[test]
 pub(in crate::app) fn completing_a_path_after_w_keeps_the_save_command() {
     let (_app_dirs, mut app) = app();
@@ -2065,7 +2031,6 @@ pub(in crate::app) fn completing_a_path_after_w_keeps_the_save_command() {
     assert!(app.input.accept_completion(app.configuration.settings()));
     assert_eq!(app.input.prompt().expect("prompt").input, "w q!");
 }
-
 
 #[test]
 pub(in crate::app) fn deferred_navigation_does_not_replace_a_newer_buffer_choice() {
@@ -2086,7 +2051,6 @@ pub(in crate::app) fn deferred_navigation_does_not_replace_a_newer_buffer_choice
     assert_eq!(app.state.active_buffer_id(), Some(newer));
 }
 
-
 #[test]
 pub(in crate::app) fn location_labels_read_only_the_required_prefix_of_a_large_file() {
     let (_app_dirs, app) = app();
@@ -2102,7 +2066,6 @@ pub(in crate::app) fn location_labels_read_only_the_required_prefix_of_a_large_f
     });
     assert!(label.ends_with(":1"));
 }
-
 
 #[test]
 pub(in crate::app) fn failed_and_cancelled_staging_never_replays_on_an_ordinary_save() {
@@ -2152,7 +2115,6 @@ pub(in crate::app) fn failed_and_cancelled_staging_never_replays_on_an_ordinary_
     assert!(app.input.take_pending_stage().is_none());
 }
 
-
 #[test]
 pub(in crate::app) fn disk_polling_retries_reloads_refused_by_document_capacity() {
     let (_app_dirs, mut app) = app();
@@ -2185,7 +2147,6 @@ pub(in crate::app) fn disk_polling_retries_reloads_refused_by_document_capacity(
     );
 }
 
-
 #[test]
 pub(in crate::app) fn failed_save_and_stage_does_not_leak_into_a_later_save() {
     let (_app_dirs, mut app, repo, path) = near_changes_fixture();
@@ -2216,7 +2177,6 @@ pub(in crate::app) fn failed_save_and_stage_does_not_leak_into_a_later_save() {
         .unwrap();
     assert_eq!(blob.content(), b"one\ntwo\nthree\nfour\nfive\n");
 }
-
 
 #[test]
 pub(in crate::app) fn staging_an_unsaved_buffer_offers_an_explicit_choice_slot5() {
@@ -2350,7 +2310,6 @@ pub(in crate::app) fn staging_an_unsaved_buffer_offers_an_explicit_choice_slot5(
     );
     assert!(!app.state.buffers[id].dirty);
 }
-
 
 #[test]
 pub(in crate::app) fn a_previewed_replacement_writes_nothing_until_it_is_confirmed_slot5() {
@@ -2490,9 +2449,10 @@ pub(in crate::app) fn a_previewed_replacement_writes_nothing_until_it_is_confirm
     );
     let replacement = app.git.take_pending_replacement().unwrap();
     app.git.set_pending_replacement(replacement.clone());
-    app.git.set_pending_destructive(
-        crate::app::git::GitDestructiveAction::RemoveWorktree("missing".into()),
-    );
+    app.git
+        .set_pending_destructive(crate::app::git::GitDestructiveAction::RemoveWorktree(
+            "missing".into(),
+        ));
     assert!(!app.git.has_pending_replacement());
     app.git.set_pending_replacement(replacement);
     assert!(app.git.take_pending_destructive().is_none());
@@ -2501,9 +2461,10 @@ pub(in crate::app) fn a_previewed_replacement_writes_nothing_until_it_is_confirm
         !app.git.has_pending_replacement(),
         "Escape cancels the replacement"
     );
-    app.git.set_pending_destructive(
-        crate::app::git::GitDestructiveAction::RemoveWorktree("missing".into()),
-    );
+    app.git
+        .set_pending_destructive(crate::app::git::GitDestructiveAction::RemoveWorktree(
+            "missing".into(),
+        ));
     app.open_confirmation(
         crate::ui::PromptKind::GitDestructive,
         "Remove worktree".into(),
@@ -2538,7 +2499,6 @@ pub(in crate::app) fn a_previewed_replacement_writes_nothing_until_it_is_confirm
     assert!(!app.git.has_pending_replacement());
     let _ = (our_tip, index_before);
 }
-
 
 #[test]
 pub(in crate::app) fn opening_changes_refreshes_cached_unsaved_document_information() {
@@ -2597,7 +2557,6 @@ pub(in crate::app) fn opening_changes_refreshes_cached_unsaved_document_informat
     );
 }
 
-
 #[test]
 pub(in crate::app) fn file_rows_dim_the_folder_and_count_what_the_query_leaves_of_all() {
     let (_app_dirs, mut app) = app();
@@ -2622,41 +2581,22 @@ pub(in crate::app) fn file_rows_dim_the_folder_and_count_what_the_query_leaves_o
     assert_eq!(cells[1].style, crate::ui::Style::Muted);
     assert_eq!(cells[2].style, crate::ui::Style::Default);
 }
-use crate::app::picker::MatcherSource;
-use crate::app::picker::PickerPayload;
-use std::collections::BTreeMap;
-use std::path::Path;
-use std::path::PathBuf;
-use std::time::Duration;
-use std::time::Instant;
-use crate::editor::input::KeyEvent;
-use crate::editor::text::ByteOffset;
-use crate::editor::text::ByteRange;
-use crate::editor::text::PositionEncoding;
-use crate::editor::text::TextBuffer;
-use crate::editor::CommandInvocation;
-use crate::editor::CommandValue;
-use crate::editor::EditorMode;
-use crate::editor::InvocationSource;
-use crate::language::lsp::file_uri;
-use crate::persistence::PersistedLocation;
-use crate::ui::PickerSurfaceKind;
-use crate::ui::PromptKind;
-use crate::ui::UiEvent;
-use crate::workspace::DiagnosticOwner;
-use crate::workspace::PickerAction;
-use crate::workspace::PickerItem;
-use crate::workspace::PickerItemId;
-use crate::workspace::WorkspaceTrust;
-use thiserror::Error;
-use crate::app::startup::StartupTarget;
-use crate::app::documents::configured_file_bytes;
-use std::fs;
-use std::thread;
-use crate::ui::render;
-use tempfile::tempdir;
 use crate::app::App;
 use crate::app::AppEffect;
 use crate::app::PickerKind;
+use crate::app::documents::configured_file_bytes;
+use crate::app::startup::StartupTarget;
+use crate::editor::CommandValue;
+use crate::editor::InvocationSource;
+use crate::editor::input::KeyEvent;
+use crate::editor::text::ByteOffset;
+use crate::editor::text::ByteRange;
+use crate::editor::text::TextBuffer;
 use crate::workspace::DiagnosticSeverity;
-
+use std::collections::BTreeMap;
+use std::fs;
+use std::path::PathBuf;
+use std::thread;
+use std::time::Duration;
+use std::time::Instant;
+use tempfile::tempdir;

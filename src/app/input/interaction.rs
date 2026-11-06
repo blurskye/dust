@@ -1,48 +1,37 @@
-use crate::editor::CommandValue;
-use crate::app::commands::AppEffect;
-use crate::editor::CommandInvocation;
-use crate::windows::DockEdge;
-use crate::editor::EditorMode;
-use std::time::Instant;
 use crate::app::App;
-use crate::app::windows::NativeSurfaceTarget;
-use crate::ui::PromptKind;
+use crate::app::commands::AppEffect;
 use crate::app::terminal::TerminalInput;
+use crate::app::windows::NativeSurfaceTarget;
+use crate::editor::CommandInvocation;
+use crate::editor::CommandValue;
+use crate::editor::EditorMode;
 use crate::editor::TransactionId;
+use crate::ui::PromptKind;
 use crate::ui::VisualRowModel;
-use crate::windows::WindowPlacement;
-use crate::windows::WindowRect;
-use crate::workspace::WorkspaceTrust;
 use crate::ui::editor_pane_viewport_at;
 use crate::ui::editor_state_content_width;
 use crate::ui::editor_state_gutter_width;
-use slotmap::Key;
+use crate::windows::WindowPlacement;
+use crate::windows::WindowRect;
+use std::time::Instant;
 // Remaining editor/window routing; terminal data and algorithms live in the owner.
 use crate::process::PtyId;
 
-use std::time::Duration;
 use crate::editor::input::KeyEvent;
-use crate::ui::KeyInputKind;
 use crate::editor::input::MappingResolution;
+use crate::ui::KeyInputKind;
+use std::time::Duration;
 
-use crate::ui::TerminalPanelMode;
-use crate::ui::UiEvent;
 use crate::app::command;
 use crate::app::mode_name;
 use crate::app::windows::rect_contains_point;
+use crate::ui::TerminalPanelMode;
+use crate::ui::UiEvent;
 use crate::ui::terminal_tab_at_column;
-use crate::ui::render::TERMINAL_PANEL_MINIMUM_HEIGHT;
 use crate::windows::PANE_MINIMUM_HEIGHT;
 use crate::windows::PANE_MINIMUM_WIDTH;
 
-
-use crate::ui::workspace_top_rows;
-
-
-
 impl App {
-
-
     pub(in crate::app) fn mouse_pane_geometry(
         &self,
     ) -> Option<(crate::editor::PaneId, u16, u16, u16, u16)> {
@@ -60,8 +49,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn focus_mouse_pane(&mut self) {
         self.reconcile_editor_windows();
         let Some((pane, ..)) = self.mouse_pane_geometry() else {
@@ -87,8 +74,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn apply_mouse_cursor(&mut self, extend_selection: bool) {
         self.reconcile_editor_windows();
         let Some((pane_id, column, row, pane_width, pane_height)) = self.mouse_pane_geometry()
@@ -183,13 +168,10 @@ impl App {
 }
 
 impl App {
-
-
     /// Dragging a docked terminal's inner edge resizes it: the border left of a right-hand
     /// terminal, or the top row of the bottom panel.
     fn handle_dock_drag(&mut self, key: &KeyEvent, column: u16, row: u16) -> bool {
         use crate::editor::input::TerminalMouseInput;
-        use crate::windows::DockEdge;
         let docked = |this: &Self, id: PtyId| {
             let rect = this.terminal_rect(id)?;
             match this
@@ -258,8 +240,6 @@ impl App {
 }
 
 impl App {
-
-
     /// A click on a terminal shown beside the active one, such as a docked agent, gives it the
     /// keys; other mouse input over it goes nowhere.
     fn handle_other_terminal_mouse(&mut self, key: &KeyEvent, column: u16, row: u16) -> bool {
@@ -287,8 +267,6 @@ impl App {
 }
 
 impl App {
-
-
     /// Dragging the border between two editor windows resizes them, as in Neovim.
     fn handle_border_drag(&mut self, key: &KeyEvent, column: u16, row: u16) -> bool {
         use crate::editor::input::TerminalMouseInput;
@@ -399,8 +377,6 @@ impl App {
 }
 
 impl App {
-
-
     fn handle_debug_tab_mouse(&mut self, key: &KeyEvent, column: u16, row: u16) -> bool {
         if key.terminal_mouse() != Some(crate::editor::input::TerminalMouseInput::LeftDown)
             || self.input.prompt().is_some()
@@ -436,8 +412,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn handle_content_tab_mouse(
         &mut self,
         key: &KeyEvent,
@@ -538,8 +512,6 @@ impl App {
 }
 
 impl App {
-
-
     /// A dragged tab moves past the tab under the mouse. Only when the mouse is moving that
     /// way, because swapping tabs of different widths can leave it over the same tab.
     fn drag_content_tab(&mut self, last: u16, column: u16) {
@@ -574,8 +546,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn handle_event(&mut self, event: UiEvent) {
         if self.clipboard.waiting() && !matches!(event, UiEvent::Resize(_, _)) {
             self.clipboard
@@ -892,8 +862,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn keyboard_terminal(&self) -> Option<PtyId> {
         if self.input.capture_context().is_some()
             || self.workspace_edits.proposal().is_some()
@@ -911,7 +879,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn active_input_context(&self) -> String {
         if self.search.help_is_open() {
             return if self.input.picker_normal() {
@@ -1032,8 +999,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(super) fn send_terminal_focus_report(&mut self, focused: bool) {
         if let Some(id) = self.keyboard_terminal()
             && let Err(error) =
@@ -1046,8 +1011,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn handle_configured_key(&mut self, key: KeyEvent) {
         if self.clipboard.waiting() {
             self.clipboard
@@ -1065,8 +1028,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn handle_key_in_context(&mut self, context: &str, key: KeyEvent) {
         let scrolls_completion_documentation = context == "completion"
             && key.modifiers.control
@@ -1151,8 +1112,6 @@ impl App {
 }
 
 impl App {
-
-
     fn typing(&self) -> bool {
         self.state.active_view.is_some_and(|view| {
             matches!(
@@ -1164,8 +1123,6 @@ impl App {
 }
 
 impl App {
-
-
     /// Types `keys` as text where `context` takes text, without looking them up again.
     /// Returns false when the context takes no text or a key has none.
     fn type_unmapped(&mut self, context: &str, keys: &[KeyEvent]) -> bool {
@@ -1195,8 +1152,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn handle_configured_paste(&mut self, text: String) {
         self.close_documentation();
         if self.window_session.terminal_focused()
@@ -1260,8 +1215,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn invoke_mapped_command(&mut self, command_id: &str) {
         match command(command_id) {
             Ok(invocation) => self.invoke_mapped(invocation),
@@ -1271,8 +1224,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn invoke_text_command(&mut self, command_id: &str, text: String) {
         match command(command_id) {
             Ok(invocation) => {
@@ -1284,8 +1235,6 @@ impl App {
 }
 
 impl App {
-
-
     #[cfg(test)]
     pub(in crate::app) fn invoke_insert_text(&mut self, text: String) {
         self.invoke_text_command("edit.insert_text", text);
@@ -1293,8 +1242,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn invoke_mapped(&mut self, mut invocation: CommandInvocation) {
         if !invocation.id.as_str().starts_with("input.") {
             self.input.decorate_invocation(&mut invocation);
@@ -1304,8 +1251,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn cancel_pending_mapping(&mut self) {
         self.input.cancel_mapping();
         self.project_input_hints();
@@ -1313,7 +1258,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn flush_keymap_timeout(&mut self) {
         if self.clipboard.waiting() {
             return;
@@ -1351,7 +1295,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn update_key_hint_ui(&mut self) {
         let context = self.active_input_context();
         if self.input.prompt().is_some() || self.workspace_edits.proposal().is_some() {
@@ -1373,7 +1316,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn restore_input_focus(&mut self) {
         let Some(capture) = self.input.released_focus() else {
             return;
@@ -1391,9 +1333,10 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn project_input_hints(&mut self) {
         let hints = self.input.hints().cloned();
         self.ui.set(hints, |ui| &mut ui.key_hints);
     }
 }
+
+use crate::windows::DockEdge;

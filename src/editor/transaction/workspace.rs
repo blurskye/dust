@@ -29,8 +29,6 @@ use crate::editor::text::TextEditSet;
 
 use crate::editor::text::TextVersion;
 
-
-
 use crate::editor::transaction::EditorDraft;
 
 use crate::editor::transaction::EditorOperation;
@@ -46,7 +44,8 @@ pub(crate) struct WorkspaceEditSources {
 }
 impl WorkspaceEditSources {
     pub(crate) fn same_editor(&self, state: &EditorState) -> bool {
-        self.editor.same_editor(&state.window_version()) && state.window_version().revision().is_some()
+        self.editor.same_editor(&state.window_version())
+            && state.window_version().revision().is_some()
     }
 }
 impl EditorState {
@@ -169,7 +168,7 @@ impl EditorState {
             let before = sources
                 .buffers
                 .iter()
-                .find(|(_, path, _)| path == &file.canonical_path);
+                .find(|(_, path, _)| path == file.canonical_path);
             let current = self
                 .buffers
                 .iter()
@@ -266,13 +265,7 @@ impl EditorDraft {
                         buffer.path.as_deref() == Some(path)
                             && buffer.text.matches_encoded_text(bytes)
                     })
-                    .map(|(id, buffer)| {
-                        (
-                            id,
-                            path.to_path_buf(),
-                            buffer.text.source_version(),
-                        )
-                    })
+                    .map(|(id, buffer)| (id, path.to_path_buf(), buffer.text.source_version()))
                     .ok_or_else(|| {
                         "staged workspace target does not match the selected preview".into()
                     })
@@ -356,4 +349,3 @@ impl WorkspaceSnapshot {
         Ok(self.file)
     }
 }
-

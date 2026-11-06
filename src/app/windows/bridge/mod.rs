@@ -380,10 +380,7 @@ impl EditorWindowBridge {
         graph.validate()
     }
 
-    pub(in crate::app) fn desired_placement(
-        &self,
-        pane: PaneId,
-    ) -> Option<WindowPlacement> {
+    pub(in crate::app) fn desired_placement(&self, pane: PaneId) -> Option<WindowPlacement> {
         self.desired_placements.get(&pane).copied()
     }
 
@@ -625,25 +622,16 @@ impl EditorWindowBridge {
         self.reconciliation_count
     }
 
-    pub(in crate::app) fn active_tab(
-        &self,
-        state: &EditorTopology,
-    ) -> Option<WorkspaceTabId> {
+    pub(in crate::app) fn active_tab(&self, state: &EditorTopology) -> Option<WorkspaceTabId> {
         self.tabs.get(&state.active_tab()?).copied()
     }
 
-    pub(in crate::app) fn focused_window(
-        &self,
-        state: &EditorTopology,
-    ) -> Option<WindowId> {
+    pub(in crate::app) fn focused_window(&self, state: &EditorTopology) -> Option<WindowId> {
         let tab = state.tabs().get(state.active_tab()?)?;
         self.panes.get(&tab.focused).copied()
     }
 
-    pub(in crate::app) fn buffer_for_content(
-        &self,
-        content: ContentId,
-    ) -> Option<BufferId> {
+    pub(in crate::app) fn buffer_for_content(&self, content: ContentId) -> Option<BufferId> {
         self.buffers
             .iter()
             .find_map(|(buffer, candidate)| (*candidate == content).then_some(*buffer))
@@ -750,10 +738,7 @@ pub(in crate::app) struct NativeSurfaceBridge {
 }
 
 impl NativeSurfaceBridge {
-    pub(in crate::app) fn is_current(
-        &self,
-        signature: &NativeSurfaceSignature,
-    ) -> bool {
+    pub(in crate::app) fn is_current(&self, signature: &NativeSurfaceSignature) -> bool {
         signature.terminal_set_revision.is_some() && self.signature.as_ref() == Some(signature)
     }
 
@@ -903,9 +888,8 @@ impl NativeSurfaceBridge {
             graph.rehost(ids.window, tab, ids.view, explorer_placement, true)?;
             Some(ids)
         } else {
-            let mut capabilities = crate::windows::ContentCapabilities::for_adapter(
-                ContentAdapterKind::DeclarativeUi,
-            );
+            let mut capabilities =
+                crate::windows::ContentCapabilities::for_adapter(ContentAdapterKind::DeclarativeUi);
             capabilities.clone_view = true;
             let content = graph.create_content_with_contract(
                 ContentTypeId::new("builtin.explorer")?,
@@ -1265,10 +1249,7 @@ impl NativeSurfaceBridge {
     }
 
     #[cfg(test)]
-    pub(in crate::app) fn picker_for(
-        &self,
-        kind: PickerSurfaceKind,
-    ) -> Option<NativeSurfaceIds> {
+    pub(in crate::app) fn picker_for(&self, kind: PickerSurfaceKind) -> Option<NativeSurfaceIds> {
         self.pickers.get(&kind).copied()
     }
 
@@ -1276,10 +1257,7 @@ impl NativeSurfaceBridge {
         self.terminals.get(&id).copied()
     }
 
-    pub(in crate::app) fn terminal_placement(
-        &self,
-        id: u64,
-    ) -> Option<WindowPlacement> {
+    pub(in crate::app) fn terminal_placement(&self, id: u64) -> Option<WindowPlacement> {
         self.terminal_placements
             .get(&id)
             .copied()
@@ -1692,7 +1670,11 @@ impl NativeSurfaceBridge {
 
     /// Records where a terminal's window goes before the window exists; the next reconcile
     /// creates it there.
-    pub(in crate::app) fn prefer_terminal_placement(&mut self, id: u64, placement: WindowPlacement) {
+    pub(in crate::app) fn prefer_terminal_placement(
+        &mut self,
+        id: u64,
+        placement: WindowPlacement,
+    ) {
         self.terminal_placements.insert(id, placement);
         self.terminal_restore_placements.insert(id, placement);
         self.signature = None;

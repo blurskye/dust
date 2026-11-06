@@ -1,6 +1,6 @@
-use crate::ui::render::markdown::*;
 use crate::editor::EditorState;
 use crate::ui::render::editor::render_editor_view;
+use crate::ui::render::markdown::*;
 use std::ops::Range;
 use std::path::PathBuf;
 

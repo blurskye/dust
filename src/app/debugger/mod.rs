@@ -269,11 +269,7 @@ impl DebugSession {
             source: None,
         }
     }
-    pub(in crate::app) fn refresh(
-        &mut self,
-        policy: &DebugConfig,
-        scope: WorkspaceVersion,
-    ) {
+    pub(in crate::app) fn refresh(&mut self, policy: &DebugConfig, scope: WorkspaceVersion) {
         if self.policy != *policy || self.scope != scope {
             let _ = self.stop();
             self.policy = policy.clone();
@@ -396,10 +392,7 @@ impl DebugSession {
         });
         errors
     }
-    pub(in crate::app) fn control(
-        &mut self,
-        control: DapControl,
-    ) -> Result<(), DapError> {
+    pub(in crate::app) fn control(&mut self, control: DapControl) -> Result<(), DapError> {
         self.control_request(control).map(|_| ())
     }
     fn control_request(&mut self, control: DapControl) -> Result<Option<u64>, DapError> {
@@ -546,12 +539,7 @@ impl DebugSession {
         }
     }
     /// The stop a stopped-data request belongs to, recorded at issue time.
-    pub(in crate::app) fn note_issued(
-        &mut self,
-        stack: bool,
-        scopes: Option<i64>,
-        epoch: u64,
-    ) {
+    pub(in crate::app) fn note_issued(&mut self, stack: bool, scopes: Option<i64>, epoch: u64) {
         if stack {
             self.issued_stack.push_back(epoch);
         }
@@ -1320,7 +1308,7 @@ impl DebugSession {
             }
         }
     }
-    pub(in crate::app) fn install(&mut self, values: Vec<(String, String, Choice)>) -> Vec<DebugRow> {
+    fn install(&mut self, values: Vec<(String, String, Choice)>) -> Vec<DebugRow> {
         let source = self.event_source.take().or_else(|| self.service.context());
         let Some(source) = source.filter(|s| self.service.current(s)) else {
             self.choices = None;
@@ -1674,10 +1662,7 @@ impl DebugSession {
         self.watch_refresh.clear();
         self.requests.clear();
     }
-    pub(in crate::app) fn frames(
-        &mut self,
-        frames: Vec<DapStackFrame>,
-    ) -> Vec<DebugRow> {
+    pub(in crate::app) fn frames(&mut self, frames: Vec<DapStackFrame>) -> Vec<DebugRow> {
         self.install(
             frames
                 .into_iter()
@@ -1823,17 +1808,10 @@ impl DebugSession {
             .current(&source.context)
             .then_some(source.target)
     }
-    pub(in crate::app) fn register_terminal(
-        &mut self,
-        id: PtyId,
-        reply: DapTerminalReply,
-    ) {
+    pub(in crate::app) fn register_terminal(&mut self, id: PtyId, reply: DapTerminalReply) {
         self.terminal_replies.insert(id, reply);
     }
-    pub(in crate::app) fn take_terminal(
-        &mut self,
-        id: &PtyId,
-    ) -> Option<DapTerminalReply> {
+    pub(in crate::app) fn take_terminal(&mut self, id: &PtyId) -> Option<DapTerminalReply> {
         self.terminal_replies.remove(id)
     }
     pub(in crate::app) fn terminal_current(&self, id: &PtyId) -> bool {
@@ -1859,7 +1837,6 @@ pub(in crate::app) mod commands;
 
 #[cfg(test)]
 pub(in crate::app) mod project_tests;
-
 
 #[cfg(test)]
 pub(in crate::app) mod surfaces_tests;

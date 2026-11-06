@@ -1,22 +1,17 @@
-
-use std::collections::BTreeMap;
 use crate::app::App;
+use crate::app::TrustedAction;
+use crate::app::picker::PickerPayload;
 use crate::telemetry::LogLevel;
 use crate::tools::PackageOperation;
-use std::path::PathBuf;
+use crate::tools::RegistryRequest;
+use crate::tools::RegistryResult;
 use crate::workspace::PickerAction;
 use crate::workspace::PickerItem;
 use crate::workspace::PickerItemId;
-use crate::app::picker::PickerPayload;
-use crate::tools::RegistryRequest;
-use crate::tools::RegistryResult;
-use crate::app::TrustedAction;
-
-
-
+use std::collections::BTreeMap;
+use std::path::PathBuf;
 
 impl App {
-
     pub(in crate::app) fn install_package_after_validation(
         &mut self,
         package_manifest: PathBuf,
@@ -52,8 +47,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn request_registry(&mut self, request: RegistryRequest, install: bool) {
         let picker = if install {
             None
@@ -72,7 +65,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn process_registry_events(&mut self) {
         use crate::app::plugins::RegistryUpdate;
         for update in self.extension.poll_registry() {
@@ -150,7 +142,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn process_package_events(&mut self) {
         let updates = self.extension.poll_packages(
             self.plugin_limits(),
@@ -162,7 +153,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn apply_extension_updates(
         &mut self,
         updates: Vec<crate::app::plugins::ExtensionUpdate>,

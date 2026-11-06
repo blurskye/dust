@@ -2,9 +2,9 @@ use crate::app::tests::*;
 
 use crate::app::documents::project_tests::wait_changes_preview;
 
-
 #[test]
-pub(in crate::app) fn the_confirmation_help_action_is_focusable_advertised_and_leaves_the_question_pending() {
+pub(in crate::app) fn the_confirmation_help_action_is_focusable_advertised_and_leaves_the_question_pending()
+ {
     let (_app_dirs, mut app) = app();
     app.open_confirmation(
         crate::ui::PromptKind::Command,
@@ -72,7 +72,6 @@ pub(in crate::app) fn the_confirmation_help_action_is_focusable_advertised_and_l
         "the confirmation is byte-identical after help: same title, message, choices, hint and selection"
     );
 }
-
 
 /// W-26: the diff pane follows the focused row and shows that path's real diff, and `Tab`
 /// switches it between the two comparisons.
@@ -185,7 +184,6 @@ pub(in crate::app) fn the_changes_diff_pane_follows_focus_and_tab_switches_the_c
     );
 }
 
-
 /// A long file's only change sits far below the top of a small diff pane: the pane opens on it,
 /// and the page keys move through the rest.
 #[test]
@@ -290,11 +288,11 @@ pub(in crate::app) fn a_small_changes_pane_opens_on_the_change_and_ctrl_d_scroll
     );
 }
 
-
 /// W-26: the footer labels `s` and `u` by focus, so the change surface stages the ROW UNDER
 /// THE CURSOR rather than whatever buffer happens to be active.
 #[test]
-pub(in crate::app) fn staging_from_the_change_surface_acts_on_the_focused_row_not_the_active_buffer() {
+pub(in crate::app) fn staging_from_the_change_surface_acts_on_the_focused_row_not_the_active_buffer()
+ {
     let (_app_dirs, mut app) = app();
     let repo = git2::Repository::init(&app.state.workspace_root).unwrap();
     let sig = git2::Signature::now("Dust", "dust@example.invalid").unwrap();
@@ -394,7 +392,6 @@ pub(in crate::app) fn staging_from_the_change_surface_acts_on_the_focused_row_no
     );
 }
 
-
 #[test]
 pub(in crate::app) fn staging_an_unsaved_focused_row_offers_the_choice_and_writes_nothing() {
     let (_app_dirs, mut app) = app();
@@ -489,18 +486,10 @@ pub(in crate::app) fn staging_an_unsaved_focused_row_offers_the_choice_and_write
         "nothing was saved on the user's behalf either"
     );
 }
-use std::path::Path;
-use std::path::PathBuf;
-use std::time::Duration;
-use std::time::Instant;
-use crate::editor::input::KeyEvent;
-use crate::editor::text::TextBuffer;
-use crate::editor::CommandInvocation;
+use crate::app::App;
 use crate::editor::InvocationSource;
-use crate::ui::PromptKind;
-use crate::ui::UiEvent;
+use crate::editor::input::KeyEvent;
 use std::fs;
 use std::thread;
-use crate::ui::render;
-use crate::app::App;
-
+use std::time::Duration;
+use std::time::Instant;

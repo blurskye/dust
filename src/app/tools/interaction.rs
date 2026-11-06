@@ -1,34 +1,29 @@
-
-use crate::workspace::ExecutionSource;
-use std::time::Instant;
 use crate::app::App;
 use crate::app::tools::LspRuntimeSource;
-use std::path::Path;
-use std::path::PathBuf;
-use crate::tools::ToolDefinition;
 use crate::app::tools::ToolInstall;
+use crate::app::tools::lsp_runtime_source_allowed_on_host;
+use crate::app::tools::tool_kind_key;
+use crate::tools::ToolDefinition;
 use crate::tools::ToolKind;
-use crate::ui::ToolMenuRow;
-use crate::ui::ToolMenuState;
 use crate::tools::ToolOperation;
-use crate::ui::ToolRuntimeOption;
-use crate::ui::ToolRuntimePickerState;
 use crate::tools::ToolStatus;
 use crate::tools::discover_executable;
 use crate::tools::is_nixos_host;
-use crate::app::tools::lsp_runtime_source_allowed_on_host;
 use crate::tools::managed_tool_executable;
 use crate::tools::nix_lsp_profile_installed;
-use crate::app::tools::tool_kind_key;
+use crate::ui::ToolMenuRow;
+use crate::ui::ToolMenuState;
+use crate::ui::ToolRuntimeOption;
+use crate::ui::ToolRuntimePickerState;
 use crate::ui::render::tools::TOOL_CATEGORY_ORDER;
 use crate::ui::render::tools::TOOL_MANAGER_MINIMUM_HEIGHT;
+use crate::workspace::ExecutionSource;
+use std::path::Path;
+use std::path::PathBuf;
+use std::time::Instant;
 
 impl App {
-
-    pub(in crate::app) fn nix_workspace_available_for(
-        &self,
-        definition: &ToolDefinition,
-    ) -> bool {
+    pub(in crate::app) fn nix_workspace_available_for(&self, definition: &ToolDefinition) -> bool {
         self.tooling.nix_workspace_available_for(
             definition,
             self.configuration.settings().lsp.nix_workspace_fallback,
@@ -37,8 +32,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn selected_lsp_runtime_source(
         &self,
         definition: &ToolDefinition,
@@ -51,8 +44,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn selected_managed_definition(
         &self,
         definition: &ToolDefinition,
@@ -62,8 +53,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn managed_variant_installed(
         &self,
         base: &ToolDefinition,
@@ -74,8 +63,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn selected_managed_executable(
         &self,
         definition: &ToolDefinition,
@@ -85,8 +72,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn tool_probe_directory(&self) -> Option<PathBuf> {
         self.active_lsp_document_without_text()
             .and_then(|(_, document)| document.path.parent().map(Path::to_path_buf))
@@ -100,8 +85,6 @@ impl App {
 }
 
 impl App {
-
-
     fn set_tool_probe_directory(&self) {
         self.tooling
             .set_probe_directory(self.tool_probe_directory());
@@ -109,8 +92,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn selected_lsp_runtime_available(
         &self,
         definition: &ToolDefinition,
@@ -124,8 +105,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn tool_version_key(
         &self,
         definition: &ToolDefinition,
@@ -139,38 +118,27 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn rust_analyzer_is_rustup_proxy(path: &Path) -> bool {
         crate::app::tools::ToolingSession::rust_analyzer_is_rustup_proxy(path)
     }
 }
 
 impl App {
-
-
     pub(in crate::app) fn unavailable_rust_analyzer_message() -> String {
         crate::app::tools::ToolingSession::unavailable_rust_analyzer_message()
     }
 }
 
 impl App {
-
-
     pub(in crate::app) fn rust_analyzer_path_version(
         version: &str,
         rustup_bundled: bool,
     ) -> (String, String) {
-        crate::app::tools::ToolingSession::rust_analyzer_path_version(
-            version,
-            rustup_bundled,
-        )
+        crate::app::tools::ToolingSession::rust_analyzer_path_version(version, rustup_bundled)
     }
 }
 
 impl App {
-
-
     pub(in crate::app) fn observed_tool_version(
         &self,
         definition: &ToolDefinition,
@@ -184,8 +152,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn queue_tool_version_probe(
         &mut self,
         definition: &ToolDefinition,
@@ -203,8 +169,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn queue_tool_version_probes(&mut self, category: &str) {
         let Some(cancelled) = self.workspace.probe_cancellation() else {
             return;
@@ -216,7 +180,6 @@ impl App {
 }
 
 impl App {
-
     fn tool_menu_height(&self) -> u16 {
         let height = (u32::from(self.window_session.height())
             * u32::from(crate::ui::render::tools::TOOL_MANAGER_HEIGHT_PERCENT)
@@ -233,8 +196,6 @@ impl App {
 }
 
 impl App {
-
-
     fn tool_menu_list_visible_rows(&self) -> usize {
         // Rendering reserves the border, up to two wrapped help rows, tabs,
         // heading, separator, and ten detail rows. Using the two-help-row
@@ -244,8 +205,6 @@ impl App {
 }
 
 impl App {
-
-
     fn tool_runtime_picker_visible_rows(&self) -> usize {
         let option_count = self
             .ui
@@ -269,8 +228,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn open_tool_menu(&mut self, category: String) {
         self.cancel_pending_mapping();
         self.input.cancel_pending();
@@ -309,8 +266,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn lsp_menu_lifecycle(&self, id: &str) -> (String, Vec<String>) {
         let running_servers = self.language.running_servers();
         let mut running = 0usize;
@@ -363,8 +318,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn runtime_options_for(
         &self,
         definition: &ToolDefinition,
@@ -599,13 +552,7 @@ impl App {
 }
 
 impl App {
-
-
-    pub(in crate::app) fn rebuild_tool_menu(
-        &mut self,
-        category: &str,
-        selected_id: Option<&str>,
-    ) {
+    pub(in crate::app) fn rebuild_tool_menu(&mut self, category: &str, selected_id: Option<&str>) {
         let nixos_host = is_nixos_host();
         let configured = self.configuration.settings().ui.tool_manager.clone();
         let previous_picker = self.ui.tool_menu.as_ref().and_then(|menu| {
@@ -963,14 +910,8 @@ impl App {
 }
 
 impl App {
-
-
     /// Set the tool search and whether keys still type into it, then filter the list again.
-    pub(in crate::app) fn search_tool_menu(
-        &mut self,
-        query: Option<String>,
-        searching: bool,
-    ) {
+    pub(in crate::app) fn search_tool_menu(&mut self, query: Option<String>, searching: bool) {
         let Some(menu) = self.ui.tool_menu.as_mut() else {
             return;
         };
@@ -982,8 +923,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn move_tool_menu(&mut self, direction: i8) {
         let list_visible = self.tool_menu_list_visible_rows();
         let picker_visible = self.tool_runtime_picker_visible_rows();
@@ -1028,8 +967,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn cycle_tool_category(&mut self, direction: i8) {
         let Some(menu) = &self.ui.tool_menu else {
             return;
@@ -1058,8 +995,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn selected_tool_id(&self) -> Option<String> {
         let menu = self.ui.tool_menu.as_ref()?;
         menu.runtime_picker
@@ -1070,8 +1005,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn focused_runtime_source(
         &self,
         definition: &ToolDefinition,
@@ -1093,8 +1026,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn focused_managed_version(
         &self,
         definition: &ToolDefinition,
@@ -1118,8 +1049,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn toggle_selected_lsp_runtime(&mut self) {
         let Some(id) = self.selected_tool_id() else {
             return;
@@ -1154,8 +1083,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn accept_selected_lsp_runtime(&mut self) {
         let Some((id, source, version_pin, installed, installable)) =
             self.ui.tool_menu.as_ref().and_then(|menu| {
@@ -1220,8 +1147,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn close_tool_menu(&mut self) {
         let Some(menu) = &mut self.ui.tool_menu else {
             return;
@@ -1237,8 +1162,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn stop_lsp_sessions_for_server(&mut self, id: &str) {
         self.language.retire_server_launches(id);
         let sessions = self
@@ -1262,7 +1185,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn refresh_tools(&mut self) {
         let category = self
             .ui
@@ -1277,8 +1199,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn process_tool_version_results(&mut self) {
         let (changed, unavailable_rustup) = self
             .tooling
@@ -1299,8 +1219,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn activate_selected_tool(&mut self) {
         if self
             .ui
@@ -1319,8 +1237,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn activate_tool_by_id(&mut self, id: &str) {
         let Some(index) = self
             .tooling
@@ -1408,8 +1324,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn install_selected_tool(&mut self) {
         let Some(id) = self.selected_tool_id() else {
             return;
@@ -1445,8 +1359,6 @@ impl App {
 }
 
 impl App {
-
-
     /// rustup and its rust-analyzer proxy, when the proxy on PATH fails because the toolchain
     /// lacks the component, so `rustup component add` can fix it.
     pub(in crate::app) fn rust_analyzer_rustup_install(
@@ -1460,8 +1372,6 @@ impl App {
 }
 
 impl App {
-
-
     /// rustup and the rust-analyzer proxy on PATH, when rustup manages the toolchain.
     fn rustup_toolchain(&self, definition: &ToolDefinition) -> Option<(PathBuf, PathBuf)> {
         if definition.id != "rust-analyzer" {
@@ -1474,8 +1384,6 @@ impl App {
 }
 
 impl App {
-
-
     /// Shows a server's warning. When rust-analyzer can't run build scripts or proc macros
     /// on a rustup toolchain, the toolchain usually lacks a component, so Dust adds the
     /// components once and restarts the server instead.
@@ -1530,8 +1438,6 @@ impl App {
 }
 
 impl App {
-
-
     /// Servers running from this tool, which a toolchain repair restarts.
     fn lsp_sessions_for_tool(&self, id: &str) -> Vec<String> {
         self.language
@@ -1544,8 +1450,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn restart_lsp(&mut self, server: &str) {
         self.language.request_start(server, Some(Instant::now()));
         let _ = self.language.stop(server);
@@ -1555,8 +1459,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn install_tool_by_id(
         &mut self,
         id: &str,
@@ -1567,12 +1469,7 @@ impl App {
 }
 
 impl App {
-
-    pub(in crate::app) fn install_tool(
-        &mut self,
-        id: &str,
-        source: Option<LspRuntimeSource>,
-    ) {
+    pub(in crate::app) fn install_tool(&mut self, id: &str, source: Option<LspRuntimeSource>) {
         let Some(index) = self
             .tooling
             .entries()
@@ -1722,8 +1619,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn uninstall_selected_tool(&mut self) {
         let Some(id) = self.selected_tool_id() else {
             return;
@@ -1819,8 +1714,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn stop_selected_lsp(&mut self) {
         let Some(id) = self.selected_tool_id() else {
             return;
@@ -1838,8 +1731,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn restart_selected_lsp(&mut self) {
         let Some(id) = self.selected_tool_id() else {
             return;
@@ -1857,8 +1748,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn process_tool_progress(&mut self) {
         let changed = self.tooling.poll_progress();
         if let (Some(_), Some(menu)) = (changed, &self.ui.tool_menu) {
@@ -1868,8 +1757,6 @@ impl App {
 }
 
 impl App {
-
-
     /// When rustup can't add rust-analyzer, install Dust's pinned standalone build instead, as
     /// mason does, so automatic installs still end with a working server.
     fn install_rust_analyzer_download(&mut self, id: &str, diagnostic: &str) -> bool {
@@ -1916,8 +1803,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn process_tool_results(&mut self) {
         while let Some((name, result)) = self.tooling.poll_install() {
             // With the server already running, rustup was repairing the toolchain, which a
@@ -1985,8 +1870,6 @@ impl App {
     }
 }
 
-
-
 /// The first word of a reported version, so `0.1.99 (58cf8f9 2025-01-01)` reads `0.1.99`.
 fn short_tool_version(version: &str) -> String {
     match version {
@@ -1994,7 +1877,6 @@ fn short_tool_version(version: &str) -> String {
         _ => version.split_whitespace().next().unwrap_or("—").to_owned(),
     }
 }
-
 
 pub(in crate::app) fn tool_install_progress_label(
     phase: &str,

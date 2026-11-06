@@ -1,23 +1,17 @@
-use crate::workspace::DiagnosticOwner;
 use crate::app::App;
+use crate::app::picker::PickerOrigin;
+use crate::app::picker::PickerPayload;
+use crate::config::LoadedConfig;
+use crate::editor::text::TextBuffer;
+use crate::ui::PickerSurfaceKind;
+use crate::ui::render::TERMINAL_PANEL_MAXIMUM_HEIGHT;
+use crate::ui::render::TERMINAL_PANEL_MINIMUM_HEIGHT;
+use crate::workspace::DiagnosticOwner;
 use crate::workspace::PickerAction;
 use crate::workspace::PickerItem;
 use crate::workspace::PickerItemId;
-use crate::app::picker::PickerOrigin;
-use crate::app::picker::PickerPayload;
-use crate::ui::PickerSurfaceKind;
-use crate::editor::text::TextBuffer;
-use crate::config::LoadedConfig;
-use crate::ui::render::TERMINAL_PANEL_MAXIMUM_HEIGHT;
-use crate::ui::render::TERMINAL_PANEL_MINIMUM_HEIGHT;
-
-
-
-
-
 
 impl App {
-
     pub(in crate::app) fn process_theme_results(&mut self) {
         if let Some(Err(error)) = self.configuration.poll_theme_restore() {
             self.show_error(error);
@@ -42,12 +36,7 @@ impl App {
 }
 
 impl App {
-
-    fn apply_wanted_theme(
-        &mut self,
-        wanted: &str,
-        rows: &crate::app::configuration::ThemeRows,
-    ) {
+    fn apply_wanted_theme(&mut self, wanted: &str, rows: &crate::app::configuration::ThemeRows) {
         // "Rosé Pine", "rose pine" and "rose-pine" all name the same theme.
         let plain = |name: &str| name.to_lowercase().replace('é', "e").replace(' ', "-");
         let key = rows
@@ -66,7 +55,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn finish_theme_choice(&mut self, name: &str) {
         // The choice goes into config.toml like any other setting; once the reload lands, the
         // configured theme replaces the applied one. Without a config file it lives in the
@@ -104,8 +92,10 @@ impl App {
 }
 
 impl App {
-
-    pub(in crate::app) fn present_theme_picker(&mut self, rows: crate::app::configuration::ThemeRows) {
+    pub(in crate::app) fn present_theme_picker(
+        &mut self,
+        rows: crate::app::configuration::ThemeRows,
+    ) {
         let items = rows
             .items
             .into_iter()
@@ -144,7 +134,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn process_configuration_result(&mut self) {
         let result = match self.configuration.next_result() {
             Ok(Some(result)) => result,
@@ -180,16 +169,12 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn retain_configuration_watch(&self) {
         self.configuration.retain_watch();
     }
 }
 
 impl App {
-
-
     pub(in crate::app) fn apply_configuration_candidate(
         &mut self,
         loaded: LoadedConfig,
@@ -324,8 +309,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn project_configuration(&mut self) {
         self.ui.dashboard_actions = self.configuration.dashboard_actions();
         self.ui.dashboard_selected = self
@@ -336,8 +319,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn message(&self, key: &str, replacements: &[(&str, String)]) -> String {
         let mut message = self
             .configuration

@@ -1533,7 +1533,9 @@ fn panes_below_a_wide_pane_are_not_its_left_neighbor() {
         crate::windows::projection::spatial_score(top, bottom, SpatialDirection::Left),
         None
     );
-    assert!(crate::windows::projection::spatial_score(top, bottom, SpatialDirection::Down).is_some());
+    assert!(
+        crate::windows::projection::spatial_score(top, bottom, SpatialDirection::Down).is_some()
+    );
 }
 
 #[test]

@@ -1,8 +1,5 @@
 use crate::app::tests::*;
 
-
-
-
 #[test]
 pub(in crate::app) fn dashboard_selection_tracks_the_actions_after_configuration_refresh() {
     let (_app_dirs, mut app) = app();
@@ -33,7 +30,6 @@ pub(in crate::app) fn dashboard_selection_tracks_the_actions_after_configuration
             .is_none()
     );
 }
-
 
 #[test]
 pub(in crate::app) fn persisted_window_rules_validate_the_final_fullscreen_configuration() {
@@ -114,9 +110,8 @@ pub(in crate::app) fn persisted_window_rules_validate_the_final_fullscreen_confi
     );
 }
 use crate::editor::text::TextBuffer;
+use crate::persistence::PersistedWindowPlacement;
 use crate::persistence::PersistedWindowRule;
 use crate::process::PtyId;
-use crate::windows::WindowPlacement;
 use crate::ui::PtyScreen;
-use crate::persistence::PersistedWindowPlacement;
-
+use crate::windows::WindowPlacement;

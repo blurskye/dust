@@ -1,9 +1,9 @@
-use crate::editor::*;
-use crate::editor::text::TextBuffer;
 use crate::app::startup::ApplicationError;
 use crate::app::startup::StartupTarget;
 use crate::app::startup::build_state;
 use crate::app::startup::new_file_path;
+use crate::editor::text::TextBuffer;
+use crate::editor::*;
 
 /// Headless composition used by tests and automation. The terminal application
 /// uses the same state construction and deterministic editing command registration.
@@ -88,9 +88,32 @@ mod tests {
 
     use tempfile::tempdir;
 
-    use crate::testing::headless::HeadlessApplication;
     use crate::app::startup::StartupTarget;
     use crate::app::startup::build_state;
+    use crate::testing::headless::HeadlessApplication;
+
+    #[test]
+    fn headless_commands_apply_transactions_to_the_startup_document() {
+        use crate::editor::{CommandInvocation, EditorMode, InvocationSource};
+
+        let directory = tempdir().unwrap();
+        let mut app = HeadlessApplication::bootstrap(StartupTarget::File {
+            path: directory.path().join("new.txt"),
+            additional_files: Vec::new(),
+            workspace_root: directory.path().into(),
+        })
+        .unwrap();
+        assert_eq!(app.startup.workspace_root(), directory.path());
+        assert!(
+            app.commands
+                .specs()
+                .any(|spec| spec.id.as_str() == "mode.insert")
+        );
+        app.execute(&CommandInvocation::new("mode.insert", InvocationSource::Test).unwrap())
+            .unwrap();
+        let view = app.state.active_view.unwrap();
+        assert_eq!(app.state.views[view].mode, EditorMode::Insert);
+    }
 
     #[test]
     fn multiple_startup_files_keep_a_live_active_view() {

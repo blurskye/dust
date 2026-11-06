@@ -1,12 +1,12 @@
-#[cfg(test)]
-use std::time::Duration;
 use std::path::PathBuf;
-use std::sync::mpsc::self;
+use std::sync::mpsc;
 use std::sync::mpsc::Receiver;
 use std::sync::mpsc::SyncSender;
 use std::sync::mpsc::TrySendError;
-use std::thread::self;
+use std::thread;
 use std::thread::JoinHandle;
+#[cfg(test)]
+use std::time::Duration;
 
 use crate::tools::install_prepare::prepare_nix_lsp_workspace;
 

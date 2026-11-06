@@ -13,8 +13,14 @@ pub use registry::RegistryService;
 
 use std::sync::OnceLock;
 
-const BUNDLED_NIX_LSP_FLAKE: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/tools/nix-workspace/flake.nix"));
-const BUNDLED_NIX_LSP_LOCK: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/tools/nix-workspace/flake.lock"));
+const BUNDLED_NIX_LSP_FLAKE: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/assets/tools/nix-workspace/flake.nix"
+));
+const BUNDLED_NIX_LSP_LOCK: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/assets/tools/nix-workspace/flake.lock"
+));
 /// Exact nixpkgs revision locked by Dust's bundled Linux compatibility runtime.
 pub const NIX_LSP_NIXPKGS_REVISION: &str = "b6018f87da91d19d0ab4cf979885689b469cdd41";
 const NIX_COMPATIBILITY_FLAKE_PACKAGE: &str = "compat-runtime";
@@ -56,6 +62,7 @@ pub use catalog::managed_formatter;
 pub use catalog::managed_tool_executable;
 pub use catalog::managed_tool_installed_version;
 pub use catalog::nix_lsp_launch_environment;
+pub(crate) use catalog::nix_lsp_launch_environment_for_workspace_at;
 pub use catalog::nix_lsp_profile_installed;
 pub use catalog::nix_lsp_shell;
 pub use catalog::nix_lsp_tool_installed;
@@ -63,7 +70,6 @@ pub use catalog::nix_lsp_workspace_root;
 pub use catalog::rust_analyzer_is_rustup_proxy;
 pub use catalog::tool_launch_environment;
 pub use catalog::tool_store_root;
-pub(crate) use catalog::nix_lsp_launch_environment_for_workspace_at;
 mod installer;
 pub use installer::ToolInstallProgress;
 pub use installer::ToolInstallResult;

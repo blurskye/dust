@@ -1438,7 +1438,8 @@ pub(in crate::app) fn timeout_executes_an_earlier_exact_mapping_and_replays_its_
 }
 
 #[test]
-pub(in crate::app) fn delayed_open_preserves_newer_unsaved_canonical_buffer_and_closed_reload_cannot_reopen_it() {
+pub(in crate::app) fn delayed_open_preserves_newer_unsaved_canonical_buffer_and_closed_reload_cannot_reopen_it()
+ {
     let (_app_dirs, mut app) = app();
     let root = app.state.workspace_root.clone();
     let state_directory = app.workspace.state_path().parent().unwrap().to_path_buf();
@@ -1520,12 +1521,14 @@ pub(in crate::app) fn startup_lifecycle_cost_probe() {
 
 #[test]
 pub(in crate::app) fn pending_open_cannot_resurrect_closed_path_or_steal_newer_navigation() {
-    crate::app::tests::driver::TestSession::new(crate::config::load_bundled_config()).verify_open_lifetimes();
+    crate::app::tests::driver::TestSession::new(crate::config::load_bundled_config())
+        .verify_open_lifetimes();
 }
 
 #[test]
 pub(in crate::app) fn force_save_as_does_not_overwrite_another_open_document() {
-    crate::app::tests::driver::TestSession::new(crate::config::load_bundled_config()).verify_save_collisions();
+    crate::app::tests::driver::TestSession::new(crate::config::load_bundled_config())
+        .verify_save_collisions();
 }
 
 #[test]
@@ -1946,7 +1949,8 @@ pub(in crate::app) fn dot_stops_before_inserting_after_a_failed_search_operator(
 }
 
 #[test]
-pub(in crate::app) fn word_search_projects_its_boundary_policy_until_an_ordinary_search_replaces_it() {
+pub(in crate::app) fn word_search_projects_its_boundary_policy_until_an_ordinary_search_replaces_it()
+ {
     let (_app_dirs, mut app) = app();
     app.state
         .open_text(TextBuffer::from_text("foo foobar foo"), None)
@@ -1963,7 +1967,8 @@ pub(in crate::app) fn word_search_projects_its_boundary_policy_until_an_ordinary
 }
 
 #[test]
-pub(in crate::app) fn cgn_repeats_with_dot_substitute_confirms_each_match_and_global_deletes_lines() {
+pub(in crate::app) fn cgn_repeats_with_dot_substitute_confirms_each_match_and_global_deletes_lines()
+{
     let (_app_dirs, mut app) = app();
     let (_, view) = app
         .state
@@ -2851,7 +2856,8 @@ pub(in crate::app) fn recovery_missing_parent_does_not_bind_an_unvalidated_desti
 
 #[cfg(unix)]
 #[test]
-pub(in crate::app) fn recovery_rejected_paths_and_missing_files_under_outside_symlinks_become_scratch() {
+pub(in crate::app) fn recovery_rejected_paths_and_missing_files_under_outside_symlinks_become_scratch()
+ {
     for exists in [true, false] {
         let (_app_dirs, mut app) = app();
         let outside = tempdir().unwrap();
@@ -3289,7 +3295,8 @@ pub(in crate::app) fn empty_substitution_selection_positions_the_cursor_without_
 }
 
 #[test]
-pub(in crate::app) fn word_search_keeps_combining_marks_and_search_selection_keeps_word_boundaries() {
+pub(in crate::app) fn word_search_keeps_combining_marks_and_search_selection_keeps_word_boundaries()
+{
     let (_app_dirs, mut app) = app();
     let (_, view) = app
         .state
@@ -3387,47 +3394,23 @@ pub(in crate::app) fn startup_reads_load_without_changing_focus_after_user_navig
     assert!(!app.documents.has_startup_work());
 }
 
-use crate::app::documents::DocumentSession;
-use std::collections::BTreeMap;
-use std::time::Duration;
-use std::time::Instant;
+use crate::app::App;
+use crate::app::AppEffect;
+use crate::app::compile_keymaps;
+use crate::app::startup::StartupTarget;
+use crate::editor::CommandValue;
+use crate::editor::InvocationSource;
 use crate::editor::input::KeyEvent;
 use crate::editor::text::ByteOffset;
 use crate::editor::text::ByteRange;
 use crate::editor::text::TextBuffer;
-use crate::editor::text::TextEdit;
-use crate::editor::text::TextEditSet;
-use crate::editor::CommandInvocation;
-use crate::editor::CommandValue;
-use crate::editor::EditorMode;
-use crate::editor::EditorState;
-use crate::editor::InvocationSource;
-use crate::editor::RegisterShape;
-use crate::editor::RegisterValue;
-use crate::files::VfsWorker;
-use crate::language::lsp::file_uri;
-use crate::language::syntax::language_for_document;
-use crate::persistence::PersistedLocation;
-use crate::ui::KeyInputKind;
-use crate::ui::PromptKind;
 use crate::ui::UiEvent;
 use crate::ui::UiFold;
-use crate::ui::UiInlayHint;
-use crate::ui::UiSyntaxSpan;
-use crate::ui::VisualRowAnchor;
-use crate::ui::VisualRowModel;
-use crate::ui::active_editor_pane_viewport;
-use crate::ui::editor_state_content_width;
-use crate::workspace::DiagnosticOwner;
-use crate::workspace::WorkspaceTrust;
-use thiserror::Error;
-use crate::app::startup::StartupTarget;
+use crate::ui::render;
+use crate::workspace::DiagnosticSeverity;
+use std::collections::BTreeMap;
 use std::fs;
 use std::thread;
-use crate::ui::render;
+use std::time::Duration;
+use std::time::Instant;
 use tempfile::tempdir;
-use crate::app::App;
-use crate::app::compile_keymaps;
-use crate::app::AppEffect;
-use crate::workspace::DiagnosticSeverity;
-

@@ -1,12 +1,11 @@
-use std::path::PathBuf;
 use crate::editor::EditorState;
 use crate::ui::render::UiState;
+use std::path::PathBuf;
 
-use crate::ui::render::composition_tests::editor_layout;
-use crate::ui::render::composition_tests::ui_with_editor_layout;
 use crate::ui::render::composition_tests::attach_test_compositor;
+use crate::ui::render::composition_tests::editor_layout;
 use crate::ui::render::composition_tests::render;
-
+use crate::ui::render::composition_tests::ui_with_editor_layout;
 
 #[test]
 fn split_tree_and_tab_line_render_real_independent_views() {
@@ -51,7 +50,6 @@ fn split_tree_and_tab_line_render_real_independent_views() {
     assert!(frame.cursor.is_some_and(|(x, y, _)| x > 29 && y == 1));
 }
 
-
 #[test]
 fn workspace_tab_line_keeps_the_active_label_visible() {
     let mut state = EditorState::new(PathBuf::from("/workspace"));
@@ -95,7 +93,6 @@ fn workspace_tab_line_keeps_the_active_label_visible() {
     }
 }
 
-
 #[test]
 fn workspace_tab_line_measures_sanitized_labels() {
     let loaded = crate::config::load_bundled_config();
@@ -130,7 +127,6 @@ fn workspace_tab_line_measures_sanitized_labels() {
         }
     }
 }
-
 
 #[test]
 fn non_wrapped_horizontal_projection_snaps_graphemes_and_preserves_source_tabs() {
@@ -223,7 +219,6 @@ fn non_wrapped_horizontal_projection_snaps_graphemes_and_preserves_source_tabs()
     );
 }
 
-
 #[test]
 fn configurable_indent_guides_follow_leading_space_and_tab_display_columns() {
     let mut state = EditorState::new(PathBuf::from("/workspace"));
@@ -266,7 +261,6 @@ fn configurable_indent_guides_follow_leading_space_and_tab_display_columns() {
     assert_eq!(wide.grid.get(4, 2).unwrap().symbol, "|");
     assert!(!wide.grid.get(4, 2).unwrap().continuation);
 }
-
 
 #[test]
 fn immutable_git_signs_use_the_reserved_gutter_and_exact_buffer_revision() {
@@ -313,8 +307,13 @@ fn immutable_git_signs_use_the_reserved_gutter_and_exact_buffer_revision() {
         },
     ];
     let frame = render(&state, &ui, &loaded.config, &loaded.dashboard, 20, 5);
-    let gutter = crate::ui::render::editor_gutter_width(&state.buffers[buffer].text, &loaded.config.editor, 20);
-    let sign_column = crate::ui::render::visual_rows::git_sign_column(gutter, &loaded.config.editor).unwrap();
+    let gutter = crate::ui::render::editor_gutter_width(
+        &state.buffers[buffer].text,
+        &loaded.config.editor,
+        20,
+    );
+    let sign_column =
+        crate::ui::render::visual_rows::git_sign_column(gutter, &loaded.config.editor).unwrap();
     assert_eq!(
         (
             frame.grid.get(sign_column, 0).unwrap().symbol.as_str(),
@@ -361,7 +360,6 @@ fn immutable_git_signs_use_the_reserved_gutter_and_exact_buffer_revision() {
     assert_eq!(tiny.grid.width(), 1);
 }
 
-
 #[test]
 fn line_number_gutter_uses_the_largest_open_buffer_across_tabs() {
     let mut state = EditorState::new(PathBuf::from("/workspace"));
@@ -381,7 +379,10 @@ fn line_number_gutter_uses_the_largest_open_buffer_across_tabs() {
         )
         .unwrap();
     let loaded = crate::config::load_bundled_config();
-    assert_eq!(crate::ui::render::visual_rows::editor_line_number_digits(&state), 4);
+    assert_eq!(
+        crate::ui::render::visual_rows::editor_line_number_digits(&state),
+        4
+    );
     let short_gutter = crate::ui::render::editor_state_gutter_width(
         &state,
         &state.buffers[short].text,
@@ -399,9 +400,14 @@ fn line_number_gutter_uses_the_largest_open_buffer_across_tabs() {
     state.focus_tab(-1, true).unwrap();
     assert_eq!(state.active_tab, Some(first_tab));
     let ui = ui_with_editor_layout(&state);
-    let frame = crate::ui::render::render_editor_view(&state, short_view, &ui, &loaded.config, 80, 4);
-    let short_sign = crate::ui::render::visual_rows::git_sign_column(short_gutter, &loaded.config.editor).unwrap();
-    let long_sign = crate::ui::render::visual_rows::git_sign_column(long_gutter, &loaded.config.editor).unwrap();
+    let frame =
+        crate::ui::render::render_editor_view(&state, short_view, &ui, &loaded.config, 80, 4);
+    let short_sign =
+        crate::ui::render::visual_rows::git_sign_column(short_gutter, &loaded.config.editor)
+            .unwrap();
+    let long_sign =
+        crate::ui::render::visual_rows::git_sign_column(long_gutter, &loaded.config.editor)
+            .unwrap();
     assert_eq!(frame.grid.get(3, 0).unwrap().symbol, "1");
     assert_eq!(frame.grid.get(short_sign, 0).unwrap().symbol, "│");
     assert_eq!(
@@ -410,23 +416,16 @@ fn line_number_gutter_uses_the_largest_open_buffer_across_tabs() {
     );
     assert_eq!(frame.grid.get(short_sign + 1, 0).unwrap().symbol, " ");
     assert_eq!(frame.grid.get(short_gutter, 0).unwrap().symbol, "s");
-    let long_frame = crate::ui::render::render_editor_view(&state, long_view, &ui, &loaded.config, 80, 4);
+    let long_frame =
+        crate::ui::render::render_editor_view(&state, long_view, &ui, &loaded.config, 80, 4);
     assert_eq!(long_frame.grid.get(long_sign, 0).unwrap().symbol, "│");
     assert_eq!(long_frame.grid.get(long_sign + 1, 0).unwrap().symbol, " ");
     assert_eq!(long_frame.grid.get(long_gutter, 0).unwrap().symbol, "l");
 }
 use crate::ui::render::composition_tests::drawn_at;
 
-use crate::ui::render::visual_rows::editor_line_number_digits;
-use crate::ui::render::visual_rows::git_sign_column;
-
 use crate::ui::render::overlays::BUFFER_OVERFLOW_RIGHT;
 use crate::ui::render::overlays::BUFFER_SEPARATOR;
-
-use crate::ui::render::overlays::render_content_tab_line;
-
-
-
 
 #[test]
 fn content_tabs_keep_literal_placeholders_and_measure_visible_replacements() {
@@ -481,7 +480,6 @@ fn content_tabs_keep_literal_placeholders_and_measure_visible_replacements() {
         );
     }
 }
-
 
 #[test]
 fn content_tabs_follow_the_last_of_many_entries() {

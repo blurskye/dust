@@ -1,16 +1,15 @@
-use std::path::PathBuf;
 use crate::editor::EditorState;
 use crate::ui::render::CompletionItem;
 use crate::ui::render::PromptKind;
 use crate::ui::render::PromptState;
 use crate::ui::render::UiState;
 use crate::ui::render::prompt_geometry;
+use std::path::PathBuf;
 
-use crate::ui::render::composition_tests::editor_layout;
-use crate::ui::render::composition_tests::ui_with_editor_layout;
 use crate::ui::render::composition_tests::attach_test_compositor;
+use crate::ui::render::composition_tests::editor_layout;
 use crate::ui::render::composition_tests::render;
-
+use crate::ui::render::composition_tests::ui_with_editor_layout;
 
 #[test]
 fn completion_attaches_below_globally_centered_prompt() {
@@ -58,7 +57,6 @@ fn completion_attaches_below_globally_centered_prompt() {
     );
 }
 
-
 #[test]
 fn prompt_completion_viewport_follows_a_selected_item_beyond_its_first_page() {
     let state = EditorState::new(PathBuf::from("/tmp/dust-workspace"));
@@ -90,7 +88,6 @@ fn prompt_completion_viewport_follows_a_selected_item_beyond_its_first_page() {
     assert!(!screen.iter().any(|line| line.contains("candidate-0")));
 }
 
-
 #[test]
 fn completion_is_clipped_to_the_focused_split() {
     let mut state = EditorState::new(PathBuf::from("/workspace"));
@@ -117,8 +114,8 @@ fn completion_is_clipped_to_the_focused_split() {
         scroll: 0,
     });
     attach_test_compositor(&state, &mut ui, &loaded.config, 80, 20);
-    let pane =
-        crate::ui::render::active_pane_viewport(&state, &ui, &loaded.config, 80, 19).expect("active pane");
+    let pane = crate::ui::render::active_pane_viewport(&state, &ui, &loaded.config, 80, 19)
+        .expect("active pane");
     let frame = render(&state, &ui, &loaded.config, &loaded.dashboard, 80, 20);
     assert!(drawn_at(&frame, "selected-completion").is_some());
     let mut selected_cells = 0;
@@ -140,7 +137,6 @@ fn completion_is_clipped_to_the_focused_split() {
         "the completion selection must be painted"
     );
 }
-
 
 #[test]
 fn language_diagnostics_and_completion_are_projected_without_service_calls() {
@@ -200,7 +196,6 @@ fn language_diagnostics_and_completion_are_projected_without_service_calls() {
     assert!(status.contains("\u{f057} 1") && status.contains("lean") && status.contains("Tasks 2"));
 }
 
-
 #[test]
 fn language_completion_keeps_the_selected_item_inside_its_bounded_viewport() {
     let mut state = EditorState::new(PathBuf::from("/tmp"));
@@ -243,15 +238,10 @@ fn language_completion_keeps_the_selected_item_inside_its_bounded_viewport() {
 }
 use crate::ui::render::composition_tests::drawn_at;
 
-
 use crate::ui::render::DocumentationMarkupKind;
 use crate::ui::render::DocumentationPopupKind;
 use crate::ui::render::DocumentationPopupState;
 use crate::ui::render::DocumentationSection;
-
-
-
-
 
 #[test]
 fn completion_height_fits_on_one_side_of_the_cursor() {
@@ -292,7 +282,6 @@ fn completion_height_fits_on_one_side_of_the_cursor() {
     assert!(frame.grid.row_text(5).starts_with("editing"));
     assert!((0..10).any(|y| frame.grid.row_text(y).contains("item8")));
 }
-
 
 #[test]
 fn completion_documentation_reports_final_wrapping_and_suppresses_cursor_overlap() {

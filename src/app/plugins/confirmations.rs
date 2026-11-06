@@ -194,7 +194,7 @@ impl PluginConfirmations {
         Ok(())
     }
 
-    pub(in crate::app) fn failed(pending: PendingConfirmation, detail: &str) -> AnsweredConfirmation {
+    fn failed(pending: PendingConfirmation, detail: &str) -> AnsweredConfirmation {
         AnsweredConfirmation {
             pending,
             outcome: PluginConfirmationOutcome::Failed(PluginConfirmationError::new(

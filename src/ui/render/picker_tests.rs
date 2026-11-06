@@ -1,10 +1,9 @@
-use std::path::PathBuf;
 use crate::editor::EditorState;
 use crate::ui::render::UiState;
+use std::path::PathBuf;
 
 use crate::ui::render::composition_tests::editor_layout;
 use crate::ui::render::composition_tests::render;
-
 
 #[test]
 fn theme_geometry_is_compact_and_bounded_without_resizing_other_pickers() {
@@ -45,7 +44,8 @@ fn theme_geometry_is_compact_and_bounded_without_resizing_other_pickers() {
                 assert!(rect.x + rect.width <= bounds.x + width);
                 assert!(rect.y + rect.height <= bounds.y + height);
                 let content =
-                    crate::ui::render::picker::picker_content_geometry(&picker, &config, rect).unwrap();
+                    crate::ui::render::picker::picker_content_geometry(&picker, &config, rect)
+                        .unwrap();
                 assert_eq!(content.outer, rect);
                 assert_eq!(content.list.height, rect.height - 4);
             } else {
@@ -59,7 +59,6 @@ fn theme_geometry_is_compact_and_bounded_without_resizing_other_pickers() {
         }
     }
 }
-
 
 #[test]
 fn picker_sources_share_a_right_column_and_do_not_overwrite_labels_or_borders() {
@@ -122,7 +121,6 @@ fn picker_sources_share_a_right_column_and_do_not_overwrite_labels_or_borders() 
     }
 }
 
-
 #[test]
 fn generic_picker_is_centered_filtered_presentation_with_configured_markers() {
     let state = EditorState::new(PathBuf::from("/tmp"));
@@ -147,7 +145,12 @@ fn generic_picker_is_centered_filtered_presentation_with_configured_markers() {
             loading: false,
             preview: Some(crate::ui::render::PickerPreview::text(
                 "health.rs",
-                crate::ui::render::PickerTextPreview::new(vec!["fn health() {}".to_string()], 0, Some(0), None),
+                crate::ui::render::PickerTextPreview::new(
+                    vec!["fn health() {}".to_string()],
+                    0,
+                    Some(0),
+                    None,
+                ),
             )),
         }),
         ..UiState::default()
@@ -159,7 +162,6 @@ fn generic_picker_is_centered_filtered_presentation_with_configured_markers() {
     assert!((0..30).any(|row| frame.grid.row_text(row).contains("1/1")));
     assert!(frame.cursor.is_some());
 }
-
 
 #[test]
 fn picker_preview_highlighting_is_prepared_before_paint_and_replaced_with_its_text() {
@@ -212,7 +214,6 @@ fn picker_preview_highlighting_is_prepared_before_paint_and_replaced_with_its_te
     assert!((0..24).any(|y| frame.grid.row_text(y).contains("1 x")));
 }
 
-
 #[test]
 fn picker_stacks_preview_when_two_readable_columns_do_not_fit() {
     let state = EditorState::new(PathBuf::from("/tmp"));
@@ -260,7 +261,6 @@ fn picker_stacks_preview_when_two_readable_columns_do_not_fit() {
         .expect("highlighted preview row");
     assert!(preview_y > result_y + 1);
 }
-
 
 #[test]
 fn a_debug_view_survives_a_narrow_width_in_the_shared_picker() {
@@ -329,14 +329,6 @@ fn a_debug_view_survives_a_narrow_width_in_the_shared_picker() {
         "with no debug view open the row is not drawn: {none:?}"
     );
 }
-
-
-
-
-
-
-
-
 
 /// U-15: a row carries per-cell text, per-cell style and glyph cells, and the columns line
 /// up because each cell declares its own width rather than being concatenated into a string.
@@ -429,7 +421,6 @@ fn a_row_with_cells_draws_each_column_at_its_own_width_and_style() {
     );
 }
 
-
 /// U-15/U-16 (base form): a diff carried as structure renders its provenance, its hunk
 /// headers, the exact count of a collapsed run, and each line with both numbers and a
 /// classification glyph. Intra-line emphasis, side-by-side mode and syntax highlighting are
@@ -472,7 +463,6 @@ fn a_short_diff_box_opens_on_the_change_and_keeps_the_comparison_on_top() {
     assert_eq!(diff.last_scroll(5), 3);
     assert_eq!(diff.last_scroll(50), 0);
 }
-
 
 #[test]
 fn a_structured_diff_preview_draws_provenance_hunks_and_classified_lines() {
@@ -601,7 +591,6 @@ fn a_structured_diff_preview_draws_provenance_hunks_and_classified_lines() {
     );
 }
 
-
 /// The same picker with the preview's two sides scrolled by their own offsets.
 fn diff_picker_scrolled(diff: super::DiffPreview, scroll: (usize, usize)) -> UiState {
     let mut state = diff_picker(diff);
@@ -610,7 +599,6 @@ fn diff_picker_scrolled(diff: super::DiffPreview, scroll: (usize, usize)) -> UiS
     }
     state
 }
-
 
 /// A picker whose preview carries a parsed diff.
 pub(super) fn diff_picker(diff: super::DiffPreview) -> UiState {
@@ -635,7 +623,6 @@ pub(super) fn diff_picker(diff: super::DiffPreview) -> UiState {
         ..UiState::default()
     }
 }
-
 
 /// U-16: every element the requirement names is drawn from real patch text.
 #[test]
@@ -699,7 +686,6 @@ fn a_parsed_diff_renders_every_element_the_requirement_names() {
     );
 }
 
-
 /// U-16: the changed span inside a modified line is emphasised, and the rest of that line is
 /// not, so a one-word change in a long line is visible.
 #[test]
@@ -731,7 +717,6 @@ fn intra_line_emphasis_marks_the_changed_span_and_not_the_rest_of_the_line() {
         "the unchanged part of the added line keeps the addition style"
     );
 }
-
 
 /// U-16: side by side, the old and new sides occupy their own columns with a divider between.
 #[test]
@@ -769,7 +754,6 @@ fn side_by_side_puts_the_two_sides_in_their_own_columns() {
         "a border divider separates the two sides on row {y}"
     );
 }
-
 
 /// U-16: a bounded patch says what it is not showing, with the true total.
 #[test]
@@ -811,7 +795,6 @@ fn a_bounded_patch_states_its_true_total() {
         "a bounded view states the true total: {rendered:?}"
     );
 }
-
 
 /// U-16: the two halves of a side-by-side diff scroll INDEPENDENTLY — moving one side leaves
 /// the other side's content exactly where it was.
@@ -876,7 +859,6 @@ fn side_by_side_halves_scroll_independently() {
     );
 }
 
-
 #[test]
 fn a_long_path_in_a_picker_row_keeps_its_end() {
     let ambiguous = crate::config::load_bundled_config()
@@ -884,7 +866,8 @@ fn a_long_path_in_a_picker_row_keeps_its_end() {
         .editor
         .ambiguous_width;
     let path = "/tmp/a/very/long/prefix/that/repeats/on/every/row/src/main.py:12";
-    let (label, detail) = crate::ui::render::picker::fitted_picker_row(path, "print(name)", 40, ambiguous);
+    let (label, detail) =
+        crate::ui::render::picker::fitted_picker_row(path, "print(name)", 40, ambiguous);
     assert!(
         label.starts_with('…') && label.ends_with("main.py:12"),
         "{label}"
@@ -908,7 +891,6 @@ fn a_long_path_in_a_picker_row_keeps_its_end() {
         "ordinary text is not a path"
     );
 }
-
 
 #[test]
 fn picker_diff_geometry_does_not_count_line_numbers_twice() {
@@ -958,15 +940,16 @@ fn picker_diff_geometry_does_not_count_line_numbers_twice() {
         width: 80,
         height: 24,
     };
-    let geometry = crate::ui::render::picker::picker_content_geometry(&picker, &config, rect).unwrap();
+    let geometry =
+        crate::ui::render::picker::picker_content_geometry(&picker, &config, rect).unwrap();
     assert!(geometry.divider.is_some());
     assert!(geometry.stacked_divider.is_none());
     let narrow = WindowRect { width: 74, ..rect };
-    let geometry = crate::ui::render::picker::picker_content_geometry(&picker, &config, narrow).unwrap();
+    let geometry =
+        crate::ui::render::picker::picker_content_geometry(&picker, &config, narrow).unwrap();
     assert!(geometry.divider.is_none());
     assert!(geometry.stacked_divider.is_some());
 }
-
 
 #[test]
 fn large_diff_rows_share_number_width() {
@@ -999,7 +982,6 @@ fn large_diff_rows_share_number_width() {
     assert!(rows.last().unwrap().text.contains("50000 + x"));
 }
 
-
 #[test]
 fn diff_tabs_and_combining_marks_keep_text_and_emphasis_aligned() {
     let state = EditorState::new("/tmp".into());
@@ -1017,3 +999,29 @@ fn diff_tabs_and_combining_marks_keep_text_and_emphasis_aligned() {
     assert!(!(0..30).any(|row| frame.grid.row_text(row).contains('◌')));
 }
 use crate::ui::render::composition_tests::drawn_at;
+
+/// Verbatim `git diff` output, the same real patch text the parser tests use, so these render
+/// tests exercise the whole chain: real patch text -> parser -> rendered cells.
+const RENDER_PATCH: &str = "\
+diff --git a/f.txt b/f.txt
+index 9792656..89d6f9e 100644
+--- a/f.txt
++++ b/f.txt
+@@ -1,6 +1,6 @@
+ line one
+ line two
+-line three
++line three changed
+ line four
+ line five
+ line six
+@@ -32,7 +32,7 @@ line thirty-one
+ line thirty-two
+ line thirty-three
+ line thirty-four
+-line thirty-five
++line thirty-five modified
+ line thirty-six
+ line thirty-seven
+ line thirty-eight
+";

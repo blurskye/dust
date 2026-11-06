@@ -1,13 +1,13 @@
 //! Terminal byte encoding, modal cursor/selection, scrollback and derived screen projection.
-use std::sync::Arc;
+use crate::app::terminal::TerminalRuntime;
+use crate::app::terminal::TerminalSession;
+use crate::app::workspace::WorkspaceSession;
 use crate::process::PtyId;
 use crate::ui::PtyScreen;
 use crate::ui::TerminalPanelMode;
 use crate::ui::TerminalPanelState;
-use crate::app::terminal::TerminalRuntime;
-use crate::app::terminal::TerminalSession;
 use crate::ui::TerminalTabState;
-use crate::app::workspace::WorkspaceSession;
+use std::sync::Arc;
 impl TerminalSession {
     pub(in crate::app) fn send(
         &self,

@@ -1,9 +1,3 @@
-
-use crate::ui::render::composition_tests::render;
-
-
-
-
 fn tool_menu_for_render() -> crate::ui::render::ToolMenuState {
     crate::ui::render::ToolMenuState {
         category: "lsp".into(),
@@ -34,7 +28,6 @@ fn tool_menu_for_render() -> crate::ui::render::ToolMenuState {
         }],
     }
 }
-
 
 #[test]
 fn tool_menu_title_and_wide_categories_stay_inside_the_modal() {
@@ -80,7 +73,6 @@ fn tool_menu_title_and_wide_categories_stay_inside_the_modal() {
     }
 }
 
-
 #[test]
 fn tool_menu_failed_probe_offers_start_instead_of_stop_and_restart() {
     let config = crate::config::load_bundled_config().config;
@@ -122,7 +114,6 @@ fn tool_menu_failed_probe_offers_start_instead_of_stop_and_restart() {
         assert!(!screen.contains("Enter start"), "{state}");
     }
 }
-
 
 #[test]
 fn runtime_picker_keeps_selection_visible_when_navigation_used_a_taller_screen() {

@@ -375,6 +375,7 @@ impl ExplorerState {
         self.data.nodes.get(&id)
     }
     #[must_use]
+    #[cfg(test)]
     pub fn visible(&self) -> Vec<&ExplorerNode> {
         self.visible_nodes
             .iter()

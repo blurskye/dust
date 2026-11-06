@@ -1,18 +1,18 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
-use std::sync::atomic::Ordering;
-use std::sync::mpsc::self;
-use std::sync::mpsc::Receiver;
-use std::sync::mpsc::SyncSender;
-use std::sync::mpsc::TrySendError;
-use std::thread::self;
-use std::thread::JoinHandle;
-use std::time::Duration;
 #[cfg(unix)]
 use std::process::Command;
 use std::process::Stdio;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
+use std::sync::mpsc;
+use std::sync::mpsc::Receiver;
+use std::sync::mpsc::SyncSender;
+use std::sync::mpsc::TrySendError;
+use std::thread;
+use std::thread::JoinHandle;
+use std::time::Duration;
 use std::time::Instant;
 
 pub(super) const MAXIMUM_TOOL_VERSION_BYTES: u64 = 1024;

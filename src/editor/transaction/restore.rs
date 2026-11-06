@@ -6,8 +6,15 @@ pub(crate) struct RestoredPane {
     pub(crate) scroll_column: usize,
 }
 pub(crate) enum RestoredLayout {
-    Pane { pane: RestoredPane },
-    Split { axis: crate::editor::Axis, ratio: u16, first: Box<Self>, second: Box<Self> },
+    Pane {
+        pane: RestoredPane,
+    },
+    Split {
+        axis: crate::editor::Axis,
+        ratio: u16,
+        first: Box<Self>,
+        second: Box<Self>,
+    },
     Invalid,
 }
 pub(crate) struct RestoredTab {
@@ -15,11 +22,10 @@ pub(crate) struct RestoredTab {
     pub(crate) focused_pane: Option<usize>,
     pub(crate) focused_path: Option<PathBuf>,
 }
-use crate::editor::transaction::EditorDraft;
 use crate::editor::EditorState;
 use crate::editor::text::ByteOffset;
 use crate::editor::text::TextBuffer;
-
+use crate::editor::transaction::EditorDraft;
 
 use std::collections::HashMap;
 use std::path::PathBuf;

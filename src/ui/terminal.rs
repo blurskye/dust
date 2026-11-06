@@ -1,6 +1,6 @@
 use std::cell::Cell;
 use std::fs::File;
-use std::io::self;
+use std::io;
 use std::io::IsTerminal;
 use std::io::Stdout;
 use std::io::Write;
@@ -17,7 +17,7 @@ use crossterm::cursor::SetCursorStyle;
 
 use crossterm::cursor::Show;
 
-use crossterm::event::self;
+use crossterm::event;
 
 use crossterm::event::DisableBracketedPaste;
 
@@ -67,7 +67,7 @@ use crossterm::style::SetBackgroundColor;
 
 use crossterm::style::SetForegroundColor;
 
-use crossterm::terminal::self;
+use crossterm::terminal;
 
 use crossterm::terminal::BeginSynchronizedUpdate;
 
@@ -103,11 +103,11 @@ use crate::config::ThemeColor;
 
 use crate::config::ThemeConfig;
 
+use crate::config::Highlight;
 use crate::config::ThemeStyle;
 use crate::editor::input::KeyCode;
 use crate::editor::input::KeyEvent;
 use crate::editor::input::Modifiers;
-use crate::config::Highlight;
 use thiserror::Error;
 
 use crate::ui::Frame;
@@ -1082,7 +1082,14 @@ mod tests {
         frame.grid.put_text(0, 3, "status", Style::Status);
         let mut output = Vec::new();
         assert!(
-            crate::ui::terminal::queue_frame(&mut output, &frame, None, &theme, ColorTier::TrueColor).unwrap()
+            crate::ui::terminal::queue_frame(
+                &mut output,
+                &frame,
+                None,
+                &theme,
+                ColorTier::TrueColor
+            )
+            .unwrap()
         );
         let emitted = String::from_utf8(output).unwrap();
         assert!(emitted.starts_with("\x1b[?2026h\x1b[?25l\x1b[2J"));
@@ -1358,7 +1365,8 @@ mod tests {
         theme.styles.status.foreground_16 = Some(ThemeColor::White);
         theme.styles.selection.background_256 = Some(ThemeColor::Indexed(236));
         theme.styles.selection.background_16 = Some(ThemeColor::DarkGrey);
-        let section = crate::ui::terminal::status_bar_style(crate::ui::Style::StatusSection, &theme);
+        let section =
+            crate::ui::terminal::status_bar_style(crate::ui::Style::StatusSection, &theme);
         assert_eq!(section.foreground, theme.styles.status.foreground);
         assert_eq!(section.foreground_256, theme.styles.status.foreground_256);
         assert_eq!(section.foreground_16, theme.styles.status.foreground_16);
@@ -1394,7 +1402,8 @@ mod tests {
             }
             assert!(emitted.contains("\x1b[?25h"));
             let mut before_keyboard_push = Vec::new();
-            crate::ui::terminal::queue_terminal_restore(&mut before_keyboard_push, options, false).unwrap();
+            crate::ui::terminal::queue_terminal_restore(&mut before_keyboard_push, options, false)
+                .unwrap();
             assert!(
                 !String::from_utf8(before_keyboard_push)
                     .unwrap()

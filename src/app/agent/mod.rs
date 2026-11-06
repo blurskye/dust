@@ -25,10 +25,6 @@ use serde_json::Value;
 use serde_json::json;
 use unicode_segmentation::UnicodeSegmentation;
 
-use crate::app::App;
-use crate::app::commands::PromptMove;
-use crate::windows::ContentLifecycle;
-use std::sync::mpsc::self;
 use crate::agent::AgentMessage;
 use crate::agent::AgentProcess;
 use crate::agent::AuthMethod;
@@ -37,16 +33,18 @@ use crate::agent::PromptPart;
 use crate::agent::Rejoin;
 use crate::agent::SessionOption;
 use crate::agent::SessionUpdate;
-use crate::agent::history::self;
+use crate::agent::history;
 use crate::agent::history::Conversation;
 use crate::agent::history::Entry;
+use crate::app::App;
+use crate::app::commands::PromptMove;
+use crate::app::picker::PickerPayload;
+use crate::app::windows::LayoutAction;
+use crate::config::Highlight;
 use crate::editor::Axis;
 use crate::editor::BufferId;
 use crate::editor::EditorMode;
-use crate::app::windows::LayoutAction;
-use crate::app::picker::PickerPayload;
 use crate::editor::text::TextBuffer;
-use crate::config::Highlight;
 use crate::remote::AgentRequest;
 use crate::remote::Reply;
 use crate::tools::ToolKind;
@@ -58,6 +56,7 @@ use crate::ui::ContentTabEntry;
 use crate::ui::ContentTabIdentity;
 use crate::ui::ContentTabKind;
 use crate::ui::PromptKind;
+use crate::windows::ContentLifecycle;
 
 use crate::ui::markdown::Styled;
 use crate::windows::ContentId;
@@ -1574,7 +1573,7 @@ impl App {
         });
     }
 
-    pub(in crate::app) fn spawn_agent(&self, name: &str, root: &Path, tab: Option<u64>) -> Result<Spawned, String> {
+    fn spawn_agent(&self, name: &str, root: &Path, tab: Option<u64>) -> Result<Spawned, String> {
         let profile = self
             .configuration
             .settings()
@@ -1789,7 +1788,10 @@ impl App {
         }
     }
 
-    pub(in crate::app) fn finish_agent_history(&self, deadline: std::time::Instant) -> Result<(), String> {
+    pub(in crate::app) fn finish_agent_history(
+        &self,
+        deadline: std::time::Instant,
+    ) -> Result<(), String> {
         for index in 0..self.agent.sessions.len() {
             self.save_agent_history(index);
         }

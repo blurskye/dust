@@ -1,8 +1,5 @@
 use crate::app::tests::*;
 
-
-
-
 #[test]
 pub(in crate::app) fn explorer_command_prompt_creates_a_file_from_the_selected_directory() {
     let (_app_dirs, mut app) = app();
@@ -19,7 +16,6 @@ pub(in crate::app) fn explorer_command_prompt_creates_a_file_from_the_selected_d
     }
     assert!(app.state.workspace_root.join("new.txt").is_file());
 }
-
 
 #[test]
 pub(in crate::app) fn explorer_prefilled_rename_keeps_original_target_and_dirty_split_views() {
@@ -106,9 +102,9 @@ pub(in crate::app) fn explorer_prefilled_rename_keeps_original_target_and_dirty_
     assert!(app.input.search_history().is_empty());
 }
 
-
 #[test]
-pub(in crate::app) fn explorer_rename_prompt_refuses_replaced_files_and_retired_or_cancelled_requests() {
+pub(in crate::app) fn explorer_rename_prompt_refuses_replaced_files_and_retired_or_cancelled_requests()
+ {
     let (_app_dirs, mut app) = app();
     let source = app.state.workspace_root.join("source.txt");
     let target = app.state.workspace_root.join("target.txt");
@@ -199,7 +195,6 @@ pub(in crate::app) fn explorer_rename_prompt_refuses_replaced_files_and_retired_
     assert!(!target.exists());
 }
 
-
 #[test]
 pub(in crate::app) fn explorer_rename_rejects_destinations_owned_by_unsaved_buffers() {
     for directory in [false, true] {
@@ -256,10 +251,8 @@ pub(in crate::app) fn explorer_rename_rejects_destinations_owned_by_unsaved_buff
     }
 }
 
-
 #[test]
 pub(in crate::app) fn explorer_close_reconciles_an_admitted_rename_even_after_disk_completion() {
-    use crate::app::documents::DocumentEvent;
     let (_app_dirs, mut app) = app();
     let source = app.state.workspace_root.join("before.txt");
     let target = app.state.workspace_root.join("after.txt");
@@ -304,9 +297,9 @@ pub(in crate::app) fn explorer_close_reconciles_an_admitted_rename_even_after_di
     assert_eq!(app.state.buffers[buffer].text.to_string(), "kept");
 }
 
-
 #[test]
-pub(in crate::app) fn explorer_rename_refuses_destinations_owned_by_unsaved_buffers_before_writing() {
+pub(in crate::app) fn explorer_rename_refuses_destinations_owned_by_unsaved_buffers_before_writing()
+{
     for directory in [false, true] {
         let (_app_dirs, mut app) = app();
         let source = app.state.workspace_root.join("source");
@@ -353,7 +346,6 @@ pub(in crate::app) fn explorer_rename_refuses_destinations_owned_by_unsaved_buff
         assert!(app.ui.notification_error);
     }
 }
-
 
 #[test]
 pub(in crate::app) fn explorer_rename_and_delete_reconcile_open_buffers_without_losing_text() {
@@ -522,7 +514,6 @@ pub(in crate::app) fn explorer_rename_and_delete_reconcile_open_buffers_without_
     );
 }
 
-
 pub(in crate::app) fn wait_explorer(app: &mut App) {
     let deadline = Instant::now() + Duration::from_secs(2);
     while app.explorer.pending() {
@@ -531,7 +522,6 @@ pub(in crate::app) fn wait_explorer(app: &mut App) {
         thread::yield_now();
     }
 }
-
 
 #[test]
 pub(in crate::app) fn explorer_lazily_loads_and_opens_scoped_file() {
@@ -631,7 +621,6 @@ pub(in crate::app) fn explorer_lazily_loads_and_opens_scoped_file() {
     assert_eq!(app.state.active_buffer_id(), newer);
 }
 
-
 #[test]
 pub(in crate::app) fn explorer_uses_filename_and_extension_specific_nerd_font_icons() {
     let (_app_dirs, mut app) = app();
@@ -663,7 +652,6 @@ pub(in crate::app) fn explorer_uses_filename_and_extension_specific_nerd_font_ic
     }
 }
 
-
 #[test]
 pub(in crate::app) fn explorer_follow_lazily_expands_to_active_file() {
     let (_app_dirs, mut app) = app();
@@ -690,9 +678,9 @@ pub(in crate::app) fn explorer_follow_lazily_expands_to_active_file() {
     );
 }
 
-
 #[test]
-pub(in crate::app) fn explorer_watch_batches_reload_through_directory_service_and_preserve_identity() {
+pub(in crate::app) fn explorer_watch_batches_reload_through_directory_service_and_preserve_identity()
+ {
     let (_app_dirs, mut app) = app();
     let directory = app.state.workspace_root.join("dir");
     fs::create_dir_all(&directory).unwrap();
@@ -778,7 +766,6 @@ pub(in crate::app) fn explorer_watch_batches_reload_through_directory_service_an
     app.process_effect(AppEffect::ExplorerClose);
     assert!(app.explorer.watch_generation().is_none());
 }
-
 
 #[test]
 pub(in crate::app) fn explorer_projection_formats_only_the_terminal_viewport() {
@@ -898,7 +885,9 @@ pub(in crate::app) fn explorer_projection_formats_only_the_terminal_viewport() {
     });
     assert_eq!(
         app.explorer.tree().selected_id(),
-        Some(crate::app::explorer::tree::ExplorerNodeId(first_viewport_node))
+        Some(crate::app::explorer::tree::ExplorerNodeId(
+            first_viewport_node
+        ))
     );
     assert_eq!(
         app.explorer.tree().projection_generation(),
@@ -938,7 +927,6 @@ pub(in crate::app) fn explorer_projection_formats_only_the_terminal_viewport() {
     );
 }
 
-
 #[test]
 pub(in crate::app) fn directional_focus_moves_spatially_then_crosses_the_explorer_boundary() {
     let (_app_dirs, mut app) = app();
@@ -975,21 +963,18 @@ pub(in crate::app) fn directional_focus_moves_spatially_then_crosses_the_explore
     assert!(!app.ui.explorer_focused);
     assert_eq!(app.state.tabs[tab].focused, left);
 }
-use crate::app::documents::DocumentEvent;
-use std::time::Duration;
-use std::time::Instant;
+use crate::app::App;
+use crate::app::AppEffect;
 use crate::editor::input::KeyEvent;
 use crate::editor::text::ByteOffset;
 use crate::editor::text::TextBuffer;
-use crate::editor::FocusDirection;
-use crate::ui::PromptKind;
-use crate::ui::UiEvent;
-use std::fs;
-use std::thread;
 use crate::files::ExplorerWatchBatch;
 use crate::files::ExplorerWatchGeneration;
-use crate::ui::ExplorerSegmentRole;
+use crate::ui::UiEvent;
 use crate::ui::render;
-use crate::app::App;
-use crate::app::AppEffect;
+use std::fs;
+use std::thread;
+use std::time::Duration;
+use std::time::Instant;
 
+use crate::app::documents::DocumentEvent;

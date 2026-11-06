@@ -1,11 +1,11 @@
 use std::collections::HashSet;
 use std::fs;
-use std::io::self;
+use std::io;
 use std::io::Read;
 use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
-use std::sync::mpsc::self;
+use std::sync::mpsc;
 use std::sync::mpsc::Receiver;
 use std::sync::mpsc::SyncSender;
 use std::sync::mpsc::TryRecvError;
@@ -20,7 +20,7 @@ use thiserror::Error;
 
 use crate::files::VfsError;
 
-use crate::workspace::RootIdentity;
+use crate::files::RootIdentity;
 
 #[derive(Clone, Debug, Default)]
 pub struct TrustStore {

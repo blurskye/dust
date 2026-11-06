@@ -1,8 +1,8 @@
-use std::time::Duration;
-use std::time::Instant;
 use crate::app::App;
 use crate::app::InteractiveError;
 use crate::files::VfsError;
+use std::time::Duration;
+use std::time::Instant;
 
 impl App {
     pub(in crate::app) fn finish_shutdown(&mut self) -> Result<(), InteractiveError> {
@@ -213,18 +213,13 @@ impl App {
 
 use crate::app::commands::AppEffect;
 
-
-
-
-
-
-
-
-
 impl App {
-    pub(in crate::app) fn process_shutdown_effect(&mut self, effect: AppEffect) -> Result<(), AppEffect> {
+    pub(in crate::app) fn process_shutdown_effect(
+        &mut self,
+        effect: AppEffect,
+    ) -> Result<(), AppEffect> {
         match effect {
-AppEffect::Quit { force } => {
+            AppEffect::Quit { force } => {
                 if !force && self.state.buffers.iter().any(|(_, buffer)| buffer.dirty) {
                     self.show_error(self.message("unsaved_quit", &[]));
                 } else {

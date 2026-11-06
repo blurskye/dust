@@ -1,8 +1,9 @@
-use crate::app::tests::*;
 use crate::app::configuration::ViewToggle;
+use crate::app::tests::*;
 
 #[test]
-pub(in crate::app) fn saved_theme_restore_rejects_invalid_data_and_cannot_overwrite_newer_interactions() {
+pub(in crate::app) fn saved_theme_restore_rejects_invalid_data_and_cannot_overwrite_newer_interactions()
+ {
     let (_app_dirs, mut app) = app();
     let original = app.configuration.theme().clone();
     let mut saved = original.clone();
@@ -96,9 +97,7 @@ pub(in crate::app) fn saved_theme_restore_rejects_invalid_data_and_cannot_overwr
 #[test]
 pub(in crate::app) fn delayed_persistence_preserves_newer_runtime_breakpoint_and_watch_choices() {
     use crate::persistence::PersistedBreakpoint;
-    use crate::persistence::PersistedState;
     use crate::persistence::PersistedWatch;
-    use crate::persistence::PersistenceService;
     let (_app_dirs, mut app) = app();
     let saved = tempdir().unwrap();
     let path = app.state.workspace_root.join("main.rs");
@@ -129,8 +128,7 @@ pub(in crate::app) fn delayed_persistence_preserves_newer_runtime_breakpoint_and
     let state_path = saved.path().join("session.json");
     fs::write(&state_path, serde_json::to_vec(&state).unwrap()).unwrap();
     let (worker, release) = PersistenceService::gated_for_test(1);
-    app.persistence =
-        crate::app::persistence::PersistenceSession::new(worker, state_path);
+    app.persistence = crate::app::persistence::PersistenceSession::new(worker, state_path);
     let row = |line, condition: &str| crate::debugger::DapSourceBreakpoint {
         path: path.clone(),
         line,
@@ -528,21 +526,28 @@ pub(in crate::app) fn resolved_explain_reports_exact_layered_and_replacement_pro
     let mut loaded = crate::config::load_config(&config_path);
 
     let dashboard_path = root.path().join("dashboard.toml");
-    let dashboard_source = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/defaults/dashboard.toml"))
-        .replace("D U S T", "PROVENANCE DASH");
+    let dashboard_source = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/assets/defaults/dashboard.toml"
+    ))
+    .replace("D U S T", "PROVENANCE DASH");
     loaded.dashboard = toml::from_str(&dashboard_source).expect("dashboard");
     loaded.dashboard_path = dashboard_path.clone();
     loaded.dashboard_spans = crate::config::setting_spans(&dashboard_source);
 
     let theme_path = root.path().join("provenance.toml");
-    let theme_source = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/themes/dust.toml"))
-        .replace("name = \"dust\"", "name = \"provenance\"");
+    let theme_source = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/assets/themes/dust.toml"
+    ))
+    .replace("name = \"dust\"", "name = \"provenance\"");
     loaded.theme = toml::from_str(&theme_source).expect("theme");
     loaded.theme_path = theme_path.clone();
     loaded.theme_spans = crate::config::setting_spans(&theme_source);
 
     let (resolved, diagnostic) =
-        crate::app::configuration::resolve_configuration(&app.commands, loaded, true).expect("resolve");
+        crate::app::configuration::resolve_configuration(&app.commands, loaded, true)
+            .expect("resolve");
     assert!(diagnostic.is_none());
     let label = resolved
         .explain(r#"command_labels."view.cursor.\u006dove""#)
@@ -1535,7 +1540,8 @@ pub(in crate::app) fn the_documented_git_and_debugger_keys_each_reach_their_comm
 }
 
 #[test]
-pub(in crate::app) fn every_key_the_experience_document_names_is_bound_or_marked_as_having_no_command() {
+pub(in crate::app) fn every_key_the_experience_document_names_is_bound_or_marked_as_having_no_command()
+ {
     let (_app_dirs, app) = app();
     let keymaps = bundled_keymaps(&app);
     let document = fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/docs/experience.md"))
@@ -2499,40 +2505,25 @@ pub(in crate::app) fn settings_toggles_wait_for_the_saved_configuration_to_reloa
     assert!(!app.ui.settings.as_ref().unwrap().saving);
 }
 
+use crate::app::App;
 use crate::app::configuration::KeymapOperation;
-use crate::app::configuration::configuration_generation_is_newer;
-use crate::app::configuration::resolve_configuration;
-use crate::app::picker::PickerPayload;
+use crate::app::startup::StartupTarget;
 use crate::app::tools::LspRuntimeSource;
-use std::collections::BTreeMap;
-use std::path::Path;
-use std::path::PathBuf;
-use std::time::Duration;
-use std::time::Instant;
-use crate::debugger::DapSourceBreakpoint;
+use crate::editor::CommandValue;
 use crate::editor::input::KeyEvent;
 use crate::editor::input::MappingResolution;
 use crate::editor::text::ByteOffset;
 use crate::editor::text::TextBuffer;
-use crate::editor::CommandInvocation;
-use crate::editor::CommandOutcome;
-use crate::editor::CommandSource;
-use crate::editor::CommandSpec;
-use crate::editor::CommandValue;
-use crate::editor::EditorMode;
-use crate::persistence::PersistedState;
-use crate::persistence::PersistenceService;
-use crate::ui::KeyInputKind;
-use crate::ui::PromptKind;
 use crate::ui::UiEvent;
-use crate::app::startup::StartupTarget;
 use crate::windows::DockEdge;
 use crate::windows::WindowPlacement;
+use std::collections::BTreeMap;
 use std::fs;
+use std::path::PathBuf;
 use std::thread;
+use std::time::Duration;
+use std::time::Instant;
 use tempfile::tempdir;
-use crate::app::App;
-
 
 use crate::app::compile_keymaps;
 
@@ -2541,16 +2532,9 @@ use crate::app::reload_keymaps;
 use crate::app::AppEffect;
 use crate::app::PickerKind;
 
-
-
-
-
 use crate::config::load_bundled_config;
 use crate::config::load_config;
 use crate::config::load_keymaps;
-
-
-
 
 #[test]
 fn global_explorer_identity_can_be_disabled_without_disabling_just_one_surface() {
@@ -2567,11 +2551,8 @@ fn global_explorer_identity_can_be_disabled_without_disabling_just_one_surface()
     let mut commands = crate::editor::CommandRegistry::default();
     crate::editor::register_builtin_commands(&mut commands).unwrap();
     crate::app::register_app_commands(&mut commands).unwrap();
-    let (_, diagnostic) = crate::app::compile_keymaps(
-        &commands,
-        &loaded.keymaps,
-        &loaded.config.input.keymaps,
-    );
+    let (_, diagnostic) =
+        crate::app::compile_keymaps(&commands, &loaded.keymaps, &loaded.config.input.keymaps);
     assert!(diagnostic.is_none(), "{diagnostic:?}");
 
     let surface = crate::config::parse_keymaps(
@@ -2581,7 +2562,6 @@ fn global_explorer_identity_can_be_disabled_without_disabling_just_one_surface()
     assert_eq!(surface.entries.len(), 1);
     assert_eq!(surface.entries[0].id, "builtin.global.explorer.explorer");
 }
-
 
 #[test]
 fn product_plan_terminal_profile_and_keymap_are_accepted() {
@@ -2620,3 +2600,6 @@ fn product_plan_terminal_profile_and_keymap_are_accepted() {
     config.keymaps = mappings;
     crate::app::validate_loaded_configuration(config).unwrap();
 }
+
+use crate::persistence::PersistedState;
+use crate::persistence::PersistenceService;

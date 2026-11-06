@@ -9,8 +9,6 @@ use crate::config::AmbiguousWidth;
 use crate::ui::geometry::text_width;
 use unicode_segmentation::UnicodeSegmentation;
 
-use std::sync::mpsc::self;
-
 use crate::config::Highlight;
 
 /// Code blocks larger than this are shown without highlighting.
@@ -754,6 +752,8 @@ fn wrap(out: &mut Styled, segments: &[Segment], width: usize, first: Prefix, res
     out.push("\n", None);
 }
 
+use crate::language::syntax;
+
 #[cfg(test)]
 mod tests {
     use crate::ui::markdown::*;
@@ -979,5 +979,3 @@ mod tests {
         assert_eq!(rendered("- aaa bbb", 7).text, "• aaa\n  bbb\n");
     }
 }
-
-use crate::language::syntax;

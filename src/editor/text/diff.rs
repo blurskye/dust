@@ -76,4 +76,3 @@ fn line_diff_spans(before: &str, after: &str) -> Option<Vec<(std::ops::Range<usi
     }
     Some(spans)
 }
-

@@ -99,10 +99,6 @@ pub(in crate::app) fn picker_preview_lines_from(
         .collect()
 }
 
-
-
-
-
 impl SearchSession {
     pub(in crate::app) fn preview(&self) -> &Option<PickerPreview> {
         &self.preview
@@ -128,10 +124,7 @@ impl SearchSession {
     /// Replace the preview with one the session already holds, such as a diff built from the
     /// structured hunk read. Any in-flight file preview is retired first, so a late read can
     /// never overwrite it with a different path's content.
-    pub(in crate::app) fn set_preview(
-        &mut self,
-        preview: PickerPreview,
-    ) -> Option<RequestId> {
+    pub(in crate::app) fn set_preview(&mut self, preview: PickerPreview) -> Option<RequestId> {
         let same_diff = self.preview.as_ref().is_some_and(|shown| {
             shown.title == preview.title
                 && match (&shown.body, &preview.body) {
@@ -148,11 +141,7 @@ impl SearchSession {
         self.preview = Some(preview);
         retired
     }
-    pub(in crate::app) fn preview_match(
-        &mut self,
-        id: &str,
-        maximum: usize,
-    ) -> Option<RequestId> {
+    pub(in crate::app) fn preview_match(&mut self, id: &str, maximum: usize) -> Option<RequestId> {
         let Some(found) = self.matches.iter().find(|found| found.id == id) else {
             return self.clear_preview();
         };
@@ -269,13 +258,12 @@ impl SearchSession {
                     crate::git::GitDiffLayer::Staged => "HEAD -> index",
                     crate::git::GitDiffLayer::Unstaged => "index -> disk",
                 };
-                let body =
-                    PickerPreviewBody::Diff(crate::app::git::diff_preview_from_hunks(
-                        &snapshot.hunks,
-                        provenance,
-                        false,
-                        0,
-                    ));
+                let body = PickerPreviewBody::Diff(crate::app::git::diff_preview_from_hunks(
+                    &snapshot.hunks,
+                    provenance,
+                    false,
+                    0,
+                ));
                 if let Some(preview) = &mut self.preview {
                     preview.body = body;
                 }
@@ -306,11 +294,7 @@ impl SearchSession {
             && self.preview_scope.is_none()
             && self.preview_snapshot_key.is_none()
     }
-    pub(in crate::app) fn preview_failed(
-        &mut self,
-        ticket: PreviewTicket,
-        error: VfsError,
-    ) {
+    pub(in crate::app) fn preview_failed(&mut self, ticket: PreviewTicket, error: VfsError) {
         if Arc::ptr_eq(&ticket.0, &self.preview_epoch) {
             if matches!(error, VfsError::QueueFull) {
                 self.preview_scope = None;

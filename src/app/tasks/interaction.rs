@@ -1,26 +1,22 @@
+use crate::app::App;
 use crate::app::diagnostics::MAXIMUM_DIAGNOSTICS;
+use crate::app::picker::PickerPayload;
 use crate::app::search::SEARCH_MAXIMUM_FILE_BYTES;
 use crate::app::tasks::AdapterContext;
-use std::collections::BTreeMap;
-use crate::workspace::DiagnosticOwner;
-use std::time::Instant;
-use crate::app::App;
-use crate::app::picker::PickerPayload;
-use crate::ui::PickerSurfaceKind;
 use crate::app::tasks::RunningTask;
 use crate::tools::managed_formatter;
-
-
+use crate::ui::PickerSurfaceKind;
+use crate::workspace::DiagnosticOwner;
+use std::collections::BTreeMap;
+use std::time::Instant;
 
 impl App {
-
     pub(in crate::app) fn rebuild_matcher_cache(&mut self) {
         self.tasks.configure(self.configuration.settings());
     }
 }
 
 impl App {
-
     pub(in crate::app) fn stop_task(&mut self, name: &str) {
         match self.tasks.stop(name) {
             Ok(source) => {
@@ -39,8 +35,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn start_task_plan(&mut self, name: &str, adapter: AdapterContext) {
         let managed = match &adapter {
             AdapterContext::Formatter { source }
@@ -98,7 +92,6 @@ impl App {
 }
 
 impl App {
-
     pub(super) fn start_task_step(&mut self, requested: String) {
         let (step, _) = match self.tasks.step(
             &requested,
@@ -122,8 +115,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(super) fn apply_formatter_result(&mut self, task: &RunningTask) {
         let transaction = self.transaction_id();
         match self.tasks.formatter_transaction(
@@ -151,8 +142,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn drain_linter_sources(&mut self) {
         self.tasks.retire_linter_sources(
             &self.state,
@@ -196,17 +185,13 @@ impl App {
                     }
                     self.sync_ui_diagnostics();
                 }
-                crate::app::tasks::LinterUpdate::Failed(error) => {
-                    self.show_error(error)
-                }
+                crate::app::tasks::LinterUpdate::Failed(error) => self.show_error(error),
             }
         }
     }
 }
 
 impl App {
-
-
     pub(in crate::app) fn show_task_picker(&mut self) {
         let items = self
             .tasks
@@ -219,8 +204,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn show_output_picker(&mut self, name: &str) {
         let previous = if self.tasks.active_output() == Some(name)
             && self.search.picker_surface() == PickerSurfaceKind::Output
@@ -250,8 +233,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn show_test_picker(&mut self, name: &str) {
         let items = self
             .tasks
@@ -267,15 +248,12 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn process_job_events(&mut self) {
         self.drain_job_events(None);
     }
 }
 
 impl App {
-
     pub(in crate::app) fn drain_job_events(&mut self, deadline: Option<Instant>) {
         for _ in 0..256 {
             if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
@@ -393,7 +371,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn project_operation_bar(&mut self) {
         let Some(status) = self.git.status() else {
             self.ui.operation_bar = None;
@@ -414,8 +391,8 @@ impl App {
                 return;
             }
         };
-        self.ui.operation_bar = crate::git::GitOperationBar::of(&state).map(|bar| {
-            crate::ui::OperationBarState {
+        self.ui.operation_bar =
+            crate::git::GitOperationBar::of(&state).map(|bar| crate::ui::OperationBarState {
                 operation: bar.operation,
                 phase: bar.phase,
                 blockers: bar.blockers,
@@ -425,7 +402,6 @@ impl App {
                     .keymaps()
                     .binding_for("editor.normal", "workspace.git.conflict.abort")
                     .map(crate::app::picker::palette::readable_keys),
-            }
-        });
+            });
     }
 }

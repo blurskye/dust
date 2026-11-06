@@ -1,8 +1,5 @@
-use crate::editor::text::ByteOffset;
 use crate::editor::state::id::BufferId;
-
-
-
+use crate::editor::text::ByteOffset;
 
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 pub enum EditorMode {
@@ -20,14 +17,12 @@ pub enum EditorMode {
     Prompt,
 }
 
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SelectionKind {
     Character,
     Line,
     Block,
 }
-
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Selection {
@@ -36,7 +31,6 @@ pub struct Selection {
     pub kind: SelectionKind,
 }
 
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ReplaceRecord {
     pub start: ByteOffset,
@@ -44,14 +38,12 @@ pub struct ReplaceRecord {
     pub inserted: String,
 }
 
-
 #[derive(Clone, Debug)]
 pub struct InsertRepeat {
     pub start: ByteOffset,
     pub count: usize,
     pub new_line: bool,
 }
-
 
 #[derive(Clone, Debug)]
 pub struct View {
@@ -73,7 +65,6 @@ pub struct View {
     /// Wanted display columns, in mark order; empty after nonvertical movement.
     pub multi_preferred_columns: Vec<usize>,
 }
-
 
 impl View {
     pub(crate) fn clear_editing_state(&mut self) {
@@ -106,5 +97,3 @@ impl View {
         }
     }
 }
-
-

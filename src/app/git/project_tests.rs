@@ -1,11 +1,10 @@
 use crate::app::tests::*;
 
+use crate::app::documents::project_tests::history_fixture;
+use crate::app::documents::project_tests::index_bytes;
+use crate::app::documents::project_tests::near_changes_fixture;
 use crate::app::explorer::project_tests::wait_explorer;
 use crate::app::workspace::project_tests::wait_workspace_search;
-use crate::app::documents::project_tests::near_changes_fixture;
-use crate::app::documents::project_tests::index_bytes;
-use crate::app::documents::project_tests::history_fixture;
-
 
 #[test]
 pub(in crate::app) fn explorer_auto_git_status_is_silent_outside_a_repository() {
@@ -43,9 +42,9 @@ pub(in crate::app) fn explorer_auto_git_status_is_silent_outside_a_repository() 
     }
 }
 
-
 #[test]
-pub(in crate::app) fn active_tracked_buffer_starts_git_status_and_updates_unsaved_signs_without_explorer() {
+pub(in crate::app) fn active_tracked_buffer_starts_git_status_and_updates_unsaved_signs_without_explorer()
+ {
     let (_app_dirs, mut app) = app();
     let repo = git2::Repository::init(&app.state.workspace_root).unwrap();
     let path = app.state.workspace_root.join("live.txt");
@@ -124,7 +123,6 @@ pub(in crate::app) fn active_tracked_buffer_starts_git_status_and_updates_unsave
     assert!(app.git.status().unwrap().entries.is_empty());
 }
 
-
 #[test]
 pub(in crate::app) fn the_first_hunk_key_reads_the_hunks_and_moves_to_the_next_one() {
     let (_app_dirs, mut app) = app();
@@ -178,7 +176,6 @@ pub(in crate::app) fn the_first_hunk_key_reads_the_hunks_and_moves_to_the_next_o
     );
 }
 
-
 pub(in crate::app) fn settle_git_work(app: &mut App) {
     let deadline = Instant::now() + Duration::from_secs(3);
     while app.git.hunks_pending() || app.git.mutation_pending() || app.git.status_pending() {
@@ -190,7 +187,6 @@ pub(in crate::app) fn settle_git_work(app: &mut App) {
     }
     wait_vfs(app);
 }
-
 
 #[test]
 pub(in crate::app) fn hunk_preview_and_stage_take_the_change_under_the_cursor() {
@@ -225,7 +221,6 @@ pub(in crate::app) fn hunk_preview_and_stage_take_the_change_under_the_cursor() 
     );
 }
 
-
 #[test]
 pub(in crate::app) fn hunk_reset_takes_the_change_under_the_cursor() {
     let (_app_dirs, mut app, _repo, path) = near_changes_fixture();
@@ -244,7 +239,6 @@ pub(in crate::app) fn hunk_reset_takes_the_change_under_the_cursor() {
         app.ui.notification
     );
 }
-
 
 #[test]
 pub(in crate::app) fn leaving_a_worktree_closes_shared_buffers_without_alternating_fallbacks() {
@@ -282,7 +276,6 @@ pub(in crate::app) fn leaving_a_worktree_closes_shared_buffers_without_alternati
     );
 }
 
-
 #[test]
 pub(in crate::app) fn leaving_a_worktree_closes_every_clean_buffer_from_it() {
     let (_app_dirs, mut app) = app();
@@ -306,7 +299,6 @@ pub(in crate::app) fn leaving_a_worktree_closes_every_clean_buffer_from_it() {
             .is_some_and(|path| path.starts_with(&old) && !path.starts_with(old.join(".worktree")))
     }),);
 }
-
 
 #[test]
 pub(in crate::app) fn explorer_auto_git_status_colors_names_opens_picker_and_idles() {
@@ -525,7 +517,6 @@ pub(in crate::app) fn explorer_auto_git_status_colors_names_opens_picker_and_idl
     }));
 }
 
-
 #[test]
 pub(in crate::app) fn trusted_stage_hunk_flow_changes_only_index_and_refreshes_status() {
     let (_app_dirs, mut app) = app();
@@ -625,21 +616,9 @@ pub(in crate::app) fn trusted_stage_hunk_flow_changes_only_index_and_refreshes_s
         maximum_bytes: 4096,
         deadline: Duration::from_secs(2),
     };
-    assert_eq!(
-        crate::git::read_hunks(&policy)
-            .unwrap()
-            .hunks
-            .len(),
-        1
-    );
+    assert_eq!(crate::git::read_hunks(&policy).unwrap().hunks.len(), 1);
     policy.layer = crate::git::GitDiffLayer::Staged;
-    assert_eq!(
-        crate::git::read_hunks(&policy)
-            .unwrap()
-            .hunks
-            .len(),
-        1
-    );
+    assert_eq!(crate::git::read_hunks(&policy).unwrap().hunks.len(), 1);
     app.start_git_hunks();
     let deadline = Instant::now() + Duration::from_secs(4);
     while app.git.hunks_pending() {
@@ -648,8 +627,7 @@ pub(in crate::app) fn trusted_stage_hunk_flow_changes_only_index_and_refreshes_s
         thread::yield_now()
     }
     app.accept_picker();
-    let index_before_reset =
-        crate::git::git_index_fingerprint(&app.state.workspace_root).unwrap();
+    let index_before_reset = crate::git::git_index_fingerprint(&app.state.workspace_root).unwrap();
     let worktree_before_reset = fs::read_to_string(&path).unwrap();
     app.request_reset_selected_git_hunk();
     assert_eq!(
@@ -687,17 +665,12 @@ pub(in crate::app) fn trusted_stage_hunk_flow_changes_only_index_and_refreshes_s
     let reset_text = fs::read_to_string(&path).unwrap();
     assert!(reset_text.contains("changed 2\n") && !reset_text.contains("changed 18\n"));
     policy.layer = crate::git::GitDiffLayer::Unstaged;
-    assert!(
-        crate::git::read_hunks(&policy)
-            .unwrap()
-            .hunks
-            .is_empty()
-    );
+    assert!(crate::git::read_hunks(&policy).unwrap().hunks.is_empty());
 }
 
-
 #[test]
-pub(in crate::app) fn workspace_replacement_previews_without_disk_mutation_and_checked_save_rejects_conflict() {
+pub(in crate::app) fn workspace_replacement_previews_without_disk_mutation_and_checked_save_rejects_conflict()
+ {
     let (_app_dirs, mut app) = app();
     let first = app.state.workspace_root.join("a.txt");
     let second = app.state.workspace_root.join("b.txt");
@@ -749,7 +722,6 @@ pub(in crate::app) fn workspace_replacement_previews_without_disk_mutation_and_c
     );
 }
 
-
 #[test]
 pub(in crate::app) fn git_change_source_labels_cover_every_combination() {
     use crate::git::GitChangeSource;
@@ -780,7 +752,6 @@ pub(in crate::app) fn git_change_source_labels_cover_every_combination() {
         "unsaved"
     );
 }
-
 
 #[test]
 pub(in crate::app) fn git_status_rows_label_each_source_without_conflating_them() {
@@ -923,7 +894,6 @@ pub(in crate::app) fn git_status_rows_label_each_source_without_conflating_them(
     );
 }
 
-
 #[test]
 pub(in crate::app) fn staged_hunk_rows_are_labelled_staged_and_unstaged_rows_are_not() {
     fn last_segment(detail: &str) -> String {
@@ -1010,7 +980,6 @@ pub(in crate::app) fn staged_hunk_rows_are_labelled_staged_and_unstaged_rows_are
         "staged rows must be labelled staged: {staged:?}"
     );
 }
-
 
 #[test]
 pub(in crate::app) fn hunk_unstage_returns_one_staged_hunk_to_head_and_refuses_the_rest() {
@@ -1148,7 +1117,6 @@ pub(in crate::app) fn hunk_unstage_returns_one_staged_hunk_to_head_and_refuses_t
     );
 }
 
-
 #[test]
 pub(in crate::app) fn the_unstage_key_undoes_the_hunk_just_staged_under_the_cursor() {
     let (_app_dirs, mut app) = app();
@@ -1207,7 +1175,6 @@ pub(in crate::app) fn the_unstage_key_undoes_the_hunk_just_staged_under_the_curs
     settle(&mut app);
     assert_eq!(indexed(&app), original, "{:?}", app.ui.notification);
 }
-
 
 #[test]
 pub(in crate::app) fn a_buffer_stays_bound_to_the_worktree_it_was_opened_in() {
@@ -1318,7 +1285,6 @@ pub(in crate::app) fn a_buffer_stays_bound_to_the_worktree_it_was_opened_in() {
         "an unopened document has no buffer binding"
     );
 }
-
 
 #[test]
 pub(in crate::app) fn switching_to_a_worktree_moves_the_editor_there() {
@@ -1449,7 +1415,6 @@ pub(in crate::app) fn switching_to_a_worktree_moves_the_editor_there() {
     );
 }
 
-
 #[test]
 pub(in crate::app) fn primary_worktree_and_linked_main_have_distinct_picker_entries() {
     let (_app_dirs, mut app) = app();
@@ -1516,7 +1481,6 @@ pub(in crate::app) fn primary_worktree_and_linked_main_have_distinct_picker_entr
     assert_eq!(repo.head().unwrap().shorthand(), Some(branch.as_str()));
 }
 
-
 #[test]
 pub(in crate::app) fn removing_the_main_checkout_cannot_remove_a_linked_worktree_named_main() {
     let (_app_dirs, mut app) = app();
@@ -1568,7 +1532,6 @@ pub(in crate::app) fn removing_the_main_checkout_cannot_remove_a_linked_worktree
     assert!(linked.is_dir());
     assert!(repo.find_worktree("main").is_ok());
 }
-
 
 #[test]
 pub(in crate::app) fn a_locked_worktree_refuses_removal() {
@@ -1655,7 +1618,6 @@ pub(in crate::app) fn a_locked_worktree_refuses_removal() {
     );
     assert!(repo.find_branch("locked", git2::BranchType::Local).is_ok());
 }
-
 
 #[test]
 pub(in crate::app) fn the_conflict_surface_shows_the_paused_operation_and_each_side() {
@@ -1763,7 +1725,6 @@ pub(in crate::app) fn the_conflict_surface_shows_the_paused_operation_and_each_s
     }
 }
 
-
 #[test]
 pub(in crate::app) fn choosing_a_side_for_an_unconflicted_path_is_refused() {
     // Its own app: opening a second buffer INVALIDATES the earlier view key, so this case must
@@ -1824,7 +1785,6 @@ pub(in crate::app) fn choosing_a_side_for_an_unconflicted_path_is_refused() {
     assert!(!app.state.buffers[buffer].dirty, "and is not marked dirty");
 }
 
-
 #[test]
 pub(in crate::app) fn changes_rows_display_index_and_worktree_status_independently() {
     let (_app_dirs, mut app, repo, _) = near_changes_fixture();
@@ -1851,7 +1811,6 @@ pub(in crate::app) fn changes_rows_display_index_and_worktree_status_independent
     assert!(added.iter().all(|row| row.source == "AM"));
 }
 
-
 /// A commit made outside Dust shows after the explorer's refresh key.
 #[test]
 pub(in crate::app) fn refreshing_the_explorer_also_refreshes_git_status() {
@@ -1871,7 +1830,6 @@ pub(in crate::app) fn refreshing_the_explorer_also_refreshes_git_status() {
     app.process_effect(AppEffect::ExplorerRefresh);
     assert!(app.git.status_pending(), "the refresh asks Git again");
 }
-
 
 #[test]
 pub(in crate::app) fn switching_up_from_a_nested_worktree_is_blocked_by_its_unsaved_file() {
@@ -1913,7 +1871,6 @@ pub(in crate::app) fn switching_up_from_a_nested_worktree_is_blocked_by_its_unsa
     );
 }
 
-
 #[test]
 pub(in crate::app) fn cached_hunk_reset_never_targets_a_previous_buffer() {
     let (_app_dirs, mut app, _repo, path) = near_changes_fixture();
@@ -1931,7 +1888,6 @@ pub(in crate::app) fn cached_hunk_reset_never_targets_a_previous_buffer() {
     assert_eq!(fs::read(path).unwrap(), before);
 }
 
-
 #[test]
 pub(in crate::app) fn conflict_navigation_works_in_unnamed_buffers() {
     let (_app_dirs, mut app) = app();
@@ -1946,7 +1902,6 @@ pub(in crate::app) fn conflict_navigation_works_in_unnamed_buffers() {
     app.process_effect(AppEffect::GitConflictNavigate(-1));
     assert_eq!(app.state.views[view].cursor, ByteOffset(6));
 }
-
 
 #[test]
 pub(in crate::app) fn save_and_stage_writes_the_refused_file_and_refreshes_its_hunks() {
@@ -2008,14 +1963,12 @@ pub(in crate::app) fn save_and_stage_writes_the_refused_file_and_refreshes_its_h
     assert_eq!(blob.content(), expected, "{:?}", app.ui.notification);
 }
 
-
 #[test]
 pub(in crate::app) fn failed_conflict_staging_cannot_arm_the_next_save() {
     let (_app_dirs, mut app) = app();
     app.stage_git_conflict();
     assert!(app.input.take_pending_stage().is_none());
 }
-
 
 #[test]
 pub(in crate::app) fn save_and_stage_refreshes_the_pre_save_hunk_snapshot() {
@@ -2058,7 +2011,6 @@ pub(in crate::app) fn save_and_stage_refreshes_the_pre_save_hunk_snapshot() {
         app.ui.notification
     );
 }
-
 
 #[test]
 pub(in crate::app) fn conflict_picker_resolves_paths_from_the_repository_root() {
@@ -2126,7 +2078,6 @@ pub(in crate::app) fn conflict_picker_resolves_paths_from_the_repository_root() 
     };
     assert_eq!(source.path, path);
 }
-
 
 #[test]
 pub(in crate::app) fn document_paths_identify_their_worktrees_independently_of_open_requests() {
@@ -2206,27 +2157,17 @@ pub(in crate::app) fn document_paths_identify_their_worktrees_independently_of_o
     assert_eq!(identity.path(), alpha.path());
     assert!(unopened.starts_with(identity.workdir().unwrap()));
 }
-use crate::app::picker::MatcherSource;
-use crate::app::picker::PickerPayload;
-use std::path::Path;
-use std::time::Duration;
-use std::time::Instant;
+use crate::app::App;
+use crate::app::AppEffect;
+use crate::app::startup::StartupTarget;
+use crate::editor::CommandValue;
+use crate::editor::InvocationSource;
 use crate::editor::input::KeyEvent;
 use crate::editor::text::ByteOffset;
 use crate::editor::text::TextBuffer;
-use crate::editor::CommandInvocation;
-use crate::editor::CommandValue;
-use crate::editor::InvocationSource;
-use crate::ui::DocumentationPopupKind;
-use crate::ui::PromptKind;
-use crate::files::RootIdentity;
-use crate::workspace::WorkspaceTrust;
-use crate::app::startup::StartupTarget;
+use crate::ui::ExplorerSegmentRole;
 use std::fs;
 use std::thread;
-use crate::ui::ExplorerSegmentRole;
-use crate::ui::render;
+use std::time::Duration;
+use std::time::Instant;
 use tempfile::tempdir;
-use crate::app::App;
-use crate::app::AppEffect;
-

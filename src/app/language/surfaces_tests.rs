@@ -2,7 +2,6 @@ use crate::app::tests::*;
 
 use crate::app::documents::surfaces_tests::gate_document_worker;
 
-
 #[test]
 pub(in crate::app) fn lsp_log_selection_keeps_the_same_message_when_old_entries_are_evicted() {
     let (_app_dirs, mut app) = app();
@@ -24,7 +23,6 @@ pub(in crate::app) fn lsp_log_selection_keeps_the_same_message_when_old_entries_
     assert_eq!(before.id, after.id);
     assert_eq!(before.label, after.label);
 }
-
 
 #[test]
 pub(in crate::app) fn saves_and_reloads_wait_for_the_same_buffers_completion() {
@@ -86,7 +84,6 @@ pub(in crate::app) fn saves_and_reloads_wait_for_the_same_buffers_completion() {
     }
 }
 
-
 #[test]
 pub(in crate::app) fn documentation_scrolling_uses_the_final_completion_box_and_reaches_its_tail() {
     let (_app_dirs, mut app) = app();
@@ -136,7 +133,6 @@ pub(in crate::app) fn documentation_scrolling_uses_the_final_completion_box_and_
     assert_eq!(app.input.documentation().unwrap().scroll, total - visible);
     assert!((0..24).any(|y| frame.grid.row_text(y).contains("THE-END")));
 }
-
 
 #[test]
 pub(in crate::app) fn recovery_delete_completion_cannot_forget_a_newer_queued_write() {
@@ -188,7 +184,6 @@ pub(in crate::app) fn recovery_delete_completion_cannot_forget_a_newer_queued_wr
         "saving removes the recovered journal, not a new session path"
     );
 }
-
 
 #[test]
 pub(in crate::app) fn semantic_window_layout_persistence_is_strict_transactional_and_id_free() {
@@ -312,10 +307,9 @@ pub(in crate::app) fn semantic_window_layout_persistence_is_strict_transactional
     );
 }
 
-
 #[test]
-pub(in crate::app) fn semantic_content_restore_uses_fresh_ids_and_preserves_unclamped_desired_placement() {
-    use crate::app::persistence::RestoreContext;
+pub(in crate::app) fn semantic_content_restore_uses_fresh_ids_and_preserves_unclamped_desired_placement()
+ {
     use crate::persistence::PersistedWindowPlacement;
 
     let (_app_dirs, mut app) = app();
@@ -433,19 +427,14 @@ pub(in crate::app) fn semantic_content_restore_uses_fresh_ids_and_preserves_uncl
     );
     app.window_session.graph().validate().expect("valid graph");
 }
-use crate::app::persistence::RestoreContext;
-use std::time::Duration;
+use crate::app::AppEffect;
 use crate::editor::text::TextBuffer;
+use crate::persistence::PersistedWindowPlacement;
 use crate::persistence::PersistedWindowRule;
-use crate::ui::DocumentationMarkupKind;
-use crate::ui::DocumentationPopupKind;
-use crate::ui::UiEvent;
 use crate::windows::DockEdge;
 use crate::windows::WindowPlacement;
 use crate::windows::WindowRect;
 use std::fs;
-use std::thread;
-use crate::ui::render;
-use crate::app::AppEffect;
-use crate::persistence::PersistedWindowPlacement;
+use std::time::Duration;
 
+use crate::app::persistence::RestoreContext;

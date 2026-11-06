@@ -1130,9 +1130,15 @@ fn counted_text_objects_materialize_the_document_once() {
     ] {
         let text = TextBuffer::from_text(&unit.repeat(10_000));
         let before = TextBuffer::test_materializations().1;
-        let range = crate::editor::command::builtins::text_object::text_object(&text, &[], ByteOffset(0), motion, 10_000)
-            .unwrap()
-            .unwrap();
+        let range = crate::editor::command::builtins::text_object::text_object(
+            &text,
+            &[],
+            ByteOffset(0),
+            motion,
+            10_000,
+        )
+        .unwrap()
+        .unwrap();
         assert_eq!(
             TextBuffer::test_materializations().1 - before,
             1,
@@ -1144,10 +1150,10 @@ fn counted_text_objects_materialize_the_document_once() {
 
 #[test]
 fn syntax_objects_do_not_fall_forward_when_an_enclosing_count_is_missing() {
-    use crate::editor::text::ByteOffset;
-    use crate::editor::text::ByteRange;
     use crate::editor::SyntaxObject;
     use crate::editor::SyntaxObjectKind;
+    use crate::editor::text::ByteOffset;
+    use crate::editor::text::ByteRange;
     let text = TextBuffer::from_text(" (a) (b)");
     for (kind, motion) in [
         (SyntaxObjectKind::Function, "inner_function"),
@@ -1167,12 +1173,25 @@ fn syntax_objects_do_not_fall_forward_when_an_enclosing_count_is_missing() {
             },
         ];
         assert!(
-            crate::editor::command::builtins::text_object::text_object(&text, &objects, ByteOffset(2), motion, 2).is_err()
+            crate::editor::command::builtins::text_object::text_object(
+                &text,
+                &objects,
+                ByteOffset(2),
+                motion,
+                2
+            )
+            .is_err()
         );
         for cursor in [0, 2] {
             assert_eq!(
-                crate::editor::command::builtins::text_object::text_object(&text, &objects, ByteOffset(cursor), motion, 1)
-                    .unwrap(),
+                crate::editor::command::builtins::text_object::text_object(
+                    &text,
+                    &objects,
+                    ByteOffset(cursor),
+                    motion,
+                    1
+                )
+                .unwrap(),
                 Some(ByteRange::new(ByteOffset(2), ByteOffset(3)).unwrap()),
             );
         }
@@ -1185,7 +1204,14 @@ fn syntax_objects_do_not_fall_forward_when_an_enclosing_count_is_missing() {
             },
         ];
         assert_eq!(
-            crate::editor::command::builtins::text_object::text_object(&text, &nested, ByteOffset(2), motion, 2).unwrap(),
+            crate::editor::command::builtins::text_object::text_object(
+                &text,
+                &nested,
+                ByteOffset(2),
+                motion,
+                2
+            )
+            .unwrap(),
             Some(ByteRange::new(ByteOffset(1), ByteOffset(8)).unwrap()),
         );
     }

@@ -12,9 +12,9 @@ use crate::editor::text::TextEditSet;
 
 use crate::editor::state::EditorState;
 
-use crate::editor::state::RegisterStore;
 use crate::editor::CommandInvocation;
 use crate::editor::InvocationSource;
+use crate::editor::state::RegisterStore;
 
 #[test]
 fn cursor_belongs_to_view_not_shared_buffer() {
@@ -22,7 +22,9 @@ fn cursor_belongs_to_view_not_shared_buffer() {
     let (buffer, first) = state
         .open_text(TextBuffer::from_text("shared"), None)
         .unwrap();
-    let second = state.split_active(crate::editor::state::Axis::Horizontal, 500).unwrap();
+    let second = state
+        .split_active(crate::editor::state::Axis::Horizontal, 500)
+        .unwrap();
     let mut transaction =
         crate::editor::transaction::EditorTransaction::new(crate::editor::state::TransactionId(1));
     transaction
@@ -129,7 +131,9 @@ fn opening_a_file_retires_only_an_unhosted_empty_scratch() {
         .unwrap();
     assert!(!state.buffers.contains_key(scratch));
     let (shared, _) = state.open_text(TextBuffer::from_text(""), None).unwrap();
-    state.split_active(crate::editor::state::Axis::Horizontal, 500).unwrap();
+    state
+        .split_active(crate::editor::state::Axis::Horizontal, 500)
+        .unwrap();
     state
         .open_text(TextBuffer::from_text("b"), Some("/workspace/b".into()))
         .unwrap();
@@ -215,7 +219,9 @@ fn minimum_resize_delta_clamps_both_sides_without_overflow() {
         for first in [false, true] {
             let mut state = EditorState::new(PathBuf::from("/resize"));
             state.open_text(TextBuffer::from_text("abc"), None).unwrap();
-            state.split_active(crate::editor::state::Axis::Horizontal, 500).unwrap();
+            state
+                .split_active(crate::editor::state::Axis::Horizontal, 500)
+                .unwrap();
             if first {
                 state.focus_pane(-1, true).unwrap();
             }
@@ -226,7 +232,8 @@ fn minimum_resize_delta_clamps_both_sides_without_overflow() {
             } else {
                 state.resize_active_pane(i16::MIN).unwrap();
             }
-            let crate::editor::state::LayoutNode::Split { ratio, .. } = state.tabs[state.active_tab.unwrap()].root
+            let crate::editor::state::LayoutNode::Split { ratio, .. } =
+                state.tabs[state.active_tab.unwrap()].root
             else {
                 panic!("split");
             };
@@ -251,7 +258,10 @@ fn split_rejects_before_exceeding_the_universal_layout_depth_ceiling() {
         state.split_active(crate::editor::state::Axis::Horizontal, 500),
         Err("layout depth ceiling reached")
     );
-    assert_eq!(state.panes.len(), crate::editor::state::MAXIMUM_LAYOUT_DEPTH);
+    assert_eq!(
+        state.panes.len(),
+        crate::editor::state::MAXIMUM_LAYOUT_DEPTH
+    );
     state
         .validate_layout()
         .expect("bounded layout remains valid");
@@ -299,7 +309,10 @@ fn new_tabs_share_the_global_layout_pane_ceiling_without_partial_mutation() {
     let revision = state.window_revision();
     assert_eq!(state.new_tab(), Err("layout pane ceiling reached"));
     assert_eq!(state.window_revision(), revision);
-    assert_eq!(state.panes.len(), crate::editor::state::MAXIMUM_LAYOUT_PANES);
+    assert_eq!(
+        state.panes.len(),
+        crate::editor::state::MAXIMUM_LAYOUT_PANES
+    );
     state.validate_layout().expect("bounded tabs remain valid");
 }
 
@@ -323,7 +336,10 @@ fn clone_pane_refuses_the_global_ceiling_without_partial_mutation() {
     );
     assert_eq!(state.window_revision(), revision);
     assert_eq!(state.active_view, active);
-    assert_eq!(state.panes.len(), crate::editor::state::MAXIMUM_LAYOUT_PANES);
+    assert_eq!(
+        state.panes.len(),
+        crate::editor::state::MAXIMUM_LAYOUT_PANES
+    );
     assert_eq!(state.views.len(), views);
     state.validate_layout().expect("bounded clone refusal");
 }
@@ -404,7 +420,10 @@ fn directional_focus_selects_spatial_neighbors_in_a_two_by_two_layout() {
         state.directional_pane(crate::editor::state::FocusDirection::Left),
         Ok(None)
     );
-    assert_eq!(state.directional_pane(crate::editor::state::FocusDirection::Up), Ok(None));
+    assert_eq!(
+        state.directional_pane(crate::editor::state::FocusDirection::Up),
+        Ok(None)
+    );
 
     state
         .focus_pane_id(bottom_right)
@@ -475,7 +494,8 @@ fn layout_model_sequences_preserve_all_id_and_focus_invariants() {
 #[test]
 fn changed_line_endings_remain_dirty_when_normalized_text_matches() {
     let original = b"a\r\nb\r\nc\n";
-    let mut buffer = crate::editor::state::Buffer::new(TextBuffer::from_bytes(original).unwrap(), None);
+    let mut buffer =
+        crate::editor::state::Buffer::new(TextBuffer::from_bytes(original).unwrap(), None);
     for (range, replacement) in [(5..6, ""), (5..5, "\n")] {
         let edits = TextEditSet::new(
             buffer.text.revision(),
@@ -701,7 +721,9 @@ fn closing_last_views_preserves_navigation_without_editing_state() {
         if close_tab {
             state.new_tab().unwrap();
         } else {
-            state.split_active(crate::editor::state::Axis::Horizontal, 500).unwrap();
+            state
+                .split_active(crate::editor::state::Axis::Horizontal, 500)
+                .unwrap();
         }
         let (a, view) = state
             .open_text(

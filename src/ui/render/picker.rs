@@ -1,46 +1,48 @@
-use crate::ui::render::editor::PROMPT_CURSOR;
-use unicode_segmentation::UnicodeSegmentation;
 use crate::config::BorderStyle;
 use crate::config::Config;
+#[cfg(test)]
 use crate::ui::CellGrid;
-use crate::ui::Style;
-use crate::ui::geometry::text_width;
-use crate::windows::WindowRect;
-use crate::ui::render::CellAlign;
 use crate::ui::DiffLayout;
 use crate::ui::DiffPreview;
+use crate::ui::Style;
 use crate::ui::diff::DiffRow;
 use crate::ui::diff::DiffRowKind;
 use crate::ui::diff::DiffSideRow;
+use crate::ui::geometry::text_width;
 use crate::ui::grid::Frame;
+use crate::ui::render::CellAlign;
 use crate::ui::render::PickerPreviewBody;
 use crate::ui::render::PickerRowKind;
 use crate::ui::render::PickerUiState;
+use crate::ui::render::editor::PROMPT_CURSOR;
 use crate::ui::render::editor::cursor_style;
 use crate::ui::render::overlays::truncate_content_title;
+use crate::windows::WindowRect;
+use unicode_segmentation::UnicodeSegmentation;
 
+#[cfg(test)]
 use crate::ui::geometry::ellipsized;
 use crate::ui::geometry::fitted_footer;
+#[cfg(test)]
 use crate::ui::render::prompt::prompt_viewport;
 
-
-
 pub(crate) const PICKER_MAXIMUM_PREVIEW_BYTES: usize = 256 * 1024;
-
 
 pub(crate) fn looks_like_path(text: &str) -> bool {
     text.contains('/') && !text.contains(char::is_whitespace)
 }
 
-
 /// A `Label  /some/path` detail row keeps its label and the end of its path.
-pub(crate) fn clip_path_tail(line: &str, maximum: usize, ambiguous: crate::config::AmbiguousWidth) -> String {
+pub(crate) fn clip_path_tail(
+    line: &str,
+    maximum: usize,
+    ambiguous: crate::config::AmbiguousWidth,
+) -> String {
     let path = line.rsplit(' ').next().unwrap_or_default();
     let label = &line[..line.len() - path.len()];
     let room = maximum.saturating_sub(text_width(label, ambiguous));
     format!("{label}{}", truncate_content_title(path, room, ambiguous))
 }
-
 
 /// A picker row's label and detail within `available` cells. A long path loses its start, since
 /// its end is what tells two rows apart.
@@ -75,7 +77,6 @@ pub(super) fn fitted_picker_row(
     (label, detail)
 }
 
-
 /// Draw a diff that was carried as structure rather than flattened text.
 ///
 /// This is the base form: the provenance line, each hunk header, the exact count of any
@@ -93,7 +94,6 @@ fn diff_row_style(kind: DiffRowKind) -> Style {
         DiffRowKind::Truncated => Style::Warning,
     }
 }
-
 
 /// Draw one diff row, emphasising the spans that changed inside it.
 ///
@@ -125,7 +125,6 @@ fn paint_diff_row(frame: &mut Frame, _config: &Config, x: u16, y: u16, right: u1
         cursor_x = next_x;
     }
 }
-
 
 fn render_diff_preview(
     frame: &mut Frame,
@@ -219,7 +218,6 @@ fn render_diff_preview(
     }
 }
 
-
 #[must_use]
 pub fn picker_geometry(bounds: WindowRect) -> Option<WindowRect> {
     let width = u16::try_from(u32::from(bounds.width) * 88 / 100)
@@ -244,7 +242,6 @@ pub fn picker_geometry(bounds: WindowRect) -> Option<WindowRect> {
         height,
     })
 }
-
 
 pub(super) fn render_picker(
     frame: &mut Frame,
@@ -716,7 +713,6 @@ pub(super) fn render_picker(
     ));
 }
 
-
 #[cfg(test)]
 mod tests {
     use crate::ui::render::picker::*;
@@ -773,11 +769,6 @@ mod tests {
 }
 use crate::ui::PickerSurfaceKind;
 
-
-
-
-
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PickerContentGeometry {
     pub outer: WindowRect,
@@ -787,7 +778,6 @@ pub struct PickerContentGeometry {
     /// The rows the preview has inside the border, zero when none is showing.
     pub preview_rows: u16,
 }
-
 
 /// Theme selection leaves most of the editor visible for live color preview.
 /// Other picker sizes retain their configured behavior.
@@ -830,7 +820,6 @@ pub(crate) fn picker_window_geometry(
     }
     Some(rect)
 }
-
 
 /// The preview decision uses the same bounded content sample as painting.
 #[must_use]

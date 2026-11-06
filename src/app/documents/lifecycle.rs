@@ -2,14 +2,14 @@ use crate::app::documents::DocumentEvent;
 use crate::app::documents::DocumentSession;
 use crate::app::windows::NavigationStamp;
 use crate::app::workspace::WorkspaceVersion;
+use crate::editor::BufferId;
+use crate::editor::EditorVersion;
+use crate::editor::EditorWindowVersion;
 use crate::editor::text::BufferRevision;
 use crate::editor::text::FileFormat;
 use crate::editor::text::LineEnding;
 use crate::editor::text::TextBuffer;
 use crate::editor::text::TextVersion;
-use crate::editor::BufferId;
-use crate::editor::EditorVersion;
-use crate::editor::EditorWindowVersion;
 use crate::files::RequestId;
 use crate::files::VfsError;
 use crate::files::VfsResult;
@@ -37,7 +37,7 @@ struct Version {
     snapshot: Option<Box<(Arc<str>, FileFormat)>>,
 }
 impl DocumentView<'_> {
-    pub(in crate::app) fn version(&self) -> Version {
+    fn version(&self) -> Version {
         Version {
             id: self.id,
             path: self.path.map(Path::to_path_buf),
@@ -127,9 +127,7 @@ impl FileReply {
         }
         Ok(())
     }
-    pub(in crate::app) fn close_save(
-        &self,
-    ) -> Option<&crate::app::windows::EditorCloseSave> {
+    pub(in crate::app) fn close_save(&self) -> Option<&crate::app::windows::EditorCloseSave> {
         match &self.intent.operation {
             Operation::Save { close, .. } => close.as_ref(),
             Operation::Open { .. } | Operation::Reload { .. } => None,
@@ -528,11 +526,7 @@ impl DocumentSession {
             change,
         })
     }
-    pub(in crate::app) fn retire_buffer(
-        &mut self,
-        buffer: BufferId,
-        path: Option<&Path>,
-    ) {
+    pub(in crate::app) fn retire_buffer(&mut self, buffer: BufferId, path: Option<&Path>) {
         self.pending_files.retain(|id, intent| {
             let keep = match &mut intent.operation {
                 Operation::Reload { version, .. } | Operation::Save { version, .. } => {
@@ -622,9 +616,9 @@ fn configured_line_ending(configured: &crate::config::EditorConfig) -> Option<Li
 #[cfg(test)]
 mod tests {
     use crate::app::documents::lifecycle::*;
+    use crate::app::startup::StartupTarget;
     use crate::app::workspace::WorkspaceSession;
     use crate::editor::EditorState;
-    use crate::app::startup::StartupTarget;
     use crate::files::RootIdentity;
     use crate::workspace::WorkspaceId;
     use crate::workspace::WorkspaceState;

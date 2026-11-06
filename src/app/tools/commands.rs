@@ -1,24 +1,21 @@
-
-use crate::app::commands::AppEffect;
 use crate::app::App;
+use crate::app::TrustedAction;
+use crate::app::commands::AppEffect;
 use crate::tools::PackageOperation;
 use crate::tools::RegistryRequest;
-use crate::app::TrustedAction;
 
-
-
-
+use crate::app::commands::register;
+use crate::app::commands::string_arg;
 use crate::editor::ArgumentSchema;
 use crate::editor::ArgumentType;
 use crate::editor::CommandError;
 use crate::editor::CommandRegistry;
 use crate::editor::ContextRequirement;
-use crate::app::commands::register;
-use crate::app::commands::string_arg;
 use std::path::PathBuf;
 
-pub(in crate::app) fn register_commands(registry: &mut CommandRegistry<AppEffect>) -> Result<(), CommandError> {
-
+pub(in crate::app) fn register_commands(
+    registry: &mut CommandRegistry<AppEffect>,
+) -> Result<(), CommandError> {
     for (id, title, update) in [
         ("package.install", "Install verified package", false),
         ("package.update", "Update verified package", true),
@@ -139,23 +136,16 @@ pub(in crate::app) fn register_commands(registry: &mut CommandRegistry<AppEffect
         ArgumentSchema::default(),
         |_| AppEffect::PackageGarbageCollect,
     )?;
-Ok(())
+    Ok(())
 }
 
-
-
-
-
-
-
-
-
-
-
 impl App {
-    pub(in crate::app) fn process_tools_effect(&mut self, effect: AppEffect) -> Result<(), AppEffect> {
+    pub(in crate::app) fn process_tools_effect(
+        &mut self,
+        effect: AppEffect,
+    ) -> Result<(), AppEffect> {
         match effect {
-AppEffect::PackageInstall {
+            AppEffect::PackageInstall {
                 package_manifest,
                 plugin_manifest,
                 component,
@@ -172,10 +162,10 @@ AppEffect::PackageInstall {
                     });
                 }
             }
-AppEffect::PackageRegistrySearch(query) => {
+            AppEffect::PackageRegistrySearch(query) => {
                 self.request_registry(RegistryRequest::Search { query }, false)
             }
-AppEffect::PackageRegistryShow {
+            AppEffect::PackageRegistryShow {
                 publisher,
                 name,
                 version,
@@ -187,7 +177,7 @@ AppEffect::PackageRegistryShow {
                 },
                 false,
             ),
-AppEffect::PackageRegistryInstall {
+            AppEffect::PackageRegistryInstall {
                 publisher,
                 name,
                 version,
@@ -202,22 +192,22 @@ AppEffect::PackageRegistryInstall {
                     })
                 }
             }
-AppEffect::PackageList => {
+            AppEffect::PackageList => {
                 if let Err(error) = self.extension.request_package(PackageOperation::List) {
                     self.show_error(error)
                 }
             }
-AppEffect::PackageVerify => {
+            AppEffect::PackageVerify => {
                 if let Err(error) = self.extension.request_package(PackageOperation::Verify) {
                     self.show_error(error)
                 }
             }
-AppEffect::PackageRollback => {
+            AppEffect::PackageRollback => {
                 if let Err(error) = self.extension.request_package(PackageOperation::Rollback) {
                     self.show_error(error)
                 }
             }
-AppEffect::PackageRemove(name) => {
+            AppEffect::PackageRemove(name) => {
                 if let Err(error) = self
                     .extension
                     .request_package(PackageOperation::Remove(name))
@@ -225,7 +215,7 @@ AppEffect::PackageRemove(name) => {
                     self.show_error(error)
                 }
             }
-AppEffect::PackageGarbageCollect => {
+            AppEffect::PackageGarbageCollect => {
                 if let Err(error) = self
                     .extension
                     .request_package(PackageOperation::GarbageCollect { maximum: 256 })
@@ -233,8 +223,8 @@ AppEffect::PackageGarbageCollect => {
                     self.show_error(error)
                 }
             }
-AppEffect::OpenToolMenu(category) => self.open_tool_menu(category),
-AppEffect::CloseToolMenu
+            AppEffect::OpenToolMenu(category) => self.open_tool_menu(category),
+            AppEffect::CloseToolMenu
                 if self
                     .ui
                     .tool_menu
@@ -243,9 +233,9 @@ AppEffect::CloseToolMenu
             {
                 self.search_tool_menu(None, false);
             }
-AppEffect::CloseToolMenu => self.close_tool_menu(),
-AppEffect::ToolSearch => self.search_tool_menu(None, true),
-AppEffect::ToolSearchInsert(text) => {
+            AppEffect::CloseToolMenu => self.close_tool_menu(),
+            AppEffect::ToolSearch => self.search_tool_menu(None, true),
+            AppEffect::ToolSearchInsert(text) => {
                 let query = self
                     .ui
                     .tool_menu
@@ -253,7 +243,7 @@ AppEffect::ToolSearchInsert(text) => {
                     .map(|menu| format!("{}{text}", menu.query));
                 self.search_tool_menu(query, true);
             }
-AppEffect::ToolSearchDelete => {
+            AppEffect::ToolSearchDelete => {
                 let query = self.ui.tool_menu.as_ref().map(|menu| {
                     let mut query = menu.query.clone();
                     query.pop();
@@ -261,19 +251,19 @@ AppEffect::ToolSearchDelete => {
                 });
                 self.search_tool_menu(query, true);
             }
-AppEffect::ToolSearchStop { keep } => {
+            AppEffect::ToolSearchStop { keep } => {
                 let query = self.ui.tool_menu.as_ref().map(|menu| menu.query.clone());
                 self.search_tool_menu(query.filter(|_| keep), false);
             }
-AppEffect::MoveToolMenu(direction) => self.move_tool_menu(direction),
-AppEffect::CycleToolCategory(direction) => self.cycle_tool_category(direction),
-AppEffect::RefreshTools => self.refresh_tools(),
-AppEffect::ActivateTool => self.activate_selected_tool(),
-AppEffect::InstallSelectedTool => self.install_selected_tool(),
-AppEffect::UninstallSelectedTool => self.uninstall_selected_tool(),
-AppEffect::StopSelectedLsp => self.stop_selected_lsp(),
-AppEffect::RestartSelectedLsp => self.restart_selected_lsp(),
-AppEffect::ToggleToolRuntime => self.toggle_selected_lsp_runtime(),
+            AppEffect::MoveToolMenu(direction) => self.move_tool_menu(direction),
+            AppEffect::CycleToolCategory(direction) => self.cycle_tool_category(direction),
+            AppEffect::RefreshTools => self.refresh_tools(),
+            AppEffect::ActivateTool => self.activate_selected_tool(),
+            AppEffect::InstallSelectedTool => self.install_selected_tool(),
+            AppEffect::UninstallSelectedTool => self.uninstall_selected_tool(),
+            AppEffect::StopSelectedLsp => self.stop_selected_lsp(),
+            AppEffect::RestartSelectedLsp => self.restart_selected_lsp(),
+            AppEffect::ToggleToolRuntime => self.toggle_selected_lsp_runtime(),
             effect => return Err(effect),
         }
         Ok(())

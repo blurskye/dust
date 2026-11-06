@@ -1,12 +1,12 @@
+use crate::app::windows::NativeSurfaceTarget;
+use crate::app::windows::WindowSession;
+use crate::app::windows::plans::TargetError;
+use crate::app::windows::plans::WindowPlan;
 use crate::editor::EditorOperation;
 use crate::editor::EditorTopology;
-use crate::app::windows::NativeSurfaceTarget;
-use crate::plugins::PluginCatalogVersion;
-use crate::app::windows::plans::TargetError;
-use crate::windows::WindowPlacement;
-use crate::app::windows::plans::WindowPlan;
-use crate::app::windows::WindowSession;
 use crate::editor::FocusDirection;
+use crate::plugins::PluginCatalogVersion;
+use crate::windows::WindowPlacement;
 
 #[derive(Clone, Copy)]
 pub(in crate::app) enum WindowCommand<'a> {
@@ -442,15 +442,11 @@ impl WindowSession {
                                 (crate::windows::DockEdge::Bottom, FocusDirection::Up)
                                 | (crate::windows::DockEdge::Top, FocusDirection::Down)
                                 | (crate::windows::DockEdge::Left, FocusDirection::Right)
-                                | (crate::windows::DockEdge::Right, FocusDirection::Left) => {
-                                    true
-                                }
+                                | (crate::windows::DockEdge::Right, FocusDirection::Left) => true,
                                 (crate::windows::DockEdge::Bottom, FocusDirection::Down)
                                 | (crate::windows::DockEdge::Top, FocusDirection::Up)
                                 | (crate::windows::DockEdge::Left, FocusDirection::Left)
-                                | (crate::windows::DockEdge::Right, FocusDirection::Right) => {
-                                    false
-                                }
+                                | (crate::windows::DockEdge::Right, FocusDirection::Right) => false,
                                 _ => {
                                     plan.native = Some(NativeAction::None);
                                     return Ok(plan);

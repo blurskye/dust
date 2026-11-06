@@ -2142,11 +2142,9 @@ fn worktree_creation_and_removal_refuse_before_writing() {
             "wt-occupied",
             &occupied.display().to_string()
         )),
-        Err(
-            crate::git::GitBranchError::RefusedDestinationNotEmpty(
-                occupied.display().to_string()
-            )
-        )
+        Err(crate::git::GitBranchError::RefusedDestinationNotEmpty(
+            occupied.display().to_string()
+        ))
     );
     assert_eq!(
         std::fs::read_to_string(occupied.join("keep.txt")).unwrap(),
@@ -2176,7 +2174,9 @@ fn worktree_creation_and_removal_refuse_before_writing() {
             "trip",
             &root.join("wt-trip2").display().to_string()
         )),
-        Err(crate::git::GitBranchError::RefusedBranchAlreadyCheckedOut("trip".into()))
+        Err(crate::git::GitBranchError::RefusedBranchAlreadyCheckedOut(
+            "trip".into()
+        ))
     );
 
     // A dirty worktree is refused removal and its files are unchanged.

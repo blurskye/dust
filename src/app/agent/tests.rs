@@ -1,18 +1,12 @@
 use crate::app::agent::*;
 
-fn test_app() -> (
-    (tempfile::TempDir, tempfile::TempDir),
-    App,
-) {
+fn test_app() -> ((tempfile::TempDir, tempfile::TempDir), App) {
     test_app_with(|_| {})
 }
 
 fn test_app_with(
     change: impl FnOnce(&mut crate::config::Config),
-) -> (
-    (tempfile::TempDir, tempfile::TempDir),
-    App,
-) {
+) -> ((tempfile::TempDir, tempfile::TempDir), App) {
     let root = tempfile::tempdir().unwrap();
     let state = tempfile::tempdir().unwrap();
     let mut loaded = crate::config::load_bundled_config();

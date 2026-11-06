@@ -1,8 +1,8 @@
 //! Canonical picker rows, actions, interaction and derived presentation.
 use crate::app::search::SearchSession;
 use crate::app::workspace::WorkspaceVersion;
-use crate::plugins::PluginLoadId;
 use crate::persistence::PersistedLocation;
+use crate::plugins::PluginLoadId;
 use crate::tools::RegistryPackageMetadata;
 use crate::tools::RegistryPackageSummary;
 use crate::ui::PickerCell;
@@ -223,7 +223,9 @@ pub(in crate::app) fn surface_footer(surface: PickerSurfaceKind) -> Option<Strin
 /// instead of the provenance.
 /// A choice with an icon: the badge is the icon, coloured as the explorer colours the file
 /// named by the row's source, such as `practice.rs`.
-pub(in crate::app) fn choice_row_cells(source: &crate::workspace::PickerRowPresentation) -> Vec<PickerCell> {
+pub(in crate::app) fn choice_row_cells(
+    source: &crate::workspace::PickerRowPresentation,
+) -> Vec<PickerCell> {
     let icon = crate::files::file_icon(&source.source).map_or(Style::ExplorerIcon, |icon| {
         crate::ui::explorer_segment_style(crate::app::explorer::explorer_icon_role(icon.color))
     });
@@ -274,7 +276,11 @@ pub(in crate::app) fn grep_row_cells(
 
 /// A path as LazyVim's pickers draw it: the file's icon, then the folder dimmed and the
 /// name bright. With more than one root the root's name comes first, dimmed too.
-pub(in crate::app) fn path_cells(path: &str, root: &str, file_icon: Option<&str>) -> Vec<PickerCell> {
+pub(in crate::app) fn path_cells(
+    path: &str,
+    root: &str,
+    file_icon: Option<&str>,
+) -> Vec<PickerCell> {
     let split = path.rfind(std::path::is_separator).map_or(0, |at| at + 1);
     let (folder, name) = path.split_at(split);
     let mut cells = Vec::new();
@@ -302,7 +308,9 @@ fn cell(text: &str, style: Style) -> PickerCell {
     PickerCell::new(text, style, u16::try_from(width).unwrap_or(u16::MAX))
 }
 
-pub(in crate::app) fn changes_row_cells(source: &crate::workspace::PickerRowPresentation) -> Vec<PickerCell> {
+pub(in crate::app) fn changes_row_cells(
+    source: &crate::workspace::PickerRowPresentation,
+) -> Vec<PickerCell> {
     let code = source.source.clone();
     let status_style = match code.chars().next() {
         // A path with only unsaved edits has no comparison code to colour.
@@ -329,8 +337,8 @@ pub(in crate::app) fn changes_row_cells(source: &crate::workspace::PickerRowPres
     cells
 }
 
-pub(in crate::app) mod preview;
 pub(in crate::app) mod palette;
+pub(in crate::app) mod preview;
 
 pub(in crate::app) mod interaction;
 
@@ -339,13 +347,8 @@ pub(in crate::app) mod commands;
 #[cfg(test)]
 pub(in crate::app) mod project_tests;
 
-
 #[cfg(test)]
 pub(in crate::app) mod surfaces_tests;
-
-
-
-
 
 impl SearchSession {
     pub(in crate::app) fn install_picker(
@@ -467,9 +470,7 @@ impl SearchSession {
         self.picker.generation = generation;
         Ok(epoch)
     }
-    pub(in crate::app) fn theme_picker_key(
-        &self,
-    ) -> Option<&crate::app::configuration::ThemeKey> {
+    pub(in crate::app) fn theme_picker_key(&self) -> Option<&crate::app::configuration::ThemeKey> {
         self.picker
             .interaction
             .as_ref()?
@@ -516,9 +517,7 @@ impl SearchSession {
                 _ => None,
             })
     }
-    pub(in crate::app) fn workspace_picker(
-        &self,
-    ) -> Option<crate::workspace::ProposalId> {
+    pub(in crate::app) fn workspace_picker(&self) -> Option<crate::workspace::ProposalId> {
         match self.picker.interaction.as_ref()?.origin {
             PickerOrigin::WorkspaceEdit(id) => Some(id),
             _ => None,
@@ -581,10 +580,7 @@ impl SearchSession {
 
     /// Re-present the open picker on another surface, keeping its rows, query and selection.
     /// This is how a picker sends its results to the shared Results surface.
-    pub(in crate::app) fn set_picker_surface(
-        &mut self,
-        surface: PickerSurfaceKind,
-    ) -> bool {
+    pub(in crate::app) fn set_picker_surface(&mut self, surface: PickerSurfaceKind) -> bool {
         let Some(picker) = self.picker.interaction.as_mut() else {
             return false;
         };
@@ -619,9 +615,7 @@ impl SearchSession {
 
     /// Switch the change surface's diff pane to the other comparison and report which one it
     /// now shows, so the caller can refresh the pane.
-    pub(in crate::app) fn switch_changes_layer(
-        &mut self,
-    ) -> Option<crate::git::GitDiffLayer> {
+    pub(in crate::app) fn switch_changes_layer(&mut self) -> Option<crate::git::GitDiffLayer> {
         let picker = self.picker.interaction.as_mut()?;
         if picker.surface != PickerSurfaceKind::Changes {
             return None;
@@ -642,10 +636,7 @@ impl SearchSession {
     }
     /// Where the diff pane starts in a box of `rows` rows. It opens on the first change and
     /// keeps its place after that.
-    pub(in crate::app) fn picker_preview_scroll(
-        &mut self,
-        rows: usize,
-    ) -> Option<usize> {
+    pub(in crate::app) fn picker_preview_scroll(&mut self, rows: usize) -> Option<usize> {
         let picker = self.picker.interaction.as_mut()?;
         let crate::ui::PickerPreviewBody::Diff(diff) = &self.preview.as_ref()?.body else {
             return None;
@@ -686,9 +677,7 @@ impl SearchSession {
     pub(in crate::app) fn picker_follows_tail(&self) -> bool {
         self.picker().is_none_or(PickerState::selected_is_last)
     }
-    pub(in crate::app) fn picker_bookmark(
-        &self,
-    ) -> Option<(String, Option<PickerItemId>)> {
+    pub(in crate::app) fn picker_bookmark(&self) -> Option<(String, Option<PickerItemId>)> {
         self.picker().map(|picker| {
             (
                 picker.query().into(),

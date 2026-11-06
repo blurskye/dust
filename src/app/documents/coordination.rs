@@ -1,29 +1,25 @@
-use crate::editor::text::ByteOffset;
-use crate::editor::text::ByteRange;
+use crate::app::App;
+use crate::app::InteractiveError;
+use crate::app::documents::DocumentEvent;
+use crate::app::persistence::RestoreContext;
+use crate::app::persistence::RestoreUpdate;
 use crate::editor::EditorOperation;
 use crate::editor::EditorTransaction;
-use std::time::Instant;
-use crate::app::App;
-use crate::editor::text::PositionCodec;
 use crate::editor::Precondition;
-use crate::app::persistence::RestoreContext;
-use crate::editor::text::TextBuffer;
 use crate::editor::UndoPolicy;
-use crate::app::documents::DocumentEvent;
-use crate::app::InteractiveError;
-use crate::app::persistence::RestoreUpdate;
+use crate::editor::text::ByteOffset;
+use crate::editor::text::PositionCodec;
+use crate::editor::text::TextBuffer;
 use crate::files::VfsResult;
 use std::ops::ControlFlow::Break;
 use std::ops::ControlFlow::Continue;
+use std::time::Instant;
 
 use crate::app::language::interaction::NavigationRead;
-
-
 
 /// Lines of a recovery journal its preview shows.
 pub(in crate::app) const RECOVERY_PREVIEW_LINES: usize = 500;
 impl App {
-
     pub(in crate::app) fn effective_large_file(&self, buffer: crate::editor::BufferId) -> bool {
         self.documents.effective_large_file(
             buffer,
@@ -34,7 +30,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn process_large_file_modes(&mut self) {
         let large = self.documents.reconcile_policy(
             &self.state.window_version(),
@@ -49,8 +44,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn sync_status_summary_ui(&mut self) {
         let branch = self.git.branch().map(str::to_owned);
         self.ui.set(branch, |ui| &mut ui.git_branch);
@@ -60,8 +53,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn toggle_buffer_pin(&mut self, buffer: crate::editor::BufferId) {
         if !self.state.buffers.contains_key(buffer) {
             return;
@@ -72,8 +63,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn toggle_active_buffer_pin(&mut self) {
         if let Some(buffer) = self.state.active_buffer_id() {
             self.toggle_buffer_pin(buffer)
@@ -82,8 +71,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn move_active_buffer_line(&mut self, direction: isize) {
         let Some(buffer) = self.state.active_buffer_id() else {
             return;
@@ -97,7 +84,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn schedule_recovery_work(&mut self) {
         self.recovery.schedule(
             &self.state,
@@ -113,7 +99,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn queue_dirty_recovery_before_exit(&mut self) {
         self.recovery.schedule(
             &self.state,
@@ -126,8 +111,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn process_vfs_results(&mut self) {
         self.process_pending_saves();
         loop {
@@ -638,37 +621,27 @@ impl App {
 }
 
 impl App {
-
     pub(super) fn project_large_file_modes(&mut self, buffers: Vec<crate::editor::BufferId>) {
         self.ui.set(buffers, |ui| &mut ui.large_file_buffers);
     }
 }
 
-use crate::ui::render::SCRATCH_LABEL;
+use crate::app::TrustedAction;
 use crate::app::commands::AppEffect;
+use crate::app::picker::PickerPayload;
 use crate::app::windows::EditorCloseSave;
 use crate::language::lsp::LspDocument;
 use crate::language::lsp::LspFeature;
-use std::path::Path;
-use std::path::PathBuf;
+use crate::language::lsp::language_id_for_path;
+use crate::tools::managed_formatter;
+use crate::ui::render::SCRATCH_LABEL;
 use crate::workspace::PickerAction;
 use crate::workspace::PickerItem;
 use crate::workspace::PickerItemId;
-use crate::app::picker::PickerPayload;
-use crate::editor::text::TextEdit;
-use crate::app::TrustedAction;
-use crate::language::lsp::language_id_for_path;
-use crate::tools::managed_formatter;
-use crate::editor::text::BufferRevision;
-use std::time::Duration;
-use crate::editor::text::TextEditSet;
-use crate::editor::ViewId;
-
-
-
+use std::path::Path;
+use std::path::PathBuf;
 
 impl App {
-
     pub(super) fn document_view(
         id: crate::editor::BufferId,
         buffer: &crate::editor::Buffer,
@@ -687,7 +660,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn show_document_failure(
         &mut self,
         failure: crate::app::documents::DocumentFailure,
@@ -702,7 +674,6 @@ impl App {
 }
 
 impl App {
-
     /// Open a path the user named. With nothing there it starts a new file, as in Vim, which
     /// the first save creates.
     pub(in crate::app) fn edit_path(&mut self, path: PathBuf) {
@@ -732,7 +703,6 @@ impl App {
 }
 
 impl App {
-
     /// The dashboard's Recover Unsaved Work: every journal with the file it was written for.
     /// Enter opens one, ctrl-x (`d` in Normal mode) discards it, Escape leaves them for later.
     pub(in crate::app) fn open_recovery_picker(&mut self) {
@@ -780,8 +750,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn recovery_picker_open(&self) -> bool {
         matches!(
             self.search.selected_picker_payload(),
@@ -791,8 +759,6 @@ impl App {
 }
 
 impl App {
-
-
     /// Recover a journal into its file, as an unsaved change on top of what is on disk, so undo
     /// goes back to the saved version. Work that never had a file, or whose file is already
     /// open, comes back in a new buffer.
@@ -850,7 +816,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn replace_with_recovered(
         &mut self,
         buffer: crate::editor::BufferId,
@@ -878,7 +843,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn finish_recovery(&mut self, journal: &Path, message: &str) {
         self.set_dashboard_visibility(false);
         self.ensure_cursor_visible();
@@ -890,8 +854,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn start_open(&mut self, path: PathBuf) {
         self.record_jump();
         match self.documents.request_open(
@@ -909,7 +871,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn start_reload(&mut self, force: bool) {
         let view = self.state.active_buffer_id().and_then(|id| {
             self.state
@@ -930,7 +891,6 @@ impl App {
 }
 
 impl App {
-
     /// The formatter from the tool manager for the active file, the way conform.nvim comes
     /// before the language server in LazyVim.
     pub(in crate::app) fn active_formatter(&self) -> Option<String> {
@@ -942,7 +902,6 @@ impl App {
 }
 
 impl App {
-
     /// Ask the language server to format, and save when it answers. False when there is nothing
     /// to wait for, so the caller saves right away.
     pub(in crate::app) fn begin_format_on_save(&mut self, quit_after: bool) -> bool {
@@ -1005,8 +964,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn formatting_save_for_request(
         &self,
         server: &str,
@@ -1023,8 +980,6 @@ impl App {
 }
 
 impl App {
-
-
     fn start_pending_save_formatters(&mut self) {
         let waiting = self
             .format_on_save
@@ -1053,12 +1008,7 @@ impl App {
 }
 
 impl App {
-
-
-    pub(in crate::app) fn finish_format_on_save(
-        &mut self,
-        buffer: crate::editor::BufferId,
-    ) {
+    pub(in crate::app) fn finish_format_on_save(&mut self, buffer: crate::editor::BufferId) {
         let Some(pending) = self.format_on_save.remove(&buffer) else {
             return;
         };
@@ -1093,8 +1043,6 @@ impl App {
 }
 
 impl App {
-
-
     /// A commit or stage made outside Dust, such as in its terminal, moves the index or HEAD.
     fn follow_outside_git_changes(&mut self) {
         let Some(status) = self.git.status() else {
@@ -1120,8 +1068,6 @@ impl App {
 }
 
 impl App {
-
-
     /// Once a second, notice open files that changed outside Dust: lazygit, a hunk reset, a
     /// formatter. A clean buffer takes the new text; a changed one keeps its text and says so.
     pub(in crate::app) fn process_disk_changes(&mut self) {
@@ -1172,8 +1118,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn process_format_on_save_deadline(&mut self) {
         let expired = self
             .format_on_save
@@ -1189,8 +1133,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn start_save(
         &mut self,
         quit_after: bool,
@@ -1225,7 +1167,6 @@ impl App {
 }
 
 impl App {
-
     /// Every changed file, without waiting on formatters. Quitting happens when the last save
     /// lands, and only if nothing is left unsaved by then.
     pub(in crate::app) fn save_all(&mut self, quit_after: bool) {
@@ -1262,8 +1203,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn process_pending_saves(&mut self) {
         while !self.pending_saves.is_empty() {
             match self.documents.check_admission() {
@@ -1284,7 +1223,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn request_save_buffer(
         &mut self,
         buffer: crate::editor::BufferId,
@@ -1320,7 +1258,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn close_active_buffer(&mut self, force: bool) {
         let Some(view) = self.state.active_view else {
             self.set_dashboard_visibility(true);
@@ -1343,7 +1280,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn retire_closed_buffer(
         &mut self,
         buffer_id: crate::editor::BufferId,
@@ -1378,7 +1314,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn close_buffer_target(
         &mut self,
         view_id: crate::editor::ViewId,
@@ -1436,11 +1371,7 @@ impl App {
 }
 
 impl App {
-
-    pub(in crate::app) fn process_file_reply(
-        &mut self,
-        reply: crate::app::documents::FileReply,
-    ) {
+    pub(in crate::app) fn process_file_reply(&mut self, reply: crate::app::documents::FileReply) {
         use crate::app::documents::DocumentChange;
         let stage = self.input.take_stage_save(reply.id());
         let close_save = reply.close_save().cloned();
@@ -1725,8 +1656,6 @@ impl App {
     }
 }
 
-
-
 /// Create a user settings or keymaps file if it is missing or empty. A new file starts with a
 /// few commented examples rather than nothing.
 pub(in crate::app) fn create_user_file(path: &std::path::Path) -> std::io::Result<()> {
@@ -1738,13 +1667,18 @@ pub(in crate::app) fn create_user_file(path: &std::path::Path) -> std::io::Resul
         .create(true)
         .open(path)?;
     let starter = if path.file_name().is_some_and(|name| name == "keymaps.toml") {
-        include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/defaults/keymaps-starter.toml"))
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/assets/defaults/keymaps-starter.toml"
+        ))
     } else {
-        include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/defaults/settings-starter.toml"))
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/assets/defaults/settings-starter.toml"
+        ))
     };
     if std::fs::metadata(path)?.len() == 0 {
         std::fs::write(path, starter)?;
     }
     Ok(())
-
 }

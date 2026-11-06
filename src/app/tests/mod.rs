@@ -6,9 +6,7 @@ use std::collections::BTreeMap;
 
 use std::collections::BTreeSet;
 
-
 use std::fs;
-
 
 use std::thread;
 
@@ -16,22 +14,9 @@ use std::time::Duration;
 
 use std::time::Instant;
 
-
-
 use tempfile::tempdir;
 
 use crate::app::App;
-
-
-
-
-
-
-
-
-
-
-
 
 use crate::app::startup::StartupTarget;
 
@@ -73,28 +58,19 @@ fn nix_lsp_launch_runs_the_processed_upstream_artifact_without_nix_evaluation() 
     assert!(launch.environment(&definition).is_err());
 }
 
-pub(super) fn app() -> (
-    (tempfile::TempDir, tempfile::TempDir),
-    App,
-) {
+pub(super) fn app() -> ((tempfile::TempDir, tempfile::TempDir), App) {
     app_with_optional_plugin_queue(None)
 }
 
 pub(in crate::app) fn app_with_plugin_queue(
     plugin_queue_capacity: usize,
-) -> (
-    (tempfile::TempDir, tempfile::TempDir),
-    App,
-) {
+) -> ((tempfile::TempDir, tempfile::TempDir), App) {
     app_with_optional_plugin_queue(Some(plugin_queue_capacity))
 }
 
 fn app_with_optional_plugin_queue(
     plugin_queue_capacity: Option<usize>,
-) -> (
-    (tempfile::TempDir, tempfile::TempDir),
-    App,
-) {
+) -> ((tempfile::TempDir, tempfile::TempDir), App) {
     let root = tempdir().expect("tempdir");
     let state = tempdir().expect("isolated state directory");
     let startup = StartupTarget::Dashboard {
@@ -132,7 +108,11 @@ fn application_fixture_cleans_up_workspace_and_state_after_drop() {
     assert!(!state.exists());
 }
 
-pub(in crate::app) fn plugin_manifest(owner: &str, mapping_id: &str, keys: &str) -> crate::plugins::PluginManifest {
+pub(in crate::app) fn plugin_manifest(
+    owner: &str,
+    mapping_id: &str,
+    keys: &str,
+) -> crate::plugins::PluginManifest {
     crate::plugins::PluginManifest {
         id: owner.into(),
         version: "1.0.0".into(),
@@ -192,7 +172,10 @@ pub(in crate::app) fn plugin_manifest(owner: &str, mapping_id: &str, keys: &str)
     }
 }
 
-pub(in crate::app) fn write_plugin_manifest(root: &std::path::Path, manifest: &crate::plugins::PluginManifest) {
+pub(in crate::app) fn write_plugin_manifest(
+    root: &std::path::Path,
+    manifest: &crate::plugins::PluginManifest,
+) {
     fs::write(
         root.join("manifest.toml"),
         toml::to_string(manifest).expect("manifest TOML"),

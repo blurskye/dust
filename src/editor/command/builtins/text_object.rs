@@ -7,9 +7,9 @@ use crate::editor::text::ByteOffset;
 
 use crate::editor::text::ByteRange;
 
-use crate::editor::text::TextBuffer;
 use crate::editor::SyntaxObject;
 use crate::editor::SyntaxObjectKind;
+use crate::editor::text::TextBuffer;
 
 use crate::editor::command::CommandError;
 

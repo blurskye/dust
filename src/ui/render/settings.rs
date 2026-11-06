@@ -5,9 +5,9 @@ use crate::config::AmbiguousWidth;
 
 use crate::config::Config;
 use crate::config::Highlight;
-use crate::ui::render::editor::PROMPT_CURSOR;
 use crate::ui::Style;
 use crate::ui::geometry::text_width;
+use crate::ui::render::editor::PROMPT_CURSOR;
 
 use crate::ui::grid::Frame;
 
@@ -409,7 +409,14 @@ pub(super) fn render_settings(
     // The page covers the editor, so its cursor would show through; search and text fields set their own.
     frame.cursor = None;
     if let Some(setup) = &page.setup {
-        crate::ui::render::setup::render_setup(frame, setup, page.status.as_ref(), config, width, height);
+        crate::ui::render::setup::render_setup(
+            frame,
+            setup,
+            page.status.as_ref(),
+            config,
+            width,
+            height,
+        );
         return;
     }
     let Some(layout) = settings_layout(width, height) else {

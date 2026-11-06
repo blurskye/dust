@@ -1,42 +1,32 @@
-
-use crate::app::commands::AppEffect;
-use crate::windows::DockEdge;
 use crate::app::App;
+use crate::app::commands::AppEffect;
+use crate::app::picker::PickerPayload;
+use crate::app::terminal::TerminalInput;
 use crate::app::windows::NativeSurfaceTarget;
+use crate::windows::DockEdge;
+use crate::windows::WindowPlacement;
+use crate::windows::WindowRect;
 use crate::workspace::PickerAction;
 use crate::workspace::PickerItem;
 use crate::workspace::PickerItemId;
-use crate::app::picker::PickerPayload;
-use crate::app::terminal::TerminalInput;
-use crate::windows::WindowPlacement;
-use crate::windows::WindowRect;
-use slotmap::Key;
 // Remaining editor/window routing; terminal data and algorithms live in the owner.
 use crate::process::PtyId;
 
-
-
-
-
-
-
-
-
+use crate::app::commands::integer_arg;
+use crate::app::commands::optional_bool_arg;
+use crate::app::commands::optional_integer_arg;
+use crate::app::commands::optional_string_arg;
+use crate::app::commands::register;
+use crate::app::commands::string_arg;
 use crate::editor::ArgumentSchema;
 use crate::editor::ArgumentType;
 use crate::editor::CommandError;
 use crate::editor::CommandRegistry;
 use crate::editor::ContextRequirement;
-use crate::app::commands::integer_arg;
-use crate::app::commands::register;
-use crate::app::commands::string_arg;
-use crate::app::commands::optional_bool_arg;
-use crate::app::commands::optional_integer_arg;
-use crate::app::commands::optional_string_arg;
-use crate::editor::CommandValue;
 
-pub(in crate::app) fn register_commands(registry: &mut CommandRegistry<AppEffect>) -> Result<(), CommandError> {
-
+pub(in crate::app) fn register_commands(
+    registry: &mut CommandRegistry<AppEffect>,
+) -> Result<(), CommandError> {
     register(
         registry,
         "terminal.open",
@@ -160,14 +150,12 @@ pub(in crate::app) fn register_commands(registry: &mut CommandRegistry<AppEffect
                     ))
                 })
             };
-            Ok(AppEffect::TerminalFloat(Some(
-                crate::windows::WindowRect {
-                    x: bounded("x")?,
-                    y: bounded("y")?,
-                    width: bounded("width")?,
-                    height: bounded("height")?,
-                },
-            )))
+            Ok(AppEffect::TerminalFloat(Some(crate::windows::WindowRect {
+                x: bounded("x")?,
+                y: bounded("y")?,
+                width: bounded("width")?,
+                height: bounded("height")?,
+            })))
         },
     )?;
     register(
@@ -274,53 +262,20 @@ pub(in crate::app) fn register_commands(registry: &mut CommandRegistry<AppEffect
         ArgumentSchema::default(),
         |_| AppEffect::TerminalQuit,
     )?;
-Ok(())
-}
-
-
-#[cfg(test)]
-mod tests {
-    use crate::app::terminal::commands::*;
-
-    #[test]
-    fn partial_float_rectangles_are_rejected() {
-        let mut registry = CommandRegistry::default();
-        register_commands(&mut registry).unwrap();
-        let state = crate::editor::EditorState::new("/workspace".into());
-        let invocation = crate::editor::CommandInvocation::new(
-            "terminal.float",
-            crate::editor::InvocationSource::Test,
-        )
-        .unwrap()
-        .with_argument("height", crate::editor::CommandValue::Integer(10));
-        assert!(registry.execute(&state, &invocation).is_err());
-    }
+    Ok(())
 }
 
 // Remaining editor/window routing; terminal data and algorithms live in the owner.
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 // Remaining editor/window routing; terminal data and algorithms live in the owner.
-
-
 
 impl App {
-    pub(in crate::app) fn process_terminal_effect(&mut self, effect: AppEffect) -> Result<(), AppEffect> {
+    pub(in crate::app) fn process_terminal_effect(
+        &mut self,
+        effect: AppEffect,
+    ) -> Result<(), AppEffect> {
         match effect {
-AppEffect::TerminalOpen(profile) => {
+            AppEffect::TerminalOpen(profile) => {
                 let profile = profile.unwrap_or_else(|| {
                     self.configuration
                         .settings()
@@ -330,7 +285,7 @@ AppEffect::TerminalOpen(profile) => {
                 });
                 self.request_terminal_open(&profile, None);
             }
-AppEffect::TerminalToggle => {
+            AppEffect::TerminalToggle => {
                 // This is the panel's terminal. A side terminal, such as a docked agent, keeps its
                 // window, so from one this opens the panel beside it.
                 let focused = self
@@ -358,7 +313,7 @@ AppEffect::TerminalToggle => {
                     self.request_terminal_open(&profile, None);
                 }
             }
-AppEffect::TerminalList => {
+            AppEffect::TerminalList => {
                 let items = self
                     .terminal_session
                     .choices()
@@ -381,7 +336,7 @@ AppEffect::TerminalList => {
                     .collect();
                 self.install_picker("Terminals".into(), items);
             }
-AppEffect::TerminalFocus(id) => {
+            AppEffect::TerminalFocus(id) => {
                 let id = PtyId(id);
                 if self.terminal_session.select(id) {
                     self.reveal_terminal(id);
@@ -389,7 +344,7 @@ AppEffect::TerminalFocus(id) => {
                     self.show_error(self.message("terminal_missing", &[]));
                 }
             }
-AppEffect::TerminalFocusActive => {
+            AppEffect::TerminalFocusActive => {
                 if self.terminal_session.selected().is_some() {
                     self.set_terminal_focus(true);
                     self.resize_active_terminal_to_panel();
@@ -398,7 +353,7 @@ AppEffect::TerminalFocusActive => {
                     self.show_error(self.message("terminal_missing", &[]));
                 }
             }
-AppEffect::TerminalCycle(direction) => {
+            AppEffect::TerminalCycle(direction) => {
                 let focused = self.window_session.terminal_focused();
                 let hidden = self.terminal_window_rect().is_none();
                 if !self.terminal_session.cycle(i64::from(direction)) {
@@ -414,7 +369,7 @@ AppEffect::TerminalCycle(direction) => {
                     self.sync_terminal_panel();
                 }
             }
-AppEffect::TerminalResize(rows) => {
+            AppEffect::TerminalResize(rows) => {
                 if let Some(id) = self.displayed_terminal() {
                     let result = if self.compositor_projection().is_none() {
                         Err("universal compositor projection is missing or stale".into())
@@ -432,7 +387,7 @@ AppEffect::TerminalResize(rows) => {
                     self.show_error(self.message("terminal_missing", &[]));
                 }
             }
-AppEffect::TerminalDock { edge, size } => {
+            AppEffect::TerminalDock { edge, size } => {
                 let edge = match edge.as_str() {
                     "left" => DockEdge::Left,
                     "right" => DockEdge::Right,
@@ -445,7 +400,7 @@ AppEffect::TerminalDock { edge, size } => {
                 };
                 self.place_active_terminal(WindowPlacement::Docked { edge, size });
             }
-AppEffect::TerminalFloat(rect) => {
+            AppEffect::TerminalFloat(rect) => {
                 let rect = rect.unwrap_or_else(|| {
                     let (columns, rows) =
                         (self.window_session.width(), self.window_session.height());
@@ -462,16 +417,16 @@ AppEffect::TerminalFloat(rect) => {
                 });
                 self.place_active_terminal(WindowPlacement::Floating(rect));
             }
-AppEffect::TerminalFullscreen => {
+            AppEffect::TerminalFullscreen => {
                 self.place_active_terminal(WindowPlacement::Fullscreen)
             }
-AppEffect::TerminalHide => self.place_active_terminal(WindowPlacement::Hidden),
-AppEffect::TerminalUnfocus => {
+            AppEffect::TerminalHide => self.place_active_terminal(WindowPlacement::Hidden),
+            AppEffect::TerminalUnfocus => {
                 self.set_terminal_focus(false);
                 self.sync_terminal_panel();
                 self.ensure_cursor_visible();
             }
-AppEffect::TerminalSend(text) => {
+            AppEffect::TerminalSend(text) => {
                 if let Some(id) = self.terminal_session.selected()
                     && let Err(error) = self.terminal_session.send(
                         id,
@@ -492,23 +447,23 @@ AppEffect::TerminalSend(text) => {
                     self.show_error(error);
                 }
             }
-AppEffect::TerminalModeNormal => self.enter_terminal_normal_mode(),
-AppEffect::TerminalModeInput => self.enter_terminal_input_mode(),
-AppEffect::TerminalNormalMove(motion) => {
+            AppEffect::TerminalModeNormal => self.enter_terminal_normal_mode(),
+            AppEffect::TerminalModeInput => self.enter_terminal_input_mode(),
+            AppEffect::TerminalNormalMove(motion) => {
                 self.move_terminal_normal_cursor(&motion);
             }
-AppEffect::TerminalVisualStart(linewise) => {
+            AppEffect::TerminalVisualStart(linewise) => {
                 self.start_terminal_visual(linewise);
             }
-AppEffect::TerminalYank { line } => self.yank_terminal_text(line),
-AppEffect::TerminalClose => {
+            AppEffect::TerminalYank { line } => self.yank_terminal_text(line),
+            AppEffect::TerminalClose => {
                 if let Some(id) = self.displayed_terminal() {
                     self.close_terminal(id);
                 } else {
                     self.terminal_session.cancel_open();
                 }
             }
-AppEffect::TerminalQuit => {
+            AppEffect::TerminalQuit => {
                 let Some(id) = self.displayed_terminal() else {
                     return Ok(());
                 };
@@ -535,5 +490,24 @@ AppEffect::TerminalQuit => {
             effect => return Err(effect),
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::app::terminal::commands::*;
+
+    #[test]
+    fn partial_float_rectangles_are_rejected() {
+        let mut registry = CommandRegistry::default();
+        register_commands(&mut registry).unwrap();
+        let state = crate::editor::EditorState::new("/workspace".into());
+        let invocation = crate::editor::CommandInvocation::new(
+            "terminal.float",
+            crate::editor::InvocationSource::Test,
+        )
+        .unwrap()
+        .with_argument("height", crate::editor::CommandValue::Integer(10));
+        assert!(registry.execute(&state, &invocation).is_err());
     }
 }

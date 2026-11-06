@@ -344,15 +344,11 @@ pub(super) fn offset_index(current: usize, len: usize, offset: isize, wrap: bool
 
 use crate::editor::state::id::ViewId;
 
-
-
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Axis {
     Horizontal,
     Vertical,
 }
-
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum FocusDirection {
@@ -361,7 +357,6 @@ pub enum FocusDirection {
     Up,
     Right,
 }
-
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum LayoutNode {
@@ -374,12 +369,10 @@ pub enum LayoutNode {
     },
 }
 
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Pane {
     pub view: ViewId,
 }
-
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Tab {

@@ -38,10 +38,7 @@ impl VirtualPublication<'_> {
     pub(in crate::app) fn catalog(&self) -> &PluginCatalogVersion {
         &self.catalog
     }
-    pub(in crate::app) fn finish(
-        self,
-        accepted: EditorState,
-    ) -> Result<EditorState, String> {
+    pub(in crate::app) fn finish(self, accepted: EditorState) -> Result<EditorState, String> {
         if accepted.version() != self.after {
             return Err("virtual publication belongs to a different editor proposal".into());
         }

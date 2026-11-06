@@ -1,6 +1,6 @@
 use crate::ui::grid::CONTROL_CHARACTER_REPLACEMENT;
-use crate::ui::render::SCRATCH_LABEL;
 use crate::ui::grid::ZERO_WIDTH_REPLACEMENT;
+use crate::ui::render::SCRATCH_LABEL;
 use std::collections::BTreeMap;
 
 use crossterm::cursor::SetCursorStyle;
@@ -201,8 +201,9 @@ pub(super) fn render_editor_view(
         let focused = state.active_view == Some(view_id) && !ui.explorer_focused;
         // Alone on screen the panel keeps the status line under it, like any editor view.
         let status = config.ui.status_line.enabled && height > 1;
-        let mut frame =
-            crate::ui::render::agent::render_agent_panel(panel, focused, config, width, height, status);
+        let mut frame = crate::ui::render::agent::render_agent_panel(
+            panel, focused, config, width, height, status,
+        );
         if status {
             render_status_line(
                 &mut frame.grid,

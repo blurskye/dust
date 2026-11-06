@@ -1,7 +1,7 @@
 //! Private event origins and consuming replies bound to the producing session.
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::mpsc::self;
+use std::sync::mpsc;
 use std::sync::mpsc::Receiver;
 use std::sync::mpsc::SyncSender;
 use std::sync::mpsc::TryRecvError;
@@ -13,8 +13,9 @@ use crate::editor::text::TextVersion;
 
 #[cfg(test)]
 use crate::language::lsp::messages::LspDiagnostic;
-use crate::language::lsp::messages::LspWorkspaceEdit;
 use crate::language::lsp::messages::LspEvent;
+#[cfg(test)]
+use crate::language::lsp::messages::LspWorkspaceEdit;
 use crate::language::lsp::messages::ServerRequestId;
 use crate::language::lsp::session::SessionCommand;
 
@@ -229,7 +230,9 @@ impl EditSourceFixture {
         }
         None
     }
-    pub(crate) fn configured(&self) -> Option<crate::language::lsp::server::LspServerConfiguration> {
+    pub(crate) fn configured(
+        &self,
+    ) -> Option<crate::language::lsp::server::LspServerConfiguration> {
         match self.commands.try_recv().ok()? {
             SessionCommand::Configure(configuration) => Some(configuration),
             _ => None,

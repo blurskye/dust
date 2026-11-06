@@ -19,9 +19,9 @@ use crate::ui::PromptKind;
 
 use crate::editor::text::TextEdit;
 
-use crate::editor::text::TextEditSet;
 use crate::editor::input::substitution_pattern;
 use crate::editor::text::TextBuffer;
+use crate::editor::text::TextEditSet;
 use unicode_segmentation::UnicodeSegmentation;
 
 /// A replacement in regex-crate template form.

@@ -172,7 +172,6 @@ mod tests {
 
     use crate::app::startup::resolve_startup;
 
-
     #[test]
     fn no_argument_preserves_exact_cwd_without_parent_discovery() {
         let root = tempdir().expect("tempdir");
@@ -300,38 +299,37 @@ pub enum ApplicationError {
     Transaction(#[from] TransactionError),
 }
 
-
-use crate::app::configuration::resolve_configuration;
-use crate::editor::CommandRegistry;
-use crate::app::configuration::ConfigurationSession;
-use crate::app::debugger::DebugSession;
-use crate::app::documents::DocumentSession;
-use crate::files::ExplorerWatchService;
-use crate::app::input::InputSession;
 use crate::app::App;
 use crate::app::InteractiveError;
-use crate::config::LoadedConfig;
-use crate::persistence::PersistenceService;
-use crate::tools::RegistryService;
-use crate::files::RootIdentity;
-use crate::app::syntax::SyntaxSession;
-use crate::editor::text::TextBuffer;
-use crate::ui::UiState;
-use crate::files::VfsWorker;
-use crate::app::windows::WindowSession;
-use crate::workspace::WorkspaceId;
-use crate::workspace::WorkspaceState;
 use crate::app::commands::register_app_commands;
-use crate::editor::register_builtin_commands;
-use crate::editor::input::ABSOLUTE_MAX_COUNT;
+use crate::app::configuration::ConfigurationSession;
+use crate::app::configuration::resolve_configuration;
+use crate::app::debugger::DebugSession;
 use crate::app::diagnostics::MAXIMUM_DIAGNOSTICS;
 use crate::app::diagnostics::MAXIMUM_DIAGNOSTICS_PER_URI;
+use crate::app::documents::DocumentSession;
 use crate::app::documents::VFS_QUEUE_CAPACITY;
+use crate::app::input::InputSession;
 use crate::app::persistence::PERSISTENCE_QUEUE_CAPACITY;
 use crate::app::persistence::STATE_FILE;
 use crate::app::persistence::STATE_MAXIMUM_BYTES;
 use crate::app::syntax::SYNTAX_QUEUE_CAPACITY;
+use crate::app::syntax::SyntaxSession;
+use crate::app::windows::WindowSession;
 use crate::app::workspace::TRUST_QUEUE_CAPACITY;
+use crate::config::LoadedConfig;
+use crate::editor::CommandRegistry;
+use crate::editor::input::ABSOLUTE_MAX_COUNT;
+use crate::editor::register_builtin_commands;
+use crate::editor::text::TextBuffer;
+use crate::files::ExplorerWatchService;
+use crate::files::RootIdentity;
+use crate::files::VfsWorker;
+use crate::persistence::PersistenceService;
+use crate::tools::RegistryService;
+use crate::ui::UiState;
+use crate::workspace::WorkspaceId;
+use crate::workspace::WorkspaceState;
 
 impl App {
     pub(in crate::app) fn new(

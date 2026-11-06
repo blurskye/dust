@@ -1,13 +1,13 @@
 //! Session history and source-bound restore obligations.
-use crate::app::persistence::PersistenceSession;
-use crate::editor::EditorDraft;
-use crate::editor::EditorState;
-use crate::editor::EditorVersion;
 use crate::app::input::InputSession;
+use crate::app::persistence::PersistenceSession;
 use crate::app::windows::NavigationStamp;
 use crate::app::windows::WindowSession;
 use crate::app::workspace::WorkspaceSession;
 use crate::app::workspace::WorkspaceVersion;
+use crate::editor::EditorDraft;
+use crate::editor::EditorState;
+use crate::editor::EditorVersion;
 use crate::editor::text::TextBuffer;
 use crate::files::RequestId;
 use crate::files::VfsResult;
@@ -22,11 +22,11 @@ use crate::persistence::PersistedTab;
 use crate::persistence::PersistedWindowRule;
 use crate::persistence::validate_content_descriptors;
 use crate::persistence::validate_window_rules;
-use std::ops::ControlFlow::self;
-use std::ops::ControlFlow::Break;
-use std::ops::ControlFlow::Continue;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
+use std::ops::ControlFlow;
+use std::ops::ControlFlow::Break;
+use std::ops::ControlFlow::Continue;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -576,10 +576,7 @@ impl PersistenceSession {
 }
 #[cfg(test)]
 impl PersistenceSession {
-    pub(in crate::app) fn fixture_restore_source(
-        &mut self,
-        context: RestoreContext<'_>,
-    ) {
+    pub(in crate::app) fn fixture_restore_source(&mut self, context: RestoreContext<'_>) {
         self.load_source = Some(RestoreSource::capture(&context));
     }
 }

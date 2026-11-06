@@ -1,16 +1,13 @@
-use crate::ui::geometry::cell_text_width;
 use crate::config::AmbiguousWidth;
 use crate::config::BorderStyle;
 use crate::config::Config;
 use crate::ui::Style;
+use crate::ui::geometry::cell_text_width;
 use crate::ui::geometry::text_width;
-use crate::windows::WindowRect;
+use crate::ui::grid::Frame;
 use crate::ui::render::DocumentationPopupKind;
 use crate::ui::render::DocumentationPopupState;
-use crate::ui::grid::Frame;
-
-
-
+use crate::windows::WindowRect;
 
 pub(crate) const DOCUMENTATION_MAX_WIDTH: u16 = 72;
 
@@ -19,7 +16,6 @@ pub(crate) const DOCUMENTATION_MAX_HEIGHT: u16 = 18;
 pub(crate) const DOCUMENTATION_PADDING: u16 = 1;
 
 pub(crate) const DOCUMENTATION_SCROLL_STEP: usize = 4;
-
 
 pub(super) fn render_documentation_popup(
     frame: &mut Frame,
@@ -39,8 +35,11 @@ pub(super) fn render_documentation_popup(
     if !enabled || line_count == 0 || editor_width < 4 || available_height < 3 {
         return None;
     }
-    let page_rows =
-        crate::ui::render::documentation::documentation_page_rows(config, editor_width, available_height);
+    let page_rows = crate::ui::render::documentation::documentation_page_rows(
+        config,
+        editor_width,
+        available_height,
+    );
     let display_count = documentation_display_rows(popup, config, editor_width);
     let scrollable = display_count > page_rows;
     let widest = (0..line_count)
@@ -309,7 +308,6 @@ pub(super) fn render_documentation_popup(
     Some((visible_rows, display_count))
 }
 
-
 pub(crate) fn documentation_display_rows(
     popup: &DocumentationPopupState,
     config: &Config,
@@ -337,10 +335,8 @@ pub(crate) fn documentation_display_rows(
         .sum()
 }
 
-
 /// Two cells read as a square swatch; the third is the gap before the detail.
 pub(crate) const SWATCH_WIDTH: usize = 3;
-
 
 /// A cell painted in a colour from a language server, with text that stays readable on it.
 pub(super) fn color_swatch_style((red, green, blue): (u8, u8, u8)) -> Style {
@@ -356,7 +352,6 @@ pub(super) fn color_swatch_style((red, green, blue): (u8, u8, u8)) -> Style {
         ..Default::default()
     })
 }
-
 
 /// The byte ranges of `line` that fit `width` cells each, broken after a space when there is
 /// one, else mid-word.
@@ -396,18 +391,12 @@ pub(crate) fn wrap_ranges(
     rows
 }
 
-
 fn boxes_overlap(at: (u16, u16), size: (u16, u16), other: WindowRect) -> bool {
     at.0 < other.x.saturating_add(other.width)
         && other.x < at.0.saturating_add(size.0)
         && at.1 < other.y.saturating_add(other.height)
         && other.y < at.1.saturating_add(size.1)
 }
-
-
-
-
-
 
 #[must_use]
 pub fn documentation_page_rows(config: &Config, width: u16, height: u16) -> usize {

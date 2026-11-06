@@ -1,31 +1,22 @@
+use crate::app::App;
+use crate::app::commands::DiagnosticFilter;
 use crate::app::persistence::CHANGE_LIMIT;
 use crate::app::persistence::JUMP_LIMIT;
-use crate::editor::text::ByteOffset;
-use crate::editor::text::ByteRange;
-use crate::app::commands::DiagnosticFilter;
+use crate::app::picker::MatcherSource;
 use crate::editor::EditorOperation;
 use crate::editor::EditorTransaction;
-use crate::app::App;
-use crate::app::picker::MatcherSource;
-use std::path::Path;
-use crate::persistence::PersistedLocation;
-use crate::editor::text::PositionCodec;
-use crate::editor::text::PositionEncoding;
 use crate::editor::Precondition;
 use crate::editor::UndoPolicy;
-use crate::language::lsp::file_uri;
+use crate::editor::text::ByteOffset;
+use crate::editor::text::ByteRange;
+use crate::editor::text::PositionCodec;
+use crate::editor::text::PositionEncoding;
 use crate::language::lsp::path_from_file_uri;
-
-
+use crate::persistence::PersistedLocation;
+use std::path::Path;
 
 impl App {
-
-
-    pub(in crate::app) fn navigate_byte_location(
-        &mut self,
-        uri: &str,
-        range: ByteRange,
-    ) {
+    pub(in crate::app) fn navigate_byte_location(&mut self, uri: &str, range: ByteRange) {
         let Some(path) = path_from_file_uri(uri) else {
             return;
         };
@@ -63,8 +54,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn navigate_lsp_location_encoded(
         &mut self,
         location: &crate::language::lsp::LspLocation,
@@ -75,8 +64,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn navigate_location_encoded(
         &mut self,
         location: &crate::language::lsp::LspLocation,
@@ -154,11 +141,7 @@ impl App {
 }
 
 impl App {
-
-
-    pub(in crate::app) fn current_persisted_location(
-        &self,
-    ) -> Option<PersistedLocation> {
+    pub(in crate::app) fn current_persisted_location(&self) -> Option<PersistedLocation> {
         let view = self.state.views.get(self.state.active_view?)?;
         let buffer = self.state.buffers.get(view.buffer)?;
         Some(PersistedLocation {
@@ -174,8 +157,6 @@ impl App {
 }
 
 impl App {
-
-
     /// Remember where the cursor is before it jumps, for `ctrl-o`.
     pub(in crate::app) fn record_jump(&mut self) {
         if let Some(location) = self.current_persisted_location() {
@@ -186,8 +167,6 @@ impl App {
 }
 
 impl App {
-
-
     /// `ctrl-o` (back) and `ctrl-i` (forward) through the jump list.
     pub(in crate::app) fn walk_jumps(&mut self, back: bool) {
         let current = self.current_persisted_location();
@@ -199,8 +178,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn push_change_location(&mut self) {
         if let Some(location) = self.current_persisted_location() {
             self.persistence
@@ -210,8 +187,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn remember_navigation_read(&mut self, id: crate::files::RequestId) {
         self.navigation_reads.insert(
             id,
@@ -225,11 +200,7 @@ impl App {
 }
 
 impl App {
-
-    pub(in crate::app) fn navigate_matcher_source(
-        &mut self,
-        mut source: MatcherSource,
-    ) {
+    pub(in crate::app) fn navigate_matcher_source(&mut self, mut source: MatcherSource) {
         if !source.path.is_absolute() {
             self.show_error(self.message("navigation_outside_workspace", &[]));
             return;
@@ -292,12 +263,7 @@ impl App {
 }
 
 impl App {
-
-
-    pub(in crate::app) fn navigate_persisted_location(
-        &mut self,
-        location: PersistedLocation,
-    ) {
+    pub(in crate::app) fn navigate_persisted_location(&mut self, location: PersistedLocation) {
         if !location.path.is_absolute()
             || !self
                 .workspace
@@ -314,8 +280,6 @@ impl App {
 }
 
 impl App {
-
-
     fn go_to_persisted_location(&mut self, location: PersistedLocation) {
         let mut roots: Vec<_> = self
             .workspace
@@ -343,8 +307,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn navigate_diagnostic(
         &mut self,
         direction: i8,

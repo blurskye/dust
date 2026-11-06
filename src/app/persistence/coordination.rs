@@ -1,29 +1,25 @@
+use crate::app::App;
+use crate::app::documents::mode_name_large;
 use crate::app::persistence::RECENT_FILE_LIMIT;
+use crate::app::persistence::RestoreContext;
+use crate::app::persistence::RestorePrepared;
+use crate::app::persistence::RestoreReady;
 use crate::app::persistence::STATE_ENTRY_LIMIT;
 use crate::app::persistence::STATE_MAXIMUM_BYTES;
-use crate::ui::render::SCRATCH_LABEL;
-use crate::app::App;
 use crate::app::windows::NativeDescriptions;
-use std::path::PathBuf;
+use crate::app::windows::RestoreWindowPolicy;
+use crate::app::windows::WindowCandidate;
 use crate::persistence::PersistedLargeFileOverride;
 use crate::persistence::PersistedSession;
 use crate::persistence::PersistedState;
 use crate::persistence::PersistedWindowRule;
 use crate::persistence::PersistencePolicy;
-use crate::ui::PromptKind;
-use crate::app::persistence::RestoreContext;
-use crate::app::persistence::RestorePrepared;
-use crate::app::persistence::RestoreReady;
-use crate::app::windows::RestoreWindowPolicy;
 use crate::persistence::STATE_VERSION;
-use crate::app::windows::WindowCandidate;
-use crate::app::documents::mode_name_large;
-
-
+use crate::ui::PromptKind;
+use crate::ui::render::SCRATCH_LABEL;
+use std::path::PathBuf;
 
 impl App {
-
-
     pub(super) fn persistence_policy(&self) -> PersistencePolicy {
         PersistencePolicy {
             maximum_file_bytes: STATE_MAXIMUM_BYTES,
@@ -33,8 +29,6 @@ impl App {
 }
 
 impl App {
-
-
     /// Asked for by the user, a saved session replaces what is open unless that would lose work.
     pub(in crate::app) fn load_session_on_request(&mut self) {
         if !self.configuration.settings().persistence.enabled {
@@ -69,8 +63,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn load_persistence(&mut self) {
         let configured = &self.configuration.settings().persistence;
         if !configured.enabled || !configured.restore_on_startup {
@@ -97,8 +89,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn capture_window_rules(&self) -> Vec<PersistedWindowRule> {
         self.window_session
             .persisted_rules(self.terminal_session.selected().map(|id| id.0))
@@ -106,8 +96,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn prepare_configured_window_rules(
         &self,
         windows: &crate::config::WindowsConfig,
@@ -131,8 +119,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn apply_persisted_window_rules(
         &mut self,
         rules: &[PersistedWindowRule],
@@ -164,8 +150,6 @@ impl App {
 }
 
 impl App {
-
-
     #[cfg(test)]
     pub(in crate::app) fn capture_session(&self) -> Option<PersistedSession> {
         self.try_capture_session().ok().flatten()
@@ -173,8 +157,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn try_capture_session(&self) -> Result<Option<PersistedSession>, String> {
         self.persistence.capture_session(
             &self.state,
@@ -187,16 +169,12 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn save_persistence(&mut self) {
         self.write_persistence();
     }
 }
 
 impl App {
-
-
     pub(in crate::app) fn write_persistence(&mut self) {
         self.persistence.reconcile_marks(&self.state);
         let configured = &self.configuration.settings().persistence;
@@ -262,8 +240,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn process_persistence_events(&mut self) {
         for error in self.persistence.poll_undo_saves() {
             self.show_error(error);
@@ -282,8 +258,6 @@ impl App {
 }
 
 impl App {
-
-
     fn read_persistence_events(&mut self) {
         while let Some(event) = self.persistence.poll() {
             match event {
@@ -337,9 +311,10 @@ impl App {
 }
 
 impl App {
-
-
-    pub(in crate::app) fn report_unavailable_persisted_content(&mut self, session: &PersistedSession) {
+    pub(in crate::app) fn report_unavailable_persisted_content(
+        &mut self,
+        session: &PersistedSession,
+    ) {
         // ponytail: production 0.2 has no source-owned restore callback; report
         // unavailable descriptors rather than inventing host-side provider authority.
         let unavailable = session.unavailable_virtual_descriptors();
@@ -353,8 +328,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn restore_session(&mut self, session: PersistedSession) {
         let empty_rules = session.window_rules.clone();
         let paths = match self.persistence.begin_restore(
@@ -395,7 +368,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn submit_restore_reads(&mut self) {
         let roots = self
             .workspace
@@ -447,7 +419,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn cancel_session_restore(&mut self) {
         self.session_restore_notice = false;
         for id in self.persistence.cancel_restore() {
@@ -457,7 +428,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn finish_session_restore(&mut self, ready: RestoreReady) {
         let result = ready
             .prepare(RestoreContext {
@@ -561,7 +531,6 @@ impl App {
 }
 
 impl App {
-
     fn notify_session_restored(&mut self) {
         if std::mem::take(&mut self.session_restore_notice) {
             self.notify_message(self.message("session_restored", &[]), false);
@@ -570,7 +539,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn record_recent_file(&mut self, path: PathBuf) {
         self.persistence.record_recent(path, RECENT_FILE_LIMIT);
     }

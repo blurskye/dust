@@ -233,8 +233,8 @@ mod tests {
 
     use crate::editor::input::keymap::KeymapResolver;
 
-    use crate::editor::input::keymap::MappingResolution;
     use crate::editor::input::KeyEvent;
+    use crate::editor::input::keymap::MappingResolution;
 
     #[test]
     fn exact_prefix_waits_then_flushes() {

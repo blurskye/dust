@@ -1,25 +1,20 @@
-use crate::app::search::SEARCH_MAXIMUM_FILE_BYTES;
 use crate::app::App;
-use crate::language::lsp::LspWorkspaceEdit;
-use crate::workspace::PickerAction;
-use crate::workspace::PickerItem;
-use crate::workspace::PickerItemId;
 use crate::app::picker::PickerOrigin;
 use crate::app::picker::PickerPayload;
-use crate::ui::PickerSurfaceKind;
 use crate::editor::text::PositionEncoding;
 use crate::files::ResourceIntentKind;
 use crate::files::VfsResult;
-
-
-
-
-
-
+use crate::language::lsp::LspWorkspaceEdit;
+use crate::ui::PickerSurfaceKind;
+use crate::workspace::PickerAction;
+use crate::workspace::PickerItem;
+use crate::workspace::PickerItemId;
 
 impl App {
-
-    pub(in crate::app) fn process_workspace_io(&mut self, reply: crate::app::documents::WorkspaceIoReply) {
+    pub(in crate::app) fn process_workspace_io(
+        &mut self,
+        reply: crate::app::documents::WorkspaceIoReply,
+    ) {
         if self.workspace_edits.owns_preparation_reply(&reply) {
             if let VfsResult::ResourceResolved {
                 result: Ok(intent), ..
@@ -96,7 +91,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn retire_workspace_resources(&mut self, reason: &str) {
         self.language.cancel_deferred_edits(None);
         let (notices, requests) = self.workspace_edits.retire_resources(reason);
@@ -118,11 +112,7 @@ impl App {
 }
 
 impl App {
-
-    pub(in crate::app) fn finish_workspace_resource_obligations(
-        &mut self,
-        reason: &str,
-    ) {
+    pub(in crate::app) fn finish_workspace_resource_obligations(&mut self, reason: &str) {
         self.language.cancel_deferred_edits(None);
         for notice in self.workspace_edits.finish_resources(reason) {
             self.show_error(notice);
@@ -131,7 +121,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn begin_workspace_proposal(
         &mut self,
         label: String,
@@ -144,7 +133,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn begin_workspace_proposal_owned(
         &mut self,
         label: String,
@@ -229,22 +217,20 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn submit_workspace_preparation(&mut self) {
         let maximum = crate::app::search::SEARCH_MAXIMUM_FILE_BYTES;
         while let Some((index, file)) = self.workspace_edits.next_file() {
-            let snapshot =
-                if let crate::app::workspace::edits::InputFile::Read(path) = file {
-                    self.state.workspace_snapshot(
-                        self.workspace_edits
-                            .preparing_sources()
-                            .expect("admitted source"),
-                        path,
-                        maximum,
-                    )
-                } else {
-                    Ok(None)
-                };
+            let snapshot = if let crate::app::workspace::edits::InputFile::Read(path) = file {
+                self.state.workspace_snapshot(
+                    self.workspace_edits
+                        .preparing_sources()
+                        .expect("admitted source"),
+                    path,
+                    maximum,
+                )
+            } else {
+                Ok(None)
+            };
             let snapshot = match snapshot {
                 Ok(snapshot) => snapshot,
                 Err(error) => {
@@ -284,7 +270,6 @@ impl App {
 }
 
 impl App {
-
     fn check_workspace_edit_origin(&self) -> Result<(), String> {
         let Some(key) = self.workspace_edits.origin() else {
             return Ok(());
@@ -315,7 +300,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn finish_workspace_proposal(&mut self) {
         let result = (|| {
             self.workspace_edits.current_preparation(
@@ -350,11 +334,7 @@ impl App {
 }
 
 impl App {
-
-    pub(in crate::app) fn retire_workspace_picker(
-        &mut self,
-        id: crate::workspace::ProposalId,
-    ) {
+    pub(in crate::app) fn retire_workspace_picker(&mut self, id: crate::workspace::ProposalId) {
         if self.workspace_edits.proposal().is_none_or(|p| p.id != id) {
             return;
         }
@@ -373,7 +353,6 @@ impl App {
 }
 
 impl App {
-
     fn finish_workspace_edit_origin(
         &mut self,
         key: &crate::app::workspace::edits::OriginKey,
@@ -389,7 +368,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn abort_workspace_edit(&mut self, reason: String) {
         let retired = self.workspace_edits.reject();
         for id in retired.requests {
@@ -404,7 +382,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn reject_workspace_proposal(&mut self) {
         let retired = self.workspace_edits.reject();
         for id in retired.requests {
@@ -423,7 +400,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn accept_workspace_proposal(&mut self) {
         if let Err(error) = self.check_workspace_edit_origin() {
             self.abort_workspace_edit(error);
@@ -469,7 +445,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn process_workspace_approval(&mut self) {
         let Some(result) = self.workspace_edits.poll_approval(
             &self.workspace.version(),
@@ -489,7 +464,6 @@ impl App {
 }
 
 impl App {
-
     fn finish_workspace_approval(
         &mut self,
         draft: crate::editor::EditorDraft,
@@ -538,7 +512,6 @@ impl App {
 }
 
 impl App {
-
     /// Applies an edit whose positions use `encoding`, the encoding of the server that sent it.
     pub(in crate::app) fn apply_lsp_workspace_edit(
         &mut self,
@@ -559,10 +532,9 @@ impl App {
                 })
             })
             .collect::<Vec<_>>();
-        let transaction =
-            crate::app::language::edits::LspEditSources::completion_transaction(
-                edit, encoding, &documents, id,
-            )?;
+        let transaction = crate::app::language::edits::LspEditSources::completion_transaction(
+            edit, encoding, &documents, id,
+        )?;
         let draft = self
             .state
             .prepare_transaction(&transaction)
@@ -573,8 +545,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn show_workspace_proposal(&mut self) {
         let Some(proposal) = self.workspace_edits.proposal() else {
             return;

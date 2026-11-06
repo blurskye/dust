@@ -1,45 +1,37 @@
+use crate::app::App;
+use crate::app::picker::MatcherSource;
+use crate::app::picker::PickerOrigin;
+use crate::app::picker::PickerPayload;
+use crate::app::search::Intent;
 use crate::app::search::SEARCH_BATCH_SIZE;
 use crate::app::search::SEARCH_MAXIMUM_FILE_BYTES;
 use crate::app::search::SEARCH_MAXIMUM_FILES;
 use crate::app::search::SEARCH_QUEUE_CAPACITY;
-use std::collections::BTreeMap;
-use crate::editor::text::ByteOffset;
-use crate::editor::text::ByteRange;
+use crate::app::search::SearchUpdate;
+use crate::editor::DocumentSnapshot as FileSnapshot;
 use crate::editor::EditorOperation;
 use crate::editor::EditorTransaction;
-use crate::editor::DocumentSnapshot as FileSnapshot;
-use std::collections::HashSet;
-use crate::app::App;
-use crate::app::picker::MatcherSource;
-use std::path::PathBuf;
-use crate::workspace::PickerAction;
-use crate::workspace::PickerItem;
-use crate::workspace::PickerItemId;
-use crate::app::picker::PickerOrigin;
-use crate::app::picker::PickerPayload;
-use crate::ui::PickerSurfaceKind;
-use crate::editor::text::PositionEncoding;
 use crate::editor::Precondition;
-use crate::ui::PromptKind;
-use crate::editor::text::TextEdit;
 use crate::editor::UndoPolicy;
-use crate::workspace::WorkspaceEditDraft;
+use crate::editor::text::ByteOffset;
+use crate::editor::text::ByteRange;
+use crate::editor::text::PositionEncoding;
+use crate::editor::text::TextEdit;
 use crate::files::WorkspaceFilePolicy;
 use crate::files::WorkspaceSearchMatch;
 use crate::files::WorkspaceSearchPolicy;
 use crate::language::lsp::file_uri;
-use crate::app::search::Intent;
-use crate::app::search::SearchUpdate;
-use crate::editor::text::BufferRevision;
-use crate::editor::ViewId;
-
-
-
-
-
+use crate::ui::PickerSurfaceKind;
+use crate::ui::PromptKind;
+use crate::workspace::PickerAction;
+use crate::workspace::PickerItem;
+use crate::workspace::PickerItemId;
+use crate::workspace::WorkspaceEditDraft;
+use std::collections::BTreeMap;
+use std::collections::HashSet;
+use std::path::PathBuf;
 
 impl App {
-
     pub(in crate::app) fn open_live_workspace_search(&mut self) {
         self.close_picker();
         self.search.open_live();
@@ -55,7 +47,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn restart_live_workspace_search(&mut self, query: String) {
         self.search.set_query(query.clone());
         if query.is_empty() {
@@ -74,7 +65,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn start_workspace_file_picker(&mut self) {
         self.close_picker();
         let configured = &self.configuration.settings().workspace.search;
@@ -113,7 +103,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn process_workspace_file_events(&mut self) {
         if self.search.help_is_open() {
             return;
@@ -173,7 +162,6 @@ impl App {
 }
 
 impl App {
-
     /// `<leader>st`: every TODO-style comment keyword in the workspace, as todo-comments.nvim.
     pub(in crate::app) fn start_todo_search(&mut self) {
         self.start_search(
@@ -185,8 +173,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn start_workspace_search(
         &mut self,
         query: String,
@@ -197,9 +183,12 @@ impl App {
 }
 
 impl App {
-
-
-    pub(in crate::app) fn start_search(&mut self, query: String, replacement: Option<String>, regex: bool) {
+    pub(in crate::app) fn start_search(
+        &mut self,
+        query: String,
+        replacement: Option<String>,
+        regex: bool,
+    ) {
         let configured = &self.configuration.settings().workspace.search;
         let policy = WorkspaceSearchPolicy {
             roots: self
@@ -254,7 +243,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn process_workspace_search_events(&mut self) {
         if self.search.help_is_open() {
             return;
@@ -329,7 +317,6 @@ impl App {
 }
 
 impl App {
-
     pub(in crate::app) fn open_workspace_search_picker(&mut self) {
         let Some(order) = self
             .search
@@ -399,11 +386,7 @@ impl App {
 }
 
 impl App {
-
-    pub(in crate::app) fn begin_workspace_search_replacement(
-        &mut self,
-        replacement: String,
-    ) {
+    pub(in crate::app) fn begin_workspace_search_replacement(&mut self, replacement: String) {
         if self.workspace_edits.preparing() || self.workspace_edits.proposal().is_some() {
             self.show_error(self.message("workspace_edit_busy", &[]));
             return;
@@ -495,8 +478,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn search_word_under_cursor(&mut self, forward: bool, count: u64) -> bool {
         let Some(view_id) = self.state.active_view else {
             return false;
@@ -528,8 +509,6 @@ impl App {
 }
 
 impl App {
-
-
     /// As with Vim's incsearch: while a `/` pattern is typed the cursor sits on its next match,
     /// and it goes back when the prompt closes.
     pub(in crate::app) fn preview_search(&mut self) {
@@ -568,9 +547,11 @@ impl App {
 }
 
 impl App {
-
-
-    pub(in crate::app) fn move_search_cursor(&mut self, view: crate::editor::ViewId, position: ByteOffset) {
+    pub(in crate::app) fn move_search_cursor(
+        &mut self,
+        view: crate::editor::ViewId,
+        position: ByteOffset,
+    ) {
         if !self.state.views.contains_key(view) {
             return;
         }
@@ -584,8 +565,6 @@ impl App {
 }
 
 impl App {
-
-
     pub(in crate::app) fn perform_search(&mut self, forward: bool, count: u64) -> bool {
         let Some(query) = self.ui.search_query.clone() else {
             self.show_error(self.message("no_previous_search", &[]));
@@ -664,8 +643,6 @@ impl App {
 }
 
 impl App {
-
-
     /// `gn`: selects the search match under the cursor, else the next one, as Vim does.
     /// Returns false, having said why, when there is none.
     pub(in crate::app) fn select_next_search_match(&mut self, count: u64) -> bool {
@@ -744,11 +721,7 @@ impl App {
 }
 
 impl App {
-
-    pub(in crate::app) fn navigate_workspace_search_match(
-        &mut self,
-        found: WorkspaceSearchMatch,
-    ) {
+    pub(in crate::app) fn navigate_workspace_search_match(&mut self, found: WorkspaceSearchMatch) {
         if let Some(buffer) = self
             .state
             .buffers
@@ -792,8 +765,6 @@ impl App {
 }
 
 use crate::editor::text::TextBuffer;
-
-
 
 /// A character of an identifier, for the word completion replaces and filters on.
 /// Where a search from `cursor` lands, as a byte offset.

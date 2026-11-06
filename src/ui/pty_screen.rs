@@ -911,19 +911,21 @@ mod tests {
                     28,
                 ),
             ] {
-                let report = crate::ui::pty_screen::encode_terminal_mouse_event(crate::ui::pty_screen::TerminalMouseEncoding {
-                    event: event.clone(),
-                    modifiers,
-                    column: 12,
-                    row: 23,
-                    left: 10,
-                    top: 20,
-                    width: 8,
-                    height: 6,
-                    mode,
-                    sgr: true,
-                    ceiling: 64,
-                })
+                let report = crate::ui::pty_screen::encode_terminal_mouse_event(
+                    crate::ui::pty_screen::TerminalMouseEncoding {
+                        event: event.clone(),
+                        modifiers,
+                        column: 12,
+                        row: 23,
+                        left: 10,
+                        top: 20,
+                        width: 8,
+                        height: 6,
+                        mode,
+                        sgr: true,
+                        ceiling: 64,
+                    },
+                )
                 .unwrap();
                 assert_eq!(
                     report,
@@ -1240,36 +1242,40 @@ mod tests {
             .is_none()
         );
         assert_eq!(
-            crate::ui::pty_screen::encode_terminal_mouse_event(crate::ui::pty_screen::TerminalMouseEncoding {
-                event: crate::editor::input::TerminalMouseInput::LeftDown,
-                modifiers: Default::default(),
-                column: 12,
-                row: 23,
-                left: 10,
-                top: 20,
-                width: 8,
-                height: 6,
-                mode: PtyMouseMode::Click,
-                sgr: true,
-                ceiling: 64,
-            })
+            crate::ui::pty_screen::encode_terminal_mouse_event(
+                crate::ui::pty_screen::TerminalMouseEncoding {
+                    event: crate::editor::input::TerminalMouseInput::LeftDown,
+                    modifiers: Default::default(),
+                    column: 12,
+                    row: 23,
+                    left: 10,
+                    top: 20,
+                    width: 8,
+                    height: 6,
+                    mode: PtyMouseMode::Click,
+                    sgr: true,
+                    ceiling: 64,
+                }
+            )
             .unwrap(),
             b"\x1b[<0;3;4M"
         );
         assert!(
-            crate::ui::pty_screen::encode_terminal_mouse_event(crate::ui::pty_screen::TerminalMouseEncoding {
-                event: crate::editor::input::TerminalMouseInput::Move,
-                modifiers: Default::default(),
-                column: 9,
-                row: 20,
-                left: 10,
-                top: 20,
-                width: 8,
-                height: 6,
-                mode: PtyMouseMode::Any,
-                sgr: true,
-                ceiling: 64,
-            })
+            crate::ui::pty_screen::encode_terminal_mouse_event(
+                crate::ui::pty_screen::TerminalMouseEncoding {
+                    event: crate::editor::input::TerminalMouseInput::Move,
+                    modifiers: Default::default(),
+                    column: 9,
+                    row: 20,
+                    left: 10,
+                    top: 20,
+                    width: 8,
+                    height: 6,
+                    mode: PtyMouseMode::Any,
+                    sgr: true,
+                    ceiling: 64,
+                }
+            )
             .is_none()
         );
     }

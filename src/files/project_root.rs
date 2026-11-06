@@ -2,7 +2,7 @@ use std::fs;
 use std::io;
 use std::path::Path;
 use std::path::PathBuf;
-use std::sync::mpsc::self;
+use std::sync::mpsc;
 use std::sync::mpsc::Receiver;
 use std::sync::mpsc::TryRecvError;
 use std::thread;

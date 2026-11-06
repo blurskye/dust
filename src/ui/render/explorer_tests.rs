@@ -1,10 +1,9 @@
-use std::path::PathBuf;
 use crate::editor::EditorState;
 use crate::ui::render::UiState;
+use std::path::PathBuf;
 
 use crate::ui::render::composition_tests::editor_layout;
 use crate::ui::render::composition_tests::render;
-
 
 #[test]
 fn buffer_line_begins_after_the_explorer_dock() {
@@ -62,7 +61,8 @@ fn buffer_line_begins_after_the_explorer_dock() {
     };
     let loaded = crate::config::load_bundled_config();
     let frame = render(&state, &ui, &loaded.config, &loaded.dashboard, 80, 10);
-    let panel = crate::ui::render::explorer_panel_width(&loaded.config, 80).expect("explorer width");
+    let panel =
+        crate::ui::render::explorer_panel_width(&loaded.config, 80).expect("explorer width");
     assert!(frame.grid.row_text(0).contains("Explorer"));
     let editor_line = (panel.saturating_add(1)..80)
         .map(|x| frame.grid.get(x, 0).map_or("", |cell| cell.symbol.as_str()))
@@ -70,7 +70,6 @@ fn buffer_line_begins_after_the_explorer_dock() {
     assert!(editor_line.contains("one.rs"));
     assert!(editor_line.contains("two.rs"));
 }
-
 
 #[test]
 fn explorer_is_a_persistent_left_dock_that_reflows_the_editor() {
@@ -156,8 +155,14 @@ fn explorer_is_a_persistent_left_dock_that_reflows_the_editor() {
     let loaded = crate::config::load_bundled_config();
     let panel = crate::ui::render::explorer_panel_width(&loaded.config, 100).expect("dock width");
     assert_eq!(panel, 40);
-    assert_eq!(crate::ui::render::explorer_panel_width(&loaded.config, 30), Some(14));
-    assert_eq!(crate::ui::render::explorer_panel_width(&loaded.config, 2), None);
+    assert_eq!(
+        crate::ui::render::explorer_panel_width(&loaded.config, 30),
+        Some(14)
+    );
+    assert_eq!(
+        crate::ui::render::explorer_panel_width(&loaded.config, 2),
+        None
+    );
     let frame = render(&state, &ui, &loaded.config, &loaded.dashboard, 100, 20);
     assert!(frame.grid.row_text(0).contains("Explorer"));
     assert!(frame.grid.row_text(3).contains("src"));

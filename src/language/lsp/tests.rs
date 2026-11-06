@@ -51,8 +51,8 @@ use crate::language::lsp::protocol::workspace_edit;
 
 use crate::language::lsp::session::LspService;
 
-use crate::language::lsp::session::requested_executable_name;
 use crate::editor::text::PositionEncoding;
+use crate::language::lsp::session::requested_executable_name;
 use crate::tools::ToolDefinition;
 use crate::tools::ToolKind;
 use crate::tools::tool_launch_environment;
@@ -533,7 +533,8 @@ fn dynamic_change_sync_is_document_specific_and_unregistration_restores_static_p
         ..old.clone()
     };
     let mut output = Vec::new();
-    crate::language::lsp::protocol::send_change(&mut output, Some(&old), &new, &capabilities).unwrap();
+    crate::language::lsp::protocol::send_change(&mut output, Some(&old), &new, &capabilities)
+        .unwrap();
     let change = crate::process::read_content_length_message(&mut std::io::Cursor::new(output))
         .unwrap()
         .unwrap();
@@ -561,7 +562,8 @@ fn dynamic_change_sync_is_document_specific_and_unregistration_restores_static_p
     assert_eq!(replies.len(), 1);
     let reply = &replies[0];
     assert!(reply.get("result").is_some());
-    crate::language::lsp::protocol::send_change(&mut output, Some(&old), &new, &capabilities).unwrap();
+    crate::language::lsp::protocol::send_change(&mut output, Some(&old), &new, &capabilities)
+        .unwrap();
     assert!(output.is_empty());
     assert_eq!(capabilities, base);
 }
@@ -724,7 +726,8 @@ fn astro_and_vue_initialization_own_the_typescript_sdk_beside_the_server() {
     std::fs::write(tsdk.join("typescript.js"), b"module").unwrap();
 
     for server in ["astro-language-server", "vue-language-server"] {
-        let configuration = crate::language::lsp::LspServerConfiguration::for_server(server, &executable);
+        let configuration =
+            crate::language::lsp::LspServerConfiguration::for_server(server, &executable);
         let initialize = initialize_message(
             directory.path(),
             configuration.initialization_options.as_ref(),
@@ -760,8 +763,9 @@ fn maximum_inlay_hint_profiles_are_adapter_specific_and_exhaustive() {
         Some(&json!(0))
     );
 
-    let typescript =
-        crate::language::lsp::LspServerConfiguration::maximum_inlay_hints("typescript-language-server");
+    let typescript = crate::language::lsp::LspServerConfiguration::maximum_inlay_hints(
+        "typescript-language-server",
+    );
     assert_eq!(
         typescript
             .initialization_options
@@ -885,7 +889,8 @@ fn formatting_parameters_use_the_requested_indentation_for_both_methods() {
                 insert_spaces,
             },
         ] {
-            let params = crate::language::lsp::protocol::feature_params(&feature, "file:///main.rs", 0, 0);
+            let params =
+                crate::language::lsp::protocol::feature_params(&feature, "file:///main.rs", 0, 0);
             assert_eq!(
                 params["options"],
                 json!({"tabSize":tab_size,"insertSpaces":insert_spaces})
@@ -896,10 +901,10 @@ fn formatting_parameters_use_the_requested_indentation_for_both_methods() {
 
 #[test]
 fn failed_document_sync_keeps_the_last_sent_document_and_stops_the_session() {
-    use crate::language::lsp::session::SessionCommand;
-    use crate::language::lsp::session::handle_command;
     use crate::editor::EditorState;
     use crate::editor::text::TextBuffer;
+    use crate::language::lsp::session::SessionCommand;
+    use crate::language::lsp::session::handle_command;
     use std::collections::HashMap;
     let old = LspDocument {
         path: "/workspace/main.rs".into(),
@@ -1018,7 +1023,8 @@ fn code_action_diagnostic_codes_keep_their_json_type_and_related_information() {
             range: diagnostics[0].range.clone(),
             diagnostics,
         };
-        let params = crate::language::lsp::protocol::feature_params(&feature, "file:///main.rs", 0, 0);
+        let params =
+            crate::language::lsp::protocol::feature_params(&feature, "file:///main.rs", 0, 0);
         assert_eq!(params["context"]["diagnostics"][0]["code"], code);
     }
 }
@@ -1104,7 +1110,9 @@ fn code_lenses_keep_resolve_data_and_accept_resolved_commands() {
 fn completion_fallback_inserts_the_full_label_not_its_display_preview() {
     let label = "é".repeat(5000);
     for resolved in [false, true] {
-        let item = crate::language::lsp::protocol::completion_item(&json!({"label":label}), resolved).unwrap();
+        let item =
+            crate::language::lsp::protocol::completion_item(&json!({"label":label}), resolved)
+                .unwrap();
         assert_eq!(item.label.chars().count(), 4096);
         assert_eq!(item.insert_text, label);
         let item = crate::language::lsp::protocol::completion_item(
@@ -1880,9 +1888,11 @@ fn maximum_hints_preserve_server_formatting_and_validation() {
         "vscode-json-language-server",
         std::path::Path::new("/server"),
     );
-    config.overlay(crate::language::lsp::LspServerConfiguration::maximum_inlay_hints(
-        "vscode-json-language-server",
-    ));
+    config.overlay(
+        crate::language::lsp::LspServerConfiguration::maximum_inlay_hints(
+            "vscode-json-language-server",
+        ),
+    );
     assert_eq!(
         config.initialization_options().unwrap()["provideFormatter"],
         true

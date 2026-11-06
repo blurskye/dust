@@ -1,11 +1,8 @@
 use crate::app::App;
-use crate::telemetry::LiveCrashSnapshot;
 use crate::plugins::PluginStatus;
-
-
+use crate::telemetry::LiveCrashSnapshot;
 
 impl App {
-
     pub(in crate::app) fn update_live_crash_snapshot(&mut self) {
         let now = self.clock.monotonic();
         if !self.health.health_due(now) {
@@ -47,17 +44,15 @@ impl App {
 
 use crate::app::commands::AppEffect;
 
-
-
-
+use crate::app::commands::register;
 use crate::editor::ArgumentSchema;
 use crate::editor::CommandError;
 use crate::editor::CommandRegistry;
 use crate::editor::ContextRequirement;
-use crate::app::commands::register;
 
-pub(in crate::app) fn register_commands(registry: &mut CommandRegistry<AppEffect>) -> Result<(), CommandError> {
-
+pub(in crate::app) fn register_commands(
+    registry: &mut CommandRegistry<AppEffect>,
+) -> Result<(), CommandError> {
     register(
         registry,
         "health.open",
@@ -98,21 +93,20 @@ pub(in crate::app) fn register_commands(registry: &mut CommandRegistry<AppEffect
         ArgumentSchema::default(),
         |_| AppEffect::HealthVirtualRefresh,
     )?;
-Ok(())
+    Ok(())
 }
 
+use crate::telemetry::CrashSnapshotWriter;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::time::Duration;
 use std::time::Instant;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
-use crate::telemetry::CrashSnapshotWriter;
 
 use crate::telemetry::LogLevel;
 use crate::telemetry::LogPolicy;
 use crate::telemetry::StructuredLogs;
-
 
 pub(in crate::app) struct Health {
     logs: StructuredLogs,
@@ -124,10 +118,16 @@ pub(in crate::app) struct Health {
     terminal_capabilities: String,
 }
 impl Health {
-pub(in crate::app) fn new(persist: bool, crash_path: PathBuf, now: Instant) -> Self {
-Self { logs: make_logs(persist), crash_snapshot: CrashSnapshotWriter::start(crash_path), next_crash_snapshot: now, crash_snapshot_pending: false, written_crash_snapshot: None, terminal_capabilities: "pending".into() }
-}
-
+    pub(in crate::app) fn new(persist: bool, crash_path: PathBuf, now: Instant) -> Self {
+        Self {
+            logs: make_logs(persist),
+            crash_snapshot: CrashSnapshotWriter::start(crash_path),
+            next_crash_snapshot: now,
+            crash_snapshot_pending: false,
+            written_crash_snapshot: None,
+            terminal_capabilities: "pending".into(),
+        }
+    }
 
     pub(in crate::app) fn record(
         &mut self,
@@ -139,21 +139,17 @@ Self { logs: make_logs(persist), crash_snapshot: CrashSnapshotWriter::start(cras
         self.logs.record(level, subsystem, event, fields);
     }
 
-
     pub(in crate::app) fn set_terminal_capabilities(&mut self, capabilities: String) {
         self.terminal_capabilities = capabilities;
     }
-
 
     pub(in crate::app) fn terminal_capabilities(&self) -> &str {
         &self.terminal_capabilities
     }
 
-
     pub(in crate::app) fn health_due(&self, now: Instant) -> bool {
         now >= self.next_crash_snapshot
     }
-
 
     pub(in crate::app) fn submit_health(
         &mut self,
@@ -223,10 +219,99 @@ fn make_logs(persist: bool) -> StructuredLogs {
     )
 }
 
+use crate::app::plugins::VirtualContext;
+use crate::ui::render::SCRATCH_LABEL;
+
+impl App {
+    pub(in crate::app) fn process_health_effect(
+        &mut self,
+        effect: AppEffect,
+    ) -> Result<(), AppEffect> {
+        match effect {
+            AppEffect::CrashInspect => {
+                let path = crate::config::user_state_directory().join("last-crash.json");
+                self.notify_message(
+                    self.message("crash_location", &[("path", path.display().to_string())]),
+                    path.is_file(),
+                );
+            }
+            AppEffect::CrashClear => {
+                let path = crate::config::user_state_directory().join("last-crash.json");
+                if let Err(error) = self
+                    .recovery
+                    .clear_crash(path, self.documents.recovery_io())
+                {
+                    self.show_error(error);
+                }
+            }
+            AppEffect::ShowHealth => {
+                self.notify_message(
+                    self.message(
+                        "healthy",
+                        &[
+                            ("buffers", self.state.buffers.len().to_string()),
+                            ("workspace", self.state.workspace_root.display().to_string()),
+                            ("terminal", self.health.terminal_capabilities().to_owned()),
+                            ("jobs", self.tasks.running_count().to_string()),
+                            ("ptys", self.terminal_session.running_count().to_string()),
+                            ("preflights", self.pending_preflight_count().to_string()),
+                            ("tasks", self.tasks.status_count().to_string()),
+                            ("plugins", self.extension.statuses().len().to_string()),
+                            (
+                                "plugin_failures",
+                                self.extension
+                                    .statuses()
+                                    .values()
+                                    .filter(|status| {
+                                        matches!(status, crate::plugins::PluginStatus::Failed(_))
+                                    })
+                                    .count()
+                                    .to_string(),
+                            ),
+                            ("packages", self.extension.pending_packages().to_string()),
+                            ("lsp", self.language.sessions().len().to_string()),
+                            ("persistence", self.persistence.pending().to_string()),
+                            ("safe", self.workspace.safe_mode().to_string()),
+                            ("dap", self.debugger_session.is_running().to_string()),
+                        ],
+                    ),
+                    false,
+                );
+            }
+            kind @ (AppEffect::HealthVirtualOpen | AppEffect::HealthVirtualRefresh) => {
+                let result = self
+                    .extension
+                    .prepare_health(
+                        matches!(kind, AppEffect::HealthVirtualRefresh),
+                        self.commands.specs().count(),
+                        VirtualContext {
+                            editor: &self.state,
+                            windows: &self.window_session,
+                            scratch: SCRATCH_LABEL,
+                        },
+                    )
+                    .and_then(|staged| {
+                        Self::accept_virtual_publication(&mut self.window_session, staged)
+                    });
+                match result {
+                    Ok(state) => {
+                        *self.state = state;
+                        self.set_dashboard_visibility(false);
+                        self.reconcile_editor_windows();
+                    }
+                    Err(error) => self.show_error(error),
+                }
+            }
+            effect => return Err(effect),
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
-use super::Health;
-use std::time::{Instant, Duration};
+    use super::Health;
+    use std::time::{Duration, Instant};
     #[test]
     fn failed_health_snapshot_is_reported_and_unchanged_health_is_retried() {
         use crate::telemetry::LiveCrashSnapshot;
@@ -293,100 +378,5 @@ use std::time::{Instant, Duration};
             serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
         assert_eq!(written["buffers"], 2);
         assert_eq!(written["dirty_buffers"], 1);
-    }
-}
-
-
-
-
-
-
-
-
-
-use crate::ui::render::SCRATCH_LABEL;
-use crate::app::plugins::VirtualContext;
-
-
-impl App {
-    pub(in crate::app) fn process_health_effect(&mut self, effect: AppEffect) -> Result<(), AppEffect> {
-        match effect {
-AppEffect::CrashInspect => {
-                let path = crate::config::user_state_directory().join("last-crash.json");
-                self.notify_message(
-                    self.message("crash_location", &[("path", path.display().to_string())]),
-                    path.is_file(),
-                );
-            }
-AppEffect::CrashClear => {
-                let path = crate::config::user_state_directory().join("last-crash.json");
-                if let Err(error) = self
-                    .recovery
-                    .clear_crash(path, self.documents.recovery_io())
-                {
-                    self.show_error(error);
-                }
-            }
-AppEffect::ShowHealth => {
-                self.notify_message(
-                    self.message(
-                        "healthy",
-                        &[
-                            ("buffers", self.state.buffers.len().to_string()),
-                            ("workspace", self.state.workspace_root.display().to_string()),
-                            ("terminal", self.health.terminal_capabilities().to_owned()),
-                            ("jobs", self.tasks.running_count().to_string()),
-                            ("ptys", self.terminal_session.running_count().to_string()),
-                            ("preflights", self.pending_preflight_count().to_string()),
-                            ("tasks", self.tasks.status_count().to_string()),
-                            ("plugins", self.extension.statuses().len().to_string()),
-                            (
-                                "plugin_failures",
-                                self.extension
-                                    .statuses()
-                                    .values()
-                                    .filter(|status| {
-                                        matches!(status, crate::plugins::PluginStatus::Failed(_))
-                                    })
-                                    .count()
-                                    .to_string(),
-                            ),
-                            ("packages", self.extension.pending_packages().to_string()),
-                            ("lsp", self.language.sessions().len().to_string()),
-                            ("persistence", self.persistence.pending().to_string()),
-                            ("safe", self.workspace.safe_mode().to_string()),
-                            ("dap", self.debugger_session.is_running().to_string()),
-                        ],
-                    ),
-                    false,
-                );
-            }
-kind @ (AppEffect::HealthVirtualOpen | AppEffect::HealthVirtualRefresh) => {
-                let result = self
-                    .extension
-                    .prepare_health(
-                        matches!(kind, AppEffect::HealthVirtualRefresh),
-                        self.commands.specs().count(),
-                        VirtualContext {
-                            editor: &self.state,
-                            windows: &self.window_session,
-                            scratch: SCRATCH_LABEL,
-                        },
-                    )
-                    .and_then(|staged| {
-                        Self::accept_virtual_publication(&mut self.window_session, staged)
-                    });
-                match result {
-                    Ok(state) => {
-                        *self.state = state;
-                        self.set_dashboard_visibility(false);
-                        self.reconcile_editor_windows();
-                    }
-                    Err(error) => self.show_error(error),
-                }
-            }
-            effect => return Err(effect),
-        }
-        Ok(())
     }
 }

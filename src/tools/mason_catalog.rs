@@ -15,7 +15,10 @@ use crate::tools::catalog::ToolKind;
 
 use crate::tools::install_prepare::validate_tool_id;
 
-const MASON_LSP_CATALOG: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/tools/mason-lsp-catalog.json"));
+const MASON_LSP_CATALOG: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/assets/tools/mason-lsp-catalog.json"
+));
 const MASON_LSP_SCHEMA_VERSION: u32 = 1;
 const MASON_LSPCONFIG_REVISION: &str = "9d28935aa95fa6c1dc7c4d6747f101a72a8a4bec";
 const NVIM_LSPCONFIG_REVISION: &str = "af9adce488c75ca0a81017945c2b7fa7b461bc23";

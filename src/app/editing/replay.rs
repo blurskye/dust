@@ -1,6 +1,4 @@
-use crate::app::input::InputSession;
 use crate::editor::CommandInvocation;
-use crate::editor::CommandValue;
 use crate::editor::InvocationSource;
 
 #[derive(Debug, Eq, PartialEq)]
@@ -23,4 +21,3 @@ pub(in crate::app) fn replayed(mut invocation: CommandInvocation) -> CommandInvo
     invocation.target = Default::default();
     invocation
 }
-

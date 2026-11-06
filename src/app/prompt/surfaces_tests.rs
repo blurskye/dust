@@ -1,8 +1,5 @@
 use crate::app::tests::*;
 
-
-
-
 #[test]
 pub(in crate::app) fn prompt_mouse_context_is_independently_configurable() {
     let (_app_dirs, mut app) = app();
@@ -34,7 +31,6 @@ pub(in crate::app) fn prompt_mouse_context_is_independently_configurable() {
     });
     assert!(app.ui.prompt.is_none());
 }
-
 
 #[test]
 pub(in crate::app) fn protected_prompt_region_blocks_ordinary_compositor_hit_testing() {
@@ -68,10 +64,4 @@ pub(in crate::app) fn protected_prompt_region_blocks_ordinary_compositor_hit_tes
             .is_some()
     );
 }
-use crate::editor::input::KeyEvent;
-use crate::editor::text::TextBuffer;
-use crate::ui::PromptKind;
-use crate::ui::UiEvent;
-use crate::workspace::WorkspaceTrust;
 use crate::app::compile_keymaps;
-
