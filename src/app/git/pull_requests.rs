@@ -23,7 +23,7 @@ use crate::workspace::PickerItemKind;
 pub(in crate::app) struct PullRequests {
     jobs: ForgeJobs,
     source: Option<crate::app::workspace::WorkspaceVersion>,
-    generation: u64,
+    request_id: u64,
     comment_body: Option<String>,
     comment_sending: bool,
     comment_loading: bool,
@@ -34,7 +34,7 @@ impl PullRequests {
     pub(in crate::app) fn prepare(&mut self, source: crate::app::workspace::WorkspaceVersion) {
         if self.source.as_ref() != Some(&source) {
             self.jobs.cancel();
-            self.generation += 1;
+            self.request_id += 1;
             self.source = Some(source);
             self.comment_target = None;
             self.comment_body = None;
@@ -45,24 +45,24 @@ impl PullRequests {
 }
 
 impl App {
-    fn pull_request_generation(&mut self) -> u64 {
+    fn pull_request_request_id(&mut self) -> u64 {
         let source = self.workspace.version();
         self.pull_requests.prepare(source);
-        self.pull_requests.generation
+        self.pull_requests.request_id
     }
 
-    fn pull_request_is_current(&self, root: &std::path::Path, generation: u64) -> bool {
+    fn pull_request_is_current(&self, root: &std::path::Path, request_id: u64) -> bool {
         root == self.state.workspace_root
-            && generation == self.pull_requests.generation
+            && request_id == self.pull_requests.request_id
             && self.pull_requests.source.as_ref() == Some(&self.workspace.version())
     }
 
     pub(in crate::app) fn list_pull_requests(&mut self) {
-        let generation = self.pull_request_generation();
+        let request_id = self.pull_request_request_id();
         match self
             .pull_requests
             .jobs
-            .list(self.state.workspace_root.clone(), generation)
+            .list(self.state.workspace_root.clone(), request_id)
         {
             Ok(()) => self.notify_message("loading pull requests…".into(), false),
             Err(error) => self.show_error(error),
@@ -73,7 +73,7 @@ impl App {
         self.pull_requests.prepare(self.workspace.version());
         match self.pull_requests.jobs.comments(
             self.state.workspace_root.clone(),
-            self.pull_requests.generation,
+            self.pull_requests.request_id,
         ) {
             Ok(()) => self.notify_message("loading review comments…".into(), false),
             Err(error) => self.show_error(error),
@@ -106,7 +106,7 @@ impl App {
             + 1;
         match self.pull_requests.jobs.comment_target(
             self.state.workspace_root.clone(),
-            self.pull_requests.generation,
+            self.pull_requests.request_id,
             path,
             line,
             self.state.buffers[buffer].text.to_string(),
@@ -136,7 +136,7 @@ impl App {
         self.pull_requests.comment_body = Some(body.clone());
         match self.pull_requests.jobs.comment(
             self.state.workspace_root.clone(),
-            self.pull_requests.generation,
+            self.pull_requests.request_id,
             target,
             body,
         ) {
@@ -156,11 +156,11 @@ impl App {
     pub(in crate::app) fn checkout_pull_request(
         &mut self,
         root: PathBuf,
-        generation: u64,
+        request_id: u64,
         number: u64,
         local: Option<PathBuf>,
     ) {
-        if !self.pull_request_is_current(&root, generation) {
+        if !self.pull_request_is_current(&root, request_id) {
             return;
         }
         if let Some(path) = local {
@@ -173,7 +173,7 @@ impl App {
         }
         match self.pull_requests.jobs.checkout(
             root,
-            generation,
+            request_id,
             number,
             self.workspace.edit_scope().clone(),
         ) {
@@ -189,7 +189,7 @@ impl App {
                 continue;
             }
             let root = event.root;
-            let generation = event.generation;
+            let request_id = event.generation;
             // The "loading…" notice is answered by whatever this reply shows.
             self.clear_notice();
             match event.reply {
@@ -242,7 +242,7 @@ impl App {
                                 },
                                 PickerPayload::PullRequest {
                                     root: root.clone(),
-                                    generation,
+                                    request_id,
                                     number,
                                     local: Some(path),
                                 },
@@ -278,7 +278,7 @@ impl App {
                                 },
                                 PickerPayload::PullRequest {
                                     root: root.clone(),
-                                    generation,
+                                    request_id,
                                     number: pr.number,
                                     local: None,
                                 },
@@ -379,24 +379,24 @@ mod tests {
     }
 
     #[test]
-    fn checkout_admission_requires_trust_and_respects_safe_mode() {
+    fn checkout_requires_trust_and_respects_safe_mode() {
         let mut app = app();
-        let generation = app.pull_request_generation();
-        app.checkout_pull_request(app.state.workspace_root.clone(), generation, 1, None);
+        let request_id = app.pull_request_request_id();
+        app.checkout_pull_request(app.state.workspace_root.clone(), request_id, 1, None);
         assert!(app.pull_requests.jobs.try_reply().is_none());
         app.workspace.fixture_safe_mode(true);
-        let generation = app.pull_request_generation();
-        app.checkout_pull_request(app.state.workspace_root.clone(), generation, 1, None);
+        let request_id = app.pull_request_request_id();
+        app.checkout_pull_request(app.state.workspace_root.clone(), request_id, 1, None);
         assert!(app.pull_requests.jobs.try_reply().is_none());
     }
 
     #[test]
-    fn retired_workspace_replies_do_not_open_pickers_or_switch_roots() {
+    fn outdated_workspace_replies_do_not_open_pickers_or_switch_roots() {
         let mut app = app();
         app.pull_requests.prepare(app.workspace.version());
         app.pull_requests.jobs.reply_for_test(
             app.state.workspace_root.clone(),
-            app.pull_requests.generation,
+            app.pull_requests.request_id,
             ForgeReply::List(Ok(vec![crate::forge::PullRequest {
                 number: 1,
                 title: "old".into(),
@@ -407,7 +407,7 @@ mod tests {
         );
         app.pull_requests.jobs.reply_for_test(
             app.state.workspace_root.clone(),
-            app.pull_requests.generation,
+            app.pull_requests.request_id,
             ForgeReply::CheckedOut(Ok(app.state.workspace_root.join("old"))),
         );
         app.workspace.fixture_safe_mode(true);
@@ -430,7 +430,7 @@ mod tests {
         );
         app.pull_requests.jobs.reply_for_test(
             app.state.workspace_root.clone(),
-            app.pull_requests.generation,
+            app.pull_requests.request_id,
             ForgeReply::Commented(Ok(())),
         );
         app.process_pull_request_events();
@@ -455,7 +455,7 @@ mod tests {
         };
         app.pull_requests.jobs.reply_for_test(
             app.state.workspace_root.clone(),
-            app.pull_requests.generation,
+            app.pull_requests.request_id,
             ForgeReply::CommentTarget(Ok(target)),
         );
         app.process_pull_request_events();
@@ -494,7 +494,7 @@ mod tests {
         app.pull_requests.comment_body = Some("my draft".into());
         app.pull_requests.jobs.reply_for_test(
             app.state.workspace_root.clone(),
-            app.pull_requests.generation,
+            app.pull_requests.request_id,
             ForgeReply::Commented(Err("offline".into())),
         );
         app.process_pull_request_events();
@@ -506,10 +506,10 @@ mod tests {
         assert_eq!(app.pull_requests.comment_target.as_ref().unwrap().line, 3);
     }
     #[test]
-    fn retired_forge_replies_and_picker_payloads_cannot_change_the_workspace() {
+    fn outdated_forge_replies_and_picker_payloads_cannot_change_the_workspace() {
         let mut app = app();
         let root = app.state.workspace_root.clone();
-        let generation = app.pull_request_generation();
+        let request_id = app.pull_request_request_id();
         let list = vec![crate::forge::PullRequest {
             number: 7,
             title: "from A".into(),
@@ -518,34 +518,34 @@ mod tests {
             draft: false,
         }];
         app.pull_requests.jobs.reply_for_test(
-            PathBuf::from("/retired"),
-            generation,
+            PathBuf::from("/old-root"),
+            request_id,
             ForgeReply::List(Ok(list.clone())),
         );
         app.pull_requests.jobs.reply_for_test(
             root.clone(),
-            generation + 1,
+            request_id + 1,
             ForgeReply::List(Ok(list.clone())),
         );
         app.process_pull_request_events();
         assert!(app.search.picker().is_none());
         app.pull_requests
             .jobs
-            .reply_for_test(root.clone(), generation, ForgeReply::List(Ok(list)));
+            .reply_for_test(root.clone(), request_id, ForgeReply::List(Ok(list)));
         app.process_pull_request_events();
         assert!(
-            matches!(app.search.selected_picker_payload(), Some(PickerPayload::PullRequest { root: source, generation: version, number: 7, local: None }) if source == &root && *version == generation)
+            matches!(app.search.selected_picker_payload(), Some(PickerPayload::PullRequest { root: source, request_id: version, number: 7, local: None }) if source == &root && *version == request_id)
         );
         let other = tempfile::tempdir().unwrap();
         app.checkout_pull_request(
             root.clone(),
-            generation + 1,
+            request_id + 1,
             7,
             Some(other.path().to_path_buf()),
         );
         app.checkout_pull_request(
-            PathBuf::from("/retired"),
-            generation,
+            PathBuf::from("/old-root"),
+            request_id,
             7,
             Some(other.path().to_path_buf()),
         );
@@ -561,26 +561,26 @@ mod tests {
             )
             .unwrap();
         app.workspace.set_active_root(first).unwrap();
-        let generation = app.pull_request_generation();
+        let request_id = app.pull_request_request_id();
         let revision = app.workspace.root_revision();
         app.workspace.set_active_root(second).unwrap();
         app.workspace.set_active_root(first).unwrap();
         assert_eq!(app.workspace.root_revision(), revision);
-        assert!(!app.pull_request_is_current(&root, generation));
+        assert!(!app.pull_request_is_current(&root, request_id));
         app.close_picker();
         app.pull_requests.jobs.reply_for_test(
             root.clone(),
-            generation,
+            request_id,
             ForgeReply::CheckedOut(Ok(other.path().to_path_buf())),
         );
         app.process_pull_request_events();
         app.checkout_pull_request(
             root.clone(),
-            generation,
+            request_id,
             7,
             Some(other.path().to_path_buf()),
         );
         assert_eq!(app.state.workspace_root, root);
-        assert!(app.pull_request_generation() > generation);
+        assert!(app.pull_request_request_id() > request_id);
     }
 }

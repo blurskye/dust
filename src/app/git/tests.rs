@@ -1,26 +1,26 @@
 //! Git behavior and application integration tests.
 
-use crate::app::tests::*;
+use crate::app::App;
+use crate::app::AppEffect;
 use crate::app::documents::tests::history_fixture;
 use crate::app::documents::tests::index_bytes;
 use crate::app::documents::tests::near_changes_fixture;
 use crate::app::explorer::tests::wait_explorer;
-use crate::app::workspace::tests::wait_workspace_search;
-use crate::app::App;
-use crate::app::AppEffect;
 use crate::app::startup::StartupTarget;
+use crate::app::tests::*;
+use crate::app::workspace::tests::wait_workspace_search;
 use crate::editor::CommandValue;
 use crate::editor::InvocationSource;
 use crate::editor::input::KeyEvent;
 use crate::editor::text::ByteOffset;
 use crate::editor::text::TextBuffer;
 use crate::ui::ExplorerSegmentRole;
+use crate::ui::UiEvent;
 use std::fs;
 use std::thread;
 use std::time::Duration;
 use std::time::Instant;
 use tempfile::tempdir;
-use crate::ui::UiEvent;
 
 #[test]
 fn explorer_auto_git_status_is_silent_outside_a_repository() {
@@ -50,17 +50,16 @@ fn explorer_auto_git_status_is_silent_outside_a_repository() {
     }
     assert!(app.git.status().is_none());
     assert!(!app.ui.notification_error);
-    let generation = app.git.status_generation();
+    let request_id = app.git.status_request_id();
     for _ in 0..256 {
         app.reconcile_git_signs();
         app.process_git_status_events();
-        assert_eq!(app.git.status_generation(), generation);
+        assert_eq!(app.git.status_request_id(), request_id);
     }
 }
 
 #[test]
-fn active_tracked_buffer_starts_git_status_and_updates_unsaved_signs_without_explorer()
- {
+fn active_tracked_buffer_starts_git_status_and_updates_unsaved_signs_without_explorer() {
     let (_app_dirs, mut app) = app();
     let repo = git2::Repository::init(&app.state.workspace_root).unwrap();
     let path = app.state.workspace_root.join("live.txt");
@@ -375,10 +374,10 @@ fn explorer_auto_git_status_colors_names_opens_picker_and_idles() {
             .any(|segment| segment.text == "M")
     );
     assert!(!app.git.silent());
-    let generation = app.git.status_generation();
+    let request_id = app.git.status_request_id();
     for _ in 0..256 {
         app.process_git_status_events();
-        assert_eq!(app.git.status_generation(), generation);
+        assert_eq!(app.git.status_request_id(), request_id);
         assert_eq!(app.git.status().unwrap().revision, revision)
     }
     app.open_git_status_picker();
@@ -449,7 +448,7 @@ fn explorer_auto_git_status_colors_names_opens_picker_and_idles() {
     let normal_sign_cell = frame.grid.get(sign_x, sign_y - 1).unwrap();
     assert_eq!(normal_sign_cell.symbol, "│");
     assert_eq!(normal_sign_cell.style, crate::ui::Style::Muted);
-    let sign_generation = app.git.sign_generation();
+    let sign_request_id = app.git.sign_request_id();
     let signs = app.ui.git_signs.clone();
     for _ in 0..256 {
         app.reconcile_git_signs();
@@ -462,7 +461,7 @@ fn explorer_auto_git_status_colors_names_opens_picker_and_idles() {
             100,
             30,
         );
-        assert_eq!(app.git.sign_generation(), sign_generation);
+        assert_eq!(app.git.sign_request_id(), sign_request_id);
         assert_eq!(app.ui.git_signs, signs);
     }
     app.start_git_hunks();
@@ -685,8 +684,7 @@ fn trusted_stage_hunk_flow_changes_only_index_and_refreshes_status() {
 }
 
 #[test]
-fn workspace_replacement_previews_without_disk_mutation_and_checked_save_rejects_conflict()
- {
+fn workspace_replacement_previews_without_disk_mutation_and_checked_save_rejects_conflict() {
     let (_app_dirs, mut app) = app();
     let first = app.state.workspace_root.join("a.txt");
     let second = app.state.workspace_root.join("b.txt");
@@ -1347,7 +1345,7 @@ fn switching_to_a_worktree_moves_the_editor_there() {
         );
     };
     let open_worktree_row = |app: &mut App| {
-        // A trust reconciliation bumps the workspace version and retires the previous status
+        // A trust reconciliation changes the workspace version and invalidates the previous status
         // snapshot, so the picker's own refresh has to be drained on every open.
         let deadline = Instant::now() + Duration::from_secs(10);
         app.start_git_status_refresh();

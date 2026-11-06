@@ -1,11 +1,11 @@
-//! Git runtime, accepted snapshots and hunk actions. No mutable editor/UI authority.
+//! Git actions, accepted repository results and editor integration.
 use crate::editor::BufferId;
 use crate::editor::EditorState;
 use crate::editor::text::TextVersion;
-use crate::git::GitBranchGeneration;
 use crate::git::GitBranchList;
 use crate::git::GitBranchListRequest;
 use crate::git::GitBranchRequest;
+use crate::git::GitBranchRequestId;
 use crate::git::GitBranchWorker;
 use crate::git::GitChangePlanRequest;
 use crate::git::GitDiffLayer;
@@ -14,23 +14,23 @@ use crate::git::GitFileStatus;
 use crate::git::GitHeadExpectation;
 use crate::git::GitHunk;
 use crate::git::GitHunkBufferInput;
-use crate::git::GitHunkGeneration;
 use crate::git::GitHunkId;
 use crate::git::GitHunkPolicy;
-use crate::git::GitHunkWorker;
+use crate::git::GitHunkRequestId;
 use crate::git::GitHunkSignKind;
 use crate::git::GitHunkSnapshot;
+use crate::git::GitHunkWorker;
 use crate::git::GitMutationError;
-use crate::git::GitMutationGeneration;
 use crate::git::GitMutationKind;
 use crate::git::GitMutationRequest;
+use crate::git::GitMutationRequestId;
 use crate::git::GitMutationWorker;
 use crate::git::GitRepositoryId;
 use crate::git::GitResetHunkRequest;
-use crate::git::GitStatusGeneration;
 use crate::git::GitStatusPolicy;
-use crate::git::GitStatusWorker;
+use crate::git::GitStatusRequestId;
 use crate::git::GitStatusSnapshot;
+use crate::git::GitStatusWorker;
 use crate::git::GitUnsavedDocument;
 use crate::git::aggregate_git_status;
 use crate::git::git_branch_name;
@@ -59,7 +59,7 @@ type SignSource = (
 #[derive(Default)]
 pub(super) struct Git {
     status: GitStatusWorker,
-    status_generation: Option<GitStatusGeneration>,
+    status_request_id: Option<GitStatusRequestId>,
     status_root_revision: Option<u64>,
     status_snapshot: Option<GitStatusSnapshot>,
     branch: Option<String>,
@@ -67,7 +67,7 @@ pub(super) struct Git {
     silent: bool,
     silent_attempted: Option<(u64, PathBuf)>,
     hunks: GitHunkWorker,
-    hunk_generation: Option<GitHunkGeneration>,
+    hunk_request_id: Option<GitHunkRequestId>,
     hunk_expected: Option<(u64, u64, GitRepositoryId, PathBuf, GitDiffLayer)>,
     hunk_action: Option<GitHunkAction>,
     hunk_source: Option<(BufferId, TextVersion)>,
@@ -75,13 +75,13 @@ pub(super) struct Git {
     hunk_snapshot: Option<GitHunkSnapshot>,
     reset_target: Option<(u64, GitHunkId, PathBuf)>,
     sign_hunks: GitHunkWorker,
-    sign_generation: Option<GitHunkGeneration>,
+    sign_request_id: Option<GitHunkRequestId>,
     /// The buffer's unstaged diff, held until the staged one is ready to go with it.
     unstaged_signs: Option<GitHunkSnapshot>,
     /// The active buffer's last unstaged diff, which places staged lines in the buffer.
     last_unstaged: Option<GitHunkSnapshot>,
     staged_sign_hunks: GitHunkWorker,
-    staged_sign_generation: Option<GitHunkGeneration>,
+    staged_sign_request_id: Option<GitHunkRequestId>,
     /// What the staged diff was read for. It doesn't change as the buffer is typed in.
     staged_sign_source: Option<(u64, u64, GitRepositoryId, PathBuf)>,
     staged_signs: Option<GitHunkSnapshot>,
@@ -90,9 +90,9 @@ pub(super) struct Git {
     /// One change inside the selected hunk, when the cursor picked one out of several.
     selected_change: Vec<u32>,
     mutation: GitMutationWorker,
-    mutation_generation: Option<GitMutationGeneration>,
+    mutation_request_id: Option<GitMutationRequestId>,
     branches: GitBranchWorker,
-    branch_generation: Option<GitBranchGeneration>,
+    branch_request_id: Option<GitBranchRequestId>,
     branch_root: Option<(u64, PathBuf)>,
     branch_list_scope: Option<(PathBuf, u64)>,
     show_worktrees: bool,
@@ -230,7 +230,7 @@ impl Git {
 
     pub(super) fn clear_signs(&mut self) {
         self.sign_hunks.cancel();
-        self.sign_generation = None;
+        self.sign_request_id = None;
         self.sign_source = None;
         self.unstaged_signs = None;
         self.last_unstaged = None;
@@ -245,7 +245,7 @@ impl Git {
     }
     fn clear_hunks(&mut self) {
         self.hunks.cancel();
-        self.hunk_generation = None;
+        self.hunk_request_id = None;
         self.hunk_expected = None;
         self.hunk_action = None;
         self.hunk_source = None;
@@ -258,7 +258,7 @@ impl Git {
     pub(in crate::app) fn clear(&mut self) {
         if self.branch_list_scope.take().is_some() {
             self.branches.cancel();
-            self.branch_generation = None;
+            self.branch_request_id = None;
             self.branch_root = None;
             self.show_worktrees = false;
         }
@@ -270,11 +270,11 @@ impl Git {
         self.cancel_destructive();
         self.clear_signs();
         self.staged_sign_hunks.cancel();
-        self.staged_sign_generation = None;
+        self.staged_sign_request_id = None;
         self.staged_sign_source = None;
         self.staged_signs = None;
         self.status.cancel();
-        self.status_generation = None;
+        self.status_request_id = None;
         self.status_root_revision = None;
         self.status_snapshot = None;
         self.branch = None;
@@ -293,7 +293,7 @@ impl Git {
             .status_snapshot
             .as_ref()
             .is_some_and(|s| s.root_revision == revision && root == Some(s.scope_root.as_path()));
-        if current || self.status_generation.is_some() {
+        if current || self.status_request_id.is_some() {
             return false;
         }
         let Some(root) = root else {
@@ -337,8 +337,8 @@ impl Git {
             None => Err("workspace root is unavailable".into()),
         };
         match result {
-            Ok(generation) => {
-                self.status_generation = Some(generation);
+            Ok(request_id) => {
+                self.status_request_id = Some(request_id);
                 self.status_root_revision = Some(revision);
                 Ok(())
             }
@@ -349,19 +349,19 @@ impl Git {
         }
     }
     pub(in crate::app) fn poll_status(&mut self, revision: u64) -> Result<bool, String> {
-        if self.status_generation.is_some() && self.status_root_revision != Some(revision) {
+        if self.status_request_id.is_some() && self.status_root_revision != Some(revision) {
             self.clear();
             return Ok(true);
         }
         match self.status.poll() {
             Ok(Some(snapshot))
-                if Some(snapshot.generation) == self.status_generation
+                if Some(snapshot.request_id) == self.status_request_id
                     && Some(snapshot.root_revision) == self.status_root_revision =>
             {
                 self.decorations = aggregate_git_status(&snapshot.scope_root, &snapshot.entries);
                 self.branch = git_branch_name(&snapshot.repository).ok().flatten();
                 self.status_snapshot = Some(snapshot.clone());
-                self.status_generation = None;
+                self.status_request_id = None;
                 self.status_root_revision = None;
                 self.silent = false;
                 Ok(true)
@@ -447,19 +447,19 @@ impl Git {
         if buffer.text.len_bytes() > policy.maximum_bytes {
             return true;
         }
-        if let Ok(generation) = self.sign_hunks.start_buffer(
+        if let Ok(request_id) = self.sign_hunks.start_buffer(
             policy,
             GitHunkBufferInput {
                 revision: source.5,
                 bytes: buffer.text.to_bytes(),
             },
         ) {
-            self.sign_generation = Some(generation);
+            self.sign_request_id = Some(request_id);
             let staged_source = (source.0, source.1, source.2, source.3.clone());
             if self.staged_sign_source.as_ref() != Some(&staged_source) {
                 // Without a staged diff the unstaged signs still show.
                 self.staged_signs = None;
-                self.staged_sign_generation = self.staged_sign_hunks.start(staged_policy).ok();
+                self.staged_sign_request_id = self.staged_sign_hunks.start(staged_policy).ok();
                 self.staged_sign_source = Some(staged_source);
             }
         }
@@ -478,17 +478,17 @@ impl Git {
         }
         match self.staged_sign_hunks.poll() {
             Ok(Some(snapshot)) => {
-                if Some(snapshot.generation) == self.staged_sign_generation {
+                if Some(snapshot.request_id) == self.staged_sign_request_id {
                     self.staged_signs = Some(snapshot.clone());
-                    self.staged_sign_generation = None;
+                    self.staged_sign_request_id = None;
                 }
             }
             Ok(None) => {}
-            Err(_) => self.staged_sign_generation = None,
+            Err(_) => self.staged_sign_request_id = None,
         }
         match self.sign_hunks.poll() {
             Ok(Some(snapshot)) => {
-                if Some(snapshot.generation) != self.sign_generation
+                if Some(snapshot.request_id) != self.sign_request_id
                     || snapshot.root_revision != source.0
                     || snapshot.status_revision != source.1
                     || snapshot.repository_id != source.2
@@ -498,7 +498,7 @@ impl Git {
                     self.clear_signs();
                     return Some(Vec::new());
                 }
-                self.sign_generation = None;
+                self.sign_request_id = None;
                 self.unstaged_signs = Some(snapshot.clone());
                 self.last_unstaged = Some(snapshot.clone());
             }
@@ -511,13 +511,13 @@ impl Git {
                 return Some(Vec::new());
             }
             Err(_) => {
-                self.sign_generation = None;
+                self.sign_request_id = None;
                 self.unstaged_signs = None;
                 self.last_unstaged = None;
                 return Some(Vec::new());
             }
         }
-        if self.staged_sign_generation.is_some() {
+        if self.staged_sign_request_id.is_some() {
             return None;
         }
         let unstaged = self.unstaged_signs.take()?;
@@ -593,7 +593,7 @@ impl Git {
             .strip_prefix(&status.scope_root)
             .map_err(|_| "active file is outside Git scope")?;
         let policy = Self::policy(status, relative.to_owned(), layer);
-        let generation = if layer == GitDiffLayer::Unstaged {
+        let request_id = if layer == GitDiffLayer::Unstaged {
             let (id, buffer) = editor
                 .buffers
                 .iter()
@@ -604,7 +604,7 @@ impl Git {
             }
             // Clean buffers use the disk snapshot needed by stage/reset. Unsaved buffers
             // use their displayed text, so navigation and previews follow their line numbers.
-            let generation = if buffer.dirty {
+            let request_id = if buffer.dirty {
                 self.hunks.start_buffer(
                     policy,
                     GitHunkBufferInput {
@@ -617,11 +617,11 @@ impl Git {
             }
             .map_err(|e| e.to_string())?;
             self.hunk_source = Some((id, buffer.text.source_version()));
-            generation
+            request_id
         } else {
             self.hunks.start(policy).map_err(|e| e.to_string())?
         };
-        self.hunk_generation = Some(generation);
+        self.hunk_request_id = Some(request_id);
         self.hunk_expected = Some((
             status.root_revision,
             status.revision,
@@ -659,12 +659,12 @@ impl Git {
         }
         match self.hunks.poll() {
             Ok(Some(snapshot))
-                if Some(snapshot.generation) == self.hunk_generation
+                if Some(snapshot.request_id) == self.hunk_request_id
                     && snapshot.layer == expected.4 =>
             {
                 self.hunk_snapshot = Some(snapshot.clone());
                 let path = expected.3.clone();
-                self.hunk_generation = None;
+                self.hunk_request_id = None;
                 self.hunk_expected = None;
                 // Keep the earlier selection when a refreshed cursor is outside every hunk.
                 if let Some(line) = self.hunk_selection_line.take() {
@@ -835,7 +835,7 @@ impl Git {
     }
     /// The file changed on disk, so the hunks have to be read again.
     pub(in crate::app) fn forget_hunks(&mut self) {
-        if self.mutation_generation.is_none() {
+        if self.mutation_request_id.is_none() {
             self.clear_hunks();
         }
     }
@@ -962,7 +962,7 @@ impl Git {
         selected_lines: Vec<u32>,
         file: Option<PathBuf>,
     ) -> Result<(), String> {
-        if self.mutation_generation.is_some() {
+        if self.mutation_request_id.is_some() {
             return Err("a Git mutation is already running".into());
         }
         if !trusted {
@@ -1033,7 +1033,7 @@ impl Git {
         }
         self.plan_path = Some(relative);
         self.unsaved_refusal = None;
-        self.mutation_generation = Some(
+        self.mutation_request_id = Some(
             self.mutation
                 .start(GitMutationRequest::Plan(plan))
                 .map_err(|e| e.to_string())?,
@@ -1047,7 +1047,7 @@ impl Git {
         revision: u64,
     ) -> Result<(), String> {
         // A running list will supply the picker; mutations already reopen it on completion.
-        if self.branch_generation.is_some() {
+        if self.branch_request_id.is_some() {
             return Ok(());
         }
         let request = GitBranchRequest::List(GitBranchListRequest {
@@ -1058,7 +1058,7 @@ impl Git {
             .status_snapshot
             .as_ref()
             .ok_or("Git status is not ready")?;
-        self.branch_generation = Some(self.branches.start(request).map_err(|e| e.to_string())?);
+        self.branch_request_id = Some(self.branches.start(request).map_err(|e| e.to_string())?);
         self.branch_root = Some((revision, status.scope_root.clone()));
         self.branch_list_scope = Some((repository.to_path_buf(), revision));
         Ok(())
@@ -1077,7 +1077,7 @@ impl Git {
         repository: &Path,
         name: &str,
     ) -> Result<(), String> {
-        if self.branch_generation.is_some() {
+        if self.branch_request_id.is_some() {
             return Err("a Git worktree request is already running".into());
         }
         let repo = git2::Repository::open(repository).map_err(|e| e.to_string())?;
@@ -1101,7 +1101,7 @@ impl Git {
             .status_snapshot
             .as_ref()
             .ok_or("Git status is not ready")?;
-        self.branch_generation = Some(self.branches.start(request).map_err(|e| e.to_string())?);
+        self.branch_request_id = Some(self.branches.start(request).map_err(|e| e.to_string())?);
         self.branch_root = Some((status.root_revision, status.scope_root.clone()));
         Ok(())
     }
@@ -1120,7 +1120,7 @@ impl Git {
         path: &Path,
         reference: &str,
     ) -> Result<(), String> {
-        if self.branch_generation.is_some() {
+        if self.branch_request_id.is_some() {
             return Err("a Git worktree request is already running".into());
         }
         let request = GitBranchRequest::CreateWorktree {
@@ -1134,7 +1134,7 @@ impl Git {
             .status_snapshot
             .as_ref()
             .ok_or("Git status is not ready")?;
-        self.branch_generation = Some(self.branches.start(request).map_err(|e| e.to_string())?);
+        self.branch_request_id = Some(self.branches.start(request).map_err(|e| e.to_string())?);
         self.branch_root = Some((status.root_revision, status.scope_root.clone()));
         Ok(())
     }
@@ -1155,12 +1155,12 @@ impl Git {
             })
         {
             self.branches.cancel();
-            self.branch_generation = None;
+            self.branch_request_id = None;
             self.branch_list_scope = None;
             self.branch_root = None;
             self.show_worktrees = false;
         }
-        if self.branch_generation.is_none() {
+        if self.branch_request_id.is_none() {
             return Ok(None);
         }
         if !self
@@ -1169,27 +1169,27 @@ impl Git {
             .is_some_and(|(revision, path)| *revision == root_revision && path == root)
         {
             self.branches.cancel();
-            self.branch_generation = None;
+            self.branch_request_id = None;
             self.branch_root = None;
             self.show_worktrees = false;
             return Ok(None);
         }
         match self.branches.poll() {
             Ok(Some(crate::git::GitBranchResult::List(list))) => {
-                if Some(list.generation) != self.branch_generation {
+                if Some(list.request_id) != self.branch_request_id {
                     return Ok(None);
                 }
-                self.branch_generation = None;
+                self.branch_request_id = None;
                 self.branch_list_scope = None;
                 Ok(Some(GitBranchOutcome::List(list.clone())))
             }
             Ok(Some(crate::git::GitBranchResult::Changed)) => {
-                self.branch_generation = None;
+                self.branch_request_id = None;
                 Ok(Some(GitBranchOutcome::Changed))
             }
             Ok(None) => Ok(None),
             Err(error) => {
-                self.branch_generation = None;
+                self.branch_request_id = None;
                 self.show_worktrees = false;
                 Err(error.to_string())
             }
@@ -1202,7 +1202,7 @@ impl Git {
         trusted: bool,
         revision: u64,
     ) -> Result<(), String> {
-        if self.mutation_generation.is_some() {
+        if self.mutation_request_id.is_some() {
             return Err("a Git mutation is already running".into());
         }
         if !trusted {
@@ -1249,7 +1249,7 @@ impl Git {
                 maximum_patch_bytes: 1024 * 1024,
                 deadline: Duration::from_secs(5),
             });
-            self.mutation_generation =
+            self.mutation_request_id =
                 Some(self.mutation.start(request).map_err(|e| e.to_string())?);
             return Ok(());
         }
@@ -1274,7 +1274,7 @@ impl Git {
         };
         self.plan_path = Some(snapshot.file.clone());
         self.unsaved_refusal = None;
-        self.mutation_generation = Some(
+        self.mutation_request_id = Some(
             self.mutation
                 .start(GitMutationRequest::Plan(plan))
                 .map_err(|e| e.to_string())?,
@@ -1282,12 +1282,12 @@ impl Git {
         Ok(())
     }
     pub(in crate::app) fn poll_mutation(&mut self) -> Result<Option<GitMutationOutcome>, String> {
-        if self.mutation_generation.is_none() {
+        if self.mutation_request_id.is_none() {
             return Ok(None);
         }
         match self.mutation.poll() {
             Ok(Some(result)) => {
-                if Some(result.generation) != self.mutation_generation {
+                if Some(result.request_id) != self.mutation_request_id {
                     return Ok(None);
                 }
                 let outcome = match result.kind {
@@ -1297,7 +1297,7 @@ impl Git {
                     GitMutationKind::UnstageHunk => GitMutationOutcome::Staged("Git hunk unstaged"),
                     _ => GitMutationOutcome::Staged("Git hunk staged"),
                 };
-                self.mutation_generation = None;
+                self.mutation_request_id = None;
                 self.plan_path = None;
                 self.unsaved_refusal = None;
                 self.clear();
@@ -1307,12 +1307,12 @@ impl Git {
             // A refusal for unsaved content is a decision for the user, not a failure: it is
             // reported as an outcome so the caller can offer the save-and-stage choice.
             Err(GitMutationError::UnsavedDocument) => {
-                self.mutation_generation = None;
+                self.mutation_request_id = None;
                 self.unsaved_refusal = self.plan_path.clone();
                 Ok(Some(GitMutationOutcome::UnsavedDocument))
             }
             Err(error) => {
-                self.mutation_generation = None;
+                self.mutation_request_id = None;
                 self.plan_path = None;
                 Err(error.to_string())
             }
@@ -1324,32 +1324,32 @@ impl Git {
         self.unsaved_refusal.as_deref()
     }
     pub(in crate::app) fn status_pending(&self) -> bool {
-        self.status_generation.is_some()
+        self.status_request_id.is_some()
     }
     pub(in crate::app) fn mutation_pending(&self) -> bool {
-        self.mutation_generation.is_some()
+        self.mutation_request_id.is_some()
     }
 }
 
 #[cfg(test)]
 impl Git {
     pub(in crate::app) fn signs_pending(&self) -> bool {
-        self.sign_generation.is_some() || self.staged_sign_generation.is_some()
+        self.sign_request_id.is_some() || self.staged_sign_request_id.is_some()
     }
     pub(in crate::app) fn hunks_pending(&self) -> bool {
-        self.hunk_generation.is_some()
+        self.hunk_request_id.is_some()
     }
     pub(in crate::app) fn branch_pending(&self) -> bool {
-        self.branch_generation.is_some()
+        self.branch_request_id.is_some()
     }
     pub(in crate::app) fn silent(&self) -> bool {
         self.silent
     }
-    pub(in crate::app) fn status_generation(&self) -> u64 {
-        self.status.generation()
+    pub(in crate::app) fn status_request_id(&self) -> u64 {
+        self.status.request_id()
     }
-    pub(in crate::app) fn sign_generation(&self) -> u64 {
-        self.sign_hunks.generation()
+    pub(in crate::app) fn sign_request_id(&self) -> u64 {
+        self.sign_hunks.request_id()
     }
 }
 
@@ -1520,8 +1520,7 @@ mod regression_tests {
         assert!(!removed.spans.is_empty());
     }
 
-    pub(in crate::app) fn fixture() -> (tempfile::TempDir, git2::Repository, EditorState, Git)
-    {
+    pub(in crate::app) fn fixture() -> (tempfile::TempDir, git2::Repository, EditorState, Git) {
         let dir = tempfile::tempdir().unwrap();
         let repo = git2::Repository::init(dir.path()).unwrap();
         let original = (1..=40).map(|n| format!("line {n}\n")).collect::<String>();
@@ -1548,12 +1547,9 @@ mod regression_tests {
         let mut session = Git::default();
         refresh(&mut session, &editor, dir.path());
         let status = session.status_snapshot.as_ref().unwrap();
-        let mut snapshot = crate::git::read_hunks(&Git::policy(
-            status,
-            "a.txt".into(),
-            GitDiffLayer::Unstaged,
-        ))
-        .unwrap();
+        let mut snapshot =
+            crate::git::read_hunks(&Git::policy(status, "a.txt".into(), GitDiffLayer::Unstaged))
+                .unwrap();
         snapshot.revision = 1;
         session.hunk_snapshot = Some(snapshot);
         session.select_at(2);
@@ -1797,7 +1793,7 @@ mod regression_tests {
         session
             .start_plan(&editor, GitMutationKind::StageFile, 1, true, vec![])
             .unwrap();
-        let generation = session.mutation_generation;
+        let request_id = session.mutation_request_id;
         assert!(
             session
                 .start_plan(&editor, GitMutationKind::StageFile, 1, true, vec![])
@@ -1810,7 +1806,7 @@ mod regression_tests {
                 .unwrap_err()
                 .contains("already running")
         );
-        assert_eq!(session.mutation_generation, generation);
+        assert_eq!(session.mutation_request_id, request_id);
         let deadline = Instant::now() + Duration::from_secs(3);
         loop {
             if let Some(outcome) = session.poll_mutation().unwrap() {
@@ -1823,7 +1819,7 @@ mod regression_tests {
     }
 
     #[test]
-    fn worktree_results_are_retired_after_a_root_change() {
+    fn worktree_results_are_ignored_after_a_root_change() {
         let (dir, _, _, mut session) = fixture();
         let other = tempfile::tempdir().unwrap();
         session.start_branches(dir.path(), 1).unwrap();
@@ -2065,9 +2061,9 @@ mod regression_tests {
             .start_worktree_create(dir.path(), "review", &path, "review")
             .unwrap();
         session.show_worktrees_after_change();
-        let generation = session.branch_generation;
+        let request_id = session.branch_request_id;
         session.start_branches(dir.path(), 1).unwrap();
-        assert_eq!(session.branch_generation, generation);
+        assert_eq!(session.branch_request_id, request_id);
         assert!(session.take_show_worktrees());
         session
             .start_hunks(
@@ -2114,9 +2110,9 @@ mod regression_tests {
             thread::yield_now();
         }
         assert!(cleared);
-        let generation = session.sign_hunks.generation();
+        let request_id = session.sign_hunks.request_id();
         assert!(!session.reconcile_signs(&editor, 1, true));
-        assert_eq!(session.sign_hunks.generation(), generation);
+        assert_eq!(session.sign_hunks.request_id(), request_id);
 
         index.add_path(Path::new("a.txt")).unwrap();
         index.write().unwrap();
@@ -2180,10 +2176,7 @@ mod regression_tests {
 mod conflict_markers;
 pub(in crate::app) mod pull_requests;
 
-
 pub(in crate::app) mod commands;
-
-
 
 use crate::app::App;
 use crate::app::commands::AppEffect;
