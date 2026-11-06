@@ -155,9 +155,7 @@ pub(super) fn execute_builtin<E>(
                 });
                 return Ok(CommandOutcome {
                     transaction: Some(transaction),
-                    effects: Vec::new(),
-                    message: None,
-                    follow_up: Vec::new(),
+                    ..CommandOutcome::empty()
                 });
             }
             let character = character_argument(invocation, "character")?;
@@ -381,9 +379,7 @@ pub(super) fn execute_builtin<E>(
                 );
                 return Ok(CommandOutcome {
                     transaction: Some(transaction),
-                    effects: Vec::new(),
-                    message: None,
-                    follow_up: Vec::new(),
+                    ..CommandOutcome::empty()
                 });
             }
             let pair = (state.policy.autopairs && view.block_insert.is_empty())
@@ -409,9 +405,7 @@ pub(super) fn execute_builtin<E>(
                 });
                 return Ok(CommandOutcome {
                     transaction: Some(transaction),
-                    effects: Vec::new(),
-                    message: None,
-                    follow_up: Vec::new(),
+                    ..CommandOutcome::empty()
                 });
             }
             let positions = if view.block_insert.is_empty() {
@@ -503,9 +497,7 @@ pub(super) fn execute_builtin<E>(
             }) else {
                 return Ok(CommandOutcome {
                     transaction: None,
-                    effects: Vec::new(),
-                    message: None,
-                    follow_up: Vec::new(),
+                    ..CommandOutcome::empty()
                 });
             };
             let end = ByteOffset(record.start.get().saturating_add(record.inserted.len()));
@@ -545,9 +537,7 @@ pub(super) fn execute_builtin<E>(
                 );
                 return Ok(CommandOutcome {
                     transaction: Some(transaction),
-                    effects: Vec::new(),
-                    message: None,
-                    follow_up: Vec::new(),
+                    ..CommandOutcome::empty()
                 });
             }
             let positions = if view.block_insert.is_empty() {
@@ -837,9 +827,7 @@ pub(super) fn execute_builtin<E>(
                 }
                 return Ok(CommandOutcome {
                     transaction: Some(transaction),
-                    effects: Vec::new(),
-                    message: None,
-                    follow_up: Vec::new(),
+                    ..CommandOutcome::empty()
                 });
             }
             if matches!(operator, "indent" | "unindent") {
@@ -866,9 +854,7 @@ pub(super) fn execute_builtin<E>(
                 });
                 return Ok(CommandOutcome {
                     transaction: Some(transaction),
-                    effects: Vec::new(),
-                    message: None,
-                    follow_up: Vec::new(),
+                    ..CommandOutcome::empty()
                 });
             }
             if matches!(operator, "lowercase" | "uppercase" | "toggle_case") {
@@ -907,9 +893,7 @@ pub(super) fn execute_builtin<E>(
                 });
                 return Ok(CommandOutcome {
                     transaction: Some(transaction),
-                    effects: Vec::new(),
-                    message: None,
-                    follow_up: Vec::new(),
+                    ..CommandOutcome::empty()
                 });
             }
             if operator == "join" {
@@ -940,9 +924,7 @@ pub(super) fn execute_builtin<E>(
                 });
                 return Ok(CommandOutcome {
                     transaction: Some(transaction),
-                    effects: Vec::new(),
-                    message: None,
-                    follow_up: Vec::new(),
+                    ..CommandOutcome::empty()
                 });
             }
             if operator == "replace" {
@@ -991,9 +973,7 @@ pub(super) fn execute_builtin<E>(
                 });
                 return Ok(CommandOutcome {
                     transaction: Some(transaction),
-                    effects: Vec::new(),
-                    message: None,
-                    follow_up: Vec::new(),
+                    ..CommandOutcome::empty()
                 });
             }
             if !matches!(operator, "delete" | "change" | "yank") {
@@ -1214,9 +1194,7 @@ pub(super) fn execute_builtin<E>(
                 });
                 return Ok(CommandOutcome {
                     transaction: Some(transaction),
-                    effects: Vec::new(),
-                    message: None,
-                    follow_up: Vec::new(),
+                    ..CommandOutcome::empty()
                 });
             }
             let at = match (register.shape, before) {
@@ -1296,9 +1274,7 @@ pub(super) fn execute_builtin<E>(
 
     Ok(CommandOutcome {
         transaction: Some(transaction),
-        effects: Vec::new(),
-        message: None,
-        follow_up: Vec::new(),
+        ..CommandOutcome::empty()
     })
 }
 
