@@ -1,3 +1,5 @@
+//! LSP snippet parsing and tab-stop expansion.
+
 use std::collections::HashMap;
 
 #[derive(Clone, Debug, Eq, PartialEq)]

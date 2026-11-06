@@ -1,3 +1,5 @@
+//! Tests for language-server connections and protocol data.
+
 use std::path::Path;
 use std::thread;
 use std::time::Duration;
@@ -49,7 +51,7 @@ use crate::language::lsp::protocol::server_status_event;
 
 use crate::language::lsp::protocol::workspace_edit;
 
-use crate::language::lsp::session::LspService;
+use crate::language::lsp::session::LspClient;
 
 use crate::editor::text::PositionEncoding;
 use crate::language::lsp::session::requested_executable_name;
@@ -921,7 +923,7 @@ fn failed_document_sync_keeps_the_last_sent_document_and_stops_the_session() {
     let (buffer, _) = editor
         .open_text(TextBuffer::from_text("old"), Some(old.path.clone()))
         .unwrap();
-    let mut service = LspService::new();
+    let mut service = LspClient::new();
     let endpoint = service.replace_edit_source_fixture(
         old.uri(),
         (buffer, editor.buffers[buffer].text.source_version()),
@@ -1282,7 +1284,7 @@ fn initialization_timeout_honors_the_one_second_minimum_and_longer_policy() {
         (Duration::from_millis(100), Duration::from_secs(1)),
         (Duration::from_millis(1500), Duration::from_millis(1500)),
     ] {
-        let mut service = LspService::new();
+        let mut service = LspClient::new();
         let started = Instant::now();
         service
             .start_session_absolute_with_policy(crate::language::lsp::LspSessionLaunch {
@@ -1349,7 +1351,7 @@ fn stopping_does_not_wait_for_a_daemon_that_kept_the_servers_pipes() {
         install: None,
         pins: Vec::new(),
     };
-    let mut service = LspService::new();
+    let mut service = LspClient::new();
     service
         .start_session_absolute_with_policy(crate::language::lsp::LspSessionLaunch {
             session_key: &definition.id,
@@ -1543,7 +1545,7 @@ while True:
         version: 1,
         text: "a😀".into(),
     };
-    let mut service = LspService::new();
+    let mut service = LspClient::new();
     service
         .start_session_absolute_with_policy(crate::language::lsp::LspSessionLaunch {
             session_key: &definition.id,
@@ -1910,14 +1912,14 @@ fn file_uris_preserve_non_utf8_path_bytes() {
     assert_eq!(path_from_file_uri(&file_uri(&b)), Some(b));
 }
 
-pub(super) fn boundary_service(script: &str) -> (tempfile::TempDir, LspService, LspDocument) {
+pub(super) fn boundary_service(script: &str) -> (tempfile::TempDir, LspClient, LspDocument) {
     boundary_service_with_policy(script, LspPolicy::default())
 }
 
 fn boundary_service_with_policy(
     script: &str,
     policy: LspPolicy,
-) -> (tempfile::TempDir, LspService, LspDocument) {
+) -> (tempfile::TempDir, LspClient, LspDocument) {
     let root = tempfile::tempdir().unwrap();
     let path = root.path().join("server.py");
     std::fs::write(&path, script).unwrap();
@@ -1933,7 +1935,7 @@ fn boundary_service_with_policy(
         version: 0,
         text: "fn main() {}".into(),
     };
-    let mut service = LspService::new();
+    let mut service = LspClient::new();
     service
         .start_session_absolute_with_policy(crate::language::lsp::LspSessionLaunch {
             session_key: "boundary",
@@ -2324,7 +2326,7 @@ fn server_that_never_initializes_fails_within_the_request_timeout() {
         install: None,
         pins: Vec::new(),
     };
-    let mut service = LspService::new();
+    let mut service = LspClient::new();
     service
         .start_session_absolute_with_policy(crate::language::lsp::LspSessionLaunch {
             session_key: &definition.id,

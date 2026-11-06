@@ -1,3 +1,5 @@
+//! Incoming language-server messages and responses.
+
 use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::time::Instant;

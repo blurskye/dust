@@ -1,3 +1,5 @@
+//! Language-server transport and protocol failures.
+
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -13,7 +15,7 @@ pub enum LspError {
     #[error("language server executable `{0}` is not installed")]
     ExecutableMissing(String),
     #[error(
-        "language server launch requires an absolute executable from ExecutionPreflightService"
+        "language server launch requires an absolute executable from ExecutionPreflightWorker"
     )]
     PreflightRequired,
     #[error("failed to create language-server thread: {0}")]

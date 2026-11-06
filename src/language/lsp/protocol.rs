@@ -1,3 +1,5 @@
+//! LSP protocol parsing and serialization.
+
 use std::path::Path;
 
 use serde_json::Value;

@@ -1,3 +1,5 @@
+//! Syntax parsing and highlight results.
+
 #![forbid(unsafe_code)]
 
 use std::collections::HashMap;
@@ -814,14 +816,14 @@ pub enum SyntaxError {
     #[error("syntax worker stopped")]
     Stopped,
 }
-pub struct SyntaxService {
+pub struct SyntaxWorker {
     sender: SyncSender<Request>,
     receiver: Receiver<SyntaxEvent>,
     slots: Receiver<()>,
     release_slot: SyncSender<()>,
     latest: Arc<Mutex<HashMap<SyntaxDocumentId, u64>>>,
 }
-impl SyntaxService {
+impl SyntaxWorker {
     pub fn start(capacity: usize) -> Self {
         let (tx, rx) = mpsc::sync_channel::<Request>(capacity.max(1));
         let (etx, erx) = mpsc::sync_channel(capacity.max(1));
@@ -1753,7 +1755,7 @@ mod tests {
         let (_events, receiver) = mpsc::sync_channel(1);
         let (release_slot, slots) = mpsc::sync_channel(1);
         release_slot.try_send(()).unwrap();
-        let service = SyntaxService {
+        let service = SyntaxWorker {
             sender,
             receiver,
             slots,
@@ -1789,7 +1791,7 @@ mod tests {
 
     #[test]
     fn saturated_result_queue_retains_completed_parses() {
-        let service = SyntaxService::start(1);
+        let service = SyntaxWorker::start(1);
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         for id in 1..=3 {
             loop {

@@ -1,3 +1,5 @@
+//! Language-server request and response data.
+
 use crate::language::lsp::paths::file_uri;
 use serde_json::Value;
 use serde_json::json;

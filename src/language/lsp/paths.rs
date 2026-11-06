@@ -1,3 +1,5 @@
+//! LSP document paths and URI conversion.
+
 use std::path::Path;
 use std::path::PathBuf;
 

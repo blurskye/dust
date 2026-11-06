@@ -1,3 +1,5 @@
+//! Language-server definitions and launch configuration.
+
 use crate::editor::text::PositionEncoding;
 use crate::language::lsp::MAX_LOG_LINES;
 use crate::language::lsp::REQUEST_TIMEOUT;

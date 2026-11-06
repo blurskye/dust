@@ -1,3 +1,5 @@
+//! Sanitization of language-server Markdown.
+
 pub fn sanitize_markdown(source: &str, maximum_chars: usize) -> String {
     let mut out = String::new();
     let mut escape = false;

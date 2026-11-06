@@ -1,3 +1,5 @@
+//! Language-server connections and protocol data.
+
 #![forbid(unsafe_code)]
 
 use std::time::Duration;
@@ -52,7 +54,7 @@ pub use server::LspServerConfiguration;
 pub use server::LspSessionKey;
 pub use server::SyncKind;
 mod session;
-pub use session::LspService;
+pub use session::LspClient;
 pub use session::LspSessionLaunch;
 mod paths;
 mod protocol;

@@ -1,3 +1,5 @@
+//! Language-server sessions, requests and worker communication.
+
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::VecDeque;
@@ -143,7 +145,7 @@ pub(super) struct SessionHandle {
     stop_requested: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
-pub struct LspService {
+pub struct LspClient {
     events: SyncSender<OwnedLspEvent>,
     receiver: Receiver<OwnedLspEvent>,
     sessions: BTreeMap<String, SessionHandle>,
@@ -161,7 +163,7 @@ pub struct LspSessionLaunch<'a> {
     pub environment: BTreeMap<String, std::ffi::OsString>,
 }
 
-impl LspService {
+impl LspClient {
     #[must_use]
     pub fn new() -> Self {
         let (events, receiver) = mpsc::sync_channel(EVENT_QUEUE);
@@ -448,13 +450,13 @@ impl LspService {
     }
 }
 
-impl Default for LspService {
+impl Default for LspClient {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl Drop for LspService {
+impl Drop for LspClient {
     fn drop(&mut self) {
         for server in self.sessions.keys().cloned().collect::<Vec<_>>() {
             let _ = self.stop(&server);
@@ -1385,7 +1387,7 @@ fn write_apply_response(
 }
 
 #[cfg(test)]
-impl LspService {
+impl LspClient {
     pub(crate) fn replace_edit_source_fixture(
         &mut self,
         uri: String,
@@ -1564,7 +1566,7 @@ while True:
         .unwrap();
         assert!(wire.is_empty());
         document.version = 1;
-        document.text = "x".repeat(crate::process::PROTOCOL_MESSAGE_BYTE_CEILING);
+        document.text = "x".repeat(crate::process::MAX_PROTOCOL_MESSAGE_BYTES);
         assert!(
             sync_document(
                 &mut wire,
@@ -1604,7 +1606,7 @@ while True:
             sync_document(
                 &mut std::io::sink(),
                 &LspDocument {
-                    text: "x".repeat(crate::process::PROTOCOL_MESSAGE_BYTE_CEILING),
+                    text: "x".repeat(crate::process::MAX_PROTOCOL_MESSAGE_BYTES),
                     ..document
                 },
                 true,
@@ -1630,7 +1632,7 @@ while True:
             version: 0,
             text: "old".into(),
         };
-        let mut service = LspService::new();
+        let mut service = LspClient::new();
         let endpoint = service.replace_edit_source_fixture(
             document.uri(),
             (buffer, text.source_version()),
@@ -1801,7 +1803,7 @@ while True:
         let (buffer, _) = editor
             .open_text(text.clone(), Some("/fixture/main.rs".into()))
             .unwrap();
-        let mut service = LspService::new();
+        let mut service = LspClient::new();
         let endpoint = service.replace_edit_source_fixture(
             "file:///fixture/main.rs".into(),
             (buffer, text.source_version()),
@@ -1868,7 +1870,7 @@ while True:
             text: "newer unsaved text".into(),
         };
         let source = (buffer, text.source_version());
-        let mut service = LspService::new();
+        let mut service = LspClient::new();
         let endpoint = service.replace_edit_source_fixture(
             document.uri(),
             source.clone(),
@@ -1937,7 +1939,7 @@ while True:
             let mut editor = EditorState::new("/fixture".into());
             let text = TextBuffer::from_text("a");
             let (buffer, _) = editor.open_text(text.clone(), None).unwrap();
-            let mut service = LspService::new();
+            let mut service = LspClient::new();
             let endpoint = service.replace_edit_source_fixture(
                 "file:///fixture/main.rs".into(),
                 (buffer, text.source_version()),
@@ -2032,7 +2034,7 @@ while True:
             version: 0,
             text: "first".into(),
         };
-        let mut service = LspService::new();
+        let mut service = LspClient::new();
         let endpoint = service.replace_edit_source_fixture(
             document.uri(),
             (buffer, first.source_version()),
