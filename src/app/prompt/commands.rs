@@ -1,3 +1,5 @@
+//! Command registration and execution for input prompts, confirmations and command completion.
+
 use crate::app::App;
 use crate::app::commands::AppEffect;
 use crate::ui::PromptKind;
