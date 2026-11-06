@@ -437,14 +437,16 @@ pub fn run_interactive(
                 Ok(false)
             } else if input_arrived || terminal.needs_full_draw() || drawn != Some(inputs) {
                 drawn = Some(inputs);
-                let frame = render_frame(
+                let config = application.input_render_config();
+                let mut frame = render_frame(
                     &application.state,
                     &application.ui,
-                    application.configuration.settings(),
+                    config.as_ref(),
                     application.configuration.dashboard(),
                     application.window_session.width(),
                     application.window_session.height(),
                 );
+                application.project_mode_cursor(&mut frame);
                 terminal.draw(&frame)
             } else {
                 Ok(false)

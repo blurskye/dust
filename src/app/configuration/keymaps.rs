@@ -140,6 +140,16 @@ impl EffectiveBinding {
 }
 
 impl ResolvedKeymaps {
+    pub(in crate::app) fn layers(
+        &self,
+        context: &str,
+    ) -> impl Iterator<Item = &crate::editor::input::Keymap> {
+        self.bindings
+            .get(context)
+            .into_iter()
+            .flat_map(KeymapBindings::highest_first)
+    }
+
     pub(crate) fn resolve(
         &self,
         sequence: &mut KeymapSequence,

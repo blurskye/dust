@@ -25,11 +25,13 @@ use crate::editor::input::KeymapSequence;
 use crate::editor::input::MappingResolution;
 use crate::editor::input::ModalResolver;
 use crate::editor::input::PendingInputContext;
+use crate::editor::input::{Keymap, ModeCursor, ModeKeys, NamedMode};
 use crate::ui::KeyHintUiRow;
 use crate::ui::KeyHintUiState;
 
 use std::collections::BTreeMap;
 use std::collections::HashMap;
+use std::collections::VecDeque;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -57,6 +59,14 @@ pub(super) struct InputState {
     )>,
     pending_breakpoint: Option<crate::debugger::DapSourceBreakpoint>,
     modal: ModalResolver,
+    named_mode: Option<(
+        crate::editor::EditorWindowVersion,
+        crate::editor::ViewId,
+        NamedMode,
+    )>,
+    key_layers: Vec<Keymap>,
+    pending_command: Option<PendingCommand>,
+    held_input: VecDeque<crate::app::editing::clipboard::DeferredInput>,
     sequence: KeymapSequence,
     pending: Option<PendingKeymap>,
     hints: Option<KeyHintUiState>,
@@ -146,6 +156,10 @@ impl InputState {
             search_origin: None,
             pending_breakpoint: None,
             modal: ModalResolver::with_count_limit(count_limit),
+            named_mode: None,
+            key_layers: Vec::new(),
+            pending_command: None,
+            held_input: VecDeque::new(),
             sequence: KeymapSequence::default(),
             pending: None,
             hints: None,
@@ -303,7 +317,20 @@ impl InputState {
             self.cancel_mapping();
         }
         let was_pending = self.pending.is_some();
-        let result = bindings.resolve(&mut self.sequence, context, key);
+        let result = if context.starts_with("editor.") {
+            let mode = self.named_mode.as_ref().map(|(_, _, mode)| mode);
+            let inherit = mode.is_none_or(|mode| mode.base().is_some());
+            self.sequence.feed_layers(
+                self.key_layers
+                    .iter()
+                    .rev()
+                    .chain(mode.map(NamedMode::layer))
+                    .chain(bindings.layers(context).filter(|_| inherit)),
+                key,
+            )
+        } else {
+            bindings.resolve(&mut self.sequence, context, key)
+        };
         match result {
             MappingResolution::Pending | MappingResolution::Ambiguous => {
                 let started_at = self
@@ -573,6 +600,14 @@ impl InputState {
                 if text_changed =>
             {
                 self.last_change = vec![semantic];
+            }
+            _ if text_changed && repeat_override.is_some() => {
+                if let Some(pending) = &mut self.pending_change {
+                    pending.push(semantic);
+                    self.pending_change_edited = true;
+                } else {
+                    self.last_change = vec![semantic];
+                }
             }
             _ => {}
         }
@@ -2097,6 +2132,12 @@ impl App {
 
 impl App {
     pub(in crate::app) fn handle_event(&mut self, event: UiEvent) {
+        if self.input.command_pending() && !matches!(event, UiEvent::Resize(_, _)) {
+            self.input
+                .held_input
+                .push_back(crate::app::editing::clipboard::DeferredInput::Event(event));
+            return;
+        }
         if self.clipboard.waiting() && !matches!(event, UiEvent::Resize(_, _)) {
             self.clipboard
                 .defer(crate::app::editing::clipboard::DeferredInput::Event(event));
@@ -2562,6 +2603,18 @@ impl App {
 
 impl App {
     pub(in crate::app) fn handle_configured_key(&mut self, key: KeyEvent) {
+        if self.input.command_pending() {
+            self.input
+                .held_input
+                .push_back(crate::app::editing::clipboard::DeferredInput::Event(
+                    UiEvent::Key {
+                        key,
+                        kind: KeyInputKind::Press,
+                    },
+                ));
+            return;
+        }
+        self.reconcile_named_mode();
         if self.clipboard.waiting() {
             self.clipboard
                 .defer(crate::app::editing::clipboard::DeferredInput::Event(
@@ -2620,7 +2673,14 @@ impl App {
             // and `<leader>gz` must not start an operator. While typing, all the keys are text,
             // so `ja` with `jk` mapped types `ja`.
             MappingResolution::Replay(prefix, replay) => {
-                if context.starts_with("editor.") && !self.typing() {
+                if context.starts_with("editor.")
+                    && !self.typing()
+                    && !self
+                        .input
+                        .named_mode
+                        .as_ref()
+                        .is_some_and(|(_, _, mode)| mode.base().is_none())
+                {
                     self.input.cancel_pending();
                 } else {
                     self.type_unmapped(&context, &prefix);
@@ -2676,6 +2736,25 @@ impl App {
     /// Types `keys` as text where `context` takes text, without looking them up again.
     /// Returns false when the context takes no text or a key has none.
     fn type_unmapped(&mut self, context: &str, keys: &[KeyEvent]) -> bool {
+        if context.starts_with("editor.")
+            && self
+                .input
+                .named_mode
+                .as_ref()
+                .is_some_and(|(_, _, mode)| mode.base().is_none())
+        {
+            for key in keys {
+                if let Some(invocation) = self
+                    .input
+                    .named_mode
+                    .as_ref()
+                    .and_then(|(_, _, mode)| mode.capture(key))
+                {
+                    self.invoke_mapped(invocation);
+                }
+            }
+            return true;
+        }
         let input = &self.configuration.settings().input;
         let context = if context == "snippet" {
             "editor.insert"
@@ -2703,6 +2782,14 @@ impl App {
 
 impl App {
     pub(in crate::app) fn handle_configured_paste(&mut self, text: String) {
+        if self.input.command_pending() {
+            self.input
+                .held_input
+                .push_back(crate::app::editing::clipboard::DeferredInput::Event(
+                    UiEvent::Paste(text),
+                ));
+            return;
+        }
         self.close_documentation();
         if self.window_session.terminal_focused()
             && let Some(id) = self.keyboard_terminal()
@@ -2809,7 +2896,7 @@ impl App {
 
 impl App {
     pub(in crate::app) fn flush_keymap_timeout(&mut self) {
-        if self.clipboard.waiting() {
+        if self.input.command_pending() || self.clipboard.waiting() {
             return;
         }
         let context = self.active_input_context();
@@ -2890,3 +2977,244 @@ impl App {
 }
 
 use crate::windows::DockEdge;
+
+/// Native input operations; ABI adapters use these same effects.
+#[derive(Clone, Debug)]
+pub enum InputCommand {
+    EnterMode(Box<NamedMode>),
+    LeaveMode,
+    PushLayer(Box<Keymap>),
+    PopLayer,
+    /// The command's eventual result must complete this id, including on failure or timeout.
+    Wait(u64),
+    Complete {
+        id: u64,
+        succeeded: bool,
+        text_changed: bool,
+    },
+}
+
+struct PendingCommand {
+    id: u64,
+    invocation: CommandInvocation,
+    repeat: Option<CommandInvocation>,
+    suppress_repeat: bool,
+    text_changed: bool,
+}
+
+impl InputState {
+    pub(in crate::app) fn command_pending(&self) -> bool {
+        self.pending_command.is_some()
+    }
+
+    pub(in crate::app) fn hold_invocation(&mut self, invocation: &CommandInvocation) -> bool {
+        if !self.command_pending() {
+            return false;
+        }
+        self.held_input
+            .push_back(crate::app::editing::clipboard::DeferredInput::Invocation(
+                invocation.clone(),
+            ));
+        true
+    }
+
+    pub(in crate::app) fn record_command_outcome(
+        &mut self,
+        invocation: &CommandInvocation,
+        repeat: Option<&CommandInvocation>,
+        suppress_repeat: bool,
+        text_changed: bool,
+        effects: &[AppEffect],
+    ) {
+        if let Some(id) = effects.iter().find_map(|effect| match effect {
+            AppEffect::Input(InputCommand::Wait(id)) => Some(*id),
+            _ => None,
+        }) {
+            self.pending_command = Some(PendingCommand {
+                id,
+                invocation: invocation.clone(),
+                // A completed asynchronous edit repeats the semantic command, not its effects.
+                repeat: Some(repeat.unwrap_or(invocation).clone()),
+                suppress_repeat,
+                text_changed,
+            });
+        } else {
+            self.record_successful_invocation(invocation, repeat, suppress_repeat, text_changed);
+        }
+    }
+
+    fn finish_command(&mut self, id: u64, succeeded: bool, text_changed: bool) -> bool {
+        if self
+            .pending_command
+            .as_ref()
+            .is_none_or(|pending| pending.id != id)
+        {
+            return false;
+        }
+        let pending = self.pending_command.take().expect("matching command");
+        if succeeded {
+            self.record_successful_invocation(
+                &pending.invocation,
+                pending.repeat.as_ref(),
+                pending.suppress_repeat,
+                pending.text_changed || text_changed,
+            );
+        }
+        true
+    }
+}
+
+impl App {
+    pub(in crate::app) fn complete_input_command(
+        &mut self,
+        id: u64,
+        succeeded: bool,
+        text_changed: bool,
+    ) {
+        if !self.input.finish_command(id, succeeded, text_changed) {
+            return;
+        }
+        if succeeded {
+            self.continue_macro_replay();
+        } else {
+            self.cancel_macro_replay();
+            self.input.held_input.retain(|input| !matches!(input,
+                crate::app::editing::clipboard::DeferredInput::Invocation(invocation)
+                    if matches!(invocation.source, InvocationSource::Repeat | InvocationSource::Macro)));
+        }
+        while !self.input.command_pending() {
+            let Some(input) = self.input.held_input.pop_front() else {
+                break;
+            };
+            // Expansions of this key (dot, mappings) precede the keys typed after it.
+            let later = std::mem::take(&mut self.input.held_input);
+            match input {
+                crate::app::editing::clipboard::DeferredInput::Event(event) => {
+                    self.handle_event(event)
+                }
+                crate::app::editing::clipboard::DeferredInput::Invocation(invocation) => {
+                    self.invoke(invocation)
+                }
+                crate::app::editing::clipboard::DeferredInput::MacroReplay(register, count) => {
+                    self.replay_macro(register, count);
+                }
+            }
+            self.input.held_input.extend(later);
+        }
+    }
+
+    pub(in crate::app) fn fail_pending_input_command(&mut self) {
+        if let Some(pending) = &self.input.pending_command {
+            self.complete_input_command(pending.id, false, false);
+        }
+    }
+
+    fn reconcile_named_mode(&mut self) {
+        let valid =
+            self.input
+                .named_mode
+                .as_ref()
+                .is_none_or(|(editor, view, mode)| {
+                    editor.same_editor(&self.state.window_version())
+                        && self.state.active_view == Some(*view)
+                        && self.state.views.get(*view).is_some_and(|view| {
+                            view.mode == mode.base().unwrap_or(EditorMode::Normal)
+                        })
+                });
+        if !valid {
+            self.input.named_mode = None;
+            self.input.cancel_mapping();
+        }
+    }
+
+    /// Built-in and named modes expose the same metadata; configuration remains the default owner.
+    pub(in crate::app) fn editor_input_mode(&self) -> Option<NamedMode> {
+        let view_id = self.state.active_view?;
+        let view = self.state.views.get(view_id)?;
+        if let Some((editor, id, mode)) = &self.input.named_mode
+            && *id == view_id
+            && editor.same_editor(&self.state.window_version())
+            && view.mode == mode.base().unwrap_or(EditorMode::Normal)
+        {
+            return Some(mode.clone());
+        }
+        let config = self.configuration.settings();
+        let name = mode_name(view.mode);
+        let shape = match view.mode {
+            EditorMode::Insert => config.ui.cursor.insert,
+            EditorMode::Replace => crate::ui::render::editor::REPLACE_CURSOR,
+            EditorMode::CommandLine => crate::ui::render::editor::COMMAND_CURSOR,
+            EditorMode::Prompt => crate::ui::render::editor::PROMPT_CURSOR,
+            EditorMode::Normal => config.ui.cursor.normal,
+            EditorMode::VisualChar
+            | EditorMode::VisualLine
+            | EditorMode::VisualBlock
+            | EditorMode::Multi => crate::ui::render::editor::VISUAL_CURSOR,
+            EditorMode::OperatorPending => crate::ui::render::editor::OPERATOR_PENDING_CURSOR,
+        };
+        let cursor = match shape {
+            crate::config::CursorShape::Default => ModeCursor::Default,
+            crate::config::CursorShape::Block => ModeCursor::Block,
+            crate::config::CursorShape::Bar => ModeCursor::Bar,
+            crate::config::CursorShape::Underline => ModeCursor::Underline,
+            crate::config::CursorShape::BlinkingBlock => ModeCursor::BlinkingBlock,
+            crate::config::CursorShape::BlinkingBar => ModeCursor::BlinkingBar,
+            crate::config::CursorShape::BlinkingUnderline => ModeCursor::BlinkingUnderline,
+        };
+        NamedMode::new(
+            name.into(),
+            config
+                .ui
+                .status_line
+                .mode_labels
+                .get(name)
+                .cloned()
+                .unwrap_or_else(|| name.into()),
+            cursor,
+            Keymap::default(),
+            ModeKeys::Base(view.mode),
+        )
+        .ok()
+    }
+
+    pub(in crate::app) fn input_render_config(
+        &self,
+    ) -> std::borrow::Cow<'_, crate::config::Config> {
+        let config = self.configuration.settings();
+        if self.input.named_mode.is_some()
+            && self.active_input_context().starts_with("editor.")
+            && let Some(mode) = self.editor_input_mode()
+        {
+            let mut config = config.clone();
+            let base = mode.base().unwrap_or(EditorMode::Normal);
+            config
+                .ui
+                .status_line
+                .mode_labels
+                .insert(mode_name(base).into(), mode.label().into());
+            std::borrow::Cow::Owned(config)
+        } else {
+            std::borrow::Cow::Borrowed(config)
+        }
+    }
+
+    pub(in crate::app) fn project_mode_cursor(&self, frame: &mut crate::ui::Frame) {
+        if !self.active_input_context().starts_with("editor.") {
+            return;
+        }
+        if let Some(mode) = self.editor_input_mode()
+            && let Some((_, _, cursor)) = &mut frame.cursor
+        {
+            use crossterm::cursor::SetCursorStyle;
+            *cursor = match mode.cursor() {
+                ModeCursor::Default => SetCursorStyle::DefaultUserShape,
+                ModeCursor::Block => SetCursorStyle::SteadyBlock,
+                ModeCursor::Bar => SetCursorStyle::SteadyBar,
+                ModeCursor::Underline => SetCursorStyle::SteadyUnderScore,
+                ModeCursor::BlinkingBlock => SetCursorStyle::BlinkingBlock,
+                ModeCursor::BlinkingBar => SetCursorStyle::BlinkingBar,
+                ModeCursor::BlinkingUnderline => SetCursorStyle::BlinkingUnderScore,
+            };
+        }
+    }
+}
