@@ -80,17 +80,17 @@ fn mutation_service_rejects_stale_worktree_wrong_hunk_and_suppresses_cancelled_l
         GitMutationError::StaleWorktree
     );
     assert_eq!(
-        stage_hunk(GitMutationGeneration(77), &base, &AtomicBool::new(true)),
+        stage_hunk(GitMutationRequestId(77), &base, &AtomicBool::new(true)),
         Err(GitMutationError::Cancelled)
     );
     service
         .start(GitMutationRequest::StageHunk(stale_worktree))
         .unwrap();
     service.cancel();
-    let generation = service.next;
+    let request_id = service.next;
     for _ in 0..256 {
         assert!(service.poll().unwrap().is_none());
-        assert_eq!(service.next, generation);
+        assert_eq!(service.next, request_id);
     }
 }
 
@@ -164,7 +164,7 @@ fn status_policy(root: &Path) -> GitStatusPolicy {
 
 fn read_status(root: &Path) -> GitStatusSnapshot {
     crate::git::status::read_status(
-        GitStatusGeneration(1),
+        GitStatusRequestId(1),
         &status_policy(root),
         &[],
         &AtomicBool::new(false),
@@ -258,7 +258,7 @@ fn status_path_budget_includes_rename_source() {
     let mut policy = status_policy(dir.path());
     policy.maximum_path_bytes = 1;
     let snapshot = crate::git::status::read_status(
-        GitStatusGeneration(1),
+        GitStatusRequestId(1),
         &policy,
         &[],
         &AtomicBool::new(false),
@@ -320,7 +320,7 @@ fn status_keeps_index_and_worktree_codes_independent() {
     index.write().unwrap();
     std::fs::write(dir.path().join("added.txt"), "modified after staging\n").unwrap();
     let snapshot = crate::git::status::read_status(
-        GitStatusGeneration(1),
+        GitStatusRequestId(1),
         &GitStatusPolicy {
             root: dir.path().into(),
             root_revision: 1,
@@ -379,7 +379,7 @@ fn worktree_hash_rejects_oversized_files_before_reading() {
 }
 
 #[test]
-fn nested_root_is_scoped_and_ceilings_truncate() {
+fn nested_root_is_scoped_and_limits_truncate_results() {
     let dir = tempdir().unwrap();
     let repo = git2::Repository::init(dir.path()).unwrap();
     std::fs::create_dir(dir.path().join("nested")).unwrap();
@@ -469,7 +469,7 @@ fn unstaged_unicode_hunks_are_bounded_and_revision_owned() {
         deadline: Duration::from_secs(2),
     };
     let mut service = GitHunkWorker::default();
-    let generation = service.start(policy.clone()).unwrap();
+    let request_id = service.start(policy.clone()).unwrap();
     let deadline = Instant::now() + Duration::from_secs(3);
     let snapshot = loop {
         if let Some(snapshot) = service.poll().unwrap() {
@@ -478,7 +478,7 @@ fn unstaged_unicode_hunks_are_bounded_and_revision_owned() {
         assert!(Instant::now() < deadline);
         thread::yield_now()
     };
-    assert_eq!(snapshot.generation, generation);
+    assert_eq!(snapshot.request_id, request_id);
     for _ in 0..256 {
         assert!(service.snapshot_if_changed(snapshot.revision).is_none())
     }
@@ -527,7 +527,7 @@ fn empty_hunks_still_obey_the_request_deadline_and_cancellation() {
     assert_eq!(read_hunks(&policy), Err(GitHunkError::Deadline));
     assert_eq!(
         hunks::read_buffer_hunks_owned(
-            GitHunkGeneration(0),
+            GitHunkRequestId(0),
             &policy,
             GitHunkBufferInput {
                 revision: 1,
@@ -550,7 +550,7 @@ fn buffer_hunks_refuse_unmerged_paths_but_allow_untracked_files() {
     };
     assert_eq!(
         hunks::read_buffer_hunks_owned(
-            GitHunkGeneration(0),
+            GitHunkRequestId(0),
             &policy,
             input.clone(),
             &AtomicBool::new(false)
@@ -558,7 +558,7 @@ fn buffer_hunks_refuse_unmerged_paths_but_allow_untracked_files() {
         Err(GitHunkError::Unmerged)
     );
     let untracked = hunks::read_buffer_hunks_owned(
-        GitHunkGeneration(0),
+        GitHunkRequestId(0),
         &GitHunkPolicy {
             file: "new.txt".into(),
             ..policy
@@ -760,7 +760,7 @@ fn mutation_service_stages_exact_hunk_and_rejects_stale_index() {
         deadline: Duration::from_secs(2),
     };
     let mut service = GitMutationWorker::default();
-    let generation = service
+    let request_id = service
         .start(GitMutationRequest::StageHunk(request.clone()))
         .unwrap();
     let deadline = Instant::now() + Duration::from_secs(3);
@@ -771,7 +771,7 @@ fn mutation_service_stages_exact_hunk_and_rejects_stale_index() {
         assert!(Instant::now() < deadline);
         thread::yield_now()
     };
-    assert_eq!(result.generation, generation);
+    assert_eq!(result.request_id, request_id);
     assert_eq!(result.kind, GitMutationKind::StageHunk);
     assert_ne!(result.before, result.after);
     assert_eq!(
@@ -938,7 +938,7 @@ fn mutation_service_rejects_stale_worktree_wrong_hunk_and_cancelled_requests() {
         GitMutationError::StaleWorktree
     );
     assert_eq!(
-        stage_hunk(GitMutationGeneration(77), &base, &AtomicBool::new(true)),
+        stage_hunk(GitMutationRequestId(77), &base, &AtomicBool::new(true)),
         Err(GitMutationError::Cancelled)
     );
 }
@@ -1108,7 +1108,7 @@ fn git_status_aggregation_and_hunk_signs_are_deterministic_and_typed() {
     assert!(!aggregate.contains_key(&root.join("../escape")));
 
     let snapshot = GitHunkSnapshot {
-        generation: GitHunkGeneration(1),
+        request_id: GitHunkRequestId(1),
         revision: 1,
         repository_id: GitRepositoryId(1),
         status_revision: 1,
@@ -3595,7 +3595,7 @@ fn nested_hunk_mutations_use_repository_paths() {
     let snapshot = read_hunks(&policy).unwrap();
     let hunk = snapshot.hunks[0].clone();
     super::mutation::reset_hunk(
-        GitMutationGeneration(1),
+        GitMutationRequestId(1),
         &GitResetHunkRequest {
             policy,
             hunk_snapshot_revision: 1,
@@ -3840,7 +3840,7 @@ fn hunk_mutations_quote_paths_and_leave_similarly_named_files_unchanged() {
         let snapshot = read_hunks(&policy).unwrap();
         let hunk = snapshot.hunks[0].clone();
         crate::git::mutation::reset_hunk(
-            GitMutationGeneration(1),
+            GitMutationRequestId(1),
             &GitResetHunkRequest {
                 policy,
                 hunk_snapshot_revision: 1,
@@ -3895,7 +3895,7 @@ fn hunk_mutations_preserve_missing_final_newlines() {
         let snapshot = read_hunks(&unstaged).unwrap();
         let hunk = snapshot.hunks[0].clone();
         crate::git::mutation::reset_hunk(
-            GitMutationGeneration(1),
+            GitMutationRequestId(1),
             &GitResetHunkRequest {
                 policy: unstaged,
                 hunk_snapshot_revision: 1,
@@ -4502,7 +4502,7 @@ fn partial_reset_validates_selections_and_handles_large_selected_runs() {
         request.selected_lines = invalid;
         assert_eq!(
             crate::git::mutation::reset_hunk(
-                GitMutationGeneration(1),
+                GitMutationRequestId(1),
                 &request,
                 &AtomicBool::new(false),
             ),
@@ -4526,7 +4526,7 @@ fn partial_reset_validates_selections_and_handles_large_selected_runs() {
         })
         .collect();
     assert_eq!(request.selected_lines.len(), 30_000);
-    crate::git::mutation::reset_hunk(GitMutationGeneration(1), &request, &AtomicBool::new(false))
+    crate::git::mutation::reset_hunk(GitMutationRequestId(1), &request, &AtomicBool::new(false))
         .unwrap();
     assert_eq!(
         std::fs::read_to_string(&file).unwrap(),
@@ -4553,7 +4553,7 @@ fn partial_reset_preserves_unselected_replacement_lines() {
         })
         .collect();
     crate::git::mutation::reset_hunk(
-        GitMutationGeneration(1),
+        GitMutationRequestId(1),
         &GitResetHunkRequest {
             policy,
             hunk_snapshot_revision: 1,

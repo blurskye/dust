@@ -15,7 +15,7 @@ use std::time::Instant;
 use thiserror::Error;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct GitBranchGeneration(pub u64);
+pub struct GitBranchRequestId(pub u64);
 #[derive(Clone, Debug)]
 pub struct GitBranchListRequest {
     pub repository: PathBuf,
@@ -69,7 +69,7 @@ pub struct GitWorktreeEntry {
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct GitBranchList {
-    pub generation: GitBranchGeneration,
+    pub request_id: GitBranchRequestId,
     pub branches: Vec<GitBranchEntry>,
     pub worktrees: Vec<GitWorktreeEntry>,
 }
@@ -119,7 +119,7 @@ pub(super) enum GitBranchEvent {
 #[derive(Default)]
 pub struct GitBranchWorker {
     pub(super) next: u64,
-    active: Option<GitBranchGeneration>,
+    active: Option<GitBranchRequestId>,
     cancel: Option<Arc<AtomicBool>>,
     receiver: Option<Receiver<GitBranchEvent>>,
     accepted: Option<GitBranchResult>,
@@ -129,7 +129,7 @@ impl GitBranchWorker {
     pub fn start(
         &mut self,
         request: GitBranchRequest,
-    ) -> Result<GitBranchGeneration, GitBranchError> {
+    ) -> Result<GitBranchRequestId, GitBranchError> {
         if !valid_request(&request) {
             return Err(GitBranchError::Invalid);
         }
@@ -139,22 +139,22 @@ impl GitBranchWorker {
         self.cancel();
         let mutating = !matches!(request, GitBranchRequest::List(_));
         self.next = self.next.saturating_add(1);
-        let generation = GitBranchGeneration(self.next);
+        let request_id = GitBranchRequestId(self.next);
         let cancel = Arc::new(AtomicBool::new(false));
         let worker = Arc::clone(&cancel);
         let (tx, rx) = mpsc::sync_channel(1);
         thread::Builder::new()
-            .name(format!("dust-git-branch-{}", generation.0))
+            .name(format!("dust-git-branch-{}", request_id.0))
             .spawn(move || {
-                let result = run(generation, &request, &worker);
+                let result = run(request_id, &request, &worker);
                 let _ = tx.send(GitBranchEvent::Complete(result));
             })
             .map_err(|_| GitBranchError::Stopped)?;
         self.mutating = mutating;
-        self.active = Some(generation);
+        self.active = Some(request_id);
         self.cancel = Some(cancel);
         self.receiver = Some(rx);
-        Ok(generation)
+        Ok(request_id)
     }
     pub fn cancel(&mut self) {
         if let Some(cancel) = self.cancel.take() {
@@ -178,9 +178,9 @@ impl GitBranchWorker {
                 self.cancel = None;
                 self.mutating = false;
                 let result = result?;
-                // A page carries its generation; a mutation is accepted for the active request.
+                // A page carries its request_id; a mutation is accepted for the active request.
                 if let GitBranchResult::List(list) = &result
-                    && Some(list.generation) != expected
+                    && Some(list.request_id) != expected
                 {
                     return Ok(None);
                 }
@@ -363,7 +363,7 @@ fn operation_name(state: git2::RepositoryState) -> Option<String> {
 }
 
 fn read_list(
-    generation: GitBranchGeneration,
+    request_id: GitBranchRequestId,
     request: &GitBranchListRequest,
     cancel: &AtomicBool,
     expires: Instant,
@@ -435,7 +435,7 @@ fn read_list(
     }
     check_request(cancel, expires)?;
     Ok(GitBranchResult::List(GitBranchList {
-        generation,
+        request_id,
         branches,
         worktrees,
     }))
@@ -630,7 +630,7 @@ fn add_worktree(
 }
 
 fn run(
-    generation: GitBranchGeneration,
+    request_id: GitBranchRequestId,
     request: &GitBranchRequest,
     cancel: &AtomicBool,
 ) -> Result<GitBranchResult, GitBranchError> {
@@ -643,7 +643,7 @@ fn run(
     let expires = Instant::now() + deadline;
     check_request(cancel, expires)?;
     match request {
-        GitBranchRequest::List(request) => read_list(generation, request, cancel, expires),
+        GitBranchRequest::List(request) => read_list(request_id, request, cancel, expires),
         GitBranchRequest::CreateDetachedWorktree {
             repository,
             name,

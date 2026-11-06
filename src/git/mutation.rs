@@ -24,7 +24,7 @@ use crate::git::hunks::GitHunk;
 
 use crate::git::hunks::GitHunkError;
 
-use crate::git::hunks::GitHunkGeneration;
+use crate::git::hunks::GitHunkRequestId;
 
 use crate::git::hunks::GitHunkId;
 
@@ -61,7 +61,7 @@ pub fn git_index_fingerprint(repository: &Path) -> Result<GitIndexFingerprint, G
     Ok(GitIndexFingerprint(hash.finalize().into()))
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct GitMutationGeneration(pub u64);
+pub struct GitMutationRequestId(pub u64);
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct GitHeadId(pub [u8; 20]);
 impl GitHeadId {
@@ -203,7 +203,7 @@ pub enum GitMutationKind {
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct GitMutationResult {
-    pub generation: GitMutationGeneration,
+    pub request_id: GitMutationRequestId,
     pub kind: GitMutationKind,
     /// Workspace-relative path the operation acted on.
     pub path: PathBuf,
@@ -259,7 +259,7 @@ pub(super) enum GitMutationEvent {
 #[derive(Default)]
 pub struct GitMutationWorker {
     pub(super) next: u64,
-    active: Option<GitMutationGeneration>,
+    active: Option<GitMutationRequestId>,
     cancel: Option<Arc<AtomicBool>>,
     receiver: Option<Receiver<GitMutationEvent>>,
     accepted: Option<GitMutationResult>,
@@ -268,7 +268,7 @@ impl GitMutationWorker {
     pub fn start(
         &mut self,
         request: GitMutationRequest,
-    ) -> Result<GitMutationGeneration, GitMutationError> {
+    ) -> Result<GitMutationRequestId, GitMutationError> {
         match &request {
             GitMutationRequest::StageHunk(request) => validate_legacy_request(
                 request.maximum_patch_bytes,
@@ -292,29 +292,29 @@ impl GitMutationWorker {
         }
         self.cancel();
         self.next = self.next.saturating_add(1);
-        let generation = GitMutationGeneration(self.next);
+        let request_id = GitMutationRequestId(self.next);
         let cancel = Arc::new(AtomicBool::new(false));
         let worker = Arc::clone(&cancel);
         let (tx, rx) = mpsc::sync_channel(1);
         thread::Builder::new()
-            .name(format!("dust-git-mutation-{}", generation.0))
+            .name(format!("dust-git-mutation-{}", request_id.0))
             .spawn(move || {
                 let result = match request {
                     GitMutationRequest::StageHunk(request) => {
-                        stage_hunk(generation, &request, &worker)
+                        stage_hunk(request_id, &request, &worker)
                     }
                     GitMutationRequest::ResetUnstagedHunk(request) => {
-                        reset_hunk(generation, &request, &worker)
+                        reset_hunk(request_id, &request, &worker)
                     }
-                    GitMutationRequest::Plan(plan) => apply_change_plan(generation, &plan, &worker),
+                    GitMutationRequest::Plan(plan) => apply_change_plan(request_id, &plan, &worker),
                 };
                 let _ = tx.send(GitMutationEvent::Complete(result));
             })
             .map_err(|_| GitMutationError::Stopped)?;
-        self.active = Some(generation);
+        self.active = Some(request_id);
         self.cancel = Some(cancel);
         self.receiver = Some(rx);
-        Ok(generation)
+        Ok(request_id)
     }
     pub fn cancel(&mut self) {
         if let Some(c) = self.cancel.take() {
@@ -334,7 +334,7 @@ impl GitMutationWorker {
                 self.receiver = None;
                 self.cancel = None;
                 let result = result?;
-                if expected != Some(result.generation) {
+                if expected != Some(result.request_id) {
                     return Ok(None);
                 }
                 self.accepted = Some(result);
@@ -358,18 +358,16 @@ pub fn worktree_hash(path: &Path) -> Result<([u8; 32], Vec<u8>), GitMutationErro
     use sha2::Digest;
     use sha2::Sha256;
     let bytes =
-        crate::files::read_file_with_ceiling(path, 8 * 1024 * 1024).map_err(
-            |error| match error {
-                crate::files::VfsError::NotRegularFile(_) => GitMutationError::UnsupportedPath,
-                crate::files::VfsError::Io { source, .. }
-                    if source.raw_os_error() == Some(nix::libc::ELOOP) =>
-                {
-                    GitMutationError::UnsupportedPath
-                }
-                crate::files::VfsError::DocumentTooLarge { .. } => GitMutationError::Invalid,
-                _ => GitMutationError::Backend,
-            },
-        )?;
+        crate::files::read_file_bounded(path, 8 * 1024 * 1024).map_err(|error| match error {
+            crate::files::VfsError::NotRegularFile(_) => GitMutationError::UnsupportedPath,
+            crate::files::VfsError::Io { source, .. }
+                if source.raw_os_error() == Some(nix::libc::ELOOP) =>
+            {
+                GitMutationError::UnsupportedPath
+            }
+            crate::files::VfsError::DocumentTooLarge { .. } => GitMutationError::Invalid,
+            _ => GitMutationError::Backend,
+        })?;
     let hash = Sha256::digest(&bytes).into();
     Ok((hash, bytes))
 }
@@ -479,7 +477,7 @@ impl IndexWrite {
 }
 
 pub(super) fn reset_hunk(
-    generation: GitMutationGeneration,
+    request_id: GitMutationRequestId,
     r: &GitResetHunkRequest,
     cancel: &AtomicBool,
 ) -> Result<GitMutationResult, GitMutationError> {
@@ -500,7 +498,7 @@ pub(super) fn reset_hunk(
         return Err(GitMutationError::StaleWorktree);
     }
     let snapshot =
-        read_hunks_owned(GitHunkGeneration(0), &r.policy, cancel).map_err(mutation_hunk_error)?;
+        read_hunks_owned(GitHunkRequestId(0), &r.policy, cancel).map_err(mutation_hunk_error)?;
     let current = snapshot
         .hunks
         .iter()
@@ -569,14 +567,14 @@ pub(super) fn reset_hunk(
     if after != before || worktree_state(&file)? == before_worktree {
         return Err(GitMutationError::Postcondition);
     }
-    let remaining = read_hunks_owned(GitHunkGeneration(0), &r.policy, cancel)
+    let remaining = read_hunks_owned(GitHunkRequestId(0), &r.policy, cancel)
         .map_err(|_| GitMutationError::Postcondition)?;
     // Part of a hunk can leave a hunk with the same header, and so the same id.
     if r.selected_lines.is_empty() && remaining.hunks.iter().any(|h| h.id == r.hunk_id) {
         return Err(GitMutationError::Postcondition);
     }
     Ok(GitMutationResult {
-        generation,
+        request_id,
         kind: GitMutationKind::ResetUnstagedHunk,
         path: r.policy.file.clone(),
         before,
@@ -586,7 +584,7 @@ pub(super) fn reset_hunk(
 }
 
 pub(super) fn stage_hunk(
-    generation: GitMutationGeneration,
+    request_id: GitMutationRequestId,
     r: &GitStageHunkRequest,
     cancel: &AtomicBool,
 ) -> Result<GitMutationResult, GitMutationError> {
@@ -607,7 +605,7 @@ pub(super) fn stage_hunk(
         return Err(GitMutationError::StaleWorktree);
     }
     let snapshot =
-        read_hunks_owned(GitHunkGeneration(0), &r.policy, cancel).map_err(mutation_hunk_error)?;
+        read_hunks_owned(GitHunkRequestId(0), &r.policy, cancel).map_err(mutation_hunk_error)?;
     let current = snapshot
         .hunks
         .iter()
@@ -645,7 +643,7 @@ pub(super) fn stage_hunk(
         return Err(GitMutationError::Postcondition);
     }
     Ok(GitMutationResult {
-        generation,
+        request_id,
         kind: GitMutationKind::StageHunk,
         path: r.policy.file.clone(),
         before,
@@ -680,7 +678,7 @@ pub(super) fn validate_legacy_request(
 }
 
 /// A plan must carry an index capture, and each kind must carry exactly the selection it
-/// needs. The unsaved list reuses W-08's existing path-byte ceiling rather than inventing one.
+/// needs. The unsaved list shares the status policy's path-byte limit.
 pub(super) fn validate_change_plan(plan: &GitChangePlanRequest) -> Result<(), GitMutationError> {
     if plan.maximum_patch_bytes == 0
         || plan.maximum_patch_bytes > 1024 * 1024
@@ -1070,7 +1068,7 @@ fn captured_hunk_patch(
     cancel: &AtomicBool,
 ) -> Result<Vec<u8>, GitMutationError> {
     let snapshot =
-        read_hunks_owned(GitHunkGeneration(0), &p.policy, cancel).map_err(mutation_hunk_error)?;
+        read_hunks_owned(GitHunkRequestId(0), &p.policy, cancel).map_err(mutation_hunk_error)?;
     let hunk_id = p.hunk_id.ok_or(GitMutationError::MissingSelection)?;
     let selected = p
         .selected
@@ -1166,7 +1164,7 @@ fn unstage_whole_file(repo: &git2::Repository, repo_path: &Path) -> Result<(), G
 /// the index and worktree are re-checked immediately before the write, and staging is proven
 /// not to have touched the worktree afterwards.
 pub(super) fn apply_change_plan(
-    generation: GitMutationGeneration,
+    request_id: GitMutationRequestId,
     p: &GitChangePlanRequest,
     cancel: &AtomicBool,
 ) -> Result<GitMutationResult, GitMutationError> {
@@ -1196,7 +1194,7 @@ pub(super) fn apply_change_plan(
         p.kind,
         GitMutationKind::StageFile | GitMutationKind::StageHunk | GitMutationKind::StageLines
     );
-    // W-12: staging a path with unsaved editor content is refused before admission.
+    // Refuse staging unsaved editor content before queuing the operation.
     if from_worktree && unsaved_here.is_some() {
         return Err(GitMutationError::UnsavedDocument);
     }
@@ -1281,7 +1279,7 @@ pub(super) fn apply_change_plan(
         return Err(GitMutationError::Postcondition);
     }
     Ok(GitMutationResult {
-        generation,
+        request_id,
         kind: p.kind,
         path: p.policy.file.clone(),
         before,
@@ -1357,7 +1355,7 @@ mod tests {
         let cancellation = Arc::new(AtomicBool::new(false));
         let mut service = GitMutationWorker {
             next: 1,
-            active: Some(GitMutationGeneration(1)),
+            active: Some(GitMutationRequestId(1)),
             cancel: Some(Arc::clone(&cancellation)),
             receiver: Some(rx),
             accepted: None,

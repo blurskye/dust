@@ -18,7 +18,7 @@ use std::time::Instant;
 use thiserror::Error;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct GitStatusGeneration(pub u64);
+pub struct GitStatusRequestId(pub u64);
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct GitRepositoryId(pub u64);
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -130,7 +130,7 @@ pub fn unsaved_document_revision(
         .map(|index| documents[index].document_revision)
 }
 /// Reject an unsaved list that is unsorted, duplicated, revision-zero, or beyond the
-/// already-bounded status policy. No new ceiling is introduced: the list is bounded by the
+/// status policy. The list is bounded by the
 /// same file and path-byte limits the caller already accepted.
 pub fn validate_unsaved_documents(
     documents: &[GitUnsavedDocument],
@@ -201,7 +201,7 @@ impl GitStatusEntry {
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct GitStatusSnapshot {
-    pub generation: GitStatusGeneration,
+    pub request_id: GitStatusRequestId,
     pub root_revision: u64,
     pub repository: PathBuf,
     /// The folder holding this checkout's index and HEAD.
@@ -306,20 +306,13 @@ pub struct GitStatusWorker {
     cancel: Option<Arc<AtomicBool>>,
     receiver: Option<Receiver<Event>>,
     accepted: Option<GitStatusSnapshot>,
-    active_generation: Option<GitStatusGeneration>,
+    active_request_id: Option<GitStatusRequestId>,
     revision: u64,
     worker: Option<thread::JoinHandle<()>>,
-    pending: Option<(
-        GitStatusGeneration,
-        GitStatusPolicy,
-        Vec<GitUnsavedDocument>,
-    )>,
+    pending: Option<(GitStatusRequestId, GitStatusPolicy, Vec<GitUnsavedDocument>)>,
 }
 impl GitStatusWorker {
-    pub fn start(
-        &mut self,
-        policy: GitStatusPolicy,
-    ) -> Result<GitStatusGeneration, GitStatusError> {
+    pub fn start(&mut self, policy: GitStatusPolicy) -> Result<GitStatusRequestId, GitStatusError> {
         self.start_with_unsaved(policy, Vec::new())
     }
 
@@ -329,7 +322,7 @@ impl GitStatusWorker {
         &mut self,
         policy: GitStatusPolicy,
         unsaved: Vec<GitUnsavedDocument>,
-    ) -> Result<GitStatusGeneration, GitStatusError> {
+    ) -> Result<GitStatusRequestId, GitStatusError> {
         if policy.maximum_files == 0
             || policy.maximum_files > 100_000
             || policy.maximum_path_bytes == 0
@@ -342,11 +335,11 @@ impl GitStatusWorker {
         validate_unsaved_documents(&unsaved, policy.maximum_files, policy.maximum_path_bytes)?;
         self.cancel();
         self.next = self.next.saturating_add(1);
-        let generation = GitStatusGeneration(self.next);
-        self.active_generation = Some(generation);
-        self.pending = Some((generation, policy, unsaved));
+        let request_id = GitStatusRequestId(self.next);
+        self.active_request_id = Some(request_id);
+        self.pending = Some((request_id, policy, unsaved));
         self.launch_pending()?;
-        Ok(generation)
+        Ok(request_id)
     }
     fn launch_pending(&mut self) -> Result<(), GitStatusError> {
         // Wait off the UI thread for cancellation to finish before launching another scan.
@@ -360,7 +353,7 @@ impl GitStatusWorker {
         if let Some(worker) = self.worker.take() {
             let _ = worker.join();
         }
-        let Some((generation, policy, unsaved)) = self.pending.take() else {
+        let Some((request_id, policy, unsaved)) = self.pending.take() else {
             return Ok(());
         };
         let cancel = Arc::new(AtomicBool::new(false));
@@ -368,9 +361,9 @@ impl GitStatusWorker {
         let (tx, rx) = mpsc::sync_channel(1);
         self.worker = Some(
             thread::Builder::new()
-                .name(format!("dust-git-status-{}", generation.0))
+                .name(format!("dust-git-status-{}", request_id.0))
                 .spawn(move || {
-                    let result = read_status(generation, &policy, &unsaved, &worker);
+                    let result = read_status(request_id, &policy, &unsaved, &worker);
                     let _ = tx.send(Event::Complete(result));
                 })
                 .map_err(|_| GitStatusError::Stopped)?,
@@ -385,7 +378,7 @@ impl GitStatusWorker {
         }
         self.receiver = None;
         self.pending = None;
-        self.active_generation = None
+        self.active_request_id = None
     }
     pub fn poll(&mut self) -> Result<Option<&GitStatusSnapshot>, GitStatusError> {
         self.launch_pending()?;
@@ -395,7 +388,7 @@ impl GitStatusWorker {
         match rx.try_recv() {
             Ok(Event::Complete(result)) => {
                 let mut snapshot = result?;
-                if self.active_generation != Some(snapshot.generation) {
+                if self.active_request_id != Some(snapshot.request_id) {
                     return Ok(None);
                 }
                 let changed = self.accepted.as_ref().is_none_or(|old| {
@@ -411,14 +404,14 @@ impl GitStatusWorker {
                 snapshot.revision = self.revision;
                 self.accepted = Some(snapshot);
                 self.receiver = None;
-                self.active_generation = None;
+                self.active_request_id = None;
                 Ok(self.accepted.as_ref())
             }
             Err(TryRecvError::Empty) => Ok(None),
             Err(TryRecvError::Disconnected) => Err(GitStatusError::Stopped),
         }
     }
-    pub const fn generation(&self) -> u64 {
+    pub const fn request_id(&self) -> u64 {
         self.next
     }
     pub fn snapshot_if_changed(&self, last: u64) -> Option<&GitStatusSnapshot> {
@@ -621,7 +614,7 @@ pub(super) fn status_command(
 }
 
 pub(super) fn read_status(
-    generation: GitStatusGeneration,
+    request_id: GitStatusRequestId,
     p: &GitStatusPolicy,
     unsaved: &[GitUnsavedDocument],
     cancel: &AtomicBool,
@@ -832,7 +825,7 @@ pub(super) fn read_status(
     }
     let entries = entries.into_values().collect();
     let mut snapshot = GitStatusSnapshot {
-        generation,
+        request_id,
         root_revision: p.root_revision,
         repository: workdir,
         git_dir: repo.path().to_path_buf(),
@@ -906,7 +899,7 @@ mod tests {
         service.worker = Some(thread::spawn(move || {
             let _ = wait.recv();
         }));
-        let mut latest = GitStatusGeneration(0);
+        let mut latest = GitStatusRequestId(0);
         for _ in 0..10 {
             latest = service.start(policy(dir.path())).unwrap();
             assert!(
@@ -919,7 +912,7 @@ mod tests {
         let deadline = Instant::now() + Duration::from_secs(3);
         loop {
             if let Some(snapshot) = service.poll().unwrap() {
-                assert_eq!(snapshot.generation, latest);
+                assert_eq!(snapshot.request_id, latest);
                 assert_eq!(snapshot.entries.len(), 1);
                 break;
             }

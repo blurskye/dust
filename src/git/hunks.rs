@@ -33,7 +33,7 @@ pub enum GitDiffLayer {
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct GitHunkId(pub u64);
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct GitHunkGeneration(pub u64);
+pub struct GitHunkRequestId(pub u64);
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum GitDiffLineKind {
     Context,
@@ -277,7 +277,7 @@ pub fn index_line_in_buffer(line: usize, unstaged: &[GitHunk]) -> Option<usize> 
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct GitHunkSnapshot {
-    pub generation: GitHunkGeneration,
+    pub request_id: GitHunkRequestId,
     pub revision: u64,
     pub repository_id: GitRepositoryId,
     pub status_revision: u64,
@@ -355,14 +355,14 @@ pub(super) enum GitHunkEvent {
 #[derive(Default)]
 pub struct GitHunkWorker {
     next: u64,
-    active: Option<GitHunkGeneration>,
+    active: Option<GitHunkRequestId>,
     cancel: Option<Arc<AtomicBool>>,
     receiver: Option<Receiver<GitHunkEvent>>,
     accepted: Option<GitHunkSnapshot>,
     revision: u64,
 }
 impl GitHunkWorker {
-    pub fn start(&mut self, policy: GitHunkPolicy) -> Result<GitHunkGeneration, GitHunkError> {
+    pub fn start(&mut self, policy: GitHunkPolicy) -> Result<GitHunkRequestId, GitHunkError> {
         self.start_owned(policy, None)
     }
 
@@ -370,7 +370,7 @@ impl GitHunkWorker {
         &mut self,
         policy: GitHunkPolicy,
         input: GitHunkBufferInput,
-    ) -> Result<GitHunkGeneration, GitHunkError> {
+    ) -> Result<GitHunkRequestId, GitHunkError> {
         if policy.layer != GitDiffLayer::Unstaged {
             return Err(GitHunkError::InvalidPolicy);
         }
@@ -384,28 +384,28 @@ impl GitHunkWorker {
         &mut self,
         policy: GitHunkPolicy,
         input: Option<GitHunkBufferInput>,
-    ) -> Result<GitHunkGeneration, GitHunkError> {
+    ) -> Result<GitHunkRequestId, GitHunkError> {
         validate_hunk_policy(&policy)?;
         self.cancel();
         self.next = self.next.saturating_add(1);
-        let generation = GitHunkGeneration(self.next);
+        let request_id = GitHunkRequestId(self.next);
         let cancellation = Arc::new(AtomicBool::new(false));
         let worker = Arc::clone(&cancellation);
         let (tx, rx) = mpsc::sync_channel(1);
         thread::Builder::new()
-            .name(format!("dust-git-hunk-{}", generation.0))
+            .name(format!("dust-git-hunk-{}", request_id.0))
             .spawn(move || {
                 let result = match input {
-                    Some(input) => read_buffer_hunks_owned(generation, &policy, input, &worker),
-                    None => read_hunks_owned(generation, &policy, &worker),
+                    Some(input) => read_buffer_hunks_owned(request_id, &policy, input, &worker),
+                    None => read_hunks_owned(request_id, &policy, &worker),
                 };
                 let _ = tx.send(GitHunkEvent::Complete(result));
             })
             .map_err(|_| GitHunkError::Stopped)?;
-        self.active = Some(generation);
+        self.active = Some(request_id);
         self.cancel = Some(cancellation);
         self.receiver = Some(rx);
-        Ok(generation)
+        Ok(request_id)
     }
     pub fn cancel(&mut self) {
         if let Some(c) = self.cancel.take() {
@@ -425,7 +425,7 @@ impl GitHunkWorker {
                 self.receiver = None;
                 self.cancel = None;
                 let mut snapshot = result?;
-                if expected != Some(snapshot.generation) {
+                if expected != Some(snapshot.request_id) {
                     return Ok(None);
                 }
                 let changed = self.accepted.as_ref().is_none_or(|old| {
@@ -456,7 +456,7 @@ impl GitHunkWorker {
     pub fn snapshot_if_changed(&self, last: u64) -> Option<&GitHunkSnapshot> {
         self.accepted.as_ref().filter(|s| s.revision != last)
     }
-    pub const fn generation(&self) -> u64 {
+    pub const fn request_id(&self) -> u64 {
         self.next
     }
 }
@@ -487,7 +487,7 @@ pub(super) fn validate_hunk_policy(p: &GitHunkPolicy) -> Result<(), GitHunkError
 }
 
 pub fn read_hunks(p: &GitHunkPolicy) -> Result<GitHunkSnapshot, GitHunkError> {
-    read_hunks_owned(GitHunkGeneration(0), p, &AtomicBool::new(false))
+    read_hunks_owned(GitHunkRequestId(0), p, &AtomicBool::new(false))
 }
 
 pub(super) fn open_hunk_repository(
@@ -638,7 +638,7 @@ pub(super) fn collect_hunks_from_diff(
 }
 
 pub(super) fn read_hunks_owned(
-    generation: GitHunkGeneration,
+    request_id: GitHunkRequestId,
     p: &GitHunkPolicy,
     cancel: &AtomicBool,
 ) -> Result<GitHunkSnapshot, GitHunkError> {
@@ -686,7 +686,7 @@ pub(super) fn read_hunks_owned(
     };
     check_hunk_request(p, cancel, started)?;
     Ok(GitHunkSnapshot {
-        generation,
+        request_id,
         revision: 0,
         repository_id: p.repository_id,
         status_revision: p.status_revision,
@@ -779,7 +779,7 @@ pub(super) fn collect_hunks_from_patch(
 }
 
 pub(super) fn read_buffer_hunks_owned(
-    generation: GitHunkGeneration,
+    request_id: GitHunkRequestId,
     p: &GitHunkPolicy,
     input: GitHunkBufferInput,
     cancel: &AtomicBool,
@@ -836,7 +836,7 @@ pub(super) fn read_buffer_hunks_owned(
     }
     check_hunk_request(p, cancel, started)?;
     Ok(GitHunkSnapshot {
-        generation,
+        request_id,
         revision: 0,
         repository_id: p.repository_id,
         status_revision: p.status_revision,
