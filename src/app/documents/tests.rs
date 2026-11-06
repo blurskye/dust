@@ -1,34 +1,27 @@
 //! Documents behavior and application integration tests.
 
-use crate::app::tests::*;
-use crate::app::git::tests::settle_git_work;
-use crate::app::tasks::tests::check_task_diagnostics;
 use crate::app::App;
 use crate::app::AppEffect;
 use crate::app::PickerKind;
+use crate::app::agent::commands::AgentCommand;
 use crate::app::documents::configured_file_bytes;
+use crate::app::git::tests::settle_git_work;
 use crate::app::startup::StartupTarget;
+use crate::app::tasks::tests::check_task_diagnostics;
+use crate::app::tests::*;
+use crate::debugger::DapControl;
+use crate::debugger::DapEvent;
+use crate::debugger::DapResponse;
 use crate::editor::CommandValue;
+use crate::editor::EditorOperation;
+use crate::editor::EditorState;
+use crate::editor::EditorTransaction;
 use crate::editor::InvocationSource;
+use crate::editor::TransactionId;
 use crate::editor::input::KeyEvent;
 use crate::editor::text::ByteOffset;
 use crate::editor::text::ByteRange;
 use crate::editor::text::TextBuffer;
-use crate::workspace::DiagnosticSeverity;
-use std::collections::BTreeMap;
-use std::fs;
-use std::path::PathBuf;
-use std::thread;
-use std::time::Duration;
-use std::time::Instant;
-use tempfile::tempdir;
-use crate::app::agent::commands::AgentCommand;
-use crate::editor::EditorOperation;
-use crate::editor::EditorState;
-use crate::editor::EditorTransaction;
-use crate::editor::TransactionId;
-use crate::ui::render::overlays::CUSTOM_ICON;
-use crate::ui::render::overlays::SCRATCH_ICON;
 use crate::process::PtyId;
 use crate::ui::ContentTabDiagnostic;
 use crate::ui::ContentTabDiagnosticSeverity;
@@ -37,11 +30,18 @@ use crate::ui::PtyScreen;
 use crate::ui::UiEvent;
 use crate::ui::active_pane_viewport;
 use crate::ui::render;
+use crate::ui::render::overlays::CUSTOM_ICON;
+use crate::ui::render::overlays::SCRATCH_ICON;
 use crate::windows::DockEdge;
 use crate::windows::WindowPlacement;
-use crate::debugger::DapControl;
-use crate::debugger::DapEvent;
-use crate::debugger::DapResponse;
+use crate::workspace::DiagnosticSeverity;
+use std::collections::BTreeMap;
+use std::fs;
+use std::path::PathBuf;
+use std::thread;
+use std::time::Duration;
+use std::time::Instant;
+use tempfile::tempdir;
 
 #[test]
 fn diagnostic_navigation_filters_severity_wraps_and_expands_the_landed_line() {
@@ -2019,8 +2019,7 @@ fn opening_changes_before_status_arrives_opens_them_when_it_does() {
 }
 
 #[test]
-fn command_line_completes_commands_without_an_alias_and_fills_in_their_arguments()
- {
+fn command_line_completes_commands_without_an_alias_and_fills_in_their_arguments() {
     let (_app_dirs, mut app) = app();
     app.open_prompt(crate::ui::PromptKind::Command, "wor".into());
     app.refresh_completions();
@@ -4347,4 +4346,202 @@ fn recovered_scratch_keeps_its_unsaved_baseline_and_durable_journal() {
     );
     app.invoke_mapped_command("history.undo");
     assert_eq!(app.state.buffers[buffer].text.to_string(), "");
+}
+
+use crate::app::documents::*;
+pub(in crate::app) fn fixture() -> (EditorState, Documents) {
+    let state = EditorState::new("/workspace".into());
+    let startup = StartupTarget::Dashboard {
+        root: "/workspace".into(),
+    };
+    let owner = Documents::new(VfsWorker::start(2), &startup, state.window_version(), 7, 2);
+    (state, owner)
+}
+#[test]
+fn startup_reply_is_exact_once_and_rejects_root_or_editor_replacement_before_decode() {
+    let (state, mut owner) = fixture();
+    // Owner-local fake delivery avoids filesystem timing and proves admission
+    // precedes UTF-8 decoding: invalid bytes must be discarded, not decoded.
+    let id = RequestId(91);
+    owner.pending_startup.insert(
+        id,
+        StartupIntent {
+            primary: true,
+            delivered: false,
+        },
+    );
+    let stale = owner.route(
+        VfsResult::Read {
+            id,
+            path: "old".into(),
+            result: Ok(vec![255]),
+        },
+        &state.window_version(),
+        8,
+    );
+    assert!(matches!(stale, DocumentEvent::Discarded));
+    assert!(!owner.has_startup_work());
+    owner.pending_startup.insert(
+        id,
+        StartupIntent {
+            primary: true,
+            delivered: false,
+        },
+    );
+    let foreign = EditorState::new("/workspace".into());
+    assert!(matches!(
+        owner.route(
+            VfsResult::Read {
+                id,
+                path: "old".into(),
+                result: Ok(vec![255])
+            },
+            &foreign.window_version(),
+            7
+        ),
+        DocumentEvent::Discarded
+    ));
+    owner.pending_startup.insert(
+        id,
+        StartupIntent {
+            primary: true,
+            delivered: false,
+        },
+    );
+    owner.retire_startup();
+    let materializations = TextBuffer::test_materializations();
+    assert!(matches!(
+        owner.route(
+            VfsResult::Read {
+                id,
+                path: "old".into(),
+                result: Ok(vec![255])
+            },
+            &state.window_version(),
+            7
+        ),
+        DocumentEvent::Discarded
+    ));
+    assert_eq!(TextBuffer::test_materializations(), materializations);
+    let mut exhausted = state.clone();
+    exhausted.exhaust_window_source_for_test();
+    owner.pending_startup.insert(
+        id,
+        StartupIntent {
+            primary: true,
+            delivered: false,
+        },
+    );
+    let materializations = TextBuffer::test_materializations();
+    assert!(matches!(
+        owner.route(
+            VfsResult::Read {
+                id,
+                path: "exhausted".into(),
+                result: Ok(vec![255])
+            },
+            &exhausted.window_version(),
+            7
+        ),
+        DocumentEvent::Discarded
+    ));
+    assert_eq!(TextBuffer::test_materializations(), materializations);
+    owner.pending_startup.insert(
+        id,
+        StartupIntent {
+            primary: true,
+            delivered: false,
+        },
+    );
+    let event = owner.route(
+        VfsResult::Read {
+            id,
+            path: "first".into(),
+            result: Ok(b"hello".to_vec()),
+        },
+        &state.window_version(),
+        7,
+    );
+    let DocumentEvent::Startup { receipt, text, .. } = event else {
+        panic!("startup event");
+    };
+    assert_eq!(text.unwrap().to_string(), "hello");
+    assert!(matches!(
+        owner.route(
+            VfsResult::Read {
+                id,
+                path: "duplicate".into(),
+                result: Ok(vec![255])
+            },
+            &state.window_version(),
+            7
+        ),
+        DocumentEvent::Discarded
+    ));
+    assert!(owner.finish_startup(receipt, None, &state.window_version(), 7));
+    assert!(!owner.has_startup_work());
+    assert!(matches!(
+        owner.route(
+            VfsResult::Read {
+                id,
+                path: "late".into(),
+                result: Ok(vec![255])
+            },
+            &state.window_version(),
+            7
+        ),
+        DocumentEvent::Discarded
+    ));
+}
+#[test]
+fn total_outstanding_admission_is_bounded_and_policy_does_not_follow_reused_buffer_ids() {
+    let (mut state, mut owner) = fixture();
+    owner.pending_legacy.extend([RequestId(1), RequestId(2)]);
+    assert!(matches!(
+        owner.read("not-submitted".into()),
+        Err(VfsError::QueueFull)
+    ));
+    owner.route(
+        VfsResult::Read {
+            id: RequestId(1),
+            path: "one".into(),
+            result: Err(VfsError::QueueFull),
+        },
+        &state.window_version(),
+        7,
+    );
+    assert!(owner.check_admission().is_ok());
+    let (id, _) = state
+        .open_text(TextBuffer::from_text("tiny"), None)
+        .unwrap();
+    let policy = crate::config::LargeFileConfig::default();
+    owner.set_large_file_mode(id, None, LargeFileOverride::On);
+    assert_eq!(
+        owner.reconcile_policy(
+            &state.window_version(),
+            state
+                .buffers
+                .iter()
+                .map(|(id, b)| (id, b.path.as_deref(), &b.text)),
+            &policy
+        ),
+        vec![id]
+    );
+    let mut foreign = EditorState::new("/workspace".into());
+    let (reused, _) = foreign
+        .open_text(TextBuffer::from_text("tiny"), None)
+        .unwrap();
+    assert_eq!(id, reused);
+    assert!(
+        owner
+            .reconcile_policy(
+                &foreign.window_version(),
+                foreign
+                    .buffers
+                    .iter()
+                    .map(|(id, b)| (id, b.path.as_deref(), &b.text)),
+                &policy
+            )
+            .is_empty()
+    );
 }
