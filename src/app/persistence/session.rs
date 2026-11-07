@@ -337,7 +337,7 @@ impl Persistence {
             let version = buffer.text.source_version();
             if let Some((previous_id, previous, revision)) = self.mark_sources.get(&mark.name)
                 && *previous_id == id
-                && previous.same_incarnation(&version)
+                && previous.same_instance(&version)
                 && let Some(mapped) = buffer.text.map_offset_since(
                     *revision,
                     crate::editor::text::ByteOffset(mark.location.byte),

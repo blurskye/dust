@@ -139,12 +139,12 @@ impl LspSession {
         // Typing moves the revision but keeps the menu: what was typed narrows it.
         let typing = match (&self.projection.owner, &current) {
             (Some(owner), Some(current)) => {
-                owner.text.same_incarnation(&current.text)
+                owner.text.same_instance(&current.text)
                     && owner.server == current.server
                     && owner.buffer == current.buffer
                     && owner.view == current.view
                     && owner.uri == current.uri
-                    && owner.text.same_incarnation(&current.text)
+                    && owner.text.same_instance(&current.text)
             }
             _ => false,
         };
@@ -2910,7 +2910,7 @@ mod tests {
         ));
     }
     #[test]
-    fn completion_items_and_resolves_reject_a_reloaded_text_incarnation() {
+    fn completion_items_and_resolves_reject_a_reloaded_text_instance() {
         let (mut editor, buffer, view) = {
             let mut editor = EditorState::new("/workspace".into());
             let (buffer, view) = editor

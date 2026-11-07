@@ -504,7 +504,7 @@ impl Documents {
                     || !current
                         .text
                         .source_version()
-                        .same_incarnation(&version.text)
+                        .same_instance(&version.text)
                     || current.virtual_read_only
                 {
                     return Err(stale());
@@ -878,7 +878,7 @@ mod tests {
     }
 
     #[test]
-    fn reload_rejects_edits_reloaded_incarnations_closed_targets_and_foreign_roots_before_decode() {
+    fn reload_rejects_edits_reloaded_instances_closed_targets_and_foreign_roots_before_decode() {
         let mut state = EditorState::new("/workspace".into());
         let (id, _) = state
             .open_text(TextBuffer::from_text("old"), Some("/workspace/file".into()))

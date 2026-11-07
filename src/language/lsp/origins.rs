@@ -371,7 +371,7 @@ impl EditSourceFixture {
     }
 }
 
-// The wire protocol has no incarnation identifier. Once a URI is reused, push
+// The wire protocol has no instance identifier. Once a URI is reused, push
 // diagnostics are quarantined for this session rather than relabeled as fresh.
 #[derive(Default)]
 pub(crate) struct DiagnosticLineage {
@@ -382,7 +382,7 @@ pub(crate) struct DiagnosticLineage {
 impl DiagnosticLineage {
     pub(crate) fn observe(&mut self, uri: String, source: &(crate::editor::BufferId, TextVersion)) {
         if let Some(first) = self.first.get(&uri) {
-            if first.0 != source.0 || !first.1.same_incarnation(&source.1) {
+            if first.0 != source.0 || !first.1.same_instance(&source.1) {
                 self.ambiguous.insert(uri);
             }
         } else if self.first.len() < 4096 {

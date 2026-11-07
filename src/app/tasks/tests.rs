@@ -199,7 +199,7 @@ fn task_formatter_uses_authorized_worker_and_refuses_reloaded_snapshot() {
                 app.ui
                     .notification
                     .as_ref()
-                    .is_some_and(|message| message.contains("formatter document incarnation")),
+                    .is_some_and(|message| message.contains("formatter document instance")),
                 "{:?}",
                 app.ui.notification
             );
@@ -758,7 +758,7 @@ fn identity_formatter_normalizes_bom_and_line_endings() {
     }
 }
 #[test]
-fn task_owner_rejects_stale_plans_and_formatter_incarnations_before_materialization() {
+fn task_owner_rejects_stale_plans_and_formatter_instances_before_materialization() {
     let root = tempfile::tempdir().unwrap();
     let scope = WorkspaceState::new(
         WorkspaceId(1),

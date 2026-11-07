@@ -1937,7 +1937,7 @@ impl App {
                 buffer.path == pending.path
                     && pending
                         .source
-                        .same_incarnation(&buffer.text.source_version())
+                        .same_instance(&buffer.text.source_version())
             })
         {
             if self

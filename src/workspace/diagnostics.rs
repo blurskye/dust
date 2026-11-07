@@ -244,7 +244,7 @@ impl DiagnosticStore {
     }
 }
 
-/// Internal producer incarnation, separate from its user-visible owner name.
+/// Internal producer instance, separate from its user-visible owner name.
 #[derive(Clone, Debug)]
 pub(crate) struct DiagnosticProducer {
     owner: DiagnosticOwner,

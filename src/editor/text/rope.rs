@@ -60,13 +60,13 @@ impl TextVersion {
             snapshot: std::sync::Arc::new(()),
         }
     }
-    pub(crate) fn same_incarnation(&self, other: &Self) -> bool {
+    pub(crate) fn same_instance(&self, other: &Self) -> bool {
         std::sync::Arc::ptr_eq(&self.origin, &other.origin)
     }
 }
 impl PartialEq for TextVersion {
     fn eq(&self, other: &Self) -> bool {
-        self.same_incarnation(other) && std::sync::Arc::ptr_eq(&self.snapshot, &other.snapshot)
+        self.same_instance(other) && std::sync::Arc::ptr_eq(&self.snapshot, &other.snapshot)
     }
 }
 impl Eq for TextVersion {}
@@ -497,7 +497,7 @@ mod source_tests {
     }
 
     #[test]
-    fn exact_snapshots_distinguish_branches_and_reload_but_keep_edit_incarnation() {
+    fn exact_snapshots_distinguish_branches_and_reload_but_keep_edit_instance() {
         let original = TextBuffer::from_text("before");
         let mut a = original.clone();
         let mut b = original.clone();
@@ -505,10 +505,10 @@ mod source_tests {
         b.restore_text("branch b").unwrap();
         assert_eq!(a.revision(), b.revision());
         assert_ne!(a.source_version(), b.source_version());
-        assert!(a.source_version().same_incarnation(&b.source_version()));
+        assert!(a.source_version().same_instance(&b.source_version()));
         assert!(
             !a.source_version()
-                .same_incarnation(&TextBuffer::from_text("branch a").source_version())
+                .same_instance(&TextBuffer::from_text("branch a").source_version())
         );
         a.revision = BufferRevision(u64::MAX);
         let source = a.source_version();

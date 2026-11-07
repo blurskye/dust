@@ -242,7 +242,7 @@ impl FormatterSource {
         {
             Ok(())
         } else {
-            Err("formatter document incarnation, content or ownership changed".into())
+            Err("formatter document instance, content or ownership changed".into())
         }
     }
     pub(in crate::app) fn stdin(

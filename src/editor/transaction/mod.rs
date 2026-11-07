@@ -1015,7 +1015,7 @@ impl EditorDraft {
             .state
             .buffers
             .get(buffer)
-            .is_none_or(|b| !b.text.source_version().same_incarnation(expected))
+            .is_none_or(|b| !b.text.source_version().same_instance(expected))
         {
             return false;
         }

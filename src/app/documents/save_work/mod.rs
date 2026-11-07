@@ -228,7 +228,7 @@ impl App {
             }
             if !provider
                 .source
-                .same_incarnation(&document.text.source_version())
+                .same_instance(&document.text.source_version())
             {
                 return Err(DocumentFailure::Error(
                     "editable document was replaced".into(),

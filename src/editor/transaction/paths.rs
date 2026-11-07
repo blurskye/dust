@@ -44,7 +44,7 @@ impl EditorState {
         for (id, path, text) in &change.buffers {
             if self.buffers.get(*id).is_none_or(|buffer| {
                 buffer.path.as_ref() != Some(path)
-                    || !buffer.text.source_version().same_incarnation(text)
+                    || !buffer.text.source_version().same_instance(text)
             }) {
                 return Err("filesystem operation completed, but an affected buffer was closed, reloaded or renamed; paths were not reconciled".into());
             }
@@ -211,7 +211,7 @@ mod tests {
         let change = editor.capture_path_change(&target).unwrap();
         editor.replace_buffer_from_disk(
             buffer,
-            TextBuffer::from_text("reloaded incarnation"),
+            TextBuffer::from_text("reloaded instance"),
             target.clone(),
         );
         let before = EditorState::test_clone_count();

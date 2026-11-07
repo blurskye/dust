@@ -287,7 +287,7 @@ mod tests {
         let original = state.buffers[b].text.clone();
         state.buffers[b].text = TextBuffer::from_text(&before);
         assert_eq!(
-            publish(&mut bridge, &mut state, &snap(3, "foreign incarnation")),
+            publish(&mut bridge, &mut state, &snap(3, "foreign instance")),
             Err(VirtualDocumentEditorError::SourceMismatch)
         );
         state.buffers[b].text = original;

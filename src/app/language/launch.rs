@@ -108,7 +108,7 @@ impl Source {
                 .get(self.buffer)
                 .is_some_and(|buffer| {
                     buffer.path.as_ref() == Some(&self.path)
-                        && self.text.same_incarnation(&buffer.text.source_version())
+                        && self.text.same_instance(&buffer.text.source_version())
                 })
     }
 }

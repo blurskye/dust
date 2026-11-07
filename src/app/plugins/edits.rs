@@ -80,7 +80,7 @@ impl Invocation {
             || buffer.read_only
         {
             return Err(
-                "plugin snapshot document incarnation, content or write policy changed".into(),
+                "plugin snapshot document instance, content or write policy changed".into(),
             );
         }
         Ok(&buffer.text)
@@ -535,7 +535,7 @@ mod tests {
         reply
     }
     #[test]
-    fn plugin_invocation_owns_snapshot_queue_reservation_and_preview_incarnation() {
+    fn plugin_invocation_owns_snapshot_queue_reservation_and_preview_instance() {
         let root = tempfile::tempdir().unwrap();
         let scope = crate::workspace::WorkspaceState::new(
             crate::workspace::WorkspaceId(1),
@@ -662,7 +662,7 @@ mod tests {
             .preview
             .unwrap()
             .unwrap();
-        editor.buffers[buffer].text = TextBuffer::from_text("éab"); // Equal numeric revision, different incarnation.
+        editor.buffers[buffer].text = TextBuffer::from_text("éab"); // Equal numeric revision, different instance.
         let before = TextBuffer::test_materializations();
         assert!(
             source

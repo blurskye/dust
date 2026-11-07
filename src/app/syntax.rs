@@ -122,7 +122,7 @@ impl Syntax {
             if self
                 .versions
                 .get(&doc.buffer)
-                .is_some_and(|previous| !previous.same_incarnation(&source))
+                .is_some_and(|previous| !previous.same_instance(&source))
             {
                 self.close(doc.buffer);
             } else if self
@@ -821,7 +821,7 @@ impl App {
                     .views
                     .get(fold.view)
                     .is_some_and(|view| view.buffer == *buffer_id)
-                    && version.same_incarnation(&buffer.text.source_version())
+                    && version.same_instance(&buffer.text.source_version())
             }) else {
                 folds_changed |= fold.collapsed;
                 fold.collapsed = false;

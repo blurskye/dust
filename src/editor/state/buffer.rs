@@ -121,7 +121,7 @@ impl Buffer {
         change
     }
 
-    /// Changes are contiguous within this buffer incarnation; a gap needs a snapshot.
+    /// Changes are contiguous within this buffer instance; a gap needs a snapshot.
     pub fn changes_since(
         &self,
         revision: BufferRevision,

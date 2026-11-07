@@ -135,7 +135,7 @@ impl App {
                 .state
                 .buffers
                 .get(flash.buffer)
-                .is_some_and(|buffer| buffer.text.source_version().same_incarnation(&flash.source))
+                .is_some_and(|buffer| buffer.text.source_version().same_instance(&flash.source))
         {
             self.sync_flash_ui();
             return;

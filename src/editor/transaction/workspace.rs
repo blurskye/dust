@@ -97,7 +97,7 @@ impl EditorState {
         {
             if self.buffers.get(*id).is_none_or(|buffer| {
                 buffer.path.as_ref() != Some(path)
-                    || !buffer.text.source_version().same_incarnation(version)
+                    || !buffer.text.source_version().same_instance(version)
             }) {
                 return Err("workspace resource buffer ownership changed after preview".into());
             }

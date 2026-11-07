@@ -373,7 +373,7 @@ impl LspEditSources {
                     .any(|buffer| buffer.path == path && buffer.dirty)
             } {
                 return Err(format!(
-                    "{} no longer has the requesting session's document incarnation/content",
+                    "{} no longer has the requesting session's document instance/content",
                     path.display()
                 ));
             }
@@ -1025,7 +1025,7 @@ mod tests {
     }
 
     #[test]
-    fn requesting_edit_origin_preserves_encoding_incarnation_and_acknowledges_only_its_endpoint() {
+    fn requesting_edit_origin_preserves_encoding_instance_and_acknowledges_only_its_endpoint() {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("source.rs");
         let mut editor = EditorState::new(root.path().into());
@@ -1285,7 +1285,7 @@ mod tests {
         sources.flush();
         assert_eq!(editor.buffers[buffer].text.to_string(), "éXb");
 
-        // Equal numeric revisions and equal bytes do not substitute a new incarnation.
+        // Equal numeric revisions and equal bytes do not substitute a new instance.
         editor.replace_buffer_from_disk(buffer, TextBuffer::from_text("éXb"), path.clone());
         let stale = LspWorkspaceEdit {
             documents: vec![LspDocumentEdit {
@@ -1353,7 +1353,7 @@ impl LspEditSources {
             if !(if pull {
                 source == *text
             } else {
-                source.same_incarnation(text)
+                source.same_instance(text)
             }) || buffer
                 .path
                 .as_ref()

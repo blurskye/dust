@@ -471,7 +471,7 @@ impl Diagnostics {
             if text.revision() == revision
                 || !document.editor.same_editor(&editor.window_version())
                 || buffer.path != document.path
-                || !text.source_version().same_incarnation(&document.text)
+                || !text.source_version().same_instance(&document.text)
                 || text.map_offset_since(revision, ByteOffset(0)).is_none()
             {
                 continue;
