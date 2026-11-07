@@ -240,6 +240,26 @@ fn palette_finds_commands_by_the_words_people_type() {
 }
 
 #[test]
+fn palette_footer_describes_the_single_escape_that_restores_editor_focus() {
+    let (_dirs, mut app) = app();
+    app.state
+        .open_text(TextBuffer::from_text("editor"), None)
+        .unwrap();
+    app.set_dashboard_visibility(false);
+    app.reconcile_editor_windows();
+    let view = app.state.active_view();
+    app.open_command_palette();
+    assert_eq!(
+        app.ui.picker.as_ref().unwrap().footer.as_deref(),
+        Some("Enter Run · Esc Close")
+    );
+    app.handle_configured_key("escape".parse().unwrap());
+    assert!(app.ui.picker.is_none());
+    assert_eq!(app.active_input_context(), "editor.normal");
+    assert_eq!(app.state.active_view(), view);
+}
+
+#[test]
 fn palette_runs_flagged_commands_with_the_flag_off() {
     let (_app_dirs, mut app) = app();
     let (buffer, _) = app
@@ -480,6 +500,131 @@ fn closed_picker_surfaces_leave_the_content_line_but_keep_their_graph_identity()
                 .any(|entry| entry.identity.0 == ids.content)
         );
     }
+}
+
+#[test]
+fn workspace_review_refresh_keeps_the_query_and_selected_file_but_new_proposals_reset() {
+    use crate::app::picker::PickerContent;
+    use crate::workspace::{PickerAction, PickerItem, PickerItemId, PickerItemKind, ProposalId};
+    let (_dirs, mut app) = app();
+    let scope = app.workspace.version();
+    let configuration = app.configuration.binding_revision();
+    let content = |id: u64, selected: bool| PickerContent {
+        surface: PickerSurfaceKind::Generic,
+        origin: PickerOrigin::WorkspaceEdit(ProposalId(id)),
+        title: "Replacement".into(),
+        query: String::new(),
+        complete: true,
+        items: (0..40)
+            .map(|index| {
+                (
+                    PickerItem {
+                        id: PickerItemId(format!("file:{index}")),
+                        label: format!("invoice_{index:02}.rs"),
+                        detail: if index == 35 && !selected {
+                            "excluded"
+                        } else {
+                            "included"
+                        }
+                        .into(),
+                        source: String::new(),
+                        badge: String::new(),
+                        action: PickerAction::None,
+                        kind: PickerItemKind::Entry,
+                    },
+                    PickerPayload::ProposalFile(index),
+                )
+            })
+            .collect(),
+    };
+    app.search
+        .install_picker(content(1, true), 64, scope.clone(), configuration)
+        .unwrap();
+    app.search.picker_insert("invoice_3");
+    let selected = PickerItemId("file:35".into());
+    app.search.select_picker_item(&selected);
+    assert!(app.search.picker_scroll(4).unwrap() > 0);
+    let epoch = app.search.picker_epoch().unwrap().clone();
+
+    app.search
+        .install_picker(content(1, false), 64, scope.clone(), configuration)
+        .unwrap();
+    let picker = app.search.picker().unwrap();
+    assert_eq!(picker.query(), "invoice_3");
+    assert_eq!(picker.presentation().rows.len(), 13);
+    assert_eq!(picker.selected_item().unwrap().id, selected);
+    assert_eq!(picker.selected_item().unwrap().detail, "excluded");
+    assert!(app.search.picker_scroll(4).unwrap() > 0);
+    assert!(app.search.owns_picker_epoch(&epoch));
+    assert!(matches!(
+        app.search.selected_picker_payload(),
+        Some(PickerPayload::ProposalFile(35))
+    ));
+
+    app.search
+        .install_picker(content(2, true), 64, scope, configuration)
+        .unwrap();
+    let picker = app.search.picker().unwrap();
+    assert_eq!(picker.query(), "");
+    assert_eq!(picker.selected_item().unwrap().id.0, "file:0");
+    assert!(!app.search.owns_picker_epoch(&epoch));
+}
+
+#[test]
+fn diagnostic_picker_keeps_the_path_separate_from_the_message_for_fitting() {
+    use crate::app::diagnostics::{DiagnosticBatch, DiagnosticDocument, DiagnosticValidity};
+    use crate::editor::text::{ByteOffset, ByteRange};
+    use crate::workspace::{Diagnostic, DiagnosticOwner, DiagnosticProducer, DiagnosticSeverity};
+    let (_dirs, mut app) = app();
+    let path = app
+        .state
+        .workspace_root
+        .join("packages/deeply/nested/critical_invoice_handler.rs");
+    let (buffer, _) = app
+        .state
+        .open_text(
+            TextBuffer::from_text("let needle = 42;"),
+            Some(path.clone()),
+        )
+        .unwrap();
+    let uri = crate::language::lsp::file_uri(&path);
+    let producer = DiagnosticProducer::new(DiagnosticOwner::new("picker-test").unwrap());
+    app.diagnostics.activate(producer.clone());
+    app.diagnostics
+        .publish(
+            DiagnosticBatch {
+                producer,
+                uri: uri.clone(),
+                document: DiagnosticDocument::capture(&app.state, buffer),
+                validity: DiagnosticValidity::RequestedSnapshot,
+                items: vec![Diagnostic {
+                    uri,
+                    version: None,
+                    range: ByteRange::new(ByteOffset(4), ByteOffset(10)).unwrap(),
+                    severity: DiagnosticSeverity::Error,
+                    source: "test".into(),
+                    code: None,
+                    message: "Check invoice\n  calculation".into(),
+                    related: Vec::new(),
+                    tags: Vec::new(),
+                    fixes: Vec::new(),
+                    data: None,
+                    timestamp: std::time::SystemTime::UNIX_EPOCH,
+                }],
+            },
+            &app.state,
+        )
+        .unwrap();
+    app.open_builtin_picker(PickerKind::Diagnostics);
+    let row = &app.ui.picker.as_ref().unwrap().rows[0];
+    assert_eq!(
+        row.label,
+        "packages/deeply/nested/critical_invoice_handler.rs:1"
+    );
+    assert_eq!(row.detail, "Check invoice calculation");
+    assert_eq!(row.source, "test");
+    app.picker_insert("invoice calculation");
+    assert_eq!(app.ui.picker.as_ref().unwrap().rows.len(), 1);
 }
 
 #[test]

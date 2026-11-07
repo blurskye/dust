@@ -22,7 +22,6 @@ use crate::ui::render::overlays::truncate_content_title;
 use crate::windows::WindowRect;
 use unicode_segmentation::UnicodeSegmentation;
 
-#[cfg(test)]
 use crate::ui::geometry::ellipsized;
 use crate::ui::geometry::fitted_footer;
 #[cfg(test)]
@@ -31,7 +30,14 @@ use crate::ui::render::prompt::prompt_viewport;
 pub(crate) const PICKER_MAXIMUM_PREVIEW_BYTES: usize = 256 * 1024;
 
 pub(crate) fn looks_like_path(text: &str) -> bool {
-    text.contains('/') && !text.contains(char::is_whitespace)
+    // A command label may contain a slash after several words. Path components
+    // after the first separator, including the filename, may contain spaces.
+    text.split_once('/')
+        .is_some_and(|(first, _)| !first.contains(char::is_whitespace))
+        // A location followed by source text is not a bare path.
+        && !text.split_once(char::is_whitespace).is_some_and(|(location, _)| {
+            location.rsplit_once(':').is_some_and(|(_, number)| number.parse::<usize>().is_ok())
+        })
 }
 
 /// A `Label  /some/path` detail row keeps its label and the end of its path.
@@ -68,13 +74,13 @@ pub(super) fn fitted_picker_row(
         };
         truncate_content_title(label, room, ambiguous)
     } else {
-        label.to_owned()
+        ellipsized(label, available, ambiguous)
     };
     let room = available.saturating_sub(text_width(&label, ambiguous) + 2);
     let detail = if looks_like_path(detail) {
         truncate_content_title(detail, room, ambiguous)
     } else {
-        detail.to_owned()
+        ellipsized(detail, room, ambiguous)
     };
     (label, detail)
 }
@@ -99,10 +105,61 @@ fn shortened_grep_path(
             return shortened;
         }
     }
-    truncate_content_title(&parts.join("/"), available, ambiguous)
+    let filename = parts.pop().unwrap_or_default();
+    let name = truncate_content_title(&filename, available, ambiguous);
+    let folder = if parts.is_empty() {
+        String::new()
+    } else {
+        format!("{}/", parts.join("/"))
+    };
+    let folder = truncate_content_title(
+        &folder,
+        available.saturating_sub(text_width(&name, ambiguous)),
+        ambiguous,
+    );
+    format!("{folder}{name}")
 }
 
-/// Code leads the row; the location gets a third, or up to half to preserve the filename.
+/// Folder cells give way before the filename, including on the selected row.
+fn fitted_path_cells(
+    cells: &[crate::ui::PickerCell],
+    available: u16,
+    ambiguous: crate::config::AmbiguousWidth,
+) -> Vec<crate::ui::PickerCell> {
+    let Some((name, prefix)) = cells.split_last() else {
+        return Vec::new();
+    };
+    let mut fitted: Vec<_> = prefix
+        .iter()
+        .filter(|cell| cell.style != Style::Muted)
+        .cloned()
+        .collect();
+    let icon_width = fitted
+        .iter()
+        .map(|cell| text_width(&cell.text, ambiguous))
+        .sum::<usize>();
+    let room = usize::from(available).saturating_sub(icon_width);
+    let name = truncate_content_title(&name.text, room, ambiguous);
+    let folder = prefix
+        .iter()
+        .filter(|cell| cell.style == Style::Muted)
+        .map(|cell| cell.text.as_str())
+        .collect::<String>();
+    let folder = truncate_content_title(
+        &folder,
+        room.saturating_sub(text_width(&name, ambiguous)),
+        ambiguous,
+    );
+    for (text, style) in [(folder, Style::Muted), (name, Style::Default)] {
+        let width = text_width(&text, ambiguous) as u16;
+        if width > 0 {
+            fitted.push(crate::ui::PickerCell::new(text, style, width));
+        }
+    }
+    fitted
+}
+
+/// Code leads the row; long filenames may use up to two thirds of a narrow row.
 fn fitted_grep_cells(
     cells: &[crate::ui::PickerCell],
     available: u16,
@@ -123,7 +180,7 @@ fn fitted_grep_cells(
         .unwrap_or("");
     let filename_room = text_width(filename, ambiguous) + number_width;
     let location_room =
-        (usize::from(available) / 3).max(filename_room.min(usize::from(available) / 2));
+        (usize::from(available) / 3).max(filename_room.min(usize::from(available) * 2 / 3));
     let path = shortened_grep_path(
         &location[0].text,
         location_room.saturating_sub(number_width),
@@ -164,6 +221,61 @@ fn fitted_grep_cells(
         fitted.extend_from_slice(&location[1..]);
     }
     fitted
+}
+
+/// Emphasise only complete query matches in the visible row, after its columns are fitted.
+pub(super) fn highlight_picker_matches(
+    frame: &mut Frame,
+    query: &str,
+    literal: bool,
+    row: WindowRect,
+) {
+    if query.trim().is_empty() {
+        return;
+    }
+    let mut text = String::new();
+    let mut columns = Vec::new();
+    for x in row.x..row.x.saturating_add(row.width) {
+        if let Some(cell) = frame.grid.get(x, row.y).filter(|cell| !cell.continuation) {
+            let lowered = cell.symbol.to_lowercase();
+            columns.extend(std::iter::repeat_n(x, lowered.len()));
+            text.push_str(&lowered);
+        }
+    }
+    let query = query.to_lowercase();
+    let mut matched = Vec::new();
+    if literal {
+        for (at, found) in text.match_indices(&query) {
+            matched.extend_from_slice(&columns[at..at + found.len()]);
+        }
+    } else {
+        for word in query.split_whitespace() {
+            if let Some(at) = text.find(word) {
+                matched.extend_from_slice(&columns[at..at + word.len()]);
+                continue;
+            }
+            let mut at = 0;
+            let mut word_columns = Vec::new();
+            for character in word.chars() {
+                let Some(relative) = text[at..].find(character) else {
+                    word_columns.clear();
+                    break;
+                };
+                at += relative;
+                word_columns.push(columns[at]);
+                at += character.len_utf8();
+            }
+            matched.extend(word_columns);
+        }
+    }
+    matched.sort_unstable();
+    matched.dedup();
+    for x in matched {
+        if let Some(cell) = frame.grid.get(x, row.y) {
+            let symbol = cell.symbol.clone();
+            frame.grid.set_cell(x, row.y, &symbol, Style::Search);
+        }
+    }
 }
 
 /// Draw a diff that was carried as structure rather than flattened text.
@@ -473,7 +585,11 @@ pub(super) fn render_picker(
                 config.editor.ambiguous_width,
             )
         } else {
-            preview.title.clone()
+            truncate_content_title(
+                &preview.title,
+                usize::from(title_right.saturating_sub(title_x)).saturating_sub(2),
+                config.editor.ambiguous_width,
+            )
         };
         frame.grid.put_text_clipped(
             title_x,
@@ -536,6 +652,22 @@ pub(super) fn render_picker(
     }
     let first_row = geometry.list.y;
     let visible_rows = usize::from(geometry.list.height);
+    if picker.rows.is_empty() && visible_rows > 0 {
+        let key = if picker.loading {
+            "picker_loading"
+        } else if !picker.query.is_empty() {
+            "picker_no_matches"
+        } else if picker.surface == PickerSurfaceKind::Grep {
+            "picker_grep_hint"
+        } else {
+            "picker_empty"
+        };
+        if let Some(hint) = config.messages.get(key) {
+            frame
+                .grid
+                .put_text_clipped(content_left, first_row, hint, Style::Muted, list_right);
+        }
+    }
     for (display_row, (index, row)) in picker
         .rows
         .iter()
@@ -617,9 +749,8 @@ pub(super) fn render_picker(
             // A row with cells draws every column at its own declared width with its own
             // style, so a status column, a lane and a badge are coloured independently.
             // The marker keeps focus legible; a cell that carries a meaningful style keeps
-            // it on the selected row, and only the default style is promoted to the
-            // selection style so no lane or status colour is lost under the cursor. Muted
-            // text is promoted too, so the selection band runs unbroken under a description.
+            // it on the selected row. Syntax keeps its foreground over the selection
+            // background; ordinary descriptions use the selection style.
             let marker_style = if selected {
                 Style::Selection
             } else {
@@ -633,6 +764,10 @@ pub(super) fn render_picker(
             let cells = if picker.surface == PickerSurfaceKind::Grep {
                 fitted =
                     fitted_grep_cells(&row.cells, list_right.saturating_sub(cell_x), ambiguous);
+                &fitted
+            } else if picker.surface == PickerSurfaceKind::Files {
+                fitted =
+                    fitted_path_cells(&row.cells, list_right.saturating_sub(cell_x), ambiguous);
                 &fitted
             } else {
                 &row.cells
@@ -649,10 +784,7 @@ pub(super) fn render_picker(
                     cell.width
                 };
                 let cell_right = cell_x.saturating_add(width).min(list_right);
-                let style = if selected
-                    && picker.surface == PickerSurfaceKind::Grep
-                    && let Style::Syntax(role) = cell.style
-                {
+                let style = if selected && let Style::Syntax(role) = cell.style {
                     Style::SelectionSyntax(role)
                 } else if selected
                     && (matches!(cell.style, Style::Default | Style::Muted | Style::Syntax(_))
@@ -663,22 +795,22 @@ pub(super) fn render_picker(
                 } else {
                     cell.style
                 };
-                let text = if picker.surface == PickerSurfaceKind::Changes && cell.width == 0 {
-                    truncate_content_title(&cell.text, usize::from(width), ambiguous)
-                } else {
-                    cell.text.clone()
-                };
+                let fitted_path = (cell.width == 0
+                    && (looks_like_path(&cell.text)
+                        || picker.surface == PickerSurfaceKind::Changes))
+                    .then(|| truncate_content_title(&cell.text, usize::from(width), ambiguous));
+                let text = fitted_path.as_deref().unwrap_or(&cell.text);
                 let text_x = match cell.align {
                     CellAlign::Left => cell_x,
                     CellAlign::Right => {
-                        let measured = text_width(&text, config.editor.ambiguous_width);
+                        let measured = text_width(text, config.editor.ambiguous_width);
                         let measured = u16::try_from(measured).unwrap_or(u16::MAX);
                         cell_x.saturating_add(width.saturating_sub(measured))
                     }
                 };
                 frame
                     .grid
-                    .put_text_clipped(text_x, y, &text, style, cell_right);
+                    .put_text_clipped(text_x, y, text, style, cell_right);
                 cell_x = cell_x.saturating_add(width);
             }
             continue;
@@ -705,6 +837,27 @@ pub(super) fn render_picker(
                     Style::Muted
                 },
                 source_right,
+            );
+        }
+    }
+    for (display_row, row) in picker
+        .rows
+        .iter()
+        .skip(picker.scroll)
+        .take(visible_rows)
+        .enumerate()
+    {
+        if row.kind == PickerRowKind::Entry {
+            highlight_picker_matches(
+                frame,
+                &picker.query,
+                picker.surface == PickerSurfaceKind::Grep,
+                WindowRect {
+                    x: content_left.saturating_add(2),
+                    y: first_row.saturating_add(display_row as u16),
+                    width: list_right.saturating_sub(content_left.saturating_add(2)),
+                    height: 1,
+                },
             );
         }
     }
@@ -774,10 +927,7 @@ pub(super) fn render_picker(
                     } else {
                         Style::Default
                     };
-                    match line_spans
-                        .get(offset)
-                        .filter(|_| !highlighted || picker.surface == PickerSurfaceKind::Grep)
-                    {
+                    match line_spans.get(offset) {
                         Some(spans) => {
                             let mut x = text_left;
                             let mut at = 0;
@@ -855,6 +1005,50 @@ pub(super) fn render_picker(
 #[cfg(test)]
 mod tests {
     use crate::ui::render::picker::*;
+
+    #[test]
+    fn shortened_grep_paths_drop_folders_before_any_part_of_a_fitting_filename() {
+        let name = "critical_invoice_handler.rs";
+        let path = format!("packages/workspace/customer/components/deeply/nested/{name}");
+        for ambiguous in [
+            crate::config::AmbiguousWidth::Narrow,
+            crate::config::AmbiguousWidth::Wide,
+        ] {
+            for available in name.len()..80 {
+                let shown = shortened_grep_path(&path, available, ambiguous);
+                assert!(shown.ends_with(name), "{available}: {shown}");
+                assert!(text_width(&shown, ambiguous) <= available);
+            }
+        }
+    }
+
+    #[test]
+    fn grep_locations_keep_long_filenames_with_two_and_three_digit_line_numbers() {
+        let name = "critical_invoice_handler.rs";
+        for available in [65, 85, 135] {
+            for line in [":9", ":10", ":100"] {
+                let cells = vec![
+                    crate::ui::PickerCell::new("let needle = 42;", Style::Default, 16),
+                    crate::ui::PickerCell::new(
+                        format!("packages/deeply/nested/{name}"),
+                        Style::Muted,
+                        60,
+                    ),
+                    crate::ui::PickerCell::new(line, Style::Accent, line.len() as u16),
+                    crate::ui::PickerCell::new(":20", Style::Muted, 3),
+                ];
+                let fitted =
+                    fitted_grep_cells(&cells, available, crate::config::AmbiguousWidth::Narrow);
+                let text = fitted
+                    .iter()
+                    .map(|cell| cell.text.as_str())
+                    .collect::<String>();
+                assert!(text.contains(name), "{available}: {text}");
+                assert!(text.contains("let needle = 42;"));
+                assert!(fitted.iter().map(|cell| cell.width).sum::<u16>() <= available);
+            }
+        }
+    }
 
     #[test]
     fn emphasized_diff_stops_at_a_wide_grapheme_that_cannot_fit() {

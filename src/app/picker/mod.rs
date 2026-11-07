@@ -390,6 +390,7 @@ impl Search {
                 | (PickerOrigin::Grep, PickerOrigin::Grep)
                 | (PickerOrigin::Plugins, PickerOrigin::Plugins) => true,
                 (PickerOrigin::PluginProvider(a), PickerOrigin::PluginProvider(b)) => a == b,
+                (PickerOrigin::WorkspaceEdit(a), PickerOrigin::WorkspaceEdit(b)) => a == b,
                 _ => false,
             };
             picker.source == (scope.clone(), configuration) && same_origin
@@ -438,7 +439,10 @@ impl Search {
             epoch = previous.epoch.clone();
             if matches!(
                 content.origin,
-                PickerOrigin::Files | PickerOrigin::PluginProvider(_) | PickerOrigin::Plugins
+                PickerOrigin::Files
+                    | PickerOrigin::PluginProvider(_)
+                    | PickerOrigin::Plugins
+                    | PickerOrigin::WorkspaceEdit(_)
             ) {
                 query = previous_query.to_owned();
             }
@@ -448,7 +452,7 @@ impl Search {
         }
         if matches!(
             content.origin,
-            PickerOrigin::Files | PickerOrigin::PluginProvider(_)
+            PickerOrigin::Files | PickerOrigin::PluginProvider(_) | PickerOrigin::WorkspaceEdit(_)
         ) {
             state.set_query(query);
         } else {
@@ -1179,8 +1183,8 @@ impl App {
                                 badge: String::new(),
                                 kind: crate::workspace::PickerItemKind::Entry,
                                 id,
-                                label: format!("{place}  {}", message.join(" ")),
-                                detail: String::new(),
+                                label: place,
+                                detail: message.join(" "),
                                 source: problem.source.clone(),
                                 action: PickerAction::None,
                             },
@@ -1197,8 +1201,8 @@ impl App {
                                 badge: String::new(),
                                 kind: crate::workspace::PickerItemKind::Entry,
                                 id: PickerItemId(format!("test:{}:{}", key.name, key.index)),
-                                label: format!("{place}:{}  {}", line + 1, summary.join(" ")),
-                                detail: String::new(),
+                                label: format!("{place}:{}", line + 1),
+                                detail: summary.join(" "),
                                 source: key.name.clone(),
                                 action: PickerAction::None,
                             },

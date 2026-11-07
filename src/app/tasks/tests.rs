@@ -88,11 +88,12 @@ fn successful_task_dependencies_publish_their_matched_diagnostics() {
     assert_eq!(rows.len(), 2);
     assert!(
         rows.iter()
-            .any(|row| row.label.contains("dependency warning")),
+            .any(|row| row.label == "a.txt" && row.detail == "dependency warning"),
         "{rows:?}"
     );
     assert!(
-        rows.iter().any(|row| row.label.contains("parent warning")),
+        rows.iter()
+            .any(|row| row.label == "a.txt" && row.detail == "parent warning"),
         "{rows:?}"
     );
 }
