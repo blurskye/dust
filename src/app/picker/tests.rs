@@ -17,6 +17,72 @@ use std::time::Duration;
 use std::time::Instant;
 
 #[test]
+fn replacement_select_uses_native_row_actions_and_rejects_old_answers() {
+    let (_dirs, mut app) = app();
+    let (sender, requests) = std::sync::mpsc::sync_channel(8);
+    app.replace_select(Some(sender));
+    let rows = || {
+        vec![(
+            crate::workspace::PickerItem {
+                id: crate::workspace::PickerItemId("notice".into()),
+                label: "Read notice".into(),
+                detail: String::new(),
+                source: String::new(),
+                badge: String::new(),
+                action: crate::workspace::PickerAction::None,
+                kind: crate::workspace::PickerItemKind::Entry,
+            },
+            PickerPayload::Notice {
+                title: "Notice".into(),
+                text: "selected".into(),
+            },
+        )]
+    };
+    app.install_picker("Select".into(), rows());
+    let old = requests.try_recv().unwrap();
+    assert_eq!(old.picker.title, "Select");
+    assert!(app.ui.picker.is_none());
+    app.install_picker("New select".into(), rows());
+    assert!(
+        old.reply
+            .send(Some(crate::workspace::PickerItemId("notice".into())))
+            .is_err()
+    );
+    let current = requests.try_recv().unwrap();
+    current
+        .reply
+        .send(Some(crate::workspace::PickerItemId("notice".into())))
+        .unwrap();
+    app.process_select_replacement();
+    assert!(app.search.picker_projection().is_none());
+    assert!(app.ui.documentation_popup.is_some());
+    app.install_picker("Cancel".into(), rows());
+    let cancelled = requests.try_recv().unwrap();
+    app.handle_configured_key("escape".parse().unwrap());
+    assert!(cancelled.reply.send(None).is_err());
+}
+
+#[test]
+fn unknown_replacement_selection_does_not_run_another_rows_action() {
+    let (_dirs, mut app) = app();
+    let (sender, requests) = std::sync::mpsc::sync_channel(1);
+    app.replace_select(Some(sender));
+    app.install_picker("Empty".into(), Vec::new());
+    requests
+        .try_recv()
+        .unwrap()
+        .reply
+        .send(Some(crate::workspace::PickerItemId("missing".into())))
+        .unwrap();
+    app.process_select_replacement();
+    assert!(app.ui.picker.is_some());
+    assert_eq!(
+        app.ui.notification.as_deref(),
+        Some("select replacement returned an unknown item")
+    );
+}
+
+#[test]
 fn file_preview_retries_after_capacity_returns_without_picker_input() {
     let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("preview.txt");

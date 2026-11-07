@@ -450,6 +450,7 @@ impl App {
             commands,
             pending_commands: std::collections::BTreeMap::new(),
             input: InputState::new(ABSOLUTE_MAX_COUNT),
+            input_replacement: crate::app::prompt::replacement::InputReplacement::default(),
             configuration: Configuration::new(
                 configuration,
                 use_user_configuration,

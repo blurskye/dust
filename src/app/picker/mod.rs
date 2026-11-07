@@ -142,6 +142,7 @@ pub(in crate::app) struct Picker {
     /// Set while the funnel that opens a help page is installing that page, so the install
     /// does not discard the very snapshot the page was opened to preserve.
     help_install: bool,
+    replacement: replacement::SelectReplacement,
 }
 impl Picker {
     /// Move the current surface aside so help can take the picker. Only one surface is ever
@@ -341,6 +342,7 @@ pub(in crate::app) mod palette;
 pub(in crate::app) mod preview;
 
 pub(in crate::app) mod commands;
+pub(in crate::app) mod replacement;
 
 impl Search {
     pub(in crate::app) fn install_picker(
@@ -884,6 +886,7 @@ impl App {
         self.input.cancel_prompt_completions();
         self.clear_picker_preview();
         self.sync_picker_ui();
+        self.request_select_replacement();
     }
 }
 
@@ -1402,7 +1405,11 @@ impl App {
         let icon = (explorer.icon_mode == crate::config::ExplorerIconMode::NerdFont)
             .then(|| explorer.active_glyphs().file.clone());
         self.search.set_file_icon(icon);
-        self.ui.picker = self.search.picker_projection();
+        self.ui.picker = if self.select_replacement_pending() {
+            None
+        } else {
+            self.search.picker_projection()
+        };
         let theme = match self.search.selected_picker_payload() {
             Some(PickerPayload::Theme(key)) => Some(key),
             _ => None,
@@ -1726,6 +1733,7 @@ impl App {
 
 impl App {
     pub(in crate::app) fn close_picker(&mut self) {
+        self.cancel_select_replacement();
         if self.search.help_is_open() {
             self.search.close_picker();
             if self.search.picker_projection().is_some() {

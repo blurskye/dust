@@ -15,9 +15,40 @@ pub(super) struct Notifications {
     warning: bool,
     history: VecDeque<(bool, String)>,
     deadline: Option<Instant>,
+    replacement: Option<std::sync::mpsc::SyncSender<NoticeRequest>>,
+    replaced: bool,
+}
+
+/// Notifications keep native history even when another surface presents them.
+#[allow(dead_code)] // Presentation adapters consume this on their own worker.
+pub(in crate::app) struct NoticeRequest {
+    pub message: String,
+    pub error: bool,
+    pub warning: bool,
 }
 
 impl Notifications {
+    #[allow(dead_code)]
+    pub(in crate::app) fn replace(
+        &mut self,
+        replacement: Option<std::sync::mpsc::SyncSender<NoticeRequest>>,
+    ) {
+        self.replacement = replacement;
+        self.replaced = false;
+    }
+
+    fn present(&mut self, message: &str, error: bool, warning: bool) {
+        self.replaced = self.replacement.as_ref().is_some_and(|replacement| {
+            replacement
+                .try_send(NoticeRequest {
+                    message: message.to_owned(),
+                    error,
+                    warning,
+                })
+                .is_ok()
+        });
+    }
+
     pub(in crate::app) fn new() -> Self {
         Self {
             current: None,
@@ -25,6 +56,8 @@ impl Notifications {
             warning: false,
             history: VecDeque::new(),
             deadline: None,
+            replacement: None,
+            replaced: false,
         }
     }
 
@@ -57,12 +90,17 @@ impl Notifications {
             }
             self.deadline = (!timeout.is_zero()).then_some(now + timeout);
         }
+        self.present(&message, error, false);
         self.current = Some((error, message));
         self.warning = false;
     }
 
     pub(super) fn warn(&mut self, message: String, now: Instant, timeout: Duration) {
-        self.notify(message, false, now, timeout);
+        // Record once; warning is part of the replacement's presentation too.
+        let replacement = self.replacement.take();
+        self.notify(message.clone(), false, now, timeout);
+        self.replacement = replacement;
+        self.present(&message, false, true);
         self.warning = true;
     }
 
@@ -140,7 +178,11 @@ impl App {
 
 impl App {
     pub(in crate::app) fn project_notice(&mut self) {
-        let current = self.notices.current();
+        let current = if self.notices.replaced {
+            None
+        } else {
+            self.notices.current()
+        };
         self.ui.notification = current.map(|(_, message)| message.to_owned());
         self.ui.notification_error = current.is_some_and(|(error, _)| error);
         self.ui.notification_warning = self.notices.is_warning();
@@ -232,6 +274,29 @@ mod tests {
     use crate::app::notifications::Notifications;
     use std::time::Duration;
     use std::time::Instant;
+
+    #[test]
+    fn replacement_receives_native_notices_and_preserves_history_with_fallback() {
+        let now = Instant::now();
+        let mut notices = Notifications::new();
+        let (sender, receiver) = std::sync::mpsc::sync_channel(2);
+        notices.replace(Some(sender));
+        notices.notify("saved".into(), false, now, Duration::ZERO);
+        let request = receiver.try_recv().unwrap();
+        assert_eq!(request.message, "saved");
+        assert!(!request.error);
+        assert!(!request.warning);
+        assert!(notices.replaced);
+        notices.warn("offline".into(), now, Duration::ZERO);
+        let warning = receiver.try_recv().unwrap();
+        assert!(warning.warning);
+        assert_eq!(notices.history().count(), 2);
+        drop(receiver);
+        notices.notify("error".into(), true, now, Duration::ZERO);
+        assert!(!notices.replaced);
+        assert_eq!(notices.current(), Some((true, "error")));
+        assert_eq!(notices.history().count(), 3);
+    }
 
     #[test]
     fn explicit_insertion_owns_history_and_expiry_without_observing_ui() {

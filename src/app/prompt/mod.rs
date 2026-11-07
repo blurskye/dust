@@ -71,6 +71,7 @@ pub(in crate::app) fn takes_path(command: &str) -> bool {
 }
 
 mod commands;
+pub(in crate::app) mod replacement;
 
 use crate::app::App;
 use crate::app::commands::PromptMove;
@@ -117,6 +118,7 @@ impl App {
         }
         self.project_input_hints();
         self.refresh_completions();
+        self.request_input_replacement();
     }
 }
 
@@ -143,6 +145,7 @@ impl App {
         negative_label: &str,
     ) {
         self.open_prompt(kind, String::new());
+        self.cancel_input_replacement();
         let binding = |command: &str| {
             self.configuration
                 .keymaps()
@@ -194,6 +197,7 @@ impl App {
 
 impl App {
     pub(in crate::app) fn close_prompt_with_editor_close(&mut self, cancel_editor_close: bool) {
+        self.cancel_input_replacement();
         if self
             .input
             .prompt()
@@ -630,7 +634,11 @@ impl App {
 
 impl App {
     pub(in crate::app) fn project_input_prompt(&mut self) {
-        let prompt = self.input.prompt().cloned();
+        let prompt = if self.input_replacement_pending() {
+            None
+        } else {
+            self.input.prompt().cloned()
+        };
         self.ui.set(prompt, |ui| &mut ui.prompt);
         self.preview_substitute();
     }

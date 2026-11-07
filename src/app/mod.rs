@@ -209,6 +209,7 @@ struct App {
     pending_commands:
         std::collections::BTreeMap<crate::editor::PendingCommandId, commands::PendingInvocation>,
     input: InputState,
+    input_replacement: prompt::replacement::InputReplacement,
     configuration: Configuration,
     ui: Tracked<UiState>,
     documents: Documents,
@@ -362,6 +363,8 @@ pub fn run_interactive(
     let mut input_arrived = true;
     while !application.should_quit {
         application.process_vfs_results();
+        application.process_input_replacement();
+        application.process_select_replacement();
         // Git commands need status from the start, not only once a file or the tree is open.
         application.start_git_status_refresh_silent();
         application.process_git_status_events();
