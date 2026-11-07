@@ -219,13 +219,59 @@ request, item, byte, and deadline limits. The full schemas live in
 [`src/plugins/manifest.rs`](../src/plugins/manifest.rs); validation is in
 [`src/plugins/index.rs`](../src/plugins/index.rs).
 
-## Reserved part-2 types
+## Surface: interactions, documents, save steps and chrome
 
-The production WIT defines records for editable plugin documents and writes,
-formatter chains and before-save requests, replaceable input/select/notify, and
-statusline/buffer-line segments. **These records do not yet have host imports.**
-Their native-owner translation lands in part 2. There is no advertised operation
-that silently succeeds without implementing the capability.
+These imports use the native owners, not plugin-specific copies of the editor UI.
+UI operations require the `ui` command grant (provided by `input`, `show_message`,
+or `private_cells`); documents and save steps require `edit` (`propose_edits`).
+Both the import and final effect check permission. Delegated callbacks and clicks
+retain the initiating authority; presenters cannot turn a UI grant into permission
+to execute a process or write files.
+
+- `ui-input(request, handler)` opens a text prompt, optionally masked with `secret`.
+  Secret input is not stored in prompt history. `ui-select(request, handler)` opens
+  the native picker with stable item IDs, labels and details. Both return a request
+  ID. The declared handler later receives `event = "surface-reply"`; drain
+  `take-command-replies`. A reply contains the input text or selected item ID, or
+  no value on cancellation. An already-open interaction is not replaced.
+- `notify` publishes info, warning or error notices through native history.
+- `set-presenter(kind, handler)` replaces ordinary input, select or notification
+  presentation. `None` restores the host presenter (only the current owner may
+  remove its replacement). The handler receives `event = "ui-input"` with
+  `title`, `initial`, `secret`; `"ui-select"` with `title`, `items`; or `"notify"`
+  with `message`, `level`. Use `set-command-result` to return input text or an
+  offered item ID; `false` cancels. To keep a custom panel open for user input,
+  return without a result, then call `answer-input(request, text)` or
+  `answer-select(request, item)` from a later panel handler. The callback's
+  `request` identifies the question; `None` cancels. Questions expire after sixty
+  seconds. Notification handlers need no result. Permission prompts and yes/no confirmations are always host-owned.
+  Failed presenters fall back to native input/select without losing the draft.
+- `open-editable-document(document, handler)` opens a normal editable buffer,
+  identified by plugin, source and key. Reopening it preserves unsaved edits.
+  The initial `surface-reply` contains its buffer ID. Saving invokes the handler
+  with `event = "document-write"`, `buffer`, `revision`, and `text`. Return
+  boolean `true` to accept; any other result or error rejects the write and leaves
+  the buffer dirty. These documents never fall through to a filesystem save.
+- `register-formatter(filetype, step)` and `register-before-save(filetype, step)`
+  add named steps ordered by integer order, then name. Registering the same name
+  updates it. The shared native chain invokes `event = "format"` with `buffer`,
+  `revision`, `text`, byte `start`/`end` (the whole buffer), and `before-save`.
+  Return a list of `{ start, end, replacement }` records using
+  `set-command-result`. Edits are validated and applied as undoable native edits;
+  changed buffers reject stale results. Errors or the two-second callback deadline
+  skip that plugin step. Provider writes instead fail visibly. Manual formatting
+  uses the same formatter chain without saving.
+- `set-chrome-segment` adds or updates a plugin-owned named statusline or buffer-line
+  segment; `remove-chrome-segment` removes it. Segments follow native fields in
+  ascending order/name order. Styled parts use `default`, `muted`, `accent`,
+  `warning`, `error`, `selected`, `border`, or `status`. The optional command runs
+  through normal permission-checked dispatch on a left click. Text is cached;
+  drawing never calls the guest.
+
+Surface requests share the 64-request/1 MiB per-execution limits. Selects allow
+4,096 items, segments 64 styled parts, and each running editor allows 128 save
+handlers and 128 named plugin segments. Unload removes presenters, save steps,
+segments and pending callbacks; unsaved document buffers remain available.
 
 Themes remain validated TOML data, not executable plugin palette mutations.
 Plugin-managed dirty documents/panels protect ordinary close; there is no guest quit

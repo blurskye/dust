@@ -211,6 +211,7 @@ pub(crate) const COMPLETION_DETAIL_GAP: u16 = 2;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PromptKind {
+    Text,
     Command,
     SearchForward,
     SearchBackward,
@@ -235,6 +236,7 @@ impl PromptKind {
     #[must_use]
     pub fn title(self, text: &PromptTextConfig) -> &str {
         match self {
+            Self::Text => "Input",
             Self::Command => &text.command_title,
             Self::SearchForward => &text.search_forward_title,
             Self::SearchBackward => &text.search_backward_title,
@@ -259,6 +261,7 @@ impl PromptKind {
     #[must_use]
     pub fn marker(self, text: &PromptTextConfig) -> &str {
         match self {
+            Self::Text => ">",
             Self::Command => &text.command_marker,
             Self::SearchForward => &text.search_forward_marker,
             Self::SearchBackward => &text.search_backward_marker,

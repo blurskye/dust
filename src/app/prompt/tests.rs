@@ -9,7 +9,8 @@ use crate::editor::input::KeyEvent;
 fn replacement_input_runs_the_native_continuation_and_escape_discards_late_answers() {
     let (_dirs, mut app) = app();
     let (sender, requests) = std::sync::mpsc::sync_channel(4);
-    app.input_replacement.install(Some(sender));
+    app.input_replacement
+        .install(Some(sender), crate::editor::CommandAuthority::Host);
     app.open_prompt(crate::ui::PromptKind::ReplaceFind, "draft".into());
     let request = requests.try_recv().unwrap();
     assert_eq!(request.prompt.input, "draft");
@@ -25,10 +26,38 @@ fn replacement_input_runs_the_native_continuation_and_escape_discards_late_answe
 }
 
 #[test]
+fn replacement_input_cannot_run_host_only_commands_with_a_ui_grant() {
+    let (_dirs, mut app) = app();
+    let (sender, requests) = std::sync::mpsc::sync_channel(1);
+    app.input_replacement.install(
+        Some(sender),
+        crate::editor::CommandAuthority::Plugin {
+            initiator: "presenter".into(),
+            grants: [crate::editor::CommandAccess::Ui].into(),
+        },
+    );
+    app.open_prompt(crate::ui::PromptKind::Command, String::new());
+    requests
+        .try_recv()
+        .unwrap()
+        .reply
+        .send(Some("q!".into()))
+        .unwrap();
+    app.process_input_replacement();
+    assert!(!app.should_quit);
+    assert_eq!(
+        app.ui.notification.as_deref(),
+        Some("access to command `editor.quit` was refused")
+    );
+    assert_eq!(app.effect_authority, crate::editor::CommandAuthority::Host);
+}
+
+#[test]
 fn trust_and_permission_prompts_cannot_be_replaced() {
     let (_dirs, mut app) = app();
     let (sender, requests) = std::sync::mpsc::sync_channel(4);
-    app.input_replacement.install(Some(sender));
+    app.input_replacement
+        .install(Some(sender), crate::editor::CommandAuthority::Host);
     for kind in [
         crate::ui::PromptKind::WorkspaceTrust,
         crate::ui::PromptKind::AgentPermission,
@@ -51,7 +80,8 @@ fn trust_and_permission_prompts_cannot_be_replaced() {
 fn disconnected_input_replacement_falls_back_without_losing_the_draft() {
     let (_dirs, mut app) = app();
     let (sender, requests) = std::sync::mpsc::sync_channel(4);
-    app.input_replacement.install(Some(sender));
+    app.input_replacement
+        .install(Some(sender), crate::editor::CommandAuthority::Host);
     app.open_prompt(crate::ui::PromptKind::ReplaceFind, "draft".into());
     drop(requests.try_recv().unwrap());
     app.process_input_replacement();

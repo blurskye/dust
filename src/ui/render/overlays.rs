@@ -616,6 +616,34 @@ pub fn content_tab_at_column(
     width: u16,
     column: u16,
 ) -> Option<ContentTabIdentity> {
+    content_tab_hit(entries, config, width, column).map(|(identity, _)| identity)
+}
+
+pub(crate) fn content_segment_at_column(
+    entries: &[ContentTabEntry],
+    config: &Config,
+    width: u16,
+    column: u16,
+) -> Option<String> {
+    let (identity, offset) = content_tab_hit(entries, config, width, column)?;
+    let entry = entries.iter().find(|entry| entry.identity == identity)?;
+    let mut x = 0;
+    for segment in entry.segments.as_ref()? {
+        let end = x + cell_text_width(&segment.text, config.editor.ambiguous_width);
+        if usize::from(offset) >= x && usize::from(offset) < end {
+            return Some(segment.name.clone());
+        }
+        x = end;
+    }
+    None
+}
+
+fn content_tab_hit(
+    entries: &[ContentTabEntry],
+    config: &Config,
+    width: u16,
+    column: u16,
+) -> Option<(ContentTabIdentity, u16)> {
     if entries.is_empty() || column >= width {
         return None;
     }
@@ -643,7 +671,7 @@ pub fn content_tab_at_column(
             .saturating_add(u16::try_from(item).unwrap_or(u16::MAX))
             .min(width);
         if column >= x && column < end {
-            return Some(entry.identity);
+            return Some((entry.identity, column - x));
         }
         x = end;
         if x >= width {

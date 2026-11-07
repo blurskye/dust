@@ -2,6 +2,7 @@
 wit_bindgen::generate!({ path: "wit", world: "editor-plugin" });
 
 use dust::plugin::host;
+mod surface;
 
 use dust::plugin::host::CheckedWindowRequest;
 
@@ -141,6 +142,7 @@ impl Guest for GuestComponent {
                 host::show_message(&results)?;
                 return Ok(results.clone());
             }
+            if let Some(result) = surface::event(&event, &call) { return result; }
             let events = host::take_editor_events();
             let replies = host::take_command_replies();
             let http = host::take_http_responses();
@@ -768,6 +770,7 @@ fn field_text(value: &host::CommandValue, name: &str) -> Option<String> {
 }
 
 fn drive_abi(action: &str, call: &host::CommandCall) -> Result<String, String> {
+    if let Some(action) = action.strip_prefix("surface-") { return surface::action(action); }
     match action {
         "system-results" => {
             let results = SYSTEM_RESULTS.lock().unwrap().clone();

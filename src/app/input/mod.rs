@@ -238,6 +238,7 @@ impl InputState {
     pub(in crate::app) fn capture_context(&self) -> Option<&'static str> {
         if let Some(prompt) = &self.prompt {
             return Some(match prompt.kind {
+                crate::ui::PromptKind::Text => "command_prompt",
                 crate::ui::PromptKind::Command
                 | crate::ui::PromptKind::ExplorerRename
                 | crate::ui::PromptKind::ReviewComment
@@ -1159,7 +1160,8 @@ impl InputState {
         };
         if matches!(
             kind,
-            PromptKind::WorkspaceTrust
+            PromptKind::Text
+                | PromptKind::WorkspaceTrust
                 | PromptKind::GitReset
                 | PromptKind::ExplorerDelete
                 | PromptKind::ExplorerRename
@@ -1385,7 +1387,8 @@ impl InputState {
         }
         if matches!(
             kind,
-            PromptKind::WorkspaceTrust
+            PromptKind::Text
+                | PromptKind::WorkspaceTrust
                 | PromptKind::ExplorerRename
                 | PromptKind::ReviewComment
                 | PromptKind::BreakpointCondition
@@ -2251,7 +2254,8 @@ impl App {
                         })
                 });
                 if (!over_floating
-                    && (self.handle_debug_tab_mouse(&key, column, row)
+                    && (self.handle_chrome_mouse(&key, column, row)
+                        || self.handle_debug_tab_mouse(&key, column, row)
                         || self.handle_content_tab_mouse(&key, column, row)
                         || self.handle_dock_drag(&key, column, row)
                         || self.handle_border_drag(&key, column, row)))

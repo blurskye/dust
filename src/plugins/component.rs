@@ -271,6 +271,108 @@ impl component_api::dust::plugin::host::Host for ComponentHostState {
         std::mem::take(&mut self.editor_requests.delivery.system)
     }
 
+    fn ui_input(
+        &mut self,
+        request: component_api::dust::plugin::host::InputRequest,
+        handler: String,
+    ) -> Result<u64, String> {
+        let token = self.editor_requests.token()?;
+        self.queue_surface(crate::plugins::surface::SurfaceRequest::Input(
+            token, request, handler,
+        ))?;
+        Ok(token)
+    }
+
+    fn ui_select(
+        &mut self,
+        request: component_api::dust::plugin::host::SelectRequest,
+        handler: String,
+    ) -> Result<u64, String> {
+        let token = self.editor_requests.token()?;
+        self.queue_surface(crate::plugins::surface::SurfaceRequest::Select(
+            token, request, handler,
+        ))?;
+        Ok(token)
+    }
+
+    fn notify(
+        &mut self,
+        request: component_api::dust::plugin::host::NotifyRequest,
+    ) -> Result<(), String> {
+        self.queue_surface(crate::plugins::surface::SurfaceRequest::Notify(request))
+    }
+
+    fn set_presenter(
+        &mut self,
+        kind: component_api::dust::plugin::host::PresenterKind,
+        handler: Option<String>,
+    ) -> Result<(), String> {
+        self.queue_surface(crate::plugins::surface::SurfaceRequest::Presenter(
+            kind, handler,
+        ))
+    }
+
+    fn answer_input(&mut self, request: u64, text: Option<String>) -> Result<(), String> {
+        self.queue_surface(crate::plugins::surface::SurfaceRequest::AnswerInput(
+            request, text,
+        ))
+    }
+
+    fn answer_select(&mut self, request: u64, item: Option<String>) -> Result<(), String> {
+        self.queue_surface(crate::plugins::surface::SurfaceRequest::AnswerSelect(
+            request, item,
+        ))
+    }
+
+    fn open_editable_document(
+        &mut self,
+        document: component_api::dust::plugin::host::EditableDocument,
+        handler: String,
+    ) -> Result<u64, String> {
+        let token = self.editor_requests.token()?;
+        self.queue_surface(crate::plugins::surface::SurfaceRequest::Document(
+            token, document, handler,
+        ))?;
+        Ok(token)
+    }
+
+    fn register_formatter(
+        &mut self,
+        filetype: String,
+        step: component_api::dust::plugin::host::Formatter,
+    ) -> Result<(), String> {
+        self.queue_surface(crate::plugins::surface::SurfaceRequest::Formatter(
+            filetype, step, false,
+        ))
+    }
+
+    fn register_before_save(
+        &mut self,
+        filetype: String,
+        step: component_api::dust::plugin::host::Formatter,
+    ) -> Result<(), String> {
+        self.queue_surface(crate::plugins::surface::SurfaceRequest::Formatter(
+            filetype, step, true,
+        ))
+    }
+
+    fn set_chrome_segment(
+        &mut self,
+        segment: component_api::dust::plugin::host::ChromeSegment,
+    ) -> Result<(), String> {
+        self.queue_surface(crate::plugins::surface::SurfaceRequest::Segment(segment))
+    }
+
+    fn remove_chrome_segment(
+        &mut self,
+        location: component_api::dust::plugin::host::SegmentLocation,
+        name: String,
+    ) -> Result<(), String> {
+        self.queue_surface(crate::plugins::surface::SurfaceRequest::RemoveSegment(
+            location, name,
+        ))
+    }
+
     fn register_command(
         &mut self,
         definition: component_api::dust::plugin::host::CommandDefinition,

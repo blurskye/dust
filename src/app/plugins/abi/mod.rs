@@ -3,6 +3,7 @@
 mod drawing;
 mod events;
 mod language;
+mod surface;
 mod system;
 #[cfg(test)]
 mod tests;
@@ -32,6 +33,7 @@ struct WaitingCall {
 
 #[derive(Default)]
 pub(in crate::app) struct PluginCalls {
+    surfaces: surface::Surfaces,
     next: u64,
     waiting: BTreeMap<(String, u64), WaitingCall>,
     replies: BTreeMap<String, Vec<wit::CommandReply>>,
@@ -392,6 +394,11 @@ impl App {
                         break;
                     }
                 }
+                let previous = std::mem::replace(&mut self.effect_authority, authority);
+                for message in std::mem::take(&mut source.execution.messages) {
+                    self.notify_message(message, false);
+                }
+                self.effect_authority = previous;
             }
             return;
         };
@@ -405,12 +412,17 @@ impl App {
         if !self.extension.is_active_load(&key.0, waiting.origin.load())
             || Instant::now() > waiting.deadline
         {
+            self.finish_surface_callback(
+                &key,
+                Err("surface callback timed out or unloaded".into()),
+            );
             if let Some(pending) = waiting.pending {
                 self.cancel_plugin_pending_command(pending);
             }
             source.source_actions_admitted = false;
             return;
         }
+        let surface_value = execution.value.clone();
         let result = (|| -> Result<(), String> {
             if let Some(error) = &execution.error {
                 return Err(error.clone());
@@ -495,6 +507,14 @@ impl App {
             }
             Ok(())
         })();
+        if result.is_ok() {
+            let previous = std::mem::replace(&mut self.effect_authority, waiting.authority);
+            for message in std::mem::take(&mut source.execution.messages) {
+                self.notify_message(message, false);
+            }
+            self.effect_authority = previous;
+        }
+        self.finish_surface_callback(&key, result.clone().map(|()| surface_value));
         if let Err(error) = result {
             if let Some(pending) = waiting.pending {
                 self.cancel_plugin_pending_command(pending);
@@ -530,6 +550,9 @@ impl App {
                 let result = self.apply_system_request(plugin, token, request);
                 self.effect_authority = previous;
                 result?;
+            }
+            EditorRequest::Surface(request) => {
+                self.apply_surface_request(plugin, authority, request)?
             }
             EditorRequest::Register(definition) => {
                 self.register_guest_command(plugin, definition)?
@@ -835,6 +858,7 @@ impl App {
 
     pub(in crate::app) fn remove_plugin_abi(&mut self, plugin: &str) {
         self.extension.abi.system.remove(plugin);
+        self.remove_surface_plugin(plugin);
         let pending: Vec<_> = self
             .extension
             .abi
@@ -930,6 +954,7 @@ impl App {
 
     pub(in crate::app) fn poll_plugin_callbacks(&mut self) {
         self.poll_system_callbacks();
+        self.poll_surface_callbacks();
         let now = Instant::now();
         let expired: Vec<_> = self
             .extension
@@ -942,6 +967,10 @@ impl App {
             .map(|(key, _)| key.clone())
             .collect();
         for key in expired {
+            self.finish_surface_callback(
+                &key,
+                Err("surface callback timed out or unloaded".into()),
+            );
             if let Some((_, after)) = self.extension.abi.subscriptions.get_mut(&key.0) {
                 *after = None;
             }

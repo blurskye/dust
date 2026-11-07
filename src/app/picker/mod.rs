@@ -19,6 +19,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 #[derive(Clone, Debug)]
 pub(in crate::app) enum PickerPayload {
+    Selection(String),
     /// A row whose whole text opens in a popup with this title, such as a past notice.
     Notice {
         title: String,
@@ -1733,6 +1734,7 @@ impl App {
 
 impl App {
     pub(in crate::app) fn close_picker(&mut self) {
+        self.finish_item_select(None);
         self.cancel_select_replacement();
         if self.search.help_is_open() {
             self.search.close_picker();
@@ -1789,6 +1791,9 @@ impl App {
             return;
         }
         let payload = self.search.take_picker_payload();
+        if let Some(PickerPayload::Selection(id)) = &payload {
+            self.finish_item_select(Some(id.clone()));
+        }
         if let Some(PickerPayload::ProposalFile(index)) = &payload {
             if let Err(error) = self.workspace_edits.toggle(*index) {
                 self.show_error(error);

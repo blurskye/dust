@@ -101,6 +101,13 @@ unsafe_code = "forbid"
 [lints.clippy]
 all = "warn"
 
+# Debug builds and tests compile plugins with Cranelift, which is many times slower unoptimized.
+[profile.dev.package.cranelift-codegen]
+opt-level = 3
+
+[profile.dev.package.regalloc2]
+opt-level = 3
+
 [profile.release]
 lto = "thin"
 strip = true

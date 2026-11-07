@@ -1,13 +1,13 @@
 //! System imports exercised by the retained Wasm guest and the native owners.
 
 use super::*;
-use crate::app::plugins::abi::tests::{action, pump, real_app_with_capabilities};
+use crate::app::plugins::abi::tests::{action, pump, real_app_with};
 use crate::editor::text::TextBuffer;
 use crate::editor::{CommandInvocation, CommandValue, InvocationSource};
 use crate::plugins::PluginCapability;
 
 fn real_app(capabilities: &[PluginCapability]) -> (Vec<tempfile::TempDir>, App) {
-    let (roots, mut app) = real_app_with_capabilities(&["demo"], capabilities);
+    let (roots, mut app) = real_app_with(&["demo"], capabilities, &[]);
     crate::app::tests::prepare_trust_identity(&mut app);
     (roots, app)
 }

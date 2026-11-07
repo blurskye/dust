@@ -27,6 +27,7 @@ impl Default for wit::CommandCall {
 
 #[derive(Clone, Debug)]
 pub(crate) enum EditorRequest {
+    Surface(crate::plugins::surface::SurfaceRequest),
     Register(wit::CommandDefinition),
     Run(u64, wit::CommandCall),
     Wrap(wit::CommandWrapper),

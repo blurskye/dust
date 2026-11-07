@@ -42,6 +42,26 @@ impl Default for ChromeLayout {
     }
 }
 
+/// Hit testing uses the same clipped statusline layout as drawing.
+pub(crate) fn status_segment_at_column(
+    state: &crate::editor::EditorState,
+    view: crate::editor::ViewId,
+    ui: &crate::ui::UiState,
+    config: &crate::config::Config,
+    width: u16,
+    height: u16,
+    column: u16,
+) -> Option<String> {
+    if height == 0 || column >= width {
+        return None;
+    }
+    let mut grid = crate::ui::CellGrid::new(width, height);
+    super::editor::render_status_line(&mut grid, state, view, ui, config, width, height - 1)
+        .into_iter()
+        .find(|(_, range)| range.contains(&column))
+        .map(|(name, _)| name)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
