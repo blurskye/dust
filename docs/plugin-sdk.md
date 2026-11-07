@@ -1,9 +1,10 @@
 # Dust Component Plugin SDK 0.4
 
 The production contract is [`wit/dust-plugin.wit`](../wit/dust-plugin.wit),
-package **`dust:plugin@0.4.0`**, world `editor-plugin`. Dust is unreleased: rebuild
-all plugins against this WIT. There is no 0.2 loader, shim, or alternate draft ABI.
-Plugins are Wasm Components, not native libraries, WASI programs, or subprocesses.
+package **`dust:plugin@0.4.0`**, world `editor-plugin`, shipped with Dust 0.2.0.
+Build plugins against this WIT; the plugin ABI version is separate from the editor
+release version. Plugins are Wasm Components, not native libraries, WASI programs,
+or subprocesses.
 
 The maintained Rust example is [`tests/fixtures/retained-guest`](../tests/fixtures/retained-guest).
 Its checked-in core module includes component metadata; tests wrap it with
