@@ -415,7 +415,7 @@ fn component_storage_queue_is_capability_key_and_count_bounded() {
         host.queue_virtual_document_proposal(VirtualDocumentProposal {
             request: 9,
             document: 4,
-            cancellation_generation: 1,
+            cancellation_id: 1,
             kind: VirtualDocumentProposalKind::CloseAcknowledged
         })
         .unwrap_err()
@@ -502,7 +502,7 @@ fn component_output_queues_enforce_cumulative_byte_budgets() {
     host.queue_picker_provider_chunk(chunk()).unwrap();
     assert_eq!(
         host.queue_picker_provider_chunk(chunk()).unwrap_err().code,
-        ProviderErrorCode::ByteCeiling
+        ProviderErrorCode::ByteLimit
     );
     assert_eq!(host.provider_chunks.len(), 1);
     host.provider_chunks.clear();
@@ -511,7 +511,7 @@ fn component_output_queues_enforce_cumulative_byte_budgets() {
     let full = || VirtualDocumentProposal {
         request: 1,
         document: 1,
-        cancellation_generation: 1,
+        cancellation_id: 1,
         kind: VirtualDocumentProposalKind::Full(VirtualDocumentFull {
             expected_revision: None,
             revision: 1,
@@ -527,14 +527,14 @@ fn component_output_queues_enforce_cumulative_byte_budgets() {
         host.queue_virtual_document_proposal(full())
             .unwrap_err()
             .code,
-        VirtualDocumentErrorCode::ByteCeiling
+        VirtualDocumentErrorCode::ByteLimit
     );
     assert_eq!(host.virtual_document_proposals.len(), 3);
     host.virtual_document_proposals.clear();
     let patches = || VirtualDocumentProposal {
         request: 1,
         document: 1,
-        cancellation_generation: 1,
+        cancellation_id: 1,
         kind: VirtualDocumentProposalKind::Patches(VirtualDocumentPatchSet {
             expected_revision: 1,
             revision: 2,
@@ -552,7 +552,7 @@ fn component_output_queues_enforce_cumulative_byte_budgets() {
         host.queue_virtual_document_proposal(patches())
             .unwrap_err()
             .code,
-        VirtualDocumentErrorCode::ByteCeiling
+        VirtualDocumentErrorCode::ByteLimit
     );
     assert_eq!(host.virtual_document_proposals.len(), 16);
     host.virtual_document_proposals.clear();

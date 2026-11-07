@@ -202,7 +202,7 @@ impl Guest for GuestComponent {
                 let _ = host::queue_virtual_document_proposal(&VirtualDocumentProposal {
                     request: request.request,
                     document: request.document,
-                    cancellation_generation: request.cancellation_generation,
+                    cancellation_id: request.cancellation_id,
                     kind: VirtualDocumentProposalKind::Full(VirtualDocumentFull {
                         expected_revision: request.current_revision,
                         revision: request.current_revision.unwrap_or(0) + 1,
@@ -231,7 +231,7 @@ impl Guest for GuestComponent {
                 let _ = host::queue_virtual_document_proposal(&VirtualDocumentProposal {
                     request: request.request,
                     document: request.document,
-                    cancellation_generation: request.cancellation_generation,
+                    cancellation_id: request.cancellation_id,
                     kind: VirtualDocumentProposalKind::Full(VirtualDocumentFull {
                         expected_revision: request.current_revision,
                         revision: request.current_revision.unwrap_or(0) + 1,
@@ -277,7 +277,7 @@ impl Guest for GuestComponent {
             let ordinal = CONFIRMATION_PROBE_ORDINAL.fetch_add(1, Ordering::SeqCst) + 1;
             let outcome = match host::queue_confirmation(&ConfirmationRequest {
                 title: "Probe confirmation capacity".into(),
-                message: "This request qualifies aggregate host admission".into(),
+                message: "This request tests the host queue limit".into(),
                 default_answer: ConfirmationAnswer::No,
             }) {
                 Ok(_) => "accepted",
@@ -440,7 +440,7 @@ fn drive_virtual_document() -> Result<String, String> {
     host::queue_virtual_document_proposal(&VirtualDocumentProposal {
         request: request.request,
         document: request.document,
-        cancellation_generation: request.cancellation_generation,
+        cancellation_id: request.cancellation_id,
         kind,
     })
     .map_err(|error| format!("virtual:{:?}", error.code))?;

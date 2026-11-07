@@ -125,18 +125,18 @@ interface host {
     stale-graph,
     stale-tree,
     stale-handle,
-    foreign-generation,
+    foreign-load,
     undeclared-content,
     undeclared-action,
     disallowed-placement,
     hidden-focus,
     cross-tab,
-    instance-ceiling,
-    graph-ceiling,
+    instance-limit,
+    graph-limit,
     invalid-tree,
     invalid-placement,
     close-order,
-    generation-lost,
+    load-unavailable,
     internal-rejected,
     wrong-presenter,
     stale-surface,
@@ -148,7 +148,7 @@ interface host {
     invalid-style,
     invalid-cursor,
     invalid-hit-region,
-    patch-ceiling,
+    patch-limit,
   }
 
   record ui-error { code: ui-error-code, detail: string }
@@ -167,7 +167,7 @@ interface host {
   }
 
   enum confirmation-answer { yes, no, cancelled }
-  enum confirmation-error-code { queue-full, invalid-request, generation-lost, source-retired, unavailable }
+  enum confirmation-error-code { queue-full, invalid-request, load-unavailable, stale-source, unavailable }
   record confirmation-error { code: confirmation-error-code, detail: string }
   record confirmation-request {
     title: string,
@@ -218,7 +218,7 @@ interface host {
     quota-exceeded,
     unavailable,
     corrupt,
-    generation-lost,
+    load-unavailable,
   }
   record storage-error { code: storage-error-code, detail: string }
   record storage-entry { key: string, revision: u64, value: list<u8> }
@@ -239,7 +239,7 @@ interface host {
     workspace-revision: option<u64>,
     buffer-revision: option<u64>,
     deadline-milliseconds: u32,
-    cancellation-generation: u64,
+    cancellation-id: u64,
     maximum-items: u16,
     maximum-bytes: u32,
   }
@@ -254,14 +254,14 @@ interface host {
     queue-full,
     unknown-request,
     unknown-provider,
-    stale-generation,
+    stale-load,
     stale-revision,
     cancelled,
     expired,
     invalid-sequence,
     duplicate-item,
-    item-ceiling,
-    byte-ceiling,
+    item-limit,
+    byte-limit,
     malformed,
     unavailable,
     internal,
@@ -287,7 +287,7 @@ interface host {
     kind: virtual-document-request-kind,
     current-revision: option<u64>,
     deadline-milliseconds: u32,
-    cancellation-generation: u64,
+    cancellation-id: u64,
     maximum-document-bytes: u32,
     maximum-document-lines: u32,
     maximum-patch-bytes: u32,
@@ -308,9 +308,9 @@ interface host {
   }
   enum virtual-document-error-code {
     queue-full, unknown-source, unknown-request, unknown-document,
-    stale-generation, stale-revision, cancelled, expired, invalid-title,
-    invalid-language, invalid-utf8-range, invalid-control, byte-ceiling,
-    line-ceiling, patch-ceiling, read-only, malformed, internal,
+    stale-load, stale-revision, cancelled, expired, invalid-title,
+    invalid-language, invalid-utf8-range, invalid-control, byte-limit,
+    line-limit, patch-limit, read-only, malformed, internal,
   }
   record virtual-document-error { code: virtual-document-error-code, detail: string }
   variant virtual-document-proposal-kind {
@@ -322,7 +322,7 @@ interface host {
   record virtual-document-proposal {
     request: u64,
     document: u64,
-    cancellation-generation: u64,
+    cancellation-id: u64,
     kind: virtual-document-proposal-kind,
   }
 
@@ -408,7 +408,7 @@ interface host {
   propose-edits: func(buffer: u64, revision: u64, edits: list<edit>) -> result<u64, string>;
   show-message: func(message: string) -> result<_, string>;
   config-get: func(key: string) -> option<string>;
-  // Immutable admission revision for queued UI proposals; it grants no graph handle.
+  // Immutable starting revision for queued UI proposals; it grants no graph handle.
   current-ui-revision: func() -> option<u64>;
 
   // These calls only enqueue bounded proposals in the component worker. The
@@ -417,18 +417,18 @@ interface host {
   take-ui-events: func() -> list<ui-event>;
 
   // Ordinary confirmation is a host-owned interaction, not a permission grant.
-  // A result is delivered once during a later admitted command execution.
+  // A result is delivered once during a later command execution.
   queue-confirmation: func(request: confirmation-request) -> result<u64, confirmation-error>;
   take-confirmation-results: func() -> list<confirmation-result>;
 
   // Subscription declarations are accepted before Component bytes. Delivery
   // occurs only in a later command execution; acknowledgement is bounded and
-  // generation ownership remains host-private.
+  // plugin load ownership remains host-private.
   take-host-events: func() -> list<host-event>;
   acknowledge-host-events: func(ids: list<u64>) -> result<_, string>;
 
   // Storage requests contain logical keys only. The host derives plugin and
-  // generation ownership and performs all persistence on a bounded worker.
+  // load ownership and performs all persistence on a bounded worker.
   queue-storage-request: func(request: storage-request) -> result<u64, storage-error>;
   take-storage-results: func() -> list<storage-result>;
 
