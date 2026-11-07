@@ -228,8 +228,12 @@ fn dashboard_hides_the_entire_logo_when_the_terminal_leaves_a_short_workspace() 
             key: None,
         })
         .collect::<Vec<_>>();
-    // A 16-row terminal leaves 29 or 16 dashboard rows in the reviewed screenshots.
-    for height in [29, 16, 14, 11] {
+    // Each header line needs one more row than the entries alone; with the bundled
+    // entries a 16-row terminal leaves a workspace about this tall.
+    let entries = actions.len() as u16;
+    let identity_fits = entries + 7;
+    let version_fits = entries + 5;
+    for height in [entries + 20, identity_fits, version_fits, entries + 2] {
         let frame = crate::ui::render::render_dashboard(
             Path::new("/workspace"),
             &actions,
@@ -251,11 +255,14 @@ fn dashboard_hides_the_entire_logo_when_the_terminal_leaves_a_short_workspace() 
             );
         }
         let version = format!("v{}", env!("CARGO_PKG_VERSION"));
-        assert_eq!(rows.iter().any(|row| row.contains(&version)), height >= 14);
+        assert_eq!(
+            rows.iter().any(|row| row.contains(&version)),
+            height >= version_fits
+        );
         assert_eq!(
             rows.iter()
                 .any(|row| row.contains(&loaded.dashboard.identity)),
-            height >= 16
+            height >= identity_fits
         );
         let first = rows.iter().position(|row| !row.trim().is_empty()).unwrap();
         let last = rows.iter().rposition(|row| !row.trim().is_empty()).unwrap();
@@ -265,15 +272,21 @@ fn dashboard_hides_the_entire_logo_when_the_terminal_leaves_a_short_workspace() 
         );
     }
     // Once the complete header fits, every logo row is present with breathing room.
-    let frame = crate::ui::render::render_dashboard(
-        Path::new("/workspace"),
-        &actions,
-        0,
-        &loaded.dashboard,
-        &loaded.config,
-        160,
-        30,
-    );
+    let render = |height| {
+        crate::ui::render::render_dashboard(
+            Path::new("/workspace"),
+            &actions,
+            0,
+            &loaded.dashboard,
+            &loaded.config,
+            160,
+            height,
+        )
+    };
+    let frame = (entries..80)
+        .map(render)
+        .find(|frame| (0..frame.grid.height()).any(|y| frame.grid.row_text(y).contains('█')))
+        .expect("the logo fits on a tall dashboard");
     assert!(frame.grid.row_text(0).trim().is_empty());
     for (index, line) in loaded.dashboard.logo.lines().enumerate() {
         assert_eq!(frame.grid.row_text(index as u16 + 1).trim(), line);
