@@ -578,12 +578,6 @@ pub(super) fn render_picker(
                 config.editor.ambiguous_width,
             );
             format!("{path}{line}")
-        } else if picker.surface == PickerSurfaceKind::Changes {
-            truncate_content_title(
-                &preview.title,
-                usize::from(title_right.saturating_sub(title_x)).saturating_sub(2),
-                config.editor.ambiguous_width,
-            )
         } else {
             truncate_content_title(
                 &preview.title,
