@@ -272,8 +272,7 @@ impl App {
             AppEffect::SaveAll { quit_after } => self.save_all(quit_after),
             AppEffect::OpenPath(path) => self.edit_path(path),
             AppEffect::ForceOpenPath(path) => {
-                let wanted =
-                    crate::files::canonicalize(self.state.workspace_root.join(&path)).ok();
+                let wanted = crate::files::canonicalize(self.state.workspace_root.join(&path)).ok();
                 let current = self
                     .state
                     .active_buffer_id()
