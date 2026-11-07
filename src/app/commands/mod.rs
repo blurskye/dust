@@ -465,6 +465,7 @@ pub enum AppEffect {
         count: u64,
     },
     DapStart(Option<PathBuf>),
+    DapCursorTest,
     DapStop,
     DapContinue,
     DapPause,
@@ -1221,6 +1222,7 @@ impl App {
             | AppEffect::DebuggerTerminate
             | AppEffect::DebuggerDetach
             | AppEffect::DapStart(..)
+            | AppEffect::DapCursorTest
             | AppEffect::DapConfigurationStart(..)
             | AppEffect::DapWatchAdd(..)
             | AppEffect::DapWatchRemove(..)

@@ -72,6 +72,8 @@ pub(in crate::app) enum PickerPayload {
     Window(crate::windows::WindowId),
     LspSession(String),
     Debug(crate::app::debugger::DebugKey),
+    DebugLaunch(Box<crate::app::debugger::PresetLaunch>),
+    DebugConfiguration(String),
     PersistedLocation(PersistedLocation),
     GitHunk {
         path: PathBuf,
@@ -1962,6 +1964,8 @@ impl App {
                 }
             }
             Some(PickerPayload::LspSession(key)) => self.select_lsp_session(&key),
+            Some(PickerPayload::DebugLaunch(launch)) => self.start_debug_preset(*launch),
+            Some(PickerPayload::DebugConfiguration(name)) => self.start_dap_configuration(&name),
             Some(PickerPayload::Debug(_)) => {
                 self.debugger_session.refresh(
                     &self.configuration.settings().debug,

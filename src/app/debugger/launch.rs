@@ -66,6 +66,7 @@ pub(super) struct Launch {
     session: DebugSessionConfig,
     tool: Option<Tool>,
     cwd: PathBuf,
+    root_selected: bool,
     program: Option<PathBuf>,
     /// The adapter runs the program itself, so a script needs no execute bit.
     source_program: bool,
@@ -369,6 +370,7 @@ impl Debugger {
             session,
             tool,
             cwd,
+            root_selected: false,
             program,
             source_program,
             automatic_program,
@@ -377,6 +379,21 @@ impl Debugger {
             terminal,
         });
         Ok(token)
+    }
+    pub(super) fn apply_preset(
+        &mut self,
+        root: &Path,
+        arguments: BTreeMap<String, serde_json::Value>,
+        module: bool,
+    ) {
+        if let Some(launch) = self.launch.as_mut() {
+            launch.cwd = root.to_path_buf();
+            launch.root_selected = true;
+            launch.session.arguments = arguments;
+            if module {
+                launch.program = None;
+            }
+        }
     }
     pub(in crate::app) fn authorize_debug(
         &mut self,
@@ -395,7 +412,7 @@ impl Debugger {
         workspace
             .execution_allowed()
             .map_err(|_| "debuggers run only in a trusted workspace".to_owned())?;
-        launch.phase = if launch.tool.is_some() {
+        launch.phase = if launch.tool.is_some() && !launch.root_selected {
             Phase::Discovery
         } else {
             Phase::Adapter
@@ -468,7 +485,7 @@ impl Debugger {
                 }
                 if launch.source_program {
                     let target = program.canonicalize().map_err(|_| {
-                        format!("debug program {} does not exist", program.display())
+                        format!("debug program {} does not exist; build it in the terminal (Ctrl-/), then press Space d s", program.display())
                     })?;
                     if !launch
                         .roots

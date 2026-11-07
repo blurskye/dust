@@ -1,5 +1,6 @@
 //! Private debugger runtime, controls, breakpoint/watch policy and sourced selections.
 mod launch;
+mod presets;
 use crate::app::windows::NavigationStamp;
 use crate::app::workspace::Workspace;
 use crate::app::workspace::WorkspaceVersion;
@@ -20,6 +21,7 @@ use crate::debugger::DapTerminalReply;
 use crate::persistence::PersistedBreakpoint;
 use crate::persistence::PersistedWatch;
 use crate::process::PtyId;
+pub(in crate::app) use presets::PresetLaunch;
 
 pub(in crate::app) const MAXIMUM_BREAKPOINTS: usize = 10_000;
 pub(in crate::app) const MAXIMUM_WATCHES: usize = 1_000;
@@ -139,6 +141,10 @@ pub(in crate::app) struct DapTargetIdentity {
 pub(super) struct Debugger {
     service: DapClient,
     launch: Option<launch::Launch>,
+    install_launch: Option<PresetLaunch>,
+    last_preset: Option<PresetLaunch>,
+    cargo_build: Option<presets::CargoBuild>,
+    build_jobs: Option<crate::process::JobSupervisor>,
     console: VecDeque<crate::debugger::DapConsoleEntry>,
     breakpoints: BTreeMap<PathBuf, Vec<DapSourceBreakpoint>>,
     sign_marks: Vec<(
@@ -228,6 +234,10 @@ impl Debugger {
         Self {
             service: DapClient::new(),
             launch: None,
+            install_launch: None,
+            last_preset: None,
+            cargo_build: None,
+            build_jobs: None,
             console: VecDeque::new(),
             breakpoints: BTreeMap::new(),
             sign_marks: Vec::new(),
@@ -284,7 +294,10 @@ impl Debugger {
         }
     }
     pub(in crate::app) fn stop(&mut self) -> Result<(), DapError> {
-        let pending_launch = self.launch.take().is_some();
+        let pending_launch = self.launch.take().is_some()
+            || self.install_launch.is_some()
+            || self.cargo_build.is_some();
+        self.cancel_preset_launch();
         self.latest_breakpoints.clear();
         self.breakpoint_refresh.clear();
         self.output_line = None;
@@ -306,6 +319,7 @@ impl Debugger {
         self.event_source = None;
         self.console.clear();
         self.configuration = None;
+        self.last_preset = None;
         self.breakpoints.clear();
         self.breakpoint_states.clear();
         self.disabled_breakpoints.clear();
@@ -314,6 +328,9 @@ impl Debugger {
     pub(in crate::app) fn begin_shutdown(&mut self) {
         let _ = self.stop();
         self.service.begin_shutdown();
+        if let Some(jobs) = self.build_jobs.as_mut() {
+            jobs.begin_shutdown();
+        }
     }
     pub(in crate::app) fn pending(&self) -> usize {
         self.service.pending() + self.reply_deliveries.len()
@@ -1848,6 +1865,7 @@ use crate::workspace::PickerItemId;
 
 impl App {
     pub(in crate::app) fn start_dap_configuration(&mut self, name: &str) {
+        self.debugger_session.last_preset = None;
         match self.debugger_session.request_debug(
             (Some(name), None),
             None,
@@ -1861,7 +1879,7 @@ impl App {
             self.tooling.entries(),
         ) {
             Ok(intent) => self.run_trusted(TrustedAction::StartDebug(intent)),
-            Err(error) => self.show_error(error),
+            Err(error) => self.show_error(format!("{error}; check [debug.adapters] and [debug.sessions] in config.toml, then press Space d s")),
         }
     }
 }
@@ -1872,6 +1890,11 @@ impl App {
         requested: Option<String>,
         program: Option<PathBuf>,
     ) {
+        if requested.is_none() && program.is_none() {
+            self.open_debug_launch_picker();
+            return;
+        }
+        self.debugger_session.last_preset = None;
         let document = self
             .state
             .active_buffer_id()
@@ -1955,6 +1978,7 @@ impl App {
 
 impl App {
     pub(in crate::app) fn process_dap_events(&mut self) {
+        self.poll_debug_presets();
         for error in self.debugger_session.reply_failures() {
             self.show_error(error);
         }
@@ -2440,6 +2464,13 @@ impl App {
 impl App {
     /// TERMINATE: ask for the debuggee to end with the session.
     pub(in crate::app) fn terminate_debug_session(&mut self) {
+        if self.debugger_session.install_launch.is_some()
+            || self.debugger_session.cargo_build.is_some()
+        {
+            self.debugger_session.cancel_preset_launch();
+            self.notify_message("Debug launch cancelled; adapter installation, if started, remains in Tools (Space c m)".into(), false);
+            return;
+        }
         if let Err(error) = self.debugger_session.terminate_debuggee() {
             self.show_error(error);
         }

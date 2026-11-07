@@ -56,6 +56,9 @@ it does not implement a second editor. Important groups are:
   language-server requests/results, completion, parsing and diagnostic display.
 - `git/`, `terminal/`, `debugger/`, `agent/`, `tasks/` and `tools/`: editor-facing
   workflows around their respective clients and workers.
+- `debugger/presets.rs`: detects `assets/defaults/debug-presets.toml` launches,
+  resumes after Tools installation and selects Cargo executables using the existing
+  process job supervisor. Launches still use the debugger's workspace preflight.
 - `configuration/` and `settings/`: compile and apply configuration contributions,
   keymaps, themes, setup and settings interactions.
 - `plugins/`: connect component requests and replies to these native owners;

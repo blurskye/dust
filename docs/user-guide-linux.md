@@ -229,6 +229,44 @@ the pull-request picker and review-comment commands also support Gitea/Forgejo v
 
 The debug console is opened with `Space d r`; `Space d R` restarts the session.
 
+### Choose a debug launch
+
+`Space d s` opens **Debug launch**, combining saved `[debug.sessions]` configurations
+with project presets. `Space d c` also opens it when no session is running.
+Rust projects offer Cargo binaries and test executables; Python offers the current
+file and pytest; Go offers the current package and package tests. The preset data
+lives in `assets/defaults/debug-presets.toml`.
+
+Rows name the adapter and say when it is missing. **Enter installs a supported
+missing adapter through Tools, then resumes the selected launch**, even if you
+switch files while installation runs. Rust prefers an already installed CodeLLDB
+or lldb-dap; otherwise it offers CodeLLDB installation. Installers still require
+a trusted workspace (`:trust`); `Space c m` opens Tools for progress and failures.
+Save the source with `:w` before starting. Missing runtimes and failed builds name
+the next action. `Space d t` cancels a pending debug build or launch; an adapter
+installation already in progress remains managed by Tools.
+
+Cargo builds run asynchronously and use Cargo's reported executable paths, rather
+than guessing filenames in `target/debug`. If there is more than one executable,
+a second picker chooses the target. Cargo's output directory must be inside the
+workspace. Existing `:dap.session.start program=...` and
+`:dap.configuration.start name=...` commands remain available.
+
+`Space t d` debugs the test containing the cursor: Rust tests, Python pytest
+functions/methods and Go `Test...` functions. Rust first builds the test targets,
+then asks the selected executable for its test names and runs an exact match.
+Duplicate function names open a test-name picker rather than running multiple
+tests. Python uses a pytest node ID; Go uses an anchored test-name filter. The
+Tree-sitter function must be available; JavaScript tests and Go subtests do not
+have cursor-test support.
+
+JavaScript/TypeScript current-file presets are detected, but the catalog's
+`js-debug-adapter` is discovery-only: Dust cannot install it. Upstream js-debug
+also needs child-session DAP support that Dust does not yet provide. Use a saved
+configuration with a compatible adapter rather than expecting the upstream TCP
+server to work as a stdio adapter. TypeScript execution additionally depends on
+the Node runtime or the project's configured loader.
+
 ## Recovery and health
 
 Dirty buffers are journaled asynchronously. Use `:recovery`, `:recover`, or the dashboard recovery action after an unclean exit. Dust never overwrites the original file automatically during recovery.

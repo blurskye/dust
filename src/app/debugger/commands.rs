@@ -192,6 +192,14 @@ pub(in crate::app) fn register_commands(
     )?;
     register(
         registry,
+        "dap.test.cursor",
+        "Debug test under cursor",
+        ContextRequirement::Buffer,
+        ArgumentSchema::default(),
+        |_| AppEffect::DapCursorTest,
+    )?;
+    register(
+        registry,
         "dap.session.start",
         "Start debug session",
         ContextRequirement::Application,
@@ -214,6 +222,7 @@ impl App {
             AppEffect::DebuggerTerminate => self.terminate_debug_session(),
             AppEffect::DebuggerDetach => self.detach_debug_session(),
             AppEffect::DapStart(program) => self.start_dap(None, program),
+            AppEffect::DapCursorTest => self.debug_cursor_test(),
             AppEffect::DapConfigurationStart(name) => self.start_dap_configuration(&name),
             AppEffect::DapWatchAdd(expression) => self.debugger_session.add_watch(expression),
             AppEffect::DapWatchRemove(expression) => {
@@ -385,6 +394,15 @@ impl App {
                 }) {
                     self.show_error(error)
                 }
+            }
+            AppEffect::DapRestart if self.debugger_session.last_preset.is_some() => {
+                let launch = self
+                    .debugger_session
+                    .last_preset
+                    .clone()
+                    .expect("preset launch");
+                let _ = self.debugger_session.stop();
+                self.start_debug_preset(launch);
             }
             AppEffect::DapRestart => {
                 match self.debugger_session.request_restart(
