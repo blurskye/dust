@@ -249,6 +249,104 @@ fn incoming_notification_runs_its_method_command_before_native_handling() {
 }
 
 #[test]
+fn first_completion_documentation_survives_background_notifications_and_retrigger() {
+    use crate::language::lsp::{LspCapabilities, LspEvent, OwnedLspEvent};
+    let (_dirs, mut app) = app();
+    let path = app.state.workspace_root.join("completion.rs");
+    let (buffer, _) = app
+        .state
+        .open_text(TextBuffer::from_text(""), Some(path))
+        .unwrap();
+    app.set_dashboard_visibility(false);
+    let endpoint = fixture_owned_lsp(&mut app, "server", buffer);
+    app.language.running(
+        "server",
+        LspCapabilities {
+            completion: true,
+            completion_resolve: true,
+            ..Default::default()
+        },
+    );
+    app.language.select("server");
+    let document = app.active_lsp_document().unwrap().1;
+    app.request_lsp(LspFeature::Completion);
+    let mut item = source_completion("method", "method()", "0");
+    item.resolved = false;
+    item.resolve_item = Some(serde_json::json!({"label": "method"}));
+    endpoint.publish_result(
+        app.language.request_id(),
+        "textDocument/completion",
+        &document,
+        LspFeatureResult::Completion {
+            items: vec![item.clone()],
+            incomplete: false,
+        },
+    );
+    app.process_lsp_events();
+    let resolve_id = app.language.request_id();
+    assert!(!app.language.completion_resolve_accepts(resolve_id));
+    item.resolved = true;
+    item.documentation = Some(LspMarkupContent {
+        kind: LspMarkupKind::Markdown,
+        value: "Documentation for the first method".into(),
+    });
+    endpoint.publish_result(
+        resolve_id,
+        "completionItem/resolve",
+        &document,
+        LspFeatureResult::CompletionResolved(Box::new(item.clone())),
+    );
+    app.process_lsp_events();
+    assert!(app.ui.documentation_popup.is_some());
+    app.route_lsp_event(OwnedLspEvent {
+        event: LspEvent::Log {
+            server: "server".into(),
+            method: Some("window/logMessage".into()),
+            message: "background notification".into(),
+        },
+        context: endpoint.context(),
+        reply: None,
+    });
+    let popup = app
+        .ui
+        .documentation_popup
+        .as_ref()
+        .expect("background LSP commands must not dismiss completion docs");
+    assert_eq!(popup.kind, DocumentationPopupKind::Completion);
+    assert!(
+        popup.sections[0]
+            .lines
+            .join(" ")
+            .contains("Documentation for the first method")
+    );
+    assert_eq!(app.ui.language_completion.as_ref().unwrap().selected, 0);
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "");
+
+    app.handle_key_in_context("completion", "ctrl-space".parse::<KeyEvent>().unwrap());
+    let retrigger_id = app.language.request_id();
+    assert!(
+        retrigger_id > resolve_id,
+        "Ctrl-Space must request completion from the open menu"
+    );
+    endpoint.publish_result(
+        retrigger_id,
+        "textDocument/completion",
+        &document,
+        LspFeatureResult::Completion {
+            items: vec![item],
+            incomplete: false,
+        },
+    );
+    app.process_lsp_events();
+    assert!(
+        app.ui.documentation_popup.is_some(),
+        "retriggered completion must show its first item's docs"
+    );
+    assert_eq!(app.ui.language_completion.as_ref().unwrap().selected, 0);
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "");
+}
+
+#[test]
 fn auto_import_completion_keeps_snippet_tabstops_after_shifted_insertion() {
     use crate::language::lsp::LspCompletionItem;
     use crate::language::lsp::LspPosition;

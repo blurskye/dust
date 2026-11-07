@@ -4034,6 +4034,12 @@ keys = "tab"
 command = "completion.accept"
 
 [[keymap]]
+id = "builtin.completion.surface.completion-trigger.ctrl-space"
+context = "completion"
+keys = "ctrl-space"
+command = "lsp.completion.trigger"
+
+[[keymap]]
 id = "builtin.completion.surface.completion-select-next.ctrl-n"
 context = "completion"
 keys = "ctrl-n"
