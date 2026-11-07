@@ -85,7 +85,7 @@ zstd = "=0.13.3"
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.30.1", features = ["signal", "process", "fs", "poll", "event"] }
 # Atomic exchange and no-clobber renames on Linux (including musl) and macOS.
-rustix = { version = "1.1.4", features = ["fs"] }
+rustix = { version = "1.1.4", features = ["fs", "process"] }
 
 [features]
 # Builds OpenSSL and libgit2 into the binary, for the static release build.

@@ -51,6 +51,28 @@ pub(crate) fn terminate_process_group(id: u32) {
         .status();
 }
 
+/// Observe exit without reaping the leader while teardown can still signal its group.
+pub(crate) fn child_exit_status(
+    child: &mut std::process::Child,
+) -> io::Result<Option<Option<i32>>> {
+    #[cfg(unix)]
+    {
+        use rustix::process::{Pid, WaitId, WaitIdOptions, waitid};
+        let pid = Pid::from_raw(child.id() as i32)
+            .ok_or_else(|| io::Error::other("invalid child process ID"))?;
+        waitid(
+            WaitId::Pid(pid),
+            WaitIdOptions::EXITED | WaitIdOptions::NOHANG | WaitIdOptions::NOWAIT,
+        )
+        .map(|status| status.map(|status| status.exit_status()))
+        .map_err(io::Error::from)
+    }
+    #[cfg(not(unix))]
+    child
+        .try_wait()
+        .map(|status| status.map(|status| status.code()))
+}
+
 pub const MAX_PROTOCOL_MESSAGE_BYTES: usize = 16 * 1024 * 1024;
 const MAX_PROTOCOL_HEADER_BYTES: usize = 16 * 1024;
 

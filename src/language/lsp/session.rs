@@ -951,26 +951,7 @@ fn shutdown_server(
 // Observe exit without reaping, so the process group cannot be recycled before
 // teardown has terminated its remaining members.
 fn server_exit_status(child: &mut std::process::Child) -> std::io::Result<Option<bool>> {
-    #[cfg(unix)]
-    {
-        use nix::sys::wait::Id;
-        use nix::sys::wait::WaitPidFlag;
-        use nix::sys::wait::WaitStatus;
-        use nix::sys::wait::waitid;
-        use nix::unistd::Pid;
-        match waitid(
-            Id::Pid(Pid::from_raw(child.id() as i32)),
-            WaitPidFlag::WEXITED | WaitPidFlag::WNOHANG | WaitPidFlag::WNOWAIT,
-        )? {
-            WaitStatus::StillAlive => Ok(None),
-            WaitStatus::Exited(_, code) => Ok(Some(code == 0)),
-            _ => Ok(Some(false)),
-        }
-    }
-    #[cfg(not(unix))]
-    child
-        .try_wait()
-        .map(|status| status.map(|status| status.success()))
+    crate::process::child_exit_status(child).map(|status| status.map(|code| code == Some(0)))
 }
 
 #[allow(clippy::too_many_arguments)]

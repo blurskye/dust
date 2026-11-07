@@ -834,30 +834,7 @@ fn reserve_output(total: &AtomicUsize, limit: usize, requested: usize) -> usize 
 }
 
 fn job_exit_status(child: &mut Child) -> io::Result<Option<Option<i32>>> {
-    #[cfg(unix)]
-    {
-        use nix::sys::wait::Id;
-        use nix::sys::wait::WaitPidFlag;
-        use nix::sys::wait::WaitStatus;
-        use nix::sys::wait::waitid;
-        // Keep the exited leader reserved while descendants can still hold pipes.
-        match waitid(
-            Id::Pid(nix::unistd::Pid::from_raw(child.id() as i32)),
-            WaitPidFlag::WEXITED | WaitPidFlag::WNOHANG | WaitPidFlag::WNOWAIT,
-        )
-        .map_err(io::Error::from)?
-        {
-            WaitStatus::Exited(_, code) => Ok(Some(Some(code))),
-            WaitStatus::Signaled(..) => Ok(Some(None)),
-            _ => Ok(None),
-        }
-    }
-    #[cfg(not(unix))]
-    {
-        child
-            .try_wait()
-            .map(|status| status.map(|status| status.code()))
-    }
+    crate::process::child_exit_status(child)
 }
 
 fn terminate_tree(child: &mut Child, reaped: bool) {
@@ -1270,7 +1247,7 @@ mod tests {
         }
         assert_ne!(engine.jobs[&JobId(1)].readers.load(Ordering::Acquire), 0);
         let running = engine.jobs.get_mut(&JobId(1)).unwrap();
-        let pid = nix::unistd::Pid::from_raw(running.child.id() as i32);
+        let pid = rustix::process::Pid::from_raw(running.child.id() as i32).unwrap();
         // Observation must not reap the leader while cleanup can still signal its group.
         assert_eq!(job_exit_status(&mut running.child).unwrap(), Some(Some(0)));
         cancel.store(true, Ordering::Release);
@@ -1279,13 +1256,14 @@ mod tests {
             assert!(Instant::now() < deadline, "descendant retained job readers");
             thread::sleep(Duration::from_millis(2));
         }
-        use nix::sys::wait::Id;
-        use nix::sys::wait::WaitPidFlag;
-        use nix::sys::wait::waitid;
-        assert_eq!(
-            waitid(Id::Pid(pid), WaitPidFlag::WEXITED | WaitPidFlag::WNOHANG),
-            Err(nix::errno::Errno::ECHILD)
-        );
+        use rustix::process::{WaitId, WaitIdOptions, waitid};
+        assert!(matches!(
+            waitid(
+                WaitId::Pid(pid),
+                WaitIdOptions::EXITED | WaitIdOptions::NOHANG
+            ),
+            Err(rustix::io::Errno::CHILD)
+        ));
     }
 
     #[test]

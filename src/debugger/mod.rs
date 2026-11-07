@@ -391,18 +391,7 @@ fn frame_body_length(frame: &[u8]) -> usize {
         .unwrap_or(0)
 }
 fn adapter_has_exited(adapter: &mut std::process::Child) -> bool {
-    #[cfg(unix)]
-    {
-        use nix::sys::wait::Id;
-        use nix::sys::wait::WaitPidFlag;
-        use nix::sys::wait::WaitStatus;
-        use nix::sys::wait::waitid;
-        matches!(waitid(Id::Pid(nix::unistd::Pid::from_raw(adapter.id() as i32)), WaitPidFlag::WEXITED | WaitPidFlag::WNOHANG | WaitPidFlag::WNOWAIT), Ok(status) if status != WaitStatus::StillAlive)
-    }
-    #[cfg(not(unix))]
-    {
-        !matches!(adapter.try_wait(), Ok(None))
-    }
+    matches!(crate::process::child_exit_status(adapter), Ok(Some(_)))
 }
 fn adapter_exited_within(adapter: &mut std::process::Child, grace: Duration) -> bool {
     let deadline = Instant::now() + grace;
