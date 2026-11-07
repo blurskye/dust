@@ -1,0 +1,15 @@
+# Run with plugin-launch and an isolated working directory.
+wait 2500
+key escape
+wait 200
+type :
+wait 200
+type plugin.mode.enter
+key enter
+wait 600
+key l l l
+wait 300
+shot review
+key q
+wait 300
+shot left

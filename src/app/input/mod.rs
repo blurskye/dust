@@ -547,9 +547,14 @@ impl InputState {
             | "edit.backspace"
             | "edit.replace_text"
             | "edit.replace_backspace" => {
-                if text_changed && let Some(pending) = &mut self.pending_change {
+                // Typing a closer may move over an existing pair without changing text.
+                // Keep that keystroke in an edited insert so dot restores the cursor too.
+                if (text_changed
+                    || (invocation.id.as_str() == "edit.insert_text" && self.pending_change_edited))
+                    && let Some(pending) = &mut self.pending_change
+                {
                     pending.push(semantic);
-                    self.pending_change_edited = true;
+                    self.pending_change_edited |= text_changed;
                 }
             }
             "view.cursor.move" if self.pending_change.is_some() => {

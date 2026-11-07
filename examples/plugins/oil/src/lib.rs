@@ -273,7 +273,17 @@ impl Guest for Oil {
                         let summary = directory
                             .operations
                             .iter()
-                            .map(|op| format!("{op:?}"))
+                            .map(|op| match op {
+                                host::FileOperation::Delete(path) => format!("delete {path}"),
+                                host::FileOperation::Rename(rename) => {
+                                    format!("rename {} → {}", rename.source, rename.target)
+                                }
+                                host::FileOperation::Write(file) => format!("create {}", file.path),
+                                host::FileOperation::CreateDirectory(path) => {
+                                    format!("create {path}/")
+                                }
+                                _ => unreachable!("directory plan contains only mutations"),
+                            })
                             .collect::<Vec<_>>()
                             .join("; ");
                         host::ui_select(

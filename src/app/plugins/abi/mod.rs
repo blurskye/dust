@@ -2,13 +2,13 @@
 
 mod drawing;
 mod events;
+#[cfg(test)]
+mod example_tests;
 mod language;
 mod surface;
 mod system;
 #[cfg(test)]
 mod tests;
-#[cfg(test)]
-mod example_tests;
 
 use crate::app::{App, commands::AppEffect};
 use crate::editor::{

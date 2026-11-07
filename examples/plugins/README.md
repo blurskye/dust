@@ -61,5 +61,17 @@ autopairs = false
 ```
 
 Boundary tests live in `src/app/plugins/abi/example_tests.rs`. Terminal scenarios
-live in `scripts/ui-scenarios/plugin-*.keys`; run them with a launcher that supplies
-an isolated configuration and the packaged guests, never with your normal data.
+live in `scripts/ui-scenarios/plugin-*.keys`. The launcher supplies an isolated
+configuration and writes demonstration files, so use a **fresh disposable directory**:
+
+```sh
+mkdir -p target/plugin-demo
+DUST_EXAMPLE=completion \
+DUST_BINARY="$PWD/target/debug/dust" \
+DUST_EXAMPLE_PACK="/absolute/path/to/packaged-plugins" \
+scripts/ui-shot scripts/ui-scenarios/plugin-completion.keys \
+  --binary scripts/ui-scenarios/plugin-launch --cwd target/plugin-demo
+```
+
+Use a Dust binary built from this checkout. Change `completion` to another example
+and choose a new empty working directory for each run.

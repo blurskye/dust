@@ -1,7 +1,7 @@
 id = "surround"
 version = "0.1.0"
 component_sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
-capabilities = ["read_current_buffer", "propose_edits", "commands", "decorations", "show_message"]
+capabilities = ["read_current_buffer", "propose_edits", "commands", "decorations", "show_message", "event_subscriptions", "timers"]
 
 [commands.enable]
 title = "surround: enable"

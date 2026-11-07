@@ -2,8 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 wit_bindgen::generate!({ path: "../../../wit", world: "editor-plugin" });
 use dust::plugin::host;
-use std::cell::RefCell;
-thread_local! { static QUERY: RefCell<Option<(u64, host::Snapshot)>> = const { RefCell::new(None) }; }
+use std::cell::{Cell, RefCell};
+thread_local! {
+    static QUERY: RefCell<Option<(u64, host::Snapshot)>> = const { RefCell::new(None) };
+    static RETRY: Cell<u32> = const { Cell::new(0) };
+    static TIMER: Cell<Option<u64>> = const { Cell::new(None) };
+}
 
 struct Functions;
 fn field<'a>(value: &'a host::CommandValue, name: &str) -> Option<&'a host::ValueNode> {
@@ -35,6 +39,16 @@ fn set(value: &mut host::CommandValue, name: &str, node: host::ValueNode) {
         value.nodes.push(node);
     }
     value.nodes.push(host::ValueNode::Object(fields));
+}
+fn schedule(delay: u32) -> Result<(), String> {
+    if let Some(timer) = TIMER.take() {
+        host::cancel_timer(timer)?;
+    }
+    TIMER.set(Some(host::start_timer(&host::TimerRequest {
+        milliseconds: delay,
+        handler: "objects".into(),
+    })?));
+    Ok(())
 }
 fn refresh() -> Result<(), String> {
     let snapshot = host::current_buffer()?;
@@ -73,8 +87,12 @@ impl Guest for Functions {
                             )
                         })
                 }) {
-                    refresh()?;
+                    RETRY.set(0);
+                    schedule(25)?;
                 }
+            } else if text(&call.arguments, "event") == Some("timer") {
+                TIMER.set(None);
+                refresh()?;
             } else {
                 for event in host::take_system_events() {
                     let query = QUERY.with(|query| query.borrow_mut().take());
@@ -85,10 +103,18 @@ impl Guest for Functions {
                         QUERY.with(|query| *query.borrow_mut() = Some((id, snapshot)));
                         continue;
                     }
-                    let host::SystemValue::Syntax(host::SyntaxValue::Captures(captures)) =
-                        event.value?
-                    else {
-                        return Err("expected syntax captures".into());
+                    let captures = match event.value {
+                        Ok(host::SystemValue::Syntax(host::SyntaxValue::Captures(captures))) => {
+                            captures
+                        }
+                        Err(error) if error.contains("not current") && RETRY.get() < 5 => {
+                            let attempt = RETRY.get();
+                            RETRY.set(attempt + 1);
+                            schedule(25 << attempt)?;
+                            continue;
+                        }
+                        Err(error) => return Err(error),
+                        _ => return Err("expected syntax captures".into()),
                     };
                     let current = host::current_buffer()?;
                     if current.buffer != snapshot.buffer || current.revision != snapshot.revision {
