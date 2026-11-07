@@ -10,4 +10,5 @@ export function practice(): void {
   const total = value * 2;
   console.log("comment me");
   console.log(greeting, total);
+  Math.max(11, 22, 33);
 }

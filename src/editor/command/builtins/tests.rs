@@ -1219,11 +1219,13 @@ fn syntax_objects_do_not_fall_forward_when_an_enclosing_count_is_missing() {
                 kind,
                 outer: (1, 4),
                 inner: (2, 3),
+                parent: None,
             },
             SyntaxObject {
                 kind,
                 outer: (5, 8),
                 inner: (6, 7),
+                parent: None,
             },
         ];
         assert!(
@@ -1255,6 +1257,7 @@ fn syntax_objects_do_not_fall_forward_when_an_enclosing_count_is_missing() {
                 kind,
                 outer: (0, 8),
                 inner: (1, 8),
+                parent: None,
             },
         ];
         assert_eq!(

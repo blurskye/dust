@@ -8,6 +8,7 @@ mod motion;
 pub(crate) use motion::visual_ranges;
 mod multi;
 mod pairs;
+mod structural;
 mod text_object;
 mod transaction;
 

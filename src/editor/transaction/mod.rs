@@ -105,6 +105,10 @@ pub enum EditorOperation {
         view: ViewId,
         selection: Option<Selection>,
     },
+    SetSyntaxSelections {
+        view: ViewId,
+        selections: Vec<(ByteOffset, Option<Selection>)>,
+    },
     SetMode {
         view: ViewId,
         mode: EditorMode,
@@ -451,6 +455,7 @@ fn apply_operation(
                     record.start = delta.map_offset(record.start, Affinity::After);
                     true
                 });
+                view.syntax_selections.clear();
                 view.cursor = delta.map_offset(view.cursor, Affinity::After);
                 if let Some(selection) = &mut view.selection {
                     selection.anchor = delta.map_offset(selection.anchor, Affinity::Before);
@@ -499,6 +504,7 @@ fn apply_operation(
             if target.cursor != *position && undo_policy == UndoPolicy::Boundary {
                 target.insert_repeat = None;
             }
+            target.syntax_selections.clear();
             target.cursor = *position;
             target.preferred_column = None;
             target.multi_preferred_columns.clear();
@@ -543,13 +549,43 @@ fn apply_operation(
                 .views
                 .get_mut(*view)
                 .ok_or(TransactionError::MissingView)?;
+            target.syntax_selections.clear();
             target.selection = *selection;
+        }
+        EditorOperation::SetSyntaxSelections { view, selections } => {
+            let target = state
+                .views
+                .get(*view)
+                .ok_or(TransactionError::MissingView)?;
+            let text = &state
+                .buffers
+                .get(target.buffer)
+                .ok_or(TransactionError::MissingBuffer)?
+                .text;
+            for (cursor, selection) in selections {
+                for position in std::iter::once(*cursor)
+                    .chain(selection.iter().flat_map(|s| [s.anchor, s.head]))
+                {
+                    text.validate_offset(position).map_err(|error| {
+                        TransactionError::InvalidCursor {
+                            position: position.get(),
+                            reason: error.to_string(),
+                        }
+                    })?;
+                }
+            }
+            state
+                .views
+                .get_mut(*view)
+                .ok_or(TransactionError::MissingView)?
+                .syntax_selections = selections.clone();
         }
         EditorOperation::SetMode { view, mode } => {
             let target = state
                 .views
                 .get_mut(*view)
                 .ok_or(TransactionError::MissingView)?;
+            target.syntax_selections.clear();
             target.mode = *mode;
             match mode {
                 EditorMode::VisualChar | EditorMode::VisualLine | EditorMode::VisualBlock => {
@@ -703,6 +739,7 @@ fn apply_operation(
                     .iter_mut()
                     .filter(|(_, view)| view.buffer == *buffer)
                 {
+                    view.syntax_selections.clear();
                     view.cursor = delta.map_offset(view.cursor, Affinity::Before);
                     for position in &mut view.block_insert {
                         *position = delta.map_offset(*position, Affinity::After);
