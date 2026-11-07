@@ -11,6 +11,12 @@ dust --clean         # ignore user configuration
 dust --safe-mode     # disable plugins, LSP/tasks/debuggers, and session restore
 ```
 
+On first run, Dust asks six setup questions. On any page, press `s` or `Escape`
+for **Start editing with defaults**: draft answers are discarded and the dashboard
+is ready. After finishing or skipping, press `t` on the dashboard for **Tutor —
+learn by editing** (also available as `:Tutor`). The tutor never opens automatically.
+Use `:setup` to revisit the questions; skipping it leaves existing settings alone.
+
 A workspace Dust has not seen before asks whether to trust it after the first frame. Press Enter to trust it (LSP servers, tasks and debuggers may then run project code), or Escape to keep editing without those execution paths. Dust remembers that it asked. Use `:trust` later to approve the workspace and `:untrust` to revoke it.
 
 ACP agents currently remain executable in safe mode and untrusted workspaces;
