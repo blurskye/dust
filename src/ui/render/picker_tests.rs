@@ -1203,6 +1203,41 @@ fn a_long_path_in_a_picker_row_keeps_its_end() {
 }
 
 #[test]
+fn spaced_conflict_paths_keep_the_filename_and_leave_room_for_metadata() {
+    let ambiguous = crate::config::load_bundled_config()
+        .config
+        .editor
+        .ambiguous_width;
+    let filename = "critical invoice handler_00.rs";
+    let detail = "base ab452960 · ours 12345678 · theirs 87654321";
+    for prefix in [
+        "packages/customer platform/deeply/nested",
+        "/tmp/customer platform/deeply/nested",
+    ] {
+        let path = format!("{prefix}/{filename}");
+        for available in [55, 75, 125] {
+            let (label, detail) =
+                crate::ui::render::picker::fitted_picker_row(&path, detail, available, ambiguous);
+            assert!(label.ends_with(filename), "{available}: {label}");
+            assert!(detail.starts_with("base "), "{available}: {detail}");
+            assert!(
+                crate::ui::geometry::text_width(&label, ambiguous)
+                    + 2
+                    + crate::ui::geometry::text_width(&detail, ambiguous)
+                    <= available
+            );
+        }
+    }
+    for label in [
+        "Git: stage/unstage all",
+        "Toggle foo/bar behavior",
+        "src/long.rs:309:5 source code follows",
+    ] {
+        assert!(!crate::ui::render::picker::looks_like_path(label));
+    }
+}
+
+#[test]
 fn picker_diff_geometry_does_not_count_line_numbers_twice() {
     use crate::ui::PickerPreview;
     use crate::ui::PickerPreviewBody;

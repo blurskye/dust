@@ -30,7 +30,14 @@ use crate::ui::render::prompt::prompt_viewport;
 pub(crate) const PICKER_MAXIMUM_PREVIEW_BYTES: usize = 256 * 1024;
 
 pub(crate) fn looks_like_path(text: &str) -> bool {
-    text.contains('/') && !text.contains(char::is_whitespace)
+    // A command label may contain a slash after several words. Path components
+    // after the first separator, including the filename, may contain spaces.
+    text.split_once('/')
+        .is_some_and(|(first, _)| !first.contains(char::is_whitespace))
+        // A location followed by source text is not a bare path.
+        && !text.split_once(char::is_whitespace).is_some_and(|(location, _)| {
+            location.rsplit_once(':').is_some_and(|(_, number)| number.parse::<usize>().is_ok())
+        })
 }
 
 /// A `Label  /some/path` detail row keeps its label and the end of its path.
