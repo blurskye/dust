@@ -602,8 +602,12 @@ fn queue_style(
             derived = theme.markdown_code(group);
             &derived
         }
-        Style::DocumentationSyntax(group) => {
-            let popup = &theme.styles.documentation_text;
+        Style::DocumentationSyntax(group) | Style::SelectionSyntax(group) => {
+            let popup = if matches!(style, Style::SelectionSyntax(_)) {
+                &theme.styles.selection
+            } else {
+                &theme.styles.documentation_text
+            };
             derived = theme.highlight(group).map_or_else(
                 || popup.clone(),
                 |style| crate::config::ThemeStyle {
@@ -1177,6 +1181,40 @@ mod tests {
                 .unwrap()
                 .starts_with("\x1b[?2026h\x1b[?25l\x1b[2J")
         );
+    }
+
+    #[test]
+    fn selected_syntax_keeps_its_foreground_on_every_selection_background() {
+        let mut theme = crate::config::load_bundled_config().theme;
+        let role = crate::config::Highlight::KEYWORD;
+        theme.styles.selection.background = crate::config::ThemeColor::Rgb(1, 2, 3);
+        theme.styles.selection.background_256 = Some(crate::config::ThemeColor::Indexed(42));
+        theme.styles.selection.background_16 = Some(crate::config::ThemeColor::Blue);
+        for tier in [ColorTier::TrueColor, ColorTier::Ansi256, ColorTier::Ansi16] {
+            let mut expected_theme = theme.clone();
+            let mut syntax = theme.highlight(role).unwrap().clone();
+            syntax.background = theme.styles.selection.background;
+            syntax.background_256 = theme.styles.selection.background_256;
+            syntax.background_16 = theme.styles.selection.background_16;
+            expected_theme.styles.accent = syntax;
+            let mut expected = Vec::new();
+            queue_style(
+                &mut expected,
+                crate::ui::Style::Accent,
+                &expected_theme,
+                tier,
+            )
+            .unwrap();
+            let mut actual = Vec::new();
+            queue_style(
+                &mut actual,
+                crate::ui::Style::SelectionSyntax(role),
+                &theme,
+                tier,
+            )
+            .unwrap();
+            assert_eq!(actual, expected);
+        }
     }
 
     #[test]
