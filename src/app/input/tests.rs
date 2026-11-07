@@ -447,7 +447,7 @@ fn documentation_is_bounded_at_utf8_boundaries_and_scroll_accepts_explicit_conte
     let popup = input.documentation().unwrap();
     assert_eq!(popup.provider.len(), 256);
     assert_eq!(popup.sections[0].lines, ["éé", "line"]);
-    // Three-byte characters straddle the 65,536-byte ceiling.
+    // Three-byte characters straddle the 65,536-byte limit.
     let long = format!("{}\n", "界".repeat(4000)).repeat(40);
     let mut end = crate::app::documentation::DOCUMENTATION_MAXIMUM_BYTES;
     while !long.is_char_boundary(end) {

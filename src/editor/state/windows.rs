@@ -12,8 +12,8 @@ const OWNER: &str = "builtin.editor";
 
 fn layout_error(error: WindowError) -> &'static str {
     match error {
-        WindowError::TiledLayoutTooDeep => "layout depth ceiling reached",
-        WindowError::TooManyTiledWindows => "layout pane ceiling reached",
+        WindowError::TiledLayoutTooDeep => "layout depth limit reached",
+        WindowError::TooManyTiledWindows => "layout pane limit reached",
         WindowError::WindowNotInTiledLayout | WindowError::MissingTiledLayout => {
             "active pane has no resizable split"
         }

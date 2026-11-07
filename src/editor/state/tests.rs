@@ -267,7 +267,7 @@ fn minimum_resize_delta_clamps_both_sides_without_overflow() {
 }
 
 #[test]
-fn split_rejects_before_exceeding_the_universal_layout_depth_ceiling() {
+fn split_rejects_before_exceeding_the_universal_layout_depth_limit() {
     let mut state = EditorState::new(PathBuf::from("/bounded"));
     state
         .open_text(TextBuffer::from_text("seed"), None)
@@ -275,11 +275,11 @@ fn split_rejects_before_exceeding_the_universal_layout_depth_ceiling() {
     for _ in 1..crate::windows::MAX_SPLIT_DEPTH {
         state
             .split_active(crate::windows::TileAxis::Horizontal, 500)
-            .expect("split within depth ceiling");
+            .expect("split within depth limit");
     }
     assert_eq!(
         state.split_active(crate::windows::TileAxis::Horizontal, 500),
-        Err("layout depth ceiling reached")
+        Err("layout depth limit reached")
     );
     assert_eq!(
         state.editor_windows().count(),
@@ -325,29 +325,29 @@ fn layout_validation_rejects_ratios_outside_editor_source_policy() {
 }
 
 #[test]
-fn new_tabs_share_the_global_layout_pane_ceiling_without_partial_mutation() {
+fn new_tabs_share_the_global_layout_pane_limit_without_partial_mutation() {
     let mut state = EditorState::new(PathBuf::from("/bounded-tabs"));
     state
         .open_text(TextBuffer::from_text("seed"), None)
         .unwrap();
     for _ in 1..crate::windows::MAX_WINDOWS {
-        state.new_tab().expect("tab within pane ceiling");
+        state.new_tab().expect("tab within pane limit");
     }
     let revision = state.window_revision();
-    assert_eq!(state.new_tab(), Err("layout pane ceiling reached"));
+    assert_eq!(state.new_tab(), Err("layout pane limit reached"));
     assert_eq!(state.window_revision(), revision);
     assert_eq!(state.editor_windows().count(), crate::windows::MAX_WINDOWS);
     state.validate_layout().expect("bounded tabs remain valid");
 }
 
 #[test]
-fn clone_pane_refuses_the_global_ceiling_without_partial_mutation() {
+fn clone_pane_refuses_the_global_limit_without_partial_mutation() {
     let mut state = EditorState::new(PathBuf::from("/bounded-clone"));
     state
         .open_text(TextBuffer::from_text("seed"), None)
         .unwrap();
     for _ in 1..crate::windows::MAX_WINDOWS {
-        state.new_tab().expect("tab within pane ceiling");
+        state.new_tab().expect("tab within pane limit");
     }
     let tab = state.active_tab().expect("active tab");
     let pane = state.tab_focused_window(tab).unwrap();
@@ -356,7 +356,7 @@ fn clone_pane_refuses_the_global_ceiling_without_partial_mutation() {
     let views = state.views.len();
     assert_eq!(
         state.clone_pane(pane, crate::windows::TileAxis::Horizontal, 500),
-        Err("layout pane ceiling reached")
+        Err("layout pane limit reached")
     );
     assert_eq!(state.window_revision(), revision);
     assert_eq!(state.active_view(), active);
@@ -384,18 +384,18 @@ fn opening_beside_a_kept_pane_propagates_split_failure_without_replacing_it() {
     let views = state.views.len();
     assert_eq!(
         state.open_text(TextBuffer::from_text("new"), Some("/workspace/b".into())),
-        Err("layout pane ceiling reached")
+        Err("layout pane limit reached")
     );
     assert_eq!(
         state.open_text(
             TextBuffer::from_text("ignored"),
             Some("/workspace/a".into())
         ),
-        Err("layout pane ceiling reached")
+        Err("layout pane limit reached")
     );
     assert_eq!(
         state.show_buffer(hidden),
-        Err("layout pane ceiling reached")
+        Err("layout pane limit reached")
     );
     assert_eq!(state.active_view(), active);
     assert_eq!(state.active_buffer_id(), Some(kept));

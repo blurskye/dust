@@ -528,7 +528,7 @@ mod tests {
     use crate::editor::input::grammar::PendingInputContext;
 
     #[test]
-    fn configured_count_limit_is_enforced_below_the_absolute_ceiling() {
+    fn configured_count_limit_is_enforced_below_the_absolute_limit() {
         let mut resolver = ModalResolver::with_count_limit(2);
         assert!(matches!(
             resolver.feed(EditorMode::Normal, GrammarInput::Count(3)),

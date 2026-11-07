@@ -34,9 +34,9 @@ most 4,096 bytes. Exact artifact paths must remain under
 `packages/PUBLISHER/NAME/VERSION/artifacts/` on the official origin.
 
 The client checks status and exact media type, rejects redirects, rejects malformed or multiple Content-Length fields, checks a single valid present length before reading, and always reads through a
-`maximum + 1` streaming ceiling. Artifact SHA-256 is verified before package
+`maximum + 1` streaming limit. Artifact SHA-256 is verified before package
 preparation. One policy connect timeout and one policy whole-request
-timeout apply to every endpoint; metadata and artifact byte ceilings are
+timeout apply to every endpoint; metadata and artifact byte limits are
 separate. Submission can fail before acceptance with queue-full or worker-stopped;
 worker results distinguish policy/origin, redirect/status/content-type/content-length,
 oversize, invalid/yanked metadata, checksum, offline miss, unsafe cache,
@@ -54,9 +54,9 @@ be relaxed. Current hardcoded limits are:
 | Offline | `false` |
 | Connect timeout | 5,000 ms |
 | Whole-request timeout | 30,000 ms |
-| Metadata ceiling | 1 MiB |
-| Artifact ceiling | 64 MiB |
-| Cache ceiling | 512 MiB / 4,096 entries |
+| Metadata limit | 1 MiB |
+| Artifact limit | 64 MiB |
+| Cache limit | 512 MiB / 4,096 entries |
 | Search results | 100 |
 | Queue capacity | 8 |
 
@@ -69,7 +69,7 @@ Bodies use a SHA-256 URL key under the user package registry cache. Each body
 has a separate SHA-256 integrity sidecar. Both must be regular files; the cache
 directory and newly written files receive owner-only modes on Unix. Unsafe
 cache directories, symlinks, missing sidecars, changed bytes, or an overbudget
-cache fail closed. Both body and checksum destinations are fail-closed preflighted before either replacement. Writes use distinct create-new quarantine files, file sync, atomic rename, and parent-directory sync. Pruning enforces policy entry and byte ceilings.
+cache fail closed. Both body and checksum destinations are fail-closed preflighted before either replacement. Writes use distinct create-new quarantine files, file sync, atomic rename, and parent-directory sync. Pruning enforces policy entry and byte limits.
 Offline mode performs no request and returns an explicit cache miss unless the
 integrity-checked object exists.
 
