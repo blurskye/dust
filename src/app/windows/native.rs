@@ -32,7 +32,7 @@ pub(in crate::app) struct NativeSurfaceSignature {
     pub picker_surface: Option<PickerSurfaceKind>,
     pub picker_title: String,
     pub protected_prompt_height: u16,
-    pub configuration_generation: u64,
+    pub configuration_reload_id: u64,
     pub screen_bottom: u16,
 }
 
@@ -98,7 +98,7 @@ impl NativeSurfaces {
         let dashboard_title = sanitize_title(dashboard_title);
         let picker_title = sanitize_title(picker_title);
         let owner = "builtin.surfaces";
-        let generation = 1;
+        let instance_id = 1;
         // Hidden retained native windows still need a host while editor tabs
         // are replaced; skipping them leaves stale tabs non-empty.
         if self.workspace_tab.is_none()
@@ -167,7 +167,7 @@ impl NativeSurfaces {
         let tab = if let Some(tab) = signature.editor_tab.or(retained_tab) {
             tab
         } else {
-            let tab = graph.create_workspace_tab(owner, generation)?;
+            let tab = graph.create_workspace_tab(owner, instance_id)?;
             self.workspace_tab = Some(tab);
             tab
         };
@@ -236,11 +236,11 @@ impl NativeSurfaces {
                 explorer_title.to_owned(),
                 false,
                 owner,
-                generation,
+                instance_id,
             )?;
-            let view = graph.create_view(content, owner, generation)?;
+            let view = graph.create_view(content, owner, instance_id)?;
             let window =
-                graph.open_window(tab, view, explorer_placement, true, owner, generation)?;
+                graph.open_window(tab, view, explorer_placement, true, owner, instance_id)?;
             let ids = NativeSurfaceIds {
                 content,
                 view,
@@ -272,14 +272,14 @@ impl NativeSurfaces {
                 if let Some(ids) = self.explorer_views.get(&view).copied() {
                     graph.rehost(ids.window, tab, ids.view, shown_placement, true)?;
                 } else {
-                    let cloned_view = graph.create_view(explorer.content, owner, generation)?;
+                    let cloned_view = graph.create_view(explorer.content, owner, instance_id)?;
                     let window = graph.open_window(
                         tab,
                         cloned_view,
                         shown_placement,
                         true,
                         owner,
-                        generation,
+                        instance_id,
                     )?;
                     self.explorer_views.insert(
                         view,
@@ -319,11 +319,11 @@ impl NativeSurfaces {
                 dashboard_title.to_owned(),
                 false,
                 owner,
-                generation,
+                instance_id,
             )?;
-            let view = graph.create_view(content, owner, generation)?;
+            let view = graph.create_view(content, owner, instance_id)?;
             let window =
-                graph.open_window(tab, view, dashboard_placement, true, owner, generation)?;
+                graph.open_window(tab, view, dashboard_placement, true, owner, instance_id)?;
             let ids = NativeSurfaceIds {
                 content,
                 view,
@@ -371,10 +371,10 @@ impl NativeSurfaces {
                     picker_title.to_owned(),
                     false,
                     owner,
-                    generation,
+                    instance_id,
                 )?;
-                let view = graph.create_view(content, owner, generation)?;
-                let window = graph.open_window(tab, view, placement, true, owner, generation)?;
+                let view = graph.create_view(content, owner, instance_id)?;
+                let window = graph.open_window(tab, view, placement, true, owner, instance_id)?;
                 let ids = NativeSurfaceIds {
                     content,
                     view,
@@ -452,10 +452,10 @@ impl NativeSurfaces {
                     profile.clone(),
                     false,
                     owner,
-                    generation,
+                    instance_id,
                 )?;
-                let view = graph.create_view(content, owner, generation)?;
-                let window = graph.open_window(tab, view, placement, true, owner, generation)?;
+                let view = graph.create_view(content, owner, instance_id)?;
+                let window = graph.open_window(tab, view, placement, true, owner, instance_id)?;
                 self.terminals.insert(
                     *id,
                     NativeSurfaceIds {
@@ -871,15 +871,15 @@ impl NativeSurfaces {
             }),
         };
         let owner = "builtin.surfaces";
-        let generation = 1;
-        let universal_view = graph.create_view(source.content, owner, generation)?;
+        let instance_id = 1;
+        let universal_view = graph.create_view(source.content, owner, instance_id)?;
         let window = graph.open_window(
             source_tab,
             universal_view,
             placement,
             true,
             owner,
-            generation,
+            instance_id,
         )?;
         let ids = NativeSurfaceIds {
             content: source.content,

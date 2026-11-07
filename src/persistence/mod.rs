@@ -1342,7 +1342,7 @@ mod tests {
             "content_id",
             "view_id",
             "window_id",
-            "generation",
+            "instance_id",
             "capabilities",
             "callback",
             "pty",

@@ -2301,7 +2301,7 @@ fn session_restore_removes_plugin_windows_before_replacing_their_tabs() {
                     picker_surface: None,
                     picker_title: "Picker".into(),
                     protected_prompt_height: 0,
-                    configuration_generation: 0,
+                    configuration_reload_id: 0,
                     screen_bottom: 0,
                 },
                 explorer_title: "Explorer",
@@ -2397,7 +2397,7 @@ fn failed_explorer_reconstruction_does_not_publish_a_partial_graph_or_resources(
         picker_surface: None,
         picker_title: "Picker".into(),
         protected_prompt_height: 0,
-        configuration_generation: 0,
+        configuration_reload_id: 0,
         screen_bottom: 0,
     };
     let error = match windows.prepare_reconcile(
@@ -3140,7 +3140,7 @@ fn startup_document_and_dashboard_publish_together_only_for_the_accepted_proposa
             picker_surface: None,
             picker_title: "Picker".into(),
             protected_prompt_height: 0,
-            configuration_generation: 0,
+            configuration_reload_id: 0,
             screen_bottom: 0,
         },
         explorer_title: "Explorer",

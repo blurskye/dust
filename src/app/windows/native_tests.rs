@@ -448,7 +448,7 @@ fn native_signature(tab: crate::windows::WorkspaceTabId) -> NativeSurfaceSignatu
         picker_surface: None,
         picker_title: "Picker".into(),
         protected_prompt_height: 0,
-        configuration_generation: 0,
+        configuration_reload_id: 0,
         screen_bottom: 0,
     }
 }
@@ -708,7 +708,7 @@ fn explorer_reopen_clones_and_debug_terminal_sizes_use_effective_placements() {
         picker_surface: None,
         picker_title: "Picker".into(),
         protected_prompt_height: 0,
-        configuration_generation: 0,
+        configuration_reload_id: 0,
         screen_bottom: 0,
     };
     let terminals = [(1, "shell".into(), ContentLifecycle::Running)];
@@ -738,7 +738,7 @@ fn explorer_reopen_clones_and_debug_terminal_sizes_use_effective_placements() {
         .unwrap();
     assert_eq!(native.explorer_placement, Some(right));
     native.explorer_placement = Some(WindowPlacement::Hidden);
-    signature.configuration_generation += 1;
+    signature.configuration_reload_id += 1;
     native
         .reconcile(
             &mut graph,

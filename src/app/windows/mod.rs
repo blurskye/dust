@@ -61,16 +61,16 @@ pub(in crate::app) struct TerminalGeometrySource {
     terminal: u64,
     content: ContentId,
     content_owner: String,
-    content_generation: u64,
+    content_instance_id: u64,
     view: ViewId,
     view_owner: String,
-    view_generation: u64,
+    view_instance_id: u64,
     window: WindowId,
     window_owner: String,
-    window_generation: u64,
+    window_instance_id: u64,
     tab: WorkspaceTabId,
     tab_owner: String,
-    tab_generation: u64,
+    tab_instance_id: u64,
     placement: WindowPlacement,
 }
 
@@ -80,16 +80,16 @@ impl PartialEq for TerminalGeometrySource {
             && self.terminal == other.terminal
             && self.content == other.content
             && self.content_owner == other.content_owner
-            && self.content_generation == other.content_generation
+            && self.content_instance_id == other.content_instance_id
             && self.view == other.view
             && self.view_owner == other.view_owner
-            && self.view_generation == other.view_generation
+            && self.view_instance_id == other.view_instance_id
             && self.window == other.window
             && self.window_owner == other.window_owner
-            && self.window_generation == other.window_generation
+            && self.window_instance_id == other.window_instance_id
             && self.tab == other.tab
             && self.tab_owner == other.tab_owner
-            && self.tab_generation == other.tab_generation
+            && self.tab_instance_id == other.tab_instance_id
             && self.placement == other.placement
     }
 }
@@ -97,22 +97,22 @@ impl Eq for TerminalGeometrySource {}
 
 #[cfg(test)]
 impl TerminalGeometrySource {
-    pub(in crate::app) fn fixture(generation: u64) -> Self {
+    pub(in crate::app) fn fixture(instance_id: u64) -> Self {
         Self {
             origin: Arc::new(()),
-            terminal: generation,
-            content: ContentId(generation),
+            terminal: instance_id,
+            content: ContentId(instance_id),
             content_owner: "fixture".into(),
-            content_generation: generation,
-            view: ViewId(generation),
+            content_instance_id: instance_id,
+            view: ViewId(instance_id),
             view_owner: "fixture".into(),
-            view_generation: generation,
-            window: WindowId(generation),
+            view_instance_id: instance_id,
+            window: WindowId(instance_id),
             window_owner: "fixture".into(),
-            window_generation: generation,
-            tab: WorkspaceTabId(generation),
+            window_instance_id: instance_id,
+            tab: WorkspaceTabId(instance_id),
             tab_owner: "fixture".into(),
-            tab_generation: generation,
+            tab_instance_id: instance_id,
             placement: WindowPlacement::Hidden,
         }
     }
@@ -1086,7 +1086,7 @@ impl App {
                 )
                 .height
             }),
-            configuration_generation: self.configuration.reload_id(),
+            configuration_reload_id: self.configuration.reload_id(),
             screen_bottom: screen_foot_rows(
                 &self.state,
                 &self.ui,
