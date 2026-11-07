@@ -56,6 +56,7 @@ pub(in crate::app) struct Search {
     intent: Option<Intent>,
     pub(in crate::app) live: bool,
     pub(in crate::app) query: String,
+    resume_selection: Option<crate::workspace::PickerItemId>,
     matcher_navigation: std::collections::HashMap<crate::files::RequestId, MatcherSource>,
     byte_navigation: std::collections::HashMap<crate::files::RequestId, ByteNavigation>,
     pub(in crate::app) preview_location: Option<(usize, usize)>,
@@ -154,6 +155,7 @@ impl Search {
         self.workflow = None;
         self.sequence = 0;
         self.matches.clear();
+        self.resume_selection = None;
         self.intent = None;
     }
     pub(in crate::app) fn cancel_files(&mut self) {
@@ -186,13 +188,22 @@ impl Search {
         if self.picker.resume_after_help() {
             return None;
         }
-        self.clear_picker();
-        self.cancel_files();
-        if self.live || !self.pending() {
-            self.cancel_grep();
+        if self.picker_surface() == crate::ui::PickerSurfaceKind::Grep || self.live {
+            self.resume_selection = self
+                .picker()
+                .and_then(|picker| picker.selected_item())
+                .map(|item| item.id.clone());
+            // Keep accepted rows and snapshots, but never let a closed picker publish late batches.
+            self.grep.cancel();
+            self.stream_id = None;
+            self.intent = None;
             self.live = false;
+        } else if self.resume_selection.is_none() && !self.pending() {
+            self.cancel_grep();
             self.query.clear();
         }
+        self.clear_picker();
+        self.cancel_files();
         self.clear_preview()
     }
     pub(in crate::app) fn start_files(
@@ -492,6 +503,29 @@ impl App {
             true,
             PickerOrigin::Grep,
         );
+    }
+}
+
+impl App {
+    pub(in crate::app) fn resume_workspace_search(&mut self) {
+        if self.search.scope.as_ref()
+            != Some(&(
+                self.workspace.version(),
+                self.configuration.binding_revision(),
+            ))
+            || self.search.workflow().is_none()
+        {
+            self.show_error("No workspace search to resume in this workspace");
+            return;
+        }
+        self.close_picker();
+        let selected = self.search.resume_selection.clone();
+        self.search.live = true;
+        self.open_workspace_search_picker();
+        if let Some(selected) = selected {
+            self.search.select_picker_item(&selected);
+        }
+        self.sync_picker_ui();
     }
 }
 

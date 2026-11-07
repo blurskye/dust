@@ -515,9 +515,11 @@ fn workspace_search_uses_generic_picker_and_opens_unopened_match() {
             let text = preview.as_text().expect("a text preview");
             preview.title == "match.txt"
                 && text.highlight_line == Some(1_087)
-                && text
-                    .highlight_line
-                    .is_some_and(|line| line.saturating_sub(text.first_line) <= 8)
+                && text.highlight_line.is_some_and(|line| {
+                    text.lines()
+                        .get(line.saturating_sub(text.first_line))
+                        .is_some_and(|line| line == "before needle after")
+                })
         })
     }));
     app.accept_picker();
@@ -733,8 +735,16 @@ fn workspace_search_rejects_changed_disk_and_open_buffer_snapshots() {
             app.ui.notification.as_deref(),
             Some(app.message("workspace_search_stale_result", &[]).as_str())
         );
-        assert!(app.search.matches().is_empty());
-        assert!(app.search.workflow().is_none());
+        assert_eq!(app.search.matches().len(), 1);
+        assert!(app.search.workflow().is_some());
+        app.invoke_mapped_command("workspace.search.resume");
+        app.accept_picker();
+        wait_vfs(&mut app);
+        assert_eq!(app.state.active_buffer_id(), before);
+        assert_eq!(
+            app.ui.notification.as_deref(),
+            Some(app.message("workspace_search_stale_result", &[]).as_str())
+        );
     }
 }
 

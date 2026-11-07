@@ -240,8 +240,8 @@ pub(in crate::app) fn choice_row_cells(
     ]
 }
 
-/// A grep row as LazyVim draws it: the file's icon, `path:line:col` with the line number
-/// accented, and the line's text highlighted for the file's language.
+/// Match-first grep columns: icon and highlighted code, followed by path, line and column.
+/// The renderer fits the last three cells to the available location column.
 pub(in crate::app) fn grep_row_cells(
     found: &crate::files::WorkspaceSearchMatch,
     row: &crate::workspace::PickerRowPresentation,
@@ -250,13 +250,18 @@ pub(in crate::app) fn grep_row_cells(
     let path = found.relative_path.display().to_string();
     let line = found.line.saturating_add(1).to_string();
     let column = found.column.saturating_add(1).to_string();
-    let mut cells = path_cells(&path, &row.source, file_icon);
-    cells.push(cell(":", Style::Muted));
-    cells.push(cell(&line, Style::Accent));
-    cells.push(cell(":", Style::Muted));
-    cells.push(cell(&column, Style::Muted));
-    cells.push(cell("  ", Style::Default));
-    let text = row.detail.as_str();
+    let mut cells = path_cells(&path, "", file_icon);
+    cells.truncate(usize::from(file_icon.is_some()));
+    let text = found.line_text.as_str();
+    let start = text
+        .get(..found.column)
+        .filter(|prefix| prefix.trim_start().chars().count() > 24)
+        .and_then(|prefix| prefix.char_indices().rev().nth(16))
+        .map_or(0, |(offset, _)| offset);
+    let text = text[start..].trim();
+    if start > 0 {
+        cells.push(cell("…", Style::Muted));
+    }
     let spans = crate::language::syntax::language_for_path(&found.canonical_path)
         .map(|language| crate::language::syntax::highlight(language, text))
         .unwrap_or_default();
@@ -273,6 +278,14 @@ pub(in crate::app) fn grep_row_cells(
     }
     cells.push(cell(text.get(at..).unwrap_or_default(), Style::Default));
     cells.retain(|cell| !cell.text.is_empty());
+    let path = if row.source.is_empty() {
+        path
+    } else {
+        format!("{}/{path}", row.source)
+    };
+    cells.push(cell(&path, Style::Muted));
+    cells.push(cell(&format!(":{line}"), Style::Accent));
+    cells.push(cell(&format!(":{column}"), Style::Muted));
     cells
 }
 
@@ -1801,7 +1814,7 @@ impl App {
             self.show_workspace_proposal();
             return;
         }
-        // Retain only the accepted source match before close clears live search data.
+        // Navigation owns its snapshot independently of subsequent searches.
         let search_match = match &payload {
             Some(PickerPayload::WorkspaceSearch(id)) => self
                 .search

@@ -20,7 +20,7 @@ pub(in crate::app) fn search_picker_preview(
     let bytes = normalized.as_bytes();
     let maximum_bytes = maximum_bytes.max(1);
     let match_start = found.range.start.min(bytes.len());
-    let mut start = match_start.saturating_sub(maximum_bytes / 3);
+    let mut start = match_start.saturating_sub(maximum_bytes / 2);
     while start < match_start
         && bytes
             .get(start)
@@ -43,9 +43,8 @@ pub(in crate::app) fn search_picker_preview(
         .iter()
         .filter(|byte| **byte == b'\n')
         .count();
-    let mut first_line = found.line.saturating_sub(before_lines);
+    let first_line = found.line.saturating_sub(before_lines);
     let selected_offset = found.line.saturating_sub(first_line);
-    let first_visible_offset = selected_offset.saturating_sub(8);
     let lines = std::str::from_utf8(&bytes[start..end]).map_or_else(
         |_| vec!["binary preview unavailable".into()],
         |text| {
@@ -57,13 +56,12 @@ pub(in crate::app) fn search_picker_preview(
                 });
             picker_preview_lines_from(
                 text,
-                first_visible_offset,
-                512,
+                0,
+                selected_offset.saturating_add(512),
                 Some((selected_offset, column)),
             )
         },
     );
-    first_line = first_line.saturating_add(first_visible_offset);
     PickerPreview {
         title: found.relative_path.display().to_string(),
         body: PickerPreviewBody::Text(PickerTextPreview::new(

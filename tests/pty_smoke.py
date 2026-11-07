@@ -586,6 +586,9 @@ def main() -> None:
                 (1.0, b"", None),
                 (0.3, b"\x1b", None),
                 (0.1, b"\x1b", None),
+                (0.2, b" sR", None),
+                (0.4, b"", None),
+                (0.1, b"\x03", None),
                 (0.2, b":workspace.replace needle changed\r", None),
                 (0.6, b"\x1b", None),
                 (0.2, b":q\r", None),
@@ -594,7 +597,11 @@ def main() -> None:
         assert code == 0
         direct_screen = terminal_screen(snapshots[1])
         search_screen = terminal_screen(snapshots[2])
-        preview_screen = terminal_screen(snapshots[6])
+        resumed_screen = terminal_screen(snapshots[6])
+        preview_screen = terminal_screen(snapshots[9])
+        assert "Grep" in resumed_screen and "2/2" in resumed_screen
+        result_row = next(row for row in resumed_screen.splitlines() if "needle alpha" in row and "alpha.txt:1:1" in row)
+        assert result_row.index("needle alpha") < result_row.index("alpha.txt:1:1")
         assert "Grep" in direct_screen and "Command" not in direct_screen
         assert "Grep" in search_screen and "alpha.txt" in search_screen
         assert "2/2" in search_screen and "needle alpha" in search_screen

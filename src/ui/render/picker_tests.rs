@@ -265,6 +265,75 @@ fn picker_stacks_preview_when_two_readable_columns_do_not_fit() {
 }
 
 #[test]
+fn grep_keeps_code_and_location_readable_and_centres_the_preview() {
+    use crate::ui::grid::Frame;
+    use crate::ui::{
+        PickerCell, PickerPreview, PickerRow, PickerSurfaceKind, PickerTextPreview, PickerUiState,
+        Style,
+    };
+    use crate::windows::WindowRect;
+    let config = crate::config::load_bundled_config().config;
+    let path = "packages/workspace/components/deeply/nested/source/main.rs";
+    let mut row = PickerRow::text("match", format!("{path}:81:5"), "let needle = 42;", "");
+    row.cells = vec![
+        PickerCell::new("󱘗 ", Style::ExplorerIcon, 2),
+        PickerCell::new("let needle = 42;", Style::Default, 16),
+        PickerCell::new(path, Style::Muted, path.len() as u16),
+        PickerCell::new(":81", Style::Accent, 3),
+        PickerCell::new(":5", Style::Muted, 2),
+    ];
+    let picker = PickerUiState {
+        preview_side_scroll: (0, 0),
+        footer: None,
+        input_hint: String::new(),
+        surface: PickerSurfaceKind::Grep,
+        title: "Grep".into(),
+        query: "needle".into(),
+        rows: vec![row],
+        selected: Some(0),
+        scroll: 0,
+        total: 1,
+        loading: false,
+        preview: Some(PickerPreview::text(
+            path,
+            PickerTextPreview::new(
+                (0..160).map(|line| format!("context {line}")).collect(),
+                0,
+                Some(80),
+                None,
+            ),
+        )),
+    };
+    for (width, height) in [(160, 45), (100, 30)] {
+        let rect = WindowRect {
+            x: 0,
+            y: 0,
+            width,
+            height,
+        };
+        let geometry =
+            crate::ui::render::picker::picker_content_geometry(&picker, &config, rect).unwrap();
+        let mut frame = Frame {
+            grid: crate::ui::CellGrid::new(width, height),
+            cursor: None,
+        };
+        crate::ui::render::picker::render_picker(&mut frame, &picker, &config, rect, None);
+        let row = frame.grid.row_text(geometry.list.y);
+        assert!(row.contains("let needle = 42;"), "{width}: {row}");
+        assert!(row.contains("main.rs:81:5"), "{width}: {row}");
+        assert!(row.find("needle").unwrap() < row.find("main.rs").unwrap());
+        assert!(
+            (0..width).any(|x| frame.grid.get(x, geometry.list.y).unwrap().style == Style::Accent)
+        );
+        let preview_top = geometry.stacked_divider.map_or(1, |divider| divider + 1);
+        let preview_rows = height - 1 - preview_top;
+        let match_y = preview_top + preview_rows / 2;
+        assert!(frame.grid.row_text(match_y).contains("81 context 80"));
+        assert!((0..width).any(|x| frame.grid.get(x, match_y).unwrap().style == Style::Selection));
+    }
+}
+
+#[test]
 fn a_debug_view_survives_a_narrow_width_in_the_shared_picker() {
     use crate::ui::PickerUiState;
     let mut state = EditorState::new(PathBuf::from("/workspace"));

@@ -392,6 +392,7 @@ pub enum AppEffect {
     WorkspaceSearchPrompt,
     WorkspaceSearch(String),
     WorkspaceSearchCancel,
+    WorkspaceSearchResume,
     WorkspaceReplace {
         query: String,
         replacement: String,
@@ -1145,6 +1146,7 @@ impl App {
             effect @ (AppEffect::WorkspaceSearchPrompt
             | AppEffect::WorkspaceSearch(..)
             | AppEffect::WorkspaceSearchCancel
+            | AppEffect::WorkspaceSearchResume
             | AppEffect::WorkspaceReplace { .. }
             | AppEffect::TodoSearch
             | AppEffect::SearchRepeat { .. }

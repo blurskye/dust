@@ -4541,6 +4541,13 @@ command = "workspace.search.prompt"
 desc = "Grep"
 
 [[keymap]]
+id = "builtin.global.search-resume"
+context = "global"
+keys = "<leader> s R"
+command = "workspace.search.resume"
+desc = "Resume Grep"
+
+[[keymap]]
 id = "builtin.global.search-replace"
 context = "global"
 keys = "<leader> s r"
