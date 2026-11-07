@@ -19,17 +19,14 @@ use std::io::Write;
 
 use std::net::Shutdown;
 
+#[cfg(unix)]
 use std::os::fd::AsFd;
-
-use std::os::unix::ffi::OsStrExt;
-
-use std::os::unix::ffi::OsStringExt;
-
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
-
+#[cfg(unix)]
 use std::os::unix::net::UnixListener;
-
-use std::os::unix::net::UnixStream;
+#[cfg(unix)]
+pub use std::os::unix::net::UnixStream;
 
 use std::path::Path;
 
@@ -51,12 +48,13 @@ use std::time::Duration;
 
 use std::time::Instant;
 
+#[cfg(unix)]
 use nix::poll::PollFd;
-
+#[cfg(unix)]
 use nix::poll::PollFlags;
-
+#[cfg(unix)]
 use nix::poll::PollTimeout;
-
+#[cfg(unix)]
 use nix::poll::poll;
 use serde_json::Value;
 use serde_json::json;
@@ -100,16 +98,14 @@ impl Reply {
     /// The MCP client cancels a call by closing its connection. The request reader
     /// has already finished, so this is the only reader of this socket now.
     pub fn is_cancelled(&self) -> bool {
-        use nix::poll::PollFd;
-        use nix::poll::PollFlags;
-        use nix::poll::PollTimeout;
-        use nix::poll::poll;
-        let mut descriptors = [PollFd::new(self.stream.as_fd(), PollFlags::POLLIN)];
-        if !matches!(poll(&mut descriptors, PollTimeout::ZERO), Ok(1)) {
-            return false;
+        #[cfg(unix)]
+        {
+            let mut descriptors = [PollFd::new(self.stream.as_fd(), PollFlags::POLLIN)];
+            if !matches!(poll(&mut descriptors, PollTimeout::ZERO), Ok(1)) {
+                return false;
+            }
+            matches!((&self.stream).read(&mut [0]), Ok(0))
         }
-        let mut stream = &self.stream;
-        matches!(stream.read(&mut [0]), Ok(0))
     }
 
     /// Written from a worker thread, so a reader that stalls cannot stall Dust.
@@ -151,9 +147,10 @@ impl RemoteServer {
         let path = directory.join(format!("dust-{}.sock", std::process::id()));
         let _ = fs::remove_file(&path);
         let listener = UnixListener::bind(&path)?;
+        #[cfg(unix)]
         fs::set_permissions(&path, fs::Permissions::from_mode(0o600))?;
         listener.set_nonblocking(true)?;
-        let (wake, wake_reader) = UnixStream::pair()?;
+        let (wake, _wake_reader) = UnixStream::pair()?;
         let (sender, requests) = mpsc::sync_channel(REQUEST_QUEUE_LIMIT);
         let (replies, pending) = mpsc::sync_channel::<(UnixStream, Result<String, String>)>(8);
         let stopping = Arc::new(AtomicBool::new(false));
@@ -189,14 +186,17 @@ impl RemoteServer {
             .name("dust-remote".into())
             .spawn(move || {
                 loop {
-                    let mut ready = [
-                        PollFd::new(listener.as_fd(), PollFlags::POLLIN),
-                        PollFd::new(wake_reader.as_fd(), PollFlags::POLLIN),
-                    ];
-                    match poll(&mut ready, PollTimeout::NONE) {
-                        Err(nix::errno::Errno::EINTR) => continue,
-                        Err(_) => break,
-                        Ok(_) => {}
+                    #[cfg(unix)]
+                    {
+                        let mut ready = [
+                            PollFd::new(listener.as_fd(), PollFlags::POLLIN),
+                            PollFd::new(_wake_reader.as_fd(), PollFlags::POLLIN),
+                        ];
+                        match poll(&mut ready, PollTimeout::NONE) {
+                            Err(nix::errno::Errno::EINTR) => continue,
+                            Err(_) => break,
+                            Ok(_) => {}
+                        }
                     }
                     if listener_stop.load(Ordering::Acquire) {
                         break;
@@ -341,10 +341,8 @@ impl Drop for RemoteServer {
 
 fn parse(line: &str) -> Option<RemoteOpen> {
     let (number, path) = line.split_once('\t')?;
-    let path = if path.starts_with('[') {
-        PathBuf::from(std::ffi::OsString::from_vec(
-            serde_json::from_str(path).ok()?,
-        ))
+    let path = if path.starts_with(['[', '"', '{']) {
+        crate::files::path_encoding::decode(path).ok()?
     } else {
         PathBuf::from(path)
     };
@@ -391,8 +389,7 @@ pub fn send(server: &Path, paths: &[PathBuf], line: Option<usize>) -> io::Result
     for (index, path) in paths.iter().enumerate() {
         let line = if index == 0 { line.unwrap_or(0) } else { 0 };
         let path = std::path::absolute(path)?;
-        let encoded =
-            serde_json::to_string(path.as_os_str().as_bytes()).map_err(io::Error::other)?;
+        let encoded = crate::files::path_encoding::encode(&path).map_err(io::Error::other)?;
         let entry = format!("{line}\t{encoded}\n");
         if message.len().saturating_add(entry.len()) > REQUEST_BYTE_LIMIT as usize {
             return Err(io::Error::new(
@@ -423,8 +420,11 @@ pub fn send(server: &Path, paths: &[PathBuf], line: Option<usize>) -> io::Result
 /// Write a lazygit config whose edit keys open files in this Dust, and return the
 /// `LG_CONFIG_FILE` value that layers it over the user's own lazygit config.
 pub fn lazygit_config(directory: &Path, dust: &Path) -> io::Result<String> {
+    #[cfg(unix)]
     let program =
         format!("'{}'", dust.display().to_string().replace('\'', "'\\''")).replace('\'', "''");
+    #[cfg(windows)]
+    let program = format!("\"{}\"", dust.display()).replace('\'', "''");
     let overlay = directory.join(format!("lazygit-{}.yml", std::process::id()));
     fs::write(
         &overlay,
@@ -650,6 +650,8 @@ mod tests {
         assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
     }
 
+    // Exercises POSIX shell quoting through a shell-script executable.
+    #[cfg(unix)]
     #[test]
     fn lazygit_commands_quote_shell_paths_separately_from_yaml() {
         let directory = tempfile::tempdir().unwrap();
@@ -711,8 +713,11 @@ mod tests {
         }));
     }
 
+    // Tests Unix path bytes that have no Unicode representation.
+    #[cfg(unix)]
     #[test]
     fn remote_paths_preserve_newlines_tabs_and_non_utf8_bytes() {
+        use std::os::unix::ffi::OsStringExt;
         let directory = tempfile::tempdir().unwrap();
         let server = RemoteServer::start(directory.path()).unwrap();
         let file = directory

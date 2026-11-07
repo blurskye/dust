@@ -15,6 +15,7 @@ use std::fs;
 use std::fs::OpenOptions;
 use std::io::Read;
 use std::io::Write;
+#[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 use std::path::PathBuf;
@@ -444,17 +445,8 @@ fn process(
                 "storage root is not a regular directory",
             ));
         }
-        let lock = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .custom_flags(nix::libc::O_NOFOLLOW)
-            .open(path.with_extension("lock"))
+        let _lock = crate::files::lock_file(&path.with_extension("lock"))
             .map_err(|error| PluginStorageError::new(PluginStorageErrorCode::Unavailable, error))?;
-        let _lock = nix::fcntl::Flock::lock(lock, nix::fcntl::FlockArg::LockExclusive).map_err(
-            |(_, error)| PluginStorageError::new(PluginStorageErrorCode::Unavailable, error),
-        )?;
         let current = load_state(&path)?;
         match work.request.kind {
             PluginStorageRequestKind::Get { key } => {
@@ -775,10 +767,11 @@ fn persist(context: PersistContext<'_>) -> Result<(), PluginStorageError> {
             "storage temporary ID exhausted",
         )
     })?;
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    options.mode(0o600);
+    let mut file = options
         .open(&temp)
         .map_err(|error| PluginStorageError::new(PluginStorageErrorCode::Unavailable, error))?;
     let mut cancelled = false;
@@ -858,7 +851,6 @@ mod tests {
 
     #[test]
     fn storage_is_atomic_revisioned_persistent_and_load_owned() {
-        use std::os::unix::fs::PermissionsExt;
         let root = tempfile::tempdir().expect("root");
         let mut service = PluginStorageWorker::start(root.path().join("data"), 8);
         service.install_load("demo", PluginLoadId(7));
@@ -880,14 +872,19 @@ mod tests {
         let stored = wait(&mut service);
         assert_eq!(stored.revision, Some(1));
         assert!(stored.error.is_none());
-        let path = root
-            .path()
-            .join("data")
-            .join(format!("{:x}.json", Sha256::digest(b"demo")));
-        assert_eq!(
-            fs::metadata(path).unwrap().permissions().mode() & 0o777,
-            0o600
-        );
+        // Permission bits are Unix-specific; the storage behavior is shared.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let path = root
+                .path()
+                .join("data")
+                .join(format!("{:x}.json", Sha256::digest(b"demo")));
+            assert_eq!(
+                fs::metadata(path).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
         service
             .request(
                 "demo".into(),
@@ -1282,7 +1279,7 @@ mod tests {
             .create_new(true)
             .open(&path)
             .unwrap();
-        let lock = nix::fcntl::Flock::lock(file, nix::fcntl::FlockArg::LockExclusive).unwrap();
+        let lock = crate::files::lock_exclusive(file, false).unwrap();
         for (service, key) in [(&mut first, "one"), (&mut second, "two")] {
             service
                 .request(
@@ -1397,7 +1394,7 @@ mod tests {
             .create_new(true)
             .open(lock_path)
             .unwrap();
-        let lock = nix::fcntl::Flock::lock(file, nix::fcntl::FlockArg::LockExclusive).unwrap();
+        let lock = crate::files::lock_exclusive(file, false).unwrap();
         service
             .request(
                 "demo".into(),

@@ -2236,7 +2236,7 @@ fn locked_uv_installation_rejects_another_process_and_uninstall() {
         .create_new(true)
         .open(root.path().join(format!(".install-{}.lock", definition.id)))
         .unwrap();
-    let lock = nix::fcntl::Flock::lock(file, nix::fcntl::FlockArg::LockExclusive).unwrap();
+    let lock = crate::files::lock_exclusive(file, false).unwrap();
     let output = std::process::Command::new(std::env::current_exe().unwrap())
         .arg("locked_uv_installation_rejects_another_process_and_uninstall")
         .env("DUST_TEST_LOCKED_TOOL_ROOT", root.path())

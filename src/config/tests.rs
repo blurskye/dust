@@ -890,6 +890,8 @@ fn configuration_worker_tracks_disk_sources_across_startup_and_acknowledgments()
     no_reload(&worker);
 }
 
+// Exercises Unix FIFOs, device files and symlinks.
+#[cfg(unix)]
 #[test]
 fn configuration_reads_reject_fifos_and_devices_without_blocking() {
     let root = tempdir().unwrap();
@@ -1036,7 +1038,7 @@ fn bundled_terminal_has_a_valid_configurable_default_profile() {
         .profiles
         .get("shell")
         .expect("bundled shell profile");
-    assert_eq!(shell.program, PathBuf::from("/bin/sh"));
+    assert_eq!(shell.program, PathBuf::from("$SHELL"));
 
     let root = tempdir().expect("tempdir");
     let path = root.path().join("config.toml");
@@ -1766,6 +1768,8 @@ fn deep_task_dependencies_are_validated_without_recursion() {
     assert!(config.validate().is_err());
 }
 
+// Creates a Unix symlink without requiring Windows developer privileges.
+#[cfg(unix)]
 #[test]
 fn settings_save_preserves_a_symlink() {
     let root = tempdir().unwrap();

@@ -722,6 +722,7 @@ fn debugger_owner_keeps_original_actor_stop_context_and_private_selection() {
     owner.dismiss_choices();
     assert!(owner.take_selection(&closed[0].key).is_err());
     let mut terminals = TerminalsConfig::default();
+    terminals.profiles.get_mut("shell").unwrap().program = "/bin/sh".into();
     owner.terminal_profile = Some(TerminalPolicy {
         name: "shell".into(),
         profile: terminals.profiles["shell"].clone(),

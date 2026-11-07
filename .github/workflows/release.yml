@@ -1,5 +1,5 @@
 name: release
-# Pushing a tag vX.Y.Z publishes Linux packages and unsigned macOS/Windows archives.
+# Pushing a tag vX.Y.Z publishes Linux packages and unsigned macOS archives.
 # Running this workflow by hand builds artifacts without publishing them.
 on:
   workflow_dispatch:
@@ -85,9 +85,6 @@ jobs:
           - os: macos-15-intel
             target: x86_64-apple-darwin
             archive: x86_64-macos
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            archive: x86_64-windows
     runs-on: ${{ matrix.os }}
     defaults:
       run:
@@ -107,17 +104,10 @@ jobs:
           mkdir -p dist stage
           cp LICENSE NOTICE stage/
           cp -R LICENSES stage/
-          if [[ "$RUNNER_OS" == Windows ]]; then
-            binary="target/$TARGET/release/dust.exe"
-            "$binary" --version
-            cp "$binary" stage/
-            python -c 'import os, shutil; shutil.make_archive("dist/dust-" + os.environ["VERSION"] + "-" + os.environ["ARCHIVE"], "zip", "stage")'
-          else
-            binary="target/$TARGET/release/dust"
-            "$binary" --version
-            cp "$binary" stage/
-            tar -czf "dist/dust-$VERSION-$ARCHIVE.tar.gz" -C stage .
-          fi
+          binary="target/$TARGET/release/dust"
+          "$binary" --version
+          cp "$binary" stage/
+          tar -czf "dist/dust-$VERSION-$ARCHIVE.tar.gz" -C stage .
       - uses: actions/upload-artifact@v4
         with:
           name: dist-${{ matrix.archive }}

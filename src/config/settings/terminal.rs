@@ -39,7 +39,11 @@ impl Default for TerminalsConfig {
             profiles: BTreeMap::from([(
                 "shell".into(),
                 TerminalProfileConfig {
-                    program: PathBuf::from("/bin/sh"),
+                    program: crate::config::load::bundled_setting(
+                        "terminals.profiles.shell.program",
+                    )
+                    .and_then(|value| value.as_str().map(PathBuf::from))
+                    .expect("bundled shell program"),
                     arguments: Vec::new(),
                     cwd: None,
                     environment: BTreeMap::new(),

@@ -36,6 +36,29 @@ cargo build --release --locked
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for tests and plugin-fixture builds.
 
+## Install on macOS
+
+Download `dust-0.2.0-aarch64-macos.tar.gz` for Apple Silicon or
+`dust-0.2.0-x86_64-macos.tar.gz` for Intel from
+[releases](https://github.com/blurskye/dust/releases). Check the archive's SHA-256
+against its entry in `SHA256SUMS`, then extract it and install the executable:
+
+```sh
+tar -xzf dust-0.2.0-aarch64-macos.tar.gz
+mkdir -p ~/.local/bin
+install -m 0755 dust ~/.local/bin/dust
+```
+
+Put `~/.local/bin` on `PATH`. These binaries are **not Developer ID–signed or
+notarized**. If macOS quarantines the verified executable, run:
+
+```sh
+xattr -d com.apple.quarantine ~/.local/bin/dust
+```
+
+See the [macOS guide](docs/user-guide-macos-windows.md) for configuration paths
+and shell selection. Windows support is planned separately.
+
 ## First run
 
 Run Dust in a terminal:
@@ -57,7 +80,7 @@ processes and can run even in untrusted workspaces or safe mode.
 - `F1` opens the command palette; `:Tutor` opens the interactive tutor.
 - `Space c m` opens the tool installer; `Space g g` opens lazygit when installed.
 
-Configuration defaults to `~/.config/dust/config.toml`, with `keymaps.toml` and
+On Linux, configuration defaults to `~/.config/dust/config.toml`, with `keymaps.toml` and
 `dashboard.toml` beside it. See the [Linux user guide](docs/user-guide-linux.md)
 for XDG overrides, configuration, trust, recovery and daily workflows. Bundled
 [settings](assets/defaults/config.toml), [keymaps](assets/defaults/keymaps.toml)

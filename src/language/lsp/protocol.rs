@@ -1352,7 +1352,6 @@ pub(super) fn fail_child(
 }
 
 pub(super) fn terminate_server(child: &mut std::process::Child) {
-    #[cfg(unix)]
     crate::process::terminate_process_group(child.id());
     let _ = child.kill();
     let _ = child.wait();

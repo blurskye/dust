@@ -285,7 +285,7 @@ highlight = true
 default_profile = "shell"
 
 [terminals.profiles.shell]
-program = "/bin/sh"
+program = "$SHELL"
 arguments = []
 environment = {}
 columns = 80

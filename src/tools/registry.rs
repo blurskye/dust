@@ -304,22 +304,8 @@ impl RegistryClient {
         Ok(bytes)
     }
     // Keep the body/checksum pair and pruning under one cross-process lock.
-    fn lock_cache(&self) -> Result<nix::fcntl::Flock<fs::File>, RegistryError> {
-        use std::os::unix::fs::OpenOptionsExt;
-        let file = fs::OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .read(true)
-            .write(true)
-            .mode(0o600)
-            .custom_flags(nix::libc::O_NOFOLLOW | nix::libc::O_NONBLOCK)
-            .open(self.cache.join("cache.lock"))
-            .map_err(io_error)?;
-        if !file.metadata().map_err(io_error)?.is_file() {
-            return Err(RegistryError::Cache);
-        }
-        nix::fcntl::Flock::lock(file, nix::fcntl::FlockArg::LockExclusive)
-            .map_err(|(_, error)| io_error(error.into()))
+    fn lock_cache(&self) -> Result<crate::files::FileLock, RegistryError> {
+        crate::files::lock_file(&self.cache.join("cache.lock")).map_err(io_error)
     }
     fn prune_cache(&self) -> Result<(), RegistryError> {
         let mut entries = fs::read_dir(&self.cache)
@@ -574,8 +560,8 @@ mod cache_tests {
             let _lock = client.lock_cache().unwrap();
             let file = fs::File::open(directory.path().join("cache.lock")).unwrap();
             assert!(matches!(
-                nix::fcntl::Flock::lock(file, nix::fcntl::FlockArg::LockExclusiveNonblock),
-                Err((_, nix::errno::Errno::EWOULDBLOCK))
+                crate::files::lock_exclusive(file, true),
+                Err((_, error)) if error.kind() == std::io::ErrorKind::WouldBlock
             ));
             write_cache(&path, b"initial").unwrap();
         }

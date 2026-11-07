@@ -1,11 +1,14 @@
 //! Terminal event decoding, rendering and restoration.
 
 use std::cell::Cell;
+#[cfg(unix)]
 use std::fs::File;
 use std::io;
+#[cfg(unix)]
 use std::io::IsTerminal;
 use std::io::Stdout;
 use std::io::Write;
+#[cfg(unix)]
 use std::os::fd::AsFd;
 use std::panic;
 use std::sync::Once;
@@ -87,14 +90,15 @@ use crossterm::terminal::disable_raw_mode;
 
 use crossterm::terminal::enable_raw_mode;
 
+#[cfg(unix)]
 use nix::errno::Errno;
-
+#[cfg(unix)]
 use nix::poll::PollFd;
-
+#[cfg(unix)]
 use nix::poll::PollFlags;
-
+#[cfg(unix)]
 use nix::poll::PollTimeout;
-
+#[cfg(unix)]
 use nix::poll::poll;
 
 use crate::config::ColorMode;
@@ -170,6 +174,7 @@ pub struct TerminalOptions {
 pub struct TerminalSession {
     stdout: Stdout,
     /// The terminal crossterm reads keys from when stdin is not one.
+    #[cfg(unix)]
     input: Option<File>,
     /// crossterm may still hold keys it parsed in its last read.
     buffered: Cell<bool>,
@@ -226,6 +231,7 @@ impl TerminalSession {
         let (color_tier, color_source) = configured_color_tier(options.color_mode);
         Ok(Self {
             stdout,
+            #[cfg(unix)]
             input: if io::stdin().is_terminal() {
                 None
             } else {
@@ -331,16 +337,23 @@ impl TerminalSession {
 
     /// Wait for terminal input; crossterm's pending signals are checked afterwards.
     fn wait_for_input(&self, timeout: Duration) -> io::Result<()> {
-        let stdin = io::stdin();
-        let terminal = match &self.input {
-            Some(tty) => tty.as_fd(),
-            None => stdin.as_fd(),
-        };
-        let timeout =
-            PollTimeout::try_from(timeout.as_micros().div_ceil(1000)).unwrap_or(PollTimeout::MAX);
-        match poll(&mut [PollFd::new(terminal, PollFlags::POLLIN)], timeout) {
-            Ok(_) | Err(Errno::EINTR) => Ok(()),
-            Err(error) => Err(error.into()),
+        #[cfg(windows)]
+        {
+            event::poll(timeout).map(|_| ())
+        }
+        #[cfg(unix)]
+        {
+            let stdin = io::stdin();
+            let terminal = match &self.input {
+                Some(tty) => tty.as_fd(),
+                None => stdin.as_fd(),
+            };
+            let timeout = PollTimeout::try_from(timeout.as_micros().div_ceil(1000))
+                .unwrap_or(PollTimeout::MAX);
+            match poll(&mut [PollFd::new(terminal, PollFlags::POLLIN)], timeout) {
+                Ok(_) | Err(Errno::EINTR) => Ok(()),
+                Err(error) => Err(error.into()),
+            }
         }
     }
 

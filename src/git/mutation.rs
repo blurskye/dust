@@ -361,7 +361,7 @@ pub fn worktree_hash(path: &Path) -> Result<([u8; 32], Vec<u8>), GitMutationErro
         crate::files::read_file_bounded(path, 8 * 1024 * 1024).map_err(|error| match error {
             crate::files::VfsError::NotRegularFile(_) => GitMutationError::UnsupportedPath,
             crate::files::VfsError::Io { source, .. }
-                if source.raw_os_error() == Some(nix::libc::ELOOP) =>
+                if crate::files::is_symlink_error(&source) =>
             {
                 GitMutationError::UnsupportedPath
             }

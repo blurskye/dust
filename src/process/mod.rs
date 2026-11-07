@@ -39,6 +39,18 @@ pub(crate) fn terminate_process_group(id: u32) {
     }
 }
 
+#[cfg(windows)]
+pub(crate) fn terminate_process_group(id: u32) {
+    use std::os::windows::process::CommandExt;
+    let _ = std::process::Command::new("taskkill.exe")
+        .args(["/PID", &id.to_string(), "/T", "/F"])
+        .creation_flags(0x08000000) // CREATE_NO_WINDOW
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
+}
+
 pub const MAX_PROTOCOL_MESSAGE_BYTES: usize = 16 * 1024 * 1024;
 const MAX_PROTOCOL_HEADER_BYTES: usize = 16 * 1024;
 
@@ -699,4 +711,6 @@ mod cancellable_pipe_tests {
 }
 
 mod executable;
+pub use executable::discover_executable;
 pub(crate) use executable::executable_file;
+pub(crate) use executable::terminal_executable;

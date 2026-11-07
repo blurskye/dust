@@ -1362,11 +1362,7 @@ impl App {
             Some(buffer) => buffer.text.byte_to_line(ByteOffset(location.byte)).ok(),
             None if location.byte <= READ_LIMIT => {
                 use std::io::Read;
-                use std::os::unix::fs::OpenOptionsExt;
-                std::fs::OpenOptions::new()
-                    .read(true)
-                    .custom_flags(nix::libc::O_NONBLOCK | nix::libc::O_NOFOLLOW)
-                    .open(&location.path)
+                crate::files::open_read_no_symlinks(&location.path)
                     .ok()
                     .and_then(|file| {
                         if !file.metadata().ok()?.is_file() {

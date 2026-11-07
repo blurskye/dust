@@ -170,12 +170,12 @@ fn permission(number: u64) -> PermissionRequest {
 fn subagent_reply() -> (
     crate::remote::RemoteServer,
     Reply,
-    std::io::BufReader<std::os::unix::net::UnixStream>,
+    std::io::BufReader<crate::remote::UnixStream>,
 ) {
     use std::io::Write;
     let directory = tempfile::tempdir().unwrap();
     let server = crate::remote::RemoteServer::start(directory.path()).unwrap();
-    let mut stream = std::os::unix::net::UnixStream::connect(server.path()).unwrap();
+    let mut stream = crate::remote::UnixStream::connect(server.path()).unwrap();
     stream
         .set_read_timeout(Some(std::time::Duration::from_secs(5)))
         .unwrap();
@@ -1718,6 +1718,8 @@ fn replacing_a_permission_prompt_cancels_the_original_request() {
     assert!(app.agent.asking.is_none());
     assert_eq!(app.input.prompt().unwrap().kind, PromptKind::ExplorerDelete);
 }
+// This fixture exercises the Unix shebang/private-runtime installation layout.
+#[cfg(unix)]
 #[test]
 fn managed_pi_starts_with_its_private_node_on_path() {
     // A child test process keeps the tool-store and PATH overrides out of other tests.

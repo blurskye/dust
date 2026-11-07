@@ -112,6 +112,11 @@ pub(crate) fn execute(
             Ok(FileValue::Done)
         }
         FileOperation::Stat(path) => {
+            #[cfg(windows)]
+            let _parents = vfs::hold_scoped_parents(&path, &roots)?;
+            #[cfg(windows)]
+            let file = vfs::open_path(&path).map_err(|e| io(&path, e))?;
+            #[cfg(unix)]
             let file = vfs::open_scoped(&path, &roots, vfs::path_open_flags())?;
             Ok(FileValue::Info(info(
                 &path,
@@ -119,46 +124,72 @@ pub(crate) fn execute(
             )?))
         }
         FileOperation::ListDirectory(path) => {
-            let directory = vfs::open_scoped(
-                &path,
-                &roots,
-                rustix::fs::OFlags::RDONLY | rustix::fs::OFlags::DIRECTORY,
-            )?;
-            let mut entries = Vec::new();
-            let iter = rustix::fs::Dir::read_from(&directory).map_err(|e| io(&path, e.into()))?;
-            for entry in iter {
-                let entry = entry.map_err(|e| io(&path, e.into()))?;
-                let name = entry
-                    .file_name()
-                    .to_str()
-                    .map_err(|e| io(&path, std::io::Error::other(e)))?;
-                if matches!(name, "." | "..") {
-                    continue;
+            #[cfg(windows)]
+            {
+                let _parents = vfs::hold_scoped_parents(&path, &roots)?;
+                let _directory = vfs::open_windows_path(&path, false).map_err(|e| io(&path, e))?;
+                let mut entries = Vec::new();
+                for entry in std::fs::read_dir(&path).map_err(|e| io(&path, e))? {
+                    let entry = entry.map_err(|e| io(&path, e))?;
+                    if entries.len() >= 4096 {
+                        return Err(io(
+                            &path,
+                            std::io::Error::other("directory entry limit exceeded"),
+                        ));
+                    }
+                    let child = entry.path();
+                    entries.push(info(
+                        &child,
+                        std::fs::symlink_metadata(&child).map_err(|e| io(&child, e))?,
+                    )?);
                 }
-                if entries.len() >= 4096 {
-                    return Err(io(
-                        &path,
-                        std::io::Error::other("directory entry limit exceeded"),
-                    ));
-                }
-                let child = path.join(name);
-                // Symlinks are reported as other entries, never followed by a listing.
-                let metadata = rustix::fs::statat(
-                    &directory,
-                    entry.file_name(),
-                    rustix::fs::AtFlags::SYMLINK_NOFOLLOW,
-                )
-                .map_err(|e| io(&child, e.into()))?;
-                let kind = rustix::fs::FileType::from_raw_mode(metadata.st_mode);
-                entries.push(FileInfo {
-                    name: name.into(),
-                    directory: kind == rustix::fs::FileType::Directory,
-                    file: kind == rustix::fs::FileType::RegularFile,
-                    bytes: metadata.st_size as u64,
-                });
+                entries.sort_by(|a, b| a.name.cmp(&b.name));
+                Ok(FileValue::Entries(entries))
             }
-            entries.sort_by(|a, b| a.name.cmp(&b.name));
-            Ok(FileValue::Entries(entries))
+            #[cfg(unix)]
+            {
+                let directory = vfs::open_scoped(
+                    &path,
+                    &roots,
+                    rustix::fs::OFlags::RDONLY | rustix::fs::OFlags::DIRECTORY,
+                )?;
+                let mut entries = Vec::new();
+                let iter =
+                    rustix::fs::Dir::read_from(&directory).map_err(|e| io(&path, e.into()))?;
+                for entry in iter {
+                    let entry = entry.map_err(|e| io(&path, e.into()))?;
+                    let name = entry
+                        .file_name()
+                        .to_str()
+                        .map_err(|e| io(&path, std::io::Error::other(e)))?;
+                    if matches!(name, "." | "..") {
+                        continue;
+                    }
+                    if entries.len() >= 4096 {
+                        return Err(io(
+                            &path,
+                            std::io::Error::other("directory entry limit exceeded"),
+                        ));
+                    }
+                    let child = path.join(name);
+                    // Symlinks are reported as other entries, never followed by a listing.
+                    let metadata = rustix::fs::statat(
+                        &directory,
+                        entry.file_name(),
+                        rustix::fs::AtFlags::SYMLINK_NOFOLLOW,
+                    )
+                    .map_err(|e| io(&child, e.into()))?;
+                    let kind = rustix::fs::FileType::from_raw_mode(metadata.st_mode);
+                    entries.push(FileInfo {
+                        name: name.into(),
+                        directory: kind == rustix::fs::FileType::Directory,
+                        file: kind == rustix::fs::FileType::RegularFile,
+                        bytes: metadata.st_size as u64,
+                    });
+                }
+                entries.sort_by(|a, b| a.name.cmp(&b.name));
+                Ok(FileValue::Entries(entries))
+            }
         }
         operation => {
             let mutation = match operation {

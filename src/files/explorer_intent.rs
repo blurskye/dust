@@ -3,6 +3,7 @@ use crate::files::ExplorerMutation;
 use crate::files::RequestId;
 use crate::files::RootIdentity;
 use crate::files::VfsError;
+#[cfg(unix)]
 use crate::files::vfs::path_open_flags;
 use crate::files::vfs::roots_current;
 use std::fs;
@@ -94,6 +95,7 @@ fn error(path: &Path, message: impl Into<String>) -> VfsError {
         source: io::Error::other(message.into()),
     }
 }
+#[cfg(unix)]
 fn identity(metadata: &fs::Metadata) -> (u64, u64) {
     use std::os::unix::fs::MetadataExt;
     (metadata.dev(), metadata.ino())
@@ -173,8 +175,8 @@ fn prepare(
         .into_iter()
         .map(|path| {
             // Holding the original inode also prevents immediate unlink/recreate inode reuse.
-            let file = crate::files::vfs::open_no_symlinks(&path, path_open_flags())
-                .map_err(|e| error(&path, e.to_string()))?;
+            let file =
+                crate::files::vfs::open_path(&path).map_err(|e| error(&path, e.to_string()))?;
             let metadata = file.metadata().map_err(|e| error(&path, e.to_string()))?;
             if !metadata.is_file() && !metadata.is_dir() {
                 return Err(VfsError::NotRegularFile(path));
@@ -193,10 +195,13 @@ fn check_identities(intent: &PreparedExplorerMutation) -> Result<(), VfsError> {
     roots_current(&intent.roots)?;
     for (path, original) in &intent.identities {
         let current = fs::symlink_metadata(path).map_err(|e| error(path, e.to_string()))?;
-        let original = original
-            .metadata()
+        let reopened =
+            crate::files::vfs::open_path(path).map_err(|e| error(path, e.to_string()))?;
+        let current_identity = crate::files::root_identity::file_identity(&reopened)
             .map_err(|e| error(path, e.to_string()))?;
-        if current.file_type().is_symlink() || identity(&current) != identity(&original) {
+        let original_identity = crate::files::root_identity::file_identity(original)
+            .map_err(|e| error(path, e.to_string()))?;
+        if current.file_type().is_symlink() || current_identity != original_identity {
             return Err(error(path, "explorer target filesystem identity changed"));
         }
     }
@@ -234,6 +239,7 @@ fn apply(intent: PreparedExplorerMutation) -> Result<(), VfsError> {
         .collect::<Vec<_>>();
     crate::files::vfs::apply_explorer_mutation(&intent.operation, &roots, intent.maximum)
 }
+#[cfg(unix)]
 fn read_scoped_file(path: &Path, roots: &[RootIdentity]) -> Result<Vec<u8>, VfsError> {
     use rustix::fs::Mode;
     use rustix::fs::OFlags;
@@ -281,6 +287,19 @@ fn read_scoped_file(path: &Path, roots: &[RootIdentity]) -> Result<Vec<u8>, VfsE
         file,
         path,
         crate::files::recovery::DOCUMENT_BYTE_LIMIT,
+    )
+}
+
+#[cfg(windows)]
+fn read_scoped_file(path: &Path, roots: &[RootIdentity]) -> Result<Vec<u8>, VfsError> {
+    roots_current(roots)?;
+    crate::files::vfs::read_scoped_file(
+        path,
+        &roots
+            .iter()
+            .map(|root| root.canonical_path.clone())
+            .collect::<Vec<_>>(),
+        crate::files::DOCUMENT_BYTE_LIMIT,
     )
 }
 
@@ -391,6 +410,8 @@ mod tests {
             std::thread::sleep(Duration::from_millis(1));
         }
     }
+    // Substitutes a Unix symlink while a scoped read is pending.
+    #[cfg(unix)]
     #[test]
     fn explorer_read_rejects_intermediate_symlink_replacement_after_canonicalization() {
         let root = tempfile::tempdir().unwrap();
@@ -407,6 +428,8 @@ mod tests {
         assert!(read_scoped_file(&path, &roots).is_err());
     }
 
+    // Unix modes distinguish read permission from permission to rename.
+    #[cfg(unix)]
     #[test]
     fn explorer_rename_and_delete_do_not_require_source_read_permission() {
         use std::os::unix::fs::PermissionsExt;
@@ -450,7 +473,7 @@ mod tests {
         fs::create_dir(&b).unwrap();
         let source = a.join("source");
         fs::write(&source, "source").unwrap();
-        let mut roots = vec![
+        let roots = vec![
             RootIdentity::capture(&a).unwrap(),
             RootIdentity::capture(&b).unwrap(),
             RootIdentity {
@@ -535,53 +558,58 @@ mod tests {
             ExplorerIoReply::Applied { result: Ok(()), .. }
         ));
         assert_eq!(fs::read(&target).unwrap(), b"source");
-        let nested = a.join("nested");
-        fs::create_dir(&nested).unwrap();
-        roots.push(RootIdentity::capture(&nested).unwrap());
-        worker
-            .inspect_explorer_rename(source.clone(), roots.clone(), 1024)
-            .unwrap();
-        let ExplorerIoReply::RenameInspected {
-            result: Ok(rename_source),
-            ..
-        } = reply(&worker)
-        else {
-            panic!("rename source inspection");
-        };
-        fs::rename(&nested, a.join("old-nested")).unwrap();
-        std::os::unix::fs::symlink(&b, &nested).unwrap();
-        worker
-            .prepare_explorer_rename(rename_source, nested.join("renamed"))
-            .unwrap();
-        assert!(matches!(
-            reply(&worker),
-            ExplorerIoReply::Prepared { result: Err(_), .. }
-        ));
-        assert!(source.exists());
-        assert!(!b.join("renamed").exists());
-        // Canonicalization points at a valid other root. The invalid lexical
-        // participating root must still reject, not fall back to b or ancestor a.
-        worker
-            .open_explorer(nested.join("copy"), roots.clone())
-            .unwrap();
-        assert!(matches!(
-            reply(&worker),
-            ExplorerIoReply::Opened { result: Err(_), .. }
-        ));
-        worker
-            .prepare_explorer(
-                ExplorerMutation::Delete {
-                    path: nested.join("copy"),
-                },
-                roots.clone(),
-                1024,
-            )
-            .unwrap();
-        assert!(matches!(
-            reply(&worker),
-            ExplorerIoReply::Prepared { result: Err(_), .. }
-        ));
-        assert_eq!(fs::read(&target).unwrap(), b"source");
+        // Symlink substitution needs Unix's unprivileged symlink creation.
+        #[cfg(unix)]
+        {
+            let mut roots = roots.clone();
+            let nested = a.join("nested");
+            fs::create_dir(&nested).unwrap();
+            roots.push(RootIdentity::capture(&nested).unwrap());
+            worker
+                .inspect_explorer_rename(source.clone(), roots.clone(), 1024)
+                .unwrap();
+            let ExplorerIoReply::RenameInspected {
+                result: Ok(rename_source),
+                ..
+            } = reply(&worker)
+            else {
+                panic!("rename source inspection");
+            };
+            fs::rename(&nested, a.join("old-nested")).unwrap();
+            std::os::unix::fs::symlink(&b, &nested).unwrap();
+            worker
+                .prepare_explorer_rename(rename_source, nested.join("renamed"))
+                .unwrap();
+            assert!(matches!(
+                reply(&worker),
+                ExplorerIoReply::Prepared { result: Err(_), .. }
+            ));
+            assert!(source.exists());
+            assert!(!b.join("renamed").exists());
+            // Canonicalization points at a valid other root. The invalid lexical
+            // participating root must still reject, not fall back to b or ancestor a.
+            worker
+                .open_explorer(nested.join("copy"), roots.clone())
+                .unwrap();
+            assert!(matches!(
+                reply(&worker),
+                ExplorerIoReply::Opened { result: Err(_), .. }
+            ));
+            worker
+                .prepare_explorer(
+                    ExplorerMutation::Delete {
+                        path: nested.join("copy"),
+                    },
+                    roots.clone(),
+                    1024,
+                )
+                .unwrap();
+            assert!(matches!(
+                reply(&worker),
+                ExplorerIoReply::Prepared { result: Err(_), .. }
+            ));
+            assert_eq!(fs::read(&target).unwrap(), b"source");
+        }
         worker.open_explorer(source, roots).unwrap();
         assert!(matches!(
             reply(&worker),

@@ -80,10 +80,14 @@ fn real_guest_file_writes_refuse_unsaved_buffers_and_symlink_escapes() {
     app.state.buffers[buffer].dirty = true;
     assert!(request(&mut app, "system-write").contains("unsaved changes"));
     assert_eq!(std::fs::read(&path).unwrap(), b"saved");
-    let outside = tempfile::tempdir().unwrap();
-    std::fs::write(outside.path().join("secret"), "secret").unwrap();
-    std::os::unix::fs::symlink(outside.path(), root.join("system-link")).unwrap();
-    assert!(request(&mut app, "system-escape").contains("outside the workspace"));
+    // The dirty-buffer check is shared; this escape uses a Unix symlink.
+    #[cfg(unix)]
+    {
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::write(outside.path().join("secret"), "secret").unwrap();
+        std::os::unix::fs::symlink(outside.path(), root.join("system-link")).unwrap();
+        assert!(request(&mut app, "system-escape").contains("outside the workspace"));
+    }
 }
 
 #[test]

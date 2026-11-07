@@ -1,0 +1,56 @@
+# Native download overrides for the Linux catalogue. Digests are upstream release
+# asset SHA-256 values. Other tools remain available on PATH.
+
+[[macos-aarch64.tool]]
+id = "rust-analyzer"
+name = "rust-analyzer"
+kind = "lsp"
+languages = ["rust"]
+executable = "rust-analyzer"
+version = "0.3.3025"
+release = "2026-08-24"
+probe_args = ["--version"]
+project_root_markers = ["Cargo.toml"]
+project_root_strategy = "cargo"
+[macos-aarch64.tool.install]
+method = "archive"
+url = "https://github.com/rust-lang/rust-analyzer/releases/download/2026-08-24/rust-analyzer-aarch64-apple-darwin.gz"
+sha256 = "5f4557c2ea4d62f80f1ffeea2646d0d56fab7172a0db11f3065c4d246b763989"
+archive = "gzip"
+executable_path = "rust-analyzer"
+
+[[macos-x86_64.tool]]
+id = "rust-analyzer"
+name = "rust-analyzer"
+kind = "lsp"
+languages = ["rust"]
+executable = "rust-analyzer"
+version = "0.3.3025"
+release = "2026-08-24"
+probe_args = ["--version"]
+project_root_markers = ["Cargo.toml"]
+project_root_strategy = "cargo"
+[macos-x86_64.tool.install]
+method = "archive"
+url = "https://github.com/rust-lang/rust-analyzer/releases/download/2026-08-24/rust-analyzer-x86_64-apple-darwin.gz"
+sha256 = "822cc4369562fc2ed26d1cf3953ef93927d8fdda4302d82e2eec407e2734eefd"
+archive = "gzip"
+executable_path = "rust-analyzer"
+
+[[windows-x86_64.tool]]
+id = "rust-analyzer"
+name = "rust-analyzer"
+kind = "lsp"
+languages = ["rust"]
+executable = "rust-analyzer.exe"
+version = "0.3.3025"
+release = "2026-08-24"
+probe_args = ["--version"]
+project_root_markers = ["Cargo.toml"]
+project_root_strategy = "cargo"
+[windows-x86_64.tool.install]
+method = "archive"
+url = "https://github.com/rust-lang/rust-analyzer/releases/download/2026-08-24/rust-analyzer-x86_64-pc-windows-msvc.zip"
+sha256 = "f6d80045e6f475606f62d294fa3b618304fd24d2ff86160495440f23d5f7fcdb"
+archive = "zip"
+executable_path = "rust-analyzer.exe"

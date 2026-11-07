@@ -1379,7 +1379,330 @@ pub(crate) fn participating_roots(
     Ok(selected)
 }
 
+pub(crate) fn open_path(path: &Path) -> io::Result<File> {
+    #[cfg(unix)]
+    {
+        open_no_symlinks(path, path_open_flags())
+    }
+    #[cfg(windows)]
+    {
+        open_windows_path(path, true)
+    }
+}
+
+#[cfg(windows)]
+pub(super) fn open_windows_path(path: &Path, allow_delete: bool) -> io::Result<File> {
+    use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
+    let mut options = fs::OpenOptions::new();
+    // Metadata-only handles can also open directories. Denying delete pins a parent
+    // while a scoped operation resolves and changes names beneath it.
+    options
+        .access_mode(0)
+        .share_mode(if allow_delete { 7 } else { 3 })
+        .custom_flags(0x02000000 | 0x00200000); // BACKUP_SEMANTICS | OPEN_REPARSE_POINT
+    let file = options.open(path)?;
+    if file.metadata()?.file_attributes() & 0x400 != 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "reparse point in scoped path",
+        ));
+    }
+    Ok(file)
+}
+
+#[cfg(windows)]
+fn hold_parents(path: &Path) -> io::Result<Vec<File>> {
+    use std::path::Component;
+    if !path.is_absolute() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "expected an absolute path",
+        ));
+    }
+    let mut current = PathBuf::new();
+    let mut held = Vec::new();
+    for component in path.parent().unwrap_or(path).components() {
+        match component {
+            Component::ParentDir => {
+                return Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    "path escapes its directory",
+                ));
+            }
+            Component::CurDir => continue,
+            Component::Prefix(_) | Component::RootDir => {
+                current.push(component);
+                continue;
+            }
+            Component::Normal(_) => current.push(component),
+        }
+        let file = open_windows_path(&current, false)?;
+        if !file.metadata()?.is_dir() {
+            return Err(io::Error::new(
+                io::ErrorKind::NotADirectory,
+                "scoped parent is not a directory",
+            ));
+        }
+        held.push(file);
+    }
+    Ok(held)
+}
+
+#[cfg(windows)]
+pub(super) fn read_scoped_file(
+    path: &Path,
+    roots: &[PathBuf],
+    maximum: u64,
+) -> Result<Vec<u8>, VfsError> {
+    let _parents = hold_scoped_parents(path, roots)?;
+    read_file_bounded(path, maximum)
+}
+
+#[cfg(windows)]
+pub(super) fn hold_scoped_parents(path: &Path, roots: &[PathBuf]) -> Result<Vec<File>, VfsError> {
+    if !roots.iter().any(|root| path.starts_with(root)) {
+        return Err(VfsError::OutsideScope(path.into()));
+    }
+    hold_parents(path).map_err(|source| VfsError::Io {
+        operation: "open scoped parents",
+        path: path.into(),
+        source,
+    })
+}
+
+#[cfg(windows)]
+pub(super) fn apply_explorer_mutation(
+    operation: &ExplorerMutation,
+    roots: &[PathBuf],
+    maximum: u64,
+) -> Result<(), VfsError> {
+    let mut parents = Vec::new();
+    for path in operation.source().into_iter().chain(operation.target()) {
+        parents.extend(hold_scoped_parents(path, roots)?);
+    }
+    let error = |path: &Path, source| VfsError::Io {
+        operation: "mutate explorer entry",
+        path: path.into(),
+        source,
+    };
+    match operation {
+        ExplorerMutation::Create { path, directory } => {
+            let path = scoped_missing_target(path, roots)?;
+            if *directory {
+                fs::create_dir(&path).map_err(|e| error(&path, e))
+            } else {
+                fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(&path)
+                    .and_then(|file| file.sync_all())
+                    .map_err(|e| error(&path, e))
+            }
+        }
+        ExplorerMutation::Rename { source, target } => {
+            let source = scoped_existing_path(source, roots)?;
+            let target = scoped_missing_target(target, roots)?;
+            // Move without replacement. Unlike std::fs::rename, persist_noclobber
+            // uses the Windows no-replace move primitive for files.
+            tempfile::TempPath::try_from_path(&source)
+                .map_err(|e| error(&source, e))?
+                .persist_noclobber(&target)
+                .map_err(|e| {
+                    let source_error = e.error;
+                    let _ = e.path.keep();
+                    if source_error.kind() == io::ErrorKind::AlreadyExists {
+                        VfsError::DestinationExists(target.clone())
+                    } else {
+                        error(&target, source_error)
+                    }
+                })?;
+            Ok(())
+        }
+        ExplorerMutation::Copy { source, target } => {
+            let source = scoped_existing_path(source, roots)?;
+            let target = scoped_missing_target(target, roots)?;
+            let metadata = fs::symlink_metadata(&source).map_err(|e| error(&source, e))?;
+            if metadata.is_dir() {
+                let _directory =
+                    open_windows_path(&source, false).map_err(|e| error(&source, e))?;
+                if fs::read_dir(&source)
+                    .map_err(|e| error(&source, e))?
+                    .next()
+                    .is_some()
+                {
+                    return Err(error(
+                        &source,
+                        io::Error::new(
+                            io::ErrorKind::InvalidInput,
+                            "recursive directory copy is not supported; select an empty directory",
+                        ),
+                    ));
+                }
+                fs::create_dir(&target).map_err(|e| error(&target, e))
+            } else {
+                let bytes = read_file_bounded(&source, maximum)?;
+                checked_atomic_write(&target, &bytes, &WriteExpectation::Missing)
+            }
+        }
+        ExplorerMutation::Delete { path } => {
+            let path = scoped_existing_path(path, roots)?;
+            let metadata = fs::symlink_metadata(&path).map_err(|e| error(&path, e))?;
+            if metadata.is_dir() {
+                fs::remove_dir(&path).map_err(|e| error(&path, e))
+            } else if metadata.is_file() {
+                fs::remove_file(&path).map_err(|e| error(&path, e))
+            } else {
+                Err(VfsError::NotRegularFile(path))
+            }
+        }
+    }
+}
+
+#[cfg(windows)]
+pub(super) fn resolve_resource_intent(
+    source: &Path,
+    target: Option<&Path>,
+    roots: &[PathBuf],
+    maximum_bytes: usize,
+) -> Result<CheckedResourceIntent, VfsError> {
+    use crate::files::root_identity::file_identity;
+    let source = scoped_existing_path(source, roots)?;
+    let _parents = hold_scoped_parents(&source, roots)?;
+    let identity = |path: &Path| {
+        open_path(path)
+            .and_then(|file| file_identity(&file))
+            .map_err(|source| VfsError::Io {
+                operation: "inspect resource identity",
+                path: path.into(),
+                source,
+            })
+    };
+    let (source_device, source_inode) = identity(&source)?;
+    let source_bytes = read_file_bounded(&source, maximum_bytes as u64)?;
+    let kind = if let Some(target) = target {
+        let target = scoped_missing_target(target, roots)?;
+        let _target_parents = hold_scoped_parents(&target, roots)?;
+        let (parent_device, parent_inode) = identity(
+            target
+                .parent()
+                .ok_or_else(|| VfsError::OutsideScope(target.clone()))?,
+        )?;
+        if parent_device != source_device {
+            return Err(VfsError::CrossFilesystem);
+        }
+        ResourceIntentKind::Rename {
+            target,
+            parent_device,
+            parent_inode,
+        }
+    } else {
+        ResourceIntentKind::Delete
+    };
+    Ok(CheckedResourceIntent {
+        source,
+        source_device,
+        source_inode,
+        source_bytes,
+        canonical_roots: roots.to_vec(),
+        maximum_bytes: maximum_bytes as u64,
+        kind,
+    })
+}
+
+#[cfg(windows)]
+pub(super) fn apply_resource_intent(intent: &CheckedResourceIntent) -> Result<(), VfsError> {
+    let target = match &intent.kind {
+        ResourceIntentKind::Rename { target, .. } => Some(target.as_path()),
+        ResourceIntentKind::Delete => None,
+    };
+    let current = resolve_resource_intent(
+        &intent.source,
+        target,
+        &intent.canonical_roots,
+        intent.maximum_bytes as usize,
+    )?;
+    if current.source_device != intent.source_device
+        || current.source_inode != intent.source_inode
+        || current.source_bytes != intent.source_bytes
+        || current.kind != intent.kind
+    {
+        return Err(VfsError::ChangedOnDisk);
+    }
+    let operation = match target {
+        Some(target) => ExplorerMutation::Rename {
+            source: intent.source.clone(),
+            target: target.into(),
+        },
+        None => ExplorerMutation::Delete {
+            path: intent.source.clone(),
+        },
+    };
+    apply_explorer_mutation(&operation, &intent.canonical_roots, intent.maximum_bytes)
+}
+
+#[cfg(windows)]
+fn replace_exact(path: &Path, temporary: NamedTempFile, _expected: &[u8]) -> Result<(), VfsError> {
+    // Windows has no rename-exchange. The caller checks the disk revision immediately
+    // before this atomic replacement, but cannot preserve a racing writer's displaced file.
+    fs::rename(temporary.path(), path).map_err(|source| VfsError::Io {
+        operation: "replace destination",
+        path: path.into(),
+        source,
+    })
+}
+
+#[cfg(windows)]
+pub(super) fn agent_atomic_write(root: &Path, path: &Path, bytes: &[u8]) -> Result<(), VfsError> {
+    let relative = path
+        .strip_prefix(root)
+        .map_err(|_| VfsError::OutsideScope(path.into()))?;
+    if relative
+        .components()
+        .any(|part| !matches!(part, std::path::Component::Normal(_)))
+    {
+        return Err(VfsError::OutsideScope(path.into()));
+    }
+    let mut current = root.to_path_buf();
+    let mut held = hold_scoped_parents(&root.join("entry"), &[root.into()])?;
+    for part in relative.parent().unwrap_or(Path::new("")).components() {
+        current.push(part);
+        match fs::create_dir(&current) {
+            Ok(()) => {}
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {}
+            Err(source) => {
+                return Err(VfsError::Io {
+                    operation: "create agent directory",
+                    path: current,
+                    source,
+                });
+            }
+        }
+        held.push(
+            open_windows_path(&current, false).map_err(|source| VfsError::Io {
+                operation: "open agent directory",
+                path: current.clone(),
+                source,
+            })?,
+        );
+    }
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if !metadata.is_file() || metadata.file_type().is_symlink() => {
+            return Err(VfsError::NotRegularFile(path.into()));
+        }
+        Err(source) if source.kind() != io::ErrorKind::NotFound => {
+            return Err(VfsError::Io {
+                operation: "inspect agent destination",
+                path: path.into(),
+                source,
+            });
+        }
+        _ => {}
+    }
+    atomic_write(path, bytes)
+}
+
 /// Open an entry for identity checks without requiring read permission.
+#[cfg(unix)]
 pub(crate) fn path_open_flags() -> rustix::fs::OFlags {
     #[cfg(target_os = "macos")]
     {
@@ -1394,6 +1717,7 @@ pub(crate) fn path_open_flags() -> rustix::fs::OFlags {
 
 // Canonicalization alone cannot constrain a later open if an ancestor is swapped
 // for a symlink. Resolve from a held root and reject links in every component.
+#[cfg(unix)]
 pub(super) fn open_scoped(
     path: &Path,
     roots: &[PathBuf],
@@ -1417,6 +1741,7 @@ pub(super) fn open_scoped(
     open_beneath(directory, relative, flags).map_err(error)
 }
 
+#[cfg(unix)]
 pub(crate) fn open_no_symlinks(path: &Path, flags: rustix::fs::OFlags) -> io::Result<fs::File> {
     use rustix::fs::CWD;
     use rustix::fs::Mode;
@@ -1434,6 +1759,7 @@ pub(crate) fn open_no_symlinks(path: &Path, flags: rustix::fs::OFlags) -> io::Re
     open_beneath(root, relative, flags)
 }
 
+#[cfg(unix)]
 fn open_beneath(
     mut directory: fs::File,
     relative: &Path,
@@ -1485,6 +1811,7 @@ fn open_beneath(
     )?))
 }
 
+#[cfg(unix)]
 fn scoped_parent(
     path: &Path,
     roots: &[PathBuf],
@@ -1503,6 +1830,7 @@ fn scoped_parent(
     Ok((file, name.into()))
 }
 
+#[cfg(unix)]
 pub(super) fn read_scoped_file(
     path: &Path,
     roots: &[PathBuf],
@@ -1565,6 +1893,7 @@ pub(super) fn scoped_missing_target(path: &Path, roots: &[PathBuf]) -> Result<Pa
     }
 }
 
+#[cfg(unix)]
 pub(super) fn apply_explorer_mutation(
     operation: &ExplorerMutation,
     roots: &[PathBuf],
@@ -1741,6 +2070,7 @@ pub(super) fn apply_explorer_mutation(
     }
 }
 
+#[cfg(unix)]
 pub(super) fn resolve_resource_intent(
     source: &Path,
     target: Option<&Path>,
@@ -1809,6 +2139,7 @@ pub(super) fn resolve_resource_intent(
         kind,
     })
 }
+#[cfg(unix)]
 pub(super) fn apply_resource_intent(intent: &CheckedResourceIntent) -> Result<(), VfsError> {
     use std::os::unix::fs::MetadataExt;
     let source = canonical_path(&intent.source)?;
@@ -1942,11 +2273,19 @@ pub(super) fn list_directory(
 
 /// Open without waiting for a FIFO writer, then validate the opened handle.
 pub(crate) fn open_regular_file(path: &Path) -> io::Result<File> {
-    use std::os::unix::fs::OpenOptionsExt;
-    let file = fs::OpenOptions::new()
-        .read(true)
-        .custom_flags(nix::libc::O_NONBLOCK)
-        .open(path)?;
+    let mut options = fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(nix::libc::O_NONBLOCK);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        options.custom_flags(0x02000000); // FILE_FLAG_BACKUP_SEMANTICS
+    }
+    let file = options.open(path)?;
     if !file.metadata()?.is_file() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -1956,17 +2295,47 @@ pub(crate) fn open_regular_file(path: &Path) -> io::Result<File> {
     Ok(file)
 }
 
+pub(crate) fn is_symlink_error(error: &io::Error) -> bool {
+    #[cfg(unix)]
+    {
+        error.raw_os_error() == Some(nix::libc::ELOOP)
+    }
+    #[cfg(windows)]
+    {
+        error.raw_os_error() == Some(1921)
+    } // ERROR_CANT_RESOLVE_FILENAME
+}
+
+pub(crate) fn open_read_no_symlinks(path: &Path) -> io::Result<File> {
+    let mut options = fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(nix::libc::O_NONBLOCK | nix::libc::O_NOFOLLOW);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        options.custom_flags(0x02000000 | 0x00200000); // BACKUP_SEMANTICS | OPEN_REPARSE_POINT
+    }
+    let file = options.open(path)?;
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        if file.metadata()?.file_attributes() & 0x400 != 0 {
+            return Err(io::Error::from_raw_os_error(1921));
+        }
+    }
+    Ok(file)
+}
+
 pub(crate) fn read_file_bounded(path: &Path, maximum_bytes: u64) -> Result<Vec<u8>, VfsError> {
-    use std::os::unix::fs::OpenOptionsExt;
-    let file = fs::OpenOptions::new()
-        .read(true)
-        .custom_flags(nix::libc::O_NONBLOCK | nix::libc::O_NOFOLLOW)
-        .open(path)
-        .map_err(|source| VfsError::Io {
-            operation: "open for reading",
-            path: path.to_path_buf(),
-            source,
-        })?;
+    let file = open_read_no_symlinks(path).map_err(|source| VfsError::Io {
+        operation: "open for reading",
+        path: path.to_path_buf(),
+        source,
+    })?;
     read_open_file_bounded(file, path, maximum_bytes)
 }
 
@@ -2062,6 +2431,7 @@ fn persist_missing(path: &Path, temporary: NamedTempFile) -> Result<(), VfsError
     Ok(())
 }
 
+#[cfg(unix)]
 fn replace_exact(path: &Path, temporary: NamedTempFile, expected: &[u8]) -> Result<(), VfsError> {
     use rustix::fs::CWD;
     use rustix::fs::RenameFlags;
@@ -2094,30 +2464,66 @@ fn replace_exact(path: &Path, temporary: NamedTempFile, expected: &[u8]) -> Resu
     })
 }
 
-/// Lock a stable sidecar across atomic replacements of the data file.
 #[cfg(unix)]
-pub(crate) fn lock_file(path: &Path) -> io::Result<nix::fcntl::Flock<File>> {
-    use std::os::unix::fs::OpenOptionsExt;
-    let file = fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .mode(0o600)
-        .custom_flags(nix::libc::O_NOFOLLOW)
-        .open(path)?;
+pub(crate) type FileLock = nix::fcntl::Flock<File>;
+#[cfg(windows)]
+pub(crate) type FileLock = File;
+
+pub(crate) fn lock_exclusive(file: File, nonblocking: bool) -> Result<FileLock, (File, io::Error)> {
+    #[cfg(unix)]
+    {
+        let mode = if nonblocking {
+            nix::fcntl::FlockArg::LockExclusiveNonblock
+        } else {
+            nix::fcntl::FlockArg::LockExclusive
+        };
+        nix::fcntl::Flock::lock(file, mode).map_err(|(file, error)| (file, error.into()))
+    }
+    #[cfg(windows)]
+    {
+        let result = if nonblocking {
+            file.try_lock().map_err(io::Error::from)
+        } else {
+            file.lock()
+        };
+        match result {
+            Ok(()) => Ok(file),
+            Err(error) => Err((file, error)),
+        }
+    }
+}
+
+/// Lock a stable sidecar across atomic replacements of the data file.
+pub(crate) fn lock_file(path: &Path) -> io::Result<FileLock> {
+    lock_exclusive(open_lock_file(path)?, false).map_err(|(_, error)| error)
+}
+
+pub(crate) fn open_lock_file(path: &Path) -> io::Result<File> {
+    let mut options = fs::OpenOptions::new();
+    options.read(true).write(true).create(true).truncate(false);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600).custom_flags(nix::libc::O_NOFOLLOW);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        options.custom_flags(0x00200000); // FILE_FLAG_OPEN_REPARSE_POINT
+    }
+    let file = options.open(path)?;
     if !file.metadata()?.is_file() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "lock target must be a regular file",
         ));
     }
-    nix::fcntl::Flock::lock(file, nix::fcntl::FlockArg::LockExclusive)
-        .map_err(|(_, error)| io::Error::from(error))
+    Ok(file)
 }
 
 /// Agent paths are already resolved. Open each directory without following
 /// symlinks and keep the parent descriptor for creation, rename and cleanup.
+#[cfg(unix)]
 pub(super) fn agent_atomic_write(root: &Path, path: &Path, bytes: &[u8]) -> Result<(), VfsError> {
     use rustix::fs::AtFlags;
     use rustix::fs::FileType;
@@ -2234,24 +2640,29 @@ pub(crate) fn atomic_write_with_executable(
     bytes: &[u8],
     executable: bool,
 ) -> Result<(), VfsError> {
-    use std::os::unix::fs::PermissionsExt;
     let temporary = stage_atomic_write(path, bytes)?;
-    let set_mode = || -> io::Result<()> {
-        let mut permissions = temporary.as_file().metadata()?.permissions();
-        let mode = permissions.mode() & !0o111;
-        permissions.set_mode(if executable {
-            mode | ((mode & 0o444) >> 2)
-        } else {
-            mode
-        });
-        temporary.as_file().set_permissions(permissions)?;
-        temporary.as_file().sync_all()
-    };
-    set_mode().map_err(|source| VfsError::Io {
-        operation: "set replacement executable flag",
-        path: path.to_path_buf(),
-        source,
-    })?;
+    #[cfg(windows)]
+    let _ = executable;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let set_mode = || -> io::Result<()> {
+            let mut permissions = temporary.as_file().metadata()?.permissions();
+            let mode = permissions.mode() & !0o111;
+            permissions.set_mode(if executable {
+                mode | ((mode & 0o444) >> 2)
+            } else {
+                mode
+            });
+            temporary.as_file().set_permissions(permissions)?;
+            temporary.as_file().sync_all()
+        };
+        set_mode().map_err(|source| VfsError::Io {
+            operation: "set replacement executable flag",
+            path: path.to_path_buf(),
+            source,
+        })?;
+    }
     commit_atomic_write(path, temporary, &WriteExpectation::Any)
 }
 
@@ -2277,18 +2688,21 @@ fn stage_atomic_write(path: &Path, bytes: &[u8]) -> Result<NamedTempFile, VfsErr
     })?;
     match fs::metadata(path) {
         Ok(metadata) => {
-            use std::os::unix::fs::MetadataExt;
-            use std::os::unix::fs::fchown;
-            fchown(
-                temporary.as_file(),
-                Some(metadata.uid()),
-                Some(metadata.gid()),
-            )
-            .map_err(|source| VfsError::Io {
-                operation: "copy ownership",
-                path: path.to_path_buf(),
-                source,
-            })?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::MetadataExt;
+                use std::os::unix::fs::fchown;
+                fchown(
+                    temporary.as_file(),
+                    Some(metadata.uid()),
+                    Some(metadata.gid()),
+                )
+                .map_err(|source| VfsError::Io {
+                    operation: "copy ownership",
+                    path: path.to_path_buf(),
+                    source,
+                })?;
+            }
             temporary
                 .as_file()
                 .set_permissions(metadata.permissions())
@@ -2347,6 +2761,8 @@ mod lifecycle_tests {
             thread::sleep(Duration::from_millis(1));
         }
     }
+    // This test substitutes Unix symlinks.
+    #[cfg(unix)]
     #[test]
     fn document_writes_reject_missing_destination_aliases_before_creating_files() {
         let root = tempfile::tempdir().unwrap();
@@ -2380,6 +2796,8 @@ mod lifecycle_tests {
         }
     }
 
+    // This test substitutes Unix symlinks.
+    #[cfg(unix)]
     #[test]
     fn agent_writes_reject_symlinks_substituted_after_path_resolution() {
         let workspace = tempfile::tempdir().unwrap();
@@ -2414,6 +2832,8 @@ mod lifecycle_tests {
         fs::rename(&moved, &root).unwrap();
     }
 
+    // Search-only directory permissions are Unix-specific.
+    #[cfg(unix)]
     #[test]
     fn agent_writes_traverse_search_only_ancestors() {
         use std::os::unix::fs::PermissionsExt;
@@ -2430,6 +2850,8 @@ mod lifecycle_tests {
         assert_eq!(fs::read(&path).unwrap(), b"inside");
     }
 
+    // Checks Unix permission bits.
+    #[cfg(unix)]
     #[test]
     fn agent_writes_replace_regular_files_and_preserve_permissions() {
         use std::os::unix::fs::PermissionsExt;
@@ -2471,27 +2893,41 @@ mod lifecycle_tests {
         ));
         assert_eq!(fs::read(&path).unwrap(), b"newer");
 
-        // Simulate a replacement after final validation but before the exchange.
-        let temporary = stage_atomic_write(&path, b"editor").unwrap();
-        let preserved = temporary.path().to_path_buf();
-        let error = replace_exact(&path, temporary, b"external").unwrap_err();
-        assert!(error.to_string().contains(&preserved.display().to_string()));
-        assert_eq!(fs::read(&preserved).unwrap(), b"newer");
-        assert_eq!(fs::read(&path).unwrap(), b"editor");
+        #[cfg(windows)]
+        {
+            checked_atomic_write(
+                &path,
+                b"editor",
+                &WriteExpectation::Exact(b"newer".to_vec()),
+            )
+            .unwrap();
+            assert_eq!(fs::read(&path).unwrap(), b"editor");
+        }
+        // Unix provides atomic exchange and unprivileged symlink creation.
+        #[cfg(unix)]
+        {
+            // Simulate a replacement after final validation but before the exchange.
+            let temporary = stage_atomic_write(&path, b"editor").unwrap();
+            let preserved = temporary.path().to_path_buf();
+            let error = replace_exact(&path, temporary, b"external").unwrap_err();
+            assert!(error.to_string().contains(&preserved.display().to_string()));
+            assert_eq!(fs::read(&preserved).unwrap(), b"newer");
+            assert_eq!(fs::read(&path).unwrap(), b"editor");
 
-        fs::remove_file(&path).unwrap();
-        let dangling = root.path().join("dangling");
-        std::os::unix::fs::symlink(&dangling, &path).unwrap();
-        assert!(matches!(
-            checked_atomic_write(&path, b"editor", &WriteExpectation::Missing),
-            Err(VfsError::DestinationExists(_))
-        ));
-        assert!(
-            fs::symlink_metadata(&path)
-                .unwrap()
-                .file_type()
-                .is_symlink()
-        );
+            fs::remove_file(&path).unwrap();
+            let dangling = root.path().join("dangling");
+            std::os::unix::fs::symlink(&dangling, &path).unwrap();
+            assert!(matches!(
+                checked_atomic_write(&path, b"editor", &WriteExpectation::Missing),
+                Err(VfsError::DestinationExists(_))
+            ));
+            assert!(
+                fs::symlink_metadata(&path)
+                    .unwrap()
+                    .file_type()
+                    .is_symlink()
+            );
+        }
     }
 
     #[test]
@@ -2543,6 +2979,8 @@ mod lifecycle_tests {
         assert_eq!(fs::read(&source).unwrap(), b"larger than accepted");
     }
 
+    // This test substitutes Unix symlinks.
+    #[cfg(unix)]
     #[test]
     fn resource_rename_rejects_a_parent_moved_outside_scope() {
         let root = tempfile::tempdir().unwrap();
@@ -2569,6 +3007,8 @@ mod lifecycle_tests {
         assert!(!moved.join("new").exists());
     }
 
+    // This test creates Unix symlinks.
+    #[cfg(unix)]
     #[test]
     fn resource_preparation_rejects_source_symlinks() {
         let root = tempfile::tempdir().unwrap();
@@ -2591,17 +3031,50 @@ mod lifecycle_tests {
 
     #[test]
     fn path_handles_support_identity_checks_and_directory_relative_opens() {
-        use std::os::unix::fs::MetadataExt;
+        use crate::files::root_identity::file_identity;
         let root = tempfile::tempdir().unwrap();
         let path = root.path().canonicalize().unwrap();
         fs::write(path.join("file"), b"contents").unwrap();
-        let directory = open_no_symlinks(&path, path_open_flags()).unwrap();
-        let file = open_beneath(directory, Path::new("file"), path_open_flags()).unwrap();
-        let expected = fs::metadata(path.join("file")).unwrap();
-        assert_eq!(file.metadata().unwrap().ino(), expected.ino());
-        assert_eq!(file.metadata().unwrap().dev(), expected.dev());
+        #[cfg(unix)]
+        let file = open_beneath(
+            open_path(&path).unwrap(),
+            Path::new("file"),
+            path_open_flags(),
+        )
+        .unwrap();
+        #[cfg(windows)]
+        let file = open_path(&path.join("file")).unwrap();
+        let expected = open_path(&path.join("file")).unwrap();
+        assert_eq!(
+            file_identity(&file).unwrap(),
+            file_identity(&expected).unwrap()
+        );
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn scoped_reads_reject_windows_junctions() {
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let path = root.path().canonicalize().unwrap();
+        let target = outside.path().canonicalize().unwrap();
+        let link = path.join("junction");
+        fs::write(target.join("secret"), b"outside").unwrap();
+        let status = std::process::Command::new("cmd.exe")
+            .args(["/C", "mklink", "/J"])
+            .arg(&link)
+            .arg(&target)
+            .status()
+            .unwrap();
+        assert!(status.success());
+        assert!(read_scoped_file(&link.join("secret"), &[path], 1024).is_err());
+        assert!(open_read_no_symlinks(&link).is_err());
+        assert_eq!(fs::read(target.join("secret")).unwrap(), b"outside");
+        fs::remove_dir(link).unwrap();
+    }
+
+    // Tests Unix directory-relative descriptors and symlink replacement.
+    #[cfg(unix)]
     #[test]
     fn scoped_descriptors_reject_swapped_ancestors_and_pin_mutation_parents() {
         use rustix::fs::AtFlags;
@@ -2626,6 +3099,8 @@ mod lifecycle_tests {
         assert_eq!(fs::read(outside.path().join("file")).unwrap(), b"outside");
     }
 
+    // FIFO creation is Unix-only.
+    #[cfg(unix)]
     #[test]
     fn explorer_copy_rejects_fifo_sources_and_keeps_the_target_missing() {
         let root = tempfile::tempdir().unwrap();
@@ -2646,6 +3121,8 @@ mod lifecycle_tests {
         assert!(!target.exists());
     }
 
+    // FIFO creation is Unix-only.
+    #[cfg(unix)]
     #[test]
     fn bounded_worker_read_rejects_fifo_and_keeps_servicing_requests() {
         let root = tempfile::tempdir().unwrap();

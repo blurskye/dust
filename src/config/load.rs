@@ -146,13 +146,28 @@ fn bundled_settings() -> Config {
     static SETTINGS: OnceLock<Config> = OnceLock::new();
     SETTINGS
         .get_or_init(|| {
-            toml::from_str::<Config>(BUNDLED_CONFIG).expect("bundled config must remain valid")
+            bundled_settings_value()
+                .try_into::<Config>()
+                .expect("bundled config must remain valid")
         })
         .clone()
 }
 
 fn bundled_settings_value() -> toml::Value {
-    bundled_value().clone()
+    let value = bundled_value().clone();
+    #[cfg(windows)]
+    {
+        let mut value = value;
+        let windows = toml::from_str(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/assets/defaults/windows.toml"
+        )))
+        .expect("bundled Windows defaults");
+        merge_toml(&mut value, windows);
+        value
+    }
+    #[cfg(unix)]
+    value
 }
 
 fn bundled_value() -> &'static toml::Value {
@@ -758,7 +773,8 @@ fn remove_key(value: &mut toml::Value, key: &[String]) -> bool {
 
 /// A setting's bundled default value, by its dotted key.
 pub(super) fn bundled_setting(key: &str) -> Option<toml::Value> {
-    let mut value = bundled_value();
+    let defaults = bundled_settings_value();
+    let mut value = &defaults;
     for segment in crate::config::config_key_segments(key)? {
         value = value.get(&segment)?;
     }

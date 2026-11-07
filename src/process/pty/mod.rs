@@ -343,20 +343,19 @@ impl Child {
     }
     fn kill(&mut self) {
         if !self.reaped {
-            #[cfg(unix)]
             if let Some(group) = self.process.process_id() {
                 crate::process::terminate_process_group(group);
             }
             let _ = self.process.kill();
         }
     }
-    fn terminate(&mut self, master: &dyn portable_pty::MasterPty) {
+    fn terminate(&mut self, _master: &dyn portable_pty::MasterPty) {
         if self.reaped {
             return;
         }
         #[cfg(unix)]
         {
-            if let Some(group) = master.process_group_leader().filter(|group| *group > 0) {
+            if let Some(group) = _master.process_group_leader().filter(|group| *group > 0) {
                 crate::process::terminate_process_group(group as u32);
             }
             if let Some(group) = self.process.process_id() {
@@ -396,6 +395,7 @@ fn open_working_directory(
     path: &std::path::Path,
     root: Option<&crate::files::RootIdentity>,
 ) -> Result<std::fs::File, PtyError> {
+    #[cfg(unix)]
     use rustix::fs::OFlags;
     let fail = |error: String| PtyError::Spawn(error);
     let canonical = path
@@ -413,20 +413,33 @@ fn open_working_directory(
             ));
         }
     }
-    crate::files::open_no_symlinks(
+    #[cfg(unix)]
+    let opened = crate::files::open_no_symlinks(
         &canonical,
         crate::files::path_open_flags() | OFlags::DIRECTORY,
-    )
-    .map_err(|e| fail(format!("PTY working directory is unavailable: {e}")))
+    );
+    #[cfg(windows)]
+    let opened = crate::files::open_path(&canonical);
+    opened.map_err(|e| fail(format!("PTY working directory is unavailable: {e}")))
 }
 
-fn working_directory_path(directory: &std::fs::File) -> std::path::PathBuf {
-    use std::os::fd::AsRawFd;
-    #[cfg(target_os = "macos")]
-    let descriptors = "/dev/fd";
-    #[cfg(not(target_os = "macos"))]
-    let descriptors = "/proc/self/fd";
-    std::path::Path::new(descriptors).join(directory.as_raw_fd().to_string())
+fn working_directory_path(
+    _directory: &std::fs::File,
+    _path: &std::path::Path,
+) -> std::io::Result<std::path::PathBuf> {
+    #[cfg(unix)]
+    {
+        use std::os::fd::AsRawFd;
+        #[cfg(target_os = "macos")]
+        let descriptors = "/dev/fd";
+        #[cfg(not(target_os = "macos"))]
+        let descriptors = "/proc/self/fd";
+        Ok(std::path::Path::new(descriptors).join(_directory.as_raw_fd().to_string()))
+    }
+    #[cfg(windows)]
+    {
+        _path.canonicalize()
+    }
 }
 
 fn run(
@@ -477,7 +490,7 @@ fn run(
     command.args(&request.arguments);
     // portable-pty substitutes HOME for a missing cwd. This descriptor-backed
     // path stays valid through spawn, even if the original name is removed.
-    command.cwd(working_directory_path(&cwd));
+    command.cwd(working_directory_path(&cwd, &request.cwd).map_err(|e| fail(e.to_string()))?);
     for (key, value) in &request.environment {
         command.env(key, value);
     }

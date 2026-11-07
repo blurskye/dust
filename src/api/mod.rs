@@ -243,9 +243,13 @@ mod tests {
         assert!(crate::api::check_compatibility(&path, bytes.len()).is_ok());
         assert!(crate::api::check_compatibility(&path, bytes.len() - 1).is_err());
         assert!(crate::api::check_compatibility(std::path::Path::new("/dev/zero"), 1024).is_err());
-        std::fs::remove_file(&path).unwrap();
-        nix::unistd::mkfifo(&path, nix::sys::stat::Mode::S_IRUSR).unwrap();
-        assert!(crate::api::check_compatibility(&path, 1024).is_err());
+        // FIFO creation is Unix-only; size and regular-file checks above are shared.
+        #[cfg(unix)]
+        {
+            std::fs::remove_file(&path).unwrap();
+            nix::unistd::mkfifo(&path, nix::sys::stat::Mode::S_IRUSR).unwrap();
+            assert!(crate::api::check_compatibility(&path, 1024).is_err());
+        }
     }
 
     #[test]

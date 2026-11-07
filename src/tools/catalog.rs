@@ -212,6 +212,13 @@ pub fn bundled_tool_catalog() -> Vec<ToolDefinition> {
     let mut definitions = toml::from_str::<ToolCatalogFile>(BUNDLED_TOOL_CATALOG)
         .expect("bundled tool catalog must remain valid")
         .tool;
+    for native in platform_tool_catalog(&format!("{}-{}", env::consts::OS, env::consts::ARCH)) {
+        if let Some(definition) = definitions.iter_mut().find(|tool| tool.id == native.id) {
+            *definition = native;
+        } else {
+            definitions.push(native);
+        }
+    }
     let mut ids = definitions
         .iter()
         .map(|definition| definition.id.clone())
@@ -226,23 +233,17 @@ pub fn bundled_tool_catalog() -> Vec<ToolDefinition> {
     definitions
 }
 
-#[must_use]
-pub fn discover_executable(executable: &str) -> Option<PathBuf> {
-    let candidate = Path::new(executable);
-    if candidate.components().count() > 1 {
-        let path = std::path::absolute(candidate).ok()?;
-        return executable_file(&path).then_some(path);
-    }
-    env::split_paths(&env::var_os("PATH")?).find_map(|directory| {
-        let directory = if directory.as_os_str().is_empty() {
-            PathBuf::from(".")
-        } else {
-            directory
-        };
-        let path = std::path::absolute(directory.join(executable)).ok()?;
-        executable_file(&path).then_some(path)
-    })
+fn platform_tool_catalog(platform: &str) -> Vec<ToolDefinition> {
+    toml::from_str::<std::collections::BTreeMap<String, ToolCatalogFile>>(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/assets/defaults/platform-tools.toml"
+    )))
+    .expect("bundled native tool catalog must remain valid")
+    .remove(platform)
+    .map_or_else(Vec::new, |catalog| catalog.tool)
 }
+
+pub use crate::process::discover_executable;
 
 /// The executables on `PATH`, read with one listing per directory. Looking up every catalog
 /// tool in every directory separately costs thousands of `stat` calls at startup.
@@ -281,7 +282,12 @@ impl PathExecutables {
         if executable.contains(std::path::MAIN_SEPARATOR) {
             return discover_executable(executable);
         }
-        let path = self.0.get(OsStr::new(executable))?;
+        let Some(path) = self.0.get(OsStr::new(executable)) else {
+            #[cfg(windows)]
+            return discover_executable(executable);
+            #[cfg(unix)]
+            return None;
+        };
         // A directory of that name shadows nothing: keep searching like the plain lookup.
         if executable_file(path) {
             Some(path.clone())
@@ -296,7 +302,7 @@ pub fn rust_analyzer_is_rustup_proxy(path: &Path) -> bool {
     if fs::canonicalize(path)
         .ok()
         .and_then(|target| target.file_name().map(ToOwned::to_owned))
-        .is_some_and(|name| name == "rustup")
+        .is_some_and(|name| name == "rustup" || name == "rustup.exe")
     {
         return true;
     }
@@ -311,8 +317,15 @@ pub fn rust_analyzer_is_rustup_proxy(path: &Path) -> bool {
         fs::metadata(rustup)
             .is_ok_and(|runtime| proxy.dev() == runtime.dev() && proxy.ino() == runtime.ino())
     }
-    #[cfg(not(unix))]
-    false
+    #[cfg(windows)]
+    {
+        let identity =
+            |path: &Path| fs::File::open(path).and_then(|file| crate::files::file_identity(&file));
+        match (identity(path), identity(&path.with_file_name("rustup.exe"))) {
+            (Ok(proxy), Ok(runtime)) => proxy == runtime,
+            _ => false,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -398,7 +411,8 @@ pub fn nix_lsp_workspace_root() -> PathBuf {
 /// remain catalog/upstream data and are never encoded in the Nix flake.
 #[must_use]
 pub fn nix_lsp_shell(definition: &ToolDefinition) -> Option<&str> {
-    (definition.kind == ToolKind::Lsp
+    (cfg!(unix)
+        && definition.kind == ToolKind::Lsp
         && definition.install.is_some()
         && validate_tool_id(&definition.id).is_ok())
     .then_some(definition.id.as_str())
@@ -740,7 +754,35 @@ pub fn nix_lsp_launch_environment(
     nix_lsp_launch_environment_at(&tool_store_root(), definition)
 }
 
+pub(super) fn installation_platform_error(definition: &ToolDefinition) -> Option<String> {
+    if cfg!(windows)
+        && definition
+            .install
+            .as_ref()
+            .is_some_and(|install| !matches!(install, ToolInstall::Archive { .. }))
+    {
+        return Some(
+            "Windows supports native downloads and PATH tools; install this tool on PATH".into(),
+        );
+    }
+    if let Some(ToolInstall::Archive { url, tree, .. }) = &definition.install
+        && ((url.contains("linux") && !cfg!(target_os = "linux"))
+            || (url.contains("darwin") && !cfg!(target_os = "macos"))
+            || (url.contains("windows") && !cfg!(windows))
+            || (cfg!(windows) && tree.is_some()))
+    {
+        return Some(format!(
+            "no compatible download for {}; install this tool on PATH",
+            env::consts::OS
+        ));
+    }
+    None
+}
+
 fn install_readiness(definition: &ToolDefinition, on_path: &PathExecutables) -> Option<String> {
+    if let Some(error) = installation_platform_error(definition) {
+        return Some(error);
+    }
     match definition.install.as_ref()? {
         ToolInstall::NpmPackage { .. }
             if on_path.find("bun").is_none()
@@ -795,6 +837,53 @@ pub fn inspect_tools_at(root: &Path) -> Vec<ToolEntry> {
 #[must_use]
 pub fn inspect_tools() -> Vec<ToolEntry> {
     inspect_tools_at(&tool_store_root())
+}
+
+#[cfg(test)]
+#[test]
+fn native_tool_downloads_are_pinned_and_use_native_executable_names() {
+    for platform in ["macos-aarch64", "macos-x86_64", "windows-x86_64"] {
+        let definitions = platform_tool_catalog(platform);
+        assert!(!definitions.is_empty(), "{platform}");
+        for definition in definitions {
+            let Some(ToolInstall::Archive {
+                url,
+                sha256,
+                executable_path,
+                ..
+            }) = definition.install
+            else {
+                panic!("native tool must use a download");
+            };
+            assert!(url.starts_with("https://"));
+            assert!(!url.contains("linux"));
+            assert!(crate::tools::package_lock::valid_digest(&sha256));
+            assert_eq!(executable_path, definition.executable);
+            assert_eq!(
+                definition.executable.ends_with(".exe"),
+                platform.starts_with("windows")
+            );
+            assert!(
+                definition.pins.is_empty(),
+                "Linux pins must not leak into native tools"
+            );
+        }
+    }
+    if cfg!(windows) {
+        for definition in bundled_tool_catalog() {
+            if definition
+                .install
+                .as_ref()
+                .is_some_and(|source| !matches!(source, ToolInstall::Archive { .. }))
+            {
+                assert!(
+                    installation_platform_error(&definition)
+                        .unwrap()
+                        .contains("PATH")
+                );
+            }
+        }
+    }
 }
 
 #[cfg(all(test, unix))]

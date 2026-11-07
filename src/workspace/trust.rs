@@ -321,8 +321,7 @@ fn update_trust_database(
         .truncate(false)
         .open(path.with_extension("lock"))
         .map_err(io_error)?;
-    let _lock = nix::fcntl::Flock::lock(file, nix::fcntl::FlockArg::LockExclusive)
-        .map_err(|(_, error)| io_error(io::Error::from_raw_os_error(error as i32)))?;
+    let _lock = crate::files::lock_exclusive(file, false).map_err(|(_, error)| io_error(error))?;
     let mut current = load_trust_database(path)?;
     for (entries, before, after) in [
         (

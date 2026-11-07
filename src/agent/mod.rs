@@ -236,11 +236,7 @@ impl AgentProcess {
 
 impl Drop for AgentProcess {
     fn drop(&mut self) {
-        #[cfg(unix)]
-        let _ = nix::sys::signal::killpg(
-            nix::unistd::Pid::from_raw(self.child.id() as i32),
-            nix::sys::signal::Signal::SIGKILL,
-        );
+        crate::process::terminate_process_group(self.child.id());
         let _ = self.child.kill();
         let _ = self.child.wait();
     }

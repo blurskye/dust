@@ -984,11 +984,18 @@ mod tests {
 
     #[test]
     fn non_utf8_paths_round_trip_in_every_persisted_location() {
-        use std::os::unix::ffi::OsStringExt;
+        #[cfg(unix)]
+        let name = {
+            use std::os::unix::ffi::OsStringExt;
+            std::ffi::OsString::from_vec(b"file-\xff".to_vec())
+        };
+        #[cfg(windows)]
+        let name = {
+            use std::os::windows::ffi::OsStringExt;
+            std::ffi::OsString::from_wide(&[b'f' as u16, 0xd800])
+        };
         let directory = tempdir().unwrap();
-        let path = directory
-            .path()
-            .join(std::ffi::OsString::from_vec(b"file-\xff".to_vec()));
+        let path = directory.path().join(name);
         let location = PersistedLocation {
             path: path.clone(),
             byte: 1,
@@ -1048,6 +1055,8 @@ mod tests {
         assert_eq!(session.tabs[0].focused_path, Some(path));
     }
 
+    // This fixture uses POSIX file-size limits and SIGXFSZ to force a write failure.
+    #[cfg(unix)]
     #[test]
     fn failed_writes_remove_temporary_files_and_preserve_saved_state() {
         const CHILD: &str = "DUST_TEST_PERSISTENCE_FILE_LIMIT";

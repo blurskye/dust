@@ -71,7 +71,7 @@ impl PackageStore {
             maximum_object_bytes,
         })
     }
-    fn transaction(&self) -> Result<impl Drop, PackageError> {
+    fn transaction(&self) -> Result<crate::files::FileLock, PackageError> {
         let file = fs::OpenOptions::new()
             .create(true)
             .truncate(false)
@@ -79,15 +79,7 @@ impl PackageStore {
             .write(true)
             .open(self.root.join("dust-packages.lock"))
             .map_err(PackageError::Io)?;
-        #[cfg(unix)]
-        {
-            nix::fcntl::Flock::lock(file, nix::fcntl::FlockArg::LockExclusive)
-                .map_err(|(_, error)| PackageError::Io(error.into()))
-        }
-        #[cfg(not(unix))]
-        {
-            Ok(file)
-        }
+        crate::files::lock_exclusive(file, false).map_err(|(_, error)| PackageError::Io(error))
     }
     fn lock_path(&self) -> PathBuf {
         self.root.join("dust-packages.lock.json")
@@ -390,14 +382,14 @@ impl PackageStore {
                 && !retained.contains(&name)
                 && removed < maximum_removals
             {
-                #[cfg(unix)]
                 let _object_lock = {
                     let file = fs::File::open(entry.path()).map_err(PackageError::Io)?;
-                    match nix::fcntl::Flock::lock(file, nix::fcntl::FlockArg::LockExclusiveNonblock)
-                    {
+                    match crate::files::lock_exclusive(file, true) {
                         Ok(lock) => lock,
-                        Err((_, nix::errno::Errno::EAGAIN)) => continue,
-                        Err((_, error)) => return Err(PackageError::Io(error.into())),
+                        Err((_, error)) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                            continue;
+                        }
+                        Err((_, error)) => return Err(PackageError::Io(error)),
                     }
                 };
                 fs::remove_file(entry.path()).map_err(PackageError::Io)?;
@@ -489,6 +481,10 @@ fn protect_object(object: &Path) -> Result<Arc<fs::File>, PackageError> {
     #[cfg(unix)]
     rustix::fs::flock(&file, rustix::fs::FlockOperation::LockShared)
         .map_err(|error| PackageError::Io(error.into()))?;
+    #[cfg(windows)]
+    {
+        file.lock_shared().map_err(PackageError::Io)?;
+    }
     Ok(Arc::new(file))
 }
 #[derive(Clone, Debug)]

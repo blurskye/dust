@@ -117,7 +117,7 @@ fn language_mapping_preserves_case_sensitive_cpp_extensions() {
 }
 
 #[test]
-fn file_uris_accept_only_local_authorities() {
+fn file_uris_validate_authorities() {
     for uri in [
         "file:///home/user/a%20b.rs",
         "file://localhost/home/user/a%20b.rs",
@@ -129,6 +129,7 @@ fn file_uris_accept_only_local_authorities() {
         );
     }
     for uri in [
+        #[cfg(unix)]
         "file://remote/home/user/main.rs",
         "file://localhost:80/home/user/main.rs",
         "file://user@localhost/home/user/main.rs",
@@ -136,6 +137,27 @@ fn file_uris_accept_only_local_authorities() {
         "file:///home/user/bad%GG.rs",
     ] {
         assert_eq!(path_from_file_uri(uri), None, "{uri}");
+    }
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_file_uris_match_canonical_buffer_paths() {
+    for path in [r"C:\src\a b.rs", r"\\?\C:\src\a b.rs"] {
+        let uri = file_uri(Path::new(path));
+        assert_eq!(uri, "file:///C:/src/a%20b.rs");
+        assert_eq!(
+            path_from_file_uri(&uri).unwrap(),
+            Path::new(r"\\?\C:\src\a b.rs")
+        );
+    }
+    for path in [r"\\server\share\a b.rs", r"\\?\UNC\server\share\a b.rs"] {
+        let uri = file_uri(Path::new(path));
+        assert_eq!(uri, "file://server/share/a%20b.rs");
+        assert_eq!(
+            path_from_file_uri(&uri).unwrap(),
+            Path::new(r"\\?\UNC\server\share\a b.rs")
+        );
     }
 }
 
@@ -306,12 +328,22 @@ fn diagnostic_disk_snapshots_reject_nonregular_and_oversized_targets() {
     use crate::language::lsp::origins::EventSender;
     use crate::language::lsp::server_message::ServerMessageContext;
     use crate::language::lsp::server_message::handle_server_message;
-    use nix::sys::stat::Mode;
-    use nix::unistd::mkfifo;
     use std::sync::Arc;
     use std::sync::mpsc;
     let root = tempfile::tempdir().unwrap();
-    mkfifo(&root.path().join("fifo"), Mode::S_IRUSR | Mode::S_IWUSR).unwrap();
+    #[cfg(unix)]
+    nix::unistd::mkfifo(
+        &root.path().join("fifo"),
+        nix::sys::stat::Mode::S_IRUSR | nix::sys::stat::Mode::S_IWUSR,
+    )
+    .unwrap();
+    let names = [
+        #[cfg(unix)]
+        "fifo",
+        "directory",
+        "large",
+        "regular",
+    ];
     std::fs::create_dir(root.path().join("directory")).unwrap();
     std::fs::write(root.path().join("large"), vec![b'x'; 4 * 1024 * 1024 + 1]).unwrap();
     std::fs::write(root.path().join("regular"), "source").unwrap();
@@ -331,9 +363,9 @@ fn diagnostic_disk_snapshots_reject_nonregular_and_oversized_targets() {
             disk: None,
         },
     };
-    let worker_root = root.path().to_path_buf();
+    let worker_root = root.path().canonicalize().unwrap();
     let worker = std::thread::spawn(move || {
-        for name in ["fifo", "directory", "large", "regular"] {
+        for name in names {
             let uri = file_uri(&worker_root.join(name));
             handle_server_message(
                 ServerMessageContext {
@@ -355,7 +387,7 @@ fn diagnostic_disk_snapshots_reject_nonregular_and_oversized_targets() {
             );
         }
     });
-    for name in ["fifo", "directory", "large", "regular"] {
+    for name in names {
         let packet = receiver
             .recv_timeout(Duration::from_secs(3))
             .expect("diagnostic snapshot read blocked");

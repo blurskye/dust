@@ -240,7 +240,12 @@ impl Config {
                 .contains_key(&self.terminals.default_profile)
             || self.terminals.profiles.iter().any(|(name, profile)| {
                 name.is_empty()
-                    || !profile.program.is_absolute()
+                    || (!profile.program.is_absolute()
+                        && !(profile.program.components().count() == 1
+                            && matches!(
+                                profile.program.components().next(),
+                                Some(std::path::Component::Normal(_))
+                            )))
                     || profile.arguments.len() > 4096
                     || !(1..=1000).contains(&profile.columns)
                     || !(1..=1000).contains(&profile.rows)

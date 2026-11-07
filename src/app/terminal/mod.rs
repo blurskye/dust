@@ -400,11 +400,8 @@ impl Terminals {
             },
         );
         let request = ExecutionPreflightRequest {
-            executable: if config.program.is_absolute() {
-                config.program.clone()
-            } else {
-                cwd.join(&config.program)
-            },
+            executable: crate::process::terminal_executable(&config.program, &cwd)
+                .map_err(|error| error.to_string())?,
             cwd,
             roots: workspace
                 .roots()

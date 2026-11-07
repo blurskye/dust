@@ -163,6 +163,8 @@ fn a_file_not_saved_yet_still_finds_its_project_root() {
     assert_eq!(resolution.project_root, Some(workspace.clone()));
 }
 
+// Creates Unix FIFOs and symlinks.
+#[cfg(unix)]
 #[test]
 fn marker_reads_reject_fifos_symlinks_and_oversized_files() {
     use crate::files::project_root::PROJECT_ROOT_MANIFEST_BYTE_LIMIT;
@@ -463,6 +465,8 @@ fn atomic_write_replaces_and_preserves_text_format_bytes() {
     assert_eq!(names, vec!["document.txt"]);
 }
 
+// Checks Unix ownership and permission bits.
+#[cfg(unix)]
 #[test]
 fn atomic_write_preserves_destination_ownership_and_permissions() {
     use std::os::unix::fs::MetadataExt;
@@ -557,6 +561,8 @@ fn recovery_journals_are_versioned_atomic_and_corruption_tolerant() {
     assert_eq!(fs::read(source).expect("source"), b"source stays intact");
 }
 
+// Unix paths can contain arbitrary non-UTF-8 bytes.
+#[cfg(unix)]
 #[test]
 fn recovery_paths_round_trip_native_bytes_and_read_legacy_journals() {
     use std::os::unix::ffi::OsStringExt;
@@ -610,6 +616,22 @@ fn recovery_paths_round_trip_native_bytes_and_read_legacy_journals() {
     assert!(!crate::files::recovery_size_allowed(
         RECOVERY_PAYLOAD_BYTE_LIMIT - 8191
     ));
+}
+
+#[cfg(windows)]
+#[test]
+fn recovery_paths_round_trip_windows_wide_names() {
+    use std::os::windows::ffi::OsStringExt;
+    let path = PathBuf::from(std::ffi::OsString::from_wide(&[
+        b'C' as u16,
+        b':' as u16,
+        b'\\' as u16,
+        0xd800,
+    ]));
+    let record = RecoveryRecord::new(Some(&path), 1, "draft".into());
+    assert_eq!(record.path(), Some(path));
+    let encoded = toml::to_string(&record).unwrap();
+    assert_eq!(toml::from_str::<RecoveryRecord>(&encoded).unwrap(), record);
 }
 
 #[test]
@@ -1020,6 +1042,8 @@ fn repository_with_worktree() -> tempfile::TempDir {
     root
 }
 
+// Creates Unix FIFOs and symlinks.
+#[cfg(unix)]
 #[test]
 fn linked_worktree_metadata_rejects_nonregular_and_oversized_files() {
     use std::os::unix::fs::symlink;
@@ -1132,6 +1156,8 @@ fn a_root_shows_its_worktrees_and_a_worktree_shows_only_itself() {
     );
 }
 
+// Creates Unix FIFOs and symlinks.
+#[cfg(unix)]
 #[test]
 fn linked_worktree_metadata_accepts_valid_paths_and_rejects_nonregular_and_oversized_files() {
     use nix::sys::stat::Mode;
@@ -1358,6 +1384,8 @@ fn scoped_directory_listing_does_not_traverse_symlink_escape_and_handles_non_utf
     ));
 }
 
+// Unix paths can contain arbitrary non-UTF-8 bytes.
+#[cfg(unix)]
 #[test]
 fn workspace_files_and_search_keep_distinct_non_utf8_path_identities() {
     if !isolated_git_test() {
@@ -1904,6 +1932,8 @@ fn directory_completion_filters_names_before_capping_worker_results() {
     }
 }
 
+// Checks Unix permission bits.
+#[cfg(unix)]
 #[test]
 fn explorer_copies_preserve_private_and_executable_permissions() {
     use std::os::unix::fs::MetadataExt;
@@ -2072,6 +2102,8 @@ fn workspace_file_delivery_waits_for_capacity_and_can_be_cancelled() {
     assert!(receiver.try_recv().is_err());
 }
 
+// Creates Unix symlinks.
+#[cfg(unix)]
 #[test]
 fn workspace_files_reject_worktrees_behind_a_symlinked_ancestor() {
     let root = repository_with_worktree();

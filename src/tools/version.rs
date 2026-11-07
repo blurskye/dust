@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 #[cfg(unix)]
 use std::process::Command;
+#[cfg(unix)]
 use std::process::Stdio;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -281,10 +282,92 @@ pub(super) fn probe_tool_version(
     result
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
 pub(super) fn probe_tool_version(
-    _request: ToolVersionRequest,
-    _cancelled: &AtomicBool,
+    request: ToolVersionRequest,
+    cancelled: &AtomicBool,
 ) -> Result<String, String> {
-    Err("bounded tool-version probes are not qualified on this platform".into())
+    use crate::process::{JobEvent, JobPolicy, JobRequest, JobStream, JobSupervisor};
+    if cancelled.load(Ordering::Acquire) || request.cancelled.load(Ordering::Acquire) {
+        return Err("version probe cancelled".into());
+    }
+    let timeout = request.timeout.min(Duration::from_secs(30));
+    let mut jobs = JobSupervisor::new(16);
+    let id = jobs
+        .start(JobRequest {
+            program: request.executable,
+            argv0: None,
+            arguments: request.arguments.into_iter().map(Into::into).collect(),
+            cwd: request
+                .current_directory
+                .unwrap_or(std::env::current_dir().map_err(|e| e.to_string())?),
+            environment: request.environment,
+            root_revision: 0,
+            stdin: None,
+            policy: JobPolicy {
+                maximum_output_bytes: MAXIMUM_TOOL_VERSION_BYTES as usize,
+                maximum_line_bytes: MAXIMUM_TOOL_VERSION_BYTES as usize,
+                maximum_stdin_bytes: 0,
+                timeout,
+            },
+        })
+        .map_err(|e| e.to_string())?;
+    let deadline = Instant::now() + timeout;
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+    loop {
+        if cancelled.load(Ordering::Acquire) || request.cancelled.load(Ordering::Acquire) {
+            let _ = jobs.cancel(id);
+            return Err("version probe cancelled".into());
+        }
+        for event in jobs.poll() {
+            match event {
+                JobEvent::Output {
+                    stream,
+                    bytes,
+                    truncated,
+                    ..
+                } => {
+                    if truncated {
+                        return Err("version probe output exceeded its limit".into());
+                    }
+                    match stream {
+                        JobStream::Stdout => stdout.extend(bytes),
+                        JobStream::Stderr => stderr.extend(bytes),
+                    }
+                }
+                JobEvent::Exited {
+                    code, timed_out, ..
+                } => {
+                    if timed_out {
+                        return Err("version probe timed out".into());
+                    }
+                    let bytes = if stdout.is_empty() { &stderr } else { &stdout };
+                    let version = String::from_utf8_lossy(bytes)
+                        .split_whitespace()
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    if code != Some(0) {
+                        return Err(format!("version probe exited with {code:?}: {version}"));
+                    }
+                    if version.is_empty() {
+                        return Err("version probe produced no output".into());
+                    }
+                    return Ok(version
+                        .strip_prefix("Version: ")
+                        .unwrap_or(&version)
+                        .chars()
+                        .take(MAXIMUM_TOOL_VERSION_CHARS)
+                        .collect());
+                }
+                JobEvent::Failed { message, .. } => return Err(message),
+                JobEvent::Started { .. } => {}
+            }
+        }
+        if Instant::now() >= deadline {
+            let _ = jobs.cancel(id);
+            return Err("version probe timed out".into());
+        }
+        thread::sleep(Duration::from_millis(5));
+    }
 }

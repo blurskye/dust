@@ -736,14 +736,18 @@ fn plugin_manifest_reads_require_regular_bounded_files() {
         .unwrap_err();
         assert!(expected(&error), "{error}");
     };
-    nix::unistd::mkfifo(&path, nix::sys::stat::Mode::S_IRUSR).unwrap();
-    check(
-        |error| matches!(error, PluginError::Io(error) if error.kind() == std::io::ErrorKind::InvalidInput),
-    );
-    fs::remove_file(&path).unwrap();
-    std::os::unix::fs::symlink("/dev/zero", &path).unwrap();
-    check(|error| matches!(error, PluginError::OutsideStore));
-    fs::remove_file(&path).unwrap();
+    // FIFO and device-symlink cases are Unix-specific; bounded-file checks below are shared.
+    #[cfg(unix)]
+    {
+        nix::unistd::mkfifo(&path, nix::sys::stat::Mode::S_IRUSR).unwrap();
+        check(
+            |error| matches!(error, PluginError::Io(error) if error.kind() == std::io::ErrorKind::InvalidInput),
+        );
+        fs::remove_file(&path).unwrap();
+        std::os::unix::fs::symlink("/dev/zero", &path).unwrap();
+        check(|error| matches!(error, PluginError::OutsideStore));
+        fs::remove_file(&path).unwrap();
+    }
 
     let mut source = toml::to_string(&manifest()).unwrap();
     fs::write(&path, &source).unwrap();
@@ -2182,6 +2186,8 @@ fn component_ui_queue_reserves_result_slots_until_guest_drain() {
     assert!(host.queue_ui_request(request()).is_ok());
 }
 
+// Creates an unprivileged Unix symlink.
+#[cfg(unix)]
 #[test]
 fn manager_accepts_a_component_inside_a_symlinked_store() {
     let root = tempfile::tempdir().unwrap();

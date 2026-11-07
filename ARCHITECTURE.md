@@ -195,5 +195,7 @@ built from its source and matching production WIT, then checked in so host tests
 need no guest compiler. `scripts/ui-shot` captures the real terminal for visual
 checks. Build and test commands are in [CONTRIBUTING.md](CONTRIBUTING.md).
 
-`packaging/` and `.github/workflows/release.yml` build Linux distribution artifacts.
-The [release guide](docs/release-linux.md) describes versions, packages and signatures.
+`packaging/` and `.github/workflows/release.yml` build Linux distribution packages
+and native macOS archives. The [Linux release guide](docs/release-linux.md)
+describes packages and checksum signatures; the [macOS guide](docs/user-guide-macos-windows.md)
+covers unsigned native archives, paths and shells.

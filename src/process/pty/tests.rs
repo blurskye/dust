@@ -7,7 +7,7 @@ use std::time::Instant;
 
 fn request(root: &Path, script: &str) -> PtyRequest {
     PtyRequest {
-        program: "/bin/sh".into(),
+        program: crate::process::discover_executable("sh").expect("test shell on PATH"),
         argv0: None,
         arguments: vec!["-c".into(), script.into()],
         cwd: root.into(),

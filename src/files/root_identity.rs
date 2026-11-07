@@ -29,17 +29,30 @@ impl RootIdentity {
         if !metadata.is_dir() {
             return Err(VfsError::RootNotDirectory(canonical_path));
         }
-        #[cfg(unix)]
-        let filesystem_identity = {
-            use std::os::unix::fs::MetadataExt;
-            Some((metadata.dev(), metadata.ino()))
-        };
-        #[cfg(not(unix))]
-        let filesystem_identity = None;
+        let file = crate::files::open_path(&canonical_path).map_err(|source| VfsError::RootIo {
+            operation: "open workspace identity",
+            path: canonical_path.clone(),
+            source,
+        })?;
+        let filesystem_identity =
+            Some(file_identity(&file).map_err(|source| VfsError::RootIo {
+                operation: "inspect workspace identity",
+                path: canonical_path.clone(),
+                source,
+            })?);
         Ok(Self {
             canonical_path,
             filesystem_identity,
         })
+    }
+}
+
+pub(crate) fn file_identity(file: &fs::File) -> std::io::Result<(u64, u64)> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        let metadata = file.metadata()?;
+        Ok((metadata.dev(), metadata.ino()))
     }
 }
 

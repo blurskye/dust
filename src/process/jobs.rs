@@ -861,10 +861,7 @@ fn job_exit_status(child: &mut Child) -> io::Result<Option<Option<i32>>> {
 }
 
 fn terminate_tree(child: &mut Child, reaped: bool) {
-    #[cfg(unix)]
-    {
-        crate::process::terminate_process_group(child.id());
-    }
+    crate::process::terminate_process_group(child.id());
     if !reaped {
         let _ = child.kill();
     }

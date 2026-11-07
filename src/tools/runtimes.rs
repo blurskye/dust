@@ -240,7 +240,6 @@ pub(super) fn run_managed(
         }
     };
     // Even a successful installer may leave helpers holding its output pipe open.
-    #[cfg(unix)]
     crate::process::terminate_process_group(child.id());
     let _ = child.kill();
     let _ = child.wait();
@@ -317,6 +316,9 @@ pub(super) fn install_javascript_package(
         .unwrap_or_else(|| bun.clone());
     #[cfg(unix)]
     std::os::unix::fs::symlink(&node, bin.join("node"))
+        .map_err(|error| format!("cannot provide private JavaScript runtime: {error}"))?;
+    #[cfg(windows)]
+    fs::copy(&node, bin.join("node.exe"))
         .map_err(|error| format!("cannot provide private JavaScript runtime: {error}"))?;
     let arguments = std::iter::once("install".into())
         .chain(std::iter::once("--global".into()))
@@ -522,7 +524,6 @@ pub(super) fn install_path_rustup_component(
             Err(error) => break Err(format!("failed to wait for rustup: {error}")),
         }
     };
-    #[cfg(unix)]
     crate::process::terminate_process_group(child.id());
     let _ = child.kill();
     let _ = child.wait();
@@ -674,7 +675,7 @@ pub(super) fn probe_downloaded_tool(
     .map_err(|error| format!("downloaded artifact is not runnable on this Linux host: {error}"))
 }
 
-fn lock_managed_tool(root: &Path, id: &str) -> Result<nix::fcntl::Flock<fs::File>, String> {
+fn lock_managed_tool(root: &Path, id: &str) -> Result<crate::files::FileLock, String> {
     validate_tool_id(id)?;
     ensure_private_directory(root)?;
     let file = fs::OpenOptions::new()
@@ -683,11 +684,9 @@ fn lock_managed_tool(root: &Path, id: &str) -> Result<nix::fcntl::Flock<fs::File
         .truncate(false)
         .open(root.join(format!(".install-{id}.lock")))
         .map_err(|error| format!("cannot open tool installation lock: {error}"))?;
-    nix::fcntl::Flock::lock(file, nix::fcntl::FlockArg::LockExclusiveNonblock).map_err(
-        |(_, error)| {
-            format!("cannot lock tool {id} (another installation may be running): {error}")
-        },
-    )
+    crate::files::lock_exclusive(file, true).map_err(|(_, error)| {
+        format!("cannot lock tool {id} (another installation may be running): {error}")
+    })
 }
 
 pub(super) fn uninstall_managed_tool(

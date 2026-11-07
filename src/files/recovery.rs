@@ -1,10 +1,13 @@
 //! Recovery journals and bounded recovery reads.
 
+#[cfg(unix)]
 use std::ffi::OsString;
 use std::fs;
 use std::io;
 use std::io::Read;
+#[cfg(unix)]
 use std::os::unix::ffi::OsStrExt;
+#[cfg(unix)]
 use std::os::unix::ffi::OsStringExt;
 use std::path::Path;
 use std::path::PathBuf;
@@ -21,7 +24,10 @@ use crate::files::vfs::atomic_write;
 
 use crate::files::vfs::lock_file;
 
+#[cfg(unix)]
 pub const RECOVERY_VERSION: u32 = 2;
+#[cfg(windows)]
+pub const RECOVERY_VERSION: u32 = 3;
 pub const DOCUMENT_BYTE_LIMIT: u64 = 256 * 1024 * 1024;
 pub(super) const RECOVERY_JOURNAL_BYTE_LIMIT: u64 = 64 * 1024 * 1024;
 pub(super) const RECOVERY_DIRECTORY_ENTRY_LIMIT: usize = 10_000;
@@ -96,6 +102,10 @@ impl RecoveryRecord {
     pub fn new(original_path: Option<&Path>, revision: u64, content: String) -> Self {
         Self {
             version: RECOVERY_VERSION,
+            #[cfg(windows)]
+            original_path: original_path
+                .map(|path| crate::files::path_encoding::encode(path).expect("path encoding")),
+            #[cfg(unix)]
             original_path: original_path.map(|path| {
                 path.as_os_str()
                     .as_bytes()
@@ -115,7 +125,8 @@ impl RecoveryRecord {
             // Old display paths with replacement characters are ambiguous. Recover
             // their text into a scratch buffer instead of risking a different file.
             1 if !path.contains('\u{fffd}') => Some(PathBuf::from(path)),
-            RECOVERY_VERSION if path.len() % 2 == 0 => {
+            3 => crate::files::path_encoding::decode(path).ok(),
+            2 if path.len() % 2 == 0 => {
                 let bytes = path
                     .as_bytes()
                     .chunks_exact(2)
@@ -125,7 +136,14 @@ impl RecoveryRecord {
                         Some((high * 16 + low) as u8)
                     })
                     .collect::<Option<Vec<_>>>()?;
-                Some(PathBuf::from(OsString::from_vec(bytes)))
+                #[cfg(unix)]
+                {
+                    Some(PathBuf::from(OsString::from_vec(bytes)))
+                }
+                #[cfg(windows)]
+                {
+                    String::from_utf8(bytes).ok().map(PathBuf::from)
+                }
             }
             _ => None,
         }

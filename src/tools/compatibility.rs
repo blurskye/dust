@@ -257,6 +257,12 @@ pub(super) fn patch_nix_compatibility_tree(
 }
 
 pub(super) fn runtime_artifact(name: &str) -> Result<BootstrapArtifact, String> {
+    if !cfg!(target_os = "linux") {
+        return Err(format!(
+            "Dust has no managed {name} download for {}; install it on PATH",
+            std::env::consts::OS
+        ));
+    }
     match (name, std::env::consts::ARCH) {
         ("uv", "x86_64") => Ok(BootstrapArtifact {
             url: "https://github.com/astral-sh/uv/releases/download/0.12.5/uv-x86_64-unknown-linux-musl.tar.gz",

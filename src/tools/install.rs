@@ -56,6 +56,9 @@ pub(super) fn install_tool(
     compatibility: Option<&NixCompatibilityRuntime>,
 ) -> Result<Option<PathBuf>, String> {
     validate_tool_id(&definition.id)?;
+    if let Some(error) = crate::tools::catalog::installation_platform_error(definition) {
+        return Err(error);
+    }
     ensure_private_directory(root)?;
     let install = definition
         .install
@@ -100,8 +103,13 @@ pub(super) fn install_tool(
                 if let Some(tree) = tree {
                     extract_zip_tree(&bytes, tree, &staging)?;
                     // The tool finds its libraries from its real path, which a link keeps.
+                    #[cfg(unix)]
                     std::os::unix::fs::symlink(Path::new("..").join(executable_path), &output)
                         .map_err(|error| format!("cannot link installed tool: {error}"))?;
+                    #[cfg(windows)]
+                    return Err(
+                        "this archive needs a Unix symlink layout; install the tool on PATH".into(),
+                    );
                 } else {
                     extract_one(&bytes, *archive, executable_path, &output)?;
                 }

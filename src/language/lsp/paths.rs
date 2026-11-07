@@ -64,16 +64,35 @@ pub fn file_uri(path: &Path) -> String {
         use std::os::unix::ffi::OsStrExt;
         path.as_os_str().as_bytes()
     };
-    #[cfg(not(unix))]
-    let path_text = path.to_string_lossy();
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    let path_text = {
+        let text = path.to_string_lossy().replace('\\', "/");
+        let text = if let Some(unc) = text.strip_prefix("//?/UNC/") {
+            format!("//{unc}")
+        } else {
+            text.strip_prefix("//?/").unwrap_or(&text).to_owned()
+        };
+        if text.as_bytes().get(1) == Some(&b':') {
+            format!("/{text}")
+        } else {
+            text
+        }
+    };
+    #[cfg(windows)]
     let bytes = path_text.as_bytes();
     for &byte in bytes {
-        if byte.is_ascii_alphanumeric() || matches!(byte, b'/' | b'-' | b'_' | b'.' | b'~' | b':') {
+        if byte.is_ascii_alphanumeric()
+            || matches!(byte, b'/' | b'-' | b'_' | b'.' | b'~')
+            || (cfg!(windows) && byte == b':')
+        {
             encoded.push(char::from(byte));
         } else {
             encoded.push_str(&format!("%{byte:02X}"));
         }
+    }
+    #[cfg(windows)]
+    if encoded.starts_with("//") {
+        return format!("file:{encoded}");
     }
     format!("file://{encoded}")
 }
@@ -82,6 +101,13 @@ pub fn file_uri(path: &Path) -> String {
 pub fn path_from_file_uri(uri: &str) -> Option<PathBuf> {
     let source = uri.strip_prefix("file://")?;
     let (authority, source) = source.split_at(source.find('/')?);
+    if authority
+        .chars()
+        .any(|ch| ch.is_whitespace() || ch.is_control() || matches!(ch, ':' | '@' | '\\' | '%'))
+    {
+        return None;
+    }
+    #[cfg(unix)]
     if !authority.is_empty() && !authority.eq_ignore_ascii_case("localhost") {
         return None;
     }
@@ -107,8 +133,22 @@ pub fn path_from_file_uri(uri: &str) -> Option<PathBuf> {
         use std::os::unix::ffi::OsStringExt;
         Some(PathBuf::from(std::ffi::OsString::from_vec(decoded)))
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
     {
-        String::from_utf8(decoded).ok().map(PathBuf::from)
+        let text = String::from_utf8(decoded).ok()?;
+        // Open buffers use canonical Windows paths, including the verbatim prefix.
+        if !authority.is_empty() && !authority.eq_ignore_ascii_case("localhost") {
+            return Some(PathBuf::from(format!(
+                r"\\?\UNC\{authority}{}",
+                text.replace('/', r"\")
+            )));
+        }
+        if text.as_bytes().get(2) == Some(&b':') {
+            return Some(PathBuf::from(format!(
+                r"\\?\{}",
+                text.strip_prefix('/')?.replace('/', r"\")
+            )));
+        }
+        Some(PathBuf::from(text))
     }
 }

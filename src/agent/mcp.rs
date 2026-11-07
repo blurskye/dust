@@ -17,7 +17,7 @@ use std::io::Write;
 
 use std::net::Shutdown;
 
-use std::os::unix::net::UnixStream;
+use crate::remote::UnixStream;
 
 use std::path::Path;
 

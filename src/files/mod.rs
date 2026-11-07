@@ -24,6 +24,7 @@ pub(crate) use explorer_intent::PreparedExplorerMutation;
 mod vfs;
 pub use vfs::CheckedResourceIntent;
 pub use vfs::ExplorerMutation;
+pub(crate) use vfs::FileLock;
 pub use vfs::RequestId;
 pub use vfs::ResourceIntentKind;
 pub(crate) use vfs::VfsReply;
@@ -34,9 +35,16 @@ pub use vfs::WriteExpectation;
 pub use vfs::atomic_write;
 pub(crate) use vfs::atomic_write_with_executable;
 pub use vfs::checked_atomic_write;
+pub(crate) use vfs::is_symlink_error;
+pub(crate) use vfs::lock_exclusive;
 pub(crate) use vfs::lock_file;
+pub(crate) use vfs::open_lock_file;
+#[cfg(unix)]
 pub(crate) use vfs::open_no_symlinks;
+pub(crate) use vfs::open_path;
+pub(crate) use vfs::open_read_no_symlinks;
 pub(crate) use vfs::open_regular_file;
+#[cfg(unix)]
 pub(crate) use vfs::path_open_flags;
 pub use vfs::read_file;
 pub(crate) use vfs::read_file_bounded;
@@ -91,4 +99,6 @@ pub(crate) use vfs::roots_current;
 
 mod root_identity;
 pub use root_identity::RootIdentity;
+#[cfg(windows)]
+pub(crate) use root_identity::file_identity;
 pub(crate) mod path_encoding;

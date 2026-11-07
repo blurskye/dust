@@ -2,9 +2,6 @@
 
 use std::cell::RefCell;
 use std::collections::VecDeque;
-use std::fs::File;
-use std::fs::OpenOptions;
-use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -90,16 +87,9 @@ pub(super) enum InstallerRequest {
 fn lock_tool_store(
     root: &Path,
     cancellations: &Receiver<()>,
-) -> Result<nix::fcntl::Flock<File>, String> {
+) -> Result<crate::files::FileLock, String> {
     ensure_private_directory(root)?;
-    let mut file = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .mode(0o600)
-        .custom_flags(nix::libc::O_NOFOLLOW)
-        .open(root.join(".installer.lock"))
+    let mut file = crate::files::open_lock_file(&root.join(".installer.lock"))
         .map_err(|error| format!("cannot open tool store lock: {error}"))?;
     if !file
         .metadata()
@@ -109,9 +99,11 @@ fn lock_tool_store(
         return Err("tool store lock must be a regular file".into());
     }
     loop {
-        match nix::fcntl::Flock::lock(file, nix::fcntl::FlockArg::LockExclusiveNonblock) {
+        match crate::files::lock_exclusive(file, true) {
             Ok(lock) => return Ok(lock),
-            Err((returned, nix::errno::Errno::EWOULDBLOCK)) => file = returned,
+            Err((returned, error)) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                file = returned
+            }
             Err((_, error)) => return Err(format!("cannot lock tool store: {error}")),
         }
         match cancellations.recv_timeout(Duration::from_millis(50)) {
@@ -445,9 +437,8 @@ mod tests {
             );
             thread::yield_now();
         }
-        let file = File::open(directory.path().join(".installer.lock")).unwrap();
-        let _lock =
-            nix::fcntl::Flock::lock(file, nix::fcntl::FlockArg::LockExclusiveNonblock).unwrap();
+        let file = std::fs::File::open(directory.path().join(".installer.lock")).unwrap();
+        let _lock = crate::files::lock_exclusive(file, true).unwrap();
     }
 
     #[test]

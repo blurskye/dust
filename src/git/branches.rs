@@ -511,8 +511,8 @@ fn exclude_from_status(
         .create(true)
         .open(&exclude)
         .map_err(backend)?;
-    let mut file = nix::fcntl::Flock::lock(file, nix::fcntl::FlockArg::LockExclusive)
-        .map_err(|(_, error)| backend(error))?;
+    let mut file =
+        crate::files::lock_exclusive(file, false).map_err(|(_, error)| backend(error))?;
     check_request(cancel, expires)?;
     let mut current = Vec::new();
     file.read_to_end(&mut current).map_err(backend)?;

@@ -6,7 +6,7 @@ license = "GPL-3.0-or-later"
 description = "A terminal IDE with Vim keys, language servers, debugging, git and coding agents"
 repository = "https://github.com/blurskye/dust"
 homepage = "https://github.com/blurskye/dust"
-rust-version = "1.88"
+rust-version = "1.89"
 default-run = "dust"
 
 [dependencies]
@@ -23,14 +23,10 @@ globset = "0.4.16"
 # HTTPS and SSH transports support Git remote operations.
 git2 = { version = "0.20.2", default-features = false, features = ["https", "ssh"] }
 ignore = "=0.4.28"
-nix = { version = "0.30.1", features = ["signal", "process", "fs", "poll", "event"] }
 portable-pty = "0.9.0"
 regex = "1.11.1"
 reqwest = { version = "=0.12.15", default-features = false, features = ["blocking", "rustls-tls", "http2"] }
 ropey = { version = "1.6.1", default-features = false, features = ["simd"] }
-# renameat2 for renames that never overwrite and saves that swap files atomically; nix has it
-# only on glibc, and the release binary is built for musl.
-rustix = { version = "1.1.4", features = ["fs"] }
 serde = { version = "1.0.217", features = ["derive"] }
 serde_json = "1.0.138"
 sha2 = "0.10.8"
@@ -85,6 +81,11 @@ unicode-segmentation = "1.12.0"
 unicode-width = "0.2.0"
 zip = { version = "2.4.2", default-features = false, features = ["deflate"] }
 zstd = "=0.13.3"
+
+[target.'cfg(unix)'.dependencies]
+nix = { version = "0.30.1", features = ["signal", "process", "fs", "poll", "event"] }
+# Atomic exchange and no-clobber renames on Linux (including musl) and macOS.
+rustix = { version = "1.1.4", features = ["fs"] }
 
 [features]
 # Builds OpenSSL and libgit2 into the binary, for the static release build.

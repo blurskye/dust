@@ -5,7 +5,6 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::io::Read;
 use std::io::Write;
-use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicU64;
@@ -84,11 +83,7 @@ pub(super) fn read_bounded_regular(path: &Path, maximum: u64) -> Result<Vec<u8>,
     {
         return Err(PackageError::InvalidManifest);
     }
-    let file = fs::OpenOptions::new()
-        .read(true)
-        .custom_flags(nix::libc::O_NOFOLLOW | nix::libc::O_NONBLOCK)
-        .open(path)
-        .map_err(PackageError::Io)?;
+    let file = crate::files::open_read_no_symlinks(path).map_err(PackageError::Io)?;
     if !file.metadata().map_err(PackageError::Io)?.is_file() {
         return Err(PackageError::InvalidManifest);
     }
@@ -267,11 +262,8 @@ pub fn verify_lock_store(
         .write(true)
         .open(parent.join("dust-packages.lock"))
         .map_err(PackageError::Io)?;
-    #[cfg(unix)]
-    let _transaction = nix::fcntl::Flock::lock(transaction, nix::fcntl::FlockArg::LockExclusive)
-        .map_err(|(_, error)| PackageError::Io(error.into()))?;
-    #[cfg(not(unix))]
-    let _transaction = transaction;
+    let _transaction = crate::files::lock_exclusive(transaction, false)
+        .map_err(|(_, error)| PackageError::Io(error))?;
     let metadata = fs::metadata(lock_path).map_err(PackageError::Io)?;
     if metadata.len() > maximum_bytes as u64 {
         return Err(PackageError::LockTooLarge);
