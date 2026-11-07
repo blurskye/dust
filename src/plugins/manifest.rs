@@ -25,6 +25,8 @@ pub enum PluginCapability {
     Timers,
     Http,
     HttpHost(String),
+    Files,
+    Process,
 }
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]

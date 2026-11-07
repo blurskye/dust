@@ -2,6 +2,7 @@
 
 mod events;
 mod language;
+mod system;
 #[cfg(test)]
 mod tests;
 
@@ -43,6 +44,7 @@ pub(in crate::app) struct PluginCalls {
     completion_observation: Option<(u64, u64, u64)>,
     http: Option<crate::plugins::http::PluginHttp>,
     http_results: BTreeMap<String, Vec<wit::HttpResponse>>,
+    system: system::SystemAccess,
     registrations: BTreeSet<(String, String)>,
     running: Option<(String, u64)>,
     awaiting: BTreeMap<PendingCommandId, (String, u64)>,
@@ -170,6 +172,8 @@ impl App {
                     | PluginCapability::PrivateCells => {
                         grants.insert(CommandAccess::Ui);
                     }
+                    PluginCapability::Files => { grants.insert(CommandAccess::Files); }
+                    PluginCapability::Process => { grants.insert(CommandAccess::Process); }
                     PluginCapability::Http => {
                         grants.insert(CommandAccess::Network);
                     }
@@ -239,6 +243,7 @@ impl App {
                 .http_results
                 .remove(&plugin)
                 .unwrap_or_default();
+            delivery.system = self.extension.abi.system.delivery(&plugin, &handler);
             let snapshot = None;
             let own = self.plugin_authority(&plugin);
             let call_authority = match (authority, own) {
@@ -498,6 +503,13 @@ impl App {
         request: EditorRequest,
     ) -> Result<(), String> {
         match request {
+            EditorRequest::System(token, request) => {
+                let authority = self.effect_authority.restrict(authority);
+                let previous = std::mem::replace(&mut self.effect_authority, authority);
+                let result = self.apply_system_request(plugin, token, request);
+                self.effect_authority = previous;
+                result?;
+            }
             EditorRequest::Register(definition) => {
                 self.register_guest_command(plugin, definition)?
             }
@@ -856,6 +868,7 @@ impl App {
     }
 
     pub(in crate::app) fn remove_plugin_abi(&mut self, plugin: &str) {
+        self.extension.abi.system.remove(plugin);
         let pending: Vec<_> = self
             .extension
             .abi
@@ -948,6 +961,7 @@ impl App {
     }
 
     pub(in crate::app) fn poll_plugin_callbacks(&mut self) {
+        self.poll_system_callbacks();
         let now = Instant::now();
         let expired: Vec<_> = self
             .extension

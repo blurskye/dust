@@ -6,6 +6,10 @@ use crate::editor::text::TextBuffer;
 use sha2::{Digest, Sha256};
 
 fn real_app(owners: &[&str]) -> (Vec<tempfile::TempDir>, App) {
+    real_app_with_capabilities(owners, &[])
+}
+
+pub(super) fn real_app_with_capabilities(owners: &[&str], capabilities: &[PluginCapability]) -> (Vec<tempfile::TempDir>, App) {
     let (dirs, mut app) = app_with_plugin_queue(16);
     let mut roots = vec![dirs.0, dirs.1];
     app.state
@@ -47,6 +51,7 @@ fn real_app(owners: &[&str]) -> (Vec<tempfile::TempDir>, App) {
             PluginCapability::Timers,
             PluginCapability::Http,
         ]);
+        manifest.capabilities.extend(capabilities.iter().cloned());
         manifest
             .commands
             .get_mut("drive")
@@ -76,7 +81,7 @@ fn real_app(owners: &[&str]) -> (Vec<tempfile::TempDir>, App) {
     (roots, app)
 }
 
-fn pump(app: &mut App, done: impl Fn(&App) -> bool) {
+pub(super) fn pump(app: &mut App, done: impl Fn(&App) -> bool) {
     let deadline = Instant::now() + Duration::from_secs(15);
     loop {
         app.process_plugin_events();
@@ -92,7 +97,7 @@ fn pump(app: &mut App, done: impl Fn(&App) -> bool) {
     }
 }
 
-fn action(app: &mut App, owner: &str, action: &str) {
+pub(super) fn action(app: &mut App, owner: &str, action: &str) {
     let invocation =
         CommandInvocation::new(&format!("plugin.{owner}.drive"), InvocationSource::Test)
             .unwrap()

@@ -455,6 +455,37 @@ interface host {
   // opaque and never expose paths, editor IDs, graph IDs, or URI authority.
   take-virtual-document-requests: func() -> list<virtual-document-request>;
   queue-virtual-document-proposal: func(proposal: virtual-document-proposal) -> result<_, virtual-document-error>;
+
+  // System access: workspace files, streaming processes and buffer syntax.
+  record process-start {
+    program: string, arguments: list<string>, cwd: string,
+    environment: list<tuple<string, string>>, stdin: option<list<u8>>, handler: string,
+  }
+  record process-input { process: u64, bytes: list<u8>, close: bool }
+  variant process-output { stdout(list<u8>), stderr(list<u8>), exited(option<s32>) }
+  record file-write { path: string, bytes: list<u8> }
+  record file-rename { source: string, target: string }
+  variant file-operation {
+    read(string), write(file-write), create-directory(string), list-directory(string),
+    stat(string), rename(file-rename), delete(string),
+  }
+  enum file-kind { file, directory, other }
+  record file-info { name: string, kind: file-kind, bytes: u64 }
+  variant file-value { done, bytes(list<u8>), entries(list<file-info>), info(file-info) }
+  record byte-range { start: u64, end: u64 }
+  record syntax-query { buffer: u64, query: string, range: option<byte-range> }
+  record syntax-node { kind: string, range: byte-range }
+  record syntax-capture { name: string, range: byte-range }
+  variant syntax-value { captures(list<syntax-capture>), nodes(list<syntax-node>) }
+  variant system-value { done, process(process-output), file(file-value), syntax(syntax-value) }
+  record system-event { request: u64, value: result<system-value, string> }
+  start-process: func(request: process-start) -> result<u64, string>;
+  write-process-stdin: func(input: process-input) -> result<u64, string>;
+  kill-process: func(process: u64) -> result<u64, string>;
+  request-file: func(operation: file-operation, handler: string) -> result<u64, string>;
+  query-syntax: func(query: syntax-query, handler: string) -> result<u64, string>;
+  node-at-position: func(buffer: u64, position: u64, handler: string) -> result<u64, string>;
+  take-system-events: func() -> list<system-event>;
 }
 
 world editor-plugin {

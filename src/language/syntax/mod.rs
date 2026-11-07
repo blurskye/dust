@@ -34,6 +34,7 @@ mod markdown;
 mod objects;
 use crate::config::Highlight;
 use crate::editor::SyntaxObject;
+pub(crate) mod query;
 pub use markdown::MarkdownMark;
 pub use markdown::MarkdownSpan;
 
@@ -745,8 +746,10 @@ pub struct SyntaxIndent {
     pub start_row: usize,
     pub end_row: usize,
 }
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct SyntaxResult {
+    pub(crate) tree: Arc<tree_sitter::Tree>,
+    pub(crate) source: Arc<str>,
     pub document: SyntaxDocumentId,
     pub request_id: u64,
     pub revision: u64,
@@ -1615,7 +1618,8 @@ fn parse(request: Request) -> SyntaxEvent {
     };
     let objects = Arc::new(objects::collect(&tree, &request.source, 50_000));
     SyntaxEvent::Parsed(SyntaxResult {
-        document: request.document,
+        tree: Arc::new(tree),
+        source: request.source.into(),        document: request.document,
         request_id: request.request_id,
         revision: request.revision,
         language: request.language,

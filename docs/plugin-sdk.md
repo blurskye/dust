@@ -249,3 +249,62 @@ anchored edits and undo, event gaps, menu/inline completion, LSP method filters,
 errors, and permission rejection, alongside the existing panels/storage/provider
 and sandbox tests. The full gate is format check, Clippy with warnings denied, and
 `cargo test --locked`.
+
+## System access: processes, workspace files, and syntax
+
+System imports return a request ID. Their declared local handler runs with
+`event = "system"`; drain `take-system-events` for matching IDs and typed results
+or errors. An import error means nothing was queued. An asynchronous error is
+returned in that request's event, not silently ignored. Handler calls retain the
+initiating command's restricted authority, including across delegation.
+
+### Processes
+
+Declare `process` in manifest capabilities. `start-process` accepts a program,
+argument vector, workspace-relative (or absolute in-workspace) cwd, environment
+additions, optional initial stdin bytes, and a handler. Programs are not implicitly
+shell commands: pass `sh` and `-c` explicitly if needed. Environment additions win
+over Dust's inherited environment. A trusted workspace is also required.
+
+The start ID identifies the process. Output events contain raw stdout/stderr byte
+chunks, including output without newlines, followed by an exit code (`none` when
+terminated by a signal). `write-process-stdin` sends more bytes and optionally closes
+stdin; stdin otherwise remains open. `kill-process` terminates the process group.
+Both return separate request IDs acknowledging success or failure. Only the owning
+plugin can address a process. There are at most eight live processes per plugin,
+1 MiB of output per process, a bounded stdin queue (16 chunks, at most 1 MiB each),
+and a one-day runtime limit. Limit failures are explicit. Unload and editor shutdown
+cancel remaining children through the same job runner used by native tasks.
+
+**The process grant gives ordinary user-process access, not a filesystem sandbox.**
+Only cwd is constrained to the workspace; spawned tools can access anything the
+user can. The files grant below is narrower.
+
+### Workspace files
+
+Declare `files`. `request-file` supports read, write, create-directory,
+list-directory, stat, rename, and delete. Paths resolve relative to the current
+workspace root. Absolute paths are accepted only inside that root. Symlinks are
+resolved before scope checks; checked filesystem opens reject substituted symlinks
+at the operation itself. Read/write bytes are binary, limited to 1 MiB per request;
+listings contain at most 4,096 entries and report links as `other` without following
+them. Rename does not overwrite an existing destination; directory deletion is
+nonrecursive. Parent directories must already exist.
+
+Writes reload matching clean open buffers through native document reload. Writes,
+renames and deletes affecting buffers with unsaved changes are refused. If a user
+edits during background I/O, those edits are preserved and the result reports the
+conflict. A successful disk write does not discard newer edits.
+
+### Tree-sitter
+
+`query-syntax` and `node-at-position` need only `read_current_buffer`, not files or
+process grants. They use the existing buffer parser's current tree, not another
+parser. A buffer without a parsed tree, or with parsing still behind its text,
+returns an error (retry after parsing). Queries return capture names and byte ranges;
+an optional byte range limits matching. Node lookup returns the smallest node at
+the byte position, then its parents through the root, with kinds and byte ranges.
+
+Ranges use UTF-8 byte boundaries and exclusive ends. Queries are limited to 16 KiB,
+4,096 captures/matches and a bounded query execution time; parent chains to 256
+nodes. Invalid query syntax and limit exhaustion return errors, never partial success.

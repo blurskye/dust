@@ -72,6 +72,7 @@ pub use workspace_search::WorkspaceSearchSummary;
 pub use workspace_search::WorkspaceSearchWorker;
 mod error;
 pub use error::VfsError;
+pub(crate) mod workspace_access;
 mod workspace_files;
 pub use workspace_files::WorkspaceFileEntry;
 pub use workspace_files::WorkspaceFileError;

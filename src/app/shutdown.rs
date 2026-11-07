@@ -41,6 +41,7 @@ impl App {
         self.language.close_preparation();
         self.debugger_session.begin_shutdown();
         self.tasks.begin_shutdown();
+        self.shutdown_plugin_system();
         self.terminal_session.begin_shutdown();
         self.reject_terminal_responses("terminal shutdown requested");
         self.drain_linter_sources();
