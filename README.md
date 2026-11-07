@@ -65,10 +65,13 @@ and [dashboard actions](assets/defaults/dashboard.toml) are the reference defaul
 
 ## Plugins
 
-Dust loads WebAssembly Component Model plugins. Commands, editing, panels,
-completion and other integrations use the native editor owners. Capabilities
-control host access; granting process execution gives a plugin ordinary
-user-process access, not a filesystem sandbox.
+Dust loads WebAssembly Component Model plugins. A plugin can add commands, modes
+and key layers, wrap built-in commands, edit buffers with normal undo and repeat,
+draw highlights, virtual text and signs, publish diagnostics, provide completion and
+formatters, open windows, prompts and plugin-backed buffers, and add status-line
+segments. Capabilities in its manifest control what it may do; files, processes and
+network access need the user's grant. Granting process execution gives a plugin
+ordinary user-process access, not a filesystem sandbox.
 
 The [Plugin SDK](docs/plugin-sdk.md) documents the production WIT contract,
 manifest, build commands and examples. [Registry client documentation](docs/registry-client.md)
