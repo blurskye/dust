@@ -262,6 +262,47 @@ fn prompt_clears_and_clips_the_editor_layer_beneath_its_box() {
 }
 
 #[test]
+fn command_completion_details_share_the_row_background_and_selection() {
+    use crate::ui::Style;
+    let config = crate::config::load_bundled_config().config;
+    for (width, height) in [(160, 45), (100, 30), (80, 24)] {
+        let mut prompt = PromptState::new(PromptKind::Command);
+        prompt.completions = vec![crate::ui::render::CompletionItem {
+            icon: None,
+            label: "w".into(),
+            detail: "Save file".into(),
+            color: None,
+        }];
+        for selected in [None, Some(0)] {
+            prompt.selected_completion = selected;
+            let mut frame = crate::ui::grid::Frame {
+                grid: crate::ui::CellGrid::new(width, height),
+                cursor: None,
+            };
+            crate::ui::render::prompt::render_prompt(&mut frame, &prompt, &config, width, height);
+            let geometry = prompt_geometry(width, height, false);
+            let y = geometry.top + 3;
+            assert_eq!(
+                frame.grid.get(geometry.left + 2, y).unwrap().style,
+                if selected.is_some() {
+                    Style::Selection
+                } else {
+                    Style::Status
+                }
+            );
+            assert_eq!(
+                frame.grid.get(geometry.left + 5, y).unwrap().style,
+                if selected.is_some() {
+                    Style::Selection
+                } else {
+                    Style::StatusMuted
+                }
+            );
+        }
+    }
+}
+
+#[test]
 fn dashboard_and_prompt_render_at_multiple_sizes() {
     let state = EditorState::new(PathBuf::from("/tmp/dust-workspace"));
     for (width, height) in [(120, 40), (42, 10), (18, 5), (18, 1)] {

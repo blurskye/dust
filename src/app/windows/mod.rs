@@ -1071,21 +1071,25 @@ impl App {
                 .as_ref()
                 .map_or("Picker", |picker| &picker.title)
                 .to_owned(),
-            protected_prompt_height: self.input.prompt().map_or(0, |prompt| {
-                let (width, height) = crate::ui::prompt_surface_dimensions(
-                    &self.state,
-                    &self.ui,
-                    self.window_session.width(),
-                    self.window_session.height(),
-                );
-                crate::ui::prompt_geometry_for_state(
-                    width,
-                    height,
-                    self.configuration.settings(),
-                    prompt,
-                )
-                .height
-            }),
+            protected_prompt_height: self
+                .input
+                .prompt()
+                .filter(|_| !self.search.help_is_open())
+                .map_or(0, |prompt| {
+                    let (width, height) = crate::ui::prompt_surface_dimensions(
+                        &self.state,
+                        &self.ui,
+                        self.window_session.width(),
+                        self.window_session.height(),
+                    );
+                    crate::ui::prompt_geometry_for_state(
+                        width,
+                        height,
+                        self.configuration.settings(),
+                        prompt,
+                    )
+                    .height
+                }),
             configuration_reload_id: self.configuration.reload_id(),
             screen_bottom: screen_foot_rows(
                 &self.state,
@@ -1219,21 +1223,26 @@ impl App {
                             )
                         })
                         .unwrap_or_default();
-                    let protected = self.input.prompt().map(|prompt| {
-                        let prompt_height = preliminary.workspace_bounds.height.saturating_sub(top);
-                        let geometry = crate::ui::prompt_geometry_for_state(
-                            self.window_session.width(),
-                            prompt_height,
-                            self.configuration.settings(),
-                            prompt,
-                        );
-                        WindowRect {
-                            x: geometry.left,
-                            y: geometry.top,
-                            width: geometry.width,
-                            height: geometry.height,
-                        }
-                    });
+                    let protected = self
+                        .input
+                        .prompt()
+                        .filter(|_| !self.search.help_is_open())
+                        .map(|prompt| {
+                            let prompt_height =
+                                preliminary.workspace_bounds.height.saturating_sub(top);
+                            let geometry = crate::ui::prompt_geometry_for_state(
+                                self.window_session.width(),
+                                prompt_height,
+                                self.configuration.settings(),
+                                prompt,
+                            );
+                            WindowRect {
+                                x: geometry.left,
+                                y: geometry.top,
+                                width: geometry.width,
+                                height: geometry.height,
+                            }
+                        });
                     Some(ProjectionRequest {
                         tab,
                         source_revision: revision,

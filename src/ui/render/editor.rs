@@ -123,7 +123,7 @@ fn diagnostic_style(severity: crate::workspace::DiagnosticSeverity) -> Style {
 /// string), but a selection or search match still shows through them.
 fn indent_guide_style(style: Style, active: bool) -> Style {
     match style {
-        Style::Selection | Style::Search => style,
+        Style::Selection | Style::SelectionSyntax(_) | Style::Search => style,
         _ if active => Style::Muted,
         _ => Style::Border,
     }
@@ -865,6 +865,28 @@ pub(super) fn render_editor_view(
                     None => {}
                 }
             }
+            while syntax_spans
+                .get(syntax_cursor)
+                .is_some_and(|span| span.range.end <= global)
+            {
+                syntax_cursor = syntax_cursor.saturating_add(1);
+            }
+            while semantic_spans
+                .get(semantic_cursor)
+                .is_some_and(|span| span.range.end <= global)
+            {
+                semantic_cursor = semantic_cursor.saturating_add(1);
+            }
+            let syntax_role = semantic_spans
+                .get(semantic_cursor)
+                .filter(|span| span.range.contains(global))
+                .map(|span| span.role)
+                .or_else(|| {
+                    syntax_spans
+                        .get(syntax_cursor)
+                        .filter(|span| span.range.contains(global))
+                        .map(|span| span.role)
+                });
             let style = if selected_bytes
                 .as_ref()
                 .is_some_and(|range| range.contains(&global))
@@ -874,7 +896,7 @@ pub(super) fn render_editor_view(
                     .any(|mark| mark.contains(global) || (mark.is_empty() && mark.start == global))
                 || view.block_insert.contains(&global)
             {
-                Style::Selection
+                syntax_role.map_or(Style::Selection, Style::SelectionSyntax)
             } else if search_ranges.iter().any(|range| range.contains(global))
                 || flash
                     .is_some_and(|flash| flash.matches.iter().any(|range| range.contains(global)))
@@ -929,32 +951,8 @@ pub(super) fn render_editor_view(
             } {
                 let _ = span;
                 Style::Accent
-            } else if let Some(span) = {
-                while semantic_spans
-                    .get(semantic_cursor)
-                    .is_some_and(|span| span.range.end <= global)
-                {
-                    semantic_cursor = semantic_cursor.saturating_add(1);
-                }
-                semantic_spans
-                    .get(semantic_cursor)
-                    .copied()
-                    .filter(|span| span.range.contains(global))
-            } {
-                Style::Syntax(span.role)
-            } else if let Some(span) = {
-                while syntax_spans
-                    .get(syntax_cursor)
-                    .is_some_and(|span| span.range.end <= global)
-                {
-                    syntax_cursor = syntax_cursor.saturating_add(1);
-                }
-                syntax_spans
-                    .get(syntax_cursor)
-                    .copied()
-                    .filter(|span| span.range.contains(global))
-            } {
-                Style::Syntax(span.role)
+            } else if let Some(role) = syntax_role {
+                Style::Syntax(role)
             } else {
                 Style::Default
             };

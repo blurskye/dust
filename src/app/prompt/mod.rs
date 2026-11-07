@@ -642,7 +642,7 @@ impl App {
 
 impl App {
     pub(in crate::app) fn project_input_prompt(&mut self) {
-        let prompt = if self.input_replacement_pending() {
+        let prompt = if self.input_replacement_pending() || self.search.help_is_open() {
             None
         } else {
             self.input.prompt().cloned().map(|mut prompt| {

@@ -34,6 +34,7 @@ impl App {
             return;
         }
         self.search.mark_help_open();
+        self.project_input_prompt();
         self.sync_picker_ui();
     }
 }

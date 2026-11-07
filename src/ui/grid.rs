@@ -12,6 +12,7 @@ pub enum Style {
     Muted,
     Accent,
     Status,
+    StatusMuted,
     StatusAccent,
     StatusInsert,
     StatusVisual,
