@@ -1,0 +1,2 @@
+# Bundled assets and tests compare exact text, so every checkout keeps LF endings.
+* text=auto eol=lf

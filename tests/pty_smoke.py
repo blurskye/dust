@@ -123,6 +123,10 @@ def run(
             config_home or pathlib.Path(cwd) / ".dust-missing-config"
         )
         os.environ["DUST_STATE_HOME"] = str(pathlib.Path(cwd) / ".dust-state")
+        # Terminals run a plain sh: a user's bashrc prompt may set the window title,
+        # which the docked terminal shows in place of its own.
+        os.environ["SHELL"] = "/bin/sh"
+        os.environ["PS1"] = "$ "
         if environment:
             os.environ.update(environment)
         command = [str(binary)]

@@ -287,7 +287,8 @@ while True:
     service
         .start_absolute(launch(root.path(), &script))
         .unwrap();
-    let deadline = Instant::now() + Duration::from_secs(20);
+    // The launch alone takes 16 seconds; leave room for a loaded machine.
+    let deadline = Instant::now() + Duration::from_secs(40);
     loop {
         match service.try_event() {
             Some(DapEvent::Running { .. }) => break,
@@ -840,7 +841,8 @@ while True:
             .iter()
             .all(|r| r.outcome() == DapReplyOutcome::Ready)
     );
-    assert_eq!(service.writes_queued(), 32);
+    // A retried reply counts itself for a moment before the full queue refuses it.
+    wait(|| service.writes_queued() == 32);
     // This is an explicit gate BEFORE write, not a claimed blocked syscall.
     service.writer_gate(false);
     let mut late = None;

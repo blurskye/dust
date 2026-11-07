@@ -2,6 +2,7 @@
 
 use crate::app::App;
 use crate::app::AppEffect;
+#[cfg(unix)]
 use crate::app::agent::commands::AgentCommand;
 use crate::app::configuration::compile_keymaps;
 use crate::app::startup::StartupTarget;

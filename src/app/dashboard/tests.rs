@@ -1,13 +1,18 @@
 //! Dashboard behavior and application integration tests.
 
+#[cfg(unix)]
 use crate::app::AppEffect;
+#[cfg(unix)]
 use crate::app::agent::commands::AgentCommand;
 use crate::app::configuration::validate_configured_commands;
 use crate::app::tests::*;
 use crate::editor::text::TextBuffer;
 use crate::windows::WindowPlacement;
+#[cfg(unix)]
 use std::thread;
+#[cfg(unix)]
 use std::time::Duration;
+#[cfg(unix)]
 use std::time::Instant;
 
 #[test]

@@ -708,7 +708,9 @@ mod tests {
             let root = tempfile::tempdir().unwrap();
             let excludes = root.path().join("excludes");
             let config = root.path().join("gitconfig");
-            fs::write(&config, format!("[core]\nexcludesFile = {:?}\n", excludes)).unwrap();
+            // Forward slashes need no escaping in git config, on Windows too.
+            let excludes = excludes.display().to_string().replace('\\', "/");
+            fs::write(&config, format!("[core]\nexcludesFile = \"{excludes}\"\n")).unwrap();
             let status = std::process::Command::new(std::env::current_exe().unwrap())
                 .args([
                     "--exact",

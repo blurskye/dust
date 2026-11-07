@@ -208,8 +208,9 @@ pub(super) fn patch_nix_compatible_executable(
 
 pub(super) fn patch_nix_compatibility_tree(
     root: &Path,
-    runtime: &NixCompatibilityRuntime,
-    cancellations: &Receiver<()>,
+    // Only Unix executables are patched.
+    #[cfg_attr(not(unix), allow(unused_variables))] runtime: &NixCompatibilityRuntime,
+    #[cfg_attr(not(unix), allow(unused_variables))] cancellations: &Receiver<()>,
 ) -> Result<(), String> {
     let mut stack = vec![root.to_path_buf()];
     let mut entries = 0usize;

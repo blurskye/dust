@@ -247,7 +247,14 @@ impl RemoteServer {
                     let mut complete = false;
                     loop {
                         let remaining = deadline.saturating_duration_since(Instant::now());
-                        if remaining.is_zero() || stream.set_read_timeout(Some(remaining)).is_err()
+                        // The timeout goes on the handle that reads: Windows sockets keep it
+                        // per duplicated handle.
+                        if remaining.is_zero()
+                            || reader
+                                .get_ref()
+                                .get_ref()
+                                .set_read_timeout(Some(remaining))
+                                .is_err()
                         {
                             break;
                         }

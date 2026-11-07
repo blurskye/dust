@@ -488,7 +488,8 @@ pub(super) fn requested_executable_name(definition: &ToolDefinition) -> String {
 pub(super) fn run_session(
     server: String,
     executable: PathBuf,
-    executable_name: String,
+    // Unix passes it as argv[0]; Windows has no separate program name.
+    #[cfg_attr(not(unix), allow(unused_variables))] executable_name: String,
     args: Vec<String>,
     root: PathBuf,
     initial_document: Option<LspDocument>,

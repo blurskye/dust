@@ -469,7 +469,8 @@ impl Terminals {
             key.id,
             TerminalRuntime {
                 profile: source.token.profile,
-                program: config.program.clone(),
+                // The resolved executable, so the title names `zsh` rather than `$SHELL`.
+                program: request.executable.clone(),
                 agent: source.token.agent,
                 cwd: request.cwd.clone(),
                 close_on_exit: config.close_on_exit,

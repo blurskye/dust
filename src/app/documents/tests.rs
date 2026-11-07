@@ -3,6 +3,7 @@
 use crate::app::App;
 use crate::app::AppEffect;
 use crate::app::PickerKind;
+#[cfg(unix)]
 use crate::app::agent::commands::AgentCommand;
 use crate::app::documents::configured_file_bytes;
 use crate::app::git::tests::settle_git_work;
@@ -35,12 +36,14 @@ use crate::ui::render::overlays::SCRATCH_ICON;
 use crate::windows::DockEdge;
 use crate::windows::WindowPlacement;
 use crate::workspace::DiagnosticSeverity;
+#[cfg(unix)]
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
 use std::thread;
 use std::time::Duration;
 use std::time::Instant;
+#[cfg(unix)]
 use tempfile::tempdir;
 
 #[test]

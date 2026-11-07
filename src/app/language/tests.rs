@@ -41,12 +41,14 @@ use crate::windows::WindowPlacement;
 use crate::windows::WindowRect;
 use crate::workspace::DiagnosticSeverity;
 use crate::workspace::WorkspaceTrust;
+#[cfg(unix)]
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fs;
 use std::thread;
 use std::time::Duration;
 use std::time::Instant;
+#[cfg(unix)]
 use tempfile::tempdir;
 
 fn source_completion(

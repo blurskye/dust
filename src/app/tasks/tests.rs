@@ -2,6 +2,7 @@
 
 use crate::app::App;
 use crate::app::AppEffect;
+#[cfg(unix)]
 use crate::app::PickerKind;
 use crate::app::startup::StartupTarget;
 use crate::app::tests::*;

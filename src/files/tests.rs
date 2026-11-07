@@ -16,6 +16,7 @@ use crate::files::directory::list_scoped_directory;
 use crate::files::DirectoryEntryKind;
 use crate::files::DirectoryWorker;
 use crate::files::ExplorerMutation;
+#[cfg(unix)]
 use crate::files::ExplorerWatchEntryKind;
 use crate::files::ExplorerWatchError;
 use crate::files::ExplorerWatchPolicy;
@@ -46,6 +47,7 @@ use crate::files::recovery::read_bounded_bytes;
 use crate::files::recovery::recovery_journal_size_allowed;
 use crate::files::recovery::recovery_payload_size_allowed;
 use crate::files::vfs::checked_atomic_write;
+#[cfg(unix)]
 use crate::files::watch::watch_name_bytes;
 use crate::files::write_recovery;
 

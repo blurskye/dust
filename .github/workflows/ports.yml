@@ -9,6 +9,8 @@ jobs:
       matrix:
         os: [macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    # A hung test fails the job instead of holding the runner for hours.
+    timeout-minutes: 90
     env:
       RUST_TEST_THREADS: 4
     steps:

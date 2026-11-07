@@ -14,7 +14,9 @@ use crate::workspace::WorkspaceState;
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
+#[cfg(unix)]
 use std::time::Duration;
+#[cfg(unix)]
 use std::time::Instant;
 
 #[test]

@@ -22,7 +22,8 @@ fn request(root: &Path, script: &str) -> PtyRequest {
     }
 }
 fn drain(service: &mut PtyWorker, id: PtyId) -> Vec<PtyEvent> {
-    let deadline = Instant::now() + Duration::from_secs(4);
+    // Generous for loaded CI machines; a passing run returns far sooner.
+    let deadline = Instant::now() + Duration::from_secs(15);
     let mut received = Vec::new();
     loop {
         let batch = service.poll().unwrap();

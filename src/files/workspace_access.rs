@@ -209,12 +209,11 @@ pub(crate) fn execute(
     }
 }
 
-#[cfg(test)]
+// Creating symlinks on Windows needs extra privileges.
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 
-    // Creating symlinks on Windows needs extra privileges.
-    #[cfg(unix)]
     #[test]
     fn workspace_operations_reject_parent_paths_and_symlink_escapes() {
         let root = tempfile::tempdir().unwrap();

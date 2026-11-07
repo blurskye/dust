@@ -2,6 +2,7 @@
 
 use std::fs;
 use std::io;
+#[cfg(unix)]
 use std::io::Read;
 use std::io::Write;
 use std::path::Path;
