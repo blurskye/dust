@@ -29,7 +29,7 @@ pub(in crate::app) fn clipboard_paste_finishes_before_later_input_or_macro_comma
         let (session, reply) = Clipboard::pending_read_fixture(
             invocation,
             app.state.window_version(),
-            app.state.registers.generation(),
+            app.state.registers.revision(),
         );
         app.clipboard = session;
         if macro_commands {
@@ -79,7 +79,7 @@ pub(in crate::app) fn clipboard_macro_stops_after_a_failed_command_following_a_p
         .state
         .open_text(TextBuffer::from_text("abc"), None)
         .unwrap();
-    app.clipboard = Clipboard::pending_copy_fixture(app.state.registers.generation(), "X");
+    app.clipboard = Clipboard::pending_copy_fixture(app.state.registers.revision(), "X");
     app.state.registers.set_macro(
         'a',
         vec![
@@ -107,7 +107,7 @@ pub(in crate::app) fn clipboard_failed_reads_stop_suspended_macros_but_release_l
         .state
         .open_text(TextBuffer::from_text("abc"), None)
         .unwrap();
-    app.clipboard = Clipboard::pending_copy_fixture(app.state.registers.generation(), "X");
+    app.clipboard = Clipboard::pending_copy_fixture(app.state.registers.revision(), "X");
     app.state
         .registers
         .set_macro('a', vec![paste(), invocation("edit.delete_char")]);
@@ -116,7 +116,7 @@ pub(in crate::app) fn clipboard_failed_reads_stop_suspended_macros_but_release_l
     let (session, reply) = Clipboard::pending_read_fixture(
         paste(),
         app.state.window_version(),
-        app.state.registers.generation(),
+        app.state.registers.revision(),
     );
     app.clipboard = session;
     app.clipboard.append_deferred(continuation);
@@ -137,7 +137,7 @@ pub(in crate::app) fn clipboard_recursive_macros_keep_the_recursion_limit_across
         .state
         .open_text(TextBuffer::from_text("a"), None)
         .unwrap();
-    app.clipboard = Clipboard::pending_copy_fixture(app.state.registers.generation(), "X");
+    app.clipboard = Clipboard::pending_copy_fixture(app.state.registers.revision(), "X");
     app.state.registers.set_macro(
         'a',
         vec![
@@ -166,7 +166,7 @@ pub(in crate::app) fn clipboard_deferred_macros_expand_before_later_input() {
         .state
         .open_text(TextBuffer::from_text("abc"), None)
         .unwrap();
-    app.clipboard = Clipboard::pending_copy_fixture(app.state.registers.generation(), "X");
+    app.clipboard = Clipboard::pending_copy_fixture(app.state.registers.revision(), "X");
     app.invoke(paste());
     app.state.registers.set_macro(
         'a',
@@ -196,7 +196,7 @@ pub(in crate::app) fn clipboard_counted_macros_finish_each_replay_before_startin
         .state
         .open_text(TextBuffer::from_text("abc"), None)
         .unwrap();
-    app.clipboard = Clipboard::pending_copy_fixture(app.state.registers.generation(), "X");
+    app.clipboard = Clipboard::pending_copy_fixture(app.state.registers.revision(), "X");
     app.state.registers.set_macro('a', vec![paste()]);
     for key in "20@ah".chars() {
         press(&mut app, key);
@@ -237,7 +237,7 @@ pub(in crate::app) fn clipboard_failed_paste_reports_error_and_releases_later_in
     let (session, reply) = Clipboard::pending_read_fixture(
         invocation,
         app.state.window_version(),
-        app.state.registers.generation(),
+        app.state.registers.revision(),
     );
     app.clipboard = session;
     press(&mut app, 'l');
@@ -281,7 +281,7 @@ pub(in crate::app) fn clipboard_imported_selection_is_used_by_the_requested_past
         let (session, reply) = Clipboard::pending_read_fixture(
             invocation,
             app.state.window_version(),
-            app.state.registers.generation(),
+            app.state.registers.revision(),
         );
         app.clipboard = session;
         reply.send(Some("selection".into())).unwrap();

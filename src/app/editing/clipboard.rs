@@ -98,13 +98,13 @@ pub(in crate::app) struct Clipboard {
 impl crate::app::App {
     pub(in crate::app) fn process_clipboard(&mut self) -> Option<String> {
         self.process_clipboard_paste();
-        let revision = self.state.registers.generation();
+        let revision = self.state.registers.revision();
         let output = if self.clipboard_shared() {
             self.clipboard.push(&mut self.state.value.registers)
         } else {
             None
         };
-        if self.state.registers.generation() != revision {
+        if self.state.registers.revision() != revision {
             self.state.revision = self.state.revision.wrapping_add(1);
         }
         output
@@ -117,7 +117,7 @@ impl Clipboard {
     pub(in crate::app) fn enable(&mut self, registers: &RegisterStore) {
         self.enabled = true;
         self.tool = Tool::detect();
-        self.synced_revision = registers.generation();
+        self.synced_revision = registers.revision();
     }
 
     /// Send a changed unnamed register to the system clipboard. Returns the text when it must
@@ -154,14 +154,14 @@ impl Clipboard {
     }
 
     fn queue_copy(&mut self, registers: &mut RegisterStore) {
-        if registers.generation() != self.synced_revision {
+        if registers.revision() != self.synced_revision {
             if let Some(value) = registers.get('"').cloned() {
                 registers.set('+', value.clone(), true, false);
                 // A new yank must replace any clipboard changes made by other applications,
                 // even when its text matches our last copy.
                 self.queued = Some(value.text);
             }
-            self.synced_revision = registers.generation();
+            self.synced_revision = registers.revision();
         }
     }
 
@@ -226,7 +226,7 @@ impl Clipboard {
             }
             self.reading = Some(receiver);
         }
-        self.paste = Some((invocation.clone(), source, registers.generation()));
+        self.paste = Some((invocation.clone(), source, registers.revision()));
         true
     }
 
@@ -246,7 +246,7 @@ impl Clipboard {
         };
         self.reading = None;
         let (invocation, source, revision) = self.paste.take().expect("pending clipboard paste");
-        if &source != current || revision != registers.generation() {
+        if &source != current || revision != registers.revision() {
             return Ok(None);
         }
         let text = text.ok_or("Could not read the system clipboard; paste cancelled")?;
@@ -285,7 +285,7 @@ impl Clipboard {
         registers.set(register, value.clone(), enabled, false);
         if register != '*' {
             registers.set('"', value, enabled, false);
-            self.synced_revision = registers.generation();
+            self.synced_revision = registers.revision();
         }
     }
 }
@@ -469,7 +469,7 @@ mod tests {
         };
         let mut registers = RegisterStore::default();
         session.import(&mut registers, true, '+', "clipboard".into());
-        session.paste = Some((invocation.clone(), version.clone(), registers.generation()));
+        session.paste = Some((invocation.clone(), version.clone(), registers.revision()));
         sender.send(Some("primary".into())).unwrap();
         assert_eq!(
             session.finish_pull(&mut registers, true, &version).unwrap(),
@@ -510,7 +510,7 @@ mod tests {
         let invocation =
             CommandInvocation::new("edit.put", crate::editor::InvocationSource::Test).unwrap();
         let (mut session, sender) =
-            Clipboard::pending_read_fixture(invocation, version.clone(), registers.generation());
+            Clipboard::pending_read_fixture(invocation, version.clone(), registers.revision());
         sender.send(None).unwrap();
         assert!(session.finish_pull(&mut registers, true, &version).is_err());
         assert_eq!(registers.get('"').unwrap().text, "old");
@@ -526,7 +526,7 @@ mod tests {
         let invocation =
             CommandInvocation::new("edit.put", crate::editor::InvocationSource::Test).unwrap();
         let (mut session, sender) =
-            Clipboard::pending_read_fixture(invocation, version.clone(), registers.generation());
+            Clipboard::pending_read_fixture(invocation, version.clone(), registers.revision());
         drop(sender);
         assert!(session.finish_pull(&mut registers, true, &version).is_err());
         assert!(!session.waiting());
@@ -544,7 +544,7 @@ mod tests {
             let (mut session, sender) = Clipboard::pending_read_fixture(
                 invocation,
                 version.clone(),
-                registers.generation(),
+                registers.revision(),
             );
             let current = if changed_register {
                 registers.set('"', value("new yank"), true, false);
@@ -630,7 +630,7 @@ mod tests {
         let (mut session, sender) = Clipboard::pending_read_fixture(
             invocation.clone(),
             version.clone(),
-            registers.generation(),
+            registers.revision(),
         );
         sender.send(Some("primary".into())).unwrap();
         assert_eq!(

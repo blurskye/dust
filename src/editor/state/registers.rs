@@ -21,7 +21,7 @@ pub struct RegisterStore {
     values: HashMap<char, RegisterValue>,
     macros: HashMap<char, Vec<CommandInvocation>>,
     /// Bumped on every stored value, so the clipboard sync notices a yank cheaply.
-    generation: u64,
+    revision: u64,
 }
 
 impl RegisterStore {
@@ -73,7 +73,7 @@ impl RegisterStore {
             }
             value.text = text;
         }
-        self.generation = self.generation.wrapping_add(1);
+        self.revision = self.revision.wrapping_add(1);
         self.values.insert(lower, value.clone());
         if mirror_named_to_unnamed && name != '"' {
             self.values.insert('"', value);
@@ -81,8 +81,8 @@ impl RegisterStore {
     }
 
     #[must_use]
-    pub const fn generation(&self) -> u64 {
-        self.generation
+    pub const fn revision(&self) -> u64 {
+        self.revision
     }
 
     #[must_use]
