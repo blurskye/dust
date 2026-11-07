@@ -114,6 +114,7 @@ pub fn settings_catalog() -> &'static SettingsCatalog {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SetupCatalog {
+    pub skip_help: String,
     #[serde(rename = "page")]
     pub pages: Vec<SetupPageInfo>,
 }

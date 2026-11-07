@@ -3,6 +3,8 @@
 # `preview` names what the small editor beside the choices shows open: the layout, the
 # terminal, the agent or the leader key's shortcuts.
 
+skip_help = "s / Esc · Start editing with defaults"
+
 [[page]]
 title = "Layout"
 question = "Where should the file explorer and the AI agent go?"

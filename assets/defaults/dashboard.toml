@@ -48,7 +48,7 @@ icon = ""
 
 [[action]]
 command = "session.tutor"
-label = "Tutorial"
+label = "Tutor — learn by editing"
 icon = "\U000F0186"
 
 [[action]]

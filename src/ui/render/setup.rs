@@ -54,7 +54,7 @@ pub(super) fn render_setup(
         frame.grid.put_text_clipped(
             0,
             height / 2,
-            "Setup: make the window larger, or Esc to skip",
+            &crate::config::setup_catalog().skip_help,
             Style::Accent,
             width,
         );
@@ -101,7 +101,7 @@ pub(super) fn render_setup(
     let room = layout.width.saturating_sub(4);
     // The preview goes beside the list when both fit, and is left out otherwise.
     let preview_width = room.saturating_sub(LIST_WIDTH.0 + 3).min(PREVIEW_MAXIMUM.0);
-    let preview_height = bottom.saturating_sub(top + 8).min(PREVIEW_MAXIMUM.1);
+    let preview_height = bottom.saturating_sub(top + 10).min(PREVIEW_MAXIMUM.1);
     let show_preview = !page.preview.is_empty()
         && preview_width >= PREVIEW_MINIMUM.0
         && preview_height >= PREVIEW_MINIMUM.1;
@@ -113,7 +113,7 @@ pub(super) fn render_setup(
     let list_width = usize::from(list_right - list_x);
     let mut y = top + 5;
     for (index, choice) in page.choices.iter().enumerate() {
-        if y + 1 >= bottom - 2 {
+        if y + 1 >= bottom - 4 {
             break;
         }
         let selected = index == picked;
@@ -165,20 +165,27 @@ pub(super) fn render_setup(
 
     let last = setup.page + 1 == setup.pages.len();
     let help = format!(
-        "j/k choose · enter {} · backspace back · esc skip",
+        "j/k choose · enter {} · backspace back",
         if last { "finish" } else { "next" }
     );
-    let footer_y = bottom - 2;
+    let footer_y = bottom - 3;
     frame
         .grid
         .put_text_clipped(left + 2, footer_y, &help, Style::Muted, right - 2);
+    frame.grid.put_text_clipped(
+        left + 2,
+        bottom - 2,
+        &crate::config::setup_catalog().skip_help,
+        Style::Accent,
+        right - 2,
+    );
     if let Some((text, failed)) = status {
         let style = if *failed { Style::Error } else { Style::Accent };
         let text = ellipsized(text, usize::from(layout.width.saturating_sub(6)), ambiguous);
         let width = u16::try_from(text_width(&text, ambiguous)).unwrap_or(u16::MAX);
         frame
             .grid
-            .put_text(right.saturating_sub(2 + width), footer_y, &text, style);
+            .put_text(right.saturating_sub(2 + width), bottom - 4, &text, style);
     }
 }
 

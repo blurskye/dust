@@ -7515,6 +7515,12 @@ keys = "left"
 command = "settings.setup.back"
 
 [[keymap]]
+id = "builtin.setup.skip.s"
+context = "setup"
+keys = "s"
+command = "settings.setup.skip"
+
+[[keymap]]
 id = "builtin.setup.skip.escape"
 context = "setup"
 keys = "escape"
