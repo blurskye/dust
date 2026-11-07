@@ -2493,7 +2493,7 @@ fn go_install_preserves_non_utf8_environment_paths() {
     use std::os::unix::ffi::OsStrExt;
     use std::os::unix::fs::PermissionsExt;
     use std::sync::mpsc;
-    // A ZFS temp directory may require UTF-8 names; tmpfs accepts raw bytes.
+    // Some filesystems require UTF-8 names; Linux tmpfs accepts raw bytes.
     let directory = if cfg!(target_os = "linux") {
         tempfile::tempdir_in("/dev/shm")
     } else {

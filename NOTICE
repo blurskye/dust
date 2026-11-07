@@ -8,10 +8,6 @@ The public plugin ABI in wit/dust-plugin.wit and the SDK contract documented
 in docs/plugin-sdk.md are licensed under Apache-2.0. See
 LICENSES/Apache-2.0.txt. This notice does not relicense the Dust editor.
 
-The separately operated registry service described by project policy is
-intended to be AGPL-3.0-or-later; no registry-server implementation is
-included in this repository.
-
 Explorer icon metadata is derived from mini.icons:
 Copyright (c) 2021 Evgeni Chasnovski, licensed under the MIT License. See
 LICENSES/MIT-mini.icons.txt.

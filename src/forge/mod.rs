@@ -1041,8 +1041,8 @@ esac
         assert_eq!(remote_host("git@github.com:a/b.git"), "github.com");
         assert_eq!(remote_host("https://github.com/a/b"), "github.com");
         assert_eq!(
-            remote_host("ssh://git@forgejo.example.org/a/b.git"),
-            "forgejo.example.org"
+            remote_host("ssh://git@git.example.org/a/b.git"),
+            "git.example.org"
         );
         assert_eq!(
             remote_host("ssh://git@codeberg.org:2222/a/b"),
