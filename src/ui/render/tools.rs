@@ -469,6 +469,23 @@ pub(super) fn render_tool_menu(
         y += 1;
     }
 
+    if menu.rows.is_empty() {
+        let hint = config
+            .messages
+            .get("tool_no_matches")
+            .expect("bundled tool empty hint");
+        for line in crate::ui::render::wrap_plain_text(hint, usize::from(content_width), ambiguous)
+        {
+            if y >= top + height - 1 {
+                break;
+            }
+            frame
+                .grid
+                .put_text_clipped(content_left, y, &line, Style::Muted, right);
+            y += 1;
+        }
+    }
+
     if let Some(row) = menu.rows.get(menu.selected) {
         y = list_bottom;
         frame.grid.put_text(
@@ -479,11 +496,21 @@ pub(super) fn render_tool_menu(
         );
         y += 1;
         let (_, state_style) = tool_state_glyph(row);
+        let status = ellipsized(
+            &row.lifecycle,
+            usize::from(content_width) * 2 / 3,
+            ambiguous,
+        );
         let status_x =
-            right.saturating_sub(u16::try_from(row.lifecycle.chars().count()).unwrap_or(u16::MAX));
+            right.saturating_sub(u16::try_from(text_width(&status, ambiguous)).unwrap_or(u16::MAX));
+        let name = ellipsized(
+            &row.name,
+            usize::from(status_x.saturating_sub(content_left + 1)),
+            ambiguous,
+        );
         frame
             .grid
-            .put_text_clipped(content_left, y, &row.name, Style::Accent, status_x);
+            .put_text_clipped(content_left, y, &name, Style::Accent, status_x);
         if !row.languages.is_empty() {
             let x = content_left
                 .saturating_add(
@@ -501,7 +528,7 @@ pub(super) fn render_tool_menu(
         }
         frame
             .grid
-            .put_text(status_x, y, &row.lifecycle, state_style);
+            .put_text_clipped(status_x, y, &status, state_style, right);
         y += if short { 1 } else { 2 };
         let mut details = Vec::new();
         if row.installed {

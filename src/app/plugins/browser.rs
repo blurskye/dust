@@ -181,14 +181,19 @@ impl App {
             .into_iter()
             .take(4096)
             .map(|(id, plugin)| {
-                let mut status = status_label(
-                    self.extension.statuses().get(&id),
-                    self.plugin_disabled(&id),
-                    self.workspace.safe_mode(),
-                );
-                if let Some(error) = &plugin.error {
-                    status.push_str(&format!(" · manifest: {error}"));
-                }
+                let status = if plugin.error.is_some() && !self.plugin_disabled(&id) {
+                    "failed".into()
+                } else {
+                    status_label(
+                        self.extension.statuses().get(&id),
+                        self.plugin_disabled(&id),
+                        self.workspace.safe_mode(),
+                    )
+                };
+                // The full failure belongs in the status action, not a clipped list row.
+                let status = status
+                    .split_once(": ")
+                    .map_or(status.as_str(), |(state, _)| state);
                 row(
                     format!("plugin:{id}"),
                     format!("{id} {}", plugin.version),
@@ -284,13 +289,19 @@ impl App {
                     disabled,
                     self.workspace.safe_mode(),
                 );
+                let reason = plugin.error.filter(|error| !status.contains(error));
+                let text =
+                    reason.map_or_else(|| status.clone(), |reason| format!("{status}\n{reason}"));
                 items.push(row(
                     "status".into(),
                     self.message("plugin_browser_status", &[]),
-                    status.clone(),
+                    status
+                        .split_once(": ")
+                        .map_or(status.as_str(), |(state, _)| state)
+                        .into(),
                     PickerPayload::Notice {
                         title: format!("{id} status"),
-                        text: format!("{status}\n{}", plugin.error.unwrap_or_default()),
+                        text,
                     },
                 ));
                 self.install_picker(format!("{id} {}", plugin.version), items);
@@ -510,11 +521,27 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(2));
         }
         let item = app.search.picker().unwrap().selected_item().unwrap();
-        assert!(item.detail.contains("failed:"), "{}", item.detail);
+        assert!(item.detail.starts_with("failed ·"), "{}", item.detail);
         let Some(PluginStatus::Failed(reason)) = app.extension.statuses().get("completion") else {
             panic!("expected failed plugin")
         };
-        assert!(item.detail.contains(reason), "{}", item.detail);
+        let reason = reason.clone();
+        app.window_session.observe_size((160, 45));
+        app.accept_plugin_choice(PluginChoice::Details("completion".into()));
+        app.search.picker_insert("Status and failure reason");
+        app.accept_picker();
+        let text = app
+            .input
+            .documentation()
+            .unwrap()
+            .sections
+            .iter()
+            .flat_map(|section| &section.lines)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(text.contains(&reason), "{text}");
+        assert_eq!(text.matches(&reason).count(), 1, "{text}");
     }
 
     #[test]

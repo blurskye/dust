@@ -89,13 +89,23 @@ pub(super) fn render_setup(
             .grid
             .put_text_clipped(x, top + 1, &other.title, style, right - 2);
     }
-    frame.grid.put_text_clipped(
-        left + 2,
-        top + 3,
+    for (row, line) in crate::ui::render::wrap_plain_text(
         &page.question,
-        Style::Syntax(crate::config::Highlight::HEADING),
-        right - 2,
-    );
+        usize::from(layout.width.saturating_sub(4)),
+        ambiguous,
+    )
+    .iter()
+    .take(2)
+    .enumerate()
+    {
+        frame.grid.put_text_clipped(
+            left + 2,
+            top + 3 + row as u16,
+            line,
+            Style::Syntax(crate::config::Highlight::HEADING),
+            right - 2,
+        );
+    }
 
     let list_x = left + 2;
     let room = layout.width.saturating_sub(4);
@@ -112,7 +122,9 @@ pub(super) fn render_setup(
     };
     let list_width = usize::from(list_right - list_x);
     let mut y = top + 5;
-    for (index, choice) in page.choices.iter().enumerate() {
+    let visible = usize::from(bottom.saturating_sub(3).saturating_sub(y) / 3).max(1);
+    let first = picked.saturating_add(1).saturating_sub(visible);
+    for (index, choice) in page.choices.iter().enumerate().skip(first).take(visible) {
         if y + 1 >= bottom - 4 {
             break;
         }

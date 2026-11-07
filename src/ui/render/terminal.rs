@@ -114,6 +114,27 @@ pub(super) fn terminal_tab_label(tabs: &[TerminalTabState], tab: &TerminalTabSta
     title
 }
 
+fn fitted_terminal_tab_label(
+    terminal: &TerminalPanelState,
+    tab: &TerminalTabState,
+    config: &Config,
+    width: u16,
+) -> String {
+    let ambiguous = config.editor.ambiguous_width;
+    let count = terminal.tabs.len().clamp(1, 3);
+    let separators = text_width(TERMINAL_TAB_SEPARATOR, ambiguous) * (count - 1);
+    let available = usize::from(width.saturating_sub(1)).saturating_sub(separators) / count;
+    let label = terminal_tab_label(&terminal.tabs, tab);
+    let suffix = &label[tab.profile.len()..];
+    let room = available.saturating_sub(text_width(suffix, ambiguous));
+    let title = if tab.profile.contains('/') || tab.profile.contains('\\') {
+        crate::ui::render::overlays::truncate_content_title(&tab.profile, room, ambiguous)
+    } else {
+        crate::ui::geometry::ellipsized(&tab.profile, room, ambiguous)
+    };
+    format!("{title}{suffix}")
+}
+
 // Drop leading tabs until the active title fits, keeping earlier tabs when there is room.
 fn terminal_tab_start(terminal: &TerminalPanelState, config: &Config, width: u16) -> usize {
     let Some(active) = terminal.tabs.iter().position(|tab| tab.id == terminal.id) else {
@@ -124,7 +145,7 @@ fn terminal_tab_start(terminal: &TerminalPanelState, config: &Config, width: u16
         .iter()
         .map(|tab| {
             text_width(
-                &terminal_tab_label(&terminal.tabs, tab),
+                &fitted_terminal_tab_label(terminal, tab, config, width),
                 config.editor.ambiguous_width,
             )
         })
@@ -139,16 +160,26 @@ fn terminal_tab_start(terminal: &TerminalPanelState, config: &Config, width: u16
 }
 
 fn terminal_title_width(terminal: &TerminalPanelState, config: &Config, width: u16) -> u16 {
-    let Some(hint) = terminal
+    let hint = terminal
         .input_hint
         .as_deref()
-        .filter(|_| terminal.focused && terminal.mode == TerminalPanelMode::Input)
-    else {
-        return width;
+        .filter(|_| terminal.focused && terminal.mode == TerminalPanelMode::Input);
+    let mode = match terminal.mode {
+        TerminalPanelMode::Input => None,
+        TerminalPanelMode::Normal => Some(TERMINAL_NORMAL_LABEL),
+        TerminalPanelMode::Visual => Some(TERMINAL_VISUAL_LABEL),
     };
-    let reserved = u16::try_from(text_width(hint, config.editor.ambiguous_width))
+    let reserved = [hint, mode, terminal.truncated.then_some("output truncated")]
+        .into_iter()
+        .flatten()
+        .map(|text| text_width(text, config.editor.ambiguous_width) + 2)
+        .sum::<usize>();
+    if reserved == 0 {
+        return width;
+    }
+    let reserved = u16::try_from(reserved)
         .unwrap_or(u16::MAX)
-        .saturating_add(4);
+        .saturating_add(2);
     if width > reserved.saturating_add(8) {
         width - reserved
     } else {
@@ -177,7 +208,7 @@ pub fn terminal_tab_at_column(
                 .unwrap_or(u16::MAX),
             );
         }
-        let label = terminal_tab_label(&terminal.tabs, tab);
+        let label = fitted_terminal_tab_label(terminal, tab, config, title_width);
         let end = x
             .saturating_add(
                 u16::try_from(text_width(&label, config.editor.ambiguous_width))
@@ -271,7 +302,7 @@ pub(super) fn dock_terminal_panel(
                 title_right,
             );
         }
-        let title = terminal_tab_label(&terminal.tabs, tab);
+        let title = fitted_terminal_tab_label(terminal, tab, config, title_width);
         title_x = grid.put_text_clipped(
             title_x,
             geometry.top,

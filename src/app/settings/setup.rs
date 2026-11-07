@@ -280,6 +280,87 @@ mod tests {
     }
 
     #[test]
+    fn setup_keeps_every_choice_and_the_complete_question_visible() {
+        for (width, height) in [(80, 24), (100, 30), (160, 45)] {
+            let mut session = TestSession::new(crate::config::load_bundled_config());
+            session.resize(width, height);
+            session.application_mut().setup_action(SetupAction::Open);
+            for page in 0..6 {
+                let choices = session
+                    .application()
+                    .ui
+                    .settings
+                    .as_ref()
+                    .unwrap()
+                    .setup
+                    .as_ref()
+                    .unwrap()
+                    .pages[page]
+                    .choices
+                    .clone();
+                for (index, choice) in choices.iter().enumerate() {
+                    session
+                        .application_mut()
+                        .ui
+                        .settings
+                        .as_mut()
+                        .unwrap()
+                        .setup
+                        .as_mut()
+                        .unwrap()
+                        .picked[page] = index;
+                    let frame = session.frame();
+                    assert!(
+                        (0..height).any(|y| {
+                            frame.grid.row_text(y).contains(&choice.label)
+                                && (0..width).any(|x| {
+                                    frame.grid.get(x, y).unwrap().style
+                                        == crate::ui::Style::Selection
+                                })
+                        }),
+                        "{} missing at {width}x{height}",
+                        choice.label
+                    );
+                    let question = session
+                        .application()
+                        .ui
+                        .settings
+                        .as_ref()
+                        .unwrap()
+                        .setup
+                        .as_ref()
+                        .unwrap()
+                        .pages[page]
+                        .question
+                        .clone();
+                    let heading = (0..height)
+                        .map(|y| {
+                            (0..width)
+                                .filter_map(|x| {
+                                    let cell = frame.grid.get(x, y).unwrap();
+                                    (cell.style
+                                        == crate::ui::Style::Syntax(
+                                            crate::config::Highlight::HEADING,
+                                        ))
+                                    .then_some(cell.symbol.as_str())
+                                })
+                                .collect::<String>()
+                        })
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    assert_eq!(
+                        heading.split_whitespace().collect::<Vec<_>>().join(" "),
+                        question
+                    );
+                }
+                if page < 5 {
+                    session.key("enter");
+                }
+            }
+        }
+    }
+
+    #[test]
     fn skip_discards_answers_remembers_first_run_and_offers_the_tutor() {
         // Isolate user paths from other tests and from the developer's configuration.
         if std::env::var_os("DUST_TEST_SETUP_SKIP").is_none() {
