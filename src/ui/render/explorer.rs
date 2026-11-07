@@ -214,13 +214,22 @@ pub(super) fn render_explorer_dock(
             right_x
         };
         let mut x = 1;
-        for segment in &row.segments {
+        for (index, segment) in row.segments.iter().enumerate() {
+            let text = if index + 1 == row.segments.len() {
+                crate::ui::render::overlays::truncate_content_title(
+                    &segment.text,
+                    usize::from(main_right.saturating_sub(x)),
+                    config.editor.ambiguous_width,
+                )
+            } else {
+                segment.text.clone()
+            };
             x = grid.put_text_clipped(
                 x,
                 y,
-                &segment.text,
+                &text,
                 if row.selected {
-                    Style::ExplorerSelection
+                    Style::ExplorerSelected(segment.role)
                 } else {
                     explorer_segment_style(segment.role)
                 },
@@ -234,7 +243,7 @@ pub(super) fn render_explorer_dock(
                 y,
                 &segment.text,
                 if row.selected {
-                    Style::ExplorerSelection
+                    Style::ExplorerSelected(segment.role)
                 } else {
                     explorer_segment_style(segment.role)
                 },
@@ -243,6 +252,19 @@ pub(super) fn render_explorer_dock(
         }
     }
 
+    if explorer.rows.is_empty() && !explorer.loading && available_rows > 0 {
+        grid.put_text_clipped(
+            1,
+            body_top,
+            if explorer.query.is_empty() {
+                "Empty folder"
+            } else {
+                "No matches"
+            },
+            Style::ExplorerCount,
+            panel_width.saturating_sub(1),
+        );
+    }
     if explorer.loading && rendered_rows < available_rows {
         let y = body_top.saturating_add(u16::try_from(rendered_rows).unwrap_or(0));
         grid.put_text_clipped(
@@ -400,6 +422,14 @@ mod tests {
             true,
         );
         frame
+    }
+
+    #[test]
+    fn empty_explorer_explains_empty_folders_and_searches() {
+        for (query, hint) in [("", "Empty folder"), ("missing", "No matches")] {
+            let frame = render_search(query, AmbiguousWidth::Narrow);
+            assert!(frame.grid.row_text(3).contains(hint));
+        }
     }
 
     #[test]

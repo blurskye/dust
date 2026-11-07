@@ -170,7 +170,8 @@ fn explorer_is_a_persistent_left_dock_that_reflows_the_editor() {
     let frame = render(&state, &ui, &loaded.config, &loaded.dashboard, 100, 20);
     assert!(frame.grid.row_text(0).contains("Explorer"));
     assert!(frame.grid.row_text(3).contains("src"));
-    assert!(frame.grid.row_text(4).contains("main.rs"));
+    assert!(frame.grid.row_text(4).contains("…"));
+    assert!(frame.grid.row_text(4).contains("spill"));
     assert_eq!(
         frame.grid.get(1, 3).expect("tree segment").style,
         crate::ui::Style::ExplorerTree
@@ -193,7 +194,11 @@ fn explorer_is_a_persistent_left_dock_that_reflows_the_editor() {
     );
     assert_eq!(
         frame.grid.get(1, 4).expect("selected row").style,
-        crate::ui::Style::ExplorerSelection
+        crate::ui::Style::ExplorerSelected(crate::ui::render::ExplorerSegmentRole::Tree)
+    );
+    assert_eq!(
+        frame.grid.get(38, 4).expect("selected diagnostic").style,
+        crate::ui::Style::ExplorerSelected(crate::ui::render::ExplorerSegmentRole::Diagnostic)
     );
     assert_eq!(
         frame.grid.get(panel, 1).expect("dock separator").symbol,

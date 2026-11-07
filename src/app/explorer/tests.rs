@@ -1565,6 +1565,25 @@ fn filtered_collapsed_directories_are_watched_and_reloaded_across_views() {
 }
 
 #[test]
+fn filtering_the_same_directories_does_not_flood_the_watch_worker() {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::write(root.path().join("file.txt"), "text").unwrap();
+    let (mut owner, scope) = fixture(root.path());
+    let node = owner.tree().selected_id().unwrap();
+    owner.load(node, scope.clone(), 1, 100).unwrap();
+    drain(&mut owner, scope);
+    owner.reconcile_watch(true).unwrap();
+    let attempts = owner.watch.reconcile_count();
+    for _ in 0..100 {
+        owner.set_search("file".into());
+        owner.reconcile_watch(true).unwrap();
+        owner.stop_search(false);
+        owner.reconcile_watch(true).unwrap();
+    }
+    assert_eq!(owner.watch.reconcile_count(), attempts);
+}
+
+#[test]
 fn failed_watch_reconciliation_is_retried_without_tree_changes() {
     let root = tempfile::tempdir().unwrap();
     let dir = root.path().join("dir");
@@ -1907,6 +1926,44 @@ fn explorer_clone_rejects_foreign_exhausted_and_over_limit_sources_without_publi
         "explorer view identity exhausted"
     );
     assert!(exhausted.cloned_views.is_empty());
+}
+
+#[test]
+fn expanded_empty_folders_are_labeled_without_adding_fake_tree_rows() {
+    let root = tempfile::tempdir().unwrap();
+    let (mut owner, source) = fixture(root.path());
+    let node = owner.tree().selected_id().unwrap();
+    owner.load(node, source.clone(), 1, 100).unwrap();
+    drain(&mut owner, source);
+    let config = crate::config::load_bundled_config();
+    let body = WindowRect {
+        x: 0,
+        y: 3,
+        width: 40,
+        height: 20,
+    };
+    let projection = owner.projection(
+        &config.config.ui.explorer,
+        body,
+        &BTreeMap::new(),
+        "Files".into(),
+        "root",
+    );
+    assert_eq!(projection.rows.len(), 1);
+    assert_eq!(projection.total, 1);
+    assert_eq!(
+        projection.rows[0].segments.last().unwrap().text,
+        "root (empty)"
+    );
+    owner.toggle_loaded(node);
+    let projection = owner.projection(
+        &config.config.ui.explorer,
+        body,
+        &BTreeMap::new(),
+        "Files".into(),
+        "root",
+    );
+    assert_eq!(projection.rows[0].segments.last().unwrap().text, "root");
 }
 
 #[test]
