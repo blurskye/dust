@@ -1979,7 +1979,9 @@ fn branch_list_reports_the_real_checked_out_worktree_including_a_linked_one() {
         .expect("the local branch is listed");
     // Compared canonically: Git spells Windows paths with forward slashes.
     assert_eq!(
-        side.checked_out.as_deref().map(|path| path.canonicalize().unwrap()),
+        side.checked_out
+            .as_deref()
+            .map(|path| path.canonicalize().unwrap()),
         Some(linked.canonicalize().unwrap()),
         "the branch is attributed to the linked worktree, not the main one"
     );

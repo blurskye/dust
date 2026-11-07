@@ -35,7 +35,6 @@ pub use vfs::WriteExpectation;
 pub use vfs::atomic_write;
 pub(crate) use vfs::atomic_write_with_executable;
 pub use vfs::checked_atomic_write;
-pub(crate) use vfs::sync_directory;
 #[cfg(unix)]
 pub(crate) use vfs::directory_open_flags;
 pub(crate) use vfs::is_symlink_error;
@@ -49,6 +48,7 @@ pub(crate) use vfs::open_read_no_symlinks;
 pub(crate) use vfs::open_regular_file;
 pub use vfs::read_file;
 pub(crate) use vfs::read_file_bounded;
+pub(crate) use vfs::sync_directory;
 mod project_root;
 pub use project_root::PROJECT_ROOT_ANCESTOR_LIMIT;
 pub use project_root::PROJECT_ROOT_MARKER_LIMIT;
