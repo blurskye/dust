@@ -618,15 +618,22 @@ def main() -> None:
             [],
             [
                 (0.8, b":workspace.trust.status\r", None),
-                (0.2, b":workspace.trust\r", None),
-                (0.2, b"\x1b", None),
-                (0.3, b":workspace.trust\r", None),
-                (0.2, b"\r", None),
-                (0.5, b":q\r", None),
+                (3.0, b":workspace.trust\r", None),
+                (3.0, b"\x1b", None),
+                (3.0, b":workspace.trust\r", None),
+                (3.0, b"\r", None),
+                (3.0, b":q\r", None),
             ],
+            stage_expectations={
+                1: lambda screen: "untrusted" in screen,
+                2: lambda screen: "Do you want to trust this workspace?" in screen,
+                3: lambda screen: "not trusted" in screen,
+                4: lambda screen: "Do you want to trust this workspace?" in screen,
+                5: lambda screen: "workspace trusted" in screen,
+            },
         )
         assert code == 0, (code, output[-4000:])
-        assert "untrusted" in terminal_screen(snapshots[1])
+        assert "untrusted" in terminal_screen(snapshots[1]), terminal_screen(snapshots[1])
         trust_prompt = terminal_screen(snapshots[2])
         assert "Do you want to trust this workspace?" in trust_prompt
         assert "LSP servers" in trust_prompt
