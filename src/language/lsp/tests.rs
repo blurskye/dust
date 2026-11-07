@@ -2121,8 +2121,8 @@ send({'jsonrpc':'2.0','id':m['id'],'result':{'capabilities':{'textDocumentSync':
 pathlib.Path('pid').write_text(str(os.getpid()))
 time.sleep(30)
 "#;
-    // The process checks that read `root` are Unix-only.
-    #[cfg_attr(not(unix), allow(unused_variables))]
+    // The process checks that read `root` are Linux-only.
+    #[cfg_attr(not(target_os = "linux"), allow(unused_variables))]
     let (root, mut service, mut document) = boundary_service_with_policy(
         &script,
         LspPolicy {
@@ -2250,8 +2250,8 @@ send({'jsonrpc':'2.0','id':m['id'],'result':{'capabilities':{'hoverProvider':Tru
 pathlib.Path('pid').write_text(str(os.getpid()))
 time.sleep(30)
 "#;
-    // The process checks that read `root` are Unix-only.
-    #[cfg_attr(not(unix), allow(unused_variables))]
+    // The process checks that read `root` are Linux-only.
+    #[cfg_attr(not(target_os = "linux"), allow(unused_variables))]
     let (root, mut service, mut document) = boundary_service(&script);
     let deadline = Instant::now() + Duration::from_secs(5);
     while !matches!(service.try_event(), Some(LspEvent::Running { .. })) {

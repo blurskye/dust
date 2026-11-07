@@ -448,7 +448,9 @@ mod tests {
         let start = std::time::Instant::now();
         let result = receive_download(&receiver, &updates, &cancellations, &mut |_, _, _| {});
         assert!(result.unwrap_err().contains("cancelled"));
-        assert!(start.elapsed() < Duration::from_millis(200));
+        // A stalled download never returns, so any prompt return proves the point;
+        // timers on loaded CI machines can run hundreds of milliseconds late.
+        assert!(start.elapsed() < Duration::from_secs(2));
         cancellation.join().unwrap();
     }
 }
