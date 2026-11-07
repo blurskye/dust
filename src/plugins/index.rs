@@ -64,7 +64,7 @@ use std::thread;
 use std::time::Duration;
 use thiserror::Error;
 
-pub(super) fn index_manifest_from_store(
+pub(crate) fn index_manifest_from_store(
     store: &Path,
     manifest_relative: &Path,
     component_relative: &Path,

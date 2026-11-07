@@ -20,6 +20,7 @@ use std::sync::Arc;
 #[derive(Clone, Debug)]
 pub(in crate::app) enum PickerPayload {
     Selection(String),
+    Plugin(crate::app::plugins::browser::PluginChoice),
     /// A row whose whole text opens in a popup with this title, such as a past notice.
     Notice {
         title: String,
@@ -98,6 +99,7 @@ pub(in crate::app) struct PickerEpoch(Arc<()>);
 #[derive(Clone, Copy)]
 pub(in crate::app) enum PickerOrigin {
     General,
+    Plugins,
     PluginProvider(u64),
     WorkspaceEdit(crate::workspace::ProposalId),
     Files,
@@ -346,6 +348,13 @@ pub(in crate::app) mod commands;
 pub(in crate::app) mod replacement;
 
 impl Search {
+    pub(in crate::app) fn plugin_browser_open(&self) -> bool {
+        self.picker
+            .interaction
+            .as_ref()
+            .is_some_and(|picker| matches!(picker.origin, PickerOrigin::Plugins))
+    }
+
     pub(in crate::app) fn install_picker(
         &mut self,
         content: PickerContent,
@@ -362,7 +371,8 @@ impl Search {
         let same_interaction = |picker: &PickerInteraction| {
             let same_origin = match (picker.origin, content.origin) {
                 (PickerOrigin::Files, PickerOrigin::Files)
-                | (PickerOrigin::Grep, PickerOrigin::Grep) => true,
+                | (PickerOrigin::Grep, PickerOrigin::Grep)
+                | (PickerOrigin::Plugins, PickerOrigin::Plugins) => true,
                 (PickerOrigin::PluginProvider(a), PickerOrigin::PluginProvider(b)) => a == b,
                 _ => false,
             };
@@ -412,7 +422,7 @@ impl Search {
             epoch = previous.epoch.clone();
             if matches!(
                 content.origin,
-                PickerOrigin::Files | PickerOrigin::PluginProvider(_)
+                PickerOrigin::Files | PickerOrigin::PluginProvider(_) | PickerOrigin::Plugins
             ) {
                 query = previous_query.to_owned();
             }
@@ -544,6 +554,7 @@ impl Search {
             picker.source != (scope, configuration)
                 || match picker.origin {
                     PickerOrigin::General
+                    | PickerOrigin::Plugins
                     | PickerOrigin::WorkspaceEdit(_)
                     | PickerOrigin::PluginProvider(_) => false,
                     PickerOrigin::Files => self.file_scope.is_none(),
@@ -1854,6 +1865,7 @@ impl App {
         self.close_picker();
         match payload {
             Some(PickerPayload::Theme(_)) => {}
+            Some(PickerPayload::Plugin(choice)) => self.accept_plugin_choice(choice),
             Some(PickerPayload::WorkspaceSearch(_)) => {
                 if let Some(found) = search_match {
                     self.navigate_workspace_search_match(found);
