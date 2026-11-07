@@ -8,34 +8,30 @@ metadata**, not directly installable components.
 
 ## Build and package
 
-From the repository root, on the build server:
+From the repository root, in the guest shell (it provides the Wasm target):
 
 ```sh
-nix develop .#guest -c sh -c '
-  set -eu
-  for name in autopairs surround oil completion wrappers mode; do
-    (cd examples/plugins/$name && cargo build --locked --offline --release --target wasm32-unknown-unknown)
-    cp "$CARGO_TARGET_DIR/wasm32-unknown-unknown/release/dust_example_$name.wasm" examples/plugins/$name/guest.core.wasm
-  done
-  tar cf guests.tar examples/plugins'
+nix develop .#guest
+for name in autopairs surround oil completion wrappers mode; do
+  (cd examples/plugins/$name &&
+    cargo build --locked --release --target wasm32-unknown-unknown &&
+    cp target/wasm32-unknown-unknown/release/dust_example_$name.wasm guest.core.wasm)
+done
 ```
 
-Fetch and copy the six core modules back with `builder fetch JOB DIRECTORY`.
 Then package them with the repository's existing component encoder:
 
 ```sh
-nix develop -c sh -c '
-  cargo run --locked --example plugin_pack -- packaged-plugins &&
-  tar cf plugins.tar packaged-plugins'
+cargo run --locked --example plugin_pack -- packaged-plugins
 ```
 
-Fetch and unpack `plugins.tar` into a directory you control. The packer creates
+`packaged-plugins/` then holds one installable folder per example. The packer creates
 fresh manifests with the component digests; the all-zero digests beside the
 sources are templates, not valid installed manifests.
 
 ## Install
 
-In your Dust `config.toml`, select the absolute directory containing the unpacked
+In your Dust `config.toml`, select the absolute directory containing the packaged
 plugin folders, and enable only the examples you want:
 
 ```toml
@@ -73,5 +69,5 @@ scripts/ui-shot scripts/ui-scenarios/plugin-completion.keys \
   --binary scripts/ui-scenarios/plugin-launch --cwd target/plugin-demo
 ```
 
-Use a Dust binary built from this checkout. Change `completion` to another example
+Build the editor first with `cargo build`. Change `completion` to another example
 and choose a new empty working directory for each run.
