@@ -501,10 +501,7 @@ impl Documents {
                 let current = view.ok_or_else(stale)?;
                 if current.id != version.id
                     || current.path != version.path.as_deref()
-                    || !current
-                        .text
-                        .source_version()
-                        .same_instance(&version.text)
+                    || !current.text.source_version().same_instance(&version.text)
                     || current.virtual_read_only
                 {
                     return Err(stale());

@@ -3984,14 +3984,7 @@ fn health_virtual_dogfood_opens_refreshes_and_remains_read_only() {
         std::collections::BTreeSet::from(["builtin.health:builtin.health.virtual:health".into()])
     );
     let encoded = serde_json::to_value(descriptor).expect("virtual descriptor JSON");
-    for forbidden in [
-        "load_id",
-        "load",
-        "revision",
-        "callback",
-        "cells",
-        "text",
-    ] {
+    for forbidden in ["load_id", "load", "revision", "callback", "cells", "text"] {
         assert!(encoded.get(forbidden).is_none(), "serialized {forbidden}");
     }
     app.report_unavailable_persisted_content(&persisted);

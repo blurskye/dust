@@ -1796,8 +1796,10 @@ impl App {
             reply,
         } = owned;
         if !self.language.owns_event_context(&context) {
-            self.language
-                .reject_reply(reply, "requesting language-server session is no longer current".into());
+            self.language.reject_reply(
+                reply,
+                "requesting language-server session is no longer current".into(),
+            );
             return;
         }
         match event {

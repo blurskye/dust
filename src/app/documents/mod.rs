@@ -1935,9 +1935,7 @@ impl App {
             .get(pending.buffer)
             .is_some_and(|buffer| {
                 buffer.path == pending.path
-                    && pending
-                        .source
-                        .same_instance(&buffer.text.source_version())
+                    && pending.source.same_instance(&buffer.text.source_version())
             })
         {
             if self

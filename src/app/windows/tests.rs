@@ -2648,9 +2648,7 @@ fn plugin_drafts_cannot_write_editor_resources_foreign_loads_tabs_or_protected_l
     let pending = windows
         .begin_plugin("demo", 1, (&state.window_version(), &catalog))
         .unwrap();
-    windows
-        .remove_plugin_load("demo", 1, &mut state)
-        .unwrap();
+    windows.remove_plugin_load("demo", 1, &mut state).unwrap();
     assert!(windows.graph().window(window).is_none());
     assert!(
         windows

@@ -1077,7 +1077,10 @@ impl App {
                 let navigation = self
                     .window_session
                     .navigation_stamp(self.state.window_version(), self.state.active_view());
-                if !self.explorer.track_open_request(request.ticket, id, navigation) {
+                if !self
+                    .explorer
+                    .track_open_request(request.ticket, id, navigation)
+                {
                     self.documents.cancel_request(id);
                 }
             }

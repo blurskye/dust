@@ -393,10 +393,7 @@ fn opening_beside_a_kept_pane_propagates_split_failure_without_replacing_it() {
         ),
         Err("layout pane limit reached")
     );
-    assert_eq!(
-        state.show_buffer(hidden),
-        Err("layout pane limit reached")
-    );
+    assert_eq!(state.show_buffer(hidden), Err("layout pane limit reached"));
     assert_eq!(state.active_view(), active);
     assert_eq!(state.active_buffer_id(), Some(kept));
     assert_eq!(state.window_version(), before);

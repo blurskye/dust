@@ -541,11 +541,8 @@ mod tests {
             registers.set('"', value("before"), true, false);
             let invocation =
                 CommandInvocation::new("edit.put", crate::editor::InvocationSource::Test).unwrap();
-            let (mut session, sender) = Clipboard::pending_read_fixture(
-                invocation,
-                version.clone(),
-                registers.revision(),
-            );
+            let (mut session, sender) =
+                Clipboard::pending_read_fixture(invocation, version.clone(), registers.revision());
             let current = if changed_register {
                 registers.set('"', value("new yank"), true, false);
                 version
