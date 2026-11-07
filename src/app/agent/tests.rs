@@ -661,7 +661,11 @@ fn agent_resume_reuses_tabs_and_reports_unreadable_history() {
         conversation.clone(),
         Vec::new(),
     );
-    history::flush(std::time::Instant::now() + std::time::Duration::from_secs(5)).unwrap();
+    history::flush(
+        &app.agent.directory,
+        std::time::Instant::now() + std::time::Duration::from_secs(5),
+    )
+    .unwrap();
     app.agent.sessions.clear();
     let index = app.reopen_conversation(&conversation.id).unwrap();
     assert_eq!(app.agent.sessions[index].history, conversation.id);

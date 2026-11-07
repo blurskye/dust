@@ -168,7 +168,7 @@ impl Writer {
         std::mem::take(&mut lock.lock().unwrap().notices)
     }
 
-    fn flush(&self, deadline: Instant) -> Result<(), String> {
+    fn flush(&self, directory: &Path, deadline: Instant) -> Result<(), String> {
         let (lock, ready) = &*self.0;
         let mut saves = lock.lock().unwrap();
         while saves.writing || !saves.pending.is_empty() {
@@ -177,8 +177,12 @@ impl Writer {
             };
             saves = ready.wait_timeout(saves, remaining).unwrap().0;
         }
-        match saves.failures.values().next() {
-            Some(error) => Err(error.clone()),
+        match saves
+            .failures
+            .iter()
+            .find(|(target, _)| target.parent() == Some(directory))
+        {
+            Some((_, error)) => Err(error.clone()),
             None => Ok(()),
         }
     }
@@ -193,9 +197,12 @@ pub fn save(directory: PathBuf, conversation: Conversation, entries: Vec<Entry>)
         .save(directory, conversation, entries);
 }
 
-/// Finish pending history writes within the editor's shared shutdown budget.
-pub fn flush(deadline: Instant) -> Result<(), String> {
-    WRITER.get().map_or(Ok(()), |writer| writer.flush(deadline))
+/// Finish pending history writes within the editor's shared shutdown budget, and report a
+/// failed save in `directory`. The writer is shared, so failures elsewhere are not this editor's.
+pub fn flush(directory: &Path, deadline: Instant) -> Result<(), String> {
+    WRITER
+        .get()
+        .map_or(Ok(()), |writer| writer.flush(directory, deadline))
 }
 
 /// New write failures for the session's notifications; failed saves still fail `flush`.
@@ -368,7 +375,7 @@ mod tests {
         let writer = Writer::new();
         writer.save(blocked.clone(), conversation.clone(), entries.clone());
         let error = writer
-            .flush(Instant::now() + std::time::Duration::from_secs(5))
+            .flush(&blocked, Instant::now() + std::time::Duration::from_secs(5))
             .unwrap_err();
         assert!(error.contains("could not save agent history"));
         assert!(error.contains("blocked"));
@@ -377,11 +384,12 @@ mod tests {
             std::slice::from_ref(&error)
         );
         assert!(writer.take_errors().is_empty());
-        assert_eq!(writer.flush(Instant::now()), Err(error));
+        assert_eq!(writer.flush(&blocked, Instant::now()), Err(error));
+        assert_eq!(writer.flush(directory.path(), Instant::now()), Ok(()));
         fs::remove_file(&blocked).unwrap();
         writer.save(blocked.clone(), conversation.clone(), entries.clone());
         writer
-            .flush(Instant::now() + std::time::Duration::from_secs(5))
+            .flush(&blocked, Instant::now() + std::time::Duration::from_secs(5))
             .unwrap();
         assert_eq!(load(&blocked, "failed"), Some((conversation, entries)));
     }
@@ -405,7 +413,10 @@ mod tests {
             entries.clone(),
         );
         writer
-            .flush(Instant::now() + std::time::Duration::from_secs(5))
+            .flush(
+                directory.path(),
+                Instant::now() + std::time::Duration::from_secs(5),
+            )
             .unwrap();
         writer.save(
             directory.path().into(),
@@ -413,7 +424,10 @@ mod tests {
             vec![Entry::Agent("x".repeat(FILE_BYTE_LIMIT as usize))],
         );
         let error = writer
-            .flush(Instant::now() + std::time::Duration::from_secs(10))
+            .flush(
+                directory.path(),
+                Instant::now() + std::time::Duration::from_secs(10),
+            )
             .unwrap_err();
         assert!(error.contains("conversation exceeds its size limit"));
         assert_eq!(
@@ -424,7 +438,10 @@ mod tests {
         oversized_header.title = "x".repeat(HEADER_BYTE_LIMIT as usize);
         writer.save(directory.path().into(), oversized_header, entries.clone());
         let error = writer
-            .flush(Instant::now() + std::time::Duration::from_secs(5))
+            .flush(
+                directory.path(),
+                Instant::now() + std::time::Duration::from_secs(5),
+            )
             .unwrap_err();
         assert!(error.contains("header exceeds its size limit"));
         assert_eq!(
@@ -469,7 +486,10 @@ mod tests {
             entries.clone(),
         );
         writer
-            .flush(Instant::now() + std::time::Duration::from_secs(5))
+            .flush(
+                directory.path(),
+                Instant::now() + std::time::Duration::from_secs(5),
+            )
             .unwrap();
         assert_eq!(
             load(directory.path(), "ordered"),

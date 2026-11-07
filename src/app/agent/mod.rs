@@ -1795,7 +1795,7 @@ impl App {
         for index in 0..self.agent.sessions.len() {
             self.save_agent_history(index);
         }
-        history::flush(deadline)
+        history::flush(&self.agent.directory, deadline)
     }
 
     /// Put a saved conversation in a tab, or show the tab it is already in.
