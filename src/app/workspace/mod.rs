@@ -1280,6 +1280,15 @@ impl App {
 impl App {
     /// Run a project-defined command if the workspace is trusted.
     pub(in crate::app) fn run_trusted(&mut self, action: TrustedAction) {
+        let access = match &action {
+            TrustedAction::InstallRegistry { .. }
+            | TrustedAction::PrepareRegistryArtifact
+            | TrustedAction::InstallPackage { .. } => crate::editor::CommandAccess::HostOnly,
+            _ => crate::editor::CommandAccess::Process,
+        };
+        if !self.require_effect_access(access) {
+            return;
+        }
         if let Err(failure) = self.workspace.execution_allowed() {
             self.show_workspace_failure(failure);
             return;

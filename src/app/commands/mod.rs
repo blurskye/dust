@@ -35,6 +35,10 @@ pub enum SyntaxFoldAction {
 
 #[derive(Clone, Debug)]
 pub enum AppEffect {
+    Authorized {
+        authority: CommandAuthority,
+        effect: Box<AppEffect>,
+    },
     CommandResume {
         pending: PendingCommandId,
         owner: String,
@@ -844,6 +848,15 @@ where
     let mut spec = CommandSpec::builtin(id, title)?;
     spec.context = context;
     spec.arguments = arguments;
+    use crate::editor::CommandAccess;
+    spec.access = [match id {
+        "file.save" | "file.save_all" => CommandAccess::Files,
+        "terminal.open" | "task.run" | "format.run" | "lint.run" | "test.run" => {
+            CommandAccess::Process
+        }
+        _ => CommandAccess::HostOnly,
+    }]
+    .into();
     registry.register(spec, move |_, invocation| {
         let effect = effect(invocation).into_effect_result()?;
         let mut outcome = CommandOutcome::empty();
@@ -970,6 +983,45 @@ impl App {
 
 impl App {
     pub(in crate::app) fn process_effect_checked(&mut self, effect: AppEffect) -> bool {
+        if let AppEffect::Authorized { authority, effect } = effect {
+            let authority = self.effect_authority.restrict(&authority);
+            let previous = std::mem::replace(&mut self.effect_authority, authority);
+            let failed = std::mem::replace(&mut self.effect_failed, false);
+            let succeeded = self.process_effect_checked(*effect) && !self.effect_failed;
+            self.effect_failed = failed;
+            self.effect_authority = previous;
+            return succeeded;
+        }
+        // Only effects whose owners preserve authority may cross this boundary. Other
+        // features remain host-only until their asynchronous requests carry it too.
+        use crate::editor::CommandAccess;
+        let access = match &effect {
+            AppEffect::Save {
+                quit_after: false, ..
+            }
+            | AppEffect::SaveAll { quit_after: false }
+            | AppEffect::TerminalOpen(..)
+            | AppEffect::TaskRun(..)
+            | AppEffect::FormatRun(..)
+            | AppEffect::LintRun(..)
+            | AppEffect::TestRun(..) => None, // Checked by the final write or run_trusted.
+            AppEffect::Input(
+                crate::app::input::InputCommand::EnterMode(..)
+                | crate::app::input::InputCommand::LeaveMode
+                | crate::app::input::InputCommand::PushLayer(..)
+                | crate::app::input::InputCommand::PopLayer,
+            ) => Some(CommandAccess::Ui),
+            AppEffect::Input(crate::app::input::InputCommand::Wait(..)) => None,
+            AppEffect::NotificationDismiss | AppEffect::NotificationHistory => {
+                Some(CommandAccess::Ui)
+            }
+            _ => Some(CommandAccess::HostOnly),
+        };
+        if let Some(access) = access
+            && !self.require_effect_access(access)
+        {
+            return false;
+        }
         let effect = match effect {
             AppEffect::SearchRepeat { reverse, count } => {
                 return self.perform_search(self.input.search_direction(reverse), count);
@@ -1001,6 +1053,7 @@ impl App {
             return true;
         }
         let result = match effect {
+            AppEffect::Authorized { .. } => unreachable!("authority handled above"),
             AppEffect::CommandResume {
                 pending,
                 owner,
@@ -1329,10 +1382,11 @@ impl App {
     }
 }
 
+#[derive(Clone)]
 pub(in crate::app) struct PendingInvocation {
-    invocation: CommandInvocation,
-    repeat_override: Option<CommandInvocation>,
-    suppress_repeat: bool,
+    pub(in crate::app) invocation: CommandInvocation,
+    pub(in crate::app) repeat_override: Option<CommandInvocation>,
+    pub(in crate::app) suppress_repeat: bool,
 }
 
 impl App {
@@ -1353,6 +1407,7 @@ impl App {
         mut invocation: CommandInvocation,
         authority: CommandAuthority,
     ) -> bool {
+        let authority = self.effect_authority.restrict(&authority);
         // Keys typed while a command is pending wait for it; only host input is held,
         // because a held invocation is replayed without the caller's grants.
         if authority == CommandAuthority::Host && self.input.hold_invocation(&invocation) {
@@ -1494,12 +1549,31 @@ impl App {
             self.show_error(CommandError::WrongWrapper);
             return false;
         }
-        let Some(invocation) = self.pending_commands.remove(&pending) else {
+        let Some(invocation) = self.input.pending_invocation(pending) else {
             self.commands.cancel(pending);
             self.show_error(CommandError::UnknownPending);
             return false;
         };
-        self.finish_command(invocation, outcome)
+        let still_pending = outcome
+            .as_ref()
+            .is_ok_and(|outcome| outcome.pending.is_some());
+        let succeeded = self.finish_command(invocation, outcome);
+        if !still_pending || !succeeded {
+            self.complete_input_command(pending, succeeded, false);
+        }
+        succeeded
+    }
+
+    pub(in crate::app) fn require_effect_access(
+        &mut self,
+        access: crate::editor::CommandAccess,
+    ) -> bool {
+        if let Err(error) = self.effect_authority.require(access) {
+            self.effect_failed = true;
+            self.show_error(error);
+            return false;
+        }
+        true
     }
 
     fn finish_command(
@@ -1514,21 +1588,8 @@ impl App {
         } = invocation;
         match outcome {
             Ok(outcome) => {
-                // Feature effects still use the 0.2 host-only ABI. Until those owners carry
-                // grants to the final operation, restricted calls may only return editor work.
-                if outcome.authority != CommandAuthority::Host
-                    && (!outcome.effects.is_empty() || !outcome.follow_up.is_empty())
-                {
-                    if let Some(pending) = outcome.pending {
-                        self.commands.cancel(pending);
-                    }
-                    self.show_error("application effects require host authority");
-                    return false;
-                }
                 if let Some(pending) = outcome.pending {
-                    self.pending_commands
-                        .retain(|id, _| self.commands.is_pending(*id));
-                    self.pending_commands.insert(
+                    self.input.suspend_command(
                         pending,
                         PendingInvocation {
                             invocation,
@@ -1537,9 +1598,12 @@ impl App {
                         },
                     );
                     for effect in outcome.effects {
-                        if !self.process_effect_checked(effect) {
-                            self.pending_commands.remove(&pending);
+                        if !self.process_effect_checked(AppEffect::Authorized {
+                            authority: outcome.authority.clone(),
+                            effect: Box::new(effect),
+                        }) {
                             self.commands.cancel(pending);
+                            self.complete_input_command(pending, false, false);
                             return false;
                         }
                     }
@@ -1552,6 +1616,13 @@ impl App {
                         .map(|buffer| buffer.text.source_version())
                 });
                 if let Some(mut transaction) = outcome.transaction {
+                    if let Err(error) = outcome
+                        .authority
+                        .require(crate::editor::CommandAccess::Edit)
+                    {
+                        self.show_error(error);
+                        return false;
+                    }
                     self.persistence.reconcile_marks(&self.state);
                     let source = self.state.window_version();
                     let snippet_document = self.input.snippet_buffer().and_then(|id| {
@@ -1600,20 +1671,46 @@ impl App {
                 if text_changed {
                     self.push_change_location();
                 }
-                self.input.record_command_outcome(
+                // Submitting the command prompt closes it and invokes the semantic command.
+                // Do not record its UI keystroke as a second macro step after it closes.
+                let command_prompt = invocation.id.as_str().starts_with("command_line.")
+                    && self
+                        .input
+                        .prompt()
+                        .is_some_and(|prompt| prompt.kind == PromptKind::Command);
+                // Establish the hold before effects can complete synchronously, but do not
+                // record a command whose final operation is refused.
+                let waiting = self.input.wait_for_effects(
                     &invocation,
                     repeat_override.as_ref(),
                     suppress_repeat,
                     text_changed,
                     &outcome.effects,
                 );
-                self.tutor_observe(&invocation);
                 for effect in outcome.effects {
-                    if !self.process_effect_checked(effect) {
+                    if !self.process_effect_checked(AppEffect::Authorized {
+                        authority: outcome.authority.clone(),
+                        effect: Box::new(effect),
+                    }) {
                         self.fail_pending_input_command();
                         return false;
                     }
                 }
+                for follow_up in outcome.follow_up {
+                    if !self.invoke_with_authority(follow_up, outcome.authority.clone()) {
+                        self.fail_pending_input_command();
+                        return false;
+                    }
+                }
+                if !waiting && !command_prompt {
+                    self.input.record_command_outcome(
+                        &invocation,
+                        repeat_override.as_ref(),
+                        suppress_repeat,
+                        text_changed,
+                    );
+                }
+                self.tutor_observe(&invocation);
                 self.sync_flash_ui();
                 true
             }
@@ -1666,7 +1763,7 @@ mod tests {
             .unwrap();
         assert!(app.invoke_checked(invocation.clone()));
         assert_eq!(app.state.buffers[buffer].text.to_string(), "");
-        let pending = *app.pending_commands.keys().next().unwrap();
+        let pending = app.input.pending_wrapper().unwrap();
         assert!(
             !app.process_effect_checked(super::AppEffect::CommandResume {
                 pending,
@@ -1674,14 +1771,14 @@ mod tests {
                 action: Box::new(CommandWrapperAction::CallNext(invocation.clone())),
             })
         );
-        assert!(app.pending_commands.contains_key(&pending));
+        assert_eq!(app.input.pending_wrapper(), Some(pending));
         assert!(app.process_effect_checked(super::AppEffect::CommandResume {
             pending,
             owner: "example".into(),
             action: Box::new(CommandWrapperAction::CallNext(invocation)),
         }));
         assert_eq!(app.state.buffers[buffer].text.to_string(), "wrapped");
-        assert!(app.pending_commands.is_empty());
+        assert!(!app.input.command_pending());
     }
 
     #[test]
@@ -1716,6 +1813,136 @@ mod tests {
         assert!(!app.invoke_checked(invocation));
         assert!(!app.should_quit);
         assert_eq!(app.state.buffers[buffer].text.to_string(), "");
+    }
+
+    #[test]
+    fn plugin_deadline_does_not_unregister_commands_or_unload_the_plugin() {
+        use crate::editor::{
+            CommandInvocation, CommandOutcome, CommandSource, CommandSpec, InvocationSource,
+        };
+        let (_dirs, mut app) = crate::app::tests::app();
+        let (manager, fixture) = crate::plugins::ExecutionFixture::new(4);
+        app.extension.fixture_manager(manager);
+        let mut spec = CommandSpec::builtin("plugin.demo.run", "Demo").unwrap();
+        spec.source = CommandSource::Plugin("demo".into());
+        app.commands
+            .register(spec, |_, _| Ok(CommandOutcome::empty()))
+            .unwrap();
+        fixture.command_failed(
+            "demo",
+            crate::plugins::PluginLoadId(1),
+            crate::plugins::PluginError::Deadline,
+        );
+        app.process_plugin_events();
+        assert!(
+            app.extension
+                .is_active_load("demo", crate::plugins::PluginLoadId(1))
+        );
+        assert!(app.invoke_checked(
+            CommandInvocation::new("plugin.demo.run", InvocationSource::Test).unwrap()
+        ));
+    }
+
+    #[test]
+    fn plugin_effect_is_refused_at_the_final_write_not_just_command_dispatch() {
+        use crate::editor::{
+            CommandAccess, CommandAuthority, CommandInvocation, CommandOutcome, CommandSource,
+            CommandSpec, InvocationSource,
+        };
+        let (_dirs, mut app) = crate::app::tests::app();
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("output.txt");
+        app.state
+            .open_text(
+                crate::editor::text::TextBuffer::from_text("plugin text"),
+                None,
+            )
+            .unwrap();
+        let mut spec = CommandSpec::builtin("plugin.writer.save", "Write").unwrap();
+        spec.source = CommandSource::Plugin("writer".into());
+        spec.access = [CommandAccess::Edit].into();
+        let destination = path.clone();
+        app.commands
+            .register(spec, move |_, _| {
+                Ok(CommandOutcome {
+                    effects: vec![super::AppEffect::Save {
+                        quit_after: false,
+                        path: Some(destination.clone()),
+                        force: false,
+                    }],
+                    ..CommandOutcome::empty()
+                })
+            })
+            .unwrap();
+        let invocation =
+            CommandInvocation::new("plugin.writer.save", InvocationSource::Plugin).unwrap();
+        let authority = CommandAuthority::Plugin {
+            initiator: "writer".into(),
+            grants: [CommandAccess::Edit].into(),
+        };
+        assert!(
+            app.commands
+                .check_access(&invocation.id, &authority)
+                .is_ok()
+        );
+        assert!(!app.invoke_with_authority(invocation.clone(), authority));
+        assert!(!path.exists());
+        assert!(!app.documents.file_work_pending());
+        let authority = CommandAuthority::Plugin {
+            initiator: "writer".into(),
+            grants: [CommandAccess::Edit, CommandAccess::Files].into(),
+        };
+        assert!(app.invoke_with_authority(invocation, authority));
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while app.documents.file_work_pending() {
+            app.process_vfs_results();
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert_eq!(std::fs::read_to_string(path).unwrap(), "plugin text");
+    }
+
+    #[test]
+    fn delegated_effect_cannot_widen_the_initiators_file_or_process_grants() {
+        use crate::editor::{CommandAccess, CommandAuthority};
+        let (_dirs, mut app) = crate::app::tests::app();
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("output.txt");
+        app.state
+            .open_text(crate::editor::text::TextBuffer::from_text("no"), None)
+            .unwrap();
+        let caller = CommandAuthority::Plugin {
+            initiator: "caller".into(),
+            grants: [CommandAccess::Edit].into(),
+        };
+        let delegate = CommandAuthority::Plugin {
+            initiator: "delegate".into(),
+            grants: [
+                CommandAccess::Edit,
+                CommandAccess::Files,
+                CommandAccess::Process,
+            ]
+            .into(),
+        };
+        for effect in [
+            super::AppEffect::Save {
+                quit_after: false,
+                path: Some(path.clone()),
+                force: false,
+            },
+            super::AppEffect::TerminalOpen(None),
+        ] {
+            assert!(!app.process_effect_checked(super::AppEffect::Authorized {
+                authority: caller.clone(),
+                effect: Box::new(super::AppEffect::Authorized {
+                    authority: delegate.clone(),
+                    effect: Box::new(effect)
+                }),
+            }));
+        }
+        assert!(!path.exists());
+        assert!(!app.documents.file_work_pending());
+        assert_eq!(app.effect_authority, CommandAuthority::Host);
     }
 
     #[test]

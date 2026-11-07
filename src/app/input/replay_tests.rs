@@ -9,10 +9,6 @@ fn pending_session() -> crate::app::tests::driver::TestSession {
     use crate::app::commands::AppEffect;
     use crate::app::input::InputCommand;
     use crate::editor::{CommandOutcome, CommandSpec};
-    use std::sync::{
-        Arc,
-        atomic::{AtomicU64, Ordering},
-    };
     let mut session =
         crate::app::tests::driver::TestSession::new(crate::config::load_bundled_config());
     session.new_buffer();
@@ -22,14 +18,13 @@ fn pending_session() -> crate::app::tests::driver::TestSession {
     app.invoke(CommandInvocation::new("mode.normal", InvocationSource::Test).unwrap());
     let view = app.state.active_view().unwrap();
     app.state.views[view].cursor = crate::editor::text::ByteOffset(0);
-    let ids = Arc::new(AtomicU64::new(1));
     app.commands
         .register(
             CommandSpec::builtin("test.pending_edit", "Pending edit").unwrap(),
             move |_, _| {
                 let mut outcome = CommandOutcome::empty();
                 outcome.effects.push(AppEffect::Input(InputCommand::Wait(
-                    ids.fetch_add(1, Ordering::Relaxed),
+                    crate::editor::PendingCommandId::allocate()?,
                 )));
                 Ok(outcome)
             },
@@ -44,7 +39,8 @@ fn pending_session() -> crate::app::tests::driver::TestSession {
     session
 }
 
-fn complete_edit(app: &mut crate::app::App, id: u64) {
+fn complete_edit(app: &mut crate::app::App) {
+    let id = app.input.pending_command.as_ref().unwrap().id;
     let delete = CommandInvocation::new("edit.delete_char", InvocationSource::Test).unwrap();
     let outcome = app.commands.execute(&app.state, &delete).unwrap();
     app.apply_authoritative_editor_transaction(outcome.transaction.as_ref().unwrap())
@@ -75,9 +71,13 @@ fn pending_command_holds_keys_and_replays_them_in_order_after_completion() {
     keys(app, &["x", "i", "1", "2", "escape"]);
     assert!(app.input.command_pending());
     assert_eq!(app.state.buffers[buffer].text.to_string(), "abcdef");
-    app.complete_input_command(999, true, true);
+    app.complete_input_command(
+        crate::editor::PendingCommandId::allocate().unwrap(),
+        true,
+        true,
+    );
     assert!(app.input.command_pending());
-    complete_edit(app, 1);
+    complete_edit(app);
     assert!(!app.input.command_pending());
     assert_eq!(app.state.buffers[buffer].text.to_string(), "12bcdef");
     assert_eq!(
@@ -93,7 +93,7 @@ fn dot_records_the_completed_pending_command_and_waits_again_when_replayed() {
     let before = app.input.repeat_plan(100, None).unwrap();
     keys(app, &["x", ".", "l"]);
     assert_eq!(app.input.repeat_plan(100, None).unwrap(), before);
-    complete_edit(app, 1);
+    complete_edit(app);
     let plan = app.input.repeat_plan(100, None).unwrap();
     assert_eq!(plan.len(), 1);
     assert_eq!(plan[0].id.as_str(), "test.pending_edit");
@@ -104,7 +104,7 @@ fn dot_records_the_completed_pending_command_and_waits_again_when_replayed() {
             .get(),
         0
     );
-    complete_edit(app, 2);
+    complete_edit(app);
     assert!(!app.input.command_pending());
     assert_eq!(
         app.state.views[app.state.active_view().unwrap()]
@@ -126,7 +126,7 @@ fn macro_records_completion_and_pauses_its_remaining_steps_during_replay() {
     let app = &mut session.application;
     keys(app, &["q", "a", "x", "l", "q"]);
     assert!(app.input.recording_macro.as_ref().unwrap().1.is_empty());
-    complete_edit(app, 1);
+    complete_edit(app);
     let recorded = app.state.registers.get_macro('a').unwrap();
     assert_eq!(recorded.len(), 2);
     assert_eq!(recorded[0].id.as_str(), "test.pending_edit");
@@ -140,7 +140,7 @@ fn macro_records_completion_and_pauses_its_remaining_steps_during_replay() {
             .get(),
         1
     );
-    complete_edit(app, 2);
+    complete_edit(app);
     assert_eq!(app.input.replay_depth(), 0);
     assert_eq!(
         app.state.views[app.state.active_view().unwrap()]
@@ -162,12 +162,161 @@ fn failed_pending_command_is_not_recorded_and_releases_later_keys() {
     let app = &mut session.application;
     let before = app.input.repeat_plan(100, None).unwrap();
     keys(app, &["q", "a", "x", "l", "q"]);
-    app.complete_input_command(1, false, false);
+    let id = app.input.pending_command.as_ref().unwrap().id;
+    app.complete_input_command(id, false, false);
     assert!(!app.input.command_pending());
     assert_eq!(app.input.repeat_plan(100, None).unwrap(), before);
     let recorded = app.state.registers.get_macro('a').unwrap();
     assert_eq!(recorded.len(), 1);
     assert_eq!(recorded[0].id.as_str(), "view.cursor.move");
+}
+
+fn wrapped_session() -> crate::app::tests::driver::TestSession {
+    use crate::editor::{CommandAuthority, CommandWrapperAction};
+    let mut session = pending_session();
+    let app = &mut session.application;
+    let id = crate::editor::CommandId::new("edit.delete_char").unwrap();
+    app.commands
+        .register_wrapper(
+            &id,
+            "wrapper".into(),
+            0,
+            CommandAuthority::Host,
+            |_, _, _, result| {
+                Ok(match result {
+                    None => CommandWrapperAction::Pending(vec![]),
+                    Some(result) => CommandWrapperAction::Complete(result),
+                })
+            },
+        )
+        .unwrap();
+    let mut layer = crate::editor::input::Keymap::default();
+    layer.insert(
+        &[crate::editor::input::KeyEvent::character('x')],
+        CommandInvocation::new("edit.delete_char", InvocationSource::Keymap).unwrap(),
+    );
+    app.process_effect(crate::app::commands::AppEffect::Input(
+        crate::app::input::InputCommand::PushLayer(Box::new(layer)),
+    ));
+    session
+}
+
+fn resume_wrapper(app: &mut crate::app::App) -> bool {
+    let pending = app.input.pending_wrapper().unwrap();
+    let invocation = app.input.pending_invocation(pending).unwrap().invocation;
+    app.process_effect_checked(crate::app::commands::AppEffect::CommandResume {
+        pending,
+        owner: "wrapper".into(),
+        action: Box::new(crate::editor::CommandWrapperAction::CallNext(invocation)),
+    })
+}
+
+#[test]
+fn wrapper_pending_holds_keys_and_replays_them_in_order() {
+    let mut session = wrapped_session();
+    let app = &mut session.application;
+    let buffer = app.state.active_buffer_id().unwrap();
+    keys(app, &["x", "i", "1", "2", "escape"]);
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "abcdef");
+    assert!(resume_wrapper(app));
+    assert!(!app.input.command_pending());
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "12bcdef");
+}
+
+#[test]
+fn wrapper_completion_records_dot_once_and_dot_waits_before_later_keys() {
+    let mut session = wrapped_session();
+    let app = &mut session.application;
+    let before = app.input.repeat_plan(100, None).unwrap();
+    keys(app, &["x", ".", "l"]);
+    assert_eq!(app.input.repeat_plan(100, None).unwrap(), before);
+    assert!(resume_wrapper(app));
+    let plan = app.input.repeat_plan(100, None).unwrap();
+    assert_eq!(plan.len(), 1);
+    assert_eq!(plan[0].id.as_str(), "edit.delete_char");
+    assert!(app.input.command_pending());
+    assert!(resume_wrapper(app));
+    assert!(!app.input.command_pending());
+    assert_eq!(
+        app.state.buffers[app.state.active_buffer_id().unwrap()]
+            .text
+            .to_string(),
+        "cdef"
+    );
+    assert_eq!(
+        app.state.views[app.state.active_view().unwrap()]
+            .cursor
+            .get(),
+        1
+    );
+}
+
+#[test]
+fn wrapper_completion_records_one_macro_step_and_replay_waits() {
+    let mut session = wrapped_session();
+    let app = &mut session.application;
+    keys(app, &["q", "a", "x", "l", "q"]);
+    assert!(app.input.recording_macro.as_ref().unwrap().1.is_empty());
+    assert!(resume_wrapper(app));
+    let recorded = app.state.registers.get_macro('a').unwrap();
+    assert_eq!(recorded.len(), 2);
+    assert_eq!(recorded[0].id.as_str(), "edit.delete_char");
+    keys(app, &["@", "a"]);
+    assert!(app.input.command_pending());
+    assert_eq!(app.input.replay_depth(), 1);
+    assert!(resume_wrapper(app));
+    assert_eq!(app.input.replay_depth(), 0);
+    assert_eq!(
+        app.state.buffers[app.state.active_buffer_id().unwrap()]
+            .text
+            .to_string(),
+        "bdef"
+    );
+}
+
+#[test]
+fn failed_wrapper_resume_releases_keys_without_recording_the_command() {
+    let mut session = wrapped_session();
+    let app = &mut session.application;
+    let before = app.input.repeat_plan(100, None).unwrap();
+    keys(app, &["q", "a", "x", "l", "q"]);
+    let pending = app.input.pending_wrapper().unwrap();
+    assert!(
+        !app.process_effect_checked(crate::app::commands::AppEffect::CommandResume {
+            pending,
+            owner: "wrapper".into(),
+            action: Box::new(crate::editor::CommandWrapperAction::CallNext(
+                CommandInvocation::new("edit.insert_text", InvocationSource::Test).unwrap()
+            )),
+        })
+    );
+    assert!(!app.input.command_pending());
+    assert_eq!(app.input.repeat_plan(100, None).unwrap(), before);
+    let recorded = app.state.registers.get_macro('a').unwrap();
+    assert_eq!(recorded.len(), 1);
+    assert_eq!(recorded[0].id.as_str(), "view.cursor.move");
+}
+
+#[test]
+fn unloaded_wrapper_releases_held_keys() {
+    let mut session = wrapped_session();
+    let app = &mut session.application;
+    keys(app, &["x", "l"]);
+    app.commands.unregister_plugin("wrapper");
+    app.flush_keymap_timeout();
+    assert!(!app.input.command_pending());
+    assert_eq!(
+        app.state.views[app.state.active_view().unwrap()]
+            .cursor
+            .get(),
+        1
+    );
+    assert_eq!(
+        app.state.buffers[app.state.active_buffer_id().unwrap()]
+            .text
+            .to_string(),
+        "abcdef"
+    );
 }
 
 fn invocation(id: &str) -> CommandInvocation {

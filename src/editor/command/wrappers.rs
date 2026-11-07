@@ -15,6 +15,17 @@ use super::{
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct PendingCommandId(u64);
 
+impl PendingCommandId {
+    pub(crate) fn allocate() -> Result<Self, CommandError> {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT_ID: AtomicU64 = AtomicU64::new(1);
+        NEXT_ID
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
+            .map(Self)
+            .map_err(|_| CommandError::Failed("command IDs exhausted".into()))
+    }
+}
+
 /// A wrapper receives `None` before the command and `Some(outcome)` after call-next.
 /// Pending suspends only this invocation; its effects can schedule work off the UI thread.
 #[derive(Clone, Debug)]
@@ -56,14 +67,12 @@ struct PendingCommand<E> {
 }
 
 pub(super) struct PendingCommands<E> {
-    next_id: u64,
     calls: BTreeMap<PendingCommandId, PendingCommand<E>>,
 }
 
 impl<E> Default for PendingCommands<E> {
     fn default() -> Self {
         Self {
-            next_id: 1,
             calls: BTreeMap::new(),
         }
     }
@@ -128,15 +137,7 @@ impl<E> CommandRegistry<E> {
         authority.check(&command.spec)?;
         command.spec.arguments.validate(&invocation.arguments)?;
         validate_context(state, invocation, command.spec.context)?;
-        let id = {
-            let mut pending = self.pending.borrow_mut();
-            let id = PendingCommandId(pending.next_id);
-            pending.next_id = pending
-                .next_id
-                .checked_add(1)
-                .ok_or_else(|| CommandError::Failed("command IDs exhausted".into()))?;
-            id
-        };
+        let id = PendingCommandId::allocate()?;
         self.advance(
             state,
             PendingCommand {

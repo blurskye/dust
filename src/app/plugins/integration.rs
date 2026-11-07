@@ -1419,6 +1419,9 @@ impl App {
                         ]),
                     );
                 }
+                PluginEvent::CommandFailed { plugin, error, .. } => {
+                    failure_diagnostic = Some(format!("Plugin {plugin}: {error}"));
+                }
                 PluginEvent::Executed(_) => self.show_error("unowned plugin execution event"),
                 PluginEvent::Failed {
                     load,

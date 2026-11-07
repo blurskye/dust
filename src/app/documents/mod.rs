@@ -1800,6 +1800,7 @@ impl App {
             .and_then(|buffer| self.format_on_save.get_mut(&buffer))
         {
             pending.quit_after |= quit_after;
+            pending.authority = pending.authority.restrict(&self.effect_authority);
             return true;
         }
         // An installed formatter runs as a process, which takes longer to start than a request.
@@ -1821,6 +1822,7 @@ impl App {
         self.format_on_save.insert(
             buffer,
             crate::app::FormatOnSave {
+                authority: self.effect_authority.clone(),
                 request: None,
                 buffer,
                 source: self.state.buffers[buffer].text.source_version(),
@@ -1882,6 +1884,7 @@ impl App {
             let pending = self.format_on_save.get_mut(&buffer).expect("pending save");
             pending.started = true;
             pending.deadline = Instant::now() + std::time::Duration::from_millis(3000);
+            let previous = std::mem::replace(&mut self.effect_authority, pending.authority.clone());
             match crate::app::tasks::FormatterSource::capture(&self.state, buffer) {
                 Ok(source) => self.run_trusted(TrustedAction::RunFormatter { name, source }),
                 Err(error) => {
@@ -1889,6 +1892,7 @@ impl App {
                     self.finish_format_on_save(buffer);
                 }
             }
+            self.effect_authority = previous;
         }
     }
 }
@@ -1918,10 +1922,12 @@ impl App {
                         .same_incarnation(&buffer.text.source_version())
             })
         {
+            let previous = std::mem::replace(&mut self.effect_authority, pending.authority);
             match self.request_save_buffer(pending.buffer, pending.quit_after, None, false, None) {
                 Ok(_) => self.notify_message(self.message("saving", &[]), false),
                 Err(error) => self.show_document_failure(error),
             }
+            self.effect_authority = previous;
         } else {
             self.show_error(self.message("format_on_save_skipped", &[]));
         }
@@ -2076,12 +2082,16 @@ impl App {
         self.notify_message(self.message("saving", &[]), false);
         for buffer in changed {
             let quit = quit_after && buffer == last;
-            if let Some((_, pending_quit)) =
-                self.pending_saves.iter_mut().find(|(id, _)| *id == buffer)
+            if let Some((_, pending_quit, authority)) = self
+                .pending_saves
+                .iter_mut()
+                .find(|(id, _, _)| *id == buffer)
             {
                 *pending_quit |= quit;
+                *authority = authority.restrict(&self.effect_authority);
             } else {
-                self.pending_saves.push_back((buffer, quit));
+                self.pending_saves
+                    .push_back((buffer, quit, self.effect_authority.clone()));
             }
         }
         self.process_pending_saves();
@@ -2100,10 +2110,12 @@ impl App {
                     break;
                 }
             }
-            let (buffer, quit) = self.pending_saves.pop_front().expect("pending save");
+            let (buffer, quit, authority) = self.pending_saves.pop_front().expect("pending save");
+            let previous = std::mem::replace(&mut self.effect_authority, authority);
             if let Err(error) = self.request_save_buffer(buffer, quit, None, false, None) {
                 self.show_document_failure(error);
             }
+            self.effect_authority = previous;
         }
     }
 }
@@ -2123,6 +2135,7 @@ impl App {
             .get(buffer)
             .map(|candidate| Self::document_view(buffer, candidate));
         let request = crate::app::documents::SaveRequest {
+            authority: self.effect_authority.clone(),
             editor: &self.state.window_version(),
             workspace: self.workspace.version(),
             base: &self.state.workspace_root,
@@ -2139,7 +2152,11 @@ impl App {
                 .filter_map(|(_, candidate)| candidate.path.clone())
                 .collect(),
         };
-        self.documents.request_save(view, request)
+        let result = self.documents.request_save(view, request);
+        if result.is_err() {
+            self.effect_failed = true;
+        }
+        result
     }
 }
 

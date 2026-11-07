@@ -286,6 +286,18 @@ pub enum CommandAuthority {
 }
 
 impl CommandAuthority {
+    pub(crate) fn require(&self, access: CommandAccess) -> Result<(), CommandError> {
+        if let Self::Plugin { initiator, grants } = self
+            && (access == CommandAccess::HostOnly || !grants.contains(&access))
+        {
+            return Err(CommandError::EffectDenied {
+                initiator: initiator.clone(),
+                access,
+            });
+        }
+        Ok(())
+    }
+
     fn check(&self, command: &CommandSpec) -> Result<(), CommandError> {
         if let Self::Plugin { grants, .. } = self
             && (command.access.contains(&CommandAccess::HostOnly)
@@ -296,7 +308,7 @@ impl CommandAuthority {
         Ok(())
     }
 
-    fn restrict(&self, other: &Self) -> Self {
+    pub(crate) fn restrict(&self, other: &Self) -> Self {
         match (self, other) {
             (Self::Host, _) => other.clone(),
             (_, Self::Host) => self.clone(),
@@ -589,6 +601,11 @@ pub enum CommandError {
     Failed(String),
     #[error("access to command `{0}` was refused")]
     AccessDenied(CommandId),
+    #[error("plugin `{initiator}` lacks {access:?} permission for this operation")]
+    EffectDenied {
+        initiator: String,
+        access: CommandAccess,
+    },
     #[error("unknown or completed pending command")]
     UnknownPending,
     #[error("only the waiting wrapper can continue this command")]

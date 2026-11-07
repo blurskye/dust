@@ -92,6 +92,11 @@ pub(super) enum Request {
 }
 #[derive(Debug)]
 pub(super) enum WorkerEvent {
+    CommandFailed {
+        load: PluginLoadId,
+        plugin: String,
+        error: PluginError,
+    },
     Indexed {
         load: PluginLoadId,
         plugin: String,
@@ -114,6 +119,11 @@ pub(super) enum WorkerEvent {
 }
 #[derive(Debug)]
 pub enum PluginEvent {
+    CommandFailed {
+        load: PluginLoadId,
+        plugin: String,
+        error: PluginError,
+    },
     Indexed {
         load: PluginLoadId,
         plugin: String,
@@ -430,11 +440,19 @@ impl PluginHost {
                                 Some(slot) => execute_component(invocation, &mut slot.runtime)
                                     .map_or_else(
                                         |error| {
-                                            runtimes.remove(&plugin);
-                                            WorkerEvent::Failed {
-                                                load,
-                                                plugin,
-                                                error,
+                                            if matches!(error, PluginError::Execution(_)) {
+                                                runtimes.remove(&plugin);
+                                                WorkerEvent::Failed {
+                                                    load,
+                                                    plugin,
+                                                    error,
+                                                }
+                                            } else {
+                                                WorkerEvent::CommandFailed {
+                                                    load,
+                                                    plugin,
+                                                    error,
+                                                }
                                             }
                                         },
                                         |execution| WorkerEvent::Executed {
@@ -779,6 +797,19 @@ impl PluginHost {
             match self.receiver.try_recv() {
                 Ok(event) => {
                     match event {
+                        WorkerEvent::CommandFailed {
+                            load,
+                            plugin,
+                            error,
+                        } => {
+                            if self.loads.get(&plugin) == Some(&load) {
+                                events.push(OwnedPluginEvent::Other(PluginEvent::CommandFailed {
+                                    load,
+                                    plugin,
+                                    error,
+                                }));
+                            }
+                        }
                         WorkerEvent::Indexed {
                             load,
                             plugin,

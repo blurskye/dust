@@ -152,6 +152,7 @@ impl<T> std::ops::DerefMut for Tracked<T> {
 
 /// A save waiting for the language server to format the buffer.
 struct FormatOnSave {
+    authority: crate::editor::CommandAuthority,
     request: Option<(String, u64)>,
     buffer: crate::editor::BufferId,
     source: crate::editor::text::TextVersion,
@@ -164,7 +165,11 @@ struct FormatOnSave {
 
 struct App {
     format_on_save: std::collections::HashMap<crate::editor::BufferId, FormatOnSave>,
-    pending_saves: std::collections::VecDeque<(crate::editor::BufferId, bool)>,
+    pending_saves: std::collections::VecDeque<(
+        crate::editor::BufferId,
+        bool,
+        crate::editor::CommandAuthority,
+    )>,
     navigation_reads: std::collections::HashMap<
         crate::files::RequestId,
         (crate::app::windows::NavigationStamp, std::sync::Arc<()>),
@@ -206,8 +211,8 @@ struct App {
     diagnostics: crate::app::diagnostics::Diagnostics,
     workspace_edits: crate::app::workspace::edits::WorkspaceEdits,
     commands: CommandRegistry<AppEffect>,
-    pending_commands:
-        std::collections::BTreeMap<crate::editor::PendingCommandId, commands::PendingInvocation>,
+    effect_authority: crate::editor::CommandAuthority,
+    effect_failed: bool,
     input: InputState,
     configuration: Configuration,
     ui: Tracked<UiState>,
