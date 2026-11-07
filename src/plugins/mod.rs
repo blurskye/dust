@@ -3,6 +3,9 @@
 #![forbid(unsafe_code)]
 
 mod providers;
+pub(crate) mod http;
+pub(crate) mod requests;
+pub use requests::PluginDelivery;
 mod storage;
 mod virtual_documents;
 pub use providers::PROVIDER_ACTION_BYTE_LIMIT;

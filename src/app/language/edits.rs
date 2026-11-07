@@ -515,7 +515,7 @@ impl LspEditSources {
         Ok(transaction)
     }
 }
-fn decode_edits(
+pub(in crate::app::language) fn decode_edits(
     edits: Vec<LspTextEdit>,
     text: &TextBuffer,
     encoding: PositionEncoding,

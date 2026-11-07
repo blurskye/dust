@@ -38,12 +38,22 @@ impl App {
             }
             InputCommand::PushLayer(layer) => {
                 self.input.cancel_mapping();
-                self.input.key_layers.push(*layer);
+                self.input.key_layers.push((None, *layer));
                 self.input.capture_changed();
             }
             InputCommand::PopLayer => {
                 self.input.cancel_mapping();
                 self.input.key_layers.pop();
+                self.input.capture_changed();
+            }
+            InputCommand::PushNamedLayer { owner, name, layer } => {
+                self.input.cancel_mapping();
+                self.input.key_layers.push((Some((owner, name)), *layer));
+                self.input.capture_changed();
+            }
+            InputCommand::RemoveNamedLayer { owner, name } => {
+                self.input.cancel_mapping();
+                self.input.key_layers.retain(|(key, _)| key.as_ref() != Some(&(owner.clone(), name.clone())));
                 self.input.capture_changed();
             }
             InputCommand::Wait(_) => {}

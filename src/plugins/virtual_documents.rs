@@ -889,6 +889,7 @@ mod tests {
     use std::collections::BTreeMap;
     fn index() -> PluginContributionIndex {
         PluginContributionIndex {
+            capabilities: Default::default(),
             owner: "demo".into(),
             version: "1".into(),
             checksum: "0".repeat(64),

@@ -691,6 +691,9 @@ impl PluginHost {
     pub(crate) fn validate_invocation(
         invocation: &PluginExecutionRequest,
     ) -> Result<(), PluginError> {
+        crate::plugins::requests::value_bytes(&invocation.call.arguments).map_err(|_| PluginError::InvalidInvocation)?;
+        if let Some(value) = &invocation.call.previous { crate::plugins::requests::value_bytes(value).map_err(|_| PluginError::InvalidInvocation)?; }
+        if invocation.call.command.len() > 256 || invocation.call.count == Some(0) { return Err(PluginError::InvalidInvocation); }
         if invocation.arguments.len() > 256
             || invocation
                 .arguments

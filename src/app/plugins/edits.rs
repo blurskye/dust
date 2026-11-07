@@ -35,6 +35,7 @@ struct Document {
     revision: BufferRevision,
 }
 struct Invocation {
+    direct: bool,
     origin: PluginInvocationOrigin,
     editor: EditorWindowVersion,
     workspace: WorkspaceVersion,
@@ -105,6 +106,7 @@ pub(super) struct InvocationLoan<'a> {
     _configuration: &'a u64,
 }
 impl InvocationLoan<'_> {
+    pub(in crate::app) fn direct(mut self) -> Self { self.invocation.direct = true; self }
     pub(in crate::app) fn origin(&self) -> &PluginInvocationOrigin {
         &self.invocation.origin
     }
@@ -274,6 +276,7 @@ impl PluginEditSources {
             .map(|(id, _)| editor.workspace_edit_source(id))
             .transpose()?;
         let invocation = Invocation {
+            direct: false,
             origin: reservation.origin().clone(),
             editor: editor.window_version(),
             workspace: workspace.version(),
@@ -332,7 +335,7 @@ impl PluginEditSources {
         if !source_actions_admitted && execution.confirmation_requests.is_empty() {
             return Err("plugin invocation workspace or configuration changed".into());
         }
-        let proposals = std::mem::take(&mut execution.proposals);
+        let proposals = if invocation.direct { Vec::new() } else { std::mem::take(&mut execution.proposals) };
         let preview = if !source_actions_admitted {
             Err("plugin invocation source changed before its reply".into())
         } else if proposals.is_empty() {

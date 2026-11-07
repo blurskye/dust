@@ -263,6 +263,14 @@ pub enum AppEffect {
     PluginValidate,
     PluginList,
     PluginDisable(String),
+    PluginCall {
+        plugin: String,
+        handler: String,
+        call: crate::plugins::component::component_api::dust::plugin::host::CommandCall,
+        pending: Option<PendingCommandId>,
+        previous: Option<Box<CommandOutcome<AppEffect>>>,
+        authority: CommandAuthority,
+    },
     PluginExecute {
         plugin: String,
         command: String,
@@ -1001,6 +1009,9 @@ impl App {
             return true;
         }
         let result = match effect {
+            AppEffect::PluginCall { plugin, handler, call, pending, previous, authority } => {
+                return self.execute_plugin_call(plugin, handler, call, pending, previous, authority);
+            }
             AppEffect::CommandResume {
                 pending,
                 owner,
@@ -1482,6 +1493,10 @@ impl App {
         )
     }
 
+    pub(in crate::app) fn incoming_command_pending(&self, id: i64) -> bool {
+        self.pending_commands.iter().any(|(pending, call)| self.commands.is_pending(*pending) && call.invocation.arguments.get("event") == Some(&CommandValue::Integer(id)))
+    }
+
     fn resume_command(
         &mut self,
         pending: PendingCommandId,
@@ -1499,7 +1514,15 @@ impl App {
             self.show_error(CommandError::UnknownPending);
             return false;
         };
-        self.finish_command(invocation, outcome)
+        self.plugin_command_resuming(pending);
+        let waiting = outcome.as_ref().is_ok_and(|outcome| outcome.pending.is_some());
+        let buffer = invocation.invocation.target.buffer.or_else(|| self.state.active_buffer_id());
+        let before = buffer.and_then(|id| self.state.buffers.get(id).map(|buffer| buffer.text.source_version()));
+        let succeeded = self.finish_command(invocation, outcome);
+        let changed = before != buffer.and_then(|id| self.state.buffers.get(id).map(|buffer| buffer.text.source_version()));
+        if !waiting { self.complete_input_command(pending.as_u64(), succeeded, changed); }
+        self.finish_incoming_lsp_commands();
+        succeeded
     }
 
     fn finish_command(
@@ -1514,10 +1537,12 @@ impl App {
         } = invocation;
         match outcome {
             Ok(outcome) => {
-                // Feature effects still use the 0.2 host-only ABI. Until those owners carry
-                // grants to the final operation, restricted calls may only return editor work.
+                // Only explicitly authorized owners may receive restricted effects. In
+                // particular a UI grant cannot turn into a process or filesystem action.
                 if outcome.authority != CommandAuthority::Host
-                    && (!outcome.effects.is_empty() || !outcome.follow_up.is_empty())
+                    && (outcome.effects.iter().any(|effect| !matches!(effect,
+                        AppEffect::PluginCall { .. } | AppEffect::LspIncoming(_)
+                    )) || !outcome.follow_up.is_empty())
                 {
                     if let Some(pending) = outcome.pending {
                         self.commands.cancel(pending);
@@ -1526,6 +1551,9 @@ impl App {
                     return false;
                 }
                 if let Some(pending) = outcome.pending {
+                    self.plugin_command_pending(pending);
+                    self.input.record_command_outcome(&invocation, repeat_override.as_ref(), suppress_repeat, false,
+                        &[AppEffect::Input(crate::app::input::InputCommand::Wait(pending.as_u64()))]);
                     self.pending_commands
                         .retain(|id, _| self.commands.is_pending(*id));
                     self.pending_commands.insert(
@@ -1536,7 +1564,8 @@ impl App {
                             suppress_repeat,
                         },
                     );
-                    for effect in outcome.effects {
+                    for mut effect in outcome.effects {
+                        if let AppEffect::PluginCall { authority, .. } = &mut effect { *authority = outcome.authority.clone(); }
                         if !self.process_effect_checked(effect) {
                             self.pending_commands.remove(&pending);
                             self.commands.cancel(pending);
@@ -1600,13 +1629,11 @@ impl App {
                 if text_changed {
                     self.push_change_location();
                 }
-                self.input.record_command_outcome(
-                    &invocation,
-                    repeat_override.as_ref(),
-                    suppress_repeat,
-                    text_changed,
-                    &outcome.effects,
-                );
+                if !self.input.command_pending() {
+                    self.input.record_command_outcome(
+                        &invocation, repeat_override.as_ref(), suppress_repeat, text_changed, &outcome.effects,
+                    );
+                }
                 self.tutor_observe(&invocation);
                 for effect in outcome.effects {
                     if !self.process_effect_checked(effect) {
@@ -1615,9 +1642,11 @@ impl App {
                     }
                 }
                 self.sync_flash_ui();
+                self.plugin_command_result(outcome.value.as_ref(), None);
                 true
             }
             Err(error) => {
+                self.plugin_command_result(None, Some(error.to_string()));
                 // A failed `dfz` or `di(` must not leave the view stuck in operator-pending.
                 if self
                     .state

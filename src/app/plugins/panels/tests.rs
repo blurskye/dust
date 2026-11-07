@@ -11,6 +11,7 @@ use crate::windows::ContentLifecycle;
 
 fn index(owner: &str, plugin_load: u64) -> PluginContributionIndex {
     PluginContributionIndex {
+        capabilities: Default::default(),
         owner: owner.into(),
         version: "1.0.0".into(),
         checksum: format!("{plugin_load:064x}"),
@@ -630,7 +631,7 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
     ));
     assert_eq!(
         format!("{:x}", Sha256::digest(core)),
-        "9f17af443ca9a4150f940656ef2edb11a48c1d59b7430d4e029f1b1cf951bc48"
+        "b4ed844dc172a7ca80c13114c2d8b23d92202490fe7ba12e09297c4aba73fd41"
     );
     let component = wit_component::ComponentEncoder::default()
         .module(core)
@@ -669,6 +670,8 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
 
     let event_execution = crate::plugins::execute_component(
         crate::plugins::PluginExecutionRequest {
+            call: Default::default(),
+            delivery: Default::default(),
             runtime_epoch: 0,
             plugin: ("demo").into(),
             command: ("events").into(),
@@ -705,6 +708,8 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
 
     let opened = crate::plugins::execute_component(
         crate::plugins::PluginExecutionRequest {
+            call: Default::default(),
+            delivery: Default::default(),
             runtime_epoch: 0,
             plugin: "demo".into(),
             command: "confirmation".into(),
@@ -738,6 +743,8 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
     };
     let requested = crate::plugins::execute_component(
         crate::plugins::PluginExecutionRequest {
+            call: Default::default(),
+            delivery: Default::default(),
             runtime_epoch: 0,
             plugin: "demo".into(),
             command: "confirmation".into(),
@@ -762,6 +769,8 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
     let confirmation_request = requested.confirmation_requests[0].token;
     let full = crate::plugins::execute_component(
         crate::plugins::PluginExecutionRequest {
+            call: Default::default(),
+            delivery: Default::default(),
             runtime_epoch: 0,
             plugin: "demo".into(),
             command: "confirmation".into(),
@@ -799,6 +808,8 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
     ] {
         let answered = crate::plugins::execute_component(
             crate::plugins::PluginExecutionRequest {
+                call: Default::default(),
+                delivery: Default::default(),
                 runtime_epoch: 0,
                 plugin: "demo".into(),
                 command: "confirmation".into(),
@@ -854,6 +865,8 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
     for phase in 0..7 {
         let execution = crate::plugins::execute_component(
             crate::plugins::PluginExecutionRequest {
+                call: Default::default(),
+                delivery: Default::default(),
                 runtime_epoch: 0,
                 plugin: ("demo").into(),
                 command: ("storage").into(),
@@ -933,6 +946,8 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
         last_envelope = requests.first().cloned();
         let execution = crate::plugins::execute_component(
             crate::plugins::PluginExecutionRequest {
+                call: Default::default(),
+                delivery: Default::default(),
                 runtime_epoch: 0,
                 plugin: ("demo").into(),
                 command: ("provider").into(),
@@ -975,6 +990,8 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
     assert!(providers.cancel(provider_request));
     let late = crate::plugins::execute_component(
         crate::plugins::PluginExecutionRequest {
+            call: Default::default(),
+            delivery: Default::default(),
             runtime_epoch: 0,
             plugin: ("demo").into(),
             command: ("provider").into(),
@@ -1028,6 +1045,8 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
         );
         let execution = crate::plugins::execute_component(
             crate::plugins::PluginExecutionRequest {
+                call: Default::default(),
+                delivery: Default::default(),
                 runtime_epoch: 0,
                 plugin: ("demo").into(),
                 command: ("virtual").into(),
@@ -1078,6 +1097,8 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
     .expect("trap runtime");
     let trapped = crate::plugins::execute_component(
         crate::plugins::PluginExecutionRequest {
+            call: Default::default(),
+            delivery: Default::default(),
             runtime_epoch: 0,
             plugin: ("demo").into(),
             command: ("trap").into(),
@@ -1145,6 +1166,8 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
     .expect("deadline runtime");
     let interrupted = crate::plugins::execute_component(
         crate::plugins::PluginExecutionRequest {
+            call: Default::default(),
+            delivery: Default::default(),
             runtime_epoch: 0,
             plugin: ("demo").into(),
             command: ("spin").into(),
@@ -1197,6 +1220,8 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
     for phase in 0..5 {
         let execution = crate::plugins::execute_component(
             crate::plugins::PluginExecutionRequest {
+                call: Default::default(),
+                delivery: Default::default(),
                 runtime_epoch: 0,
                 plugin: ("demo").into(),
                 command: ("drive").into(),
@@ -1240,6 +1265,8 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
 
     let private_open = crate::plugins::execute_component(
         crate::plugins::PluginExecutionRequest {
+            call: Default::default(),
+            delivery: Default::default(),
             runtime_epoch: 0,
             plugin: ("demo").into(),
             command: ("private").into(),
@@ -1292,6 +1319,8 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
         .2;
     let private_replace = crate::plugins::execute_component(
         crate::plugins::PluginExecutionRequest {
+            call: Default::default(),
+            delivery: Default::default(),
             runtime_epoch: 0,
             plugin: ("demo").into(),
             command: ("private").into(),
@@ -1326,6 +1355,8 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
 
     let private_patch = crate::plugins::execute_component(
         crate::plugins::PluginExecutionRequest {
+            call: Default::default(),
+            delivery: Default::default(),
             runtime_epoch: 0,
             plugin: ("demo").into(),
             command: ("private").into(),
@@ -1367,6 +1398,8 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
         .expect("private action");
     let private_close = crate::plugins::execute_component(
         crate::plugins::PluginExecutionRequest {
+            call: Default::default(),
+            delivery: Default::default(),
             runtime_epoch: 0,
             plugin: ("demo").into(),
             command: ("private").into(),
@@ -1404,6 +1437,8 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
     // A restored session discards the earlier, deliberately undelivered results.
     let flood = crate::plugins::execute_component(
         crate::plugins::PluginExecutionRequest {
+            call: Default::default(),
+            delivery: Default::default(),
             runtime_epoch: 1,
             plugin: ("demo").into(),
             command: ("flood").into(),

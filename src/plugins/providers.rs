@@ -596,6 +596,7 @@ mod tests {
 
     fn index(plugin_load: u64, maximum_items: u16, maximum_bytes: u32) -> PluginContributionIndex {
         PluginContributionIndex {
+            capabilities: Default::default(),
             owner: "demo".into(),
             version: "1".into(),
             checksum: "0".repeat(64),

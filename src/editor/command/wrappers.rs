@@ -15,6 +15,10 @@ use super::{
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct PendingCommandId(u64);
 
+impl PendingCommandId {
+    pub(crate) fn as_u64(self) -> u64 { self.0 }
+}
+
 /// A wrapper receives `None` before the command and `Some(outcome)` after call-next.
 /// Pending suspends only this invocation; its effects can schedule work off the UI thread.
 #[derive(Clone, Debug)]

@@ -64,7 +64,7 @@ pub(super) struct InputState {
         crate::editor::ViewId,
         NamedMode,
     )>,
-    key_layers: Vec<Keymap>,
+    key_layers: Vec<(Option<(String, String)>, Keymap)>,
     pending_command: Option<PendingCommand>,
     held_input: VecDeque<crate::app::editing::clipboard::DeferredInput>,
     sequence: KeymapSequence,
@@ -323,6 +323,7 @@ impl InputState {
             self.sequence.feed_layers(
                 self.key_layers
                     .iter()
+                    .map(|(_, layer)| layer)
                     .rev()
                     .chain(mode.map(NamedMode::layer))
                     .chain(bindings.layers(context).filter(|_| inherit)),
@@ -2977,6 +2978,8 @@ pub enum InputCommand {
     LeaveMode,
     PushLayer(Box<Keymap>),
     PopLayer,
+    PushNamedLayer { owner: String, name: String, layer: Box<Keymap> },
+    RemoveNamedLayer { owner: String, name: String },
     /// The command's eventual result must complete this id, including on failure or timeout.
     Wait(u64),
     Complete {

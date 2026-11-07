@@ -52,7 +52,7 @@ const METHODS: &[&str] = &[
     "textDocument/selectionRange",
 ];
 
-fn command_id(method: &str) -> String {
+pub(in crate::app) fn command_id(method: &str) -> String {
     format!(
         "lsp.incoming.{}",
         method
@@ -86,6 +86,7 @@ pub(super) fn register_commands(
                 ))
             },
         )?;
+        registry.set_access(&crate::editor::CommandId::new(command_id(method))?, [crate::editor::CommandAccess::Edit].into())?;
     }
     Ok(())
 }
@@ -132,26 +133,22 @@ impl App {
             .with_argument("method", CommandValue::String(method.into()))
             .with_argument("server", CommandValue::String(server.into()));
         self.language.incoming_id = id;
-        self.language.incoming = Some((id, owned));
+        self.language.incoming.insert(id, owned);
         self.invoke_checked(invocation);
-        // A handler that does not continue suppresses the event. Server edit requests
-        // still need a negative reply rather than leaving the server waiting forever.
-        if let Some((_, owned)) = self.language.incoming.take() {
-            self.language.reject_reply(
-                owned.reply,
-                "incoming LSP handler did not apply the request".into(),
-            );
+        self.finish_incoming_lsp_commands();
+    }
+
+    pub(in crate::app) fn finish_incoming_lsp_commands(&mut self) {
+        let finished: Vec<_> = self.language.incoming.keys().copied().filter(|id| !self.incoming_command_pending(*id)).collect();
+        for id in finished {
+            if let Some(owned) = self.language.incoming.remove(&id) {
+                self.language.reject_reply(owned.reply, "incoming LSP handler did not apply the request".into());
+            }
         }
     }
 
     pub(super) fn handle_incoming_lsp_command(&mut self, id: i64) {
-        if self
-            .language
-            .incoming
-            .as_ref()
-            .is_some_and(|(pending, _)| *pending == id)
-            && let Some((_, owned)) = self.language.incoming.take()
-        {
+        if let Some(owned) = self.language.incoming.remove(&id) {
             self.handle_lsp_event(owned);
         }
     }
