@@ -448,7 +448,8 @@ impl App {
             diagnostics,
             workspace_edits: crate::app::workspace::edits::WorkspaceEdits::default(),
             commands,
-            pending_commands: std::collections::BTreeMap::new(),
+            effect_authority: crate::editor::CommandAuthority::Host,
+            effect_failed: false,
             input: InputState::new(ABSOLUTE_MAX_COUNT),
             configuration: Configuration::new(
                 configuration,

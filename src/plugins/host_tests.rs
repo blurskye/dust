@@ -1551,6 +1551,15 @@ impl ExecutionFixture {
             })
             .unwrap();
     }
+    pub(crate) fn command_failed(&self, plugin: &str, load: PluginLoadId, error: PluginError) {
+        self.events
+            .try_send(WorkerEvent::CommandFailed {
+                load,
+                plugin: plugin.into(),
+                error,
+            })
+            .unwrap();
+    }
     pub(crate) fn fail(&self, captured: &CapturedExecution) {
         self.events
             .try_send(WorkerEvent::Failed {
@@ -1780,6 +1789,66 @@ fn component_execution_errors_include_the_trap_cause() {
 }
 
 #[test]
+fn missed_command_deadline_discards_effects_and_the_instance_runs_again() {
+    let mut runtime = retained_runtime(&PluginLimits::default(), false)
+        .unwrap()
+        .runtime;
+    runtime.limits.epoch_deadline_ticks = 0;
+    let mut request = empty_execution_request();
+    request.command = "storage".into();
+    assert!(matches!(
+        crate::plugins::index::execute_component(request, &mut runtime),
+        Err(PluginError::Deadline)
+    ));
+    assert!(runtime.store.data().storage_requests.is_empty());
+    assert!(runtime.store.data().pending_storage.is_empty());
+    runtime.limits.epoch_deadline_ticks = 1000;
+    let mut request = empty_execution_request();
+    request.command = "events".into();
+    assert!(crate::plugins::index::execute_component(request, &mut runtime).is_ok());
+}
+
+#[test]
+fn missed_deadline_and_command_error_preserve_the_active_load_but_a_trap_unloads() {
+    let (tx, _rx) = mpsc::sync_channel(4);
+    let (etx, erx) = mpsc::sync_channel(4);
+    let mut manager = manager(tx, erx);
+    let load = PluginLoadId(1);
+    manager.loads.insert("demo".into(), load);
+    manager
+        .statuses
+        .insert("demo".into(), PluginStatus::Active(vec!["run".into()]));
+    for error in [
+        PluginError::Deadline,
+        PluginError::CommandFailed("ordinary error".into()),
+    ] {
+        etx.send(WorkerEvent::CommandFailed {
+            load,
+            plugin: "demo".into(),
+            error,
+        })
+        .unwrap();
+        assert!(matches!(
+            manager.poll().unwrap().as_slice(),
+            [PluginEvent::CommandFailed { .. }]
+        ));
+        assert!(manager.is_active_load("demo", load));
+        assert!(matches!(manager.statuses["demo"], PluginStatus::Active(_)));
+    }
+    etx.send(WorkerEvent::Failed {
+        load,
+        plugin: "demo".into(),
+        error: PluginError::Execution("trap".into()),
+    })
+    .unwrap();
+    assert!(matches!(
+        manager.poll().unwrap().as_slice(),
+        [PluginEvent::Failed { .. }]
+    ));
+    assert!(!manager.is_active_load("demo", load));
+}
+
+#[test]
 fn component_activation_and_each_command_have_their_own_deadline() {
     let limits = PluginLimits {
         fuel: 1_000_000_000,
@@ -1909,7 +1978,7 @@ fn component_storage_driver_validates_each_reply_before_advancing() {
             let error = crate::plugins::index::execute_component(request, &mut runtime)
                 .expect_err("invalid storage reply must fail");
             assert!(
-                matches!(error, PluginError::Execution(ref detail)
+                matches!(error, PluginError::CommandFailed(ref detail)
                     if detail.starts_with(&format!("storage:{phase}:"))),
                 "{error}"
             );

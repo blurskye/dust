@@ -1143,6 +1143,7 @@ pub(in crate::app) fn app_waiting_to_save_formatted(
     app.format_on_save.insert(
         buffer,
         crate::app::FormatOnSave {
+            authority: crate::editor::CommandAuthority::Host,
             request: Some(("formatter".into(), 1)),
             buffer,
             source: app.state.buffers[buffer].text.source_version(),
@@ -1749,6 +1750,7 @@ fn formatting_saves_using_the_same_managed_tool_run_in_turn() {
     app.format_on_save.insert(
         second,
         crate::app::FormatOnSave {
+            authority: crate::editor::CommandAuthority::Host,
             request: None,
             buffer: second,
             source: app.state.buffers[second].text.source_version(),

@@ -346,6 +346,10 @@ impl Documents {
             // The worker resolves aliases before deciding whether this is a save-as.
             WriteExpectation::Exact(view.persisted.to_vec())
         };
+        request
+            .authority
+            .require(crate::editor::CommandAccess::Files)
+            .map_err(|error| DocumentFailure::Error(error.to_string()))?;
         let id = self.vfs.write_document(
             target.clone(),
             bytes.clone(),
@@ -572,6 +576,7 @@ impl Documents {
     }
 }
 pub(in crate::app) struct SaveRequest<'a> {
+    pub authority: crate::editor::CommandAuthority,
     pub editor: &'a EditorWindowVersion,
     pub workspace: WorkspaceVersion,
     pub base: &'a Path,
@@ -793,6 +798,7 @@ mod tests {
                 .request_save(
                     Some(view(&state, buffer)),
                     SaveRequest {
+                        authority: crate::editor::CommandAuthority::Host,
                         editor: &state.window_version(),
                         workspace: workspace.version(),
                         base: std::path::Path::new("/workspace"),

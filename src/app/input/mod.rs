@@ -2888,6 +2888,11 @@ impl App {
 
 impl App {
     pub(in crate::app) fn flush_keymap_timeout(&mut self) {
+        if let Some(id) = self.input.pending_wrapper()
+            && !self.commands.is_pending(id)
+        {
+            self.complete_input_command(id, false, false);
+        }
         if self.input.command_pending() || self.clipboard.waiting() {
             return;
         }
@@ -2978,16 +2983,17 @@ pub enum InputCommand {
     PushLayer(Box<Keymap>),
     PopLayer,
     /// The command's eventual result must complete this id, including on failure or timeout.
-    Wait(u64),
+    Wait(crate::editor::PendingCommandId),
     Complete {
-        id: u64,
+        id: crate::editor::PendingCommandId,
         succeeded: bool,
         text_changed: bool,
     },
 }
 
 struct PendingCommand {
-    id: u64,
+    id: crate::editor::PendingCommandId,
+    wrapper: bool,
     invocation: CommandInvocation,
     repeat: Option<CommandInvocation>,
     suppress_repeat: bool,
@@ -3010,32 +3016,97 @@ impl InputState {
         true
     }
 
-    pub(in crate::app) fn record_command_outcome(
+    pub(in crate::app) fn pending_wrapper(&self) -> Option<crate::editor::PendingCommandId> {
+        self.pending_command
+            .as_ref()
+            .filter(|pending| pending.wrapper)
+            .map(|pending| pending.id)
+    }
+
+    pub(in crate::app) fn pending_invocation(
+        &self,
+        id: crate::editor::PendingCommandId,
+    ) -> Option<crate::app::commands::PendingInvocation> {
+        let pending = self
+            .pending_command
+            .as_ref()
+            .filter(|pending| pending.id == id && pending.wrapper)?;
+        Some(crate::app::commands::PendingInvocation {
+            invocation: pending.invocation.clone(),
+            repeat_override: pending.repeat.clone(),
+            suppress_repeat: pending.suppress_repeat,
+        })
+    }
+
+    pub(in crate::app) fn suspend_command(
+        &mut self,
+        id: crate::editor::PendingCommandId,
+        invocation: crate::app::commands::PendingInvocation,
+    ) {
+        if self.pending_wrapper() == Some(id) {
+            return;
+        }
+        self.pending_command = Some(PendingCommand {
+            id,
+            wrapper: true,
+            repeat: Some(
+                invocation
+                    .repeat_override
+                    .unwrap_or_else(|| invocation.invocation.clone()),
+            ),
+            invocation: invocation.invocation,
+            suppress_repeat: invocation.suppress_repeat,
+            text_changed: false,
+        });
+    }
+
+    pub(in crate::app) fn wait_for_effects(
         &mut self,
         invocation: &CommandInvocation,
         repeat: Option<&CommandInvocation>,
         suppress_repeat: bool,
         text_changed: bool,
         effects: &[AppEffect],
-    ) {
+    ) -> bool {
         if let Some(id) = effects.iter().find_map(|effect| match effect {
             AppEffect::Input(InputCommand::Wait(id)) => Some(*id),
             _ => None,
         }) {
             self.pending_command = Some(PendingCommand {
                 id,
+                wrapper: false,
                 invocation: invocation.clone(),
                 // A completed asynchronous edit repeats the semantic command, not its effects.
                 repeat: Some(repeat.unwrap_or(invocation).clone()),
                 suppress_repeat,
                 text_changed,
             });
+            true
+        } else {
+            false
+        }
+    }
+
+    pub(in crate::app) fn record_command_outcome(
+        &mut self,
+        invocation: &CommandInvocation,
+        repeat: Option<&CommandInvocation>,
+        suppress_repeat: bool,
+        text_changed: bool,
+    ) {
+        if let Some(pending) = &mut self.pending_command {
+            pending.text_changed |= text_changed;
         } else {
             self.record_successful_invocation(invocation, repeat, suppress_repeat, text_changed);
         }
     }
 
-    fn finish_command(&mut self, id: u64, succeeded: bool, text_changed: bool) -> bool {
+    fn finish_command(
+        &mut self,
+        id: crate::editor::PendingCommandId,
+        succeeded: bool,
+        text_changed: bool,
+    ) -> bool {
         if self
             .pending_command
             .as_ref()
@@ -3059,7 +3130,7 @@ impl InputState {
 impl App {
     pub(in crate::app) fn complete_input_command(
         &mut self,
-        id: u64,
+        id: crate::editor::PendingCommandId,
         succeeded: bool,
         text_changed: bool,
     ) {

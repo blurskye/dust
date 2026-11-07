@@ -829,8 +829,15 @@ pub(crate) fn execute_component(
         .set_fuel(runtime.limits.fuel)
         .map_err(|error| PluginError::Execution(error.to_string()))?;
     runtime.store.set_epoch_deadline(1);
-    let deadline =
-        ComponentDeadline::arm(runtime.store.engine(), runtime.limits.epoch_deadline_ticks)?;
+    let started = std::time::Instant::now();
+    let result_timeout =
+        Duration::from_millis(runtime.limits.epoch_deadline_ticks.saturating_mul(10));
+    // A late result is discarded without interrupting a reusable instance. The epoch
+    // limit is separate: code still running after two seconds is a runaway.
+    let deadline = ComponentDeadline::arm(
+        runtime.store.engine(),
+        runtime.limits.epoch_deadline_ticks.max(200),
+    )?;
     {
         let state = runtime.store.data_mut();
         if state.runtime_epoch != runtime_epoch {
@@ -979,11 +986,26 @@ pub(crate) fn execute_component(
         })
         .collect();
     let result = result
-        .map_err(|error| PluginError::Execution(format!("{error:#}")))?
-        .map_err(PluginError::Execution)?;
-    if result.len() > 1024 * 1024 {
-        return Err(PluginError::InvalidInvocation);
+        .map_err(|error| PluginError::Execution(format!("{error:#}")))
+        .and_then(|result| result.map_err(PluginError::CommandFailed))
+        .and_then(|result| {
+            if started.elapsed() > result_timeout {
+                Err(PluginError::Deadline)
+            } else if result.len() > 1024 * 1024 {
+                Err(PluginError::InvalidInvocation)
+            } else {
+                Ok(result)
+            }
+        });
+    if result.is_err() {
+        for request in &ui_requests {
+            state.pending_ui_tokens.remove(&request.token);
+        }
+        for request in &storage_requests {
+            state.pending_storage.remove(&request.token);
+        }
     }
+    let result = result?;
     Ok(PluginExecution {
         plugin,
         command,
@@ -1016,6 +1038,10 @@ pub enum PluginError {
     Activation(String),
     #[error("plugin execution failed: {0}")]
     Execution(String),
+    #[error("plugin command failed: {0}")]
+    CommandFailed(String),
+    #[error("plugin command deadline elapsed; result discarded")]
+    Deadline,
     #[error("plugin command was not declared")]
     UndeclaredCommand,
     #[error("plugin contribution conflicts with an installed plugin default")]
