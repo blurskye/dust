@@ -10,4 +10,5 @@ fn practice() {
     let total = value * 2;
     println!("comment me");
     println!("{greeting} {total}");
+    let _ = (|first, second, third| (first, second, third))(11, 22, 33);
 }

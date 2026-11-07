@@ -606,6 +606,8 @@ impl InputState {
             | "edit.surround"
             | "edit.operator"
             | "edit.repeat_visual"
+            | "syntax.argument.swap_next"
+            | "syntax.argument.swap_previous"
                 if text_changed =>
             {
                 self.last_change = vec![semantic];

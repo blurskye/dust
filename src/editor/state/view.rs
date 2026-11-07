@@ -52,6 +52,8 @@ pub struct View {
     pub buffer: BufferId,
     pub cursor: ByteOffset,
     pub selection: Option<Selection>,
+    /// Previous cursor and selection for incremental syntax selection, newest last.
+    pub(crate) syntax_selections: Vec<(ByteOffset, Option<Selection>)>,
     pub scroll_line: usize,
     /// Wrapped visual row within `scroll_line`; runtime viewport state only.
     pub scroll_wrap_row: usize,
@@ -70,6 +72,7 @@ pub struct View {
 
 impl View {
     pub(crate) fn clear_editing_state(&mut self) {
+        self.syntax_selections.clear();
         self.replace_history.clear();
         self.insert_repeat = None;
         self.block_insert.clear();
@@ -85,6 +88,7 @@ impl View {
             buffer,
             cursor: ByteOffset(0),
             selection: None,
+            syntax_selections: Vec::new(),
             scroll_line: 0,
             scroll_wrap_row: 0,
             scroll_column: 0,

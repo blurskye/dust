@@ -452,6 +452,12 @@ pub(super) fn operator_range(
     if let Some(range) = text_object(text, objects, cursor, motion, count)? {
         return Ok(range);
     }
+    if let Some(target) =
+        crate::editor::command::builtins::structural::motion_target(objects, cursor, motion, count)
+    {
+        let target = target?;
+        return ByteRange::new(cursor.min(target), cursor.max(target)).map_err(failed);
+    }
     if linewise {
         // `dd` covers `count` lines; `dj`, `dk`, `dG`… cover every line up to the target.
         let cursor_line = text.byte_to_line(cursor).map_err(failed)?;

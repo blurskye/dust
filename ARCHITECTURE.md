@@ -141,7 +141,9 @@ preview and acceptance. Document edits use checked native transactions or the
 workspace-edit workflow. Stale replies cannot replace current document results.
 
 Tree-sitter is independent of LSP. `language/syntax/` parses buffer snapshots and
-provides highlights, folds, text objects and bounded queries. `app/syntax.rs`
+provides highlights, folds, text objects and bounded queries. Node-kind tables live
+in `assets/defaults/syntax-objects.toml`; `editor/command/builtins/structural.rs`
+owns incremental selection, definition motions and argument-swap transactions. `app/syntax.rs`
 coordinates parsing and projects accepted results for display.
 
 ## Plugins and permissions

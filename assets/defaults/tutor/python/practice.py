@@ -11,3 +11,4 @@ def practice():
     total = value * 2
     print("comment me")
     print(greeting, total)
+    max(11, 22, 33)

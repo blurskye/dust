@@ -144,6 +144,16 @@ pub(super) fn execute_builtin<E>(
     let mut transaction = transaction_for(view_id, buffer_id, buffer.text.revision());
 
     match invocation.id.as_str() {
+        id if id.starts_with("syntax.") => {
+            crate::editor::command::builtins::structural::apply(
+                &mut transaction,
+                buffer,
+                view_id,
+                view,
+                invocation,
+                count,
+            )?;
+        }
         "edit.apply" => {
             let range = checked_range(invocation, &buffer.text)?;
             let position = checked_offset(invocation, "cursor")?;
@@ -221,15 +231,23 @@ pub(super) fn execute_builtin<E>(
                 )?),
                 _ => None,
             };
-            let target = motion_target(
-                &buffer.text,
+            let target = match crate::editor::command::builtins::structural::motion_target(
+                buffer.current_syntax_objects(),
                 view.cursor,
                 motion,
                 count,
-                character,
-                state.policy,
-                wanted_column,
-            )?;
+            ) {
+                Some(target) => target?,
+                None => motion_target(
+                    &buffer.text,
+                    view.cursor,
+                    motion,
+                    count,
+                    character,
+                    state.policy,
+                    wanted_column,
+                )?,
+            };
             let target = if matches!(view.mode, EditorMode::Normal | EditorMode::OperatorPending)
                 || (wanted_column.is_some()
                     && !matches!(view.mode, EditorMode::Insert | EditorMode::Replace))

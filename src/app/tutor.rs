@@ -1447,6 +1447,50 @@ mod tests {
     }
 
     #[test]
+    fn syntax_lessons_work_in_every_practice_language() {
+        use crate::app::editing::tests::{press_keys, wait_syntax};
+        for language in Language::ALL {
+            let mut app = app();
+            let first = lessons(language)
+                .unwrap()
+                .iter()
+                .position(|step| step.chapter == "Syntax editing")
+                .unwrap();
+            app.start_tutor(TutorStart {
+                language,
+                step: first,
+            });
+            enter(&mut app);
+            crate::app::tests::wait_vfs(&mut app);
+            app.tutor_tick();
+            let buffer = app.state.active_buffer_id().unwrap();
+            wait_syntax(&mut app, buffer);
+            press_keys(&mut app, &["/", "1", "1", "enter"]);
+            press_keys(&mut app, &["ctrl-space", "ctrl-space", "backspace"]);
+            app.tutor_tick();
+            assert!(app.tutor.done_at.is_some(), "{language:?}: grow/shrink");
+            app.tutor_next();
+            press_keys(&mut app, &["escape"]);
+            app.tutor_tick();
+            press_keys(&mut app, &["/", "2", "2", "enter", "v", "i", "a"]);
+            app.tutor_tick();
+            assert!(app.tutor.done_at.is_some(), "{language:?}: argument object");
+            app.tutor_next();
+            press_keys(&mut app, &["escape"]);
+            app.tutor_tick();
+            press_keys(&mut app, &["/", "1", "1", "enter", "space", "c", ">"]);
+            app.tutor_tick();
+            assert!(app.tutor.done_at.is_some(), "{language:?}: swap");
+            assert!(
+                app.state.buffers[buffer]
+                    .text
+                    .to_string()
+                    .contains("(22, 11, 33)")
+            );
+        }
+    }
+
+    #[test]
     fn rust_practice_manifest_is_emitted_with_its_cargo_name() {
         let files = Language::Rust.practice_files().collect::<Vec<_>>();
         let manifest = files

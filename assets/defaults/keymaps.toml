@@ -3865,11 +3865,160 @@ keys = "g O"
 command = "lsp.document_symbols"
 
 [[keymap]]
-id = "builtin.editor.normal.lsp-completion-trigger.ctrl-space"
+id = "builtin.editor.normal.syntax-selection-grow.ctrl-space"
 context = "editor"
 mode = "normal"
 keys = "ctrl-space"
-command = "lsp.completion.trigger"
+command = "syntax.selection.grow"
+desc = "Grow syntax selection"
+
+[[keymap]]
+id = "builtin.editor.visual-char.syntax-selection-grow.ctrl-space"
+context = "editor"
+mode = "visual_char"
+keys = "ctrl-space"
+command = "syntax.selection.grow"
+[[keymap]]
+id = "builtin.editor.visual-char.syntax-selection-shrink.backspace"
+context = "editor"
+mode = "visual_char"
+keys = "backspace"
+command = "syntax.selection.shrink"
+
+# Parameter swaps: these code-prefix keys are unassigned in LazyVim.
+[[keymap]]
+id = "builtin.editor.normal.syntax-swap-next"
+context = "editor"
+mode = "normal"
+keys = "<leader> c >"
+command = "syntax.argument.swap_next"
+desc = "Swap argument with next"
+[[keymap]]
+id = "builtin.editor.normal.syntax-swap-previous"
+context = "editor"
+mode = "normal"
+keys = "<leader> c <"
+command = "syntax.argument.swap_previous"
+desc = "Swap argument with previous"
+
+[[keymap]]
+id = "builtin.editor.normal.syntax-next-function"
+context = "editor"
+mode = "normal"
+keys = "] f"
+command = "input.motion"
+arguments = { motion = "next_function", linewise = false }
+desc = "Next function"
+[[keymap]]
+id = "builtin.editor.normal.syntax-previous-function"
+context = "editor"
+mode = "normal"
+keys = "[ f"
+command = "input.motion"
+arguments = { motion = "previous_function", linewise = false }
+desc = "Previous function"
+[[keymap]]
+id = "builtin.editor.normal.syntax-next-class"
+context = "editor"
+mode = "normal"
+keys = "] c"
+command = "input.motion"
+arguments = { motion = "next_class", linewise = false }
+desc = "Next class"
+[[keymap]]
+id = "builtin.editor.normal.syntax-previous-class"
+context = "editor"
+mode = "normal"
+keys = "[ c"
+command = "input.motion"
+arguments = { motion = "previous_class", linewise = false }
+desc = "Previous class"
+[[keymap]]
+id = "builtin.editor.visual-char.syntax-next-function"
+context = "editor"
+mode = "visual_char"
+keys = "] f"
+command = "input.motion"
+arguments = { motion = "next_function", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.syntax-previous-function"
+context = "editor"
+mode = "visual_char"
+keys = "[ f"
+command = "input.motion"
+arguments = { motion = "previous_function", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.syntax-next-class"
+context = "editor"
+mode = "visual_char"
+keys = "] c"
+command = "input.motion"
+arguments = { motion = "next_class", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.syntax-previous-class"
+context = "editor"
+mode = "visual_char"
+keys = "[ c"
+command = "input.motion"
+arguments = { motion = "previous_class", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.syntax-next-function"
+context = "editor"
+mode = "operator_pending"
+keys = "] f"
+command = "input.motion"
+arguments = { motion = "next_function", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.syntax-previous-function"
+context = "editor"
+mode = "operator_pending"
+keys = "[ f"
+command = "input.motion"
+arguments = { motion = "previous_function", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.syntax-next-class"
+context = "editor"
+mode = "operator_pending"
+keys = "] c"
+command = "input.motion"
+arguments = { motion = "next_class", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.syntax-previous-class"
+context = "editor"
+mode = "operator_pending"
+keys = "[ c"
+command = "input.motion"
+arguments = { motion = "previous_class", linewise = false }
+
+# c is class; / names a comment without conflicting with ac/ic.
+[[keymap]]
+id = "builtin.editor.operator-pending.syntax-inner-comment"
+context = "editor"
+mode = "operator_pending"
+keys = "i /"
+command = "input.motion"
+arguments = { motion = "inner_comment", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.syntax-around-comment"
+context = "editor"
+mode = "operator_pending"
+keys = "a /"
+command = "input.motion"
+arguments = { motion = "a_comment", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.syntax-inner-comment"
+context = "editor"
+mode = "visual_char"
+keys = "i /"
+command = "input.motion"
+arguments = { motion = "inner_comment", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.syntax-around-comment"
+context = "editor"
+mode = "visual_char"
+keys = "a /"
+command = "input.motion"
+arguments = { motion = "a_comment", linewise = false }
 
 [[keymap]]
 id = "builtin.completion.surface.completion-accept.tab"

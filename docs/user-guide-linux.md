@@ -51,6 +51,37 @@ Yank and paste share the system clipboard, as in LazyVim (`clipboard = "unnamedp
 
 `Ctrl-h/j/k/l` moves between editor panes and the explorer. `H`/`L` and `[b`/`]b` switch buffers. The cursor remains visible through wrapping, folds, Unicode text, splits, resize, and explorer/terminal layout changes. During repaint, Dust hides the hardware cursor and publishes its final position within a synchronized terminal update; unchanged frames send no cursor commands. This keeps internal painting movements from appearing as cursor jumps or trails.
 
+## Syntax editing
+
+Tree-sitter works offline, independently of language servers. In Normal mode,
+`Ctrl-Space` selects the syntax node under the cursor; press it again to grow to
+its parent. In character Visual mode, `Backspace` retraces those selections, down
+to the original cursor. Moving or editing starts a fresh selection history.
+`Ctrl-Space` still requests completion in Insert mode.
+
+Use these objects after an operator (`d`, `c`, `y`) or in character Visual mode:
+
+| Object | Around | Inside |
+|---|---|---|
+| Function or method | `af` | `if` |
+| Class, struct or similar definition | `ac` | `ic` |
+| Argument or parameter | `aa` | `ia` |
+| Comment | `a/` | `i/` |
+
+Inside a function/class selects its body; inside a comment omits its delimiters.
+`]f` / `[f` move to the next/previous function start, and `]c` / `[c` to class
+starts. Counts, Visual selection and operators also work with these motions.
+`Space c >` / `Space c <` swap the argument under the cursor with its next/previous
+sibling, keeping separators and following the moved argument. These code-prefix
+keys are unassigned in LazyVim; `/` distinguishes comments from class objects.
+
+Edits use ordinary `u`, `Ctrl-r` and `.`. Selection and navigation behave like
+other motions: they do not add text-undo entries or replace the last dot change.
+All actions also have command-palette entries (search “syntax”, “function”,
+“class”, “argument” or “comment”). `:Tutor` includes hands-on syntax lessons.
+Objects depend on the bundled grammar's node kinds; unsupported objects or a
+pending parse report an unavailable action rather than editing guessed ranges.
+
 ## Explorer
 
 Open the explorer with `e` on the dashboard, `Space e` in Normal mode, or `:explore`.
@@ -112,7 +143,7 @@ Diagnostics render directly beside the affected source line. Navigating to a dia
 
 For an existing named file, LSP synchronization uses every in-memory buffer revision. Saving is **not** required for diagnostics, completion, hover, semantic data, or inlay hints to update. Server startup still requires a named file inside a recognized project and a trusted workspace.
 
-`Ctrl-Space` requests completion. The menu is clipped to the focused split, follows selection, identifies item kind and server, and automatically opens available documentation beside the menu. Enter accepts; Escape cancels.
+In Insert mode, `Ctrl-Space` requests completion. The menu is clipped to the focused split, follows selection, identifies item kind and server, and automatically opens available documentation beside the menu. Enter accepts; Escape cancels.
 
 Code navigation uses `g d` for definition, `g D` for declaration, `g I` for implementation, `g y` for type definition, `g r` for references, `g O` for document symbols, and `g K` for signature help.
 
