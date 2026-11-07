@@ -10,13 +10,14 @@ fn tool_menu_for_render() -> crate::ui::render::ToolMenuState {
         runtime_picker: None,
         rows: vec![crate::ui::render::ToolMenuRow {
             id: "rust-analyzer".into(),
+            for_project: true,
             name: "Rust Analyzer".into(),
             kind: "lsp".into(),
             languages: "rust".into(),
             version: String::new(),
             release: String::new(),
             runtime: "PATH".into(),
-            lifecycle: "not working".into(),
+            lifecycle: "failed".into(),
             session_state: String::new(),
             executable: "/bin/rust-analyzer".into(),
             note: "Version probe failed".into(),
@@ -90,7 +91,8 @@ fn tool_menu_failed_probe_offers_start_instead_of_stop_and_restart() {
             .map(|y| frame.grid.row_text(y))
             .collect::<Vec<_>>()
             .join("\n");
-        assert!(screen.contains("not working"));
+        assert!(screen.contains("failed"));
+        assert!(screen.contains("For this project"));
         assert!(screen.contains(if can_start {
             "Enter start"
         } else {
@@ -114,6 +116,46 @@ fn tool_menu_failed_probe_offers_start_instead_of_stop_and_restart() {
         assert!(screen.contains("x stop"), "{state}");
         assert!(screen.contains("R restart"), "{state}");
         assert!(!screen.contains("Enter start"), "{state}");
+    }
+}
+
+#[test]
+fn project_group_headers_keep_selected_tools_visible_across_the_boundary() {
+    let config = crate::config::load_bundled_config().config;
+    let mut menu = tool_menu_for_render();
+    let row = menu.rows[0].clone();
+    menu.rows = (0..30)
+        .map(|index| {
+            let mut row = row.clone();
+            row.name = format!("tool-{index:03}-end");
+            row.for_project = index < 3;
+            row.lifecycle = "not installed".into();
+            row.note = "Not installed".into();
+            row
+        })
+        .collect();
+    for (width, height) in [(80, 24), (160, 45)] {
+        for selected in 0..menu.rows.len() {
+            menu.selected = selected;
+            let mut frame = crate::ui::grid::Frame {
+                grid: crate::ui::CellGrid::new(width, height),
+                cursor: None,
+            };
+            crate::ui::render::tools::render_tool_menu(&mut frame, &menu, &config, width, height);
+            let selected_rows = (0..height)
+                .filter(|y| {
+                    (0..width).any(|x| {
+                        frame.grid.get(x, *y).unwrap().style == crate::ui::Style::Selection
+                    })
+                })
+                .collect::<Vec<_>>();
+            assert!(
+                selected_rows
+                    .iter()
+                    .any(|y| frame.grid.row_text(*y).contains(&menu.rows[selected].name)),
+                "selected tool {selected} missing at {width}x{height}"
+            );
+        }
     }
 }
 

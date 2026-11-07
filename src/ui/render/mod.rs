@@ -347,6 +347,7 @@ pub struct DashboardAction {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ToolMenuRow {
     pub id: String,
+    pub for_project: bool,
     pub name: String,
     pub kind: String,
     pub languages: String,

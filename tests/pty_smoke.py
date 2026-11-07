@@ -1188,7 +1188,7 @@ exit 1
         )
         assert code == 0
         manager = terminal_screen(snapshots[3])
-        assert "unavailable" in manager, manager
+        assert re.search(r"rust-analyzer[^\n]*PATH\s+failed", manager), manager
         assert "starting" not in manager
         installed = terminal_screen(snapshots[4])
         assert re.search(r"rust-analyzer[^\n]*PATH\s+installed", installed), installed
