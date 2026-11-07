@@ -17,11 +17,9 @@ use crate::ui::SettingsPageState;
 use crate::ui::SettingsRow;
 use crate::ui::SettingsValue;
 
-/// Contexts whose bindings are the inner workings of a page or the mouse, not shortcuts.
+/// Mouse and terminal lifecycle events are not keyboard shortcuts.
 fn listed(context: &str) -> bool {
-    !(context.ends_with("_mouse")
-        || context.starts_with("settings")
-        || matches!(context, "setup" | "focus" | "key_release"))
+    !(context.ends_with("_mouse") || matches!(context, "focus" | "key_release"))
 }
 
 /// A binding longer than this many keys can't be typed in, as in keymaps.toml.
@@ -108,10 +106,17 @@ impl App {
                 found.len() - 1
             });
             let command = entry.command.clone().unwrap_or_default();
-            let mut title = settings
-                .command_labels
-                .get(&command)
+            let mut title = entry
+                .desc
+                .as_ref()
+                .or_else(|| settings.command_labels.get(&command))
                 .cloned()
+                .or_else(|| {
+                    self.commands
+                        .specs()
+                        .find(|spec| spec.id.as_str() == command)
+                        .map(|spec| spec.title.clone())
+                })
                 .unwrap_or_else(|| command.clone());
             // What the arguments say, as in "Move: down, linewise".
             let arguments: Vec<String> = entry
@@ -364,5 +369,58 @@ fn section_title(context: &str, mode: &str) -> String {
         context
     } else {
         format!("{context} · {}", mode.replace('_', " "))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::app::tests::app;
+
+    #[test]
+    fn shortcuts_include_every_keyboard_context_and_binding_descriptions() {
+        let (_dirs, mut app) = app();
+        for key in ["space", "s", "k"] {
+            app.handle_configured_key(key.parse().unwrap());
+        }
+        assert!(app.ui.settings.as_ref().unwrap().shortcuts);
+        let (sections, rows) = app.shortcut_rows();
+        let declared = crate::config::declared_keymaps(None);
+        for binding in declared.iter().filter(|binding| {
+            binding.entry.command.is_some()
+                && binding.entry.keys.is_some()
+                && binding.entry.context.as_deref().is_some_and(super::listed)
+        }) {
+            let row = rows
+                .iter()
+                .find(|row| row.key == binding.entry.id)
+                .unwrap_or_else(|| panic!("missing {}", binding.entry.id));
+            assert!(!row.title.is_empty());
+            if let Some(description) = &binding.entry.desc {
+                assert!(row.title.starts_with(description), "{}", row.key);
+            }
+        }
+        for context in ["settings", "setup", "terminal_visual", "editor"] {
+            let binding = declared
+                .iter()
+                .find(|binding| binding.entry.context.as_deref() == Some(context))
+                .unwrap();
+            assert!(
+                rows.iter().any(|row| row.key == binding.entry.id),
+                "{context}"
+            );
+        }
+        assert!(
+            sections
+                .iter()
+                .any(|section| section.to_lowercase().contains("insert"))
+        );
+        app.ui.settings.as_mut().unwrap().query = "terminal visual".into();
+        app.refresh_settings();
+        let page = app.ui.settings.as_ref().unwrap();
+        assert!(
+            page.lines
+                .iter()
+                .any(|line| matches!(line, crate::ui::SettingsLine::Setting(_)))
+        );
     }
 }

@@ -101,6 +101,7 @@ Open the explorer with `e` on the dashboard, `Space e` in Normal mode, or `:expl
 | Refresh | `R` |
 | Toggle hidden / ignored | `.` / `I` |
 | Open command menu | `:` |
+| Show explorer key help | `?` |
 | Close explorer | `Escape` |
 
 Rename opens the shared **Rename path** prompt, prefilled relative to its displayed workspace root. Edit the path and press Enter; Escape cancels before application. A collision keeps the entered name available for correction. Source inspection is asynchronous; wait for it to finish before submitting. Names are literal (not shell or command-line text), limited to 4096 UTF-8 bytes without controls or `..` traversal. Open dirty buffers and their split views retain their text after rename. `:explorer.rename target=...` remains the direct selected-path command with parent-relative target semantics.
@@ -127,6 +128,19 @@ Pickers open in **Insert** mode: every letter (including `j` and `k`) types into
 Controls are configurable in the `picker` (Insert) and `picker_normal` contexts. Insert-context Escape invokes `picker.mode.normal`; `picker.cancel` closes directly. Workspace-edit review uses separate toggle/apply/reject controls.
 
 `Space s r` opens checked workspace replacement.
+
+`Space s k` opens the searchable **Keyboard Shortcuts** page. Press `/` to search
+by key, description, command, or mode (for example `terminal visual`); Escape clears
+the search. It includes editor modes and surface controls, including settings and
+setup. Enter records a replacement binding, so use Escape or `q` to leave without
+changing keys.
+
+Press `?` in the explorer, terminal Normal/Visual mode, Tools, Settings, Setup, or
+agent Normal mode for a searchable popup of that surface's effective keys. User
+remaps and binding descriptions are respected. Enter or Ctrl-C closes help without
+running its selected command; Escape uses the ordinary two-step picker behavior.
+Text-entry modes keep `?` as text, and the editor/dashboard retain their existing
+`?` action. `Space ?` also opens contextual key help wherever leader keys apply.
 
 ## Diagnostics and LSP
 
@@ -183,6 +197,10 @@ OSC 0/2 title replaces that title until it is cleared. The first focused termina
 briefly shows the configured key for leaving terminal input mode (Double Escape
 by default); `[ui.terminal_panel].input_hint_ms` controls its duration, with `0`
 disabling it. The dashboard adapts to the space left above a docked terminal.
+
+For terminal key help, press Escape twice to enter Normal mode, then `?`. Close
+help and press `i` to return to shell input; `?` typed in shell input still reaches
+the child process.
 
 Terminal processes are never restored as fake live sessions. Zero-exit terminals close automatically; failed terminals retain bounded output.
 
@@ -285,6 +303,10 @@ Use `:health`, `dust --health`, or `application.safe_mode.status` to inspect run
 ## Configuration
 
 User configuration is loaded transactionally. Invalid reloads retain the previous working configuration. WhichKey-style help appears after `[ui.key_hints].delay_ms`; a pure prefix such as `g`, `Space`, or `Space s` remains open until the next key or cancellation. Only a prefix that is also a complete command expires through `[input].mapping_timeout_ms`.
+The popup's **Keys:** heading shows the complete prefix pressed so far. Commands
+come before groups, with keys sorted case-insensitively within each; explicit user
+group `order` values still take precedence. Group names follow LazyVim (`file/find`,
+`quit/session`, `diagnostics/quickfix`).
 
 Current Linux path resolution is:
 

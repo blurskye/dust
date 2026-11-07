@@ -316,7 +316,30 @@ pub(in crate::app) fn resolved_key_hints_follow_leaders_groups_and_configured_co
         .iter()
         .find(|row| row.next_key == "f")
         .expect("files group");
-    assert_eq!(files.label, "Files");
+    assert_eq!(files.label, "file/find");
+    let groups = hints
+        .rows
+        .iter()
+        .filter(|row| row.group_id.is_some())
+        .map(|row| row.next_key.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        groups,
+        [
+            "a", "b", "c", "d", "f", "g", "q", "s", "t", "tab", "u", "w", "x"
+        ]
+    );
+    let first_group = hints
+        .rows
+        .iter()
+        .position(|row| row.group_id.is_some())
+        .unwrap();
+    assert!(hints.rows[..first_group].iter().all(|row| row.direct));
+    assert!(
+        hints.rows[first_group..]
+            .iter()
+            .all(|row| row.group_id.is_some())
+    );
     assert_eq!(
         files.group_id.as_deref(),
         Some("builtin.global.group.files.editor-normal")
@@ -350,6 +373,13 @@ pub(in crate::app) fn resolved_key_hints_follow_leaders_groups_and_configured_co
             .find(|row| row.next_key == "b")
             .map(|row| row.label.as_str()),
         Some("Buffers")
+    );
+    assert_eq!(file_hints.prefix, "space f");
+    assert!(
+        file_hints
+            .rows
+            .windows(2)
+            .all(|rows| { rows[0].next_key.to_lowercase() <= rows[1].next_key.to_lowercase() })
     );
     let goto_hints = app
         .configuration
