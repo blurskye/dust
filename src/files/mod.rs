@@ -35,6 +35,8 @@ pub use vfs::WriteExpectation;
 pub use vfs::atomic_write;
 pub(crate) use vfs::atomic_write_with_executable;
 pub use vfs::checked_atomic_write;
+#[cfg(unix)]
+pub(crate) use vfs::directory_open_flags;
 pub(crate) use vfs::is_symlink_error;
 pub(crate) use vfs::lock_exclusive;
 pub(crate) use vfs::lock_file;
@@ -44,8 +46,6 @@ pub(crate) use vfs::open_no_symlinks;
 pub(crate) use vfs::open_path;
 pub(crate) use vfs::open_read_no_symlinks;
 pub(crate) use vfs::open_regular_file;
-#[cfg(unix)]
-pub(crate) use vfs::path_open_flags;
 pub use vfs::read_file;
 pub(crate) use vfs::read_file_bounded;
 mod project_root;

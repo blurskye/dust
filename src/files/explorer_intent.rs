@@ -4,7 +4,7 @@ use crate::files::RequestId;
 use crate::files::RootIdentity;
 use crate::files::VfsError;
 #[cfg(unix)]
-use crate::files::vfs::path_open_flags;
+use crate::files::vfs::directory_open_flags;
 use crate::files::vfs::roots_current;
 use std::fs;
 use std::io;
@@ -251,11 +251,9 @@ fn read_scoped_file(path: &Path, roots: &[RootIdentity]) -> Result<Vec<u8>, VfsE
         .filter(|root| path.starts_with(&root.canonical_path))
         .max_by_key(|root| root.canonical_path.components().count())
         .ok_or_else(|| error(path, "file is outside the workspace roots"))?;
-    let directory = crate::files::vfs::open_no_symlinks(
-        &root.canonical_path,
-        path_open_flags() | OFlags::DIRECTORY,
-    )
-    .map_err(|e| error(path, e.to_string()))?;
+    let directory =
+        crate::files::vfs::open_no_symlinks(&root.canonical_path, directory_open_flags())
+            .map_err(|e| error(path, e.to_string()))?;
     let metadata = directory
         .metadata()
         .map_err(|e| error(path, e.to_string()))?;
@@ -274,7 +272,7 @@ fn read_scoped_file(path: &Path, roots: &[RootIdentity]) -> Result<Vec<u8>, VfsE
             return Err(error(path, "invalid workspace-relative file path"));
         };
         let flags = if components.peek().is_some() {
-            path_open_flags() | OFlags::DIRECTORY
+            directory_open_flags()
         } else {
             OFlags::RDONLY | OFlags::NONBLOCK
         } | OFlags::NOFOLLOW
@@ -428,8 +426,9 @@ mod tests {
         assert!(read_scoped_file(&path, &roots).is_err());
     }
 
-    // Unix modes distinguish read permission from permission to rename.
-    #[cfg(unix)]
+    // Unix modes distinguish read permission from permission to rename. Only Linux
+    // (O_PATH) can hold an unreadable file to check its identity.
+    #[cfg(target_os = "linux")]
     #[test]
     fn explorer_rename_and_delete_do_not_require_source_read_permission() {
         use std::os::unix::fs::PermissionsExt;

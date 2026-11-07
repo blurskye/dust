@@ -2,6 +2,7 @@
 
 use reqwest::Url;
 
+#[cfg(target_os = "linux")]
 use crate::tools::catalog::ToolArchiveFormat;
 
 use crate::tools::catalog::ToolInstall;
@@ -20,6 +21,7 @@ use crate::tools::catalog::nix_lsp_runtime_at;
 
 use crate::tools::catalog::nix_lsp_shell;
 
+#[cfg(target_os = "linux")]
 use crate::tools::catalog::nixos_os_release_at;
 
 use crate::tools::catalog::tool_launch_environment_at;
@@ -28,6 +30,7 @@ use crate::tools::catalog::write_managed_tool_version;
 
 use crate::tools::compatibility::elf_interpreter;
 
+#[cfg(target_os = "linux")]
 use crate::tools::compatibility::runtime_artifact;
 
 use crate::tools::install::install_tool;
@@ -240,6 +243,8 @@ fn javascript_tools_prepend_their_private_bun_backed_node_runtime() {
     }
 }
 
+// Managed runtimes and NixOS detection exist only on Linux.
+#[cfg(target_os = "linux")]
 #[test]
 fn nixos_host_detection_accepts_only_the_exact_os_release_id() {
     let directory = tempfile::tempdir().expect("os release directory");
@@ -266,6 +271,8 @@ fn private_nix_workspace_contains_only_dust_pinned_flake_inputs() {
     assert!(lock.contains("b6018f87da91d19d0ab4cf979885689b469cdd41"));
 }
 
+// Managed runtimes and NixOS detection exist only on Linux.
+#[cfg(target_os = "linux")]
 #[test]
 fn bun_bootstrap_is_the_pinned_glibc_baseline_artifact() {
     let bun = runtime_artifact("bun").expect("Bun runtime artifact");
@@ -281,6 +288,8 @@ fn bun_bootstrap_is_the_pinned_glibc_baseline_artifact() {
     assert_eq!(bun.executable_path, "bun-linux-x64-baseline/bun");
 }
 
+// Managed runtimes and NixOS detection exist only on Linux.
+#[cfg(target_os = "linux")]
 #[test]
 fn cached_runtime_refreshes_when_the_nix_compatibility_loader_changes() {
     use crate::tools::catalog::NixCompatibilityRuntime;
@@ -2257,7 +2266,8 @@ fn locked_uv_installation_rejects_another_process_and_uninstall() {
     assert!(!tool.exists());
 }
 
-#[cfg(unix)]
+// Managed runtimes exist only on Linux.
+#[cfg(target_os = "linux")]
 #[test]
 fn failed_uv_update_restores_previous_environment_and_shebang_paths() {
     use std::fs;
@@ -2485,7 +2495,8 @@ fn package_commit_rejects_changed_or_shared_plugin_ids() {
     assert_eq!(activations[0].0.id, "alpha");
 }
 
-#[cfg(unix)]
+// Managed runtimes exist only on Linux.
+#[cfg(target_os = "linux")]
 #[test]
 fn go_install_preserves_non_utf8_environment_paths() {
     use std::ffi::OsStr;
@@ -2525,7 +2536,8 @@ fn go_install_preserves_non_utf8_environment_paths() {
     assert!(installed.starts_with(&root));
 }
 
-#[cfg(unix)]
+// Managed runtimes exist only on Linux.
+#[cfg(target_os = "linux")]
 #[test]
 fn npm_install_patches_native_dependencies_before_activation() {
     use std::fs;

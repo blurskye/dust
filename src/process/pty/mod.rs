@@ -395,8 +395,6 @@ fn open_working_directory(
     path: &std::path::Path,
     root: Option<&crate::files::RootIdentity>,
 ) -> Result<std::fs::File, PtyError> {
-    #[cfg(unix)]
-    use rustix::fs::OFlags;
     let fail = |error: String| PtyError::Spawn(error);
     let canonical = path
         .canonicalize()
@@ -414,10 +412,7 @@ fn open_working_directory(
         }
     }
     #[cfg(unix)]
-    let opened = crate::files::open_no_symlinks(
-        &canonical,
-        crate::files::path_open_flags() | OFlags::DIRECTORY,
-    );
+    let opened = crate::files::open_no_symlinks(&canonical, crate::files::directory_open_flags());
     #[cfg(windows)]
     let opened = crate::files::open_path(&canonical);
     opened.map_err(|e| fail(format!("PTY working directory is unavailable: {e}")))
@@ -427,14 +422,18 @@ fn working_directory_path(
     _directory: &std::fs::File,
     _path: &std::path::Path,
 ) -> std::io::Result<std::path::PathBuf> {
-    #[cfg(unix)]
+    // macOS cannot chdir through /dev/fd, so it asks the kernel for the opened
+    // directory's current path instead.
+    #[cfg(target_os = "macos")]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        let path = rustix::fs::getpath(_directory)?;
+        Ok(std::ffi::OsStr::from_bytes(path.as_bytes()).into())
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
     {
         use std::os::fd::AsRawFd;
-        #[cfg(target_os = "macos")]
-        let descriptors = "/dev/fd";
-        #[cfg(not(target_os = "macos"))]
-        let descriptors = "/proc/self/fd";
-        Ok(std::path::Path::new(descriptors).join(_directory.as_raw_fd().to_string()))
+        Ok(std::path::Path::new("/proc/self/fd").join(_directory.as_raw_fd().to_string()))
     }
     #[cfg(windows)]
     {

@@ -1701,6 +1701,20 @@ pub(super) fn agent_atomic_write(root: &Path, path: &Path, bytes: &[u8]) -> Resu
     atomic_write(path, bytes)
 }
 
+/// Open a directory for identity checks and relative opens with search permission only.
+#[cfg(unix)]
+pub(crate) fn directory_open_flags() -> rustix::fs::OFlags {
+    #[cfg(target_os = "macos")]
+    {
+        // O_EVTONLY needs read permission; O_SEARCH is enough to walk through a directory.
+        rustix::fs::OFlags::from_bits_retain(nix::libc::O_SEARCH as _)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        rustix::fs::OFlags::PATH | rustix::fs::OFlags::DIRECTORY
+    }
+}
+
 /// Open an entry for identity checks without requiring read permission.
 #[cfg(unix)]
 pub(crate) fn path_open_flags() -> rustix::fs::OFlags {
@@ -1734,7 +1748,7 @@ pub(super) fn open_scoped(
         path: path.into(),
         source,
     };
-    let directory = open_no_symlinks(root, path_open_flags() | OFlags::DIRECTORY).map_err(error)?;
+    let directory = open_no_symlinks(root, directory_open_flags()).map_err(error)?;
     let relative = path
         .strip_prefix(root)
         .map_err(|_| VfsError::OutsideScope(path.into()))?;
@@ -1753,7 +1767,7 @@ pub(crate) fn open_no_symlinks(path: &Path, flags: rustix::fs::OFlags) -> io::Re
     let root = fs::File::from(openat(
         CWD,
         "/",
-        path_open_flags() | OFlags::DIRECTORY | OFlags::CLOEXEC,
+        directory_open_flags() | OFlags::CLOEXEC,
         Mode::empty(),
     )?);
     open_beneath(root, relative, flags)
@@ -1781,7 +1795,7 @@ fn open_beneath(
             ));
         };
         let flags = if components.peek().is_some() {
-            path_open_flags() | OFlags::DIRECTORY
+            directory_open_flags()
         } else {
             flags
         };
@@ -1822,11 +1836,7 @@ fn scoped_parent(
     let name = path
         .file_name()
         .ok_or_else(|| VfsError::OutsideScope(path.into()))?;
-    let file = open_scoped(
-        parent,
-        roots,
-        path_open_flags() | rustix::fs::OFlags::DIRECTORY,
-    )?;
+    let file = open_scoped(parent, roots, directory_open_flags())?;
     Ok((file, name.into()))
 }
 
@@ -2555,7 +2565,7 @@ pub(super) fn agent_atomic_write(root: &Path, path: &Path, bytes: &[u8]) -> Resu
         .ok_or_else(|| VfsError::OutsideScope(path.into()))?;
     let result = (|| -> io::Result<()> {
         // Ancestors need search permission, not directory-listing permission.
-        let flags = path_open_flags() | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC;
+        let flags = directory_open_flags() | OFlags::NOFOLLOW | OFlags::CLOEXEC;
         let mut directory = File::from(openat(rustix::fs::CWD, "/", flags, Mode::empty())?);
         // Walk the root too: an ancestor substituted since resolution must not
         // redirect the initial directory open outside the resolved workspace.

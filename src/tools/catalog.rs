@@ -853,26 +853,45 @@ fn native_tool_downloads_are_pinned_and_use_native_executable_names() {
         let definitions = platform_tool_catalog(platform);
         assert!(!definitions.is_empty(), "{platform}");
         for definition in definitions {
-            let Some(ToolInstall::Archive {
-                url,
-                sha256,
-                executable_path,
-                ..
-            }) = definition.install
-            else {
-                panic!("native tool must use a download");
-            };
-            assert!(url.starts_with("https://"));
-            assert!(!url.contains("linux"));
-            assert!(crate::tools::package_lock::valid_digest(&sha256));
-            assert_eq!(executable_path, definition.executable);
+            let linux = toml::from_str::<ToolCatalogFile>(BUNDLED_TOOL_CATALOG)
+                .unwrap()
+                .tool
+                .into_iter()
+                .find(|tool| tool.id == definition.id)
+                .expect("native tools override Linux catalogue entries");
+            let release = |tool: &ToolDefinition| tool.release.clone();
+            assert_eq!(
+                definition
+                    .managed_versions()
+                    .iter()
+                    .map(release)
+                    .collect::<Vec<_>>(),
+                linux
+                    .managed_versions()
+                    .iter()
+                    .map(release)
+                    .collect::<Vec<_>>(),
+                "{platform} offers the same exact pins as Linux"
+            );
+            for version in definition.managed_versions() {
+                let Some(ToolInstall::Archive {
+                    url,
+                    sha256,
+                    executable_path,
+                    ..
+                }) = version.install
+                else {
+                    panic!("native tool must use a download");
+                };
+                assert!(url.starts_with("https://"));
+                assert!(!url.contains("linux"));
+                assert!(url.contains(version.release.as_deref().unwrap_or_default()));
+                assert!(crate::tools::package_lock::valid_digest(&sha256));
+                assert_eq!(executable_path, definition.executable);
+            }
             assert_eq!(
                 definition.executable.ends_with(".exe"),
                 platform.starts_with("windows")
-            );
-            assert!(
-                definition.pins.is_empty(),
-                "Linux pins must not leak into native tools"
             );
         }
     }

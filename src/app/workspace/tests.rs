@@ -401,11 +401,12 @@ fn workspace_file_picker_publishes_the_full_discovery_byte_budget() {
     let (_app_dirs, mut app) = app();
     let files = tempfile::tempdir_in(&app.state.workspace_root).unwrap();
     let mut directory = files.path().to_path_buf();
-    for _ in 0..10 {
+    // Deep enough to make the budget matter, yet inside macOS's 1024-byte path limit.
+    for _ in 0..4 {
         directory.push("d".repeat(200));
     }
     fs::create_dir_all(&directory).unwrap();
-    let count = 3000;
+    let count = 8000;
     for index in 0..count {
         fs::write(directory.join(format!("file-{index:04}")), "").unwrap();
     }

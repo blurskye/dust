@@ -206,6 +206,10 @@ impl RemoteServer {
                         Err(error) if error.kind() == io::ErrorKind::WouldBlock => continue,
                         Err(_) => break,
                     };
+                    // macOS hands accepted sockets the listener's non-blocking mode.
+                    if stream.set_nonblocking(false).is_err() {
+                        continue;
+                    }
                     {
                         let mut reading = listener_reading.lock().unwrap();
                         if listener_stop.load(Ordering::Acquire) {
