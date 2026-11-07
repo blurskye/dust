@@ -469,7 +469,21 @@ impl Writer {
         pipe: std::process::ChildStdin,
         events: Events,
     ) -> std::io::Result<(Self, thread::JoinHandle<()>)> {
-        let mut pipe = crate::process::CancellablePipe::new(pipe, events.actor.cancel.clone())?;
+        let pipe = crate::process::CancellablePipe::new(pipe, events.actor.cancel.clone())?;
+        Self::start_writer(pipe, events)
+    }
+    pub(super) fn socket(
+        socket: std::net::TcpStream,
+        events: Events,
+    ) -> std::io::Result<(Self, thread::JoinHandle<()>)> {
+        socket.set_nonblocking(true)?;
+        let pipe = crate::process::CancellablePipe::new(socket, events.actor.cancel.clone())?;
+        Self::start_writer(pipe, events)
+    }
+    fn start_writer(
+        mut pipe: impl std::io::Write + Send + 'static,
+        events: Events,
+    ) -> std::io::Result<(Self, thread::JoinHandle<()>)> {
         let (sender, receiver) = mpsc::sync_channel::<(Value, Option<Arc<AtomicU8>>)>(CAPACITY);
         let actor = events.actor.clone();
         let worker = thread::Builder::new()

@@ -347,6 +347,7 @@ pub struct DashboardAction {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ToolMenuRow {
     pub id: String,
+    pub for_project: bool,
     pub name: String,
     pub kind: String,
     pub languages: String,
@@ -1007,6 +1008,7 @@ pub struct TerminalPanelState {
     pub exit_code: Option<u32>,
     pub truncated: bool,
     pub focused: bool,
+    pub input_hint: Option<String>,
     pub columns: u16,
     pub rows: u16,
     pub cells: Vec<Vec<crate::ui::pty_screen::PtyCell>>,
@@ -1559,7 +1561,41 @@ pub fn prompt_geometry_for_state(
     config: &Config,
     prompt: &PromptState,
 ) -> PromptGeometry {
-    confirmation_layout(terminal_width, terminal_height, config, prompt).geometry
+    let mut geometry =
+        confirmation_layout(terminal_width, terminal_height, config, prompt).geometry;
+    if prompt.confirmation.is_none()
+        && prompt.error.is_none()
+        && let Some(help) = &prompt.help
+    {
+        // Short prompts retain their usual box. Longer instructions first use the available
+        // width, then wrap above the input instead of losing their ending at the border.
+        let message_width = help
+            .lines()
+            .map(|line| text_width(line, config.editor.ambiguous_width))
+            .max()
+            .unwrap_or(0)
+            .saturating_add(4);
+        geometry.width = geometry.width.max(
+            u16::try_from(message_width)
+                .unwrap_or(u16::MAX)
+                .min(terminal_width.saturating_sub(2).max(1)),
+        );
+        geometry.left = terminal_width.saturating_sub(geometry.width) / 2;
+        let rows = wrap_plain_text(
+            help,
+            usize::from(geometry.width.saturating_sub(4)).max(1),
+            config.editor.ambiguous_width,
+        )
+        .len();
+        geometry.height = u16::try_from(rows)
+            .unwrap_or(u16::MAX)
+            .saturating_add(3)
+            .min(terminal_height.max(1));
+        geometry.top = geometry
+            .top
+            .min(terminal_height.saturating_sub(geometry.height));
+    }
+    geometry
 }
 
 #[must_use]
@@ -2017,7 +2053,7 @@ pub(crate) fn render_with_documentation_geometry(
         // The compositor already subtracts every dock, including top and bottom docks.
         workspace.map(|bounds| {
             if let Some(window) = dashboard_window
-                && window.layer != crate::windows::CompositorLayer::Overlay
+                && window.layer == crate::windows::CompositorLayer::Docked
             {
                 return window.rect;
             }

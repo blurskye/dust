@@ -988,7 +988,14 @@ fn bundled_assets_share_the_typed_configuration_loaders() {
     assert_eq!(loaded.config.input.keymaps.leader, "space");
     assert_eq!(loaded.config.input.keymaps.local_leader, "\\");
     assert!(loaded.config.editor.indent_guides.enabled);
-    assert_eq!(loaded.dashboard.action.len(), 9);
+    assert_eq!(loaded.dashboard.action.len(), 10);
+    assert!(
+        loaded
+            .dashboard
+            .action
+            .iter()
+            .any(|action| action.command == "plugin.list")
+    );
     assert!(
         loaded
             .dashboard

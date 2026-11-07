@@ -51,6 +51,7 @@ fn terminal_is_a_full_width_bottom_dock_with_direct_cells_and_focus_cursor() {
         exit_code: None,
         truncated: false,
         focused: true,
+        input_hint: None,
         columns: 80,
         rows: 4,
         cells: screen.history_window(0, 4),
@@ -155,6 +156,14 @@ fn terminal_is_a_full_width_bottom_dock_with_direct_cells_and_focus_cursor() {
     assert!(tab_row.contains("shell"));
     assert!(!tab_row.contains("TERMINAL"));
 
+    ui.terminal_panel.as_mut().unwrap().input_hint = Some("Esc Esc → Normal mode".into());
+    let hinted = render(&state, &ui, &config, &loaded.dashboard, 80, 20);
+    assert!(
+        hinted
+            .grid
+            .row_text(geometry.top)
+            .contains("Esc Esc → Normal mode")
+    );
     let mut editor_ui = ui;
     editor_ui.terminal_panel.as_mut().expect("terminal").focused = false;
     let editor_frame = render(&state, &editor_ui, &config, &loaded.dashboard, 80, 20);
@@ -167,6 +176,7 @@ fn terminal_is_a_full_width_bottom_dock_with_direct_cells_and_focus_cursor() {
     let tab_row = editor_frame.grid.row_text(geometry.top);
     assert!(tab_row.contains("shell"));
     assert!(tab_row.contains("logs [exit 2]"));
+    assert!(!tab_row.contains("Normal mode"));
 }
 
 #[test]
@@ -194,6 +204,7 @@ fn terminal_tabs_keep_the_active_title_visible_and_hit_targets_match_borders() {
         exit_code: None,
         truncated: false,
         focused: true,
+        input_hint: None,
         columns: 40,
         rows: 2,
         cells: screen.history_window(0, 2),
@@ -330,6 +341,7 @@ fn the_debug_console_and_the_terminal_panel_are_planned_together_rather_than_col
         exit_code: None,
         truncated: false,
         focused: false,
+        input_hint: None,
         columns: 40,
         rows: 8,
         cells: Vec::new(),
@@ -446,6 +458,7 @@ fn terminal_wide_cells_are_clipped_to_the_window_during_resize() {
         exit_code: None,
         truncated: false,
         focused: false,
+        input_hint: None,
         columns: 60,
         rows: 2,
         cells: vec![screen.history_row(0).unwrap()],
@@ -514,6 +527,7 @@ fn side_docked_terminal_keeps_the_debug_inspectors_visible() {
         exit_code: None,
         truncated: false,
         focused: false,
+        input_hint: None,
         columns: 40,
         rows: 20,
         cells: vec![screen.history_row(0).expect("terminal output row")],

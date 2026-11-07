@@ -2,10 +2,6 @@
 
 use crate::app::App;
 use crate::app::commands::AppEffect;
-use crate::app::picker::PickerPayload;
-use crate::workspace::PickerAction;
-use crate::workspace::PickerItem;
-use crate::workspace::PickerItemId;
 
 use crate::app::commands::register;
 use crate::app::commands::string_arg;
@@ -58,51 +54,15 @@ impl App {
     ) -> Result<(), AppEffect> {
         match effect {
             AppEffect::PluginValidate => self.load_configured_plugins(),
-            AppEffect::PluginList => {
-                let items: Vec<_> = self
-                    .extension
-                    .statuses()
-                    .iter()
-                    .take(4096)
-                    .enumerate()
-                    .map(|(index, (id, status))| {
-                        (
-                            PickerItem {
-                                badge: String::new(),
-                                kind: crate::workspace::PickerItemKind::Entry,
-                                id: PickerItemId(format!("plugin:{index}:{id}")),
-                                label: id.clone(),
-                                detail: format!("{status:?}"),
-                                source: String::new(),
-                                action: PickerAction::None,
-                            },
-                            PickerPayload::Command(String::new()),
-                        )
-                    })
-                    .collect();
-                let empty = items.is_empty();
-                self.install_picker(self.message("plugin_picker_title", &[]), items);
-                if empty {
-                    self.search
-                        .set_picker_footer(self.message("plugin_picker_empty", &[]));
-                    self.sync_picker_ui();
-                }
-            }
+            AppEffect::PluginList => self.open_plugin_browser(),
             AppEffect::PluginDisable(id) => {
                 if !self.extension.statuses().contains_key(&id) {
                     self.show_error(self.message("plugin_unknown", &[("id", id)]));
                     return Ok(());
                 }
-                let load = self.extension.load_id(&id);
-                if let Err(error) = self.extension.disable(&id) {
-                    self.show_error(error)
-                } else {
-                    if let Some(load) = load {
-                        self.remove_plugin_contributions(&id, load);
-                    }
-                    self.commands.unregister_plugin(&id);
-                    self.notify_message(self.message("plugin_disabled", &[("id", id)]), false);
-                }
+                self.disable_browser_plugin(&id);
+                self.notify_message(self.message("plugin_disabled", &[("id", id)]), false);
+                self.refresh_plugin_browser();
             }
             AppEffect::PluginPickerOpen { provider, query } => {
                 self.open_plugin_picker(provider, query)

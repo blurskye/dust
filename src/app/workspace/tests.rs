@@ -74,6 +74,26 @@ fn workspace_trust_is_one_key_cancels_on_focus_loss_and_persists() {
 }
 
 #[test]
+fn dashboard_trust_accepts_the_documented_yes_key_without_opening_a_document() {
+    let (_app_dirs, mut app) = app();
+    prepare_trust_identity(&mut app);
+    app.window_session.observe_size((160, 45));
+    app.reconcile_editor_windows();
+    assert!(app.ui.dashboard);
+    assert!(app.state.active_view().is_none());
+    app.request_workspace_trust();
+    app.handle_configured_key("y".parse().unwrap());
+    assert!(app.ui.prompt.is_none());
+    wait_trust(&mut app);
+    assert_eq!(
+        app.workspace.trust(),
+        crate::workspace::WorkspaceTrust::Trusted
+    );
+    assert!(app.ui.dashboard);
+    assert!(app.state.active_view().is_none());
+}
+
+#[test]
 fn shutdown_waits_for_a_queued_workspace_revocation() {
     let (_app_dirs, mut app) = app();
     prepare_trust_identity(&mut app);
@@ -515,9 +535,11 @@ fn workspace_search_uses_generic_picker_and_opens_unopened_match() {
             let text = preview.as_text().expect("a text preview");
             preview.title == "match.txt"
                 && text.highlight_line == Some(1_087)
-                && text
-                    .highlight_line
-                    .is_some_and(|line| line.saturating_sub(text.first_line) <= 8)
+                && text.highlight_line.is_some_and(|line| {
+                    text.lines()
+                        .get(line.saturating_sub(text.first_line))
+                        .is_some_and(|line| line == "before needle after")
+                })
         })
     }));
     app.accept_picker();
@@ -733,8 +755,16 @@ fn workspace_search_rejects_changed_disk_and_open_buffer_snapshots() {
             app.ui.notification.as_deref(),
             Some(app.message("workspace_search_stale_result", &[]).as_str())
         );
-        assert!(app.search.matches().is_empty());
-        assert!(app.search.workflow().is_none());
+        assert_eq!(app.search.matches().len(), 1);
+        assert!(app.search.workflow().is_some());
+        app.invoke_mapped_command("workspace.search.resume");
+        app.accept_picker();
+        wait_vfs(&mut app);
+        assert_eq!(app.state.active_buffer_id(), before);
+        assert_eq!(
+            app.ui.notification.as_deref(),
+            Some(app.message("workspace_search_stale_result", &[]).as_str())
+        );
     }
 }
 

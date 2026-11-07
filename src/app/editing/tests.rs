@@ -2634,6 +2634,258 @@ pub(in crate::app) fn wait_syntax(app: &mut App, buffer: crate::editor::BufferId
 }
 
 #[test]
+fn syntax_selection_grows_shrinks_and_resets_after_motion() {
+    let (_dirs, mut app) = app();
+    app.set_dashboard_visibility(false);
+    let source = "fn main() { call(alpha, beta); }";
+    let path = app.state.workspace_root.join("select.rs");
+    let (buffer, view) = app
+        .state
+        .open_text(TextBuffer::from_text(source), Some(path))
+        .unwrap();
+    wait_syntax(&mut app, buffer);
+    let start = ByteOffset(source.find("alpha").unwrap());
+    app.state.views[view].cursor = start;
+    press_keys(&mut app, &["ctrl-space"]);
+    let small = app.state.views[view].selection.unwrap();
+    assert_eq!(small.anchor, start);
+    assert_eq!(small.head.get(), start.get() + 4);
+    press_keys(&mut app, &["ctrl-space"]);
+    let large = app.state.views[view].selection.unwrap();
+    assert!(large.anchor < small.anchor && large.head > small.head);
+    press_keys(&mut app, &["backspace"]);
+    assert_eq!(app.state.views[view].selection, Some(small));
+    press_keys(&mut app, &["backspace"]);
+    assert_eq!(app.state.views[view].selection, None);
+    assert_eq!(app.state.views[view].cursor, start);
+    assert_eq!(
+        app.state.views[view].mode,
+        crate::editor::EditorMode::Normal
+    );
+    press_keys(&mut app, &["ctrl-space", "l", "backspace"]);
+    assert!(app.state.views[view].syntax_selections.is_empty());
+    assert_eq!(app.state.views[view].cursor.get(), small.head.get() + 1);
+    assert_eq!(app.state.buffers[buffer].text.to_string(), source);
+}
+
+#[test]
+fn syntax_argument_swaps_follow_the_argument_repeat_and_undo_atomically() {
+    let (_dirs, mut app) = app();
+    app.set_dashboard_visibility(false);
+    let source = "fn main() { call(éclair, two, three); }";
+    let path = app.state.workspace_root.join("swap.rs");
+    let (buffer, view) = app
+        .state
+        .open_text(TextBuffer::from_text(source), Some(path))
+        .unwrap();
+    wait_syntax(&mut app, buffer);
+    app.state.views[view].cursor = ByteOffset(source.find("éclair").unwrap());
+    press_keys(&mut app, &["space", "c", ">"]);
+    assert_eq!(
+        app.state.buffers[buffer].text.to_string(),
+        "fn main() { call(two, éclair, three); }"
+    );
+    assert_eq!(
+        app.state.views[view].cursor.get(),
+        source.find("éclair").unwrap() + 5
+    );
+    wait_syntax(&mut app, buffer);
+    press_keys(&mut app, &["."]);
+    assert_eq!(
+        app.state.buffers[buffer].text.to_string(),
+        "fn main() { call(two, three, éclair); }"
+    );
+    press_keys(&mut app, &["u"]);
+    assert_eq!(
+        app.state.buffers[buffer].text.to_string(),
+        "fn main() { call(two, éclair, three); }"
+    );
+    press_keys(&mut app, &["u"]);
+    assert_eq!(app.state.buffers[buffer].text.to_string(), source);
+    press_keys(&mut app, &["ctrl-r"]);
+    assert_eq!(
+        app.state.buffers[buffer].text.to_string(),
+        "fn main() { call(two, éclair, three); }"
+    );
+    wait_syntax(&mut app, buffer);
+    app.state.views[view].cursor = ByteOffset(
+        app.state.buffers[buffer]
+            .text
+            .to_string()
+            .find("éclair")
+            .unwrap(),
+    );
+    press_keys(&mut app, &["space", "c", "<"]);
+    assert_eq!(app.state.buffers[buffer].text.to_string(), source);
+}
+
+#[test]
+fn syntax_swaps_stay_with_siblings_and_preserve_comments_and_separators() {
+    let (_dirs, mut app) = app();
+    app.set_dashboard_visibility(false);
+    let source = "fn main() { call(inner(a, b), /* note */ c, d,); }";
+    let path = app.state.workspace_root.join("nested.rs");
+    let (buffer, view) = app
+        .state
+        .open_text(TextBuffer::from_text(source), Some(path))
+        .unwrap();
+    wait_syntax(&mut app, buffer);
+    app.state.views[view].cursor = ByteOffset(source.find("a, b").unwrap());
+    press_keys(&mut app, &["space", "c", ">"]);
+    let swapped = "fn main() { call(inner(b, a), /* note */ c, d,); }";
+    assert_eq!(app.state.buffers[buffer].text.to_string(), swapped);
+    wait_syntax(&mut app, buffer);
+    press_keys(&mut app, &["space", "c", ">"]);
+    assert_eq!(
+        app.state.buffers[buffer].text.to_string(),
+        swapped,
+        "must not swap an inner argument with c"
+    );
+    app.state.views[view].cursor = ByteOffset(swapped.find("inner").unwrap());
+    press_keys(&mut app, &["2", "space", "c", ">"]);
+    assert_eq!(
+        app.state.buffers[buffer].text.to_string(),
+        "fn main() { call(d, /* note */ c, inner(b, a),); }"
+    );
+}
+
+#[test]
+fn syntax_objects_and_definition_motions_work_through_operators_and_dot() {
+    let (_dirs, mut app) = app();
+    app.set_dashboard_visibility(false);
+    let source = "// first\nfn one() {}\n// second\nfn two() {}\nstruct A {}\nstruct B {}\n";
+    let path = app.state.workspace_root.join("objects.rs");
+    let (buffer, view) = app
+        .state
+        .open_text(TextBuffer::from_text(source), Some(path))
+        .unwrap();
+    wait_syntax(&mut app, buffer);
+    press_keys(&mut app, &["2", "]", "f"]);
+    assert_eq!(
+        app.state.views[view].cursor.get(),
+        source.find("fn two").unwrap()
+    );
+    press_keys(&mut app, &["[", "f"]);
+    assert_eq!(
+        app.state.views[view].cursor.get(),
+        source.find("fn one").unwrap()
+    );
+    press_keys(&mut app, &["]", "c", "]", "c", "[", "c"]);
+    assert_eq!(
+        app.state.views[view].cursor.get(),
+        source.find("struct A").unwrap()
+    );
+    app.state.views[view].cursor = ByteOffset(3);
+    press_keys(&mut app, &["d", "i", "/"]);
+    assert!(
+        app.state.buffers[buffer]
+            .text
+            .to_string()
+            .starts_with("// \n")
+    );
+    wait_syntax(&mut app, buffer);
+    app.state.views[view].cursor = ByteOffset(
+        app.state.buffers[buffer]
+            .text
+            .to_string()
+            .find("second")
+            .unwrap(),
+    );
+    press_keys(&mut app, &["."]);
+    assert!(
+        !app.state.buffers[buffer]
+            .text
+            .to_string()
+            .contains("second")
+    );
+    press_keys(&mut app, &["u", "u"]);
+    assert_eq!(app.state.buffers[buffer].text.to_string(), source);
+    wait_syntax(&mut app, buffer);
+    app.state.views[view].cursor = ByteOffset(source.find("fn one").unwrap());
+    press_keys(&mut app, &["d", "]", "f"]);
+    assert_eq!(
+        app.state.buffers[buffer].text.to_string(),
+        "// first\nfn two() {}\nstruct A {}\nstruct B {}\n"
+    );
+    press_keys(&mut app, &["u"]);
+    assert_eq!(app.state.buffers[buffer].text.to_string(), source);
+}
+
+#[test]
+fn syntax_palette_objects_select_functions_classes_arguments_and_comments() {
+    let (_dirs, mut app) = app();
+    app.set_dashboard_visibility(false);
+    let source = "// hello\nstruct A { field: u8 }\nfn one(x: u8) { call(x); }";
+    let path = app.state.workspace_root.join("palette.rs");
+    let (buffer, view) = app
+        .state
+        .open_text(TextBuffer::from_text(source), Some(path))
+        .unwrap();
+    wait_syntax(&mut app, buffer);
+    for (kind, at, expected) in [
+        ("inner_function", "call", " call(x); "),
+        ("a_function", "call", "fn one(x: u8) { call(x); }"),
+        ("inner_class", "field", " field: u8 "),
+        ("a_class", "field", "struct A { field: u8 }"),
+        ("inner_argument", "x: u8", "x: u8"),
+        ("a_argument", "x: u8", "x: u8"),
+        ("inner_comment", "hello", "hello"),
+        ("a_comment", "hello", "// hello"),
+    ] {
+        app.state.views[view].cursor = ByteOffset(source.find(at).unwrap());
+        assert!(
+            app.invoke_checked(
+                crate::editor::CommandInvocation::new(
+                    &format!("syntax.select.{kind}"),
+                    InvocationSource::CommandLine
+                )
+                .unwrap()
+            )
+        );
+        let selection = app.state.views[view].selection.unwrap();
+        let end = crate::editor::text::next_grapheme_boundary(
+            &app.state.buffers[buffer].text,
+            selection.head,
+        );
+        assert_eq!(
+            &source[selection.anchor.get()..end.get()],
+            expected,
+            "{kind}"
+        );
+        press_keys(&mut app, &["escape"]);
+    }
+}
+
+#[test]
+fn syntax_edits_refuse_stale_ranges_and_selection_history_does_not_cross_edits() {
+    let (_dirs, mut app) = app();
+    app.set_dashboard_visibility(false);
+    let source = "fn main() { call(a, b); }";
+    let path = app.state.workspace_root.join("stale.rs");
+    let (buffer, view) = app
+        .state
+        .open_text(TextBuffer::from_text(source), Some(path))
+        .unwrap();
+    wait_syntax(&mut app, buffer);
+    app.state.views[view].cursor = ByteOffset(source.find("a, b").unwrap());
+    press_keys(&mut app, &["ctrl-space", "d"]);
+    assert!(app.state.views[view].syntax_selections.is_empty());
+    let after = app.state.buffers[buffer].text.to_string();
+    assert!(
+        !app.invoke_checked(
+            crate::editor::CommandInvocation::new(
+                "syntax.argument.swap_next",
+                InvocationSource::CommandLine
+            )
+            .unwrap()
+        )
+    );
+    assert_eq!(app.state.buffers[buffer].text.to_string(), after);
+    press_keys(&mut app, &["u"]);
+    assert_eq!(app.state.buffers[buffer].text.to_string(), source);
+}
+
+#[test]
 fn syntax_objects_refresh_when_only_the_document_language_changes() {
     let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("hello.rs");

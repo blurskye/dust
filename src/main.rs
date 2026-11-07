@@ -25,6 +25,9 @@ use dust::config::load_user_config;
 #[derive(Debug, Parser)]
 #[command(name = "dust", version, about = "Dust modal terminal IDE")]
 struct Cli {
+    #[command(subcommand)]
+    command: Option<CliCommand>,
+
     /// Files or one directory to open.
     #[arg(value_name = "PATH")]
     paths: Vec<PathBuf>,
@@ -104,6 +107,21 @@ struct Cli {
     agent_tools: Option<Option<u64>>,
 }
 
+#[derive(Debug, clap::Subcommand)]
+enum CliCommand {
+    /// Create a WebAssembly component plugin.
+    Plugin {
+        #[command(subcommand)]
+        command: PluginCommand,
+    },
+}
+
+#[derive(Debug, clap::Subcommand)]
+enum PluginCommand {
+    /// Create a ready-to-build Rust plugin in a new NAME directory.
+    New { name: String },
+}
+
 fn main() -> ExitCode {
     #[cfg(unix)]
     {
@@ -154,6 +172,17 @@ fn main() -> ExitCode {
 }
 
 fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
+    if let Some(CliCommand::Plugin {
+        command: PluginCommand::New { name },
+    }) = cli.command
+    {
+        let directory = dust::plugins::scaffold::create(&std::env::current_dir()?, &name)?;
+        println!(
+            "Created {} — see README.md for build, pack and load instructions",
+            directory.display()
+        );
+        return Ok(());
+    }
     if let Some(tab) = cli.agent_tools {
         let tab = tab.or_else(|| {
             std::env::var(dust::agent::mcp::TAB_VARIABLE)
@@ -384,6 +413,21 @@ fn install_crash_hook() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn plugin_subcommand_preserves_file_arguments() {
+        assert!(
+            matches!(Cli::try_parse_from(["dust", "plugin", "new", "words"]).unwrap().command, Some(CliCommand::Plugin { command: PluginCommand::New { name } }) if name == "words")
+        );
+        assert_eq!(
+            Cli::try_parse_from(["dust", "file.rs"]).unwrap().paths,
+            vec![PathBuf::from("file.rs")]
+        );
+        assert_eq!(
+            Cli::try_parse_from(["dust", "--", "plugin"]).unwrap().paths,
+            vec![PathBuf::from("plugin")]
+        );
+    }
 
     #[test]
     fn crash_counts_accept_bounded_regular_reports() {

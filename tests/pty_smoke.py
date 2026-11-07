@@ -586,6 +586,9 @@ def main() -> None:
                 (1.0, b"", None),
                 (0.3, b"\x1b", None),
                 (0.1, b"\x1b", None),
+                (0.2, b" sR", None),
+                (0.4, b"", None),
+                (0.1, b"\x03", None),
                 (0.2, b":workspace.replace needle changed\r", None),
                 (0.6, b"\x1b", None),
                 (0.2, b":q\r", None),
@@ -594,7 +597,11 @@ def main() -> None:
         assert code == 0
         direct_screen = terminal_screen(snapshots[1])
         search_screen = terminal_screen(snapshots[2])
-        preview_screen = terminal_screen(snapshots[6])
+        resumed_screen = terminal_screen(snapshots[6])
+        preview_screen = terminal_screen(snapshots[9])
+        assert "Grep" in resumed_screen and "2/2" in resumed_screen
+        result_row = next(row for row in resumed_screen.splitlines() if "needle alpha" in row and "alpha.txt:1:1" in row)
+        assert result_row.index("needle alpha") < result_row.index("alpha.txt:1:1")
         assert "Grep" in direct_screen and "Command" not in direct_screen
         assert "Grep" in search_screen and "alpha.txt" in search_screen
         assert "2/2" in search_screen and "needle alpha" in search_screen
@@ -611,15 +618,22 @@ def main() -> None:
             [],
             [
                 (0.8, b":workspace.trust.status\r", None),
-                (0.2, b":workspace.trust\r", None),
-                (0.2, b"\x1b", None),
-                (0.3, b":workspace.trust\r", None),
-                (0.2, b"\r", None),
-                (0.5, b":q\r", None),
+                (3.0, b":workspace.trust\r", None),
+                (3.0, b"\x1b", None),
+                (3.0, b":workspace.trust\r", None),
+                (3.0, b"\r", None),
+                (3.0, b":q\r", None),
             ],
+            stage_expectations={
+                1: lambda screen: "untrusted" in screen,
+                2: lambda screen: "Do you want to trust this workspace?" in screen,
+                3: lambda screen: "not trusted" in screen,
+                4: lambda screen: "Do you want to trust this workspace?" in screen,
+                5: lambda screen: "workspace trusted" in screen,
+            },
         )
         assert code == 0, (code, output[-4000:])
-        assert "untrusted" in terminal_screen(snapshots[1])
+        assert "untrusted" in terminal_screen(snapshots[1]), terminal_screen(snapshots[1])
         trust_prompt = terminal_screen(snapshots[2])
         assert "Do you want to trust this workspace?" in trust_prompt
         assert "LSP servers" in trust_prompt
@@ -1103,11 +1117,15 @@ while True:
             config_home=config_home,
         )
         assert code == 0
+        initial_terminal = terminal_screen(snapshots[6], 100, 30)
+        assert "sh ·" in initial_terminal.splitlines()[19]
+        assert pathlib.Path(directory).name in initial_terminal.splitlines()[19]
+        assert "Normal mode" in initial_terminal.splitlines()[19]
         focused = terminal_screen(snapshots[7], 100, 30)
         focused_rows = focused.splitlines()
         assert pathlib.Path(directory).name in focused and "EDITOR-TOP" in focused
         # The ten-row dock ends above the screen's persistent status line.
-        assert "shell" in focused_rows[19]
+        assert "title" in focused_rows[19]
         assert any("DOCKED-TERMINAL" in row for row in focused_rows[20:29])
         assert "[?2004h" not in focused and "[1;32m" not in focused
         assert "]0;title" not in focused
@@ -1117,19 +1135,19 @@ while True:
         assert focused_rows[20][40] != "│"  # terminal spans beneath explorer
 
         hidden = terminal_screen(snapshots[8], 100, 30)
-        assert "shell" not in hidden
+        assert "title" not in hidden
         assert "unsupported" not in hidden
         assert "EDITOR-TOP" in hidden
         assert terminal_cursor(snapshots[8], 100, 30)[1] < 30
 
         resized = terminal_screen(snapshots[9], 60, 20)
-        assert "shell" not in resized
+        assert "title" not in resized
         assert "EDITOR-TOP" in resized
         refocused = terminal_screen(snapshots[10], 60, 20)
-        assert "shell" in refocused
+        assert "title" in refocused
         assert 10 <= terminal_cursor(snapshots[10], 60, 20)[1] < 19
         exited = terminal_screen(snapshots[11], 60, 20)
-        assert "shell" not in exited
+        assert "title" not in exited
         assert "EXIT 0" not in exited
         assert "EDITOR-TOP" in exited
         assert_restored(output)
@@ -1188,7 +1206,7 @@ exit 1
         )
         assert code == 0
         manager = terminal_screen(snapshots[3])
-        assert "unavailable" in manager, manager
+        assert re.search(r"rust-analyzer[^\n]*PATH\s+failed", manager), manager
         assert "starting" not in manager
         installed = terminal_screen(snapshots[4])
         assert re.search(r"rust-analyzer[^\n]*PATH\s+installed", installed), installed
@@ -1548,11 +1566,11 @@ arguments = { force = false }
         )
         assert code == 0
         hint_screen = terminal_screen(snapshots[1])
-        assert "Files" in hint_screen
-        assert "Search" in hint_screen
-        assert "Diagnostics" in hint_screen
-        assert "Code" in hint_screen
-        assert "space" in hint_screen
+        assert "file/find" in hint_screen
+        assert "search" in hint_screen
+        assert "diagnostics/" in hint_screen
+        assert "code" in hint_screen
+        assert "Keys: space" in hint_screen
         goto_screen = terminal_screen(snapshots[3])
         assert "Go to implementation" in goto_screen
         assert "Go to type definition" in goto_screen
@@ -1599,10 +1617,8 @@ order = 1
         assert code == 0
         custom_hint_screen = terminal_screen(snapshots[1])
         assert "Project files" in custom_hint_screen
-        assert "Files" not in custom_hint_screen.replace("Project files", "").replace(
-            "Find Files", ""
-        )
-        assert "," in custom_hint_screen
+        assert "file/find" not in custom_hint_screen
+        assert "Keys: ," in custom_hint_screen
         assert_restored(output)
 
     with tempfile.TemporaryDirectory() as directory:
@@ -1625,9 +1641,9 @@ order = 1
         )
         assert code == 0
         disabled_hint_screen = terminal_screen(snapshots[1])
-        assert "Files" not in disabled_hint_screen
-        assert "Diagnostics" not in disabled_hint_screen
-        assert "Code" not in disabled_hint_screen
+        assert "file/find" not in disabled_hint_screen
+        assert "diagnostics/" not in disabled_hint_screen
+        assert "Keys: space" not in disabled_hint_screen
         assert_restored(output)
 
     with tempfile.TemporaryDirectory() as directory:

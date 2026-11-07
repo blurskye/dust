@@ -44,6 +44,7 @@ pub(super) fn text_object(
         "function" => syntax(objects, SyntaxObjectKind::Function, cursor, around, count),
         "class" => syntax(objects, SyntaxObjectKind::Class, cursor, around, count),
         "argument" => syntax(objects, SyntaxObjectKind::Argument, cursor, around, count),
+        "comment" => syntax(objects, SyntaxObjectKind::Comment, cursor, around, count),
         _ => return Ok(None),
     };
     if count > 1 && matches!(kind, "word" | "big_word" | "paragraph") {

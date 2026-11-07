@@ -254,6 +254,12 @@ impl ResolvedKeymaps {
             .cloned()
     }
 
+    pub(in crate::app) fn reachable_bindings(&self) -> impl Iterator<Item = &KeymapInspection> {
+        self.inspections.iter().filter(|binding| {
+            binding.operation == KeymapOperation::Command && self.mapping_reachable(binding)
+        })
+    }
+
     fn mapping_reachable(&self, inspection: &KeymapInspection) -> bool {
         let Ok(keys) = inspection
             .keys
@@ -381,7 +387,7 @@ impl ResolvedKeymaps {
                         })
                         .or_else(|| direct.command.clone())
                         .unwrap_or_else(|| direct.id.clone());
-                    (label, None, None, i32::MAX)
+                    (label, None, None, 0)
                 },
                 |(_, group)| {
                     (
@@ -415,6 +421,12 @@ impl ResolvedKeymaps {
         rows.sort_by(|left, right| {
             left.order
                 .cmp(&right.order)
+                .then_with(|| left.group_id.is_some().cmp(&right.group_id.is_some()))
+                .then_with(|| {
+                    left.next_key
+                        .to_lowercase()
+                        .cmp(&right.next_key.to_lowercase())
+                })
                 .then_with(|| left.next_key.cmp(&right.next_key))
                 .then_with(|| left.label.cmp(&right.label))
         });

@@ -5,6 +5,7 @@
 pub(crate) mod http;
 mod providers;
 pub(crate) mod requests;
+pub mod scaffold;
 pub(crate) mod surface;
 pub use requests::PluginDelivery;
 mod storage;
@@ -136,6 +137,7 @@ pub use index::activate_candidate;
 #[cfg(test)]
 pub(crate) use index::execute_component;
 pub use index::index_manifest_contributions;
+pub(crate) use index::index_manifest_from_store;
 
 #[cfg(test)]
 mod host_tests;

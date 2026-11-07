@@ -150,7 +150,7 @@ pub(super) fn render_prompt(
         && prompt.error.is_none()
         && prompt.help.is_some()
         && geometry.height >= 4;
-    let bottom_y = if prompt.confirmation.is_some() {
+    let bottom_y = if prompt.confirmation.is_some() || show_help {
         geometry
             .top
             .saturating_add(geometry.height.saturating_sub(1))
@@ -315,16 +315,38 @@ pub(super) fn render_prompt(
         return;
     }
     let input_x = geometry.left.saturating_add(PROMPT_INPUT_PADDING);
-    let input_y = geometry.top.saturating_add(if show_help { 2 } else { 1 });
+    let input_y = if show_help {
+        bottom_y.saturating_sub(1)
+    } else {
+        geometry.top.saturating_add(1)
+    };
     let content_right = right.saturating_sub(1);
     if show_help && let Some(help) = &prompt.help {
-        frame.grid.put_text_clipped(
-            input_x,
-            geometry.top.saturating_add(1),
+        let lines = crate::ui::render::wrap_plain_text(
             help,
-            Style::Muted,
-            content_right,
+            usize::from(geometry.width.saturating_sub(4)).max(1),
+            config.editor.ambiguous_width,
         );
+        let available = usize::from(geometry.height.saturating_sub(3));
+        if lines.len() > available {
+            frame.grid.put_text_clipped(
+                input_x,
+                geometry.top.saturating_add(1),
+                "Resize to read the full message",
+                Style::Warning,
+                content_right,
+            );
+        } else {
+            for (row, line) in lines.iter().enumerate() {
+                frame.grid.put_text_clipped(
+                    input_x,
+                    geometry.top.saturating_add(1).saturating_add(row as u16),
+                    line,
+                    Style::Muted,
+                    content_right,
+                );
+            }
+        }
     }
     let marker_end = frame.grid.put_text_clipped(
         input_x,
@@ -364,7 +386,11 @@ pub(super) fn render_prompt(
             );
         }
     } else if !prompt.completions.is_empty() {
-        let completion_top = geometry.top.saturating_add(3);
+        let completion_top = if show_help {
+            bottom_y
+        } else {
+            geometry.top.saturating_add(3)
+        };
         let available = height.saturating_sub(completion_top);
         let rows = u16::try_from(prompt.completions.len())
             .unwrap_or(u16::MAX)

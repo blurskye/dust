@@ -65,7 +65,14 @@ pub(in crate::app) struct InvocationContext<'a> {
 
 type BufferObservation = (u64, u64, usize, usize, usize, u8);
 pub(in crate::app) type HostObservation = (u64, String, Option<BufferObservation>, u64);
+pub(in crate::app) mod browser;
+
 pub(super) struct Plugins {
+    browser_configured: BTreeMap<String, browser::BrowserPlugin>,
+    browser_packages: BTreeMap<String, browser::BrowserPlugin>,
+    browser_dirty: bool,
+    browser_folder: Option<PathBuf>,
+    enabled_plugins: BTreeSet<String>,
     abi: abi::PluginCalls,
     runtime_epoch: u64,
     windows: panels::PluginWindowHost,
@@ -113,6 +120,11 @@ impl Plugins {
         registry: RegistryWorker,
     ) -> Self {
         Self {
+            browser_configured: BTreeMap::new(),
+            browser_packages: BTreeMap::new(),
+            browser_dirty: false,
+            browser_folder: None,
+            enabled_plugins: BTreeSet::new(),
             abi: abi::PluginCalls::default(),
             runtime_epoch: 0,
             windows: panels::PluginWindowHost::default(),

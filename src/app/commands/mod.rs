@@ -86,6 +86,7 @@ pub enum AppEffect {
     GitChangesLayerSwitch,
     GitHunksOpen,
     GitHunkNavigate(i8),
+    GitReviewHunk(String),
     GitConflictNavigate(i8),
     MarkdownPreview,
     SaveAll {
@@ -392,6 +393,7 @@ pub enum AppEffect {
     WorkspaceSearchPrompt,
     WorkspaceSearch(String),
     WorkspaceSearchCancel,
+    WorkspaceSearchResume,
     WorkspaceReplace {
         query: String,
         replacement: String,
@@ -465,6 +467,7 @@ pub enum AppEffect {
         count: u64,
     },
     DapStart(Option<PathBuf>),
+    DapCursorTest,
     DapStop,
     DapContinue,
     DapPause,
@@ -1145,6 +1148,7 @@ impl App {
             effect @ (AppEffect::WorkspaceSearchPrompt
             | AppEffect::WorkspaceSearch(..)
             | AppEffect::WorkspaceSearchCancel
+            | AppEffect::WorkspaceSearchResume
             | AppEffect::WorkspaceReplace { .. }
             | AppEffect::TodoSearch
             | AppEffect::SearchRepeat { .. }
@@ -1221,6 +1225,7 @@ impl App {
             | AppEffect::DebuggerTerminate
             | AppEffect::DebuggerDetach
             | AppEffect::DapStart(..)
+            | AppEffect::DapCursorTest
             | AppEffect::DapConfigurationStart(..)
             | AppEffect::DapWatchAdd(..)
             | AppEffect::DapWatchRemove(..)
@@ -1269,6 +1274,7 @@ impl App {
             | AppEffect::GitHunksOpen
             | AppEffect::GitConflictNavigate(..)
             | AppEffect::GitHunkNavigate(..)
+            | AppEffect::GitReviewHunk(..)
             | AppEffect::GitHunkPreview
             | AppEffect::GitHunkStage
             | AppEffect::GitHunkReset) => self.process_git_effect(effect),

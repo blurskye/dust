@@ -1,52 +1,26 @@
-//! Function, class and argument ranges for the `af if ac ic aa ia` text objects, as
-//! mini.ai provides them in LazyVim.
+//! Syntax node selections and definition, argument and comment text objects.
 
-/// Definition and argument-list node kinds across the built-in grammars.
-const FUNCTIONS: &[&str] = &[
-    "function_definition",
-    "function_item",
-    "closure_expression",
-    "function_declaration",
-    "function_expression",
-    "function",
-    "function_def",
-    "method",
-    "singleton_method",
-    "generator_function_declaration",
-    "arrow_function",
-    "method_definition",
-    "method_declaration",
-    "func_literal",
-];
-const CLASSES: &[&str] = &[
-    "struct_item",
-    "enum_item",
-    "union_item",
-    "impl_item",
-    "trait_item",
-    "mod_item",
-    "class_definition",
-    "class_declaration",
-    "abstract_class_declaration",
-    "class",
-    "interface_declaration",
-    "enum_declaration",
-    "type_declaration",
-    "type_spec",
-];
-const ARGUMENT_LISTS: &[&str] = &[
-    "parameters",
-    "arguments",
-    "type_arguments",
-    "type_parameters",
-    "closure_parameters",
-    "formal_parameters",
-    "parameter_list",
-    "method_parameters",
-    "lambda_parameters",
-    "block_parameters",
-    "argument_list",
-];
+use serde::Deserialize;
+use std::sync::LazyLock;
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Kinds {
+    functions: Vec<String>,
+    classes: Vec<String>,
+    argument_lists: Vec<String>,
+    bodies: Vec<String>,
+    comments: Vec<String>,
+    comment_markers: Vec<(String, String)>,
+}
+
+static KINDS: LazyLock<Kinds> = LazyLock::new(|| {
+    toml::from_str(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/assets/defaults/syntax-objects.toml"
+    )))
+    .expect("bundled syntax object kinds")
+});
 
 use crate::editor::{SyntaxObject, SyntaxObjectKind};
 
@@ -60,10 +34,13 @@ pub(super) fn collect(tree: &tree_sitter::Tree, source: &str, limit: usize) -> V
         let node = cursor.node();
         let kind = node.kind();
         // CMake's named `function` keyword is a leaf, not a definition.
-        if node.is_named() && FUNCTIONS.contains(&kind) && node.child_count() > 0 {
+        if node.is_named()
+            && KINDS.functions.iter().any(|name| name == kind)
+            && node.child_count() > 0
+        {
             objects.push(block(node, source, SyntaxObjectKind::Function));
         } else if node.is_named()
-            && CLASSES.contains(&kind)
+            && KINDS.classes.iter().any(|name| name == kind)
             && !(kind == "type_declaration" && {
                 let mut walk = node.walk();
                 node.named_children(&mut walk)
@@ -71,9 +48,11 @@ pub(super) fn collect(tree: &tree_sitter::Tree, source: &str, limit: usize) -> V
             })
         {
             objects.push(block(node, source, SyntaxObjectKind::Class));
-        } else if ARGUMENT_LISTS.contains(&kind) {
+        } else if KINDS.argument_lists.iter().any(|name| name == kind) {
             let remaining = limit - objects.len();
             arguments(node, &mut objects, remaining);
+        } else if node.is_named() && KINDS.comments.iter().any(|name| name == kind) {
+            objects.push(comment(node, source));
         }
         if objects.len() >= limit {
             break;
@@ -90,14 +69,63 @@ pub(super) fn collect(tree: &tree_sitter::Tree, source: &str, limit: usize) -> V
             }
         }
     }
+    // Preserve the text-object budget before spending the remaining space on node selection.
+    let mut cursor = tree.walk();
+    'nodes: loop {
+        if objects.len() >= limit {
+            break;
+        }
+        let node = cursor.node();
+        if node.is_named() && node.start_byte() < node.end_byte() {
+            objects.push(SyntaxObject {
+                kind: SyntaxObjectKind::Node,
+                outer: (node.start_byte(), node.end_byte()),
+                inner: (node.start_byte(), node.end_byte()),
+                parent: None,
+            });
+        }
+        if cursor.goto_first_child() || cursor.goto_next_sibling() {
+            continue;
+        }
+        loop {
+            if !cursor.goto_parent() {
+                break 'nodes;
+            }
+            if cursor.goto_next_sibling() {
+                break;
+            }
+        }
+    }
     objects
+}
+
+fn comment(node: tree_sitter::Node<'_>, source: &str) -> SyntaxObject {
+    let outer = (node.start_byte(), node.end_byte());
+    let text = &source[outer.0..outer.1];
+    let (prefix, content) = KINDS
+        .comment_markers
+        .iter()
+        .find_map(|(open, close)| Some((open.len(), text.strip_prefix(open)?.strip_suffix(close)?)))
+        .unwrap_or((0, text));
+    let start = outer.0 + prefix;
+    let leading = content.len() - content.trim_start().len();
+    SyntaxObject {
+        kind: SyntaxObjectKind::Comment,
+        outer,
+        inner: (start + leading, start + leading + content.trim().len()),
+        parent: None,
+    }
 }
 
 /// The outer range is the whole node; the inner range is its body without the braces, the
 /// newline after `{` and the indentation before `}`, so `dif` leaves an empty block.
 fn block(node: tree_sitter::Node<'_>, source: &str, kind: SyntaxObjectKind) -> SyntaxObject {
     let mut outer = (node.start_byte(), node.end_byte());
-    let mut body = node.child_by_field_name("body");
+    let mut body = node.child_by_field_name("body").or_else(|| {
+        let mut walk = node.walk();
+        node.named_children(&mut walk)
+            .find(|child| KINDS.bodies.iter().any(|kind| kind == child.kind()))
+    });
     if node.kind() == "type_spec" {
         if let Some(parent) = node.parent().filter(|parent| {
             let mut walk = parent.walk();
@@ -155,7 +183,12 @@ fn block(node: tree_sitter::Node<'_>, source: &str, kind: SyntaxObjectKind) -> S
     } else {
         body
     };
-    SyntaxObject { kind, outer, inner }
+    SyntaxObject {
+        kind,
+        outer,
+        inner,
+        parent: None,
+    }
 }
 
 /// Each named child of an argument list. The outer range takes the separating comma and
@@ -198,6 +231,7 @@ fn arguments(list: tree_sitter::Node<'_>, objects: &mut Vec<SyntaxObject>, remai
             kind: SyntaxObjectKind::Argument,
             outer,
             inner,
+            parent: Some((list.start_byte(), list.end_byte())),
         });
     }
 }
@@ -213,6 +247,135 @@ mod tests {
             .unwrap();
         let tree = parser.parse(source, None).unwrap();
         collect(&tree, source, 100)
+    }
+
+    #[test]
+    fn comments_trim_markers_and_space_without_splitting_unicode() {
+        for (source, language, expected) in [
+            ("// café\n", tree_sitter_rust::LANGUAGE.into(), "café"),
+            ("/* éclair */", tree_sitter_rust::LANGUAGE.into(), "éclair"),
+            ("/// docs\n", tree_sitter_rust::LANGUAGE.into(), "docs"),
+            ("/**/", tree_sitter_rust::LANGUAGE.into(), ""),
+            ("# hello\n", tree_sitter_python::LANGUAGE.into(), "hello"),
+            ("<!-- hello -->", tree_sitter_html::LANGUAGE.into(), "hello"),
+            ("-- hello\n", tree_sitter_lua::LANGUAGE.into(), "hello"),
+        ] {
+            let found = parsed(source, language);
+            let object = found
+                .iter()
+                .find(|o| o.kind == SyntaxObjectKind::Comment)
+                .unwrap();
+            assert_eq!(
+                &source[object.inner.0..object.inner.1],
+                expected,
+                "{source}"
+            );
+            assert!(
+                source.is_char_boundary(object.inner.0) && source.is_char_boundary(object.inner.1)
+            );
+        }
+    }
+
+    #[test]
+    fn definition_bodies_without_named_fields_remain_selectable() {
+        for (source, language, kind, expected) in [
+            (
+                "class A {\n fun f(x: Int) { println(x) }\n}\n",
+                tree_sitter_kotlin_sg::LANGUAGE.into(),
+                SyntaxObjectKind::Class,
+                "fun f(x: Int) { println(x) }",
+            ),
+            (
+                "class A { func f() { print(1) } }",
+                tree_sitter_swift::LANGUAGE.into(),
+                SyntaxObjectKind::Class,
+                "func f() { print(1) }",
+            ),
+            (
+                "fn f(x: u8) u8 { return x; }",
+                tree_sitter_zig::LANGUAGE.into(),
+                SyntaxObjectKind::Function,
+                "return x;",
+            ),
+            (
+                "function f(x) return x end",
+                tree_sitter_lua::LANGUAGE.into(),
+                SyntaxObjectKind::Function,
+                "return x",
+            ),
+        ] {
+            let found = parsed(source, language);
+            let object = found.iter().find(|o| o.kind == kind).unwrap();
+            assert_eq!(
+                source[object.inner.0..object.inner.1].trim(),
+                expected,
+                "{source}"
+            );
+        }
+    }
+
+    #[test]
+    fn nodes_and_argument_parents_preserve_the_parse_tree_structure() {
+        let source = "fn main() { call(inner(a, b), c); }";
+        let found = objects(source);
+        let argument = |name| {
+            found
+                .iter()
+                .find(|o| {
+                    o.kind == SyntaxObjectKind::Argument && &source[o.inner.0..o.inner.1] == name
+                })
+                .unwrap()
+        };
+        assert_eq!(argument("a").parent, argument("b").parent);
+        assert_ne!(argument("a").parent, argument("c").parent);
+        assert_eq!(argument("inner(a, b)").parent, argument("c").parent);
+        for expected in ["a", "(a, b)", "inner(a, b)", "(inner(a, b), c)", source] {
+            assert!(
+                found.iter().any(|o| o.kind == SyntaxObjectKind::Node
+                    && &source[o.outer.0..o.outer.1] == expected),
+                "{expected}"
+            );
+        }
+    }
+
+    #[test]
+    fn bundled_grammar_definitions_and_parameters_are_available_without_lsp() {
+        for (source, language) in [
+            (
+                "class A { method(x, y) { return x; } }",
+                tree_sitter_javascript::LANGUAGE.into(),
+            ),
+            (
+                "class A { method(x: number, y: number) { return x; } }",
+                tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+            ),
+            (
+                "class A:\n    def method(self, x):\n        return x\n",
+                tree_sitter_python::LANGUAGE.into(),
+            ),
+            (
+                "class A { int method(int x, int y) { return x; } }",
+                tree_sitter_java::LANGUAGE.into(),
+            ),
+            (
+                "class A { int Method(int x, int y) { return x; } }",
+                tree_sitter_c_sharp::LANGUAGE.into(),
+            ),
+            (
+                "class A\n  def method(x, y)\n    x\n  end\nend",
+                tree_sitter_ruby::LANGUAGE.into(),
+            ),
+        ] {
+            let found = parsed(source, language);
+            for kind in [
+                SyntaxObjectKind::Class,
+                SyntaxObjectKind::Function,
+                SyntaxObjectKind::Argument,
+                SyntaxObjectKind::Node,
+            ] {
+                assert!(found.iter().any(|o| o.kind == kind), "{kind:?}: {source}");
+            }
+        }
     }
 
     #[test]
@@ -371,7 +534,14 @@ mod tests {
         let tree = parser.parse(&source, None).unwrap();
         for limit in [0, 1, 2, 10, 1001, 2000] {
             let found = collect(&tree, &source, limit);
-            assert_eq!(found.len(), limit.min(1001));
+            assert!(found.len() <= limit);
+            assert_eq!(
+                found
+                    .iter()
+                    .filter(|o| o.kind != SyntaxObjectKind::Node)
+                    .count(),
+                limit.min(1001)
+            );
             if limit > 1 {
                 let argument = found[1];
                 assert_eq!(&source[argument.inner.0..argument.inner.1], "x");
@@ -385,7 +555,7 @@ mod tests {
         let found = parsed(source, tree_sitter_javascript::LANGUAGE.into());
         let b = found
             .iter()
-            .find(|o| &source[o.inner.0..o.inner.1] == "b")
+            .find(|o| o.kind == SyntaxObjectKind::Argument && &source[o.inner.0..o.inner.1] == "b")
             .unwrap();
         assert_eq!(&source[b.outer.0..b.outer.1], ", b");
     }

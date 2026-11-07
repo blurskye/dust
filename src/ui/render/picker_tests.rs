@@ -265,6 +265,107 @@ fn picker_stacks_preview_when_two_readable_columns_do_not_fit() {
 }
 
 #[test]
+fn grep_keeps_code_and_location_readable_and_centres_the_preview() {
+    use crate::ui::grid::Frame;
+    use crate::ui::{
+        PickerCell, PickerPreview, PickerRow, PickerSurfaceKind, PickerTextPreview, PickerUiState,
+        Style,
+    };
+    use crate::windows::WindowRect;
+    let config = crate::config::load_bundled_config().config;
+    let path = "packages/workspace-services/customer-platform/components/deeply/nested/provider-integrations/internal/source/main.rs";
+    let mut row = PickerRow::text("match", format!("{path}:81:5"), "let needle = 42;", "");
+    row.cells = vec![
+        PickerCell::new("󱘗 ", Style::ExplorerIcon, 2),
+        PickerCell::new("let", Style::Syntax(crate::config::Highlight::KEYWORD), 3),
+        PickerCell::new(" needle = 42;", Style::Default, 13),
+        PickerCell::new(path, Style::Muted, path.len() as u16),
+        PickerCell::new(":81", Style::Accent, 3),
+        PickerCell::new(":5", Style::Muted, 2),
+    ];
+    let picker = PickerUiState {
+        preview_side_scroll: (0, 0),
+        footer: None,
+        input_hint: String::new(),
+        surface: PickerSurfaceKind::Grep,
+        title: "Grep".into(),
+        query: "needle".into(),
+        rows: vec![row],
+        selected: Some(0),
+        scroll: 0,
+        total: 1,
+        loading: false,
+        preview: Some(PickerPreview::text(
+            path,
+            PickerTextPreview::new(
+                (0..160)
+                    .map(|line| {
+                        if line == 80 {
+                            "let needle = 42;".into()
+                        } else {
+                            format!("context {line}")
+                        }
+                    })
+                    .collect(),
+                0,
+                Some(80),
+                Some(crate::language::syntax::SyntaxLanguage::Rust),
+            ),
+        )),
+    };
+    for (width, height) in [(160, 45), (100, 30)] {
+        let rect = WindowRect {
+            x: 0,
+            y: 0,
+            width,
+            height,
+        };
+        let geometry =
+            crate::ui::render::picker::picker_content_geometry(&picker, &config, rect).unwrap();
+        let mut frame = Frame {
+            grid: crate::ui::CellGrid::new(width, height),
+            cursor: None,
+        };
+        crate::ui::render::picker::render_picker(&mut frame, &picker, &config, rect, None);
+        let row = frame.grid.row_text(geometry.list.y);
+        assert!(row.contains("let needle = 42;"), "{width}: {row}");
+        assert!(row.contains("main.rs:81:5"), "{width}: {row}");
+        assert!(row.find("needle").unwrap() < row.find("main.rs").unwrap());
+        assert!(
+            (0..width).any(|x| frame.grid.get(x, geometry.list.y).unwrap().style == Style::Accent)
+        );
+        let preview_top = geometry.stacked_divider.map_or(1, |divider| divider + 1);
+        let preview_rows = height - 1 - preview_top;
+        let match_y = preview_top + preview_rows / 2;
+        assert!(frame.grid.row_text(match_y).contains("81 let needle = 42;"));
+        assert!((0..width).any(|x| frame.grid.get(x, match_y).unwrap().style == Style::Selection));
+        for y in [geometry.list.y, match_y] {
+            assert!((0..width).any(|x| matches!(
+                frame.grid.get(x, y).unwrap().style,
+                Style::SelectionSyntax(_)
+            )));
+        }
+        let title_y = geometry.stacked_divider.unwrap_or(0);
+        let title = frame.grid.row_text(title_y);
+        assert!(title.contains("main.rs:81"), "{width}: {title}");
+        assert!(title.contains('…') || title.contains("p/w/"), "{title}");
+
+        // Other pickers retain their existing selected-row and matched-line styles.
+        let mut files = picker.clone();
+        files.surface = PickerSurfaceKind::Files;
+        let mut frame = Frame {
+            grid: crate::ui::CellGrid::new(width, height),
+            cursor: None,
+        };
+        crate::ui::render::picker::render_picker(&mut frame, &files, &config, rect, None);
+        assert!(!(0..height).any(|y| (0..width).any(|x| matches!(
+            frame.grid.get(x, y).unwrap().style,
+            Style::SelectionSyntax(_)
+        ))));
+    }
+}
+
+#[test]
 fn a_debug_view_survives_a_narrow_width_in_the_shared_picker() {
     use crate::ui::PickerUiState;
     let mut state = EditorState::new(PathBuf::from("/workspace"));

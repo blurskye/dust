@@ -20,6 +20,7 @@ use std::sync::Arc;
 #[derive(Clone, Debug)]
 pub(in crate::app) enum PickerPayload {
     Selection(String),
+    Plugin(crate::app::plugins::browser::PluginChoice),
     /// A row whose whole text opens in a popup with this title, such as a past notice.
     Notice {
         title: String,
@@ -72,6 +73,8 @@ pub(in crate::app) enum PickerPayload {
     Window(crate::windows::WindowId),
     LspSession(String),
     Debug(crate::app::debugger::DebugKey),
+    DebugLaunch(Box<crate::app::debugger::PresetLaunch>),
+    DebugConfiguration(String),
     PersistedLocation(PersistedLocation),
     GitHunk {
         path: PathBuf,
@@ -98,6 +101,7 @@ pub(in crate::app) struct PickerEpoch(Arc<()>);
 #[derive(Clone, Copy)]
 pub(in crate::app) enum PickerOrigin {
     General,
+    Plugins,
     PluginProvider(u64),
     WorkspaceEdit(crate::workspace::ProposalId),
     Files,
@@ -240,8 +244,8 @@ pub(in crate::app) fn choice_row_cells(
     ]
 }
 
-/// A grep row as LazyVim draws it: the file's icon, `path:line:col` with the line number
-/// accented, and the line's text highlighted for the file's language.
+/// Match-first grep columns: icon and highlighted code, followed by path, line and column.
+/// The renderer fits the last three cells to the available location column.
 pub(in crate::app) fn grep_row_cells(
     found: &crate::files::WorkspaceSearchMatch,
     row: &crate::workspace::PickerRowPresentation,
@@ -250,13 +254,18 @@ pub(in crate::app) fn grep_row_cells(
     let path = found.relative_path.display().to_string();
     let line = found.line.saturating_add(1).to_string();
     let column = found.column.saturating_add(1).to_string();
-    let mut cells = path_cells(&path, &row.source, file_icon);
-    cells.push(cell(":", Style::Muted));
-    cells.push(cell(&line, Style::Accent));
-    cells.push(cell(":", Style::Muted));
-    cells.push(cell(&column, Style::Muted));
-    cells.push(cell("  ", Style::Default));
-    let text = row.detail.as_str();
+    let mut cells = path_cells(&path, "", file_icon);
+    cells.truncate(usize::from(file_icon.is_some()));
+    let text = found.line_text.as_str();
+    let start = text
+        .get(..found.column)
+        .filter(|prefix| prefix.trim_start().chars().count() > 24)
+        .and_then(|prefix| prefix.char_indices().rev().nth(16))
+        .map_or(0, |(offset, _)| offset);
+    let text = text[start..].trim();
+    if start > 0 {
+        cells.push(cell("…", Style::Muted));
+    }
     let spans = crate::language::syntax::language_for_path(&found.canonical_path)
         .map(|language| crate::language::syntax::highlight(language, text))
         .unwrap_or_default();
@@ -273,6 +282,14 @@ pub(in crate::app) fn grep_row_cells(
     }
     cells.push(cell(text.get(at..).unwrap_or_default(), Style::Default));
     cells.retain(|cell| !cell.text.is_empty());
+    let path = if row.source.is_empty() {
+        path
+    } else {
+        format!("{}/{path}", row.source)
+    };
+    cells.push(cell(&path, Style::Muted));
+    cells.push(cell(&format!(":{line}"), Style::Accent));
+    cells.push(cell(&format!(":{column}"), Style::Muted));
     cells
 }
 
@@ -346,6 +363,13 @@ pub(in crate::app) mod commands;
 pub(in crate::app) mod replacement;
 
 impl Search {
+    pub(in crate::app) fn plugin_browser_open(&self) -> bool {
+        self.picker
+            .interaction
+            .as_ref()
+            .is_some_and(|picker| matches!(picker.origin, PickerOrigin::Plugins))
+    }
+
     pub(in crate::app) fn install_picker(
         &mut self,
         content: PickerContent,
@@ -362,7 +386,8 @@ impl Search {
         let same_interaction = |picker: &PickerInteraction| {
             let same_origin = match (picker.origin, content.origin) {
                 (PickerOrigin::Files, PickerOrigin::Files)
-                | (PickerOrigin::Grep, PickerOrigin::Grep) => true,
+                | (PickerOrigin::Grep, PickerOrigin::Grep)
+                | (PickerOrigin::Plugins, PickerOrigin::Plugins) => true,
                 (PickerOrigin::PluginProvider(a), PickerOrigin::PluginProvider(b)) => a == b,
                 _ => false,
             };
@@ -412,7 +437,7 @@ impl Search {
             epoch = previous.epoch.clone();
             if matches!(
                 content.origin,
-                PickerOrigin::Files | PickerOrigin::PluginProvider(_)
+                PickerOrigin::Files | PickerOrigin::PluginProvider(_) | PickerOrigin::Plugins
             ) {
                 query = previous_query.to_owned();
             }
@@ -544,6 +569,7 @@ impl Search {
             picker.source != (scope, configuration)
                 || match picker.origin {
                     PickerOrigin::General
+                    | PickerOrigin::Plugins
                     | PickerOrigin::WorkspaceEdit(_)
                     | PickerOrigin::PluginProvider(_) => false,
                     PickerOrigin::Files => self.file_scope.is_none(),
@@ -617,6 +643,34 @@ impl Search {
         }
         picker.changes_other_layer = !picker.changes_other_layer;
         Some(self.changes_layer())
+    }
+
+    pub(in crate::app) fn move_diff_hunk(&mut self, direction: i8) {
+        let Some(snapshot) = &self.diff_snapshot else {
+            return;
+        };
+        let count = snapshot.hunks.len();
+        if count == 0 {
+            return;
+        }
+        self.diff_hunk = if direction < 0 {
+            (self.diff_hunk + count - 1) % count
+        } else {
+            (self.diff_hunk + 1) % count
+        };
+        let Some(crate::ui::PickerPreviewBody::Diff(diff)) =
+            self.preview.as_mut().map(|preview| &mut preview.body)
+        else {
+            return;
+        };
+        let layer = match snapshot.layer {
+            crate::git::GitDiffLayer::Staged => "HEAD -> index",
+            crate::git::GitDiffLayer::Unstaged => "index -> disk",
+        };
+        diff.provenance = format!("{layer} · Hunk {}/{count}", self.diff_hunk + 1);
+        if let Some(picker) = &mut self.picker.interaction {
+            picker.preview_scroll = Some(diff.hunk_scroll(self.diff_hunk));
+        }
     }
 
     pub(in crate::app) fn picker_move(&mut self, direction: i8, wrap: bool) {
@@ -1786,7 +1840,17 @@ impl App {
             }
             return;
         }
-        let payload = self.search.take_picker_payload();
+        let review_line = if self.search.picker_surface() == PickerSurfaceKind::Changes {
+            self.git_review_line()
+        } else {
+            None
+        };
+        let mut payload = self.search.take_picker_payload();
+        if let (Some(line), Some(PickerPayload::MatcherSource(source))) =
+            (review_line, &mut payload)
+        {
+            source.line = line;
+        }
         if let Some(PickerPayload::Selection(id)) = &payload {
             self.finish_item_select(Some(id.clone()));
         }
@@ -1797,7 +1861,7 @@ impl App {
             self.show_workspace_proposal();
             return;
         }
-        // Retain only the accepted source match before close clears live search data.
+        // Navigation owns its snapshot independently of subsequent searches.
         let search_match = match &payload {
             Some(PickerPayload::WorkspaceSearch(id)) => self
                 .search
@@ -1850,6 +1914,7 @@ impl App {
         self.close_picker();
         match payload {
             Some(PickerPayload::Theme(_)) => {}
+            Some(PickerPayload::Plugin(choice)) => self.accept_plugin_choice(choice),
             Some(PickerPayload::WorkspaceSearch(_)) => {
                 if let Some(found) = search_match {
                     self.navigate_workspace_search_match(found);
@@ -1958,6 +2023,8 @@ impl App {
                 }
             }
             Some(PickerPayload::LspSession(key)) => self.select_lsp_session(&key),
+            Some(PickerPayload::DebugLaunch(launch)) => self.start_debug_preset(*launch),
+            Some(PickerPayload::DebugConfiguration(name)) => self.start_dap_configuration(&name),
             Some(PickerPayload::Debug(_)) => {
                 self.debugger_session.refresh(
                     &self.configuration.settings().debug,

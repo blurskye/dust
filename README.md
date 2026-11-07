@@ -96,6 +96,11 @@ segments. Capabilities in its manifest control what it may do; files, processes 
 network access need the user's grant. Granting process execution gives a plugin
 ordinary user-process access, not a filesystem sandbox.
 
+Open **Plugins** on the dashboard or run `:plugins` to inspect installed plugins,
+permissions and failures, enable/disable them for the session, reload, or open their
+folders. `dust plugin new mywords` creates a ready-to-build Rust guest with a README
+covering build, pack and load steps.
+
 The [Plugin SDK](docs/plugin-sdk.md) documents the production WIT contract,
 manifest, build commands and examples. [Registry client documentation](docs/registry-client.md)
 describes package installation and verification.

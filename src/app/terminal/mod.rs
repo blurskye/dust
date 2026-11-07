@@ -99,6 +99,8 @@ pub(super) struct Terminals {
     policy: TerminalsConfig,
     closed_ptys: HashSet<PtyId>,
     close_intent: Option<TerminalCloseSource>,
+    input_hint_seen: bool,
+    input_hint_until: Option<std::time::Instant>,
     closed: bool,
     /// Set for every terminal under the profile's own variables, such as `DUST_SERVER`.
     environment: BTreeMap<String, String>,
@@ -123,6 +125,8 @@ impl Terminals {
             policy: policy.clone(),
             closed_ptys: HashSet::new(),
             close_intent: None,
+            input_hint_seen: false,
+            input_hint_until: None,
             closed: false,
             environment: BTreeMap::new(),
         }
@@ -465,6 +469,7 @@ impl Terminals {
             key.id,
             TerminalRuntime {
                 profile: source.token.profile,
+                program: config.program.clone(),
                 agent: source.token.agent,
                 cwd: request.cwd.clone(),
                 close_on_exit: config.close_on_exit,
@@ -796,6 +801,7 @@ impl Terminals {
         self.tabs
             .values()
             .filter_map(|tab| tab.screen.sync_deadline())
+            .chain(self.input_hint_until)
             .min()
     }
     pub(in crate::app) fn drain(
@@ -809,6 +815,13 @@ impl Terminals {
             .filter_map(|(id, t)| (t.scope != workspace.version()).then_some(*id))
             .collect::<Vec<_>>();
         let mut updates = Vec::new();
+        if self
+            .input_hint_until
+            .is_some_and(|until| until <= std::time::Instant::now())
+        {
+            self.input_hint_until = None;
+            updates.push(TerminalUpdate::Changed);
+        }
         for id in stale {
             self.close(id);
             updates.push(TerminalUpdate::Closed(id));
@@ -1045,6 +1058,7 @@ fn acknowledge_resize(
 
 struct TerminalRuntime {
     profile: String,
+    program: std::path::PathBuf,
     agent: bool,
     cwd: std::path::PathBuf,
     close_on_exit: bool,
@@ -1108,6 +1122,7 @@ impl Terminals {
         self.tabs.insert(
             id,
             TerminalRuntime {
+                program: fixture.profile.clone().into(),
                 profile: fixture.profile,
                 agent: false,
                 cwd: std::path::PathBuf::new(),
@@ -1586,12 +1601,43 @@ impl App {
 impl App {
     pub(in crate::app) fn sync_terminal_panel(&mut self) {
         let focused = self.window_session.focused_terminal();
+        if focused.is_some() && !self.terminal_session.input_hint_seen {
+            self.terminal_session.input_hint_seen = true;
+            let duration = self
+                .configuration
+                .settings()
+                .ui
+                .terminal_panel
+                .input_hint_ms
+                .unwrap_or(0);
+            self.terminal_session.input_hint_until = std::time::Instant::now()
+                .checked_add(std::time::Duration::from_millis(u64::from(duration)));
+        }
+        let hint = self
+            .terminal_session
+            .input_hint_until
+            .filter(|until| *until > std::time::Instant::now())
+            .and_then(|_| {
+                self.configuration
+                    .keymaps()
+                    .binding_for("terminal", "terminal.mode.normal")
+            })
+            .map(|keys| {
+                self.message(
+                    "terminal_input_hint",
+                    &[("key", crate::app::picker::palette::readable_keys(keys))],
+                )
+            });
         let height = self.window_session.terminal_height();
         self.ui.terminal_panel = self.displayed_terminal().and_then(|id| {
             self.terminal_session
                 .projection(id, focused == Some(id.0), height)
         });
-        if self.ui.terminal_panel.is_none() {
+        if let Some(panel) = &mut self.ui.terminal_panel {
+            if panel.focused && panel.mode == TerminalPanelMode::Input {
+                panel.input_hint = hint;
+            }
+        } else {
             self.set_terminal_focus(false);
         }
         self.reconcile_editor_windows();

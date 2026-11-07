@@ -164,6 +164,33 @@ pub fn register_builtin_commands<E: 'static>(
         ContextRequirement::View,
         ArgumentSchema::default().field("before", ArgumentType::Bool, true),
     )?;
+    for id in [
+        "syntax.selection.grow",
+        "syntax.selection.shrink",
+        "syntax.function.next",
+        "syntax.function.previous",
+        "syntax.class.next",
+        "syntax.class.previous",
+        "syntax.argument.swap_next",
+        "syntax.argument.swap_previous",
+        "syntax.select.inner_function",
+        "syntax.select.a_function",
+        "syntax.select.inner_class",
+        "syntax.select.a_class",
+        "syntax.select.inner_argument",
+        "syntax.select.a_argument",
+        "syntax.select.inner_comment",
+        "syntax.select.a_comment",
+    ] {
+        // User-facing labels are supplied by the bundled configuration.
+        register(
+            registry,
+            id,
+            id,
+            ContextRequirement::View,
+            ArgumentSchema::default(),
+        )?;
+    }
     Ok(())
 }
 

@@ -21,7 +21,7 @@ Paths in this table are under `src/`.
 | `git/` | Repository status, hunks, signs, mutations, branches, conflicts and worktrees. |
 | `forge/` | Pull requests and review comments through the `gh` and `tea` CLIs. |
 | `language/` | Filetype identification, Tree-sitter parsing and queries, LSP transport, sessions, protocol messages, snippets and paths. |
-| `debugger/` | DAP transport and sessions, requests, events and reverse requests. |
+| `debugger/` | DAP transport and sessions, requests, events and reverse requests. `connection.rs` owns pipe/loopback connections, including server adapter child sessions. |
 | `agent/` | ACP clients, conversation history and the MCP subagent endpoint. |
 | `tools/` | Tool catalog, installed executables, runtime discovery, Nix workspace environments, downloads, installers, plugin packages and registry client. |
 | `plugins/` | Wasmtime component loading/execution, manifests, capabilities, bounded host requests, HTTP, storage, picker providers and virtual-document protocols. |
@@ -55,7 +55,12 @@ it does not implement a second editor. Important groups are:
 - `language/`, `syntax.rs` and `diagnostics.rs`: document synchronization,
   language-server requests/results, completion, parsing and diagnostic display.
 - `git/`, `terminal/`, `debugger/`, `agent/`, `tasks/` and `tools/`: editor-facing
-  workflows around their respective clients and workers.
+  workflows around their respective clients and workers. `tasks/output.rs` parses
+  compiler locations for the existing task-output picker; `git/review.rs` coordinates
+  hunk actions in the existing changed-files picker.
+- `debugger/presets.rs`: detects `assets/defaults/debug-presets.toml` launches,
+  resumes after Tools installation and selects Cargo executables using the existing
+  process job supervisor. Launches still use the debugger's workspace preflight.
 - `configuration/` and `settings/`: compile and apply configuration contributions,
   keymaps, themes, setup and settings interactions.
 - `plugins/`: connect component requests and replies to these native owners;
@@ -140,7 +145,9 @@ preview and acceptance. Document edits use checked native transactions or the
 workspace-edit workflow. Stale replies cannot replace current document results.
 
 Tree-sitter is independent of LSP. `language/syntax/` parses buffer snapshots and
-provides highlights, folds, text objects and bounded queries. `app/syntax.rs`
+provides highlights, folds, text objects and bounded queries. Node-kind tables live
+in `assets/defaults/syntax-objects.toml`; `editor/command/builtins/structural.rs`
+owns incremental selection, definition motions and argument-swap transactions. `app/syntax.rs`
 coordinates parsing and projects accepted results for display.
 
 ## Plugins and permissions
@@ -149,6 +156,12 @@ The production interface is [`wit/dust-plugin.wit`](wit/dust-plugin.wit), packag
 `dust:plugin@0.4.0`, world `editor-plugin`. This ABI version is separate from the
 editor's release version. The [Plugin SDK](docs/plugin-sdk.md) specifies manifests,
 limits and request semantics.
+
+`plugins/scaffold.rs` creates standalone Rust guests for `dust plugin new`, using
+`examples/plugins/completion` and `assets/plugin-template/README.md` as templates.
+`app/plugins/browser.rs` lists configured and package-managed plugins in the native
+picker and routes session enable/disable, reload and folder actions to existing
+owners. The package worker remains responsible for installed package discovery.
 
 The flow is:
 

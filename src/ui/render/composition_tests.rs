@@ -259,6 +259,7 @@ fn workspace_frame_respects_nonzero_compositor_origin_for_side_and_top_docks() {
         exit_code: None,
         truncated: false,
         focused: false,
+        input_hint: None,
         columns: 5,
         rows: 8,
         cells: Vec::new(),
@@ -2272,6 +2273,7 @@ fn key_hints_anchor_clip_and_preserve_protected_rows() {
         })
         .expect("right anchored prefix");
     assert!(right_prefix_x > 30);
+    assert!((0..19).any(|row| right.grid.row_text(row).contains("Keys: space f")));
     assert!(!(0..80).any(|x| {
         right.grid.get(x, 19).is_some_and(|cell| {
             matches!(

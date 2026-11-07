@@ -2016,6 +2016,7 @@ context = "explorer"
 keys = "a"
 command = "command_line.open"
 arguments = { kind = "command", initial = "exploreradd " }
+desc = "Add file or directory"
 [[keymap]]
 id = "builtin.explorer.surface.explorer-rename.r"
 context = "explorer"
@@ -2064,6 +2065,12 @@ keys = "mouse-left-down"
 command = "terminal.focus_active"
 
 # Trust confirmation is sensitivity-aware: no history or completion bindings.
+[[keymap]]
+id = "builtin.tools.trust"
+context = "tool_manager"
+keys = "t"
+command = "workspace.trust"
+
 [[keymap]]
 id = "builtin.workspace-trust-prompt.surface.command-line-cancel.escape"
 context = "workspace_trust_prompt"
@@ -3865,11 +3872,160 @@ keys = "g O"
 command = "lsp.document_symbols"
 
 [[keymap]]
-id = "builtin.editor.normal.lsp-completion-trigger.ctrl-space"
+id = "builtin.editor.normal.syntax-selection-grow.ctrl-space"
 context = "editor"
 mode = "normal"
 keys = "ctrl-space"
-command = "lsp.completion.trigger"
+command = "syntax.selection.grow"
+desc = "Grow syntax selection"
+
+[[keymap]]
+id = "builtin.editor.visual-char.syntax-selection-grow.ctrl-space"
+context = "editor"
+mode = "visual_char"
+keys = "ctrl-space"
+command = "syntax.selection.grow"
+[[keymap]]
+id = "builtin.editor.visual-char.syntax-selection-shrink.backspace"
+context = "editor"
+mode = "visual_char"
+keys = "backspace"
+command = "syntax.selection.shrink"
+
+# Parameter swaps: these code-prefix keys are unassigned in LazyVim.
+[[keymap]]
+id = "builtin.editor.normal.syntax-swap-next"
+context = "editor"
+mode = "normal"
+keys = "<leader> c >"
+command = "syntax.argument.swap_next"
+desc = "Swap argument with next"
+[[keymap]]
+id = "builtin.editor.normal.syntax-swap-previous"
+context = "editor"
+mode = "normal"
+keys = "<leader> c <"
+command = "syntax.argument.swap_previous"
+desc = "Swap argument with previous"
+
+[[keymap]]
+id = "builtin.editor.normal.syntax-next-function"
+context = "editor"
+mode = "normal"
+keys = "] f"
+command = "input.motion"
+arguments = { motion = "next_function", linewise = false }
+desc = "Next function"
+[[keymap]]
+id = "builtin.editor.normal.syntax-previous-function"
+context = "editor"
+mode = "normal"
+keys = "[ f"
+command = "input.motion"
+arguments = { motion = "previous_function", linewise = false }
+desc = "Previous function"
+[[keymap]]
+id = "builtin.editor.normal.syntax-next-class"
+context = "editor"
+mode = "normal"
+keys = "] c"
+command = "input.motion"
+arguments = { motion = "next_class", linewise = false }
+desc = "Next class"
+[[keymap]]
+id = "builtin.editor.normal.syntax-previous-class"
+context = "editor"
+mode = "normal"
+keys = "[ c"
+command = "input.motion"
+arguments = { motion = "previous_class", linewise = false }
+desc = "Previous class"
+[[keymap]]
+id = "builtin.editor.visual-char.syntax-next-function"
+context = "editor"
+mode = "visual_char"
+keys = "] f"
+command = "input.motion"
+arguments = { motion = "next_function", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.syntax-previous-function"
+context = "editor"
+mode = "visual_char"
+keys = "[ f"
+command = "input.motion"
+arguments = { motion = "previous_function", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.syntax-next-class"
+context = "editor"
+mode = "visual_char"
+keys = "] c"
+command = "input.motion"
+arguments = { motion = "next_class", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.syntax-previous-class"
+context = "editor"
+mode = "visual_char"
+keys = "[ c"
+command = "input.motion"
+arguments = { motion = "previous_class", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.syntax-next-function"
+context = "editor"
+mode = "operator_pending"
+keys = "] f"
+command = "input.motion"
+arguments = { motion = "next_function", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.syntax-previous-function"
+context = "editor"
+mode = "operator_pending"
+keys = "[ f"
+command = "input.motion"
+arguments = { motion = "previous_function", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.syntax-next-class"
+context = "editor"
+mode = "operator_pending"
+keys = "] c"
+command = "input.motion"
+arguments = { motion = "next_class", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.syntax-previous-class"
+context = "editor"
+mode = "operator_pending"
+keys = "[ c"
+command = "input.motion"
+arguments = { motion = "previous_class", linewise = false }
+
+# c is class; / names a comment without conflicting with ac/ic.
+[[keymap]]
+id = "builtin.editor.operator-pending.syntax-inner-comment"
+context = "editor"
+mode = "operator_pending"
+keys = "i /"
+command = "input.motion"
+arguments = { motion = "inner_comment", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.syntax-around-comment"
+context = "editor"
+mode = "operator_pending"
+keys = "a /"
+command = "input.motion"
+arguments = { motion = "a_comment", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.syntax-inner-comment"
+context = "editor"
+mode = "visual_char"
+keys = "i /"
+command = "input.motion"
+arguments = { motion = "inner_comment", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.syntax-around-comment"
+context = "editor"
+mode = "visual_char"
+keys = "a /"
+command = "input.motion"
+arguments = { motion = "a_comment", linewise = false }
 
 [[keymap]]
 id = "builtin.completion.surface.completion-accept.tab"
@@ -4184,6 +4340,12 @@ keys = "enter"
 command = "picker.accept"
 
 [[keymap]]
+id = "builtin.picker.normal.picker-accept.gf"
+context = "picker_normal"
+keys = "g f"
+command = "picker.accept"
+
+[[keymap]]
 id = "builtin.picker.normal.picker-cancel.escape"
 context = "picker_normal"
 keys = "escape"
@@ -4229,6 +4391,47 @@ id = "builtin.picker.normal.changes-unstage-file.u"
 context = "picker_normal"
 keys = "u"
 command = "workspace.git.file.unstage"
+
+# Review keeps Snacks-style file actions on s/u; capitals act on the displayed hunk.
+[[keymap]]
+id = "builtin.picker.normal.review-hunk-next"
+context = "picker_normal"
+keys = "] h"
+command = "workspace.git.review.hunk"
+arguments = { action = "next" }
+desc = "Next Review Hunk"
+
+[[keymap]]
+id = "builtin.picker.normal.review-hunk-previous"
+context = "picker_normal"
+keys = "[ h"
+command = "workspace.git.review.hunk"
+arguments = { action = "previous" }
+desc = "Previous Review Hunk"
+
+[[keymap]]
+id = "builtin.picker.normal.review-hunk-stage"
+context = "picker_normal"
+keys = "S"
+command = "workspace.git.review.hunk"
+arguments = { action = "stage" }
+desc = "Stage Review Hunk"
+
+[[keymap]]
+id = "builtin.picker.normal.review-hunk-unstage"
+context = "picker_normal"
+keys = "U"
+command = "workspace.git.review.hunk"
+arguments = { action = "unstage" }
+desc = "Unstage Review Hunk"
+
+[[keymap]]
+id = "builtin.picker.normal.review-hunk-discard"
+context = "picker_normal"
+keys = "r"
+command = "workspace.git.review.hunk"
+arguments = { action = "discard" }
+desc = "Discard Review Hunk"
 
 [[keymap]]
 id = "builtin.picker.surface.picker-backspace.backspace"
@@ -4278,7 +4481,58 @@ context = "workspace_edit"
 keys = "escape"
 command = "workspace.edit.reject"
 
-# Leader bindings, LazyVim layout. `context = "global"` applies them in the editor
+# Surface help does not intercept text input or existing search keys.
+[[keymap]]
+id = "builtin.explorer.help"
+context = "explorer"
+keys = "?"
+command = "overlay.help.contextual"
+desc = "Explorer key help"
+
+[[keymap]]
+id = "builtin.terminal-normal.help"
+context = "terminal_normal"
+keys = "?"
+command = "overlay.help.contextual"
+desc = "Terminal key help"
+
+[[keymap]]
+id = "builtin.terminal-visual.help"
+context = "terminal_visual"
+keys = "?"
+command = "overlay.help.contextual"
+desc = "Terminal selection key help"
+
+[[keymap]]
+id = "builtin.settings.help"
+context = "settings"
+keys = "?"
+command = "overlay.help.contextual"
+desc = "Settings key help"
+
+[[keymap]]
+id = "builtin.setup.help"
+context = "setup"
+keys = "?"
+command = "overlay.help.contextual"
+desc = "Setup key help"
+
+[[keymap]]
+id = "builtin.tool-manager.help"
+context = "tool_manager"
+keys = "?"
+command = "overlay.help.contextual"
+desc = "Tools key help"
+
+[[keymap]]
+id = "builtin.agent-normal.help"
+context = "agent_normal"
+keys = "?"
+command = "overlay.help.contextual"
+desc = "Agent pane key help"
+
+# Leader bindings, LazyVim layout. Groups use which-key's key order, not priorities.
+# `context = "global"` applies them in the editor
 # (normal mode), explorer, dashboard, terminal normal mode, tool manager and panels.
 
 [[key_group]]
@@ -4287,7 +4541,6 @@ context = "global"
 prefix = "<leader> a"
 label = "AI"
 icon = "󰚩"
-order = 3
 
 [[key_group]]
 id = "builtin.global.group.git-pull-requests"
@@ -4295,109 +4548,96 @@ context = "global"
 prefix = "<leader> g p"
 label = "Pull Requests"
 icon = ""
-order = 27
 
 [[key_group]]
 id = "builtin.global.group.buffers"
 context = "global"
 prefix = "<leader> b"
-label = "Buffers"
+label = "buffers"
 icon = "󰓩"
-order = 5
 
 [[key_group]]
 id = "builtin.global.group.code"
 context = "global"
 prefix = "<leader> c"
-label = "Code"
+label = "code"
 icon = "󰅩"
-order = 10
 
 [[key_group]]
 id = "builtin.global.group.test"
 context = "global"
 prefix = "<leader> t"
-label = "Test"
+label = "test"
 
 [[key_group]]
 id = "builtin.global.group.debug"
 context = "global"
 prefix = "<leader> d"
-label = "Debug"
+label = "debug"
 icon = "󰃤"
-order = 15
 
 [[key_group]]
 id = "builtin.global.group.files"
 context = "global"
 prefix = "<leader> f"
-label = "Files"
+label = "file/find"
 icon = "󰈞"
-order = 20
 
 [[key_group]]
 id = "builtin.global.group.git"
 context = "global"
 prefix = "<leader> g"
-label = "Git"
+label = "git"
 icon = "󰊢"
-order = 25
 
 [[key_group]]
 id = "builtin.global.group.hunks"
 context = "global"
 prefix = "<leader> g h"
-label = "Hunks"
+label = "hunks"
 icon = "󰊢"
-order = 26
 
 [[key_group]]
 id = "builtin.global.group.quit"
 context = "global"
 prefix = "<leader> q"
-label = "Quit"
+label = "quit/session"
 icon = "󰗼"
-order = 30
 
 [[key_group]]
 id = "builtin.global.group.search"
 context = "global"
 prefix = "<leader> s"
-label = "Search"
+label = "search"
 icon = "󰍉"
-order = 35
 
 [[key_group]]
 id = "builtin.global.group.ui"
 context = "global"
 prefix = "<leader> u"
-label = "UI"
+label = "ui"
 icon = "󰙵"
-order = 40
 
 [[key_group]]
 id = "builtin.global.group.windows"
 context = "global"
 prefix = "<leader> w"
-label = "Windows"
+label = "windows"
 icon = "󰖲"
-order = 45
 
 [[key_group]]
 id = "builtin.global.group.diagnostics"
 context = "global"
 prefix = "<leader> x"
-label = "Diagnostics"
+label = "diagnostics/quickfix"
 icon = "󰒡"
-order = 50
 
 [[key_group]]
 id = "builtin.global.group.tabs"
 context = "global"
 prefix = "<leader> tab"
-label = "Tabs"
+label = "tabs"
 icon = "󰓩"
-order = 55
 
 [[keymap]]
 id = "builtin.global.help"
@@ -4539,6 +4779,13 @@ context = "global"
 keys = "<leader> s g"
 command = "workspace.search.prompt"
 desc = "Grep"
+
+[[keymap]]
+id = "builtin.global.search-resume"
+context = "global"
+keys = "<leader> s R"
+command = "workspace.search.resume"
+desc = "Resume Grep"
 
 [[keymap]]
 id = "builtin.global.search-replace"
@@ -4929,6 +5176,13 @@ context = "global"
 keys = "<leader> q s"
 command = "session.load"
 desc = "Restore Session"
+
+[[keymap]]
+id = "builtin.global.test-debug"
+context = "global"
+keys = "<leader> t d"
+command = "dap.test.cursor"
+desc = "Debug Test"
 
 [[keymap]]
 id = "builtin.global.test-run"
@@ -7266,6 +7520,12 @@ id = "builtin.setup.back.left"
 context = "setup"
 keys = "left"
 command = "settings.setup.back"
+
+[[keymap]]
+id = "builtin.setup.skip.s"
+context = "setup"
+keys = "s"
+command = "settings.setup.skip"
 
 [[keymap]]
 id = "builtin.setup.skip.escape"

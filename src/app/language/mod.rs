@@ -3019,30 +3019,94 @@ impl App {
     pub(in crate::app) fn sync_lsp_status_ui(&mut self) {
         let running = self.language.running_servers();
         let server = self
-            .language
-            .active()
-            .and_then(|server| {
-                self.language
+            .active_lsp_document_without_text()
+            .map(|(buffer, document)| {
+                let session = self
+                    .language
                     .sessions()
-                    .get(server)
-                    .map(|session| (server, session))
-            })
-            .map(|(server, session)| {
-                if session.capabilities.is_some() {
-                    session.server_id.clone()
-                } else if session.circuit_open {
-                    format!("failed {}", session.server_id)
-                } else if session.restart_due.is_some() {
-                    format!("backoff {}", session.server_id)
-                } else if running.contains(server) {
-                    format!("starting {}", session.server_id)
+                    .iter()
+                    .filter(|(_, session)| session.documents.contains_key(&buffer))
+                    .min_by_key(|(key, session)| {
+                        (
+                            self.language.active() != Some(*key),
+                            session.capabilities.is_none(),
+                            session.definition.languages.len(),
+                        )
+                    });
+                if let Some((key, session)) = session {
+                    let state = if session.capabilities.is_some() {
+                        "✓"
+                    } else if session.circuit_open {
+                        "failed"
+                    } else if session.restart_due.is_some() {
+                        "restarting"
+                    } else if running.contains(key) {
+                        "starting"
+                    } else {
+                        "stopped"
+                    };
+                    return format!("{} {state}", session.server_id);
+                }
+                if !self.configuration.settings().lsp.enabled {
+                    return "LSP disabled".into();
+                }
+                let entry = self
+                    .tooling
+                    .entries()
+                    .iter()
+                    .filter(|entry| {
+                        entry.definition.kind == ToolKind::Lsp
+                            && entry
+                                .definition
+                                .automatically_supports_language(&document.language_id)
+                    })
+                    .min_by_key(|entry| {
+                        (
+                            !matches!(entry.status, ToolStatus::Installed(_)),
+                            entry.definition.languages.len(),
+                        )
+                    });
+                let Some(entry) = entry else {
+                    return "no server: <leader>cm".into();
+                };
+                let id = &entry.definition.id;
+                if self.language.launch_pending(id) {
+                    format!("{id} starting")
+                } else if self.language.errors().contains_key(id)
+                    || matches!(entry.status, ToolStatus::Failed(_))
+                {
+                    format!("{id} failed")
+                } else if matches!(entry.status, ToolStatus::Installing { .. }) {
+                    format!("{id} installing")
+                } else if !matches!(entry.status, ToolStatus::Installed(_)) {
+                    "no server: <leader>cm".into()
+                } else if self.workspace.safe_mode() {
+                    "LSP blocked: safe mode".into()
+                } else if self.workspace.execution_allowed().is_err() {
+                    "LSP blocked: :trust".into()
                 } else {
-                    format!("stopped {}", session.server_id)
+                    format!("{id} stopped")
                 }
             });
         self.ui.set(server, |ui| &mut ui.lsp_server);
         let refresh = self.ui.tool_menu.as_ref().is_some_and(|menu| {
             menu.rows.iter().any(|row| {
+                let blocked = if self.workspace.safe_mode() {
+                    "blocked: safe mode"
+                } else if self.workspace.execution_allowed().is_err() {
+                    "blocked: untrusted"
+                } else {
+                    "installed"
+                };
+                if matches!(
+                    row.lifecycle.as_str(),
+                    "installed" | "blocked: untrusted" | "blocked: safe mode"
+                ) && self.tooling.entries().iter().any(|entry| {
+                    entry.definition.id == row.id && entry.definition.kind != ToolKind::Agent
+                }) && row.lifecycle != blocked
+                {
+                    return true;
+                }
                 self.tooling
                     .entries()
                     .iter()

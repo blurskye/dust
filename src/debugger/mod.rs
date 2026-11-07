@@ -6,8 +6,6 @@ use std::collections::BTreeMap;
 
 use std::collections::HashMap;
 
-use std::io::BufReader;
-
 use std::io::Read;
 
 use std::path::Path;
@@ -34,8 +32,6 @@ use serde_json::Value;
 
 use serde_json::json;
 use thiserror::Error;
-
-use crate::process::read_content_length_message;
 
 #[derive(Clone, Debug)]
 pub enum DapEvent {
@@ -201,6 +197,7 @@ pub(crate) use reverse::DapReplyDelivery;
 pub use reverse::DapReplyOutcome;
 pub use reverse::DapTerminalReply;
 
+mod connection;
 mod session;
 pub use session::DapClient;
 pub(crate) use session::DapContext;
@@ -478,8 +475,8 @@ fn run_adapter(
         environment,
         path_maps,
         root,
-        request,
-        request_arguments,
+        mut request,
+        mut request_arguments,
         breakpoints: initial_breakpoints,
     } = launch;
     if let Some(scope) = &scope
@@ -488,13 +485,38 @@ fn run_adapter(
         events.fail(message);
         return;
     }
+    // Server adapters listen on a loopback port; connect-back adapters still use the bridge.
+    let server_address = if arguments.iter().any(|arg| arg.contains("{listen_port}")) {
+        match std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
+            .and_then(|listener| listener.local_addr())
+        {
+            Ok(address) => Some(address),
+            Err(error) => {
+                events.fail(error.to_string());
+                return;
+            }
+        }
+    } else {
+        None
+    };
+    let arguments = arguments
+        .into_iter()
+        .map(|arg| match server_address {
+            Some(address) => arg.replace("{listen_port}", &address.port().to_string()),
+            None => arg,
+        })
+        .collect();
     let mut command = adapter_command(executable, arguments);
     command
         .env_clear()
         .envs(environment)
         .current_dir(&root)
         .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
+        .stdout(if server_address.is_some() {
+            Stdio::null()
+        } else {
+            Stdio::piped()
+        })
         .stderr(Stdio::piped());
     if events.actor.cancel.load(Ordering::Acquire) {
         return;
@@ -521,47 +543,24 @@ fn run_adapter(
     // including unwind; rebinding transfers this guard's drop order.
     let _live = _live;
     let child = &mut child.0;
-    let (Some(stdin), Some(stdout)) = (child.stdin.take(), child.stdout.take()) else {
-        events.fail("adapter pipes unavailable".into());
-        return;
+    let connection = match server_address {
+        Some(address) => connection::Connection::socket(address, child, events.clone()),
+        None => connection::Connection::stdio(child, events.clone()),
     };
-    let (messages, receiver) = mpsc::sync_channel(32);
-    let reader_events = events.clone();
-    let reader = thread::Builder::new()
-        .name("dust-dap-reader".into())
-        .spawn(move || {
-            let _resident = reader_events.clone();
-            let Ok(stdout) =
-                crate::process::CancellablePipe::new(stdout, reader_events.actor.cancel.clone())
-            else {
-                return;
-            };
-            let mut reader = BufReader::new(stdout);
-            loop {
-                // Framing already enforces a bounded header and 16MiB message limit.
-                let value = match read_content_length_message(&mut reader) {
-                    Ok(Some(value)) => Ok(value),
-                    Ok(None) => break,
-                    Err(error) => Err(error.to_string()),
-                };
-                if !session::deliver(&messages, value, &reader_events.actor.cancel) {
-                    break;
-                }
-            }
-        });
-    if let Err(error) = reader {
-        events.fail(error.to_string());
-        return;
-    }
-    // A pipe write cannot hold the controller hostage. Both I/O threads retain
-    // resident leases, including while an inherited descriptor is stuck.
-    let (mut stdin, writer) = match Writer::start(stdin, events.clone()) {
-        Ok(writer) => writer,
+    let connection::Connection {
+        writer: mut stdin,
+        messages: mut receiver,
+        mut reader,
+        worker: mut writer,
+    } = match connection {
+        Ok(connection) => connection,
         Err(error) => {
             events.fail(error.to_string());
             return;
         }
     };
+    // A parent session keeps its target alive while a child session owns the controls.
+    let mut parents = Vec::new();
     let stderr_events = events.clone();
     let stderr = child.stderr.take().and_then(|mut stderr| {
         thread::Builder::new()
@@ -624,16 +623,21 @@ fn run_adapter(
         json!({
             "clientID":"dust", "clientName":"Dust", "adapterID":adapter,
             "pathFormat":"path", "linesStartAt1":true, "columnsStartAt1":true,
-            "supportsVariablePaging":true, "supportsVariableType":true, "supportsRunInTerminalRequest":true
+            "supportsVariablePaging":true, "supportsVariableType":true, "supportsRunInTerminalRequest":true,
+            "supportsStartDebuggingRequest":server_address.is_some()
         }),
     );
-    let initialize_sequence = sequence;
+    let mut initialize_sequence = sequence;
     sequence += 1;
     let mut launched = false;
-    let started = Instant::now();
+    let mut started = Instant::now();
     let mut launch_accepted = false;
     let mut initialized = false;
     let mut configuration_sent = false;
+    let mut saved_breakpoints = initial_breakpoints
+        .iter()
+        .cloned()
+        .collect::<BTreeMap<_, _>>();
     let mut initial_breakpoints = initial_breakpoints
         .into_iter()
         .map(|(path, rows)| (path, (0, rows)))
@@ -674,6 +678,9 @@ fn run_adapter(
                 )
             {
                 continue;
+            }
+            if let DapControl::SetBreakpoints { path, breakpoints } = &control.value {
+                saved_breakpoints.insert(path.clone(), breakpoints.clone());
             }
             let request_id = control.request_id;
             let original = control.value.clone();
@@ -1162,7 +1169,77 @@ fn run_adapter(
                         break;
                     }
                     last_reverse_sequence = request_seq;
-                    if command == "runInTerminal" {
+                    if command == "startDebugging"
+                        && let Some(address) = server_address
+                    {
+                        let Some(configuration) = message
+                            .pointer("/arguments/configuration")
+                            .and_then(Value::as_object)
+                        else {
+                            events.fail("adapter child configuration missing".into());
+                            break;
+                        };
+                        let child_request = message
+                            .pointer("/arguments/request")
+                            .and_then(Value::as_str)
+                            .unwrap_or("");
+                        if parents.len() >= 8
+                            || !matches!(child_request, "launch" | "attach")
+                            || !reverse.is_empty()
+                        {
+                            events.fail("adapter child session is unsupported or full".into());
+                            break;
+                        }
+                        let _ = stdin.submit(json!({"seq":sequence,"type":"response","request_seq":request_seq,"success":true,"command":command}));
+                        sequence += 1;
+                        let connection =
+                            match connection::Connection::socket(address, child, events.clone()) {
+                                Ok(connection) => connection,
+                                Err(error) => {
+                                    events.fail(format!(
+                                        "cannot connect child debug session: {error}"
+                                    ));
+                                    break;
+                                }
+                            };
+                        parents.push((stdin, writer, reader, receiver));
+                        stdin = connection.writer;
+                        writer = connection.worker;
+                        reader = connection.reader;
+                        receiver = connection.messages;
+                        request = child_request.to_owned();
+                        request_arguments = Value::Object(configuration.clone());
+                        pending.clear();
+                        breakpoint_ids.clear();
+                        applied_breakpoints.clear();
+                        initial_breakpoints = saved_breakpoints
+                            .iter()
+                            .map(|(path, rows)| (path.clone(), (0, rows.clone())))
+                            .collect();
+                        initialize_sequence = sequence;
+                        send_request(
+                            &mut stdin,
+                            sequence,
+                            "initialize",
+                            json!({
+                                "clientID":"dust", "clientName":"Dust", "adapterID":adapter,
+                                "pathFormat":"path", "linesStartAt1":true, "columnsStartAt1":true,
+                                "supportsVariablePaging":true, "supportsVariableType":true,
+                                "supportsRunInTerminalRequest":true, "supportsStartDebuggingRequest":true
+                            }),
+                        );
+                        sequence += 1;
+                        launched = false;
+                        launch_accepted = false;
+                        initialized = false;
+                        configuration_sent = false;
+                        supports_configuration_done = false;
+                        paused = false;
+                        thread_id = None;
+                        last_reverse_sequence = 0;
+                        debuggee_exited = false;
+                        started = Instant::now();
+                    } else if command == "runInTerminal" {
                         // Reserve the reply mailbox before copying arguments and environment.
                         let (request, reply) =
                             reverse::ReverseRequest::reserve(request_seq, live.clone());

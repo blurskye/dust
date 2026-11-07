@@ -233,6 +233,31 @@ at = "milk"
 line = "- butter"
 
 [[step]]
+chapter = "Syntax editing"
+text = "Tree-sitter knows code structure without a language server. Ctrl-Space selects a node, then grows to its parent. Backspace shrinks it again."
+press = "Type `/11` and `enter`, then press `ctrl-space` twice and `backspace`."
+at = "(11, 22, 33)"
+mark = "11"
+done = ["syntax.selection.shrink"]
+
+[[step]]
+chapter = "Syntax editing"
+text = "Syntax objects work with Visual mode and operators: ia/aa argument, if/af function, ic/ac class, i/ and a/ comment."
+press = "Press `esc`, type `/22` and `enter`, then `v` `i` `a` to select just this argument."
+at = "(11, 22, 33)"
+mark = "22"
+done = ["view.cursor.move motion=inner_argument"]
+
+[[step]]
+chapter = "Syntax editing"
+text = "Swap with the next argument using Space c >, or the previous using Space c <. The cursor follows it; u undoes and dot repeats the change."
+press = "Press `esc`, type `/11` and `enter`, then `<leader>` `c` `>` to swap 11 with 22."
+at = "(11, 22, 33)"
+mark = "11"
+line = "(22, 11, 33)"
+done = ["syntax.argument.swap_next"]
+
+[[step]]
 chapter = "Search"
 text = "`/` searches forward and `?` backward."
 press = "Type `/cat` and press `enter`."

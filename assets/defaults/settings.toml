@@ -98,6 +98,7 @@ settings = [
   { key = "terminals.default_profile", title = "Default Shell Profile", about = "The terminal profile ctrl-/ opens.", choices_from = "terminals.profiles" },
   { key = "ui.terminal_panel.placement", title = "Placement", about = "bottom docks the terminal under the editor, float opens it in a centered window, fullscreen draws it over everything.", choices = ["bottom", "float", "fullscreen"] },
   { key = "ui.terminal_panel.height", title = "Panel Height", about = "Rows the terminal panel opens with when docked at the bottom." },
+  { key = "ui.terminal_panel.input_hint_ms", title = "Input Hint Duration (ms)", about = "Briefly show the escape key on the first focused terminal. Zero disables the hint." },
 ]
 
 [[section]]

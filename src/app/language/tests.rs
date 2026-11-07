@@ -4167,8 +4167,30 @@ fn typing_narrows_the_completion_menu_instead_of_closing_it() {
 }
 
 #[test]
+fn lsp_status_missing_server_points_to_tools_and_scratch_has_no_server() {
+    let (_dirs, mut app) = app();
+    app.tooling.fixture_retain(|_| false);
+    let source = app.state.workspace_root.join("main.rs");
+    app.state
+        .open_text(TextBuffer::from_text("fn main() {}"), Some(source))
+        .unwrap();
+    app.sync_lsp_status_ui();
+    assert_eq!(app.ui.lsp_server.as_deref(), Some("no server: <leader>cm"));
+    app.state
+        .open_text(TextBuffer::from_text("notes"), None)
+        .unwrap();
+    app.sync_lsp_status_ui();
+    assert!(app.ui.lsp_server.is_none());
+}
+
+#[test]
 fn lsp_status_never_labels_failed_or_backing_off_sessions_as_starting() {
     let (_app_dirs, mut app) = app();
+    let rust = app.state.workspace_root.join("main.rs");
+    app.state
+        .open_text(TextBuffer::from_text("fn main() {}"), Some(rust))
+        .unwrap();
+    let (buffer, document) = app.active_lsp_document_without_text().unwrap();
     let definition = app
         .tooling
         .entries()
@@ -4192,7 +4214,7 @@ fn lsp_status_never_labels_failed_or_backing_off_sessions_as_starting() {
                 managed: false,
             },
             capabilities: None,
-            documents: HashMap::new(),
+            documents: HashMap::from([(buffer, document)]),
             restart_count: 1,
             restart_due: None,
             circuit_open: true,
@@ -4202,14 +4224,31 @@ fn lsp_status_never_labels_failed_or_backing_off_sessions_as_starting() {
     );
     app.language.select(&key);
     app.sync_lsp_status_ui();
-    assert_eq!(app.ui.lsp_server.as_deref(), Some("failed rust-analyzer"));
+    assert_eq!(app.ui.lsp_server.as_deref(), Some("rust-analyzer failed"));
     app.language
         .request_start(&key, Some(Instant::now() + Duration::from_secs(1)));
     app.sync_lsp_status_ui();
-    assert_eq!(app.ui.lsp_server.as_deref(), Some("backoff rust-analyzer"));
+    assert_eq!(
+        app.ui.lsp_server.as_deref(),
+        Some("rust-analyzer restarting")
+    );
     assert!(!app.language.select("foreign-session"));
     assert_eq!(app.language.active(), Some(&key));
     app.language.running(&key, Default::default());
+    app.sync_lsp_status_ui();
+    assert_eq!(app.ui.lsp_server.as_deref(), Some("rust-analyzer ✓"));
+    let python = app.state.workspace_root.join("main.py");
+    app.state
+        .open_text(TextBuffer::from_text("print('hello')"), Some(python))
+        .unwrap();
+    app.sync_lsp_status_ui();
+    assert!(
+        !app.ui
+            .lsp_server
+            .as_deref()
+            .unwrap()
+            .contains("rust-analyzer")
+    );
     assert!(app.language.capabilities().is_some());
     assert!(app.language.stopped(&key));
     assert!(app.language.capabilities().is_none());
@@ -4443,8 +4482,8 @@ fn installed_path_server_without_a_qualified_probe_never_says_not_probed() {
     let row = &app.ui.tool_menu.as_ref().expect("menu").rows[0];
     assert_eq!(row.version, "—");
     assert_eq!(row.release, "—");
-    assert_eq!(row.lifecycle, "installed");
-    assert!(row.note.contains("Found on PATH"));
+    assert_eq!(row.lifecycle, "blocked: untrusted");
+    assert!(row.note.contains("Press t"));
 }
 
 #[test]
