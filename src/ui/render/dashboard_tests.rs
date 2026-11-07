@@ -228,6 +228,43 @@ fn dashboard_hides_the_entire_logo_when_the_terminal_leaves_a_short_workspace() 
             key: None,
         })
         .collect::<Vec<_>>();
+    // A 16-row terminal leaves 29 or 16 dashboard rows in the reviewed screenshots.
+    for height in [29, 16, 14, 11] {
+        let frame = crate::ui::render::render_dashboard(
+            Path::new("/workspace"),
+            &actions,
+            0,
+            &loaded.dashboard,
+            &loaded.config,
+            160,
+            height,
+        );
+        let rows = (0..height)
+            .map(|y| frame.grid.row_text(y))
+            .collect::<Vec<_>>();
+        assert!(rows.iter().all(|row| !row.contains('█')), "height {height}");
+        for action in &actions {
+            assert!(
+                rows.iter().any(|row| row.contains(&action.label)),
+                "height {height}: {}",
+                action.label
+            );
+        }
+        let version = format!("v{}", env!("CARGO_PKG_VERSION"));
+        assert_eq!(rows.iter().any(|row| row.contains(&version)), height >= 14);
+        assert_eq!(
+            rows.iter()
+                .any(|row| row.contains(&loaded.dashboard.identity)),
+            height >= 16
+        );
+        let first = rows.iter().position(|row| !row.trim().is_empty()).unwrap();
+        let last = rows.iter().rposition(|row| !row.trim().is_empty()).unwrap();
+        assert!(
+            first.abs_diff(rows.len() - last - 1) <= 1,
+            "height {height}"
+        );
+    }
+    // Once the complete header fits, every logo row is present with breathing room.
     let frame = crate::ui::render::render_dashboard(
         Path::new("/workspace"),
         &actions,
@@ -235,15 +272,12 @@ fn dashboard_hides_the_entire_logo_when_the_terminal_leaves_a_short_workspace() 
         &loaded.dashboard,
         &loaded.config,
         160,
-        16,
+        30,
     );
-    let rows = (0..16).map(|y| frame.grid.row_text(y)).collect::<Vec<_>>();
-    assert!(
-        rows.iter()
-            .any(|row| row.contains(&loaded.dashboard.identity))
-    );
-    assert!(rows.iter().any(|row| row.contains("Quit")));
-    assert!(rows.iter().all(|row| !row.contains('█')));
+    assert!(frame.grid.row_text(0).trim().is_empty());
+    for (index, line) in loaded.dashboard.logo.lines().enumerate() {
+        assert_eq!(frame.grid.row_text(index as u16 + 1).trim(), line);
+    }
 }
 
 #[test]
