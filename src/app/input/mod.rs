@@ -2652,7 +2652,8 @@ impl App {
         let scrolls_completion_documentation = context == "completion"
             && key.modifiers.control
             && matches!(key.code, crate::editor::input::KeyCode::Char('d' | 'u'));
-        if context != "documentation" && !scrolls_completion_documentation {
+        if !matches!(context, "documentation" | "key_release") && !scrolls_completion_documentation
+        {
             self.close_documentation();
         }
         self.ui.lsp_loading = None;

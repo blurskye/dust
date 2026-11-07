@@ -1466,7 +1466,10 @@ impl App {
                 ));
             return true;
         }
-        if !invocation.id.as_str().starts_with("lsp.documentation.") {
+        // Background server notifications are not user actions that dismiss documentation.
+        if !invocation.id.as_str().starts_with("lsp.documentation.")
+            && !invocation.id.as_str().starts_with("lsp.incoming.")
+        {
             self.close_documentation();
         }
         if invocation.target.view.is_none() {

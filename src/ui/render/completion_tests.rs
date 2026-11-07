@@ -247,6 +247,80 @@ use crate::ui::render::DocumentationPopupState;
 use crate::ui::render::DocumentationSection;
 
 #[test]
+fn indented_completion_keeps_room_for_documentation() {
+    for width in [60, 80, 100, 160] {
+        let mut frame = crate::ui::grid::Frame {
+            grid: crate::ui::CellGrid::new(width, 24),
+            cursor: Some((12, 20, crossterm::cursor::SetCursorStyle::SteadyBar)),
+        };
+        let completion = crate::ui::render::LanguageCompletionState {
+            typed: 0,
+            items: vec![CompletionItem {
+                icon: None,
+                color: None,
+                label: "long_completion_method_name".into(),
+                detail: "rust-analyzer".into(),
+            }],
+            selected: 0,
+            scroll: 0,
+        };
+        let rect = crate::ui::render::overlays::render_language_completion(
+            &mut frame,
+            &completion,
+            &crate::config::load_bundled_config().config,
+            crate::windows::WindowRect {
+                x: 0,
+                y: 0,
+                width,
+                height: 24,
+            },
+        )
+        .unwrap();
+        assert!(rect.x >= 20 || width - rect.x - rect.width >= 20);
+    }
+}
+
+#[test]
+fn long_completion_labels_end_in_an_ellipsis_inside_the_menu() {
+    let mut frame = crate::ui::grid::Frame {
+        grid: crate::ui::CellGrid::new(80, 24),
+        cursor: Some((10, 4, crossterm::cursor::SetCursorStyle::SteadyBar)),
+    };
+    let completion = crate::ui::render::LanguageCompletionState {
+        typed: 0,
+        items: vec![CompletionItem {
+            icon: None,
+            color: None,
+            label: "long_method_".repeat(12),
+            detail: "rust-analyzer".into(),
+        }],
+        selected: 0,
+        scroll: 0,
+    };
+    let rect = crate::ui::render::overlays::render_language_completion(
+        &mut frame,
+        &completion,
+        &crate::config::load_bundled_config().config,
+        crate::windows::WindowRect {
+            x: 0,
+            y: 0,
+            width: 80,
+            height: 24,
+        },
+    )
+    .unwrap();
+    assert!(frame.grid.row_text(rect.y).trim_end().ends_with('…'));
+    assert_eq!(
+        frame
+            .grid
+            .get(rect.x + rect.width - 1, rect.y)
+            .unwrap()
+            .symbol,
+        " "
+    );
+}
+
+#[test]
 fn completion_height_fits_on_one_side_of_the_cursor() {
     let mut frame = crate::ui::grid::Frame {
         grid: crate::ui::CellGrid::new(40, 10),

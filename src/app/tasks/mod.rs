@@ -929,9 +929,13 @@ impl Tasks {
                         source: String::new(),
                         action: PickerAction::None,
                     },
-                    row.source
-                        .clone()
-                        .map_or(PickerPayload::Section, PickerPayload::MatcherSource),
+                    row.source.clone().map_or_else(
+                        || PickerPayload::Notice {
+                            title: name.to_owned(),
+                            text: row.text.clone(),
+                        },
+                        PickerPayload::MatcherSource,
+                    ),
                 )
             })
             .collect()
@@ -1294,7 +1298,10 @@ impl App {
             .tasks
             .task_items()
             .into_iter()
-            .map(|item| (item, PickerPayload::Command(String::new())))
+            .map(|item| {
+                let payload = PickerPayload::TaskOutput(item.label.clone());
+                (item, payload)
+            })
             .collect();
         self.install_picker(self.message("picker_tasks_title", &[]), items);
     }

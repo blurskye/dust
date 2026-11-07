@@ -951,7 +951,10 @@ impl App {
                         source: "lsp".into(),
                         action: PickerAction::None,
                     },
-                    PickerPayload::Command(String::new()),
+                    PickerPayload::Notice {
+                        title: self.message("lsp_logs", &[("logs", String::new())]),
+                        text: line.clone(),
+                    },
                 )
             })
             .collect();
@@ -1018,12 +1021,37 @@ impl App {
             .is_some_and(|item| item.documentation.is_some() || item.signature().is_some())
         {
             self.open_lsp_completion_documentation(false);
-        } else if self
-            .input
-            .documentation()
-            .is_some_and(|popup| popup.kind == DocumentationPopupKind::Completion)
-        {
-            self.close_documentation();
+        } else {
+            if self
+                .input
+                .documentation()
+                .is_some_and(|popup| popup.kind == DocumentationPopupKind::Completion)
+            {
+                self.close_documentation();
+            }
+            let can_resolve = self
+                .language
+                .completion_items()
+                .get(selected)
+                .is_some_and(|item| !item.resolved && item.resolve_item.is_some())
+                && self
+                    .language
+                    .completion_server(selected)
+                    .and_then(|server| self.language.sessions().get(server))
+                    .and_then(|session| session.capabilities.as_ref())
+                    .is_some_and(|capabilities| capabilities.completion_resolve);
+            if can_resolve && let Some((_, document)) = self.active_lsp_document() {
+                let offset = self
+                    .state
+                    .active_view()
+                    .map_or(ByteOffset(0), |view| self.state.views[view].cursor);
+                if let Err(error) = self
+                    .language
+                    .resolve_completion(selected, document, offset, false)
+                {
+                    self.show_error(error);
+                }
+            }
         }
     }
 }
@@ -1082,7 +1110,10 @@ impl App {
                 .state
                 .active_view()
                 .map_or(ByteOffset(0), |view| self.state.views[view].cursor);
-            if let Err(error) = self.language.resolve_completion(selected, document, offset) {
+            if let Err(error) = self
+                .language
+                .resolve_completion(selected, document, offset, true)
+            {
                 self.show_error(error);
             }
             return;
@@ -2601,12 +2632,15 @@ impl App {
                 }
             }
             LspFeatureResult::CompletionResolved(item) => {
+                let accept = self.language.completion_resolve_accepts(request_id);
                 if self
                     .language
                     .accept_resolved(request_id, *item, &self.state)
                 {
                     self.project_lsp_completion();
-                    self.accept_lsp_completion();
+                    if accept {
+                        self.accept_lsp_completion();
+                    }
                 }
             }
             LspFeatureResult::Locations(locations) => {
