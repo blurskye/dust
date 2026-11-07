@@ -1,0 +1,17 @@
+id = "autopairs"
+version = "0.1.0"
+component_sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
+capabilities = ["read_current_buffer", "propose_edits", "commands"]
+
+[commands.enable]
+title = "autopairs: enable"
+context = "buffer"
+activation = "active_only"
+
+[commands.type]
+title = "autopairs: type"
+context = "buffer"
+activation = "active_only"
+
+[contributions]
+schema_version = 1

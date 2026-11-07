@@ -7,6 +7,8 @@ mod surface;
 mod system;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod example_tests;
 
 use crate::app::{App, commands::AppEffect};
 use crate::editor::{
@@ -491,7 +493,14 @@ impl App {
                     if execution.call_next != waiting.call.pending {
                         return Err("wrong wrapper callback".into());
                     }
-                    CommandWrapperAction::CallNext(invocation(&waiting.call)?)
+                    let mut next = invocation(&waiting.call)?;
+                    if let Some(value) = outcome.value {
+                        let CommandValue::Record(arguments) = value else {
+                            return Err("wrapper arguments must be a record".into());
+                        };
+                        next.arguments = arguments;
+                    }
+                    CommandWrapperAction::CallNext(next)
                 } else {
                     CommandWrapperAction::Complete(outcome)
                 };

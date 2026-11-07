@@ -101,6 +101,18 @@ pub fn register_builtin_commands<E: 'static>(
     )?;
     register(
         registry,
+        "edit.apply",
+        "Apply a checked edit and cursor",
+        ContextRequirement::View,
+        ArgumentSchema::default()
+            .field("revision", ArgumentType::Integer, true)
+            .field("start", ArgumentType::Integer, true)
+            .field("end", ArgumentType::Integer, true)
+            .field("text", ArgumentType::String, true)
+            .field("cursor", ArgumentType::Integer, true),
+    )?;
+    register(
+        registry,
         "edit.replace_text",
         "Replace text in Replace mode",
         ContextRequirement::View,
@@ -117,7 +129,10 @@ pub fn register_builtin_commands<E: 'static>(
             .field("linewise", ArgumentType::Bool, true)
             .field("character", ArgumentType::String, false)
             .field("find_character", ArgumentType::String, false)
-            .field("comment", ArgumentType::String, false),
+            .field("comment", ArgumentType::String, false)
+            .field("revision", ArgumentType::Integer, false)
+            .field("start", ArgumentType::Integer, false)
+            .field("end", ArgumentType::Integer, false),
     )?;
     register(
         registry,

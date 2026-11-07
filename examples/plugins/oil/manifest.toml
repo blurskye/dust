@@ -1,0 +1,42 @@
+id = "oil"
+version = "0.1.0"
+component_sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
+capabilities = ["read_current_buffer", "propose_edits", "commands", "files", "input"]
+
+[commands.open]
+title = "oil: open"
+context = "buffer"
+activation = "active_only"
+
+[commands.listed]
+title = "oil: listed"
+context = "buffer"
+activation = "active_only"
+
+[commands.write]
+title = "oil: write"
+context = "buffer"
+activation = "active_only"
+
+[commands.save]
+title = "oil: save"
+context = "buffer"
+activation = "active_only"
+
+[commands.confirm]
+title = "oil: confirm"
+context = "buffer"
+activation = "active_only"
+
+[commands.checked]
+title = "oil: checked"
+context = "buffer"
+activation = "active_only"
+
+[commands.applied]
+title = "oil: applied"
+context = "buffer"
+activation = "active_only"
+
+[contributions]
+schema_version = 1
