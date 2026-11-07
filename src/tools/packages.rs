@@ -174,7 +174,10 @@ impl PackageStore {
             self.maximum_object_bytes,
         )?;
         let mut config = wasmtime::Config::new();
-        config.wasm_component_model(true);
+        // This compilation only validates the object; the plugin host compiles it for execution.
+        config
+            .wasm_component_model(true)
+            .cranelift_opt_level(wasmtime::OptLevel::None);
         let engine = wasmtime::Engine::new(&config).map_err(|_| PackageError::InvalidManifest)?;
         wasmtime::component::Component::from_file(&engine, &object)
             .map_err(|_| PackageError::InvalidManifest)?;
@@ -299,7 +302,10 @@ impl PackageStore {
     ) -> Result<Vec<(PluginManifest, PathBuf, Arc<fs::File>)>, PackageError> {
         let mut output = Vec::new();
         let mut config = wasmtime::Config::new();
-        config.wasm_component_model(true);
+        // Startup checks discard compiled code too; optimization belongs to the runtime loader.
+        config
+            .wasm_component_model(true)
+            .cranelift_opt_level(wasmtime::OptLevel::None);
         let engine = wasmtime::Engine::new(&config).map_err(|_| PackageError::InvalidManifest)?;
         for package in &lock.packages {
             let plugin = self.activation_manifest(package)?;
@@ -991,6 +997,35 @@ mod tests {
                 1
             );
             worker.join().unwrap();
+        }
+    }
+
+    #[test]
+    fn package_validation_rejects_invalid_components_at_install_and_startup() {
+        for bytes in [
+            b"\0asm\x01\0\0\0".as_slice(),
+            b"\0asm\x0d\0\x01\0\x01\x01\xff",
+        ] {
+            let root = tempfile::tempdir().unwrap();
+            let manager = PackageStore::new(root.path().into(), 1024 * 1024, 1024).unwrap();
+            let (mut manifest, mut plugin, _) = crate::tools::tests::package_fixture("demo");
+            let digest = format!("{:x}", Sha256::digest(bytes));
+            if let PackageSource::Registry { archive_sha256, .. } = &mut manifest.source {
+                *archive_sha256 = digest.clone();
+            }
+            plugin.component_sha256 = digest.clone();
+            assert!(matches!(
+                manager.stage_verified_object(&manifest, bytes),
+                Err(PackageError::InvalidManifest)
+            ));
+            let object = manager.store_root().join(digest);
+            manager
+                .commit_prepared(&manifest, &plugin, &object)
+                .unwrap();
+            assert!(matches!(
+                manager.activations(),
+                Err(PackageError::InvalidManifest)
+            ));
         }
     }
 

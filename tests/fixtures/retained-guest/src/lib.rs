@@ -92,6 +92,9 @@ static CONFIRMATION_HANDLE: AtomicU64 = AtomicU64::new(0);
 static CONFIRMATION_REVISION: AtomicU64 = AtomicU64::new(1);
 static CONFIRMATION_PROBE_ORDINAL: AtomicU64 = AtomicU64::new(0);
 
+static SYSTEM_PROCESS: AtomicU64 = AtomicU64::new(0);
+static SYSTEM_RESULTS: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+
 struct GuestComponent;
 
 impl Guest for GuestComponent {
@@ -129,6 +132,15 @@ impl Guest for GuestComponent {
             .into());
         }
         if let Some(event) = field_text(&call.arguments, "event") {
+            if event == "system" {
+                let events = host::take_system_events();
+                let mut results = SYSTEM_RESULTS.lock().unwrap();
+                for event in events {
+                    results.push_str(&format!("{:?}\n", event.value));
+                }
+                host::show_message(&results)?;
+                return Ok(results.clone());
+            }
             let events = host::take_editor_events();
             let replies = host::take_command_replies();
             let http = host::take_http_responses();
@@ -757,6 +769,69 @@ fn field_text(value: &host::CommandValue, name: &str) -> Option<String> {
 
 fn drive_abi(action: &str, call: &host::CommandCall) -> Result<String, String> {
     match action {
+        "system-results" => {
+            let results = SYSTEM_RESULTS.lock().unwrap().clone();
+            host::show_message(&results)?;
+            return Ok(results);
+        }
+        "system-clear" => SYSTEM_RESULTS.lock().unwrap().clear(),
+        "system-process" | "system-sleep" | "system-process-escape" => {
+            let process = host::start_process(&host::ProcessStart {
+                program: "sh".into(),
+                arguments: vec!["-c".into(), if action == "system-sleep" { "sleep 60" } else { "printf ready; IFS= read -r line; printf '%s' \"$line\"; printf '%s' \"$DUST_SYSTEM_TEST\" >&2; cat; exit 7" }.into()],
+                cwd: if action == "system-process-escape" { ".." } else { "." }.into(),
+                environment: vec![("DUST_SYSTEM_TEST".into(), "environment".into())],
+                stdin: Some(b"initial\n".to_vec()), handler: "drive".into(),
+            })?;
+            SYSTEM_PROCESS.store(process, Ordering::SeqCst);
+        }
+        "system-input" => {
+            host::write_process_stdin(&host::ProcessInput {
+                process: SYSTEM_PROCESS.load(Ordering::SeqCst),
+                bytes: b"later".to_vec(),
+                close: true,
+            })?;
+        }
+        "system-kill" => {
+            host::kill_process(SYSTEM_PROCESS.load(Ordering::SeqCst))?;
+        }
+        "system-write" | "system-read" | "system-mkdir" | "system-list" | "system-stat"
+        | "system-rename" | "system-delete" | "system-escape" => {
+            let operation = match action {
+                "system-write" => host::FileOperation::Write(host::FileWrite {
+                    path: "system.txt".into(),
+                    bytes: b"new contents\n".to_vec(),
+                }),
+                "system-read" => host::FileOperation::Read("system.txt".into()),
+                "system-mkdir" => host::FileOperation::CreateDirectory("system-dir".into()),
+                "system-list" => host::FileOperation::ListDirectory(".".into()),
+                "system-stat" => host::FileOperation::Stat("system.txt".into()),
+                "system-rename" => host::FileOperation::Rename(host::FileRename {
+                    source: "system.txt".into(),
+                    target: "system-renamed.txt".into(),
+                }),
+                "system-delete" => host::FileOperation::Delete("system-renamed.txt".into()),
+                _ => host::FileOperation::Read("system-link/secret".into()),
+            };
+            host::request_file(&operation, "drive")?;
+        }
+        "system-query" | "system-query-range" => {
+            host::query_syntax(
+                &host::SyntaxQuery {
+                    buffer: host::current_buffer()?.buffer,
+                    query: "(identifier) @name".into(),
+                    range: if action == "system-query-range" {
+                        Some(host::ByteRange { start: 9, end: 13 })
+                    } else {
+                        None
+                    },
+                },
+                "drive",
+            )?;
+        }
+        "system-node" => {
+            host::node_at_position(host::current_buffer()?.buffer, 4, "drive")?;
+        }
         "echo" => {
             host::set_command_result(&call.arguments)?;
         }

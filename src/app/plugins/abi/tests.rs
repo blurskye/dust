@@ -6,6 +6,13 @@ use crate::editor::text::TextBuffer;
 use sha2::{Digest, Sha256};
 
 pub(super) fn real_app(owners: &[&str]) -> (Vec<tempfile::TempDir>, App) {
+    real_app_with_capabilities(owners, &[])
+}
+
+pub(super) fn real_app_with_capabilities(
+    owners: &[&str],
+    capabilities: &[PluginCapability],
+) -> (Vec<tempfile::TempDir>, App) {
     let (dirs, mut app) = app_with_plugin_queue(16);
     let mut roots = vec![dirs.0, dirs.1];
     app.state
@@ -47,6 +54,7 @@ pub(super) fn real_app(owners: &[&str]) -> (Vec<tempfile::TempDir>, App) {
             PluginCapability::Timers,
             PluginCapability::Http,
         ]);
+        manifest.capabilities.extend(capabilities.iter().cloned());
         manifest
             .commands
             .get_mut("drive")

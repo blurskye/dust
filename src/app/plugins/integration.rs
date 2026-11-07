@@ -1979,7 +1979,12 @@ mod tests {
                 if let Some(load) = loaded {
                     break load;
                 }
-                assert!(Instant::now() < deadline, "replacement load timed out");
+                assert!(
+                    Instant::now() < deadline,
+                    "replacement load timed out: update={update}, pending={}, statuses={:?}",
+                    owner.pending_packages(),
+                    owner.statuses(),
+                );
                 thread::sleep(Duration::from_millis(2));
             };
             assert_ne!(Some(load), old_load);

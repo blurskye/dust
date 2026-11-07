@@ -316,7 +316,8 @@ impl Documents {
             };
         }
         let id = match &event {
-            VfsResult::PathsResolved { id, .. }
+            VfsResult::WorkspaceFile { id, .. }
+            | VfsResult::PathsResolved { id, .. }
             | VfsResult::ResourceResolved { id, .. }
             | VfsResult::ResourceApplied { id, .. }
             | VfsResult::ExplorerMutated { id, .. }
@@ -1144,7 +1145,8 @@ impl App {
                 Continue(result) => result,
             };
             match result {
-                VfsResult::PathsResolved { .. }
+                VfsResult::WorkspaceFile { .. }
+                | VfsResult::PathsResolved { .. }
                 | VfsResult::RecoveryDiscovered { .. }
                 | VfsResult::RecoveryCleaned { .. }
                 | VfsResult::RecoveryWritten { .. } => {

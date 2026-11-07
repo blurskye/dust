@@ -92,11 +92,13 @@ struct Submission {
     request: JobRequest,
     cancel: Arc<AtomicBool>,
     slot: Arc<JobSlot>,
+    input: Option<Receiver<Vec<u8>>>,
 }
 /// Reserves worker capacity. Filesystem access, spawning and process cleanup run on workers.
 pub struct JobSupervisor {
     next: Option<u64>,
     jobs: HashMap<JobId, Arc<AtomicBool>>,
+    inputs: HashMap<JobId, SyncSender<Vec<u8>>>,
     sender: SyncSender<Submission>,
     receiver: Option<Receiver<JobEvent>>,
     stop: Arc<AtomicBool>,
@@ -170,6 +172,7 @@ impl JobSupervisor {
         Ok(Self {
             next: Some(1),
             jobs: HashMap::new(),
+            inputs: HashMap::new(),
             sender: tx,
             receiver: Some(receiver),
             stop,
@@ -198,6 +201,40 @@ impl JobSupervisor {
     pub fn start(&mut self, request: JobRequest) -> Result<JobId, JobError> {
         self.reserve()?.submit(request)
     }
+    /// Interactive jobs use raw output chunks and keep stdin open until explicitly closed.
+    pub(crate) fn start_streaming(
+        &mut self,
+        request: JobRequest,
+        root: crate::files::RootIdentity,
+    ) -> Result<JobId, JobError> {
+        let (sender, input) = mpsc::sync_channel(16);
+        let id = self
+            .reserve()?
+            .submit_inner(request, Some(root), Some(input))?;
+        self.inputs.insert(id, sender);
+        Ok(id)
+    }
+    pub(crate) fn write_stdin(
+        &mut self,
+        id: JobId,
+        bytes: Vec<u8>,
+        close: bool,
+    ) -> Result<(), JobError> {
+        if bytes.len() > 1024 * 1024 {
+            return Err(JobError::InvalidPolicy);
+        }
+        let sender = self.inputs.get(&id).ok_or(JobError::Unknown(id))?;
+        if !bytes.is_empty() {
+            sender.try_send(bytes).map_err(|error| match error {
+                mpsc::TrySendError::Full(_) => JobError::Full,
+                mpsc::TrySendError::Disconnected(_) => JobError::Unknown(id),
+            })?;
+        }
+        if close {
+            self.inputs.remove(&id);
+        }
+        Ok(())
+    }
     pub fn poll(&mut self) -> Vec<JobEvent> {
         let mut events = Vec::new();
         if let Some(receiver) = &self.receiver {
@@ -211,6 +248,7 @@ impl JobSupervisor {
                 }
                 if matches!(event, JobEvent::Failed { .. } | JobEvent::Exited { .. }) {
                     self.jobs.remove(&id);
+                    self.inputs.remove(&id);
                 }
                 events.push(event);
             }
@@ -243,11 +281,12 @@ impl JobSupervisor {
         self.begin_shutdown();
         self.receiver.take();
         self.jobs.clear();
+        self.inputs.clear();
     }
 }
 impl JobReservation<'_> {
     pub(crate) fn submit(self, request: JobRequest) -> Result<JobId, JobError> {
-        self.submit_inner(request, None)
+        self.submit_inner(request, None, None)
     }
     pub(crate) fn submit_scoped(
         self,
@@ -257,14 +296,15 @@ impl JobReservation<'_> {
         if !request.cwd.starts_with(&root.canonical_path) {
             return Err(JobError::InvalidPolicy);
         }
-        self.submit_inner(request, Some(root))
+        self.submit_inner(request, Some(root), None)
     }
     fn submit_inner(
         self,
         request: JobRequest,
         root: Option<crate::files::RootIdentity>,
+        input: Option<Receiver<Vec<u8>>>,
     ) -> Result<JobId, JobError> {
-        check_request(&request)?;
+        check_request(&request, input.is_some())?;
         let supervisor = self.supervisor;
         let next = supervisor.next.ok_or(JobError::Exhausted)?;
         supervisor.next = next.checked_add(1);
@@ -278,6 +318,7 @@ impl JobReservation<'_> {
                 request,
                 cancel: cancel.clone(),
                 slot: self.slot,
+                input,
             })
             .map_err(|error| match error {
                 mpsc::TrySendError::Full(_) => JobError::Full,
@@ -302,7 +343,7 @@ impl JobEvent {
         }
     }
 }
-fn check_request(request: &JobRequest) -> Result<(), JobError> {
+fn check_request(request: &JobRequest, streaming: bool) -> Result<(), JobError> {
     let argument_bytes = request
         .arguments
         .iter()
@@ -313,7 +354,8 @@ fn check_request(request: &JobRequest) -> Result<(), JobError> {
         .iter()
         .map(|(key, value)| key.len().saturating_add(value.len()))
         .sum::<usize>();
-    if !request.program.is_absolute()
+    if (!streaming && !request.program.is_absolute())
+        || request.program.as_os_str().is_empty()
         || !request.cwd.is_absolute()
         || request.arguments.len() > 4096
         || request.environment.len() > 4096
@@ -390,7 +432,9 @@ impl JobEngine {
             request,
             cancel,
             slot,
+            input,
         } = submission;
+        let streaming = input.is_some();
         let cwd = request
             .cwd
             .canonicalize()
@@ -416,7 +460,7 @@ impl JobEngine {
             .current_dir(&cwd)
             .env_clear()
             .envs(&request.environment)
-            .stdin(if request.stdin.is_some() {
+            .stdin(if request.stdin.is_some() || streaming {
                 Stdio::piped()
             } else {
                 Stdio::null()
@@ -463,7 +507,31 @@ impl JobEngine {
         let readers = Arc::new(AtomicUsize::new(0));
         let io_failed = Arc::new(AtomicBool::new(false));
         let setup_io = (|| -> io::Result<()> {
-            if let Some(bytes) = request.stdin
+            if let Some(input) = input {
+                let mut stdin = stdin.expect("streaming stdin is piped");
+                let initial = request.stdin.unwrap_or_default();
+                let cancelled = cancel.clone();
+                let lease = slot.clone();
+                thread::Builder::new()
+                    .name("dust-job-stdin".into())
+                    .spawn(move || {
+                        let _lease = lease;
+                        if stdin.write_all(&initial).is_err() {
+                            return;
+                        }
+                        while !cancelled.load(Ordering::Acquire) {
+                            match input.recv_timeout(Duration::from_millis(10)) {
+                                Ok(bytes) => {
+                                    if stdin.write_all(&bytes).is_err() {
+                                        break;
+                                    }
+                                }
+                                Err(mpsc::RecvTimeoutError::Timeout) => {}
+                                Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                            }
+                        }
+                    })?;
+            } else if let Some(bytes) = request.stdin
                 && let Some(mut stdin) = stdin
             {
                 let lease = slot.clone();
@@ -489,7 +557,7 @@ impl JobEngine {
                     stdout,
                     self.sender.clone(),
                     total.clone(),
-                    request.policy.clone(),
+                    (request.policy.clone(), streaming),
                     (
                         readers.clone(),
                         io_failed.clone(),
@@ -505,7 +573,7 @@ impl JobEngine {
                     stderr,
                     self.sender.clone(),
                     total,
-                    request.policy.clone(),
+                    (request.policy.clone(), streaming),
                     (
                         readers.clone(),
                         io_failed.clone(),
@@ -591,6 +659,7 @@ impl JobEngine {
             if let Some(code) = running.status
                 && running.readers.load(Ordering::Acquire) == 0
             {
+                running.cancel.store(true, Ordering::Release);
                 // No later cleanup can signal this group once the leader is reaped.
                 let _ = running.child.wait();
                 terminals.push(if running.io_failed.load(Ordering::Acquire) {
@@ -642,7 +711,7 @@ fn stream_reader(
     reader: impl Read + Send + 'static,
     sender: SyncSender<JobEvent>,
     total: Arc<AtomicUsize>,
-    policy: JobPolicy,
+    (policy, streaming): (JobPolicy, bool),
     completion: (
         Arc<AtomicUsize>,
         Arc<AtomicBool>,
@@ -669,11 +738,18 @@ fn stream_reader(
                     break;
                 }
                 let mut bytes = Vec::new();
-                let read = match reader
-                    .by_ref()
-                    .take(policy.maximum_line_bytes.saturating_add(1) as u64)
-                    .read_until(b'\n', &mut bytes)
-                {
+                let result = if streaming {
+                    bytes.resize(8192.min(policy.maximum_line_bytes), 0);
+                    reader
+                        .read(&mut bytes)
+                        .inspect(|read| bytes.truncate(*read))
+                } else {
+                    reader
+                        .by_ref()
+                        .take(policy.maximum_line_bytes.saturating_add(1) as u64)
+                        .read_until(b'\n', &mut bytes)
+                };
+                let read = match result {
                     Ok(read) => read,
                     Err(_) => {
                         if !cancel.load(Ordering::Acquire) {
@@ -984,6 +1060,7 @@ mod tests {
         (
             Submission {
                 root: None,
+                input: None,
                 id: JobId(1),
                 request,
                 cancel: Arc::new(AtomicBool::new(false)),

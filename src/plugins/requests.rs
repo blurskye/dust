@@ -43,6 +43,17 @@ pub(crate) enum EditorRequest {
     Timer(u64, wit::TimerRequest),
     CancelTimer(u64),
     Http(u64, wit::HttpRequest),
+    System(u64, SystemRequest),
+}
+
+#[derive(Clone, Debug)]
+pub(crate) enum SystemRequest {
+    Start(wit::ProcessStart),
+    Input(wit::ProcessInput),
+    Kill(u64),
+    File(wit::FileOperation, String),
+    Query(wit::SyntaxQuery, String),
+    Node(u64, u64, String),
 }
 
 #[derive(Clone, Debug, Default)]
@@ -51,6 +62,7 @@ pub struct PluginDelivery {
     pub(crate) events: Option<wit::EventBatch>,
     pub(crate) replies: Vec<wit::CommandReply>,
     pub(crate) http: Vec<wit::HttpResponse>,
+    pub(crate) system: Vec<wit::SystemEvent>,
     pub(crate) marks: Vec<wit::MarkSet>,
 }
 
@@ -168,6 +180,17 @@ pub(crate) fn value_bytes(value: &wit::CommandValue) -> Result<usize, String> {
 }
 
 impl super::component::ComponentHostState {
+    pub(crate) fn queue_system(
+        &mut self,
+        request: SystemRequest,
+        bytes: usize,
+    ) -> Result<u64, String> {
+        let token = self.editor_requests.token()?;
+        self.editor_requests
+            .push(EditorRequest::System(token, request), bytes)?;
+        Ok(token)
+    }
+
     pub(crate) fn require_editor_capability(
         &self,
         capability: PluginCapability,
