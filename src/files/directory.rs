@@ -201,7 +201,7 @@ pub(super) fn root_worktrees(
     mut keep_scanning: impl FnMut() -> bool,
 ) -> impl Iterator<Item = PathBuf> {
     // Do not follow either the special directory or its children through symlinks.
-    let canonical_root = std::fs::canonicalize(root).ok();
+    let canonical_root = crate::files::canonicalize(root).ok();
     let directory = root.join(WORKTREE_DIRECTORY);
     let entries = canonical_root.as_ref().and_then(|_| {
         std::fs::symlink_metadata(&directory)
@@ -219,7 +219,7 @@ pub(super) fn root_worktrees(
                 return None;
             }
             let path = entry.path();
-            let canonical = std::fs::canonicalize(&path).ok()?;
+            let canonical = crate::files::canonicalize(&path).ok()?;
             if !canonical.starts_with(canonical_root.as_ref()?) || !path.join(".git").is_file() {
                 return None;
             }

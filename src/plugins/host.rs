@@ -353,9 +353,10 @@ impl PluginHost {
                         } => {
                             let plugin = manifest.id.clone();
                             let prepared = (|| {
-                                let store = fs::canonicalize(store).map_err(PluginError::Io)?;
+                                let store =
+                                    crate::files::canonicalize(store).map_err(PluginError::Io)?;
                                 if path.is_absolute()
-                                    && !fs::canonicalize(&path)
+                                    && !crate::files::canonicalize(&path)
                                         .map_err(PluginError::Io)?
                                         .starts_with(&store)
                                 {

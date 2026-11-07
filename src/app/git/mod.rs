@@ -1083,7 +1083,7 @@ impl Git {
         }
         let repo = git2::Repository::open(repository).map_err(|e| e.to_string())?;
         let worktree = repo.find_worktree(name).map_err(|e| e.to_string())?;
-        let path = worktree.path().canonicalize().map_err(|e| e.to_string())?;
+        let path = crate::files::canonicalize(worktree.path()).map_err(|e| e.to_string())?;
         if editor.buffers.values().any(|buffer| {
             buffer.dirty
                 && buffer
@@ -2584,9 +2584,7 @@ impl App {
                 if worktree.main {
                     detail.push_str(" · main");
                 }
-                if worktree
-                    .path
-                    .canonicalize()
+                if crate::files::canonicalize(&worktree.path)
                     .is_ok_and(|path| path == self.state.workspace_root)
                 {
                     detail.push_str(" · open here");

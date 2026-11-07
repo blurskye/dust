@@ -1,7 +1,6 @@
 //! Bounded workspace file discovery.
 
 use std::collections::HashSet;
-use std::fs;
 use std::io;
 use std::path::Path;
 use std::path::PathBuf;
@@ -182,7 +181,7 @@ pub(super) fn run_workspace_files(
 ) {
     let mut roots = Vec::new();
     for root in &policy.roots {
-        match fs::canonicalize(root) {
+        match crate::files::canonicalize(root) {
             Ok(root) => roots.push(root),
             Err(error) => {
                 let _ = send_file_event(

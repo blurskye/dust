@@ -159,7 +159,7 @@ pub(super) fn managed_bun_runtime(
     if compatibility.is_none()
         && let Some(bun) = discover_executable("bun")
     {
-        let bun = fs::canonicalize(&bun)
+        let bun = crate::files::canonicalize(&bun)
             .map_err(|error| format!("cannot canonicalize Bun runtime: {error}"))?;
         if bun.is_file() && bun.is_absolute() {
             report("verifying Bun runtime", 0, None);
@@ -461,9 +461,9 @@ pub(super) fn install_path_rustup_component(
     {
         return Err("external rustup installation is restricted to rust-analyzer".into());
     }
-    let rustup =
-        fs::canonicalize(rustup).map_err(|error| format!("cannot canonicalize rustup: {error}"))?;
-    let cwd = fs::canonicalize(cwd)
+    let rustup = crate::files::canonicalize(rustup)
+        .map_err(|error| format!("cannot canonicalize rustup: {error}"))?;
+    let cwd = crate::files::canonicalize(cwd)
         .map_err(|error| format!("cannot canonicalize rustup working directory: {error}"))?;
     if !rustup.is_file() || !cwd.is_dir() || !rust_analyzer_is_rustup_proxy(proxy) {
         return Err("the selected PATH runtime is not a valid rustup proxy".into());
@@ -480,7 +480,7 @@ pub(super) fn install_path_rustup_component(
         }
     }
     #[cfg(not(unix))]
-    if fs::canonicalize(proxy).ok().as_deref() != Some(rustup.as_path()) {
+    if crate::files::canonicalize(proxy).ok().as_deref() != Some(rustup.as_path()) {
         return Err("the selected rustup executable does not own the PATH proxy".into());
     }
     report("installing rustup component", 0, None);
@@ -777,7 +777,7 @@ pub(super) fn install_nix_lsp_profile(
 
 pub(super) fn nix_profile_installed_at(profile: &Path) -> bool {
     fs::symlink_metadata(profile).is_ok_and(|metadata| metadata.file_type().is_symlink())
-        && fs::canonicalize(profile).is_ok()
+        && crate::files::canonicalize(profile).is_ok()
 }
 
 pub(super) fn uninstall_nix_lsp_profile(

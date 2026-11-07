@@ -419,7 +419,7 @@ mod tests {
         fs::write(sub.join("file"), b"inside").unwrap();
         fs::write(outside.path().join("file"), b"outside").unwrap();
         let roots = vec![RootIdentity::capture(root.path()).unwrap()];
-        let path = fs::canonicalize(sub.join("file")).unwrap();
+        let path = crate::files::canonicalize(sub.join("file")).unwrap();
         assert_eq!(read_scoped_file(&path, &roots).unwrap(), b"inside");
         fs::rename(&sub, root.path().join("original-sub")).unwrap();
         std::os::unix::fs::symlink(outside.path(), &sub).unwrap();

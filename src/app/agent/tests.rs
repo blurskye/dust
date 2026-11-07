@@ -1994,7 +1994,9 @@ fn a_new_file_under_a_symlinked_directory_resolves_to_where_it_will_be_written()
     };
     assert_eq!(
         resolved,
-        outside.path().canonicalize().unwrap().join("new/file.txt")
+        crate::files::canonicalize(outside.path())
+            .unwrap()
+            .join("new/file.txt")
     );
-    assert!(!resolved.starts_with(root.path().canonicalize().unwrap()));
+    assert!(!resolved.starts_with(crate::files::canonicalize(root.path()).unwrap()));
 }

@@ -1262,7 +1262,7 @@ fn a_buffer_stays_bound_to_the_worktree_it_was_opened_in() {
     let alpha = app.state.buffers[alpha_buffer].path.clone().unwrap();
     assert_eq!(
         alpha.parent().unwrap(),
-        std::fs::canonicalize(&roots[0]).unwrap(),
+        crate::files::canonicalize(&roots[0]).unwrap(),
         "the buffer path names the worktree the document was opened in"
     );
 
@@ -1278,7 +1278,7 @@ fn a_buffer_stays_bound_to_the_worktree_it_was_opened_in() {
     assert_eq!(beta, beta_file);
     assert_eq!(
         beta.parent().unwrap(),
-        std::fs::canonicalize(&roots[1]).unwrap()
+        crate::files::canonicalize(&roots[1]).unwrap()
     );
     assert_ne!(
         alpha, beta,
@@ -1336,7 +1336,7 @@ fn switching_to_a_worktree_moves_the_editor_there() {
         assert!(Instant::now() < deadline);
         thread::yield_now()
     }
-    let main_root = std::fs::canonicalize(&app.state.workspace_root).unwrap();
+    let main_root = crate::files::canonicalize(&app.state.workspace_root).unwrap();
     let main_file = main_root.join("h0.txt");
     let (main_buffer, main_view) = app
         .state
@@ -1411,7 +1411,7 @@ fn switching_to_a_worktree_moves_the_editor_there() {
     // The worktree replaces the root, and clean buffers from the old root close.
     open_worktree_row(&mut app);
     switch(&mut app);
-    let canonical = std::fs::canonicalize(&worktree).unwrap();
+    let canonical = crate::files::canonicalize(&worktree).unwrap();
     assert_eq!(app.workspace.roots().len(), 1, "a switch replaces the root");
     assert_eq!(app.workspace.roots()[0].identity.canonical_path, canonical);
     assert_eq!(app.state.workspace_root, canonical);
@@ -1857,7 +1857,7 @@ fn refreshing_the_explorer_also_refreshes_git_status() {
 fn switching_up_from_a_nested_worktree_is_blocked_by_its_unsaved_file() {
     let main = tempdir().unwrap();
     let state_dir = tempdir().unwrap();
-    let main = main.path().canonicalize().unwrap();
+    let main = crate::files::canonicalize(main.path()).unwrap();
     let nested = main.join(".worktree/feature");
     fs::create_dir_all(&nested).unwrap();
     let mut app = App::new(
@@ -2141,7 +2141,7 @@ fn document_paths_identify_their_worktrees_independently_of_open_requests() {
         git2::Repository::discover(&alpha_file).expect("the alpha path belongs to a worktree");
     assert_eq!(
         alpha.workdir().unwrap(),
-        std::fs::canonicalize(&roots[0]).unwrap(),
+        crate::files::canonicalize(&roots[0]).unwrap(),
         "the identity names the worktree the document was opened in"
     );
 
@@ -2152,7 +2152,7 @@ fn document_paths_identify_their_worktrees_independently_of_open_requests() {
     let beta = git2::Repository::discover(&beta_file).expect("the beta path belongs to a worktree");
     assert_eq!(
         beta.workdir().unwrap(),
-        std::fs::canonicalize(&roots[1]).unwrap()
+        crate::files::canonicalize(&roots[1]).unwrap()
     );
     assert_ne!(
         alpha.path(),

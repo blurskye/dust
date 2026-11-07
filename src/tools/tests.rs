@@ -911,7 +911,7 @@ fn lsp_protocol_smoke(
         environment.insert(variable.into(), path.to_str().unwrap().into());
     }
     if matches!(definition.install, Some(ToolInstall::NpmPackage { .. })) {
-        let node = std::fs::canonicalize(store.join(&definition.id).join("bin/node"))
+        let node = crate::files::canonicalize(store.join(&definition.id).join("bin/node"))
             .expect("private Node runtime");
         assert!(
             node.starts_with("/nix/store") && node.to_string_lossy().contains("nodejs"),

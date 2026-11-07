@@ -921,7 +921,7 @@ impl App {
             self.add_workspace_root(path);
             return;
         };
-        let target = path.canonicalize().unwrap_or_else(|_| path.clone());
+        let target = crate::files::canonicalize(&path).unwrap_or_else(|_| path.clone());
         if target == current_path {
             self.close_picker();
             self.notify_message(format!("already in {}", target.display()), false);

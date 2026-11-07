@@ -182,7 +182,7 @@ pub fn explorer_directory_fingerprint(
         return Err(ExplorerWatchError::WorkerUnavailable);
     }
     let canonical =
-        fs::canonicalize(directory).map_err(|_| ExplorerWatchError::WorkerUnavailable)?;
+        crate::files::canonicalize(directory).map_err(|_| ExplorerWatchError::WorkerUnavailable)?;
     if !roots.iter().any(|root| canonical.starts_with(root)) {
         return Err(ExplorerWatchError::Limit);
     }
@@ -225,7 +225,7 @@ pub fn explorer_directory_fingerprint(
     for path in ignore_paths {
         // Ignore files may be symlinks; the bounded reader still checks that
         // the resolved target is a regular file and opens it without following links.
-        let contents = fs::canonicalize(&path)
+        let contents = crate::files::canonicalize(&path)
             .map_err(|source| crate::files::VfsError::Io {
                 operation: "resolve ignore file",
                 path: path.clone(),
@@ -735,7 +735,7 @@ mod tests {
             ignore::gitignore::gitconfig_excludes_path(),
             Some(excludes.clone())
         );
-        let roots = vec![fs::canonicalize(&directory).unwrap()];
+        let roots = vec![crate::files::canonicalize(&directory).unwrap()];
         fs::write(&excludes, "one.txt\n").unwrap();
         let before = explorer_directory_fingerprint(&directory, &roots, 10, 4096).unwrap();
         fs::write(&excludes, "two.txt\n").unwrap();
@@ -761,7 +761,7 @@ mod tests {
     #[test]
     fn newly_watched_directories_are_invalidated_after_the_initial_snapshot() {
         let root = tempfile::tempdir().unwrap();
-        let root_path = fs::canonicalize(root.path()).unwrap();
+        let root_path = crate::files::canonicalize(root.path()).unwrap();
         // The displayed listing was empty; the file appears before watching starts.
         fs::write(root.path().join("new"), "new").unwrap();
         let mut service = ExplorerWatchWorker::start(ExplorerWatchPolicy {

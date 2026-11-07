@@ -349,9 +349,7 @@ impl App {
             PluginChoice::Folder(id) => {
                 if let Some(plugin) = self.browser_plugins().get(&id) {
                     if plugin.folder.is_dir() {
-                        let folder = plugin
-                            .folder
-                            .canonicalize()
+                        let folder = crate::files::canonicalize(&plugin.folder)
                             .unwrap_or_else(|_| plugin.folder.clone());
                         if let Some(id) = self
                             .workspace

@@ -518,14 +518,9 @@ impl App {
                 return self.show_error(format!("could not make the practice project: {error}"));
             }
         };
-        let root = folder
-            .path()
-            .canonicalize()
+        let root = crate::files::canonicalize(folder.path())
             .unwrap_or_else(|_| folder.path().to_path_buf());
-        let home = self
-            .state
-            .workspace_root
-            .canonicalize()
+        let home = crate::files::canonicalize(&self.state.workspace_root)
             .unwrap_or_else(|_| self.state.workspace_root.clone());
         self.switch_workspace_root(root.clone());
         // Keep the same project while confirming that running terminals may stop.

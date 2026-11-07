@@ -34,7 +34,7 @@ fn mutation_service_rejects_stale_worktree_wrong_hunk_and_suppresses_cancelled_l
     let repo = git2::Repository::init(dir.path()).unwrap();
     commit(&repo, "negative.txt", "one\ntwo\nthree\n");
     std::fs::write(dir.path().join("negative.txt"), "one\nchanged\nthree\n").unwrap();
-    let root = std::fs::canonicalize(dir.path()).unwrap();
+    let root = crate::files::canonicalize(dir.path()).unwrap();
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     root.hash(&mut hasher);
     let policy = GitHunkPolicy {
@@ -451,7 +451,7 @@ fn unstaged_unicode_hunks_are_bounded_and_revision_owned() {
     let dir = tempdir().unwrap();
     let repo = git2::Repository::init(dir.path()).unwrap();
     commit(&repo, "u.txt", "alpha βeta\nlast\n");
-    let workdir = std::fs::canonicalize(dir.path()).unwrap();
+    let workdir = crate::files::canonicalize(dir.path()).unwrap();
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     workdir.hash(&mut hasher);
     let repository_id = GitRepositoryId(hasher.finish());
@@ -581,7 +581,7 @@ fn buffer_hunks_compare_exact_unsaved_revision_to_index_without_worktree_mutatio
     let dir = tempdir().unwrap();
     let repo = git2::Repository::init(dir.path()).unwrap();
     commit(&repo, "live.txt", "one\ntwo\nthree\n");
-    let workdir = std::fs::canonicalize(dir.path()).unwrap();
+    let workdir = crate::files::canonicalize(dir.path()).unwrap();
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     workdir.hash(&mut hasher);
     let policy = GitHunkPolicy {
@@ -671,7 +671,7 @@ fn libgit2_can_stage_one_exact_hunk_without_changing_worktree() {
         .replace("line 2\n", "changed 2\n")
         .replace("line 18\n", "changed 18\n");
     std::fs::write(dir.path().join("two.txt"), &changed).unwrap();
-    let workdir = std::fs::canonicalize(dir.path()).unwrap();
+    let workdir = crate::files::canonicalize(dir.path()).unwrap();
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     workdir.hash(&mut hasher);
     let policy = GitHunkPolicy {
@@ -732,7 +732,7 @@ fn mutation_service_stages_exact_hunk_and_rejects_stale_index() {
         .replace("line 2\n", "changed 2\n")
         .replace("line 18\n", "changed 18\n");
     std::fs::write(dir.path().join("m.txt"), &changed).unwrap();
-    let root = std::fs::canonicalize(dir.path()).unwrap();
+    let root = crate::files::canonicalize(dir.path()).unwrap();
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     root.hash(&mut hasher);
     let policy = GitHunkPolicy {
@@ -817,7 +817,7 @@ fn libgit2_can_reset_one_exact_hunk_without_changing_index() {
         .replace("line 2\n", "changed 2\n")
         .replace("line 18\n", "changed 18\n");
     std::fs::write(dir.path().join("reset.txt"), &changed).unwrap();
-    let root = std::fs::canonicalize(dir.path()).unwrap();
+    let root = crate::files::canonicalize(dir.path()).unwrap();
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     root.hash(&mut hasher);
     let policy = GitHunkPolicy {
@@ -892,7 +892,7 @@ fn mutation_service_rejects_stale_worktree_wrong_hunk_and_cancelled_requests() {
     let repo = git2::Repository::init(dir.path()).unwrap();
     commit(&repo, "negative.txt", "one\ntwo\nthree\n");
     std::fs::write(dir.path().join("negative.txt"), "one\nchanged\nthree\n").unwrap();
-    let root = std::fs::canonicalize(dir.path()).unwrap();
+    let root = crate::files::canonicalize(dir.path()).unwrap();
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     root.hash(&mut hasher);
     let policy = GitHunkPolicy {
@@ -951,7 +951,7 @@ fn mutation_service_rejects_symlink_root_replacement_binary_and_directory_paths(
     let repo = git2::Repository::init(dir.path()).unwrap();
     commit(&repo, "valid.txt", "one\ntwo\n");
     std::fs::write(dir.path().join("valid.txt"), "one\nchanged\n").unwrap();
-    let root = std::fs::canonicalize(dir.path()).unwrap();
+    let root = crate::files::canonicalize(dir.path()).unwrap();
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     root.hash(&mut hasher);
     let repository_id = GitRepositoryId(hasher.finish());
@@ -1003,7 +1003,7 @@ fn mutation_service_rejects_symlink_root_replacement_binary_and_directory_paths(
     let replacement = tempdir().unwrap();
     git2::Repository::init(replacement.path()).unwrap();
     let mut replacement_policy = policy.clone();
-    replacement_policy.scope_root = std::fs::canonicalize(replacement.path()).unwrap();
+    replacement_policy.scope_root = crate::files::canonicalize(replacement.path()).unwrap();
     service
         .start(GitMutationRequest::StageHunk(request_for(
             replacement_policy,
@@ -1238,7 +1238,7 @@ fn reset_service_restores_only_selected_hunk_and_preserves_index() {
         .replace("line 2\n", "changed 2\n")
         .replace("line 18\n", "changed 18\n");
     std::fs::write(dir.path().join("service-reset.txt"), &changed).unwrap();
-    let root = std::fs::canonicalize(dir.path()).unwrap();
+    let root = crate::files::canonicalize(dir.path()).unwrap();
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     root.hash(&mut hasher);
     let policy = GitHunkPolicy {
@@ -1287,7 +1287,7 @@ fn reset_service_restores_only_selected_hunk_and_preserves_index() {
 }
 
 fn plan_policy(root: &Path, file: &str, layer: GitDiffLayer) -> GitHunkPolicy {
-    let root = std::fs::canonicalize(root).unwrap();
+    let root = crate::files::canonicalize(root).unwrap();
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     root.hash(&mut hasher);
     GitHunkPolicy {
@@ -1314,7 +1314,10 @@ fn plan_policy_uses_canonical_repository_identity() {
     let alias = dir.path().join("alias");
     std::os::unix::fs::symlink(&root, &alias).unwrap();
     let policy = plan_policy(&alias, "a.txt", GitDiffLayer::Unstaged);
-    assert_eq!(policy.scope_root, std::fs::canonicalize(&root).unwrap());
+    assert_eq!(
+        policy.scope_root,
+        crate::files::canonicalize(&root).unwrap()
+    );
     assert!(read_hunks(&policy).unwrap().hunks.is_empty());
 }
 
@@ -1463,7 +1466,7 @@ fn hunk_snapshot_source_reports_staged_unstaged_and_unsaved() {
     let repo = git2::Repository::init(dir.path()).unwrap();
     commit(&repo, "src.txt", "one\ntwo\nthree\n");
     std::fs::write(dir.path().join("src.txt"), "one\nchanged\nthree\n").unwrap();
-    let root = std::fs::canonicalize(dir.path()).unwrap();
+    let root = crate::files::canonicalize(dir.path()).unwrap();
     let unstaged = plan_policy(&root, "src.txt", GitDiffLayer::Unstaged);
     assert_eq!(
         read_hunks(&unstaged).unwrap().source(),
@@ -1508,7 +1511,7 @@ fn staging_a_path_with_unsaved_edits_is_refused_before_any_write() {
     let repo = git2::Repository::init(dir.path()).unwrap();
     commit(&repo, "guard.txt", "one\n");
     std::fs::write(dir.path().join("guard.txt"), "two\n").unwrap();
-    let root = std::fs::canonicalize(dir.path()).unwrap();
+    let root = crate::files::canonicalize(dir.path()).unwrap();
     let index_before = git_index_fingerprint(&root).unwrap();
     let mut plan = plan_template(
         plan_policy(&root, "guard.txt", GitDiffLayer::Unstaged),
@@ -1536,7 +1539,7 @@ fn file_level_stage_and_unstage_are_separately_named() {
     let repo = git2::Repository::init(dir.path()).unwrap();
     commit(&repo, "whole.txt", "one\n");
     std::fs::write(dir.path().join("whole.txt"), "two\n").unwrap();
-    let root = std::fs::canonicalize(dir.path()).unwrap();
+    let root = crate::files::canonicalize(dir.path()).unwrap();
     let head = git_head_id(&root).unwrap();
     let mut stage = plan_template(
         plan_policy(&root, "whole.txt", GitDiffLayer::Unstaged),
@@ -1577,7 +1580,7 @@ fn plan_is_rejected_after_an_external_index_or_head_change() {
     commit(&repo, "stale.txt", "one\n");
     commit(&repo, "other.txt", "one\n");
     std::fs::write(dir.path().join("stale.txt"), "two\n").unwrap();
-    let root = std::fs::canonicalize(dir.path()).unwrap();
+    let root = crate::files::canonicalize(dir.path()).unwrap();
     let head = git_head_id(&root).unwrap();
     let mut plan = plan_template(
         plan_policy(&root, "stale.txt", GitDiffLayer::Unstaged),
@@ -1616,7 +1619,7 @@ fn line_range_stage_applies_only_the_selected_lines() {
     commit(&repo, "lines.txt", "a\nb\nc\nd\ne\n");
     let changed = "a\nB\nc\nNEW\nd\ne\n";
     std::fs::write(dir.path().join("lines.txt"), changed).unwrap();
-    let root = std::fs::canonicalize(dir.path()).unwrap();
+    let root = crate::files::canonicalize(dir.path()).unwrap();
     let policy = plan_policy(&root, "lines.txt", GitDiffLayer::Unstaged);
     let snapshot = read_hunks(&policy).unwrap();
     assert_eq!(snapshot.hunks.len(), 1, "fixture must produce one hunk");
@@ -1651,7 +1654,7 @@ fn invalid_line_selections_are_rejected_without_writing_the_index() {
     let repo = git2::Repository::init(dir.path()).unwrap();
     commit(&repo, "range.txt", "a\nb\nc\n");
     std::fs::write(dir.path().join("range.txt"), "a\nB\nc\n").unwrap();
-    let root = std::fs::canonicalize(dir.path()).unwrap();
+    let root = crate::files::canonicalize(dir.path()).unwrap();
     let policy = plan_policy(&root, "range.txt", GitDiffLayer::Unstaged);
     let snapshot = read_hunks(&policy).unwrap();
     let hunk = &snapshot.hunks[0];
@@ -1712,7 +1715,7 @@ fn hunk_level_unstage_returns_one_hunk_to_head() {
         .replace("line 2\n", "changed 2\n")
         .replace("line 38\n", "changed 38\n");
     std::fs::write(dir.path().join("two-way.txt"), &changed).unwrap();
-    let root = std::fs::canonicalize(dir.path()).unwrap();
+    let root = crate::files::canonicalize(dir.path()).unwrap();
     let unstaged = plan_policy(&root, "two-way.txt", GitDiffLayer::Unstaged);
     let staged = plan_policy(&root, "two-way.txt", GitDiffLayer::Staged);
     assert_eq!(
@@ -1776,7 +1779,7 @@ fn plan_hunk_stage_uses_the_same_capture_as_the_legacy_path() {
     commit(&repo, "plan-hunk.txt", &original);
     let changed = original.replace("line 2\n", "changed 2\n");
     std::fs::write(dir.path().join("plan-hunk.txt"), &changed).unwrap();
-    let root = std::fs::canonicalize(dir.path()).unwrap();
+    let root = crate::files::canonicalize(dir.path()).unwrap();
     let policy = plan_policy(&root, "plan-hunk.txt", GitDiffLayer::Unstaged);
     let snapshot = read_hunks(&policy).unwrap();
     assert_eq!(snapshot.hunks.len(), 1);
@@ -1810,7 +1813,7 @@ fn plan_requires_the_captured_hunk_and_rejects_a_foreign_selection() {
     let repo = git2::Repository::init(dir.path()).unwrap();
     commit(&repo, "foreign.txt", "one\ntwo\nthree\n");
     std::fs::write(dir.path().join("foreign.txt"), "one\nchanged\nthree\n").unwrap();
-    let root = std::fs::canonicalize(dir.path()).unwrap();
+    let root = crate::files::canonicalize(dir.path()).unwrap();
     let policy = plan_policy(&root, "foreign.txt", GitDiffLayer::Unstaged);
     let snapshot = read_hunks(&policy).unwrap();
     let hunk = snapshot.hunks[0].clone();
@@ -1859,7 +1862,7 @@ fn unstage_reports_no_change_when_the_index_already_matches_head() {
     let dir = tempdir().unwrap();
     let repo = git2::Repository::init(dir.path()).unwrap();
     commit(&repo, "clean.txt", "one\n");
-    let root = std::fs::canonicalize(dir.path()).unwrap();
+    let root = crate::files::canonicalize(dir.path()).unwrap();
     let index_before = git_index_fingerprint(&root).unwrap();
     let mut plan = plan_template(
         plan_policy(&root, "clean.txt", GitDiffLayer::Unstaged),
@@ -1940,7 +1943,7 @@ fn branch_list_reports_the_real_checked_out_worktree_including_a_linked_one() {
     let dir = tempdir().unwrap();
     let repo = git2::Repository::init(dir.path()).unwrap();
     commit(&repo, "b.txt", "one\n");
-    let root = std::fs::canonicalize(dir.path()).unwrap();
+    let root = crate::files::canonicalize(dir.path()).unwrap();
     create_branch(&root, "side");
     let linked = root.join("wt-side");
     run_branch(branch_request(
@@ -1981,8 +1984,8 @@ fn branch_list_reports_the_real_checked_out_worktree_including_a_linked_one() {
     assert_eq!(
         side.checked_out
             .as_deref()
-            .map(|path| path.canonicalize().unwrap()),
-        Some(linked.canonicalize().unwrap()),
+            .map(|path| crate::files::canonicalize(path).unwrap()),
+        Some(crate::files::canonicalize(&linked).unwrap()),
         "the branch is attributed to the linked worktree, not the main one"
     );
     assert!(
@@ -1996,7 +1999,7 @@ fn worktree_list_reports_detached_heads_without_a_branch() {
     let dir = tempdir().unwrap();
     let repo = git2::Repository::init(dir.path()).unwrap();
     commit(&repo, "tracked.txt", "one\n");
-    let root = dir.path().canonicalize().unwrap();
+    let root = crate::files::canonicalize(dir.path()).unwrap();
     let linked = root.join("detached");
     run_branch(branch_request(
         &root,
@@ -2046,7 +2049,7 @@ fn worktree_deadlines_refuse_expired_mutations_and_lists() {
     let dir = tempdir().unwrap();
     let repo = git2::Repository::init(dir.path()).unwrap();
     commit(&repo, "tracked.txt", "one\n");
-    let root = dir.path().canonicalize().unwrap();
+    let root = crate::files::canonicalize(dir.path()).unwrap();
     let linked = root.join("side");
     run_branch(branch_request(
         &root,
@@ -2131,7 +2134,7 @@ fn worktree_creation_and_removal_refuse_before_writing() {
     let dir = tempdir().unwrap();
     let repo = git2::Repository::init(dir.path()).unwrap();
     commit(&repo, "w.txt", "one\n");
-    let root = std::fs::canonicalize(dir.path()).unwrap();
+    let root = crate::files::canonicalize(dir.path()).unwrap();
     let read_head = |repo: &git2::Repository| repo.head().unwrap().target().unwrap();
     let main_head = read_head(&repo);
     let main_index = git_index_fingerprint(&root).unwrap();
@@ -2220,8 +2223,8 @@ fn a_locked_or_paused_worktree_refuses_removal_before_any_write() {
     let worktree = root.join("wt-paused");
     repo.worktree("paused", &worktree, Some(&options)).unwrap();
     drop(paused_ref);
-    let root = std::fs::canonicalize(&root).unwrap();
-    let worktree = std::fs::canonicalize(&worktree).unwrap();
+    let root = crate::files::canonicalize(&root).unwrap();
+    let worktree = crate::files::canonicalize(&worktree).unwrap();
     let read_head = |repo: &git2::Repository| repo.head().unwrap().target().unwrap();
     let main_head = read_head(&repo);
     let main_index = git_index_fingerprint(&root).unwrap();
@@ -2303,7 +2306,7 @@ fn conflict_provenance_reports_the_three_sides_from_the_index_on_demand() {
     let root = dir.path().join("work");
     std::fs::create_dir_all(&root).unwrap();
     let repo = git2::Repository::init(&root).unwrap();
-    let root = std::fs::canonicalize(&root).unwrap();
+    let root = crate::files::canonicalize(&root).unwrap();
     let sig = git2::Signature::now("Dust", "dust@example.invalid").unwrap();
 
     // A real conflict: both branches change the same line of the same file.
@@ -3259,7 +3262,7 @@ fn a_review_worktree_is_detached_at_the_inspected_revision_and_moves_no_branch()
     )
     .unwrap();
     commit(&repo, "w.txt", "one\n");
-    let root = std::fs::canonicalize(dir.path()).unwrap();
+    let root = crate::files::canonicalize(dir.path()).unwrap();
     let main_head = repo.head().unwrap().target().unwrap();
     let main_branch = repo.head().unwrap().shorthand().unwrap().to_owned();
 
@@ -3351,7 +3354,7 @@ fn the_worktree_list_names_the_main_checkout_from_inside_a_linked_worktree() {
     let dir = tempdir().unwrap();
     let repo = git2::Repository::init(dir.path()).unwrap();
     commit(&repo, "w.txt", "one\n");
-    let root = std::fs::canonicalize(dir.path()).unwrap();
+    let root = crate::files::canonicalize(dir.path()).unwrap();
     let main_branch = repo.head().unwrap().shorthand().unwrap().to_owned();
     run_branch(crate::git::GitBranchRequest::CreateWorktree {
         repository: root.clone(),
@@ -3393,8 +3396,8 @@ fn the_worktree_list_names_the_main_checkout_from_inside_a_linked_worktree() {
         Some(main_branch.as_str())
     );
     assert_eq!(
-        std::fs::canonicalize(&list.worktrees[1].path).unwrap(),
-        std::fs::canonicalize(&linked).unwrap()
+        crate::files::canonicalize(&list.worktrees[1].path).unwrap(),
+        crate::files::canonicalize(&linked).unwrap()
     );
 }
 #[test]
@@ -3419,7 +3422,7 @@ fn worktree_paths_use_the_checkout_with_separate_git_metadata() {
     assert!(!dir.path().join(".worktree/side").exists());
     assert_eq!(
         branch_list(&root).worktrees[0].path,
-        root.canonicalize().unwrap()
+        crate::files::canonicalize(&root).unwrap()
     );
     // Git does not record a backlink for --separate-git-dir. Never invent a primary path.
     assert!(
@@ -3445,7 +3448,7 @@ fn worktree_paths_use_the_checkout_with_separate_git_metadata() {
         .unwrap();
     assert_eq!(
         branch_list(&linked).worktrees[0].path,
-        root.canonicalize().unwrap()
+        crate::files::canonicalize(&root).unwrap()
     );
     run_branch(branch_request(
         &linked,
@@ -3462,7 +3465,7 @@ fn a_new_worktree_creates_its_branch_at_head_and_stays_out_of_status() {
     let dir = tempdir().unwrap();
     let repo = git2::Repository::init(dir.path()).unwrap();
     commit(&repo, "w.txt", "one\n");
-    let root = std::fs::canonicalize(dir.path()).unwrap();
+    let root = crate::files::canonicalize(dir.path()).unwrap();
     let head = repo.head().unwrap().target().unwrap();
 
     run_branch(crate::git::GitBranchRequest::CreateWorktree {

@@ -176,7 +176,7 @@ fn an_empty_plugin_list_says_how_to_get_one() {
 fn switching_folders_with_open_terminals_warns_before_ending_them() {
     let main = tempdir().unwrap();
     let state_dir = tempdir().unwrap();
-    let main = main.path().canonicalize().unwrap();
+    let main = crate::files::canonicalize(main.path()).unwrap();
     let nested = main.join(".worktree/feature");
     fs::create_dir_all(&nested).unwrap();
     let mut app = App::new(
@@ -285,7 +285,9 @@ fn removing_a_root_preserves_terminals_and_updates_relative_paths() {
     );
     app.terminal_session.fixture_cwd(PtyId(101), path.clone());
     let first_file = path.join("first.txt");
-    let second_file = extra.path().canonicalize().unwrap().join("second.txt");
+    let second_file = crate::files::canonicalize(extra.path())
+        .unwrap()
+        .join("second.txt");
     assert_eq!(app.workspace.roots().len(), 2);
     assert_eq!(app.workspace_relative_label(&first_file), "first.txt");
     assert_eq!(app.workspace_relative_label(&second_file), "second.txt");

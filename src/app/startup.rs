@@ -136,7 +136,7 @@ fn canonical_or_new(path: &Path, current_directory: &Path) -> Result<PathBuf, St
 }
 
 fn canonical_existing(path: &Path) -> Result<PathBuf, StartupError> {
-    path.canonicalize().map_err(|source| StartupError::Path {
+    crate::files::canonicalize(path).map_err(|source| StartupError::Path {
         path: path.to_path_buf(),
         source,
     })
@@ -211,7 +211,7 @@ mod tests {
         assert_eq!(
             target,
             StartupTarget::Dashboard {
-                root: root.path().canonicalize().expect("canonical")
+                root: crate::files::canonicalize(root.path()).expect("canonical")
             }
         );
     }
@@ -222,7 +222,7 @@ mod tests {
         fs::write(root.path().join("main.rs"), "fn main() {}\n").unwrap();
         fs::write(root.path().join("other.rs"), "// other\n").unwrap();
         let target = resolve_startup(&["main.rs".into(), "other.rs".into()], root.path()).unwrap();
-        let canonical = root.path().canonicalize().unwrap();
+        let canonical = crate::files::canonicalize(root.path()).unwrap();
         assert_eq!(
             target,
             StartupTarget::File {
@@ -247,7 +247,11 @@ mod tests {
             resolve_startup(&[std::path::PathBuf::from("new.txt")], root.path()).expect("startup");
         assert_eq!(
             target.new_files(),
-            vec![root.path().canonicalize().unwrap().join("new.txt")]
+            vec![
+                crate::files::canonicalize(root.path())
+                    .unwrap()
+                    .join("new.txt")
+            ]
         );
         assert!(
             resolve_startup(&[std::path::PathBuf::from("missing/new.txt")], root.path()).is_err(),
@@ -265,7 +269,7 @@ mod tests {
             target,
             StartupTarget::File {
                 workspace_root: root.path().to_path_buf(),
-                path: file.canonicalize().expect("canonical"),
+                path: crate::files::canonicalize(&file).expect("canonical"),
                 additional_files: Vec::new(),
             }
         );

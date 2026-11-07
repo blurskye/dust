@@ -42,7 +42,7 @@ fn drain(service: &mut PtyWorker, id: PtyId) -> Vec<PtyEvent> {
 #[test]
 fn pty_starts_in_the_requested_directory() {
     let root = tempfile::tempdir().unwrap();
-    let canonical = root.path().canonicalize().unwrap();
+    let canonical = crate::files::canonicalize(root.path()).unwrap();
     let mut service = PtyWorker::start(1);
     let id = service.open(request(&canonical, "pwd -P")).unwrap();
     let events = drain(&mut service, id);
@@ -475,7 +475,7 @@ fn interactive_pty_keeps_invocation_name() {
     std::os::unix::fs::symlink("/bin/sh", &invocation).unwrap();
     let mut service = PtyWorker::start(1);
     let mut request = request(root.path(), "printf '%s' \"$0\"");
-    request.program = invocation.canonicalize().unwrap();
+    request.program = crate::files::canonicalize(&invocation).unwrap();
     request.argv0 = Some(invocation.clone());
     request.policy.maximum_output_bytes = 0;
     let id = service.open(request).unwrap();
@@ -546,7 +546,7 @@ fn interactive_pty_output_has_no_lifetime_quota_and_keeps_invocation_name() {
     std::os::unix::fs::symlink("/bin/sh", &invocation).unwrap();
     let mut service = PtyWorker::start(1);
     let mut request = request(root.path(), "printf '%s' \"$0\"");
-    request.program = invocation.canonicalize().unwrap();
+    request.program = crate::files::canonicalize(&invocation).unwrap();
     request.argv0 = Some(invocation.clone());
     request.policy.maximum_output_bytes = 0;
     let id = service.open(request).unwrap();

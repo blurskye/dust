@@ -219,7 +219,7 @@ fn workspace_history_records_visits_without_trust_prompts() {
     wait_trust(&mut app);
 
     let second = tempdir().unwrap();
-    let second_path = second.path().canonicalize().unwrap();
+    let second_path = crate::files::canonicalize(second.path()).unwrap();
     app.switch_workspace_root(second_path.clone());
     wait_root_operation(&mut app);
     wait_trust(&mut app);
@@ -288,7 +288,7 @@ fn async_root_add_activation_and_dirty_removal_preflight_are_real() {
     let (_app_dirs, mut app) = app();
     let first = app.workspace.active_root().expect("first root");
     let second_directory = tempdir().expect("second root");
-    let second_path = fs::canonicalize(second_directory.path()).expect("canonical");
+    let second_path = crate::files::canonicalize(second_directory.path()).expect("canonical");
     app.add_workspace_root(second_path.clone());
     wait_root_operation(&mut app);
     assert_eq!(app.workspace.roots().len(), 2);
@@ -357,7 +357,7 @@ fn workspace_switch_rechecks_dirty_buffers_before_publishing() {
     wait_root_operation(&mut app);
     assert_eq!(
         app.state.workspace_root,
-        target.path().canonicalize().unwrap()
+        crate::files::canonicalize(target.path()).unwrap()
     );
 }
 

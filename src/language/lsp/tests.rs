@@ -363,7 +363,7 @@ fn diagnostic_disk_snapshots_reject_nonregular_and_oversized_targets() {
             disk: None,
         },
     };
-    let worker_root = root.path().canonicalize().unwrap();
+    let worker_root = crate::files::canonicalize(root.path()).unwrap();
     let worker = std::thread::spawn(move || {
         for name in names {
             let uri = file_uri(&worker_root.join(name));
@@ -770,7 +770,7 @@ fn astro_and_vue_initialization_own_the_typescript_sdk_beside_the_server() {
             initialize
                 .pointer("/params/initializationOptions/typescript/tsdk")
                 .and_then(Value::as_str),
-            std::fs::canonicalize(&tsdk).unwrap().to_str()
+            crate::files::canonicalize(&tsdk).unwrap().to_str()
         );
     }
 }

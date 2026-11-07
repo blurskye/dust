@@ -596,12 +596,12 @@ impl PackageWorker {
                                 if !prepared.is_empty() {
                                     return Err(PackageError::Busy);
                                 }
-                                let package_manifest =
-                                    fs::canonicalize(package_manifest).map_err(PackageError::Io)?;
-                                let plugin_manifest =
-                                    fs::canonicalize(plugin_manifest).map_err(PackageError::Io)?;
-                                let component =
-                                    fs::canonicalize(component).map_err(PackageError::Io)?;
+                                let package_manifest = crate::files::canonicalize(package_manifest)
+                                    .map_err(PackageError::Io)?;
+                                let plugin_manifest = crate::files::canonicalize(plugin_manifest)
+                                    .map_err(PackageError::Io)?;
+                                let component = crate::files::canonicalize(component)
+                                    .map_err(PackageError::Io)?;
                                 if [&package_manifest, &plugin_manifest, &component]
                                     .into_iter()
                                     .any(|path| !roots.iter().any(|root| path.starts_with(root)))
@@ -918,7 +918,7 @@ mod tests {
                         package_manifest,
                         plugin_manifest,
                         component: component_path,
-                        roots: vec![root.path().canonicalize().unwrap()],
+                        roots: vec![crate::files::canonicalize(root.path()).unwrap()],
                         limits: PluginLimits::default(),
                         update: true,
                     }

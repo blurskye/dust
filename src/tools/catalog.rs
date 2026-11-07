@@ -306,7 +306,7 @@ impl PathExecutables {
 
 #[must_use]
 pub fn rust_analyzer_is_rustup_proxy(path: &Path) -> bool {
-    if fs::canonicalize(path)
+    if crate::files::canonicalize(path)
         .ok()
         .and_then(|target| target.file_name().map(ToOwned::to_owned))
         .is_some_and(|name| name == "rustup" || name == "rustup.exe")

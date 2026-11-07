@@ -1651,7 +1651,7 @@ fn tutor_moves_on_when_each_step_is_done() {
         app.tutor_tick();
     }
     let (_app_dirs, mut app) = app();
-    let home = app.state.workspace_root.canonicalize().unwrap();
+    let home = crate::files::canonicalize(&app.state.workspace_root).unwrap();
     // The first start asks for a language; Rust comes first.
     app.process_effect(AppEffect::Tutor);
     assert!(app.ui.tutor.is_none());

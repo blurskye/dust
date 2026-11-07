@@ -2594,8 +2594,8 @@ fn nested_marker_backed_project_gets_its_own_lsp_preflight_root() {
     .unwrap();
     let source = nested.join("src/main.rs");
     fs::write(&source, "fn main() {}\n").unwrap();
-    let source = fs::canonicalize(source).unwrap();
-    let nested = fs::canonicalize(nested).unwrap();
+    let source = crate::files::canonicalize(source).unwrap();
+    let nested = crate::files::canonicalize(nested).unwrap();
     app.state
         .open_text(TextBuffer::from_text("fn main() {}"), Some(source))
         .unwrap();
@@ -2747,8 +2747,8 @@ fn nested_marker_backed_project_gets_its_own_dap_preflight_root() {
     .unwrap();
     let source = nested.join("src/main.rs");
     fs::write(&source, "fn main() {}\n").unwrap();
-    let source = fs::canonicalize(source).unwrap();
-    let nested = fs::canonicalize(nested).unwrap();
+    let source = crate::files::canonicalize(source).unwrap();
+    let nested = crate::files::canonicalize(nested).unwrap();
     app.state
         .open_text(TextBuffer::from_text("fn main() {}"), Some(source.clone()))
         .unwrap();
@@ -3045,8 +3045,8 @@ fn unopened_multifile_workspace_edit_previews_then_applies_only_to_editor_buffer
     let second = app.state.workspace_root.join("second.rs");
     fs::write(&first, "abc").expect("first");
     fs::write(&second, "xyz").expect("second");
-    let first = fs::canonicalize(first).expect("canonical first");
-    let second = fs::canonicalize(second).expect("canonical second");
+    let first = crate::files::canonicalize(first).expect("canonical first");
+    let second = crate::files::canonicalize(second).expect("canonical second");
     let (first_buffer, _) = app
         .state
         .open_text(

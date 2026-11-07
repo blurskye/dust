@@ -730,7 +730,7 @@ impl VfsWorker {
                                         checked_atomic_write(&path, &bytes, &expectation)
                                     })();
                                     let path = if document && result.is_ok() {
-                                        fs::canonicalize(&path).unwrap_or(path)
+                                        crate::files::canonicalize(&path).unwrap_or(path)
                                     } else {
                                         path
                                     };
@@ -1311,7 +1311,7 @@ fn resolve_existing_prefix(path: &Path) -> PathBuf {
     let mut existing = path;
     let mut rest = Vec::new();
     loop {
-        if let Ok(resolved) = existing.canonicalize() {
+        if let Ok(resolved) = crate::files::canonicalize(existing) {
             return rest
                 .iter()
                 .rev()
@@ -2231,7 +2231,7 @@ pub(super) fn apply_resource_intent(intent: &CheckedResourceIntent) -> Result<()
 }
 
 fn canonical_write_path(path: &Path) -> io::Result<PathBuf> {
-    fs::canonicalize(path).or_else(|error| {
+    crate::files::canonicalize(path).or_else(|error| {
         if error.kind() != io::ErrorKind::NotFound {
             return Err(error);
         }
@@ -2240,12 +2240,42 @@ fn canonical_write_path(path: &Path) -> io::Result<PathBuf> {
             .parent()
             .filter(|p| !p.as_os_str().is_empty())
             .unwrap_or(Path::new("."));
-        Ok(fs::canonicalize(parent)?.join(name))
+        Ok(crate::files::canonicalize(parent)?.join(name))
     })
 }
 
+/// The absolute path with every symlink resolved, like `fs::canonicalize`. On Windows it
+/// drops the `\\?\` prefix std adds when the path does not need it, so canonical paths
+/// compare equal to the ones users, Git and the explorer write.
+pub fn canonicalize(path: impl AsRef<Path>) -> io::Result<PathBuf> {
+    let path = fs::canonicalize(path)?;
+    #[cfg(windows)]
+    if let Some(plain) = plain_windows_path(&path) {
+        return Ok(plain);
+    }
+    Ok(path)
+}
+
+/// `\\?\C:\dir` as `C:\dir` and `\\?\UNC\server\share` as `\\server\share`, when the
+/// result is short enough for the ordinary Windows path limit.
+#[cfg(windows)]
+fn plain_windows_path(path: &Path) -> Option<PathBuf> {
+    let text = path.to_str()?;
+    let plain = if let Some(share) = text.strip_prefix(r"\\?\UNC\") {
+        format!(r"\\{share}")
+    } else {
+        let disk = text.strip_prefix(r"\\?\")?;
+        let bytes = disk.as_bytes();
+        if bytes.len() < 3 || !bytes[0].is_ascii_alphabetic() || &bytes[1..3] != br":\" {
+            return None;
+        }
+        disk.to_owned()
+    };
+    (plain.len() < 260).then(|| PathBuf::from(plain))
+}
+
 pub(super) fn canonical_path(path: &Path) -> Result<PathBuf, VfsError> {
-    fs::canonicalize(path).map_err(|source| VfsError::Io {
+    crate::files::canonicalize(path).map_err(|source| VfsError::Io {
         operation: "canonicalize",
         path: path.to_path_buf(),
         source,
@@ -2815,7 +2845,7 @@ mod lifecycle_tests {
     fn agent_writes_reject_symlinks_substituted_after_path_resolution() {
         let workspace = tempfile::tempdir().unwrap();
         let outside = tempfile::tempdir().unwrap();
-        let root = fs::canonicalize(workspace.path()).unwrap();
+        let root = crate::files::canonicalize(workspace.path()).unwrap();
         let parent = root.join("nested");
         fs::create_dir(&parent).unwrap();
         let path = resolve_existing_prefix(&parent.join("new/file"));
@@ -2854,7 +2884,7 @@ mod lifecycle_tests {
         let ancestor = temporary.path().join("search-only");
         let workspace = ancestor.join("workspace");
         fs::create_dir_all(&workspace).unwrap();
-        let root = fs::canonicalize(&workspace).unwrap();
+        let root = crate::files::canonicalize(&workspace).unwrap();
         let path = root.join("file");
         fs::set_permissions(&ancestor, fs::Permissions::from_mode(0o111)).unwrap();
         let result = agent_atomic_write(&root, &path, b"inside");
@@ -2869,7 +2899,7 @@ mod lifecycle_tests {
     fn agent_writes_replace_regular_files_and_preserve_permissions() {
         use std::os::unix::fs::PermissionsExt;
         let workspace = tempfile::tempdir().unwrap();
-        let root = fs::canonicalize(workspace.path()).unwrap();
+        let root = crate::files::canonicalize(workspace.path()).unwrap();
         let path = root.join("file");
         fs::write(&path, "old").unwrap();
         fs::set_permissions(&path, fs::Permissions::from_mode(0o640)).unwrap();
@@ -3046,7 +3076,7 @@ mod lifecycle_tests {
     fn path_handles_support_identity_checks_and_directory_relative_opens() {
         use crate::files::root_identity::file_identity;
         let root = tempfile::tempdir().unwrap();
-        let path = root.path().canonicalize().unwrap();
+        let path = crate::files::canonicalize(root.path()).unwrap();
         fs::write(path.join("file"), b"contents").unwrap();
         #[cfg(unix)]
         let file = open_beneath(
@@ -3069,8 +3099,8 @@ mod lifecycle_tests {
     fn scoped_reads_reject_windows_junctions() {
         let root = tempfile::tempdir().unwrap();
         let outside = tempfile::tempdir().unwrap();
-        let path = root.path().canonicalize().unwrap();
-        let target = outside.path().canonicalize().unwrap();
+        let path = crate::files::canonicalize(&root.path()).unwrap();
+        let target = crate::files::canonicalize(&outside.path()).unwrap();
         let link = path.join("junction");
         fs::write(target.join("secret"), b"outside").unwrap();
         let status = std::process::Command::new("cmd.exe")

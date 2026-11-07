@@ -7,10 +7,8 @@ use std::path::Path;
 pub fn git_browse_url(file: &Path, line: usize) -> Result<String, String> {
     let repo = git2::Repository::discover(file).map_err(|_| "not inside a Git repository")?;
     let workdir = repo.workdir().ok_or("the repository has no working tree")?;
-    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
-    let workdir = workdir
-        .canonicalize()
-        .unwrap_or_else(|_| workdir.to_path_buf());
+    let canonical = crate::files::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
+    let workdir = crate::files::canonicalize(workdir).unwrap_or_else(|_| workdir.to_path_buf());
     let relative = canonical
         .strip_prefix(&workdir)
         .map_err(|_| "the file is outside the repository")?;

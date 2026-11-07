@@ -387,11 +387,11 @@ pub(super) fn exact_mutation_repository(
     policy: &GitHunkPolicy,
 ) -> Result<(PathBuf, git2::Repository, PathBuf), GitMutationError> {
     validate_hunk_policy(policy).map_err(|_| GitMutationError::Invalid)?;
-    let root =
-        std::fs::canonicalize(&policy.scope_root).map_err(|_| GitMutationError::StaleRepository)?;
+    let root = crate::files::canonicalize(&policy.scope_root)
+        .map_err(|_| GitMutationError::StaleRepository)?;
     let repository =
         git2::Repository::discover(&root).map_err(|_| GitMutationError::StaleRepository)?;
-    let workdir = std::fs::canonicalize(
+    let workdir = crate::files::canonicalize(
         repository
             .workdir()
             .ok_or(GitMutationError::StaleRepository)?,

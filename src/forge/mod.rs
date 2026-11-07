@@ -584,19 +584,14 @@ impl ForgeCommands<'_> {
         }
         let source = git2::Repository::discover(root).map_err(|error| error.to_string())?;
         let repository = git2::Repository::open(target).map_err(|error| error.to_string())?;
-        let common = source
-            .commondir()
-            .canonicalize()
-            .map_err(|error| error.to_string())?;
-        if repository
-            .commondir()
-            .canonicalize()
-            .map_err(|error| error.to_string())?
+        let common =
+            crate::files::canonicalize(source.commondir()).map_err(|error| error.to_string())?;
+        if crate::files::canonicalize(repository.commondir()).map_err(|error| error.to_string())?
             != common
         {
             return Err("pull request checkout belongs to another repository".into());
         }
-        let target = target.canonicalize().map_err(|error| error.to_string())?;
+        let target = crate::files::canonicalize(target).map_err(|error| error.to_string())?;
         let registered = source
             .worktrees()
             .map_err(|error| error.to_string())?
@@ -605,9 +600,7 @@ impl ForgeCommands<'_> {
             .any(|name| {
                 source.find_worktree(name).is_ok_and(|worktree| {
                     worktree.validate().is_ok()
-                        && worktree
-                            .path()
-                            .canonicalize()
+                        && crate::files::canonicalize(worktree.path())
                             .is_ok_and(|path| path == target)
                 })
             });
@@ -615,7 +608,7 @@ impl ForgeCommands<'_> {
             git2::Repository::open(&common).map_err(|error| error.to_string())?;
         let main = common_repository
             .workdir()
-            .and_then(|path| path.canonicalize().ok());
+            .and_then(|path| crate::files::canonicalize(path).ok());
         if !registered && main.as_ref() != Some(&target) {
             return Err("pull request checkout is not a registered worktree".into());
         }

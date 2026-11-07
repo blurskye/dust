@@ -90,7 +90,7 @@ impl App {
             // look at it, and nothing here can write it.
             let mut path = path;
             if self.workspace.require_path(&path).is_err() {
-                if let Ok(real) = path.canonicalize() {
+                if let Ok(real) = crate::files::canonicalize(&path) {
                     path = real;
                 }
                 roots.extend(path.parent().map(std::path::Path::to_owned));
@@ -248,7 +248,7 @@ impl App {
             .collect();
         // A debugger frame in a library or the toolchain opens too, read-only, as definitions do.
         if !roots.iter().any(|root| source.path.starts_with(root)) {
-            if let Ok(real) = source.path.canonicalize() {
+            if let Ok(real) = crate::files::canonicalize(&source.path) {
                 source.path = real;
             }
             roots.extend(source.path.parent().map(std::path::Path::to_owned));

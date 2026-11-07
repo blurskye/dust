@@ -484,7 +484,7 @@ impl Debugger {
                     *program = result.root.join(&*program);
                 }
                 if launch.source_program {
-                    let target = program.canonicalize().map_err(|_| {
+                    let target = crate::files::canonicalize(&program).map_err(|_| {
                         format!("debug program {} does not exist; build it in the terminal (Ctrl-/), then press Space d s", program.display())
                     })?;
                     if !launch
@@ -1095,7 +1095,7 @@ mod tests {
             ("delve", false, true),
         ] {
             let root = tempfile::tempdir().unwrap();
-            let root_path = root.path().canonicalize().unwrap();
+            let root_path = crate::files::canonicalize(root.path()).unwrap();
             let target = root_path.join(if automatic { "main.go" } else { "target" });
             if directory {
                 std::fs::create_dir(&target).unwrap();

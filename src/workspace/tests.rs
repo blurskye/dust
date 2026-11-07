@@ -108,7 +108,7 @@ fn root_ids_are_monotonic_removal_has_fallback_and_root_changes_revoke_trust() {
         workspace.add_root(
             "duplicate".into(),
             RootIdentity {
-                canonical_path: fs::canonicalize(&third).expect("canonical"),
+                canonical_path: crate::files::canonicalize(&third).expect("canonical"),
                 filesystem_identity: Some((u64::MAX, u64::MAX)),
             }
         ),
@@ -646,7 +646,7 @@ fn workspace_edit_proposal_validates_scope_overlap_staleness_and_rejection() {
     let workspace = workspace(directory.path());
     let path = directory.path().join("a.txt");
     fs::write(&path, "abc").expect("write");
-    let path = fs::canonicalize(path).expect("canonical");
+    let path = crate::files::canonicalize(path).expect("canonical");
     let snapshot = FileSnapshot {
         canonical_path: path.clone(),
         revision: Some(BufferRevision(9)),
@@ -676,7 +676,7 @@ fn workspace_edit_proposal_validates_scope_overlap_staleness_and_rejection() {
     let outside = tempdir().expect("outside root");
     let outside_path = outside.path().join("outside.txt");
     fs::write(&outside_path, "abc").expect("outside file");
-    let outside_path = fs::canonicalize(outside_path).expect("canonical outside path");
+    let outside_path = crate::files::canonicalize(outside_path).expect("canonical outside path");
     assert!(matches!(
         WorkspaceEditProposal::build(
             ProposalId(4),

@@ -69,8 +69,8 @@ fn project_root_resolution_requires_valid_tool_evidence_and_prefers_the_nested_p
     .unwrap();
     let document = source.join("main.rs");
     fs::write(&document, "fn main() {}\n").unwrap();
-    let workspace = fs::canonicalize(workspace.path()).unwrap();
-    let document = fs::canonicalize(document).unwrap();
+    let workspace = crate::files::canonicalize(workspace.path()).unwrap();
+    let document = crate::files::canonicalize(document).unwrap();
     let mut service = ProjectRootWorker::default();
     let request_id = service
         .resolve(
@@ -101,7 +101,7 @@ fn project_root_resolution_requires_valid_tool_evidence_and_prefers_the_nested_p
     fs::write(&broken, "pub fn broken() {}\n").unwrap();
     service
         .resolve(
-            fs::canonicalize(broken).unwrap(),
+            crate::files::canonicalize(broken).unwrap(),
             workspace.clone(),
             8,
             vec!["Cargo.toml".into()],
@@ -119,7 +119,7 @@ fn project_root_resolution_requires_valid_tool_evidence_and_prefers_the_nested_p
     assert_eq!(resolution.project_root, None);
 
     fs::write(workspace.join("orphan.rs"), "fn orphan() {}\n").unwrap();
-    let orphan = fs::canonicalize(workspace.join("orphan.rs")).unwrap();
+    let orphan = crate::files::canonicalize(workspace.join("orphan.rs")).unwrap();
     service
         .resolve(
             orphan,
@@ -143,7 +143,7 @@ fn project_root_resolution_requires_valid_tool_evidence_and_prefers_the_nested_p
 #[test]
 fn a_file_not_saved_yet_still_finds_its_project_root() {
     let workspace = tempdir().unwrap();
-    let workspace = fs::canonicalize(workspace.path()).unwrap();
+    let workspace = crate::files::canonicalize(workspace.path()).unwrap();
     fs::write(workspace.join("Cargo.toml"), "[package]\nname = \"a\"\n").unwrap();
     let mut service = ProjectRootWorker::default();
     service
@@ -264,7 +264,7 @@ fn project_roots_accept_bom_prefixed_node_manifests() {
         .unwrap();
         assert_eq!(
             resolution.project_root,
-            Some(fs::canonicalize(root.path()).unwrap())
+            Some(crate::files::canonicalize(root.path()).unwrap())
         );
         fs::remove_file(root.path().join(marker)).unwrap();
     }
@@ -317,7 +317,7 @@ fn explorer_watch_reads_symlinked_ignore_files() {
     let target = outside.path().join("ignore");
     fs::write(&target, "one.txt\n").unwrap();
     symlink(&target, root.path().join(".gitignore")).unwrap();
-    let roots = vec![fs::canonicalize(root.path()).unwrap()];
+    let roots = vec![crate::files::canonicalize(root.path()).unwrap()];
     let before = explorer_directory_fingerprint(root.path(), &roots, 10, 4096).unwrap();
     fs::write(&target, "two.txt\n").unwrap();
     let after = explorer_directory_fingerprint(root.path(), &roots, 10, 4096).unwrap();
@@ -360,7 +360,7 @@ fn explorer_watch_reads_symlinked_ignore_files() {
 #[test]
 fn explorer_watch_fingerprints_are_deterministic_metadata_only_and_bounded() {
     let root = tempdir().unwrap();
-    let canonical = fs::canonicalize(root.path()).unwrap();
+    let canonical = crate::files::canonicalize(root.path()).unwrap();
     fs::write(root.path().join("b"), "one").unwrap();
     fs::create_dir(root.path().join("a")).unwrap();
     let first =
@@ -415,7 +415,7 @@ fn explorer_watch_preserves_non_utf8_names_and_never_follows_symlinks() {
     use std::os::unix::ffi::OsStringExt;
     use std::os::unix::fs::symlink;
     let root = tempdir().unwrap();
-    let canonical = fs::canonicalize(root.path()).unwrap();
+    let canonical = crate::files::canonicalize(root.path()).unwrap();
     let non_utf8 = std::ffi::OsString::from_vec(vec![b'x', 0xff]);
     assert_eq!(watch_name_bytes(&non_utf8), vec![b'x', 0xff]);
     let outside = tempdir().unwrap();
@@ -1078,7 +1078,7 @@ fn a_root_shows_its_worktrees_and_a_worktree_shows_only_itself() {
         return;
     }
     let repository = repository_with_worktree();
-    let root = repository.path().canonicalize().expect("root");
+    let root = crate::files::canonicalize(repository.path()).expect("root");
     let worktree = root.join(".worktree/feat");
 
     let listing = list_scoped_directory(1, 0, &root, std::slice::from_ref(&root), false, false, 10)
@@ -1230,7 +1230,7 @@ fn worktree_discovery_respects_the_listing_limit() {
         return;
     }
     let repository = repository_with_worktree();
-    let root = repository.path().canonicalize().unwrap();
+    let root = crate::files::canonicalize(repository.path()).unwrap();
     let listing =
         list_scoped_directory(1, 0, &root, std::slice::from_ref(&root), false, false, 1).unwrap();
     assert_eq!(listing.entries.len(), 1);
@@ -1304,7 +1304,7 @@ fn scoped_directory_listing_is_lazy_sorted_hidden_aware_and_bounded() {
     fs::write(root.path().join("file10"), "10").expect("file10");
     fs::write(root.path().join("file2"), "2").expect("file2");
     fs::write(root.path().join(".hidden"), "h").expect("hidden");
-    let canonical = fs::canonicalize(root.path()).expect("canonical");
+    let canonical = crate::files::canonicalize(root.path()).expect("canonical");
     let mut service = DirectoryWorker::default();
     service
         .list(
@@ -1354,7 +1354,7 @@ fn scoped_directory_listing_does_not_traverse_symlink_escape_and_handles_non_utf
     symlink(outside.path(), root.path().join("escape")).expect("symlink");
     let invalid = std::ffi::OsString::from_vec(vec![b'x', 0xff]);
     let invalid_created = fs::write(root.path().join(invalid), "x").is_ok();
-    let canonical = fs::canonicalize(root.path()).expect("canonical");
+    let canonical = crate::files::canonicalize(root.path()).expect("canonical");
     let result = list_scoped_directory(
         1,
         0,
@@ -1814,7 +1814,7 @@ fn scoped_read_rejects_symlink_escape_after_canonicalization() {
     let id = worker
         .read_scoped(
             link,
-            vec![fs::canonicalize(root.path()).expect("canonical root")],
+            vec![crate::files::canonicalize(root.path()).expect("canonical root")],
         )
         .expect("queue");
     let deadline = Instant::now() + Duration::from_secs(2);
@@ -1943,7 +1943,7 @@ fn explorer_copies_preserve_private_and_executable_permissions() {
     use std::os::unix::fs::MetadataExt;
     use std::os::unix::fs::PermissionsExt;
     let root = tempdir().unwrap();
-    let roots = vec![fs::canonicalize(root.path()).unwrap()];
+    let roots = vec![crate::files::canonicalize(root.path()).unwrap()];
     for mode in [0o600, 0o751] {
         let source = root.path().join(format!("source-{mode:o}"));
         let target = root.path().join(format!("target-{mode:o}"));
@@ -1973,7 +1973,7 @@ fn explorer_mutations_are_scoped_non_overwriting_and_worker_owned() {
         let id = worker
             .explorer_mutate(
                 operation,
-                vec![fs::canonicalize(root).expect("canonical root")],
+                vec![crate::files::canonicalize(root).expect("canonical root")],
                 1024,
             )
             .expect("queue mutation");
@@ -2308,7 +2308,7 @@ fn patterned_project_marker_detects_opam_project() {
     .unwrap();
     assert_eq!(
         result.project_root,
-        Some(root.path().canonicalize().unwrap())
+        Some(crate::files::canonicalize(root.path()).unwrap())
     );
     std::fs::remove_file(root.path().join("example.opam")).unwrap();
     let result = crate::files::project_root::resolve_project_root(

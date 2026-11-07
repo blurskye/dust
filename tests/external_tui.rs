@@ -47,7 +47,7 @@ fn wait_for_preflight(
 #[ignore = "operator probe: requires NixOS LazyGit absolute path"]
 fn lazygit_version_uses_canonical_preflight_and_portable_pty_without_shell() {
     let executable = PathBuf::from("/run/current-system/sw/bin/lazygit");
-    let cwd = std::env::temp_dir().canonicalize().unwrap();
+    let cwd = dust::files::canonicalize(std::env::temp_dir()).unwrap();
     let deadline = Instant::now() + Duration::from_secs(5);
     let mut preflight = ExecutionPreflightWorker::start(2);
     preflight
@@ -132,7 +132,7 @@ fn lazygit_launch_resize_and_quit_uses_preflight_pty() {
         .unwrap();
     drop(tree);
     let executable = PathBuf::from("/run/current-system/sw/bin/lazygit");
-    let cwd = dir.path().canonicalize().unwrap();
+    let cwd = dust::files::canonicalize(dir.path()).unwrap();
     let deadline = Instant::now() + Duration::from_secs(5);
     let mut preflight = ExecutionPreflightWorker::start(2);
     preflight
@@ -272,8 +272,8 @@ fn production_binary_ignores_external_tui_fixture_environment() {
 
 #[test]
 fn canonical_preflight_portable_pty_drives_external_tui_fixture_without_shell() {
-    let executable = std::env::current_exe().unwrap().canonicalize().unwrap();
-    let cwd = std::env::temp_dir().canonicalize().unwrap();
+    let executable = dust::files::canonicalize(std::env::current_exe().unwrap()).unwrap();
+    let cwd = dust::files::canonicalize(std::env::temp_dir()).unwrap();
     let mut preflight = ExecutionPreflightWorker::start(2);
     preflight
         .request(ExecutionPreflightRequest {

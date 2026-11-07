@@ -247,9 +247,8 @@ pub fn apply_config_migration(
     source: &str,
     migrated: &str,
 ) -> Result<(), crate::files::VfsError> {
-    let target = path
-        .canonicalize()
-        .map_err(|source| crate::files::VfsError::Io {
+    let target =
+        crate::files::canonicalize(path).map_err(|source| crate::files::VfsError::Io {
             operation: "resolve migration destination",
             path: path.to_path_buf(),
             source,

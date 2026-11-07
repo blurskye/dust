@@ -273,8 +273,8 @@ fn main_repository(repository: &git2::Repository) -> Result<git2::Repository, Gi
     }
     let checked = open(path)?;
     if checked.is_worktree()
-        || checked.commondir().canonicalize().map_err(backend)?
-            != repository.commondir().canonicalize().map_err(backend)?
+        || crate::files::canonicalize(checked.commondir()).map_err(backend)?
+            != crate::files::canonicalize(repository.commondir()).map_err(backend)?
     {
         return Err(GitBranchError::NotRepository);
     }
@@ -373,7 +373,7 @@ fn read_list(
     let main = main_repository(&repository)?;
     let main_path = main
         .workdir()
-        .and_then(|path| std::fs::canonicalize(path).ok());
+        .and_then(|path| crate::files::canonicalize(path).ok());
     let mut worktrees = vec![GitWorktreeEntry {
         name: "main".into(),
         path: main_path.clone().unwrap_or_default(),
@@ -809,8 +809,10 @@ fn run(
             let path = worktree.path().to_path_buf();
             if path.try_exists().map_err(backend)? {
                 let opened = git2::Repository::open(&path).map_err(backend)?;
-                let workdir = opened.workdir().and_then(|path| path.canonicalize().ok());
-                if workdir != Some(path.canonicalize().map_err(backend)?) {
+                let workdir = opened
+                    .workdir()
+                    .and_then(|path| crate::files::canonicalize(path).ok());
+                if workdir != Some(crate::files::canonicalize(&path).map_err(backend)?) {
                     return Err(GitBranchError::RefusedDirtyWorktree(name.clone()));
                 }
                 if has_changes(&opened, cancel, expires)? {

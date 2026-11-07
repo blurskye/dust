@@ -191,7 +191,7 @@ impl LspServerConfiguration {
 }
 
 fn typescript_sdk_for_executable(executable: &Path) -> Option<PathBuf> {
-    let executable = std::fs::canonicalize(executable).ok()?;
+    let executable = crate::files::canonicalize(executable).ok()?;
     for ancestor in executable.ancestors().take(12) {
         for candidate in [
             ancestor.join("typescript/lib"),
@@ -201,7 +201,7 @@ fn typescript_sdk_for_executable(executable: &Path) -> Option<PathBuf> {
             if candidate.join("typescript.js").is_file()
                 || candidate.join("tsserverlibrary.js").is_file()
             {
-                return std::fs::canonicalize(candidate).ok();
+                return crate::files::canonicalize(candidate).ok();
             }
         }
     }

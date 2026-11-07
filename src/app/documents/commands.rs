@@ -272,12 +272,13 @@ impl App {
             AppEffect::SaveAll { quit_after } => self.save_all(quit_after),
             AppEffect::OpenPath(path) => self.edit_path(path),
             AppEffect::ForceOpenPath(path) => {
-                let wanted = self.state.workspace_root.join(&path).canonicalize().ok();
+                let wanted =
+                    crate::files::canonicalize(self.state.workspace_root.join(&path)).ok();
                 let current = self
                     .state
                     .active_buffer_id()
                     .and_then(|id| self.state.buffers[id].path.as_ref())
-                    .and_then(|file| file.canonicalize().ok());
+                    .and_then(|file| crate::files::canonicalize(file).ok());
                 if wanted.is_some() && wanted == current {
                     self.start_reload(true);
                 } else {

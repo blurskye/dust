@@ -493,7 +493,7 @@ pub fn read_hunks(p: &GitHunkPolicy) -> Result<GitHunkSnapshot, GitHunkError> {
 pub(super) fn open_hunk_repository(
     p: &GitHunkPolicy,
 ) -> Result<(PathBuf, git2::Repository, PathBuf, PathBuf), GitHunkError> {
-    let root = std::fs::canonicalize(&p.scope_root)
+    let root = crate::files::canonicalize(&p.scope_root)
         .map_err(|e| GitHunkError::Backend(e.to_string().chars().take(1024).collect()))?;
     let mut checked = root.clone();
     for component in &p.file {
@@ -513,7 +513,7 @@ pub(super) fn open_hunk_repository(
     }
     let repo = git2::Repository::discover(&root)
         .map_err(|e| GitHunkError::Backend(e.message().chars().take(1024).collect()))?;
-    let workdir = std::fs::canonicalize(repo.workdir().ok_or(GitHunkError::OutsideScope)?)
+    let workdir = crate::files::canonicalize(repo.workdir().ok_or(GitHunkError::OutsideScope)?)
         .map_err(|_| GitHunkError::OutsideScope)?;
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     workdir.hash(&mut hasher);

@@ -195,9 +195,9 @@ mod tests {
         .unwrap();
         assert_eq!(
             result.executable,
-            std::fs::canonicalize(executable).unwrap()
+            crate::files::canonicalize(executable).unwrap()
         );
-        assert_eq!(result.cwd, std::fs::canonicalize(&root).unwrap());
+        assert_eq!(result.cwd, crate::files::canonicalize(&root).unwrap());
         assert_eq!(result.root_revision, 7);
     }
 
@@ -475,8 +475,8 @@ fn preflight(
     request: ExecutionPreflightRequest,
 ) -> Result<ExecutionPreflightResult, String> {
     let executable =
-        std::fs::canonicalize(&request.executable).map_err(|error| error.to_string())?;
-    let cwd = std::fs::canonicalize(&request.cwd).map_err(|error| error.to_string())?;
+        crate::files::canonicalize(&request.executable).map_err(|error| error.to_string())?;
+    let cwd = crate::files::canonicalize(&request.cwd).map_err(|error| error.to_string())?;
     let executable_metadata =
         std::fs::symlink_metadata(&executable).map_err(|error| error.to_string())?;
     let cwd_metadata = std::fs::symlink_metadata(&cwd).map_err(|error| error.to_string())?;
@@ -489,7 +489,7 @@ fn preflight(
     let mut roots = request
         .roots
         .into_iter()
-        .filter_map(|root| std::fs::canonicalize(root).ok())
+        .filter_map(|root| crate::files::canonicalize(root).ok())
         .filter(|root| cwd.starts_with(root))
         .collect::<Vec<_>>();
     roots.sort_by_key(|root| std::cmp::Reverse(root.components().count()));

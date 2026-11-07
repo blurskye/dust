@@ -326,7 +326,7 @@ pub(super) fn run_workspace_search(
     };
     let mut roots = Vec::new();
     for root in &policy.roots {
-        match fs::canonicalize(root) {
+        match crate::files::canonicalize(root) {
             Ok(root) => roots.push(root),
             Err(error) => {
                 send_failure(format!(

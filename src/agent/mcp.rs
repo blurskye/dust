@@ -442,6 +442,8 @@ mod tests {
             io::ErrorKind::WouldBlock
         );
         for mut stream in connections {
+            // macOS hands out accepted sockets non-blocking like their listener.
+            stream.set_nonblocking(false).unwrap();
             stream
                 .set_read_timeout(Some(Duration::from_secs(5)))
                 .unwrap();

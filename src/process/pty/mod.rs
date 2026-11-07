@@ -396,8 +396,7 @@ fn open_working_directory(
     root: Option<&crate::files::RootIdentity>,
 ) -> Result<std::fs::File, PtyError> {
     let fail = |error: String| PtyError::Spawn(error);
-    let canonical = path
-        .canonicalize()
+    let canonical = crate::files::canonicalize(path)
         .map_err(|e| fail(format!("PTY working directory is unavailable: {e}")))?;
     if let Some(root) = root {
         let current = crate::files::RootIdentity::capture(&root.canonical_path)
@@ -437,7 +436,7 @@ fn working_directory_path(
     }
     #[cfg(windows)]
     {
-        _path.canonicalize()
+        crate::files::canonicalize(&_path)
     }
 }
 
@@ -475,13 +474,8 @@ fn run(
             .map_err(|error| fail(error.to_string()))?
             .join(program)
     };
-    if program
-        .canonicalize()
-        .map_err(|error| fail(error.to_string()))?
-        != request
-            .program
-            .canonicalize()
-            .map_err(|error| fail(error.to_string()))?
+    if crate::files::canonicalize(&program).map_err(|error| fail(error.to_string()))?
+        != crate::files::canonicalize(&request.program).map_err(|error| fail(error.to_string()))?
     {
         return Err(fail("PTY executable target changed".into()));
     }

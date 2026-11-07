@@ -619,10 +619,10 @@ pub(super) fn read_status(
     unsaved: &[GitUnsavedDocument],
     cancel: &AtomicBool,
 ) -> Result<GitStatusSnapshot, GitStatusError> {
-    let root = std::fs::canonicalize(&p.root).map_err(|e| backend(&e.to_string()))?;
+    let root = crate::files::canonicalize(&p.root).map_err(|e| backend(&e.to_string()))?;
     let repo = git2::Repository::discover(&root).map_err(|_| GitStatusError::NotRepository)?;
     let workdir = repo.workdir().ok_or(GitStatusError::BareUnsupported)?;
-    let workdir = std::fs::canonicalize(workdir).map_err(|e| backend(&e.to_string()))?;
+    let workdir = crate::files::canonicalize(workdir).map_err(|e| backend(&e.to_string()))?;
     if !root.starts_with(&workdir) && !workdir.starts_with(&root) {
         return Err(GitStatusError::OutsideScope);
     }

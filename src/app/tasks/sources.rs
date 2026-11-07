@@ -119,12 +119,12 @@ pub(super) fn source_path(path: &Path) -> PathBuf {
 }
 
 pub(super) fn resolve_source_path(path: &Path) -> std::io::Result<PathBuf> {
-    std::fs::canonicalize(path).or_else(|error| {
+    crate::files::canonicalize(path).or_else(|error| {
         if error.kind() != std::io::ErrorKind::NotFound {
             return Err(error);
         }
         // A new open buffer can have a missing file under a symlinked directory.
-        let parent = std::fs::canonicalize(path.parent().ok_or(error)?)?;
+        let parent = crate::files::canonicalize(path.parent().ok_or(error)?)?;
         Ok(parent.join(
             path.file_name()
                 .ok_or_else(|| std::io::Error::other("linter source has no filename"))?,

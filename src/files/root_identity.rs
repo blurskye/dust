@@ -16,11 +16,12 @@ pub struct RootIdentity {
 
 impl RootIdentity {
     pub fn capture(path: &Path) -> Result<Self, VfsError> {
-        let canonical_path = fs::canonicalize(path).map_err(|source| VfsError::RootIo {
-            operation: "canonicalize workspace root",
-            path: path.to_path_buf(),
-            source,
-        })?;
+        let canonical_path =
+            crate::files::canonicalize(path).map_err(|source| VfsError::RootIo {
+                operation: "canonicalize workspace root",
+                path: path.to_path_buf(),
+                source,
+            })?;
         let metadata = fs::metadata(&canonical_path).map_err(|source| VfsError::RootIo {
             operation: "inspect workspace root",
             path: canonical_path.clone(),
@@ -100,7 +101,7 @@ mod tests {
             error.to_string(),
             format!(
                 "workspace root is not a directory: {}",
-                path.canonicalize().unwrap().display()
+                crate::files::canonicalize(&path).unwrap().display()
             )
         );
     }

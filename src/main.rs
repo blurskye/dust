@@ -238,7 +238,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
     if let Some(path) = &cli.migrate_config {
-        let path = fs::canonicalize(path)?;
+        let path = dust::files::canonicalize(path)?;
         if !fs::metadata(&path)?.is_file() {
             return Err("configuration must be a regular file".into());
         }

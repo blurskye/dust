@@ -447,7 +447,7 @@ impl App {
         let listing_tests = launch.program.is_some() && launch.test.is_some();
         let executable = if listing_tests {
             let path = launch.program.as_ref().expect("test binary");
-            match path.canonicalize() {
+            match crate::files::canonicalize(path) {
                 Ok(path) if self.workspace.require_path(&path).is_ok() => path,
                 _ => {
                     self.show_error("Test binary is missing or outside the workspace; rebuild inside the project, then Space t d");

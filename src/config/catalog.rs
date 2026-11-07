@@ -197,8 +197,10 @@ pub(super) struct UserFile {
 impl UserFile {
     pub(super) fn read(path: &Path) -> Result<Self, String> {
         let path = match std::fs::symlink_metadata(path) {
-            Ok(metadata) if metadata.file_type().is_symlink() => std::fs::canonicalize(path)
-                .map_err(|error| format!("cannot resolve {}: {error}", path.display()))?,
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                crate::files::canonicalize(path)
+                    .map_err(|error| format!("cannot resolve {}: {error}", path.display()))?
+            }
             Ok(_) => path.to_path_buf(),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => path.to_path_buf(),
             Err(error) => return Err(format!("cannot inspect {}: {error}", path.display())),

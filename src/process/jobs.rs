@@ -435,10 +435,7 @@ impl JobEngine {
             input,
         } = submission;
         let streaming = input.is_some();
-        let cwd = request
-            .cwd
-            .canonicalize()
-            .map_err(|_| JobError::InvalidPolicy)?;
+        let cwd = crate::files::canonicalize(&request.cwd).map_err(|_| JobError::InvalidPolicy)?;
         if let Some(expected) = root
             && (crate::files::RootIdentity::capture(&expected.canonical_path)
                 .ok()
@@ -1302,7 +1299,7 @@ mod tests {
         let invocation = root.path().join("custom-sh");
         std::os::unix::fs::symlink("/bin/sh", &invocation).unwrap();
         let (mut queued, _) = submission(root.path(), "printf '%s' \"$0\"");
-        queued.request.program = invocation.canonicalize().unwrap();
+        queued.request.program = crate::files::canonicalize(&invocation).unwrap();
         queued.request.argv0 = Some(invocation.clone());
         let mut engine = JobEngine::new(16);
         engine.start(queued).unwrap();

@@ -116,8 +116,8 @@ pub(super) fn handle_server_message(context: ServerMessageContext<'_>, message: 
             let disk = (!rejected && !diagnostic_lineage.tracked(uri))
                 .then(|| {
                     let path = crate::language::lsp::paths::path_from_file_uri(uri)?;
-                    let path = std::fs::canonicalize(path).ok()?;
-                    let root = std::fs::canonicalize(root).ok()?;
+                    let path = crate::files::canonicalize(path).ok()?;
+                    let root = crate::files::canonicalize(root).ok()?;
                     if !path.starts_with(root) {
                         return None;
                     }

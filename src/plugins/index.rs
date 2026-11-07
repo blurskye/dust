@@ -75,8 +75,9 @@ pub(crate) fn index_manifest_from_store(
     if manifest_relative.is_absolute() || component_relative.is_absolute() {
         return Err(PluginError::OutsideStore);
     }
-    let store = fs::canonicalize(store).map_err(PluginError::Io)?;
-    let manifest_path = fs::canonicalize(store.join(manifest_relative)).map_err(PluginError::Io)?;
+    let store = crate::files::canonicalize(store).map_err(PluginError::Io)?;
+    let manifest_path =
+        crate::files::canonicalize(store.join(manifest_relative)).map_err(PluginError::Io)?;
     if !manifest_path.starts_with(&store) {
         return Err(PluginError::OutsideStore);
     }
@@ -632,8 +633,8 @@ pub(crate) fn load_component(
     manifest: PluginManifest,
     limits: &PluginLimits,
 ) -> Result<LoadOutcome, PluginError> {
-    let store = fs::canonicalize(store).map_err(PluginError::Io)?;
-    let path = fs::canonicalize(path).map_err(PluginError::Io)?;
+    let store = crate::files::canonicalize(store).map_err(PluginError::Io)?;
+    let path = crate::files::canonicalize(path).map_err(PluginError::Io)?;
     if !path.starts_with(&store) {
         return Err(PluginError::OutsideStore);
     }
