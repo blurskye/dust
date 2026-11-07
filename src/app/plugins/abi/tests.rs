@@ -193,7 +193,7 @@ fn two_real_guest_wrappers_continue_the_same_builtin_and_hold_later_keys() {
         )
     );
     assert!(app.input.command_pending());
-    let pending = app.input.pending_wrapper().unwrap();
+    let pending = app.input.pending_input_command().unwrap();
     app.handle_configured_key("z".parse().unwrap());
     assert_eq!(app.state.buffers[buffer].text.to_string(), "abc");
     pump(&mut app, |app| {
@@ -323,6 +323,67 @@ fn real_guest_runs_native_commands_and_an_ordinary_error_does_not_unload_it() {
 }
 
 #[test]
+fn real_guest_native_edits_record_the_completed_command_for_dot() {
+    let (_roots, mut app) = real_app(&["demo"]);
+    action(&mut app, "demo", "run");
+    let repeat = app.input.repeat_plan(100, None).unwrap();
+    assert_eq!(repeat.len(), 1);
+    assert_eq!(repeat[0].id.as_str(), "plugin.demo.drive");
+    app.handle_configured_key(".".parse().unwrap());
+    assert!(app.input.command_pending());
+    pump(&mut app, |app| !app.input.command_pending());
+    assert_eq!(
+        app.state.buffers[app.state.active_buffer_id().unwrap()]
+            .text
+            .to_string(),
+        "runrunabc"
+    );
+}
+
+#[test]
+fn plugin_command_requests_allow_granted_effects_but_refuse_host_only_effects() {
+    let (_roots, mut app) = real_app(&["demo"]);
+    let authority = CommandAuthority::Plugin {
+        initiator: "demo".into(),
+        grants: [CommandAccess::Ui].into(),
+    };
+    for (name, effect, allowed) in [
+        ("test.dismiss", AppEffect::NotificationDismiss, true),
+        ("test.quit", AppEffect::Quit { force: true }, false),
+    ] {
+        let mut spec = crate::editor::CommandSpec::builtin(name, "Effect").unwrap();
+        spec.access = [CommandAccess::Ui].into();
+        app.commands
+            .register(spec, move |_, _| {
+                Ok(CommandOutcome {
+                    effects: vec![effect.clone()],
+                    ..CommandOutcome::empty()
+                })
+            })
+            .unwrap();
+        app.show_error("visible notice");
+        let call = command_call(
+            &CommandInvocation::new(name, InvocationSource::Plugin).unwrap(),
+            None,
+        );
+        app.apply_editor_request("demo", &authority, EditorRequest::Run(42, call))
+            .unwrap();
+        let reply = app
+            .extension
+            .abi
+            .replies
+            .get_mut("demo")
+            .unwrap()
+            .pop()
+            .unwrap();
+        assert_eq!(reply.error.is_none(), allowed);
+        assert_eq!(app.ui.notification.is_none(), allowed);
+        assert!(!app.should_quit);
+        assert_eq!(app.effect_authority, CommandAuthority::Host);
+    }
+}
+
+#[test]
 fn real_guest_timers_fire_once_and_http_requires_an_approved_host() {
     let (_roots, mut app) = real_app(&["demo"]);
     action(&mut app, "demo", "timer");
@@ -360,10 +421,18 @@ fn real_guest_lsp_filters_wait_for_call_next_or_suppress_the_message() {
             !app.input.command_pending(),
             "server messages must not hold keyboard input"
         );
-        let pending = app.extension.abi.waiting.values().find_map(|call| call.pending).unwrap();
+        let pending = app
+            .extension
+            .abi
+            .waiting
+            .values()
+            .find_map(|call| call.pending)
+            .unwrap();
         assert!(app.input.pending_invocation(pending).is_some());
         assert!(app.incoming_command_pending(1));
-        pump(&mut app, |app| app.input.pending_invocation(pending).is_none());
+        pump(&mut app, |app| {
+            app.input.pending_invocation(pending).is_none()
+        });
         assert!(!app.incoming_command_pending(1));
         assert_eq!(
             app.language

@@ -202,7 +202,7 @@ fn wrapped_session() -> crate::app::tests::driver::TestSession {
 }
 
 fn resume_wrapper(app: &mut crate::app::App) -> bool {
-    let pending = app.input.pending_wrapper().unwrap();
+    let pending = app.input.pending_input_command().unwrap();
     let invocation = app.input.pending_invocation(pending).unwrap().invocation;
     app.process_effect_checked(crate::app::commands::AppEffect::CommandResume {
         pending,
@@ -280,7 +280,7 @@ fn failed_wrapper_resume_releases_keys_without_recording_the_command() {
     let app = &mut session.application;
     let before = app.input.repeat_plan(100, None).unwrap();
     keys(app, &["q", "a", "x", "l", "q"]);
-    let pending = app.input.pending_wrapper().unwrap();
+    let pending = app.input.pending_input_command().unwrap();
     assert!(
         !app.process_effect_checked(crate::app::commands::AppEffect::CommandResume {
             pending,
@@ -316,6 +316,70 @@ fn unloaded_wrapper_releases_held_keys() {
             .text
             .to_string(),
         "abcdef"
+    );
+}
+
+#[test]
+fn incoming_lsp_wait_does_not_replace_or_release_the_keyboard_command() {
+    use crate::app::commands::AppEffect;
+    use crate::editor::{CommandAuthority, CommandValue, CommandWrapperAction};
+    let mut session = wrapped_session();
+    let app = &mut session.application;
+    let command = crate::app::language::incoming::command_id("window/showMessage");
+    app.commands
+        .register_wrapper(
+            &crate::editor::CommandId::new(&command).unwrap(),
+            "filter".into(),
+            0,
+            CommandAuthority::Host,
+            |_, _, _, _| Ok(CommandWrapperAction::Pending(Vec::new())),
+        )
+        .unwrap();
+    keys(app, &["x", "l"]);
+    let keyboard = app.input.pending_input_command().unwrap();
+    let incoming = CommandInvocation::new(&command, InvocationSource::Startup)
+        .unwrap()
+        .with_argument("event", CommandValue::Integer(42))
+        .with_argument("method", CommandValue::String("window/showMessage".into()))
+        .with_argument("server", CommandValue::String("server".into()));
+    assert!(app.invoke_checked(incoming));
+    assert!(app.incoming_command_pending(42));
+    assert_eq!(app.input.pending_input_command(), Some(keyboard));
+    let background = *app
+        .input
+        .pending_commands
+        .keys()
+        .find(|id| **id != keyboard)
+        .unwrap();
+    assert!(app.process_effect_checked(AppEffect::CommandResume {
+        pending: background,
+        owner: "filter".into(),
+        action: Box::new(CommandWrapperAction::Complete(
+            crate::editor::CommandOutcome::empty()
+        )),
+    }));
+    assert!(!app.incoming_command_pending(42));
+    assert_eq!(app.input.pending_input_command(), Some(keyboard));
+    assert_eq!(
+        app.state.buffers[app.state.active_buffer_id().unwrap()]
+            .text
+            .to_string(),
+        "abcdef"
+    );
+    assert!(resume_wrapper(app));
+    assert!(!app.input.command_pending());
+    assert!(app.input.pending_commands.is_empty());
+    assert_eq!(
+        app.state.buffers[app.state.active_buffer_id().unwrap()]
+            .text
+            .to_string(),
+        "bcdef"
+    );
+    assert_eq!(
+        app.state.views[app.state.active_view().unwrap()]
+            .cursor
+            .get(),
+        1
     );
 }
 

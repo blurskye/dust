@@ -997,7 +997,10 @@ pub(crate) fn execute_component(
         .and_then(|result| {
             if started.elapsed() > result_timeout {
                 Err(PluginError::Deadline)
-            } else if result.as_ref().is_ok_and(|result| result.len() > 1024 * 1024) {
+            } else if result
+                .as_ref()
+                .is_ok_and(|result| result.len() > 1024 * 1024)
+            {
                 Err(PluginError::InvalidInvocation)
             } else {
                 Ok(result)

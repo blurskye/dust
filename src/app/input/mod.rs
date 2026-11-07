@@ -2905,7 +2905,10 @@ impl App {
 
 impl App {
     pub(in crate::app) fn flush_keymap_timeout(&mut self) {
-        let cancelled: Vec<_> = self.input.pending_commands.iter()
+        let cancelled: Vec<_> = self
+            .input
+            .pending_commands
+            .iter()
             .filter(|(id, pending)| pending.wrapper && !self.commands.is_pending(**id))
             .map(|(id, _)| *id)
             .collect();
@@ -3043,15 +3046,18 @@ impl InputState {
         true
     }
 
-    pub(in crate::app) fn pending_wrapper(&self) -> Option<crate::editor::PendingCommandId> {
-        self.pending_input.filter(|id| self.pending_commands[id].wrapper)
+    pub(in crate::app) fn pending_input_command(&self) -> Option<crate::editor::PendingCommandId> {
+        self.pending_input
     }
 
     pub(in crate::app) fn pending_invocation(
         &self,
         id: crate::editor::PendingCommandId,
     ) -> Option<crate::app::commands::PendingInvocation> {
-        let pending = self.pending_commands.get(&id).filter(|pending| pending.wrapper)?;
+        let pending = self
+            .pending_commands
+            .get(&id)
+            .filter(|pending| pending.wrapper)?;
         Some(crate::app::commands::PendingInvocation {
             invocation: pending.invocation.clone(),
             repeat_override: pending.repeat.clone(),
@@ -3069,20 +3075,28 @@ impl InputState {
         }
         // Incoming server handlers can wait without stopping typing. Nested plugin calls
         // share the outer command's input hold, but retain their own continuation.
-        if !invocation.invocation.id.as_str().starts_with("lsp.incoming.") {
+        if !invocation
+            .invocation
+            .id
+            .as_str()
+            .starts_with("lsp.incoming.")
+        {
             self.pending_input.get_or_insert(id);
         }
-        self.pending_commands.insert(id, PendingCommand {
-            wrapper: true,
-            repeat: Some(
-                invocation
-                    .repeat_override
-                    .unwrap_or_else(|| invocation.invocation.clone()),
-            ),
-            invocation: invocation.invocation,
-            suppress_repeat: invocation.suppress_repeat,
-            text_changed: false,
-        });
+        self.pending_commands.insert(
+            id,
+            PendingCommand {
+                wrapper: true,
+                repeat: Some(
+                    invocation
+                        .repeat_override
+                        .unwrap_or_else(|| invocation.invocation.clone()),
+                ),
+                invocation: invocation.invocation,
+                suppress_repeat: invocation.suppress_repeat,
+                text_changed: false,
+            },
+        );
     }
 
     pub(in crate::app) fn incoming_command_pending(
@@ -3094,7 +3108,8 @@ impl InputState {
             pending.wrapper
                 && commands.is_pending(*id)
                 && pending.invocation.id.as_str().starts_with("lsp.incoming.")
-                && pending.invocation.arguments.get("event") == Some(&crate::editor::CommandValue::Integer(event))
+                && pending.invocation.arguments.get("event")
+                    == Some(&crate::editor::CommandValue::Integer(event))
         })
     }
 
@@ -3111,14 +3126,17 @@ impl InputState {
             _ => None,
         }) {
             self.pending_input.get_or_insert(id);
-            self.pending_commands.insert(id, PendingCommand {
-                wrapper: false,
-                invocation: invocation.clone(),
-                // A completed asynchronous edit repeats the semantic command, not its effects.
-                repeat: Some(repeat.unwrap_or(invocation).clone()),
-                suppress_repeat,
-                text_changed,
-            });
+            self.pending_commands.insert(
+                id,
+                PendingCommand {
+                    wrapper: false,
+                    invocation: invocation.clone(),
+                    // A completed asynchronous edit repeats the semantic command, not its effects.
+                    repeat: Some(repeat.unwrap_or(invocation).clone()),
+                    suppress_repeat,
+                    text_changed,
+                },
+            );
             true
         } else {
             false
@@ -3132,7 +3150,10 @@ impl InputState {
         suppress_repeat: bool,
         text_changed: bool,
     ) {
-        if let Some(pending) = self.pending_input.and_then(|id| self.pending_commands.get_mut(&id)) {
+        if let Some(pending) = self
+            .pending_input
+            .and_then(|id| self.pending_commands.get_mut(&id))
+        {
             pending.text_changed |= text_changed;
         } else {
             self.record_successful_invocation(invocation, repeat, suppress_repeat, text_changed);
@@ -3204,7 +3225,7 @@ impl App {
     }
 
     pub(in crate::app) fn fail_pending_input_command(&mut self) {
-        if let Some(id) = self.input.pending_input {
+        if let Some(id) = self.input.pending_input_command() {
             self.complete_input_command(id, false, false);
         }
     }

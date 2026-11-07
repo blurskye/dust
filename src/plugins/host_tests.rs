@@ -1871,7 +1871,12 @@ fn missed_command_deadline_discards_effects_and_the_instance_runs_again() {
     let mut request = empty_execution_request();
     request.command = "storage".into();
     let execution = crate::plugins::index::execute_component(request, &mut runtime).unwrap();
-    assert!(execution.error.as_ref().is_some_and(|error| error.starts_with("storage:1:")));
+    assert!(
+        execution
+            .error
+            .as_ref()
+            .is_some_and(|error| error.starts_with("storage:1:"))
+    );
     assert!(execution.storage_requests.is_empty());
     assert!(execution.editor_requests.is_empty());
     let mut request = empty_execution_request();

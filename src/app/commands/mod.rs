@@ -1073,7 +1073,12 @@ impl App {
                 previous,
             } => {
                 return self.execute_plugin_call(
-                    plugin, handler, *call, pending, previous, self.effect_authority.clone(),
+                    plugin,
+                    handler,
+                    *call,
+                    pending,
+                    previous,
+                    self.effect_authority.clone(),
                 );
             }
             AppEffect::CommandResume {
@@ -1614,6 +1619,9 @@ impl App {
                     .get(id)
                     .map(|buffer| buffer.text.source_version())
             });
+        if !succeeded {
+            self.plugin_command_result(None, Some("plugin command failed".into()));
+        }
         if !waiting || !succeeded {
             self.complete_input_command(pending, succeeded, changed);
         }
@@ -1759,7 +1767,10 @@ impl App {
                         return false;
                     }
                 }
-                if !waiting && !command_prompt {
+                if !waiting
+                    && !command_prompt
+                    && !invocation.id.as_str().starts_with("lsp.incoming.")
+                {
                     self.input.record_command_outcome(
                         &invocation,
                         repeat_override.as_ref(),
@@ -1822,7 +1833,7 @@ mod tests {
             .unwrap();
         assert!(app.invoke_checked(invocation.clone()));
         assert_eq!(app.state.buffers[buffer].text.to_string(), "");
-        let pending = app.input.pending_wrapper().unwrap();
+        let pending = app.input.pending_input_command().unwrap();
         assert!(
             !app.process_effect_checked(super::AppEffect::CommandResume {
                 pending,
@@ -1830,7 +1841,7 @@ mod tests {
                 action: Box::new(CommandWrapperAction::CallNext(invocation.clone())),
             })
         );
-        assert_eq!(app.input.pending_wrapper(), Some(pending));
+        assert_eq!(app.input.pending_input_command(), Some(pending));
         assert!(app.process_effect_checked(super::AppEffect::CommandResume {
             pending,
             owner: "example".into(),
