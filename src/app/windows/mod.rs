@@ -146,6 +146,7 @@ pub(super) struct Windows {
     epoch: u64,
     content_line: content::ContentLine,
     chrome: crate::ui::render::chrome::ChromeLayout,
+    named_segments: std::collections::BTreeMap<String, chrome::NamedSegment>,
     focus: FocusTarget,
     /// Where the keyboard was before the terminal took it, so hiding the terminal goes back there.
     before_terminal: FocusTarget,

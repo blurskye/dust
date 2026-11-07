@@ -20,7 +20,7 @@ use std::time::Instant;
 fn replacement_select_uses_native_row_actions_and_rejects_old_answers() {
     let (_dirs, mut app) = app();
     let (sender, requests) = std::sync::mpsc::sync_channel(8);
-    app.replace_select(Some(sender));
+    app.replace_select(Some(sender), crate::editor::CommandAuthority::Host);
     let rows = || {
         vec![(
             crate::workspace::PickerItem {
@@ -66,7 +66,7 @@ fn replacement_select_uses_native_row_actions_and_rejects_old_answers() {
 fn unknown_replacement_selection_does_not_run_another_rows_action() {
     let (_dirs, mut app) = app();
     let (sender, requests) = std::sync::mpsc::sync_channel(1);
-    app.replace_select(Some(sender));
+    app.replace_select(Some(sender), crate::editor::CommandAuthority::Host);
     app.install_picker("Empty".into(), Vec::new());
     requests
         .try_recv()

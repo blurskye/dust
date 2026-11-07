@@ -118,7 +118,9 @@ impl App {
         }
         self.project_input_hints();
         self.refresh_completions();
-        self.request_input_replacement();
+        if kind != PromptKind::Text {
+            self.request_input_replacement();
+        }
     }
 }
 
@@ -198,6 +200,7 @@ impl App {
 impl App {
     pub(in crate::app) fn close_prompt_with_editor_close(&mut self, cancel_editor_close: bool) {
         self.cancel_input_replacement();
+        self.finish_text_input(None);
         if self
             .input
             .prompt()
@@ -410,7 +413,8 @@ impl App {
         }
         if !matches!(
             prompt.kind,
-            PromptKind::WorkspaceTrust
+            PromptKind::Text
+                | PromptKind::WorkspaceTrust
                 | PromptKind::GitReset
                 | PromptKind::ExplorerDelete
                 | PromptKind::ExplorerRename
@@ -425,6 +429,10 @@ impl App {
             self.record_prompt_history(prompt.kind, &prompt.input);
         }
         match prompt.kind {
+            PromptKind::Text => {
+                self.finish_text_input(Some(prompt.input));
+                self.close_prompt();
+            }
             PromptKind::Command => match parse_ex(
                 &prompt.input,
                 &self.configuration.settings().input.command_aliases,
@@ -637,7 +645,10 @@ impl App {
         let prompt = if self.input_replacement_pending() {
             None
         } else {
-            self.input.prompt().cloned()
+            self.input.prompt().cloned().map(|mut prompt| {
+                self.mask_text_input(&mut prompt);
+                prompt
+            })
         };
         self.ui.set(prompt, |ui| &mut ui.prompt);
         self.preview_substitute();

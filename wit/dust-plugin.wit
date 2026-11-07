@@ -380,20 +380,6 @@ interface host {
   record http-request { url: string, method: string, headers: list<tuple<string, string>>, body: list<u8>, handler: string }
   record http-response { request: u64, status: u16, headers: list<tuple<string, string>>, body: list<u8>, error: option<string> }
 
-  // Part 2 owners implement these records; no imports claim support yet.
-  record editable-document { source: string, key: string, title: string, language: string, text: string }
-  record document-write { request: u64, buffer: u64, revision: u64, text: string }
-  record formatter { name: string, handler: string, order: s32 }
-  record format-request { request: u64, buffer: u64, revision: u64, start: option<u64>, end: option<u64>, before-save: bool }
-  record input-request { title: string, initial: string, secret: bool }
-  record select-item { id: string, label: string, detail: option<string> }
-  record select-request { title: string, items: list<select-item> }
-  enum notice-level { info, warning, error }
-  record notify-request { level: notice-level, message: string }
-  record styled-text { text: string, style: string }
-  enum segment-location { statusline, buffer-line }
-  record chrome-segment { name: string, location: segment-location, order: s32, text: list<styled-text>, command: option<string> }
-
   // Imports enqueue work; editor owners apply it after the guest returns.
   register-command: func(definition: command-definition) -> result<_, string>;
   run-command: func(call: command-call) -> result<u64, string>;
@@ -455,6 +441,35 @@ interface host {
   // opaque and never expose paths, editor IDs, graph IDs, or URI authority.
   take-virtual-document-requests: func() -> list<virtual-document-request>;
   queue-virtual-document-proposal: func(proposal: virtual-document-proposal) -> result<_, virtual-document-error>;
+
+  // Surface: ordinary interactions, editable documents, save steps and chrome.
+  record editable-document { source: string, key: string, title: string, language: string, text: string }
+  record document-write { request: u64, buffer: u64, revision: u64, text: string }
+  record formatter { name: string, handler: string, order: s32 }
+  record format-request { request: u64, buffer: u64, revision: u64, start: option<u64>, end: option<u64>, before-save: bool }
+  record input-request { title: string, initial: string, secret: bool }
+  record select-item { id: string, label: string, detail: option<string> }
+  record select-request { title: string, items: list<select-item> }
+  enum notice-level { info, warning, error }
+  record notify-request { level: notice-level, message: string }
+  record styled-text { text: string, style: string }
+  enum segment-location { statusline, buffer-line }
+  record chrome-segment { name: string, location: segment-location, order: s32, text: list<styled-text>, command: option<string> }
+  enum presenter-kind { input, select, notifications }
+
+  // Replies use take-command-replies in the named handler; cancellation has no value.
+  ui-input: func(request: input-request, handler: string) -> result<u64, string>;
+  ui-select: func(request: select-request, handler: string) -> result<u64, string>;
+  notify: func(request: notify-request) -> result<_, string>;
+  // None restores the host presenter. Permission and confirmation UI is never replaced.
+  set-presenter: func(kind: presenter-kind, handler: option<string>) -> result<_, string>;
+  answer-input: func(request: u64, text: option<string>) -> result<_, string>;
+  answer-select: func(request: u64, item: option<string>) -> result<_, string>;
+  open-editable-document: func(document: editable-document, handler: string) -> result<u64, string>;
+  register-formatter: func(filetype: string, step: formatter) -> result<_, string>;
+  register-before-save: func(filetype: string, step: formatter) -> result<_, string>;
+  set-chrome-segment: func(segment: chrome-segment) -> result<_, string>;
+  remove-chrome-segment: func(location: segment-location, name: string) -> result<_, string>;
 }
 
 world editor-plugin {

@@ -12,9 +12,9 @@ use std::time::{Duration, Instant};
 
 /// The receiver runs outside the editor loop and answers exactly once. Dropping it cancels
 /// the save; a failed custom write never falls through to a filesystem write.
-#[allow(dead_code)] // Read by the native provider receiver; the 0.2 bridge has no adapter yet.
 pub(in crate::app) struct SaveWorkRequest {
     pub buffer: BufferId,
+    pub authority: crate::editor::CommandAuthority,
     pub text: TextBuffer,
     pub reply: SyncSender<Result<Option<String>, String>>,
 }
@@ -40,6 +40,7 @@ struct EditableDocument {
 
 struct PendingSave {
     buffer: BufferId,
+    authority: crate::editor::CommandAuthority,
     source: TextVersion,
     steps: VecDeque<SaveStep>,
     reply: Option<Receiver<Result<Option<String>, String>>>,
@@ -59,13 +60,43 @@ pub(super) struct SaveWork {
     documents: HashMap<BufferId, EditableDocument>,
     before: HashMap<String, Vec<SaveStep>>,
     formatters: HashMap<String, Vec<Formatter>>,
+    named: HashMap<String, (String, bool, i32, SaveStep)>,
     pub(super) remaining_formatters: HashMap<BufferId, VecDeque<Formatter>>,
     pub(super) format_only: std::collections::HashSet<BufferId>,
     pending: HashMap<BufferId, PendingSave>,
 }
 
 impl Documents {
-    // These installation APIs are consumed by the next ABI wave, not the 0.2 bridge.
+    pub(in crate::app) fn register_save_step(
+        &mut self,
+        filetype: String,
+        before: bool,
+        order: i32,
+        step: SaveStep,
+    ) {
+        self.save_work
+            .named
+            .insert(step.name.clone(), (filetype, before, order, step));
+    }
+
+    pub(in crate::app) fn remove_save_step(&mut self, name: &str) {
+        self.save_work.named.remove(name);
+    }
+
+    fn named_save_steps(&self, filetype: &str, before: bool) -> Vec<SaveStep> {
+        let mut steps: Vec<_> = self
+            .save_work
+            .named
+            .values()
+            .filter(|(language, kind, _, _)| language == filetype && *kind == before)
+            .collect();
+        steps.sort_by_key(|(_, _, order, step)| (*order, &step.name));
+        steps
+            .into_iter()
+            .map(|(_, _, _, step)| step.clone())
+            .collect()
+    }
+
     #[allow(dead_code)]
     pub(in crate::app) fn set_before_save(&mut self, filetype: String, steps: Vec<SaveStep>) {
         self.save_work.before.insert(filetype, steps);
@@ -81,10 +112,19 @@ impl Documents {
     }
 
     pub(super) fn formatter_chain(&self, filetype: &str) -> Option<VecDeque<Formatter>> {
-        self.save_work
-            .formatters
-            .get(filetype)
-            .map(|steps| steps.iter().cloned().collect())
+        let named = self.named_save_steps(filetype, false);
+        let existing = self.save_work.formatters.get(filetype);
+        if named.is_empty() && existing.is_none() {
+            return None;
+        }
+        Some(
+            existing
+                .into_iter()
+                .flatten()
+                .cloned()
+                .chain(named.into_iter().map(Formatter::Text))
+                .collect(),
+        )
     }
 
     pub(in crate::app) fn stage_after_save_work(&mut self, buffer: BufferId) {
@@ -106,7 +146,6 @@ impl Documents {
 }
 
 impl App {
-    #[allow(dead_code)]
     pub(in crate::app) fn open_editable_document(
         &mut self,
         title: String,
@@ -114,6 +153,9 @@ impl App {
         text: String,
         save: SaveStep,
     ) -> Result<BufferId, String> {
+        self.effect_authority
+            .require(crate::editor::CommandAccess::Edit)
+            .map_err(|error| error.to_string())?;
         let (buffer, _) = self
             .state
             .open_text(TextBuffer::from_text(&text), None)
@@ -176,6 +218,7 @@ impl App {
             .flatten()
             .cloned()
             .collect();
+        steps.extend(self.documents.named_save_steps(&filetype, true));
         let provider = self.documents.save_work.documents.get(&buffer);
         if let Some(provider) = provider {
             if path.is_some() {
@@ -200,6 +243,7 @@ impl App {
             buffer,
             PendingSave {
                 buffer,
+                authority: self.effect_authority.clone(),
                 source: document.text.source_version(),
                 snapshot: document.text.clone(),
                 steps,
@@ -252,6 +296,7 @@ impl App {
                     buffer,
                     PendingSave {
                         buffer,
+                        authority: pending.authority.clone(),
                         source: document.text.source_version(),
                         snapshot: document.text.clone(),
                         steps: VecDeque::from([step]),
@@ -307,6 +352,9 @@ impl App {
     }
 
     pub(super) fn apply_save_text(&mut self, buffer: BufferId, text: String) -> Result<(), String> {
+        self.effect_authority
+            .require(crate::editor::CommandAccess::Edit)
+            .map_err(|error| error.to_string())?;
         if self.state.buffers[buffer].text.text_equals(&text) {
             return Ok(());
         }
@@ -346,9 +394,13 @@ impl App {
                 };
                 match result {
                     Ok(text) => {
-                        if let Some(text) = text
-                            && let Err(error) = self.apply_save_text(buffer, text)
-                        {
+                        let previous = std::mem::replace(
+                            &mut self.effect_authority,
+                            pending.authority.clone(),
+                        );
+                        let result = text.map_or(Ok(()), |text| self.apply_save_text(buffer, text));
+                        self.effect_authority = previous;
+                        if let Err(error) = result {
                             self.fail_save_work(pending, error);
                             continue;
                         }
@@ -366,6 +418,7 @@ impl App {
                 let (reply, receiver) = std::sync::mpsc::sync_channel(1);
                 let request = SaveWorkRequest {
                     buffer,
+                    authority: pending.authority.clone(),
                     text: pending.snapshot.clone(),
                     reply,
                 };
@@ -386,13 +439,16 @@ impl App {
                 );
                 self.finish_provider_save(buffer, pending);
             } else {
-                match self.request_disk_save(
+                let previous = std::mem::replace(&mut self.effect_authority, pending.authority);
+                let result = self.request_disk_save(
                     buffer,
                     pending.quit,
                     pending.path,
                     pending.force,
                     pending.close.clone(),
-                ) {
+                );
+                self.effect_authority = previous;
+                match result {
                     Ok(id) if pending.stage => self.input.bind_stage_save(id),
                     Ok(_) => {}
                     Err(error) => {

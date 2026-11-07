@@ -1193,13 +1193,14 @@ pub(super) fn render_status_line(
     config: &Config,
     width: u16,
     status_y: u16,
-) {
+) -> Vec<(String, std::ops::Range<u16>)> {
     let Some(view) = state.views.get(view_id) else {
-        return;
+        return Vec::new();
     };
     let Some(buffer) = state.buffers.get(view.buffer) else {
-        return;
+        return Vec::new();
     };
+    let mut segments = Vec::new();
     grid.fill_row(status_y, Style::Status);
     let status = &config.ui.status_line;
     let default_order = crate::ui::render::chrome::ChromeLayout::default().status;
@@ -1485,6 +1486,9 @@ pub(super) fn render_status_line(
                         continue;
                     }
                     x = grid.put_text_clipped(next, status_y, text, *style, left_limit);
+                    if ui.chrome.status_text.contains_key(name) {
+                        segments.push((name.to_owned(), next..x));
+                    }
                 }
             }
         }
@@ -1530,6 +1534,7 @@ pub(super) fn render_status_line(
             _ => {}
         }
     }
+    segments
 }
 
 /// A mode's block on the status line and the edge that joins it to the next section.

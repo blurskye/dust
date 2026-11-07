@@ -631,7 +631,7 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
     ));
     assert_eq!(
         format!("{:x}", Sha256::digest(core)),
-        "b4ed844dc172a7ca80c13114c2d8b23d92202490fe7ba12e09297c4aba73fd41"
+        "eba25c49194e60b86aef8629fb018ff4b6116029dbb4865ac153ee20ae718381"
     );
     let component = wit_component::ComponentEncoder::default()
         .module(core)

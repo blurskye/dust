@@ -857,6 +857,7 @@ where
     spec.arguments = arguments;
     use crate::editor::CommandAccess;
     spec.access = [match id {
+        "application.notification.dismiss" => CommandAccess::Ui,
         "file.save" | "file.save_all" => CommandAccess::Files,
         "terminal.open" | "task.run" | "format.run" | "lint.run" | "test.run" => {
             CommandAccess::Process

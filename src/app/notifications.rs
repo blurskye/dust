@@ -20,15 +20,14 @@ pub(super) struct Notifications {
 }
 
 /// Notifications keep native history even when another surface presents them.
-#[allow(dead_code)] // Presentation adapters consume this on their own worker.
 pub(in crate::app) struct NoticeRequest {
     pub message: String,
+    pub authority: crate::editor::CommandAuthority,
     pub error: bool,
     pub warning: bool,
 }
 
 impl Notifications {
-    #[allow(dead_code)]
     pub(in crate::app) fn replace(
         &mut self,
         replacement: Option<std::sync::mpsc::SyncSender<NoticeRequest>>,
@@ -37,11 +36,18 @@ impl Notifications {
         self.replaced = false;
     }
 
-    fn present(&mut self, message: &str, error: bool, warning: bool) {
+    fn present(
+        &mut self,
+        message: &str,
+        error: bool,
+        warning: bool,
+        authority: &crate::editor::CommandAuthority,
+    ) {
         self.replaced = self.replacement.as_ref().is_some_and(|replacement| {
             replacement
                 .try_send(NoticeRequest {
                     message: message.to_owned(),
+                    authority: authority.clone(),
                     error,
                     warning,
                 })
@@ -67,6 +73,7 @@ impl Notifications {
         error: bool,
         now: Instant,
         timeout: Duration,
+        authority: &crate::editor::CommandAuthority,
     ) {
         // Repeated status messages do not perpetually postpone expiry.
         if self
@@ -90,17 +97,23 @@ impl Notifications {
             }
             self.deadline = (!timeout.is_zero()).then_some(now + timeout);
         }
-        self.present(&message, error, false);
+        self.present(&message, error, false, authority);
         self.current = Some((error, message));
         self.warning = false;
     }
 
-    pub(super) fn warn(&mut self, message: String, now: Instant, timeout: Duration) {
+    pub(super) fn warn(
+        &mut self,
+        message: String,
+        now: Instant,
+        timeout: Duration,
+        authority: &crate::editor::CommandAuthority,
+    ) {
         // Record once; warning is part of the replacement's presentation too.
         let replacement = self.replacement.take();
-        self.notify(message.clone(), false, now, timeout);
+        self.notify(message.clone(), false, now, timeout, authority);
         self.replacement = replacement;
-        self.present(&message, false, true);
+        self.present(&message, false, true, authority);
         self.warning = true;
     }
 
@@ -154,8 +167,13 @@ const NOTICE_TIMEOUT: Duration = Duration::from_secs(4);
 
 impl App {
     pub(in crate::app) fn notify_message(&mut self, message: String, error: bool) {
-        self.notices
-            .notify(message, error, self.clock.monotonic(), NOTICE_TIMEOUT);
+        self.notices.notify(
+            message,
+            error,
+            self.clock.monotonic(),
+            NOTICE_TIMEOUT,
+            &self.effect_authority,
+        );
         self.project_notice();
     }
 }
@@ -163,8 +181,12 @@ impl App {
 impl App {
     /// A small yellow notice: something is missing, but what could be shown is shown.
     pub(in crate::app) fn notify_warning(&mut self, message: String) {
-        self.notices
-            .warn(message, self.clock.monotonic(), NOTICE_TIMEOUT);
+        self.notices.warn(
+            message,
+            self.clock.monotonic(),
+            NOTICE_TIMEOUT,
+            &self.effect_authority,
+        );
         self.project_notice();
     }
 }
@@ -272,6 +294,7 @@ impl App {
 #[cfg(test)]
 mod tests {
     use crate::app::notifications::Notifications;
+    use crate::editor::CommandAuthority::Host;
     use std::time::Duration;
     use std::time::Instant;
 
@@ -281,18 +304,18 @@ mod tests {
         let mut notices = Notifications::new();
         let (sender, receiver) = std::sync::mpsc::sync_channel(2);
         notices.replace(Some(sender));
-        notices.notify("saved".into(), false, now, Duration::ZERO);
+        notices.notify("saved".into(), false, now, Duration::ZERO, &Host);
         let request = receiver.try_recv().unwrap();
         assert_eq!(request.message, "saved");
         assert!(!request.error);
         assert!(!request.warning);
         assert!(notices.replaced);
-        notices.warn("offline".into(), now, Duration::ZERO);
+        notices.warn("offline".into(), now, Duration::ZERO, &Host);
         let warning = receiver.try_recv().unwrap();
         assert!(warning.warning);
         assert_eq!(notices.history().count(), 2);
         drop(receiver);
-        notices.notify("error".into(), true, now, Duration::ZERO);
+        notices.notify("error".into(), true, now, Duration::ZERO, &Host);
         assert!(!notices.replaced);
         assert_eq!(notices.current(), Some((true, "error")));
         assert_eq!(notices.history().count(), 3);
@@ -302,26 +325,27 @@ mod tests {
     fn explicit_insertion_owns_history_and_expiry_without_observing_ui() {
         let now = Instant::now();
         let mut notices = Notifications::new();
-        notices.notify("first".into(), false, now, Duration::from_secs(1));
+        notices.notify("first".into(), false, now, Duration::from_secs(1), &Host);
         notices.notify(
             "first".into(),
             false,
             now + Duration::from_millis(900),
             Duration::from_secs(1),
+            &Host,
         );
         assert_eq!(notices.history().count(), 1);
         assert!(!notices.tick(now + Duration::from_millis(999)));
         assert!(notices.tick(now + Duration::from_secs(1)));
         assert_eq!(notices.current(), None);
         assert_eq!(notices.history().count(), 1);
-        notices.notify("error".into(), true, now, Duration::ZERO);
+        notices.notify("error".into(), true, now, Duration::ZERO, &Host);
         assert!(!notices.tick(now + Duration::from_secs(60)));
         assert_eq!(notices.current(), Some((true, "error")));
         notices.clear();
         assert_eq!(notices.current(), None);
-        notices.warn("offline".into(), now, Duration::ZERO);
+        notices.warn("offline".into(), now, Duration::ZERO, &Host);
         assert!(notices.is_warning());
-        notices.notify("back".into(), false, now, Duration::ZERO);
+        notices.notify("back".into(), false, now, Duration::ZERO, &Host);
         assert!(!notices.is_warning());
     }
 
@@ -329,12 +353,13 @@ mod tests {
     fn changed_severity_records_a_new_notice_and_restarts_expiry() {
         let now = Instant::now();
         let mut notices = Notifications::new();
-        notices.notify("offline".into(), false, now, Duration::from_secs(1));
+        notices.notify("offline".into(), false, now, Duration::from_secs(1), &Host);
         notices.notify(
             "offline".into(),
             true,
             now + Duration::from_millis(900),
             Duration::from_secs(1),
+            &Host,
         );
         assert_eq!(notices.current(), Some((true, "offline")));
         assert_eq!(
@@ -350,7 +375,7 @@ mod tests {
         let now = Instant::now();
         let mut notices = Notifications::new();
         for index in 0..205 {
-            notices.notify(index.to_string(), false, now, Duration::ZERO);
+            notices.notify(index.to_string(), false, now, Duration::ZERO, &Host);
         }
         assert_eq!(notices.history().count(), 200);
         assert_eq!(notices.history().next().unwrap().1, "5");

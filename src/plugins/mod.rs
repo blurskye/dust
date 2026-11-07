@@ -5,6 +5,7 @@
 pub(crate) mod http;
 mod providers;
 pub(crate) mod requests;
+pub(crate) mod surface;
 pub use requests::PluginDelivery;
 mod storage;
 mod virtual_documents;
