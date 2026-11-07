@@ -30,6 +30,7 @@ use std::time::Duration;
 
 pub(super) struct Tools {
     entries: Vec<ToolEntry>,
+    project_tools: BTreeSet<String>,
     /// Each executable's PATH location and whether it is rustup's proxy, kept until the tool
     /// list is inspected again. The language server autostart check asks on every main loop
     /// pass, and a PATH search costs dozens of `stat` calls.
@@ -158,6 +159,7 @@ impl Tools {
     pub(in crate::app) fn new(entries: Vec<ToolEntry>) -> Self {
         Self {
             entries,
+            project_tools: BTreeSet::new(),
             path_lookups: RefCell::default(),
             nix_preferred: BTreeSet::new(),
             managed_preferred: BTreeSet::new(),
@@ -844,6 +846,120 @@ impl Tools {
 mod tests {
     use crate::app::tools::*;
 
+    #[test]
+    fn tools_rank_root_markers_and_all_open_buffer_languages_before_other_tools() {
+        let (_dirs, mut app) = crate::app::tests::app();
+        app.tooling.fixture_retain(|_| false);
+        for (id, language, marker) in [
+            ("astro", "astro", "astro.config.mjs"),
+            ("rust", "rust", "Cargo.toml"),
+            ("rustfmt", "rust", ""),
+            ("python", "python", "pyproject.toml"),
+            ("go", "go", "go.mod"),
+            ("shell", "shellscript", ".git"),
+        ] {
+            let mut definition = crate::tools::bundled_tool_catalog().remove(0);
+            definition.id = id.into();
+            definition.name = id.into();
+            definition.languages = vec![language.into()];
+            definition.project_root_markers = if marker.is_empty() {
+                Vec::new()
+            } else {
+                vec![marker.into()]
+            };
+            definition.executable = format!("dust-test-missing-{id}");
+            app.tooling.fixture_insert(ToolEntry {
+                definition,
+                status: ToolStatus::Available,
+            });
+        }
+        std::fs::write(app.state.workspace_root.join("Cargo.toml"), "").unwrap();
+        std::fs::create_dir_all(app.state.workspace_root.join(".git")).unwrap();
+        let python = app.state.workspace_root.join("main.py");
+        let go = app.state.workspace_root.join("main.go");
+        app.state
+            .open_text(crate::editor::text::TextBuffer::from_text(""), Some(python))
+            .unwrap();
+        app.state
+            .open_text(crate::editor::text::TextBuffer::from_text(""), Some(go))
+            .unwrap();
+        app.open_tool_menu("all".into());
+        let rows = &app.ui.tool_menu.as_ref().unwrap().rows;
+        assert_eq!(
+            rows.iter().map(|row| row.id.as_str()).collect::<Vec<_>>(),
+            ["go", "python", "rust", "rustfmt", "astro", "shell"]
+        );
+        assert!(rows[..4].iter().all(|row| row.for_project));
+        assert!(rows[4..].iter().all(|row| !row.for_project));
+        app.search_tool_menu(Some("rust".into()), true);
+        assert_eq!(app.ui.tool_menu.as_ref().unwrap().rows[0].id, "rust");
+        app.search_tool_menu(None, false);
+        assert_eq!(app.selected_tool_id().as_deref(), Some("rust"));
+    }
+
+    #[test]
+    fn root_markers_include_language_formatters_without_unrelated_web_tools() {
+        for (marker, formatter) in [("Cargo.toml", "rustfmt"), ("pyproject.toml", "black")] {
+            let (_dirs, mut app) = crate::app::tests::app();
+            std::fs::write(app.state.workspace_root.join(marker), "").unwrap();
+            app.refresh_project_tools();
+            assert!(app.tooling.project_tools.contains(formatter));
+            assert!(!app.tooling.project_tools.contains("astro-language-server"));
+            assert!(
+                !app.tooling
+                    .project_tools
+                    .contains("tailwindcss-language-server")
+            );
+        }
+    }
+
+    #[test]
+    fn tool_rows_distinguish_missing_installing_failed_and_trust_blocked() {
+        let (_dirs, mut app) = crate::app::tests::app();
+        app.tooling.fixture_retain(|_| false);
+        let mut definition = crate::tools::bundled_tool_catalog().remove(0);
+        definition.id = "test-rust".into();
+        definition.executable = "dust-test-missing-server".into();
+        app.tooling.fixture_insert(ToolEntry {
+            definition,
+            status: ToolStatus::Available,
+        });
+        for (status, expected) in [
+            (ToolStatus::Available, "not installed"),
+            (
+                ToolStatus::Installing {
+                    phase: "downloading".into(),
+                    completed: 5,
+                    total: Some(10),
+                },
+                "installing (downloading 50% (0 KiB / 0 KiB))",
+            ),
+            (ToolStatus::Failed("download refused".into()), "failed"),
+        ] {
+            app.tooling.entries[0].status = status;
+            app.open_tool_menu("all".into());
+            let row = &app.ui.tool_menu.as_ref().unwrap().rows[0];
+            assert_eq!(row.lifecycle, expected);
+            if expected == "failed" {
+                assert_eq!(row.note, "download refused");
+            }
+        }
+        let executable = crate::tools::discover_executable("echo").unwrap();
+        app.tooling.entries[0].definition.executable = executable.display().to_string();
+        app.tooling.entries[0].definition.probe_args.clear();
+        app.tooling.entries[0].status = ToolStatus::Installed(executable);
+        app.open_tool_menu("all".into());
+        let row = &app.ui.tool_menu.as_ref().unwrap().rows[0];
+        assert_eq!(row.lifecycle, "blocked: untrusted");
+        assert!(row.note.contains("Press t"));
+        app.workspace.fixture_safe_mode(true);
+        app.open_tool_menu("all".into());
+        assert_eq!(
+            app.ui.tool_menu.as_ref().unwrap().rows[0].lifecycle,
+            "blocked: safe mode"
+        );
+    }
+
     #[cfg(unix)]
     #[test]
     fn rustup_probes_use_project_directory_and_separate_cached_results() {
@@ -1189,7 +1305,7 @@ impl App {
         // Rendering reserves the border, up to two wrapped help rows, tabs,
         // heading, separator, and ten detail rows. Using the two-help-row
         // bound keeps navigation safe when the help text wraps after resize.
-        usize::from(self.tool_menu_height().saturating_sub(18)).max(1)
+        usize::from(self.tool_menu_height().saturating_sub(20)).max(1)
     }
 }
 
@@ -1217,7 +1333,64 @@ impl App {
 }
 
 impl App {
+    fn refresh_project_tools(&mut self) {
+        let mut languages = self
+            .state
+            .buffers
+            .values()
+            .filter_map(|buffer| buffer.path.as_deref())
+            .filter_map(crate::language::lsp::language_id_for_path)
+            .collect::<BTreeSet<_>>();
+        // Root markers describe language evidence, not permission to launch. Git alone
+        // says nothing about a project's languages. Cache the result until open/refresh.
+        let mut markers = BTreeMap::new();
+        let matching_markers = self
+            .tooling
+            .entries()
+            .iter()
+            .filter(|entry| {
+                entry.definition.project_root_markers.iter().any(|marker| {
+                    marker != ".git"
+                        && *markers.entry(marker.clone()).or_insert_with(|| {
+                            self.workspace
+                                .roots()
+                                .iter()
+                                .any(|root| root.identity.canonical_path.join(marker).exists())
+                        })
+                })
+            })
+            .collect::<Vec<_>>();
+        for entry in &matching_markers {
+            // Broad servers (for example Django's Python + HTML) must not make
+            // every web tool relevant to a plain Python project.
+            if entry.definition.kind == ToolKind::Lsp
+                && (entry.definition.languages.len() == 1
+                    || entry.definition.project_root_strategy
+                        != crate::files::ProjectRootStrategy::Marker)
+            {
+                languages.extend(entry.definition.languages.iter().map(String::as_str));
+            }
+        }
+        self.tooling.project_tools = self
+            .tooling
+            .entries()
+            .iter()
+            .filter(|entry| {
+                matching_markers
+                    .iter()
+                    .any(|matched| matched.definition.id == entry.definition.id)
+                    || entry
+                        .definition
+                        .languages
+                        .iter()
+                        .any(|language| languages.contains(language.as_str()))
+            })
+            .map(|entry| entry.definition.id.clone())
+            .collect();
+    }
+
     pub(in crate::app) fn open_tool_menu(&mut self, category: String) {
+        self.refresh_project_tools();
         self.cancel_pending_mapping();
         self.input.cancel_pending();
         self.close_prompt();
@@ -1606,7 +1779,12 @@ impl App {
             .collect::<Vec<_>>();
         // Stable ordering is deliberate: installation, runtime selection, and
         // lifecycle changes must never make the focused row jump elsewhere.
-        entries.sort_by_key(|entry| entry.definition.name.to_lowercase());
+        entries.sort_by_key(|entry| {
+            (
+                !self.tooling.project_tools.contains(&entry.definition.id),
+                entry.definition.name.to_lowercase(),
+            )
+        });
         let rows = entries
             .into_iter()
             .map(|entry| {
@@ -1740,17 +1918,15 @@ impl App {
                     total,
                 } = &entry.status
                 {
-                    tool_install_progress_label(phase, *completed, *total)
+                    format!("installing ({})", tool_install_progress_label(phase, *completed, *total))
+                } else if error.is_some() && (installed || matches!(entry.status, ToolStatus::Failed(_))) {
+                    "failed".into()
                 } else if !installed {
-                    if matches!(entry.status, ToolStatus::Failed(_)) {
-                        "install failed".into()
-                    } else {
-                        "not installed".into()
-                    }
-                } else if source == LspRuntimeSource::Path && probe_error.is_some() {
-                    "not working".into()
+                    "not installed".into()
                 } else if is_lsp && session_state != "stopped" {
-                    session_state.clone()
+                    if session_state == "crashed" { "failed".into() } else { session_state.clone() }
+                } else if definition.kind != ToolKind::Agent && self.workspace.execution_allowed().is_err() {
+                    if self.workspace.safe_mode() { "blocked: safe mode".into() } else { "blocked: untrusted".into() }
                 } else {
                     "installed".into()
                 };
@@ -1775,8 +1951,12 @@ impl App {
                 };
                 let note = if let Some(error) = error {
                     error
+                } else if lifecycle == "blocked: untrusted" {
+                    "Workspace is not trusted. Press t to review workspace trust before running tools.".into()
+                } else if lifecycle == "blocked: safe mode" {
+                    "Tools cannot run in safe mode. Restart Dust without --safe-mode to enable them.".into()
                 } else if matches!(entry.status, ToolStatus::Installing { .. }) {
-                    format!("Installing {} {version}.", definition.name)
+                    format!("Installing {} {version}: {lifecycle}.", definition.name)
                 } else if installed {
                     match source {
                         LspRuntimeSource::Path => {
@@ -1809,6 +1989,7 @@ impl App {
                 };
                 ToolMenuRow {
                     id: definition.id.clone(),
+                    for_project: self.tooling.project_tools.contains(&definition.id),
                     name: definition.name.clone(),
                     kind: configured
                         .categories
@@ -2175,6 +2356,7 @@ impl App {
 
 impl App {
     pub(in crate::app) fn refresh_tools(&mut self) {
+        self.refresh_project_tools();
         let category = self
             .ui
             .tool_menu

@@ -373,11 +373,31 @@ pub(super) fn render_tool_menu(
         .max(failure_rows)
         .min(remaining.saturating_sub(1));
     let list_bottom = top + height - 1 - detail_rows;
-    let visible_rows = usize::from(list_bottom.saturating_sub(y));
+    // At most two group headings; keep the selected tool visible across the boundary.
+    let visible_rows = usize::from(list_bottom.saturating_sub(y).saturating_sub(2)).max(1);
     let scroll = menu
         .scroll
         .max((menu.selected + 1).saturating_sub(visible_rows));
+    let mut group = None;
     for (index, row) in menu.rows.iter().enumerate().skip(scroll).take(visible_rows) {
+        if group != Some(row.for_project) && y + 1 < list_bottom {
+            frame.grid.put_text_clipped(
+                content_left,
+                y,
+                if row.for_project {
+                    "For this project"
+                } else {
+                    "Other tools"
+                },
+                Style::Accent,
+                right,
+            );
+            y += 1;
+            group = Some(row.for_project);
+        }
+        if y >= list_bottom {
+            break;
+        }
         let selected = index == menu.selected;
         let style = if selected {
             Style::Selection
@@ -557,9 +577,9 @@ fn tool_busy(state: &str) -> bool {
         state,
         "installed"
             | "not installed"
-            | "install failed"
-            | "not working"
-            | "crashed"
+            | "failed"
+            | "blocked: untrusted"
+            | "blocked: safe mode"
             | "starting"
             | "restarting"
     ) && !state.starts_with("running")
@@ -569,7 +589,8 @@ fn tool_busy(state: &str) -> bool {
 /// when broken, hollow when not installed.
 fn tool_state_glyph(row: &crate::ui::ToolMenuRow) -> (&'static str, Style) {
     match row.lifecycle.as_str() {
-        "install failed" | "not working" | "crashed" => ("✗", Style::Error),
+        "failed" => ("✗", Style::Error),
+        "blocked: untrusted" | "blocked: safe mode" => ("!", Style::Warning),
         "not installed" => ("○", Style::Muted),
         "starting" | "restarting" => ("◐", Style::Warning),
         state if tool_busy(state) => ("◐", Style::Warning),
@@ -581,14 +602,21 @@ fn tool_state_glyph(row: &crate::ui::ToolMenuRow) -> (&'static str, Style) {
 fn tool_row_keys(row: &crate::ui::ToolMenuRow) -> Vec<&'static str> {
     let state = row.lifecycle.as_str();
     let mut keys = Vec::new();
-    if tool_busy(state) {
+    if state == "blocked: untrusted" {
+        keys.push("t trust workspace");
+        if row.lsp {
+            keys.push("p versions");
+        }
+        return keys;
+    }
+    if tool_busy(state) || state == "blocked: safe mode" {
         return keys;
     }
     if row.installed {
         if row.lsp {
             let active = row.session_state.starts_with("running")
                 || matches!(row.session_state.as_str(), "starting" | "restarting");
-            if matches!(state, "installed" | "crashed") || state == "not working" && !active {
+            if state == "installed" || state == "failed" && !active {
                 keys.push(if row.can_start {
                     "Enter start"
                 } else {
@@ -606,7 +634,7 @@ fn tool_row_keys(row: &crate::ui::ToolMenuRow) -> Vec<&'static str> {
             keys.push("u uninstall");
         }
     } else if row.can_install {
-        keys.push(if state == "install failed" {
+        keys.push(if state == "failed" {
             "i retry install"
         } else {
             "i install"

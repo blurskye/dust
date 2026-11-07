@@ -2065,6 +2065,12 @@ command = "terminal.focus_active"
 
 # Trust confirmation is sensitivity-aware: no history or completion bindings.
 [[keymap]]
+id = "builtin.tools.trust"
+context = "tool_manager"
+keys = "t"
+command = "workspace.trust"
+
+[[keymap]]
 id = "builtin.workspace-trust-prompt.surface.command-line-cancel.escape"
 context = "workspace_trust_prompt"
 keys = "escape"
