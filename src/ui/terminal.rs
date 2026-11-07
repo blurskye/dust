@@ -545,6 +545,15 @@ fn queue_style(
         Style::Muted => &theme.styles.muted,
         Style::Accent => &theme.styles.accent,
         Style::Status => &theme.styles.status,
+        Style::StatusMuted => {
+            derived = crate::config::ThemeStyle {
+                background: theme.styles.status.background,
+                background_256: theme.styles.status.background_256,
+                background_16: theme.styles.status.background_16,
+                ..theme.styles.muted.clone()
+            };
+            &derived
+        }
         Style::StatusAccent => &theme.styles.status_accent,
         Style::StatusInsert
         | Style::StatusVisual
@@ -1286,6 +1295,31 @@ mod tests {
                 queue_style(&mut actual, Style::ExplorerSelected(role), &theme, tier).unwrap();
                 assert_eq!(actual, expected);
             }
+        }
+    }
+
+    #[test]
+    fn completion_details_keep_muted_text_on_the_row_background_in_every_color_tier() {
+        let mut theme = crate::config::load_bundled_config().theme;
+        theme.styles.status.background = crate::config::ThemeColor::Rgb(1, 2, 3);
+        theme.styles.status.background_256 = Some(crate::config::ThemeColor::Indexed(42));
+        theme.styles.status.background_16 = Some(crate::config::ThemeColor::Blue);
+        let mut expected_theme = theme.clone();
+        expected_theme.styles.muted.background = theme.styles.status.background;
+        expected_theme.styles.muted.background_256 = theme.styles.status.background_256;
+        expected_theme.styles.muted.background_16 = theme.styles.status.background_16;
+        for tier in [ColorTier::TrueColor, ColorTier::Ansi256, ColorTier::Ansi16] {
+            let mut expected = Vec::new();
+            queue_style(
+                &mut expected,
+                crate::ui::Style::Muted,
+                &expected_theme,
+                tier,
+            )
+            .unwrap();
+            let mut actual = Vec::new();
+            queue_style(&mut actual, crate::ui::Style::StatusMuted, &theme, tier).unwrap();
+            assert_eq!(actual, expected);
         }
     }
 

@@ -471,6 +471,60 @@ fn insert_selection_highlighting_is_half_open_while_visual_selection_is_inclusiv
 }
 
 #[test]
+fn visual_selections_keep_syntax_and_semantic_colors() {
+    use crate::config::Highlight;
+    use crate::editor::text::{ByteOffset, ByteRange, TextBuffer};
+    use crate::editor::{EditorMode, Selection, SelectionKind};
+    use crate::ui::Style;
+    let mut state = EditorState::new("/workspace".into());
+    let (buffer, view) = state
+        .open_text(TextBuffer::from_text("let value = 21;"), None)
+        .unwrap();
+    let mut config = crate::config::load_bundled_config().config;
+    config.editor.line_numbers = crate::config::LineNumbers::Off;
+    config.editor.git_signs.enabled = false;
+    config.ui.status_line.enabled = false;
+    let revision = state.buffers[buffer].text.revision();
+    let ui = UiState {
+        syntax_spans: vec![crate::ui::render::UiSyntaxSpan {
+            buffer,
+            revision,
+            range: ByteRange::new(ByteOffset(0), ByteOffset(3)).unwrap(),
+            role: Highlight::KEYWORD,
+        }],
+        lsp_semantic_spans: vec![crate::ui::render::UiSyntaxSpan {
+            buffer,
+            revision,
+            range: ByteRange::new(ByteOffset(4), ByteOffset(9)).unwrap(),
+            role: Highlight::STRING,
+        }],
+        ..UiState::default()
+    };
+    for (mode, kind) in [
+        (EditorMode::VisualChar, SelectionKind::Character),
+        (EditorMode::VisualLine, SelectionKind::Line),
+        (EditorMode::VisualBlock, SelectionKind::Block),
+    ] {
+        state.views[view].mode = mode;
+        state.views[view].selection = Some(Selection {
+            anchor: ByteOffset(0),
+            head: ByteOffset(13),
+            kind,
+        });
+        let frame = crate::ui::render::render_editor_view(&state, view, &ui, &config, 30, 3);
+        assert_eq!(
+            frame.grid.get(0, 0).unwrap().style,
+            Style::SelectionSyntax(Highlight::KEYWORD)
+        );
+        assert_eq!(frame.grid.get(3, 0).unwrap().style, Style::Selection);
+        assert_eq!(
+            frame.grid.get(4, 0).unwrap().style,
+            Style::SelectionSyntax(Highlight::STRING)
+        );
+    }
+}
+
+#[test]
 fn concealed_markdown_preserves_source_tab_columns() {
     use crate::editor::text::ByteOffset;
     use crate::editor::text::ByteRange;

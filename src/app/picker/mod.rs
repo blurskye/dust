@@ -1788,6 +1788,7 @@ impl App {
         self.cancel_select_replacement();
         if self.search.help_is_open() {
             self.search.close_picker();
+            self.project_input_prompt();
             if self.search.picker_projection().is_some() {
                 self.sync_picker_ui();
                 self.refresh_window_content();

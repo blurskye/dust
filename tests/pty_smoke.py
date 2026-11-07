@@ -149,6 +149,22 @@ def run(
             os.write(descriptor, b"\x1b[?62c" * (queries - answered))
             answered = queries
 
+    # Start input timing after the first complete paint, not after fork: startup
+    # and terminal negotiation can outlast a short stage on a shared build host.
+    deadline = time.monotonic() + 5
+    while b"\x1b[?2026l" not in output and time.monotonic() < deadline:
+        readable, _, _ = select.select([descriptor], [], [], 0.02)
+        if readable:
+            try:
+                read()
+            except OSError:
+                break
+    if b"\x1b[?2026l" not in output:
+        os.kill(pid, signal.SIGKILL)
+        os.waitpid(pid, 0)
+        os.close(descriptor)
+        raise AssertionError("Dust did not paint its first frame within five seconds")
+
     for stage_index, (delay, data, size) in enumerate(stages):
         deadline = time.time() + delay
         expected = (stage_expectations or {}).get(stage_index)
@@ -203,7 +219,10 @@ def run(
     if status is None:
         os.kill(pid, 9)
         os.waitpid(pid, 0)
-        raise AssertionError("Dust did not exit within five seconds")
+        raise AssertionError(
+            "Dust did not exit within five seconds; final terminal screen:\n"
+            + terminal_screen(bytes(output))
+        )
     return os.waitstatus_to_exitcode(status), bytes(output), snapshots
 
 

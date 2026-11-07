@@ -491,16 +491,133 @@ pub(super) fn render_workspace(
             cursor = Some((rect.x.saturating_add(x), rect.y.saturating_add(y), shape));
         }
     }
-    let horizontal = one_cell_symbol("─", "-", config.editor.ambiguous_width);
-    let vertical = one_cell_symbol("│", "|", config.editor.ambiguous_width);
-    for border in projection.borders {
+    render_split_borders(
+        &mut grid,
+        &projection.borders,
+        config.editor.ambiguous_width,
+    );
+    Frame { grid, cursor }
+}
+
+fn render_split_borders(
+    grid: &mut CellGrid,
+    borders: &[crate::windows::ProjectedBorder],
+    ambiguous: AmbiguousWidth,
+) {
+    let mut cells = std::collections::BTreeMap::new();
+    const LEFT: u8 = 1;
+    const RIGHT: u8 = 2;
+    const UP: u8 = 4;
+    const DOWN: u8 = 8;
+    for border in borders {
         for offset in 0..border.length {
-            let (cell_x, cell_y, symbol) = match border.axis {
-                TileAxis::Horizontal => (border.x, border.y.saturating_add(offset), vertical),
-                TileAxis::Vertical => (border.x.saturating_add(offset), border.y, horizontal),
+            let (x, y, directions) = match border.axis {
+                TileAxis::Horizontal => (border.x, border.y.saturating_add(offset), UP | DOWN),
+                TileAxis::Vertical => (border.x.saturating_add(offset), border.y, LEFT | RIGHT),
             };
-            grid.set_cell(cell_x, cell_y, symbol, Style::Border);
+            *cells.entry((x, y)).or_insert(0) |= directions;
         }
     }
-    Frame { grid, cursor }
+    // Split segments end beside their parent's divider. Connect only projected borders,
+    // never an editor's indent guide or a box drawn inside a pane.
+    for (&(x, y), &directions) in &cells {
+        let mut joined = directions;
+        for (neighbor, incoming, outgoing) in [
+            (x.checked_sub(1).map(|x| (x, y)), RIGHT, LEFT),
+            (x.checked_add(1).map(|x| (x, y)), LEFT, RIGHT),
+            (y.checked_sub(1).map(|y| (x, y)), DOWN, UP),
+            (y.checked_add(1).map(|y| (x, y)), UP, DOWN),
+        ] {
+            if neighbor
+                .and_then(|position| cells.get(&position))
+                .is_some_and(|directions| directions & incoming != 0)
+            {
+                joined |= outgoing;
+            }
+        }
+        let (symbol, fallback) = match (
+            joined & LEFT != 0,
+            joined & RIGHT != 0,
+            joined & UP != 0,
+            joined & DOWN != 0,
+        ) {
+            (true, true, false, false) => ("─", "-"),
+            (false, false, true, true) => ("│", "|"),
+            (true, true, true, false) => ("┴", "+"),
+            (true, true, false, true) => ("┬", "+"),
+            (true, false, true, true) => ("┤", "+"),
+            (false, true, true, true) => ("├", "+"),
+            _ => ("┼", "+"),
+        };
+        grid.set_cell(
+            x,
+            y,
+            one_cell_symbol(symbol, fallback, ambiguous),
+            Style::Border,
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::windows::ProjectedBorder;
+
+    #[test]
+    fn nested_split_borders_join_at_both_sides_and_crossings() {
+        let vertical = ProjectedBorder {
+            x: 5,
+            y: 0,
+            length: 9,
+            axis: TileAxis::Horizontal,
+        };
+        let left = ProjectedBorder {
+            x: 0,
+            y: 4,
+            length: 5,
+            axis: TileAxis::Vertical,
+        };
+        let right = ProjectedBorder {
+            x: 6,
+            y: 4,
+            length: 5,
+            axis: TileAxis::Vertical,
+        };
+        let above = ProjectedBorder {
+            x: 5,
+            y: 0,
+            length: 4,
+            axis: TileAxis::Horizontal,
+        };
+        let below = ProjectedBorder {
+            x: 5,
+            y: 5,
+            length: 4,
+            axis: TileAxis::Horizontal,
+        };
+        let horizontal = ProjectedBorder {
+            x: 0,
+            y: 4,
+            length: 11,
+            axis: TileAxis::Vertical,
+        };
+        for (borders, expected) in [
+            (vec![vertical, left], "┤"),
+            (vec![vertical, right], "├"),
+            (vec![vertical, left, right], "┼"),
+            (vec![horizontal, above], "┴"),
+            (vec![horizontal, below], "┬"),
+            (vec![horizontal, above, below], "┼"),
+        ] {
+            for ambiguous in [AmbiguousWidth::Narrow, AmbiguousWidth::Wide] {
+                let mut grid = CellGrid::new(11, 9);
+                render_split_borders(&mut grid, &borders, ambiguous);
+                assert_eq!(
+                    grid.get(5, 4).unwrap().symbol,
+                    one_cell_symbol(expected, "+", ambiguous)
+                );
+                assert_eq!(grid.get(5, 4).unwrap().style, Style::Border);
+            }
+        }
+    }
 }

@@ -437,7 +437,7 @@ pub(super) fn render_prompt(
             let detail_style = if style == Style::Selection {
                 style
             } else {
-                Style::Muted
+                Style::StatusMuted
             };
             frame
                 .grid

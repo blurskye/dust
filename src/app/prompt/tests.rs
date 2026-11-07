@@ -167,14 +167,61 @@ fn form_help_captures_keys_without_changing_the_prompt_draft() {
     app.open_prompt(crate::ui::PromptKind::Command, "write draft".into());
     app.handle_configured_key("ctrl-g".parse().unwrap());
     assert!(app.search.help_is_open());
+    assert!(
+        app.ui.prompt.is_none(),
+        "the draft must not cover its help page"
+    );
     app.handle_configured_key(KeyEvent::character('j'));
     assert_eq!(app.input.prompt().unwrap().input, "write draft");
     app.handle_configured_key("escape".parse().unwrap());
     app.handle_configured_key("escape".parse().unwrap());
     assert!(!app.search.help_is_open());
+    assert_eq!(app.ui.prompt.as_ref().unwrap().input, "write draft");
     assert_eq!(app.input.prompt().unwrap().input, "write draft");
     app.handle_configured_key(KeyEvent::character('x'));
     assert_eq!(app.input.prompt().unwrap().input, "write draftx");
+}
+
+#[test]
+fn confirmation_help_hides_the_dialog_and_restores_its_choice_without_answering() {
+    let (_dirs, mut app) = app();
+    app.state
+        .open_text(crate::editor::text::TextBuffer::from_text("draft"), None)
+        .unwrap();
+    app.set_dashboard_visibility(false);
+    app.open_confirmation(
+        crate::ui::PromptKind::DirtyClose,
+        "Close dirty document".into(),
+        "Save changes before closing?".into(),
+        crate::ui::ConfirmationChoice::No,
+    );
+    let pending = app.input.prompt().unwrap().clone();
+    assert_eq!(
+        app.compositor_projection().unwrap().protected_regions.len(),
+        1
+    );
+    app.handle_configured_key("?".parse().unwrap());
+    app.reconcile_editor_windows();
+    assert!(app.search.help_is_open());
+    assert!(app.ui.prompt.is_none());
+    assert!(
+        app.compositor_projection()
+            .unwrap()
+            .protected_regions
+            .is_empty()
+    );
+    app.handle_configured_key(KeyEvent::character('y'));
+    assert_eq!(app.input.prompt(), Some(&pending));
+    app.handle_configured_key("ctrl-c".parse().unwrap());
+    app.reconcile_editor_windows();
+    assert!(!app.search.help_is_open());
+    assert_eq!(app.ui.prompt.as_ref(), Some(&pending));
+    assert_eq!(
+        app.compositor_projection().unwrap().protected_regions.len(),
+        1
+    );
+    assert_eq!(app.active_input_context(), "confirmation_prompt");
+    assert!(!app.should_quit);
 }
 
 #[test]
