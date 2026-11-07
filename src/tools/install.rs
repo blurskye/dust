@@ -106,6 +106,30 @@ pub(super) fn install_tool(
                     extract_one(&bytes, *archive, executable_path, &output)?;
                 }
             }
+            ToolInstall::JavascriptArchive {
+                url,
+                sha256,
+                prefix,
+                entrypoint,
+            } => {
+                let bytes = download_checked(url, sha256, cancellations, report)?;
+                let runtime = compatibility
+                    .and_then(|runtime| runtime.executable("node"))
+                    .or_else(|| crate::tools::discover_executable("node"));
+                let runtime = match runtime {
+                    Some(runtime) => runtime,
+                    None => crate::tools::runtimes::managed_bun_runtime(
+                        root,
+                        cancellations,
+                        report,
+                        compatibility,
+                    )?,
+                };
+                report("extracting JavaScript adapter", 0, None);
+                prepare_javascript_archive(
+                    &bytes, prefix, entrypoint, &runtime, &staging, &output,
+                )?;
+            }
             ToolInstall::NpmPackage { packages } => {
                 install_javascript_package(
                     root,
@@ -166,6 +190,99 @@ pub(super) fn install_tool(
         let _ = fs::remove_dir_all(&staging);
     }
     result
+}
+
+fn prepare_javascript_archive(
+    bytes: &[u8],
+    prefix: &str,
+    entrypoint: &str,
+    runtime: &Path,
+    staging: &Path,
+    output: &Path,
+) -> Result<(), String> {
+    let entrypoint = crate::tools::install_prepare::relative_catalog_path(entrypoint)?;
+    crate::tools::download::extract_tar_gzip_tree(bytes, prefix, staging)?;
+    if !staging.join(&entrypoint).is_file() {
+        return Err("JavaScript archive does not contain its entrypoint".into());
+    }
+    // Quote paths literally; a tool-store path may contain spaces or shell metacharacters.
+    let quote = |path: &Path| -> Result<String, String> {
+        let path = path
+            .to_str()
+            .ok_or("JavaScript runtime path is not UTF-8")?;
+        Ok(format!("'{}'", path.replace('\'', "'\\''")))
+    };
+    let script = format!(
+        "#!/bin/sh\nexec {} \"$(dirname \"$0\")/../\"{} \"$@\"\n",
+        quote(runtime)?,
+        quote(&entrypoint)?
+    );
+    fs::write(output, script)
+        .map_err(|error| format!("cannot write JavaScript launcher: {error}"))?;
+    prepare_executable(output)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn javascript_archive_launcher_keeps_support_files_and_literal_paths() {
+        use std::io::Write;
+        let root = tempfile::tempdir().unwrap();
+        let staging = root.path().join("adapter's files");
+        fs::create_dir_all(staging.join("bin")).unwrap();
+        let encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        let mut archive = tar::Builder::new(encoder);
+        for (name, data) in [
+            ("adapter/src/main.js", "entrypoint"),
+            ("adapter/src/support.js", "support"),
+        ] {
+            let mut header = tar::Header::new_gnu();
+            header.set_size(data.len() as u64);
+            header.set_mode(0o600);
+            header.set_cksum();
+            archive
+                .append_data(&mut header, name, data.as_bytes())
+                .unwrap();
+        }
+        let bytes = archive.into_inner().unwrap().finish().unwrap();
+        let runtime = root.path().join("runtime's shell");
+        fs::File::create(&runtime)
+            .unwrap()
+            .write_all(b"#!/bin/sh\nprintf '%s\\n' \"$@\"\n")
+            .unwrap();
+        prepare_executable(&runtime).unwrap();
+        let output = staging.join("bin/adapter");
+        prepare_javascript_archive(
+            &bytes,
+            "adapter",
+            "src/main.js",
+            &runtime,
+            &staging,
+            &output,
+        )
+        .unwrap();
+        assert_eq!(
+            fs::read_to_string(staging.join("src/support.js")).unwrap(),
+            "support"
+        );
+        let result = std::process::Command::new(&output)
+            .arg("literal argument")
+            .output()
+            .unwrap();
+        assert!(result.status.success());
+        assert_eq!(
+            String::from_utf8(result.stdout).unwrap(),
+            format!(
+                "{}/bin/../src/main.js\nliteral argument\n",
+                staging.display()
+            )
+        );
+        assert!(
+            prepare_javascript_archive(&bytes, "adapter", "../escape", &runtime, &staging, &output)
+                .is_err()
+        );
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, Error, PartialEq)]

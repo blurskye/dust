@@ -5178,6 +5178,13 @@ command = "session.load"
 desc = "Restore Session"
 
 [[keymap]]
+id = "builtin.global.test-debug"
+context = "global"
+keys = "<leader> t d"
+command = "dap.test.cursor"
+desc = "Debug Test"
+
+[[keymap]]
 id = "builtin.global.test-run"
 context = "global"
 keys = "<leader> t t"

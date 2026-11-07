@@ -311,6 +311,46 @@ the pull-request picker and review-comment commands also support Gitea/Forgejo v
 
 The debug console is opened with `Space d r`; `Space d R` restarts the session.
 
+### Choose a debug launch
+
+`Space d s` opens **Debug launch**, combining saved `[debug.sessions]` configurations
+with project presets. `Space d c` also opens it when no session is running.
+Rust projects offer Cargo binaries and test executables; Python offers the current
+file and pytest; JavaScript/TypeScript offers the current file in Node; Go offers
+the current package and package tests. The preset data
+lives in `assets/defaults/debug-presets.toml`.
+
+Rows name the adapter and say when it is missing. **Enter installs a supported
+missing adapter through Tools, then resumes the selected launch**, even if you
+switch files while installation runs. Rust prefers an already installed CodeLLDB
+or lldb-dap; otherwise it offers CodeLLDB installation. Installers still require
+a trusted workspace (`:trust`); `Space c m` opens Tools for progress and failures.
+Save the source with `:w` before starting. Missing runtimes and failed builds name
+the next action. `Space d t` cancels a pending debug build or launch; an adapter
+installation already in progress remains managed by Tools.
+
+Cargo builds run asynchronously and use Cargo's reported executable paths, rather
+than guessing filenames in `target/debug`. If there is more than one executable,
+a second picker chooses the target. Cargo's output directory must be inside the
+workspace. Existing `:dap.session.start program=...` and
+`:dap.configuration.start name=...` commands remain available.
+
+`Space t d` debugs the test containing the cursor: Rust tests, Python pytest
+functions/methods and Go `Test...` functions. Rust first builds the test targets,
+then asks the selected executable for its test names and runs an exact match.
+Duplicate function names open a test-name picker rather than running multiple
+tests. Python uses a pytest node ID; Go uses an anchored test-name filter. The
+Tree-sitter function must be available; JavaScript tests and Go subtests do not
+have cursor-test support.
+
+JavaScript/TypeScript current-file launches install the pinned upstream
+`js-debug-adapter` release through Tools. Dust connects to its loopback server
+and follows its child-session request to debug the Node process. The adapter runs
+with Node from PATH, or Dust's managed JavaScript runtime when Node is absent.
+The program itself needs `node` on PATH. TypeScript execution depends on that
+Node version's TypeScript support or the project's configured loader; JSX/TSX
+requires the project's build/loader configuration rather than plain Node.
+
 ## Plugins
 
 Open **Plugins** from the dashboard, **Browse installed plugins** from `F1`, or
