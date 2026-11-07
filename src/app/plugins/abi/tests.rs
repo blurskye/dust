@@ -9,7 +9,10 @@ fn real_app(owners: &[&str]) -> (Vec<tempfile::TempDir>, App) {
     real_app_with_capabilities(owners, &[])
 }
 
-pub(super) fn real_app_with_capabilities(owners: &[&str], capabilities: &[PluginCapability]) -> (Vec<tempfile::TempDir>, App) {
+pub(super) fn real_app_with_capabilities(
+    owners: &[&str],
+    capabilities: &[PluginCapability],
+) -> (Vec<tempfile::TempDir>, App) {
     let (dirs, mut app) = app_with_plugin_queue(16);
     let mut roots = vec![dirs.0, dirs.1];
     app.state

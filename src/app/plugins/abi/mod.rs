@@ -172,8 +172,12 @@ impl App {
                     | PluginCapability::PrivateCells => {
                         grants.insert(CommandAccess::Ui);
                     }
-                    PluginCapability::Files => { grants.insert(CommandAccess::Files); }
-                    PluginCapability::Process => { grants.insert(CommandAccess::Process); }
+                    PluginCapability::Files => {
+                        grants.insert(CommandAccess::Files);
+                    }
+                    PluginCapability::Process => {
+                        grants.insert(CommandAccess::Process);
+                    }
                     PluginCapability::Http => {
                         grants.insert(CommandAccess::Network);
                     }
@@ -207,6 +211,9 @@ impl App {
                 .checked_add(1)
                 .ok_or("plugin callback IDs exhausted")?;
             self.extension.abi.next = id;
+            if call.command.is_empty() {
+                call.command = format!("plugin.{plugin}.{handler}");
+            }
             call.pending = pending.map(|_| id);
             call.after = previous.is_some();
             let mut delivery = self.plugin_delivery(&plugin)?;
@@ -243,7 +250,15 @@ impl App {
                 .http_results
                 .remove(&plugin)
                 .unwrap_or_default();
-            delivery.system = self.extension.abi.system.delivery(&plugin, &handler);
+            let system_authority = authority.clone();
+            if pending.is_none()
+                && decode_value(call.arguments.clone())?.as_record().is_ok_and(|arguments| {
+                    matches!(arguments.get("event"), Some(CommandValue::String(event)) if event == "system")
+                })
+            {
+                delivery.system = self.extension.abi.system.delivery(&plugin, &handler, &authority);
+            }
+            let system_count = delivery.system.len();
             let snapshot = None;
             let own = self.plugin_authority(&plugin);
             let call_authority = match (authority, own) {
@@ -320,6 +335,10 @@ impl App {
                 request_id: id,
             };
             reservation.enqueue(|| loan.submit(request))?;
+            self.extension
+                .abi
+                .system
+                .delivered(&plugin, &handler, &system_authority, system_count);
             if let Some(sequence) = delivered_sequence
                 && let Some((_, after)) = self.extension.abi.subscriptions.get_mut(&plugin)
             {

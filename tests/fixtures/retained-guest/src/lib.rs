@@ -135,7 +135,10 @@ impl Guest for GuestComponent {
             if event == "system" {
                 let events = host::take_system_events();
                 let mut results = SYSTEM_RESULTS.lock().unwrap();
-                for event in events { results.push_str(&format!("{:?}\n", event.value)); }
+                for event in events {
+                    results.push_str(&format!("{:?}\n", event.value));
+                }
+                host::show_message(&results)?;
                 return Ok(results.clone());
             }
             let events = host::take_editor_events();
@@ -766,7 +769,11 @@ fn field_text(value: &host::CommandValue, name: &str) -> Option<String> {
 
 fn drive_abi(action: &str, call: &host::CommandCall) -> Result<String, String> {
     match action {
-        "system-results" => return Ok(SYSTEM_RESULTS.lock().unwrap().clone()),
+        "system-results" => {
+            let results = SYSTEM_RESULTS.lock().unwrap().clone();
+            host::show_message(&results)?;
+            return Ok(results);
+        }
         "system-clear" => SYSTEM_RESULTS.lock().unwrap().clear(),
         "system-process" | "system-sleep" | "system-process-escape" => {
             let process = host::start_process(&host::ProcessStart {
@@ -778,25 +785,53 @@ fn drive_abi(action: &str, call: &host::CommandCall) -> Result<String, String> {
             })?;
             SYSTEM_PROCESS.store(process, Ordering::SeqCst);
         }
-        "system-input" => { host::write_process_stdin(&host::ProcessInput { process: SYSTEM_PROCESS.load(Ordering::SeqCst), bytes: b"later".to_vec(), close: true })?; }
-        "system-kill" => { host::kill_process(SYSTEM_PROCESS.load(Ordering::SeqCst))?; }
-        "system-write" | "system-read" | "system-mkdir" | "system-list" | "system-stat" | "system-rename" | "system-delete" | "system-escape" => {
+        "system-input" => {
+            host::write_process_stdin(&host::ProcessInput {
+                process: SYSTEM_PROCESS.load(Ordering::SeqCst),
+                bytes: b"later".to_vec(),
+                close: true,
+            })?;
+        }
+        "system-kill" => {
+            host::kill_process(SYSTEM_PROCESS.load(Ordering::SeqCst))?;
+        }
+        "system-write" | "system-read" | "system-mkdir" | "system-list" | "system-stat"
+        | "system-rename" | "system-delete" | "system-escape" => {
             let operation = match action {
-                "system-write" => host::FileOperation::Write(host::FileWrite { path: "system.txt".into(), bytes: b"new contents\n".to_vec() }),
+                "system-write" => host::FileOperation::Write(host::FileWrite {
+                    path: "system.txt".into(),
+                    bytes: b"new contents\n".to_vec(),
+                }),
                 "system-read" => host::FileOperation::Read("system.txt".into()),
                 "system-mkdir" => host::FileOperation::CreateDirectory("system-dir".into()),
                 "system-list" => host::FileOperation::ListDirectory(".".into()),
                 "system-stat" => host::FileOperation::Stat("system.txt".into()),
-                "system-rename" => host::FileOperation::Rename(host::FileRename { source: "system.txt".into(), target: "system-renamed.txt".into() }),
+                "system-rename" => host::FileOperation::Rename(host::FileRename {
+                    source: "system.txt".into(),
+                    target: "system-renamed.txt".into(),
+                }),
                 "system-delete" => host::FileOperation::Delete("system-renamed.txt".into()),
                 _ => host::FileOperation::Read("system-link/secret".into()),
             };
             host::request_file(&operation, "drive")?;
         }
         "system-query" | "system-query-range" => {
-            host::query_syntax(&host::SyntaxQuery { buffer: host::current_buffer()?.buffer, query: "(identifier) @name".into(), range: if action == "system-query-range" { Some(host::ByteRange { start: 9, end: 13 }) } else { None } }, "drive")?;
+            host::query_syntax(
+                &host::SyntaxQuery {
+                    buffer: host::current_buffer()?.buffer,
+                    query: "(identifier) @name".into(),
+                    range: if action == "system-query-range" {
+                        Some(host::ByteRange { start: 9, end: 13 })
+                    } else {
+                        None
+                    },
+                },
+                "drive",
+            )?;
         }
-        "system-node" => { host::node_at_position(host::current_buffer()?.buffer, 4, "drive")?; }
+        "system-node" => {
+            host::node_at_position(host::current_buffer()?.buffer, 4, "drive")?;
+        }
         "echo" => {
             host::set_command_result(&call.arguments)?;
         }

@@ -182,16 +182,31 @@ pub struct ComponentHostState {
     pub virtual_document_proposals: Vec<PluginVirtualDocumentProposal>,
 }
 impl component_api::dust::plugin::host::Host for ComponentHostState {
-    fn start_process(&mut self, request: component_api::dust::plugin::host::ProcessStart) -> Result<u64, String> {
+    fn start_process(
+        &mut self,
+        request: component_api::dust::plugin::host::ProcessStart,
+    ) -> Result<u64, String> {
         self.require_editor_capability(PluginCapability::Process)?;
-        let bytes = request.program.len() + request.cwd.len() + request.handler.len()
+        let bytes = request.program.len()
+            + request.cwd.len()
+            + request.handler.len()
             + request.arguments.iter().map(String::len).sum::<usize>()
-            + request.environment.iter().map(|(key, value)| key.len() + value.len()).sum::<usize>()
+            + request
+                .environment
+                .iter()
+                .map(|(key, value)| key.len() + value.len())
+                .sum::<usize>()
             + request.stdin.as_ref().map_or(0, Vec::len);
-        self.queue_system(crate::plugins::requests::SystemRequest::Start(request), bytes)
+        self.queue_system(
+            crate::plugins::requests::SystemRequest::Start(request),
+            bytes,
+        )
     }
 
-    fn write_process_stdin(&mut self, input: component_api::dust::plugin::host::ProcessInput) -> Result<u64, String> {
+    fn write_process_stdin(
+        &mut self,
+        input: component_api::dust::plugin::host::ProcessInput,
+    ) -> Result<u64, String> {
         self.require_editor_capability(PluginCapability::Process)?;
         let bytes = input.bytes.len();
         self.queue_system(crate::plugins::requests::SystemRequest::Input(input), bytes)
@@ -202,27 +217,54 @@ impl component_api::dust::plugin::host::Host for ComponentHostState {
         self.queue_system(crate::plugins::requests::SystemRequest::Kill(process), 8)
     }
 
-    fn request_file(&mut self, operation: component_api::dust::plugin::host::FileOperation, handler: String) -> Result<u64, String> {
+    fn request_file(
+        &mut self,
+        operation: component_api::dust::plugin::host::FileOperation,
+        handler: String,
+    ) -> Result<u64, String> {
         self.require_editor_capability(PluginCapability::Files)?;
         use component_api::dust::plugin::host::FileOperation as Op;
-        let bytes = handler.len() + match &operation {
-            Op::Read(path) | Op::CreateDirectory(path) | Op::ListDirectory(path) | Op::Stat(path) | Op::Delete(path) => path.len(),
-            Op::Write(write) => write.path.len() + write.bytes.len(),
-            Op::Rename(rename) => rename.source.len() + rename.target.len(),
-        };
-        self.queue_system(crate::plugins::requests::SystemRequest::File(operation, handler), bytes)
+        let bytes = handler.len()
+            + match &operation {
+                Op::Read(path)
+                | Op::CreateDirectory(path)
+                | Op::ListDirectory(path)
+                | Op::Stat(path)
+                | Op::Delete(path) => path.len(),
+                Op::Write(write) => write.path.len() + write.bytes.len(),
+                Op::Rename(rename) => rename.source.len() + rename.target.len(),
+            };
+        self.queue_system(
+            crate::plugins::requests::SystemRequest::File(operation, handler),
+            bytes,
+        )
     }
 
-    fn query_syntax(&mut self, query: component_api::dust::plugin::host::SyntaxQuery, handler: String) -> Result<u64, String> {
+    fn query_syntax(
+        &mut self,
+        query: component_api::dust::plugin::host::SyntaxQuery,
+        handler: String,
+    ) -> Result<u64, String> {
         self.require_editor_capability(PluginCapability::ReadCurrentBuffer)?;
         let bytes = query.query.len() + handler.len();
-        self.queue_system(crate::plugins::requests::SystemRequest::Query(query, handler), bytes)
+        self.queue_system(
+            crate::plugins::requests::SystemRequest::Query(query, handler),
+            bytes,
+        )
     }
 
-    fn node_at_position(&mut self, buffer: u64, position: u64, handler: String) -> Result<u64, String> {
+    fn node_at_position(
+        &mut self,
+        buffer: u64,
+        position: u64,
+        handler: String,
+    ) -> Result<u64, String> {
         self.require_editor_capability(PluginCapability::ReadCurrentBuffer)?;
         let bytes = handler.len() + 16;
-        self.queue_system(crate::plugins::requests::SystemRequest::Node(buffer, position, handler), bytes)
+        self.queue_system(
+            crate::plugins::requests::SystemRequest::Node(buffer, position, handler),
+            bytes,
+        )
     }
 
     fn take_system_events(&mut self) -> Vec<component_api::dust::plugin::host::SystemEvent> {

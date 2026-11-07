@@ -1619,7 +1619,8 @@ fn parse(request: Request) -> SyntaxEvent {
     let objects = Arc::new(objects::collect(&tree, &request.source, 50_000));
     SyntaxEvent::Parsed(SyntaxResult {
         tree: Arc::new(tree),
-        source: request.source.into(),        document: request.document,
+        source: request.source.into(),
+        document: request.document,
         request_id: request.request_id,
         revision: request.revision,
         language: request.language,

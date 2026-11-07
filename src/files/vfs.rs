@@ -52,7 +52,11 @@ pub struct RequestId(pub u64);
 
 #[derive(Debug)]
 pub enum VfsRequest {
-    WorkspaceFile { id: RequestId, root: crate::files::RootIdentity, operation: super::workspace_access::FileOperation },
+    WorkspaceFile {
+        id: RequestId,
+        root: crate::files::RootIdentity,
+        operation: super::workspace_access::FileOperation,
+    },
     ResolvePaths {
         id: RequestId,
         paths: Vec<PathBuf>,
@@ -193,7 +197,10 @@ pub enum WriteExpectation {
 
 #[derive(Debug)]
 pub enum VfsResult {
-    WorkspaceFile { id: RequestId, result: Result<super::workspace_access::FileValue, VfsError> },
+    WorkspaceFile {
+        id: RequestId,
+        result: Result<super::workspace_access::FileValue, VfsError>,
+    },
     PathsResolved {
         id: RequestId,
         paths: Vec<PathBuf>,
@@ -254,7 +261,8 @@ pub enum VfsResult {
 impl VfsResult {
     pub(crate) fn request_id(&self) -> RequestId {
         match self {
-            Self::WorkspaceFile { id, .. } | Self::PathsResolved { id, .. }
+            Self::WorkspaceFile { id, .. }
+            | Self::PathsResolved { id, .. }
             | Self::ResourceResolved { id, .. }
             | Self::ResourceApplied { id, .. }
             | Self::ExplorerMutated { id, .. }
@@ -291,7 +299,8 @@ impl Drop for WorkerFinished {
 impl VfsRequest {
     fn id(&self) -> Option<RequestId> {
         match self {
-            Self::WorkspaceFile { id, .. } | Self::ResolvePaths { id, .. }
+            Self::WorkspaceFile { id, .. }
+            | Self::ResolvePaths { id, .. }
             | Self::AgentWrite { id, .. }
             | Self::Read { id, .. }
             | Self::ReadScoped { id, .. }
@@ -483,7 +492,14 @@ impl VfsWorker {
                             }
                         } else {
                             match request {
-                                VfsRequest::WorkspaceFile { id, root, operation } => VfsResult::WorkspaceFile { id, result: super::workspace_access::execute(&root, operation) },
+                                VfsRequest::WorkspaceFile {
+                                    id,
+                                    root,
+                                    operation,
+                                } => VfsResult::WorkspaceFile {
+                                    id,
+                                    result: super::workspace_access::execute(&root, operation),
+                                },
                                 VfsRequest::ResolvePaths { id, paths } => {
                                     VfsResult::PathsResolved {
                                         id,
@@ -999,9 +1015,17 @@ impl VfsWorker {
         Ok(id)
     }
 
-    pub(crate) fn workspace_file(&mut self, root: crate::files::RootIdentity, operation: super::workspace_access::FileOperation) -> Result<RequestId, VfsError> {
+    pub(crate) fn workspace_file(
+        &mut self,
+        root: crate::files::RootIdentity,
+        operation: super::workspace_access::FileOperation,
+    ) -> Result<RequestId, VfsError> {
         let id = self.next_request_id()?;
-        self.submit(VfsRequest::WorkspaceFile { id, root, operation })?;
+        self.submit(VfsRequest::WorkspaceFile {
+            id,
+            root,
+            operation,
+        })?;
         Ok(id)
     }
 

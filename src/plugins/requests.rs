@@ -179,9 +179,14 @@ pub(crate) fn value_bytes(value: &wit::CommandValue) -> Result<usize, String> {
 }
 
 impl super::component::ComponentHostState {
-    pub(crate) fn queue_system(&mut self, request: SystemRequest, bytes: usize) -> Result<u64, String> {
+    pub(crate) fn queue_system(
+        &mut self,
+        request: SystemRequest,
+        bytes: usize,
+    ) -> Result<u64, String> {
         let token = self.editor_requests.token()?;
-        self.editor_requests.push(EditorRequest::System(token, request), bytes)?;
+        self.editor_requests
+            .push(EditorRequest::System(token, request), bytes)?;
         Ok(token)
     }
 

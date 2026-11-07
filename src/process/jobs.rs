@@ -202,14 +202,27 @@ impl JobSupervisor {
         self.reserve()?.submit(request)
     }
     /// Interactive jobs use raw output chunks and keep stdin open until explicitly closed.
-    pub(crate) fn start_streaming(&mut self, request: JobRequest, root: crate::files::RootIdentity) -> Result<JobId, JobError> {
+    pub(crate) fn start_streaming(
+        &mut self,
+        request: JobRequest,
+        root: crate::files::RootIdentity,
+    ) -> Result<JobId, JobError> {
         let (sender, input) = mpsc::sync_channel(16);
-        let id = self.reserve()?.submit_inner(request, Some(root), Some(input))?;
+        let id = self
+            .reserve()?
+            .submit_inner(request, Some(root), Some(input))?;
         self.inputs.insert(id, sender);
         Ok(id)
     }
-    pub(crate) fn write_stdin(&mut self, id: JobId, bytes: Vec<u8>, close: bool) -> Result<(), JobError> {
-        if bytes.len() > 1024 * 1024 { return Err(JobError::InvalidPolicy); }
+    pub(crate) fn write_stdin(
+        &mut self,
+        id: JobId,
+        bytes: Vec<u8>,
+        close: bool,
+    ) -> Result<(), JobError> {
+        if bytes.len() > 1024 * 1024 {
+            return Err(JobError::InvalidPolicy);
+        }
         let sender = self.inputs.get(&id).ok_or(JobError::Unknown(id))?;
         if !bytes.is_empty() {
             sender.try_send(bytes).map_err(|error| match error {
@@ -217,7 +230,9 @@ impl JobSupervisor {
                 mpsc::TrySendError::Disconnected(_) => JobError::Unknown(id),
             })?;
         }
-        if close { self.inputs.remove(&id); }
+        if close {
+            self.inputs.remove(&id);
+        }
         Ok(())
     }
     pub fn poll(&mut self) -> Vec<JobEvent> {
@@ -497,17 +512,25 @@ impl JobEngine {
                 let initial = request.stdin.unwrap_or_default();
                 let cancelled = cancel.clone();
                 let lease = slot.clone();
-                thread::Builder::new().name("dust-job-stdin".into()).spawn(move || {
-                    let _lease = lease;
-                    if stdin.write_all(&initial).is_err() { return; }
-                    while !cancelled.load(Ordering::Acquire) {
-                        match input.recv_timeout(Duration::from_millis(10)) {
-                            Ok(bytes) => if stdin.write_all(&bytes).is_err() { break; },
-                            Err(mpsc::RecvTimeoutError::Timeout) => {},
-                            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                thread::Builder::new()
+                    .name("dust-job-stdin".into())
+                    .spawn(move || {
+                        let _lease = lease;
+                        if stdin.write_all(&initial).is_err() {
+                            return;
                         }
-                    }
-                })?;
+                        while !cancelled.load(Ordering::Acquire) {
+                            match input.recv_timeout(Duration::from_millis(10)) {
+                                Ok(bytes) => {
+                                    if stdin.write_all(&bytes).is_err() {
+                                        break;
+                                    }
+                                }
+                                Err(mpsc::RecvTimeoutError::Timeout) => {}
+                                Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                            }
+                        }
+                    })?;
             } else if let Some(bytes) = request.stdin
                 && let Some(mut stdin) = stdin
             {
@@ -717,9 +740,14 @@ fn stream_reader(
                 let mut bytes = Vec::new();
                 let result = if streaming {
                     bytes.resize(8192.min(policy.maximum_line_bytes), 0);
-                    reader.read(&mut bytes).inspect(|read| bytes.truncate(*read))
+                    reader
+                        .read(&mut bytes)
+                        .inspect(|read| bytes.truncate(*read))
                 } else {
-                    reader.by_ref().take(policy.maximum_line_bytes.saturating_add(1) as u64).read_until(b'\n', &mut bytes)
+                    reader
+                        .by_ref()
+                        .take(policy.maximum_line_bytes.saturating_add(1) as u64)
+                        .read_until(b'\n', &mut bytes)
                 };
                 let read = match result {
                     Ok(read) => read,
@@ -1032,6 +1060,7 @@ mod tests {
         (
             Submission {
                 root: None,
+                input: None,
                 id: JobId(1),
                 request,
                 cancel: Arc::new(AtomicBool::new(false)),

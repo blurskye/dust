@@ -1034,7 +1034,7 @@ fn packaged_production_component_clone_refusal_never_enqueues_a_guest_callback()
     ));
     assert_eq!(
         format!("{:x}", Sha256::digest(core)),
-        "b4ed844dc172a7ca80c13114c2d8b23d92202490fe7ba12e09297c4aba73fd41"
+        "1dcea3a7a12d9a91da253c0bbf414cc25698dc2082c50fd7328651eea9fe6a12"
     );
     let component = wit_component::ComponentEncoder::default()
         .module(core)
