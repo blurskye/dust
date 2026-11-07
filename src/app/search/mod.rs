@@ -60,6 +60,8 @@ pub(in crate::app) struct Search {
     byte_navigation: std::collections::HashMap<crate::files::RequestId, ByteNavigation>,
     pub(in crate::app) preview_location: Option<(usize, usize)>,
     pub(in crate::app) diff_preview: crate::git::GitHunkWorker,
+    pub(in crate::app) diff_snapshot: Option<crate::git::GitHunkSnapshot>,
+    pub(in crate::app) diff_hunk: usize,
     pub(in crate::app) diff_preview_key: Option<(
         WorkspaceVersion,
         u64,

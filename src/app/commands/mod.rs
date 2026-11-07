@@ -86,6 +86,7 @@ pub enum AppEffect {
     GitChangesLayerSwitch,
     GitHunksOpen,
     GitHunkNavigate(i8),
+    GitReviewHunk(String),
     GitConflictNavigate(i8),
     MarkdownPreview,
     SaveAll {
@@ -1269,6 +1270,7 @@ impl App {
             | AppEffect::GitHunksOpen
             | AppEffect::GitConflictNavigate(..)
             | AppEffect::GitHunkNavigate(..)
+            | AppEffect::GitReviewHunk(..)
             | AppEffect::GitHunkPreview
             | AppEffect::GitHunkStage
             | AppEffect::GitHunkReset) => self.process_git_effect(effect),

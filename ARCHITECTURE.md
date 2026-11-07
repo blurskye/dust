@@ -55,7 +55,8 @@ it does not implement a second editor. Important groups are:
 - `language/`, `syntax.rs` and `diagnostics.rs`: document synchronization,
   language-server requests/results, completion, parsing and diagnostic display.
 - `git/`, `terminal/`, `debugger/`, `agent/`, `tasks/` and `tools/`: editor-facing
-  workflows around their respective clients and workers.
+  workflows around their respective clients and workers. `git/review.rs` coordinates
+  hunk actions in the existing changed-files picker.
 - `configuration/` and `settings/`: compile and apply configuration contributions,
   keymaps, themes, setup and settings interactions.
 - `plugins/`: connect component requests and replies to these native owners;

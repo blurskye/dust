@@ -147,7 +147,16 @@ Dust does what needs the buffer natively and runs lazygit for the rest:
 - `]h` / `[h` move between hunks; `Space g h p` previews, `Space g h s` stages, `Space g h u`
   unstages and `Space g h r` resets the hunk at the cursor (reset asks for the phrase
   `reset this hunk`);
-- `Space g s` lists changed files with the diff beside them (`s` / `u` stage and unstage);
+- `Space g s` opens **Review changed files (Git status)**, also available in the command
+  palette. The Changes picker lists staged and unstaged files with the selected file's
+  diff beside them. It starts in Normal mode: `j`/`k` select files, `]h`/`[h` select
+  hunks (the diff shows the current hunk number), and Enter opens the file at that
+  change. `s`/`u` stage/unstage the whole file; `S`/`U` stage/unstage the displayed
+  hunk. `r` discards an unstaged hunk after the shared prompt asks for
+  `reset this hunk`. Tab switches between disk and staged diffs; `Ctrl-d`/`Ctrl-u`
+  scroll. `i` filters files; Escape returns to Normal, then closes. Save unsaved
+  buffers before acting on their disk hunks. Binary files have file actions but no
+  text hunks; deleted files cannot be opened. Full Git work remains in lazygit;
 - `Space g x` shows conflicts and lets you pick a side; `Space g w` lists worktrees;
 - `Space g g` opens lazygit at the workspace root, `Space g G` in the current file's
   directory, `Space g f` on the current file's history, and `Space g l` / `Space g c` on the

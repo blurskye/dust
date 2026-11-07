@@ -1203,6 +1203,17 @@ impl Git {
         trusted: bool,
         revision: u64,
     ) -> Result<(), String> {
+        self.mutate_for(editor, reset, trusted, revision, None)
+    }
+
+    fn mutate_for(
+        &mut self,
+        editor: &EditorState,
+        reset: bool,
+        trusted: bool,
+        revision: u64,
+        file: Option<PathBuf>,
+    ) -> Result<(), String> {
         if self.mutation_request_id.is_some() {
             return Err("a Git mutation is already running".into());
         }
@@ -1230,7 +1241,10 @@ impl Git {
         if !reset && snapshot.layer == GitDiffLayer::Staged {
             return Err("that hunk is already staged; unstage it instead".into());
         }
-        let (active, _) = self.active_relative(editor, revision)?;
+        let active = match file {
+            Some(file) => file,
+            None => self.active_relative(editor, revision)?.0,
+        };
         if snapshot.file != active {
             return Err("Git hunk belongs to another file".into());
         }
@@ -1239,6 +1253,19 @@ impl Git {
         // and its index-plus-worktree capture. Hunk staging migrated to the plan type, which
         // additionally captures HEAD and the unsaved revisions.
         if reset {
+            if snapshot.layer != GitDiffLayer::Unstaged {
+                return Err("select an unstaged Git hunk to discard".into());
+            }
+            let path = status.scope_root.join(&snapshot.file);
+            if editor
+                .buffers
+                .values()
+                .any(|buffer| buffer.dirty && buffer.path.as_ref() == Some(&path))
+            {
+                return Err(
+                    "save or close the unsaved buffer before discarding a disk hunk".into(),
+                );
+            }
             let request = GitMutationRequest::ResetUnstagedHunk(GitResetHunkRequest {
                 policy,
                 hunk_snapshot_revision: snapshot.revision,
@@ -2232,6 +2259,9 @@ mod regression_tests {
 
 mod conflict_markers;
 pub(in crate::app) mod pull_requests;
+mod review;
+#[cfg(test)]
+mod review_tests;
 
 pub(in crate::app) mod commands;
 
@@ -2867,6 +2897,10 @@ impl App {
 
 impl App {
     pub(in crate::app) fn confirm_reset_selected_git_hunk(&mut self, phrase: String) {
+        if self.search.picker_surface() == PickerSurfaceKind::Changes {
+            self.confirm_reset_git_review_hunk(phrase);
+            return;
+        }
         let same_target = self.git.take_reset_target();
         if !same_target || !self.active_git_hunks(crate::git::GitDiffLayer::Unstaged) {
             self.show_error("Git hunk target changed");
@@ -3320,9 +3354,8 @@ impl App {
             None => format!("Changes · ±{total}"),
         };
         self.install_surface_picker(PickerSurfaceKind::Changes, title, items);
-        self.search.set_picker_footer(
-            "s Stage · u Unstage · Tab Diff · ctrl-d Scroll · Esc Close".to_owned(),
-        );
+        self.search
+            .set_picker_footer(self.message("git_review_footer", &[]));
         // The list is for acting on files, so its keys work from the start; i searches it.
         self.input.set_picker_normal(true);
         self.search.restore_picker_view(previous, false);

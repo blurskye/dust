@@ -296,6 +296,18 @@ pub(in crate::app) fn register_commands(
     )?;
     register(
         registry,
+        "workspace.git.review.hunk",
+        "Act on the hunk in the changed-files review",
+        ContextRequirement::Workspace,
+        ArgumentSchema::default().field("action", ArgumentType::String, true),
+        |invocation| {
+            Ok(AppEffect::GitReviewHunk(
+                string_arg(invocation, "action")?.into(),
+            ))
+        },
+    )?;
+    register(
+        registry,
         "workspace.git.diff.layer.switch",
         "Switch the diff between the unstaged and staged comparison",
         ContextRequirement::Workspace,
@@ -313,7 +325,26 @@ impl App {
         &mut self,
         effect: AppEffect,
     ) -> Result<(), AppEffect> {
+        let reviewing = self.search.picker_surface() == crate::ui::PickerSurfaceKind::Changes;
         match effect {
+            AppEffect::GitReviewHunk(action) => {
+                if reviewing {
+                    match action.as_str() {
+                        "next" => self.navigate_git_review_hunk(1),
+                        "previous" => self.navigate_git_review_hunk(-1),
+                        "stage" => self.stage_git_review_hunk(false),
+                        "unstage" => self.stage_git_review_hunk(true),
+                        "discard" => self.request_reset_git_review_hunk(),
+                        _ => self.show_error("choose next, previous, stage, unstage or discard"),
+                    }
+                }
+            }
+            AppEffect::GitHunkNavigate(direction) if reviewing => {
+                self.navigate_git_review_hunk(direction)
+            }
+            AppEffect::GitHunkStage if reviewing => self.stage_git_review_hunk(false),
+            AppEffect::GitHunkUnstage if reviewing => self.stage_git_review_hunk(true),
+            AppEffect::GitHunkReset if reviewing => self.request_reset_git_review_hunk(),
             AppEffect::GitFileStage => {
                 self.input.set_pending_stage(AppEffect::GitFileStage);
                 // The plan itself refuses a path whose buffer has unsaved edits and reports
