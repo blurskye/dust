@@ -4392,6 +4392,47 @@ context = "picker_normal"
 keys = "u"
 command = "workspace.git.file.unstage"
 
+# Review keeps Snacks-style file actions on s/u; capitals act on the displayed hunk.
+[[keymap]]
+id = "builtin.picker.normal.review-hunk-next"
+context = "picker_normal"
+keys = "] h"
+command = "workspace.git.review.hunk"
+arguments = { action = "next" }
+desc = "Next Review Hunk"
+
+[[keymap]]
+id = "builtin.picker.normal.review-hunk-previous"
+context = "picker_normal"
+keys = "[ h"
+command = "workspace.git.review.hunk"
+arguments = { action = "previous" }
+desc = "Previous Review Hunk"
+
+[[keymap]]
+id = "builtin.picker.normal.review-hunk-stage"
+context = "picker_normal"
+keys = "S"
+command = "workspace.git.review.hunk"
+arguments = { action = "stage" }
+desc = "Stage Review Hunk"
+
+[[keymap]]
+id = "builtin.picker.normal.review-hunk-unstage"
+context = "picker_normal"
+keys = "U"
+command = "workspace.git.review.hunk"
+arguments = { action = "unstage" }
+desc = "Unstage Review Hunk"
+
+[[keymap]]
+id = "builtin.picker.normal.review-hunk-discard"
+context = "picker_normal"
+keys = "r"
+command = "workspace.git.review.hunk"
+arguments = { action = "discard" }
+desc = "Discard Review Hunk"
+
 [[keymap]]
 id = "builtin.picker.surface.picker-backspace.backspace"
 context = "picker"

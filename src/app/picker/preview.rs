@@ -116,6 +116,8 @@ impl Search {
         self.preview_path = None;
         self.preview_location = None;
         self.diff_preview.cancel();
+        self.diff_snapshot = None;
+        self.diff_hunk = 0;
         self.diff_preview_key = None;
         self.preview_scope = None;
         self.preview_epoch = Arc::new(());
@@ -261,19 +263,34 @@ impl Search {
                     crate::git::GitDiffLayer::Staged => "HEAD -> index",
                     crate::git::GitDiffLayer::Unstaged => "index -> disk",
                 };
+                let provenance = if snapshot.hunks.is_empty() {
+                    format!("{provenance} · No text hunks (unchanged or binary)")
+                } else {
+                    format!("{provenance} · Hunk 1/{}", snapshot.hunks.len())
+                };
                 let body = PickerPreviewBody::Diff(crate::app::git::diff_preview_from_hunks(
                     &snapshot.hunks,
-                    provenance,
+                    &provenance,
                     false,
                     0,
                 ));
+                self.diff_snapshot = Some(snapshot.clone());
+                self.diff_hunk = 0;
                 if let Some(preview) = &mut self.preview {
                     preview.body = body;
                 }
                 true
             }
-            Err(_) => {
-                self.preview = None;
+            Err(error) => {
+                self.diff_snapshot = None;
+                if let Some(preview) = &mut self.preview {
+                    preview.body = PickerPreviewBody::Text(PickerTextPreview::new(
+                        vec![format!("Diff unavailable: {error}")],
+                        0,
+                        None,
+                        None,
+                    ));
+                }
                 true
             }
             Ok(None) => false,

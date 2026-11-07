@@ -632,6 +632,34 @@ impl Search {
         Some(self.changes_layer())
     }
 
+    pub(in crate::app) fn move_diff_hunk(&mut self, direction: i8) {
+        let Some(snapshot) = &self.diff_snapshot else {
+            return;
+        };
+        let count = snapshot.hunks.len();
+        if count == 0 {
+            return;
+        }
+        self.diff_hunk = if direction < 0 {
+            (self.diff_hunk + count - 1) % count
+        } else {
+            (self.diff_hunk + 1) % count
+        };
+        let Some(crate::ui::PickerPreviewBody::Diff(diff)) =
+            self.preview.as_mut().map(|preview| &mut preview.body)
+        else {
+            return;
+        };
+        let layer = match snapshot.layer {
+            crate::git::GitDiffLayer::Staged => "HEAD -> index",
+            crate::git::GitDiffLayer::Unstaged => "index -> disk",
+        };
+        diff.provenance = format!("{layer} · Hunk {}/{count}", self.diff_hunk + 1);
+        if let Some(picker) = &mut self.picker.interaction {
+            picker.preview_scroll = Some(diff.hunk_scroll(self.diff_hunk));
+        }
+    }
+
     pub(in crate::app) fn picker_move(&mut self, direction: i8, wrap: bool) {
         if let Some(picker) = &mut self.picker.interaction {
             picker.state.move_selection(direction, wrap);
@@ -1803,7 +1831,17 @@ impl App {
             }
             return;
         }
-        let payload = self.search.take_picker_payload();
+        let review_line = if self.search.picker_surface() == PickerSurfaceKind::Changes {
+            self.git_review_line()
+        } else {
+            None
+        };
+        let mut payload = self.search.take_picker_payload();
+        if let (Some(line), Some(PickerPayload::MatcherSource(source))) =
+            (review_line, &mut payload)
+        {
+            source.line = line;
+        }
         if let Some(PickerPayload::Selection(id)) = &payload {
             self.finish_item_select(Some(id.clone()));
         }

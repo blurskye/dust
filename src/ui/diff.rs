@@ -257,6 +257,21 @@ index 9792656..89d6f9e 100644
 ";
 
     #[test]
+    fn hunk_scroll_points_to_headers_below_the_pinned_comparison() {
+        let diff = parse_unified_patch(
+            "@@ -1 +1 @@\n-old\n+new\n@@ -20 +20 @@\n-before\n+after\n",
+            "index -> disk",
+        );
+        let rows = diff.rows();
+        for index in 0..2 {
+            let offset = diff.pinned_rows() + diff.hunk_scroll(index);
+            assert_eq!(rows[offset].kind, crate::ui::diff::DiffRowKind::Header);
+            assert_eq!(rows[offset].text, diff.hunks[index].header);
+        }
+        assert!(diff.hunk_scroll(1) > diff.hunk_scroll(0));
+    }
+
+    #[test]
     fn real_patch_text_parses_into_hunks_lines_and_numbers() {
         let diff = parse_unified_patch(REAL_PATCH, "unstaged = index -> disk");
         assert_eq!(diff.hunks.len(), 2, "two hunks");
@@ -632,6 +647,17 @@ impl DiffPreview {
         total
             .saturating_sub(pinned)
             .saturating_sub(height.saturating_sub(pinned))
+    }
+
+    /// The scroll offset of a hunk header, excluding the pinned comparison row.
+    #[must_use]
+    pub fn hunk_scroll(&self, index: usize) -> usize {
+        self.iter_rows()
+            .skip(self.pinned_rows())
+            .enumerate()
+            .filter(|(_, row)| row.kind == DiffRowKind::Header)
+            .nth(index)
+            .map_or(0, |(row, _)| row)
     }
 
     /// Where a box of `height` rows opens: at the top when the first change fits, otherwise

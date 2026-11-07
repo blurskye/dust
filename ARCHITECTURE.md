@@ -56,7 +56,8 @@ it does not implement a second editor. Important groups are:
   language-server requests/results, completion, parsing and diagnostic display.
 - `git/`, `terminal/`, `debugger/`, `agent/`, `tasks/` and `tools/`: editor-facing
   workflows around their respective clients and workers. `tasks/output.rs` parses
-  compiler locations for the existing task-output picker.
+  compiler locations for the existing task-output picker; `git/review.rs` coordinates
+  hunk actions in the existing changed-files picker.
 - `configuration/` and `settings/`: compile and apply configuration contributions,
   keymaps, themes, setup and settings interactions.
 - `plugins/`: connect component requests and replies to these native owners;
