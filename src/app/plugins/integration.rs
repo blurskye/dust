@@ -948,10 +948,18 @@ impl App {
                         crate::plugins::PluginArgumentKind::Boolean => {
                             crate::editor::ArgumentType::Bool
                         }
-                        crate::plugins::PluginArgumentKind::Integer => crate::editor::ArgumentType::Integer,
-                        crate::plugins::PluginArgumentKind::Number => crate::editor::ArgumentType::Number,
-                        crate::plugins::PluginArgumentKind::List => crate::editor::ArgumentType::List,
-                        crate::plugins::PluginArgumentKind::Record => crate::editor::ArgumentType::Record,
+                        crate::plugins::PluginArgumentKind::Integer => {
+                            crate::editor::ArgumentType::Integer
+                        }
+                        crate::plugins::PluginArgumentKind::Number => {
+                            crate::editor::ArgumentType::Number
+                        }
+                        crate::plugins::PluginArgumentKind::List => {
+                            crate::editor::ArgumentType::List
+                        }
+                        crate::plugins::PluginArgumentKind::Record => {
+                            crate::editor::ArgumentType::Record
+                        }
                     },
                     field.required,
                 );
@@ -981,18 +989,35 @@ impl App {
                 source: CommandSource::Plugin(plugin.clone()),
             };
             let command_id = spec.id.clone();
-            if let Err(error) = self.commands.register(spec, |_, _| Ok(CommandOutcome::empty())) {
+            if let Err(error) = self
+                .commands
+                .register(spec, |_, _| Ok(CommandOutcome::empty()))
+            {
                 self.commands.unregister_plugin(&plugin);
                 return Err(error.to_string());
             }
             let authority = self.plugin_authority(&plugin);
-            if let Err(error) = self.commands.register_wrapper(&command_id, plugin.clone(), 0, authority, move |_, invocation, pending, previous| {
-                Ok(crate::editor::CommandWrapperAction::Pending(vec![AppEffect::PluginCall {
-                    plugin: effect_plugin.clone(), handler: effect_command.clone(),
-                    call: crate::app::plugins::abi::command_call(invocation, previous.as_ref().and_then(|outcome| outcome.value.as_ref())),
-                    pending: Some(pending), previous: previous.map(Box::new), authority: crate::editor::CommandAuthority::Host,
-                }]))
-            }) {
+            if let Err(error) = self.commands.register_wrapper(
+                &command_id,
+                plugin.clone(),
+                0,
+                authority,
+                move |_, invocation, pending, previous| {
+                    Ok(crate::editor::CommandWrapperAction::Pending(vec![
+                        AppEffect::PluginCall {
+                            plugin: effect_plugin.clone(),
+                            handler: effect_command.clone(),
+                            call: Box::new(crate::app::plugins::abi::command_call(
+                                invocation,
+                                previous.as_ref().and_then(|outcome| outcome.value.as_ref()),
+                            )),
+                            pending: Some(pending),
+                            previous: previous.map(Box::new),
+                            authority: Box::new(crate::editor::CommandAuthority::Host),
+                        },
+                    ]))
+                },
+            ) {
                 self.commands.unregister_plugin(&plugin);
                 return Err(error.to_string());
             }
@@ -1513,7 +1538,9 @@ impl App {
             }
         };
         self.apply_plugin_call_source(&mut source);
-        if let Some(error) = &source.execution.error { self.show_error(error); }
+        if let Some(error) = &source.execution.error {
+            self.show_error(error);
+        }
         let confirmation_source = source.confirmation_source.clone();
         let navigation_current =
             confirmation_source.navigation_current(&self.state, &self.window_session);

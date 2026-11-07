@@ -1399,7 +1399,9 @@ impl CapturedExecution {
     pub(crate) fn arguments(&self) -> &[String] {
         &self.request.arguments
     }
-    pub(crate) fn call(&self) -> &crate::plugins::component::component_api::dust::plugin::host::CommandCall {
+    pub(crate) fn call(
+        &self,
+    ) -> &crate::plugins::component::component_api::dust::plugin::host::CommandCall {
         &self.request.call
     }
     pub(crate) fn virtual_documents(&self) -> &[crate::plugins::PluginVirtualDocumentRequest] {
@@ -1454,7 +1456,7 @@ impl ExecutionFixture {
             } => CapturedExecution {
                 load,
                 origin,
-                request: invocation,
+                request: *invocation,
             },
             other => panic!("expected invocation, got {other:?}"),
         }
@@ -1518,10 +1520,10 @@ impl ExecutionFixture {
                 load: captured.load,
                 origin: captured.origin.clone(),
                 execution: PluginExecution {
-            error: None,
-            editor_requests: Vec::new(),
-            value: None,
-            call_next: None,
+                    error: None,
+                    editor_requests: Vec::new(),
+                    value: None,
+                    call_next: None,
                     plugin: captured.request.plugin.clone(),
                     command: captured.request.command.clone(),
                     request_id: captured.request.request_id,
@@ -1548,10 +1550,10 @@ impl ExecutionFixture {
                 load: captured.load,
                 origin: captured.origin.clone(),
                 execution: PluginExecution {
-            error: None,
-            editor_requests: Vec::new(),
-            value: None,
-            call_next: None,
+                    error: None,
+                    editor_requests: Vec::new(),
+                    value: None,
+                    call_next: None,
                     plugin: captured.request.plugin.clone(),
                     command: captured.request.command.clone(),
                     request_id: captured.request.request_id,
@@ -1670,7 +1672,10 @@ fn retained_runtime_with_activation(
             if section == 2 {
                 let count = number(original, &mut section_at);
                 for _ in 0..count {
-                    for _ in 0..2 { let length = number(original, &mut section_at); section_at += length; }
+                    for _ in 0..2 {
+                        let length = number(original, &mut section_at);
+                        section_at += length;
+                    }
                     assert_eq!(original[section_at], 0, "fixture imports only functions");
                     section_at += 1;
                     number(original, &mut section_at);
@@ -1682,9 +1687,12 @@ fn retained_runtime_with_activation(
                     let length = number(original, &mut section_at);
                     let name = &original[section_at..section_at + length];
                     section_at += length;
-                    let kind = original[section_at]; section_at += 1;
+                    let kind = original[section_at];
+                    section_at += 1;
                     let index = number(original, &mut section_at);
-                    if name == b"activate" && kind == 0 { activation = Some(index); }
+                    if name == b"activate" && kind == 0 {
+                        activation = Some(index);
+                    }
                 }
             }
             section_at = end;
@@ -1956,7 +1964,8 @@ fn component_storage_driver_validates_each_reply_before_advancing() {
             let mut request = empty_execution_request();
             request.command = "storage".into();
             request.storage_results = replies;
-            let execution = crate::plugins::index::execute_component(request, &mut runtime).unwrap();
+            let execution =
+                crate::plugins::index::execute_component(request, &mut runtime).unwrap();
             let error = execution.error.expect("invalid storage reply must fail");
             assert!(error.starts_with(&format!("storage:{phase}:")), "{error}");
             assert!(execution.storage_requests.is_empty());

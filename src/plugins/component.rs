@@ -65,10 +65,18 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 
 fn key_layer_bytes(layer: &component_api::dust::plugin::host::KeyLayer) -> Result<usize, String> {
-    if layer.bindings.len() > 256 { return Err("key binding limit exceeded".into()); }
-    layer.bindings.iter().try_fold(layer.name.len(), |bytes, binding| {
-        Ok(bytes + binding.keys.len() + binding.command.len() + crate::plugins::requests::value_bytes(&binding.arguments)?)
-    })
+    if layer.bindings.len() > 256 {
+        return Err("key binding limit exceeded".into());
+    }
+    layer
+        .bindings
+        .iter()
+        .try_fold(layer.name.len(), |bytes, binding| {
+            Ok(bytes
+                + binding.keys.len()
+                + binding.command.len()
+                + crate::plugins::requests::value_bytes(&binding.arguments)?)
+        })
 }
 
 pub mod component_api {
@@ -174,35 +182,70 @@ pub struct ComponentHostState {
     pub virtual_document_proposals: Vec<PluginVirtualDocumentProposal>,
 }
 impl component_api::dust::plugin::host::Host for ComponentHostState {
-    fn register_command(&mut self, definition: component_api::dust::plugin::host::CommandDefinition) -> Result<(), String> {
+    fn register_command(
+        &mut self,
+        definition: component_api::dust::plugin::host::CommandDefinition,
+    ) -> Result<(), String> {
         self.require_editor_capability(PluginCapability::Commands)?;
-        if definition.arguments.len() > 32 || definition.access.len() > 5 { return Err("command declaration limit exceeded".into()); }
-        let bytes = definition.name.len() + definition.title.len() + definition.handler.len() + definition.arguments.iter().map(|field| field.name.len()).sum::<usize>();
-        self.editor_requests.push(crate::plugins::requests::EditorRequest::Register(definition), bytes)
+        if definition.arguments.len() > 32 || definition.access.len() > 5 {
+            return Err("command declaration limit exceeded".into());
+        }
+        let bytes = definition.name.len()
+            + definition.title.len()
+            + definition.handler.len()
+            + definition
+                .arguments
+                .iter()
+                .map(|field| field.name.len())
+                .sum::<usize>();
+        self.editor_requests.push(
+            crate::plugins::requests::EditorRequest::Register(definition),
+            bytes,
+        )
     }
 
-    fn run_command(&mut self, call: component_api::dust::plugin::host::CommandCall) -> Result<u64, String> {
+    fn run_command(
+        &mut self,
+        call: component_api::dust::plugin::host::CommandCall,
+    ) -> Result<u64, String> {
         self.require_editor_capability(PluginCapability::Commands)?;
         let bytes = crate::plugins::requests::value_bytes(&call.arguments)?;
-        if call.pending.is_some() || call.previous.is_some() || call.after || call.command.len() > 256 {
+        if call.pending.is_some()
+            || call.previous.is_some()
+            || call.after
+            || call.command.len() > 256
+        {
             return Err("run-command cannot supply wrapper state".into());
         }
         let token = self.editor_requests.token()?;
-        self.editor_requests.push(crate::plugins::requests::EditorRequest::Run(token, call), bytes)?;
+        self.editor_requests.push(
+            crate::plugins::requests::EditorRequest::Run(token, call),
+            bytes,
+        )?;
         Ok(token)
     }
 
     fn call_next(&mut self, pending: u64) -> Result<(), String> {
         self.require_editor_capability(PluginCapability::Commands)?;
-        if self.editor_requests.pending != Some(pending) || self.editor_requests.after || self.editor_requests.call_next.is_some() || self.editor_requests.value.is_some() {
+        if self.editor_requests.pending != Some(pending)
+            || self.editor_requests.after
+            || self.editor_requests.call_next.is_some()
+            || self.editor_requests.value.is_some()
+        {
             return Err("call-next requires the current waiting wrapper".into());
         }
         self.editor_requests.call_next = Some(pending);
         Ok(())
     }
 
-    fn set_command_result(&mut self, value: component_api::dust::plugin::host::CommandValue) -> Result<(), String> {
-        if self.confirmation_result_only || !self.execution_available || self.editor_requests.call_next.is_some() {
+    fn set_command_result(
+        &mut self,
+        value: component_api::dust::plugin::host::CommandValue,
+    ) -> Result<(), String> {
+        if self.confirmation_result_only
+            || !self.execution_available
+            || self.editor_requests.call_next.is_some()
+        {
             return Err("command result is unavailable".into());
         }
         crate::plugins::requests::value_bytes(&value)?;
@@ -214,96 +257,192 @@ impl component_api::dust::plugin::host::Host for ComponentHostState {
         std::mem::take(&mut self.editor_requests.delivery.replies)
     }
 
-    fn wrap_command(&mut self, wrapper: component_api::dust::plugin::host::CommandWrapper) -> Result<(), String> {
+    fn wrap_command(
+        &mut self,
+        wrapper: component_api::dust::plugin::host::CommandWrapper,
+    ) -> Result<(), String> {
         self.require_editor_capability(PluginCapability::Commands)?;
         let bytes = wrapper.command.len() + wrapper.handler.len();
-        self.editor_requests.push(crate::plugins::requests::EditorRequest::Wrap(wrapper), bytes)
+        self.editor_requests.push(
+            crate::plugins::requests::EditorRequest::Wrap(wrapper),
+            bytes,
+        )
     }
 
-    fn enter_mode(&mut self, mode: component_api::dust::plugin::host::NamedMode) -> Result<(), String> {
+    fn enter_mode(
+        &mut self,
+        mode: component_api::dust::plugin::host::NamedMode,
+    ) -> Result<(), String> {
         self.require_editor_capability(PluginCapability::Input)?;
         let bytes = mode.label.len() + mode.name.len() + key_layer_bytes(&mode.layer)?;
-        self.editor_requests.push(crate::plugins::requests::EditorRequest::EnterMode(mode), bytes)
+        self.editor_requests.push(
+            crate::plugins::requests::EditorRequest::EnterMode(mode),
+            bytes,
+        )
     }
 
     fn leave_mode(&mut self) -> Result<(), String> {
         self.require_editor_capability(PluginCapability::Input)?;
-        self.editor_requests.push(crate::plugins::requests::EditorRequest::LeaveMode, 0)
+        self.editor_requests
+            .push(crate::plugins::requests::EditorRequest::LeaveMode, 0)
     }
 
-    fn push_key_layer(&mut self, layer: component_api::dust::plugin::host::KeyLayer) -> Result<(), String> {
+    fn push_key_layer(
+        &mut self,
+        layer: component_api::dust::plugin::host::KeyLayer,
+    ) -> Result<(), String> {
         self.require_editor_capability(PluginCapability::Input)?;
         let bytes = key_layer_bytes(&layer)?;
-        self.editor_requests.push(crate::plugins::requests::EditorRequest::PushLayer(layer), bytes)
+        self.editor_requests.push(
+            crate::plugins::requests::EditorRequest::PushLayer(layer),
+            bytes,
+        )
     }
 
     fn pop_key_layer(&mut self, name: String) -> Result<(), String> {
         self.require_editor_capability(PluginCapability::Input)?;
         let bytes = name.len();
-        self.editor_requests.push(crate::plugins::requests::EditorRequest::PopLayer(name), bytes)
+        self.editor_requests.push(
+            crate::plugins::requests::EditorRequest::PopLayer(name),
+            bytes,
+        )
     }
 
-    fn replace_marks(&mut self, marks: component_api::dust::plugin::host::MarkSet) -> Result<(), String> {
+    fn replace_marks(
+        &mut self,
+        marks: component_api::dust::plugin::host::MarkSet,
+    ) -> Result<(), String> {
         self.require_editor_capability(PluginCapability::Decorations)?;
-        if marks.marks.len() > 4096 { return Err("mark limit exceeded".into()); }
+        if marks.marks.len() > 4096 {
+            return Err("mark limit exceeded".into());
+        }
         let bytes = marks.namespace.len() + marks.marks.len() * 40;
-        self.editor_requests.push(crate::plugins::requests::EditorRequest::Marks(marks), bytes)
+        self.editor_requests
+            .push(crate::plugins::requests::EditorRequest::Marks(marks), bytes)
     }
 
-    fn read_marks(&mut self, buffer: u64, namespace: String) -> Result<Vec<component_api::dust::plugin::host::Mark>, String> {
+    fn read_marks(
+        &mut self,
+        buffer: u64,
+        namespace: String,
+    ) -> Result<Vec<component_api::dust::plugin::host::Mark>, String> {
         self.require_editor_capability(PluginCapability::Decorations)?;
-        Ok(self.editor_requests.delivery.marks.iter().find(|set| set.buffer == buffer && set.namespace == namespace).map(|set| set.marks.clone()).unwrap_or_default())
+        Ok(self
+            .editor_requests
+            .delivery
+            .marks
+            .iter()
+            .find(|set| set.buffer == buffer && set.namespace == namespace)
+            .map(|set| set.marks.clone())
+            .unwrap_or_default())
     }
 
     fn subscribe_events(&mut self, handler: String) -> Result<(), String> {
         self.require_editor_capability(PluginCapability::EventSubscriptions)?;
         let bytes = handler.len();
-        self.editor_requests.push(crate::plugins::requests::EditorRequest::Subscribe(handler), bytes)
+        self.editor_requests.push(
+            crate::plugins::requests::EditorRequest::Subscribe(handler),
+            bytes,
+        )
     }
 
     fn take_editor_events(&mut self) -> Option<component_api::dust::plugin::host::EventBatch> {
         self.editor_requests.delivery.events.take()
     }
 
-    fn register_completion_source(&mut self, source: component_api::dust::plugin::host::CompletionSource) -> Result<(), String> {
+    fn register_completion_source(
+        &mut self,
+        source: component_api::dust::plugin::host::CompletionSource,
+    ) -> Result<(), String> {
         self.require_editor_capability(PluginCapability::Completion)?;
         let bytes = source.name.len() + source.handler.len();
-        self.editor_requests.push(crate::plugins::requests::EditorRequest::CompletionSource(source), bytes)
+        self.editor_requests.push(
+            crate::plugins::requests::EditorRequest::CompletionSource(source),
+            bytes,
+        )
     }
 
-    fn publish_completions(&mut self, batch: component_api::dust::plugin::host::CompletionBatch) -> Result<(), String> {
+    fn publish_completions(
+        &mut self,
+        batch: component_api::dust::plugin::host::CompletionBatch,
+    ) -> Result<(), String> {
         self.require_editor_capability(PluginCapability::Completion)?;
-        if batch.items.len() > 4096 { return Err("completion item limit exceeded".into()); }
-        let bytes = batch.source.len() + batch.items.iter().map(|item| item.label.len() + item.text.len() + item.detail.as_ref().map_or(0, String::len)).sum::<usize>();
-        self.editor_requests.push(crate::plugins::requests::EditorRequest::Completions(batch), bytes)
+        if batch.items.len() > 4096 {
+            return Err("completion item limit exceeded".into());
+        }
+        let bytes = batch.source.len()
+            + batch
+                .items
+                .iter()
+                .map(|item| {
+                    item.label.len() + item.text.len() + item.detail.as_ref().map_or(0, String::len)
+                })
+                .sum::<usize>();
+        self.editor_requests.push(
+            crate::plugins::requests::EditorRequest::Completions(batch),
+            bytes,
+        )
     }
 
-    fn filter_lsp(&mut self, filter: component_api::dust::plugin::host::LspFilter) -> Result<(), String> {
+    fn filter_lsp(
+        &mut self,
+        filter: component_api::dust::plugin::host::LspFilter,
+    ) -> Result<(), String> {
         self.require_editor_capability(PluginCapability::Commands)?;
         let bytes = filter.method.len() + filter.handler.len();
-        self.editor_requests.push(crate::plugins::requests::EditorRequest::LspFilter(filter), bytes)
+        self.editor_requests.push(
+            crate::plugins::requests::EditorRequest::LspFilter(filter),
+            bytes,
+        )
     }
 
-    fn start_timer(&mut self, request: component_api::dust::plugin::host::TimerRequest) -> Result<u64, String> {
+    fn start_timer(
+        &mut self,
+        request: component_api::dust::plugin::host::TimerRequest,
+    ) -> Result<u64, String> {
         self.require_editor_capability(PluginCapability::Timers)?;
-        if request.milliseconds == 0 || request.milliseconds > 86_400_000 { return Err("timer must be between 1 ms and one day".into()); }
+        if request.milliseconds == 0 || request.milliseconds > 86_400_000 {
+            return Err("timer must be between 1 ms and one day".into());
+        }
         let token = self.editor_requests.token()?;
         let bytes = request.handler.len();
-        self.editor_requests.push(crate::plugins::requests::EditorRequest::Timer(token, request), bytes)?;
+        self.editor_requests.push(
+            crate::plugins::requests::EditorRequest::Timer(token, request),
+            bytes,
+        )?;
         Ok(token)
     }
 
     fn cancel_timer(&mut self, request: u64) -> Result<(), String> {
         self.require_editor_capability(PluginCapability::Timers)?;
-        self.editor_requests.push(crate::plugins::requests::EditorRequest::CancelTimer(request), 8)
+        self.editor_requests.push(
+            crate::plugins::requests::EditorRequest::CancelTimer(request),
+            8,
+        )
     }
 
-    fn request_http(&mut self, request: component_api::dust::plugin::host::HttpRequest) -> Result<u64, String> {
+    fn request_http(
+        &mut self,
+        request: component_api::dust::plugin::host::HttpRequest,
+    ) -> Result<u64, String> {
         self.require_editor_capability(PluginCapability::Http)?;
-        if request.headers.len() > 64 { return Err("HTTP header limit exceeded".into()); }
-        let bytes = request.url.len() + request.method.len() + request.body.len() + request.handler.len() + request.headers.iter().map(|(key, value)| key.len() + value.len()).sum::<usize>();
+        if request.headers.len() > 64 {
+            return Err("HTTP header limit exceeded".into());
+        }
+        let bytes = request.url.len()
+            + request.method.len()
+            + request.body.len()
+            + request.handler.len()
+            + request
+                .headers
+                .iter()
+                .map(|(key, value)| key.len() + value.len())
+                .sum::<usize>();
         let token = self.editor_requests.token()?;
-        self.editor_requests.push(crate::plugins::requests::EditorRequest::Http(token, request), bytes)?;
+        self.editor_requests.push(
+            crate::plugins::requests::EditorRequest::Http(token, request),
+            bytes,
+        )?;
         Ok(token)
     }
 
@@ -312,7 +451,14 @@ impl component_api::dust::plugin::host::Host for ComponentHostState {
     }
 
     fn current_view(&mut self) -> Option<component_api::dust::plugin::host::ViewState> {
-        if self.capabilities.contains(&PluginCapability::ReadCurrentBuffer) { self.editor_requests.delivery.view.clone() } else { None }
+        if self
+            .capabilities
+            .contains(&PluginCapability::ReadCurrentBuffer)
+        {
+            self.editor_requests.delivery.view.clone()
+        } else {
+            None
+        }
     }
 
     fn current_buffer(&mut self) -> Result<component_api::dust::plugin::host::Snapshot, String> {

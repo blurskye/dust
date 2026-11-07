@@ -617,7 +617,8 @@ impl PluginHostEventQueue {
 pub struct PluginExecution {
     pub(crate) error: Option<String>,
     pub(crate) editor_requests: Vec<crate::plugins::requests::EditorRequest>,
-    pub(crate) value: Option<crate::plugins::component::component_api::dust::plugin::host::CommandValue>,
+    pub(crate) value:
+        Option<crate::plugins::component::component_api::dust::plugin::host::CommandValue>,
     pub(crate) call_next: Option<u64>,
     pub plugin: String,
     pub command: String,

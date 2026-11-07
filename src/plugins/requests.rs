@@ -11,7 +11,9 @@ impl Default for wit::CommandCall {
     fn default() -> Self {
         Self {
             command: String::new(),
-            arguments: wit::CommandValue { nodes: vec![wit::ValueNode::Object(Vec::new())] },
+            arguments: wit::CommandValue {
+                nodes: vec![wit::ValueNode::Object(Vec::new())],
+            },
             buffer: None,
             view: None,
             count: None,
@@ -84,17 +86,27 @@ impl ComponentRequests {
     }
 
     pub(crate) fn token(&mut self) -> Result<u64, String> {
-        self.next = self.next.checked_add(1).ok_or("plugin request IDs exhausted")?;
+        self.next = self
+            .next
+            .checked_add(1)
+            .ok_or("plugin request IDs exhausted")?;
         Ok(self.next)
     }
 }
 
 pub(crate) fn positional_value(arguments: Vec<String>) -> wit::CommandValue {
     let mut nodes = Vec::new();
-    let fields = arguments.into_iter().enumerate().map(|(index, text)| {
-        nodes.push(wit::ValueNode::Text(text));
-        wit::ValueField { name: index.to_string(), value: index as u32 }
-    }).collect();
+    let fields = arguments
+        .into_iter()
+        .enumerate()
+        .map(|(index, text)| {
+            nodes.push(wit::ValueNode::Text(text));
+            wit::ValueField {
+                name: index.to_string(),
+                value: index as u32,
+            }
+        })
+        .collect();
     nodes.push(wit::ValueNode::Object(fields));
     wit::CommandValue { nodes }
 }
@@ -105,31 +117,48 @@ pub(crate) fn value_bytes(value: &wit::CommandValue) -> Result<usize, String> {
     }
     let mut bytes = 0usize;
     let mut used = vec![false; value.nodes.len()];
+    let mut depths = Vec::with_capacity(value.nodes.len());
     for (index, node) in value.nodes.iter().enumerate() {
+        let mut depth = 1;
         let mut child = |id: u32| -> Result<(), String> {
             let id = id as usize;
-            if id >= index || used[id] { return Err("command values must be trees in postorder".into()); }
+            if id >= index || used[id] {
+                return Err("command values must be trees in postorder".into());
+            }
             used[id] = true;
+            depth = depth.max(depths[id] + 1);
+            if depth > 64 {
+                return Err("command value nesting limit exceeded".into());
+            }
             Ok(())
         };
         bytes += match node {
             wit::ValueNode::Text(text) => text.len(),
-            wit::ValueNode::Number(number) if !number.is_finite() => return Err("non-finite number".into()),
+            wit::ValueNode::Number(number) if !number.is_finite() => {
+                return Err("non-finite number".into());
+            }
             wit::ValueNode::Sequence(ids) => {
-                for id in ids { child(*id)?; }
+                for id in ids {
+                    child(*id)?;
+                }
                 ids.len() * 4
             }
             wit::ValueNode::Object(fields) => {
                 let mut names = std::collections::BTreeSet::new();
                 for field in fields {
-                    if !names.insert(&field.name) { return Err("duplicate command field".into()); }
+                    if !names.insert(&field.name) {
+                        return Err("duplicate command field".into());
+                    }
                     child(field.value)?;
                 }
                 fields.iter().map(|field| field.name.len() + 4).sum()
             }
             _ => 8,
         };
-        if bytes > BYTE_LIMIT { return Err("command value byte limit exceeded".into()); }
+        depths.push(depth);
+        if bytes > BYTE_LIMIT {
+            return Err("command value byte limit exceeded".into());
+        }
     }
     if used[..used.len() - 1].iter().any(|used| !used) {
         return Err("unreferenced command value node".into());
@@ -138,11 +167,16 @@ pub(crate) fn value_bytes(value: &wit::CommandValue) -> Result<usize, String> {
 }
 
 impl super::component::ComponentHostState {
-    pub(crate) fn require_editor_capability(&self, capability: PluginCapability) -> Result<(), String> {
+    pub(crate) fn require_editor_capability(
+        &self,
+        capability: PluginCapability,
+    ) -> Result<(), String> {
         if !self.execution_available || self.confirmation_result_only {
             return Err("editor requests are unavailable in this callback".into());
         }
-        if !self.capabilities.contains(&capability) { return Err("capability denied".into()); }
+        if !self.capabilities.contains(&capability) {
+            return Err("capability denied".into());
+        }
         Ok(())
     }
 }

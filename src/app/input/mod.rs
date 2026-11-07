@@ -2978,8 +2978,15 @@ pub enum InputCommand {
     LeaveMode,
     PushLayer(Box<Keymap>),
     PopLayer,
-    PushNamedLayer { owner: String, name: String, layer: Box<Keymap> },
-    RemoveNamedLayer { owner: String, name: String },
+    PushNamedLayer {
+        owner: String,
+        name: String,
+        layer: Box<Keymap>,
+    },
+    RemoveNamedLayer {
+        owner: String,
+        name: String,
+    },
     /// The command's eventual result must complete this id, including on failure or timeout.
     Wait(u64),
     Complete {

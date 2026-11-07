@@ -459,8 +459,16 @@ impl<E> CommandRegistry<E> {
         Ok(())
     }
 
-    pub(crate) fn set_access(&mut self, id: &CommandId, access: BTreeSet<CommandAccess>) -> Result<(), CommandError> {
-        self.commands.get_mut(id).ok_or_else(|| CommandError::Unknown(id.clone()))?.spec.access = access;
+    pub(crate) fn set_access(
+        &mut self,
+        id: &CommandId,
+        access: BTreeSet<CommandAccess>,
+    ) -> Result<(), CommandError> {
+        self.commands
+            .get_mut(id)
+            .ok_or_else(|| CommandError::Unknown(id.clone()))?
+            .spec
+            .access = access;
         Ok(())
     }
 

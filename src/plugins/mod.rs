@@ -2,8 +2,8 @@
 
 #![forbid(unsafe_code)]
 
-mod providers;
 pub(crate) mod http;
+mod providers;
 pub(crate) mod requests;
 pub use requests::PluginDelivery;
 mod storage;

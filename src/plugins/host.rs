@@ -76,14 +76,14 @@ pub(super) enum Request {
         load: PluginLoadId,
         store: PathBuf,
         path: PathBuf,
-        manifest: PluginManifest,
+        manifest: Box<PluginManifest>,
         limits: PluginLimits,
         object_lock: Option<Arc<fs::File>>,
     },
     Execute {
         load: PluginLoadId,
         origin: Option<PluginInvocationOrigin>,
-        invocation: PluginExecutionRequest,
+        invocation: Box<PluginExecutionRequest>,
     },
     Disable {
         load: PluginLoadId,
@@ -194,7 +194,7 @@ impl PluginInvocation<'_> {
             request: Request::Execute {
                 load: self.origin.load,
                 origin: Some(self.origin),
-                invocation,
+                invocation: Box::new(invocation),
             },
             slot: self.slot,
         })
@@ -365,7 +365,7 @@ impl PluginHost {
                                         IndexedCandidate {
                                             store,
                                             component_path: path,
-                                            manifest,
+                                            manifest: *manifest,
                                             limits,
                                             _object_lock: object_lock,
                                         },
@@ -427,7 +427,7 @@ impl PluginHost {
                         } => {
                             let plugin = invocation.plugin.clone();
                             match runtimes.get_mut(&plugin).filter(|slot| slot.load == load) {
-                                Some(slot) => execute_component(invocation, &mut slot.runtime)
+                                Some(slot) => execute_component(*invocation, &mut slot.runtime)
                                     .map_or_else(
                                         |error| {
                                             runtimes.remove(&plugin);
@@ -680,7 +680,7 @@ impl PluginHost {
             load,
             store,
             path,
-            manifest,
+            manifest: Box::new(manifest),
             limits,
             object_lock,
         })?;
@@ -691,9 +691,15 @@ impl PluginHost {
     pub(crate) fn validate_invocation(
         invocation: &PluginExecutionRequest,
     ) -> Result<(), PluginError> {
-        crate::plugins::requests::value_bytes(&invocation.call.arguments).map_err(|_| PluginError::InvalidInvocation)?;
-        if let Some(value) = &invocation.call.previous { crate::plugins::requests::value_bytes(value).map_err(|_| PluginError::InvalidInvocation)?; }
-        if invocation.call.command.len() > 256 || invocation.call.count == Some(0) { return Err(PluginError::InvalidInvocation); }
+        crate::plugins::requests::value_bytes(&invocation.call.arguments)
+            .map_err(|_| PluginError::InvalidInvocation)?;
+        if let Some(value) = &invocation.call.previous {
+            crate::plugins::requests::value_bytes(value)
+                .map_err(|_| PluginError::InvalidInvocation)?;
+        }
+        if invocation.call.command.len() > 256 || invocation.call.count == Some(0) {
+            return Err(PluginError::InvalidInvocation);
+        }
         if invocation.arguments.len() > 256
             || invocation
                 .arguments
@@ -744,7 +750,7 @@ impl PluginHost {
         self.send_request(Request::Execute {
             load,
             origin: None,
-            invocation,
+            invocation: Box::new(invocation),
         })
     }
     fn fail_stopped_loads(&mut self) {

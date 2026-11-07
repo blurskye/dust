@@ -106,7 +106,26 @@ pub(super) struct InvocationLoan<'a> {
     _configuration: &'a u64,
 }
 impl InvocationLoan<'_> {
-    pub(in crate::app) fn direct(mut self) -> Self { self.invocation.direct = true; self }
+    pub(in crate::app) fn direct(mut self, target: Option<BufferId>) -> Result<Self, String> {
+        if let Some(id) = target {
+            let buffer = self
+                .editor
+                .buffers
+                .get(id)
+                .ok_or("plugin target buffer closed")?;
+            if buffer.text.len_bytes() > self.invocation.maximum {
+                return Err("plugin snapshot exceeds byte limit".into());
+            }
+            self.invocation.document = Some(Document {
+                id,
+                path: buffer.path.clone(),
+                text: buffer.text.source_version(),
+                revision: buffer.text.revision(),
+            });
+        }
+        self.invocation.direct = true;
+        Ok(self)
+    }
     pub(in crate::app) fn origin(&self) -> &PluginInvocationOrigin {
         &self.invocation.origin
     }
@@ -335,7 +354,11 @@ impl PluginEditSources {
         if !source_actions_admitted && execution.confirmation_requests.is_empty() {
             return Err("plugin invocation workspace or configuration changed".into());
         }
-        let proposals = if invocation.direct { Vec::new() } else { std::mem::take(&mut execution.proposals) };
+        let proposals = if invocation.direct {
+            Vec::new()
+        } else {
+            std::mem::take(&mut execution.proposals)
+        };
         let preview = if !source_actions_admitted {
             Err("plugin invocation source changed before its reply".into())
         } else if proposals.is_empty() {

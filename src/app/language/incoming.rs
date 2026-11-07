@@ -86,7 +86,10 @@ pub(super) fn register_commands(
                 ))
             },
         )?;
-        registry.set_access(&crate::editor::CommandId::new(command_id(method))?, [crate::editor::CommandAccess::Edit].into())?;
+        registry.set_access(
+            &crate::editor::CommandId::new(command_id(method))?,
+            [crate::editor::CommandAccess::Edit].into(),
+        )?;
     }
     Ok(())
 }
@@ -109,7 +112,7 @@ fn method(event: &LspEvent) -> Option<(&str, &str)> {
 }
 
 impl App {
-    pub(super) fn route_lsp_event(&mut self, owned: OwnedLspEvent) {
+    pub(in crate::app) fn route_lsp_event(&mut self, owned: OwnedLspEvent) {
         if !self.language.owns_event_context(&owned.context) {
             self.language.reject_reply(
                 owned.reply,
@@ -139,10 +142,19 @@ impl App {
     }
 
     pub(in crate::app) fn finish_incoming_lsp_commands(&mut self) {
-        let finished: Vec<_> = self.language.incoming.keys().copied().filter(|id| !self.incoming_command_pending(*id)).collect();
+        let finished: Vec<_> = self
+            .language
+            .incoming
+            .keys()
+            .copied()
+            .filter(|id| !self.incoming_command_pending(*id))
+            .collect();
         for id in finished {
             if let Some(owned) = self.language.incoming.remove(&id) {
-                self.language.reject_reply(owned.reply, "incoming LSP handler did not apply the request".into());
+                self.language.reject_reply(
+                    owned.reply,
+                    "incoming LSP handler did not apply the request".into(),
+                );
             }
         }
     }

@@ -53,7 +53,9 @@ impl App {
             }
             InputCommand::RemoveNamedLayer { owner, name } => {
                 self.input.cancel_mapping();
-                self.input.key_layers.retain(|(key, _)| key.as_ref() != Some(&(owner.clone(), name.clone())));
+                self.input
+                    .key_layers
+                    .retain(|(key, _)| key.as_ref() != Some(&(owner.clone(), name.clone())));
                 self.input.capture_changed();
             }
             InputCommand::Wait(_) => {}

@@ -943,7 +943,9 @@ pub(crate) fn execute_component(
             .map(|request| request.request)
             .collect();
         state.virtual_document_proposals.clear();
-        state.editor_requests.begin(delivery, call.pending, call.after);
+        state
+            .editor_requests
+            .begin(delivery, call.pending, call.after);
         state.proposals.clear();
         state.messages.clear();
         state.ui_requests.clear();
@@ -981,15 +983,37 @@ pub(crate) fn execute_component(
         })
         .collect();
     let result = result.map_err(|error| PluginError::Execution(format!("{error:#}")))?;
-    let (result, error) = match result { Ok(result) => (result, None), Err(error) => (String::new(), Some(error.chars().take(4096).collect())) };
+    let (result, error) = match result {
+        Ok(result) => (result, None),
+        Err(error) => (String::new(), Some(error.chars().take(4096).collect())),
+    };
     if result.len() > 1024 * 1024 {
         return Err(PluginError::InvalidInvocation);
     }
     if error.is_some() {
+        for request in &ui_requests {
+            state.pending_ui_tokens.remove(&request.token);
+        }
+        for request in &storage_requests {
+            state.pending_storage.remove(&request.token);
+        }
         return Ok(PluginExecution {
-            error, plugin, command, request_id, result,
-            editor_requests: Vec::new(), value: None, call_next: None,
-            messages: Vec::new(), proposals: Vec::new(), ui_requests: Vec::new(), confirmation_requests: Vec::new(), host_event_acknowledgements: Vec::new(), storage_requests: Vec::new(), provider_chunks: Vec::new(), virtual_document_proposals: Vec::new(),
+            error,
+            plugin,
+            command,
+            request_id,
+            result,
+            editor_requests: Vec::new(),
+            value: None,
+            call_next: None,
+            messages: Vec::new(),
+            proposals: Vec::new(),
+            ui_requests: Vec::new(),
+            confirmation_requests: Vec::new(),
+            host_event_acknowledgements: Vec::new(),
+            storage_requests: Vec::new(),
+            provider_chunks: Vec::new(),
+            virtual_document_proposals: Vec::new(),
         });
     }
     Ok(PluginExecution {

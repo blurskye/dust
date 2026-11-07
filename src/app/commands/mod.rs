@@ -266,10 +266,10 @@ pub enum AppEffect {
     PluginCall {
         plugin: String,
         handler: String,
-        call: crate::plugins::component::component_api::dust::plugin::host::CommandCall,
+        call: Box<crate::plugins::component::component_api::dust::plugin::host::CommandCall>,
         pending: Option<PendingCommandId>,
         previous: Option<Box<CommandOutcome<AppEffect>>>,
-        authority: CommandAuthority,
+        authority: Box<CommandAuthority>,
     },
     PluginExecute {
         plugin: String,
@@ -1009,8 +1009,16 @@ impl App {
             return true;
         }
         let result = match effect {
-            AppEffect::PluginCall { plugin, handler, call, pending, previous, authority } => {
-                return self.execute_plugin_call(plugin, handler, call, pending, previous, authority);
+            AppEffect::PluginCall {
+                plugin,
+                handler,
+                call,
+                pending,
+                previous,
+                authority,
+            } => {
+                return self
+                    .execute_plugin_call(plugin, handler, *call, pending, previous, *authority);
             }
             AppEffect::CommandResume {
                 pending,
@@ -1366,7 +1374,10 @@ impl App {
     ) -> bool {
         // Keys typed while a command is pending wait for it; only host input is held,
         // because a held invocation is replayed without the caller's grants.
-        if authority == CommandAuthority::Host && self.input.hold_invocation(&invocation) {
+        if authority == CommandAuthority::Host
+            && !invocation.id.as_str().starts_with("lsp.incoming.")
+            && self.input.hold_invocation(&invocation)
+        {
             return true;
         }
         if let Err(error) = self.commands.check_access(&invocation.id, &authority) {
@@ -1493,8 +1504,18 @@ impl App {
         )
     }
 
+    pub(in crate::app) fn cancel_plugin_pending_command(&mut self, pending: PendingCommandId) {
+        self.commands.cancel(pending);
+        self.pending_commands.remove(&pending);
+        self.complete_input_command(pending.as_u64(), false, false);
+        self.finish_incoming_lsp_commands();
+    }
+
     pub(in crate::app) fn incoming_command_pending(&self, id: i64) -> bool {
-        self.pending_commands.iter().any(|(pending, call)| self.commands.is_pending(*pending) && call.invocation.arguments.get("event") == Some(&CommandValue::Integer(id)))
+        self.pending_commands.iter().any(|(pending, call)| {
+            self.commands.is_pending(*pending)
+                && call.invocation.arguments.get("event") == Some(&CommandValue::Integer(id))
+        })
     }
 
     fn resume_command(
@@ -1515,12 +1536,31 @@ impl App {
             return false;
         };
         self.plugin_command_resuming(pending);
-        let waiting = outcome.as_ref().is_ok_and(|outcome| outcome.pending.is_some());
-        let buffer = invocation.invocation.target.buffer.or_else(|| self.state.active_buffer_id());
-        let before = buffer.and_then(|id| self.state.buffers.get(id).map(|buffer| buffer.text.source_version()));
+        let waiting = outcome
+            .as_ref()
+            .is_ok_and(|outcome| outcome.pending.is_some());
+        let buffer = invocation
+            .invocation
+            .target
+            .buffer
+            .or_else(|| self.state.active_buffer_id());
+        let before = buffer.and_then(|id| {
+            self.state
+                .buffers
+                .get(id)
+                .map(|buffer| buffer.text.source_version())
+        });
         let succeeded = self.finish_command(invocation, outcome);
-        let changed = before != buffer.and_then(|id| self.state.buffers.get(id).map(|buffer| buffer.text.source_version()));
-        if !waiting { self.complete_input_command(pending.as_u64(), succeeded, changed); }
+        let changed = before
+            != buffer.and_then(|id| {
+                self.state
+                    .buffers
+                    .get(id)
+                    .map(|buffer| buffer.text.source_version())
+            });
+        if !waiting {
+            self.complete_input_command(pending.as_u64(), succeeded, changed);
+        }
         self.finish_incoming_lsp_commands();
         succeeded
     }
@@ -1540,9 +1580,12 @@ impl App {
                 // Only explicitly authorized owners may receive restricted effects. In
                 // particular a UI grant cannot turn into a process or filesystem action.
                 if outcome.authority != CommandAuthority::Host
-                    && (outcome.effects.iter().any(|effect| !matches!(effect,
-                        AppEffect::PluginCall { .. } | AppEffect::LspIncoming(_)
-                    )) || !outcome.follow_up.is_empty())
+                    && (outcome.effects.iter().any(|effect| {
+                        !matches!(
+                            effect,
+                            AppEffect::PluginCall { .. } | AppEffect::LspIncoming(_)
+                        )
+                    }) || !outcome.follow_up.is_empty())
                 {
                     if let Some(pending) = outcome.pending {
                         self.commands.cancel(pending);
@@ -1552,8 +1595,17 @@ impl App {
                 }
                 if let Some(pending) = outcome.pending {
                     self.plugin_command_pending(pending);
-                    self.input.record_command_outcome(&invocation, repeat_override.as_ref(), suppress_repeat, false,
-                        &[AppEffect::Input(crate::app::input::InputCommand::Wait(pending.as_u64()))]);
+                    if !invocation.id.as_str().starts_with("lsp.incoming.") {
+                        self.input.record_command_outcome(
+                            &invocation,
+                            repeat_override.as_ref(),
+                            suppress_repeat,
+                            false,
+                            &[AppEffect::Input(crate::app::input::InputCommand::Wait(
+                                pending.as_u64(),
+                            ))],
+                        );
+                    }
                     self.pending_commands
                         .retain(|id, _| self.commands.is_pending(*id));
                     self.pending_commands.insert(
@@ -1565,7 +1617,9 @@ impl App {
                         },
                     );
                     for mut effect in outcome.effects {
-                        if let AppEffect::PluginCall { authority, .. } = &mut effect { *authority = outcome.authority.clone(); }
+                        if let AppEffect::PluginCall { authority, .. } = &mut effect {
+                            **authority = outcome.authority.clone();
+                        }
                         if !self.process_effect_checked(effect) {
                             self.pending_commands.remove(&pending);
                             self.commands.cancel(pending);
@@ -1631,7 +1685,11 @@ impl App {
                 }
                 if !self.input.command_pending() {
                     self.input.record_command_outcome(
-                        &invocation, repeat_override.as_ref(), suppress_repeat, text_changed, &outcome.effects,
+                        &invocation,
+                        repeat_override.as_ref(),
+                        suppress_repeat,
+                        text_changed,
+                        &outcome.effects,
                     );
                 }
                 self.tutor_observe(&invocation);

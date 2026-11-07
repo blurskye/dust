@@ -584,7 +584,7 @@ impl App {
         let unavailable = session.unavailable_virtual_descriptors();
         if !unavailable.is_empty() {
             self.ui.config_diagnostic = Some(format!(
-                "persistent virtual content unavailable under production API 0.2; continuing without: {}",
+                "persistent virtual content unavailable under production API 0.4; continuing without: {}",
                 unavailable.into_iter().collect::<Vec<_>>().join(", ")
             ));
         }

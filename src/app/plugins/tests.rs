@@ -3317,8 +3317,13 @@ fn plugin_command_arguments_reach_the_existing_execution_request() {
             .with_argument("value", CommandValue::String("configured".into())),
     );
     let captured = fixture.take();
-    assert_eq!(crate::app::plugins::abi::decode_value(captured.call().arguments.clone()).unwrap(),
-        CommandValue::Record(BTreeMap::from([("value".into(), CommandValue::String("configured".into()))])));
+    assert_eq!(
+        crate::app::plugins::abi::decode_value(captured.call().arguments.clone()).unwrap(),
+        CommandValue::Record(BTreeMap::from([(
+            "value".into(),
+            CommandValue::String("configured".into())
+        )]))
+    );
 }
 
 #[test]
@@ -3991,7 +3996,7 @@ fn health_virtual_dogfood_opens_refreshes_and_remains_read_only() {
     }
     app.report_unavailable_persisted_content(&persisted);
     assert!(app.ui.config_diagnostic.as_deref().is_some_and(|message| {
-        message.contains("production API 0.2")
+        message.contains("production API 0.4")
             && message.contains("builtin.health:builtin.health.virtual:health")
             && message.contains("continuing without")
     }));
