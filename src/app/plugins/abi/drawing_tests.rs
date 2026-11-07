@@ -177,7 +177,22 @@ fn guest_inline_completion_draws_and_disappears_after_acceptance_or_cursor_motio
     let (_roots, mut app) = real_app(&["demo"]);
     action(&mut app, "demo", "completion");
     app.set_mode(crate::editor::EditorMode::Insert);
-    pump(&mut app, |app| app.ui.inline_completion.is_some());
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    loop {
+        app.sync_lsp_document();
+        app.process_plugin_events();
+        if app.ui.inline_completion.is_some() {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "completion did not survive LSP synchronization: {:?}",
+            app.ui.notification
+        );
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    app.sync_lsp_document();
+    app.refresh_lsp_projection_owner();
     assert!(screen(&mut app).contains("plugin-valueabc"));
     let view = app.state.active_view().unwrap();
     app.state.views[view].cursor = crate::editor::text::ByteOffset(1);
