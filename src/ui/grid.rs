@@ -5,6 +5,27 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::ui::pty_screen::PtyStyle;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ExplorerSegmentRole {
+    Tree,
+    Icon,
+    IconAzure,
+    IconBlue,
+    IconCyan,
+    IconGreen,
+    IconGrey,
+    IconOrange,
+    IconPurple,
+    IconRed,
+    IconYellow,
+    Directory,
+    File,
+    Symlink,
+    Loading,
+    Git,
+    Diagnostic,
+}
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum Style {
     #[default]
@@ -70,6 +91,8 @@ pub enum Style {
     ExplorerDiagnostic,
     ExplorerDecoration,
     ExplorerSelection,
+    /// An explorer foreground on its selected row's background.
+    ExplorerSelected(ExplorerSegmentRole),
     ExplorerBorder,
     TerminalBackground,
     TerminalBorder,

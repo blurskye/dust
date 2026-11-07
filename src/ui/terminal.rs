@@ -533,6 +533,12 @@ fn queue_style(
         }
         return Ok(());
     }
+    let selected_explorer = matches!(style, Style::ExplorerSelected(_));
+    let style = if let Style::ExplorerSelected(role) = style {
+        crate::ui::render::explorer_segment_style(role)
+    } else {
+        style
+    };
     let derived;
     let configured = match style {
         Style::Default => &theme.styles.default,
@@ -599,6 +605,7 @@ fn queue_style(
         Style::ExplorerDiagnostic => &theme.styles.explorer_diagnostic,
         Style::ExplorerDecoration => &theme.styles.explorer_decoration,
         Style::ExplorerSelection => &theme.styles.explorer_selection,
+        Style::ExplorerSelected(_) => unreachable!("selected explorer role is resolved above"),
         Style::ExplorerBorder => &theme.styles.explorer_border,
         Style::TerminalBackground => &theme.styles.terminal_background,
         Style::TerminalBorder => &theme.styles.terminal_border,
@@ -632,6 +639,19 @@ fn queue_style(
             );
             &derived
         }
+    };
+    let selected_style;
+    let configured = if selected_explorer {
+        let selection = &theme.styles.explorer_selection;
+        selected_style = ThemeStyle {
+            background: selection.background,
+            background_256: selection.background_256,
+            background_16: selection.background_16,
+            ..configured.clone()
+        };
+        &selected_style
+    } else {
+        configured
     };
     queue!(writer, SetAttribute(Attribute::Reset))?;
     queue_colors(
@@ -1228,6 +1248,44 @@ mod tests {
             )
             .unwrap();
             assert_eq!(actual, expected);
+        }
+    }
+
+    #[test]
+    fn selected_explorer_preserves_role_colors_at_every_color_tier() {
+        use crate::ui::Style;
+        use crate::ui::grid::ExplorerSegmentRole;
+        let mut theme = crate::config::load_bundled_config().theme;
+        theme.styles.explorer_selection.background = crate::config::ThemeColor::Rgb(1, 2, 3);
+        theme.styles.explorer_selection.background_256 =
+            Some(crate::config::ThemeColor::Indexed(42));
+        theme.styles.explorer_selection.background_16 = Some(crate::config::ThemeColor::Blue);
+        for role in [
+            ExplorerSegmentRole::Directory,
+            ExplorerSegmentRole::IconBlue,
+            ExplorerSegmentRole::Git,
+        ] {
+            for tier in [ColorTier::TrueColor, ColorTier::Ansi256, ColorTier::Ansi16] {
+                let mut foreground = match role {
+                    ExplorerSegmentRole::Directory => theme.styles.explorer_directory.clone(),
+                    ExplorerSegmentRole::IconBlue => theme
+                        .highlight(crate::config::Highlight::FUNCTION)
+                        .unwrap()
+                        .clone(),
+                    ExplorerSegmentRole::Git => theme.styles.explorer_git.clone(),
+                    _ => unreachable!(),
+                };
+                foreground.background = theme.styles.explorer_selection.background;
+                foreground.background_256 = theme.styles.explorer_selection.background_256;
+                foreground.background_16 = theme.styles.explorer_selection.background_16;
+                let mut expected_theme = theme.clone();
+                expected_theme.styles.accent = foreground;
+                let mut expected = Vec::new();
+                queue_style(&mut expected, Style::Accent, &expected_theme, tier).unwrap();
+                let mut actual = Vec::new();
+                queue_style(&mut actual, Style::ExplorerSelected(role), &theme, tier).unwrap();
+                assert_eq!(actual, expected);
+            }
         }
     }
 

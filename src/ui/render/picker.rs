@@ -177,8 +177,8 @@ fn diff_row_style(kind: DiffRowKind) -> Style {
     match kind {
         DiffRowKind::Provenance | DiffRowKind::Collapsed => Style::Muted,
         DiffRowKind::Header => Style::Accent,
-        DiffRowKind::Added => Style::StatusAccent,
-        DiffRowKind::Removed => Style::Error,
+        DiffRowKind::Added => Style::GitSignAdded,
+        DiffRowKind::Removed => Style::GitSignDeleted,
         DiffRowKind::Context => Style::Default,
         DiffRowKind::Truncated => Style::Warning,
     }
@@ -466,6 +466,12 @@ pub(super) fn render_picker(
                 config.editor.ambiguous_width,
             );
             format!("{path}{line}")
+        } else if picker.surface == PickerSurfaceKind::Changes {
+            truncate_content_title(
+                &preview.title,
+                usize::from(title_right.saturating_sub(title_x)).saturating_sub(2),
+                config.editor.ambiguous_width,
+            )
         } else {
             preview.title.clone()
         };
@@ -657,17 +663,22 @@ pub(super) fn render_picker(
                 } else {
                     cell.style
                 };
+                let text = if picker.surface == PickerSurfaceKind::Changes && cell.width == 0 {
+                    truncate_content_title(&cell.text, usize::from(width), ambiguous)
+                } else {
+                    cell.text.clone()
+                };
                 let text_x = match cell.align {
                     CellAlign::Left => cell_x,
                     CellAlign::Right => {
-                        let measured = text_width(&cell.text, config.editor.ambiguous_width);
+                        let measured = text_width(&text, config.editor.ambiguous_width);
                         let measured = u16::try_from(measured).unwrap_or(u16::MAX);
                         cell_x.saturating_add(width.saturating_sub(measured))
                     }
                 };
                 frame
                     .grid
-                    .put_text_clipped(text_x, y, &cell.text, style, cell_right);
+                    .put_text_clipped(text_x, y, &text, style, cell_right);
                 cell_x = cell_x.saturating_add(width);
             }
             continue;

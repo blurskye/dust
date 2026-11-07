@@ -919,26 +919,7 @@ pub struct KeyHintUiState {
     pub rows: Vec<KeyHintUiRow>,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ExplorerSegmentRole {
-    Tree,
-    Icon,
-    IconAzure,
-    IconBlue,
-    IconCyan,
-    IconGreen,
-    IconGrey,
-    IconOrange,
-    IconPurple,
-    IconRed,
-    IconYellow,
-    Directory,
-    File,
-    Symlink,
-    Loading,
-    Git,
-    Diagnostic,
-}
+pub use crate::ui::grid::ExplorerSegmentRole;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ExplorerUiSegment {

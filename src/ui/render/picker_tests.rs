@@ -684,13 +684,13 @@ fn a_structured_diff_preview_draws_provenance_hunks_and_classified_lines() {
         drawn_at(&frame, "ensure!(gen > self.gen);").expect("the added line is drawn");
     assert_eq!(
         frame.grid.get(added_x, added_y).expect("cell").style,
-        Style::StatusAccent
+        Style::GitSignAdded
     );
     let (removed_x, removed_y) =
         drawn_at(&frame, "let gen = self.gen;").expect("the removed line is drawn");
     assert_eq!(
         frame.grid.get(removed_x, removed_y).expect("cell").style,
-        Style::Error
+        Style::GitSignDeleted
     );
 }
 
@@ -724,6 +724,39 @@ pub(super) fn diff_picker(diff: super::DiffPreview) -> UiState {
             }),
         }),
         ..UiState::default()
+    }
+}
+
+#[test]
+fn changed_file_rows_and_preview_titles_keep_filenames_at_every_terminal_size() {
+    let diff = crate::ui::parse_unified_patch(RENDER_PATCH, "index -> disk");
+    let mut ui = diff_picker(diff);
+    let picker = ui.picker.as_mut().unwrap();
+    picker.surface = super::PickerSurfaceKind::Changes;
+    picker.rows[0].cells = vec![
+        super::PickerCell::new("M  ", crate::ui::Style::Warning, 3),
+        super::PickerCell::flex(
+            format!("{}/reviewed.rs", "long-directory/".repeat(12)),
+            crate::ui::Style::Default,
+        ),
+    ];
+    picker.preview.as_mut().unwrap().title =
+        format!("{}/important.rs", "long-directory/".repeat(12));
+    let state = EditorState::new(PathBuf::from("/tmp"));
+    let loaded = crate::config::load_bundled_config();
+    for (width, height) in [(160, 45), (100, 30), (80, 24)] {
+        let frame = render(
+            &state,
+            &ui,
+            &loaded.config,
+            &loaded.dashboard,
+            width,
+            height,
+        );
+        for filename in ["important.rs", "reviewed.rs"] {
+            assert!((0..height).any(|y| frame.grid.row_text(y).contains("…")
+                && frame.grid.row_text(y).contains(filename)));
+        }
     }
 }
 
@@ -816,7 +849,7 @@ fn intra_line_emphasis_marks_the_changed_span_and_not_the_rest_of_the_line() {
             .get(unchanged_x, same_y)
             .expect("a drawn cell")
             .style,
-        Style::StatusAccent,
+        Style::GitSignAdded,
         "the unchanged part of the added line keeps the addition style"
     );
 }

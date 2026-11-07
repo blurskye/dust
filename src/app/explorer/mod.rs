@@ -93,7 +93,7 @@ pub(in crate::app) struct Explorer {
     next_loads: VecDeque<DirectoryLoad>,
     watch: ExplorerWatchWorker,
     watch_stream_id: Option<ExplorerWatchId>,
-    watch_observation: Option<(u64, u64)>,
+    watch_observation: Option<(u64, u64, Vec<PathBuf>)>,
     watch_visible: bool,
     watch_reload: VecDeque<PathBuf>,
 }
@@ -708,20 +708,34 @@ impl Explorer {
             self.watch_reload.clear();
             return Ok(());
         }
-        let observation = (
-            self.watch_projection_revision(),
-            self.tree().root_revision(),
-        );
-        if self.watch_observation == Some(observation) {
+        let projection = self.watch_projection_revision();
+        let revision = self.tree().root_revision();
+        if self
+            .watch_observation
+            .as_ref()
+            .is_some_and(|(old_projection, old_revision, _)| {
+                *old_projection == projection && *old_revision == revision
+            })
+        {
             return Ok(());
         }
-        match self.watch.reconcile(
-            observation.1,
-            self.roots.clone(),
-            self.watched_directories(),
-        ) {
+        let directories = self.watched_directories();
+        if self
+            .watch_observation
+            .as_ref()
+            .is_some_and(|(_, old_revision, old_directories)| {
+                *old_revision == revision && *old_directories == directories
+            })
+        {
+            self.watch_observation = Some((projection, revision, directories));
+            return Ok(());
+        }
+        match self
+            .watch
+            .reconcile(revision, self.roots.clone(), directories.clone())
+        {
             Ok(stream_id) => {
-                self.watch_observation = Some(observation);
+                self.watch_observation = Some((projection, revision, directories));
                 self.watch_stream_id = stream_id;
                 Ok(())
             }
@@ -925,10 +939,21 @@ impl Explorer {
                     role: ExplorerSegmentRole::Tree,
                 });
                 segments.push(ExplorerUiSegment {
-                    text: if node.kind == ExplorerKind::Root && self.root_count == 1 {
-                        root_label.to_owned()
-                    } else {
-                        node.name.clone()
+                    text: {
+                        let name = if node.kind == ExplorerKind::Root && self.root_count == 1 {
+                            root_label.to_owned()
+                        } else {
+                            node.name.clone()
+                        };
+                        if matches!(node.kind, ExplorerKind::Root | ExplorerKind::Directory)
+                            && node.load == ExplorerLoadState::Loaded
+                            && tree.is_expanded(node.id)
+                            && node.children.is_empty()
+                        {
+                            format!("{name} (empty)")
+                        } else {
+                            name
+                        }
                     },
                     role: name_role,
                 });
