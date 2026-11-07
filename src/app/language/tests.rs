@@ -961,7 +961,7 @@ fn retiring_a_completion_server_refreshes_the_menu_without_a_text_edit() {
             uri: crate::language::lsp::file_uri(&path),
             language: "rust".into(),
         }));
-    for (server, label) in [("secondary", "a-retired"), ("primary", "z-kept")] {
+    for (server, label) in [("secondary", "a-stale"), ("primary", "z-kept")] {
         app.language.install_completions(
             server,
             vec![LspCompletionItem {
@@ -1781,7 +1781,7 @@ fn formatting_saves_using_the_same_managed_tool_run_in_turn() {
 }
 
 #[test]
-fn a_timed_out_managed_formatting_save_retires_already_buffered_results() {
+fn a_timed_out_managed_formatting_save_discards_already_buffered_results() {
     let (_app_dirs, mut app, buffer, path, _) = app_waiting_to_save_formatted("slow-managed.txt");
     let pending = app.format_on_save.get_mut(&buffer).unwrap();
     pending.request = None;
@@ -3158,7 +3158,7 @@ fn unopened_multifile_workspace_edit_previews_then_applies_only_to_editor_buffer
     wait_vfs(&mut app);
     assert!(
         first.exists() && !target.exists(),
-        "configuration retirement must discard unsubmitted resources"
+        "configuration change must discard unsubmitted resources"
     );
     app.begin_workspace_proposal(
         "after configuration".into(),
@@ -4734,7 +4734,7 @@ fn lsp_tool_menu_is_registry_driven_filterable_and_configurable() {
 }
 
 #[test]
-fn plugin_workspace_preview_uses_invocation_source_and_retires_on_dismissal() {
+fn plugin_workspace_preview_uses_invocation_source_and_is_cleared_on_dismissal() {
     use crate::plugins::ExecutionFixture;
     use crate::plugins::PluginEdit;
     use crate::plugins::PluginEditProposal;
@@ -4850,7 +4850,7 @@ fn plugin_workspace_preview_uses_invocation_source_and_retires_on_dismissal() {
     app.install_picker("other".into(), Vec::new());
     assert!(
         app.workspace_edits.proposal().is_none(),
-        "another picker retires the old preview source"
+        "another picker invalidates the old preview source"
     );
     app.process_effect(execute);
     let late = endpoint.take();
@@ -5589,7 +5589,7 @@ fn code_lens_commands_keep_their_originating_session() {
     assert_eq!(second.executed_command(), None);
     assert_eq!(
         app.ui.notification.as_deref(),
-        Some("code-lens source retired")
+        Some("code-lens source is stale")
     );
 }
 
@@ -5921,7 +5921,7 @@ fn explicit_detach_survives_autostart_until_attach() {
 }
 
 #[test]
-fn stopping_a_starting_server_retires_its_launch() {
+fn stopping_a_starting_server_discards_its_launch() {
     let (_app_dirs, mut app) = app();
     let path = app.state.workspace_root.join("main.rs");
     app.state

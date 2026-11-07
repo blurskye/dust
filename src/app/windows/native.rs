@@ -131,14 +131,14 @@ impl NativeSurfaces {
             .iter()
             .copied()
             .collect::<std::collections::BTreeSet<_>>();
-        let retired_explorer_views = self
+        let closed_explorer_views = self
             .explorer_views
             .iter()
             .filter_map(|(view, ids)| {
                 (!semantic_explorer_views.contains(view)).then_some((*view, *ids))
             })
             .collect::<Vec<_>>();
-        for (view, ids) in retired_explorer_views {
+        for (view, ids) in closed_explorer_views {
             graph.close_window(ids.window)?;
             graph.remove_view(ids.view)?;
             self.explorer_views.remove(&view);

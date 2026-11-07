@@ -686,7 +686,7 @@ impl LspSession {
         {
             self.projection.requests.remove(&request_id);
             self.projection.request_cursors.remove(&request_id);
-            self.retire_request(server, request_id);
+            self.finish_request(server, request_id);
             return false;
         }
         if let Some((owner, servers, expected_method)) =
@@ -762,7 +762,7 @@ impl LspSession {
                 .is_some_and(|(current, _)| *current == request_id)
                 && !self.projection.request_servers.is_empty())
     }
-    pub(in crate::app) fn retire_request(&mut self, server: &str, request_id: u64) {
+    pub(in crate::app) fn finish_request(&mut self, server: &str, request_id: u64) {
         self.forget_request(server, request_id);
         if self
             .projection
@@ -1476,7 +1476,7 @@ impl LspSession {
             data,
         })
     }
-    pub(in crate::app) fn retire_projection_server(&mut self, server: &str) {
+    pub(in crate::app) fn clear_server_projection(&mut self, server: &str) {
         self.projection.semantic.retain(|(key, _), _| key != server);
         self.projection.pull_ids.retain(|(key, _), _| key != server);
         self.projection.request_servers.retain(|key| key != server);
@@ -1537,7 +1537,7 @@ impl LspSession {
             .completion_scroll
             .min(self.projection.completion_selected);
     }
-    pub(in crate::app) fn retire_projection_document(&mut self, server: &str, uri: &str) {
+    pub(in crate::app) fn clear_document_projection(&mut self, server: &str, uri: &str) {
         let key = (server.into(), uri.into());
         self.projection.semantic.remove(&key);
         self.projection.pull_ids.remove(&key);
@@ -1995,7 +1995,7 @@ mod tests {
         assert!(endpoint.take_synced_source().is_none());
     }
     #[test]
-    fn document_replay_retires_missing_and_renamed_buffers_even_when_stopped() {
+    fn document_replay_closes_missing_and_renamed_buffers_even_when_stopped() {
         let (mut editor, buffer, document, mut owner) = fixture();
         let (renamed, _) = editor
             .open_text(
@@ -2040,7 +2040,7 @@ mod tests {
     }
 
     #[test]
-    fn document_retirement_retries_a_busy_close_before_forgetting_the_registration() {
+    fn document_close_retries_a_busy_close_before_forgetting_the_registration() {
         let (mut editor, buffer, document, mut owner) = fixture();
         let endpoint = owner.service.replace_edit_source_fixture_for(
             "owned",
@@ -2217,7 +2217,7 @@ mod tests {
         assert!(owner.completion_automatic());
     }
     #[test]
-    fn reloaded_text_retires_projection_even_at_the_same_revision() {
+    fn reloaded_text_clears_projection_even_at_the_same_revision() {
         let (mut editor, buffer, document, mut owner) = fixture();
         let old = owner.projection.owner.clone().unwrap();
         owner.projection.request = Some((0, old));
@@ -2239,7 +2239,7 @@ mod tests {
         assert!(owner.completion_items().is_empty());
     }
     #[test]
-    fn dismissed_completion_retires_every_pending_server() {
+    fn dismissed_completion_cancels_every_pending_server() {
         let (_, _, document, mut owner) = fixture();
         owner.projection.request_id = 3;
         owner.projection.request = Some((3, owner.projection.owner.clone().unwrap()));
@@ -2293,7 +2293,7 @@ mod tests {
     fn retiring_a_secondary_server_removes_its_items_and_resolve_data() {
         let (editor, _, document, mut owner) = fixture();
         let source = owner.projection.owner.clone().unwrap();
-        owner.install_completions("second", vec![item("retired")], false, 0);
+        owner.install_completions("second", vec![item("stale")], false, 0);
         owner.install_completions("owned", vec![item("kept")], false, 0);
         owner.move_completion(1, 10);
         owner.projection.resolve = Some((1, source.clone(), 1, ByteOffset(0)));
@@ -2550,7 +2550,7 @@ mod tests {
         ));
     }
     #[test]
-    fn semantic_splices_use_the_original_array_and_retire_with_the_server() {
+    fn semantic_splices_use_the_original_array_and_are_cleared_with_the_server() {
         let mut owner = LspSession::default();
         let full = LspSemanticTokens {
             result_id: Some("old".into()),
@@ -2583,7 +2583,7 @@ mod tests {
         assert!(owner.projection.semantic.is_empty());
     }
     #[test]
-    fn detaching_a_document_retires_its_pull_and_semantic_result_ids() {
+    fn detaching_a_document_clears_its_pull_and_semantic_result_ids() {
         let (_, buffer, document, mut owner) = fixture();
         let uri = document.uri();
         owner.record_pull("owned", &uri, "old-pull".into());
@@ -2611,7 +2611,7 @@ mod tests {
         assert_eq!(owner.projection.semantic.len(), 1);
     }
     #[test]
-    fn starting_a_replacement_transport_retires_old_result_ids() {
+    fn starting_a_replacement_transport_clears_old_result_ids() {
         use crate::language::lsp::LspPolicy;
         use crate::language::lsp::LspServerConfiguration;
         use crate::language::lsp::LspSessionLaunch;
@@ -2939,7 +2939,7 @@ mod tests {
     }
 
     #[test]
-    fn stopping_a_nonactive_server_retires_its_delta_caches() {
+    fn stopping_a_nonactive_server_clears_its_delta_caches() {
         let mut session = LspSession::default();
         session.record_pull("old", "uri", "previous".into());
         session.record_semantic(
@@ -2983,7 +2983,7 @@ mod tests {
                 "textDocument/formatting".into(),
             ),
         );
-        session.retire_request("formatter", 1);
+        session.finish_request("formatter", 1);
         assert!(!session.accept_result(
             "formatter",
             1,
@@ -3007,7 +3007,7 @@ mod tests {
             2,
             (source, vec!["hover".into()], "textDocument/hover".into()),
         );
-        session.retire_request("formatter", 1);
+        session.finish_request("formatter", 1);
         assert!(!session.accept_result(
             "formatter",
             1,

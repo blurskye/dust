@@ -1015,7 +1015,7 @@ impl App {
             let mut candidate = self.state.draft();
             candidate.remove_hidden_document(buffer);
             match self.commit_editor_draft(candidate, None, false) {
-                Ok(()) => self.retire_closed_buffer(buffer, closed_path.as_deref(), true),
+                Ok(()) => self.finish_buffer_close(buffer, closed_path.as_deref(), true),
                 Err(error) => self.show_error(error),
             }
         }
@@ -1170,7 +1170,7 @@ impl App {
         if removed_lsp {
             self.sync_ui_diagnostics();
         }
-        self.language.retire_launches();
+        self.language.forget_launches();
         for (plugin, load) in self.extension.cancel_pending_packages() {
             self.remove_plugin_contributions(&plugin, load);
         }

@@ -511,7 +511,7 @@ impl App {
                             self.show_error(error);
                         } else {
                             for (id, path, clean) in closed {
-                                self.retire_closed_buffer(id, path.as_deref(), clean);
+                                self.finish_buffer_close(id, path.as_deref(), clean);
                             }
                             self.cancel_pending_mapping();
                             self.input.cancel_pending();
@@ -583,8 +583,8 @@ impl App {
 impl App {
     pub(in crate::app) fn refresh_window_content(&mut self) {
         self.sync_ui_diagnostics();
-        self.retire_stale_picker();
-        self.retire_stale_explorer_intents();
+        self.close_stale_picker();
+        self.cancel_stale_explorer_intents();
         self.window_session
             .project_content(self.ui.picker.as_ref(), self.configuration.settings());
         if let Some(geometry) = self.window_session.content().picker {

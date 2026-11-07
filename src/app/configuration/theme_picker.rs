@@ -13,7 +13,7 @@ impl App {
         if let Some(Err(error)) = self.configuration.poll_theme_restore() {
             self.show_error(error);
         }
-        self.retire_stale_picker();
+        self.close_stale_picker();
         if let Some(rows) = self
             .configuration
             .poll_theme_picker(self.search.theme_picker_key())

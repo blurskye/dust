@@ -116,7 +116,7 @@ impl App {
         if !self.language.owns_event_context(&owned.context) {
             self.language.reject_reply(
                 owned.reply,
-                "requesting language-server session retired".into(),
+                "requesting language-server session is no longer current".into(),
             );
             return;
         }

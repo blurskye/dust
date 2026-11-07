@@ -2152,7 +2152,7 @@ impl App {
 
 impl App {
     pub(in crate::app) fn stop_lsp_sessions_for_server(&mut self, id: &str) {
-        self.language.retire_server_launches(id);
+        self.language.forget_server_launches(id);
         let sessions = self
             .language
             .sessions()

@@ -1098,7 +1098,7 @@ impl App {
 }
 
 impl App {
-    pub(in crate::app) fn retire_stale_explorer_intents(&mut self) {
+    pub(in crate::app) fn cancel_stale_explorer_intents(&mut self) {
         let ids = self.explorer.cancel_stale_intents(
             self.workspace.version(),
             self.configuration.binding_revision(),

@@ -119,7 +119,7 @@ impl InputState {
     pub(in crate::app) fn completion_read_pending(&self) -> bool {
         !self.completion_reads.is_empty()
     }
-    pub(in crate::app) fn retire_document_request(&mut self, id: crate::files::RequestId) {
+    pub(in crate::app) fn forget_document_request(&mut self, id: crate::files::RequestId) {
         self.completion_reads.remove(&id);
         if self.stage_save == Some(id) {
             self.clear_pending_stage();

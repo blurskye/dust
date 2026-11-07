@@ -209,7 +209,7 @@ fn explorer_rename_prompt_refuses_replaced_files_and_stale_or_cancelled_requests
     app.open_explorer_rename_prompt();
     app.explorer
         .reset_roots(app.workspace.roots(), app.workspace.root_revision());
-    app.retire_stale_explorer_intents();
+    app.cancel_stale_explorer_intents();
     wait_vfs(&mut app);
     assert!(app.input.prompt().is_none());
     assert!(!target.exists());
@@ -310,7 +310,7 @@ fn explorer_close_reconciles_an_admitted_rename_even_after_disk_completion() {
     }
     assert_eq!(app.state.buffers[buffer].path.as_ref(), Some(&source));
     app.process_effect(AppEffect::ExplorerClose);
-    app.retire_stale_explorer_intents();
+    app.cancel_stale_explorer_intents();
     wait_vfs(&mut app);
     assert_eq!(app.state.buffers[buffer].path.as_ref(), Some(&target));
     assert!(!app.explorer.mutation_pending());

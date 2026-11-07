@@ -892,7 +892,7 @@ impl App {
 }
 
 impl App {
-    pub(in crate::app) fn retire_stale_picker(&mut self) {
+    pub(in crate::app) fn close_stale_picker(&mut self) {
         if self.search.picker_is_stale(
             self.workspace.version(),
             self.configuration.binding_revision(),
@@ -1401,7 +1401,7 @@ impl App {
 
 impl App {
     pub(in crate::app) fn sync_picker_ui(&mut self) {
-        self.retire_stale_picker();
+        self.close_stale_picker();
         let explorer = &self.configuration.settings().ui.explorer;
         let icon = (explorer.icon_mode == crate::config::ExplorerIconMode::NerdFont)
             .then(|| explorer.active_glyphs().file.clone());
@@ -1498,7 +1498,7 @@ impl App {
 
 impl App {
     pub(in crate::app) fn picker_insert(&mut self, text: &str) {
-        self.retire_stale_picker();
+        self.close_stale_picker();
         let query = self.search.picker_insert(text);
         self.sync_picker_ui();
         if self.search.live()
@@ -1511,7 +1511,7 @@ impl App {
 
 impl App {
     pub(in crate::app) fn picker_backspace(&mut self) {
-        self.retire_stale_picker();
+        self.close_stale_picker();
         let query = self.search.picker_backspace();
         self.sync_picker_ui();
         if self.search.live()
@@ -1524,7 +1524,7 @@ impl App {
 
 impl App {
     pub(in crate::app) fn picker_move(&mut self, direction: i8) {
-        self.retire_stale_picker();
+        self.close_stale_picker();
         self.search.picker_move(direction, true);
         self.sync_picker_ui();
     }
@@ -1774,7 +1774,7 @@ impl App {
             self.close_picker();
             return;
         }
-        self.retire_stale_picker();
+        self.close_stale_picker();
         if let Some(name) = self.search.new_worktree_name() {
             self.close_picker();
             self.create_git_worktree(name, None);
@@ -1905,7 +1905,7 @@ impl App {
                 lens,
             }) => {
                 if !self.language.edit_context_current(&context) {
-                    self.show_error("code-lens source retired");
+                    self.show_error("code-lens source is stale");
                     return;
                 }
                 if let Some(command) = lens.command {

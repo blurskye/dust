@@ -83,7 +83,7 @@ impl Source {
             .buffers
             .get(buffer)
             .filter(|document| document.path.as_deref() == Some(path))
-            .ok_or("language-server launch document retired")?;
+            .ok_or("language-server launch document is stale")?;
         if context.configuration == u64::MAX || context.editor.window_version().revision().is_none()
         {
             return Err("language-server launch source exhausted".into());
@@ -221,14 +221,14 @@ impl LspSession {
         self.preparation.preflights.remove(&id).is_some()
     }
     pub(in crate::app) fn close_preparation(&mut self) {
-        self.retire_launches();
+        self.forget_launches();
         self.preparation.worker.close();
         self.service.begin_shutdown();
     }
     pub(in crate::app) fn preparation_pending(&self) -> bool {
         self.preparation.worker.pending()
     }
-    pub(in crate::app) fn retire_server_launches(&mut self, server: &str) {
+    pub(in crate::app) fn forget_server_launches(&mut self, server: &str) {
         if self
             .preparation
             .root
@@ -249,7 +249,7 @@ impl LspSession {
             .preflights
             .retain(|_, pending| pending.pending.value.definition.id != server);
     }
-    pub(in crate::app) fn retire_launches(&mut self) {
+    pub(in crate::app) fn forget_launches(&mut self) {
         self.preparation.root = None;
         self.preparation.nix = None;
         self.preparation.preflights.clear();
@@ -266,7 +266,7 @@ impl LspSession {
             || !lane.discovery_available()
         {
             self.reset_autostart();
-            return Err("language-server root admission is retired or busy".into());
+            return Err("language-server root request is stale or busy".into());
         }
         let source = Source::capture(value.buffer, &value.document.path, &context)?;
         let request_id = lane.discover(
@@ -509,7 +509,7 @@ impl LspSession {
             || !lane.current(&context.workspace)
             || !lane.preflight_available()?
         {
-            return Err("language-server preflight admission retired or full".into());
+            return Err("language-server preflight request is stale or queue is full".into());
         }
         let source = Source::capture(value.buffer, &value.document.path, &context)?;
         self.submit_launch(Pending { value, source }, lane)
@@ -523,7 +523,7 @@ impl LspSession {
             || !lane.current(&pending.source.workspace)
             || !lane.preflight_available()?
         {
-            return Err("language-server preflight admission retired or full".into());
+            return Err("language-server preflight request is stale or queue is full".into());
         }
         let request = lane.request(
             pending.value.launch.executable().clone(),
@@ -860,7 +860,7 @@ mod tests {
         assert!(!source.current(&context(&editor, &workspace)));
     }
     #[test]
-    fn stopping_a_definition_retires_pending_root_nix_and_preflight_launches() {
+    fn stopping_a_definition_discards_pending_root_nix_and_preflight_launches() {
         use crate::editor::text::TextBuffer;
         let root = tempfile::tempdir().unwrap();
         let identity = crate::files::RootIdentity::capture(root.path()).unwrap();

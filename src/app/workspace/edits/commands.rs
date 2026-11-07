@@ -11,7 +11,7 @@ impl App {
     ) -> Result<(), AppEffect> {
         match effect {
             AppEffect::WorkspaceEditToggle => {
-                self.retire_stale_picker();
+                self.close_stale_picker();
                 let selected = self
                     .selected_picker_payload()
                     .and_then(|payload| match payload {

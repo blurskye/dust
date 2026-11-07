@@ -1,4 +1,4 @@
-//! Source-private LSP edit decoding, requesting-session identity and reply obligations.
+//! Source-private LSP edit decoding, requesting-session identity and pending replies.
 use crate::app::workspace::edits::InputFile;
 use crate::app::workspace::edits::OriginKey;
 use crate::app::workspace::edits::PreparedFiles;
@@ -127,7 +127,7 @@ impl LspEditSources {
                 .is_none_or(|context| service.edit_context_current(context))
         });
         if actions.len() > maximum || (offered > 0 && actions.is_empty()) {
-            return Err("code-action source retired or exceeded its item limit".into());
+            return Err("code-action source is stale or exceeded its item limit".into());
         }
         let key = std::sync::Arc::new(());
         let rows = actions
@@ -176,7 +176,7 @@ impl LspEditSources {
                     .is_some_and(|context| !service.edit_context_current(context))
             })
         {
-            return Err("code-action source retired".into());
+            return Err("code-action source is stale".into());
         }
         let offered = &set.actions[key.index];
         if let Some(context) = &offered.context {
@@ -357,7 +357,7 @@ impl LspEditSources {
             return Ok(());
         };
         if !service.edit_context_current(context) {
-            return Err("requesting language-server session has retired".into());
+            return Err("requesting language-server session is no longer current".into());
         }
         for (uri, path) in paths {
             let expected = context.document_source(uri);
@@ -390,7 +390,7 @@ impl LspEditSources {
             .active
             .as_ref()
             .filter(|r| r.key.same(key))
-            .ok_or("workspace edit origin is foreign or retired")?;
+            .ok_or("workspace edit origin is foreign or stale")?;
         Self::validate_context(request.context.as_ref(), &request.paths, current, service)
     }
     pub(in crate::app) fn decode(
@@ -402,7 +402,7 @@ impl LspEditSources {
             .active
             .as_mut()
             .filter(|r| r.key.same(key))
-            .ok_or("workspace edit origin retired before decoding")?;
+            .ok_or("workspace edit origin changed before decoding")?;
         let documents = request
             .documents
             .take()

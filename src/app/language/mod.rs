@@ -209,7 +209,7 @@ impl LspSession {
     )> {
         self.navigation_reads.remove(&id)
     }
-    pub(in crate::app) fn retire_document_request(&mut self, id: crate::files::RequestId) {
+    pub(in crate::app) fn forget_document_request(&mut self, id: crate::files::RequestId) {
         self.navigation_reads.remove(&id);
     }
     pub(in crate::app) fn running_servers(&self) -> Vec<String> {
@@ -570,7 +570,7 @@ impl LspSession {
                 || current.path.as_ref() != Some(&document.path)
                 || current.text.revision().0 != document.version
         }) {
-            return Err("language-server launch document source retired".into());
+            return Err("language-server launch document source is stale".into());
         }
         let key = request.session_key.to_owned();
         let definition = request.definition.clone();
@@ -594,7 +594,7 @@ impl LspSession {
         );
         let mut documents = previous.map_or_else(HashMap::new, |s| s.documents);
         documents.insert(buffer, document.clone());
-        self.retire_projection_server(&key);
+        self.clear_server_projection(&key);
         self.forget_synced(&key);
         if origin.2 {
             for (id, replay) in &mut documents {
@@ -640,7 +640,7 @@ impl LspSession {
         }
         Ok(())
     }
-    pub(in crate::app) fn retire_documents(&mut self, editor: &EditorState) {
+    pub(in crate::app) fn close_stale_documents(&mut self, editor: &EditorState) {
         for (key, session) in &mut self.sessions {
             session.documents.retain(|id, document| {
                 let current = editor
@@ -663,7 +663,7 @@ impl LspSession {
     }
     /// Returns whether the active document changed, so its UI refreshes still run.
     pub(in crate::app) fn retry_documents(&mut self, editor: &EditorState) -> bool {
-        self.retire_documents(editor);
+        self.close_stale_documents(editor);
         let mut active_changed = false;
         for (key, session) in &mut self.sessions {
             if !session.desired_running || session.capabilities.is_none() {
@@ -696,7 +696,7 @@ impl LspSession {
         active_changed
     }
     pub(in crate::app) fn remove(&mut self, key: &str) {
-        self.retire_projection_server(key);
+        self.clear_server_projection(key);
         self.sessions.remove(key);
         self.forget_synced(key);
     }
@@ -719,7 +719,7 @@ impl LspSession {
         self.active.as_deref() == Some(key)
     }
     pub(in crate::app) fn stopped(&mut self, key: &str) -> bool {
-        self.retire_projection_server(key);
+        self.clear_server_projection(key);
         self.forget_synced(key);
         self.sessions.get_mut(key).is_some_and(|state| {
             state.capabilities = None;
@@ -799,7 +799,7 @@ impl LspSession {
             .get_mut(key)
             .and_then(|state| state.documents.remove(&buffer))
         {
-            self.retire_projection_document(key, &document.uri());
+            self.clear_document_projection(key, &document.uri());
         }
     }
     pub(in crate::app) fn hint_install_once(&mut self, language: &str) -> bool {
@@ -1797,7 +1797,7 @@ impl App {
         } = owned;
         if !self.language.owns_event_context(&context) {
             self.language
-                .reject_reply(reply, "requesting language-server session retired".into());
+                .reject_reply(reply, "requesting language-server session is no longer current".into());
             return;
         }
         match event {
@@ -2851,7 +2851,7 @@ impl App {
                 let Some(context) =
                     context.filter(|context| self.language.edit_context_current(context))
                 else {
-                    self.show_error("code-lens source retired");
+                    self.show_error("code-lens source is stale");
                     return;
                 };
                 let rows = items
@@ -3941,7 +3941,7 @@ impl App {
 
 impl App {
     pub(in crate::app) fn restart_lsp_session(&mut self, key: String) {
-        self.language.retire_documents(&self.state);
+        self.language.close_stale_documents(&self.state);
         let Some(state) = self.language.sessions().get(&key) else {
             return;
         };
@@ -4056,7 +4056,7 @@ impl App {
         }
         self.sync_ui_diagnostics();
         self.language.forget_synced(server);
-        self.language.retire_projection_server(server);
+        self.language.clear_server_projection(server);
     }
 }
 
@@ -4070,7 +4070,7 @@ impl App {
         for (server, uri) in documents {
             let _ = self.language.close(&server, uri.clone());
             self.language.invalidate_document(&server, buffer);
-            self.language.retire_projection_document(&server, &uri);
+            self.language.clear_document_projection(&server, &uri);
             for prefix in ["lsp.", "lsp-pull:"] {
                 if let Ok(owner) = DiagnosticOwner::new(format!("{prefix}{server}")) {
                     self.diagnostics.clear_owner_uri(&owner, &uri);

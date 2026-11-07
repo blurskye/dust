@@ -125,7 +125,7 @@ fn workspace_root_changes_invalidate_window_titles() {
 }
 
 #[test]
-fn opening_a_file_retires_only_an_unhosted_empty_scratch() {
+fn opening_a_file_removes_only_an_unhosted_empty_scratch() {
     let mut state = EditorState::new("/workspace".into());
     let (scratch, _) = state.open_text(TextBuffer::from_text(""), None).unwrap();
     state

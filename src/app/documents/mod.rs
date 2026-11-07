@@ -1043,9 +1043,9 @@ impl App {
                     task_reads,
                 })) => {
                     for id in requests {
-                        self.input.retire_document_request(id);
+                        self.input.forget_document_request(id);
                         self.search.forget_document_request(id);
-                        self.language.retire_document_request(id);
+                        self.language.forget_document_request(id);
                         self.persistence.forget_document_request(id);
                         self.navigation_reads.remove(&id);
                         self.recovery.take_read(id, self.workspace.version());
@@ -1927,7 +1927,7 @@ impl App {
         }
         if let Some((server, request_id)) = pending.request.take() {
             let _ = self.language.cancel(&server, request_id);
-            self.language.retire_request(&server, request_id);
+            self.language.finish_request(&server, request_id);
         }
         if self
             .state
@@ -2247,7 +2247,7 @@ impl App {
 }
 
 impl App {
-    pub(in crate::app) fn retire_closed_buffer(
+    pub(in crate::app) fn finish_buffer_close(
         &mut self,
         buffer_id: crate::editor::BufferId,
         path: Option<&Path>,
@@ -2317,7 +2317,7 @@ impl App {
             return;
         }
         if removed {
-            self.retire_closed_buffer(buffer_id, closed_path.as_deref(), clean);
+            self.finish_buffer_close(buffer_id, closed_path.as_deref(), clean);
         }
         self.set_dashboard_visibility(self.state.active_view().is_none());
         if !self.window_session.dashboard_visible() {
