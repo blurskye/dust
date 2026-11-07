@@ -120,7 +120,10 @@ fn validate_current_directory(path: &Path) -> Result<(), StartupError> {
 /// Where a new file at `path` lives: its folder resolved when that exists, as an open resolves
 /// an existing file.
 pub(crate) fn new_file_path(path: &Path) -> PathBuf {
-    match (path.parent().map(Path::canonicalize), path.file_name()) {
+    match (
+        path.parent().map(crate::files::canonicalize),
+        path.file_name(),
+    ) {
         (Some(Ok(parent)), Some(name)) => parent.join(name),
         _ => path.to_path_buf(),
     }

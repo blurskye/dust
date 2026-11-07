@@ -734,7 +734,7 @@ mod persistence_tests {
         let mut store = TrustStore::default();
         let identities = (0..=TRUST_IDENTITY_LIMIT)
             .map(|n| RootIdentity {
-                canonical_path: PathBuf::from(format!("/workspace/{n}")),
+                canonical_path: crate::files::absolute_test_path(&format!("/workspace/{n}")),
                 filesystem_identity: Some((1, n as u64)),
             })
             .collect::<Vec<_>>();

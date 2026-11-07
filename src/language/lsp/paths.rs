@@ -136,19 +136,22 @@ pub fn path_from_file_uri(uri: &str) -> Option<PathBuf> {
     #[cfg(windows)]
     {
         let text = String::from_utf8(decoded).ok()?;
-        // Open buffers use canonical Windows paths, including the verbatim prefix.
-        if !authority.is_empty() && !authority.eq_ignore_ascii_case("localhost") {
-            return Some(PathBuf::from(format!(
-                r"\\?\UNC\{authority}{}",
-                text.replace('/', r"\")
-            )));
-        }
-        if text.as_bytes().get(2) == Some(&b':') {
-            return Some(PathBuf::from(format!(
-                r"\\?\{}",
-                text.strip_prefix('/')?.replace('/', r"\")
-            )));
-        }
-        Some(PathBuf::from(text))
+        // Open buffers use canonical paths, which keep the verbatim prefix only past the
+        // ordinary Windows length limit (see `files::canonicalize`).
+        let (plain, verbatim) =
+            if !authority.is_empty() && !authority.eq_ignore_ascii_case("localhost") {
+                let share = format!(r"{authority}{}", text.replace('/', r"\"));
+                (format!(r"\\{share}"), format!(r"\\?\UNC\{share}"))
+            } else if text.as_bytes().get(2) == Some(&b':') {
+                let disk = text.strip_prefix('/')?.replace('/', r"\");
+                (disk.clone(), format!(r"\\?\{disk}"))
+            } else {
+                return Some(PathBuf::from(text));
+            };
+        Some(PathBuf::from(if plain.len() < 260 {
+            plain
+        } else {
+            verbatim
+        }))
     }
 }

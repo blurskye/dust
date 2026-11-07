@@ -1259,7 +1259,7 @@ pub(in crate::app) fn app_waiting_to_save_formatted(
             deadline: std::time::Instant::now() + std::time::Duration::from_secs(60),
         },
     );
-    let uri = format!("file://{}", path.display());
+    let uri = file_uri(&path);
     (dirs, app, buffer, path, uri)
 }
 
@@ -1741,7 +1741,7 @@ fn a_format_replacing_the_whole_file_keeps_the_cursor_on_its_line() {
         "formatter",
         1,
         "textDocument/formatting",
-        &format!("file://{}", path.display()),
+        &file_uri(&path),
         LspFeatureResult::WorkspaceEdit(LspWorkspaceEdit {
             resources: Vec::new(),
             documents: vec![LspDocumentEdit {

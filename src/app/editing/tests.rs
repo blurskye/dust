@@ -195,7 +195,10 @@ fn path_completion_keeps_open_buffers_and_lists_directory_children() {
     wait_vfs(&mut app);
     let completions = &app.ui.prompt.as_ref().expect("prompt").completions;
     assert_eq!(completions.len(), 1);
-    assert_eq!(completions[0].label, "src/needle.rs");
+    assert_eq!(
+        completions[0].label,
+        format!("src{}needle.rs", std::path::MAIN_SEPARATOR)
+    );
 
     app.open_prompt(crate::ui::PromptKind::Command, "e src/".into());
     wait_vfs(&mut app);

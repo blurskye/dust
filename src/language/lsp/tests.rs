@@ -148,7 +148,7 @@ fn windows_file_uris_match_canonical_buffer_paths() {
         assert_eq!(uri, "file:///C:/src/a%20b.rs");
         assert_eq!(
             path_from_file_uri(&uri).unwrap(),
-            Path::new(r"\\?\C:\src\a b.rs")
+            Path::new(r"C:\src\a b.rs")
         );
     }
     for path in [r"\\server\share\a b.rs", r"\\?\UNC\server\share\a b.rs"] {
@@ -156,7 +156,7 @@ fn windows_file_uris_match_canonical_buffer_paths() {
         assert_eq!(uri, "file://server/share/a%20b.rs");
         assert_eq!(
             path_from_file_uri(&uri).unwrap(),
-            Path::new(r"\\?\UNC\server\share\a b.rs")
+            Path::new(r"\\server\share\a b.rs")
         );
     }
 }

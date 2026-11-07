@@ -2621,6 +2621,8 @@ fn global_explorer_identity_can_be_disabled_without_disabling_just_one_surface()
     assert_eq!(surface.entries[0].id, "builtin.global.explorer.explorer");
 }
 
+// The guide's terminal profile names a Unix shell.
+#[cfg(unix)]
 #[test]
 fn user_guide_terminal_profile_and_keymap_are_accepted() {
     let guide = include_str!(concat!(

@@ -833,6 +833,8 @@ fn relative_linter_and_test_paths_use_the_task_working_directory() {
     );
 }
 
+// The task fixtures are POSIX shell scripts.
+#[cfg(unix)]
 #[test]
 fn a_failing_dependency_publishes_its_matched_diagnostics() {
     let (root, mut editor, workspace, mut config, mut tasks, mut diagnostics) = fixture();

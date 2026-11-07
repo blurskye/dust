@@ -1939,7 +1939,7 @@ fn accepting_a_leaf_does_not_reopen_its_closed_expansion() {
 fn breakpoint_rejections_update_only_the_latest_requested_rows() {
     use crate::debugger::DapBreakpointState;
     let (mut owner, adapter) = request_fixture();
-    let path = PathBuf::from("/source.rs");
+    let path = crate::files::absolute_test_path("/source.rs");
     let at = |line| DapSourceBreakpoint {
         path: path.clone(),
         line,
@@ -2028,7 +2028,7 @@ fn breakpoint_rejections_update_only_the_latest_requested_rows() {
 #[test]
 fn breakpoint_changes_send_only_enabled_rows_and_acknowledge_the_captured_list() {
     let (mut owner, adapter) = request_fixture();
-    let path = PathBuf::from("/source.rs");
+    let path = crate::files::absolute_test_path("/source.rs");
     let at = |line| DapSourceBreakpoint {
         path: path.clone(),
         line,
@@ -2087,7 +2087,7 @@ fn breakpoint_changes_send_only_enabled_rows_and_acknowledge_the_captured_list()
 #[test]
 fn breakpoint_changes_retry_the_latest_configuration_after_backpressure() {
     let (mut owner, adapter) = request_fixture();
-    let path = PathBuf::from("/source.rs");
+    let path = crate::files::absolute_test_path("/source.rs");
     let at = |line| DapSourceBreakpoint {
         path: path.clone(),
         line,
@@ -2128,7 +2128,7 @@ fn breakpoint_changes_retry_the_latest_configuration_after_backpressure() {
 fn startup_breakpoints_reset_enabled_verdicts_for_the_new_adapter() {
     use crate::debugger::DapBreakpointState;
     let (mut owner, adapter) = request_fixture();
-    let path = PathBuf::from("/source.rs");
+    let path = crate::files::absolute_test_path("/source.rs");
     let at = |line| DapSourceBreakpoint {
         path: path.clone(),
         line,
@@ -2377,7 +2377,7 @@ fn automatic_stop_following_only_consumes_its_own_requests() {
     let frame = |id, name: &str| DapStackFrame {
         id,
         name: name.into(),
-        path: Some(PathBuf::from(format!("/{name}.rs"))),
+        path: Some(crate::files::absolute_test_path(&format!("/{name}.rs"))),
         line: 3,
         column: 1,
         source_reference: None,
@@ -2404,7 +2404,10 @@ fn automatic_stop_following_only_consumes_its_own_requests() {
     ) else {
         panic!("automatic navigation")
     };
-    assert_eq!(location.path, PathBuf::from("/stopped.rs"));
+    assert_eq!(
+        location.path,
+        crate::files::absolute_test_path("/stopped.rs")
+    );
     assert_eq!(owner.current_frame(), Some(10));
     let automatic_scopes = adapter.control().unwrap();
     owner.control(DapControl::Scopes { frame_id: 10 }).unwrap();

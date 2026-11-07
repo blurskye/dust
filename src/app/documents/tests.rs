@@ -564,6 +564,8 @@ fn a_failed_test_is_listed_in_problems_and_jumps_to_its_line() {
     assert_eq!(rows[0].label, "a.txt:3  adds: wrong sum");
 }
 
+// The task fixtures are POSIX shell scripts.
+#[cfg(unix)]
 #[test]
 fn successful_dependency_diagnostics_keep_separate_stream_records() {
     check_task_diagnostics(true);
@@ -2612,7 +2614,11 @@ fn file_rows_dim_the_folder_and_count_what_the_query_leaves_of_all() {
     let cells = &picker.rows[0].cells;
     let icon = crate::files::file_icon("lib.rs").unwrap().glyph;
     let texts: Vec<_> = cells.iter().map(|cell| cell.text.as_str()).collect();
-    assert_eq!(texts, [format!("{icon} ").as_str(), "src/", "lib.rs"]);
+    let folder = format!("src{}", std::path::MAIN_SEPARATOR);
+    assert_eq!(
+        texts,
+        [format!("{icon} ").as_str(), folder.as_str(), "lib.rs"]
+    );
     assert_eq!(cells[1].style, crate::ui::Style::Muted);
     assert_eq!(cells[2].style, crate::ui::Style::Default);
 }

@@ -109,8 +109,11 @@ impl PackageStore {
     }
     fn replace_lock(&self, lock: &PackageLock) -> Result<(), PackageError> {
         // Finish serialization and staging before changing rollback history.
-        let staged = tempfile::NamedTempFile::new_in(&self.root).map_err(PackageError::Io)?;
-        write_lock_atomic(staged.path(), lock, self.maximum_lock_bytes)?;
+        // Only the path is kept: Windows refuses to rename over a file that is held open.
+        let staged = tempfile::NamedTempFile::new_in(&self.root)
+            .map_err(PackageError::Io)?
+            .into_temp_path();
+        write_lock_atomic(&staged, lock, self.maximum_lock_bytes)?;
         let backup = self.backup_path();
         let previous = if backup.exists() {
             Some(read_bounded_regular(

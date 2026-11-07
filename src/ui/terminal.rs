@@ -213,12 +213,16 @@ impl TerminalSession {
                 execute!(stdout, EnableMouseCapture)?;
             }
             // Terminals with the kitty keyboard protocol then send keys like ctrl-, that have no
-            // legacy code; the others ignore the request.
-            execute!(
+            // legacy code; the others ignore the request. Legacy Windows consoles cannot be
+            // asked at all, which crossterm reports as unsupported.
+            match execute!(
                 stdout,
                 PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
-            )?;
-            keyboard_pushed = true;
+            ) {
+                Ok(()) => keyboard_pushed = true,
+                Err(error) if error.kind() == std::io::ErrorKind::Unsupported => {}
+                Err(error) => return Err(error),
+            }
             execute!(stdout, Hide, Clear(ClearType::All))?;
             event::poll(Duration::ZERO)?;
             Ok(())
@@ -1529,6 +1533,8 @@ mod tests {
         }
     }
 
+    // On Windows crossterm writes these sequences only to a console with ANSI support.
+    #[cfg(unix)]
     #[test]
     fn terminal_restoration_balances_enabled_modes_once() {
         for enabled in [false, true] {

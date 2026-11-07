@@ -104,3 +104,13 @@ pub use root_identity::RootIdentity;
 #[cfg(windows)]
 pub(crate) use root_identity::file_identity;
 pub(crate) mod path_encoding;
+
+/// A Unix-style absolute test path such as `/workspace/a.rs`, made absolute on Windows too.
+#[cfg(test)]
+pub(crate) fn absolute_test_path(path: &str) -> std::path::PathBuf {
+    if cfg!(windows) {
+        std::path::PathBuf::from(format!(r"C:{}", path.replace('/', r"\")))
+    } else {
+        std::path::PathBuf::from(path)
+    }
+}

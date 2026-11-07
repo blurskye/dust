@@ -951,7 +951,8 @@ fn watcher_fingerprint_detects_same_length_content_and_sources_are_size_bounded(
 #[test]
 fn bundled_assets_share_the_typed_configuration_loaders() {
     let loaded = load_bundled_config();
-    let declared = toml::from_str::<toml::Value>(BUNDLED_CONFIG).expect("bundled source value");
+    // The platform's bundled overlay (windows.toml) counts as explicit too.
+    let declared = crate::config::load::bundled_settings_value();
     let resolved = toml::Value::try_from(&loaded.config).expect("resolved value");
     assert_eq!(
         setting_keys(&declared),
@@ -1756,7 +1757,7 @@ fn settings_save_rejects_growth_past_the_configuration_byte_limit() {
 #[test]
 fn deep_task_dependencies_are_validated_without_recursion() {
     let task: crate::config::settings::TaskConfig =
-        toml::from_str("executable = '/bin/true'").unwrap();
+        toml::from_str(&format!("executable = '{}'", true_executable())).unwrap();
     let mut config = load_bundled_config().config;
     for index in 0..50_000 {
         let mut task = task.clone();
@@ -1851,9 +1852,10 @@ fn unknown_fields_in_window_rules_do_not_remove_valid_fields_from_other_variants
 
 #[test]
 fn unknown_fields_under_dotted_task_names_preserve_valid_settings() {
-    let (config, _, _, ignored) = crate::config::load::settings_from_source(
-        "[editor]\ntab_width=3\n[tasks.'build.all']\nexecutable='/bin/true'\nunknown=true\n",
-    )
+    let (config, _, _, ignored) = crate::config::load::settings_from_source(&format!(
+        "[editor]\ntab_width=3\n[tasks.'build.all']\nexecutable='{}'\nunknown=true\n",
+        true_executable()
+    ))
     .unwrap();
     assert_eq!(config.editor.tab_width, 3);
     assert!(config.tasks.contains_key("build.all"));
@@ -2069,4 +2071,11 @@ fn config_migration_preserves_symlinks_and_updates_their_target() {
             .is_symlink()
     );
     assert_eq!(std::fs::read_to_string(target).unwrap(), migrated);
+}
+
+/// An absolute executable path in the host's form; validation only checks its shape.
+fn true_executable() -> String {
+    crate::files::absolute_test_path("/bin/true")
+        .display()
+        .to_string()
 }

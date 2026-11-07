@@ -3786,6 +3786,8 @@ fn index_only_unstage_does_not_read_worktree_content() {
     }
 }
 
+// Windows file names cannot contain `*`.
+#[cfg(unix)]
 #[test]
 fn whole_file_unstage_treats_wildcards_literally() {
     let dir = tempdir().unwrap();

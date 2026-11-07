@@ -433,7 +433,9 @@ impl Drop for IndexLock {
 struct IndexWrite {
     _lock: IndexLock,
     path: PathBuf,
-    temporary: tempfile::NamedTempFile,
+    // Only the path is kept: Windows refuses to rename over a file that is held open,
+    // and libgit2 writes the index by renaming over it.
+    temporary: tempfile::TempPath,
 }
 impl IndexWrite {
     fn start(repo: &git2::Repository) -> Result<Self, GitMutationError> {
@@ -452,14 +454,14 @@ impl IndexWrite {
         let lock = IndexLock { path: lock_path };
         let temporary =
             tempfile::NamedTempFile::new_in(path.parent().ok_or(GitMutationError::Backend)?)
-                .map_err(|_| GitMutationError::Backend)?;
+                .map_err(|_| GitMutationError::Backend)?
+                .into_temp_path();
         if path.exists() {
-            std::fs::copy(&path, temporary.path()).map_err(|_| GitMutationError::Backend)?;
+            std::fs::copy(&path, &temporary).map_err(|_| GitMutationError::Backend)?;
         } else {
-            std::fs::remove_file(temporary.path()).map_err(|_| GitMutationError::Backend)?;
+            std::fs::remove_file(&temporary).map_err(|_| GitMutationError::Backend)?;
         }
-        let mut index =
-            git2::Index::open(temporary.path()).map_err(|_| GitMutationError::Backend)?;
+        let mut index = git2::Index::open(&temporary).map_err(|_| GitMutationError::Backend)?;
         repo.set_index(&mut index)
             .map_err(|_| GitMutationError::Backend)?;
         Ok(Self {
@@ -469,12 +471,13 @@ impl IndexWrite {
         })
     }
     fn commit(&self) -> Result<(), GitMutationError> {
-        // Flushing needs a writable handle on Windows; the temporary file holds one.
-        self.temporary
-            .as_file()
-            .sync_all()
+        // Windows flushes a file only through a writable handle.
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&self.temporary)
+            .and_then(|file| file.sync_all())
             .map_err(|_| GitMutationError::Backend)?;
-        std::fs::rename(self.temporary.path(), &self.path).map_err(|_| GitMutationError::Backend)
+        std::fs::rename(&self.temporary, &self.path).map_err(|_| GitMutationError::Backend)
     }
 }
 

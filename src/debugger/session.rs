@@ -776,7 +776,7 @@ impl ExecutionScope {
         let canonical = self
             .paths
             .iter()
-            .map(std::fs::canonicalize)
+            .map(crate::files::canonicalize)
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| e.to_string())?;
         let requested = self.paths.iter().map(|p| p.as_path()).collect::<Vec<_>>();

@@ -738,7 +738,9 @@ fn recovery_discovery_keeps_the_same_newest_journals_as_cleanup() {
     for index in 0..200 {
         let path = root.path().join(format!("{index:03}.toml"));
         write_recovery(&path, &RecoveryRecord::new(None, index, "unsaved".into())).unwrap();
-        fs::File::open(&path)
+        fs::File::options()
+            .write(true)
+            .open(&path)
             .unwrap()
             .set_modified(now - Duration::from_secs(200 - index))
             .unwrap();
@@ -825,7 +827,9 @@ fn recovery_cleanup_waits_for_replacement_before_deciding_retention() {
     let journal = root.path().join("buffer.toml");
     write_recovery(&journal, &RecoveryRecord::new(None, 1, "old".into())).unwrap();
     let now = crate::clock::system_time();
-    fs::File::open(&journal)
+    fs::File::options()
+        .write(true)
+        .open(&journal)
         .unwrap()
         .set_modified(now - Duration::from_secs(2 * 86_400))
         .unwrap();
@@ -978,7 +982,8 @@ pub(super) fn search_policy(root: &Path, query: &str) -> WorkspaceSearchPolicy {
 pub(super) fn collect_search(
     service: &WorkspaceSearchWorker,
 ) -> (Vec<WorkspaceSearchMatch>, WorkspaceSearchSummary) {
-    let deadline = Instant::now() + Duration::from_secs(5);
+    // Debug builds scan megabyte fixtures slowly on a busy machine.
+    let deadline = Instant::now() + Duration::from_secs(30);
     let mut matches = Vec::new();
     loop {
         if let Some(event) = service.try_event() {

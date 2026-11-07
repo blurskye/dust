@@ -1136,7 +1136,9 @@ mod tests {
         original.metadata.insert("old".into(), "old".into());
         write_state(&path, &original, None, &policy).unwrap();
         let mut first = original.clone();
-        first.recent_files.push("/first".into());
+        first
+            .recent_files
+            .push(crate::files::absolute_test_path("/first"));
         first.command_history.clear();
         first.command_history.push("first".into());
         first.metadata.clear();
@@ -1144,7 +1146,7 @@ mod tests {
         first.marks.push(crate::persistence::PersistedMark {
             name: "A".into(),
             location: PersistedLocation {
-                path: "/first".into(),
+                path: crate::files::absolute_test_path("/first"),
                 byte: 0,
                 anchor: 0,
                 scroll_line: 0,
@@ -1152,13 +1154,15 @@ mod tests {
             },
         });
         let mut second = original.clone();
-        second.recent_files.push("/second".into());
+        second
+            .recent_files
+            .push(crate::files::absolute_test_path("/second"));
         second.command_history.push("second".into());
         second.metadata.insert("second".into(), "second".into());
         second.marks.push(crate::persistence::PersistedMark {
             name: "B".into(),
             location: PersistedLocation {
-                path: "/second".into(),
+                path: crate::files::absolute_test_path("/second"),
                 byte: 0,
                 anchor: 0,
                 scroll_line: 0,
@@ -1179,8 +1183,16 @@ mod tests {
             }
         });
         let saved = read_state(&path, &policy).unwrap();
-        assert!(saved.recent_files.contains(&PathBuf::from("/first")));
-        assert!(saved.recent_files.contains(&PathBuf::from("/second")));
+        assert!(
+            saved
+                .recent_files
+                .contains(&crate::files::absolute_test_path("/first"))
+        );
+        assert!(
+            saved
+                .recent_files
+                .contains(&crate::files::absolute_test_path("/second"))
+        );
         assert!(saved.command_history.contains(&"first".into()));
         assert!(saved.command_history.contains(&"second".into()));
         assert!(!saved.command_history.contains(&"old".into()));
@@ -1196,18 +1208,18 @@ mod tests {
         PersistedState {
             version: STATE_VERSION,
             session: Some(PersistedSession {
-                roots: vec![PathBuf::from("/workspace")],
+                roots: vec![crate::files::absolute_test_path("/workspace")],
                 tabs: vec![PersistedTab {
                     layout: PersistedLayout::Pane {
                         pane: PersistedPane {
-                            path: PathBuf::from("/workspace/main.rs"),
+                            path: crate::files::absolute_test_path("/workspace/main.rs"),
                             cursor: 27,
                             anchor: 27,
                             scroll_line: 3,
                             scroll_column: 19,
                         },
                     },
-                    focused_path: Some(PathBuf::from("/workspace/main.rs")),
+                    focused_path: Some(crate::files::absolute_test_path("/workspace/main.rs")),
                     focused_pane: Some(0),
                 }],
                 active_tab: 0,
@@ -1222,7 +1234,7 @@ mod tests {
                 pinned: Vec::new(),
             }),
             jumps: vec![PersistedLocation {
-                path: PathBuf::from("/workspace/main.rs"),
+                path: crate::files::absolute_test_path("/workspace/main.rs"),
                 byte: 27,
                 anchor: 27,
                 scroll_line: 3,
@@ -1329,7 +1341,7 @@ mod tests {
             semantic_id: "text:0:0".into(),
             content_type: "builtin.text-buffer".into(),
             adapter: "text-buffer".into(),
-            path: Some(PathBuf::from("/workspace/main.rs")),
+            path: Some(crate::files::absolute_test_path("/workspace/main.rs")),
             provider: None,
             source: None,
             key: None,
@@ -1377,7 +1389,7 @@ mod tests {
 
         let mut stale = state.clone();
         stale.session.as_mut().expect("session").content_descriptors[0].path =
-            Some(PathBuf::from("/workspace/other.rs"));
+            Some(crate::files::absolute_test_path("/workspace/other.rs"));
         assert!(matches!(
             stale.validate(&PersistencePolicy::default()),
             Err(PersistenceError::StaleContentDescriptor)

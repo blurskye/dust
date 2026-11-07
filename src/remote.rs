@@ -498,7 +498,7 @@ mod tests {
         let file = directory.path().join("a.rs");
         send(
             server.path(),
-            &[file.clone(), PathBuf::from("/b.rs")],
+            &[file.clone(), crate::files::absolute_test_path("/b.rs")],
             Some(12),
         )
         .unwrap();
@@ -521,7 +521,7 @@ mod tests {
                     line: Some(12)
                 },
                 RemoteOpen {
-                    path: "/b.rs".into(),
+                    path: crate::files::absolute_test_path("/b.rs"),
                     line: None
                 },
             ]
@@ -538,17 +538,28 @@ mod tests {
             .set_read_timeout(Some(Duration::from_secs(5)))
             .unwrap();
         for _ in 0..=REQUEST_QUEUE_LIMIT {
-            writeln!(client, "0\t/file.rs").unwrap();
+            writeln!(
+                client,
+                "0\t{}",
+                crate::files::path_encoding::encode(&crate::files::absolute_test_path("/file.rs"))
+                    .unwrap()
+            )
+            .unwrap();
         }
         let mut byte = [0];
         assert_eq!(client.read(&mut byte).unwrap(), 0);
         let received: Vec<_> = std::iter::from_fn(|| server.try_request()).collect();
         assert_eq!(received.len(), REQUEST_QUEUE_LIMIT);
-        send(server.path(), &[PathBuf::from("/next.rs")], None).unwrap();
+        send(
+            server.path(),
+            &[crate::files::absolute_test_path("/next.rs")],
+            None,
+        )
+        .unwrap();
         let deadline = Instant::now() + Duration::from_secs(3);
         loop {
             if let Some(RemoteRequest::Open(open)) = server.try_request() {
-                assert_eq!(open.path, Path::new("/next.rs"));
+                assert_eq!(open.path, crate::files::absolute_test_path("/next.rs"));
                 break;
             }
             assert!(Instant::now() < deadline);
@@ -560,18 +571,34 @@ mod tests {
     fn bulk_opens_report_rejected_requests_instead_of_silent_success() {
         let directory = tempfile::tempdir().unwrap();
         let server = RemoteServer::start(directory.path()).unwrap();
-        let paths = vec![PathBuf::from("/file.rs"); REQUEST_QUEUE_LIMIT];
+        let paths = vec![crate::files::absolute_test_path("/file.rs"); REQUEST_QUEUE_LIMIT];
         send(server.path(), &paths, None).unwrap();
-        assert!(send(server.path(), &[PathBuf::from("/rejected.rs")], None).is_err());
+        assert!(
+            send(
+                server.path(),
+                &[crate::files::absolute_test_path("/rejected.rs")],
+                None
+            )
+            .is_err()
+        );
         let received: Vec<_> = std::iter::from_fn(|| server.try_request()).collect();
         assert_eq!(received.len(), REQUEST_QUEUE_LIMIT);
-        assert!(send(server.path(), &[PathBuf::from("/next.rs")], None).is_ok());
+        assert!(
+            send(
+                server.path(),
+                &[crate::files::absolute_test_path("/next.rs")],
+                None
+            )
+            .is_ok()
+        );
 
         let server = RemoteServer::start(&directory.path().join("bulk")).unwrap();
-        let paths = vec![PathBuf::from("/file.rs"); REQUEST_QUEUE_LIMIT + 1];
+        let paths = vec![crate::files::absolute_test_path("/file.rs"); REQUEST_QUEUE_LIMIT + 1];
         assert!(send(server.path(), &paths, None).is_err());
     }
 
+    // The raw request lines carry Unix path text.
+    #[cfg(unix)]
     #[test]
     fn final_unterminated_remote_lines_and_trailing_carriage_returns_are_preserved() {
         let directory = tempfile::tempdir().unwrap();
@@ -677,7 +704,7 @@ mod tests {
 
     #[test]
     fn oversized_bulk_requests_are_rejected_before_connecting() {
-        let paths = vec![PathBuf::from(format!("/{}", "a".repeat(1024))); 400];
+        let paths = vec![crate::files::absolute_test_path(&format!("/{}", "a".repeat(1024))); 1100];
         let error = send(Path::new("/no-such-dust.sock"), &paths, None).unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
     }

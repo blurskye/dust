@@ -153,7 +153,7 @@ fn bundled_settings() -> Config {
         .clone()
 }
 
-fn bundled_settings_value() -> toml::Value {
+pub(super) fn bundled_settings_value() -> toml::Value {
     let value = bundled_value().clone();
     #[cfg(windows)]
     {

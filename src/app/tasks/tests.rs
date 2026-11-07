@@ -408,6 +408,8 @@ fn linter_job_and_vfs_publish_only_original_source_then_recover() {
     );
 }
 
+// The task fixtures are POSIX shell scripts.
+#[cfg(unix)]
 #[test]
 fn a_task_with_a_matcher_puts_what_it_matched_in_problems() {
     check_task_diagnostics(false);
