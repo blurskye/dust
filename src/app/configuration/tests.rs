@@ -1574,14 +1574,15 @@ pub(in crate::app) fn the_documented_git_and_debugger_keys_each_reach_their_comm
 }
 
 #[test]
-pub(in crate::app) fn every_key_the_experience_document_names_is_bound_or_marked_as_having_no_command()
- {
+pub(in crate::app) fn documented_git_and_debugger_keys_match_the_keymap() {
     let (_app_dirs, app) = app();
     let keymaps = bundled_keymaps(&app);
-    let document = fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/docs/experience.md"))
-        .expect("the experience document is part of the checkout");
-    // Scope to the prefix table itself: section 2.2's leader table also names `Space g g`,
-    // and a row there says what the key opens rather than whether it is bound.
+    let document = fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/docs/user-guide-linux.md"
+    ))
+    .expect("the user guide is part of the checkout");
+    // Check the explicit binding status, not other tables describing the same shortcuts.
     let table = document
         .split("#### The Git and debugger prefixes")
         .nth(1)
@@ -2621,9 +2622,12 @@ fn global_explorer_identity_can_be_disabled_without_disabling_just_one_surface()
 }
 
 #[test]
-fn product_plan_terminal_profile_and_keymap_are_accepted() {
-    let plan = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/docs/product-plan.md"));
-    let profile = plan
+fn user_guide_terminal_profile_and_keymap_are_accepted() {
+    let guide = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/docs/user-guide-linux.md"
+    ));
+    let profile = guide
         .split("Example profile in `config.toml`:")
         .nth(1)
         .unwrap()
@@ -2633,7 +2637,7 @@ fn product_plan_terminal_profile_and_keymap_are_accepted() {
         .split("```")
         .next()
         .unwrap();
-    let mapping = plan
+    let mapping = guide
         .split("Mapping in `keymaps.toml`:")
         .nth(1)
         .unwrap()

@@ -74,7 +74,7 @@ Open the explorer with `e` on the dashboard, `Space e` in Normal mode, or `:expl
 
 Rename opens the shared **Rename path** prompt, prefilled relative to its displayed workspace root. Edit the path and press Enter; Escape cancels before application. A collision keeps the entered name available for correction. Source inspection is asynchronous; wait for it to finish before submitting. Names are literal (not shell or command-line text), limited to 4096 UTF-8 bytes without controls or `..` traversal. Open dirty buffers and their split views retain their text after rename. `:explorer.rename target=...` remains the direct selected-path command with parent-relative target semantics.
 
-Explorer deletion opens the shared protected **Delete this path?** dialog with **No** selected. Left/Right, Tab, Y/N choose an answer; Enter submits it; Escape cancels without answering. Dust disables positive confirmation until the complete escaped target is visible, so resize a too-small terminal before choosing **Yes**. This replaces the old `d`, then type `delete` flow.
+Explorer deletion opens the shared protected **Delete this path?** dialog with **No** selected. Left/Right, Tab, Y/N choose an answer; Enter submits it; Escape cancels without answering. Dust disables positive confirmation until the complete escaped target is visible, so resize a too-small terminal before choosing **Yes**. Deletion requires confirmation; pressing `d` alone never deletes the path.
 
 Explorer mutations are asynchronous, confined to canonical workspace roots, reject overwrite and symlink mutation, and reconcile open buffers. Deleting an open file keeps its text as a dirty recoverable scratch buffer. Recursive copy and deletion of non-empty directories are intentionally refused; empty directories are supported.
 
@@ -93,9 +93,9 @@ Dust exposes the daily Telescope/Snacks-style workflows through its bounded pick
 
 Pickers open in **Insert** mode: every letter (including `j` and `k`) types into the query; arrow keys move through results and Enter accepts. Escape switches to **Picker Normal**, where `j`/`k` and arrows navigate, `i` returns to query editing, and Escape closes. `Ctrl-C` closes directly from either mode. The lower border shows the effective mode and configured keys. These modes do not change the underlying editor mode. Files preserves text entered before its first batch; streamed results retain the selected item while it remains present.
 
-Controls are configurable in the `picker` (Insert) and `picker_normal` contexts. The existing `j`/`k` mapping IDs now belong to `picker_normal`; the existing Insert-context Escape mapping invokes `picker.mode.normal`. `picker.cancel` remains the direct-close command. Workspace-edit review is deliberately separate: its existing toggle/apply/reject controls are not query editing.
+Controls are configurable in the `picker` (Insert) and `picker_normal` contexts. Insert-context Escape invokes `picker.mode.normal`; `picker.cancel` closes directly. Workspace-edit review uses separate toggle/apply/reject controls.
 
-`Space s r` opens checked workspace replacement. The comparison stack is LazyVim with Snacks/blink, not assumed Telescope.
+`Space s r` opens checked workspace replacement.
 
 ## Diagnostics and LSP
 
@@ -158,6 +158,77 @@ arguments and `cwd` may use `{root}`, `{file}`, `{dir}` and `{line}`; for exampl
 `arguments = ["-c", "exec lazygit -f \"$1\"", "lazygit", "{file}"]` passes the path as a
 separate argument instead of splicing it into the shell string.
 
+### Custom terminal profiles
+
+Example profile in `config.toml`:
+
+```toml
+[terminals.profiles.lazygit]
+program = "/bin/sh"
+arguments = ["-c", "exec lazygit"]
+cwd = "{root}"
+float = true
+close_on_exit = true
+```
+
+Mapping in `keymaps.toml`:
+
+```toml
+[[keymap]]
+id = "user.lazygit"
+context = "editor"
+mode = "normal"
+keys = "<leader> g g"
+command = "terminal.open"
+arguments = { profile = "lazygit" }
+```
+
+#### The Git and debugger prefixes
+
+`Space g` and `Space d` show available Git and debugger commands. The table records
+which shortcuts are bound; unassigned keys do not invoke another action. Lazygit,
+`gh` and `tea` must be installed separately. The `gh pr` profiles require GitHub;
+the pull-request picker and review-comment commands also support Gitea/Forgejo via `tea`.
+
+| Keys | Action | Status |
+|---|---|---|
+| `Space g g` | Lazygit at the workspace root | bound |
+| `Space g G` | Lazygit in the current file's directory | bound |
+| `Space g c` | Lazygit log | bound |
+| `Space g l` | Lazygit log | bound |
+| `Space g f` | Lazygit file history | bound |
+| `Space g s` | Changed files and diff | bound |
+| `Space g x` | Conflicts | bound |
+| `Space g w` | Worktrees | bound |
+| `Space g d` | Changed hunks in the project | bound |
+| `Space g h p` | Preview the hunk at the cursor | bound |
+| `Space g b` | Blame the cursor line | bound |
+| `Space g B` | Open the file on the forge | bound |
+| `Space g Y` | Copy the file's forge URL | bound |
+| `Space g p p` | Pick a pull request and check it out in a worktree | bound |
+| `Space g p v` | Pull request description (`gh pr view`) | bound |
+| `Space g p d` | Pull request diff (`gh pr diff`) | bound |
+| `Space g p r` | Submit a review (`gh pr review`) | bound |
+| `Space g p c` | Review comments | bound |
+| `Space g p a` | Comment on the cursor line | bound |
+| `Space g i` | Unassigned | no command |
+| `Space d s` | Start a debug session | bound |
+| `Space d c` | Continue | bound |
+| `Space d O` | Step over | bound |
+| `Space d i` | Step in | bound |
+| `Space d o` | Step out | bound |
+| `Space d p` | Pause | bound |
+| `Space d t` | Stop the debuggee | bound |
+| `Space d R` | Restart the session | bound |
+| `Space d b` | Toggle a breakpoint | bound |
+| `Space d B` | Set a condition or hit count | bound |
+| `Space d l` | List breakpoints and verification state | bound |
+| `Space d w` | Unassigned; use `:dap.watch.add expression=...` | no prompt command |
+| `Space d D` | Detach, leaving the process alive | bound |
+| `Space d r` | Debug console for the selected frame | bound |
+
+The debug console is opened with `Space d r`; `Space d R` restarts the session.
+
 ## Recovery and health
 
 Dirty buffers are journaled asynchronously. Use `:recovery`, `:recover`, or the dashboard recovery action after an unclean exit. Dust never overwrites the original file automatically during recovery.
@@ -175,18 +246,18 @@ Current Linux path resolution is:
 - Installed themes: `themes/*.toml` beside the resolved `config.toml`.
 - State directory: `$DUST_STATE_HOME` when set, otherwise `$XDG_STATE_HOME/dust`, otherwise `$HOME/.local/state/dust`.
 
-The current executable accepts those environment paths as supplied. If no applicable environment/home variable exists, it falls back to `./dust`; a relative override is also currently accepted. Use absolute override directories and do not rely on the cwd fallback: the target C-01 contract requires absolute bases and disables persistence/package writes when none can be resolved, and that target behavior remains Partial in delivery status.
+Dust accepts those environment paths as supplied, including relative overrides. If no applicable environment/home variable exists, it falls back to `./dust`. Prefer absolute override directories so configuration and state do not depend on the current directory.
 
-There is no generated configuration reference or JSON schema in this checkout; those outputs remain Unimplemented. The exact current fields, defaults and bounds come from the typed serializers/validators and [`assets/defaults/config.toml`](../assets/defaults/config.toml); bundled mappings and dashboard actions come from [`keymaps.toml`](../assets/defaults/keymaps.toml) and [`dashboard.toml`](../assets/defaults/dashboard.toml). A field shown only in the target specification is not accepted configuration. Run `dust --check-config` before restarting after large edits. `:config explain key` shows where a resolved value came from; `:keymap inspect key context` explains a binding.
+Available fields, defaults and bounds are defined by the configuration serializers and validators in `src/config/` and [`assets/defaults/config.toml`](../assets/defaults/config.toml). Bundled mappings and dashboard actions are in [`keymaps.toml`](../assets/defaults/keymaps.toml) and [`dashboard.toml`](../assets/defaults/dashboard.toml). Run `dust --check-config` before restarting after large edits. `:config explain key` shows where a resolved value came from; `:keymap inspect key context` explains a binding.
 
 
 ### Select a theme
 
 Use `:theme.select` (or `Space u C` from editor Normal mode). Type to filter, then use Up/Down to preview the selected theme on the actual screen. **Enter applies and remembers it in editor state. Escape or Ctrl-C cancels immediately**, restoring the previously chosen theme without saving the preview. This selection dialog uses the configurable `theme_picker` context, rather than the two-Escape result-picker grammar. A newer accepted configuration reload wins over an older preview or pending discovery.
 
-The compact chooser leaves the editor visible for live preview (up to 64 columns and 12 rows by default). It lists **Dust** (the unchanged original theme), **Catppuccin Latte, Frappé, Macchiato and Mocha**, **Gruvbox Dark**, **Nord**, **Tokyo Night / Storm / Moon / Day**, **Rosé Pine / Moon / Dawn**, and validated `themes/<name>.toml` files beside the accepted user `config.toml`. Identical current/catalog entries appear only once. Theme names are left-aligned; `Builtin`, `Installed` or `Saved` provenance is right-aligned. `Current` is separate from the keyboard selection. This uses the common picker row renderer, including plugin-provider pickers; long source labels are clipped to at most a third of the row. The optional `ui.picker.source_separator` is a prefix for that trailing source column (empty by default). Longer lists scroll; other pickers keep their existing size. `builtin.theme` has its own ordinary-window placement rule. The file's declared `name` must match its filename; names use letters, digits, `-` or `_` (up to 96 UTF-8 bytes). Files are regular, non-symlink TOML files of at most 128 KiB, with the existing semantic roles and validated color fallbacks. Discovery examines at most 256 directory entries and loads at most 31 installed files; it reports invalid files and limits instead of silently applying a fallback. `--clean` skips installed-theme discovery, but does not clear editor state; safe mode skips state restoration. Palette sources and MIT/Apache-2.0 license notices are in `assets/themes/README.md` and `LICENSES/`.
+The compact chooser leaves the editor visible for live preview (up to 64 columns and 12 rows by default). It lists **Dust**, **Catppuccin Latte, Frappé, Macchiato and Mocha**, **Gruvbox Dark**, **Nord**, **Tokyo Night / Storm / Moon / Day**, **Rosé Pine / Moon / Dawn**, and validated `themes/<name>.toml` files beside the accepted user `config.toml`. Identical current/catalog entries appear only once. Theme names are left-aligned; `Builtin`, `Installed` or `Saved` provenance is right-aligned. `Current` is separate from the keyboard selection. This uses the common picker row renderer, including plugin-provider pickers; long source labels are clipped to at most a third of the row. The optional `ui.picker.source_separator` is a prefix for that trailing source column (empty by default). Longer lists scroll; other pickers keep their existing size. `builtin.theme` has its own ordinary-window placement rule. The file's declared `name` must match its filename; names use letters, digits, `-` or `_` (up to 96 UTF-8 bytes). Files are regular, non-symlink TOML files of at most 128 KiB, with the existing semantic roles and validated color fallbacks. Discovery examines at most 256 directory entries and loads at most 31 installed files; it reports invalid files and limits instead of silently applying a fallback. `--clean` skips installed-theme discovery, but does not clear editor state; safe mode skips state restoration. Palette sources and MIT/Apache-2.0 license notices are in `assets/themes/README.md` and `LICENSES/`.
 
-Theme selection does not reload the rest of your configuration or restart tools. The existing atomic state writer saves the chosen palette snapshot under `metadata["ui.theme.snapshot"]` in `session.json` below the resolved state directory above. It restores on the next launch, including when opening a file directly. Preview alone is never saved. State-save errors are reported; the initial notice says **save requested**, not that disk I/O has already completed. Normal persistence settings apply: disabling persistence or `save_on_exit` disables automatic theme saving; disabling `restore_on_startup` disables restoration. `:config.explain key=ui.theme` and `:config.explain key=theme.styles.accent.foreground` identify the effective editor-state selection. An accepted configuration reload replaces the selection and cancels any older pending theme restore. Child terminal programs still control their own output colors.
+Theme selection does not reload the rest of your configuration or restart tools. The atomic state writer saves the chosen palette snapshot under `metadata["ui.theme.snapshot"]` in `session.json` below the resolved state directory above. It restores on the next launch, including when opening a file directly. Preview alone is never saved. State-save errors are reported; the initial notice says **save requested**, not that disk I/O has already completed. Normal persistence settings apply: disabling persistence or `save_on_exit` disables automatic theme saving; disabling `restore_on_startup` disables restoration. `:config.explain key=ui.theme` and `:config.explain key=theme.styles.accent.foreground` identify the effective editor-state selection. An accepted configuration reload replaces the selection and cancels any older pending theme restore. Child terminal programs still control their own output colors.
 
 **No configuration-file write is needed to remember a choice.** To explicitly override the saved selection, set `theme = "<name>"` in your existing `[ui]` section and use `:config.reload`. Selecting a theme never rewrites configuration files. Bundled names are `dust`, `catppuccin-latte`, `catppuccin-frappe`, `catppuccin-macchiato`, `catppuccin-mocha`, `gruvbox-dark`, `nord`, `tokyo-night`, `tokyo-night-storm`, `tokyo-night-moon`, `tokyo-night-day`, `rose-pine`, `rose-pine-moon` and `rose-pine-dawn`. The 14 bundled palettes work offline; chooser discovery does not download anything. Plugins cannot yet contribute themes through their manifests or WIT—use custom Dust TOML files for now, not executable Neovim theme plugins. For names other than the reserved original `dust`, an installed same-name file takes precedence when loading configuration; malformed installed files are reported, not silently replaced by the bundled palette.
 

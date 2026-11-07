@@ -8,7 +8,7 @@ Plugins are Wasm Components, not native libraries, WASI programs, or subprocesse
 The maintained Rust example is [`tests/fixtures/retained-guest`](../tests/fixtures/retained-guest).
 Its checked-in core module includes component metadata; tests wrap it with
 `wit-component` and execute it through the production Wasmtime host. See its README
-for the remote build command. Other component languages can generate bindings from
+for the build command. Other component languages can generate bindings from
 the same WIT. No published SDK crate is required.
 
 ## Lifecycle and manifest
@@ -279,14 +279,13 @@ hook and no way to block a forced quit.
 
 ## Verification and development
 
-Build from a checkout, never inside a running editor. The guest shell supplies the Wasm
-target without adding an SDK dependency to Dust:
+From the repository root, enter the guest shell, which supplies the Wasm target:
 
 ```sh
-nix develop .#guest -c sh -c '
-  cd tests/fixtures/retained-guest &&
-  cargo build --locked --offline --release --target wasm32-unknown-unknown &&
-  cp "$CARGO_TARGET_DIR/wasm32-unknown-unknown/release/dust_retained_guest.wasm" ../../../guest.wasm'
+nix develop .#guest
+cd tests/fixtures/retained-guest
+cargo build --locked --release --target wasm32-unknown-unknown --target-dir target
+cp target/wasm32-unknown-unknown/release/dust_retained_guest.wasm retained-guest.core.wasm
 ```
 
 After changing WIT, rebuild every fixture and copy the production WIT into its guest

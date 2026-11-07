@@ -5,18 +5,19 @@ production `wit/dust-plugin.wit`: **dust:plugin@0.4.0**, world `editor-plugin`.
 It has no WASI imports. Tests wrap its embedded metadata with `wit-component` and
 instantiate it with the real production host; tests never invoke a compiler.
 
-Build from a repository checkout:
+Build from the repository root:
 
 ```sh
-nix develop .#guest -c sh -c '
-  cd tests/fixtures/retained-guest &&
-  cargo build --locked --offline --release --target wasm32-unknown-unknown &&
-  cp "$CARGO_TARGET_DIR/wasm32-unknown-unknown/release/dust_retained_guest.wasm" ../../../guest.wasm'
+nix develop .#guest
+cd tests/fixtures/retained-guest
+cargo build --locked --release --target wasm32-unknown-unknown --target-dir target
+cp target/wasm32-unknown-unknown/release/dust_retained_guest.wasm retained-guest.core.wasm
 ```
 
-Fetch the artifact with `builder fetch` and copy it to `retained-guest.core.wasm`.
-Keep the two fixture-digest test assertions current when rebuilding. The `guest`
+Keep the fixture-digest test assertions current when rebuilding. The `guest`
 Nix shell includes the Wasm target; the editor's normal build shell does not.
+When changing the ABI, copy `wit/dust-plugin.wit` from the repository root to this
+fixture's `wit/dust-plugin.wit` before rebuilding.
 
 The example demonstrates retained and private-cell panels, confirmations, storage,
 picker chunks, read-only virtual documents, traps and runaway interruption. Its
