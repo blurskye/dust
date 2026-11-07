@@ -1,6 +1,6 @@
 name: release
-# Pushing a tag vX.Y.Z publishes a GitHub release with every Linux package. Running the
-# workflow by hand builds the same packages as artifacts without publishing them.
+# Pushing a tag vX.Y.Z publishes Linux packages and unsigned macOS/Windows archives.
+# Running this workflow by hand builds artifacts without publishing them.
 on:
   workflow_dispatch:
   push:
@@ -73,9 +73,60 @@ jobs:
       - uses: actions/upload-artifact@v4
         with: { name: dist-flatpak, path: '*.flatpak', if-no-files-found: error }
 
+  ports:
+    needs: packages
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            archive: aarch64-macos
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+            archive: x86_64-macos
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            archive: x86_64-windows
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.97.0
+        with: { targets: '${{ matrix.target }}' }
+      - name: Build the native binary
+        run: cargo build --release --locked --target '${{ matrix.target }}' --features static
+      - name: Package the unsigned binary
+        env:
+          VERSION: ${{ needs.packages.outputs.version }}
+          TARGET: ${{ matrix.target }}
+          ARCHIVE: ${{ matrix.archive }}
+        run: |
+          mkdir -p dist stage
+          cp LICENSE NOTICE stage/
+          cp -R LICENSES stage/
+          if [[ "$RUNNER_OS" == Windows ]]; then
+            binary="target/$TARGET/release/dust.exe"
+            "$binary" --version
+            cp "$binary" stage/
+            python -c 'import os, shutil; shutil.make_archive("dist/dust-" + os.environ["VERSION"] + "-" + os.environ["ARCHIVE"], "zip", "stage")'
+          else
+            binary="target/$TARGET/release/dust"
+            "$binary" --version
+            cp "$binary" stage/
+            tar -czf "dist/dust-$VERSION-$ARCHIVE.tar.gz" -C stage .
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.archive }}
+          path: dist/*
+          if-no-files-found: error
+
   publish:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [packages, flatpak]
+    needs: [packages, flatpak, ports]
     runs-on: ubuntu-latest
     permissions:
       contents: write

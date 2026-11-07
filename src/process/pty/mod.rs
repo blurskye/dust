@@ -413,8 +413,20 @@ fn open_working_directory(
             ));
         }
     }
-    crate::files::open_no_symlinks(&canonical, OFlags::PATH | OFlags::DIRECTORY)
-        .map_err(|e| fail(format!("PTY working directory is unavailable: {e}")))
+    crate::files::open_no_symlinks(
+        &canonical,
+        crate::files::path_open_flags() | OFlags::DIRECTORY,
+    )
+    .map_err(|e| fail(format!("PTY working directory is unavailable: {e}")))
+}
+
+fn working_directory_path(directory: &std::fs::File) -> std::path::PathBuf {
+    use std::os::fd::AsRawFd;
+    #[cfg(target_os = "macos")]
+    let descriptors = "/dev/fd";
+    #[cfg(not(target_os = "macos"))]
+    let descriptors = "/proc/self/fd";
+    std::path::Path::new(descriptors).join(directory.as_raw_fd().to_string())
 }
 
 fn run(
@@ -465,8 +477,7 @@ fn run(
     command.args(&request.arguments);
     // portable-pty substitutes HOME for a missing cwd. This descriptor-backed
     // path stays valid through spawn, even if the original name is removed.
-    use std::os::fd::AsRawFd;
-    command.cwd(format!("/proc/self/fd/{}", cwd.as_raw_fd()));
+    command.cwd(working_directory_path(&cwd));
     for (key, value) in &request.environment {
         command.env(key, value);
     }

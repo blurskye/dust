@@ -38,6 +38,33 @@ fn drain(service: &mut PtyWorker, id: PtyId) -> Vec<PtyEvent> {
         thread::sleep(Duration::from_millis(1));
     }
 }
+#[test]
+fn pty_starts_in_the_requested_directory() {
+    let root = tempfile::tempdir().unwrap();
+    let canonical = root.path().canonicalize().unwrap();
+    let mut service = PtyWorker::start(1);
+    let id = service.open(request(&canonical, "pwd -P")).unwrap();
+    let events = drain(&mut service, id);
+    let output: Vec<u8> = events
+        .iter()
+        .filter_map(|event| match event {
+            PtyEvent::Output { bytes, .. } => Some(bytes.as_slice()),
+            _ => None,
+        })
+        .flatten()
+        .copied()
+        .collect();
+    assert_eq!(
+        String::from_utf8(output).unwrap().trim(),
+        canonical.to_str().unwrap()
+    );
+    assert!(
+        events
+            .iter()
+            .any(|event| matches!(event, PtyEvent::IoComplete { result: Ok(()), .. }))
+    );
+}
+
 #[cfg(target_os = "linux")]
 #[test]
 fn pinned_pty_cwd_cannot_be_retargeted_or_fall_back_to_home() {

@@ -1379,6 +1379,19 @@ pub(crate) fn participating_roots(
     Ok(selected)
 }
 
+/// Open an entry for identity checks without requiring read permission.
+pub(crate) fn path_open_flags() -> rustix::fs::OFlags {
+    #[cfg(target_os = "macos")]
+    {
+        // macOS has no O_PATH; O_EVTONLY also permits fstat and directory-relative opens.
+        rustix::fs::OFlags::from_bits_retain(nix::libc::O_EVTONLY as _)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        rustix::fs::OFlags::PATH
+    }
+}
+
 // Canonicalization alone cannot constrain a later open if an ancestor is swapped
 // for a symlink. Resolve from a held root and reject links in every component.
 pub(super) fn open_scoped(
@@ -1397,7 +1410,7 @@ pub(super) fn open_scoped(
         path: path.into(),
         source,
     };
-    let directory = open_no_symlinks(root, OFlags::PATH | OFlags::DIRECTORY).map_err(error)?;
+    let directory = open_no_symlinks(root, path_open_flags() | OFlags::DIRECTORY).map_err(error)?;
     let relative = path
         .strip_prefix(root)
         .map_err(|_| VfsError::OutsideScope(path.into()))?;
@@ -1415,7 +1428,7 @@ pub(crate) fn open_no_symlinks(path: &Path, flags: rustix::fs::OFlags) -> io::Re
     let root = fs::File::from(openat(
         CWD,
         "/",
-        OFlags::PATH | OFlags::DIRECTORY | OFlags::CLOEXEC,
+        path_open_flags() | OFlags::DIRECTORY | OFlags::CLOEXEC,
         Mode::empty(),
     )?);
     open_beneath(root, relative, flags)
@@ -1442,7 +1455,7 @@ fn open_beneath(
             ));
         };
         let flags = if components.peek().is_some() {
-            OFlags::PATH | OFlags::DIRECTORY
+            path_open_flags() | OFlags::DIRECTORY
         } else {
             flags
         };
@@ -1485,7 +1498,7 @@ fn scoped_parent(
     let file = open_scoped(
         parent,
         roots,
-        rustix::fs::OFlags::PATH | rustix::fs::OFlags::DIRECTORY,
+        path_open_flags() | rustix::fs::OFlags::DIRECTORY,
     )?;
     Ok((file, name.into()))
 }
@@ -1710,7 +1723,7 @@ pub(super) fn apply_explorer_mutation(
         }
         ExplorerMutation::Delete { path } => {
             let path = scoped_existing_path(path, roots)?;
-            let file = open_scoped(&path, roots, OFlags::PATH)?;
+            let file = open_scoped(&path, roots, path_open_flags())?;
             let metadata = file.metadata().map_err(|source| VfsError::Io {
                 operation: "inspect explorer delete target",
                 path: path.clone(),
@@ -2136,7 +2149,7 @@ pub(super) fn agent_atomic_write(root: &Path, path: &Path, bytes: &[u8]) -> Resu
         .ok_or_else(|| VfsError::OutsideScope(path.into()))?;
     let result = (|| -> io::Result<()> {
         // Ancestors need search permission, not directory-listing permission.
-        let flags = OFlags::PATH | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC;
+        let flags = path_open_flags() | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC;
         let mut directory = File::from(openat(rustix::fs::CWD, "/", flags, Mode::empty())?);
         // Walk the root too: an ancestor substituted since resolution must not
         // redirect the initial directory open outside the resolved workspace.
@@ -2577,9 +2590,21 @@ mod lifecycle_tests {
     }
 
     #[test]
+    fn path_handles_support_identity_checks_and_directory_relative_opens() {
+        use std::os::unix::fs::MetadataExt;
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().canonicalize().unwrap();
+        fs::write(path.join("file"), b"contents").unwrap();
+        let directory = open_no_symlinks(&path, path_open_flags()).unwrap();
+        let file = open_beneath(directory, Path::new("file"), path_open_flags()).unwrap();
+        let expected = fs::metadata(path.join("file")).unwrap();
+        assert_eq!(file.metadata().unwrap().ino(), expected.ino());
+        assert_eq!(file.metadata().unwrap().dev(), expected.dev());
+    }
+
+    #[test]
     fn scoped_descriptors_reject_swapped_ancestors_and_pin_mutation_parents() {
         use rustix::fs::AtFlags;
-        use rustix::fs::OFlags;
         use rustix::fs::unlinkat;
         let root = tempfile::tempdir().unwrap();
         let outside = tempfile::tempdir().unwrap();
@@ -2594,7 +2619,7 @@ mod lifecycle_tests {
         fs::rename(&sub, &parked).unwrap();
         std::os::unix::fs::symlink(outside.path(), &sub).unwrap();
         assert!(read_scoped_file(&canonical, &roots, 1024).is_err());
-        assert!(open_scoped(&canonical, &roots, OFlags::PATH).is_err());
+        assert!(open_scoped(&canonical, &roots, path_open_flags()).is_err());
         assert!(scoped_parent(&canonical, &roots).is_err());
         unlinkat(&parent, &name, AtFlags::empty()).unwrap();
         assert!(!parked.join("file").exists());

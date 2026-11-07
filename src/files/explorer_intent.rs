@@ -3,6 +3,7 @@ use crate::files::ExplorerMutation;
 use crate::files::RequestId;
 use crate::files::RootIdentity;
 use crate::files::VfsError;
+use crate::files::vfs::path_open_flags;
 use crate::files::vfs::roots_current;
 use std::fs;
 use std::io;
@@ -172,11 +173,7 @@ fn prepare(
         .into_iter()
         .map(|path| {
             // Holding the original inode also prevents immediate unlink/recreate inode reuse.
-            use std::os::unix::fs::OpenOptionsExt;
-            let file = fs::OpenOptions::new()
-                .read(true)
-                .custom_flags(nix::libc::O_PATH | nix::libc::O_NOFOLLOW)
-                .open(&path)
+            let file = crate::files::vfs::open_no_symlinks(&path, path_open_flags())
                 .map_err(|e| error(&path, e.to_string()))?;
             let metadata = file.metadata().map_err(|e| error(&path, e.to_string()))?;
             if !metadata.is_file() && !metadata.is_dir() {
@@ -241,7 +238,6 @@ fn read_scoped_file(path: &Path, roots: &[RootIdentity]) -> Result<Vec<u8>, VfsE
     use rustix::fs::Mode;
     use rustix::fs::OFlags;
     use rustix::fs::openat;
-    use std::os::unix::fs::OpenOptionsExt;
     use std::path::Component;
 
     let root = roots
@@ -249,11 +245,11 @@ fn read_scoped_file(path: &Path, roots: &[RootIdentity]) -> Result<Vec<u8>, VfsE
         .filter(|root| path.starts_with(&root.canonical_path))
         .max_by_key(|root| root.canonical_path.components().count())
         .ok_or_else(|| error(path, "file is outside the workspace roots"))?;
-    let directory = fs::OpenOptions::new()
-        .read(true)
-        .custom_flags(nix::libc::O_PATH | nix::libc::O_DIRECTORY | nix::libc::O_NOFOLLOW)
-        .open(&root.canonical_path)
-        .map_err(|e| error(path, e.to_string()))?;
+    let directory = crate::files::vfs::open_no_symlinks(
+        &root.canonical_path,
+        path_open_flags() | OFlags::DIRECTORY,
+    )
+    .map_err(|e| error(path, e.to_string()))?;
     let metadata = directory
         .metadata()
         .map_err(|e| error(path, e.to_string()))?;
@@ -272,7 +268,7 @@ fn read_scoped_file(path: &Path, roots: &[RootIdentity]) -> Result<Vec<u8>, VfsE
             return Err(error(path, "invalid workspace-relative file path"));
         };
         let flags = if components.peek().is_some() {
-            OFlags::PATH | OFlags::DIRECTORY
+            path_open_flags() | OFlags::DIRECTORY
         } else {
             OFlags::RDONLY | OFlags::NONBLOCK
         } | OFlags::NOFOLLOW

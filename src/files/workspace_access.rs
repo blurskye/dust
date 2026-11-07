@@ -112,7 +112,7 @@ pub(crate) fn execute(
             Ok(FileValue::Done)
         }
         FileOperation::Stat(path) => {
-            let file = vfs::open_scoped(&path, &roots, rustix::fs::OFlags::PATH)?;
+            let file = vfs::open_scoped(&path, &roots, vfs::path_open_flags())?;
             Ok(FileValue::Info(info(
                 &path,
                 file.metadata().map_err(|e| io(&path, e))?,

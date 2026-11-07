@@ -48,10 +48,13 @@ pub fn user_state_directory() -> PathBuf {
     }
     #[cfg(target_os = "macos")]
     {
-        return env::var_os("HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join("Library/Application Support/Dust");
+        return env::var_os("XDG_STATE_HOME")
+            .map(|root| PathBuf::from(root).join("dust"))
+            .or_else(|| {
+                env::var_os("HOME")
+                    .map(|home| PathBuf::from(home).join("Library/Application Support/Dust"))
+            })
+            .unwrap_or_else(|| PathBuf::from("dust"));
     }
     #[cfg(all(unix, not(target_os = "macos")))]
     {
@@ -78,10 +81,14 @@ pub fn user_config_path() -> PathBuf {
     }
     #[cfg(target_os = "macos")]
     {
-        return env::var_os("HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join("Library/Application Support/Dust/config.toml");
+        return env::var_os("XDG_CONFIG_HOME")
+            .map(|root| PathBuf::from(root).join("dust"))
+            .or_else(|| {
+                env::var_os("HOME")
+                    .map(|home| PathBuf::from(home).join("Library/Application Support/Dust"))
+            })
+            .unwrap_or_else(|| PathBuf::from("dust"))
+            .join("config.toml");
     }
     #[cfg(all(unix, not(target_os = "macos")))]
     {

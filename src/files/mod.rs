@@ -37,6 +37,7 @@ pub use vfs::checked_atomic_write;
 pub(crate) use vfs::lock_file;
 pub(crate) use vfs::open_no_symlinks;
 pub(crate) use vfs::open_regular_file;
+pub(crate) use vfs::path_open_flags;
 pub use vfs::read_file;
 pub(crate) use vfs::read_file_bounded;
 mod project_root;

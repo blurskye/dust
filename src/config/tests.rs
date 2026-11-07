@@ -773,6 +773,36 @@ fn installed_plugin_discovery_uses_and_verifies_activation_digests() {
     }
 }
 
+// XDG overrides are Unix configuration conventions, including on macOS.
+#[cfg(unix)]
+#[test]
+fn user_directories_honor_xdg_overrides() {
+    if std::env::var_os("DUST_XDG_TEST_CHILD").is_some() {
+        assert_eq!(
+            crate::config::user_config_path(),
+            PathBuf::from("xdg-config/dust/config.toml")
+        );
+        assert_eq!(
+            crate::config::user_state_directory(),
+            PathBuf::from("xdg-state/dust")
+        );
+        return;
+    }
+    let status = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "config::tests::user_directories_honor_xdg_overrides",
+        ])
+        .env("DUST_XDG_TEST_CHILD", "1")
+        .env_remove("DUST_CONFIG_HOME")
+        .env_remove("DUST_STATE_HOME")
+        .env("XDG_CONFIG_HOME", "xdg-config")
+        .env("XDG_STATE_HOME", "xdg-state")
+        .status()
+        .unwrap();
+    assert!(status.success());
+}
+
 #[test]
 fn configuration_worker_tracks_disk_sources_across_startup_and_acknowledgments() {
     use crate::config::ConfigurationWorker;
