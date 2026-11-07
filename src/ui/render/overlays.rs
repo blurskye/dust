@@ -269,33 +269,39 @@ pub(super) fn render_dashboard(
     let logo: Vec<&str> = configured.logo.lines().collect();
     let logo_width = logo.iter().map(|line| measure(line)).max().unwrap_or(0);
     let actions = u16::try_from(configured_actions.len()).unwrap_or(u16::MAX);
-    let version = u16::from(configured.show_version);
     let footer = if configured.show_path { 2 } else { 0 };
-    // Like LazyVim's dashboard: the big logo and roomy rows when they fit, then smaller
-    // pieces as the window shrinks.
+    // Keep a full logo away from the window edges. Drop it before compressing entries,
+    // rather than squeezing the header against the top of a terminal dock's workspace.
     let big_logo = !logo.is_empty() && logo_width.saturating_add(2) <= width;
-    let layouts = [(true, 2), (true, 1), (false, 2), (false, 1)];
-    let fitting = layouts.into_iter().find_map(|(use_logo, row_step)| {
-        if use_logo && !big_logo {
-            return None;
-        }
-        let header = if use_logo {
-            u16::try_from(logo.len())
-                .unwrap_or(u16::MAX)
-                .saturating_add(version)
-        } else {
-            u16::from(configured.show_identity).saturating_add(version)
-        };
-        let rows = actions
-            .saturating_mul(row_step)
-            .saturating_sub(row_step - 1);
-        let total = header
-            .saturating_add(2)
-            .saturating_add(rows)
-            .saturating_add(footer);
-        (total <= height).then_some((use_logo, row_step, header, total))
-    });
-    let Some((use_logo, row_step, header, total)) = fitting
+    let layouts = [
+        (true, false, configured.show_version, 2),
+        (false, configured.show_identity, configured.show_version, 2),
+        (false, configured.show_identity, configured.show_version, 1),
+        (false, false, configured.show_version, 1),
+        (false, false, false, 1),
+    ];
+    let fitting = layouts
+        .into_iter()
+        .find_map(|(use_logo, identity, version, row_step)| {
+            if use_logo && !big_logo {
+                return None;
+            }
+            let header = if use_logo {
+                u16::try_from(logo.len())
+                    .unwrap_or(u16::MAX)
+                    .saturating_add(u16::from(version))
+            } else {
+                u16::from(identity).saturating_add(u16::from(version))
+            };
+            let rows = actions
+                .saturating_mul(row_step)
+                .saturating_sub(row_step - 1);
+            let header = header.saturating_add(if header > 0 { 2 } else { 0 });
+            let total = header.saturating_add(rows).saturating_add(footer);
+            let required = total.saturating_add(if use_logo { 2 } else { 0 });
+            (required <= height).then_some((use_logo, identity, version, row_step, header, total))
+        });
+    let Some((use_logo, identity, version, row_step, header, total)) = fitting
         .filter(|_| width >= configured.minimum_width && height >= configured.minimum_height)
     else {
         grid.put_text(
@@ -314,11 +320,11 @@ pub(super) fn render_dashboard(
             grid.put_text(left, y, line, Style::Accent);
             y = y.saturating_add(1);
         }
-    } else if configured.show_identity {
+    } else if identity {
         center_text(&mut grid, y, &configured.identity, Style::Accent, ambiguous);
         y = y.saturating_add(1);
     }
-    if configured.show_version {
+    if version {
         center_text(
             &mut grid,
             y,
@@ -329,7 +335,7 @@ pub(super) fn render_dashboard(
             ambiguous,
         );
     }
-    y = top.saturating_add(header).saturating_add(2);
+    y = top.saturating_add(header);
     let row_width = configured.content_width.min(width.saturating_sub(4));
     let left = width.saturating_sub(row_width) / 2;
     let right = left.saturating_add(row_width);
