@@ -484,7 +484,8 @@ impl Tasks {
                 let uri = crate::language::lsp::file_uri(
                     document
                         .as_ref()
-                        .map_or(path.as_path(), |document| document.path()),
+                        .and_then(|document| document.path())
+                        .unwrap_or(path.as_path()),
                 );
                 for item in &mut items {
                     item.uri = uri.clone();

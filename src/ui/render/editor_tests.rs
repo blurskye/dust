@@ -324,6 +324,7 @@ fn expanded_diagnostics_share_painted_mouse_rows() {
     config.ui.status_line.enabled = false;
     let mut ui = ui_with_editor_layout(&state);
     ui.diagnostics = vec![crate::ui::render::UiDiagnostic {
+        buffer: None,
         path: path.clone(),
         range: ByteRange::empty(ByteOffset(0)),
         severity: crate::workspace::DiagnosticSeverity::Error,
@@ -332,6 +333,7 @@ fn expanded_diagnostics_share_painted_mouse_rows() {
         message: "bad".into(),
     }];
     ui.expanded_diagnostic = Some(crate::ui::render::ExpandedDiagnosticState {
+        buffer: None,
         path,
         line: 0,
         severities: vec![crate::workspace::DiagnosticSeverity::Error],
@@ -606,6 +608,7 @@ fn markdown_background_fill_leaves_room_for_diagnostics_and_fold_labels() {
             mark(8, text.find("last").unwrap(), MarkdownMark::Code),
         ],
         diagnostics: vec![crate::ui::render::UiDiagnostic {
+            buffer: None,
             path,
             range: ByteRange::empty(ByteOffset(0)),
             severity: crate::workspace::DiagnosticSeverity::Warning,
@@ -1017,6 +1020,7 @@ fn expanded_diagnostics_share_painted_mouse_rows_slot5() {
     config.ui.status_line.enabled = false;
     let mut ui = ui_with_editor_layout(&state);
     ui.diagnostics = vec![crate::ui::render::UiDiagnostic {
+        buffer: None,
         path: path.clone(),
         range: ByteRange::empty(ByteOffset(0)),
         severity: crate::workspace::DiagnosticSeverity::Error,
@@ -1025,6 +1029,7 @@ fn expanded_diagnostics_share_painted_mouse_rows_slot5() {
         message: "bad".into(),
     }];
     ui.expanded_diagnostic = Some(crate::ui::render::ExpandedDiagnosticState {
+        buffer: None,
         path,
         line: 0,
         severities: vec![crate::workspace::DiagnosticSeverity::Error],

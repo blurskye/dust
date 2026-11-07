@@ -1,5 +1,6 @@
 //! Translate component commands and queued requests into native editor owners.
 
+mod drawing;
 mod events;
 mod language;
 #[cfg(test)]
@@ -36,6 +37,7 @@ pub(in crate::app) struct PluginCalls {
     reply_handlers: BTreeMap<String, String>,
     subscriptions: BTreeMap<String, (String, Option<u64>)>,
     marks: BTreeMap<(String, u64, String), Vec<(wit::Mark, crate::editor::decorations::MarkId)>>,
+    diagnostics: BTreeMap<(String, String), crate::workspace::DiagnosticProducer>,
     layers: Vec<(String, String)>,
     mode: Option<String>,
     timers: BTreeMap<(String, u64), (Instant, String, PluginLoadId)>,
@@ -601,7 +603,10 @@ impl App {
                     .layers
                     .retain(|(owner, layer)| owner != plugin || layer != &name);
             }
-            EditorRequest::Marks(set) => self.replace_plugin_marks(plugin, set)?,
+            EditorRequest::Marks(set) => self.replace_plugin_marks(plugin, authority, set)?,
+            EditorRequest::Diagnostics(set) => {
+                self.publish_plugin_diagnostics(plugin, authority, set)?
+            }
             EditorRequest::Subscribe(handler) => {
                 self.handler(plugin, &handler)?;
                 self.extension
@@ -610,9 +615,13 @@ impl App {
                     .insert(plugin.into(), (handler, None));
             }
             EditorRequest::CompletionSource(source) => {
+                self.require_plugin_drawing(plugin, authority)?;
                 self.install_plugin_completion(plugin, source)?
             }
-            EditorRequest::Completions(batch) => self.publish_plugin_completions(plugin, batch)?,
+            EditorRequest::Completions(batch) => {
+                self.require_plugin_drawing(plugin, authority)?;
+                self.publish_plugin_completions(plugin, batch)?;
+            }
             EditorRequest::Timer(token, request) => {
                 self.handler(plugin, &request.handler)?;
                 if self.extension.abi.timers.len() >= 64 {
@@ -793,68 +802,6 @@ impl App {
         Ok(())
     }
 
-    fn replace_plugin_marks(&mut self, plugin: &str, set: wit::MarkSet) -> Result<(), String> {
-        let total: usize = self
-            .extension
-            .abi
-            .marks
-            .iter()
-            .filter(|((owner, buffer, namespace), _)| {
-                owner == plugin && (*buffer != set.buffer || namespace != &set.namespace)
-            })
-            .map(|(_, marks)| marks.len())
-            .sum();
-        if total + set.marks.len() > 4096 {
-            return Err("plugin mark limit exceeded".into());
-        }
-        let buffer_id = slotmap::KeyData::from_ffi(set.buffer).into();
-        let buffer = self
-            .state
-            .buffers
-            .get_mut(buffer_id)
-            .ok_or("buffer closed")?;
-        if buffer.text.revision().0 != set.revision {
-            return Err("stale marks".into());
-        }
-        if set.namespace.is_empty() || set.namespace.len() > 128 {
-            return Err("invalid mark namespace".into());
-        }
-        let namespace = format!("plugin.{plugin}.{}", set.namespace);
-        let mut decorations = buffer.decorations.clone();
-        decorations.clear(&namespace);
-        let mut ids = BTreeSet::new();
-        let mut marks = Vec::new();
-        for mark in set.marks {
-            if !ids.insert(mark.id) {
-                return Err("duplicate mark ID".into());
-            }
-            let range = crate::editor::text::ByteRange {
-                start: crate::editor::text::ByteOffset(mark.start as usize),
-                end: crate::editor::text::ByteOffset(mark.end as usize),
-            };
-            let gravity = |gravity| match gravity {
-                wit::Gravity::Left => crate::editor::decorations::Gravity::Left,
-                wit::Gravity::Right => crate::editor::decorations::Gravity::Right,
-            };
-            let id = decorations
-                .insert(
-                    &buffer.text,
-                    &namespace,
-                    range,
-                    gravity(mark.start_gravity),
-                    gravity(mark.end_gravity),
-                )
-                .ok_or("invalid mark range")?;
-            marks.push((mark, id));
-        }
-        buffer.decorations = decorations;
-        self.extension
-            .abi
-            .marks
-            .insert((plugin.into(), set.buffer, set.namespace), marks);
-        Ok(())
-    }
-
     pub(in crate::app) fn remove_plugin_abi(&mut self, plugin: &str) {
         let pending: Vec<_> = self
             .extension
@@ -911,6 +858,7 @@ impl App {
             }
             self.extension.abi.marks.remove(&key);
         }
+        self.remove_plugin_diagnostics(plugin);
         let sources: Vec<_> = self
             .extension
             .abi
@@ -924,6 +872,7 @@ impl App {
                 .remove_completion_source(&format!("plugin.{plugin}.{}", key.1));
             self.extension.abi.completions.remove(&key);
         }
+        self.project_lsp_completion();
         self.extension.abi.subscriptions.remove(plugin);
         self.extension.abi.replies.remove(plugin);
         self.extension.abi.reply_handlers.remove(plugin);

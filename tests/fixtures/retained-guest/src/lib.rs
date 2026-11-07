@@ -874,8 +874,32 @@ fn drive_abi(action: &str, call: &host::CommandCall) -> Result<String, String> {
                     end: 0,
                     start_gravity: host::Gravity::Right,
                     end_gravity: host::Gravity::Right,
+                    decoration: None,
                 }],
             })?;
+        }
+        "drawing" | "drawing-clear" => {
+            let snapshot = host::current_buffer()?;
+            let marks = if action == "drawing-clear" { Vec::new() } else {
+                [host::VirtualTextPosition::Inline, host::VirtualTextPosition::EndOfLine, host::VirtualTextPosition::Overlay].into_iter().enumerate().map(|(index, position)| host::Mark {
+                    id: index as u64, start: index as u64, end: index as u64 + 1,
+                    start_gravity: host::Gravity::Right, end_gravity: host::Gravity::Left,
+                    decoration: Some(host::MarkDecoration {
+                        highlight: Some("@keyword".into()),
+                        virtual_text: Some(host::VirtualText { text: ["before ", " after", "Z"][index].into(), style: "Comment".into(), position }),
+                        sign: (index == 0).then_some(host::StyledText { text: "!".into(), style: "DiagnosticWarn".into() }),
+                    }),
+                }).collect()
+            };
+            host::replace_marks(&host::MarkSet { buffer: snapshot.buffer, revision: snapshot.revision, namespace: "drawing".into(), marks })?;
+        }
+        "diagnostics" | "diagnostics-clear" => {
+            let snapshot = host::current_buffer()?;
+            let diagnostics = if action == "diagnostics-clear" { Vec::new() } else { vec![host::Diagnostic {
+                start: 1, end: 2, severity: host::DiagnosticSeverity::Warning,
+                message: "check this value".into(), source: "fixture".into(),
+            }] };
+            host::publish_diagnostics(&host::DiagnosticSet { buffer: snapshot.buffer, revision: snapshot.revision, namespace: "lint".into(), diagnostics })?;
         }
         "events" => {
             host::subscribe_events("drive")?;

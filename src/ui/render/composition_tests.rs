@@ -1977,6 +1977,7 @@ fn multiline_diagnostics_style_continuations_but_only_annotate_the_start() {
     config.ui.status_line.enabled = false;
     let ui = UiState {
         diagnostics: vec![crate::ui::render::UiDiagnostic {
+            buffer: None,
             path,
             range: ByteRange::new(ByteOffset(1), ByteOffset(12)).unwrap(),
             severity: crate::workspace::DiagnosticSeverity::Error,
@@ -2038,6 +2039,7 @@ fn diagnostic_continuations_handle_unicode_ends_and_collapsed_lines() {
     for end in [12, 13] {
         let ui = UiState {
             diagnostics: vec![crate::ui::render::UiDiagnostic {
+                buffer: None,
                 path: path.clone(),
                 range: ByteRange::new(ByteOffset(1), ByteOffset(end)).unwrap(),
                 severity: crate::workspace::DiagnosticSeverity::Error,
@@ -2064,6 +2066,7 @@ fn diagnostic_continuations_handle_unicode_ends_and_collapsed_lines() {
     state.buffers[buffer].text = TextBuffer::from_text(&source);
     let ui = UiState {
         diagnostics: vec![crate::ui::render::UiDiagnostic {
+            buffer: None,
             path,
             range: ByteRange::new(ByteOffset(0), ByteOffset(source.len())).unwrap(),
             severity: crate::workspace::DiagnosticSeverity::Error,
@@ -2145,6 +2148,7 @@ fn a_line_with_a_diagnostic_is_marked_in_the_gutter_with_its_worst_severity() {
         )
         .unwrap();
     let diagnostic = |severity, start, end| crate::ui::render::UiDiagnostic {
+        buffer: None,
         path: path.clone(),
         severity,
         range: crate::editor::text::ByteRange::new(
@@ -2205,6 +2209,7 @@ fn focused_diagnostic_expands_all_matching_messages_as_virtual_lines() {
     )
     .expect("range");
     let diagnostic = |message: &str, code: &str| crate::ui::render::UiDiagnostic {
+        buffer: None,
         path: path.clone(),
         range,
         severity: crate::workspace::DiagnosticSeverity::Error,
@@ -2219,6 +2224,7 @@ fn focused_diagnostic_expands_all_matching_messages_as_virtual_lines() {
             diagnostic("second error", "E0002"),
         ],
         expanded_diagnostic: Some(crate::ui::render::ExpandedDiagnosticState {
+            buffer: None,
             path,
             line: 0,
             severities: vec![crate::workspace::DiagnosticSeverity::Error],

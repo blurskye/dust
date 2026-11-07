@@ -162,7 +162,7 @@ impl App {
                             Some(wit::Mark {
                                 start: range.start.0 as u64,
                                 end: range.end.0 as u64,
-                                ..*mark
+                                ..mark.clone()
                             })
                         })
                         .collect(),

@@ -316,9 +316,46 @@ impl component_api::dust::plugin::host::Host for ComponentHostState {
         if marks.marks.len() > 4096 {
             return Err("mark limit exceeded".into());
         }
-        let bytes = marks.namespace.len() + marks.marks.len() * 40;
+        let bytes = marks.namespace.len()
+            + marks
+                .marks
+                .iter()
+                .map(|mark| {
+                    40 + mark.decoration.as_ref().map_or(0, |decoration| {
+                        decoration.highlight.as_ref().map_or(0, String::len)
+                            + decoration
+                                .virtual_text
+                                .as_ref()
+                                .map_or(0, |text| text.text.len() + text.style.len())
+                            + decoration
+                                .sign
+                                .as_ref()
+                                .map_or(0, |sign| sign.text.len() + sign.style.len())
+                    })
+                })
+                .sum::<usize>();
         self.editor_requests
             .push(crate::plugins::requests::EditorRequest::Marks(marks), bytes)
+    }
+
+    fn publish_diagnostics(
+        &mut self,
+        set: component_api::dust::plugin::host::DiagnosticSet,
+    ) -> Result<(), String> {
+        self.require_editor_capability(PluginCapability::ShowMessage)?;
+        if set.diagnostics.len() > 2000 {
+            return Err("diagnostic limit exceeded".into());
+        }
+        let bytes = set.namespace.len()
+            + set
+                .diagnostics
+                .iter()
+                .map(|item| 24 + item.message.len() + item.source.len())
+                .sum::<usize>();
+        self.editor_requests.push(
+            crate::plugins::requests::EditorRequest::Diagnostics(set),
+            bytes,
+        )
     }
 
     fn read_marks(

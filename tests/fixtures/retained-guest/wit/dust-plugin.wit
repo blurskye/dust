@@ -357,7 +357,7 @@ interface host {
   }
 
   enum gravity { left, right }
-  record mark { id: u64, start: u64, end: u64, start-gravity: gravity, end-gravity: gravity }
+  record mark { id: u64, start: u64, end: u64, start-gravity: gravity, end-gravity: gravity, decoration: option<mark-decoration> }
   record mark-set { buffer: u64, revision: u64, namespace: string, marks: list<mark> }
 
   record buffer-state { buffer: u64, revision: u64, text: string, dirty: bool, read-only: bool }
@@ -455,6 +455,15 @@ interface host {
   // opaque and never expose paths, editor IDs, graph IDs, or URI authority.
   take-virtual-document-requests: func() -> list<virtual-document-request>;
   queue-virtual-document-proposal: func(proposal: virtual-document-proposal) -> result<_, virtual-document-error>;
+
+  // Drawing: decorations on existing marks and namespaced diagnostics.
+  enum virtual-text-position { end-of-line, inline, overlay }
+  record virtual-text { text: string, style: string, position: virtual-text-position }
+  record mark-decoration { highlight: option<string>, virtual-text: option<virtual-text>, sign: option<styled-text> }
+  enum diagnostic-severity { error, warning, information, hint }
+  record diagnostic { start: u64, end: u64, severity: diagnostic-severity, message: string, source: string }
+  record diagnostic-set { buffer: u64, revision: u64, namespace: string, diagnostics: list<diagnostic> }
+  publish-diagnostics: func(diagnostics: diagnostic-set) -> result<_, string>;
 }
 
 world editor-plugin {

@@ -1260,6 +1260,7 @@ pub(in crate::app) fn half_page_scrolling_and_cursor_follow_include_expanded_dia
     let cursor = app.state.buffers[buffer].text.line_to_byte(3).unwrap();
     app.state.views[view].cursor = cursor;
     app.ui.diagnostics.push(crate::ui::UiDiagnostic {
+        buffer: None,
         path: path.clone(),
         range: ByteRange::empty(cursor),
         severity: DiagnosticSeverity::Error,
@@ -1268,6 +1269,7 @@ pub(in crate::app) fn half_page_scrolling_and_cursor_follow_include_expanded_dia
         message: "diagnostic ".repeat(40),
     });
     app.ui.expanded_diagnostic = Some(crate::ui::ExpandedDiagnosticState {
+        buffer: None,
         path,
         line: 3,
         severities: vec![DiagnosticSeverity::Error],

@@ -35,20 +35,56 @@ use crate::ui::render::UiState;
 
 use crate::ui::render::editor::display_column;
 
+#[derive(Clone)]
+pub(super) struct InlayText {
+    pub(super) position: ByteOffset,
+    pub(super) label: String,
+    pub(super) style: crate::ui::Style,
+    pub(super) ghost: bool,
+}
+
 /// Hints inside a source grapheme are drawn immediately after it. Scan each hinted line once.
 pub(super) fn projected_inlay_hints(
-    text: &crate::editor::text::TextBuffer,
-    buffer: crate::editor::BufferId,
+    state: &EditorState,
+    view: crate::editor::ViewId,
     ui: &UiState,
-) -> Vec<crate::ui::render::UiInlayHint> {
+) -> Vec<InlayText> {
+    let buffer = state.views[view].buffer;
+    let text = &state.buffers[buffer].text;
     let mut hints = ui
         .lsp_inlay_hints
         .iter()
         .chain(&ui.substitute_preview)
         .filter(|hint| hint.buffer == buffer && hint.revision == text.revision())
         .take(10_000)
+        .map(|hint| InlayText {
+            position: hint.position,
+            label: hint.label.clone(),
+            style: crate::ui::Style::Muted,
+            ghost: false,
+        })
         .collect::<Vec<_>>();
-    hints.sort_unstable_by_key(|hint| hint.position);
+    for (range, decoration) in state.buffers[buffer].decorations.drawing() {
+        if let Some(text) = &decoration.virtual_text
+            && text.position == crate::editor::decorations::VirtualTextPosition::Inline
+        {
+            hints.push(InlayText {
+                position: range.start,
+                label: text.text.text.clone(),
+                style: crate::ui::render::decorations::style(&text.text.style),
+                ghost: false,
+            });
+        }
+    }
+    if let Some(ghost) = crate::ui::render::decorations::ghost(state, view, ui) {
+        hints.push(InlayText {
+            position: ghost.position,
+            label: ghost.label.lines().next().unwrap_or_default().into(),
+            style: crate::ui::Style::Muted,
+            ghost: true,
+        });
+    }
+    hints.sort_by_key(|hint| hint.position);
     let mut projected = Vec::with_capacity(hints.len());
     for group in hints
         .chunk_by(|a, b| text.byte_to_line(a.position).ok() == text.byte_to_line(b.position).ok())
@@ -72,7 +108,7 @@ pub(super) fn projected_inlay_hints(
             while boundaries.peek().is_some_and(|at| *at < relative) {
                 boundaries.next();
             }
-            let mut hint = (*hint).clone();
+            let mut hint = hint.clone();
             hint.position =
                 ByteOffset(start.get() + boundaries.peek().copied().unwrap_or(source.len()));
             projected.push(hint);
@@ -99,6 +135,7 @@ pub struct VisualRowModel<'a> {
     ambiguous_width: AmbiguousWidth,
     inlay_widths: BTreeMap<ByteOffset, usize>,
     rows: RefCell<BTreeMap<usize, Vec<VisualRowSlice>>>,
+    ghost_width: Option<(ByteOffset, usize)>,
     diagnostic_rows: Option<(usize, Vec<(String, crate::ui::Style)>)>,
     /// Rendered markdown, so rows break and cells are counted where it is drawn.
     markdown: Option<crate::ui::render::markdown::MarkdownMarks<'a>>,
@@ -157,9 +194,10 @@ impl<'a> VisualRowModel<'a> {
     ) -> Self {
         let mut inlay_widths = BTreeMap::<ByteOffset, usize>::new();
         let mut labels = BTreeMap::<ByteOffset, Vec<&str>>::new();
-        let hints = state.views.get(view).map_or_else(Vec::new, |view| {
-            projected_inlay_hints(text, view.buffer, ui)
-        });
+        let hints = state
+            .views
+            .get(view)
+            .map_or_else(Vec::new, |_| projected_inlay_hints(state, view, ui));
         {
             let mut per_line = BTreeMap::<usize, usize>::new();
             for hint in &hints {
@@ -240,6 +278,17 @@ impl<'a> VisualRowModel<'a> {
             minimum_digits: editor_line_number_digits(state),
             inlay_widths,
         });
+        model.ghost_width = hints.iter().find(|hint| hint.ghost).map(|ghost| {
+            let before = hints
+                .iter()
+                .filter(|hint| hint.position == ghost.position && !hint.ghost)
+                .map(|hint| cell_text_width(&hint.label, config.editor.ambiguous_width))
+                .sum::<usize>();
+            (
+                ghost.position,
+                model.inlay_width(ghost.position).saturating_sub(before),
+            )
+        });
         model.markdown = state.views.get(view).and_then(|view| {
             crate::ui::render::markdown::MarkdownMarks::new(
                 ui,
@@ -257,6 +306,7 @@ impl<'a> VisualRowModel<'a> {
         {
             model.diagnostic_rows = crate::ui::render::editor::expanded_diagnostic_rows(
                 text,
+                state.views[view].buffer,
                 buffer.path.as_deref(),
                 ui,
                 config,
@@ -315,6 +365,7 @@ impl<'a> VisualRowModel<'a> {
             ambiguous_width: config.editor.ambiguous_width,
             inlay_widths,
             rows: RefCell::default(),
+            ghost_width: None,
             diagnostic_rows: None,
             markdown: None,
         }
@@ -956,7 +1007,12 @@ impl<'a> VisualRowModel<'a> {
         };
         (
             anchor,
-            self.row_cell_for_relative_byte(line, rows[row_index], relative),
+            self.row_cell_for_relative_byte(line, rows[row_index], relative)
+                .saturating_sub(
+                    self.ghost_width
+                        .filter(|(at, _)| *at == cursor)
+                        .map_or(0, |(_, width)| width),
+                ),
         )
     }
 

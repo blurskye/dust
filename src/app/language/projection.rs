@@ -160,7 +160,7 @@ impl LspSession {
             {
                 *owner = current.clone();
             }
-        } else {
+        } else if !self.local_completion_current(editor) {
             let start = self.projection.completion_start;
             let automatic = self.projection.completion_automatic;
             self.clear_completion();
@@ -186,9 +186,19 @@ impl LspSession {
             ProjectionChange::Moved
         }
     }
-    pub(in crate::app) fn clear_projection(&mut self) {
-        self.clear_completion();
+    pub(in crate::app) fn clear_projection(&mut self, editor: &EditorState) {
+        if !self.local_completion_current(editor) {
+            self.clear_completion();
+        }
         self.clear_projection_rows();
+    }
+    fn local_completion_current(&self, editor: &EditorState) -> bool {
+        self.completion_current(editor)
+            && self
+                .projection
+                .completion_owner
+                .as_ref()
+                .is_some_and(|(_, owner)| owner.server.is_empty())
     }
     fn clear_projection_rows(&mut self) {
         self.projection.selection_ranges.clear();

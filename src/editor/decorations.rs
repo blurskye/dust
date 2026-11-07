@@ -29,6 +29,33 @@ struct Mark {
     range: ByteRange,
     start_gravity: Gravity,
     end_gravity: Gravity,
+    decoration: Decoration,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum VirtualTextPosition {
+    Inline,
+    EndOfLine,
+    Overlay,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct StyledText {
+    pub(crate) text: String,
+    pub(crate) style: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct VirtualText {
+    pub(crate) text: StyledText,
+    pub(crate) position: VirtualTextPosition,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub(crate) struct Decoration {
+    pub(crate) highlight: Option<String>,
+    pub(crate) virtual_text: Option<VirtualText>,
+    pub(crate) sign: Option<StyledText>,
 }
 
 /// Positions are bytes in the current buffer. Deletion collapses anchors; undo
@@ -71,6 +98,7 @@ impl Decorations {
                 range,
                 start_gravity,
                 end_gravity,
+                decoration: Decoration::default(),
             },
         );
         Some(id)
@@ -78,6 +106,18 @@ impl Decorations {
 
     pub(crate) fn range(&self, id: MarkId) -> Option<ByteRange> {
         self.marks.get(&id).map(|mark| mark.range)
+    }
+
+    pub(crate) fn decorate(&mut self, id: MarkId, decoration: Decoration) {
+        if let Some(mark) = self.marks.get_mut(&id) {
+            mark.decoration = decoration;
+        }
+    }
+
+    pub(crate) fn drawing(&self) -> impl Iterator<Item = (ByteRange, &Decoration)> {
+        self.marks
+            .values()
+            .map(|mark| (mark.range, &mark.decoration))
     }
 
     pub(crate) fn remove(&mut self, id: MarkId) {

@@ -1037,7 +1037,7 @@ impl App {
             completion.selected = selected;
             completion.scroll = scroll;
         }
-        self.refresh_lsp_completion_documentation();
+        self.project_lsp_completion();
     }
 }
 
@@ -1413,8 +1413,11 @@ pub(in crate::app) enum NavigationRead {
 }
 impl App {
     fn clear_lsp_ui_rows(&mut self) {
-        if self.ui.language_completion.is_some() {
+        if self.language.completion_current(&self.state) {
+            self.project_lsp_completion();
+        } else {
             self.ui.language_completion = None;
+            self.ui.inline_completion = None;
         }
         // A Git or Markdown preview doesn't come from a server, and this runs each frame in a file
         // without one.
@@ -1422,7 +1425,8 @@ impl App {
             !matches!(
                 popup.kind,
                 DocumentationPopupKind::Git | DocumentationPopupKind::Notice
-            )
+            ) && !(popup.kind == DocumentationPopupKind::Completion
+                && self.language.completion_current(&self.state))
         }) {
             self.close_documentation();
         }
@@ -1435,7 +1439,7 @@ impl App {
 
 impl App {
     pub(in crate::app) fn clear_lsp_ui_projection(&mut self) {
-        self.language.clear_projection();
+        self.language.clear_projection(&self.state);
         self.clear_lsp_ui_rows();
     }
 }
@@ -3489,6 +3493,22 @@ impl App {
 impl App {
     /// Mirrors the current items into the menu the renderer draws.
     pub(in crate::app) fn project_lsp_completion(&mut self) {
+        self.ui.inline_completion =
+            self.language
+                .inline_completion(&self.state)
+                .and_then(|label| {
+                    let id = self.state.active_view()?;
+                    let view = &self.state.views[id];
+                    Some((
+                        id,
+                        crate::ui::UiInlayHint {
+                            buffer: view.buffer,
+                            revision: self.state.buffers[view.buffer].text.revision(),
+                            position: view.cursor,
+                            label,
+                        },
+                    ))
+                });
         let icons = &self
             .configuration
             .settings()

@@ -19,15 +19,12 @@ use std::path::Path;
 
 impl App {
     pub(in crate::app) fn navigate_byte_location(&mut self, uri: &str, range: ByteRange) {
-        let Some(path) = path_from_file_uri(uri) else {
-            return;
-        };
-        let Some((buffer, _)) = self
-            .state
-            .buffers
-            .iter()
-            .find(|(_, buffer)| buffer.path.as_ref() == Some(&path))
-        else {
+        let Some((buffer, _)) = self.state.buffers.iter().find(|(id, buffer)| {
+            crate::app::diagnostics::document_uri(*id, buffer.path.as_deref()) == uri
+        }) else {
+            let Some(path) = path_from_file_uri(uri) else {
+                return;
+            };
             let roots = self
                 .workspace
                 .roots()
@@ -323,10 +320,10 @@ impl App {
         let view = &self.state.views[view_id];
         let buffer_id = view.buffer;
         let cursor = view.cursor;
-        let Some(path) = self.state.buffers[buffer_id].path.clone() else {
-            return;
-        };
-        let uri = crate::language::lsp::file_uri(&path);
+        let uri = crate::app::diagnostics::document_uri(
+            buffer_id,
+            self.state.buffers[buffer_id].path.as_deref(),
+        );
         self.diagnostics.clear_stale_documents(&self.state);
         let Some(key) =
             self.diagnostics
