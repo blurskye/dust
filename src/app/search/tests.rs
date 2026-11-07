@@ -70,7 +70,7 @@ fn help_filters_do_not_restart_the_suspended_live_grep() {
 }
 
 #[test]
-fn grep_rows_draw_the_icon_location_and_highlighted_text_as_lazyvim_does() {
+fn grep_rows_put_highlighted_code_before_the_coloured_location() {
     let (_app_dirs, mut app) = app();
     fs::write(
         app.state.workspace_root.join("main.rs"),
@@ -85,12 +85,118 @@ fn grep_rows_draw_the_icon_location_and_highlighted_text_as_lazyvim_does() {
     let cells = &picker.rows[0].cells;
     let icon = crate::files::file_icon("main.rs").unwrap().glyph;
     assert_eq!(cells[0].text, format!("{icon} "));
-    let texts: Vec<_> = cells[1..6].iter().map(|cell| cell.text.as_str()).collect();
-    assert_eq!(texts, ["main.rs", ":", "2", ":", "9"]);
-    assert_eq!(cells[3].style, crate::ui::Style::Accent);
-    assert_eq!(cells[5].style, crate::ui::Style::Muted);
+    let location = &cells[cells.len() - 3..];
+    let texts: Vec<_> = location.iter().map(|cell| cell.text.as_str()).collect();
+    assert_eq!(texts, ["main.rs", ":2", ":9"]);
+    assert_eq!(location[1].style, crate::ui::Style::Accent);
+    assert_eq!(location[2].style, crate::ui::Style::Muted);
+    assert!(
+        cells[1..cells.len() - 3]
+            .iter()
+            .any(|cell| cell.text.contains("needle"))
+    );
     let keyword = cells.iter().find(|cell| cell.text == "let").unwrap();
     assert!(matches!(keyword.style, crate::ui::Style::Syntax(_)));
+}
+
+#[test]
+fn closed_grep_resumes_query_selection_preview_and_accepts_again() {
+    let (_app_dirs, mut app) = app();
+    fs::write(
+        app.state.workspace_root.join("matches.txt"),
+        "needle one\nneedle two\n",
+    )
+    .unwrap();
+    app.invoke_mapped_command("workspace.search.prompt");
+    app.picker_insert("needle");
+    wait_workspace_search(&mut app);
+    app.picker_move(1);
+    let selected = app
+        .search
+        .picker()
+        .unwrap()
+        .selected_item()
+        .unwrap()
+        .id
+        .clone();
+    app.close_picker();
+    assert!(app.ui.picker.is_none());
+    assert!(!app.search.pending());
+    assert!(!app.search.live());
+    assert_eq!(app.search.matches().len(), 2);
+    // Other pickers do not consume the retained search.
+    app.start_workspace_file_picker();
+    app.close_picker();
+    app.invoke_mapped_command("workspace.search.resume");
+    assert_eq!(app.ui.picker.as_ref().unwrap().query, "needle");
+    assert_eq!(
+        app.search.picker().unwrap().selected_item().unwrap().id,
+        selected
+    );
+    assert_eq!(
+        app.search
+            .preview()
+            .as_ref()
+            .unwrap()
+            .as_text()
+            .unwrap()
+            .highlight_line,
+        Some(1)
+    );
+    app.accept_picker();
+    wait_vfs(&mut app);
+    assert_eq!(
+        app.state.views[app.state.active_view().unwrap()].cursor,
+        ByteOffset(11)
+    );
+    app.invoke_mapped_command("workspace.search.resume");
+    app.accept_picker();
+    wait_vfs(&mut app);
+    assert_eq!(
+        app.state.views[app.state.active_view().unwrap()].cursor,
+        ByteOffset(11)
+    );
+}
+
+#[test]
+fn resume_rejects_changed_configuration_and_new_search_replaces_results() {
+    let (_app_dirs, mut app) = app();
+    fs::write(
+        app.state.workspace_root.join("matches.txt"),
+        "needle\nother\n",
+    )
+    .unwrap();
+    app.invoke_mapped_command("workspace.search.prompt");
+    app.picker_insert("needle");
+    wait_workspace_search(&mut app);
+    app.close_picker();
+    app.search.scope.as_mut().unwrap().1 += 1;
+    app.invoke_mapped_command("workspace.search.resume");
+    assert!(app.ui.picker.is_none());
+    app.invoke_mapped_command("workspace.search.prompt");
+    app.picker_insert("other");
+    wait_workspace_search(&mut app);
+    assert_eq!(app.search.matches().len(), 1);
+    assert_eq!(app.search.matches()[0].line, 1);
+}
+
+#[test]
+fn grep_rows_keep_a_late_match_in_a_unicode_line_visible() {
+    let (_app_dirs, mut app) = app();
+    let line = format!("{}needle();\n", "let context = \"界界\"; ".repeat(20));
+    fs::write(app.state.workspace_root.join("long.rs"), line).unwrap();
+    app.invoke_mapped_command("workspace.search.prompt");
+    app.picker_insert("needle");
+    wait_workspace_search(&mut app);
+    let picker = app.search.picker_projection().unwrap();
+    let cells = &picker.rows[0].cells;
+    let code = cells[..cells.len() - 3]
+        .iter()
+        .map(|cell| cell.text.as_str())
+        .collect::<String>();
+    assert!(code.contains('…'));
+    assert!(code.contains("needle()"));
+    assert!(code.chars().count() < 40, "{code}");
 }
 
 fn scope(root: &std::path::Path) -> WorkspaceVersion {

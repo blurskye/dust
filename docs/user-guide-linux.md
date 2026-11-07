@@ -112,7 +112,7 @@ Explorer mutations are asynchronous, confined to canonical workspace roots, reje
 
 ## Finders and search
 
-Dust exposes the daily Telescope/Snacks-style workflows through its bounded picker. `Space /` and `Space s g` open the Grep panel directly—there is no intermediate command prompt—and typing restarts the cancellable live search. File and grep results use a compact result list, live result count, and adaptive file preview: readable panes sit side by side when their measured content fits, otherwise Dust stacks the preview below the results. Grep previews keep the selected match line on-screen and highlight it even when the stacked preview has fewer rows than the captured context. File previews read up to 256 KiB by default through scoped asynchronous VFS reads (`[ui.picker].maximum_preview_bytes`), so files larger than 120 KiB are not rejected:
+Dust exposes the daily Telescope/Snacks-style workflows through its bounded picker. `Space /` and `Space s g` open the Grep panel directly—there is no intermediate command prompt—and typing restarts the cancellable live search. File and grep results use a compact result list, live result count, and adaptive file preview: readable panes sit side by side when their measured content fits, otherwise Dust stacks the preview below the results. Grep rows put the matching code first, with a shortened path and coloured line number on the right. Long directory names give way to their initials and then an ellipsis, keeping the filename readable. Previews centre and highlight the selected match line, including in a stacked preview. File previews read up to 256 KiB by default through scoped asynchronous VFS reads (`[ui.picker].maximum_preview_bytes`), so files larger than 120 KiB are not rejected:
 
 - `Space Space` or `Space f f`: files in the active workspace roots;
 - `Space /` or `Space s g`: workspace text search;
@@ -126,6 +126,8 @@ Dust exposes the daily Telescope/Snacks-style workflows through its bounded pick
 Pickers open in **Insert** mode: every letter (including `j` and `k`) types into the query; arrow keys move through results and Enter accepts. Escape switches to **Picker Normal**, where `j`/`k` and arrows navigate, `i` returns to query editing, and Escape closes. `Ctrl-C` closes directly from either mode. The lower border shows the effective mode and configured keys. These modes do not change the underlying editor mode. Files preserves text entered before its first batch; streamed results retain the selected item while it remains present.
 
 Controls are configurable in the `picker` (Insert) and `picker_normal` contexts. Insert-context Escape invokes `picker.mode.normal`; `picker.cancel` closes directly. Workspace-edit review uses separate toggle/apply/reject controls.
+
+`Space s R` resumes the last grep with its query, results and selected match, even after accepting a result or opening another picker. Closing grep stops the search worker but keeps the results already received; editing the resumed query starts a fresh search. A new grep replaces the retained results. Workspace or configuration changes invalidate them, and accepting a result still checks for changed file contents. These results last for the current editor session.
 
 `Space s r` opens checked workspace replacement.
 

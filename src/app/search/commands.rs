@@ -14,6 +14,14 @@ pub(in crate::app) fn register_commands(
 ) -> Result<(), CommandError> {
     register(
         registry,
+        "workspace.search.resume",
+        "Resume workspace search",
+        ContextRequirement::Application,
+        ArgumentSchema::default(),
+        |_| AppEffect::WorkspaceSearchResume,
+    )?;
+    register(
+        registry,
         "search.word",
         "Search word under cursor",
         ContextRequirement::Buffer,
@@ -62,6 +70,7 @@ impl App {
     ) -> Result<(), AppEffect> {
         match effect {
             AppEffect::WorkspaceSearchPrompt => self.open_live_workspace_search(),
+            AppEffect::WorkspaceSearchResume => self.resume_workspace_search(),
             AppEffect::WorkspaceSearch(query) => self.start_workspace_search(query, None),
             AppEffect::WorkspaceSearchCancel => {
                 self.search.cancel_grep();

@@ -79,6 +79,93 @@ pub(super) fn fitted_picker_row(
     (label, detail)
 }
 
+/// Shorten directory components before sacrificing the filename, as Snacks does.
+fn shortened_grep_path(
+    path: &str,
+    available: usize,
+    ambiguous: crate::config::AmbiguousWidth,
+) -> String {
+    if text_width(path, ambiguous) <= available {
+        return path.to_owned();
+    }
+    let mut parts: Vec<_> = path
+        .split(std::path::is_separator)
+        .map(str::to_owned)
+        .collect();
+    for index in 0..parts.len().saturating_sub(1) {
+        parts[index] = parts[index].graphemes(true).next().unwrap_or("").to_owned();
+        let shortened = parts.join("/");
+        if text_width(&shortened, ambiguous) <= available {
+            return shortened;
+        }
+    }
+    truncate_content_title(&parts.join("/"), available, ambiguous)
+}
+
+/// Code leads the row; the location gets a third, or up to half to preserve the filename.
+fn fitted_grep_cells(
+    cells: &[crate::ui::PickerCell],
+    available: u16,
+    ambiguous: crate::config::AmbiguousWidth,
+) -> Vec<crate::ui::PickerCell> {
+    let Some(split) = cells.len().checked_sub(3) else {
+        return cells.to_vec();
+    };
+    let (code, location) = cells.split_at(split);
+    let number_width = location[1..]
+        .iter()
+        .map(|cell| text_width(&cell.text, ambiguous))
+        .sum::<usize>();
+    let filename = location[0]
+        .text
+        .rsplit(std::path::is_separator)
+        .next()
+        .unwrap_or("");
+    let filename_room = text_width(filename, ambiguous) + number_width;
+    let location_room =
+        (usize::from(available) / 3).max(filename_room.min(usize::from(available) / 2));
+    let path = shortened_grep_path(
+        &location[0].text,
+        location_room.saturating_sub(number_width),
+        ambiguous,
+    );
+    let show_location = !path.is_empty() && location_room > number_width;
+    let location_width = text_width(&path, ambiguous) + number_width;
+    let code_room = if show_location {
+        usize::from(available).saturating_sub(location_width + 2)
+    } else {
+        usize::from(available)
+    };
+    let mut remaining = code_room;
+    let mut fitted = Vec::new();
+    for cell in code {
+        let width = text_width(&cell.text, ambiguous).min(remaining);
+        if width == 0 {
+            continue;
+        }
+        fitted.push(crate::ui::PickerCell::new(
+            &cell.text,
+            cell.style,
+            width as u16,
+        ));
+        remaining -= width;
+    }
+    if show_location {
+        fitted.push(crate::ui::PickerCell::new(
+            "",
+            Style::Default,
+            (remaining + 2) as u16,
+        ));
+        fitted.push(crate::ui::PickerCell::new(
+            path,
+            Style::Muted,
+            (location_width - number_width) as u16,
+        ));
+        fitted.extend_from_slice(&location[1..]);
+    }
+    fitted
+}
+
 /// Draw a diff that was carried as structure rather than flattened text.
 ///
 /// This is the base form: the provenance line, each hunk header, the exact count of any
@@ -521,26 +608,31 @@ pub(super) fn render_picker(
                 .grid
                 .put_text_clipped(content_left, y, marker, marker_style, list_right);
             let mut cell_x = content_left.saturating_add(2);
-            for (position, cell) in row.cells.iter().enumerate() {
+            let fitted;
+            let cells = if picker.surface == PickerSurfaceKind::Grep {
+                fitted =
+                    fitted_grep_cells(&row.cells, list_right.saturating_sub(cell_x), ambiguous);
+                &fitted
+            } else {
+                &row.cells
+            };
+            for (position, cell) in cells.iter().enumerate() {
                 if cell_x >= list_right {
                     break;
                 }
                 // A zero-width column takes what the fixed columns beside it leave.
                 let width = if cell.width == 0 {
-                    let fixed: u16 = row.cells[position + 1..]
-                        .iter()
-                        .map(|rest| rest.width)
-                        .sum();
+                    let fixed: u16 = cells[position + 1..].iter().map(|rest| rest.width).sum();
                     list_right.saturating_sub(cell_x).saturating_sub(fixed)
                 } else {
                     cell.width
                 };
                 let cell_right = cell_x.saturating_add(width).min(list_right);
                 let style = if selected
-                    && matches!(
-                        cell.style,
-                        Style::Default | Style::Muted | Style::Accent | Style::Syntax(_)
-                    ) {
+                    && (matches!(cell.style, Style::Default | Style::Muted | Style::Syntax(_))
+                        || (cell.style == Style::Accent
+                            && picker.surface != PickerSurfaceKind::Grep))
+                {
                     Style::Selection
                 } else {
                     cell.style
@@ -604,7 +696,9 @@ pub(super) fn render_picker(
                     .highlight_line
                     .and_then(|line| line.checked_sub(text.first_line));
                 let first_visible_offset = highlighted_offset.map_or(0, |offset| {
-                    offset.saturating_add(1).saturating_sub(available_rows)
+                    offset
+                        .saturating_sub(available_rows / 2)
+                        .min(text.lines.len().saturating_sub(available_rows))
                 });
                 let line_spans = &text.spans;
                 for (visible_offset, (offset, line)) in text
