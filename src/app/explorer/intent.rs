@@ -51,10 +51,10 @@ pub(in crate::app) struct MutationRequest {
     pub maximum: u64,
 }
 enum Phase {
-    Admitting,
+    Submitting,
     Preparing(RequestId),
     Ready(PreparedExplorerMutation),
-    AdmittingApply,
+    SubmittingApply,
     Applying(RequestId),
 }
 pub(super) struct MutationIntent {
@@ -312,7 +312,7 @@ impl Explorer {
                 .submitted
                 .as_ref()
                 .is_some_and(|key| Arc::ptr_eq(key, &intent.key))
-                && matches!(intent.phase, Phase::Admitting | Phase::Preparing(_))
+                && matches!(intent.phase, Phase::Submitting | Phase::Preparing(_))
         }) && let Some(intent) = self.mutation.take()
             && let Phase::Preparing(id) = intent.phase
         {
@@ -401,7 +401,7 @@ impl Explorer {
             epoch: self.epoch.clone(),
             context,
             operation: operation.clone(),
-            phase: Phase::Admitting,
+            phase: Phase::Submitting,
             confirmation,
             invalid: false,
         });
@@ -412,7 +412,7 @@ impl Explorer {
             maximum,
         })
     }
-    pub(in crate::app) fn admit_mutation(
+    pub(in crate::app) fn track_mutation_request(
         &mut self,
         ticket: MutationTicket,
         result: Result<RequestId, String>,
@@ -421,7 +421,7 @@ impl Explorer {
             .mutation
             .as_mut()
             .filter(|intent| {
-                Arc::ptr_eq(&intent.key, &ticket.0) && matches!(intent.phase, Phase::Admitting)
+                Arc::ptr_eq(&intent.key, &ticket.0) && matches!(intent.phase, Phase::Submitting)
             })
             .ok_or("explorer request is stale")?;
         match result {
@@ -466,7 +466,7 @@ impl Explorer {
         }
         let current = self.mutation_current(intent, &scope, configuration, editor);
         let mut intent = self.mutation.take().expect("checked request");
-        // Once a write is admitted, its result must still reconcile buffer paths even
+        // Once a write is accepted, its result must still reconcile buffer paths even
         // if the explorer closes or its configuration changes in the meantime.
         if !current && !matches!(intent.phase, Phase::Applying(_)) {
             return Some(MutationUpdate::Failed("explorer result is stale".into()));
@@ -485,7 +485,7 @@ impl Explorer {
                     intent.phase = Phase::Ready(prepared);
                     MutationUpdate::Confirmation(path)
                 } else {
-                    intent.phase = Phase::AdmittingApply;
+                    intent.phase = Phase::SubmittingApply;
                     MutationUpdate::Apply(prepared)
                 };
                 self.mutation = Some(intent);
@@ -537,18 +537,18 @@ impl Explorer {
             self.mutation = Some(intent);
             return Err("explorer target inspection is not ready".into());
         };
-        intent.phase = Phase::AdmittingApply;
+        intent.phase = Phase::SubmittingApply;
         self.mutation = Some(intent);
         Ok(prepared)
     }
-    pub(in crate::app) fn admit_apply(
+    pub(in crate::app) fn track_apply_request(
         &mut self,
         result: Result<RequestId, String>,
     ) -> Result<(), String> {
         let intent = self
             .mutation
             .as_mut()
-            .filter(|i| matches!(i.phase, Phase::AdmittingApply))
+            .filter(|i| matches!(i.phase, Phase::SubmittingApply))
             .ok_or("explorer apply request is stale")?;
         match result {
             Ok(id) => {
@@ -563,7 +563,7 @@ impl Explorer {
     }
     pub(in crate::app) fn cancel_confirmation(&mut self) -> Option<RequestId> {
         if self.mutation.as_ref().is_some_and(|i| {
-            i.confirmation && !matches!(i.phase, Phase::Applying(_) | Phase::AdmittingApply)
+            i.confirmation && !matches!(i.phase, Phase::Applying(_) | Phase::SubmittingApply)
         }) {
             return self.mutation.take().and_then(|i| match i.phase {
                 Phase::Preparing(id) => Some(id),
@@ -680,7 +680,7 @@ impl Explorer {
             },
         ))
     }
-    pub(in crate::app) fn admit_open(
+    pub(in crate::app) fn track_open_request(
         &mut self,
         ticket: OpenTicket,
         id: RequestId,

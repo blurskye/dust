@@ -1920,7 +1920,7 @@ mod tests {
     }
 
     #[test]
-    fn document_replay_retries_every_rejected_queue_admission() {
+    fn document_replay_retries_every_rejected_queue_submission() {
         let (mut editor, buffer, document, mut owner) = fixture();
         let endpoint = owner.service.replace_edit_source_fixture(
             document.uri(),
@@ -1949,12 +1949,12 @@ mod tests {
         owner.retry_documents(&editor);
         assert!(owner.synced.is_empty());
         endpoint.unblock_responses();
-        let mut admitted = std::collections::HashSet::new();
+        let mut accepted = std::collections::HashSet::new();
         for _ in 0..count {
             owner.retry_documents(&editor);
-            assert!(admitted.insert(endpoint.take_synced_source().unwrap()));
+            assert!(accepted.insert(endpoint.take_synced_source().unwrap()));
         }
-        assert_eq!(admitted.len(), count);
+        assert_eq!(accepted.len(), count);
         owner.retry_documents(&editor);
         assert!(endpoint.take_synced_source().is_none());
     }

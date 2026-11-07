@@ -1547,17 +1547,17 @@ impl App {
         let navigation_current =
             confirmation_source.navigation_current(&self.state, &self.window_session);
         let confirmation_result = source.confirmation_result;
-        let source_actions_admitted = source.source_actions_admitted;
+        let source_actions_allowed = source.source_actions_allowed;
         let mut execution = source.execution;
         let load = source.load;
         let confirmation_requests = std::mem::take(&mut execution.confirmation_requests);
         if let Err(error) = self
             .extension
-            .admit_confirmations(confirmation_source, confirmation_requests)
+            .queue_confirmations(confirmation_source, confirmation_requests)
         {
             self.show_error(error);
         }
-        if !source_actions_admitted {
+        if !source_actions_allowed {
             execution.messages.clear();
             execution.ui_requests.clear();
             execution.host_event_acknowledgements.clear();

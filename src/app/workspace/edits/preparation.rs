@@ -152,7 +152,7 @@ impl WorkspaceEdits {
             if !roots.iter().any(|root| file.path().starts_with(root))
                 || matches!(file, InputFile::Resource { target: Some(target), .. } if !roots.iter().any(|root| target.starts_with(root)))
             {
-                return Err("workspace edit path is outside the admitted roots".into());
+                return Err("workspace edit path is outside the allowed roots".into());
             }
         }
         let preparing = self.preparing.as_mut().expect("checked source");
@@ -227,7 +227,7 @@ impl WorkspaceEdits {
         };
         let snapshot = snapshot.into_file(&p.source.editor, path)?;
         if snapshot.bytes.len() > p.maximum {
-            return Err("workspace snapshot exceeds or differs from its admitted read".into());
+            return Err("workspace snapshot exceeds or differs from its accepted read".into());
         }
         p.paths
             .insert(path.clone(), snapshot.canonical_path.clone());
@@ -307,7 +307,7 @@ impl WorkspaceEdits {
             ) => {
                 let bytes = result.map_err(|e| e.to_string())?;
                 if bytes.len() > p.maximum {
-                    return Err("workspace read exceeds its admitted byte limit".into());
+                    return Err("workspace read exceeds its requested byte limit".into());
                 }
                 if !p.roots.iter().any(|root| path.starts_with(root)) {
                     return Err("workspace read escaped its scope".into());

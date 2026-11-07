@@ -378,7 +378,7 @@ mod tests {
     use slotmap::SlotMap;
 
     #[test]
-    fn every_admitted_parse_event_is_delivered() {
+    fn every_accepted_parse_event_is_delivered() {
         let mut ids = SlotMap::<BufferId, ()>::with_key();
         let text = TextBuffer::from_text("fn main() {}");
         let documents = (0..12)

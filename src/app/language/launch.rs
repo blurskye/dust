@@ -854,7 +854,7 @@ mod tests {
         editor.buffers[buffer].text = TextBuffer::from_text("new");
         assert!(
             !source.current(&context(&editor, &workspace)),
-            "equal-byte replacement is not the admitted document"
+            "equal-byte replacement is not the original document"
         );
         editor.buffers.remove(buffer);
         assert!(!source.current(&context(&editor, &workspace)));

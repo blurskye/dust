@@ -137,7 +137,7 @@ impl Plugins {
         }
         if let Some(event) = self
             .windows
-            .admit_window_request(windows.graph(), index, &request)
+            .validate_window_request(windows.graph(), index, &request)
         {
             return WindowUpdate::Ready(event);
         }

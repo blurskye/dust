@@ -387,7 +387,7 @@ impl App {
                     .then(|| key.clone())
             });
         let Some(key) = key else {
-            if source.source_actions_admitted && !source.confirmation_result {
+            if source.source_actions_allowed && !source.confirmation_result {
                 let plugin = source.execution.plugin.clone();
                 let authority = self.plugin_authority(&plugin);
                 for request in std::mem::take(&mut source.execution.editor_requests) {
@@ -421,7 +421,7 @@ impl App {
             if let Some(pending) = waiting.pending {
                 self.cancel_plugin_pending_command(pending);
             }
-            source.source_actions_admitted = false;
+            source.source_actions_allowed = false;
             return;
         }
         let surface_value = execution.value.clone();
@@ -429,7 +429,7 @@ impl App {
             if let Some(error) = &execution.error {
                 return Err(error.clone());
             }
-            if !source.source_actions_admitted
+            if !source.source_actions_allowed
                 || !source.confirmation_source.current(
                     &self.extension.manager,
                     &self.state,
@@ -528,7 +528,7 @@ impl App {
             if let Some(pending) = waiting.pending {
                 self.cancel_plugin_pending_command(pending);
             }
-            source.source_actions_admitted = false;
+            source.source_actions_allowed = false;
             self.show_error(error);
         }
     }

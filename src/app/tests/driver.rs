@@ -823,7 +823,7 @@ impl TestSession {
                 .contains("exit snapshot was not saved"),
             "unexpected shutdown result: {result:?}"
         );
-        let admitted = self.application.persistence.pending();
+        let accepted = self.application.persistence.pending();
         let deadline = Instant::now() + Duration::from_secs(2);
         while self.application.persistence.pending() {
             self.application.process_persistence_events();
@@ -833,7 +833,7 @@ impl TestSession {
             );
             std::thread::sleep(Duration::from_millis(1));
         }
-        assert!(!admitted, "expired shutdown admitted a persistence request");
+        assert!(!accepted, "expired shutdown accepted a persistence request");
         assert!(
             !self._state.path().join(STATE_FILE).exists(),
             "expired shutdown wrote an exit snapshot"

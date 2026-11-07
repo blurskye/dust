@@ -1559,7 +1559,7 @@ fn force_save_as_does_not_overwrite_another_open_document() {
 }
 
 #[test]
-fn expired_shutdown_does_not_admit_or_report_an_exit_snapshot() {
+fn expired_shutdown_does_not_accept_or_report_an_exit_snapshot() {
     crate::app::tests::driver::TestSession::new(crate::config::load_bundled_config())
         .verify_expired_shutdown_does_not_write();
 }

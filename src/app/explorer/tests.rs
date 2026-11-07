@@ -272,7 +272,7 @@ fn explorer_rename_rejects_destinations_owned_by_unsaved_buffers() {
 }
 
 #[test]
-fn explorer_close_reconciles_an_admitted_rename_even_after_disk_completion() {
+fn explorer_close_reconciles_an_accepted_rename_even_after_disk_completion() {
     let (_app_dirs, mut app) = app();
     let source = app.state.workspace_root.join("before.txt");
     let target = app.state.workspace_root.join("after.txt");
@@ -291,7 +291,7 @@ fn explorer_close_reconciles_an_admitted_rename_even_after_disk_completion() {
     app.explorer
         .select(app.explorer.tree().id_for_path(&source).unwrap());
     app.rename_explorer_path("after.txt".into());
-    // Admit the prepared write, but do not consume its completion yet.
+    // Submit the prepared write, but do not consume its completion yet.
     loop {
         if let Some(DocumentEvent::Explorer(reply)) = app
             .documents

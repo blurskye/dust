@@ -733,7 +733,7 @@ fn earlier_save_finishing_during_exit_does_not_acknowledge_the_exit_snapshot() {
     drain(&mut owner);
     assert!(
         owner.shutdown_result().is_err(),
-        "earlier save incorrectly acknowledged an exit snapshot that was never admitted"
+        "earlier save incorrectly acknowledged an exit snapshot that was never accepted"
     );
     owner
         .save(PersistedState::default(), PersistencePolicy::default())

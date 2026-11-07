@@ -1035,7 +1035,7 @@ mod tests {
                 crate::app::windows::Windows::default()
                     .navigation_stamp(state.window_version(), state.active_view()),
             )
-            .unwrap_or_else(|_| panic!("admit"));
+            .unwrap_or_else(|_| panic!("accept"));
         owner.stop_worker();
         gate.send(()).unwrap();
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);

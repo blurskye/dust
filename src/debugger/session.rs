@@ -601,7 +601,7 @@ impl Writer {
                     mpsc::TrySendError::Disconnected(_) => {
                         if let Ok(mut failure) = self.actor.failure.lock() {
                             *failure =
-                                Some("DAP writer stopped; admitted write outcomes unknown".into());
+                                Some("DAP writer stopped; accepted write outcomes unknown".into());
                         }
                         self.actor.live.store(false, Ordering::Release);
                         self.actor.cancel.store(true, Ordering::Release);
@@ -869,7 +869,7 @@ while True:
             assert!(Instant::now() < deadline);
             thread::sleep(Duration::from_millis(2));
         }
-        // These controls were admitted before the stop advanced, unlike stopped-data queries.
+        // These controls were accepted before the stop advanced, unlike stopped-data queries.
         for (request_id, value) in [
             (
                 100,

@@ -106,7 +106,7 @@ impl App {
         self.drain_linter_sources();
         let unfinished_tasks = self.tasks.abandon();
         if unfinished_tasks != 0 {
-            diagnostics.push(format!("{unfinished_tasks} task outcomes are unknown at shutdown; admitted work may still complete"));
+            diagnostics.push(format!("{unfinished_tasks} task outcomes are unknown at shutdown; accepted work may still complete"));
         }
         for outcome in self.terminal_session.expire_shutdown() {
             if let crate::app::terminal::TerminalUpdate::Unknown(id, message) = outcome {

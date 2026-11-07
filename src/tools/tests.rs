@@ -2116,13 +2116,13 @@ fn package_service_keeps_every_completion_under_backpressure() {
     use std::time::Instant;
     let root = tempfile::tempdir().unwrap();
     let mut service = crate::tools::PackageWorker::start(root.path().into(), 1, 1024, 1024);
-    let mut admitted = Vec::new();
+    let mut accepted = Vec::new();
     let deadline = Instant::now() + Duration::from_secs(10);
     for _ in 0..3 {
         loop {
             match service.request(crate::tools::PackageOperation::List) {
                 Ok(id) => {
-                    admitted.push(id);
+                    accepted.push(id);
                     break;
                 }
                 Err(crate::tools::PackageError::QueueFull) => {
@@ -2144,11 +2144,11 @@ fn package_service_keeps_every_completion_under_backpressure() {
         }
         assert!(
             Instant::now() < deadline,
-            "missing admitted package completion"
+            "missing accepted package completion"
         );
         thread::sleep(Duration::from_millis(2));
     }
-    assert_eq!(received, admitted);
+    assert_eq!(received, accepted);
 }
 
 #[test]
@@ -2166,7 +2166,7 @@ fn registry_service_keeps_every_result_under_backpressure() {
         root.path().into(),
     )
     .unwrap();
-    let mut admitted = Vec::new();
+    let mut accepted = Vec::new();
     let deadline = Instant::now() + Duration::from_secs(10);
     for _ in 0..3 {
         loop {
@@ -2174,7 +2174,7 @@ fn registry_service_keeps_every_result_under_backpressure() {
                 query: "fixture".into(),
             }) {
                 Ok(id) => {
-                    admitted.push(id);
+                    accepted.push(id);
                     break;
                 }
                 Err(crate::tools::RegistryError::QueueFull) => {
@@ -2187,15 +2187,15 @@ fn registry_service_keeps_every_result_under_backpressure() {
     }
     let mut received = Vec::new();
     let deadline = Instant::now() + Duration::from_secs(3);
-    while received.len() < admitted.len() {
+    while received.len() < accepted.len() {
         received.extend(service.poll().unwrap().into_iter().map(|event| event.id));
         assert!(
             Instant::now() < deadline,
-            "missing admitted registry completion"
+            "missing accepted registry completion"
         );
         thread::sleep(Duration::from_millis(2));
     }
-    assert_eq!(received, admitted);
+    assert_eq!(received, accepted);
 }
 
 #[cfg(unix)]

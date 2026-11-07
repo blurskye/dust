@@ -579,7 +579,7 @@ impl LspSession {
         self.service
             .start_session_owned(request, Some((buffer, version.clone())))
             .map_err(|e| e.to_string())?;
-        // No registry entry is installed unless the real transport admitted startup.
+        // No registry entry is installed unless the real transport accepted startup.
         let previous = self.sessions.remove(&key);
         let restart_count = previous.as_ref().map_or(0, |s| s.restart_count);
         // A server joining a document that already has one stays secondary.

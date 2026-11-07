@@ -108,7 +108,7 @@ fn pty_worker_reserves_real_capacity_and_preserves_stream_before_terminal() {
     let mut missing = PtyWorker::start(1);
     let id = missing
         .open(request(&root.path().join("missing"), "printf forbidden"))
-        .expect("foreground admits; worker inspects directory");
+        .expect("foreground accepts; worker inspects directory");
     let events = drain(&mut missing, id);
     assert!(
         matches!(&events[..],[PtyEvent::Failed{message,..}] if message.contains("working directory"))

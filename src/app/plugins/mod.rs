@@ -281,7 +281,7 @@ impl Plugins {
                 execution,
                 confirmation_source,
                 confirmation_result: true,
-                source_actions_admitted: true,
+                source_actions_allowed: true,
                 preview: Ok(None),
             });
         }
@@ -296,12 +296,12 @@ impl Plugins {
         }
         received
     }
-    fn admit_confirmations(
+    fn queue_confirmations(
         &mut self,
         source: crate::app::plugins::edits::ConfirmationSource,
         requests: Vec<crate::plugins::PluginConfirmationRequest>,
     ) -> Result<(), String> {
-        self.confirmations.admit(source, requests, &self.manager)
+        self.confirmations.queue(source, requests, &self.manager)
     }
     pub(in crate::app) fn next_confirmation(
         &mut self,

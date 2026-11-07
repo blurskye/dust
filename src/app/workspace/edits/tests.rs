@@ -632,7 +632,7 @@ fn workspace_preview_owns_selection_and_rejects_stale_or_replaced_sources_before
     );
     assert!(resources.finish_resources("duplicate shutdown").is_empty());
 
-    // Stop a gated worker with an admitted resource: report an unknown outcome
+    // Stop a gated worker with an accepted resource: report an unknown outcome
     // exactly once, not a rollback or a falsely acknowledged cancellation.
     stage_resource(
         &mut resources,

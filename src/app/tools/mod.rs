@@ -211,7 +211,7 @@ impl Tools {
     }
     fn replace_probe_worker(&mut self) {
         self.version_service = ToolVersionWorker::start();
-        // A replacement cannot complete requests admitted by the old worker.
+        // A replacement cannot complete requests accepted by the old worker.
         self.version_pending.clear();
         self.version_queued.clear();
     }

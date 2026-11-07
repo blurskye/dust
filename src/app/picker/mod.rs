@@ -378,7 +378,7 @@ impl Search {
             self.picker.suspended = None;
         }
         // Stream refreshes replace rows, not the user's interaction. A new search
-        // invocation closes the old picker before admitting its producer.
+        // invocation closes the old picker before starting its producer.
         let slot = if refresh_suspended {
             &mut self.picker.suspended
         } else {
@@ -1720,7 +1720,7 @@ impl App {
                     .read_scoped_bounded(source.path, roots, maximum as u64)
                 {
                     Ok(id) => {
-                        if !self.search.admit_preview(ticket, id, maximum) {
+                        if !self.search.track_preview_read(ticket, id, maximum) {
                             self.documents.cancel_request(id);
                         }
                     }

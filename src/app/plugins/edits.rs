@@ -231,7 +231,7 @@ pub(super) struct SourceExecution {
     pub load: PluginLoadId,
     pub confirmation_source: ConfirmationSource,
     pub confirmation_result: bool,
-    pub source_actions_admitted: bool,
+    pub source_actions_allowed: bool,
     pub preview: Result<Option<OriginKey>, String>,
 }
 pub(super) struct PreparedPluginEdit {
@@ -284,7 +284,7 @@ impl PluginEditSources {
             .active_buffer_id()
             .and_then(|id| editor.buffers.get(id).map(|buffer| (id, buffer)));
         if document.is_some_and(|(_, buffer)| buffer.text.len_bytes() > maximum) {
-            return Err("plugin snapshot exceeds its admitted byte limit".into());
+            return Err("plugin snapshot exceeds its requested byte limit".into());
         }
         // Reserves actual bounded queue capacity before snapshot/metadata materialization.
         let reservation = manager
@@ -350,8 +350,8 @@ impl PluginEditSources {
             navigation: invocation.navigation.clone(),
             interaction_available: invocation.interaction_available,
         };
-        let source_actions_admitted = invocation.current(manager, workspace, configuration);
-        if !source_actions_admitted && execution.confirmation_requests.is_empty() {
+        let source_actions_allowed = invocation.current(manager, workspace, configuration);
+        if !source_actions_allowed && execution.confirmation_requests.is_empty() {
             return Err("plugin invocation workspace or configuration changed".into());
         }
         let proposals = if invocation.direct {
@@ -359,7 +359,7 @@ impl PluginEditSources {
         } else {
             std::mem::take(&mut execution.proposals)
         };
-        let preview = if !source_actions_admitted {
+        let preview = if !source_actions_allowed {
             Err("plugin invocation source changed before its reply".into())
         } else if proposals.is_empty() {
             Ok(None)
@@ -388,7 +388,7 @@ impl PluginEditSources {
             load,
             confirmation_source,
             confirmation_result: false,
-            source_actions_admitted,
+            source_actions_allowed,
             preview,
         })
     }

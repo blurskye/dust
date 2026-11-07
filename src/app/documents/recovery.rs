@@ -505,7 +505,7 @@ impl Recovery {
                 Pending::Write { path, .. } => Some((*id, path.clone())),
                 _ => None,
             })
-            .expect("actual admitted recovery write");
+            .expect("actual accepted recovery write");
         let count = self.pending.len();
         assert!(
             self.accept(VfsResult::Deleted {

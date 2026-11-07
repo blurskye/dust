@@ -140,10 +140,10 @@ fn preview_retries_full_queue_but_caches_permanent_failures() {
     let ticket = prepare(&mut owner)
         .1
         .expect("retry after temporary refusal");
-    assert!(owner.admit_preview(ticket, RequestId(1), 64));
+    assert!(owner.track_preview_read(ticket, RequestId(1), 64));
     assert!(
         prepare(&mut owner).1.is_none(),
-        "do not duplicate an admitted read"
+        "do not duplicate an accepted read"
     );
     assert!(owner.accept_preview(RequestId(1), &Ok(b"ready".to_vec()), source.clone(), 1));
     assert!(prepare(&mut owner).1.is_none());
@@ -183,7 +183,7 @@ fn file_previews_follow_selected_lines_and_normalize_newlines() {
             )
             .1
             .expect("a different location in the same file needs its own preview");
-        assert!(owner.admit_preview(ticket, RequestId(request), bytes.len()));
+        assert!(owner.track_preview_read(ticket, RequestId(request), bytes.len()));
         assert!(owner.accept_preview(RequestId(request), &Ok(bytes.clone()), source.clone(), 1));
         let text = owner.preview().as_ref().unwrap().as_text().unwrap();
         assert_eq!(text.highlight_line, Some(line));
@@ -217,7 +217,7 @@ fn file_previews_follow_selected_lines_and_normalize_newlines() {
             )
             .1
             .unwrap();
-        assert!(owner.admit_preview(ticket, RequestId(3), 64));
+        assert!(owner.track_preview_read(ticket, RequestId(3), 64));
         assert!(owner.accept_preview(RequestId(3), &Ok(bytes), source.clone(), 1));
         assert_eq!(
             owner.preview().as_ref().unwrap().as_text().unwrap().lines(),
@@ -270,7 +270,7 @@ fn location_preview_loading_and_errors_remain_visible() {
             )
             .1
             .unwrap();
-        assert!(owner.admit_preview(ticket, RequestId(1), 64));
+        assert!(owner.track_preview_read(ticket, RequestId(1), 64));
         assert!(owner.accept_preview(RequestId(1), &result, source.clone(), 1));
         let text = owner.preview().as_ref().unwrap().as_text().unwrap();
         assert_eq!(text.lines().len(), 1);
@@ -322,7 +322,7 @@ fn preview_rejects_foreign_stale_oversized_and_duplicate_replies() {
         .1
         .unwrap();
     let mut other = Search::default();
-    assert!(!other.admit_preview(ticket, crate::files::RequestId(1), 8));
+    assert!(!other.track_preview_read(ticket, crate::files::RequestId(1), 8));
     let ticket = owner
         .prepare_preview(
             "second".into(),
@@ -334,7 +334,7 @@ fn preview_rejects_foreign_stale_oversized_and_duplicate_replies() {
         )
         .1
         .unwrap();
-    assert!(owner.admit_preview(ticket, crate::files::RequestId(2), 8));
+    assert!(owner.track_preview_read(ticket, crate::files::RequestId(2), 8));
     assert_eq!(owner.clear_preview(), Some(crate::files::RequestId(2)));
     assert!(!owner.accept_preview(
         crate::files::RequestId(2),
@@ -354,7 +354,7 @@ fn preview_rejects_foreign_stale_oversized_and_duplicate_replies() {
         )
         .1
         .unwrap();
-    assert!(owner.admit_preview(ticket, crate::files::RequestId(3), 8));
+    assert!(owner.track_preview_read(ticket, crate::files::RequestId(3), 8));
     assert!(owner.accept_preview(
         crate::files::RequestId(3),
         &Ok(vec![255; 9]),
@@ -369,7 +369,7 @@ fn preview_rejects_foreign_stale_oversized_and_duplicate_replies() {
             .as_text()
             .expect("text preview")
             .lines(),
-        ["preview exceeds admitted byte limit"]
+        ["preview exceeds requested byte limit"]
     );
     assert!(!owner.accept_preview(
         crate::files::RequestId(3),
@@ -388,7 +388,7 @@ fn preview_rejects_foreign_stale_oversized_and_duplicate_replies() {
         )
         .1
         .unwrap();
-    assert!(owner.admit_preview(ticket, crate::files::RequestId(4), 8));
+    assert!(owner.track_preview_read(ticket, crate::files::RequestId(4), 8));
     assert!(owner.accept_preview(
         crate::files::RequestId(4),
         &Ok(b"valid".to_vec()),
@@ -416,7 +416,7 @@ fn preview_rejects_foreign_stale_oversized_and_duplicate_replies() {
         )
         .1
         .unwrap();
-    assert!(owner.admit_preview(ticket, crate::files::RequestId(5), 8));
+    assert!(owner.track_preview_read(ticket, crate::files::RequestId(5), 8));
     assert!(owner.accept_preview(crate::files::RequestId(5), &Ok(vec![255; 8]), source, 2));
     assert!(owner.preview().is_none());
 }
@@ -440,7 +440,7 @@ fn matcher_previews_follow_the_source_location_within_one_file() {
         .map(|line| format!("line {line}\n"))
         .collect::<String>()
         .into_bytes();
-    assert!(owner.admit_preview(ticket, crate::files::RequestId(1), bytes.len()));
+    assert!(owner.track_preview_read(ticket, crate::files::RequestId(1), bytes.len()));
     assert!(owner.accept_preview(crate::files::RequestId(1), &Ok(bytes), source.clone(), 1));
     let preview = owner.preview().as_ref().unwrap().as_text().unwrap();
     assert_eq!(preview.first_line, 892);
@@ -748,7 +748,7 @@ fn picker_epochs_scope_and_close_preserve_only_current_interaction() {
         source,
         1,
     );
-    assert!(owner.admit_preview(ticket.unwrap(), crate::files::RequestId(9), 64));
+    assert!(owner.track_preview_read(ticket.unwrap(), crate::files::RequestId(9), 64));
     assert_eq!(owner.close_picker(), Some(crate::files::RequestId(9)));
     assert!(!owner.owns_picker_epoch(&next));
     assert!(owner.picker_projection().is_none());
@@ -937,7 +937,7 @@ impl Search {
         matches: Vec<WorkspaceSearchMatch>,
         truncated: bool,
     ) {
-        let stream_id = self.stream_id.expect("admitted search");
+        let stream_id = self.stream_id.expect("accepted search");
         self.grep = WorkspaceSearchWorker::events_for_test(vec![
             WorkspaceSearchEvent::Batch { stream_id, matches },
             WorkspaceSearchEvent::Complete {

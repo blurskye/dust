@@ -488,7 +488,7 @@ impl VfsWorker {
                                         result: Err(error),
                                     }
                                 }
-                                _ => unreachable!("request kind does not admit cancellation"),
+                                _ => unreachable!("request kind does not support cancellation"),
                             }
                         } else {
                             match request {
@@ -2519,7 +2519,7 @@ mod lifecycle_tests {
         let source = root.path().join("source");
         fs::write(&source, b"small").unwrap();
         let intent = resolve_resource_intent(&source, None, &[root.path().into()], 5).unwrap();
-        fs::write(&source, b"larger than admitted").unwrap();
+        fs::write(&source, b"larger than accepted").unwrap();
         assert!(matches!(
             apply_resource_intent(&intent),
             Err(VfsError::DocumentTooLarge {
@@ -2527,7 +2527,7 @@ mod lifecycle_tests {
                 ..
             })
         ));
-        assert_eq!(fs::read(&source).unwrap(), b"larger than admitted");
+        assert_eq!(fs::read(&source).unwrap(), b"larger than accepted");
     }
 
     #[test]

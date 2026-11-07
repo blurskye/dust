@@ -943,7 +943,7 @@ fn real_component_observes_queue_full_from_aggregate_confirmation_ownership() {
             }
             assert!(
                 Instant::now() < enqueue_deadline,
-                "production execution queue did not admit reservation {expected}"
+                "production execution queue did not accept reservation {expected}"
             );
             thread::yield_now();
         }

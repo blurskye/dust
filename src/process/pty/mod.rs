@@ -612,7 +612,7 @@ fn run(
                     }
                 }
                 if input.try_recv().is_ok() {
-                    return Err("PTY stopped with undelivered admitted input".into());
+                    return Err("PTY stopped with undelivered accepted input".into());
                 }
                 Ok(())
             })();

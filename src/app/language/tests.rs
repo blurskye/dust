@@ -2650,14 +2650,14 @@ fn nested_marker_backed_project_gets_its_own_lsp_preflight_root() {
     assert_eq!(action.0, &expected_key);
     while app.pending_preflight_count() != 0 {
         app.process_execution_preflight();
-        assert!(Instant::now() < deadline, "LSP startup admission timed out");
+        assert!(Instant::now() < deadline, "LSP startup timed out");
         thread::yield_now();
     }
     let registered = app
         .language
         .sessions()
         .get(&expected_key)
-        .expect("actual transport-admitted session");
+        .expect("actual transport-accepted session");
     assert_eq!(registered.root_path, nested);
     assert!(
         registered
@@ -2669,7 +2669,7 @@ fn nested_marker_backed_project_gets_its_own_lsp_preflight_root() {
     assert!(item.detail.starts_with("nested ·"));
     assert_eq!(item.source, nested.display().to_string());
     assert!(app.language.capabilities().is_none()); // `false` is not an initialized language server.
-    // Synthetic Running publication over the actual admitted transport: idle
+    // Synthetic Running publication over the actual accepted transport: idle
     // document sync must not start a fresh completion request every frame.
     app.language.running(
         &expected_key,
@@ -2998,7 +2998,7 @@ fn staged_workspace_resources_survive_queue_backpressure_and_can_be_retried() {
             )
         })
         .collect::<Vec<_>>();
-    // Independent previews can accumulate more resources than one admission batch.
+    // Independent previews can accumulate more resources than one submitted batch.
     for (source, target) in &paths {
         fs::write(source, "resource").unwrap();
         app.begin_workspace_proposal(
@@ -4506,7 +4506,7 @@ fn enter_installs_a_missing_managed_lsp_instead_of_trying_to_start_it() {
             project_root_markers: vec!["install.test".into()],
             project_root_strategy: crate::files::ProjectRootStrategy::Marker,
             // A local URL is deliberately rejected by the HTTPS-only installer after
-            // admission: this test checks the menu action, not artifact downloading.
+            // submission: this test checks the menu action, not artifact downloading.
             install: Some(crate::tools::ToolInstall::Archive {
                 url: format!("file://{}", artifact.display()),
                 sha256: "0".repeat(64),
@@ -6040,7 +6040,7 @@ fn saves_and_reloads_wait_for_the_same_buffers_completion() {
                 Some(&root.join("b.txt"))
             );
         }
-        // Admission resumes after the first result has been reconciled.
+        // Submission resumes after the first result has been reconciled.
         app.start_save(false, Some(root.join("c.txt")), false);
         wait_vfs(&mut app);
         assert_eq!(

@@ -1150,7 +1150,7 @@ mod tests {
         assert!(sources.flush().is_empty());
         assert!(
             sources.pending_replies(),
-            "queue admission is not a wire acknowledgement"
+            "queue acceptance is not a wire acknowledgement"
         );
         assert_eq!(
             endpoint.response(),

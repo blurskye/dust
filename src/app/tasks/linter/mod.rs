@@ -70,7 +70,7 @@ impl Linters {
             .filter(|build| std::sync::Arc::ptr_eq(&build.key.epoch, &key.epoch))
         {
             producer = Some(build.source.producer().clone());
-            build.fail("linter stopped; admitted reads may still complete");
+            build.fail("linter stopped; accepted reads may still complete");
         }
         producer
     }
@@ -407,7 +407,7 @@ impl Tasks {
             build.source.checked_document(&path, editor)?;
             let bytes = result.map_err(|e| e.to_string())?;
             if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > build.maximum {
-                return Err("linter source exceeds its admitted byte limit".into());
+                return Err("linter source exceeds its requested byte limit".into());
             }
             let text = TextBuffer::from_bytes(&bytes).map_err(|e| e.to_string())?;
             let items = convert(&path, read.raw, &text, None, &build.name)?;

@@ -119,7 +119,7 @@ impl PluginWindowHost {
     }
     /// Validation runs against immutable live state, before graph/host staging.
     /// Structural graph validation still runs on the accepted mutation candidate.
-    pub(in crate::app) fn admit_window_request(
+    pub(in crate::app) fn validate_window_request(
         &self,
         graph: &WindowGraph,
         index: &PluginContributionIndex,

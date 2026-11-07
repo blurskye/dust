@@ -289,7 +289,7 @@ impl WorkspaceCommitCheck {
     }
 }
 
-/// Only the editor can associate bytes with an admitted open-buffer snapshot.
+/// Only the editor can associate bytes with an checked open-buffer snapshot.
 pub(crate) struct WorkspaceSnapshot {
     editor: EditorWindowVersion,
     buffer: BufferId,
@@ -312,11 +312,11 @@ impl EditorState {
             return Ok(None);
         };
         if buffer.text.len_bytes() > maximum {
-            return Err("workspace buffer exceeds the admitted byte limit".into());
+            return Err("workspace buffer exceeds the requested byte limit".into());
         }
         let bytes = buffer.text.to_bytes();
         if bytes.len() > maximum {
-            return Err("workspace encoded buffer exceeds the admitted byte limit".into());
+            return Err("workspace encoded buffer exceeds the requested byte limit".into());
         }
         Ok(Some(WorkspaceSnapshot {
             editor: self.window_version(),

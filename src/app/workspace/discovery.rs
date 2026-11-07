@@ -296,7 +296,7 @@ impl ExecutionLane<'_> {
         let revision = self.revision;
         let discovery = &mut *self.discovery;
         // A detached old probe is not a cancelled filesystem call. Keep one
-        // admitted probe per protocol lane until it produces a terminal result.
+        // accepted probe per protocol lane until it produces a terminal result.
         if discovery.pending.is_some() {
             return Err("project-root discovery is already pending".into());
         }

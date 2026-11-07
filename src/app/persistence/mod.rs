@@ -250,7 +250,7 @@ impl Persistence {
     }
     pub(in crate::app) fn shutdown_result(&self) -> Result<(), String> {
         if self.pending() {
-            return Err("persistence did not finish before the exit deadline; an admitted write may still complete".into());
+            return Err("persistence did not finish before the exit deadline; an accepted write may still complete".into());
         }
         if let Some(error) = &self.failure {
             return Err(error.clone());

@@ -938,7 +938,7 @@ mod tests {
                     &[]
                 )
                 .is_err(),
-            "configuration revision substitution admitted original launch"
+            "configuration revision substitution accepted original launch"
         );
         assert!(owner.launch.is_none());
         owner.begin_shutdown();

@@ -129,7 +129,7 @@ impl PreparedResource<'_> {
                 entry.insert((worker, request));
                 Ok(())
             }
-            _ => Err("resource identity reused; admitted disk work may still finish".into()),
+            _ => Err("resource identity reused; accepted disk work may still finish".into()),
         }
     }
 }
@@ -598,7 +598,7 @@ impl WorkspaceEdits {
     }
     pub(in crate::app) fn finish_resources(&mut self, reason: &str) -> Vec<String> {
         let mut notices = self.discard_staged_resources(reason);
-        notices.extend(self.applying.drain().map(|(_, (_, request))| format!("proposal {} resource outcome is unknown after {reason}; admitted disk work may have completed or may still finish", request.proposal.0)));
+        notices.extend(self.applying.drain().map(|(_, (_, request))| format!("proposal {} resource outcome is unknown after {reason}; accepted disk work may have completed or may still finish", request.proposal.0)));
         notices
     }
 }
@@ -890,7 +890,7 @@ impl App {
                 self.state.workspace_snapshot(
                     self.workspace_edits
                         .preparing_sources()
-                        .expect("admitted source"),
+                        .expect("accepted source"),
                     path,
                     maximum,
                 )
@@ -910,7 +910,7 @@ impl App {
                     return;
                 }
             } else {
-                let admitted = self
+                let accepted = self
                     .workspace_edits
                     .prepare_io(
                         index,
@@ -919,7 +919,7 @@ impl App {
                         &self.state,
                     )
                     .and_then(|prepared| self.documents.submit_workspace_io(prepared));
-                match admitted {
+                match accepted {
                     Ok(true) => {}
                     Ok(false) => return,
                     Err(error) => {

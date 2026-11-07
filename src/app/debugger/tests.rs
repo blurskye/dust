@@ -373,7 +373,7 @@ fn debugger_protected_launch_source_capture_refusal_and_fresh_recovery() {
         driver.pump_debug();
         assert!(
             Instant::now() < program_deadline,
-            "program preflight not admitted: {:?}",
+            "program preflight not accepted: {:?}",
             driver.projection().notification
         );
         std::thread::sleep(Duration::from_millis(2));
@@ -942,7 +942,7 @@ fn detaching_and_terminating_are_different_session_facts() {
     detached.execution = Some((root.path().join("main.rs"), 2));
     detached.stop_reason = Some("breakpoint".into());
     detached.variables.push("value = 1".into());
-    detached.detach_debuggee().expect("detach is admitted");
+    detached.detach_debuggee().expect("detach is accepted");
     assert_eq!(detached.end_state(), None);
     let request = adapter.control().expect("detach sends a control");
     let DapControl::Disconnect { terminate_debuggee } = request else {
@@ -982,7 +982,7 @@ fn detaching_and_terminating_are_different_session_facts() {
     terminated.variables.push("value = 1".into());
     terminated
         .terminate_debuggee()
-        .expect("terminate is admitted");
+        .expect("terminate is accepted");
     assert_eq!(terminated.end_state(), None);
     let request = adapter.control().expect("terminate sends a control");
     let DapControl::Disconnect { terminate_debuggee } = request else {
@@ -2286,7 +2286,7 @@ fn removed_watches_drop_queued_cached_and_late_values() {
 }
 
 #[test]
-fn every_admitted_watch_is_refreshed_after_control_queue_backpressure() {
+fn every_accepted_watch_is_refreshed_after_control_queue_backpressure() {
     let (mut owner, adapter) = request_fixture();
     owner.watch_refresh = (0..101).map(|i| format!("watch{i}")).collect();
     owner.refresh_watches();

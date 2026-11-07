@@ -194,7 +194,7 @@ impl EditorState {
 
     /// Exact source-owned gate for universal-window reconciliation.
     ///
-    /// Exhaustion returns `None`; window admission and projections fail closed.
+    /// Exhaustion returns `None`; window creation and projections fail closed.
     #[must_use]
     pub const fn window_revision(&self) -> Option<u64> {
         if self.window_revision_exhausted {

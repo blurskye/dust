@@ -1077,7 +1077,7 @@ impl App {
                 let navigation = self
                     .window_session
                     .navigation_stamp(self.state.window_version(), self.state.active_view());
-                if !self.explorer.admit_open(request.ticket, id, navigation) {
+                if !self.explorer.track_open_request(request.ticket, id, navigation) {
                     self.documents.cancel_request(id);
                 }
             }
@@ -1185,7 +1185,7 @@ impl App {
         }
         .map_err(|e| e.to_string());
         let id = result.as_ref().ok().copied();
-        if let Err(error) = self.explorer.admit_mutation(request.ticket, result) {
+        if let Err(error) = self.explorer.track_mutation_request(request.ticket, result) {
             if let Some(id) = id {
                 self.documents.cancel_request(id);
             }
@@ -1315,7 +1315,7 @@ impl App {
                 .map_err(|e| e.to_string())
         })();
         let id = result.as_ref().ok().copied();
-        if let Err(error) = self.explorer.admit_apply(result) {
+        if let Err(error) = self.explorer.track_apply_request(result) {
             if let Some(id) = id {
                 self.documents.cancel_request(id);
             }

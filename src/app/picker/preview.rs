@@ -282,7 +282,7 @@ impl Search {
         }
     }
 
-    pub(in crate::app) fn admit_preview(
+    pub(in crate::app) fn track_preview_read(
         &mut self,
         ticket: PreviewTicket,
         id: RequestId,
@@ -333,7 +333,7 @@ impl Search {
         if let Some(text) = self.preview.as_mut().and_then(PickerPreview::as_text_mut) {
             let lines = match result {
                 Ok(bytes) if bytes.len() > maximum => {
-                    vec!["preview exceeds admitted byte limit".into()]
+                    vec!["preview exceeds requested byte limit".into()]
                 }
                 Ok(bytes) => crate::editor::text::decode_utf8(bytes).map_or_else(
                     |_| vec!["binary preview unavailable".into()],

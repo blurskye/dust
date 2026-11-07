@@ -266,7 +266,7 @@ fn read_scoped_file(path: &Path, roots: &[RootIdentity]) -> Result<Vec<u8>, VfsE
     let mut file = directory;
     let mut components = relative.components().peekable();
     // Walk from held directory descriptors so intermediate replacements cannot
-    // redirect the read through a symlink. No absolute paths or `..` are admitted.
+    // redirect the read through a symlink. No absolute paths or `..` are allowed.
     while let Some(component) = components.next() {
         let Component::Normal(name) = component else {
             return Err(error(path, "invalid workspace-relative file path"));

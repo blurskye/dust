@@ -1141,7 +1141,7 @@ fn tab_close_reviews_every_last_dirty_reference_before_one_publication() {
     assert_eq!(
         app.state.editor_tabs().count(),
         tabs,
-        "save admission is not close ACK"
+        "queueing a save is not close ACK"
     );
     crate::app::tests::wait_vfs(&mut app);
     assert_eq!(
@@ -3007,8 +3007,8 @@ fn invalid_editor_sources_reject_before_graph_copy() {
 /// Run directly with --ignored --nocapture --test-threads=1. Optional Linux
 /// allocation observer: tests/ownership_alloc.c; timings run WITHOUT preloading.
 #[test]
-#[ignore = "explicit admission cost probe; prints bounded fixture counters/timing"]
-fn window_admission_cost_probe() {
+#[ignore = "explicit window creation cost probe; prints bounded fixture counters/timing"]
+fn window_creation_cost_probe() {
     use crate::editor::EditorOperation;
     use crate::editor::EditorState;
     use crate::editor::EditorTransaction;

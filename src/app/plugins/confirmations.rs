@@ -140,7 +140,7 @@ impl PluginConfirmations {
         true
     }
 
-    pub(in crate::app) fn admit(
+    pub(in crate::app) fn queue(
         &mut self,
         source: ConfirmationSource,
         requests: Vec<PluginConfirmationRequest>,

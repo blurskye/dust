@@ -37,7 +37,7 @@ The client checks status and exact media type, rejects redirects, rejects malfor
 `maximum + 1` streaming ceiling. Artifact SHA-256 is verified before package
 preparation. One policy connect timeout and one policy whole-request
 timeout apply to every endpoint; metadata and artifact byte ceilings are
-separate. Submission can fail before admission with queue-full or worker-stopped;
+separate. Submission can fail before acceptance with queue-full or worker-stopped;
 worker results distinguish policy/origin, redirect/status/content-type/content-length,
 oversize, invalid/yanked metadata, checksum, offline miss, unsafe cache,
 HTTP, I/O and thread failures. None of those failures publishes an install

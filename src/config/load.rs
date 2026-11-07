@@ -1160,7 +1160,7 @@ impl Drop for ConfigurationWorker {
     fn drop(&mut self) {
         let _ = self.sender.try_send(ConfigurationRequest::Shutdown);
         // Configuration filesystem I/O must not add a blocking shutdown join.
-        // Dropping the sender also stops the worker after admitted requests finish.
+        // Dropping the sender also stops the worker after accepted requests finish.
         drop(self.thread.take());
     }
 }

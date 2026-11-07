@@ -1,4 +1,4 @@
-//! Task planning, admitted run ownership, bounded output and source projections.
+//! Task planning, accepted run ownership, bounded output and source projections.
 use crate::app::workspace::Workspace;
 use crate::app::workspace::WorkspaceVersion;
 mod linter;
@@ -261,7 +261,7 @@ impl Tasks {
         self.plan_checked(name, adapter, config, workspace, configuration)?;
         self.plans
             .get_mut(name)
-            .expect("admitted task plan")
+            .expect("accepted task plan")
             .formatter = formatter;
         Ok(())
     }
@@ -1225,7 +1225,7 @@ impl App {
                 break;
             };
             // Full capacity preserves the unread path for retry. Permanent failure discards
-            // only this build; already-admitted reads stay owned until a proven terminal.
+            // only this build; already-accepted reads stay owned until a proven terminal.
             if !matches!(self.documents.submit_linter_read(loan), Ok(true)) {
                 break;
             }

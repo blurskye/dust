@@ -306,7 +306,7 @@ fn canonical_preflight_portable_pty_drives_external_tui_fixture_without_shell() 
             policy: PtyPolicy::default(),
         })
         .unwrap();
-    assert_eq!(id, PtyId(1), "one external TUI process was admitted");
+    assert_eq!(id, PtyId(1), "one external TUI process was accepted");
     let mut screen = PtyScreen::new(40, 8, 1024);
     let mut raw = Vec::new();
     let mut requested_resize = false;
