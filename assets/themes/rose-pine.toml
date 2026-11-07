@@ -1,0 +1,705 @@
+# Adapted to Dust semantic roles and terminal fallbacks; not the upstream editor implementation.
+# Palette source: README.md. License: ../../LICENSES/MIT-rose-pine.txt
+name = "rose-pine"
+
+[styles.default]
+foreground = "#e0def4"
+background = "#191724"
+foreground_256 = "indexed:189"
+background_256 = "indexed:234"
+foreground_16 = "white"
+background_16 = "black"
+attributes = []
+
+[styles.muted]
+foreground = "#908caa"
+background = "#191724"
+foreground_256 = "indexed:103"
+background_256 = "indexed:234"
+foreground_16 = "grey"
+background_16 = "black"
+attributes = []
+
+[styles.accent]
+foreground = "#9ccfd8"
+background = "#191724"
+foreground_256 = "indexed:152"
+background_256 = "indexed:234"
+foreground_16 = "blue"
+background_16 = "black"
+attributes = ["bold"]
+
+[styles.status]
+foreground = "#e0def4"
+background = "#191724"
+foreground_256 = "indexed:189"
+background_256 = "indexed:234"
+foreground_16 = "white"
+background_16 = "black"
+attributes = []
+
+[styles.status_accent]
+foreground = "#191724"
+background = "#9ccfd8"
+foreground_256 = "indexed:234"
+background_256 = "indexed:152"
+foreground_16 = "white"
+background_16 = "dark_blue"
+attributes = ["bold"]
+
+[styles.selection]
+foreground = "#e0def4"
+background = "#26233a"
+foreground_256 = "indexed:189"
+background_256 = "indexed:236"
+foreground_16 = "white"
+background_16 = "dark_grey"
+attributes = []
+
+[styles.search]
+foreground = "#191724"
+background = "#f6c177"
+foreground_256 = "indexed:234"
+background_256 = "indexed:216"
+foreground_16 = "white"
+background_16 = "dark_yellow"
+attributes = []
+
+[styles.error]
+foreground = "#eb6f92"
+background = "#191724"
+foreground_256 = "indexed:168"
+background_256 = "indexed:234"
+foreground_16 = "red"
+background_16 = "black"
+attributes = ["bold"]
+
+[styles.warning]
+foreground = "#f6c177"
+background = "#191724"
+foreground_256 = "indexed:216"
+background_256 = "indexed:234"
+foreground_16 = "yellow"
+background_16 = "black"
+attributes = []
+
+[styles.border]
+foreground = "#6e6a86"
+background = "#191724"
+foreground_256 = "indexed:60"
+background_256 = "indexed:234"
+foreground_16 = "white"
+background_16 = "black"
+attributes = []
+
+[styles.buffer_line_background]
+foreground = "#908caa"
+background = "#191724"
+foreground_256 = "indexed:103"
+background_256 = "indexed:234"
+foreground_16 = "grey"
+background_16 = "black"
+attributes = []
+
+[styles.buffer_line_active]
+foreground = "#e0def4"
+background = "#1f1d2e"
+foreground_256 = "indexed:189"
+background_256 = "indexed:235"
+foreground_16 = "white"
+background_16 = "black"
+attributes = ["bold"]
+
+[styles.buffer_line_inactive]
+foreground = "#908caa"
+background = "#191724"
+foreground_256 = "indexed:103"
+background_256 = "indexed:234"
+foreground_16 = "grey"
+background_16 = "black"
+attributes = []
+
+[styles.buffer_line_dirty]
+foreground = "#eb6f92"
+background = "#1f1d2e"
+foreground_256 = "indexed:168"
+background_256 = "indexed:235"
+foreground_16 = "red"
+background_16 = "black"
+attributes = ["bold"]
+
+[styles.buffer_line_icon]
+foreground = "#908caa"
+background = "#1f1d2e"
+foreground_256 = "indexed:103"
+background_256 = "indexed:235"
+foreground_16 = "grey"
+background_16 = "black"
+attributes = []
+
+[styles.buffer_line_pin]
+foreground = "#c4a7e7"
+background = "#1f1d2e"
+foreground_256 = "indexed:182"
+background_256 = "indexed:235"
+foreground_16 = "magenta"
+background_16 = "black"
+attributes = []
+
+[styles.buffer_line_diagnostic]
+foreground = "#ebbcba"
+background = "#1f1d2e"
+foreground_256 = "indexed:181"
+background_256 = "indexed:235"
+foreground_16 = "yellow"
+background_16 = "black"
+attributes = []
+
+[styles.buffer_line_close]
+foreground = "#908caa"
+background = "#1f1d2e"
+foreground_256 = "indexed:103"
+background_256 = "indexed:235"
+foreground_16 = "grey"
+background_16 = "black"
+attributes = []
+
+[styles.buffer_line_separator]
+foreground = "#6e6a86"
+background = "#191724"
+foreground_256 = "indexed:60"
+background_256 = "indexed:234"
+foreground_16 = "white"
+background_16 = "black"
+attributes = []
+
+[styles.key_hint_background]
+foreground = "#e0def4"
+background = "#1f1d2e"
+foreground_256 = "indexed:189"
+background_256 = "indexed:235"
+foreground_16 = "white"
+background_16 = "black"
+attributes = []
+
+[styles.key_hint_border]
+foreground = "#6e6a86"
+background = "#1f1d2e"
+foreground_256 = "indexed:60"
+background_256 = "indexed:235"
+foreground_16 = "white"
+background_16 = "black"
+attributes = []
+
+[styles.key_hint_key]
+foreground = "#9ccfd8"
+background = "#1f1d2e"
+foreground_256 = "indexed:152"
+background_256 = "indexed:235"
+foreground_16 = "blue"
+background_16 = "black"
+attributes = ["bold"]
+
+[styles.key_hint_group]
+foreground = "#c4a7e7"
+background = "#1f1d2e"
+foreground_256 = "indexed:182"
+background_256 = "indexed:235"
+foreground_16 = "magenta"
+background_16 = "black"
+attributes = ["bold"]
+
+[styles.key_hint_command]
+foreground = "#e0def4"
+background = "#1f1d2e"
+foreground_256 = "indexed:189"
+background_256 = "indexed:235"
+foreground_16 = "white"
+background_16 = "black"
+attributes = []
+
+[styles.key_hint_prefix]
+foreground = "#908caa"
+background = "#1f1d2e"
+foreground_256 = "indexed:103"
+background_256 = "indexed:235"
+foreground_16 = "grey"
+background_16 = "black"
+attributes = []
+
+[styles.documentation_background]
+foreground = "#e0def4"
+background = "#1f1d2e"
+foreground_256 = "indexed:189"
+background_256 = "indexed:235"
+foreground_16 = "white"
+background_16 = "black"
+attributes = []
+
+[styles.documentation_border]
+foreground = "#9ccfd8"
+background = "#1f1d2e"
+foreground_256 = "indexed:152"
+background_256 = "indexed:235"
+foreground_16 = "blue"
+background_16 = "black"
+attributes = []
+
+[styles.documentation_title]
+foreground = "#c4a7e7"
+background = "#1f1d2e"
+foreground_256 = "indexed:182"
+background_256 = "indexed:235"
+foreground_16 = "magenta"
+background_16 = "black"
+attributes = ["bold"]
+
+[styles.documentation_text]
+foreground = "#e0def4"
+background = "#1f1d2e"
+foreground_256 = "indexed:189"
+background_256 = "indexed:235"
+foreground_16 = "white"
+background_16 = "black"
+attributes = []
+
+[styles.git_sign_added]
+foreground = "#9ccfd8"
+background = "#191724"
+foreground_256 = "indexed:152"
+background_256 = "indexed:234"
+foreground_16 = "green"
+background_16 = "black"
+attributes = []
+
+[styles.git_sign_changed]
+foreground = "#f6c177"
+background = "#191724"
+foreground_256 = "indexed:216"
+background_256 = "indexed:234"
+foreground_16 = "yellow"
+background_16 = "black"
+attributes = []
+
+[styles.git_sign_deleted]
+foreground = "#eb6f92"
+background = "#191724"
+foreground_256 = "indexed:168"
+background_256 = "indexed:234"
+foreground_16 = "red"
+background_16 = "black"
+attributes = []
+
+[styles.explorer_background]
+foreground = "#e0def4"
+background = "#191724"
+foreground_256 = "indexed:189"
+background_256 = "indexed:234"
+foreground_16 = "white"
+background_16 = "black"
+attributes = []
+
+[styles.explorer_header]
+foreground = "#9ccfd8"
+background = "#191724"
+foreground_256 = "indexed:152"
+background_256 = "indexed:234"
+foreground_16 = "blue"
+background_16 = "black"
+attributes = ["bold"]
+
+[styles.explorer_count]
+foreground = "#908caa"
+background = "#191724"
+foreground_256 = "indexed:103"
+background_256 = "indexed:234"
+foreground_16 = "grey"
+background_16 = "black"
+attributes = []
+
+[styles.explorer_tree]
+foreground = "#6e6a86"
+background = "#191724"
+foreground_256 = "indexed:60"
+background_256 = "indexed:234"
+foreground_16 = "white"
+background_16 = "black"
+attributes = []
+
+[styles.explorer_icon]
+foreground = "#908caa"
+background = "#191724"
+foreground_256 = "indexed:103"
+background_256 = "indexed:234"
+foreground_16 = "grey"
+background_16 = "black"
+attributes = []
+
+[styles.explorer_directory]
+foreground = "#9ccfd8"
+background = "#191724"
+foreground_256 = "indexed:152"
+background_256 = "indexed:234"
+foreground_16 = "blue"
+background_16 = "black"
+attributes = []
+
+[styles.explorer_file]
+foreground = "#e0def4"
+background = "#191724"
+foreground_256 = "indexed:189"
+background_256 = "indexed:234"
+foreground_16 = "white"
+background_16 = "black"
+attributes = []
+
+[styles.explorer_symlink]
+foreground = "#c4a7e7"
+background = "#191724"
+foreground_256 = "indexed:182"
+background_256 = "indexed:234"
+foreground_16 = "magenta"
+background_16 = "black"
+attributes = []
+
+[styles.explorer_git]
+foreground = "#f6c177"
+background = "#191724"
+foreground_256 = "indexed:216"
+background_256 = "indexed:234"
+foreground_16 = "yellow"
+background_16 = "black"
+attributes = []
+
+[styles.explorer_diagnostic]
+foreground = "#eb6f92"
+background = "#191724"
+foreground_256 = "indexed:168"
+background_256 = "indexed:234"
+foreground_16 = "red"
+background_16 = "black"
+attributes = []
+
+[styles.explorer_decoration]
+foreground = "#908caa"
+background = "#191724"
+foreground_256 = "indexed:103"
+background_256 = "indexed:234"
+foreground_16 = "grey"
+background_16 = "black"
+attributes = []
+
+[styles.explorer_selection]
+foreground = "#e0def4"
+background = "#26233a"
+foreground_256 = "indexed:189"
+background_256 = "indexed:236"
+foreground_16 = "white"
+background_16 = "dark_grey"
+attributes = []
+
+[styles.explorer_border]
+foreground = "#6e6a86"
+background = "#191724"
+foreground_256 = "indexed:60"
+background_256 = "indexed:234"
+foreground_16 = "white"
+background_16 = "black"
+attributes = []
+
+[styles.terminal_background]
+foreground = "#e0def4"
+background = "#191724"
+foreground_256 = "indexed:189"
+background_256 = "indexed:234"
+foreground_16 = "white"
+background_16 = "black"
+attributes = []
+
+[styles.terminal_border]
+foreground = "#6e6a86"
+background = "#191724"
+foreground_256 = "indexed:60"
+background_256 = "indexed:234"
+foreground_16 = "white"
+background_16 = "black"
+attributes = []
+
+[styles.terminal_title]
+foreground = "#9ccfd8"
+background = "#191724"
+foreground_256 = "indexed:152"
+background_256 = "indexed:234"
+foreground_16 = "blue"
+background_16 = "black"
+attributes = ["bold"]
+
+[styles.terminal_status]
+foreground = "#908caa"
+background = "#191724"
+foreground_256 = "indexed:103"
+background_256 = "indexed:234"
+foreground_16 = "grey"
+background_16 = "black"
+attributes = []
+
+[styles.terminal_status_accent]
+foreground = "#191724"
+background = "#9ccfd8"
+foreground_256 = "indexed:234"
+background_256 = "indexed:152"
+foreground_16 = "white"
+background_16 = "dark_blue"
+attributes = ["bold"]
+
+[styles.terminal_text]
+foreground = "#e0def4"
+background = "#191724"
+foreground_256 = "indexed:189"
+background_256 = "indexed:234"
+foreground_16 = "white"
+background_16 = "black"
+attributes = []
+
+[highlights]
+# From the Neovim colorscheme, dumped with scripts/nvim-highlights.lua.
+"@attribute" = { fg = "#c4a7e7" }
+"@attribute.builtin" = { fg = "#c4a7e7", bold = true }
+"@attribute.diff" = { fg = "#f6c177" }
+"@boolean" = { link = "Boolean" }
+"@character" = { link = "Character" }
+"@character.special" = { link = "Character" }
+"@class" = { fg = "#9ccfd8" }
+"@comment" = { link = "Comment" }
+"@comment.error" = { fg = "#eb6f92" }
+"@comment.hint" = { fg = "#c4a7e7", bg = "#332d41" }
+"@comment.info" = { fg = "#9ccfd8", bg = "#2d333f" }
+"@comment.note" = { fg = "#31748f", bg = "#1d2534" }
+"@comment.todo" = { fg = "#ebbcba", bg = "#39303b" }
+"@comment.warning" = { fg = "#f6c177" }
+"@conceal" = { link = "Conceal" }
+"@conceal.markdown" = { fg = "#908caa" }
+"@conditional" = { link = "Conditional" }
+"@constant" = { fg = "#f6c177" }
+"@constant.builtin" = { fg = "#f6c177", bold = true }
+"@constant.macro" = { fg = "#f6c177" }
+"@constructor" = { fg = "#9ccfd8" }
+"@diff.delta" = { bg = "#433842" }
+"@diff.minus" = { fg = "#eb6f92", bg = "#43293a" }
+"@diff.plus" = { fg = "#9ccfd8", bg = "#333c48" }
+"@field" = { fg = "#9ccfd8" }
+"@float" = { link = "Number" }
+"@function" = { fg = "#ebbcba" }
+"@function.builtin" = { fg = "#ebbcba", bold = true }
+"@function.macro" = { link = "Function" }
+"@function.method" = { fg = "#ebbcba" }
+"@function.method.call" = { fg = "#c4a7e7" }
+"@include" = { link = "Include" }
+"@interface" = { fg = "#9ccfd8" }
+"@keyword" = { link = "Keyword" }
+"@keyword.conditional" = { fg = "#31748f" }
+"@keyword.conditional.ternary" = { fg = "#31748f" }
+"@keyword.debug" = { fg = "#ebbcba" }
+"@keyword.directive" = { fg = "#c4a7e7" }
+"@keyword.directive.define" = { fg = "#c4a7e7" }
+"@keyword.exception" = { fg = "#31748f" }
+"@keyword.import" = { fg = "#31748f" }
+"@keyword.operator" = { fg = "#908caa" }
+"@keyword.repeat" = { fg = "#31748f" }
+"@keyword.return" = { fg = "#31748f" }
+"@keyword.storage" = { fg = "#9ccfd8" }
+"@label" = { link = "Label" }
+"@lsp.mod.deprecated" = { link = "DiagnosticDeprecated" }
+"@lsp.type.class" = { link = "@type" }
+"@lsp.type.comment" = {  }
+"@lsp.type.comment.c" = { link = "@comment" }
+"@lsp.type.comment.cpp" = { link = "@comment" }
+"@lsp.type.decorator" = { link = "@attribute" }
+"@lsp.type.enum" = { link = "@type" }
+"@lsp.type.enumMember" = { link = "@constant" }
+"@lsp.type.event" = { link = "@type" }
+"@lsp.type.function" = { link = "@function" }
+"@lsp.type.interface" = { link = "@interface" }
+"@lsp.type.keyword" = { link = "@keyword" }
+"@lsp.type.macro" = { link = "@constant.macro" }
+"@lsp.type.method" = { link = "@function.method" }
+"@lsp.type.modifier" = { link = "@type.qualifier" }
+"@lsp.type.namespace" = { link = "@namespace" }
+"@lsp.type.namespace.python" = { link = "@variable" }
+"@lsp.type.number" = { link = "@number" }
+"@lsp.type.operator" = { link = "@operator" }
+"@lsp.type.parameter" = { link = "@parameter" }
+"@lsp.type.property" = { link = "@property" }
+"@lsp.type.regexp" = { link = "@string.regexp" }
+"@lsp.type.string" = { link = "@string" }
+"@lsp.type.struct" = { link = "@type" }
+"@lsp.type.type" = { link = "@type" }
+"@lsp.type.typeParameter" = { link = "@type.definition" }
+"@lsp.type.variable" = {  }
+"@lsp.type.variable.svelte" = { link = "@variable" }
+"@lsp.typemod.function.defaultLibrary" = { link = "@function.builtin" }
+"@lsp.typemod.operator.injected" = { link = "@operator" }
+"@lsp.typemod.string.injected" = { link = "@string" }
+"@lsp.typemod.variable.constant" = { link = "@constant" }
+"@lsp.typemod.variable.defaultLibrary" = { link = "@variable.builtin" }
+"@lsp.typemod.variable.injected" = { link = "@variable" }
+"@macro" = { link = "Macro" }
+"@markup" = { link = "Special" }
+"@markup.environment" = { link = "Macro" }
+"@markup.environment.name" = { link = "@type" }
+"@markup.heading" = { fg = "#9ccfd8", bold = true }
+"@markup.heading.1.delimiter.vimdoc" = { fg = "#191724", bg = "#191724" }
+"@markup.heading.1.markdown" = { link = "markdownH1" }
+"@markup.heading.1.marker.markdown" = { link = "markdownH1Delimiter" }
+"@markup.heading.2.delimiter.vimdoc" = { fg = "#191724", bg = "#191724", underline = true }
+"@markup.heading.2.markdown" = { link = "markdownH2" }
+"@markup.heading.2.marker.markdown" = { link = "markdownH2Delimiter" }
+"@markup.heading.3.markdown" = { link = "markdownH3" }
+"@markup.heading.3.marker.markdown" = { link = "markdownH3Delimiter" }
+"@markup.heading.4.markdown" = { link = "markdownH4" }
+"@markup.heading.4.marker.markdown" = { link = "markdownH4Delimiter" }
+"@markup.heading.5.markdown" = { link = "markdownH5" }
+"@markup.heading.5.marker.markdown" = { link = "markdownH5Delimiter" }
+"@markup.heading.6.markdown" = { link = "markdownH6" }
+"@markup.heading.6.marker.markdown" = { link = "markdownH6Delimiter" }
+"@markup.italic" = { italic = true }
+"@markup.link" = { link = "Underlined" }
+"@markup.link.label.markdown_inline" = { fg = "#9ccfd8" }
+"@markup.link.markdown_inline" = { fg = "#908caa" }
+"@markup.link.url" = { fg = "#c4a7e7" }
+"@markup.list" = { fg = "#31748f" }
+"@markup.list.checked" = { fg = "#9ccfd8", bg = "#262936" }
+"@markup.list.unchecked" = { fg = "#e0def4" }
+"@markup.math" = { link = "Special" }
+"@markup.quote" = { fg = "#e0def4" }
+"@markup.raw.delimiter.markdown" = { fg = "#908caa" }
+"@markup.strikethrough" = { strikethrough = true }
+"@markup.strong" = { bold = true }
+"@markup.underline" = { underline = true }
+"@method" = { fg = "#ebbcba" }
+"@module" = { fg = "#e0def4" }
+"@module.builtin" = { fg = "#e0def4", bold = true }
+"@namespace" = { link = "Include" }
+"@number" = { link = "Number" }
+"@number.float" = { link = "Number" }
+"@operator" = { link = "Operator" }
+"@parameter" = { fg = "#c4a7e7", italic = true }
+"@preproc" = { link = "PreProc" }
+"@property" = { fg = "#9ccfd8", italic = true }
+"@punctuation" = { fg = "#908caa" }
+"@punctuation.bracket" = { fg = "#908caa" }
+"@punctuation.delimiter" = { fg = "#908caa" }
+"@punctuation.special" = { fg = "#908caa" }
+"@regexp" = { link = "String" }
+"@repeat" = { link = "Repeat" }
+"@storageclass" = { link = "StorageClass" }
+"@string" = { link = "String" }
+"@string.escape" = { fg = "#31748f" }
+"@string.regexp" = { fg = "#c4a7e7" }
+"@string.special" = { link = "String" }
+"@string.special.symbol" = { link = "Identifier" }
+"@string.special.url" = { fg = "#c4a7e7" }
+"@symbol" = { link = "Identifier" }
+"@tag" = { link = "Tag" }
+"@tag.attribute" = { fg = "#c4a7e7" }
+"@tag.builtin" = { link = "Special" }
+"@tag.delimiter" = { fg = "#908caa" }
+"@text" = { fg = "#e0def4" }
+"@text.danger" = { fg = "#eb6f92" }
+"@text.diff.add" = { fg = "#9ccfd8", bg = "#333c48" }
+"@text.diff.delete" = { fg = "#eb6f92", bg = "#43293a" }
+"@text.emphasis" = { italic = true }
+"@text.environment" = { link = "Macro" }
+"@text.environment.name" = { link = "Type" }
+"@text.math" = { link = "Special" }
+"@text.note" = { link = "SpecialComment" }
+"@text.strike" = { strikethrough = true }
+"@text.strong" = { bold = true }
+"@text.title" = { link = "Title" }
+"@text.title.1.markdown" = { link = "markdownH1" }
+"@text.title.1.marker.markdown" = { link = "markdownH1Delimiter" }
+"@text.title.2.markdown" = { link = "markdownH2" }
+"@text.title.2.marker.markdown" = { link = "markdownH2Delimiter" }
+"@text.title.3.markdown" = { link = "markdownH3" }
+"@text.title.3.marker.markdown" = { link = "markdownH3Delimiter" }
+"@text.title.4.markdown" = { link = "markdownH4" }
+"@text.title.4.marker.markdown" = { link = "markdownH4Delimiter" }
+"@text.title.5.markdown" = { link = "markdownH5" }
+"@text.title.5.marker.markdown" = { link = "markdownH5Delimiter" }
+"@text.title.6.markdown" = { link = "markdownH6" }
+"@text.title.6.marker.markdown" = { link = "markdownH6Delimiter" }
+"@text.underline" = { underline = true }
+"@text.uri" = { fg = "#c4a7e7" }
+"@text.warning" = { fg = "#f6c177" }
+"@todo" = { link = "Todo" }
+"@type" = { fg = "#9ccfd8" }
+"@type.builtin" = { fg = "#9ccfd8", bold = true }
+"@variable" = { fg = "#e0def4", italic = true }
+"@variable.builtin" = { fg = "#eb6f92", bold = true, italic = true }
+"@variable.member" = { fg = "#9ccfd8" }
+"@variable.parameter" = { fg = "#c4a7e7", italic = true }
+"@variable.parameter.builtin" = { fg = "#c4a7e7", bold = true, italic = true }
+"Added" = { fg = "#9ccfd8" }
+"Boolean" = { fg = "#ebbcba" }
+"Changed" = { fg = "#ebbcba" }
+"Character" = { fg = "#f6c177" }
+"Comment" = { fg = "#908caa", italic = true }
+"Conceal" = {  }
+"Conditional" = { fg = "#31748f" }
+"Constant" = { fg = "#f6c177" }
+"Debug" = { fg = "#ebbcba" }
+"Define" = { fg = "#c4a7e7" }
+"Delimiter" = { fg = "#908caa" }
+"DiagnosticDeprecated" = { strikethrough = true }
+"DiagnosticError" = { fg = "#eb6f92" }
+"DiagnosticHint" = { fg = "#c4a7e7" }
+"DiagnosticInfo" = { fg = "#9ccfd8" }
+"DiagnosticOk" = { fg = "#95b1ac" }
+"DiagnosticUnnecessary" = { link = "Comment" }
+"DiagnosticWarn" = { fg = "#f6c177" }
+"DiffAdd" = { bg = "#333c48" }
+"DiffChange" = { bg = "#433842" }
+"DiffDelete" = { bg = "#43293a" }
+"DiffText" = { bg = "#6d5960" }
+"Error" = { fg = "#eb6f92" }
+"Exception" = { fg = "#31748f" }
+"Float" = { fg = "#f6c177" }
+"Function" = { fg = "#ebbcba" }
+"Identifier" = { fg = "#e0def4" }
+"Ignore" = { link = "Normal" }
+"Include" = { fg = "#31748f" }
+"Keyword" = { fg = "#31748f" }
+"Label" = { fg = "#9ccfd8" }
+"Macro" = { fg = "#c4a7e7" }
+"Normal" = { fg = "#e0def4" }
+"Number" = { fg = "#f6c177" }
+"Operator" = { fg = "#908caa" }
+"PreCondit" = { fg = "#c4a7e7" }
+"PreProc" = { link = "PreCondit" }
+"Removed" = { fg = "#eb6f92" }
+"Repeat" = { fg = "#31748f" }
+"Special" = { fg = "#9ccfd8" }
+"SpecialChar" = { link = "Special" }
+"SpecialComment" = { fg = "#c4a7e7" }
+"Statement" = { fg = "#31748f", bold = true }
+"StorageClass" = { fg = "#9ccfd8" }
+"String" = { fg = "#f6c177" }
+"Structure" = { fg = "#9ccfd8" }
+"Tag" = { fg = "#9ccfd8" }
+"Title" = { fg = "#9ccfd8", bold = true }
+"Todo" = { fg = "#ebbcba", bg = "#433842" }
+"Type" = { fg = "#9ccfd8" }
+"Typedef" = { link = "Type" }
+"Underlined" = { fg = "#c4a7e7", underline = true }
+"markdownH1" = { fg = "#c4a7e7", bold = true }
+"markdownH1Delimiter" = { link = "markdownH1" }
+"markdownH2" = { fg = "#9ccfd8", bold = true }
+"markdownH2Delimiter" = { link = "markdownH2" }
+"markdownH3" = { fg = "#ebbcba", bold = true }
+"markdownH3Delimiter" = { link = "markdownH3" }
+"markdownH4" = { fg = "#f6c177", bold = true }
+"markdownH4Delimiter" = { link = "markdownH4" }
+"markdownH5" = { fg = "#31748f", bold = true }
+"markdownH5Delimiter" = { link = "markdownH5" }
+"markdownH6" = { fg = "#95b1ac", bold = true }
+"markdownH6Delimiter" = { link = "markdownH6" }

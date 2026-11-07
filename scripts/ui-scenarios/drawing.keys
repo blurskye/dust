@@ -1,0 +1,38 @@
+# Load the retained guest as demo with decorations, completion, and UI grants.
+# The working directory contains drawing.txt starting with abc.
+wait 1200
+key escape
+type :e drawing.txt
+key enter
+wait 1200
+key escape
+shot baseline
+type :plugin.demo.drive abi=drawing
+key enter
+wait 500
+type :plugin.demo.drive abi=diagnostics
+key enter
+wait 800
+key escape
+shot decorations-diagnostics
+type ]d
+wait 500
+shot diagnostic-navigation
+type :plugin.demo.drive abi=drawing-clear
+key enter
+wait 400
+type :plugin.demo.drive abi=diagnostics-clear
+key enter
+wait 400
+key escape g g 0
+wait 500
+shot cleared
+type :plugin.demo.drive abi=completion
+key enter
+wait 500
+key i
+wait 1000
+shot inline-completion
+key escape
+wait 500
+shot completion-dismissed

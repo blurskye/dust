@@ -1,0 +1,235 @@
+#!/usr/bin/env python3
+"""Compare Dust with another editor (nvim + LazyVim by default) on the same machine.
+
+Usage:
+    scripts/bench [--dust PATH] [--other "nvim -n"] [--runs 5] [--keys 200]
+
+Each editor runs in a pseudo-terminal of 120x40. Measured:
+
+    startup   time from spawn until a marker line of a 5000-line Rust file is on screen
+    typing    time from writing one key in insert mode until it is echoed (p50 / p99)
+    idle cpu  CPU time the editor uses over 3 s of doing nothing, once startup work is done
+    memory    resident memory of the editor process after startup
+
+Dust runs with fresh XDG directories; the other editor uses its normal configuration,
+which is the baseline being compared against. CPU and memory count the editor process and
+its same-named children (nvim's `--embed` server), not language servers or other tools.
+"""
+
+import argparse
+import fcntl
+import os
+import pathlib
+import pty
+import re
+import select
+import shlex
+import shutil
+import statistics
+import struct
+import tempfile
+import termios
+import time
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+MARKER = b"zqmarkerline"
+# Answers a real terminal gives to the queries editors send at startup, so neither editor
+# waits for a reply timeout that a real terminal would never cause.
+REPLIES = [
+    (b"\x1b[c", b"\x1b[?62;22c"),
+    (b"\x1b[0c", b"\x1b[?62;22c"),
+    (b"\x1b[6n", b"\x1b[1;1R"),
+    (b"\x1b]11;?", b"\x1b]11;rgb:0d0d/1111/1717\x1b\\"),
+    (b"\x1b]10;?", b"\x1b]10;rgb:c9c9/d1d1/d9d9\x1b\\"),
+    (b"\x1bP$qm\x1b\\", b"\x1bP1$r0m\x1b\\"),
+    (b"\x1b[>0q", b"\x1bP>|xterm(390)\x1b\\"),
+    # Last: nvim sends this after the color query and treats its answer as "no more replies".
+    (b"\x1b[5n", b"\x1b[0n"),
+]
+ESCAPE = re.compile(rb"\x1b(\[[0-9;?<>=]*[ -/]*[@-~]|\][^\x07\x1b]*(\x07|\x1b\\)|[()][A-Z0-9]|[=>78])")
+
+
+def rust_file(directory):
+    path = directory / "bench.rs"
+    lines = [f"// {MARKER.decode()}"]
+    for index in range(1250):
+        lines += [
+            f"fn function_{index}(value: u64) -> u64 {{",
+            f"    let doubled = value * 2 + {index};",
+            "    doubled.saturating_sub(1)",
+            "}",
+        ]
+    path.write_text("\n".join(lines) + "\n")
+    return path
+
+
+class Editor:
+    def __init__(self, command, environment, cwd):
+        self.started = time.perf_counter()
+        self.pid, self.fd = pty.fork()
+        if self.pid == 0:
+            os.chdir(cwd)
+            os.execvpe(command[0], command, environment)
+        fcntl.ioctl(self.fd, termios.TIOCSWINSZ, struct.pack("HHHH", 40, 120, 0, 0))
+        self.output = b""
+
+    def read(self, timeout):
+        ready, _, _ = select.select([self.fd], [], [], timeout)
+        if not ready:
+            return b""
+        try:
+            chunk = os.read(self.fd, 65536)
+        except OSError:
+            return b""
+        self.output += chunk
+        for query, reply in REPLIES:
+            if query in chunk:
+                os.write(self.fd, reply)
+        return chunk
+
+    def screen_text(self):
+        return ESCAPE.sub(b"", self.output)
+
+    def wait_for(self, needle, timeout=10.0, text=False):
+        deadline = time.perf_counter() + timeout
+        while needle not in (self.screen_text() if text else self.output):
+            if time.perf_counter() > deadline:
+                raise TimeoutError(needle)
+            self.read(0.05)
+        return time.perf_counter()
+
+    def settle(self, quiet=0.3, limit=8.0):
+        deadline = time.perf_counter() + limit
+        while time.perf_counter() < deadline:
+            if not self.read(quiet):
+                return
+
+    def descendants(self, same_name=False):
+        """The editor and its descendants; with `same_name`, only those named like it
+        (nvim's `--embed` server does the real work), not language servers it starts."""
+        name = pathlib.Path(f"/proc/{self.pid}/comm").read_text()
+        parents = {}
+        for entry in pathlib.Path("/proc").iterdir():
+            if entry.name.isdigit():
+                try:
+                    stat = (entry / "stat").read_text()
+                    comm = (entry / "comm").read_text()
+                except OSError:
+                    continue
+                parents[int(entry.name)] = (int(stat.rsplit(")", 1)[1].split()[1]), comm)
+        found, frontier = [self.pid], [self.pid]
+        while frontier:
+            parent = frontier.pop()
+            for pid, (ppid, comm) in parents.items():
+                if ppid == parent and (comm == name or not same_name):
+                    found.append(pid)
+                    frontier.append(pid)
+        return found
+
+    def processes(self):
+        return self.descendants(same_name=True)
+
+    def cpu_seconds(self):
+        # schedstat counts nanoseconds per thread; /proc/<pid>/stat ticks are too coarse for idle.
+        total = 0
+        for pid in self.processes():
+            for task in pathlib.Path(f"/proc/{pid}/task").iterdir():
+                try:
+                    total += int((task / "schedstat").read_text().split()[0])
+                except OSError:
+                    pass
+        return total / 1e9
+
+    def rss_mb(self):
+        total = 0
+        for pid in self.processes():
+            for line in pathlib.Path(f"/proc/{pid}/status").read_text().splitlines():
+                if line.startswith("VmRSS:"):
+                    total += int(line.split()[1])
+        return total / 1024
+
+    def close(self):
+        # Killing only the editor would orphan nvim's server and the language servers.
+        for pid in self.descendants():
+            try:
+                os.kill(pid, 9)
+            except ProcessLookupError:
+                pass
+        try:
+            os.waitpid(self.pid, 0)
+        except ChildProcessError:
+            pass
+        os.close(self.fd)
+
+
+def measure(name, command, environment, cwd, path, runs, keys):
+    startups, latencies, idle, memory = [], [], [], []
+    for run in range(runs):
+        editor = Editor(command + [str(path)], environment, cwd)
+        try:
+            startups.append((editor.wait_for(MARKER, text=True) - editor.started) * 1000)
+            editor.settle()
+            memory.append(editor.rss_mb())
+            # Let background startup work (highlighting, git status, file index) finish first.
+            time.sleep(2)
+            before = editor.cpu_seconds()
+            time.sleep(3)
+            idle.append((editor.cpu_seconds() - before) / 3 * 100)
+            if run == 0:
+                # Escape dismisses Dust's workspace trust prompt (and is a no-op in nvim), then
+                # `o` opens a line below the marker. `z` and `q` end no escape sequence.
+                os.write(editor.fd, b"\x1b")
+                editor.settle()
+                os.write(editor.fd, b"o")
+                editor.settle()
+                for index in range(keys):
+                    key = b"zq"[index % 2 : index % 2 + 1]
+                    editor.output = b""
+                    sent = time.perf_counter()
+                    os.write(editor.fd, key)
+                    latencies.append((editor.wait_for(key, 2.0) - sent) * 1000)
+                    editor.settle(0.005, 0.2)
+        finally:
+            editor.close()
+    startups.sort()
+    latencies.sort()
+    print(f"{name}")
+    print(f"  startup to file on screen  median {statistics.median(startups):7.1f} ms"
+          f"   min {startups[0]:.1f} ms")
+    if latencies:
+        p99 = latencies[min(len(latencies) - 1, int(len(latencies) * 0.99))]
+        print(f"  key to echo               p50 {statistics.median(latencies):7.2f} ms"
+              f"   p99 {p99:.2f} ms")
+    print(f"  idle cpu                       {statistics.median(idle):7.3f} %")
+    print(f"  memory after startup           {statistics.median(memory):7.1f} MB")
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--dust", default=str(ROOT / "target/release/dust"))
+    # -n: no swap file, so a killed run does not leave a recovery prompt for the next one.
+    parser.add_argument("--other", default="nvim -n")
+    parser.add_argument("--runs", type=int, default=5)
+    parser.add_argument("--keys", type=int, default=200)
+    arguments = parser.parse_args()
+
+    with tempfile.TemporaryDirectory(prefix="dust-bench-") as scratch:
+        scratch = pathlib.Path(scratch)
+        workspace = scratch / "workspace"
+        workspace.mkdir()
+        path = rust_file(workspace)
+        base = dict(os.environ, TERM="xterm-256color", COLUMNS="120", LINES="40")
+        fresh = dict(base)
+        for variable in ("CONFIG", "STATE", "DATA", "CACHE"):
+            directory = scratch / variable.lower()
+            directory.mkdir()
+            fresh[f"XDG_{variable}_HOME"] = str(directory)
+        dust = str(pathlib.Path(arguments.dust).resolve())
+        measure("dust", [dust], fresh, workspace, path, arguments.runs, arguments.keys)
+        other = shlex.split(arguments.other)
+        if shutil.which(other[0]):
+            measure(arguments.other, other, base, workspace, path, arguments.runs, arguments.keys)
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,17 @@
+id = "completion"
+version = "0.1.0"
+component_sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
+capabilities = ["read_current_buffer", "completion", "show_message"]
+
+[commands.enable]
+title = "completion: enable"
+context = "buffer"
+activation = "active_only"
+
+[commands.complete]
+title = "completion: complete"
+context = "buffer"
+activation = "active_only"
+
+[contributions]
+schema_version = 1

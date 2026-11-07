@@ -1,0 +1,140 @@
+# The Settings page (`:settings`, ctrl-, or <leader>,): each section lists settings by key with
+# a description. The title comes from the key unless one is given; `choices` makes a dropdown,
+# `choices_from` fills one from a table of the configuration, and `restart` says the change
+# takes effect next time Dust starts. Every setting in config.toml must be listed here or sit
+# under one of the `collections`, which are edited in config.toml itself.
+
+collections = [
+  "schema_version", "messages", "command_labels", "command_palette", "editor.comments",
+  "input.command_aliases", "input.text_commands", "input.paste_commands",
+  "input.character_fallback_commands", "input.unmatched_commands",
+  "ui.command_line.completion_kind_icons", "ui.command_line.text", "ui.explorer.glyphs",
+  "editor.markdown.glyphs",
+  "ui.status_line.mode_labels", "ui.buffer_line.extension_icons", "ui.tool_manager.categories",
+  "terminals.profiles", "agents.profiles", "windows", "plugins", "tasks",
+]
+
+[[section]]
+title = "Commonly Used"
+common = [
+  "editor.wrap", "editor.line_numbers", "editor.tab_width", "editor.expand_tabs",
+  "editor.autopairs", "ui.theme", "lsp.inlay_hints", "lsp.format_on_save",
+  "lsp.auto_completion", "agents.default", "agents.connection", "editor.registers.clipboard",
+  "ui.explorer.icon_mode", "ui.mouse", "startup.show_dashboard",
+]
+
+[[section]]
+title = "Text Editor"
+settings = [
+  { key = "editor.line_numbers", about = "How the gutter numbers lines: relative counts from the cursor line, hybrid shows the cursor line's own number.", choices = ["absolute", "relative", "hybrid", "off"] },
+  { key = "editor.wrap", title = "Word Wrap", about = "Wrap long lines at the window edge instead of scrolling sideways." },
+  { key = "editor.tab_width", about = "How many columns a tab character takes." },
+  { key = "editor.indent_width", about = "How many columns >>, << and automatic indentation move by." },
+  { key = "editor.expand_tabs", title = "Insert Spaces", about = "Indent with spaces instead of tab characters." },
+  { key = "editor.autopairs", title = "Auto Close Brackets", about = "Typing an opening bracket or quote inserts its closing partner." },
+  { key = "editor.viewport.horizontal_margin", title = "Scroll Off: Columns", about = "Columns kept visible beside the cursor when scrolling sideways." },
+  { key = "editor.viewport.vertical_margin", title = "Scroll Off: Lines", about = "Lines kept visible above and below the cursor." },
+  { key = "editor.line_endings", about = "Line endings written on save; preserve keeps what the file had.", choices = ["preserve", "lf", "cr_lf", "cr"] },
+  { key = "editor.final_newline", about = "Whether a saved file ends with a newline; preserve keeps what the file had.", choices = ["preserve", "insert", "remove"] },
+  { key = "editor.ambiguous_width", about = "How wide characters of ambiguous width are drawn; match your terminal.", choices = ["narrow", "wide"] },
+  { key = "editor.registers.clipboard", title = "System Clipboard", about = "unnamedplus shares yank and paste with the system clipboard; off keeps them inside Dust.", choices = ["unnamedplus", "off"] },
+  { key = "editor.indent_guides.enabled", about = "Draw a line at each indentation level." },
+  { key = "editor.markdown.render", title = "Render Markdown", about = "Draw markdown headings, lists, code and links in place; the cursor's line shows the source." },
+  { key = "editor.markdown.table_bottom", title = "Table Bottom Border", about = "Close a markdown table with a border under its last row." },
+  { key = "editor.markdown.table_row_lines", title = "Table Row Lines", about = "Draw a border between a markdown table's rows." },
+  { key = "editor.git_signs.enabled", about = "Mark added, changed and deleted lines in the gutter." },
+  { key = "editor.large_file.enabled", about = "Open big files in a lighter mode that stays fast." },
+]
+
+[[section]]
+title = "Appearance"
+settings = [
+  { key = "ui.theme", title = "Color Theme", about = "The colour theme. Pick one to preview it live." },
+  { key = "ui.color_mode", about = "How many colours the terminal shows; auto asks the terminal.", choices = ["auto", "true_color", "ansi256", "ansi16"] },
+  { key = "ui.cursor.normal", title = "Cursor: Normal Mode", about = "Cursor shape in Normal mode.", choices = ["block", "bar", "underline", "blinking_block", "blinking_bar", "blinking_underline", "default"] },
+  { key = "ui.cursor.insert", title = "Cursor: Insert Mode", about = "Cursor shape in Insert mode.", choices = ["bar", "block", "underline", "blinking_bar", "blinking_block", "blinking_underline", "default"] },
+  { key = "ui.key_hints.enabled", title = "Key Hints", about = "Show the keys that can follow, like which-key, when you pause in a key sequence." },
+  { key = "ui.key_hints.delay_ms", title = "Key Hints: Delay (ms)", about = "How long to wait before showing key hints." },
+  { key = "ui.documentation_popup.enabled", title = "Hover Documentation", about = "Show documentation popups for hover and completion." },
+  { key = "ui.lsp_progress.enabled", title = "Language Server Progress", about = "Show what language servers are busy with in the corner." },
+]
+
+[[section]]
+title = "Status Line & Tabs"
+settings = [
+  { key = "ui.status_line.enabled", title = "Status Line", about = "Show the status line at the bottom." },
+  { key = "ui.status_line.components", about = "What the status line shows, in order, separated by commas: mode, git, file, breadcrumbs, diagnostics, tasks, large_file, lsp, root, progress, position." },
+  { key = "ui.buffer_line.enabled", title = "Buffer Tabs", about = "Show open files as tabs along the top." },
+  { key = "ui.buffer_line.hide_when_single", about = "Hide the buffer tabs while only one file is open." },
+]
+
+[[section]]
+title = "Code Intelligence"
+settings = [
+  { key = "lsp.enabled", title = "Language Servers", about = "Use language servers for completion, diagnostics, hover and go to definition." },
+  { key = "lsp.auto_start", about = "Start the language server for a file when it opens." },
+  { key = "lsp.auto_install", about = "Install a language server for a file when none is installed or the one on PATH doesn't work." },
+  { key = "lsp.auto_completion", title = "Completion While Typing", about = "Show completions as you type, without ctrl-space." },
+  { key = "lsp.inlay_hints", title = "Inlay Hints", about = "Show types and parameter names inside the code." },
+  { key = "lsp.inlay_hint_level", about = "standard shows what the server shows by default; max turns on every hint the server has.", choices = ["standard", "max"] },
+  { key = "lsp.format_on_save", about = "Format the file with its language server when you save." },
+  { key = "lsp.nix_workspace_fallback", title = "Nix Workspace Fallback", about = "Run servers through the project's Nix shell when they are not installed." },
+  { key = "syntax.enabled", title = "Syntax Highlighting", about = "Colour code with tree-sitter." },
+]
+
+[[section]]
+title = "AI Agents"
+settings = [
+  { key = "agents.default", title = "Default Agent", about = "The agent <leader>aa and ctrl-t in the agent panel start; ctrl-shift-t always asks.", choices_from = "agents.profiles", empty = "Ask every time" },
+  { key = "agents.connection", about = "acp runs the agent inside Dust's agent panel; terminal runs the agent's own command-line program in a terminal beside the editor.", choices = ["acp", "terminal"] },
+  { key = "agents.side", title = "Panel Side", about = "The side the agent panel or terminal agent opens on.", choices = ["right", "left"] },
+  { key = "agents.panel_width", title = "Panel Width (%)", about = "Share of the editor width the agent panel opens at." },
+  { key = "agents.add_tools", title = "Add Dust's Tools", about = "Give agents that keep their tools in their own config, such as pi, Dust's tools and subagents, by running their add_tools command before they start." },
+]
+
+[[section]]
+title = "Terminal"
+settings = [
+  { key = "terminals.default_profile", title = "Default Shell Profile", about = "The terminal profile ctrl-/ opens.", choices_from = "terminals.profiles" },
+  { key = "ui.terminal_panel.placement", title = "Placement", about = "bottom docks the terminal under the editor, float opens it in a centered window, fullscreen draws it over everything.", choices = ["bottom", "float", "fullscreen"] },
+  { key = "ui.terminal_panel.height", title = "Panel Height", about = "Rows the terminal panel opens with when docked at the bottom." },
+]
+
+[[section]]
+title = "Explorer"
+settings = [
+  { key = "ui.explorer.icon_mode", title = "File Icons", about = "nerd_font needs a Nerd Font; unicode and ascii work with any font.", choices = ["nerd_font", "unicode", "ascii"] },
+  { key = "ui.explorer.side", title = "Side", about = "The side the file explorer docks on.", choices = ["left", "right"] },
+  { key = "ui.explorer.width", about = "Columns the explorer opens with." },
+]
+
+[[section]]
+title = "Search"
+settings = [
+  { key = "search.smart_case", about = "Searches ignore case unless they contain a capital letter." },
+  { key = "search.wrap", title = "Wrap Around", about = "n and N continue from the other end of the file." },
+  { key = "search.highlight", title = "Highlight Matches", about = "Highlight every match of the last search." },
+  { key = "workspace.search.exclude_globs", title = "Project Search: Exclude", about = "Skip files matching these globs, separated by commas." },
+  { key = "workspace.search.include_hidden", about = "Search hidden files too." },
+  { key = "workspace.search.include_ignored", about = "Search files .gitignore leaves out too." },
+]
+
+[[section]]
+title = "Files & Session"
+settings = [
+  { key = "startup.show_dashboard", title = "Show Dashboard", about = "Show the start screen when Dust opens without a file." },
+  { key = "persistence.enabled", title = "Remember Session", about = "Remember open files, marks, jumps and recent files between runs." },
+  { key = "persistence.restore_on_startup", about = "Reopen the last session's files when Dust starts." },
+  { key = "persistence.undo_history", title = "Persistent Undo", about = "Keep each file's undo history across restarts." },
+  { key = "recovery.enabled", title = "Crash Recovery", about = "Keep a journal of unsaved changes so they survive a crash." },
+]
+
+[[section]]
+title = "Keyboard & Mouse"
+settings = [
+  { key = "input.keymaps.leader", title = "Leader Key", about = "The key that starts <leader> shortcuts." },
+  { key = "input.keymaps.local_leader", title = "Local Leader Key", about = "The key that starts <localleader> shortcuts." },
+  { key = "input.mapping_timeout_ms", title = "Key Sequence Timeout (ms)", about = "How long Dust waits for the next key of a sequence." },
+  { key = "ui.mouse", title = "Mouse", about = "Click, scroll and drag with the mouse." },
+]
+

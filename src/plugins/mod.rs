@@ -1,0 +1,150 @@
+//! Sandboxed component plugins and host requests.
+
+#![forbid(unsafe_code)]
+
+pub(crate) mod http;
+mod providers;
+pub(crate) mod requests;
+pub(crate) mod surface;
+pub use requests::PluginDelivery;
+mod storage;
+mod virtual_documents;
+pub use providers::PROVIDER_ACTION_BYTE_LIMIT;
+pub use providers::PROVIDER_CHUNK_ITEM_LIMIT;
+pub use providers::PROVIDER_CONTEXT_BYTE_LIMIT;
+pub use providers::PROVIDER_ITEM_ID_BYTE_LIMIT;
+pub use providers::PROVIDER_PRIMARY_BYTE_LIMIT;
+pub use providers::PROVIDER_QUERY_BYTE_LIMIT;
+pub use providers::PROVIDER_REQUEST_QUEUE_LIMIT;
+pub use providers::PROVIDER_SECONDARY_BYTE_LIMIT;
+pub use providers::PluginPickerChunk;
+pub use providers::PluginPickerItem;
+pub use providers::PluginPickerProjection;
+pub use providers::PluginPickerRequestEnvelope;
+pub use providers::PluginProviderBroker;
+pub use providers::PluginProviderError;
+pub use providers::PluginProviderErrorCode;
+pub use providers::PluginProviderSessionStatus;
+pub use providers::PluginProviderStart;
+pub use providers::PluginProviderTerminal;
+pub use storage::PluginStorageEntry;
+pub use storage::PluginStorageError;
+pub use storage::PluginStorageErrorCode;
+pub use storage::PluginStorageRequest;
+pub use storage::PluginStorageRequestKind;
+pub use storage::PluginStorageResult;
+pub use storage::PluginStorageWorker;
+pub use storage::STORAGE_KEY_BYTE_LIMIT;
+pub use storage::STORAGE_LIST_BYTE_LIMIT;
+pub use storage::STORAGE_LIST_ENTRY_LIMIT;
+pub use storage::STORAGE_REQUEST_LIMIT;
+pub use storage::STORAGE_RESULT_QUEUE_BYTE_LIMIT;
+pub use storage::STORAGE_VALUE_BYTE_LIMIT;
+pub use virtual_documents::PluginVirtualDocumentBroker;
+pub use virtual_documents::PluginVirtualDocumentError;
+pub use virtual_documents::PluginVirtualDocumentErrorCode;
+pub use virtual_documents::PluginVirtualDocumentFull;
+pub use virtual_documents::PluginVirtualDocumentPatch;
+pub use virtual_documents::PluginVirtualDocumentPatchSet;
+pub use virtual_documents::PluginVirtualDocumentProposal;
+pub use virtual_documents::PluginVirtualDocumentProposalKind;
+pub use virtual_documents::PluginVirtualDocumentRequest;
+pub use virtual_documents::PluginVirtualDocumentRequestKind;
+pub use virtual_documents::PluginVirtualDocumentSnapshot;
+pub(crate) use virtual_documents::PluginVirtualRequestLane;
+pub use virtual_documents::VIRTUAL_DOCUMENT_KEY_BYTE_LIMIT;
+pub use virtual_documents::VIRTUAL_DOCUMENT_LANGUAGE_BYTE_LIMIT;
+pub use virtual_documents::VIRTUAL_DOCUMENT_REQUEST_QUEUE_LIMIT;
+pub use virtual_documents::VIRTUAL_DOCUMENT_TITLE_BYTE_LIMIT;
+
+mod manifest;
+pub use manifest::PluginActivationBehavior;
+pub use manifest::PluginArgumentDeclaration;
+pub use manifest::PluginArgumentKind;
+pub use manifest::PluginCapability;
+pub(crate) use manifest::PluginCatalogVersion;
+pub use manifest::PluginCommandContext;
+pub use manifest::PluginCommandDeclaration;
+pub use manifest::PluginContentTypeContribution;
+pub use manifest::PluginContributionCatalog;
+pub use manifest::PluginContributionIndex;
+pub use manifest::PluginContributionProvenance;
+pub use manifest::PluginContributions;
+pub use manifest::PluginInputContextContribution;
+pub use manifest::PluginKeyGroupContribution;
+pub use manifest::PluginKeymapContribution;
+pub use manifest::PluginLimits;
+pub use manifest::PluginManifest;
+pub use manifest::PluginPresenterKind;
+pub use manifest::PluginPrivateCellPolicy;
+pub use manifest::PluginProviderContribution;
+pub use manifest::PluginProviderKind;
+pub use manifest::PluginStorageContribution;
+pub use manifest::PluginSubscriptionContribution;
+pub use manifest::PluginSubscriptionKind;
+pub use manifest::PluginVirtualDocumentContribution;
+pub use manifest::PluginVirtualDocumentMode;
+pub use manifest::PluginWindowPlacementKind;
+mod execution;
+pub use execution::LoadedComponent;
+pub use execution::PluginConfirmationAnswer;
+pub use execution::PluginConfirmationError;
+pub use execution::PluginConfirmationErrorCode;
+pub use execution::PluginConfirmationOutcome;
+pub use execution::PluginConfirmationRequest;
+pub use execution::PluginConfirmationResult;
+pub use execution::PluginEdit;
+pub use execution::PluginEditProposal;
+pub use execution::PluginExecution;
+pub use execution::PluginExecutionRequest;
+pub use execution::PluginHostEventEnvelope;
+pub use execution::PluginHostEventQueue;
+pub use execution::PluginLoadId;
+pub use execution::PluginPrivateCell;
+pub use execution::PluginPrivateCursor;
+pub use execution::PluginPrivateHitRegion;
+pub use execution::PluginPrivatePatch;
+pub use execution::PluginPrivateRect;
+pub use execution::PluginPrivateSnapshot;
+pub use execution::PluginPrivateStyle;
+pub use execution::PluginRequestedPlacement;
+pub use execution::PluginSnapshot;
+pub use execution::PluginStatus;
+pub use execution::PluginSurfaceGeometry;
+pub use execution::PluginUiError;
+pub use execution::PluginUiErrorCode;
+pub use execution::PluginUiEvent;
+pub use execution::PluginUiNode;
+pub use execution::PluginUiNodeKind;
+pub use execution::PluginUiRequest;
+pub use execution::PluginUiRequestKind;
+pub use execution::PluginUiStyle;
+pub use execution::PluginUiTree;
+mod host;
+pub(crate) use host::OwnedPluginEvent;
+pub use host::PluginEvent;
+pub(crate) use host::PluginExecutionReply;
+pub use host::PluginHost;
+pub(crate) use host::PluginInvocation;
+pub(crate) use host::PluginInvocationOrigin;
+pub mod component;
+mod index;
+pub use component::ComponentHostState;
+pub use component::component_api;
+pub use index::PluginError;
+pub use index::activate_candidate;
+#[cfg(test)]
+pub(crate) use index::execute_component;
+pub use index::index_manifest_contributions;
+
+#[cfg(test)]
+mod host_tests;
+
+#[cfg(test)]
+#[cfg(test)]
+pub(crate) use host_tests::ExecutionFixture;
+#[cfg(test)]
+pub(crate) use host_tests::empty_execution_request;
+
+#[cfg(test)]
+pub(crate) use index::load_component;

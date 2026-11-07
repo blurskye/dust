@@ -1,0 +1,7634 @@
+# Every shipped logical key binding and key-hint group is declared here. Rust code
+# implements commands and projections, never a second default key or hint table.
+
+[[keymap]]
+id = "builtin.editor.normal.input-motion.h"
+context = "editor"
+mode = "normal"
+keys = "h"
+command = "input.motion"
+arguments = { motion = "left", linewise = false }
+[[keymap]]
+id = "builtin.editor.normal.input-motion.left"
+context = "editor"
+mode = "normal"
+keys = "left"
+command = "input.motion"
+arguments = { motion = "left", linewise = false }
+[[keymap]]
+id = "builtin.editor.normal.input-motion.j"
+context = "editor"
+mode = "normal"
+keys = "j"
+command = "input.motion"
+arguments = { motion = "down", linewise = false }
+[[keymap]]
+id = "builtin.editor.normal.input-motion.down"
+context = "editor"
+mode = "normal"
+keys = "down"
+command = "input.motion"
+arguments = { motion = "down", linewise = false }
+[[keymap]]
+id = "builtin.editor.normal.input-motion.k"
+context = "editor"
+mode = "normal"
+keys = "k"
+command = "input.motion"
+arguments = { motion = "up", linewise = false }
+[[keymap]]
+id = "builtin.editor.normal.input-motion.up"
+context = "editor"
+mode = "normal"
+keys = "up"
+command = "input.motion"
+arguments = { motion = "up", linewise = false }
+[[keymap]]
+id = "builtin.editor.normal.input-motion.l"
+context = "editor"
+mode = "normal"
+keys = "l"
+command = "input.motion"
+arguments = { motion = "right", linewise = false }
+[[keymap]]
+id = "builtin.editor.normal.input-motion.right"
+context = "editor"
+mode = "normal"
+keys = "right"
+command = "input.motion"
+arguments = { motion = "right", linewise = false }
+[[keymap]]
+id = "builtin.editor.normal.input-zero.key-0"
+context = "editor"
+mode = "normal"
+keys = "0"
+command = "input.zero"
+[[keymap]]
+id = "builtin.editor.normal.input-motion.home"
+context = "editor"
+mode = "normal"
+keys = "home"
+command = "input.motion"
+arguments = { motion = "line_start", linewise = false }
+[[keymap]]
+id = "builtin.editor.normal.input-motion.caret"
+context = "editor"
+mode = "normal"
+keys = "^"
+command = "input.motion"
+arguments = { motion = "first_nonblank", linewise = false }
+[[keymap]]
+id = "builtin.editor.normal.input-motion.dollar"
+context = "editor"
+mode = "normal"
+keys = "$"
+command = "input.motion"
+arguments = { motion = "line_end", linewise = false }
+[[keymap]]
+id = "builtin.editor.normal.input-motion.end"
+context = "editor"
+mode = "normal"
+keys = "end"
+command = "input.motion"
+arguments = { motion = "line_end", linewise = false }
+[[keymap]]
+id = "builtin.editor.normal.input-motion.w"
+context = "editor"
+mode = "normal"
+keys = "w"
+command = "input.motion"
+arguments = { motion = "word_forward", linewise = false }
+[[keymap]]
+id = "builtin.editor.normal.input-motion.upper-w"
+context = "editor"
+mode = "normal"
+keys = "W"
+command = "input.motion"
+arguments = { motion = "big_word_forward", linewise = false }
+[[keymap]]
+id = "builtin.editor.normal.input-motion.b"
+context = "editor"
+mode = "normal"
+keys = "b"
+command = "input.motion"
+arguments = { motion = "word_backward", linewise = false }
+[[keymap]]
+id = "builtin.editor.normal.input-motion.upper-b"
+context = "editor"
+mode = "normal"
+keys = "B"
+command = "input.motion"
+arguments = { motion = "big_word_backward", linewise = false }
+[[keymap]]
+id = "builtin.editor.normal.input-motion.e"
+context = "editor"
+mode = "normal"
+keys = "e"
+command = "input.motion"
+arguments = { motion = "word_end", linewise = false }
+[[keymap]]
+id = "builtin.editor.normal.input-motion.upper-e"
+context = "editor"
+mode = "normal"
+keys = "E"
+command = "input.motion"
+arguments = { motion = "big_word_end", linewise = false }
+[[keymap]]
+id = "builtin.editor.normal.input-motion.percent"
+context = "editor"
+mode = "normal"
+keys = "%"
+command = "input.motion"
+arguments = { motion = "matching_pair", linewise = false }
+[[keymap]]
+id = "builtin.editor.normal.input-motion.upper-g"
+context = "editor"
+mode = "normal"
+keys = "G"
+command = "input.motion"
+arguments = { motion = "document_end", linewise = false }
+[[keymap]]
+id = "builtin.editor.normal.input-motion.g-g"
+context = "editor"
+mode = "normal"
+keys = "g g"
+command = "input.motion"
+arguments = { motion = "document_start", linewise = false }
+desc = "Document start"
+
+# Counts and register/operator grammar.
+[[keymap]]
+id = "builtin.editor.normal.input-count.key-1"
+context = "editor"
+mode = "normal"
+keys = "1"
+command = "input.count"
+arguments = { digit = 1 }
+[[keymap]]
+id = "builtin.editor.normal.input-count.key-2"
+context = "editor"
+mode = "normal"
+keys = "2"
+command = "input.count"
+arguments = { digit = 2 }
+[[keymap]]
+id = "builtin.editor.normal.input-count.key-3"
+context = "editor"
+mode = "normal"
+keys = "3"
+command = "input.count"
+arguments = { digit = 3 }
+[[keymap]]
+id = "builtin.editor.normal.input-count.key-4"
+context = "editor"
+mode = "normal"
+keys = "4"
+command = "input.count"
+arguments = { digit = 4 }
+[[keymap]]
+id = "builtin.editor.normal.input-count.key-5"
+context = "editor"
+mode = "normal"
+keys = "5"
+command = "input.count"
+arguments = { digit = 5 }
+[[keymap]]
+id = "builtin.editor.normal.input-count.key-6"
+context = "editor"
+mode = "normal"
+keys = "6"
+command = "input.count"
+arguments = { digit = 6 }
+[[keymap]]
+id = "builtin.editor.normal.input-count.key-7"
+context = "editor"
+mode = "normal"
+keys = "7"
+command = "input.count"
+arguments = { digit = 7 }
+[[keymap]]
+id = "builtin.editor.normal.input-count.key-8"
+context = "editor"
+mode = "normal"
+keys = "8"
+command = "input.count"
+arguments = { digit = 8 }
+[[keymap]]
+id = "builtin.editor.normal.input-count.key-9"
+context = "editor"
+mode = "normal"
+keys = "9"
+command = "input.count"
+arguments = { digit = 9 }
+[[keymap]]
+id = "builtin.editor.normal.input-register-begin.quote"
+context = "editor"
+mode = "normal"
+keys = "\""
+command = "input.register.begin"
+[[keymap]]
+id = "builtin.editor.normal.input-operator-begin.d"
+context = "editor"
+mode = "normal"
+keys = "d"
+command = "input.operator.begin"
+arguments = { operator = "delete" }
+[[keymap]]
+id = "builtin.editor.normal.input-operator-begin.c"
+context = "editor"
+mode = "normal"
+keys = "c"
+command = "input.operator.begin"
+arguments = { operator = "change" }
+[[keymap]]
+id = "builtin.editor.normal.input-operator-begin.y"
+context = "editor"
+mode = "normal"
+keys = "y"
+command = "input.operator.begin"
+arguments = { operator = "yank" }
+[[keymap]]
+id = "builtin.editor.normal.input-operator-begin.greater"
+context = "editor"
+mode = "normal"
+keys = ">"
+command = "input.operator.begin"
+arguments = { operator = "indent" }
+[[keymap]]
+id = "builtin.editor.normal.input-operator-begin.less"
+context = "editor"
+mode = "normal"
+keys = "<"
+command = "input.operator.begin"
+arguments = { operator = "unindent" }
+
+# Normal-mode direct commands and transitions.
+[[keymap]]
+id = "builtin.editor.normal.mode-insert.i"
+context = "editor"
+mode = "normal"
+keys = "i"
+command = "mode.insert"
+arguments = { placement = "before" }
+[[keymap]]
+id = "builtin.editor.normal.mode-insert.upper-i"
+context = "editor"
+mode = "normal"
+keys = "I"
+command = "mode.insert"
+arguments = { placement = "line_start" }
+[[keymap]]
+id = "builtin.editor.normal.mode-insert.a"
+context = "editor"
+mode = "normal"
+keys = "a"
+command = "mode.insert"
+arguments = { placement = "after" }
+[[keymap]]
+id = "builtin.editor.normal.mode-insert.upper-a"
+context = "editor"
+mode = "normal"
+keys = "A"
+command = "mode.insert"
+arguments = { placement = "line_end" }
+[[keymap]]
+id = "builtin.editor.normal.mode-insert.o"
+context = "editor"
+mode = "normal"
+keys = "o"
+command = "mode.insert"
+arguments = { placement = "open_below" }
+[[keymap]]
+id = "builtin.editor.normal.mode-insert.upper-o"
+context = "editor"
+mode = "normal"
+keys = "O"
+command = "mode.insert"
+arguments = { placement = "open_above" }
+[[keymap]]
+id = "builtin.editor.normal.edit-delete-char.x"
+context = "editor"
+mode = "normal"
+keys = "x"
+command = "edit.delete_char"
+[[keymap]]
+id = "builtin.editor.normal.edit-delete-char.delete"
+context = "editor"
+mode = "normal"
+keys = "delete"
+command = "edit.delete_char"
+[[keymap]]
+id = "builtin.editor.normal.edit-delete-backward.upper-x"
+context = "editor"
+mode = "normal"
+keys = "X"
+command = "edit.delete_backward"
+[[keymap]]
+id = "builtin.editor.normal.flash.s"
+context = "editor"
+mode = "normal"
+keys = "s"
+command = "editor.flash"
+desc = "Flash"
+
+[[keymap]]
+id = "builtin.editor.visual-char.flash.s"
+context = "editor"
+mode = "visual_char"
+keys = "s"
+command = "editor.flash"
+desc = "Flash"
+
+[[keymap]]
+id = "builtin.editor.visual-line.flash.s"
+context = "editor"
+mode = "visual_line"
+keys = "s"
+command = "editor.flash"
+desc = "Flash"
+[[keymap]]
+id = "builtin.editor.normal.edit-operator.upper-s"
+context = "editor"
+mode = "normal"
+keys = "S"
+command = "edit.operator"
+arguments = { operator = "change", motion = "line", linewise = true }
+[[keymap]]
+id = "builtin.editor.normal.input-replace-begin.r"
+context = "editor"
+mode = "normal"
+keys = "r"
+command = "input.replace.begin"
+[[keymap]]
+id = "builtin.editor.normal.edit-join-lines.upper-j"
+context = "editor"
+mode = "normal"
+keys = "J"
+command = "edit.join_lines"
+[[keymap]]
+id = "builtin.editor.normal.edit-toggle-case.tilde"
+context = "editor"
+mode = "normal"
+keys = "~"
+command = "edit.toggle_case"
+[[keymap]]
+id = "builtin.editor.normal.edit-put.p"
+context = "editor"
+mode = "normal"
+keys = "p"
+command = "edit.put"
+arguments = { before = false }
+[[keymap]]
+id = "builtin.editor.normal.edit-put.upper-p"
+context = "editor"
+mode = "normal"
+keys = "P"
+command = "edit.put"
+arguments = { before = true }
+[[keymap]]
+id = "builtin.editor.normal.history-undo.u"
+context = "editor"
+mode = "normal"
+keys = "u"
+command = "history.undo"
+[[keymap]]
+id = "builtin.editor.normal.history-redo.ctrl-r"
+context = "editor"
+mode = "normal"
+keys = "ctrl-r"
+command = "history.redo"
+[[keymap]]
+id = "builtin.editor.normal.edit-repeat-last.period"
+context = "editor"
+mode = "normal"
+keys = "."
+command = "edit.repeat_last"
+[[keymap]]
+id = "builtin.editor.normal.mode-visual-char.v"
+context = "editor"
+mode = "normal"
+keys = "v"
+command = "mode.visual_char"
+[[keymap]]
+id = "builtin.editor.normal.mode-visual-line.upper-v"
+context = "editor"
+mode = "normal"
+keys = "V"
+command = "mode.visual_line"
+[[keymap]]
+id = "builtin.editor.normal.command-line-open.colon"
+context = "editor"
+mode = "normal"
+keys = ":"
+command = "command_line.open"
+arguments = { kind = "command" }
+[[keymap]]
+id = "builtin.editor.normal.command-line-open.slash"
+context = "editor"
+mode = "normal"
+keys = "/"
+command = "command_line.open"
+arguments = { kind = "search_forward" }
+[[keymap]]
+id = "builtin.editor.normal.command-line-open.question"
+context = "editor"
+mode = "normal"
+keys = "?"
+command = "command_line.open"
+arguments = { kind = "search_backward" }
+[[keymap]]
+id = "builtin.editor.normal.search-repeat.n"
+context = "editor"
+mode = "normal"
+keys = "n"
+command = "search.repeat"
+arguments = { reverse = false }
+[[keymap]]
+id = "builtin.editor.normal.search-repeat.upper-n"
+context = "editor"
+mode = "normal"
+keys = "N"
+command = "search.repeat"
+arguments = { reverse = true }
+[[keymap]]
+id = "builtin.editor.normal.search-word.star"
+context = "editor"
+mode = "normal"
+keys = "*"
+command = "search.word"
+arguments = { forward = true }
+[[keymap]]
+id = "builtin.editor.normal.search-word.hash"
+context = "editor"
+mode = "normal"
+keys = "#"
+command = "search.word"
+arguments = { forward = false }
+[[keymap]]
+id = "builtin.editor.normal.input-macro-record-toggle.q"
+context = "editor"
+mode = "normal"
+keys = "q"
+command = "input.macro.record.toggle"
+[[keymap]]
+id = "builtin.editor.normal.input-macro-replay-begin.at"
+context = "editor"
+mode = "normal"
+keys = "@"
+command = "input.macro.replay.begin"
+[[keymap]]
+id = "builtin.editor.normal.view-scroll.ctrl-f"
+context = "editor"
+mode = "normal"
+keys = "ctrl-f"
+command = "view.scroll"
+arguments = { kind = "page_down" }
+[[keymap]]
+id = "builtin.editor.normal.view-scroll.ctrl-b"
+context = "editor"
+mode = "normal"
+keys = "ctrl-b"
+command = "view.scroll"
+arguments = { kind = "page_up" }
+[[keymap]]
+id = "builtin.editor.normal.view-scroll.ctrl-d"
+context = "editor"
+mode = "normal"
+keys = "ctrl-d"
+command = "view.scroll"
+arguments = { kind = "half_down" }
+[[keymap]]
+id = "builtin.editor.normal.view-scroll.ctrl-u"
+context = "editor"
+mode = "normal"
+keys = "ctrl-u"
+command = "view.scroll"
+arguments = { kind = "half_up" }
+[[keymap]]
+id = "builtin.editor.normal.input-cancel.escape"
+context = "editor"
+mode = "normal"
+keys = "escape"
+command = "input.cancel"
+
+# Insert mode special keys. Ordinary committed characters use the configured text command.
+[[keymap]]
+id = "builtin.editor.insert.input-cancel.escape"
+context = "editor"
+mode = "insert"
+keys = "escape"
+command = "input.cancel"
+[[keymap]]
+id = "builtin.editor.insert.edit-backspace.backspace"
+context = "editor"
+mode = "insert"
+keys = "backspace"
+command = "edit.backspace"
+[[keymap]]
+id = "builtin.editor.insert.edit-delete-char.delete"
+context = "editor"
+mode = "insert"
+keys = "delete"
+command = "edit.delete_char"
+[[keymap]]
+id = "builtin.editor.insert.edit-insert-text.enter"
+context = "editor"
+mode = "insert"
+keys = "enter"
+command = "edit.insert_text"
+arguments = { text = "\n" }
+[[keymap]]
+id = "builtin.editor.insert.edit-insert-text.tab"
+context = "editor"
+mode = "insert"
+keys = "tab"
+command = "edit.insert_text"
+arguments = { text = "\t" }
+[[keymap]]
+id = "builtin.editor.insert.input-motion.left"
+context = "editor"
+mode = "insert"
+keys = "left"
+command = "input.motion"
+arguments = { motion = "left", linewise = false }
+[[keymap]]
+id = "builtin.editor.insert.input-motion.right"
+context = "editor"
+mode = "insert"
+keys = "right"
+command = "input.motion"
+arguments = { motion = "right", linewise = false }
+[[keymap]]
+id = "builtin.editor.insert.input-motion.word-backward.ctrl-left"
+context = "editor"
+mode = "insert"
+keys = "ctrl-left"
+command = "input.motion"
+arguments = { motion = "word_backward", linewise = false }
+[[keymap]]
+id = "builtin.editor.insert.input-motion.word-forward.ctrl-right"
+context = "editor"
+mode = "insert"
+keys = "ctrl-right"
+command = "input.motion"
+arguments = { motion = "word_forward", linewise = false }
+[[keymap]]
+id = "builtin.editor.insert.input-motion.up"
+context = "editor"
+mode = "insert"
+keys = "up"
+command = "input.motion"
+arguments = { motion = "up", linewise = false }
+[[keymap]]
+id = "builtin.editor.insert.input-motion.down"
+context = "editor"
+mode = "insert"
+keys = "down"
+command = "input.motion"
+arguments = { motion = "down", linewise = false }
+
+# Operator-pending grammar.
+[[keymap]]
+id = "builtin.editor.operator-pending.input-cancel.escape"
+context = "editor"
+mode = "operator_pending"
+keys = "escape"
+command = "input.cancel"
+[[keymap]]
+id = "builtin.editor.operator-pending.input-operator-repeat.d"
+context = "editor"
+mode = "operator_pending"
+keys = "d"
+command = "input.operator.repeat"
+arguments = { operator = "delete" }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-operator-repeat.c"
+context = "editor"
+mode = "operator_pending"
+keys = "c"
+command = "input.operator.repeat"
+arguments = { operator = "change" }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-operator-repeat.y"
+context = "editor"
+mode = "operator_pending"
+keys = "y"
+command = "input.operator.repeat"
+arguments = { operator = "yank" }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-operator-repeat.greater"
+context = "editor"
+mode = "operator_pending"
+keys = ">"
+command = "input.operator.repeat"
+arguments = { operator = "indent" }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-operator-repeat.less"
+context = "editor"
+mode = "operator_pending"
+keys = "<"
+command = "input.operator.repeat"
+arguments = { operator = "unindent" }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.w"
+context = "editor"
+mode = "operator_pending"
+keys = "w"
+command = "input.motion"
+arguments = { motion = "word_forward", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.upper-w"
+context = "editor"
+mode = "operator_pending"
+keys = "W"
+command = "input.motion"
+arguments = { motion = "big_word_forward", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.b"
+context = "editor"
+mode = "operator_pending"
+keys = "b"
+command = "input.motion"
+arguments = { motion = "word_backward", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.upper-b"
+context = "editor"
+mode = "operator_pending"
+keys = "B"
+command = "input.motion"
+arguments = { motion = "big_word_backward", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.e"
+context = "editor"
+mode = "operator_pending"
+keys = "e"
+command = "input.motion"
+arguments = { motion = "word_end", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.upper-e"
+context = "editor"
+mode = "operator_pending"
+keys = "E"
+command = "input.motion"
+arguments = { motion = "big_word_end", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.dollar"
+context = "editor"
+mode = "operator_pending"
+keys = "$"
+command = "input.motion"
+arguments = { motion = "line_end", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.h"
+context = "editor"
+mode = "operator_pending"
+keys = "h"
+command = "input.motion"
+arguments = { motion = "left", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.l"
+context = "editor"
+mode = "operator_pending"
+keys = "l"
+command = "input.motion"
+arguments = { motion = "right", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-prefix-begin.g"
+context = "editor"
+mode = "operator_pending"
+keys = "g"
+command = "input.prefix.begin"
+
+# Visual contexts.
+[[keymap]]
+id = "builtin.editor.visual-char.input-cancel.escape"
+context = "editor"
+mode = "visual_char"
+keys = "escape"
+command = "input.cancel"
+[[keymap]]
+id = "builtin.editor.visual-char.mode-normal.v"
+context = "editor"
+mode = "visual_char"
+keys = "v"
+command = "mode.normal"
+[[keymap]]
+id = "builtin.editor.visual-char.input-visual-operator.d"
+context = "editor"
+mode = "visual_char"
+keys = "d"
+command = "input.visual.operator"
+arguments = { operator = "delete", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-visual-operator.c"
+context = "editor"
+mode = "visual_char"
+keys = "c"
+command = "input.visual.operator"
+arguments = { operator = "change", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-visual-operator.y"
+context = "editor"
+mode = "visual_char"
+keys = "y"
+command = "input.visual.operator"
+arguments = { operator = "yank", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-line.input-cancel.escape"
+context = "editor"
+mode = "visual_line"
+keys = "escape"
+command = "input.cancel"
+[[keymap]]
+id = "builtin.editor.visual-line.mode-normal.upper-v"
+context = "editor"
+mode = "visual_line"
+keys = "V"
+command = "mode.normal"
+[[keymap]]
+id = "builtin.editor.visual-line.input-visual-operator.d"
+context = "editor"
+mode = "visual_line"
+keys = "d"
+command = "input.visual.operator"
+arguments = { operator = "delete", linewise = true }
+[[keymap]]
+id = "builtin.editor.visual-line.input-visual-operator.c"
+context = "editor"
+mode = "visual_line"
+keys = "c"
+command = "input.visual.operator"
+arguments = { operator = "change", linewise = true }
+[[keymap]]
+id = "builtin.editor.visual-line.input-visual-operator.y"
+context = "editor"
+mode = "visual_line"
+keys = "y"
+command = "input.visual.operator"
+arguments = { operator = "yank", linewise = true }
+
+# Shared visual motions.
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.h"
+context = "editor"
+mode = "visual_char"
+keys = "h"
+command = "input.motion"
+arguments = { motion = "left", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.j"
+context = "editor"
+mode = "visual_char"
+keys = "j"
+command = "input.motion"
+arguments = { motion = "down", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.k"
+context = "editor"
+mode = "visual_char"
+keys = "k"
+command = "input.motion"
+arguments = { motion = "up", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.l"
+context = "editor"
+mode = "visual_char"
+keys = "l"
+command = "input.motion"
+arguments = { motion = "right", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-line.input-motion.h"
+context = "editor"
+mode = "visual_line"
+keys = "h"
+command = "input.motion"
+arguments = { motion = "left", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-line.input-motion.j"
+context = "editor"
+mode = "visual_line"
+keys = "j"
+command = "input.motion"
+arguments = { motion = "down", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-line.input-motion.k"
+context = "editor"
+mode = "visual_line"
+keys = "k"
+command = "input.motion"
+arguments = { motion = "up", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-line.input-motion.l"
+context = "editor"
+mode = "visual_line"
+keys = "l"
+command = "input.motion"
+arguments = { motion = "right", linewise = false }
+
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.j"
+context = "editor"
+mode = "operator_pending"
+keys = "j"
+command = "input.motion"
+arguments = { motion = "down", linewise = true }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.k"
+context = "editor"
+mode = "operator_pending"
+keys = "k"
+command = "input.motion"
+arguments = { motion = "up", linewise = true }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.upper-g"
+context = "editor"
+mode = "operator_pending"
+keys = "G"
+command = "input.motion"
+arguments = { motion = "document_end", linewise = true }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.upper-g"
+context = "editor"
+mode = "visual_char"
+keys = "G"
+command = "input.motion"
+arguments = { motion = "document_end", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.g-g"
+context = "editor"
+mode = "visual_char"
+keys = "g g"
+command = "input.motion"
+arguments = { motion = "document_start", linewise = false }
+desc = "Document start"
+[[keymap]]
+id = "builtin.editor.visual-line.input-motion.upper-g"
+context = "editor"
+mode = "visual_line"
+keys = "G"
+command = "input.motion"
+arguments = { motion = "document_end", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-line.input-motion.g-g"
+context = "editor"
+mode = "visual_line"
+keys = "g g"
+command = "input.motion"
+arguments = { motion = "document_start", linewise = false }
+desc = "Document start"
+
+# Find on line, text objects, comments and surround (LazyVim: mini.ai, mini.surround).
+[[keymap]]
+id = "builtin.editor.normal.input-find-begin.f"
+context = "editor"
+mode = "normal"
+keys = "f"
+command = "input.find.begin"
+arguments = { text = "find_forward" }
+[[keymap]]
+id = "builtin.editor.normal.input-find-begin.upper-f"
+context = "editor"
+mode = "normal"
+keys = "F"
+command = "input.find.begin"
+arguments = { text = "find_backward" }
+[[keymap]]
+id = "builtin.editor.normal.input-find-begin.t"
+context = "editor"
+mode = "normal"
+keys = "t"
+command = "input.find.begin"
+arguments = { text = "till_forward" }
+[[keymap]]
+id = "builtin.editor.normal.input-find-begin.upper-t"
+context = "editor"
+mode = "normal"
+keys = "T"
+command = "input.find.begin"
+arguments = { text = "till_backward" }
+[[keymap]]
+id = "builtin.editor.normal.input-find-repeat.semicolon"
+context = "editor"
+mode = "normal"
+keys = ";"
+command = "input.find.repeat"
+[[keymap]]
+id = "builtin.editor.normal.input-find-reverse.comma"
+context = "editor"
+mode = "normal"
+keys = ","
+command = "input.find.reverse"
+[[keymap]]
+id = "builtin.editor.operator-pending.input-find-begin.f"
+context = "editor"
+mode = "operator_pending"
+keys = "f"
+command = "input.find.begin"
+arguments = { text = "find_forward" }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-find-begin.upper-f"
+context = "editor"
+mode = "operator_pending"
+keys = "F"
+command = "input.find.begin"
+arguments = { text = "find_backward" }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-find-begin.t"
+context = "editor"
+mode = "operator_pending"
+keys = "t"
+command = "input.find.begin"
+arguments = { text = "till_forward" }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-find-begin.upper-t"
+context = "editor"
+mode = "operator_pending"
+keys = "T"
+command = "input.find.begin"
+arguments = { text = "till_backward" }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-find-repeat.semicolon"
+context = "editor"
+mode = "operator_pending"
+keys = ";"
+command = "input.find.repeat"
+[[keymap]]
+id = "builtin.editor.operator-pending.input-find-reverse.comma"
+context = "editor"
+mode = "operator_pending"
+keys = ","
+command = "input.find.reverse"
+[[keymap]]
+id = "builtin.editor.visual-char.input-find-begin.f"
+context = "editor"
+mode = "visual_char"
+keys = "f"
+command = "input.find.begin"
+arguments = { text = "find_forward" }
+[[keymap]]
+id = "builtin.editor.visual-char.input-find-begin.upper-f"
+context = "editor"
+mode = "visual_char"
+keys = "F"
+command = "input.find.begin"
+arguments = { text = "find_backward" }
+[[keymap]]
+id = "builtin.editor.visual-char.input-find-begin.t"
+context = "editor"
+mode = "visual_char"
+keys = "t"
+command = "input.find.begin"
+arguments = { text = "till_forward" }
+[[keymap]]
+id = "builtin.editor.visual-char.input-find-begin.upper-t"
+context = "editor"
+mode = "visual_char"
+keys = "T"
+command = "input.find.begin"
+arguments = { text = "till_backward" }
+[[keymap]]
+id = "builtin.editor.visual-char.input-find-repeat.semicolon"
+context = "editor"
+mode = "visual_char"
+keys = ";"
+command = "input.find.repeat"
+[[keymap]]
+id = "builtin.editor.visual-char.input-find-reverse.comma"
+context = "editor"
+mode = "visual_char"
+keys = ","
+command = "input.find.reverse"
+[[keymap]]
+id = "builtin.editor.visual-line.input-find-begin.f"
+context = "editor"
+mode = "visual_line"
+keys = "f"
+command = "input.find.begin"
+arguments = { text = "find_forward" }
+[[keymap]]
+id = "builtin.editor.visual-line.input-find-begin.upper-f"
+context = "editor"
+mode = "visual_line"
+keys = "F"
+command = "input.find.begin"
+arguments = { text = "find_backward" }
+[[keymap]]
+id = "builtin.editor.visual-line.input-find-begin.t"
+context = "editor"
+mode = "visual_line"
+keys = "t"
+command = "input.find.begin"
+arguments = { text = "till_forward" }
+[[keymap]]
+id = "builtin.editor.visual-line.input-find-begin.upper-t"
+context = "editor"
+mode = "visual_line"
+keys = "T"
+command = "input.find.begin"
+arguments = { text = "till_backward" }
+[[keymap]]
+id = "builtin.editor.visual-line.input-find-repeat.semicolon"
+context = "editor"
+mode = "visual_line"
+keys = ";"
+command = "input.find.repeat"
+[[keymap]]
+id = "builtin.editor.visual-line.input-find-reverse.comma"
+context = "editor"
+mode = "visual_line"
+keys = ","
+command = "input.find.reverse"
+# `gn` is the next search match: `cgn` changes it and `.` changes the one after, as in Vim.
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.g-n"
+context = "editor"
+mode = "operator_pending"
+keys = "g n"
+command = "input.motion"
+arguments = { motion = "search_match", linewise = false }
+[[keymap]]
+id = "builtin.editor.normal.search-select-next.g-n"
+context = "editor"
+mode = "normal"
+keys = "g n"
+command = "search.select_next"
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.i-w"
+context = "editor"
+mode = "operator_pending"
+keys = "i w"
+command = "input.motion"
+arguments = { motion = "inner_word", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.i-upper-w"
+context = "editor"
+mode = "operator_pending"
+keys = "i W"
+command = "input.motion"
+arguments = { motion = "inner_big_word", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.i-p"
+context = "editor"
+mode = "operator_pending"
+keys = "i p"
+command = "input.motion"
+arguments = { motion = "inner_paragraph", linewise = true }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.i-paren-open"
+context = "editor"
+mode = "operator_pending"
+keys = "i ("
+command = "input.motion"
+arguments = { motion = "inner_paren", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.i-paren-close"
+context = "editor"
+mode = "operator_pending"
+keys = "i )"
+command = "input.motion"
+arguments = { motion = "inner_paren", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.i-b"
+context = "editor"
+mode = "operator_pending"
+keys = "i b"
+command = "input.motion"
+arguments = { motion = "inner_paren", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.i-bracket-open"
+context = "editor"
+mode = "operator_pending"
+keys = "i ["
+command = "input.motion"
+arguments = { motion = "inner_bracket", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.i-bracket-close"
+context = "editor"
+mode = "operator_pending"
+keys = "i ]"
+command = "input.motion"
+arguments = { motion = "inner_bracket", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.i-brace-open"
+context = "editor"
+mode = "operator_pending"
+keys = "i {"
+command = "input.motion"
+arguments = { motion = "inner_brace", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.i-brace-close"
+context = "editor"
+mode = "operator_pending"
+keys = "i }"
+command = "input.motion"
+arguments = { motion = "inner_brace", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.i-upper-b"
+context = "editor"
+mode = "operator_pending"
+keys = "i B"
+command = "input.motion"
+arguments = { motion = "inner_brace", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.i-angle-open"
+context = "editor"
+mode = "operator_pending"
+keys = "i <"
+command = "input.motion"
+arguments = { motion = "inner_angle", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.i-angle-close"
+context = "editor"
+mode = "operator_pending"
+keys = "i >"
+command = "input.motion"
+arguments = { motion = "inner_angle", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.i-double-quote"
+context = "editor"
+mode = "operator_pending"
+keys = "i \""
+command = "input.motion"
+arguments = { motion = "inner_double_quote", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.i-single-quote"
+context = "editor"
+mode = "operator_pending"
+keys = "i '"
+command = "input.motion"
+arguments = { motion = "inner_single_quote", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.i-backtick"
+context = "editor"
+mode = "operator_pending"
+keys = "i `"
+command = "input.motion"
+arguments = { motion = "inner_backtick", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.a-w"
+context = "editor"
+mode = "operator_pending"
+keys = "a w"
+command = "input.motion"
+arguments = { motion = "a_word", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.a-upper-w"
+context = "editor"
+mode = "operator_pending"
+keys = "a W"
+command = "input.motion"
+arguments = { motion = "a_big_word", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.a-p"
+context = "editor"
+mode = "operator_pending"
+keys = "a p"
+command = "input.motion"
+arguments = { motion = "a_paragraph", linewise = true }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.a-paren-open"
+context = "editor"
+mode = "operator_pending"
+keys = "a ("
+command = "input.motion"
+arguments = { motion = "a_paren", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.a-paren-close"
+context = "editor"
+mode = "operator_pending"
+keys = "a )"
+command = "input.motion"
+arguments = { motion = "a_paren", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.a-b"
+context = "editor"
+mode = "operator_pending"
+keys = "a b"
+command = "input.motion"
+arguments = { motion = "a_paren", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.a-bracket-open"
+context = "editor"
+mode = "operator_pending"
+keys = "a ["
+command = "input.motion"
+arguments = { motion = "a_bracket", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.a-bracket-close"
+context = "editor"
+mode = "operator_pending"
+keys = "a ]"
+command = "input.motion"
+arguments = { motion = "a_bracket", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.a-brace-open"
+context = "editor"
+mode = "operator_pending"
+keys = "a {"
+command = "input.motion"
+arguments = { motion = "a_brace", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.a-brace-close"
+context = "editor"
+mode = "operator_pending"
+keys = "a }"
+command = "input.motion"
+arguments = { motion = "a_brace", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.a-upper-b"
+context = "editor"
+mode = "operator_pending"
+keys = "a B"
+command = "input.motion"
+arguments = { motion = "a_brace", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.a-angle-open"
+context = "editor"
+mode = "operator_pending"
+keys = "a <"
+command = "input.motion"
+arguments = { motion = "a_angle", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.a-angle-close"
+context = "editor"
+mode = "operator_pending"
+keys = "a >"
+command = "input.motion"
+arguments = { motion = "a_angle", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.a-double-quote"
+context = "editor"
+mode = "operator_pending"
+keys = "a \""
+command = "input.motion"
+arguments = { motion = "a_double_quote", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.a-single-quote"
+context = "editor"
+mode = "operator_pending"
+keys = "a '"
+command = "input.motion"
+arguments = { motion = "a_single_quote", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.a-backtick"
+context = "editor"
+mode = "operator_pending"
+keys = "a `"
+command = "input.motion"
+arguments = { motion = "a_backtick", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.i-w"
+context = "editor"
+mode = "visual_char"
+keys = "i w"
+command = "input.motion"
+arguments = { motion = "inner_word", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.i-upper-w"
+context = "editor"
+mode = "visual_char"
+keys = "i W"
+command = "input.motion"
+arguments = { motion = "inner_big_word", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.i-p"
+context = "editor"
+mode = "visual_char"
+keys = "i p"
+command = "input.motion"
+arguments = { motion = "inner_paragraph", linewise = true }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.i-paren-open"
+context = "editor"
+mode = "visual_char"
+keys = "i ("
+command = "input.motion"
+arguments = { motion = "inner_paren", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.i-paren-close"
+context = "editor"
+mode = "visual_char"
+keys = "i )"
+command = "input.motion"
+arguments = { motion = "inner_paren", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.i-b"
+context = "editor"
+mode = "visual_char"
+keys = "i b"
+command = "input.motion"
+arguments = { motion = "inner_paren", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.i-bracket-open"
+context = "editor"
+mode = "visual_char"
+keys = "i ["
+command = "input.motion"
+arguments = { motion = "inner_bracket", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.i-bracket-close"
+context = "editor"
+mode = "visual_char"
+keys = "i ]"
+command = "input.motion"
+arguments = { motion = "inner_bracket", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.i-brace-open"
+context = "editor"
+mode = "visual_char"
+keys = "i {"
+command = "input.motion"
+arguments = { motion = "inner_brace", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.i-brace-close"
+context = "editor"
+mode = "visual_char"
+keys = "i }"
+command = "input.motion"
+arguments = { motion = "inner_brace", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.i-upper-b"
+context = "editor"
+mode = "visual_char"
+keys = "i B"
+command = "input.motion"
+arguments = { motion = "inner_brace", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.i-angle-open"
+context = "editor"
+mode = "visual_char"
+keys = "i <"
+command = "input.motion"
+arguments = { motion = "inner_angle", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.i-angle-close"
+context = "editor"
+mode = "visual_char"
+keys = "i >"
+command = "input.motion"
+arguments = { motion = "inner_angle", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.i-double-quote"
+context = "editor"
+mode = "visual_char"
+keys = "i \""
+command = "input.motion"
+arguments = { motion = "inner_double_quote", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.i-single-quote"
+context = "editor"
+mode = "visual_char"
+keys = "i '"
+command = "input.motion"
+arguments = { motion = "inner_single_quote", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.i-backtick"
+context = "editor"
+mode = "visual_char"
+keys = "i `"
+command = "input.motion"
+arguments = { motion = "inner_backtick", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.a-w"
+context = "editor"
+mode = "visual_char"
+keys = "a w"
+command = "input.motion"
+arguments = { motion = "a_word", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.a-upper-w"
+context = "editor"
+mode = "visual_char"
+keys = "a W"
+command = "input.motion"
+arguments = { motion = "a_big_word", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.a-p"
+context = "editor"
+mode = "visual_char"
+keys = "a p"
+command = "input.motion"
+arguments = { motion = "a_paragraph", linewise = true }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.a-paren-open"
+context = "editor"
+mode = "visual_char"
+keys = "a ("
+command = "input.motion"
+arguments = { motion = "a_paren", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.a-paren-close"
+context = "editor"
+mode = "visual_char"
+keys = "a )"
+command = "input.motion"
+arguments = { motion = "a_paren", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.a-b"
+context = "editor"
+mode = "visual_char"
+keys = "a b"
+command = "input.motion"
+arguments = { motion = "a_paren", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.a-bracket-open"
+context = "editor"
+mode = "visual_char"
+keys = "a ["
+command = "input.motion"
+arguments = { motion = "a_bracket", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.a-bracket-close"
+context = "editor"
+mode = "visual_char"
+keys = "a ]"
+command = "input.motion"
+arguments = { motion = "a_bracket", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.a-brace-open"
+context = "editor"
+mode = "visual_char"
+keys = "a {"
+command = "input.motion"
+arguments = { motion = "a_brace", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.a-brace-close"
+context = "editor"
+mode = "visual_char"
+keys = "a }"
+command = "input.motion"
+arguments = { motion = "a_brace", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.a-upper-b"
+context = "editor"
+mode = "visual_char"
+keys = "a B"
+command = "input.motion"
+arguments = { motion = "a_brace", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.a-angle-open"
+context = "editor"
+mode = "visual_char"
+keys = "a <"
+command = "input.motion"
+arguments = { motion = "a_angle", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.a-angle-close"
+context = "editor"
+mode = "visual_char"
+keys = "a >"
+command = "input.motion"
+arguments = { motion = "a_angle", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.a-double-quote"
+context = "editor"
+mode = "visual_char"
+keys = "a \""
+command = "input.motion"
+arguments = { motion = "a_double_quote", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.a-single-quote"
+context = "editor"
+mode = "visual_char"
+keys = "a '"
+command = "input.motion"
+arguments = { motion = "a_single_quote", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.a-backtick"
+context = "editor"
+mode = "visual_char"
+keys = "a `"
+command = "input.motion"
+arguments = { motion = "a_backtick", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.i-f"
+context = "editor"
+mode = "operator_pending"
+keys = "i f"
+command = "input.motion"
+arguments = { motion = "inner_function", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.a-f"
+context = "editor"
+mode = "operator_pending"
+keys = "a f"
+command = "input.motion"
+arguments = { motion = "a_function", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.i-c"
+context = "editor"
+mode = "operator_pending"
+keys = "i c"
+command = "input.motion"
+arguments = { motion = "inner_class", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.a-c"
+context = "editor"
+mode = "operator_pending"
+keys = "a c"
+command = "input.motion"
+arguments = { motion = "a_class", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.i-a"
+context = "editor"
+mode = "operator_pending"
+keys = "i a"
+command = "input.motion"
+arguments = { motion = "inner_argument", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.a-a"
+context = "editor"
+mode = "operator_pending"
+keys = "a a"
+command = "input.motion"
+arguments = { motion = "a_argument", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.i-f"
+context = "editor"
+mode = "visual_char"
+keys = "i f"
+command = "input.motion"
+arguments = { motion = "inner_function", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.a-f"
+context = "editor"
+mode = "visual_char"
+keys = "a f"
+command = "input.motion"
+arguments = { motion = "a_function", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.i-c"
+context = "editor"
+mode = "visual_char"
+keys = "i c"
+command = "input.motion"
+arguments = { motion = "inner_class", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.a-c"
+context = "editor"
+mode = "visual_char"
+keys = "a c"
+command = "input.motion"
+arguments = { motion = "a_class", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.i-a"
+context = "editor"
+mode = "visual_char"
+keys = "i a"
+command = "input.motion"
+arguments = { motion = "inner_argument", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.a-a"
+context = "editor"
+mode = "visual_char"
+keys = "a a"
+command = "input.motion"
+arguments = { motion = "a_argument", linewise = false }
+[[keymap]]
+id = "builtin.editor.normal.edit-operator.g-c-c"
+context = "editor"
+mode = "normal"
+keys = "g c c"
+command = "edit.operator"
+arguments = { operator = "comment", motion = "line", linewise = true }
+desc = "Toggle Comment Line"
+[[keymap]]
+id = "builtin.editor.normal.input-operator-begin.g-c"
+context = "editor"
+mode = "normal"
+keys = "g c"
+command = "input.operator.begin"
+arguments = { operator = "comment" }
+desc = "Toggle Comment"
+[[keymap]]
+id = "builtin.editor.visual-char.input-visual-operator.g-c"
+context = "editor"
+mode = "visual_char"
+keys = "g c"
+command = "input.visual.operator"
+arguments = { operator = "comment", linewise = false }
+desc = "Toggle Comment"
+[[keymap]]
+id = "builtin.editor.visual-line.input-visual-operator.g-c"
+context = "editor"
+mode = "visual_line"
+keys = "g c"
+command = "input.visual.operator"
+arguments = { operator = "comment", linewise = true }
+desc = "Toggle Comment"
+[[keymap]]
+id = "builtin.editor.normal.input-operator-begin.g-s-a"
+context = "editor"
+mode = "normal"
+keys = "g s a"
+command = "input.operator.begin"
+arguments = { operator = "surround_add" }
+desc = "Add Surrounding"
+[[keymap]]
+id = "builtin.editor.normal.input-surround-begin.g-s-d"
+context = "editor"
+mode = "normal"
+keys = "g s d"
+command = "input.surround.begin"
+arguments = { text = "delete" }
+desc = "Delete Surrounding"
+[[keymap]]
+id = "builtin.editor.normal.input-surround-begin.g-s-r"
+context = "editor"
+mode = "normal"
+keys = "g s r"
+command = "input.surround.begin"
+arguments = { text = "replace" }
+desc = "Replace Surrounding"
+[[keymap]]
+id = "builtin.editor.visual-char.input-visual-operator.g-s-a"
+context = "editor"
+mode = "visual_char"
+keys = "g s a"
+command = "input.visual.operator"
+arguments = { operator = "surround_add", linewise = false }
+desc = "Add Surrounding"
+[[keymap]]
+id = "builtin.editor.visual-line.input-visual-operator.g-s-a"
+context = "editor"
+mode = "visual_line"
+keys = "g s a"
+command = "input.visual.operator"
+arguments = { operator = "surround_add", linewise = true }
+desc = "Add Surrounding"
+[[keymap]]
+id = "builtin.character.surface.input-cancel.escape"
+context = "character"
+keys = "escape"
+command = "input.cancel"
+
+# Prefix and pending-character contexts.
+[[keymap]]
+id = "builtin.prefix.surface.input-motion.g"
+context = "prefix"
+keys = "g"
+command = "input.motion"
+arguments = { motion = "document_start", linewise = true }
+[[keymap]]
+id = "builtin.prefix.surface.input-cancel.escape"
+context = "prefix"
+keys = "escape"
+command = "input.cancel"
+[[keymap]]
+id = "builtin.register.surface.input-cancel.escape"
+context = "register"
+keys = "escape"
+command = "input.cancel"
+[[keymap]]
+id = "builtin.replace.surface.input-cancel.escape"
+context = "replace"
+keys = "escape"
+command = "input.cancel"
+[[keymap]]
+id = "builtin.macro-record.surface.input-cancel.escape"
+context = "macro_record"
+keys = "escape"
+command = "input.cancel"
+[[keymap]]
+id = "builtin.macro-replay.surface.input-cancel.escape"
+context = "macro_replay"
+keys = "escape"
+command = "input.cancel"
+
+# Dashboard.
+[[keymap]]
+id = "builtin.dashboard.surface.command-line-open.colon"
+context = "dashboard"
+keys = ":"
+command = "command_line.open"
+arguments = { kind = "command" }
+[[keymap]]
+id = "builtin.dashboard.surface.command-line-open.slash"
+context = "dashboard"
+keys = "/"
+command = "command_line.open"
+arguments = { kind = "search_forward" }
+[[keymap]]
+id = "builtin.dashboard.surface.command-line-open.question"
+context = "dashboard"
+keys = "?"
+command = "command_line.open"
+arguments = { kind = "search_backward" }
+[[keymap]]
+id = "builtin.dashboard.surface.editor-quit.q"
+context = "dashboard"
+keys = "q"
+command = "editor.quit"
+arguments = { force = false }
+[[keymap]]
+id = "builtin.dashboard.surface.file-new.n"
+context = "dashboard"
+keys = "n"
+command = "file.new"
+[[keymap]]
+id = "builtin.dashboard.surface.workspace-file-find.f"
+context = "dashboard"
+keys = "f"
+command = "workspace.file.find"
+[[keymap]]
+id = "builtin.dashboard.surface.workspace-search-prompt.g"
+context = "dashboard"
+keys = "g"
+command = "workspace.search.prompt"
+[[keymap]]
+id = "builtin.dashboard.surface.navigation-recents.r"
+context = "dashboard"
+keys = "r"
+command = "navigation.recents"
+[[keymap]]
+id = "builtin.dashboard.surface.explorer-open.e"
+context = "dashboard"
+keys = "e"
+command = "explorer.open"
+[[keymap]]
+id = "builtin.dashboard.surface.session-load.s"
+context = "dashboard"
+keys = "s"
+command = "session.load"
+
+# The cursor moves between items as in LazyVim; Enter runs the one under it.
+[[keymap]]
+id = "builtin.dashboard.surface.select-next.j"
+context = "dashboard"
+keys = "j"
+command = "dashboard.select.next"
+[[keymap]]
+id = "builtin.dashboard.surface.select-next.down"
+context = "dashboard"
+keys = "down"
+command = "dashboard.select.next"
+[[keymap]]
+id = "builtin.dashboard.surface.select-previous.k"
+context = "dashboard"
+keys = "k"
+command = "dashboard.select.previous"
+[[keymap]]
+id = "builtin.dashboard.surface.select-previous.up"
+context = "dashboard"
+keys = "up"
+command = "dashboard.select.previous"
+[[keymap]]
+id = "builtin.dashboard.surface.open.enter"
+context = "dashboard"
+keys = "enter"
+command = "dashboard.open"
+# Ctrl-h/j/k/l move to a terminal or panel beside the dashboard, as in the editor.
+[[keymap]]
+id = "builtin.dashboard.surface.surface-focus-left.ctrl-h"
+context = "dashboard"
+keys = "ctrl-h"
+command = "surface.focus.left"
+[[keymap]]
+id = "builtin.dashboard.surface.surface-focus-down.ctrl-j"
+context = "dashboard"
+keys = "ctrl-j"
+command = "surface.focus.down"
+[[keymap]]
+id = "builtin.dashboard.surface.surface-focus-up.ctrl-k"
+context = "dashboard"
+keys = "ctrl-k"
+command = "surface.focus.up"
+[[keymap]]
+id = "builtin.dashboard.surface.surface-focus-right.ctrl-l"
+context = "dashboard"
+keys = "ctrl-l"
+command = "surface.focus.right"
+
+# Command/search prompt controls.
+[[keymap]]
+id = "builtin.command-prompt.surface.help-form.ctrl-g"
+context = "command_prompt"
+keys = "ctrl-g"
+command = "overlay.help.form"
+
+[[keymap]]
+id = "builtin.command-prompt.surface.command-line-cancel.escape"
+context = "command_prompt"
+keys = "escape"
+command = "command_line.cancel"
+[[keymap]]
+id = "builtin.command-prompt.surface.command-line-cancel.ctrl-c"
+context = "command_prompt"
+keys = "ctrl-c"
+command = "command_line.cancel"
+[[keymap]]
+id = "builtin.command-prompt.surface.command-line-submit.enter"
+context = "command_prompt"
+keys = "enter"
+command = "command_line.submit"
+[[keymap]]
+id = "builtin.command-prompt.surface.command-line-backspace.backspace"
+context = "command_prompt"
+keys = "backspace"
+command = "command_line.backspace"
+[[keymap]]
+id = "builtin.command-prompt.surface.command-line-delete-word.ctrl-w"
+context = "command_prompt"
+keys = "ctrl-w"
+command = "command_line.delete_word"
+[[keymap]]
+id = "builtin.command-prompt.surface.command-line-delete-to-start.ctrl-u"
+context = "command_prompt"
+keys = "ctrl-u"
+command = "command_line.delete_to_start"
+[[keymap]]
+id = "builtin.command-prompt.surface.command-line-move-left.left"
+context = "command_prompt"
+keys = "left"
+command = "command_line.move_left"
+[[keymap]]
+id = "builtin.command-prompt.surface.command-line-move-right.right"
+context = "command_prompt"
+keys = "right"
+command = "command_line.move_right"
+[[keymap]]
+id = "builtin.command-prompt.surface.command-line-move-word-left.ctrl-left"
+context = "command_prompt"
+keys = "ctrl-left"
+command = "command_line.move_word_left"
+[[keymap]]
+id = "builtin.command-prompt.surface.command-line-move-word-right.ctrl-right"
+context = "command_prompt"
+keys = "ctrl-right"
+command = "command_line.move_word_right"
+[[keymap]]
+id = "builtin.command-prompt.surface.command-line-move-home.home"
+context = "command_prompt"
+keys = "home"
+command = "command_line.move_home"
+[[keymap]]
+id = "builtin.command-prompt.surface.command-line-move-end.end"
+context = "command_prompt"
+keys = "end"
+command = "command_line.move_end"
+[[keymap]]
+id = "builtin.command-prompt.surface.command-line-history-previous.up"
+context = "command_prompt"
+keys = "up"
+command = "command_line.history.previous"
+[[keymap]]
+id = "builtin.command-prompt.surface.command-line-history-next.down"
+context = "command_prompt"
+keys = "down"
+command = "command_line.history.next"
+[[keymap]]
+id = "builtin.command-prompt.surface.command-line-complete-next.tab"
+context = "command_prompt"
+keys = "tab"
+command = "command_line.complete.next"
+[[keymap]]
+id = "builtin.command-prompt.surface.command-line-complete-previous.shift-tab"
+context = "command_prompt"
+keys = "shift-tab"
+command = "command_line.complete.previous"
+
+[[keymap]]
+id = "builtin.search-prompt.surface.command-line-cancel.escape"
+context = "search_prompt"
+keys = "escape"
+command = "command_line.cancel"
+[[keymap]]
+id = "builtin.search-prompt.surface.command-line-submit.enter"
+context = "search_prompt"
+keys = "enter"
+command = "command_line.submit"
+[[keymap]]
+id = "builtin.search-prompt.surface.command-line-backspace.backspace"
+context = "search_prompt"
+keys = "backspace"
+command = "command_line.backspace"
+[[keymap]]
+id = "builtin.search-prompt.surface.command-line-delete-word.ctrl-w"
+context = "search_prompt"
+keys = "ctrl-w"
+command = "command_line.delete_word"
+[[keymap]]
+id = "builtin.search-prompt.surface.command-line-delete-to-start.ctrl-u"
+context = "search_prompt"
+keys = "ctrl-u"
+command = "command_line.delete_to_start"
+[[keymap]]
+id = "builtin.search-prompt.surface.command-line-move-left.left"
+context = "search_prompt"
+keys = "left"
+command = "command_line.move_left"
+[[keymap]]
+id = "builtin.search-prompt.surface.command-line-move-right.right"
+context = "search_prompt"
+keys = "right"
+command = "command_line.move_right"
+[[keymap]]
+id = "builtin.search-prompt.surface.command-line-move-word-left.ctrl-left"
+context = "search_prompt"
+keys = "ctrl-left"
+command = "command_line.move_word_left"
+[[keymap]]
+id = "builtin.search-prompt.surface.command-line-move-word-right.ctrl-right"
+context = "search_prompt"
+keys = "ctrl-right"
+command = "command_line.move_word_right"
+[[keymap]]
+id = "builtin.search-prompt.surface.command-line-move-home.home"
+context = "search_prompt"
+keys = "home"
+command = "command_line.move_home"
+[[keymap]]
+id = "builtin.search-prompt.surface.command-line-move-end.end"
+context = "search_prompt"
+keys = "end"
+command = "command_line.move_end"
+[[keymap]]
+id = "builtin.search-prompt.surface.command-line-history-previous.up"
+context = "search_prompt"
+keys = "up"
+command = "command_line.history.previous"
+[[keymap]]
+id = "builtin.search-prompt.surface.command-line-history-next.down"
+context = "search_prompt"
+keys = "down"
+command = "command_line.history.next"
+
+# Explorer controls.
+[[keymap]]
+id = "builtin.explorer.surface.explorer-close.escape"
+context = "explorer"
+keys = "escape"
+command = "explorer.close"
+[[keymap]]
+id = "builtin.explorer.surface.command-line-open.colon"
+context = "explorer"
+keys = ":"
+command = "command_line.open"
+arguments = { kind = "command" }
+[[keymap]]
+id = "builtin.explorer.surface.explorer-next.j"
+context = "explorer"
+keys = "j"
+command = "explorer.next"
+[[keymap]]
+id = "builtin.explorer.surface.explorer-previous.k"
+context = "explorer"
+keys = "k"
+command = "explorer.previous"
+[[keymap]]
+id = "builtin.explorer.surface.explorer-parent.h"
+context = "explorer"
+keys = "h"
+command = "explorer.parent"
+[[keymap]]
+id = "builtin.explorer.surface.explorer-toggle.l"
+context = "explorer"
+keys = "l"
+command = "explorer.toggle"
+[[keymap]]
+id = "builtin.explorer.surface.explorer-file-open.enter"
+context = "explorer"
+keys = "enter"
+command = "explorer.file.open"
+[[keymap]]
+id = "builtin.explorer.surface.explorer-file-split-open.s"
+context = "explorer"
+keys = "s"
+command = "explorer.file.split_open"
+[[keymap]]
+id = "builtin.explorer.surface.explorer-refresh.upper-r"
+context = "explorer"
+keys = "R"
+command = "explorer.refresh"
+[[keymap]]
+id = "builtin.explorer.surface.explorer-hidden-toggle.period"
+context = "explorer"
+keys = "."
+command = "explorer.hidden.toggle"
+[[keymap]]
+id = "builtin.explorer.surface.explorer-ignored-toggle.upper-i"
+context = "explorer"
+keys = "I"
+command = "explorer.ignored.toggle"
+[[keymap]]
+id = "builtin.explorer.surface.explorer-create.a"
+context = "explorer"
+keys = "a"
+command = "command_line.open"
+arguments = { kind = "command", initial = "exploreradd " }
+[[keymap]]
+id = "builtin.explorer.surface.explorer-rename.r"
+context = "explorer"
+keys = "r"
+command = "explorer.rename.prompt"
+[[keymap]]
+id = "builtin.explorer.surface.explorer-rename.e"
+context = "explorer"
+keys = "e"
+command = "explorer.rename.prompt"
+[[keymap]]
+id = "builtin.explorer.surface.explorer-delete.d"
+context = "explorer"
+keys = "d"
+command = "explorer.delete"
+[[keymap]]
+id = "builtin.explorer.surface.explorer-copy.c"
+context = "explorer"
+keys = "c"
+command = "explorer.copy"
+[[keymap]]
+id = "builtin.explorer.surface.explorer-move.m"
+context = "explorer"
+keys = "m"
+command = "explorer.move"
+[[keymap]]
+id = "builtin.explorer.surface.explorer-paste.p"
+context = "explorer"
+keys = "p"
+command = "explorer.paste"
+[[keymap]]
+id = "builtin.explorer.surface.explorer-path-yank.y"
+context = "explorer"
+keys = "y"
+command = "explorer.path.yank"
+[[keymap]]
+id = "builtin.explorer-mouse.surface.explorer-mouse-select.mouse-left-down"
+context = "explorer_mouse"
+keys = "mouse-left-down"
+command = "explorer.mouse.select"
+
+[[keymap]]
+id = "builtin.terminal-mouse.surface.terminal-focus-active.mouse-left-down"
+context = "terminal_mouse"
+keys = "mouse-left-down"
+command = "terminal.focus_active"
+
+# Trust confirmation is sensitivity-aware: no history or completion bindings.
+[[keymap]]
+id = "builtin.workspace-trust-prompt.surface.command-line-cancel.escape"
+context = "workspace_trust_prompt"
+keys = "escape"
+command = "command_line.cancel"
+[[keymap]]
+id = "builtin.workspace-trust-prompt.surface.command-line-submit.enter"
+context = "workspace_trust_prompt"
+keys = "enter"
+command = "command_line.submit"
+[[keymap]]
+id = "builtin.workspace-trust-prompt.surface.command-line-backspace.backspace"
+context = "workspace_trust_prompt"
+keys = "backspace"
+command = "command_line.backspace"
+[[keymap]]
+id = "builtin.workspace-trust-prompt.surface.command-line-move-left.left"
+context = "workspace_trust_prompt"
+keys = "left"
+command = "command_line.move_left"
+[[keymap]]
+id = "builtin.workspace-trust-prompt.surface.command-line-move-right.right"
+context = "workspace_trust_prompt"
+keys = "right"
+command = "command_line.move_right"
+[[keymap]]
+id = "builtin.workspace-trust-prompt.surface.command-line-move-home.home"
+context = "workspace_trust_prompt"
+keys = "home"
+command = "command_line.move_home"
+[[keymap]]
+id = "builtin.workspace-trust-prompt.surface.command-line-move-end.end"
+context = "workspace_trust_prompt"
+keys = "end"
+command = "command_line.move_end"
+
+# Shared ordinary confirmation. Strong trust/reset prompts keep the phrase context above.
+[[keymap]]
+id = "builtin.confirmation-prompt.surface.command-line-cancel.escape"
+context = "confirmation_prompt"
+keys = "escape"
+command = "command_line.cancel"
+[[keymap]]
+id = "builtin.confirmation-prompt.surface.command-line-submit.enter"
+context = "confirmation_prompt"
+keys = "enter"
+command = "command_line.submit"
+[[keymap]]
+id = "builtin.confirmation-prompt.surface.command-line-move-left.left"
+context = "confirmation_prompt"
+keys = "left"
+command = "command_line.move_left"
+[[keymap]]
+id = "builtin.confirmation-prompt.surface.command-line-move-right.right"
+context = "confirmation_prompt"
+keys = "right"
+command = "command_line.move_right"
+[[keymap]]
+id = "builtin.confirmation-prompt.surface.help-form.question"
+context = "confirmation_prompt"
+keys = "?"
+command = "overlay.help.form"
+
+[[keymap]]
+id = "builtin.confirmation-prompt.surface.confirmation-toggle.tab"
+context = "confirmation_prompt"
+keys = "tab"
+command = "surface.confirmation.toggle"
+[[keymap]]
+id = "builtin.confirmation-prompt.surface.confirmation-yes.y"
+context = "confirmation_prompt"
+keys = "y"
+command = "surface.confirmation.select_yes"
+[[keymap]]
+id = "builtin.confirmation-prompt.surface.confirmation-yes.upper-y"
+context = "confirmation_prompt"
+keys = "Y"
+command = "surface.confirmation.select_yes"
+[[keymap]]
+id = "builtin.confirmation-prompt.surface.confirmation-no.n"
+context = "confirmation_prompt"
+keys = "n"
+command = "surface.confirmation.select_no"
+# While `:s///c` asks about each match, `a` replaces the rest and `q` stops, as in Vim.
+[[keymap]]
+id = "builtin.confirmation-prompt.edit-substitute-rest.a"
+context = "confirmation_prompt"
+keys = "a"
+command = "edit.substitute_rest"
+[[keymap]]
+id = "builtin.confirmation-prompt.command-line-cancel.q"
+context = "confirmation_prompt"
+keys = "q"
+command = "command_line.cancel"
+[[keymap]]
+id = "builtin.confirmation-prompt.surface.confirmation-no.upper-n"
+context = "confirmation_prompt"
+keys = "N"
+command = "surface.confirmation.select_no"
+
+# Operator-pending counts and explicit register selection remain configurable.
+[[keymap]]
+id = "builtin.editor.operator-pending.input-zero.key-0"
+context = "editor"
+mode = "operator_pending"
+keys = "0"
+command = "input.zero"
+[[keymap]]
+id = "builtin.editor.operator-pending.input-count.key-1"
+context = "editor"
+mode = "operator_pending"
+keys = "1"
+command = "input.count"
+arguments = { digit = 1 }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-count.key-2"
+context = "editor"
+mode = "operator_pending"
+keys = "2"
+command = "input.count"
+arguments = { digit = 2 }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-count.key-3"
+context = "editor"
+mode = "operator_pending"
+keys = "3"
+command = "input.count"
+arguments = { digit = 3 }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-count.key-4"
+context = "editor"
+mode = "operator_pending"
+keys = "4"
+command = "input.count"
+arguments = { digit = 4 }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-count.key-5"
+context = "editor"
+mode = "operator_pending"
+keys = "5"
+command = "input.count"
+arguments = { digit = 5 }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-count.key-6"
+context = "editor"
+mode = "operator_pending"
+keys = "6"
+command = "input.count"
+arguments = { digit = 6 }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-count.key-7"
+context = "editor"
+mode = "operator_pending"
+keys = "7"
+command = "input.count"
+arguments = { digit = 7 }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-count.key-8"
+context = "editor"
+mode = "operator_pending"
+keys = "8"
+command = "input.count"
+arguments = { digit = 8 }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-count.key-9"
+context = "editor"
+mode = "operator_pending"
+keys = "9"
+command = "input.count"
+arguments = { digit = 9 }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-register-begin.quote"
+context = "editor"
+mode = "operator_pending"
+keys = "\""
+command = "input.register.begin"
+
+# The commit composer composes on Enter and commits on an explicit key, so a message can
+# span lines. Both keys are ordinary configurable mappings; ctrl-s is bound as well because
+# a terminal may consume it as flow control.
+[[keymap]]
+id = "builtin.focus.surface.input-mapping-cancel.focus-lost"
+context = "focus"
+keys = "focus-lost"
+command = "input.mapping.cancel"
+
+# Configured motion coverage shared by Visual modes.
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.left"
+context = "editor"
+mode = "visual_char"
+keys = "left"
+command = "input.motion"
+arguments = { motion = "left", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.right"
+context = "editor"
+mode = "visual_char"
+keys = "right"
+command = "input.motion"
+arguments = { motion = "right", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.up"
+context = "editor"
+mode = "visual_char"
+keys = "up"
+command = "input.motion"
+arguments = { motion = "up", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.down"
+context = "editor"
+mode = "visual_char"
+keys = "down"
+command = "input.motion"
+arguments = { motion = "down", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.home"
+context = "editor"
+mode = "visual_char"
+keys = "home"
+command = "input.motion"
+arguments = { motion = "line_start", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.caret"
+context = "editor"
+mode = "visual_char"
+keys = "^"
+command = "input.motion"
+arguments = { motion = "first_nonblank", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.dollar"
+context = "editor"
+mode = "visual_char"
+keys = "$"
+command = "input.motion"
+arguments = { motion = "line_end", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.end"
+context = "editor"
+mode = "visual_char"
+keys = "end"
+command = "input.motion"
+arguments = { motion = "line_end", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.w"
+context = "editor"
+mode = "visual_char"
+keys = "w"
+command = "input.motion"
+arguments = { motion = "word_forward", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.upper-w"
+context = "editor"
+mode = "visual_char"
+keys = "W"
+command = "input.motion"
+arguments = { motion = "big_word_forward", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.b"
+context = "editor"
+mode = "visual_char"
+keys = "b"
+command = "input.motion"
+arguments = { motion = "word_backward", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.upper-b"
+context = "editor"
+mode = "visual_char"
+keys = "B"
+command = "input.motion"
+arguments = { motion = "big_word_backward", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.e"
+context = "editor"
+mode = "visual_char"
+keys = "e"
+command = "input.motion"
+arguments = { motion = "word_end", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.upper-e"
+context = "editor"
+mode = "visual_char"
+keys = "E"
+command = "input.motion"
+arguments = { motion = "big_word_end", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.percent"
+context = "editor"
+mode = "visual_char"
+keys = "%"
+command = "input.motion"
+arguments = { motion = "matching_pair", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-line.input-motion.left"
+context = "editor"
+mode = "visual_line"
+keys = "left"
+command = "input.motion"
+arguments = { motion = "left", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-line.input-motion.right"
+context = "editor"
+mode = "visual_line"
+keys = "right"
+command = "input.motion"
+arguments = { motion = "right", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-line.input-motion.up"
+context = "editor"
+mode = "visual_line"
+keys = "up"
+command = "input.motion"
+arguments = { motion = "up", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-line.input-motion.down"
+context = "editor"
+mode = "visual_line"
+keys = "down"
+command = "input.motion"
+arguments = { motion = "down", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-line.input-motion.home"
+context = "editor"
+mode = "visual_line"
+keys = "home"
+command = "input.motion"
+arguments = { motion = "line_start", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-line.input-motion.caret"
+context = "editor"
+mode = "visual_line"
+keys = "^"
+command = "input.motion"
+arguments = { motion = "first_nonblank", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-line.input-motion.dollar"
+context = "editor"
+mode = "visual_line"
+keys = "$"
+command = "input.motion"
+arguments = { motion = "line_end", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-line.input-motion.end"
+context = "editor"
+mode = "visual_line"
+keys = "end"
+command = "input.motion"
+arguments = { motion = "line_end", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-line.input-motion.w"
+context = "editor"
+mode = "visual_line"
+keys = "w"
+command = "input.motion"
+arguments = { motion = "word_forward", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-line.input-motion.upper-w"
+context = "editor"
+mode = "visual_line"
+keys = "W"
+command = "input.motion"
+arguments = { motion = "big_word_forward", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-line.input-motion.b"
+context = "editor"
+mode = "visual_line"
+keys = "b"
+command = "input.motion"
+arguments = { motion = "word_backward", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-line.input-motion.upper-b"
+context = "editor"
+mode = "visual_line"
+keys = "B"
+command = "input.motion"
+arguments = { motion = "big_word_backward", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-line.input-motion.e"
+context = "editor"
+mode = "visual_line"
+keys = "e"
+command = "input.motion"
+arguments = { motion = "word_end", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-line.input-motion.upper-e"
+context = "editor"
+mode = "visual_line"
+keys = "E"
+command = "input.motion"
+arguments = { motion = "big_word_end", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-line.input-motion.percent"
+context = "editor"
+mode = "visual_line"
+keys = "%"
+command = "input.motion"
+arguments = { motion = "matching_pair", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.left"
+context = "editor"
+mode = "operator_pending"
+keys = "left"
+command = "input.motion"
+arguments = { motion = "left", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.right"
+context = "editor"
+mode = "operator_pending"
+keys = "right"
+command = "input.motion"
+arguments = { motion = "right", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.up"
+context = "editor"
+mode = "operator_pending"
+keys = "up"
+command = "input.motion"
+arguments = { motion = "up", linewise = true }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.down"
+context = "editor"
+mode = "operator_pending"
+keys = "down"
+command = "input.motion"
+arguments = { motion = "down", linewise = true }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.home"
+context = "editor"
+mode = "operator_pending"
+keys = "home"
+command = "input.motion"
+arguments = { motion = "line_start", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.caret"
+context = "editor"
+mode = "operator_pending"
+keys = "^"
+command = "input.motion"
+arguments = { motion = "first_nonblank", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.end"
+context = "editor"
+mode = "operator_pending"
+keys = "end"
+command = "input.motion"
+arguments = { motion = "line_end", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.percent"
+context = "editor"
+mode = "operator_pending"
+keys = "%"
+command = "input.motion"
+arguments = { motion = "matching_pair", linewise = false }
+
+# Mouse gestures are normalized and resolved like logical keyboard events.
+[[keymap]]
+id = "builtin.editor-mouse.surface.view-scroll.mouse-scroll-up"
+context = "editor_mouse"
+keys = "mouse-scroll-up"
+command = "view.scroll"
+arguments = { kind = "half_up", at_mouse = true }
+
+[[keymap]]
+id = "builtin.editor-mouse.surface.view-scroll.mouse-scroll-down"
+context = "editor_mouse"
+keys = "mouse-scroll-down"
+command = "view.scroll"
+arguments = { kind = "half_down", at_mouse = true }
+
+[[keymap]]
+id = "builtin.editor-mouse.surface.view-cursor-place-mouse.mouse-left-down"
+context = "editor_mouse"
+keys = "mouse-left-down"
+command = "view.cursor.place_mouse"
+
+[[keymap]]
+id = "builtin.editor-mouse.surface.view-selection-extend-mouse.mouse-left-drag"
+context = "editor_mouse"
+keys = "mouse-left-drag"
+command = "view.selection.extend_mouse"
+
+# Replace mode and blockwise Visual are real editing modes. Their defaults use
+# the same declarative compiler as every other context.
+[[keymap]]
+id = "builtin.editor.normal.mode-replace.upper-r"
+context = "editor"
+mode = "normal"
+keys = "R"
+command = "mode.replace"
+
+[[keymap]]
+id = "builtin.editor.normal.mode-visual-block.ctrl-v"
+context = "editor"
+mode = "normal"
+keys = "ctrl-v"
+command = "mode.visual_block"
+
+[[keymap]]
+id = "builtin.editor.replace.input-cancel.escape"
+context = "editor"
+mode = "replace"
+keys = "escape"
+command = "input.cancel"
+[[keymap]]
+id = "builtin.editor.replace.edit-replace-backspace.backspace"
+context = "editor"
+mode = "replace"
+keys = "backspace"
+command = "edit.replace_backspace"
+[[keymap]]
+id = "builtin.editor.replace.edit-replace-text.enter"
+context = "editor"
+mode = "replace"
+keys = "enter"
+command = "edit.replace_text"
+arguments = { text = "\n" }
+[[keymap]]
+id = "builtin.editor.replace.input-motion.left"
+context = "editor"
+mode = "replace"
+keys = "left"
+command = "input.motion"
+arguments = { motion = "left", linewise = false }
+[[keymap]]
+id = "builtin.editor.replace.input-motion.right"
+context = "editor"
+mode = "replace"
+keys = "right"
+command = "input.motion"
+arguments = { motion = "right", linewise = false }
+[[keymap]]
+id = "builtin.editor.replace.input-motion.up"
+context = "editor"
+mode = "replace"
+keys = "up"
+command = "input.motion"
+arguments = { motion = "up", linewise = false }
+[[keymap]]
+id = "builtin.editor.replace.input-motion.down"
+context = "editor"
+mode = "replace"
+keys = "down"
+command = "input.motion"
+arguments = { motion = "down", linewise = false }
+
+[[keymap]]
+id = "builtin.editor.visual-block.input-cancel.escape"
+context = "editor"
+mode = "visual_block"
+keys = "escape"
+command = "input.cancel"
+[[keymap]]
+id = "builtin.editor.visual-block.mode-normal.ctrl-v"
+context = "editor"
+mode = "visual_block"
+keys = "ctrl-v"
+command = "mode.normal"
+[[keymap]]
+id = "builtin.editor.visual-block.input-visual-operator.d"
+context = "editor"
+mode = "visual_block"
+keys = "d"
+command = "input.visual.operator"
+arguments = { operator = "delete", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-block.input-visual-operator.c"
+context = "editor"
+mode = "visual_block"
+keys = "c"
+command = "input.visual.operator"
+arguments = { operator = "change", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-block.input-visual-operator.y"
+context = "editor"
+mode = "visual_block"
+keys = "y"
+command = "input.visual.operator"
+arguments = { operator = "yank", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-block.input-motion.h"
+context = "editor"
+mode = "visual_block"
+keys = "h"
+command = "input.motion"
+arguments = { motion = "left", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-block.input-motion.j"
+context = "editor"
+mode = "visual_block"
+keys = "j"
+command = "input.motion"
+arguments = { motion = "down", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-block.input-motion.k"
+context = "editor"
+mode = "visual_block"
+keys = "k"
+command = "input.motion"
+arguments = { motion = "up", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-block.input-motion.l"
+context = "editor"
+mode = "visual_block"
+keys = "l"
+command = "input.motion"
+arguments = { motion = "right", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-block.input-motion.left"
+context = "editor"
+mode = "visual_block"
+keys = "left"
+command = "input.motion"
+arguments = { motion = "left", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-block.input-motion.down"
+context = "editor"
+mode = "visual_block"
+keys = "down"
+command = "input.motion"
+arguments = { motion = "down", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-block.input-motion.up"
+context = "editor"
+mode = "visual_block"
+keys = "up"
+command = "input.motion"
+arguments = { motion = "up", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-block.input-motion.right"
+context = "editor"
+mode = "visual_block"
+keys = "right"
+command = "input.motion"
+arguments = { motion = "right", linewise = false }
+# I and A type before and after the block on every line, as in Vim.
+[[keymap]]
+id = "builtin.editor.visual-block.multi-insert.upper-i"
+context = "editor"
+mode = "visual_block"
+keys = "I"
+command = "multi.insert"
+arguments = { placement = "start" }
+[[keymap]]
+id = "builtin.editor.visual-block.multi-insert.upper-a"
+context = "editor"
+mode = "visual_block"
+keys = "A"
+command = "multi.insert"
+arguments = { placement = "end" }
+[[keymap]]
+id = "builtin.editor.visual-block.input-count.key-1"
+context = "editor"
+mode = "visual_block"
+keys = "1"
+command = "input.count"
+arguments = { digit = 1 }
+[[keymap]]
+id = "builtin.editor.visual-block.input-count.key-2"
+context = "editor"
+mode = "visual_block"
+keys = "2"
+command = "input.count"
+arguments = { digit = 2 }
+[[keymap]]
+id = "builtin.editor.visual-block.input-count.key-3"
+context = "editor"
+mode = "visual_block"
+keys = "3"
+command = "input.count"
+arguments = { digit = 3 }
+[[keymap]]
+id = "builtin.editor.visual-block.input-count.key-4"
+context = "editor"
+mode = "visual_block"
+keys = "4"
+command = "input.count"
+arguments = { digit = 4 }
+[[keymap]]
+id = "builtin.editor.visual-block.input-count.key-5"
+context = "editor"
+mode = "visual_block"
+keys = "5"
+command = "input.count"
+arguments = { digit = 5 }
+[[keymap]]
+id = "builtin.editor.visual-block.input-count.key-6"
+context = "editor"
+mode = "visual_block"
+keys = "6"
+command = "input.count"
+arguments = { digit = 6 }
+[[keymap]]
+id = "builtin.editor.visual-block.input-count.key-7"
+context = "editor"
+mode = "visual_block"
+keys = "7"
+command = "input.count"
+arguments = { digit = 7 }
+[[keymap]]
+id = "builtin.editor.visual-block.input-count.key-8"
+context = "editor"
+mode = "visual_block"
+keys = "8"
+command = "input.count"
+arguments = { digit = 8 }
+[[keymap]]
+id = "builtin.editor.visual-block.input-count.key-9"
+context = "editor"
+mode = "visual_block"
+keys = "9"
+command = "input.count"
+arguments = { digit = 9 }
+[[keymap]]
+id = "builtin.editor.visual-block.input-zero.key-0"
+context = "editor"
+mode = "visual_block"
+keys = "0"
+command = "input.zero"
+[[keymap]]
+id = "builtin.editor.visual-block.input-motion.w"
+context = "editor"
+mode = "visual_block"
+keys = "w"
+command = "input.motion"
+arguments = { motion = "word_forward", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-block.input-motion.b"
+context = "editor"
+mode = "visual_block"
+keys = "b"
+command = "input.motion"
+arguments = { motion = "word_backward", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-block.input-motion.e"
+context = "editor"
+mode = "visual_block"
+keys = "e"
+command = "input.motion"
+arguments = { motion = "word_end", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-block.input-motion.caret"
+context = "editor"
+mode = "visual_block"
+keys = "^"
+command = "input.motion"
+arguments = { motion = "first_nonblank", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-block.input-motion.upper-g"
+context = "editor"
+mode = "visual_block"
+keys = "G"
+command = "input.motion"
+arguments = { motion = "document_end", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-block.input-motion.g-g"
+context = "editor"
+mode = "visual_block"
+keys = "g g"
+command = "input.motion"
+arguments = { motion = "document_start", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-block.selection-swap.o"
+context = "editor"
+mode = "visual_block"
+keys = "o"
+command = "view.selection.swap"
+
+# Spatial focus uses the same Ctrl-h/j/k/l model across editor and explorer surfaces.
+[[keymap]]
+id = "builtin.editor.normal.surface-focus-left.ctrl-h"
+context = "editor"
+mode = "normal"
+keys = "ctrl-h"
+command = "surface.focus.left"
+[[keymap]]
+id = "builtin.editor.normal.surface-focus-down.ctrl-j"
+context = "editor"
+mode = "normal"
+keys = "ctrl-j"
+command = "surface.focus.down"
+[[keymap]]
+id = "builtin.editor.normal.surface-focus-up.ctrl-k"
+context = "editor"
+mode = "normal"
+keys = "ctrl-k"
+command = "surface.focus.up"
+[[keymap]]
+id = "builtin.editor.normal.surface-focus-right.ctrl-l"
+context = "editor"
+mode = "normal"
+keys = "ctrl-l"
+command = "surface.focus.right"
+[[keymap]]
+id = "builtin.editor.visual-char.surface-focus-left.ctrl-h"
+context = "editor"
+mode = "visual_char"
+keys = "ctrl-h"
+command = "surface.focus.left"
+[[keymap]]
+id = "builtin.editor.visual-char.surface-focus-down.ctrl-j"
+context = "editor"
+mode = "visual_char"
+keys = "ctrl-j"
+command = "surface.focus.down"
+[[keymap]]
+id = "builtin.editor.visual-char.surface-focus-up.ctrl-k"
+context = "editor"
+mode = "visual_char"
+keys = "ctrl-k"
+command = "surface.focus.up"
+[[keymap]]
+id = "builtin.editor.visual-char.surface-focus-right.ctrl-l"
+context = "editor"
+mode = "visual_char"
+keys = "ctrl-l"
+command = "surface.focus.right"
+[[keymap]]
+id = "builtin.editor.visual-line.surface-focus-left.ctrl-h"
+context = "editor"
+mode = "visual_line"
+keys = "ctrl-h"
+command = "surface.focus.left"
+[[keymap]]
+id = "builtin.editor.visual-line.surface-focus-down.ctrl-j"
+context = "editor"
+mode = "visual_line"
+keys = "ctrl-j"
+command = "surface.focus.down"
+[[keymap]]
+id = "builtin.editor.visual-line.surface-focus-up.ctrl-k"
+context = "editor"
+mode = "visual_line"
+keys = "ctrl-k"
+command = "surface.focus.up"
+[[keymap]]
+id = "builtin.editor.visual-line.surface-focus-right.ctrl-l"
+context = "editor"
+mode = "visual_line"
+keys = "ctrl-l"
+command = "surface.focus.right"
+[[keymap]]
+id = "builtin.editor.visual-block.surface-focus-left.ctrl-h"
+context = "editor"
+mode = "visual_block"
+keys = "ctrl-h"
+command = "surface.focus.left"
+[[keymap]]
+id = "builtin.editor.visual-block.surface-focus-down.ctrl-j"
+context = "editor"
+mode = "visual_block"
+keys = "ctrl-j"
+command = "surface.focus.down"
+[[keymap]]
+id = "builtin.editor.visual-block.surface-focus-up.ctrl-k"
+context = "editor"
+mode = "visual_block"
+keys = "ctrl-k"
+command = "surface.focus.up"
+[[keymap]]
+id = "builtin.editor.visual-block.surface-focus-right.ctrl-l"
+context = "editor"
+mode = "visual_block"
+keys = "ctrl-l"
+command = "surface.focus.right"
+[[keymap]]
+id = "builtin.explorer.surface.surface-focus-left.ctrl-h"
+context = "explorer"
+keys = "ctrl-h"
+command = "surface.focus.left"
+[[keymap]]
+id = "builtin.explorer.surface.surface-focus-down.ctrl-j"
+context = "explorer"
+keys = "ctrl-j"
+command = "surface.focus.down"
+[[keymap]]
+id = "builtin.explorer.surface.surface-focus-up.ctrl-k"
+context = "explorer"
+keys = "ctrl-k"
+command = "surface.focus.up"
+[[keymap]]
+id = "builtin.explorer.surface.surface-focus-right.ctrl-l"
+context = "explorer"
+keys = "ctrl-l"
+command = "surface.focus.right"
+
+# Ctrl-arrow resizing follows the active window, matching the bundled
+# Neovim-like model. Horizontal arrows resize width; vertical arrows resize
+# height. Dock edges grow toward the editor and shrink away from it.
+[[keymap]]
+id = "builtin.editor.normal.window-resize-left.ctrl-left"
+context = "editor"
+mode = "normal"
+keys = "ctrl-left"
+command = "window.resize.directional"
+arguments = { direction = "left" }
+[[keymap]]
+id = "builtin.editor.normal.window-resize-right.ctrl-right"
+context = "editor"
+mode = "normal"
+keys = "ctrl-right"
+command = "window.resize.directional"
+arguments = { direction = "right" }
+[[keymap]]
+id = "builtin.editor.normal.window-resize-up.ctrl-up"
+context = "editor"
+mode = "normal"
+keys = "ctrl-up"
+command = "window.resize.directional"
+arguments = { direction = "up" }
+[[keymap]]
+id = "builtin.editor.normal.window-resize-down.ctrl-down"
+context = "editor"
+mode = "normal"
+keys = "ctrl-down"
+command = "window.resize.directional"
+arguments = { direction = "down" }
+[[keymap]]
+id = "builtin.explorer.surface.window-resize-left.ctrl-left"
+context = "explorer"
+keys = "ctrl-left"
+command = "window.resize.directional"
+arguments = { direction = "left" }
+[[keymap]]
+id = "builtin.explorer.surface.window-resize-right.ctrl-right"
+context = "explorer"
+keys = "ctrl-right"
+command = "window.resize.directional"
+arguments = { direction = "right" }
+[[keymap]]
+id = "builtin.explorer.surface.window-resize-up.ctrl-up"
+context = "explorer"
+keys = "ctrl-up"
+command = "window.resize.directional"
+arguments = { direction = "up" }
+[[keymap]]
+id = "builtin.explorer.surface.window-resize-down.ctrl-down"
+context = "explorer"
+keys = "ctrl-down"
+command = "window.resize.directional"
+arguments = { direction = "down" }
+
+# Pane and tab layout commands.
+[[keymap]]
+id = "builtin.editor.normal.pane-split-vertical.ctrl-w-s"
+context = "editor"
+mode = "normal"
+keys = "ctrl-w s"
+command = "pane.split.vertical"
+[[keymap]]
+id = "builtin.editor.normal.pane-split-horizontal.ctrl-w-v"
+context = "editor"
+mode = "normal"
+keys = "ctrl-w v"
+command = "pane.split.horizontal"
+[[keymap]]
+id = "builtin.editor.normal.pane-close.ctrl-w-q"
+context = "editor"
+mode = "normal"
+keys = "ctrl-w q"
+command = "pane.close"
+[[keymap]]
+id = "builtin.editor.normal.pane-focus-next.ctrl-w-w"
+context = "editor"
+mode = "normal"
+keys = "ctrl-w w"
+command = "pane.focus.next"
+[[keymap]]
+id = "builtin.editor.normal.pane-focus-previous.ctrl-w-upper-w"
+context = "editor"
+mode = "normal"
+keys = "ctrl-w W"
+command = "pane.focus.previous"
+[[keymap]]
+id = "builtin.editor.normal.tab-next.g-t"
+context = "editor"
+mode = "normal"
+keys = "g t"
+command = "tab.next"
+[[keymap]]
+id = "builtin.editor.normal.tab-previous.g-upper-t"
+context = "editor"
+mode = "normal"
+keys = "g T"
+command = "tab.previous"
+
+[[keymap]]
+id = "builtin.dashboard.surface.session-tutor.t"
+context = "dashboard"
+keys = "t"
+command = "session.tutor"
+
+[[keymap]]
+id = "builtin.dashboard.surface.recovery-inspect.shift-r"
+context = "dashboard"
+keys = "R"
+command = "recovery.inspect"
+[[keymap]]
+id = "builtin.editor.normal.pane-resize-grow.ctrl-w-plus"
+context = "editor"
+mode = "normal"
+keys = "ctrl-w +"
+command = "pane.resize.grow"
+[[keymap]]
+id = "builtin.editor.normal.pane-resize-shrink.ctrl-w-underscore"
+context = "editor"
+mode = "normal"
+keys = "ctrl-w _"
+command = "pane.resize.shrink"
+
+[[keymap]]
+id = "builtin.editor.normal.buffer-next.right-bracket-b"
+context = "editor"
+mode = "normal"
+keys = "] b"
+command = "buffer.next"
+[[keymap]]
+id = "builtin.editor.normal.buffer-previous.left-bracket-b"
+context = "editor"
+mode = "normal"
+keys = "[ b"
+command = "buffer.previous"
+[[keymap]]
+id = "builtin.editor.normal.buffer-previous.upper-h"
+context = "editor"
+mode = "normal"
+keys = "H"
+command = "buffer.previous"
+[[keymap]]
+id = "builtin.editor.normal.buffer-next.upper-l"
+context = "editor"
+mode = "normal"
+keys = "L"
+command = "buffer.next"
+[[keymap]]
+id = "builtin.editor.normal.buffer-next.ctrl-pagedown"
+context = "editor"
+mode = "normal"
+keys = "ctrl-pagedown"
+command = "buffer.next"
+[[keymap]]
+id = "builtin.editor.normal.buffer-previous.ctrl-pageup"
+context = "editor"
+mode = "normal"
+keys = "ctrl-pageup"
+command = "buffer.previous"
+[[keymap]]
+id = "builtin.editor.insert.buffer-next.ctrl-pagedown"
+context = "editor"
+mode = "insert"
+keys = "ctrl-pagedown"
+command = "buffer.next"
+[[keymap]]
+id = "builtin.editor.insert.buffer-previous.ctrl-pageup"
+context = "editor"
+mode = "insert"
+keys = "ctrl-pageup"
+command = "buffer.previous"
+
+# The bottom terminal toggle is available from every editor mode and the two
+# persistent navigation surfaces. Both conventional terminal shortcuts are
+# explicit, ordinary mappings and remain user-replaceable by stable ID.
+[[keymap]]
+id = "builtin.editor.normal.terminal-toggle.ctrl-slash"
+context = "editor"
+mode = "normal"
+keys = "ctrl-/"
+command = "terminal.toggle"
+[[keymap]]
+id = "builtin.editor.normal.terminal-toggle.ctrl-backslash"
+context = "editor"
+mode = "normal"
+keys = "ctrl-\\"
+command = "terminal.toggle"
+[[keymap]]
+id = "builtin.editor.insert.terminal-toggle.ctrl-slash"
+context = "editor"
+mode = "insert"
+keys = "ctrl-/"
+command = "terminal.toggle"
+[[keymap]]
+id = "builtin.editor.insert.terminal-toggle.ctrl-backslash"
+context = "editor"
+mode = "insert"
+keys = "ctrl-\\"
+command = "terminal.toggle"
+[[keymap]]
+id = "builtin.editor.replace.terminal-toggle.ctrl-slash"
+context = "editor"
+mode = "replace"
+keys = "ctrl-/"
+command = "terminal.toggle"
+[[keymap]]
+id = "builtin.editor.replace.terminal-toggle.ctrl-backslash"
+context = "editor"
+mode = "replace"
+keys = "ctrl-\\"
+command = "terminal.toggle"
+[[keymap]]
+id = "builtin.editor.visual-char.terminal-toggle.ctrl-slash"
+context = "editor"
+mode = "visual_char"
+keys = "ctrl-/"
+command = "terminal.toggle"
+[[keymap]]
+id = "builtin.editor.visual-char.terminal-toggle.ctrl-backslash"
+context = "editor"
+mode = "visual_char"
+keys = "ctrl-\\"
+command = "terminal.toggle"
+[[keymap]]
+id = "builtin.editor.visual-line.terminal-toggle.ctrl-slash"
+context = "editor"
+mode = "visual_line"
+keys = "ctrl-/"
+command = "terminal.toggle"
+[[keymap]]
+id = "builtin.editor.visual-line.terminal-toggle.ctrl-backslash"
+context = "editor"
+mode = "visual_line"
+keys = "ctrl-\\"
+command = "terminal.toggle"
+[[keymap]]
+id = "builtin.editor.visual-block.terminal-toggle.ctrl-slash"
+context = "editor"
+mode = "visual_block"
+keys = "ctrl-/"
+command = "terminal.toggle"
+[[keymap]]
+id = "builtin.editor.visual-block.terminal-toggle.ctrl-backslash"
+context = "editor"
+mode = "visual_block"
+keys = "ctrl-\\"
+command = "terminal.toggle"
+[[keymap]]
+id = "builtin.editor.operator-pending.terminal-toggle.ctrl-slash"
+context = "editor"
+mode = "operator_pending"
+keys = "ctrl-/"
+command = "terminal.toggle"
+[[keymap]]
+id = "builtin.editor.operator-pending.terminal-toggle.ctrl-backslash"
+context = "editor"
+mode = "operator_pending"
+keys = "ctrl-\\"
+command = "terminal.toggle"
+[[keymap]]
+id = "builtin.dashboard.surface.terminal-toggle.ctrl-slash"
+context = "dashboard"
+keys = "ctrl-/"
+command = "terminal.toggle"
+[[keymap]]
+id = "builtin.dashboard.surface.terminal-toggle.ctrl-backslash"
+context = "dashboard"
+keys = "ctrl-\\"
+command = "terminal.toggle"
+[[keymap]]
+id = "builtin.explorer.surface.terminal-toggle.ctrl-slash"
+context = "explorer"
+keys = "ctrl-/"
+command = "terminal.toggle"
+[[keymap]]
+id = "builtin.explorer.surface.terminal-toggle.ctrl-backslash"
+context = "explorer"
+keys = "ctrl-\\"
+command = "terminal.toggle"
+[[keymap]]
+id = "builtin.terminal.surface.terminal-toggle.ctrl-slash"
+context = "terminal"
+keys = "ctrl-/"
+command = "terminal.toggle"
+[[keymap]]
+id = "builtin.terminal.surface.terminal-toggle.ctrl-backslash"
+context = "terminal"
+keys = "ctrl-\\"
+command = "terminal.toggle"
+[[keymap]]
+id = "builtin.terminal.surface.terminal-new.ctrl-t"
+context = "terminal"
+keys = "ctrl-t"
+command = "terminal.open"
+desc = "New Terminal"
+[[keymap]]
+id = "builtin.terminal.surface.terminal-quit.ctrl-q"
+context = "terminal"
+keys = "ctrl-q"
+command = "terminal.quit"
+desc = "Quit Terminal"
+
+# Focused terminal input remains typed and configurable. Spatial focus keys
+# are host commands, so they are never forwarded as terminal control bytes.
+[[keymap]]
+id = "builtin.terminal.surface.surface-focus-left.ctrl-h"
+context = "terminal"
+keys = "ctrl-h"
+command = "surface.focus.left"
+[[keymap]]
+id = "builtin.terminal.surface.surface-focus-down.ctrl-j"
+context = "terminal"
+keys = "ctrl-j"
+command = "surface.focus.down"
+[[keymap]]
+id = "builtin.terminal.surface.surface-focus-up.ctrl-k"
+context = "terminal"
+keys = "ctrl-k"
+command = "surface.focus.up"
+[[keymap]]
+id = "builtin.terminal.surface.surface-focus-right.ctrl-l"
+context = "terminal"
+keys = "ctrl-l"
+command = "surface.focus.right"
+[[keymap]]
+id = "builtin.terminal.surface.terminal-send.escape"
+context = "terminal"
+keys = "escape"
+command = "terminal.send"
+arguments = { text = "\u001b" }
+[[keymap]]
+id = "builtin.terminal.surface.terminal-mode-normal.double-escape"
+context = "terminal"
+keys = "escape escape"
+command = "terminal.mode.normal"
+[[keymap]]
+id = "builtin.terminal.surface.terminal-send.enter"
+context = "terminal"
+keys = "enter"
+command = "terminal.send"
+arguments = { text = "\r" }
+[[keymap]]
+id = "builtin.terminal.surface.terminal-send.tab"
+context = "terminal"
+keys = "tab"
+command = "terminal.send"
+arguments = { text = "\t" }
+[[keymap]]
+id = "builtin.terminal.surface.terminal-send.backspace"
+context = "terminal"
+keys = "backspace"
+command = "terminal.send"
+arguments = { text = "\u007f" }
+[[keymap]]
+id = "builtin.terminal.surface.terminal-send.up"
+context = "terminal"
+keys = "up"
+command = "terminal.send"
+arguments = { text = "\u001b[A" }
+[[keymap]]
+id = "builtin.terminal.surface.terminal-send.down"
+context = "terminal"
+keys = "down"
+command = "terminal.send"
+arguments = { text = "\u001b[B" }
+[[keymap]]
+id = "builtin.terminal.surface.terminal-send.right"
+context = "terminal"
+keys = "right"
+command = "terminal.send"
+arguments = { text = "\u001b[C" }
+[[keymap]]
+id = "builtin.terminal.surface.terminal-send.left"
+context = "terminal"
+keys = "left"
+command = "terminal.send"
+arguments = { text = "\u001b[D" }
+[[keymap]]
+id = "builtin.terminal.surface.terminal-send.home"
+context = "terminal"
+keys = "home"
+command = "terminal.send"
+arguments = { text = "\u001b[H" }
+[[keymap]]
+id = "builtin.terminal.surface.terminal-send.end"
+context = "terminal"
+keys = "end"
+command = "terminal.send"
+arguments = { text = "\u001b[F" }
+[[keymap]]
+id = "builtin.terminal.surface.terminal-send.pageup"
+context = "terminal"
+keys = "pageup"
+command = "terminal.send"
+arguments = { text = "\u001b[5~" }
+[[keymap]]
+id = "builtin.terminal.surface.terminal-send.pagedown"
+context = "terminal"
+keys = "pagedown"
+command = "terminal.send"
+arguments = { text = "\u001b[6~" }
+[[keymap]]
+id = "builtin.terminal.surface.terminal-send.ctrl-c"
+context = "terminal"
+keys = "ctrl-c"
+command = "terminal.send"
+arguments = { text = "\u0003" }
+[[keymap]]
+id = "builtin.terminal.surface.terminal-send.ctrl-d"
+context = "terminal"
+keys = "ctrl-d"
+command = "terminal.send"
+arguments = { text = "\u0004" }
+[[keymap]]
+id = "builtin.terminal.surface.terminal-send.ctrl-z"
+context = "terminal"
+keys = "ctrl-z"
+command = "terminal.send"
+arguments = { text = "\u001a" }
+[[keymap]]
+id = "builtin.terminal.surface.terminal-cycle-previous.ctrl-shift-h"
+context = "terminal"
+keys = "ctrl-shift-h"
+command = "terminal.cycle"
+arguments = { direction = -1 }
+[[keymap]]
+id = "builtin.terminal.surface.terminal-cycle-next.ctrl-shift-l"
+context = "terminal"
+keys = "ctrl-shift-l"
+command = "terminal.cycle"
+arguments = { direction = 1 }
+[[keymap]]
+id = "builtin.terminal.surface.terminal-cycle-previous.ctrl-pageup"
+context = "terminal"
+keys = "ctrl-pageup"
+command = "terminal.cycle"
+arguments = { direction = -1 }
+[[keymap]]
+id = "builtin.terminal.surface.terminal-cycle-next.ctrl-pagedown"
+context = "terminal"
+keys = "ctrl-pagedown"
+command = "terminal.cycle"
+arguments = { direction = 1 }
+
+# Terminal normal mode is host-owned over bounded scrollback. The PTY keeps
+# running, but navigation and yanks never become process input.
+[[keymap]]
+id = "builtin.terminal-normal.surface.terminal-mode-input.i"
+context = "terminal_normal"
+keys = "i"
+command = "terminal.mode.input"
+[[keymap]]
+id = "builtin.terminal-normal.surface.terminal-mode-input.a"
+context = "terminal_normal"
+keys = "a"
+command = "terminal.mode.input"
+[[keymap]]
+id = "builtin.terminal-normal.surface.terminal-mode-input.enter"
+context = "terminal_normal"
+keys = "enter"
+command = "terminal.mode.input"
+[[keymap]]
+id = "builtin.terminal-normal.surface.terminal-move-left.h"
+context = "terminal_normal"
+keys = "h"
+command = "terminal.normal.move"
+arguments = { motion = "left" }
+[[keymap]]
+id = "builtin.terminal-normal.surface.terminal-move-down.j"
+context = "terminal_normal"
+keys = "j"
+command = "terminal.normal.move"
+arguments = { motion = "down" }
+[[keymap]]
+id = "builtin.terminal-normal.surface.terminal-move-up.k"
+context = "terminal_normal"
+keys = "k"
+command = "terminal.normal.move"
+arguments = { motion = "up" }
+[[keymap]]
+id = "builtin.terminal-normal.surface.terminal-move-right.l"
+context = "terminal_normal"
+keys = "l"
+command = "terminal.normal.move"
+arguments = { motion = "right" }
+[[keymap]]
+id = "builtin.terminal-normal.surface.terminal-move-left.arrow"
+context = "terminal_normal"
+keys = "left"
+command = "terminal.normal.move"
+arguments = { motion = "left" }
+[[keymap]]
+id = "builtin.terminal-normal.surface.terminal-move-down.arrow"
+context = "terminal_normal"
+keys = "down"
+command = "terminal.normal.move"
+arguments = { motion = "down" }
+[[keymap]]
+id = "builtin.terminal-normal.surface.terminal-move-up.arrow"
+context = "terminal_normal"
+keys = "up"
+command = "terminal.normal.move"
+arguments = { motion = "up" }
+[[keymap]]
+id = "builtin.terminal-normal.surface.terminal-move-right.arrow"
+context = "terminal_normal"
+keys = "right"
+command = "terminal.normal.move"
+arguments = { motion = "right" }
+[[keymap]]
+id = "builtin.terminal-normal.surface.terminal-line-start.zero"
+context = "terminal_normal"
+keys = "0"
+command = "terminal.normal.move"
+arguments = { motion = "line_start" }
+[[keymap]]
+id = "builtin.terminal-normal.surface.terminal-line-end.dollar"
+context = "terminal_normal"
+keys = "$"
+command = "terminal.normal.move"
+arguments = { motion = "line_end" }
+[[keymap]]
+id = "builtin.terminal-normal.surface.terminal-first.g-g"
+context = "terminal_normal"
+keys = "g g"
+command = "terminal.normal.move"
+arguments = { motion = "first" }
+[[keymap]]
+id = "builtin.terminal-normal.surface.terminal-last.upper-g"
+context = "terminal_normal"
+keys = "G"
+command = "terminal.normal.move"
+arguments = { motion = "last" }
+[[keymap]]
+id = "builtin.terminal-normal.surface.terminal-visual.v"
+context = "terminal_normal"
+keys = "v"
+command = "terminal.visual.start"
+arguments = { linewise = false }
+[[keymap]]
+id = "builtin.terminal-normal.surface.terminal-visual-line.upper-v"
+context = "terminal_normal"
+keys = "V"
+command = "terminal.visual.start"
+arguments = { linewise = true }
+[[keymap]]
+id = "builtin.terminal-normal.surface.terminal-yank-line.y-y"
+context = "terminal_normal"
+keys = "y y"
+command = "terminal.yank"
+arguments = { line = true }
+[[keymap]]
+id = "builtin.terminal-normal.surface.terminal-toggle.ctrl-slash"
+context = "terminal_normal"
+keys = "ctrl-/"
+command = "terminal.toggle"
+[[keymap]]
+id = "builtin.terminal-normal.surface.terminal-new.ctrl-t"
+context = "terminal_normal"
+keys = "ctrl-t"
+command = "terminal.open"
+desc = "New Terminal"
+[[keymap]]
+id = "builtin.terminal-normal.surface.terminal-quit.ctrl-q"
+context = "terminal_normal"
+keys = "ctrl-q"
+command = "terminal.quit"
+desc = "Quit Terminal"
+[[keymap]]
+id = "builtin.terminal-normal.surface.terminal-toggle.ctrl-backslash"
+context = "terminal_normal"
+keys = "ctrl-\\"
+command = "terminal.toggle"
+[[keymap]]
+id = "builtin.terminal-normal.surface.surface-focus-left.ctrl-h"
+context = "terminal_normal"
+keys = "ctrl-h"
+command = "surface.focus.left"
+[[keymap]]
+id = "builtin.terminal-normal.surface.surface-focus-down.ctrl-j"
+context = "terminal_normal"
+keys = "ctrl-j"
+command = "surface.focus.down"
+[[keymap]]
+id = "builtin.terminal-normal.surface.surface-focus-up.ctrl-k"
+context = "terminal_normal"
+keys = "ctrl-k"
+command = "surface.focus.up"
+[[keymap]]
+id = "builtin.terminal-normal.surface.surface-focus-right.ctrl-l"
+context = "terminal_normal"
+keys = "ctrl-l"
+command = "surface.focus.right"
+[[keymap]]
+id = "builtin.terminal-normal.surface.window-resize-left.ctrl-left"
+context = "terminal_normal"
+keys = "ctrl-left"
+command = "window.resize.directional"
+arguments = { direction = "left" }
+[[keymap]]
+id = "builtin.terminal-normal.surface.window-resize-right.ctrl-right"
+context = "terminal_normal"
+keys = "ctrl-right"
+command = "window.resize.directional"
+arguments = { direction = "right" }
+[[keymap]]
+id = "builtin.terminal-normal.surface.window-resize-up.ctrl-up"
+context = "terminal_normal"
+keys = "ctrl-up"
+command = "window.resize.directional"
+arguments = { direction = "up" }
+[[keymap]]
+id = "builtin.terminal-normal.surface.window-resize-down.ctrl-down"
+context = "terminal_normal"
+keys = "ctrl-down"
+command = "window.resize.directional"
+arguments = { direction = "down" }
+[[keymap]]
+id = "builtin.terminal-normal.surface.terminal-cycle-previous.ctrl-shift-h"
+context = "terminal_normal"
+keys = "ctrl-shift-h"
+command = "terminal.cycle"
+arguments = { direction = -1 }
+[[keymap]]
+id = "builtin.terminal-normal.surface.terminal-cycle-next.ctrl-shift-l"
+context = "terminal_normal"
+keys = "ctrl-shift-l"
+command = "terminal.cycle"
+arguments = { direction = 1 }
+[[keymap]]
+id = "builtin.terminal-normal.surface.terminal-cycle-previous.ctrl-pageup"
+context = "terminal_normal"
+keys = "ctrl-pageup"
+command = "terminal.cycle"
+arguments = { direction = -1 }
+[[keymap]]
+id = "builtin.terminal-normal.surface.terminal-cycle-next.ctrl-pagedown"
+context = "terminal_normal"
+keys = "ctrl-pagedown"
+command = "terminal.cycle"
+arguments = { direction = 1 }
+
+[[keymap]]
+id = "builtin.terminal-visual.surface.terminal-mode-normal.escape"
+context = "terminal_visual"
+keys = "escape"
+command = "terminal.mode.normal"
+[[keymap]]
+id = "builtin.terminal-visual.surface.terminal-yank.y"
+context = "terminal_visual"
+keys = "y"
+command = "terminal.yank"
+arguments = { line = false }
+[[keymap]]
+id = "builtin.terminal-visual.surface.terminal-move-left.h"
+context = "terminal_visual"
+keys = "h"
+command = "terminal.normal.move"
+arguments = { motion = "left" }
+[[keymap]]
+id = "builtin.terminal-visual.surface.terminal-move-down.j"
+context = "terminal_visual"
+keys = "j"
+command = "terminal.normal.move"
+arguments = { motion = "down" }
+[[keymap]]
+id = "builtin.terminal-visual.surface.terminal-move-up.k"
+context = "terminal_visual"
+keys = "k"
+command = "terminal.normal.move"
+arguments = { motion = "up" }
+[[keymap]]
+id = "builtin.terminal-visual.surface.terminal-move-right.l"
+context = "terminal_visual"
+keys = "l"
+command = "terminal.normal.move"
+arguments = { motion = "right" }
+[[keymap]]
+id = "builtin.terminal-visual.surface.terminal-move-left.arrow"
+context = "terminal_visual"
+keys = "left"
+command = "terminal.normal.move"
+arguments = { motion = "left" }
+[[keymap]]
+id = "builtin.terminal-visual.surface.terminal-move-down.arrow"
+context = "terminal_visual"
+keys = "down"
+command = "terminal.normal.move"
+arguments = { motion = "down" }
+[[keymap]]
+id = "builtin.terminal-visual.surface.terminal-move-up.arrow"
+context = "terminal_visual"
+keys = "up"
+command = "terminal.normal.move"
+arguments = { motion = "up" }
+[[keymap]]
+id = "builtin.terminal-visual.surface.terminal-move-right.arrow"
+context = "terminal_visual"
+keys = "right"
+command = "terminal.normal.move"
+arguments = { motion = "right" }
+[[keymap]]
+id = "builtin.terminal-visual.surface.window-resize-left.ctrl-left"
+context = "terminal_visual"
+keys = "ctrl-left"
+command = "window.resize.directional"
+arguments = { direction = "left" }
+[[keymap]]
+id = "builtin.terminal-visual.surface.window-resize-right.ctrl-right"
+context = "terminal_visual"
+keys = "ctrl-right"
+command = "window.resize.directional"
+arguments = { direction = "right" }
+[[keymap]]
+id = "builtin.terminal-visual.surface.window-resize-up.ctrl-up"
+context = "terminal_visual"
+keys = "ctrl-up"
+command = "window.resize.directional"
+arguments = { direction = "up" }
+[[keymap]]
+id = "builtin.terminal-visual.surface.window-resize-down.ctrl-down"
+context = "terminal_visual"
+keys = "ctrl-down"
+command = "window.resize.directional"
+arguments = { direction = "down" }
+
+[[keymap]]
+id = "builtin.tool-manager.surface.tools-menu-next.j"
+context = "tool_manager"
+keys = "j"
+command = "tools.menu.next"
+
+[[keymap]]
+id = "builtin.tool-manager.surface.tools-menu-next.down"
+context = "tool_manager"
+keys = "down"
+command = "tools.menu.next"
+
+[[keymap]]
+id = "builtin.tool-manager.surface.tools-menu-previous.k"
+context = "tool_manager"
+keys = "k"
+command = "tools.menu.previous"
+
+[[keymap]]
+id = "builtin.tool-manager.surface.tools-menu-previous.up"
+context = "tool_manager"
+keys = "up"
+command = "tools.menu.previous"
+
+[[keymap]]
+id = "builtin.tool-manager.surface.tools-category-next.tab"
+context = "tool_manager"
+keys = "tab"
+command = "tools.category.next"
+
+[[keymap]]
+id = "builtin.tool-manager.surface.tools-category-previous.shift-tab"
+context = "tool_manager"
+keys = "shift-tab"
+command = "tools.category.previous"
+
+[[keymap]]
+id = "builtin.tool-manager.surface.tools-activate.enter"
+context = "tool_manager"
+keys = "enter"
+command = "tools.activate"
+
+[[keymap]]
+id = "builtin.tool-manager.surface.tools-runtime-toggle.p"
+context = "tool_manager"
+keys = "p"
+command = "tools.runtime.toggle"
+
+[[keymap]]
+id = "builtin.tool-manager.surface.tools-install.i"
+context = "tool_manager"
+keys = "i"
+command = "tools.install"
+
+[[keymap]]
+id = "builtin.tool-manager.surface.tools-uninstall.u"
+context = "tool_manager"
+keys = "u"
+command = "tools.uninstall"
+
+[[keymap]]
+id = "builtin.tool-manager.surface.tools-lsp-stop.x"
+context = "tool_manager"
+keys = "x"
+command = "tools.lsp.stop"
+
+[[keymap]]
+id = "builtin.tool-manager.surface.tools-lsp-restart.upper-r"
+context = "tool_manager"
+keys = "R"
+command = "tools.lsp.restart"
+
+[[keymap]]
+id = "builtin.tool-manager.surface.tools-refresh.r"
+context = "tool_manager"
+keys = "r"
+command = "tools.refresh"
+
+[[keymap]]
+id = "builtin.tool-manager.surface.tools-menu-close.escape"
+context = "tool_manager"
+keys = "escape"
+command = "tools.menu.close"
+
+[[keymap]]
+id = "builtin.documentation.surface.scroll-down.j"
+context = "documentation"
+keys = "j"
+command = "lsp.documentation.scroll_down"
+
+[[keymap]]
+id = "builtin.documentation.surface.scroll-down.down"
+context = "documentation"
+keys = "down"
+command = "lsp.documentation.scroll_down"
+
+[[keymap]]
+id = "builtin.documentation.surface.scroll-down.ctrl-d"
+context = "documentation"
+keys = "ctrl-d"
+command = "lsp.documentation.scroll_down"
+
+[[keymap]]
+id = "builtin.documentation.surface.scroll-up.k"
+context = "documentation"
+keys = "k"
+command = "lsp.documentation.scroll_up"
+
+[[keymap]]
+id = "builtin.documentation.surface.scroll-up.up"
+context = "documentation"
+keys = "up"
+command = "lsp.documentation.scroll_up"
+
+[[keymap]]
+id = "builtin.documentation.surface.scroll-up.ctrl-u"
+context = "documentation"
+keys = "ctrl-u"
+command = "lsp.documentation.scroll_up"
+
+[[keymap]]
+id = "builtin.documentation.surface.close.q"
+context = "documentation"
+keys = "q"
+command = "lsp.documentation.close"
+
+[[keymap]]
+id = "builtin.documentation.surface.close.escape"
+context = "documentation"
+keys = "escape"
+command = "lsp.documentation.close"
+
+[[keymap]]
+id = "builtin.editor.normal.lsp-hover.upper-k"
+context = "editor"
+mode = "normal"
+keys = "K"
+command = "lsp.hover"
+
+[[keymap]]
+id = "builtin.editor.normal.lsp-definition.g-d"
+context = "editor"
+mode = "normal"
+keys = "g d"
+command = "lsp.definition"
+
+[[keymap]]
+id = "builtin.editor.normal.lsp-declaration.g-upper-d"
+context = "editor"
+mode = "normal"
+keys = "g D"
+command = "lsp.declaration"
+
+[[keymap]]
+id = "builtin.editor.normal.lsp-references.g-r"
+context = "editor"
+mode = "normal"
+keys = "g r"
+command = "lsp.references"
+
+[[keymap]]
+id = "builtin.editor.normal.lsp-implementation.g-upper-i"
+context = "editor"
+mode = "normal"
+keys = "g I"
+command = "lsp.implementation"
+
+[[keymap]]
+id = "builtin.editor.normal.lsp-type-definition.g-y"
+context = "editor"
+mode = "normal"
+keys = "g y"
+command = "lsp.type_definition"
+
+[[keymap]]
+id = "builtin.editor.normal.lsp-signature-help.g-upper-k"
+context = "editor"
+mode = "normal"
+keys = "g K"
+command = "lsp.signature_help"
+
+[[keymap]]
+id = "builtin.editor.normal.lsp-document-symbols.g-upper-o"
+context = "editor"
+mode = "normal"
+keys = "g O"
+command = "lsp.document_symbols"
+
+[[keymap]]
+id = "builtin.editor.normal.lsp-completion-trigger.ctrl-space"
+context = "editor"
+mode = "normal"
+keys = "ctrl-space"
+command = "lsp.completion.trigger"
+
+[[keymap]]
+id = "builtin.completion.surface.completion-accept.tab"
+context = "completion"
+keys = "tab"
+command = "completion.accept"
+
+[[keymap]]
+id = "builtin.completion.surface.completion-select-next.ctrl-n"
+context = "completion"
+keys = "ctrl-n"
+command = "completion.select_next"
+
+[[keymap]]
+id = "builtin.completion.surface.completion-select-previous.ctrl-p"
+context = "completion"
+keys = "ctrl-p"
+command = "completion.select_previous"
+
+[[keymap]]
+id = "builtin.snippet.surface.snippet-next.tab"
+context = "snippet"
+keys = "tab"
+command = "snippet.next"
+
+[[keymap]]
+id = "builtin.snippet.surface.snippet-previous.shift-tab"
+context = "snippet"
+keys = "shift-tab"
+command = "snippet.previous"
+
+[[keymap]]
+id = "builtin.snippet.surface.snippet-leave.escape"
+context = "snippet"
+keys = "escape"
+command = "snippet.leave"
+
+[[keymap]]
+id = "builtin.completion.surface.completion-select-next.down"
+context = "completion"
+keys = "down"
+command = "completion.select_next"
+
+[[keymap]]
+id = "builtin.completion.surface.completion-select-previous.shift-tab"
+context = "completion"
+keys = "shift-tab"
+command = "completion.select_previous"
+
+[[keymap]]
+id = "builtin.completion.surface.completion-select-previous.up"
+context = "completion"
+keys = "up"
+command = "completion.select_previous"
+
+[[keymap]]
+id = "builtin.completion.surface.documentation-scroll-down.ctrl-d"
+context = "completion"
+keys = "ctrl-d"
+command = "lsp.documentation.scroll_down"
+
+[[keymap]]
+id = "builtin.completion.surface.documentation-scroll-up.ctrl-u"
+context = "completion"
+keys = "ctrl-u"
+command = "lsp.documentation.scroll_up"
+
+[[keymap]]
+id = "builtin.completion.surface.completion-accept.enter"
+context = "completion"
+keys = "enter"
+command = "completion.accept"
+
+[[keymap]]
+id = "builtin.completion.surface.completion-cancel.escape"
+context = "completion"
+keys = "escape"
+command = "completion.leave"
+
+[[keymap]]
+id = "builtin.completion.surface.edit-backspace.backspace"
+context = "completion"
+keys = "backspace"
+command = "edit.backspace"
+
+[[keymap]]
+id = "builtin.editor.normal.diagnostic-next.right-bracket-d"
+context = "editor"
+mode = "normal"
+keys = "] d"
+command = "diagnostic.next"
+
+[[keymap]]
+id = "builtin.editor.normal.diagnostic-previous.left-bracket-d"
+context = "editor"
+mode = "normal"
+keys = "[ d"
+command = "diagnostic.previous"
+
+[[keymap]]
+id = "builtin.editor.normal.diagnostic-error-next.right-bracket-e"
+context = "editor"
+mode = "normal"
+keys = "] e"
+command = "diagnostic.error.next"
+
+[[keymap]]
+id = "builtin.editor.normal.diagnostic-error-previous.left-bracket-e"
+context = "editor"
+mode = "normal"
+keys = "[ e"
+command = "diagnostic.error.previous"
+
+[[keymap]]
+id = "builtin.editor.normal.diagnostic-warning-next.right-bracket-w"
+context = "editor"
+mode = "normal"
+keys = "] w"
+command = "diagnostic.warning.next"
+
+[[keymap]]
+id = "builtin.editor.normal.diagnostic-warning-previous.left-bracket-w"
+context = "editor"
+mode = "normal"
+keys = "[ w"
+command = "diagnostic.warning.previous"
+
+[[keymap]]
+id = "builtin.editor.normal.git-hunk-next.right-bracket-h"
+context = "editor"
+mode = "normal"
+keys = "] h"
+command = "workspace.git.hunk.next"
+
+[[keymap]]
+id = "builtin.editor.normal.markdown-preview.leader-c-p"
+context = "editor"
+mode = "normal"
+keys = "<leader> c p"
+command = "file.markdown_preview"
+desc = "Markdown Preview"
+
+[[keymap]]
+id = "builtin.global.git-diff.leader-g-d"
+context = "global"
+keys = "<leader> g d"
+command = "workspace.git.hunks.open"
+desc = "Git Diff (hunks)"
+
+[[key_group]]
+id = "builtin.editor.group.surround"
+context = "editor"
+mode = "normal"
+prefix = "g s"
+label = "Surround"
+order = 90
+
+[[keymap]]
+id = "builtin.editor.normal.git-conflict-next.right-bracket-x"
+context = "editor"
+mode = "normal"
+keys = "] x"
+command = "workspace.git.conflict.next"
+desc = "Next Conflict"
+
+[[keymap]]
+id = "builtin.editor.normal.git-conflict-previous.left-bracket-x"
+context = "editor"
+mode = "normal"
+keys = "[ x"
+command = "workspace.git.conflict.previous"
+desc = "Previous Conflict"
+
+[[keymap]]
+id = "builtin.editor.normal.mark-set.m"
+context = "editor"
+mode = "normal"
+keys = "m"
+command = "input.mark.begin"
+arguments = { text = "navigation.mark.set" }
+
+[[keymap]]
+id = "builtin.editor.normal.mark-jump.apostrophe"
+context = "editor"
+mode = "normal"
+keys = "'"
+command = "input.mark.begin"
+arguments = { text = "navigation.mark.jump" }
+
+[[keymap]]
+id = "builtin.editor.normal.mark-jump.backtick"
+context = "editor"
+mode = "normal"
+keys = "`"
+command = "input.mark.begin"
+arguments = { text = "navigation.mark.jump" }
+
+[[keymap]]
+id = "builtin.editor.normal.git-hunk-previous.left-bracket-h"
+context = "editor"
+mode = "normal"
+keys = "[ h"
+command = "workspace.git.hunk.previous"
+
+[[keymap]]
+id = "builtin.editor.insert.lsp-completion-trigger.ctrl-space"
+context = "editor"
+mode = "insert"
+keys = "ctrl-space"
+command = "lsp.completion.trigger"
+
+[[keymap]]
+id = "builtin.theme-picker.down"
+context = "theme_picker"
+keys = "down"
+command = "picker.next"
+
+[[keymap]]
+id = "builtin.theme-picker.up"
+context = "theme_picker"
+keys = "up"
+command = "picker.previous"
+
+[[keymap]]
+id = "builtin.theme-picker.enter"
+context = "theme_picker"
+keys = "enter"
+command = "picker.accept"
+
+[[keymap]]
+id = "builtin.theme-picker.escape"
+context = "theme_picker"
+keys = "escape"
+command = "picker.cancel"
+
+[[keymap]]
+id = "builtin.theme-picker.ctrl-c"
+context = "theme_picker"
+keys = "ctrl-c"
+command = "picker.cancel"
+
+[[keymap]]
+id = "builtin.theme-picker.backspace"
+context = "theme_picker"
+keys = "backspace"
+command = "picker.backspace"
+
+[[keymap]]
+id = "builtin.picker.surface.picker-next.j"
+context = "picker_normal"
+keys = "j"
+command = "picker.next"
+
+[[keymap]]
+id = "builtin.picker.surface.picker-next.down"
+context = "picker"
+keys = "down"
+command = "picker.next"
+
+[[keymap]]
+id = "builtin.picker.surface.picker-previous.k"
+context = "picker_normal"
+keys = "k"
+command = "picker.previous"
+
+[[keymap]]
+id = "builtin.picker.surface.picker-previous.up"
+context = "picker"
+keys = "up"
+command = "picker.previous"
+
+[[keymap]]
+id = "builtin.picker.surface.picker-accept.enter"
+context = "picker"
+keys = "enter"
+command = "picker.accept"
+
+[[keymap]]
+id = "builtin.picker.surface.help-reference.ctrl-o"
+context = "picker"
+keys = "ctrl-o"
+command = "overlay.help.reference"
+
+[[keymap]]
+id = "builtin.picker.surface.picker-cancel.escape"
+context = "picker"
+keys = "escape"
+command = "picker.mode.normal"
+
+[[keymap]]
+id = "builtin.picker.surface.picker-cancel.ctrl-c"
+context = "picker"
+keys = "ctrl-c"
+command = "picker.cancel"
+
+[[keymap]]
+id = "builtin.picker.normal.picker-next.down"
+context = "picker_normal"
+keys = "down"
+command = "picker.next"
+
+[[keymap]]
+id = "builtin.picker.normal.picker-previous.up"
+context = "picker_normal"
+keys = "up"
+command = "picker.previous"
+
+[[keymap]]
+id = "builtin.picker.normal.picker-accept.enter"
+context = "picker_normal"
+keys = "enter"
+command = "picker.accept"
+
+[[keymap]]
+id = "builtin.picker.normal.picker-cancel.escape"
+context = "picker_normal"
+keys = "escape"
+command = "picker.cancel"
+
+[[keymap]]
+id = "builtin.picker.normal.picker-cancel.ctrl-c"
+context = "picker_normal"
+keys = "ctrl-c"
+command = "picker.cancel"
+
+[[keymap]]
+id = "builtin.picker.normal.picker-mode-insert.i"
+context = "picker_normal"
+keys = "i"
+command = "picker.mode.insert"
+[[keymap]]
+id = "builtin.picker.picker-results.ctrl-q"
+context = "picker"
+keys = "ctrl-q"
+command = "picker.results"
+
+[[keymap]]
+id = "builtin.picker.normal.picker-results.ctrl-q"
+context = "picker_normal"
+keys = "ctrl-q"
+command = "picker.results"
+
+[[keymap]]
+id = "builtin.picker.normal.changes-layer-switch.tab"
+context = "picker_normal"
+keys = "tab"
+command = "workspace.git.diff.layer.switch"
+
+[[keymap]]
+id = "builtin.picker.normal.changes-stage-file.s"
+context = "picker_normal"
+keys = "s"
+command = "workspace.git.file.stage"
+
+[[keymap]]
+id = "builtin.picker.normal.changes-unstage-file.u"
+context = "picker_normal"
+keys = "u"
+command = "workspace.git.file.unstage"
+
+[[keymap]]
+id = "builtin.picker.surface.picker-backspace.backspace"
+context = "picker"
+keys = "backspace"
+command = "picker.backspace"
+
+[[keymap]]
+id = "builtin.workspace-edit.surface.picker-next.j"
+context = "workspace_edit"
+keys = "j"
+command = "picker.next"
+
+[[keymap]]
+id = "builtin.workspace-edit.surface.picker-next.down"
+context = "workspace_edit"
+keys = "down"
+command = "picker.next"
+
+[[keymap]]
+id = "builtin.workspace-edit.surface.picker-previous.k"
+context = "workspace_edit"
+keys = "k"
+command = "picker.previous"
+
+[[keymap]]
+id = "builtin.workspace-edit.surface.picker-previous.up"
+context = "workspace_edit"
+keys = "up"
+command = "picker.previous"
+
+[[keymap]]
+id = "builtin.workspace-edit.surface.workspace-edit-toggle.space"
+context = "workspace_edit"
+keys = "space"
+command = "workspace.edit.toggle"
+
+[[keymap]]
+id = "builtin.workspace-edit.surface.workspace-edit-accept.enter"
+context = "workspace_edit"
+keys = "enter"
+command = "workspace.edit.accept"
+
+[[keymap]]
+id = "builtin.workspace-edit.surface.workspace-edit-reject.escape"
+context = "workspace_edit"
+keys = "escape"
+command = "workspace.edit.reject"
+
+# Leader bindings, LazyVim layout. `context = "global"` applies them in the editor
+# (normal mode), explorer, dashboard, terminal normal mode, tool manager and panels.
+
+[[key_group]]
+id = "builtin.global.group.ai"
+context = "global"
+prefix = "<leader> a"
+label = "AI"
+icon = "󰚩"
+order = 3
+
+[[key_group]]
+id = "builtin.global.group.git-pull-requests"
+context = "global"
+prefix = "<leader> g p"
+label = "Pull Requests"
+icon = ""
+order = 27
+
+[[key_group]]
+id = "builtin.global.group.buffers"
+context = "global"
+prefix = "<leader> b"
+label = "Buffers"
+icon = "󰓩"
+order = 5
+
+[[key_group]]
+id = "builtin.global.group.code"
+context = "global"
+prefix = "<leader> c"
+label = "Code"
+icon = "󰅩"
+order = 10
+
+[[key_group]]
+id = "builtin.global.group.test"
+context = "global"
+prefix = "<leader> t"
+label = "Test"
+
+[[key_group]]
+id = "builtin.global.group.debug"
+context = "global"
+prefix = "<leader> d"
+label = "Debug"
+icon = "󰃤"
+order = 15
+
+[[key_group]]
+id = "builtin.global.group.files"
+context = "global"
+prefix = "<leader> f"
+label = "Files"
+icon = "󰈞"
+order = 20
+
+[[key_group]]
+id = "builtin.global.group.git"
+context = "global"
+prefix = "<leader> g"
+label = "Git"
+icon = "󰊢"
+order = 25
+
+[[key_group]]
+id = "builtin.global.group.hunks"
+context = "global"
+prefix = "<leader> g h"
+label = "Hunks"
+icon = "󰊢"
+order = 26
+
+[[key_group]]
+id = "builtin.global.group.quit"
+context = "global"
+prefix = "<leader> q"
+label = "Quit"
+icon = "󰗼"
+order = 30
+
+[[key_group]]
+id = "builtin.global.group.search"
+context = "global"
+prefix = "<leader> s"
+label = "Search"
+icon = "󰍉"
+order = 35
+
+[[key_group]]
+id = "builtin.global.group.ui"
+context = "global"
+prefix = "<leader> u"
+label = "UI"
+icon = "󰙵"
+order = 40
+
+[[key_group]]
+id = "builtin.global.group.windows"
+context = "global"
+prefix = "<leader> w"
+label = "Windows"
+icon = "󰖲"
+order = 45
+
+[[key_group]]
+id = "builtin.global.group.diagnostics"
+context = "global"
+prefix = "<leader> x"
+label = "Diagnostics"
+icon = "󰒡"
+order = 50
+
+[[key_group]]
+id = "builtin.global.group.tabs"
+context = "global"
+prefix = "<leader> tab"
+label = "Tabs"
+icon = "󰓩"
+order = 55
+
+[[keymap]]
+id = "builtin.global.help"
+context = "global"
+keys = "<leader> ?"
+command = "overlay.help.contextual"
+desc = "Keymaps"
+
+[[keymap]]
+id = "builtin.global.explorer"
+context = "global"
+keys = "<leader> e"
+command = "explorer.panel.toggle"
+desc = "Explorer"
+
+[[keymap]]
+id = "builtin.global.files-find-root"
+context = "global"
+keys = "<leader> space"
+command = "workspace.file.find"
+desc = "Find Files"
+
+[[keymap]]
+id = "builtin.global.grep"
+context = "global"
+keys = "<leader> /"
+command = "workspace.search.prompt"
+desc = "Grep"
+
+[[keymap]]
+id = "builtin.global.settings"
+context = "global"
+keys = "<leader> ,"
+command = "settings.open"
+desc = "Settings"
+
+[[keymap]]
+id = "builtin.global.settings.ctrl-comma"
+context = "global"
+keys = "ctrl-,"
+command = "settings.open"
+desc = "Settings"
+
+[[keymap]]
+id = "builtin.global.commands"
+context = "global"
+keys = "<leader> :"
+command = "command_palette.open"
+desc = "Commands"
+
+[[keymap]]
+id = "builtin.global.commands.f1"
+context = "global"
+keys = "f1"
+command = "command_palette.open"
+desc = "Commands"
+
+[[keymap]]
+id = "builtin.editor.insert.commands.f1"
+context = "editor"
+mode = "insert"
+keys = "f1"
+command = "command_palette.open"
+desc = "Commands"
+
+[[keymap]]
+id = "builtin.global.notifications"
+context = "global"
+keys = "<leader> n"
+command = "application.notifications.open"
+desc = "Notifications"
+
+[[keymap]]
+id = "builtin.global.split-below"
+context = "global"
+keys = "<leader> -"
+command = "pane.split.vertical"
+desc = "Split Below"
+
+[[keymap]]
+id = "builtin.global.split-right"
+context = "global"
+keys = "<leader> |"
+command = "pane.split.horizontal"
+desc = "Split Right"
+
+[[keymap]]
+id = "builtin.global.files-explorer"
+context = "global"
+keys = "<leader> f e"
+command = "explorer.panel.toggle"
+desc = "Explorer"
+
+[[keymap]]
+id = "builtin.global.files-find"
+context = "global"
+keys = "<leader> f f"
+command = "workspace.file.find"
+desc = "Find Files"
+
+[[keymap]]
+id = "builtin.global.files-buffers"
+context = "global"
+keys = "<leader> f b"
+command = "buffer.picker.open"
+desc = "Buffers"
+
+[[keymap]]
+id = "builtin.global.files-recent"
+context = "global"
+keys = "<leader> f r"
+command = "navigation.recents"
+desc = "Recent"
+
+[[keymap]]
+id = "builtin.global.files-new"
+context = "global"
+keys = "<leader> f n"
+command = "file.new"
+desc = "New File"
+
+[[keymap]]
+id = "builtin.global.files-projects"
+context = "global"
+keys = "<leader> f p"
+command = "workspace.root.list"
+desc = "Projects"
+
+[[keymap]]
+id = "builtin.global.search-todo"
+context = "global"
+keys = "<leader> s t"
+command = "workspace.search.todo"
+desc = "Todo"
+
+[[keymap]]
+id = "builtin.global.search-grep"
+context = "global"
+keys = "<leader> s g"
+command = "workspace.search.prompt"
+desc = "Grep"
+
+[[keymap]]
+id = "builtin.global.search-replace"
+context = "global"
+keys = "<leader> s r"
+command = "workspace.replace.prompt"
+desc = "Search and Replace"
+
+[[keymap]]
+id = "builtin.global.search-symbols"
+context = "global"
+keys = "<leader> s s"
+command = "lsp.document_symbols"
+desc = "Symbols"
+
+[[keymap]]
+id = "builtin.global.search-workspace-symbols"
+context = "global"
+keys = "<leader> s S"
+command = "lsp.workspace_symbols"
+desc = "Workspace Symbols"
+arguments = { query = "" }
+
+[[keymap]]
+id = "builtin.global.search-diagnostics"
+context = "global"
+keys = "<leader> s d"
+command = "diagnostic.open"
+desc = "Diagnostics"
+
+[[keymap]]
+id = "builtin.global.search-jumps"
+context = "global"
+keys = "<leader> s j"
+command = "navigation.jumps"
+desc = "Jumps"
+
+[[keymap]]
+id = "builtin.global.search-marks"
+context = "global"
+keys = "<leader> s m"
+command = "navigation.marks"
+desc = "Marks"
+
+[[keymap]]
+id = "builtin.global.search-commands"
+context = "global"
+keys = "<leader> s C"
+command = "command_palette.open"
+desc = "Commands"
+
+[[keymap]]
+id = "builtin.global.search-keymaps"
+context = "global"
+keys = "<leader> s k"
+command = "settings.shortcuts"
+desc = "Keymaps"
+
+[[keymap]]
+id = "builtin.global.code-action"
+context = "global"
+keys = "<leader> c a"
+command = "lsp.code_action"
+desc = "Code Action"
+
+[[keymap]]
+id = "builtin.global.code-format"
+context = "global"
+keys = "<leader> c f"
+command = "lsp.format"
+desc = "Format"
+
+[[keymap]]
+id = "builtin.global.code-symbols"
+context = "global"
+keys = "<leader> c s"
+command = "lsp.document_symbols"
+desc = "Symbols"
+
+[[keymap]]
+id = "builtin.global.code-lsp-info"
+context = "global"
+keys = "<leader> c l"
+command = "lsp.server.status"
+desc = "LSP Info"
+
+[[keymap]]
+id = "builtin.global.code-tools"
+context = "global"
+keys = "<leader> c m"
+command = "tools.menu.open"
+desc = "Tools"
+
+[[keymap]]
+id = "builtin.global.diagnostics"
+context = "global"
+keys = "<leader> x x"
+command = "diagnostic.open"
+desc = "Diagnostics"
+
+[[keymap]]
+id = "builtin.global.debug-breakpoint"
+context = "global"
+keys = "<leader> d b"
+command = "dap.breakpoint.toggle"
+desc = "Toggle Breakpoint"
+
+[[keymap]]
+id = "builtin.global.debug-variables"
+context = "global"
+keys = "<leader> d v"
+command = "dap.scopes"
+desc = "Inspect Variables"
+
+[[keymap]]
+id = "builtin.global.debug-breakpoint-condition"
+context = "global"
+keys = "<leader> d B"
+command = "dap.breakpoint.configure"
+desc = "Breakpoint Condition"
+
+[[keymap]]
+id = "builtin.global.debug-continue"
+context = "global"
+keys = "<leader> d c"
+command = "dap.session.continue"
+desc = "Continue"
+
+[[keymap]]
+id = "builtin.global.debug-start"
+context = "global"
+keys = "<leader> d s"
+command = "dap.session.start"
+desc = "Start"
+
+[[keymap]]
+id = "builtin.global.debug-step-into"
+context = "global"
+keys = "<leader> d i"
+command = "dap.session.step_in"
+desc = "Step Into"
+
+[[keymap]]
+id = "builtin.global.debug-step-over"
+context = "global"
+keys = "<leader> d O"
+command = "dap.session.next"
+desc = "Step Over"
+
+[[keymap]]
+id = "builtin.global.debug-step-out"
+context = "global"
+keys = "<leader> d o"
+command = "dap.session.step_out"
+desc = "Step Out"
+
+[[keymap]]
+id = "builtin.global.debug-pause"
+context = "global"
+keys = "<leader> d p"
+command = "dap.session.pause"
+desc = "Pause"
+
+[[keymap]]
+id = "builtin.global.debug-terminate"
+context = "global"
+keys = "<leader> d t"
+command = "dap.session.stop"
+desc = "Terminate"
+
+[[keymap]]
+id = "builtin.global.debug-restart"
+context = "global"
+keys = "<leader> d R"
+command = "dap.session.restart"
+desc = "Restart"
+
+[[keymap]]
+id = "builtin.global.debug-next-pane"
+context = "global"
+keys = "<leader> d n"
+command = "dap.inspector.next"
+desc = "Next Debug Pane"
+
+[[keymap]]
+id = "builtin.global.debug-repl"
+context = "global"
+keys = "<leader> d r"
+command = "dap.console"
+desc = "Console"
+
+[[keymap]]
+id = "builtin.global.debug-breakpoints"
+context = "global"
+keys = "<leader> d l"
+command = "dap.breakpoints.states"
+desc = "Breakpoints"
+
+[[keymap]]
+id = "builtin.global.debug-detach"
+context = "global"
+keys = "<leader> d D"
+command = "dap.detach"
+desc = "Detach"
+
+[[keymap]]
+id = "builtin.global.lazygit"
+context = "global"
+keys = "<leader> g g"
+command = "terminal.open"
+arguments = { profile = "lazygit" }
+desc = "Lazygit"
+
+[[keymap]]
+id = "builtin.global.lazygit-cwd"
+context = "global"
+keys = "<leader> g G"
+command = "terminal.open"
+arguments = { profile = "lazygit_cwd" }
+desc = "Lazygit (file directory)"
+
+[[keymap]]
+id = "builtin.global.git-blame-line"
+context = "global"
+keys = "<leader> g b"
+command = "terminal.open"
+arguments = { profile = "git_blame_line" }
+desc = "Git Blame Line"
+
+[[keymap]]
+id = "builtin.global.git-browse"
+context = "global"
+keys = "<leader> g B"
+command = "workspace.git.browse"
+desc = "Git Browse (open)"
+
+[[keymap]]
+id = "builtin.global.git-browse-copy"
+context = "global"
+keys = "<leader> g Y"
+command = "workspace.git.browse.copy"
+desc = "Git Browse (copy)"
+
+[[keymap]]
+id = "builtin.global.lazygit-file"
+context = "global"
+keys = "<leader> g f"
+command = "terminal.open"
+arguments = { profile = "lazygit_file" }
+desc = "Git Current File History"
+
+[[keymap]]
+id = "builtin.global.lazygit-log"
+context = "global"
+keys = "<leader> g l"
+command = "terminal.open"
+arguments = { profile = "lazygit_log" }
+desc = "Git Log"
+
+[[keymap]]
+id = "builtin.global.lazygit-log-commits"
+context = "global"
+keys = "<leader> g c"
+command = "terminal.open"
+arguments = { profile = "lazygit_log" }
+desc = "Git Log"
+
+[[keymap]]
+id = "builtin.global.git-status"
+context = "global"
+keys = "<leader> g s"
+command = "workspace.git.status.open"
+desc = "Git Status"
+
+[[keymap]]
+id = "builtin.global.git-conflicts"
+context = "global"
+keys = "<leader> g x"
+command = "workspace.git.conflicts.open"
+desc = "Conflicts"
+
+[[keymap]]
+id = "builtin.picker.remove.ctrl-x"
+context = "picker"
+keys = "ctrl-x"
+command = "picker.remove"
+
+[[keymap]]
+id = "builtin.picker-normal.remove.d"
+context = "picker_normal"
+keys = "d"
+command = "picker.remove"
+
+[[keymap]]
+id = "builtin.global.git-worktrees"
+context = "global"
+keys = "<leader> g w"
+command = "workspace.git.worktrees.open"
+desc = "Worktrees"
+
+[[keymap]]
+id = "builtin.global.hunk-preview"
+context = "global"
+keys = "<leader> g h p"
+command = "workspace.git.hunk.preview"
+desc = "Preview Hunk"
+
+[[keymap]]
+id = "builtin.global.hunk-stage"
+context = "global"
+keys = "<leader> g h s"
+command = "workspace.git.hunk.stage"
+desc = "Stage Hunk"
+
+[[keymap]]
+id = "builtin.global.hunk-unstage"
+context = "global"
+keys = "<leader> g h u"
+command = "workspace.git.hunk.unstage"
+desc = "Unstage Hunk"
+
+[[keymap]]
+id = "builtin.global.hunk-reset"
+context = "global"
+keys = "<leader> g h r"
+command = "workspace.git.hunk.reset"
+desc = "Reset Hunk"
+
+[[keymap]]
+id = "builtin.global.ui-colorscheme"
+context = "global"
+keys = "<leader> u C"
+command = "theme.select"
+desc = "Colorscheme"
+
+[[keymap]]
+id = "builtin.global.ui-inlay-hints"
+context = "global"
+keys = "<leader> u h"
+command = "lsp.inlay_hints.toggle"
+desc = "Toggle Inlay Hints"
+
+[[keymap]]
+id = "builtin.global.ui-wrap"
+context = "global"
+keys = "<leader> u w"
+command = "view.wrap.toggle"
+desc = "Toggle Wrap"
+
+[[keymap]]
+id = "builtin.global.ui-line-numbers"
+context = "global"
+keys = "<leader> u l"
+command = "view.line_numbers.toggle"
+desc = "Toggle Line Numbers"
+
+[[keymap]]
+id = "builtin.global.ui-relative-numbers"
+context = "global"
+keys = "<leader> u L"
+command = "view.relative_numbers.toggle"
+desc = "Toggle Relative Number"
+
+[[keymap]]
+id = "builtin.global.ui-indent-guides"
+context = "global"
+keys = "<leader> u g"
+command = "view.indent_guides.toggle"
+desc = "Toggle Indent Guides"
+
+[[keymap]]
+id = "builtin.global.ui-git-signs"
+context = "global"
+keys = "<leader> u G"
+command = "view.git_signs.toggle"
+desc = "Toggle Git Signs"
+
+[[keymap]]
+id = "builtin.global.ui-format-on-save"
+context = "global"
+keys = "<leader> u f"
+command = "view.format_on_save.toggle"
+desc = "Toggle Format on Save"
+
+[[keymap]]
+id = "builtin.global.session-restore"
+context = "global"
+keys = "<leader> q s"
+command = "session.load"
+desc = "Restore Session"
+
+[[keymap]]
+id = "builtin.global.test-run"
+context = "global"
+keys = "<leader> t t"
+command = "test.run.prompt"
+desc = "Run Test"
+
+[[keymap]]
+id = "builtin.global.test-results"
+context = "global"
+keys = "<leader> t s"
+command = "test.list.prompt"
+desc = "Test Results"
+
+[[keymap]]
+id = "builtin.global.test-stop"
+context = "global"
+keys = "<leader> t S"
+command = "test.stop.prompt"
+desc = "Stop Test"
+
+[[keymap]]
+id = "builtin.global.ui-zen"
+context = "global"
+keys = "<leader> u z"
+command = "view.zen.toggle"
+desc = "Toggle Zen Mode"
+
+[[keymap]]
+id = "builtin.global.ui-zoom"
+context = "global"
+keys = "<leader> u Z"
+command = "pane.zoom"
+desc = "Toggle Zoom Mode"
+
+[[keymap]]
+id = "builtin.global.window-zoom"
+context = "global"
+keys = "<leader> w m"
+command = "pane.zoom"
+desc = "Toggle Zoom Mode"
+
+[[keymap]]
+id = "builtin.global.window-close"
+context = "global"
+keys = "<leader> w d"
+command = "pane.close"
+desc = "Close Window"
+
+[[keymap]]
+id = "builtin.global.window-split-below"
+context = "global"
+keys = "<leader> w -"
+command = "pane.split.vertical"
+desc = "Split Below"
+
+[[keymap]]
+id = "builtin.global.window-split-right"
+context = "global"
+keys = "<leader> w |"
+command = "pane.split.horizontal"
+desc = "Split Right"
+
+[[keymap]]
+id = "builtin.global.window-next"
+context = "global"
+keys = "<leader> w w"
+command = "pane.focus.next"
+desc = "Next Window"
+
+[[keymap]]
+id = "builtin.global.buffer-close"
+context = "global"
+keys = "<leader> b d"
+command = "buffer.close"
+desc = "Delete Buffer"
+arguments = { force = false }
+
+[[keymap]]
+id = "builtin.global.buffer-pin"
+context = "global"
+keys = "<leader> b p"
+command = "buffer.pin.toggle"
+desc = "Toggle Pin"
+
+[[keymap]]
+id = "builtin.global.quit"
+context = "global"
+keys = "<leader> q q"
+command = "editor.quit"
+desc = "Quit All"
+arguments = { force = false }
+
+[[keymap]]
+id = "builtin.global.tab-new"
+context = "global"
+keys = "<leader> tab tab"
+command = "tab.new"
+desc = "New Tab"
+
+[[keymap]]
+id = "builtin.global.tab-close"
+context = "global"
+keys = "<leader> tab d"
+command = "tab.close"
+desc = "Close Tab"
+
+[[keymap]]
+id = "builtin.global.tab-next"
+context = "global"
+keys = "<leader> tab ]"
+command = "tab.next"
+desc = "Next Tab"
+
+[[keymap]]
+id = "builtin.global.tab-previous"
+context = "global"
+keys = "<leader> tab ["
+command = "tab.previous"
+desc = "Previous Tab"
+
+[[keymap]]
+id = "builtin.global.agent-ask"
+context = "global"
+keys = "<leader> a a"
+command = "agent.toggle"
+desc = "Toggle Agent"
+
+[[keymap]]
+id = "builtin.global.agent-toggle"
+context = "global"
+keys = "<leader> a t"
+command = "agent.toggle"
+desc = "Toggle Agent Panel"
+
+[[keymap]]
+id = "builtin.global.agent-file"
+context = "global"
+keys = "<leader> a f"
+command = "agent.add_file"
+desc = "Ask About File"
+
+[[keymap]]
+id = "builtin.global.agent-diagnostics"
+context = "global"
+keys = "<leader> a d"
+command = "agent.add_diagnostics"
+desc = "Ask About Diagnostics"
+
+[[keymap]]
+id = "builtin.global.agent-new"
+context = "global"
+keys = "<leader> a n"
+command = "agent.new"
+desc = "New Agent Session"
+
+[[keymap]]
+id = "builtin.global.agent-cancel"
+context = "global"
+keys = "<leader> a c"
+command = "agent.cancel"
+desc = "Stop Agent"
+
+[[keymap]]
+id = "builtin.global.agent-sessions"
+context = "global"
+keys = "<leader> a s"
+command = "agent.sessions"
+desc = "Agent Sessions"
+
+[[keymap]]
+id = "builtin.global.agent-next"
+context = "global"
+keys = "<leader> a ]"
+command = "agent.session.next"
+desc = "Next Agent Session"
+
+[[keymap]]
+id = "builtin.global.agent-previous"
+context = "global"
+keys = "<leader> a ["
+command = "agent.session.previous"
+desc = "Previous Agent Session"
+
+[[keymap]]
+id = "builtin.global.agent-close"
+context = "global"
+keys = "<leader> a x"
+command = "agent.session.close"
+desc = "Close Agent Session"
+
+[[keymap]]
+id = "builtin.global.agent-resume"
+context = "global"
+keys = "<leader> a R"
+command = "agent.resume"
+desc = "Resume Agent Conversation"
+
+[[keymap]]
+id = "builtin.global.agent-model"
+context = "global"
+keys = "<leader> a m"
+command = "agent.model"
+desc = "Agent Model"
+
+[[keymap]]
+id = "builtin.global.agent-mode"
+context = "global"
+keys = "<leader> a M"
+command = "agent.mode"
+desc = "Agent Mode"
+
+[[keymap]]
+id = "builtin.global.agent-thinking"
+context = "global"
+keys = "<leader> a r"
+command = "agent.thinking"
+desc = "Agent Thinking Level"
+
+[[keymap]]
+id = "builtin.global.agent-options"
+context = "global"
+keys = "<leader> a o"
+command = "agent.options"
+desc = "Agent Options"
+
+[[keymap]]
+id = "builtin.editor.visual-char.agent-ask"
+context = "editor"
+mode = "visual_char"
+keys = "<leader> a a"
+command = "agent.ask"
+desc = "Ask Agent About Selection"
+
+[[keymap]]
+id = "builtin.editor.visual-char.git-lines-stage"
+context = "editor"
+mode = "visual_char"
+keys = "<leader> g h s"
+command = "workspace.git.lines.stage"
+desc = "Stage Selected Lines"
+
+[[keymap]]
+id = "builtin.editor.visual-line.git-lines-stage"
+context = "editor"
+mode = "visual_line"
+keys = "<leader> g h s"
+command = "workspace.git.lines.stage"
+desc = "Stage Selected Lines"
+
+[[keymap]]
+id = "builtin.editor.visual-line.agent-ask"
+context = "editor"
+mode = "visual_line"
+keys = "<leader> a a"
+command = "agent.ask"
+desc = "Ask Agent About Selection"
+
+# The agent panel's input. Typed text goes in through [input.text_commands].
+[[keymap]]
+id = "builtin.agent.submit.enter"
+context = "agent"
+keys = "enter"
+command = "agent.input.edit"
+arguments = { action = "submit" }
+desc = "Send"
+
+[[keymap]]
+id = "builtin.agent.newline.alt-enter"
+context = "agent"
+keys = "alt-enter"
+command = "agent.input.edit"
+arguments = { action = "newline" }
+desc = "New Line"
+
+[[keymap]]
+id = "builtin.agent.newline.shift-enter"
+context = "agent"
+keys = "shift-enter"
+command = "agent.input.edit"
+arguments = { action = "newline" }
+
+[[keymap]]
+id = "builtin.agent.backspace"
+context = "agent"
+keys = "backspace"
+command = "agent.input.edit"
+arguments = { action = "backspace" }
+
+[[keymap]]
+id = "builtin.agent.delete"
+context = "agent"
+keys = "delete"
+command = "agent.input.edit"
+arguments = { action = "delete" }
+
+[[keymap]]
+id = "builtin.agent.left"
+context = "agent"
+keys = "left"
+command = "agent.input.edit"
+arguments = { action = "left" }
+
+[[keymap]]
+id = "builtin.agent.right"
+context = "agent"
+keys = "right"
+command = "agent.input.edit"
+arguments = { action = "right" }
+
+[[keymap]]
+id = "builtin.agent.up"
+context = "agent"
+keys = "up"
+command = "agent.input.edit"
+arguments = { action = "up" }
+
+[[keymap]]
+id = "builtin.agent.down"
+context = "agent"
+keys = "down"
+command = "agent.input.edit"
+arguments = { action = "down" }
+
+[[keymap]]
+id = "builtin.agent.home"
+context = "agent"
+keys = "home"
+command = "agent.input.edit"
+arguments = { action = "home" }
+
+[[keymap]]
+id = "builtin.agent.end"
+context = "agent"
+keys = "end"
+command = "agent.input.edit"
+arguments = { action = "end" }
+
+[[keymap]]
+id = "builtin.agent.home.ctrl-a"
+context = "agent"
+keys = "ctrl-a"
+command = "agent.input.edit"
+arguments = { action = "home" }
+
+[[keymap]]
+id = "builtin.agent.end.ctrl-e"
+context = "agent"
+keys = "ctrl-e"
+command = "agent.input.edit"
+arguments = { action = "end" }
+
+[[keymap]]
+id = "builtin.agent.delete-word.ctrl-w"
+context = "agent"
+keys = "ctrl-w"
+command = "agent.input.edit"
+arguments = { action = "delete_word" }
+
+[[keymap]]
+id = "builtin.agent.delete-word.alt-backspace"
+context = "agent"
+keys = "alt-backspace"
+command = "agent.input.edit"
+arguments = { action = "delete_word" }
+
+[[keymap]]
+id = "builtin.agent.clear-line.ctrl-u"
+context = "agent"
+keys = "ctrl-u"
+command = "agent.input.edit"
+arguments = { action = "clear_line" }
+
+[[keymap]]
+id = "builtin.agent.clear.ctrl-c"
+context = "agent"
+keys = "ctrl-c"
+command = "agent.input.edit"
+arguments = { action = "clear" }
+desc = "Clear Input"
+
+[[keymap]]
+id = "builtin.agent.normal.escape"
+context = "agent"
+keys = "escape"
+command = "agent.input.edit"
+arguments = { action = "normal" }
+desc = "Normal Mode"
+
+[[keymap]]
+id = "builtin.agent.complete.tab"
+context = "agent"
+keys = "tab"
+command = "agent.input.edit"
+arguments = { action = "complete" }
+desc = "Complete Slash Command"
+
+[[keymap]]
+id = "builtin.agent.tab-new.ctrl-t"
+context = "agent"
+keys = "ctrl-t"
+command = "agent.tab.new"
+desc = "New Agent Tab"
+
+[[keymap]]
+id = "builtin.agent.new.ctrl-shift-t"
+context = "agent"
+keys = "ctrl-shift-t"
+command = "agent.new"
+desc = "New Session"
+
+[[keymap]]
+id = "builtin.agent.scroll-up.shift-up"
+context = "agent"
+keys = "shift-up"
+command = "agent.scroll"
+arguments = { rows = 3 }
+
+[[keymap]]
+id = "builtin.agent.scroll-down.shift-down"
+context = "agent"
+keys = "shift-down"
+command = "agent.scroll"
+arguments = { rows = -3 }
+
+[[keymap]]
+id = "builtin.agent.scroll-up.ctrl-b"
+context = "agent"
+keys = "ctrl-b"
+command = "agent.scroll"
+arguments = { rows = 20 }
+desc = "Scroll Up"
+
+[[keymap]]
+id = "builtin.agent.scroll-down.ctrl-f"
+context = "agent"
+keys = "ctrl-f"
+command = "agent.scroll"
+arguments = { rows = -20 }
+desc = "Scroll Down"
+
+[[keymap]]
+id = "builtin.agent.surface-focus-left.ctrl-h"
+context = "agent"
+keys = "ctrl-h"
+command = "surface.focus.left"
+
+[[keymap]]
+id = "builtin.agent.surface-focus-down.ctrl-j"
+context = "agent"
+keys = "ctrl-j"
+command = "surface.focus.down"
+
+[[keymap]]
+id = "builtin.agent.surface-focus-up.ctrl-k"
+context = "agent"
+keys = "ctrl-k"
+command = "surface.focus.up"
+
+[[keymap]]
+id = "builtin.agent.surface-focus-right.ctrl-l"
+context = "agent"
+keys = "ctrl-l"
+command = "surface.focus.right"
+
+[[keymap]]
+id = "builtin.agent.word-left.ctrl-left"
+context = "agent"
+keys = "ctrl-left"
+command = "agent.input.edit"
+arguments = { action = "word_left" }
+
+[[keymap]]
+id = "builtin.agent.window-resize.ctrl-down"
+context = "agent"
+keys = "ctrl-down"
+command = "window.resize.directional"
+arguments = { direction = "down" }
+
+[[keymap]]
+id = "builtin.agent.window-resize.ctrl-up"
+context = "agent"
+keys = "ctrl-up"
+command = "window.resize.directional"
+arguments = { direction = "up" }
+
+[[keymap]]
+id = "builtin.agent.word-right.ctrl-right"
+context = "agent"
+keys = "ctrl-right"
+command = "agent.input.edit"
+arguments = { action = "word_right" }
+
+[[keymap]]
+id = "builtin.agent.terminal-toggle.ctrl-slash"
+context = "agent"
+keys = "ctrl-/"
+command = "terminal.toggle"
+
+[[keymap]]
+id = "builtin.agent.session-next.alt-bracket-right"
+context = "agent"
+keys = "alt-]"
+command = "agent.session.next"
+desc = "Next Session"
+
+[[keymap]]
+id = "builtin.agent.session-previous.alt-bracket-left"
+context = "agent"
+keys = "alt-["
+command = "agent.session.previous"
+desc = "Previous Session"
+
+# As in the editor and the terminal, ctrl-pagedown and ctrl-pageup switch tabs while typing.
+[[keymap]]
+id = "builtin.agent.session-next.ctrl-pagedown"
+context = "agent"
+keys = "ctrl-pagedown"
+command = "agent.session.next"
+desc = "Next Session"
+
+[[keymap]]
+id = "builtin.agent.session-previous.ctrl-pageup"
+context = "agent"
+keys = "ctrl-pageup"
+command = "agent.session.previous"
+desc = "Previous Session"
+
+[[keymap]]
+id = "builtin.agent.new.ctrl-n"
+context = "agent"
+keys = "ctrl-n"
+command = "agent.new"
+desc = "New Session"
+
+[[keymap]]
+id = "builtin.agent.resume.ctrl-r"
+context = "agent"
+keys = "ctrl-r"
+command = "agent.resume"
+desc = "Resume Conversation"
+
+[[keymap]]
+id = "builtin.agent.close.ctrl-q"
+context = "agent"
+keys = "ctrl-q"
+command = "agent.session.close"
+desc = "Close Session"
+
+[[keymap]]
+id = "builtin.agent.model.ctrl-p"
+context = "agent"
+keys = "ctrl-p"
+command = "agent.model"
+desc = "Model"
+
+[[keymap]]
+id = "builtin.agent.thinking.shift-tab"
+context = "agent"
+keys = "shift-tab"
+command = "agent.thinking"
+desc = "Thinking Level"
+
+[[keymap]]
+id = "builtin.agent.options.ctrl-o"
+context = "agent"
+keys = "ctrl-o"
+command = "agent.options"
+desc = "Agent Options"
+
+[[keymap]]
+id = "builtin.global.git-pr-list"
+context = "global"
+keys = "<leader> g p p"
+command = "workspace.git.pr.list"
+desc = "Pull Requests"
+
+[[keymap]]
+id = "builtin.global.git-pr-view"
+context = "global"
+keys = "<leader> g p v"
+command = "terminal.open"
+arguments = { profile = "gh_pr_view" }
+desc = "View Pull Request"
+
+[[keymap]]
+id = "builtin.global.git-pr-diff"
+context = "global"
+keys = "<leader> g p d"
+command = "terminal.open"
+arguments = { profile = "gh_pr_diff" }
+desc = "Pull Request Diff"
+
+[[keymap]]
+id = "builtin.global.git-pr-review"
+context = "global"
+keys = "<leader> g p r"
+command = "terminal.open"
+arguments = { profile = "gh_pr_review" }
+desc = "Submit Review"
+
+[[keymap]]
+id = "builtin.global.git-pr-comments"
+context = "global"
+keys = "<leader> g p c"
+command = "workspace.git.pr.comments"
+desc = "Review Comments"
+
+[[keymap]]
+id = "builtin.global.git-pr-comment"
+context = "global"
+keys = "<leader> g p a"
+command = "workspace.git.pr.comment"
+desc = "Comment on Line"
+
+[[keymap]]
+id = "builtin.agent-normal.submit.enter"
+context = "agent_normal"
+keys = "enter"
+command = "agent.input.edit"
+arguments = { action = "submit" }
+desc = "Send"
+
+[[keymap]]
+id = "builtin.agent-normal.left"
+context = "agent_normal"
+keys = "left"
+command = "agent.input.edit"
+arguments = { action = "left" }
+
+[[keymap]]
+id = "builtin.agent-normal.right"
+context = "agent_normal"
+keys = "right"
+command = "agent.input.edit"
+arguments = { action = "right" }
+
+[[keymap]]
+id = "builtin.agent-normal.up"
+context = "agent_normal"
+keys = "up"
+command = "agent.input.edit"
+arguments = { action = "up" }
+
+[[keymap]]
+id = "builtin.agent-normal.down"
+context = "agent_normal"
+keys = "down"
+command = "agent.input.edit"
+arguments = { action = "down" }
+
+[[keymap]]
+id = "builtin.agent-normal.home"
+context = "agent_normal"
+keys = "home"
+command = "agent.input.edit"
+arguments = { action = "home" }
+
+[[keymap]]
+id = "builtin.agent-normal.end"
+context = "agent_normal"
+keys = "end"
+command = "agent.input.edit"
+arguments = { action = "end" }
+
+[[keymap]]
+id = "builtin.agent-normal.complete.tab"
+context = "agent_normal"
+keys = "tab"
+command = "agent.input.edit"
+arguments = { action = "complete" }
+desc = "Complete Slash Command"
+
+[[keymap]]
+id = "builtin.agent-normal.tab-new.ctrl-t"
+context = "agent_normal"
+keys = "ctrl-t"
+command = "agent.tab.new"
+desc = "New Agent Tab"
+
+[[keymap]]
+id = "builtin.agent-normal.new.ctrl-shift-t"
+context = "agent_normal"
+keys = "ctrl-shift-t"
+command = "agent.new"
+desc = "New Session"
+
+[[keymap]]
+id = "builtin.agent-normal.scroll-up.shift-up"
+context = "agent_normal"
+keys = "shift-up"
+command = "agent.scroll"
+arguments = { rows = 3 }
+
+[[keymap]]
+id = "builtin.agent-normal.scroll-down.shift-down"
+context = "agent_normal"
+keys = "shift-down"
+command = "agent.scroll"
+arguments = { rows = -3 }
+
+[[keymap]]
+id = "builtin.agent-normal.scroll-up.ctrl-b"
+context = "agent_normal"
+keys = "ctrl-b"
+command = "agent.scroll"
+arguments = { rows = 20 }
+desc = "Scroll Up"
+
+[[keymap]]
+id = "builtin.agent-normal.scroll-down.ctrl-f"
+context = "agent_normal"
+keys = "ctrl-f"
+command = "agent.scroll"
+arguments = { rows = -20 }
+desc = "Scroll Down"
+
+[[keymap]]
+id = "builtin.agent-normal.surface-focus-left.ctrl-h"
+context = "agent_normal"
+keys = "ctrl-h"
+command = "surface.focus.left"
+
+[[keymap]]
+id = "builtin.agent-normal.surface-focus-down.ctrl-j"
+context = "agent_normal"
+keys = "ctrl-j"
+command = "surface.focus.down"
+
+[[keymap]]
+id = "builtin.agent-normal.surface-focus-up.ctrl-k"
+context = "agent_normal"
+keys = "ctrl-k"
+command = "surface.focus.up"
+
+[[keymap]]
+id = "builtin.agent-normal.surface-focus-right.ctrl-l"
+context = "agent_normal"
+keys = "ctrl-l"
+command = "surface.focus.right"
+
+[[keymap]]
+id = "builtin.agent-normal.window-resize.ctrl-left"
+context = "agent_normal"
+keys = "ctrl-left"
+command = "window.resize.directional"
+arguments = { direction = "left" }
+
+[[keymap]]
+id = "builtin.agent-normal.window-resize.ctrl-down"
+context = "agent_normal"
+keys = "ctrl-down"
+command = "window.resize.directional"
+arguments = { direction = "down" }
+
+[[keymap]]
+id = "builtin.agent-normal.window-resize.ctrl-up"
+context = "agent_normal"
+keys = "ctrl-up"
+command = "window.resize.directional"
+arguments = { direction = "up" }
+
+[[keymap]]
+id = "builtin.agent-normal.window-resize.ctrl-right"
+context = "agent_normal"
+keys = "ctrl-right"
+command = "window.resize.directional"
+arguments = { direction = "right" }
+
+[[keymap]]
+id = "builtin.agent-normal.terminal-toggle.ctrl-slash"
+context = "agent_normal"
+keys = "ctrl-/"
+command = "terminal.toggle"
+
+[[keymap]]
+id = "builtin.agent-normal.session-next.alt-bracket-right"
+context = "agent_normal"
+keys = "alt-]"
+command = "agent.session.next"
+desc = "Next Session"
+
+[[keymap]]
+id = "builtin.agent-normal.session-previous.alt-bracket-left"
+context = "agent_normal"
+keys = "alt-["
+command = "agent.session.previous"
+desc = "Previous Session"
+
+# As in the editor and the terminal, ctrl-pagedown and ctrl-pageup switch tabs while typing.
+[[keymap]]
+id = "builtin.agent-normal.session-next.ctrl-pagedown"
+context = "agent_normal"
+keys = "ctrl-pagedown"
+command = "agent.session.next"
+desc = "Next Session"
+
+[[keymap]]
+id = "builtin.agent-normal.session-previous.ctrl-pageup"
+context = "agent_normal"
+keys = "ctrl-pageup"
+command = "agent.session.previous"
+desc = "Previous Session"
+
+[[keymap]]
+id = "builtin.agent-normal.new.ctrl-n"
+context = "agent_normal"
+keys = "ctrl-n"
+command = "agent.new"
+desc = "New Session"
+
+[[keymap]]
+id = "builtin.agent-normal.resume.ctrl-r"
+context = "agent_normal"
+keys = "ctrl-r"
+command = "agent.resume"
+desc = "Resume Conversation"
+
+[[keymap]]
+id = "builtin.agent-normal.close.ctrl-q"
+context = "agent_normal"
+keys = "ctrl-q"
+command = "agent.session.close"
+desc = "Close Session"
+
+[[keymap]]
+id = "builtin.agent-normal.model.ctrl-p"
+context = "agent_normal"
+keys = "ctrl-p"
+command = "agent.model"
+desc = "Model"
+
+[[keymap]]
+id = "builtin.agent-normal.thinking.shift-tab"
+context = "agent_normal"
+keys = "shift-tab"
+command = "agent.thinking"
+desc = "Thinking Level"
+
+[[keymap]]
+id = "builtin.agent-normal.options.ctrl-o"
+context = "agent_normal"
+keys = "ctrl-o"
+command = "agent.options"
+desc = "Agent Options"
+
+[[keymap]]
+id = "builtin.agent-normal.insert.i"
+context = "agent_normal"
+keys = "i"
+command = "agent.input.edit"
+arguments = { action = "insert" }
+desc = "Insert"
+
+[[keymap]]
+id = "builtin.agent-normal.append.a"
+context = "agent_normal"
+keys = "a"
+command = "agent.input.edit"
+arguments = { action = "append" }
+desc = "Append"
+
+[[keymap]]
+id = "builtin.agent-normal.insert-home.upper-i"
+context = "agent_normal"
+keys = "I"
+command = "agent.input.edit"
+arguments = { action = "insert_home" }
+
+[[keymap]]
+id = "builtin.agent-normal.append-end.upper-a"
+context = "agent_normal"
+keys = "A"
+command = "agent.input.edit"
+arguments = { action = "append_end" }
+
+[[keymap]]
+id = "builtin.agent-normal.open-below.o"
+context = "agent_normal"
+keys = "o"
+command = "agent.input.edit"
+arguments = { action = "open_below" }
+
+[[keymap]]
+id = "builtin.agent-normal.open-above.upper-o"
+context = "agent_normal"
+keys = "O"
+command = "agent.input.edit"
+arguments = { action = "open_above" }
+
+[[keymap]]
+id = "builtin.agent-normal.left.h"
+context = "agent_normal"
+keys = "h"
+command = "agent.input.edit"
+arguments = { action = "left" }
+
+[[keymap]]
+id = "builtin.agent-normal.right.l"
+context = "agent_normal"
+keys = "l"
+command = "agent.input.edit"
+arguments = { action = "right" }
+
+[[keymap]]
+id = "builtin.agent-normal.down.j"
+context = "agent_normal"
+keys = "j"
+command = "agent.input.edit"
+arguments = { action = "down" }
+
+[[keymap]]
+id = "builtin.agent-normal.up.k"
+context = "agent_normal"
+keys = "k"
+command = "agent.input.edit"
+arguments = { action = "up" }
+
+[[keymap]]
+id = "builtin.agent-normal.home.zero"
+context = "agent_normal"
+keys = "0"
+command = "agent.input.edit"
+arguments = { action = "home" }
+
+[[keymap]]
+id = "builtin.agent-normal.home.caret"
+context = "agent_normal"
+keys = "^"
+command = "agent.input.edit"
+arguments = { action = "home" }
+
+[[keymap]]
+id = "builtin.agent-normal.end.dollar"
+context = "agent_normal"
+keys = "$"
+command = "agent.input.edit"
+arguments = { action = "end" }
+
+[[keymap]]
+id = "builtin.agent-normal.word-forward.w"
+context = "agent_normal"
+keys = "w"
+command = "agent.input.edit"
+arguments = { action = "word_forward" }
+
+[[keymap]]
+id = "builtin.agent-normal.word-back.b"
+context = "agent_normal"
+keys = "b"
+command = "agent.input.edit"
+arguments = { action = "word_back" }
+
+[[keymap]]
+id = "builtin.agent-normal.word-end.e"
+context = "agent_normal"
+keys = "e"
+command = "agent.input.edit"
+arguments = { action = "word_end" }
+
+[[keymap]]
+id = "builtin.agent-normal.delete.x"
+context = "agent_normal"
+keys = "x"
+command = "agent.input.edit"
+arguments = { action = "delete" }
+
+[[keymap]]
+id = "builtin.agent-normal.backspace.upper-x"
+context = "agent_normal"
+keys = "X"
+command = "agent.input.edit"
+arguments = { action = "backspace" }
+
+[[keymap]]
+id = "builtin.agent-normal.delete-line.d-d"
+context = "agent_normal"
+keys = "d d"
+command = "agent.input.edit"
+arguments = { action = "delete_line" }
+desc = "Delete Line"
+
+[[keymap]]
+id = "builtin.agent-normal.delete-to-end.upper-d"
+context = "agent_normal"
+keys = "D"
+command = "agent.input.edit"
+arguments = { action = "delete_to_end" }
+
+[[keymap]]
+id = "builtin.agent-normal.change-to-end.upper-c"
+context = "agent_normal"
+keys = "C"
+command = "agent.input.edit"
+arguments = { action = "change_to_end" }
+
+[[keymap]]
+id = "builtin.agent-normal.change-line.upper-s"
+context = "agent_normal"
+keys = "S"
+command = "agent.input.edit"
+arguments = { action = "change_line" }
+
+[[keymap]]
+id = "builtin.agent-normal.change-line.c-c"
+context = "agent_normal"
+keys = "c c"
+command = "agent.input.edit"
+arguments = { action = "change_line" }
+
+[[keymap]]
+id = "builtin.agent-normal.slash"
+context = "agent_normal"
+keys = "/"
+command = "agent.input.edit"
+arguments = { action = "slash" }
+desc = "Slash Command"
+
+[[keymap]]
+id = "builtin.agent-normal.escape"
+context = "agent_normal"
+keys = "escape"
+command = "agent.escape"
+desc = "Stop Agent"
+
+[[keymap]]
+id = "builtin.agent-normal.scroll-up.ctrl-u"
+context = "agent_normal"
+keys = "ctrl-u"
+command = "agent.scroll"
+arguments = { rows = 10 }
+
+[[keymap]]
+id = "builtin.agent-normal.scroll-down.ctrl-d"
+context = "agent_normal"
+keys = "ctrl-d"
+command = "agent.scroll"
+arguments = { rows = -10 }
+
+[[keymap]]
+id = "builtin.agent-normal.scroll-top.g-g"
+context = "agent_normal"
+keys = "g g"
+command = "agent.scroll"
+arguments = { rows = 1000000 }
+desc = "Top of Conversation"
+
+[[keymap]]
+id = "builtin.agent-normal.scroll-bottom.upper-g"
+context = "agent_normal"
+keys = "G"
+command = "agent.scroll"
+arguments = { rows = -1000000 }
+desc = "End of Conversation"
+
+[[keymap]]
+id = "builtin.agent-normal.command-line.colon"
+context = "agent_normal"
+keys = ":"
+command = "command_line.open"
+arguments = { kind = "command" }
+
+[[keymap]]
+id = "builtin.editor.normal.buffer-new-tab.ctrl-t"
+context = "editor"
+mode = "normal"
+keys = "ctrl-t"
+command = "buffer.new_tab"
+desc = "New Tab"
+
+[[keymap]]
+id = "builtin.editor.normal.buffer-close.ctrl-q"
+context = "editor"
+mode = "normal"
+keys = "ctrl-q"
+command = "buffer.close"
+arguments = { force = false }
+desc = "Close Tab"
+
+[[keymap]]
+id = "builtin.dashboard.buffer-new-tab.ctrl-t"
+context = "dashboard"
+keys = "ctrl-t"
+command = "buffer.new_tab"
+desc = "New Tab"
+
+[[keymap]]
+id = "builtin.agent-normal.session-previous.upper-h"
+context = "agent_normal"
+keys = "H"
+command = "agent.session.previous"
+
+[[keymap]]
+id = "builtin.agent-normal.session-next.upper-l"
+context = "agent_normal"
+keys = "L"
+command = "agent.session.next"
+
+# `/` in the explorer types into the search bar at its top and filters the tree.
+[[keymap]]
+id = "builtin.explorer.surface.explorer-search.slash"
+context = "explorer"
+keys = "/"
+command = "explorer.search"
+desc = "Search"
+
+[[keymap]]
+id = "builtin.explorer-search.delete.backspace"
+context = "explorer_search"
+keys = "backspace"
+command = "explorer.search.delete"
+
+[[keymap]]
+id = "builtin.explorer-search.done.enter"
+context = "explorer_search"
+keys = "enter"
+command = "explorer.search.done"
+
+[[keymap]]
+id = "builtin.explorer-search.cancel.escape"
+context = "explorer_search"
+keys = "escape"
+command = "explorer.search.cancel"
+
+[[keymap]]
+id = "builtin.explorer-search.next.down"
+context = "explorer_search"
+keys = "down"
+command = "explorer.next"
+
+[[keymap]]
+id = "builtin.explorer-search.previous.up"
+context = "explorer_search"
+keys = "up"
+command = "explorer.previous"
+
+[[keymap]]
+id = "builtin.explorer-search.next.ctrl-n"
+context = "explorer_search"
+keys = "ctrl-n"
+command = "explorer.next"
+
+[[keymap]]
+id = "builtin.explorer-search.previous.ctrl-p"
+context = "explorer_search"
+keys = "ctrl-p"
+command = "explorer.previous"
+
+# `/` in the tool manager filters the tools by name or language, like Mason.
+[[keymap]]
+id = "builtin.tool-manager.surface.tools-search.slash"
+context = "tool_manager"
+keys = "/"
+command = "tools.search"
+desc = "Search"
+
+[[keymap]]
+id = "builtin.tool-manager-search.delete.backspace"
+context = "tool_manager_search"
+keys = "backspace"
+command = "tools.search.delete"
+
+[[keymap]]
+id = "builtin.tool-manager-search.done.enter"
+context = "tool_manager_search"
+keys = "enter"
+command = "tools.search.done"
+
+[[keymap]]
+id = "builtin.tool-manager-search.cancel.escape"
+context = "tool_manager_search"
+keys = "escape"
+command = "tools.search.cancel"
+
+[[keymap]]
+id = "builtin.tool-manager-search.next.down"
+context = "tool_manager_search"
+keys = "down"
+command = "tools.menu.next"
+
+[[keymap]]
+id = "builtin.tool-manager-search.previous.up"
+context = "tool_manager_search"
+keys = "up"
+command = "tools.menu.previous"
+
+[[keymap]]
+id = "builtin.tool-manager-search.next.ctrl-n"
+context = "tool_manager_search"
+keys = "ctrl-n"
+command = "tools.menu.next"
+
+[[keymap]]
+id = "builtin.tool-manager-search.previous.ctrl-p"
+context = "tool_manager_search"
+keys = "ctrl-p"
+command = "tools.menu.previous"
+
+# Vim keys LazyVim users expect: the jump list, paragraphs, case operators and Visual-mode edits.
+[[keymap]]
+id = "builtin.editor.normal.jump-back.ctrl-o"
+context = "editor"
+mode = "normal"
+keys = "ctrl-o"
+command = "navigation.jump.back"
+[[keymap]]
+id = "builtin.editor.normal.jump-forward.tab"
+context = "editor"
+mode = "normal"
+keys = "tab"
+command = "navigation.jump.forward"
+[[keymap]]
+id = "builtin.editor.normal.input-motion.right-brace"
+context = "editor"
+mode = "normal"
+keys = "}"
+command = "input.motion"
+arguments = { motion = "paragraph_forward", linewise = false }
+[[keymap]]
+id = "builtin.editor.normal.input-motion.left-brace"
+context = "editor"
+mode = "normal"
+keys = "{"
+command = "input.motion"
+arguments = { motion = "paragraph_backward", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.right-brace"
+context = "editor"
+mode = "operator_pending"
+keys = "}"
+command = "input.motion"
+arguments = { motion = "paragraph_forward", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.left-brace"
+context = "editor"
+mode = "operator_pending"
+keys = "{"
+command = "input.motion"
+arguments = { motion = "paragraph_backward", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.right-brace"
+context = "editor"
+mode = "visual_char"
+keys = "}"
+command = "input.motion"
+arguments = { motion = "paragraph_forward", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.left-brace"
+context = "editor"
+mode = "visual_char"
+keys = "{"
+command = "input.motion"
+arguments = { motion = "paragraph_backward", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-line.input-motion.right-brace"
+context = "editor"
+mode = "visual_line"
+keys = "}"
+command = "input.motion"
+arguments = { motion = "paragraph_forward", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-line.input-motion.left-brace"
+context = "editor"
+mode = "visual_line"
+keys = "{"
+command = "input.motion"
+arguments = { motion = "paragraph_backward", linewise = false }
+[[keymap]]
+id = "builtin.editor.normal.input-operator-begin.g-u"
+context = "editor"
+mode = "normal"
+keys = "g u"
+command = "input.operator.begin"
+arguments = { operator = "lowercase" }
+desc = "Lowercase"
+[[keymap]]
+id = "builtin.editor.normal.input-operator-begin.g-upper-u"
+context = "editor"
+mode = "normal"
+keys = "g U"
+command = "input.operator.begin"
+arguments = { operator = "uppercase" }
+desc = "Uppercase"
+[[keymap]]
+id = "builtin.editor.normal.input-operator-begin.g-tilde"
+context = "editor"
+mode = "normal"
+keys = "g ~"
+command = "input.operator.begin"
+arguments = { operator = "toggle_case" }
+desc = "Toggle case"
+[[keymap]]
+id = "builtin.editor.visual-char.input-count.key-1"
+context = "editor"
+mode = "visual_char"
+keys = "1"
+command = "input.count"
+arguments = { digit = 1 }
+[[keymap]]
+id = "builtin.editor.visual-char.input-count.key-2"
+context = "editor"
+mode = "visual_char"
+keys = "2"
+command = "input.count"
+arguments = { digit = 2 }
+[[keymap]]
+id = "builtin.editor.visual-char.input-count.key-3"
+context = "editor"
+mode = "visual_char"
+keys = "3"
+command = "input.count"
+arguments = { digit = 3 }
+[[keymap]]
+id = "builtin.editor.visual-char.input-count.key-4"
+context = "editor"
+mode = "visual_char"
+keys = "4"
+command = "input.count"
+arguments = { digit = 4 }
+[[keymap]]
+id = "builtin.editor.visual-char.input-count.key-5"
+context = "editor"
+mode = "visual_char"
+keys = "5"
+command = "input.count"
+arguments = { digit = 5 }
+[[keymap]]
+id = "builtin.editor.visual-char.input-count.key-6"
+context = "editor"
+mode = "visual_char"
+keys = "6"
+command = "input.count"
+arguments = { digit = 6 }
+[[keymap]]
+id = "builtin.editor.visual-char.input-count.key-7"
+context = "editor"
+mode = "visual_char"
+keys = "7"
+command = "input.count"
+arguments = { digit = 7 }
+[[keymap]]
+id = "builtin.editor.visual-char.input-count.key-8"
+context = "editor"
+mode = "visual_char"
+keys = "8"
+command = "input.count"
+arguments = { digit = 8 }
+[[keymap]]
+id = "builtin.editor.visual-char.input-count.key-9"
+context = "editor"
+mode = "visual_char"
+keys = "9"
+command = "input.count"
+arguments = { digit = 9 }
+[[keymap]]
+id = "builtin.editor.visual-char.input-zero.key-0"
+context = "editor"
+mode = "visual_char"
+keys = "0"
+command = "input.zero"
+[[keymap]]
+id = "builtin.editor.visual-char.selection-swap.o"
+context = "editor"
+mode = "visual_char"
+keys = "o"
+command = "view.selection.swap"
+[[keymap]]
+id = "builtin.editor.visual-char.input-visual-operator.greater"
+context = "editor"
+mode = "visual_char"
+keys = ">"
+command = "input.visual.operator"
+arguments = { operator = "indent", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-visual-operator.less"
+context = "editor"
+mode = "visual_char"
+keys = "<"
+command = "input.visual.operator"
+arguments = { operator = "unindent", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-visual-operator.x"
+context = "editor"
+mode = "visual_char"
+keys = "x"
+command = "input.visual.operator"
+arguments = { operator = "delete", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-visual-operator.p"
+context = "editor"
+mode = "visual_char"
+keys = "p"
+command = "input.visual.operator"
+arguments = { operator = "replace", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-visual-operator.upper-p"
+context = "editor"
+mode = "visual_char"
+keys = "P"
+command = "input.visual.operator"
+arguments = { operator = "replace", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-visual-operator.upper-j"
+context = "editor"
+mode = "visual_char"
+keys = "J"
+command = "input.visual.operator"
+arguments = { operator = "join", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-visual-operator.tilde"
+context = "editor"
+mode = "visual_char"
+keys = "~"
+command = "input.visual.operator"
+arguments = { operator = "toggle_case", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-visual-operator.u"
+context = "editor"
+mode = "visual_char"
+keys = "u"
+command = "input.visual.operator"
+arguments = { operator = "lowercase", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-visual-operator.upper-u"
+context = "editor"
+mode = "visual_char"
+keys = "U"
+command = "input.visual.operator"
+arguments = { operator = "uppercase", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-line.input-count.key-1"
+context = "editor"
+mode = "visual_line"
+keys = "1"
+command = "input.count"
+arguments = { digit = 1 }
+[[keymap]]
+id = "builtin.editor.visual-line.input-count.key-2"
+context = "editor"
+mode = "visual_line"
+keys = "2"
+command = "input.count"
+arguments = { digit = 2 }
+[[keymap]]
+id = "builtin.editor.visual-line.input-count.key-3"
+context = "editor"
+mode = "visual_line"
+keys = "3"
+command = "input.count"
+arguments = { digit = 3 }
+[[keymap]]
+id = "builtin.editor.visual-line.input-count.key-4"
+context = "editor"
+mode = "visual_line"
+keys = "4"
+command = "input.count"
+arguments = { digit = 4 }
+[[keymap]]
+id = "builtin.editor.visual-line.input-count.key-5"
+context = "editor"
+mode = "visual_line"
+keys = "5"
+command = "input.count"
+arguments = { digit = 5 }
+[[keymap]]
+id = "builtin.editor.visual-line.input-count.key-6"
+context = "editor"
+mode = "visual_line"
+keys = "6"
+command = "input.count"
+arguments = { digit = 6 }
+[[keymap]]
+id = "builtin.editor.visual-line.input-count.key-7"
+context = "editor"
+mode = "visual_line"
+keys = "7"
+command = "input.count"
+arguments = { digit = 7 }
+[[keymap]]
+id = "builtin.editor.visual-line.input-count.key-8"
+context = "editor"
+mode = "visual_line"
+keys = "8"
+command = "input.count"
+arguments = { digit = 8 }
+[[keymap]]
+id = "builtin.editor.visual-line.input-count.key-9"
+context = "editor"
+mode = "visual_line"
+keys = "9"
+command = "input.count"
+arguments = { digit = 9 }
+[[keymap]]
+id = "builtin.editor.visual-line.input-zero.key-0"
+context = "editor"
+mode = "visual_line"
+keys = "0"
+command = "input.zero"
+[[keymap]]
+id = "builtin.editor.visual-line.selection-swap.o"
+context = "editor"
+mode = "visual_line"
+keys = "o"
+command = "view.selection.swap"
+[[keymap]]
+id = "builtin.editor.visual-line.input-visual-operator.greater"
+context = "editor"
+mode = "visual_line"
+keys = ">"
+command = "input.visual.operator"
+arguments = { operator = "indent", linewise = true }
+[[keymap]]
+id = "builtin.editor.visual-line.input-visual-operator.less"
+context = "editor"
+mode = "visual_line"
+keys = "<"
+command = "input.visual.operator"
+arguments = { operator = "unindent", linewise = true }
+[[keymap]]
+id = "builtin.editor.visual-line.input-visual-operator.x"
+context = "editor"
+mode = "visual_line"
+keys = "x"
+command = "input.visual.operator"
+arguments = { operator = "delete", linewise = true }
+[[keymap]]
+id = "builtin.editor.visual-line.input-visual-operator.p"
+context = "editor"
+mode = "visual_line"
+keys = "p"
+command = "input.visual.operator"
+arguments = { operator = "replace", linewise = true }
+[[keymap]]
+id = "builtin.editor.visual-line.input-visual-operator.upper-p"
+context = "editor"
+mode = "visual_line"
+keys = "P"
+command = "input.visual.operator"
+arguments = { operator = "replace", linewise = true }
+[[keymap]]
+id = "builtin.editor.visual-line.input-visual-operator.upper-j"
+context = "editor"
+mode = "visual_line"
+keys = "J"
+command = "input.visual.operator"
+arguments = { operator = "join", linewise = true }
+[[keymap]]
+id = "builtin.editor.visual-line.input-visual-operator.tilde"
+context = "editor"
+mode = "visual_line"
+keys = "~"
+command = "input.visual.operator"
+arguments = { operator = "toggle_case", linewise = true }
+[[keymap]]
+id = "builtin.editor.visual-line.input-visual-operator.u"
+context = "editor"
+mode = "visual_line"
+keys = "u"
+command = "input.visual.operator"
+arguments = { operator = "lowercase", linewise = true }
+[[keymap]]
+id = "builtin.editor.visual-line.input-visual-operator.upper-u"
+context = "editor"
+mode = "visual_line"
+keys = "U"
+command = "input.visual.operator"
+arguments = { operator = "uppercase", linewise = true }
+
+# VS Code keys beside the LazyVim ones, and the z fold keys.
+[[keymap]]
+id = "builtin.editor.normal.file-save.ctrl-s"
+context = "editor"
+mode = "normal"
+keys = "ctrl-s"
+command = "file.save"
+[[keymap]]
+id = "builtin.editor.normal.lsp-rename.f2"
+context = "editor"
+mode = "normal"
+keys = "f2"
+command = "lsp.rename.prompt"
+[[keymap]]
+id = "builtin.editor.normal.dap-continue.f5"
+context = "editor"
+mode = "normal"
+keys = "f5"
+command = "dap.session.continue"
+[[keymap]]
+id = "builtin.editor.normal.dap-breakpoint.f9"
+context = "editor"
+mode = "normal"
+keys = "f9"
+command = "dap.breakpoint.toggle"
+[[keymap]]
+id = "builtin.editor.normal.dap-next.f10"
+context = "editor"
+mode = "normal"
+keys = "f10"
+command = "dap.session.next"
+[[keymap]]
+id = "builtin.editor.normal.dap-step-in.f11"
+context = "editor"
+mode = "normal"
+keys = "f11"
+command = "dap.session.step_in"
+[[keymap]]
+id = "builtin.editor.normal.dap-step-out.shift-f11"
+context = "editor"
+mode = "normal"
+keys = "shift-f11"
+command = "dap.session.step_out"
+[[keymap]]
+id = "builtin.editor.insert.file-save.ctrl-s"
+context = "editor"
+mode = "insert"
+keys = "ctrl-s"
+command = "file.save"
+[[keymap]]
+id = "builtin.editor.insert.lsp-rename.f2"
+context = "editor"
+mode = "insert"
+keys = "f2"
+command = "lsp.rename.prompt"
+[[keymap]]
+id = "builtin.editor.insert.dap-continue.f5"
+context = "editor"
+mode = "insert"
+keys = "f5"
+command = "dap.session.continue"
+[[keymap]]
+id = "builtin.editor.insert.dap-breakpoint.f9"
+context = "editor"
+mode = "insert"
+keys = "f9"
+command = "dap.breakpoint.toggle"
+[[keymap]]
+id = "builtin.editor.insert.dap-next.f10"
+context = "editor"
+mode = "insert"
+keys = "f10"
+command = "dap.session.next"
+[[keymap]]
+id = "builtin.editor.insert.dap-step-in.f11"
+context = "editor"
+mode = "insert"
+keys = "f11"
+command = "dap.session.step_in"
+[[keymap]]
+id = "builtin.editor.insert.dap-step-out.shift-f11"
+context = "editor"
+mode = "insert"
+keys = "shift-f11"
+command = "dap.session.step_out"
+[[keymap]]
+id = "builtin.editor.visual-char.file-save.ctrl-s"
+context = "editor"
+mode = "visual_char"
+keys = "ctrl-s"
+command = "file.save"
+[[keymap]]
+id = "builtin.editor.visual-char.lsp-rename.f2"
+context = "editor"
+mode = "visual_char"
+keys = "f2"
+command = "lsp.rename.prompt"
+[[keymap]]
+id = "builtin.editor.visual-char.dap-continue.f5"
+context = "editor"
+mode = "visual_char"
+keys = "f5"
+command = "dap.session.continue"
+[[keymap]]
+id = "builtin.editor.visual-char.dap-breakpoint.f9"
+context = "editor"
+mode = "visual_char"
+keys = "f9"
+command = "dap.breakpoint.toggle"
+[[keymap]]
+id = "builtin.editor.visual-char.dap-next.f10"
+context = "editor"
+mode = "visual_char"
+keys = "f10"
+command = "dap.session.next"
+[[keymap]]
+id = "builtin.editor.visual-char.dap-step-in.f11"
+context = "editor"
+mode = "visual_char"
+keys = "f11"
+command = "dap.session.step_in"
+[[keymap]]
+id = "builtin.editor.visual-char.dap-step-out.shift-f11"
+context = "editor"
+mode = "visual_char"
+keys = "shift-f11"
+command = "dap.session.step_out"
+[[keymap]]
+id = "builtin.editor.visual-line.file-save.ctrl-s"
+context = "editor"
+mode = "visual_line"
+keys = "ctrl-s"
+command = "file.save"
+[[keymap]]
+id = "builtin.editor.visual-line.lsp-rename.f2"
+context = "editor"
+mode = "visual_line"
+keys = "f2"
+command = "lsp.rename.prompt"
+[[keymap]]
+id = "builtin.editor.visual-line.dap-continue.f5"
+context = "editor"
+mode = "visual_line"
+keys = "f5"
+command = "dap.session.continue"
+[[keymap]]
+id = "builtin.editor.visual-line.dap-breakpoint.f9"
+context = "editor"
+mode = "visual_line"
+keys = "f9"
+command = "dap.breakpoint.toggle"
+[[keymap]]
+id = "builtin.editor.visual-line.dap-next.f10"
+context = "editor"
+mode = "visual_line"
+keys = "f10"
+command = "dap.session.next"
+[[keymap]]
+id = "builtin.editor.visual-line.dap-step-in.f11"
+context = "editor"
+mode = "visual_line"
+keys = "f11"
+command = "dap.session.step_in"
+[[keymap]]
+id = "builtin.editor.visual-line.dap-step-out.shift-f11"
+context = "editor"
+mode = "visual_line"
+keys = "shift-f11"
+command = "dap.session.step_out"
+[[keymap]]
+id = "builtin.editor.visual-block.file-save.ctrl-s"
+context = "editor"
+mode = "visual_block"
+keys = "ctrl-s"
+command = "file.save"
+[[keymap]]
+id = "builtin.editor.visual-block.lsp-rename.f2"
+context = "editor"
+mode = "visual_block"
+keys = "f2"
+command = "lsp.rename.prompt"
+[[keymap]]
+id = "builtin.editor.visual-block.dap-continue.f5"
+context = "editor"
+mode = "visual_block"
+keys = "f5"
+command = "dap.session.continue"
+[[keymap]]
+id = "builtin.editor.visual-block.dap-breakpoint.f9"
+context = "editor"
+mode = "visual_block"
+keys = "f9"
+command = "dap.breakpoint.toggle"
+[[keymap]]
+id = "builtin.editor.visual-block.dap-next.f10"
+context = "editor"
+mode = "visual_block"
+keys = "f10"
+command = "dap.session.next"
+[[keymap]]
+id = "builtin.editor.visual-block.dap-step-in.f11"
+context = "editor"
+mode = "visual_block"
+keys = "f11"
+command = "dap.session.step_in"
+[[keymap]]
+id = "builtin.editor.visual-block.dap-step-out.shift-f11"
+context = "editor"
+mode = "visual_block"
+keys = "shift-f11"
+command = "dap.session.step_out"
+[[keymap]]
+id = "builtin.global.code-rename"
+context = "global"
+keys = "<leader> c r"
+command = "lsp.rename.prompt"
+[[keymap]]
+id = "builtin.editor.normal.fold.z-a"
+context = "editor"
+mode = "normal"
+keys = "z a"
+command = "syntax.fold.toggle"
+[[keymap]]
+id = "builtin.editor.normal.fold.z-o"
+context = "editor"
+mode = "normal"
+keys = "z o"
+command = "syntax.fold.open"
+[[keymap]]
+id = "builtin.editor.normal.fold.z-c"
+context = "editor"
+mode = "normal"
+keys = "z c"
+command = "syntax.fold.close"
+[[keymap]]
+id = "builtin.editor.normal.fold.z-open-all"
+context = "editor"
+mode = "normal"
+keys = "z R"
+command = "syntax.fold.open_all"
+[[keymap]]
+id = "builtin.editor.normal.fold.z-close-all"
+context = "editor"
+mode = "normal"
+keys = "z M"
+command = "syntax.fold.close_all"
+[[keymap]]
+id = "builtin.completion.surface.completion-hide.ctrl-e"
+context = "completion"
+keys = "ctrl-e"
+command = "completion.cancel"
+[[keymap]]
+id = "builtin.editor.visual-char.command-line-open.colon"
+context = "editor"
+mode = "visual_char"
+keys = ":"
+command = "command_line.open"
+arguments = { kind = "command", initial = "'<,'>" }
+[[keymap]]
+id = "builtin.editor.visual-line.command-line-open.colon"
+context = "editor"
+mode = "visual_line"
+keys = ":"
+command = "command_line.open"
+arguments = { kind = "command", initial = "'<,'>" }
+[[keymap]]
+id = "builtin.editor.visual-block.command-line-open.colon"
+context = "editor"
+mode = "visual_block"
+keys = ":"
+command = "command_line.open"
+arguments = { kind = "command", initial = "'<,'>" }
+[[keymap]]
+id = "builtin.global.git-merge-ours"
+context = "global"
+keys = "<leader> g m o"
+command = "workspace.git.conflict.accept"
+arguments = { side = "ours" }
+desc = "Accept Ours"
+[[keymap]]
+id = "builtin.global.git-merge-theirs"
+context = "global"
+keys = "<leader> g m t"
+command = "workspace.git.conflict.accept"
+arguments = { side = "theirs" }
+desc = "Accept Theirs"
+[[keymap]]
+id = "builtin.global.git-merge-both"
+context = "global"
+keys = "<leader> g m b"
+command = "workspace.git.conflict.accept"
+arguments = { side = "both" }
+desc = "Accept Both"
+[[keymap]]
+id = "builtin.global.git-merge-stage"
+context = "global"
+keys = "<leader> g m s"
+command = "workspace.git.conflict.stage"
+desc = "Stage Resolved File"
+[[keymap]]
+id = "builtin.global.git-merge-continue"
+context = "global"
+keys = "<leader> g m c"
+command = "workspace.git.conflict.continue"
+desc = "Continue Merge"
+[[keymap]]
+id = "builtin.global.git-merge-abort"
+context = "global"
+keys = "<leader> g m a"
+command = "workspace.git.conflict.abort"
+desc = "Abort Merge"
+
+# Several cursors. Ctrl-N is the usual Vim key for this; Ctrl-Alt-Up/Down are VS Code's.
+[[keymap]]
+id = "builtin.editor.normal.multi-add-next.ctrl-n"
+context = "editor"
+mode = "normal"
+keys = "ctrl-n"
+command = "multi.add_next"
+[[keymap]]
+id = "builtin.editor.normal.multi-add-below.ctrl-alt-j"
+context = "editor"
+mode = "normal"
+keys = "ctrl-alt-j"
+command = "multi.add_below"
+[[keymap]]
+id = "builtin.editor.normal.multi-add-below.ctrl-alt-down"
+context = "editor"
+mode = "normal"
+keys = "ctrl-alt-down"
+command = "multi.add_below"
+[[keymap]]
+id = "builtin.editor.normal.multi-add-above.ctrl-alt-k"
+context = "editor"
+mode = "normal"
+keys = "ctrl-alt-k"
+command = "multi.add_above"
+[[keymap]]
+id = "builtin.editor.normal.multi-add-above.ctrl-alt-up"
+context = "editor"
+mode = "normal"
+keys = "ctrl-alt-up"
+command = "multi.add_above"
+[[keymap]]
+id = "builtin.editor.multi.multi-add-next.ctrl-n"
+context = "editor"
+mode = "multi"
+keys = "ctrl-n"
+command = "multi.add_next"
+[[keymap]]
+id = "builtin.editor.multi.multi-add-below.ctrl-alt-j"
+context = "editor"
+mode = "multi"
+keys = "ctrl-alt-j"
+command = "multi.add_below"
+[[keymap]]
+id = "builtin.editor.multi.multi-add-below.ctrl-alt-down"
+context = "editor"
+mode = "multi"
+keys = "ctrl-alt-down"
+command = "multi.add_below"
+[[keymap]]
+id = "builtin.editor.multi.multi-add-above.ctrl-alt-k"
+context = "editor"
+mode = "multi"
+keys = "ctrl-alt-k"
+command = "multi.add_above"
+[[keymap]]
+id = "builtin.editor.multi.multi-add-above.ctrl-alt-up"
+context = "editor"
+mode = "multi"
+keys = "ctrl-alt-up"
+command = "multi.add_above"
+[[keymap]]
+id = "builtin.editor.visual-char.multi-add-next.ctrl-n"
+context = "editor"
+mode = "visual_char"
+keys = "ctrl-n"
+command = "multi.add_next"
+[[keymap]]
+id = "builtin.editor.multi.multi-insert.c.change"
+context = "editor"
+mode = "multi"
+keys = "c"
+command = "multi.insert"
+arguments = { placement = "change" }
+[[keymap]]
+id = "builtin.editor.multi.multi-insert.i.start"
+context = "editor"
+mode = "multi"
+keys = "i"
+command = "multi.insert"
+arguments = { placement = "start" }
+[[keymap]]
+id = "builtin.editor.multi.multi-insert.a.end"
+context = "editor"
+mode = "multi"
+keys = "a"
+command = "multi.insert"
+arguments = { placement = "end" }
+[[keymap]]
+id = "builtin.editor.multi.multi-delete.d"
+context = "editor"
+mode = "multi"
+keys = "d"
+command = "multi.delete"
+# VS Code selects every match with Ctrl-Shift-L, which kitty keeps for itself by default, so
+# Alt-A does it too; vim-visual-multi moves between cursors with
+# n and N, skips a match with q and removes a cursor with Q. Motions move every cursor.
+[[keymap]]
+id = "builtin.editor.normal.multi-add-all.ctrl-shift-l"
+context = "editor"
+mode = "normal"
+keys = "ctrl-shift-l"
+command = "multi.add_all"
+[[keymap]]
+id = "builtin.editor.normal.multi-add-all.alt-a"
+context = "editor"
+mode = "normal"
+keys = "alt-a"
+command = "multi.add_all"
+[[keymap]]
+id = "builtin.editor.visual-char.multi-add-all.ctrl-shift-l"
+context = "editor"
+mode = "visual_char"
+keys = "ctrl-shift-l"
+command = "multi.add_all"
+[[keymap]]
+id = "builtin.editor.visual-char.multi-add-all.alt-a"
+context = "editor"
+mode = "visual_char"
+keys = "alt-a"
+command = "multi.add_all"
+[[keymap]]
+id = "builtin.editor.multi.multi-add-all.ctrl-shift-l"
+context = "editor"
+mode = "multi"
+keys = "ctrl-shift-l"
+command = "multi.add_all"
+[[keymap]]
+id = "builtin.editor.multi.multi-add-all.alt-a"
+context = "editor"
+mode = "multi"
+keys = "alt-a"
+command = "multi.add_all"
+[[keymap]]
+id = "builtin.editor.multi.multi-next.n"
+context = "editor"
+mode = "multi"
+keys = "n"
+command = "multi.next"
+[[keymap]]
+id = "builtin.editor.multi.multi-previous.upper-n"
+context = "editor"
+mode = "multi"
+keys = "N"
+command = "multi.previous"
+[[keymap]]
+id = "builtin.editor.multi.multi-skip.q"
+context = "editor"
+mode = "multi"
+keys = "q"
+command = "multi.skip"
+[[keymap]]
+id = "builtin.editor.multi.multi-remove.upper-q"
+context = "editor"
+mode = "multi"
+keys = "Q"
+command = "multi.remove"
+[[keymap]]
+id = "builtin.editor.multi.multi-delete-char.x"
+context = "editor"
+mode = "multi"
+keys = "x"
+command = "multi.delete_char"
+[[keymap]]
+id = "builtin.editor.multi.multi-insert.line-start"
+context = "editor"
+mode = "multi"
+keys = "I"
+command = "multi.insert"
+arguments = { placement = "line_start" }
+[[keymap]]
+id = "builtin.editor.multi.multi-insert.line-end"
+context = "editor"
+mode = "multi"
+keys = "A"
+command = "multi.insert"
+arguments = { placement = "line_end" }
+[[keymap]]
+id = "builtin.editor.multi.multi-move.h"
+context = "editor"
+mode = "multi"
+keys = "h"
+command = "multi.move"
+arguments = { motion = "left" }
+[[keymap]]
+id = "builtin.editor.multi.multi-move.j"
+context = "editor"
+mode = "multi"
+keys = "j"
+command = "multi.move"
+arguments = { motion = "down" }
+[[keymap]]
+id = "builtin.editor.multi.multi-move.k"
+context = "editor"
+mode = "multi"
+keys = "k"
+command = "multi.move"
+arguments = { motion = "up" }
+[[keymap]]
+id = "builtin.editor.multi.multi-move.l"
+context = "editor"
+mode = "multi"
+keys = "l"
+command = "multi.move"
+arguments = { motion = "right" }
+[[keymap]]
+id = "builtin.editor.multi.multi-move.left"
+context = "editor"
+mode = "multi"
+keys = "left"
+command = "multi.move"
+arguments = { motion = "left" }
+[[keymap]]
+id = "builtin.editor.multi.multi-move.down"
+context = "editor"
+mode = "multi"
+keys = "down"
+command = "multi.move"
+arguments = { motion = "down" }
+[[keymap]]
+id = "builtin.editor.multi.multi-move.up"
+context = "editor"
+mode = "multi"
+keys = "up"
+command = "multi.move"
+arguments = { motion = "up" }
+[[keymap]]
+id = "builtin.editor.multi.multi-move.right"
+context = "editor"
+mode = "multi"
+keys = "right"
+command = "multi.move"
+arguments = { motion = "right" }
+[[keymap]]
+id = "builtin.editor.multi.multi-move.w"
+context = "editor"
+mode = "multi"
+keys = "w"
+command = "multi.move"
+arguments = { motion = "word_forward" }
+[[keymap]]
+id = "builtin.editor.multi.multi-move.b"
+context = "editor"
+mode = "multi"
+keys = "b"
+command = "multi.move"
+arguments = { motion = "word_backward" }
+[[keymap]]
+id = "builtin.editor.multi.multi-move.e"
+context = "editor"
+mode = "multi"
+keys = "e"
+command = "multi.move"
+arguments = { motion = "word_end" }
+[[keymap]]
+id = "builtin.editor.multi.multi-move.zero"
+context = "editor"
+mode = "multi"
+keys = "0"
+command = "multi.move"
+arguments = { motion = "line_start" }
+[[keymap]]
+id = "builtin.editor.multi.multi-move.caret"
+context = "editor"
+mode = "multi"
+keys = "^"
+command = "multi.move"
+arguments = { motion = "first_nonblank" }
+[[keymap]]
+id = "builtin.editor.multi.multi-move.dollar"
+context = "editor"
+mode = "multi"
+keys = "$"
+command = "multi.move"
+arguments = { motion = "line_end" }
+[[keymap]]
+id = "builtin.editor.multi.mode-normal.escape"
+context = "editor"
+mode = "multi"
+keys = "escape"
+command = "mode.normal"
+
+[[keymap]]
+id = "builtin.picker.surface.picker-preview-down.ctrl-d"
+context = "picker"
+keys = "ctrl-d"
+command = "picker.preview.down"
+
+[[keymap]]
+id = "builtin.picker.surface.picker-preview-down.pagedown"
+context = "picker"
+keys = "pagedown"
+command = "picker.preview.down"
+
+[[keymap]]
+id = "builtin.picker.surface.picker-preview-up.ctrl-u"
+context = "picker"
+keys = "ctrl-u"
+command = "picker.preview.up"
+
+[[keymap]]
+id = "builtin.picker.surface.picker-preview-up.pageup"
+context = "picker"
+keys = "pageup"
+command = "picker.preview.up"
+
+[[keymap]]
+id = "builtin.picker.normal.picker-preview-down.ctrl-d"
+context = "picker_normal"
+keys = "ctrl-d"
+command = "picker.preview.down"
+
+[[keymap]]
+id = "builtin.picker.normal.picker-preview-down.pagedown"
+context = "picker_normal"
+keys = "pagedown"
+command = "picker.preview.down"
+
+[[keymap]]
+id = "builtin.picker.normal.picker-preview-up.ctrl-u"
+context = "picker_normal"
+keys = "ctrl-u"
+command = "picker.preview.up"
+
+[[keymap]]
+id = "builtin.picker.normal.picker-preview-up.pageup"
+context = "picker_normal"
+keys = "pageup"
+command = "picker.preview.up"
+
+[[keymap]]
+id = "builtin.editor.normal.view-scroll.pagedown"
+context = "editor"
+mode = "normal"
+keys = "pagedown"
+command = "view.scroll"
+arguments = { kind = "page_down" }
+
+[[keymap]]
+id = "builtin.editor.normal.view-scroll.pageup"
+context = "editor"
+mode = "normal"
+keys = "pageup"
+command = "view.scroll"
+arguments = { kind = "page_up" }
+
+[[keymap]]
+id = "builtin.editor.insert.view-scroll.pagedown"
+context = "editor"
+mode = "insert"
+keys = "pagedown"
+command = "view.scroll"
+arguments = { kind = "page_down" }
+
+[[keymap]]
+id = "builtin.editor.insert.view-scroll.pageup"
+context = "editor"
+mode = "insert"
+keys = "pageup"
+command = "view.scroll"
+arguments = { kind = "page_up" }
+
+[[keymap]]
+id = "builtin.explorer.explorer-page-down.pagedown"
+context = "explorer"
+keys = "pagedown"
+command = "explorer.page_down"
+
+[[keymap]]
+id = "builtin.explorer.explorer-page-up.pageup"
+context = "explorer"
+keys = "pageup"
+command = "explorer.page_up"
+
+[[keymap]]
+id = "builtin.editor.insert.settings.ctrl-comma"
+context = "editor"
+mode = "insert"
+keys = "ctrl-,"
+command = "settings.open"
+
+[[keymap]]
+id = "builtin.terminal.settings.ctrl-comma"
+context = "terminal"
+keys = "ctrl-,"
+command = "settings.open"
+
+[[keymap]]
+id = "builtin.agent.settings.ctrl-comma"
+context = "agent"
+keys = "ctrl-,"
+command = "settings.open"
+
+[[keymap]]
+id = "builtin.setup.move.j"
+context = "setup"
+keys = "j"
+command = "settings.setup.move"
+arguments = { by = 1 }
+
+[[keymap]]
+id = "builtin.setup.move.down"
+context = "setup"
+keys = "down"
+command = "settings.setup.move"
+arguments = { by = 1 }
+
+[[keymap]]
+id = "builtin.setup.move.k"
+context = "setup"
+keys = "k"
+command = "settings.setup.move"
+arguments = { by = -1 }
+
+[[keymap]]
+id = "builtin.setup.move.up"
+context = "setup"
+keys = "up"
+command = "settings.setup.move"
+arguments = { by = -1 }
+
+[[keymap]]
+id = "builtin.setup.next.enter"
+context = "setup"
+keys = "enter"
+command = "settings.setup.next"
+
+[[keymap]]
+id = "builtin.setup.next.l"
+context = "setup"
+keys = "l"
+command = "settings.setup.next"
+
+[[keymap]]
+id = "builtin.setup.next.right"
+context = "setup"
+keys = "right"
+command = "settings.setup.next"
+
+[[keymap]]
+id = "builtin.setup.back.backspace"
+context = "setup"
+keys = "backspace"
+command = "settings.setup.back"
+
+[[keymap]]
+id = "builtin.setup.back.h"
+context = "setup"
+keys = "h"
+command = "settings.setup.back"
+
+[[keymap]]
+id = "builtin.setup.back.left"
+context = "setup"
+keys = "left"
+command = "settings.setup.back"
+
+[[keymap]]
+id = "builtin.setup.skip.escape"
+context = "setup"
+keys = "escape"
+command = "settings.setup.skip"
+
+[[keymap]]
+id = "builtin.setup.skip.q"
+context = "setup"
+keys = "q"
+command = "settings.setup.skip"
+
+[[keymap]]
+id = "builtin.settings.move.j"
+context = "settings"
+keys = "j"
+command = "settings.page.move"
+arguments = { by = 1 }
+
+[[keymap]]
+id = "builtin.settings.move.down"
+context = "settings"
+keys = "down"
+command = "settings.page.move"
+arguments = { by = 1 }
+
+[[keymap]]
+id = "builtin.settings.move.k"
+context = "settings"
+keys = "k"
+command = "settings.page.move"
+arguments = { by = -1 }
+
+[[keymap]]
+id = "builtin.settings.move.up"
+context = "settings"
+keys = "up"
+command = "settings.page.move"
+arguments = { by = -1 }
+
+[[keymap]]
+id = "builtin.settings.move.ctrl-d"
+context = "settings"
+keys = "ctrl-d"
+command = "settings.page.move"
+arguments = { by = 5 }
+
+[[keymap]]
+id = "builtin.settings.move.pagedown"
+context = "settings"
+keys = "pagedown"
+command = "settings.page.move"
+arguments = { by = 5 }
+
+[[keymap]]
+id = "builtin.settings.move.ctrl-u"
+context = "settings"
+keys = "ctrl-u"
+command = "settings.page.move"
+arguments = { by = -5 }
+
+[[keymap]]
+id = "builtin.settings.move.pageup"
+context = "settings"
+keys = "pageup"
+command = "settings.page.move"
+arguments = { by = -5 }
+
+[[keymap]]
+id = "builtin.settings.move.g-g"
+context = "settings"
+keys = "g g"
+command = "settings.page.move"
+arguments = { by = -100000 }
+
+[[keymap]]
+id = "builtin.settings.move.home"
+context = "settings"
+keys = "home"
+command = "settings.page.move"
+arguments = { by = -100000 }
+
+[[keymap]]
+id = "builtin.settings.move.shift-g"
+context = "settings"
+keys = "G"
+command = "settings.page.move"
+arguments = { by = 100000 }
+
+[[keymap]]
+id = "builtin.settings.move.end"
+context = "settings"
+keys = "end"
+command = "settings.page.move"
+arguments = { by = 100000 }
+
+[[keymap]]
+id = "builtin.settings.section.tab"
+context = "settings"
+keys = "tab"
+command = "settings.page.section"
+arguments = { by = 1 }
+
+[[keymap]]
+id = "builtin.settings.section.shift-tab"
+context = "settings"
+keys = "shift-tab"
+command = "settings.page.section"
+arguments = { by = -1 }
+
+[[keymap]]
+id = "builtin.settings.section.bracket-right"
+context = "settings"
+keys = "]"
+command = "settings.page.section"
+arguments = { by = 1 }
+
+[[keymap]]
+id = "builtin.settings.section.bracket-left"
+context = "settings"
+keys = "["
+command = "settings.page.section"
+arguments = { by = -1 }
+
+[[keymap]]
+id = "builtin.settings.activate.enter"
+context = "settings"
+keys = "enter"
+command = "settings.page.activate"
+
+[[keymap]]
+id = "builtin.settings.toggle.space"
+context = "settings"
+keys = "space"
+command = "settings.page.toggle"
+
+[[keymap]]
+id = "builtin.settings.reset.r"
+context = "settings"
+keys = "r"
+command = "settings.page.reset"
+
+[[keymap]]
+id = "builtin.settings.search.slash"
+context = "settings"
+keys = "/"
+command = "settings.page.search"
+
+[[keymap]]
+id = "builtin.settings.search.ctrl-f"
+context = "settings"
+keys = "ctrl-f"
+command = "settings.page.search"
+
+[[keymap]]
+id = "builtin.settings.modified.m"
+context = "settings"
+keys = "m"
+command = "settings.page.modified"
+
+[[keymap]]
+id = "builtin.settings.open-file.o"
+context = "settings"
+keys = "o"
+command = "settings.page.open_file"
+
+[[keymap]]
+id = "builtin.settings.cancel.escape"
+context = "settings"
+keys = "escape"
+command = "settings.page.cancel"
+
+[[keymap]]
+id = "builtin.settings.close.q"
+context = "settings"
+keys = "q"
+command = "settings.page.close"
+
+[[keymap]]
+id = "builtin.settings.close.ctrl-comma"
+context = "settings"
+keys = "ctrl-,"
+command = "settings.page.close"
+
+[[keymap]]
+id = "builtin.settings-search.cancel.escape"
+context = "settings_search"
+keys = "escape"
+command = "settings.page.cancel"
+
+[[keymap]]
+id = "builtin.settings-search.activate.enter"
+context = "settings_search"
+keys = "enter"
+command = "settings.page.activate"
+
+[[keymap]]
+id = "builtin.settings-search.backspace.backspace"
+context = "settings_search"
+keys = "backspace"
+command = "settings.page.backspace"
+
+[[keymap]]
+id = "builtin.settings-search.clear.ctrl-u"
+context = "settings_search"
+keys = "ctrl-u"
+command = "settings.page.clear"
+
+[[keymap]]
+id = "builtin.settings-search.move.down"
+context = "settings_search"
+keys = "down"
+command = "settings.page.move"
+arguments = { by = 1 }
+
+[[keymap]]
+id = "builtin.settings-search.move.up"
+context = "settings_search"
+keys = "up"
+command = "settings.page.move"
+arguments = { by = -1 }
+
+[[keymap]]
+id = "builtin.settings-search.move.ctrl-n"
+context = "settings_search"
+keys = "ctrl-n"
+command = "settings.page.move"
+arguments = { by = 1 }
+
+[[keymap]]
+id = "builtin.settings-search.move.ctrl-p"
+context = "settings_search"
+keys = "ctrl-p"
+command = "settings.page.move"
+arguments = { by = -1 }
+
+[[keymap]]
+id = "builtin.settings-search.close.ctrl-comma"
+context = "settings_search"
+keys = "ctrl-,"
+command = "settings.page.close"
+
+[[keymap]]
+id = "builtin.settings-edit.cancel.escape"
+context = "settings_edit"
+keys = "escape"
+command = "settings.page.cancel"
+
+[[keymap]]
+id = "builtin.settings-edit.activate.enter"
+context = "settings_edit"
+keys = "enter"
+command = "settings.page.activate"
+
+[[keymap]]
+id = "builtin.settings-edit.backspace.backspace"
+context = "settings_edit"
+keys = "backspace"
+command = "settings.page.backspace"
+
+[[keymap]]
+id = "builtin.settings-edit.clear.ctrl-u"
+context = "settings_edit"
+keys = "ctrl-u"
+command = "settings.page.clear"
+
+[[keymap]]
+id = "builtin.settings-edit.left.left"
+context = "settings_edit"
+keys = "left"
+command = "settings.page.left"
+
+[[keymap]]
+id = "builtin.settings-edit.right.right"
+context = "settings_edit"
+keys = "right"
+command = "settings.page.right"
+
+[[keymap]]
+id = "builtin.settings-edit.word-left.ctrl-left"
+context = "settings_edit"
+keys = "ctrl-left"
+command = "settings.page.word_left"
+
+[[keymap]]
+id = "builtin.settings-edit.word-right.ctrl-right"
+context = "settings_edit"
+keys = "ctrl-right"
+command = "settings.page.word_right"
+
+[[keymap]]
+id = "builtin.settings-edit.home.home"
+context = "settings_edit"
+keys = "home"
+command = "settings.page.home"
+
+[[keymap]]
+id = "builtin.settings-edit.end.end"
+context = "settings_edit"
+keys = "end"
+command = "settings.page.end"
+
+[[keymap]]
+id = "builtin.settings-edit.home.ctrl-a"
+context = "settings_edit"
+keys = "ctrl-a"
+command = "settings.page.home"
+
+[[keymap]]
+id = "builtin.settings-edit.end.ctrl-e"
+context = "settings_edit"
+keys = "ctrl-e"
+command = "settings.page.end"
+
+[[keymap]]
+id = "builtin.settings-choice.move.j"
+context = "settings_choice"
+keys = "j"
+command = "settings.page.move"
+arguments = { by = 1 }
+
+[[keymap]]
+id = "builtin.settings-choice.move.down"
+context = "settings_choice"
+keys = "down"
+command = "settings.page.move"
+arguments = { by = 1 }
+
+[[keymap]]
+id = "builtin.settings-choice.move.k"
+context = "settings_choice"
+keys = "k"
+command = "settings.page.move"
+arguments = { by = -1 }
+
+[[keymap]]
+id = "builtin.settings-choice.move.up"
+context = "settings_choice"
+keys = "up"
+command = "settings.page.move"
+arguments = { by = -1 }
+
+[[keymap]]
+id = "builtin.settings-choice.activate.enter"
+context = "settings_choice"
+keys = "enter"
+command = "settings.page.activate"
+
+[[keymap]]
+id = "builtin.settings-choice.activate.space"
+context = "settings_choice"
+keys = "space"
+command = "settings.page.activate"
+
+[[keymap]]
+id = "builtin.settings-choice.cancel.escape"
+context = "settings_choice"
+keys = "escape"
+command = "settings.page.cancel"
+
+[[keymap]]
+id = "builtin.settings-choice.cancel.q"
+context = "settings_choice"
+keys = "q"
+command = "settings.page.cancel"

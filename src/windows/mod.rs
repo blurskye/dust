@@ -1,0 +1,61 @@
+//! Window topology, content ownership and compositor geometry.
+
+pub(crate) const PANE_DEFAULT_RATIO: u16 = 500;
+pub(crate) const PANE_RESIZE_STEP: u16 = 50;
+pub(crate) const PANE_MINIMUM_WIDTH: u16 = 8;
+pub(crate) const PANE_MINIMUM_HEIGHT: u16 = 3;
+
+const MAXIMUM_CONTENT_TYPE_ID_BYTES: usize = 128;
+const MAXIMUM_OWNER_BYTES: usize = 128;
+const MAXIMUM_TITLE_BYTES: usize = 4 * 1024;
+pub(crate) const MAX_SPLIT_DEPTH: usize = 64;
+pub(crate) const MAX_WINDOWS: usize = 1_024;
+const MAXIMUM_NON_TILED_WINDOWS_PER_TAB: usize = 128;
+const MAXIMUM_OVERLAY_WINDOWS_PER_TAB: usize = 32;
+const MAXIMUM_PROTECTED_REGIONS: usize = 16;
+mod identity;
+pub use identity::ContentId;
+pub use identity::ContentTypeId;
+pub use identity::ViewId;
+pub use identity::WindowId;
+pub use identity::WindowTarget;
+pub use identity::WorkspaceTabId;
+mod layout;
+mod tree;
+pub use layout::CompositorLayer;
+pub use layout::CompositorProjection;
+pub use layout::CompositorSnapshot;
+pub use layout::CompositorWindowSnapshot;
+pub use layout::ContentAdapterKind;
+pub use layout::DockEdge;
+pub use layout::ProjectedBorder;
+pub use layout::ProjectedCompositorWindow;
+pub use layout::ProjectedWindow;
+pub use layout::SpatialDirection;
+pub use layout::TileAxis;
+pub use layout::TiledInsets;
+pub use layout::TiledLayoutNode;
+pub use layout::TiledLayoutProjection;
+pub use layout::TiledLayoutSnapshot;
+pub use layout::WindowPlacement;
+pub use layout::WindowRect;
+pub(crate) use tree::offset_index;
+mod content;
+pub use content::ContentCapabilities;
+pub use content::ContentContract;
+pub use content::ContentDescriptor;
+pub use content::ContentLifecycle;
+pub use content::ContentSnapshot;
+pub use content::ViewDescriptor;
+pub use content::WindowDescriptor;
+pub use content::WorkspaceTabDescriptor;
+mod graph;
+mod navigation;
+pub use graph::WindowGraph;
+mod error;
+mod projection;
+pub use error::WindowError;
+pub(crate) use error::validate_title;
+
+#[cfg(test)]
+mod tests;

@@ -1,0 +1,620 @@
+# Dust-owned Linux tool sources. Direct release artifacts are exact-version, HTTPS-only
+# and SHA-256 pinned. Ecosystem packages are exact-version and installed only in a
+# Dust-owned Bun prefix. The package installer never invokes npm or a system package
+# manager. On NixOS, explicit LSP installation realizes Dust's locked private Nix
+# compatibility environment, then verifies and processes this same upstream artifact.
+
+[[tool]]
+id = "rust-analyzer"
+name = "rust-analyzer"
+kind = "lsp"
+languages = ["rust"]
+executable = "rust-analyzer"
+version = "0.3.3025"
+release = "2026-08-24"
+probe_args = ["--version"]
+project_root_markers = ["Cargo.toml"]
+project_root_strategy = "cargo"
+
+[tool.install]
+method = "archive"
+url = "https://github.com/rust-lang/rust-analyzer/releases/download/2026-08-24/rust-analyzer-x86_64-unknown-linux-gnu.gz"
+sha256 = "c4d409690b98d84ce98174829362a59214825d72304fe2504f4b906a116b51fe"
+archive = "gzip"
+executable_path = "rust-analyzer"
+
+# Exact recent release pins shown as separate choices in :lsp. Mutable aliases such
+# as `nightly` are deliberately excluded; every row has an immutable URL and digest.
+[[tool.pins]]
+version = "0.3.3016"
+release = "2026-08-17.4"
+
+[tool.pins.install]
+method = "archive"
+url = "https://github.com/rust-lang/rust-analyzer/releases/download/2026-08-17.4/rust-analyzer-x86_64-unknown-linux-gnu.gz"
+sha256 = "a559eaa29920e4c12718fba101f2055f1da0ad8bc458ef9dc1a670778cc66901"
+archive = "gzip"
+executable_path = "rust-analyzer"
+
+[[tool.pins]]
+version = "0.3.3008"
+release = "2026-08-10.1"
+
+[tool.pins.install]
+method = "archive"
+url = "https://github.com/rust-lang/rust-analyzer/releases/download/2026-08-10.1/rust-analyzer-x86_64-unknown-linux-gnu.gz"
+sha256 = "d42908a7dc7b89250ae881a0919e477296843665c98574ecc8fe16ba60cecefb"
+archive = "gzip"
+executable_path = "rust-analyzer"
+
+[[tool.pins]]
+version = "0.3.2997"
+release = "2026-08-03"
+
+[tool.pins.install]
+method = "archive"
+url = "https://github.com/rust-lang/rust-analyzer/releases/download/2026-08-03/rust-analyzer-x86_64-unknown-linux-gnu.gz"
+sha256 = "769670319df8571dac91b6eab6d3a65b18b69488a6900959f2fb6157181ace9d"
+archive = "gzip"
+executable_path = "rust-analyzer"
+
+[[tool.pins]]
+version = "0.3.2989"
+release = "2026-07-27"
+
+[tool.pins.install]
+method = "archive"
+url = "https://github.com/rust-lang/rust-analyzer/releases/download/2026-07-27/rust-analyzer-x86_64-unknown-linux-gnu.gz"
+sha256 = "ac4f42ddbbd040d75d847e991894776485783e28beb744b9719a660a99abe115"
+archive = "gzip"
+executable_path = "rust-analyzer"
+
+[[tool]]
+id = "typescript-language-server"
+name = "typescript-language-server"
+kind = "lsp"
+languages = ["typescript", "typescriptreact", "javascript", "javascriptreact"]
+executable = "typescript-language-server"
+version = "4.3.4"
+release = "TypeScript 5.9.3"
+launch_args = ["--stdio"]
+probe_args = ["--version"]
+project_root_markers = ["tsconfig.json", "jsconfig.json", "package.json"]
+project_root_strategy = "node"
+
+[tool.install]
+method = "npm_package"
+packages = ["typescript@5.9.3", "typescript-language-server@4.3.4"]
+
+[[tool]]
+id = "pyright"
+name = "pyright"
+kind = "lsp"
+languages = ["python"]
+executable = "pyright-langserver"
+version = "1.1.407"
+launch_args = ["--stdio"]
+project_root_markers = ["pyproject.toml", "setup.py", "setup.cfg", "requirements.txt"]
+project_root_strategy = "python"
+
+[tool.install]
+method = "npm_package"
+packages = ["pyright@1.1.407"]
+
+[[tool]]
+id = "clangd"
+name = "clangd"
+kind = "lsp"
+languages = ["c", "cpp"]
+executable = "clangd"
+version = "22.1.6"
+probe_args = ["--version"]
+project_root_markers = ["compile_commands.json", "compile_flags.txt", ".clangd"]
+project_root_strategy = "marker"
+
+[tool.install]
+method = "archive"
+url = "https://github.com/clangd/clangd/releases/download/22.1.6/clangd-linux-22.1.6.zip"
+sha256 = "a9c77443af2e447ed467e84771848d3a6ac1c56f84bcfcde717e66318de77cfa"
+archive = "zip"
+executable_path = "clangd_22.1.6/bin/clangd"
+
+[[tool]]
+id = "gopls"
+name = "gopls"
+kind = "lsp"
+languages = ["go", "gomod", "gowork", "gotmpl"]
+executable = "gopls"
+version = "0.20.0"
+probe_args = ["version"]
+project_root_markers = ["go.work", "go.mod"]
+project_root_strategy = "go"
+
+[tool.install]
+method = "go_package"
+package = "golang.org/x/tools/gopls@v0.20.0"
+
+[[tool]]
+id = "bash-language-server"
+name = "Bash Language Server"
+kind = "lsp"
+languages = ["shellscript"]
+executable = "bash-language-server"
+version = "5.6.0"
+launch_args = ["start"]
+probe_args = ["--version"]
+project_root_markers = [".git", ".bashrc"]
+project_root_strategy = "marker"
+
+[tool.install]
+method = "npm_package"
+packages = ["bash-language-server@5.6.0"]
+
+[[tool]]
+id = "vscode-html-language-server"
+name = "VS Code HTML Language Server"
+kind = "lsp"
+languages = ["html"]
+executable = "vscode-html-language-server"
+version = "4.10.0"
+launch_args = ["--stdio"]
+project_root_markers = ["package.json", ".git"]
+project_root_strategy = "marker"
+
+[tool.install]
+method = "npm_package"
+packages = ["vscode-langservers-extracted@4.10.0"]
+
+[[tool]]
+id = "tailwindcss-language-server"
+name = "Tailwind CSS Language Server"
+kind = "lsp"
+languages = ["html", "css", "scss", "sass", "less", "javascript", "javascriptreact", "typescript", "typescriptreact", "vue", "svelte", "astro", "php"]
+executable = "tailwindcss-language-server"
+version = "0.16.0"
+launch_args = ["--stdio"]
+project_root_markers = ["tailwind.config.js", "tailwind.config.ts", "tailwind.config.cjs", "tailwind.config.mjs", "package.json", ".git"]
+project_root_strategy = "marker"
+
+[tool.install]
+method = "npm_package"
+packages = ["@tailwindcss/language-server@0.16.0"]
+
+[[tool]]
+id = "taplo"
+name = "Taplo"
+kind = "lsp"
+languages = ["toml"]
+executable = "taplo"
+version = "0.10.0"
+launch_args = ["lsp", "stdio"]
+probe_args = ["--version"]
+project_root_markers = [".taplo.toml", "taplo.toml", "Cargo.toml", "pyproject.toml", ".git"]
+project_root_strategy = "marker"
+
+[tool.install]
+method = "archive"
+url = "https://github.com/tamasfe/taplo/releases/download/0.10.0/taplo-linux-x86_64.gz"
+sha256 = "8fe196b894ccf9072f98d4e1013a180306e17d244830b03986ee5e8eabeb6156"
+archive = "gzip"
+executable_path = "taplo"
+
+[[tool]]
+id = "vscode-css-language-server"
+name = "VS Code CSS Language Server"
+kind = "lsp"
+languages = ["css", "scss", "less"]
+executable = "vscode-css-language-server"
+version = "4.10.0"
+launch_args = ["--stdio"]
+project_root_markers = ["package.json", ".git"]
+project_root_strategy = "marker"
+
+[tool.install]
+method = "npm_package"
+packages = ["vscode-langservers-extracted@4.10.0"]
+
+[[tool]]
+id = "vscode-json-language-server"
+name = "VS Code JSON Language Server"
+kind = "lsp"
+languages = ["json", "jsonc"]
+executable = "vscode-json-language-server"
+version = "4.10.0"
+launch_args = ["--stdio"]
+project_root_markers = ["package.json", ".git"]
+project_root_strategy = "marker"
+
+[tool.install]
+method = "npm_package"
+packages = ["vscode-langservers-extracted@4.10.0"]
+
+[[tool]]
+id = "yaml-language-server"
+name = "YAML Language Server"
+kind = "lsp"
+languages = ["yaml"]
+executable = "yaml-language-server"
+version = "1.24.0"
+launch_args = ["--stdio"]
+project_root_markers = [".git", "package.json"]
+project_root_strategy = "marker"
+
+[tool.install]
+method = "npm_package"
+packages = ["yaml-language-server@1.24.0"]
+
+[[tool]]
+id = "marksman"
+name = "Marksman"
+kind = "lsp"
+languages = ["markdown", "markdown.mdx"]
+executable = "marksman"
+version = "2026-02-08"
+launch_args = ["server"]
+probe_args = ["--version"]
+project_root_markers = [".marksman.toml", ".git"]
+project_root_strategy = "marker"
+
+[tool.install]
+method = "archive"
+url = "https://github.com/artempyanykh/marksman/releases/download/2026-02-08/marksman-linux-x64"
+sha256 = "be5098e8213219269c47fc0d916a66fa31ce0602ec967475c722260aabf26087"
+archive = "raw"
+executable_path = "marksman"
+
+[[tool]]
+id = "emmylua-ls"
+name = "EmmyLua Language Server"
+kind = "lsp"
+languages = ["lua"]
+executable = "emmylua_ls"
+version = "0.25.1"
+probe_args = ["--version"]
+project_root_markers = [".emmyrc.json", ".luarc.json", ".luarc.jsonc", ".git"]
+project_root_strategy = "marker"
+
+[tool.install]
+method = "archive"
+url = "https://github.com/EmmyLuaLs/emmylua-analyzer-rust/releases/download/0.25.1/emmylua_ls-linux-x64-glibc.2.17.tar.gz"
+sha256 = "9731ec340b1b40916555dcb31c1c539beee9fa184997962c9af250c42b316950"
+archive = "tar_gzip"
+executable_path = "emmylua_ls"
+
+[[tool]]
+id = "intelephense"
+name = "Intelephense"
+kind = "lsp"
+languages = ["php"]
+executable = "intelephense"
+version = "1.18.5"
+launch_args = ["--stdio"]
+project_root_markers = ["composer.json", ".git"]
+project_root_strategy = "marker"
+
+[tool.install]
+method = "npm_package"
+packages = ["intelephense@1.18.5"]
+
+[[tool]]
+id = "svelte-language-server"
+name = "Svelte Language Server"
+kind = "lsp"
+languages = ["svelte"]
+executable = "svelteserver"
+version = "0.18.4"
+launch_args = ["--stdio"]
+project_root_markers = ["svelte.config.js", "package.json"]
+project_root_strategy = "marker"
+
+[tool.install]
+method = "npm_package"
+packages = ["svelte-language-server@0.18.4", "typescript@5.9.3"]
+
+[[tool]]
+id = "vue-language-server"
+name = "Vue Language Server"
+kind = "lsp"
+languages = ["vue"]
+executable = "vue-language-server"
+version = "3.3.11"
+launch_args = ["--stdio"]
+project_root_markers = ["package.json", "tsconfig.json", "jsconfig.json"]
+project_root_strategy = "node"
+
+[tool.install]
+method = "npm_package"
+packages = ["@vue/language-server@3.3.11", "typescript@5.9.3"]
+
+[[tool]]
+id = "dockerfile-language-server"
+name = "Dockerfile Language Server"
+kind = "lsp"
+languages = ["dockerfile"]
+executable = "docker-langserver"
+version = "0.15.0"
+launch_args = ["--stdio"]
+project_root_markers = ["Dockerfile", "compose.yaml", "compose.yml", ".git"]
+project_root_strategy = "marker"
+
+[tool.install]
+method = "npm_package"
+packages = ["dockerfile-language-server-nodejs@0.15.0"]
+
+[[tool]]
+id = "astro-language-server"
+name = "Astro Language Server"
+kind = "lsp"
+languages = ["astro"]
+executable = "astro-ls"
+version = "2.16.15"
+launch_args = ["--stdio"]
+project_root_markers = ["astro.config.js", "astro.config.mjs", "package.json"]
+project_root_strategy = "marker"
+
+[tool.install]
+method = "npm_package"
+packages = ["@astrojs/language-server@2.16.15", "typescript@5.9.3"]
+
+[[tool]]
+id = "biome"
+name = "biome"
+kind = "lsp"
+languages = ["astro", "css", "html", "javascript", "javascriptreact", "json", "jsonc", "svelte", "typescript", "typescriptreact", "vue"]
+executable = "biome"
+version = "2.6.4"
+launch_args = ["lsp-proxy"]
+probe_args = ["--version"]
+project_root_markers = ["biome.json", "biome.jsonc"]
+project_root_strategy = "marker"
+
+[tool.install]
+method = "npm_package"
+packages = ["@biomejs/biome@2.6.4"]
+
+[[tool]]
+id = "oxlint"
+name = "oxlint"
+kind = "lsp"
+languages = ["astro", "javascript", "javascriptreact", "svelte", "typescript", "typescriptreact", "vue"]
+executable = "oxlint"
+version = "1.90.0"
+launch_args = ["--lsp"]
+probe_args = ["--version"]
+project_root_markers = [".oxlintrc.json", "oxlint.config.ts"]
+project_root_strategy = "marker"
+
+[tool.install]
+method = "npm_package"
+packages = ["oxlint@1.90.0"]
+
+[[tool]]
+id = "oxfmt"
+name = "oxfmt"
+kind = "lsp"
+languages = ["astro", "css", "html", "javascript", "javascriptreact", "json", "jsonc", "markdown", "svelte", "typescript", "typescriptreact", "vue", "yaml"]
+executable = "oxfmt"
+version = "0.75.0"
+launch_args = ["--lsp"]
+probe_args = ["--version"]
+project_root_markers = [".oxfmtrc.json", ".oxfmtrc.jsonc"]
+project_root_strategy = "marker"
+
+[tool.install]
+method = "npm_package"
+packages = ["oxfmt@0.75.0"]
+
+[[tool]]
+id = "tsgo"
+name = "tsgo"
+kind = "lsp"
+languages = ["typescript", "typescriptreact", "javascript", "javascriptreact"]
+executable = "tsgo"
+version = "7.0.0-dev.20260707.2"
+launch_args = ["--lsp", "--stdio"]
+probe_args = ["--version"]
+project_root_markers = ["tsconfig.json", "jsconfig.json", "package.json"]
+project_root_strategy = "node"
+
+[tool.install]
+method = "npm_package"
+packages = ["@typescript/native-preview@7.0.0-dev.20260707.2"]
+
+[[tool]]
+id = "debugpy"
+name = "debugpy"
+kind = "dap"
+languages = ["python"]
+executable = "debugpy-adapter"
+version = "1.8.17"
+debug_program_policy = "source"
+project_root_markers = ["pyproject.toml", "setup.py", "setup.cfg", "requirements.txt"]
+project_root_strategy = "python"
+
+[tool.install]
+method = "uv_tool"
+packages = ["debugpy==1.8.17"]
+
+[[tool]]
+id = "delve"
+name = "Delve"
+kind = "dap"
+languages = ["go"]
+executable = "dlv"
+version = "1.27.2"
+probe_args = ["version"]
+launch_args = ["dap", "--client-addr={address}"]
+debug_program_policy = "source"
+project_root_markers = ["go.work", "go.mod"]
+project_root_strategy = "go"
+
+[tool.install]
+method = "go_package"
+package = "github.com/go-delve/delve/cmd/dlv@v1.27.2"
+
+[[tool]]
+id = "codelldb"
+name = "CodeLLDB"
+kind = "dap"
+languages = ["rust", "c", "cpp"]
+executable = "codelldb"
+version = "1.12.3"
+probe_args = ["--help"]
+launch_args = ["--connect", "{port}"]
+project_root_markers = ["Cargo.toml", "compile_commands.json", "compile_flags.txt", ".clangd"]
+project_root_strategy = "marker"
+
+[tool.install]
+method = "archive"
+url = "https://github.com/vadimcn/codelldb/releases/download/v1.12.3/codelldb-linux-x64.vsix"
+sha256 = "1cd7f386598022b51a5b93b9ffa23e812b23f519cfe1833384ec4bef4bfd1be1"
+archive = "zip"
+executable_path = "extension/adapter/codelldb"
+# It loads liblldb from beside the adapter.
+tree = "extension"
+
+[[tool]]
+id = "lldb-dap"
+name = "lldb-dap"
+kind = "dap"
+languages = ["rust", "c", "cpp"]
+executable = "lldb-dap"
+project_root_markers = ["Cargo.toml", "compile_commands.json", "compile_flags.txt", ".clangd"]
+project_root_strategy = "marker"
+# LLVM does not publish a portable, supported standalone lldb-dap artifact. Dust
+# deliberately leaves this as discovery-only instead of disguising a distro package
+# installation as a managed download.
+
+[[tool]]
+id = "js-debug-adapter"
+name = "JavaScript Debug Adapter"
+kind = "dap"
+languages = ["typescript", "typescriptreact", "javascript", "javascriptreact"]
+executable = "js-debug-adapter"
+debug_program_policy = "source"
+project_root_markers = ["tsconfig.json", "jsconfig.json", "package.json"]
+project_root_strategy = "node"
+# The upstream VSIX is a Node program rather than a standalone Linux executable.
+# It remains discovery-only until upstream publishes a portable adapter binary.
+
+[[tool]]
+id = "rustfmt"
+name = "rustfmt"
+kind = "formatter"
+languages = ["rust"]
+executable = "rustfmt"
+format_arguments = ["--emit", "stdout"]
+version = "stable toolchain"
+probe_args = ["--version"]
+
+[tool.install]
+method = "rustup_component"
+component = "rustfmt"
+
+[[tool]]
+id = "prettier"
+name = "prettier"
+kind = "formatter"
+languages = ["typescript", "typescriptreact", "javascript", "javascriptreact", "json", "jsonc", "css", "scss", "less", "html", "yaml", "markdown"]
+executable = "prettier"
+format_arguments = ["--stdin-filepath", "{path}"]
+version = "3.6.2"
+probe_args = ["--version"]
+
+[tool.install]
+method = "npm_package"
+packages = ["prettier@3.6.2"]
+
+[[tool]]
+id = "ruff"
+name = "ruff"
+kind = "lsp"
+languages = ["python"]
+executable = "ruff"
+version = "0.17.3"
+launch_args = ["server"]
+project_root_markers = ["pyproject.toml", "ruff.toml", ".ruff.toml", ".git"]
+
+[tool.install]
+method = "uv_tool"
+packages = ["ruff==0.17.3"]
+
+[[tool]]
+id = "black"
+name = "black"
+kind = "formatter"
+languages = ["python"]
+executable = "black"
+format_arguments = ["--quiet", "--stdin-filename", "{path}", "-"]
+version = "25.1.0"
+probe_args = ["--version"]
+
+[tool.install]
+method = "uv_tool"
+packages = ["black==25.1.0"]
+
+[[tool]]
+id = "shfmt"
+name = "shfmt"
+kind = "formatter"
+languages = ["shellscript"]
+executable = "shfmt"
+format_arguments = ["--filename", "{path}", "-"]
+version = "3.14.1"
+probe_args = ["--version"]
+
+[tool.install]
+method = "archive"
+url = "https://github.com/mvdan/sh/releases/download/v3.14.1/shfmt_v3.14.1_linux_amd64"
+sha256 = "76e77641faa025814b77f153b29796b8e6fa2fca03e0c76a691608b86c7ea7bf"
+archive = "raw"
+executable_path = "shfmt"
+
+[[tool]]
+id = "clippy"
+name = "clippy"
+kind = "linter"
+languages = ["rust"]
+executable = "cargo-clippy"
+version = "stable toolchain"
+probe_args = ["--version"]
+
+[tool.install]
+method = "rustup_component"
+component = "clippy"
+
+[[tool]]
+id = "claude-agent-acp"
+name = "Claude Code (ACP adapter)"
+kind = "agent"
+languages = []
+executable = "claude-agent-acp"
+version = "0.99.0"
+
+[tool.install]
+method = "npm_package"
+packages = ["@agentclientprotocol/claude-agent-acp@0.99.0"]
+
+[[tool]]
+id = "codex-acp"
+name = "Codex (ACP adapter)"
+kind = "agent"
+languages = []
+executable = "codex-acp"
+version = "2.5.0"
+
+[tool.install]
+method = "npm_package"
+packages = ["@agentclientprotocol/codex-acp@2.5.0"]
+
+[[tool]]
+id = "pi-acp"
+name = "pi (ACP adapter)"
+kind = "agent"
+languages = []
+executable = "pi-acp"
+version = "0.0.34"
+
+[tool.install]
+method = "npm_package"
+packages = ["pi-acp@0.0.34"]

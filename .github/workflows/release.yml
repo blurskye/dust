@@ -1,0 +1,96 @@
+name: release
+# Pushing a tag vX.Y.Z publishes a GitHub release with every Linux package. Running the
+# workflow by hand builds the same packages as artifacts without publishing them.
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+jobs:
+  packages:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: version
+        name: Version from Cargo.toml, which a tag must match
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          if [[ $GITHUB_REF == refs/tags/* && $GITHUB_REF_NAME != "v$version" ]]; then
+            echo "tag $GITHUB_REF_NAME does not match Cargo.toml version $version"; exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@1.97.0
+        with: { targets: x86_64-unknown-linux-musl }
+      - name: Install musl and packaging tools
+        env: { GH_TOKEN: '${{ github.token }}' }
+        # musl-gcc needs the kernel headers to build OpenSSL.
+        run: |
+          sudo apt-get update && sudo apt-get install -y musl-tools
+          for dir in asm asm-generic linux; do
+            source=/usr/include/$dir; [ $dir = asm ] && source=/usr/include/x86_64-linux-gnu/asm
+            sudo ln -sfn "$source" /usr/include/x86_64-linux-musl/$dir
+          done
+          mkdir -p "$HOME/.local/bin"
+          gh release download v2.48.0 --repo goreleaser/nfpm \
+            --pattern 'nfpm_2.48.0_Linux_x86_64.tar.gz' --output - | tar -xz -C "$HOME/.local/bin" nfpm
+          gh release download continuous --repo AppImage/appimagetool \
+            --pattern appimagetool-x86_64.AppImage --output "$HOME/.local/bin/appimagetool"
+          chmod +x "$HOME/.local/bin/appimagetool"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Build the static binary
+        run: cargo build --release --locked --target x86_64-unknown-linux-musl --features static
+      - name: Check it runs and links nothing
+        run: |
+          binary=target/x86_64-unknown-linux-musl/release/dust
+          if ldd "$binary" 2>/dev/null | grep -q '=>'; then ldd "$binary"; exit 1; fi
+          "$binary" --version
+      - run: packaging/build-packages.sh ${{ steps.version.outputs.version }} target/x86_64-unknown-linux-musl/release/dust
+      - uses: actions/upload-artifact@v4
+        with: { name: dist-packages, path: dist/*, if-no-files-found: error }
+      - uses: actions/upload-artifact@v4
+        with: { name: stage, path: target/package-stage/dust/dust, if-no-files-found: error }
+
+  flatpak:
+    needs: packages
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:freedesktop-24.08
+      options: --privileged
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { name: stage, path: target/package-stage/dust }
+      - run: chmod +x target/package-stage/dust/dust
+      - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
+        with:
+          manifest-path: packaging/flatpak/dev.blurskye.Dust.yml
+          bundle: dust-${{ needs.packages.outputs.version }}-x86_64.flatpak
+          upload-artifact: false
+          cache: false
+      - uses: actions/upload-artifact@v4
+        with: { name: dist-flatpak, path: '*.flatpak', if-no-files-found: error }
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [packages, flatpak]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { pattern: dist-*, merge-multiple: true, path: dist }
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum -- * > SHA256SUMS
+      - uses: sigstore/cosign-installer@v3
+      - name: Keyless signature of the checksums
+        run: cosign sign-blob --yes --bundle dist/SHA256SUMS.sigstore.json dist/SHA256SUMS
+      - name: Create the release
+        env: { GH_TOKEN: '${{ github.token }}' }
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" \
+            --title "Dust ${{ needs.packages.outputs.version }}" --generate-notes

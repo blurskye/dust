@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="console-application">
+  <id>dev.blurskye.Dust</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <name>Dust</name>
+  <summary>Terminal IDE with Vim keys, language servers, git and coding agents</summary>
+  <description>
+    <p>
+      Dust is a terminal IDE that works like LazyVim out of the box: Vim editing, a file
+      explorer, fuzzy finding, language servers, debugging, git, terminals and coding
+      agents, with no configuration needed.
+    </p>
+  </description>
+  <launchable type="desktop-id">dev.blurskye.Dust.desktop</launchable>
+  <url type="homepage">https://github.com/blurskye/dust</url>
+  <url type="bugtracker">https://github.com/blurskye/dust/issues</url>
+  <provides>
+    <binary>dust</binary>
+  </provides>
+  <categories>
+    <category>Development</category>
+    <category>TextEditor</category>
+  </categories>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="0.2.0" date="2026-11-07"/>
+  </releases>
+</component>
