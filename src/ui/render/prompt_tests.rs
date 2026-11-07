@@ -22,6 +22,133 @@ fn prompt_is_globally_centered_and_clamped() {
 }
 
 #[test]
+fn prompt_help_grows_or_wraps_without_losing_the_instruction_or_input() {
+    let loaded = crate::config::load_bundled_config();
+    let message = "Discard hunk 2 in src/settings.txt. Type `reset this hunk`.";
+    for kind in [
+        PromptKind::GitReset,
+        PromptKind::Text,
+        PromptKind::ExplorerRename,
+    ] {
+        for width in [160, 80, 40, 26] {
+            let mut prompt = PromptState::new(kind);
+            prompt.help = Some(message.into());
+            prompt.input = "draft".into();
+            prompt.cursor = prompt.input.len();
+            let geometry = crate::ui::prompt_geometry_for_state(width, 24, &loaded.config, &prompt);
+            let mut frame = crate::ui::grid::Frame {
+                grid: crate::ui::CellGrid::new(width, 24),
+                cursor: None,
+            };
+            crate::ui::render::prompt::render_prompt(
+                &mut frame,
+                &prompt,
+                &loaded.config,
+                width,
+                24,
+            );
+            let expected = crate::ui::render::wrap_plain_text(
+                message,
+                usize::from(geometry.width - 4),
+                loaded.config.editor.ambiguous_width,
+            );
+            for (row, line) in expected.iter().enumerate() {
+                let y = geometry.top + 1 + row as u16;
+                assert!(
+                    frame.grid.row_text(y).contains(line),
+                    "{kind:?} at {width}: {line:?}"
+                );
+                assert_eq!(
+                    frame
+                        .grid
+                        .get(geometry.left + geometry.width - 1, y)
+                        .unwrap()
+                        .style,
+                    crate::ui::Style::Border
+                );
+            }
+            let input_y = geometry.top + geometry.height - 2;
+            assert!(frame.grid.row_text(input_y).contains("draft"));
+            assert_eq!(frame.cursor.unwrap().1, input_y);
+            assert_eq!(geometry.height, expected.len() as u16 + 3);
+            assert!(geometry.left + geometry.width <= width);
+        }
+    }
+}
+
+#[test]
+fn prompt_help_wraps_unicode_multiline_and_long_paths() {
+    let loaded = crate::config::load_bundled_config();
+    let message = format!(
+        "界 e\u{301} instruction\n/{}\nType `reset this hunk`.",
+        "long-path/".repeat(8)
+    );
+    let mut prompt = PromptState::new(PromptKind::Text);
+    prompt.help = Some(message.clone());
+    let geometry = crate::ui::prompt_geometry_for_state(30, 60, &loaded.config, &prompt);
+    let mut frame = crate::ui::grid::Frame {
+        grid: crate::ui::CellGrid::new(30, 60),
+        cursor: None,
+    };
+    crate::ui::render::prompt::render_prompt(&mut frame, &prompt, &loaded.config, 30, 60);
+    let expected = crate::ui::render::wrap_plain_text(
+        &message,
+        usize::from(geometry.width - 4),
+        loaded.config.editor.ambiguous_width,
+    );
+    for (row, line) in expected.iter().enumerate() {
+        assert!(
+            frame
+                .grid
+                .row_text(geometry.top + 1 + row as u16)
+                .contains(line)
+        );
+    }
+    assert!(
+        frame
+            .grid
+            .row_text(geometry.top + geometry.height - 3)
+            .contains("hunk`.")
+    );
+}
+
+#[test]
+fn short_prompt_help_and_error_layouts_remain_unchanged() {
+    let loaded = crate::config::load_bundled_config();
+    for (help, error) in [
+        (None, None),
+        (Some("Short instruction."), None),
+        (Some("Hidden help"), Some("Error")),
+    ] {
+        let mut prompt = PromptState::new(PromptKind::Command);
+        prompt.help = help.map(str::to_owned);
+        prompt.error = error.map(str::to_owned);
+        assert_eq!(
+            crate::ui::prompt_geometry_for_state(120, 40, &loaded.config, &prompt),
+            prompt_geometry(120, 40, help.is_some() || error.is_some()),
+        );
+    }
+}
+
+#[test]
+fn prompt_help_reports_when_the_terminal_cannot_fit_the_message() {
+    let loaded = crate::config::load_bundled_config();
+    let mut prompt = PromptState::new(PromptKind::GitReset);
+    prompt.help = Some("a long instruction ".repeat(20));
+    let mut frame = crate::ui::grid::Frame {
+        grid: crate::ui::CellGrid::new(40, 5),
+        cursor: None,
+    };
+    crate::ui::render::prompt::render_prompt(&mut frame, &prompt, &loaded.config, 40, 5);
+    assert!((0..5).any(|y| {
+        frame
+            .grid
+            .row_text(y)
+            .contains("Resize to read the full message")
+    }));
+}
+
+#[test]
 fn workspace_trust_prompt_is_one_centered_confirmation_panel() {
     let state = EditorState::new(PathBuf::from("/tmp/dust-workspace"));
     let loaded = crate::config::load_bundled_config();
