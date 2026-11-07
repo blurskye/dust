@@ -1025,7 +1025,7 @@ fn real_component_observes_queue_full_from_aggregate_confirmation_ownership() {
 }
 
 #[test]
-fn packaged_production_02_component_clone_refusal_never_enqueues_a_guest_callback() {
+fn packaged_production_component_clone_refusal_never_enqueues_a_guest_callback() {
     use sha2::Digest;
     use sha2::Sha256;
     let core = include_bytes!(concat!(
@@ -1034,7 +1034,7 @@ fn packaged_production_02_component_clone_refusal_never_enqueues_a_guest_callbac
     ));
     assert_eq!(
         format!("{:x}", Sha256::digest(core)),
-        "9f17af443ca9a4150f940656ef2edb11a48c1d59b7430d4e029f1b1cf951bc48"
+        "b4ed844dc172a7ca80c13114c2d8b23d92202490fe7ba12e09297c4aba73fd41"
     );
     let component = wit_component::ComponentEncoder::default()
         .module(core)
@@ -1141,7 +1141,7 @@ fn packaged_production_02_component_clone_refusal_never_enqueues_a_guest_callbac
 
         let error = app
             .clone_graph_window(&target, crate::windows::TileAxis::Horizontal)
-            .expect_err("production 0.2 presenter clone must be rejected");
+            .expect_err("production presenter clone must be rejected");
         assert!(error.contains("clone-view"), "{error}");
         assert_eq!(app.window_session.graph(), &graph);
         assert_eq!(app.state.window_version(), editor);
@@ -2506,6 +2506,7 @@ fn deferred_batch_abort_and_worker_loss_clear_static_ownership() {
         plugin_load: u64,
     ) -> crate::plugins::PluginContributionIndex {
         crate::plugins::PluginContributionIndex {
+            capabilities: Default::default(),
             owner: owner.into(),
             version: "1.0.0".into(),
             checksum: "0".repeat(64),
@@ -3315,7 +3316,14 @@ fn plugin_command_arguments_reach_the_existing_execution_request() {
             .unwrap()
             .with_argument("value", CommandValue::String("configured".into())),
     );
-    assert_eq!(fixture.take().arguments(), ["configured"]);
+    let captured = fixture.take();
+    assert_eq!(
+        crate::app::plugins::abi::decode_value(captured.call().arguments.clone()).unwrap(),
+        CommandValue::Record(BTreeMap::from([(
+            "value".into(),
+            CommandValue::String("configured".into())
+        )]))
+    );
 }
 
 #[test]
@@ -3988,7 +3996,7 @@ fn health_virtual_dogfood_opens_refreshes_and_remains_read_only() {
     }
     app.report_unavailable_persisted_content(&persisted);
     assert!(app.ui.config_diagnostic.as_deref().is_some_and(|message| {
-        message.contains("production API 0.2")
+        message.contains("production API 0.4")
             && message.contains("builtin.health:builtin.health.virtual:health")
             && message.contains("continuing without")
     }));

@@ -58,6 +58,8 @@ pub struct PluginSnapshot {
 
 #[derive(Debug)]
 pub struct PluginExecutionRequest {
+    pub call: crate::plugins::component::component_api::dust::plugin::host::CommandCall,
+    pub delivery: crate::plugins::PluginDelivery,
     pub runtime_epoch: u64,
     pub plugin: String,
     pub command: String,
@@ -613,6 +615,11 @@ impl PluginHostEventQueue {
 
 #[derive(Clone, Debug)]
 pub struct PluginExecution {
+    pub(crate) error: Option<String>,
+    pub(crate) editor_requests: Vec<crate::plugins::requests::EditorRequest>,
+    pub(crate) value:
+        Option<crate::plugins::component::component_api::dust::plugin::host::CommandValue>,
+    pub(crate) call_next: Option<u64>,
     pub plugin: String,
     pub command: String,
     pub request_id: u64,

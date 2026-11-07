@@ -18,6 +18,13 @@ pub enum PluginCapability {
     PickerProviders,
     PluginStorage,
     VirtualDocuments,
+    Commands,
+    Input,
+    Decorations,
+    Completion,
+    Timers,
+    Http,
+    HttpHost(String),
 }
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -278,6 +285,7 @@ pub(super) const fn default_plugin_content_instances() -> u16 {
 }
 #[derive(Clone, Debug)]
 pub struct PluginContributionIndex {
+    pub capabilities: BTreeSet<PluginCapability>,
     pub owner: String,
     pub version: String,
     pub checksum: String,
@@ -387,6 +395,9 @@ pub enum PluginArgumentKind {
     String,
     Boolean,
     Integer,
+    Number,
+    List,
+    Record,
 }
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]

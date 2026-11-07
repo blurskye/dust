@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 wit_bindgen::generate!({ path: "wit", world: "editor-plugin" });
 
-use dust::plugin::host::self;
+use dust::plugin::host;
 
 use dust::plugin::host::CheckedWindowRequest;
 
@@ -78,6 +78,7 @@ use std::sync::atomic::AtomicU8;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 
+static FILTER: AtomicU8 = AtomicU8::new(0);
 static PHASE: AtomicU8 = AtomicU8::new(0);
 static PRIVATE_PHASE: AtomicU8 = AtomicU8::new(0);
 static PRIVATE_HANDLE: AtomicU64 = AtomicU64::new(0);
@@ -110,19 +111,79 @@ impl Guest for GuestComponent {
         ])
     }
 
-    fn execute_command(command: String, arguments: Vec<String>) -> Result<String, String> {
+    fn execute_command(command: String, call: host::CommandCall) -> Result<String, String> {
+        if call.command == "edit.insert_text" || call.command.starts_with("lsp.incoming.") {
+            if call.command.starts_with("lsp.incoming.") && FILTER.load(Ordering::SeqCst) == 1 {
+                return Ok("filtered".into());
+            }
+            if !call.after {
+                host::call_next(call.pending.ok_or("missing wrapper id")?)?;
+            } else if let Some(value) = &call.previous {
+                host::set_command_result(value)?;
+            }
+            return Ok(if call.after {
+                "wrapper:after"
+            } else {
+                "wrapper:before"
+            }
+            .into());
+        }
+        if let Some(event) = field_text(&call.arguments, "event") {
+            let events = host::take_editor_events();
+            let replies = host::take_command_replies();
+            let http = host::take_http_responses();
+            return Ok(format!(
+                "callback:{event}:events={}:replies={}:http={}",
+                events.as_ref().map_or(0, |batch| batch.records.len()),
+                replies.len(),
+                http.len()
+            ));
+        }
+        if field_text(&call.arguments, "source").is_some() {
+            let snapshot = host::current_buffer()?;
+            let view = host::current_view().ok_or("no view")?;
+            let request = field_integer(&call.arguments, "request").ok_or("no request")? as u64;
+            host::publish_completions(&host::CompletionBatch {
+                source: "fixture".into(),
+                request,
+                buffer: snapshot.buffer,
+                revision: snapshot.revision,
+                items: vec![host::CompletionItem {
+                    label: "plugin-value".into(),
+                    detail: Some("fixture source".into()),
+                    start: view.cursor,
+                    end: view.cursor,
+                    text: "plugin-value".into(),
+                    snippet: false,
+                }],
+                incomplete: false,
+            })?;
+            return Ok("completion:published".into());
+        }
+        if let Some(action) = field_text(&call.arguments, "abi") {
+            return drive_abi(&action, &call);
+        }
+        let arguments: Vec<String> = match call.arguments.nodes.last() {
+            Some(host::ValueNode::Object(fields)) => fields
+                .iter()
+                .filter_map(|field| match &call.arguments.nodes[field.value as usize] {
+                    host::ValueNode::Text(text) => Some(text.clone()),
+                    _ => None,
+                })
+                .collect(),
+            _ => Vec::new(),
+        };
         let graph = host::current_ui_revision()
             .or_else(|| arguments.first().and_then(|value| value.parse().ok()))
             .unwrap_or(1);
         if command == "trap" {
             let _ = host::queue_ui_request(&open_retained(graph, "Trap", "trap"));
-            let _ = host::queue_storage_request(&StorageRequest::CompareAndSet(
-                StorageCasRequest {
+            let _ =
+                host::queue_storage_request(&StorageRequest::CompareAndSet(StorageCasRequest {
                     key: "trap.value".into(),
                     expected_revision: None,
                     value: b"never".to_vec(),
-                },
-            ));
+                }));
             if let Some(request) = host::take_virtual_document_requests().first() {
                 let _ = host::queue_virtual_document_proposal(&VirtualDocumentProposal {
                     request: request.request,
@@ -131,7 +192,9 @@ impl Guest for GuestComponent {
                     kind: VirtualDocumentProposalKind::Full(VirtualDocumentFull {
                         expected_revision: request.current_revision,
                         revision: request.current_revision.unwrap_or(0) + 1,
-                        title: "Fixture help".into(), language: "markdown".into(), text: "never".into(),
+                        title: "Fixture help".into(),
+                        language: "markdown".into(),
+                        text: "never".into(),
                     }),
                 });
             }
@@ -152,8 +215,16 @@ impl Guest for GuestComponent {
             let _ = host::queue_ui_request(&open_retained(graph, "Spin", "spin"));
             if let Some(request) = host::take_virtual_document_requests().first() {
                 let _ = host::queue_virtual_document_proposal(&VirtualDocumentProposal {
-                    request: request.request, document: request.document, cancellation_generation: request.cancellation_generation,
-                    kind: VirtualDocumentProposalKind::Full(VirtualDocumentFull { expected_revision: request.current_revision, revision: request.current_revision.unwrap_or(0) + 1, title: "Fixture help".into(), language: "markdown".into(), text: "never spin".into() }),
+                    request: request.request,
+                    document: request.document,
+                    cancellation_generation: request.cancellation_generation,
+                    kind: VirtualDocumentProposalKind::Full(VirtualDocumentFull {
+                        expected_revision: request.current_revision,
+                        revision: request.current_revision.unwrap_or(0) + 1,
+                        title: "Fixture help".into(),
+                        language: "markdown".into(),
+                        text: "never spin".into(),
+                    }),
                 });
             }
             loop {
@@ -261,7 +332,9 @@ fn drive_confirmation(graph: u64) -> Result<String, String> {
             ConfirmationOutcome::Answered(ConfirmationAnswer::Yes) => "Confirmed: Yes",
             ConfirmationOutcome::Answered(ConfirmationAnswer::No) => "Confirmed: No",
             ConfirmationOutcome::Answered(ConfirmationAnswer::Cancelled) => "Confirmed: Cancelled",
-            ConfirmationOutcome::Failed(error) => return Ok(format!("confirmation:{:?}", error.code)),
+            ConfirmationOutcome::Failed(error) => {
+                return Ok(format!("confirmation:{:?}", error.code));
+            }
         };
         let events = host::take_ui_events();
         let event = events.iter().rev().find(|event| event.handle.is_some());
@@ -323,27 +396,49 @@ fn drive_confirmation(graph: u64) -> Result<String, String> {
 
 fn drive_virtual_document() -> Result<String, String> {
     let requests = host::take_virtual_document_requests();
-    let request = requests.last().ok_or_else(|| "virtual:no-request".to_string())?;
+    let request = requests
+        .last()
+        .ok_or_else(|| "virtual:no-request".to_string())?;
     let phase = VIRTUAL_PHASE.load(Ordering::SeqCst);
     let kind = match request.kind {
-        VirtualDocumentRequestKind::Open => VirtualDocumentProposalKind::Full(VirtualDocumentFull {
-            expected_revision: None, revision: 1, title: "Fixture help".into(), language: "markdown".into(), text: "# Héllo\nvirtual document".into(),
-        }),
-        VirtualDocumentRequestKind::Refresh => VirtualDocumentProposalKind::Patches(VirtualDocumentPatchSet {
-            expected_revision: request.current_revision.unwrap_or(1), revision: request.current_revision.unwrap_or(1) + 1,
-            patches: vec![VirtualDocumentPatch { start: 0, end: 1, replacement: "##".into() }],
-        }),
+        VirtualDocumentRequestKind::Open => {
+            VirtualDocumentProposalKind::Full(VirtualDocumentFull {
+                expected_revision: None,
+                revision: 1,
+                title: "Fixture help".into(),
+                language: "markdown".into(),
+                text: "# Héllo\nvirtual document".into(),
+            })
+        }
+        VirtualDocumentRequestKind::Refresh => {
+            VirtualDocumentProposalKind::Patches(VirtualDocumentPatchSet {
+                expected_revision: request.current_revision.unwrap_or(1),
+                revision: request.current_revision.unwrap_or(1) + 1,
+                patches: vec![VirtualDocumentPatch {
+                    start: 0,
+                    end: 1,
+                    replacement: "##".into(),
+                }],
+            })
+        }
         VirtualDocumentRequestKind::CloseNotice => VirtualDocumentProposalKind::CloseAcknowledged,
     };
-    host::queue_virtual_document_proposal(&VirtualDocumentProposal { request: request.request, document: request.document, cancellation_generation: request.cancellation_generation, kind })
-        .map_err(|error| format!("virtual:{:?}", error.code))?;
+    host::queue_virtual_document_proposal(&VirtualDocumentProposal {
+        request: request.request,
+        document: request.document,
+        cancellation_generation: request.cancellation_generation,
+        kind,
+    })
+    .map_err(|error| format!("virtual:{:?}", error.code))?;
     VIRTUAL_PHASE.store(phase.saturating_add(1), Ordering::SeqCst);
     Ok(format!("virtual:{phase}"))
 }
 
 fn drive_provider() -> Result<String, String> {
     let requests = host::take_picker_provider_requests();
-    let request = requests.last().ok_or_else(|| "provider:no-request".to_string())?;
+    let request = requests
+        .last()
+        .ok_or_else(|| "provider:no-request".to_string())?;
     let phase = PROVIDER_PHASE.load(Ordering::SeqCst);
     let (items, terminal) = match phase {
         0 => (
@@ -402,31 +497,40 @@ fn drive_storage() -> Result<String, String> {
             return Err(format!("storage:{phase}:expected-one-result"));
         };
         let valid_error = if phase == 3 {
-            result.error.as_ref().is_some_and(|error| {
-                error.code == host::StorageErrorCode::StaleRevision
-            })
+            result
+                .error
+                .as_ref()
+                .is_some_and(|error| error.code == host::StorageErrorCode::StaleRevision)
         } else {
             result.error.is_none()
         };
         let valid_content = match phase {
-            1 => result.value.is_none()
-                && result.revision.is_some_and(|revision| revision > 0)
-                && result.entries.is_empty(),
-            2 => result.value.as_deref() == Some(b"value".as_slice())
-                && result.revision == Some(revision)
-                && result.entries.is_empty(),
-            3 | 6 => result.value.is_none()
-                && result.revision.is_none()
-                && result.entries.is_empty(),
-            4 => result.value.is_none()
-                && result.revision.is_none()
-                && matches!(result.entries.as_slice(), [entry]
+            1 => {
+                result.value.is_none()
+                    && result.revision.is_some_and(|revision| revision > 0)
+                    && result.entries.is_empty()
+            }
+            2 => {
+                result.value.as_deref() == Some(b"value".as_slice())
+                    && result.revision == Some(revision)
+                    && result.entries.is_empty()
+            }
+            3 | 6 => {
+                result.value.is_none() && result.revision.is_none() && result.entries.is_empty()
+            }
+            4 => {
+                result.value.is_none()
+                    && result.revision.is_none()
+                    && matches!(result.entries.as_slice(), [entry]
                     if entry.key == "item.one"
                         && entry.value == b"value"
-                        && entry.revision == revision),
-            5 => result.value.is_none()
-                && result.revision == Some(revision)
-                && result.entries.is_empty(),
+                        && entry.revision == revision)
+            }
+            5 => {
+                result.value.is_none()
+                    && result.revision == Some(revision)
+                    && result.entries.is_empty()
+            }
             _ => false,
         };
         if result.token != STORAGE_TOKEN.load(Ordering::SeqCst)
@@ -639,3 +743,183 @@ fn private_snapshot(revision: u64, dimensions_revision: u64, text: &str) -> Priv
 }
 
 export!(GuestComponent);
+
+fn field_text(value: &host::CommandValue, name: &str) -> Option<String> {
+    let host::ValueNode::Object(fields) = value.nodes.last()? else {
+        return None;
+    };
+    let field = fields.iter().find(|field| field.name == name)?;
+    match &value.nodes[field.value as usize] {
+        host::ValueNode::Text(text) => Some(text.clone()),
+        _ => None,
+    }
+}
+
+fn drive_abi(action: &str, call: &host::CommandCall) -> Result<String, String> {
+    match action {
+        "echo" => {
+            host::set_command_result(&call.arguments)?;
+        }
+        "register" => {
+            host::register_command(&host::CommandDefinition {
+                name: "echo".into(),
+                title: "Echo structured values".into(),
+                handler: "drive".into(),
+                arguments: vec![
+                    host::ArgumentField {
+                        name: "abi".into(),
+                        kind: host::ArgumentKind::Text,
+                        required: true,
+                    },
+                    host::ArgumentField {
+                        name: "value".into(),
+                        kind: host::ArgumentKind::Object,
+                        required: false,
+                    },
+                ],
+                result_kind: Some(host::ArgumentKind::Object),
+                access: vec![],
+            })?;
+        }
+        "wrap" => {
+            host::wrap_command(&host::CommandWrapper {
+                command: "edit.insert_text".into(),
+                handler: "drive".into(),
+                order: 0,
+            })?;
+        }
+        "filter-pass" | "filter-drop" => {
+            FILTER.store(
+                if action == "filter-drop" { 1 } else { 0 },
+                Ordering::SeqCst,
+            );
+            host::filter_lsp(&host::LspFilter {
+                method: "window/showMessage".into(),
+                handler: "drive".into(),
+                order: 0,
+            })?;
+        }
+        "run" => {
+            host::run_command(&host::CommandCall {
+                command: "edit.insert_text".into(),
+                arguments: host::CommandValue {
+                    nodes: vec![
+                        host::ValueNode::Text("run".into()),
+                        host::ValueNode::Object(vec![host::ValueField {
+                            name: "text".into(),
+                            value: 0,
+                        }]),
+                    ],
+                },
+                buffer: call.buffer,
+                view: call.view,
+                count: call.count,
+                register: call.register,
+                pending: None,
+                after: false,
+                previous: None,
+            })?;
+        }
+        "marks-read" => {
+            let snapshot = host::current_buffer()?;
+            let marks = host::read_marks(snapshot.buffer, "points")?;
+            return Ok(format!(
+                "marks:{}:{}",
+                marks.len(),
+                marks.first().map_or(0, |mark| mark.start)
+            ));
+        }
+        "error" => {
+            host::show_message("must-not-publish")?;
+            return Err("ordinary guest error".into());
+        }
+        "next" => {
+            host::call_next(call.pending.ok_or("missing pending command")?)?;
+        }
+        "mode" => {
+            host::enter_mode(&host::NamedMode {
+                name: "review".into(),
+                label: "REVIEW".into(),
+                cursor: host::ModeCursor::Underline,
+                layer: host::KeyLayer {
+                    name: "review".into(),
+                    bindings: Vec::new(),
+                },
+                base: Some(host::BaseMode::Normal),
+                capture: None,
+            })?;
+        }
+        "capture" => {
+            host::enter_mode(&host::NamedMode {
+                name: "capture".into(),
+                label: "CAPTURE".into(),
+                cursor: host::ModeCursor::Bar,
+                layer: host::KeyLayer {
+                    name: "capture".into(),
+                    bindings: Vec::new(),
+                },
+                base: None,
+                capture: Some("plugin.demo.drive".into()),
+            })?;
+        }
+        "marks" => {
+            let snapshot = host::current_buffer()?;
+            host::replace_marks(&host::MarkSet {
+                buffer: snapshot.buffer,
+                revision: snapshot.revision,
+                namespace: "points".into(),
+                marks: vec![host::Mark {
+                    id: 1,
+                    start: 0,
+                    end: 0,
+                    start_gravity: host::Gravity::Right,
+                    end_gravity: host::Gravity::Right,
+                }],
+            })?;
+        }
+        "events" => {
+            host::subscribe_events("drive")?;
+        }
+        "completion" => {
+            host::register_completion_source(&host::CompletionSource {
+                name: "fixture".into(),
+                handler: "drive".into(),
+                inline: true,
+            })?;
+        }
+        "timer" => {
+            host::start_timer(&host::TimerRequest {
+                milliseconds: 1,
+                handler: "drive".into(),
+            })?;
+        }
+        "layer" => {
+            host::push_key_layer(&host::KeyLayer {
+                name: "fixture".into(),
+                bindings: Vec::new(),
+            })?;
+        }
+        "http-denied" => {
+            host::request_http(&host::HttpRequest {
+                url: "https://not-granted.invalid/".into(),
+                method: "GET".into(),
+                headers: Vec::new(),
+                body: Vec::new(),
+                handler: "drive".into(),
+            })?;
+        }
+        _ => return Err("unknown ABI action".into()),
+    }
+    Ok(format!("abi:{action}"))
+}
+
+fn field_integer(value: &host::CommandValue, name: &str) -> Option<i64> {
+    let host::ValueNode::Object(fields) = value.nodes.last()? else {
+        return None;
+    };
+    let field = fields.iter().find(|field| field.name == name)?;
+    match &value.nodes[field.value as usize] {
+        host::ValueNode::Integer(value) => Some(*value),
+        _ => None,
+    }
+}

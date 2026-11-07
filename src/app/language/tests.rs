@@ -243,7 +243,7 @@ fn incoming_notification_runs_its_method_command_before_native_handling() {
     app.route_lsp_event(notification());
     assert!(seen.load(std::sync::atomic::Ordering::Relaxed));
     assert_eq!(app.language.logs().len(), before);
-    assert!(app.language.incoming.is_none());
+    assert!(app.language.incoming.is_empty());
 }
 
 #[test]
@@ -5077,7 +5077,7 @@ fn completion_narrows_as_you_type_and_replaces_what_was_typed() {
     assert!(app.ui.language_completion.is_none());
 }
 
-pub(super) fn fixture_owned_lsp(
+pub(in crate::app) fn fixture_owned_lsp(
     app: &mut App,
     key: &str,
     buffer: crate::editor::BufferId,

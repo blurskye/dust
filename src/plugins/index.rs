@@ -334,13 +334,6 @@ pub(super) fn index_manifest_contributions_with_text(
             return Err(PluginError::InvalidManifest);
         }
     }
-    if manifest
-        .capabilities
-        .contains(&PluginCapability::EventSubscriptions)
-        == subscriptions.is_empty()
-    {
-        return Err(PluginError::InvalidManifest);
-    }
 
     let mut providers = manifest.contributions.providers.clone();
     providers.sort_by(|left, right| left.id.cmp(&right.id));
@@ -550,6 +543,7 @@ pub(super) fn index_manifest_contributions_with_text(
         }
     }
     Ok(PluginContributionIndex {
+        capabilities: manifest.capabilities.clone(),
         owner: manifest.id.clone(),
         version: manifest.version.clone(),
         checksum: manifest.component_sha256.clone(),
@@ -677,6 +671,7 @@ pub(crate) fn load_component(
         .tables(limits.maximum_instances as usize)
         .build();
     let host = ComponentHostState {
+        editor_requests: Default::default(),
         runtime_epoch: 0,
         limits: ComponentLimits::new(store_limits, limits.maximum_memory_bytes),
         capabilities: manifest.capabilities.clone(),
@@ -805,6 +800,8 @@ pub(crate) fn execute_component(
     runtime: &mut ActiveRuntime,
 ) -> Result<PluginExecution, PluginError> {
     let PluginExecutionRequest {
+        mut call,
+        delivery,
         runtime_epoch,
         plugin,
         command,
@@ -953,16 +950,26 @@ pub(crate) fn execute_component(
             .map(|request| request.request)
             .collect();
         state.virtual_document_proposals.clear();
+        state
+            .editor_requests
+            .begin(delivery, call.pending, call.after);
         state.proposals.clear();
         state.messages.clear();
         state.ui_requests.clear();
     }
+    if call.command.is_empty() {
+        call.command = format!("plugin.{plugin}.{command}");
+        call.arguments = crate::plugins::requests::positional_value(arguments);
+    }
     let result = runtime
         .bindings
-        .call_execute_command(&mut runtime.store, &command, &arguments);
+        .call_execute_command(&mut runtime.store, &command, &call);
     drop(deadline);
     // Drain effects even on traps and interruptions; failed executions publish none of them.
     let state = runtime.store.data_mut();
+    let editor_requests = std::mem::take(&mut state.editor_requests.queued);
+    let value = state.editor_requests.value.take();
+    let call_next = state.editor_requests.call_next.take();
     let messages = std::mem::take(&mut state.messages);
     let ui_requests = std::mem::take(&mut state.ui_requests);
     let confirmation_requests = std::mem::take(&mut state.confirmation_requests);
@@ -987,17 +994,16 @@ pub(crate) fn execute_component(
         .collect();
     let result = result
         .map_err(|error| PluginError::Execution(format!("{error:#}")))
-        .and_then(|result| result.map_err(PluginError::CommandFailed))
         .and_then(|result| {
             if started.elapsed() > result_timeout {
                 Err(PluginError::Deadline)
-            } else if result.len() > 1024 * 1024 {
+            } else if result.as_ref().is_ok_and(|result| result.len() > 1024 * 1024) {
                 Err(PluginError::InvalidInvocation)
             } else {
                 Ok(result)
             }
         });
-    if result.is_err() {
+    if !matches!(&result, Ok(Ok(_))) {
         for request in &ui_requests {
             state.pending_ui_tokens.remove(&request.token);
         }
@@ -1005,8 +1011,35 @@ pub(crate) fn execute_component(
             state.pending_storage.remove(&request.token);
         }
     }
-    let result = result?;
+    let (result, error) = match result? {
+        Ok(result) => (result, None),
+        Err(error) => (String::new(), Some(error.chars().take(4096).collect())),
+    };
+    if error.is_some() {
+        return Ok(PluginExecution {
+            error,
+            plugin,
+            command,
+            request_id,
+            result,
+            editor_requests: Vec::new(),
+            value: None,
+            call_next: None,
+            messages: Vec::new(),
+            proposals: Vec::new(),
+            ui_requests: Vec::new(),
+            confirmation_requests: Vec::new(),
+            host_event_acknowledgements: Vec::new(),
+            storage_requests: Vec::new(),
+            provider_chunks: Vec::new(),
+            virtual_document_proposals: Vec::new(),
+        });
+    }
     Ok(PluginExecution {
+        error: None,
+        editor_requests,
+        value,
+        call_next,
         plugin,
         command,
         request_id,

@@ -64,8 +64,9 @@ pub(super) struct InputState {
         crate::editor::ViewId,
         NamedMode,
     )>,
-    key_layers: Vec<Keymap>,
-    pending_command: Option<PendingCommand>,
+    key_layers: Vec<(Option<(String, String)>, Keymap)>,
+    pending_commands: BTreeMap<crate::editor::PendingCommandId, PendingCommand>,
+    pending_input: Option<crate::editor::PendingCommandId>,
     held_input: VecDeque<crate::app::editing::clipboard::DeferredInput>,
     sequence: KeymapSequence,
     pending: Option<PendingKeymap>,
@@ -158,7 +159,8 @@ impl InputState {
             modal: ModalResolver::with_count_limit(count_limit),
             named_mode: None,
             key_layers: Vec::new(),
-            pending_command: None,
+            pending_commands: BTreeMap::new(),
+            pending_input: None,
             held_input: VecDeque::new(),
             sequence: KeymapSequence::default(),
             pending: None,
@@ -323,6 +325,7 @@ impl InputState {
             self.sequence.feed_layers(
                 self.key_layers
                     .iter()
+                    .map(|(_, layer)| layer)
                     .rev()
                     .chain(mode.map(NamedMode::layer))
                     .chain(bindings.layers(context).filter(|_| inherit)),
@@ -2902,10 +2905,12 @@ impl App {
 
 impl App {
     pub(in crate::app) fn flush_keymap_timeout(&mut self) {
-        if let Some(id) = self.input.pending_wrapper()
-            && !self.commands.is_pending(id)
-        {
-            self.complete_input_command(id, false, false);
+        let cancelled: Vec<_> = self.input.pending_commands.iter()
+            .filter(|(id, pending)| pending.wrapper && !self.commands.is_pending(**id))
+            .map(|(id, _)| *id)
+            .collect();
+        for id in cancelled {
+            self.cancel_plugin_pending_command(id);
         }
         if self.input.command_pending() || self.clipboard.waiting() {
             return;
@@ -2996,6 +3001,15 @@ pub enum InputCommand {
     LeaveMode,
     PushLayer(Box<Keymap>),
     PopLayer,
+    PushNamedLayer {
+        owner: String,
+        name: String,
+        layer: Box<Keymap>,
+    },
+    RemoveNamedLayer {
+        owner: String,
+        name: String,
+    },
     /// The command's eventual result must complete this id, including on failure or timeout.
     Wait(crate::editor::PendingCommandId),
     Complete {
@@ -3006,7 +3020,6 @@ pub enum InputCommand {
 }
 
 struct PendingCommand {
-    id: crate::editor::PendingCommandId,
     wrapper: bool,
     invocation: CommandInvocation,
     repeat: Option<CommandInvocation>,
@@ -3016,7 +3029,7 @@ struct PendingCommand {
 
 impl InputState {
     pub(in crate::app) fn command_pending(&self) -> bool {
-        self.pending_command.is_some()
+        self.pending_input.is_some()
     }
 
     pub(in crate::app) fn hold_invocation(&mut self, invocation: &CommandInvocation) -> bool {
@@ -3031,20 +3044,14 @@ impl InputState {
     }
 
     pub(in crate::app) fn pending_wrapper(&self) -> Option<crate::editor::PendingCommandId> {
-        self.pending_command
-            .as_ref()
-            .filter(|pending| pending.wrapper)
-            .map(|pending| pending.id)
+        self.pending_input.filter(|id| self.pending_commands[id].wrapper)
     }
 
     pub(in crate::app) fn pending_invocation(
         &self,
         id: crate::editor::PendingCommandId,
     ) -> Option<crate::app::commands::PendingInvocation> {
-        let pending = self
-            .pending_command
-            .as_ref()
-            .filter(|pending| pending.id == id && pending.wrapper)?;
+        let pending = self.pending_commands.get(&id).filter(|pending| pending.wrapper)?;
         Some(crate::app::commands::PendingInvocation {
             invocation: pending.invocation.clone(),
             repeat_override: pending.repeat.clone(),
@@ -3057,11 +3064,15 @@ impl InputState {
         id: crate::editor::PendingCommandId,
         invocation: crate::app::commands::PendingInvocation,
     ) {
-        if self.pending_wrapper() == Some(id) {
+        if self.pending_commands.contains_key(&id) {
             return;
         }
-        self.pending_command = Some(PendingCommand {
-            id,
+        // Incoming server handlers can wait without stopping typing. Nested plugin calls
+        // share the outer command's input hold, but retain their own continuation.
+        if !invocation.invocation.id.as_str().starts_with("lsp.incoming.") {
+            self.pending_input.get_or_insert(id);
+        }
+        self.pending_commands.insert(id, PendingCommand {
             wrapper: true,
             repeat: Some(
                 invocation
@@ -3072,6 +3083,19 @@ impl InputState {
             suppress_repeat: invocation.suppress_repeat,
             text_changed: false,
         });
+    }
+
+    pub(in crate::app) fn incoming_command_pending(
+        &self,
+        event: i64,
+        commands: &crate::editor::CommandRegistry<AppEffect>,
+    ) -> bool {
+        self.pending_commands.iter().any(|(id, pending)| {
+            pending.wrapper
+                && commands.is_pending(*id)
+                && pending.invocation.id.as_str().starts_with("lsp.incoming.")
+                && pending.invocation.arguments.get("event") == Some(&crate::editor::CommandValue::Integer(event))
+        })
     }
 
     pub(in crate::app) fn wait_for_effects(
@@ -3086,8 +3110,8 @@ impl InputState {
             AppEffect::Input(InputCommand::Wait(id)) => Some(*id),
             _ => None,
         }) {
-            self.pending_command = Some(PendingCommand {
-                id,
+            self.pending_input.get_or_insert(id);
+            self.pending_commands.insert(id, PendingCommand {
                 wrapper: false,
                 invocation: invocation.clone(),
                 // A completed asynchronous edit repeats the semantic command, not its effects.
@@ -3108,7 +3132,7 @@ impl InputState {
         suppress_repeat: bool,
         text_changed: bool,
     ) {
-        if let Some(pending) = &mut self.pending_command {
+        if let Some(pending) = self.pending_input.and_then(|id| self.pending_commands.get_mut(&id)) {
             pending.text_changed |= text_changed;
         } else {
             self.record_successful_invocation(invocation, repeat, suppress_repeat, text_changed);
@@ -3121,14 +3145,13 @@ impl InputState {
         succeeded: bool,
         text_changed: bool,
     ) -> bool {
-        if self
-            .pending_command
-            .as_ref()
-            .is_none_or(|pending| pending.id != id)
-        {
+        let Some(pending) = self.pending_commands.remove(&id) else {
+            return false;
+        };
+        if self.pending_input != Some(id) {
             return false;
         }
-        let pending = self.pending_command.take().expect("matching command");
+        self.pending_input = None;
         if succeeded {
             self.record_successful_invocation(
                 &pending.invocation,
@@ -3181,8 +3204,8 @@ impl App {
     }
 
     pub(in crate::app) fn fail_pending_input_command(&mut self) {
-        if let Some(pending) = &self.input.pending_command {
-            self.complete_input_command(pending.id, false, false);
+        if let Some(id) = self.input.pending_input {
+            self.complete_input_command(id, false, false);
         }
     }
 

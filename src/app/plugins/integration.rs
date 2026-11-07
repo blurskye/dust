@@ -663,7 +663,6 @@ impl Plugins {
 use crate::app::commands::AppEffect;
 use crate::app::search::SEARCH_MAXIMUM_FILE_BYTES;
 use crate::editor::ArgumentSchema;
-use crate::editor::CommandValue;
 use crate::ui::render::SCRATCH_LABEL;
 
 use crate::app::App;
@@ -952,6 +951,15 @@ impl App {
                         crate::plugins::PluginArgumentKind::Integer => {
                             crate::editor::ArgumentType::Integer
                         }
+                        crate::plugins::PluginArgumentKind::Number => {
+                            crate::editor::ArgumentType::Number
+                        }
+                        crate::plugins::PluginArgumentKind::List => {
+                            crate::editor::ArgumentType::List
+                        }
+                        crate::plugins::PluginArgumentKind::Record => {
+                            crate::editor::ArgumentType::Record
+                        }
                     },
                     field.required,
                 );
@@ -964,7 +972,7 @@ impl App {
                 description: declaration.description.clone(),
                 arguments,
                 result: None,
-                access: std::collections::BTreeSet::from([crate::editor::CommandAccess::HostOnly]),
+                access: std::collections::BTreeSet::new(),
                 context: match declaration.context {
                     crate::plugins::PluginCommandContext::Application => {
                         ContextRequirement::Application
@@ -980,26 +988,35 @@ impl App {
                 },
                 source: CommandSource::Plugin(plugin.clone()),
             };
-            if let Err(error) = self.commands.register(spec, move |_, invocation| {
-                Ok(CommandOutcome {
-                    transaction: None,
-                    effects: vec![AppEffect::PluginExecute {
-                        plugin: effect_plugin.clone(),
-                        command: effect_command.clone(),
-                        arguments: invocation
-                            .arguments
-                            .values()
-                            .map(|value| match value {
-                                CommandValue::String(value) => value.clone(),
-                                CommandValue::Bool(value) => value.to_string(),
-                                CommandValue::Integer(value) => value.to_string(),
-                                _ => unreachable!("the 0.2 ABI only declares scalar arguments"),
-                            })
-                            .collect(),
-                    }],
-                    ..CommandOutcome::empty()
-                })
-            }) {
+            let command_id = spec.id.clone();
+            if let Err(error) = self
+                .commands
+                .register(spec, |_, _| Ok(CommandOutcome::empty()))
+            {
+                self.commands.unregister_plugin(&plugin);
+                return Err(error.to_string());
+            }
+            let authority = self.plugin_authority(&plugin);
+            if let Err(error) = self.commands.register_wrapper(
+                &command_id,
+                plugin.clone(),
+                0,
+                authority,
+                move |_, invocation, pending, previous| {
+                    Ok(crate::editor::CommandWrapperAction::Pending(vec![
+                        AppEffect::PluginCall {
+                            plugin: effect_plugin.clone(),
+                            handler: effect_command.clone(),
+                            call: Box::new(crate::app::plugins::abi::command_call(
+                                invocation,
+                                previous.as_ref().and_then(|outcome| outcome.value.as_ref()),
+                            )),
+                            pending: Some(pending),
+                            previous: previous.map(Box::new),
+                        },
+                    ]))
+                },
+            ) {
                 self.commands.unregister_plugin(&plugin);
                 return Err(error.to_string());
             }
@@ -1129,6 +1146,7 @@ impl App {
 
         if self.extension.remove_contribution(plugin, load) {
             self.commands.unregister_plugin(plugin);
+            self.remove_plugin_abi(plugin);
             if let Err(error) = self.recompile_plugin_contributions() {
                 match self
                     .configuration
@@ -1256,6 +1274,7 @@ impl App {
 
 impl App {
     pub(in crate::app) fn process_plugin_events(&mut self) {
+        self.poll_plugin_callbacks();
         if let Some(request) = self.extension.expire_providers() {
             self.present_plugin_picker(request);
         }
@@ -1509,7 +1528,7 @@ impl App {
         &mut self,
         reply: crate::plugins::PluginExecutionReply,
     ) {
-        let source = match self.extension.receive(
+        let mut source = match self.extension.receive(
             reply,
             &self.workspace.version(),
             self.configuration.binding_revision(),
@@ -1520,6 +1539,10 @@ impl App {
                 return;
             }
         };
+        self.apply_plugin_call_source(&mut source);
+        if let Some(error) = &source.execution.error {
+            self.show_error(error);
+        }
         let confirmation_source = source.confirmation_source.clone();
         let navigation_current =
             confirmation_source.navigation_current(&self.state, &self.window_session);

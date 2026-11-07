@@ -267,6 +267,13 @@ pub enum AppEffect {
     PluginValidate,
     PluginList,
     PluginDisable(String),
+    PluginCall {
+        plugin: String,
+        handler: String,
+        call: Box<crate::plugins::component::component_api::dust::plugin::host::CommandCall>,
+        pending: Option<PendingCommandId>,
+        previous: Option<Box<CommandOutcome<AppEffect>>>,
+    },
     PluginExecute {
         plugin: String,
         command: String,
@@ -1009,9 +1016,13 @@ impl App {
                 crate::app::input::InputCommand::EnterMode(..)
                 | crate::app::input::InputCommand::LeaveMode
                 | crate::app::input::InputCommand::PushLayer(..)
-                | crate::app::input::InputCommand::PopLayer,
+                | crate::app::input::InputCommand::PopLayer
+                | crate::app::input::InputCommand::PushNamedLayer { .. }
+                | crate::app::input::InputCommand::RemoveNamedLayer { .. },
             ) => Some(CommandAccess::Ui),
-            AppEffect::Input(crate::app::input::InputCommand::Wait(..)) => None,
+            AppEffect::Input(crate::app::input::InputCommand::Wait(..))
+            | AppEffect::PluginCall { .. } => None,
+            AppEffect::LspIncoming(_) => Some(CommandAccess::Edit),
             AppEffect::NotificationDismiss | AppEffect::NotificationHistory => {
                 Some(CommandAccess::Ui)
             }
@@ -1054,6 +1065,17 @@ impl App {
         }
         let result = match effect {
             AppEffect::Authorized { .. } => unreachable!("authority handled above"),
+            AppEffect::PluginCall {
+                plugin,
+                handler,
+                call,
+                pending,
+                previous,
+            } => {
+                return self.execute_plugin_call(
+                    plugin, handler, *call, pending, previous, self.effect_authority.clone(),
+                );
+            }
             AppEffect::CommandResume {
                 pending,
                 owner,
@@ -1410,7 +1432,10 @@ impl App {
         let authority = self.effect_authority.restrict(&authority);
         // Keys typed while a command is pending wait for it; only host input is held,
         // because a held invocation is replayed without the caller's grants.
-        if authority == CommandAuthority::Host && self.input.hold_invocation(&invocation) {
+        if authority == CommandAuthority::Host
+            && !invocation.id.as_str().starts_with("lsp.incoming.")
+            && self.input.hold_invocation(&invocation)
+        {
             return true;
         }
         if let Err(error) = self.commands.check_access(&invocation.id, &authority) {
@@ -1537,6 +1562,18 @@ impl App {
         )
     }
 
+    pub(in crate::app) fn cancel_plugin_pending_command(&mut self, pending: PendingCommandId) {
+        self.commands.cancel(pending);
+        self.plugin_command_resuming(pending);
+        self.plugin_command_result(None, Some("plugin command cancelled".into()));
+        self.complete_input_command(pending, false, false);
+        self.finish_incoming_lsp_commands();
+    }
+
+    pub(in crate::app) fn incoming_command_pending(&self, id: i64) -> bool {
+        self.input.incoming_command_pending(id, &self.commands)
+    }
+
     fn resume_command(
         &mut self,
         pending: PendingCommandId,
@@ -1554,13 +1591,33 @@ impl App {
             self.show_error(CommandError::UnknownPending);
             return false;
         };
-        let still_pending = outcome
+        self.plugin_command_resuming(pending);
+        let waiting = outcome
             .as_ref()
             .is_ok_and(|outcome| outcome.pending.is_some());
+        let buffer = invocation
+            .invocation
+            .target
+            .buffer
+            .or_else(|| self.state.active_buffer_id());
+        let before = buffer.and_then(|id| {
+            self.state
+                .buffers
+                .get(id)
+                .map(|buffer| buffer.text.source_version())
+        });
         let succeeded = self.finish_command(invocation, outcome);
-        if !still_pending || !succeeded {
-            self.complete_input_command(pending, succeeded, false);
+        let changed = before
+            != buffer.and_then(|id| {
+                self.state
+                    .buffers
+                    .get(id)
+                    .map(|buffer| buffer.text.source_version())
+            });
+        if !waiting || !succeeded {
+            self.complete_input_command(pending, succeeded, changed);
         }
+        self.finish_incoming_lsp_commands();
         succeeded
     }
 
@@ -1589,6 +1646,7 @@ impl App {
         match outcome {
             Ok(outcome) => {
                 if let Some(pending) = outcome.pending {
+                    self.plugin_command_pending(pending);
                     self.input.suspend_command(
                         pending,
                         PendingInvocation {
@@ -1602,8 +1660,7 @@ impl App {
                             authority: outcome.authority.clone(),
                             effect: Box::new(effect),
                         }) {
-                            self.commands.cancel(pending);
-                            self.complete_input_command(pending, false, false);
+                            self.cancel_plugin_pending_command(pending);
                             return false;
                         }
                     }
@@ -1712,9 +1769,11 @@ impl App {
                 }
                 self.tutor_observe(&invocation);
                 self.sync_flash_ui();
+                self.plugin_command_result(outcome.value.as_ref(), None);
                 true
             }
             Err(error) => {
+                self.plugin_command_result(None, Some(error.to_string()));
                 // A failed `dfz` or `di(` must not leave the view stuck in operator-pending.
                 if self
                     .state

@@ -32,6 +32,7 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::path::PathBuf;
+pub(in crate::app) mod abi;
 mod confirmations;
 mod hosting;
 pub(super) use confirmations::ConfirmationPresentation;
@@ -65,6 +66,7 @@ pub(in crate::app) struct InvocationContext<'a> {
 type BufferObservation = (u64, u64, usize, usize, usize, u8);
 pub(in crate::app) type HostObservation = (u64, String, Option<BufferObservation>, u64);
 pub(super) struct Plugins {
+    abi: abi::PluginCalls,
     runtime_epoch: u64,
     windows: panels::PluginWindowHost,
     providers: PluginProviderBroker,
@@ -111,6 +113,7 @@ impl Plugins {
         registry: RegistryWorker,
     ) -> Self {
         Self {
+            abi: abi::PluginCalls::default(),
             runtime_epoch: 0,
             windows: panels::PluginWindowHost::default(),
             providers: PluginProviderBroker::default(),
@@ -223,6 +226,8 @@ impl Plugins {
         let reservation = self.confirmations.reserve(&origin);
         let confirmation_available = reservation.available();
         let mut request = PluginExecutionRequest {
+            call: Default::default(),
+            delivery: Default::default(),
             runtime_epoch: self.runtime_epoch,
             plugin: plugin.into(),
             command: command.into(),

@@ -99,6 +99,7 @@ fn manifest() -> PluginManifest {
 
 fn component_host() -> ComponentHostState {
     ComponentHostState {
+        editor_requests: Default::default(),
         runtime_epoch: 0,
         limits: crate::plugins::component::ComponentLimits::new(
             wasmtime::StoreLimitsBuilder::new().build(),
@@ -189,7 +190,7 @@ fn completed_component_execution_cancels_its_epoch_timer() {
     assert!(
         runtime
             .bindings
-            .call_execute_command(&mut runtime.store, "confirmationprobe", &[])
+            .call_execute_command(&mut runtime.store, "confirmationprobe", &Default::default())
             .unwrap()
             .is_ok()
     );
@@ -439,6 +440,7 @@ fn component_output_queues_enforce_cumulative_byte_budgets() {
     use component_api::dust::plugin::host::VirtualDocumentProposal;
     use component_api::dust::plugin::host::VirtualDocumentProposalKind;
     let mut host = ComponentHostState {
+        editor_requests: Default::default(),
         runtime_epoch: 0,
         limits: crate::plugins::component::ComponentLimits::new(
             wasmtime::StoreLimitsBuilder::new().build(),
@@ -1397,6 +1399,11 @@ impl CapturedExecution {
     pub(crate) fn arguments(&self) -> &[String] {
         &self.request.arguments
     }
+    pub(crate) fn call(
+        &self,
+    ) -> &crate::plugins::component::component_api::dust::plugin::host::CommandCall {
+        &self.request.call
+    }
     pub(crate) fn virtual_documents(&self) -> &[crate::plugins::PluginVirtualDocumentRequest] {
         &self.request.virtual_document_requests
     }
@@ -1449,7 +1456,7 @@ impl ExecutionFixture {
             } => CapturedExecution {
                 load,
                 origin,
-                request: invocation,
+                request: *invocation,
             },
             other => panic!("expected invocation, got {other:?}"),
         }
@@ -1477,6 +1484,10 @@ impl ExecutionFixture {
         update: impl FnOnce(&mut PluginExecution),
     ) {
         let mut execution = PluginExecution {
+            error: None,
+            editor_requests: Vec::new(),
+            value: None,
+            call_next: None,
             plugin: captured.request.plugin.clone(),
             command: captured.request.command.clone(),
             request_id: captured.request.request_id,
@@ -1509,6 +1520,10 @@ impl ExecutionFixture {
                 load: captured.load,
                 origin: captured.origin.clone(),
                 execution: PluginExecution {
+                    error: None,
+                    editor_requests: Vec::new(),
+                    value: None,
+                    call_next: None,
                     plugin: captured.request.plugin.clone(),
                     command: captured.request.command.clone(),
                     request_id: captured.request.request_id,
@@ -1535,6 +1550,10 @@ impl ExecutionFixture {
                 load: captured.load,
                 origin: captured.origin.clone(),
                 execution: PluginExecution {
+                    error: None,
+                    editor_requests: Vec::new(),
+                    value: None,
+                    call_next: None,
                     plugin: captured.request.plugin.clone(),
                     command: captured.request.command.clone(),
                     request_id: captured.request.request_id,
@@ -1572,6 +1591,8 @@ impl ExecutionFixture {
 }
 pub(crate) fn empty_execution_request() -> PluginExecutionRequest {
     PluginExecutionRequest {
+        call: Default::default(),
+        delivery: Default::default(),
         runtime_epoch: 0,
         plugin: "demo".into(),
         command: "run".into(),
@@ -1648,6 +1669,44 @@ fn retained_runtime_with_activation(
     ));
     let mut core = original.to_vec();
     if let Some(activation_body) = activation_body {
+        // Find the exported function rather than depending on compiler function order.
+        let mut imported_functions = 0;
+        let mut activation = None;
+        let mut section_at = 8;
+        while section_at < original.len() {
+            let section = original[section_at];
+            section_at += 1;
+            let length = number(original, &mut section_at);
+            let end = section_at + length;
+            if section == 2 {
+                let count = number(original, &mut section_at);
+                for _ in 0..count {
+                    for _ in 0..2 {
+                        let length = number(original, &mut section_at);
+                        section_at += length;
+                    }
+                    assert_eq!(original[section_at], 0, "fixture imports only functions");
+                    section_at += 1;
+                    number(original, &mut section_at);
+                    imported_functions += 1;
+                }
+            } else if section == 7 {
+                let count = number(original, &mut section_at);
+                for _ in 0..count {
+                    let length = number(original, &mut section_at);
+                    let name = &original[section_at..section_at + length];
+                    section_at += length;
+                    let kind = original[section_at];
+                    section_at += 1;
+                    let index = number(original, &mut section_at);
+                    if name == b"activate" && kind == 0 {
+                        activation = Some(index);
+                    }
+                }
+            }
+            section_at = end;
+        }
+        let activation = activation.expect("fixture exports activate") - imported_functions;
         let mut at = 8;
         while at < original.len() {
             let section = original[at];
@@ -1660,8 +1719,7 @@ fn retained_runtime_with_activation(
                 encode(count, &mut payload);
                 for function in 0..count {
                     let length = number(original, &mut at);
-                    // The fixed guest exports activate as function 70, after 15 imports.
-                    let body: &[u8] = if function == 55 {
+                    let body: &[u8] = if function == activation {
                         activation_body
                     } else {
                         &original[at..at + length]
@@ -1802,7 +1860,20 @@ fn missed_command_deadline_discards_effects_and_the_instance_runs_again() {
     ));
     assert!(runtime.store.data().storage_requests.is_empty());
     assert!(runtime.store.data().pending_storage.is_empty());
+    // A guest error after the deadline is discarded too, not delivered as a reply.
+    let mut request = empty_execution_request();
+    request.command = "storage".into();
+    assert!(matches!(
+        crate::plugins::index::execute_component(request, &mut runtime),
+        Err(PluginError::Deadline)
+    ));
     runtime.limits.epoch_deadline_ticks = 1000;
+    let mut request = empty_execution_request();
+    request.command = "storage".into();
+    let execution = crate::plugins::index::execute_component(request, &mut runtime).unwrap();
+    assert!(execution.error.as_ref().is_some_and(|error| error.starts_with("storage:1:")));
+    assert!(execution.storage_requests.is_empty());
+    assert!(execution.editor_requests.is_empty());
     let mut request = empty_execution_request();
     request.command = "events".into();
     assert!(crate::plugins::index::execute_component(request, &mut runtime).is_ok());
@@ -1975,13 +2046,11 @@ fn component_storage_driver_validates_each_reply_before_advancing() {
             let mut request = empty_execution_request();
             request.command = "storage".into();
             request.storage_results = replies;
-            let error = crate::plugins::index::execute_component(request, &mut runtime)
-                .expect_err("invalid storage reply must fail");
-            assert!(
-                matches!(error, PluginError::CommandFailed(ref detail)
-                    if detail.starts_with(&format!("storage:{phase}:"))),
-                "{error}"
-            );
+            let execution =
+                crate::plugins::index::execute_component(request, &mut runtime).unwrap();
+            let error = execution.error.expect("invalid storage reply must fail");
+            assert!(error.starts_with(&format!("storage:{phase}:")), "{error}");
+            assert!(execution.storage_requests.is_empty());
             assert!(runtime.store.data().storage_requests.is_empty());
         }
         let mut request = empty_execution_request();

@@ -1,29 +1,29 @@
-# Retained UI Component fixture
+# Maintained Dust component example
 
-`retained-guest.core.wasm` is a deterministic `wasm32-unknown-unknown` core
-module generated from `src/lib.rs` and the checked-in byte-identical copy of
-production `wit/dust-plugin.wit` (`dust:plugin@0.2.0`, world `editor-plugin`).
-Tests wrap the embedded Component metadata with `wit-component` and instantiate
-the result through Dust's production no-WASI Wasmtime Component path. Tests
-never invoke Cargo, rustc, a shell, or another compiler. This fixture is the
-maintained 0.2 authoring example, not a published SDK crate or evidence for the
-incompatible target 0.3 host/package contract.
+`retained-guest.core.wasm` is built from `src/lib.rs` and a byte-identical copy of
+production `wit/dust-plugin.wit`: **dust:plugin@0.4.0**, world `editor-plugin`.
+It has no WASI imports. Tests wrap its embedded metadata with `wit-component` and
+instantiate it with the real production host; tests never invoke a compiler.
 
-Reproduction (maintainer-only, outside test execution) uses the already installed stable toolchain selected by the repository; it does not authorize rustup or network installation:
+Build from a repository checkout:
 
-```text
-cargo build --locked --offline --release --target wasm32-unknown-unknown
+```sh
+nix develop .#guest -c sh -c '
+  cd tests/fixtures/retained-guest &&
+  cargo build --locked --offline --release --target wasm32-unknown-unknown &&
+  cp "$CARGO_TARGET_DIR/wasm32-unknown-unknown/release/dust_retained_guest.wasm" ../../../guest.wasm'
 ```
 
-Copy `target/wasm32-unknown-unknown/release/dust_retained_guest.wasm` to
-`retained-guest.core.wasm`. Expected SHA-256:
+Fetch the artifact with `builder fetch` and copy it to `retained-guest.core.wasm`.
+Keep the two fixture-digest test assertions current when rebuilding. The `guest`
+Nix shell includes the Wasm target; the editor's normal build shell does not.
 
-```text
-9f17af443ca9a4150f940656ef2edb11a48c1d59b7430d4e029f1b1cf951bc48
-```
+The example demonstrates retained and private-cell panels, confirmations, storage,
+picker chunks, read-only virtual documents, traps and runaway interruption. Its
+`drive` handler also demonstrates typed command values/results, dynamic registration,
+run/wrap/call-next, named modes/capture/layers, anchored marks, occurrence batches,
+menu/inline completion, incoming LSP filters, timers and HTTP denial. Host tests
+instantiate it twice to verify wrapper ordering and held input.
 
-The fixture has no WASI imports. It drives retained open/full-tree replacement,
-placement, focus, close, private open/local-geometry/full-snapshot/patch/action/close,
-typed queue exhaustion, asynchronous event draining, a trap after enqueue, and
-fuel/epoch interruption after enqueue, bounded later-execution host-event delivery/acknowledgement, queued private-storage CAS/get/stale-CAS/list/delete/missing-result feedback (validating each reply's token, value, revision, entries, truncation and error before advancing), picker-source request/two-chunk/completion/late-cancellation flow, read-only virtual-document initial Unicode/full plus exact-revision patch requests, and the two-step confirmation example: one command opens a retained button view, its real action requests the host dialog, and a result-only execution replaces that existing view with Yes/No/Cancelled state. Its capacity probe consumes result-only callbacks without issuing another request and emits a guest-owned ordinary invocation ordinal, so the 65th ordinary probe unambiguously observes typed `queue-full` from the actual aggregate 64-item host lane. Fixture source and WIT/SDK artifacts are licensed
-under Apache-2.0; the repository test harness remains GPL-3.0-or-later.
+Guest source, WIT and SDK documentation are Apache-2.0. The repository's test
+harness is GPL-3.0-or-later.

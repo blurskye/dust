@@ -28,6 +28,13 @@
     in {
       devShells.x86_64-linux = {
         linux = shell;
+        guest = pkgs.mkShell {
+          packages = [
+            (pkgs.rust-bin.stable."1.97.0".default.override {
+              targets = [ "wasm32-unknown-unknown" ];
+            })
+          ];
+        };
         default = shell;
       };
     };

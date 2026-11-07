@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Public plugin ABI; see LICENSES/Apache-2.0.txt.
-package dust:plugin@0.2.0;
+package dust:plugin@0.4.0;
 
 interface host {
   record snapshot { buffer: u64, revision: u64, utf8: string }
@@ -326,6 +326,98 @@ interface host {
     kind: virtual-document-proposal-kind,
   }
 
+  // Values are postorder trees. Child indices must precede their parent; the
+  // final node is the root. This represents nested lists/records without JSON.
+  record value-field { name: string, value: u32 }
+  variant value-node {
+    text(string), boolean(bool), integer(s64), number(f64),
+    sequence(list<u32>), object(list<value-field>),
+  }
+  record command-value { nodes: list<value-node> }
+  record command-call {
+    command: string,
+    arguments: command-value,
+    buffer: option<u64>, view: option<u64>, count: option<u64>, register: option<char>,
+    pending: option<u64>, after: bool, previous: option<command-value>,
+  }
+  enum command-access { edit, ui, files, process, network }
+  enum argument-kind { text, boolean, integer, number, sequence, object }
+  record argument-field { name: string, kind: argument-kind, required: bool }
+  record command-definition { name: string, title: string, handler: string, arguments: list<argument-field>, result-kind: option<argument-kind>, access: list<command-access> }
+  record command-wrapper { command: string, handler: string, order: s32 }
+  record command-reply { request: u64, value: option<command-value>, error: option<string> }
+
+  enum base-mode { normal, insert, replace, visual-char, visual-line, visual-block, multi }
+  enum mode-cursor { default, block, bar, underline, blinking-block, blinking-bar, blinking-underline }
+  record key-binding { keys: string, command: string, arguments: command-value }
+  record key-layer { name: string, bindings: list<key-binding> }
+  record named-mode {
+    name: string, label: string, cursor: mode-cursor, layer: key-layer,
+    base: option<base-mode>, capture: option<string>,
+  }
+
+  enum gravity { left, right }
+  record mark { id: u64, start: u64, end: u64, start-gravity: gravity, end-gravity: gravity }
+  record mark-set { buffer: u64, revision: u64, namespace: string, marks: list<mark> }
+
+  record buffer-state { buffer: u64, revision: u64, text: string, dirty: bool, read-only: bool }
+  record view-state { view: u64, buffer: u64, cursor: u64, mode: string }
+  record editor-snapshot { buffers: list<buffer-state>, views: list<view-state>, active-view: option<u64>, workspace: string }
+  record buffer-change { buffer: u64, revision: u64, edits: list<edit> }
+  variant occurrence {
+    opened(u64), closed(u64), changed(buffer-change), saved(u64),
+    cursor(view-state), mode(view-state), workspace(string),
+  }
+  record event-record { sequence: u64, value: occurrence }
+  record event-batch { sequence: u64, records: list<event-record>, snapshot: option<editor-snapshot> }
+
+  record completion-source { name: string, handler: string, inline: bool }
+  record completion-item { label: string, detail: option<string>, start: u64, end: u64, text: string, snippet: bool }
+  record completion-batch { source: string, request: u64, buffer: u64, revision: u64, items: list<completion-item>, incomplete: bool }
+  record lsp-filter { method: string, handler: string, order: s32 }
+
+  record timer-request { milliseconds: u32, handler: string }
+  record http-request { url: string, method: string, headers: list<tuple<string, string>>, body: list<u8>, handler: string }
+  record http-response { request: u64, status: u16, headers: list<tuple<string, string>>, body: list<u8>, error: option<string> }
+
+  // Part 2 owners implement these records; no imports claim support yet.
+  record editable-document { source: string, key: string, title: string, language: string, text: string }
+  record document-write { request: u64, buffer: u64, revision: u64, text: string }
+  record formatter { name: string, handler: string, order: s32 }
+  record format-request { request: u64, buffer: u64, revision: u64, start: option<u64>, end: option<u64>, before-save: bool }
+  record input-request { title: string, initial: string, secret: bool }
+  record select-item { id: string, label: string, detail: option<string> }
+  record select-request { title: string, items: list<select-item> }
+  enum notice-level { info, warning, error }
+  record notify-request { level: notice-level, message: string }
+  record styled-text { text: string, style: string }
+  enum segment-location { statusline, buffer-line }
+  record chrome-segment { name: string, location: segment-location, order: s32, text: list<styled-text>, command: option<string> }
+
+  // Imports enqueue work; editor owners apply it after the guest returns.
+  register-command: func(definition: command-definition) -> result<_, string>;
+  run-command: func(call: command-call) -> result<u64, string>;
+  call-next: func(pending: u64) -> result<_, string>;
+  set-command-result: func(value: command-value) -> result<_, string>;
+  take-command-replies: func() -> list<command-reply>;
+  wrap-command: func(wrapper: command-wrapper) -> result<_, string>;
+  enter-mode: func(mode: named-mode) -> result<_, string>;
+  leave-mode: func() -> result<_, string>;
+  push-key-layer: func(layer: key-layer) -> result<_, string>;
+  pop-key-layer: func(name: string) -> result<_, string>;
+  replace-marks: func(marks: mark-set) -> result<_, string>;
+  read-marks: func(buffer: u64, namespace: string) -> result<list<mark>, string>;
+  subscribe-events: func(handler: string) -> result<_, string>;
+  take-editor-events: func() -> option<event-batch>;
+  register-completion-source: func(source: completion-source) -> result<_, string>;
+  publish-completions: func(batch: completion-batch) -> result<_, string>;
+  filter-lsp: func(filter: lsp-filter) -> result<_, string>;
+  start-timer: func(request: timer-request) -> result<u64, string>;
+  cancel-timer: func(request: u64) -> result<_, string>;
+  request-http: func(request: http-request) -> result<u64, string>;
+  take-http-responses: func() -> list<http-response>;
+
+  current-view: func() -> option<view-state>;
   current-buffer: func() -> result<snapshot, string>;
   propose-edits: func(buffer: u64, revision: u64, edits: list<edit>) -> result<u64, string>;
   show-message: func(message: string) -> result<_, string>;
@@ -368,5 +460,7 @@ interface host {
 world editor-plugin {
   import host;
   export activate: func() -> result<list<string>, string>;
-  export execute-command: func(command: string, arguments: list<string>) -> result<string, string>;
+  use host.{command-call};
+  // The string is an optional display message; structured results use set-command-result.
+  export execute-command: func(command: string, call: command-call) -> result<string, string>;
 }

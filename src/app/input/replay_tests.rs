@@ -40,7 +40,7 @@ fn pending_session() -> crate::app::tests::driver::TestSession {
 }
 
 fn complete_edit(app: &mut crate::app::App) {
-    let id = app.input.pending_command.as_ref().unwrap().id;
+    let id = app.input.pending_input.unwrap();
     let delete = CommandInvocation::new("edit.delete_char", InvocationSource::Test).unwrap();
     let outcome = app.commands.execute(&app.state, &delete).unwrap();
     app.apply_authoritative_editor_transaction(outcome.transaction.as_ref().unwrap())
@@ -162,7 +162,7 @@ fn failed_pending_command_is_not_recorded_and_releases_later_keys() {
     let app = &mut session.application;
     let before = app.input.repeat_plan(100, None).unwrap();
     keys(app, &["q", "a", "x", "l", "q"]);
-    let id = app.input.pending_command.as_ref().unwrap().id;
+    let id = app.input.pending_input.unwrap();
     app.complete_input_command(id, false, false);
     assert!(!app.input.command_pending());
     assert_eq!(app.input.repeat_plan(100, None).unwrap(), before);

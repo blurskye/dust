@@ -2795,6 +2795,7 @@ fn staged_window_work_rejects_editor_and_catalog_changes_without_a_window_epoch_
     let graph = windows.graph().clone();
     catalog
         .install(PluginContributionIndex {
+            capabilities: Default::default(),
             owner: "demo".into(),
             version: "1.0.0".into(),
             checksum: "0".repeat(64),

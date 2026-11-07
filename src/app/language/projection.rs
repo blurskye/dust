@@ -1481,6 +1481,11 @@ impl LspSession {
         self.remove_completion_source_items(server);
     }
 
+    pub(in crate::app) fn remove_completion_source(&mut self, source: &str) {
+        self.projection.completion_sources.remove(source);
+        self.remove_completion_source_items(source);
+    }
+
     fn remove_completion_source_items(&mut self, server: &str) {
         let retained_index = |index: usize| {
             (self

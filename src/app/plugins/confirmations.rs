@@ -293,6 +293,8 @@ impl PluginConfirmations {
             .remove(&(answered.pending.plugin.clone(), answered.pending.load))
             .unwrap_or_default();
         let request = PluginExecutionRequest {
+            call: Default::default(),
+            delivery: Default::default(),
             runtime_epoch,
             plugin: answered.pending.plugin.clone(),
             command: answered.pending.command.clone(),

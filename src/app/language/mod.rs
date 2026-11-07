@@ -1,6 +1,6 @@
 //! Language-server requests and editor results.
 
-mod incoming;
+pub(in crate::app) mod incoming;
 mod inlay;
 mod launch;
 
@@ -152,7 +152,7 @@ pub(super) struct LspSession {
     marks: inlay::LanguageMarks,
     preparation: launch::Preparation,
     service: LspClient,
-    incoming: Option<(i64, OwnedLspEvent)>,
+    incoming: std::collections::BTreeMap<i64, OwnedLspEvent>,
     incoming_id: i64,
     edits: LspEditSources,
     deferred_commands: Vec<(ProposalId, String, crate::language::lsp::LspCommand)>,
@@ -1052,8 +1052,15 @@ impl App {
         let Some(item) = self.language.completion_items().get(selected).cloned() else {
             return;
         };
-        let Some((buffer_id, document)) = self.active_lsp_document() else {
+        let Some(buffer_id) = self.state.active_buffer_id() else {
             return;
+        };
+        let buffer = &self.state.buffers[buffer_id];
+        let document = LspDocument {
+            path: buffer.path.clone().unwrap_or_default(),
+            language_id: String::new(),
+            version: buffer.text.revision().0,
+            text: buffer.text.to_string(),
         };
         // The item belongs to the server that offered it: resolve there and read its positions in that server's encoding.
         let server = self
@@ -1258,15 +1265,21 @@ impl App {
         }
         let mut edits = vec![edit];
         edits.extend(item.additional_edits);
-        let workspace_edit = LspWorkspaceEdit {
-            resources: Vec::new(),
-            documents: vec![crate::language::lsp::LspDocumentEdit {
-                uri: document.uri(),
-                version: Some(document.version),
-                edits,
-            }],
-        };
-        let applied = self.apply_lsp_workspace_edit(workspace_edit, encoding);
+        let applied =
+            crate::app::language::edits::decode_edits(edits, &buffer, encoding).and_then(|edits| {
+                let transaction = EditorTransaction::new(self.transaction_id()).with_operation(
+                    EditorOperation::ApplyEdits {
+                        buffer: buffer_id,
+                        edits: crate::editor::text::TextEditSet::new(
+                            self.state.buffers[buffer_id].text.revision(),
+                            edits,
+                        ),
+                    },
+                );
+                self.state
+                    .apply_transaction(&transaction)
+                    .map_err(|error| error.to_string())
+            });
         let succeeded = applied.is_ok();
         if let Err(error) = applied {
             self.show_error(error);
