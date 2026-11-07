@@ -350,7 +350,7 @@ fn grep_keeps_code_and_location_readable_and_centres_the_preview() {
         assert!(title.contains("main.rs:81"), "{width}: {title}");
         assert!(title.contains('…') || title.contains("p/w/"), "{title}");
 
-        // Other pickers retain their existing selected-row and matched-line styles.
+        // Syntax remains readable on selected lines in every picker preview.
         let mut files = picker.clone();
         files.surface = PickerSurfaceKind::Files;
         let mut frame = Frame {
@@ -358,10 +358,217 @@ fn grep_keeps_code_and_location_readable_and_centres_the_preview() {
             cursor: None,
         };
         crate::ui::render::picker::render_picker(&mut frame, &files, &config, rect, None);
-        assert!(!(0..height).any(|y| (0..width).any(|x| matches!(
+        assert!((0..height).any(|y| (0..width).any(|x| matches!(
             frame.grid.get(x, y).unwrap().style,
             Style::SelectionSyntax(_)
         ))));
+    }
+}
+
+#[test]
+fn files_keep_deep_filenames_and_preview_titles_at_every_qa_size() {
+    use crate::ui::{CellGrid, Frame, PickerCell, PickerSurfaceKind, Style};
+    let config = crate::config::load_bundled_config().config;
+    let folder = "packages/workspace-services/customer-platform/components/deeply/nested/internal/";
+    let name = "critical_invoice_handler.rs";
+    let mut picker = diff_picker(crate::ui::diff::parse_unified_patch("", "test"))
+        .picker
+        .unwrap();
+    picker.surface = PickerSurfaceKind::Files;
+    picker.rows = vec![crate::ui::PickerRow::text(
+        "deep",
+        format!("{folder}{name}"),
+        "",
+        "",
+    )];
+    picker.rows[0].cells = vec![
+        PickerCell::new("R ", Style::ExplorerIcon, 2),
+        PickerCell::new(folder, Style::Muted, folder.len() as u16),
+        PickerCell::new(name, Style::Default, name.len() as u16),
+    ];
+    picker.preview = Some(crate::ui::PickerPreview::text(
+        format!("{folder}{name}"),
+        crate::ui::PickerTextPreview::new(
+            vec!["fn invoice() {}".into()],
+            0,
+            Some(0),
+            Some(crate::language::syntax::SyntaxLanguage::Rust),
+        ),
+    ));
+    for (width, height) in [(160, 45), (100, 30), (80, 24)] {
+        let rect = crate::ui::picker_geometry(crate::windows::WindowRect {
+            x: 0,
+            y: 0,
+            width,
+            height,
+        })
+        .unwrap();
+        let geometry =
+            crate::ui::render::picker::picker_content_geometry(&picker, &config, rect).unwrap();
+        let mut frame = Frame {
+            grid: CellGrid::new(width, height),
+            cursor: None,
+        };
+        crate::ui::render::picker::render_picker(&mut frame, &picker, &config, rect, None);
+        let row = frame.grid.row_text(geometry.list.y);
+        assert!(row.contains(name), "{width}: {row}");
+        let title = frame
+            .grid
+            .row_text(geometry.stacked_divider.unwrap_or(rect.y));
+        assert!(title.contains(name), "{width}: {title}");
+        assert!((0..height).any(|y| (0..width).any(|x| matches!(
+            frame.grid.get(x, y).unwrap().style,
+            Style::SelectionSyntax(_)
+        ))));
+        assert_eq!(
+            frame
+                .grid
+                .get(rect.x + rect.width - 1, geometry.list.y)
+                .unwrap()
+                .symbol,
+            "│"
+        );
+    }
+}
+
+#[test]
+fn changed_files_keep_the_filename_before_the_unsaved_badge_in_narrow_lists() {
+    let config = crate::config::load_bundled_config().config;
+    let mut picker = diff_picker(crate::ui::diff::parse_unified_patch("", "test"))
+        .picker
+        .unwrap();
+    picker.surface = crate::ui::PickerSurfaceKind::Changes;
+    picker.preview = None;
+    picker.rows = vec![crate::ui::PickerRow::text("change", "", "", "")];
+    picker.rows[0].cells = vec![
+        crate::ui::PickerCell::new(" M", crate::ui::Style::Warning, 3),
+        crate::ui::PickerCell::flex(
+            "packages/customer platform/deeply/nested/internal/critical_invoice_handler.rs",
+            crate::ui::Style::Default,
+        ),
+        crate::ui::PickerCell::new(" [+]", crate::ui::Style::Warning, 4),
+    ];
+    for width in [140, 88, 70] {
+        let mut frame = crate::ui::Frame {
+            grid: crate::ui::CellGrid::new(width, 18),
+            cursor: None,
+        };
+        crate::ui::render::picker::render_picker(
+            &mut frame,
+            &picker,
+            &config,
+            crate::windows::WindowRect {
+                x: 0,
+                y: 0,
+                width,
+                height: 18,
+            },
+            None,
+        );
+        let row = frame.grid.row_text(3);
+        let filename = row
+            .find("critical_invoice_handler.rs")
+            .expect("filename is visible");
+        let badge = row.find("[+]").expect("unsaved badge is visible");
+        assert!(
+            filename + "critical_invoice_handler.rs".len() < badge,
+            "{width}: {row}"
+        );
+        assert_eq!(frame.grid.get(width - 1, 3).unwrap().symbol, "│");
+    }
+}
+
+#[test]
+fn empty_pickers_explain_loading_search_and_no_results() {
+    let config = crate::config::load_bundled_config().config;
+    let mut picker = diff_picker(crate::ui::diff::parse_unified_patch("", "test"))
+        .picker
+        .unwrap();
+    picker.rows.clear();
+    picker.preview = None;
+    for (surface, query, loading, expected) in [
+        (crate::ui::PickerSurfaceKind::Files, "", true, "Loading…"),
+        (
+            crate::ui::PickerSurfaceKind::Files,
+            "",
+            false,
+            "No items available",
+        ),
+        (
+            crate::ui::PickerSurfaceKind::Grep,
+            "",
+            false,
+            "Type to search the workspace",
+        ),
+        (
+            crate::ui::PickerSurfaceKind::Grep,
+            "missing",
+            false,
+            "No matches · Try another query",
+        ),
+        (
+            crate::ui::PickerSurfaceKind::Theme,
+            "missing",
+            false,
+            "No matches · Try another query",
+        ),
+    ] {
+        picker.surface = surface;
+        picker.query = query.into();
+        picker.loading = loading;
+        let mut frame = crate::ui::Frame {
+            grid: crate::ui::CellGrid::new(80, 24),
+            cursor: None,
+        };
+        crate::ui::render::picker::render_picker(
+            &mut frame,
+            &picker,
+            &config,
+            crate::windows::WindowRect {
+                x: 3,
+                y: 2,
+                width: 70,
+                height: 18,
+            },
+            None,
+        );
+        assert!(frame.grid.row_text(5).contains(expected));
+        assert!(frame.grid.row_text(3).contains("0/0"));
+    }
+}
+
+#[test]
+fn picker_queries_emphasise_fuzzy_words_and_literal_grep_without_touching_borders() {
+    use crate::ui::{CellGrid, Frame, Style};
+    let row = crate::windows::WindowRect {
+        x: 1,
+        y: 0,
+        width: 30,
+        height: 1,
+    };
+    for (query, text, literal, expected) in [
+        ("main rs", "src/main.rs", false, "mainrs"),
+        ("CAFÉ", "café.rs", false, "café"),
+        ("界", "界.rs", false, "界"),
+        ("needle", "let needle = needle;", true, "needleneedle"),
+        ("absent", "src/main.rs", false, ""),
+    ] {
+        let mut frame = Frame {
+            grid: CellGrid::new(32, 1),
+            cursor: None,
+        };
+        frame
+            .grid
+            .put_text_clipped(1, 0, text, Style::Selection, 31);
+        frame.grid.set_cell(31, 0, "│", Style::Border);
+        crate::ui::render::picker::highlight_picker_matches(&mut frame, query, literal, row);
+        let highlighted = (1..31)
+            .filter_map(|x| frame.grid.get(x, 0))
+            .filter(|cell| cell.style == Style::Search && !cell.continuation)
+            .map(|cell| cell.symbol.as_str())
+            .collect::<String>();
+        assert_eq!(highlighted, expected);
+        assert_eq!(frame.grid.get(31, 0).unwrap().style, Style::Border);
     }
 }
 
@@ -990,8 +1197,8 @@ fn a_long_path_in_a_picker_row_keeps_its_end() {
     let (label, _) =
         crate::ui::render::picker::fitted_picker_row("Git: stage/unstage all", "", 12, ambiguous);
     assert_eq!(
-        label, "Git: stage/unstage all",
-        "ordinary text is not a path"
+        label, "Git: stage/…",
+        "ordinary text keeps its start and marks the omitted tail"
     );
 }
 
