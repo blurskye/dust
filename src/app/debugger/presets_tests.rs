@@ -184,11 +184,13 @@ fn cursor_tests_use_enclosing_function_and_python_class() {
             kind: SyntaxObjectKind::Class,
             outer: (0, source.len()),
             inner: (15, source.len()),
+            parent: None,
         },
         SyntaxObject {
             kind: SyntaxObjectKind::Function,
             outer: (19, source.len()),
             inner: (48, source.len()),
+            parent: None,
         },
     ];
     assert_eq!(
@@ -201,6 +203,7 @@ fn cursor_tests_use_enclosing_function_and_python_class() {
         kind: SyntaxObjectKind::Function,
         outer: (0, source.len()),
         inner: (29, source.len()),
+        parent: None,
     }];
     assert_eq!(
         cursor_test("go", source, 34, &objects),
