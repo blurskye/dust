@@ -39,6 +39,9 @@ fn drain(service: &mut PtyWorker, id: PtyId) -> Vec<PtyEvent> {
         thread::sleep(Duration::from_millis(1));
     }
 }
+// ConPTY waits for its cursor query to be answered, which the terminal panel does and this
+// bare worker does not, and Git's `sh` prints MSYS-style paths.
+#[cfg(unix)]
 #[test]
 fn pty_starts_in_the_requested_directory() {
     let root = tempfile::tempdir().unwrap();

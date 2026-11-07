@@ -735,4 +735,6 @@ mod cancellable_pipe_tests {
 mod executable;
 pub use executable::discover_executable;
 pub(crate) use executable::executable_file;
+#[cfg(windows)]
+pub(crate) use executable::path_extensions;
 pub(crate) use executable::terminal_executable;

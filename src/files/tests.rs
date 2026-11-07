@@ -2251,9 +2251,12 @@ fn workspace_files_are_bounded_deterministic_and_ignore_symlink_escapes() {
     assert_eq!(
         entries
             .iter()
-            .map(|e| e.relative_path.to_string_lossy().into_owned())
+            .map(|e| e.relative_path.clone())
             .collect::<Vec<_>>(),
-        vec!["b.txt", "sub/a.txt"]
+        vec![
+            std::path::PathBuf::from("b.txt"),
+            Path::new("sub").join("a.txt")
+        ]
     );
 }
 

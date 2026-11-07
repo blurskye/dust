@@ -8,6 +8,7 @@ use crate::app::agent::commands::AgentCommand;
 use crate::app::documents::configured_file_bytes;
 use crate::app::git::tests::settle_git_work;
 use crate::app::startup::StartupTarget;
+#[cfg(unix)]
 use crate::app::tasks::tests::check_task_diagnostics;
 use crate::app::tests::*;
 use crate::debugger::DapControl;

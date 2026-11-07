@@ -65,7 +65,7 @@ pub(in crate::app) enum DocumentEvent {
     WorkspaceIo(WorkspaceIoReply),
     TaskRead(TaskReadReply),
     Explorer(crate::files::ExplorerIoReply),
-    File(FileReply),
+    File(Box<FileReply>),
     Stopped {
         task_reads: TaskReadStopped,
         requests: Vec<RequestId>,
@@ -1033,7 +1033,7 @@ impl App {
                     continue;
                 }
                 Ok(Some(DocumentEvent::File(reply))) => {
-                    self.process_file_reply(reply);
+                    self.process_file_reply(*reply);
                     self.process_pending_saves();
                     continue;
                 }

@@ -2156,6 +2156,8 @@ time.sleep(30)
     service.stop("boundary").unwrap();
 }
 
+// The fixture server watches stdin with `select`, which Windows supports only on sockets.
+#[cfg(unix)]
 #[test]
 fn shutdown_waits_for_the_servers_response_before_sending_exit() {
     let script = BOUNDARY_SERVER

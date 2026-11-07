@@ -805,6 +805,14 @@ fn repository_relative_path(
     {
         return Err(GitMutationError::OutsideScope);
     }
+    // Patch text names the file as Git does, with `/` on every platform.
+    #[cfg(windows)]
+    let repo_path = PathBuf::from(
+        repo_path
+            .to_str()
+            .ok_or(GitMutationError::Invalid)?
+            .replace('\\', "/"),
+    );
     Ok(repo_path)
 }
 
@@ -1373,14 +1381,12 @@ mod tests {
             tx.send(GitMutationEvent::Complete(Err(
                 GitMutationError::StaleWorktree,
             )))
+            .is_err()
         });
         service.cancel();
         assert!(cancellation.load(Ordering::Acquire));
         release.send(()).unwrap();
-        assert!(
-            worker.join().unwrap().is_err(),
-            "cancel drops the result receiver"
-        );
+        assert!(worker.join().unwrap(), "cancel drops the result receiver");
         assert!(service.poll().unwrap().is_none());
         assert_eq!(service.next, 1);
     }

@@ -209,6 +209,9 @@ fn prepare_javascript_archive(
     output: &Path,
 ) -> Result<(), String> {
     let entrypoint = crate::tools::install_prepare::relative_catalog_path(entrypoint)?;
+    if cfg!(windows) {
+        return Err("this adapter's launcher is a POSIX shell script; install it on PATH".into());
+    }
     crate::tools::download::extract_tar_gzip_tree(bytes, prefix, staging)?;
     if !staging.join(&entrypoint).is_file() {
         return Err("JavaScript archive does not contain its entrypoint".into());
@@ -233,6 +236,7 @@ fn prepare_javascript_archive(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
     #[test]
     fn javascript_archive_launcher_keeps_support_files_and_literal_paths() {
         use std::io::Write;

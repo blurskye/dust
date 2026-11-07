@@ -1941,20 +1941,20 @@ fn component_activation_and_each_command_have_their_own_deadline() {
     assert!(error.to_string().contains("interrupt"), "{error}");
     let limits = PluginLimits {
         fuel: u64::MAX,
-        epoch_deadline_ticks: 20,
+        epoch_deadline_ticks: 100,
         ..Default::default()
     };
     let mut runtime = retained_runtime(&limits, false).unwrap().runtime;
     let mut request = empty_execution_request();
     request.command = "events".into();
     crate::plugins::index::execute_component(request, &mut runtime).unwrap();
-    std::thread::sleep(Duration::from_millis(150));
+    std::thread::sleep(Duration::from_millis(750));
     let start = std::time::Instant::now();
     let mut request = empty_execution_request();
     request.command = "spin".into();
     assert!(crate::plugins::index::execute_component(request, &mut runtime).is_err());
     assert!(
-        start.elapsed() >= Duration::from_millis(120),
+        start.elapsed() >= Duration::from_millis(600),
         "a previous invocation interrupted this one"
     );
 }

@@ -619,7 +619,10 @@ fn diagnostic_picker_keeps_the_path_separate_from_the_message_for_fitting() {
     let row = &app.ui.picker.as_ref().unwrap().rows[0];
     assert_eq!(
         row.label,
-        "packages/deeply/nested/critical_invoice_handler.rs:1"
+        format!(
+            "packages{0}deeply{0}nested{0}critical_invoice_handler.rs:1",
+            std::path::MAIN_SEPARATOR
+        )
     );
     assert_eq!(row.detail, "Check invoice calculation");
     assert_eq!(row.source, "test");

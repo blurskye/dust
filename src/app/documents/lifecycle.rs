@@ -402,7 +402,7 @@ impl Documents {
     }
     pub(in crate::app) fn file_reply(&mut self, id: RequestId, event: VfsResult) -> DocumentEvent {
         match self.pending_files.remove(&id) {
-            Some(intent) => DocumentEvent::File(FileReply { id, intent, event }),
+            Some(intent) => DocumentEvent::File(Box::new(FileReply { id, intent, event })),
             None => DocumentEvent::Discarded,
         }
     }

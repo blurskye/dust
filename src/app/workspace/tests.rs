@@ -907,14 +907,14 @@ pub(in crate::app) fn fixture() -> (Workspace, tempfile::TempDir) {
             (
                 "one".into(),
                 RootIdentity {
-                    canonical_path: "/one".into(),
+                    canonical_path: crate::files::absolute_test_path("/one"),
                     filesystem_identity: Some((1, 1)),
                 },
             ),
             (
                 "two".into(),
                 RootIdentity {
-                    canonical_path: "/two".into(),
+                    canonical_path: crate::files::absolute_test_path("/two"),
                     filesystem_identity: Some((1, 2)),
                 },
             ),
@@ -960,7 +960,7 @@ fn workspace_root_removal_reconciles_remaining_trust() {
 fn workspace_root_addition_reconciles_previously_saved_trust() {
     let (mut owner, _directory) = fixture();
     let identity = RootIdentity {
-        canonical_path: "/three".into(),
+        canonical_path: crate::files::absolute_test_path("/three"),
         filesystem_identity: Some((1, 3)),
     };
     owner.store.trust(identity.clone());
@@ -1002,7 +1002,7 @@ fn workspace_root_replacement_at_capacity_is_atomic() {
             .unwrap();
     }
     let identity = RootIdentity {
-        canonical_path: "/replacement".into(),
+        canonical_path: crate::files::absolute_test_path("/replacement"),
         filesystem_identity: Some((1, 100)),
     };
     owner
@@ -1020,7 +1020,7 @@ fn workspace_root_replacement_at_capacity_is_atomic() {
     );
     assert!(
         matches!(updates.as_slice(), [WorkspaceUpdate::RootSwitched { path, old }]
-            if path == &identity.canonical_path && old == Path::new("/one"))
+            if path == &identity.canonical_path && *old == crate::files::absolute_test_path("/one"))
     );
     assert_eq!(owner.roots().len(), 64);
     assert!(owner.roots().iter().all(|root| root.id != RootId(1)));

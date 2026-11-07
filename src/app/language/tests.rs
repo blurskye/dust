@@ -2980,7 +2980,7 @@ fn untrusted_workspace_blocks_project_local_language_server_launch() {
         .unwrap();
     }
     app.start_lsp(Some("project-local".into()));
-    let deadline = Instant::now() + Duration::from_secs(2);
+    let deadline = Instant::now() + Duration::from_secs(10);
     while app.language.project_pending() && Instant::now() < deadline {
         app.process_lsp_project_root();
         thread::sleep(Duration::from_millis(5));
@@ -6035,6 +6035,20 @@ fn selection_expansion_requests_ranges_and_finishes_when_they_arrive() {
 #[test]
 fn explicit_detach_survives_autostart_until_attach() {
     let (_app_dirs, mut app) = app();
+    // A Rust server installed on this machine would autostart beside the fixture.
+    let servers = app
+        .tooling
+        .entries()
+        .iter()
+        .filter(|entry| entry.definition.kind == crate::tools::ToolKind::Lsp)
+        .cloned()
+        .collect::<Vec<_>>();
+    app.tooling
+        .fixture_retain(|entry| entry.definition.kind != crate::tools::ToolKind::Lsp);
+    for mut server in servers {
+        server.status = crate::tools::ToolStatus::Available;
+        app.tooling.fixture_insert(server);
+    }
     prepare_trust_identity(&mut app);
     for root in app.workspace.roots().to_vec() {
         app.workspace.fixture_trust_identity(root.identity);

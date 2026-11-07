@@ -324,6 +324,12 @@ fn canonical_preflight_portable_pty_drives_external_tui_fixture_without_shell() 
                 } if event_id == id => {
                     raw.extend_from_slice(&bytes);
                     screen.feed_bytes(&bytes);
+                    // Answer queries as the terminal panel does; ConPTY waits for its
+                    // cursor position request to be answered.
+                    let replies = screen.take_replies();
+                    if !replies.is_empty() {
+                        ptys.input(id, replies, 1024).unwrap();
+                    }
                     if !requested_resize
                         && raw.windows(9).any(|w| w == b"ALT_READY")
                         && screen.application_cursor()

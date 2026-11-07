@@ -2592,7 +2592,9 @@ use crate::app::commands::AppEffect;
 use crate::app::commands::PickerKind;
 
 use crate::config::load_bundled_config;
+#[cfg(unix)]
 use crate::config::load_config;
+#[cfg(unix)]
 use crate::config::load_keymaps;
 
 #[test]

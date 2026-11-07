@@ -214,7 +214,10 @@ fn path_completion_keeps_open_buffers_and_lists_directory_children() {
     wait_vfs(&mut app);
     let completions = &app.ui.prompt.as_ref().expect("prompt").completions;
     assert_eq!(completions.len(), 1);
-    assert_eq!(completions[0].label, "src/other.rs");
+    assert_eq!(
+        completions[0].label,
+        format!("src{}other.rs", std::path::MAIN_SEPARATOR)
+    );
 }
 
 #[test]

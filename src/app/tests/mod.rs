@@ -22,6 +22,8 @@ use crate::app::App;
 
 use crate::app::startup::StartupTarget;
 
+// Dust only offers Nix runtimes on Unix.
+#[cfg(unix)]
 #[test]
 fn nix_workspace_fallback_is_reserved_for_nixos_hosts() {
     let definition = crate::tools::bundled_tool_catalog()
@@ -81,6 +83,9 @@ fn app_with_optional_plugin_queue(
     let mut loaded = crate::config::load_bundled_config();
     if let Some(plugin_queue_capacity) = plugin_queue_capacity {
         loaded.config.plugins.queue_capacity = plugin_queue_capacity;
+        // Plugin tests run real guests, and the bundled 100 ms command budget is too
+        // tight on slow CI runners; tests that check expiry move the deadline themselves.
+        loaded.config.plugins.epoch_deadline_ticks = 100;
     }
     let mut app = App::new(
         startup,

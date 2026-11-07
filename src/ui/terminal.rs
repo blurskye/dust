@@ -1077,6 +1077,7 @@ mod tests {
         let mut child = pair.slave.spawn_command(command).unwrap();
         drop(pair.slave);
         let mut output = pair.master.try_clone_reader().unwrap();
+        let mut input = pair.master.take_writer().unwrap();
         let (sender, receiver) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
             let mut text = String::new();
@@ -1087,6 +1088,10 @@ mod tests {
                 text.push(char::from(byte[0]));
                 if text.ends_with("resize-ready") {
                     let _ = sender.send(());
+                }
+                // ConPTY waits for its cursor position request to be answered.
+                if text.ends_with("\x1b[6n") {
+                    let _ = input.write_all(b"\x1b[1;1R");
                 }
             }
         });

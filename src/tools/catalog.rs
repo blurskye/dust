@@ -254,6 +254,7 @@ pub use crate::process::discover_executable;
 
 /// The executables on `PATH`, read with one listing per directory. Looking up every catalog
 /// tool in every directory separately costs thousands of `stat` calls at startup.
+/// On Windows the keys are lowercase, and a bare name maps to its first PATHEXT match.
 struct PathExecutables(HashMap<OsString, PathBuf>);
 
 impl PathExecutables {
@@ -275,10 +276,37 @@ impl PathExecutables {
             let Ok(entries) = fs::read_dir(&directory) else {
                 continue;
             };
+            #[cfg(unix)]
             for entry in entries.flatten() {
                 found
                     .entry(entry.file_name())
                     .or_insert_with(|| entry.path());
+            }
+            #[cfg(windows)]
+            {
+                // Within one directory, `tool.com` beats `tool.exe` when PATHEXT says so.
+                let extensions = crate::process::path_extensions();
+                let mut bare = HashMap::<OsString, (usize, PathBuf)>::new();
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    let name = entry.file_name().to_string_lossy().to_lowercase();
+                    let Some((stem, extension)) = name.rsplit_once('.') else {
+                        continue;
+                    };
+                    if let Some(rank) = extensions
+                        .iter()
+                        .position(|candidate| candidate[1..] == *extension)
+                    {
+                        let best = bare.entry(stem.into()).or_insert((rank, path.clone()));
+                        if rank < best.0 {
+                            *best = (rank, path.clone());
+                        }
+                    }
+                    found.entry(name.into()).or_insert(path);
+                }
+                for (stem, (_, path)) in bare {
+                    found.entry(stem).or_insert(path);
+                }
             }
         }
         Self(found)
@@ -289,12 +317,9 @@ impl PathExecutables {
         if executable.contains(std::path::MAIN_SEPARATOR) {
             return discover_executable(executable);
         }
-        let Some(path) = self.0.get(OsStr::new(executable)) else {
-            #[cfg(windows)]
-            return discover_executable(executable);
-            #[cfg(unix)]
-            return None;
-        };
+        #[cfg(windows)]
+        let executable = &executable.to_lowercase();
+        let path = self.0.get(OsStr::new(executable))?;
         // A directory of that name shadows nothing: keep searching like the plain lookup.
         if executable_file(path) {
             Some(path.clone())

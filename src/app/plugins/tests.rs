@@ -1049,7 +1049,7 @@ fn packaged_production_component_clone_refusal_never_enqueues_a_guest_callback()
     write_plugin_manifest(store.path(), &manifest);
 
     for (command, private) in [("drive", false), ("private", true)] {
-        let (_app_dirs, mut app) = app();
+        let (_app_dirs, mut app) = app_with_plugin_queue(8);
         app.state
             .open_text(TextBuffer::from_text("editor"), None)
             .unwrap();
@@ -1220,7 +1220,7 @@ fn packaged_real_guest_confirmation_updates_its_custom_view() {
         crate::app::plugins::fixture_manifest(format!("{:x}", Sha256::digest(&component)));
     write_plugin_manifest(store.path(), &manifest);
 
-    let (_app_dirs, mut app) = app();
+    let (_app_dirs, mut app) = app_with_plugin_queue(8);
     app.state
         .open_text(TextBuffer::from_text("editor"), None)
         .unwrap();

@@ -3099,8 +3099,8 @@ mod lifecycle_tests {
     fn scoped_reads_reject_windows_junctions() {
         let root = tempfile::tempdir().unwrap();
         let outside = tempfile::tempdir().unwrap();
-        let path = crate::files::canonicalize(&root.path()).unwrap();
-        let target = crate::files::canonicalize(&outside.path()).unwrap();
+        let path = crate::files::canonicalize(root.path()).unwrap();
+        let target = crate::files::canonicalize(outside.path()).unwrap();
         let link = path.join("junction");
         fs::write(target.join("secret"), b"outside").unwrap();
         let status = std::process::Command::new("cmd.exe")

@@ -3,6 +3,7 @@
 use crate::app::documents::DocumentEvent;
 use crate::app::documents::Documents;
 use crate::app::startup::StartupTarget;
+#[cfg(unix)]
 use crate::app::tasks::TaskUpdate;
 use crate::app::tasks::linter::*;
 use crate::config::Config;

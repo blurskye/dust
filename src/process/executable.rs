@@ -23,27 +23,33 @@ pub(crate) fn executable_file(path: &Path) -> bool {
 }
 use std::fs;
 
+/// The extensions Windows tries, in order, for a bare command name, lowercased.
+#[cfg(windows)]
+pub(crate) fn path_extensions() -> Vec<String> {
+    std::env::var("PATHEXT")
+        .unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".into())
+        .split(';')
+        .filter(|value| value.starts_with('.'))
+        .map(str::to_ascii_lowercase)
+        .collect()
+}
+
 /// Search PATH without invoking a shell; Windows also searches PATHEXT.
 pub fn discover_executable(executable: &str) -> Option<std::path::PathBuf> {
     let candidate = Path::new(executable);
     let find = |path: std::path::PathBuf| {
-        if executable_file(&path) {
-            return Some(path);
-        }
+        // Windows cannot start an extensionless file, such as the `sh` shim npm writes
+        // beside `tool.cmd`, so a bare name only matches through PATHEXT there.
         #[cfg(windows)]
         if path.extension().is_none() {
-            let extensions =
-                std::env::var("PATHEXT").unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".into());
-            for extension in extensions.split(';').filter(|value| value.starts_with('.')) {
+            return path_extensions().into_iter().find_map(|extension| {
                 let mut name = path.as_os_str().to_owned();
                 name.push(extension);
                 let candidate = std::path::PathBuf::from(name);
-                if executable_file(&candidate) {
-                    return Some(candidate);
-                }
-            }
+                executable_file(&candidate).then_some(candidate)
+            });
         }
-        None
+        executable_file(&path).then_some(path)
     };
     if candidate.components().count() > 1 {
         return find(std::path::absolute(candidate).ok()?);
@@ -80,13 +86,12 @@ pub(crate) fn terminal_executable(
         {
             for shell in defaults["windows"].as_array().expect("Windows shells") {
                 let name = shell.as_str().expect("shell name");
-                if name.eq_ignore_ascii_case("cmd.exe") {
-                    if let Some(path) = std::env::var_os("ComSpec")
+                if name.eq_ignore_ascii_case("cmd.exe")
+                    && let Some(path) = std::env::var_os("ComSpec")
                         .map(std::path::PathBuf::from)
                         .filter(|path| executable_file(path))
-                    {
-                        return Ok(path);
-                    }
+                {
+                    return Ok(path);
                 }
                 if let Some(path) = discover_executable(name) {
                     return Ok(path);

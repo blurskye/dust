@@ -99,11 +99,12 @@ fn bundled_catalog_is_typed_and_has_real_language_and_debug_tools() {
             .count(),
         3
     );
+    // Dust only offers Nix runtimes on Unix.
     assert!(
         catalog
             .iter()
             .filter(|tool| tool.kind == ToolKind::Lsp && tool.install.is_some())
-            .all(|tool| nix_lsp_shell(tool).is_some())
+            .all(|tool| nix_lsp_shell(tool).is_some() == cfg!(unix))
     );
     assert_eq!(
         catalog
@@ -1442,6 +1443,8 @@ fn pinned_nix_uninstall_removes_only_its_profile_generations() {
     assert_eq!(std::fs::read_dir(&profiles).unwrap().count(), 1);
 }
 
+// Dust only offers Nix runtimes on Unix.
+#[cfg(unix)]
 #[test]
 fn nix_profile_uninstall_reports_metadata_errors_other_than_absence() {
     let directory = tempfile::tempdir().unwrap();

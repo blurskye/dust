@@ -53,7 +53,10 @@ fn launch(root: &Path, script: &Path) -> DapLaunch {
         adapter: "same-name".into(),
         executable: python(),
         arguments: vec!["-u".into(), script.display().to_string()],
-        environment: HashMap::new(),
+        // Windows cannot open sockets in a process without SYSTEMROOT.
+        environment: std::env::vars()
+            .filter(|(name, _)| name.eq_ignore_ascii_case("SYSTEMROOT"))
+            .collect(),
         path_maps: BTreeMap::new(),
         root: root.into(),
         request: "launch".into(),

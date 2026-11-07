@@ -436,7 +436,7 @@ fn working_directory_path(
     }
     #[cfg(windows)]
     {
-        crate::files::canonicalize(&_path)
+        crate::files::canonicalize(_path)
     }
 }
 
