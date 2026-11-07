@@ -2016,6 +2016,7 @@ context = "explorer"
 keys = "a"
 command = "command_line.open"
 arguments = { kind = "command", initial = "exploreradd " }
+desc = "Add file or directory"
 [[keymap]]
 id = "builtin.explorer.surface.explorer-rename.r"
 context = "explorer"
@@ -4278,7 +4279,58 @@ context = "workspace_edit"
 keys = "escape"
 command = "workspace.edit.reject"
 
-# Leader bindings, LazyVim layout. `context = "global"` applies them in the editor
+# Surface help does not intercept text input or existing search keys.
+[[keymap]]
+id = "builtin.explorer.help"
+context = "explorer"
+keys = "?"
+command = "overlay.help.contextual"
+desc = "Explorer key help"
+
+[[keymap]]
+id = "builtin.terminal-normal.help"
+context = "terminal_normal"
+keys = "?"
+command = "overlay.help.contextual"
+desc = "Terminal key help"
+
+[[keymap]]
+id = "builtin.terminal-visual.help"
+context = "terminal_visual"
+keys = "?"
+command = "overlay.help.contextual"
+desc = "Terminal selection key help"
+
+[[keymap]]
+id = "builtin.settings.help"
+context = "settings"
+keys = "?"
+command = "overlay.help.contextual"
+desc = "Settings key help"
+
+[[keymap]]
+id = "builtin.setup.help"
+context = "setup"
+keys = "?"
+command = "overlay.help.contextual"
+desc = "Setup key help"
+
+[[keymap]]
+id = "builtin.tool-manager.help"
+context = "tool_manager"
+keys = "?"
+command = "overlay.help.contextual"
+desc = "Tools key help"
+
+[[keymap]]
+id = "builtin.agent-normal.help"
+context = "agent_normal"
+keys = "?"
+command = "overlay.help.contextual"
+desc = "Agent pane key help"
+
+# Leader bindings, LazyVim layout. Groups use which-key's key order, not priorities.
+# `context = "global"` applies them in the editor
 # (normal mode), explorer, dashboard, terminal normal mode, tool manager and panels.
 
 [[key_group]]
@@ -4287,7 +4339,6 @@ context = "global"
 prefix = "<leader> a"
 label = "AI"
 icon = "󰚩"
-order = 3
 
 [[key_group]]
 id = "builtin.global.group.git-pull-requests"
@@ -4295,109 +4346,96 @@ context = "global"
 prefix = "<leader> g p"
 label = "Pull Requests"
 icon = ""
-order = 27
 
 [[key_group]]
 id = "builtin.global.group.buffers"
 context = "global"
 prefix = "<leader> b"
-label = "Buffers"
+label = "buffers"
 icon = "󰓩"
-order = 5
 
 [[key_group]]
 id = "builtin.global.group.code"
 context = "global"
 prefix = "<leader> c"
-label = "Code"
+label = "code"
 icon = "󰅩"
-order = 10
 
 [[key_group]]
 id = "builtin.global.group.test"
 context = "global"
 prefix = "<leader> t"
-label = "Test"
+label = "test"
 
 [[key_group]]
 id = "builtin.global.group.debug"
 context = "global"
 prefix = "<leader> d"
-label = "Debug"
+label = "debug"
 icon = "󰃤"
-order = 15
 
 [[key_group]]
 id = "builtin.global.group.files"
 context = "global"
 prefix = "<leader> f"
-label = "Files"
+label = "file/find"
 icon = "󰈞"
-order = 20
 
 [[key_group]]
 id = "builtin.global.group.git"
 context = "global"
 prefix = "<leader> g"
-label = "Git"
+label = "git"
 icon = "󰊢"
-order = 25
 
 [[key_group]]
 id = "builtin.global.group.hunks"
 context = "global"
 prefix = "<leader> g h"
-label = "Hunks"
+label = "hunks"
 icon = "󰊢"
-order = 26
 
 [[key_group]]
 id = "builtin.global.group.quit"
 context = "global"
 prefix = "<leader> q"
-label = "Quit"
+label = "quit/session"
 icon = "󰗼"
-order = 30
 
 [[key_group]]
 id = "builtin.global.group.search"
 context = "global"
 prefix = "<leader> s"
-label = "Search"
+label = "search"
 icon = "󰍉"
-order = 35
 
 [[key_group]]
 id = "builtin.global.group.ui"
 context = "global"
 prefix = "<leader> u"
-label = "UI"
+label = "ui"
 icon = "󰙵"
-order = 40
 
 [[key_group]]
 id = "builtin.global.group.windows"
 context = "global"
 prefix = "<leader> w"
-label = "Windows"
+label = "windows"
 icon = "󰖲"
-order = 45
 
 [[key_group]]
 id = "builtin.global.group.diagnostics"
 context = "global"
 prefix = "<leader> x"
-label = "Diagnostics"
+label = "diagnostics/quickfix"
 icon = "󰒡"
-order = 50
 
 [[key_group]]
 id = "builtin.global.group.tabs"
 context = "global"
 prefix = "<leader> tab"
-label = "Tabs"
+label = "tabs"
 icon = "󰓩"
-order = 55
 
 [[keymap]]
 id = "builtin.global.help"

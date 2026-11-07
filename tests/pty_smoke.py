@@ -1548,11 +1548,11 @@ arguments = { force = false }
         )
         assert code == 0
         hint_screen = terminal_screen(snapshots[1])
-        assert "Files" in hint_screen
-        assert "Search" in hint_screen
-        assert "Diagnostics" in hint_screen
-        assert "Code" in hint_screen
-        assert "space" in hint_screen
+        assert "file/find" in hint_screen
+        assert "search" in hint_screen
+        assert "diagnostics/" in hint_screen
+        assert "code" in hint_screen
+        assert "Keys: space" in hint_screen
         goto_screen = terminal_screen(snapshots[3])
         assert "Go to implementation" in goto_screen
         assert "Go to type definition" in goto_screen
@@ -1599,10 +1599,8 @@ order = 1
         assert code == 0
         custom_hint_screen = terminal_screen(snapshots[1])
         assert "Project files" in custom_hint_screen
-        assert "Files" not in custom_hint_screen.replace("Project files", "").replace(
-            "Find Files", ""
-        )
-        assert "," in custom_hint_screen
+        assert "file/find" not in custom_hint_screen
+        assert "Keys: ," in custom_hint_screen
         assert_restored(output)
 
     with tempfile.TemporaryDirectory() as directory:
@@ -1625,9 +1623,9 @@ order = 1
         )
         assert code == 0
         disabled_hint_screen = terminal_screen(snapshots[1])
-        assert "Files" not in disabled_hint_screen
-        assert "Diagnostics" not in disabled_hint_screen
-        assert "Code" not in disabled_hint_screen
+        assert "file/find" not in disabled_hint_screen
+        assert "diagnostics/" not in disabled_hint_screen
+        assert "Keys: space" not in disabled_hint_screen
         assert_restored(output)
 
     with tempfile.TemporaryDirectory() as directory:

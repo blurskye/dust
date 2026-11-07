@@ -401,7 +401,8 @@ pub(super) fn render_key_hints(
         .saturating_mul(columns)
         .saturating_add(usize::from(KEY_HINT_COLUMN_GAP).saturating_mul(columns.saturating_sub(1)))
         .saturating_add(usize::from(KEY_HINT_PADDING).saturating_mul(2))
-        .saturating_add(2);
+        .saturating_add(2)
+        .max(frame.grid.display_width(&hints.prefix) + 10);
     let box_width = u16::try_from(desired_width)
         .unwrap_or(KEY_HINT_MAX_WIDTH)
         .min(KEY_HINT_MAX_WIDTH)
@@ -468,7 +469,7 @@ pub(super) fn render_key_hints(
     frame.grid.put_text_clipped(
         inner_left,
         top.saturating_add(1),
-        &hints.prefix,
+        &format!("Keys: {}", hints.prefix),
         Style::KeyHintPrefix,
         inner_right,
     );
