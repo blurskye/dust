@@ -32,8 +32,8 @@ pub(in crate::app) struct PluginWindowTransition {
     key: Arc<()>,
 }
 pub(in crate::app) struct PluginWindowKey(Arc<()>);
-pub(in crate::app) struct PluginWindowReceipt(Arc<()>);
-impl PluginWindowReceipt {
+pub(in crate::app) struct PluginWindowResult(Arc<()>);
+impl PluginWindowResult {
     pub(in crate::app) fn matches(&self, key: &PluginWindowKey) -> bool {
         Arc::ptr_eq(&self.0, &key.0)
     }
@@ -57,9 +57,9 @@ impl Windows {
         current: &crate::editor::EditorWindowVersion,
         catalog: &crate::plugins::PluginCatalogVersion,
         state: &mut crate::editor::EditorState,
-    ) -> Result<PluginWindowReceipt, String> {
+    ) -> Result<PluginWindowResult, String> {
         self.commit_plugin(transition.draft, current, catalog, state)?;
-        Ok(PluginWindowReceipt(transition.key))
+        Ok(PluginWindowResult(transition.key))
     }
 
     #[cfg(test)]

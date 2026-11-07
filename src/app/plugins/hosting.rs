@@ -6,7 +6,7 @@ use crate::app::plugins::Plugins;
 use crate::app::plugins::panels::PluginUiInteraction;
 use crate::app::plugins::panels::PluginWindowHost;
 use crate::app::windows::PluginWindowKey;
-use crate::app::windows::PluginWindowReceipt;
+use crate::app::windows::PluginWindowResult;
 use crate::app::windows::PluginWindowTransition;
 use crate::app::windows::Windows;
 use crate::editor::EditorState;
@@ -41,7 +41,7 @@ impl WindowPublication<'_> {
     }
     pub(in crate::app) fn finish(
         mut self,
-        accepted: Result<PluginWindowReceipt, String>,
+        accepted: Result<PluginWindowResult, String>,
         revision: Option<u64>,
     ) -> PluginUiEvent {
         let result = accepted.and_then(|accepted| {

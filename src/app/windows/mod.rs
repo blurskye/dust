@@ -294,7 +294,7 @@ pub(in crate::app) fn rect_contains_point(rect: WindowRect, column: u16, row: u1
 
 pub(in crate::app) use plugin::PluginWindowKey;
 
-pub(in crate::app) use plugin::PluginWindowReceipt;
+pub(in crate::app) use plugin::PluginWindowResult;
 
 pub(in crate::app) use plugin::PluginWindowTransition;
 
