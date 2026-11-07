@@ -1940,6 +1940,5 @@ impl App {
     }
 }
 
-#[cfg(all(test, unix))]
 #[cfg(test)]
 pub(in crate::app) mod tests;

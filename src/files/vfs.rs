@@ -18,7 +18,6 @@ use std::thread;
 use std::thread::JoinHandle;
 use std::time::Duration;
 
-#[cfg(unix)]
 use std::fs::File;
 
 use tempfile::NamedTempFile;

@@ -1831,6 +1831,8 @@ mod regression_tests {
         assert!(repo.find_blob(entry.id).unwrap().content().is_empty());
     }
 
+    // Device files and FIFOs are Unix special files.
+    #[cfg(unix)]
     #[test]
     fn stage_requests_reject_special_files_on_the_worker() {
         let (dir, _, editor, mut session) = fixture();
@@ -1947,6 +1949,8 @@ mod regression_tests {
         assert!(!session.take_show_worktrees());
     }
 
+    // Creating symlinks on Windows needs extra privileges.
+    #[cfg(unix)]
     #[test]
     fn worktree_removal_refuses_unsaved_buffers_including_new_files() {
         let (dir, _, mut editor, mut session) = fixture();

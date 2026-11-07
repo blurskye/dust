@@ -54,6 +54,11 @@ pub(crate) fn file_identity(file: &fs::File) -> std::io::Result<(u64, u64)> {
         let metadata = file.metadata()?;
         Ok((metadata.dev(), metadata.ino()))
     }
+    #[cfg(windows)]
+    {
+        let information = winapi_util::file::information(file)?;
+        Ok((information.volume_serial_number(), information.file_index()))
+    }
 }
 
 #[cfg(test)]

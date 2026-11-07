@@ -1071,12 +1071,14 @@ impl TestSession {
 }
 
 impl TestSession {
-    #[cfg(unix)]
     pub(in crate::app) fn debug_program_fixture(&self) {
-        use std::os::unix::fs::PermissionsExt;
         let path = self._workspace.path().join("debuggee");
         std::fs::write(&path, "#!/bin/sh\nexit 0\n").unwrap();
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
+        }
     }
     pub(in crate::app) fn debug_start_native_program_fixture(&mut self) {
         let source = self._workspace.path().join("main.rs");

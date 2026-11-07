@@ -1292,6 +1292,8 @@ pub(super) fn apply_change_plan(
 mod tests {
     use crate::git::mutation::*;
 
+    // FIFOs and symlinks are Unix special files here.
+    #[cfg(unix)]
     #[test]
     fn worktree_hash_rejects_special_files_and_bounds_regular_reads() {
         let dir = tempfile::tempdir().unwrap();

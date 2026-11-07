@@ -1118,9 +1118,9 @@ while True:
         )
         assert code == 0
         initial_terminal = terminal_screen(snapshots[6], 100, 30)
-        assert "sh ·" in initial_terminal.splitlines()[19]
-        assert pathlib.Path(directory).name in initial_terminal.splitlines()[19]
-        assert "Normal mode" in initial_terminal.splitlines()[19]
+        assert "sh ·" in initial_terminal.splitlines()[19], initial_terminal
+        assert pathlib.Path(directory).name in initial_terminal.splitlines()[19], initial_terminal
+        assert "Normal mode" in initial_terminal.splitlines()[19], initial_terminal
         focused = terminal_screen(snapshots[7], 100, 30)
         focused_rows = focused.splitlines()
         assert pathlib.Path(directory).name in focused and "EDITOR-TOP" in focused

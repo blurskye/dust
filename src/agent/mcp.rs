@@ -261,10 +261,15 @@ mod tests {
     use super::*;
     use std::io::BufReader;
     use std::io::Cursor;
+    #[cfg(unix)]
     use std::os::unix::net::UnixListener;
     use std::time::Duration;
     use std::time::Instant;
+    #[cfg(windows)]
+    use uds_windows::UnixListener;
 
+    // Byte paths that are not UTF-8 exist only on Unix.
+    #[cfg(unix)]
     #[test]
     fn mcp_server_entry_rejects_non_utf8_paths() {
         use std::ffi::OsStr;

@@ -1869,6 +1869,8 @@ fn package_resolver_and_verifier_accept_uppercase_digests() {
     }
 }
 
+// FIFOs and symlinks are Unix special files here.
+#[cfg(unix)]
 #[test]
 fn package_reader_accepts_exact_limit_and_rejects_excess_and_special_files() {
     use crate::tools::package_lock::read_bounded_regular;
@@ -1903,6 +1905,8 @@ fn package_reader_bounds_streams_whose_metadata_understates_their_size() {
     ));
 }
 
+// FIFOs are Unix special files.
+#[cfg(unix)]
 #[test]
 fn package_verification_bounds_objects_and_rejects_non_regular_entries() {
     let root = tempfile::tempdir().unwrap();

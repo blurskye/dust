@@ -3,6 +3,8 @@
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
+#[cfg(windows)]
+use std::path::PathBuf;
 use std::time::Duration;
 use std::time::Instant;
 

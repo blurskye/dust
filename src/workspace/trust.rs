@@ -579,6 +579,8 @@ mod persistence_tests {
         }
     }
 
+    // Byte paths that are not UTF-8 exist only on Unix.
+    #[cfg(unix)]
     #[test]
     fn non_utf8_trust_paths_round_trip_without_changing_utf8_records() {
         use std::os::unix::ffi::OsStringExt;

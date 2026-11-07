@@ -1266,8 +1266,8 @@ fn expand_placeholders(
     let expand = |value: &std::ffi::OsStr| -> Result<std::ffi::OsString, String> {
         #[cfg(unix)]
         use std::os::unix::ffi::OsStrExt;
+        #[cfg(unix)]
         use std::os::unix::ffi::OsStringExt;
-        #[cfg(windows)]
         #[cfg(windows)]
         use std::os::windows::ffi::OsStrExt;
         #[cfg(windows)]

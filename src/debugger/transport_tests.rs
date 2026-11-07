@@ -63,7 +63,8 @@ fn launch(root: &Path, script: &Path) -> DapLaunch {
     }
 }
 fn wait(mut predicate: impl FnMut() -> bool) {
-    let deadline = Instant::now() + Duration::from_secs(3);
+    // Each call takes at most one event, and sleeps are coarse on loaded CI machines.
+    let deadline = Instant::now() + Duration::from_secs(10);
     while !predicate() {
         assert!(Instant::now() < deadline, "owned adapter deadline");
         thread::sleep(Duration::from_millis(2));

@@ -27,6 +27,11 @@ use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::UnixListener;
 #[cfg(unix)]
 pub use std::os::unix::net::UnixStream;
+// Windows 10 and later have AF_UNIX sockets; this crate gives them std's API.
+#[cfg(windows)]
+use uds_windows::UnixListener;
+#[cfg(windows)]
+pub use uds_windows::UnixStream;
 
 use std::path::Path;
 
@@ -105,6 +110,16 @@ impl Reply {
                 return false;
             }
             matches!((&self.stream).read(&mut [0]), Ok(0))
+        }
+        #[cfg(windows)]
+        {
+            // Without poll, a non-blocking read tells a closed peer (end of file) apart.
+            if self.stream.set_nonblocking(true).is_err() {
+                return false;
+            }
+            let closed = matches!((&self.stream).read(&mut [0]), Ok(0));
+            let _ = self.stream.set_nonblocking(false);
+            closed
         }
     }
 
@@ -203,10 +218,16 @@ impl RemoteServer {
                     }
                     let mut stream = match listener.accept() {
                         Ok((stream, _)) => stream,
-                        Err(error) if error.kind() == io::ErrorKind::WouldBlock => continue,
+                        Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                            // Windows has no poll here, so the listener checks for a stop
+                            // request between non-blocking accepts.
+                            #[cfg(windows)]
+                            thread::sleep(Duration::from_millis(20));
+                            continue;
+                        }
                         Err(_) => break,
                     };
-                    // macOS hands accepted sockets the listener's non-blocking mode.
+                    // macOS and Windows hand accepted sockets the listener's non-blocking mode.
                     if stream.set_nonblocking(false).is_err() {
                         continue;
                     }
