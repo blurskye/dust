@@ -451,6 +451,7 @@ impl App {
             effect_authority: crate::editor::CommandAuthority::Host,
             effect_failed: false,
             input: InputState::new(ABSOLUTE_MAX_COUNT),
+            input_replacement: crate::app::prompt::replacement::InputReplacement::default(),
             configuration: Configuration::new(
                 configuration,
                 use_user_configuration,

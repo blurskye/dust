@@ -1,4 +1,5 @@
 //! Checked window operations, native surfaces and accepted geometry.
+pub(in crate::app) mod chrome;
 pub(in crate::app) mod content;
 mod focus;
 mod native;
@@ -144,6 +145,7 @@ pub(super) struct Windows {
     origin: Arc<()>,
     epoch: u64,
     content_line: content::ContentLine,
+    chrome: crate::ui::render::chrome::ChromeLayout,
     focus: FocusTarget,
     /// Where the keyboard was before the terminal took it, so hiding the terminal goes back there.
     before_terminal: FocusTarget,
@@ -564,6 +566,7 @@ impl App {
             self.configuration.reload_id(),
         );
         self.ui.content_tabs = self.window_session.content_tabs().to_vec();
+        self.ui.chrome = self.window_session.chrome_layout().clone();
     }
 }
 

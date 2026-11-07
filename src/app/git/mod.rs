@@ -3118,7 +3118,8 @@ impl App {
             return;
         };
         match self.request_save_buffer(buffer, false, None, false, None) {
-            Ok(id) => self.input.bind_stage_save(id),
+            Ok(Some(id)) => self.input.bind_stage_save(id),
+            Ok(None) => self.documents.stage_after_save_work(buffer),
             Err(error) => {
                 self.input.clear_pending_stage();
                 self.show_document_failure(error);

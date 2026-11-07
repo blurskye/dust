@@ -2595,6 +2595,17 @@ impl App {
 
 impl App {
     pub(in crate::app) fn handle_configured_key(&mut self, key: KeyEvent) {
+        if self.input_replacement_pending() || self.select_replacement_pending() {
+            if key.code == crate::editor::input::KeyCode::Escape {
+                if self.input_replacement_pending() {
+                    self.close_prompt();
+                }
+                if self.select_replacement_pending() {
+                    self.close_picker();
+                }
+            }
+            return;
+        }
         if self.input.command_pending() {
             self.input
                 .held_input
@@ -2774,6 +2785,9 @@ impl App {
 
 impl App {
     pub(in crate::app) fn handle_configured_paste(&mut self, text: String) {
+        if self.input_replacement_pending() || self.select_replacement_pending() {
+            return;
+        }
         if self.input.command_pending() {
             self.input
                 .held_input

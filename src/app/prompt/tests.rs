@@ -6,6 +6,59 @@ use crate::editor::InvocationSource;
 use crate::editor::input::KeyEvent;
 
 #[test]
+fn replacement_input_runs_the_native_continuation_and_escape_discards_late_answers() {
+    let (_dirs, mut app) = app();
+    let (sender, requests) = std::sync::mpsc::sync_channel(4);
+    app.input_replacement.install(Some(sender));
+    app.open_prompt(crate::ui::PromptKind::ReplaceFind, "draft".into());
+    let request = requests.try_recv().unwrap();
+    assert_eq!(request.prompt.input, "draft");
+    assert!(app.ui.prompt.is_none());
+    request.reply.send(Some("needle".into())).unwrap();
+    app.process_input_replacement();
+    assert_eq!(app.replace_query.as_deref(), Some("needle"));
+    let next = requests.try_recv().unwrap();
+    assert_eq!(next.prompt.kind, crate::ui::PromptKind::ReplaceWith);
+    app.handle_configured_key("escape".parse().unwrap());
+    assert!(next.reply.send(Some("late".into())).is_err());
+    assert!(app.input.prompt().is_none());
+}
+
+#[test]
+fn trust_and_permission_prompts_cannot_be_replaced() {
+    let (_dirs, mut app) = app();
+    let (sender, requests) = std::sync::mpsc::sync_channel(4);
+    app.input_replacement.install(Some(sender));
+    for kind in [
+        crate::ui::PromptKind::WorkspaceTrust,
+        crate::ui::PromptKind::AgentPermission,
+        crate::ui::PromptKind::PluginConfirmation,
+    ] {
+        app.open_confirmation(
+            kind,
+            "Permission".into(),
+            "Allow?".into(),
+            crate::ui::ConfirmationChoice::No,
+        );
+        assert!(requests.try_recv().is_err());
+        assert!(app.ui.prompt.as_ref().unwrap().confirmation.is_some());
+        assert!(!app.input_replacement_pending());
+        app.close_prompt();
+    }
+}
+
+#[test]
+fn disconnected_input_replacement_falls_back_without_losing_the_draft() {
+    let (_dirs, mut app) = app();
+    let (sender, requests) = std::sync::mpsc::sync_channel(4);
+    app.input_replacement.install(Some(sender));
+    app.open_prompt(crate::ui::PromptKind::ReplaceFind, "draft".into());
+    drop(requests.try_recv().unwrap());
+    app.process_input_replacement();
+    assert_eq!(app.ui.prompt.as_ref().unwrap().input, "draft");
+}
+
+#[test]
 fn help_preserves_a_draft_and_a_pending_confirmation() {
     let (_app_dirs, mut app) = app();
     app.open_prompt(crate::ui::PromptKind::Command, "exploreradd ".into());

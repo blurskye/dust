@@ -7,6 +7,7 @@ pub(in crate::app) const LARGE_FILE_BYTES: usize = 16 * 1024 * 1024;
 pub(in crate::app) const LARGE_FILE_LINES: usize = 250_000;
 
 mod lifecycle;
+pub(in crate::app) mod save_work;
 #[cfg(test)]
 pub(in crate::app) use lifecycle::configured_file_bytes;
 mod task_io;
@@ -99,6 +100,7 @@ pub(super) struct Documents {
     policy_editor: EditorWindowVersion,
     overrides: HashMap<BufferId, LargeFileOverride>,
     restored_overrides: HashMap<PathBuf, LargeFileOverride>,
+    save_work: save_work::SaveWork,
 }
 impl Documents {
     pub(in crate::app) fn new(
@@ -146,6 +148,7 @@ impl Documents {
             root_revision,
             overrides: HashMap::new(),
             restored_overrides: HashMap::new(),
+            save_work: save_work::SaveWork::default(),
         }
     }
     pub(in crate::app) fn startup_activation(
@@ -998,6 +1001,7 @@ impl App {
 
 impl App {
     pub(in crate::app) fn process_vfs_results(&mut self) {
+        self.process_save_work();
         self.process_pending_saves();
         loop {
             self.submit_restore_reads();
@@ -1519,7 +1523,6 @@ use crate::app::commands::AppEffect;
 use crate::app::picker::PickerPayload;
 use crate::app::windows::EditorCloseSave;
 use crate::language::lsp::LspDocument;
-use crate::language::lsp::LspFeature;
 use crate::language::lsp::language_id_for_path;
 use crate::tools::managed_formatter;
 use crate::ui::render::SCRATCH_LABEL;
@@ -1794,6 +1797,14 @@ impl App {
         if !self.configuration.settings().lsp.format_on_save {
             return false;
         }
+        self.begin_formatting_chain(quit_after, true)
+    }
+
+    pub(in crate::app) fn begin_document_format(&mut self) -> bool {
+        self.begin_formatting_chain(false, false)
+    }
+
+    fn begin_formatting_chain(&mut self, quit_after: bool, save_after: bool) -> bool {
         if let Some(pending) = self
             .state
             .active_buffer_id()
@@ -1803,22 +1814,40 @@ impl App {
             pending.authority = pending.authority.restrict(&self.effect_authority);
             return true;
         }
-        // An installed formatter runs as a process, which takes longer to start than a request.
-        let managed =
-            self.workspace.execution_allowed().is_ok() && self.active_formatter().is_some();
-        let buffer = if managed {
-            self.state.active_buffer_id()
-        } else {
-            self.active_lsp_document_without_text()
-                .and_then(|(buffer, document)| {
-                    self.language
-                        .formatting_server(buffer, &document)
-                        .map(|_| buffer)
-                })
-        };
-        let Some(buffer) = buffer else {
+        let Some(buffer) = self.state.active_buffer_id() else {
             return false;
         };
+        let chain = self
+            .documents
+            .formatter_chain(&self.save_filetype(buffer))
+            .unwrap_or_else(|| {
+                // As in LazyVim, an installed formatter takes precedence over LSP by default.
+                if (!save_after || self.workspace.execution_allowed().is_ok())
+                    && let Some(tool) = self.active_formatter()
+                {
+                    return VecDeque::from([save_work::Formatter::Tool(tool)]);
+                }
+                if self
+                    .active_lsp_document_without_text()
+                    .is_some_and(|(buffer, document)| {
+                        self.language.formatting_server(buffer, &document).is_some()
+                    })
+                {
+                    VecDeque::from([save_work::Formatter::Lsp])
+                } else {
+                    VecDeque::new()
+                }
+            });
+        if chain.is_empty() {
+            return false;
+        }
+        if !save_after {
+            self.documents.save_work.format_only.insert(buffer);
+        }
+        self.documents
+            .save_work
+            .remaining_formatters
+            .insert(buffer, chain);
         self.format_on_save.insert(
             buffer,
             crate::app::FormatOnSave {
@@ -1827,26 +1856,13 @@ impl App {
                 buffer,
                 source: self.state.buffers[buffer].text.source_version(),
                 path: self.state.buffers[buffer].path.clone(),
-                formatter: if managed {
-                    self.active_formatter()
-                } else {
-                    None
-                },
-                started: !managed,
+                formatter: None,
+                started: false,
                 quit_after,
-                // VS Code gives formatters 750ms by default; a slow server must not hold a save back.
-                deadline: std::time::Instant::now()
-                    + std::time::Duration::from_millis(if managed { 3000 } else { 1000 }),
+                deadline: Instant::now() + std::time::Duration::from_secs(3),
             },
         );
-        if managed {
-            self.start_pending_save_formatters();
-        } else {
-            self.request_lsp(LspFeature::Formatting {
-                tab_size: self.state.policy.tab_width,
-                insert_spaces: self.state.policy.expand_tabs,
-            });
-        }
+        self.start_next_save_formatter(buffer);
         true
     }
 }
@@ -1899,7 +1915,7 @@ impl App {
 
 impl App {
     pub(in crate::app) fn finish_format_on_save(&mut self, buffer: crate::editor::BufferId) {
-        let Some(pending) = self.format_on_save.remove(&buffer) else {
+        let Some(mut pending) = self.format_on_save.remove(&buffer) else {
             return;
         };
         if pending.started
@@ -1907,7 +1923,7 @@ impl App {
         {
             self.tasks.stop_formatter(formatter, pending.buffer);
         }
-        if let Some((server, request_id)) = pending.request {
+        if let Some((server, request_id)) = pending.request.take() {
             let _ = self.language.cancel(&server, request_id);
             self.language.retire_request(&server, request_id);
         }
@@ -1922,6 +1938,25 @@ impl App {
                         .same_incarnation(&buffer.text.source_version())
             })
         {
+            if self
+                .documents
+                .save_work
+                .remaining_formatters
+                .get(&buffer)
+                .is_some_and(|steps| !steps.is_empty())
+            {
+                pending.source = self.state.buffers[buffer].text.source_version();
+                self.format_on_save.insert(buffer, pending);
+                self.start_next_save_formatter(buffer);
+                return;
+            }
+            self.documents
+                .save_work
+                .remaining_formatters
+                .remove(&buffer);
+            if self.documents.save_work.format_only.remove(&buffer) {
+                return;
+            }
             let previous = std::mem::replace(&mut self.effect_authority, pending.authority);
             match self.request_save_buffer(pending.buffer, pending.quit_after, None, false, None) {
                 Ok(_) => self.notify_message(self.message("saving", &[]), false),
@@ -2014,7 +2049,11 @@ impl App {
         let expired = self
             .format_on_save
             .values()
-            .filter(|pending| pending.started && Instant::now() >= pending.deadline)
+            .filter(|pending| {
+                pending.started
+                    && Instant::now() >= pending.deadline
+                    && !self.documents.save_work_pending(pending.buffer)
+            })
             .map(|pending| pending.buffer)
             .collect::<Vec<_>>();
         for buffer in expired {
@@ -2066,8 +2105,10 @@ impl App {
             .state
             .buffers
             .iter()
-            .filter(|(_, buffer)| {
-                buffer.dirty && buffer.path.is_some() && buffer.virtual_owner().is_none()
+            .filter(|(id, buffer)| {
+                buffer.dirty
+                    && (self.documents.editable_document(*id)
+                        || buffer.path.is_some() && buffer.virtual_owner().is_none())
             })
             .map(|(id, _)| id)
             .collect();
@@ -2122,6 +2163,27 @@ impl App {
 
 impl App {
     pub(in crate::app) fn request_save_buffer(
+        &mut self,
+        buffer: crate::editor::BufferId,
+        quit_after: bool,
+        requested_path: Option<PathBuf>,
+        force: bool,
+        close: Option<EditorCloseSave>,
+    ) -> Result<Option<crate::files::RequestId>, crate::app::documents::DocumentFailure> {
+        if self.begin_save_work(
+            buffer,
+            quit_after,
+            requested_path.clone(),
+            force,
+            close.clone(),
+        )? {
+            return Ok(None);
+        }
+        self.request_disk_save(buffer, quit_after, requested_path, force, close)
+            .map(Some)
+    }
+
+    fn request_disk_save(
         &mut self,
         buffer: crate::editor::BufferId,
         quit_after: bool,
@@ -2190,6 +2252,7 @@ impl App {
         clean: bool,
     ) {
         self.recovery.forget_buffer(buffer_id, clean);
+        self.documents.forget_save_work(buffer_id);
         self.documents.cancel_buffer_requests(buffer_id, path);
         if let Some(path) = path
             && let Some(id) = self.explorer.exclude_buffer_path(path)

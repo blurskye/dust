@@ -20,7 +20,7 @@ pub(super) struct ContentLine {
     pins: BTreeSet<BufferId>,
     order_revision: u64,
     diagnostic_revision: u64,
-    signature: Option<(u64, u64, u64, u64)>,
+    pub(super) signature: Option<(u64, u64, u64, u64)>,
     entries: Vec<ContentTabEntry>,
     #[cfg(test)]
     builds: usize,
@@ -266,7 +266,7 @@ impl Windows {
                             (icon, diagnostic, true)
                         },
                     );
-                    let entry = ContentTabEntry {
+                    let mut entry = ContentTabEntry {
                         identity: ContentTabIdentity(content.id),
                         kind: if buffer
                             .is_some_and(|buffer| state.buffers()[buffer].is_virtual_read_only())
@@ -282,7 +282,13 @@ impl Windows {
                         diagnostic,
                         icon,
                         closeable,
+                        segments: None,
                     };
+                    entry.segments = Some(crate::app::windows::chrome::project_buffer_segments(
+                        &entry,
+                        config,
+                        &self.chrome,
+                    ));
                     (
                         (
                             if buffer.is_some() {

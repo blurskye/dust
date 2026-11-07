@@ -534,41 +534,72 @@ pub(super) fn formatted_content_tab(
     )
 }
 
-pub(super) fn content_tab_segments(
+pub(crate) fn builtin_content_tab_segments(
     entry: &ContentTabEntry,
     config: &Config,
-) -> Vec<(String, Style)> {
+) -> Vec<crate::ui::render::chrome::ChromeSegment> {
+    use crate::ui::render::chrome::ChromeSegment;
     let (before, dirty, after, style) = formatted_content_tab(entry, config);
     let mut segments = Vec::with_capacity(8);
+    let mut push = |name: &str, text, style| {
+        segments.push(ChromeSegment {
+            name: name.into(),
+            text,
+            style,
+        })
+    };
     if entry.pinned {
-        segments.push((format!("{BUFFER_PIN_MARKER} "), Style::BufferLinePin));
+        push("pin", format!("{BUFFER_PIN_MARKER} "), Style::BufferLinePin);
     }
     // Inactive tabs are drawn in one quiet style so the active one stands out.
     let accent = |role| if entry.active { role } else { style };
-    segments.push((format!(" {} ", entry.icon), accent(Style::BufferLineIcon)));
-    segments.push((before, style));
+    push(
+        "icon",
+        format!(" {} ", entry.icon),
+        accent(Style::BufferLineIcon),
+    );
+    push("title", before, style);
     if !dirty.is_empty() {
-        segments.push((dirty, Style::BufferLineDirty));
+        push("dirty", dirty, Style::BufferLineDirty);
     }
     if let Some(diagnostic) = entry.diagnostic {
         let marker = match diagnostic.severity {
             ContentTabDiagnosticSeverity::Error => BUFFER_ERROR_MARKER,
             ContentTabDiagnosticSeverity::Warning => BUFFER_WARNING_MARKER,
         };
-        segments.push((
+        push(
+            "diagnostics",
             format!(" {marker}{}", diagnostic.count),
             Style::BufferLineDiagnostic,
-        ));
+        );
     }
     if entry.closeable {
-        segments.push((
+        push(
+            "close",
             format!(" {BUFFER_CLOSE_MARKER}"),
             accent(Style::BufferLineClose),
-        ));
+        );
     }
-    segments.push((after, style));
-    segments.push((BUFFER_SEPARATOR.to_owned(), Style::BufferLineSeparator));
+    push("suffix", after, style);
+    push(
+        "separator",
+        BUFFER_SEPARATOR.to_owned(),
+        Style::BufferLineSeparator,
+    );
     segments
+}
+
+pub(super) fn content_tab_segments(
+    entry: &ContentTabEntry,
+    config: &Config,
+) -> Vec<(String, Style)> {
+    entry
+        .segments
+        .clone()
+        .unwrap_or_else(|| builtin_content_tab_segments(entry, config))
+        .into_iter()
+        .map(|segment| (segment.text, segment.style))
+        .collect()
 }
 
 pub(super) fn content_tab_width(entry: &ContentTabEntry, config: &Config) -> usize {

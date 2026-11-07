@@ -2229,9 +2229,12 @@ impl App {
 impl App {
     pub(in crate::app) fn request_lsp(&mut self, mut feature: LspFeature) {
         if matches!(feature, LspFeature::Formatting { .. })
-            && let Some(tool) = self.active_formatter()
+            && !self
+                .state
+                .active_buffer_id()
+                .is_some_and(|buffer| self.format_on_save.contains_key(&buffer))
+            && self.begin_document_format()
         {
-            self.process_effect(AppEffect::FormatRun(tool));
             return;
         }
         if matches!(feature, LspFeature::InlayHints { .. }) {

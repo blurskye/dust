@@ -30,6 +30,7 @@ use explorer::place_workspace_frame;
 
 use explorer::render_explorer_window;
 
+pub mod chrome;
 pub(crate) mod overlays;
 
 use crate::ui::geometry::text_width;
@@ -1084,6 +1085,8 @@ pub struct ContentTabEntry {
     pub diagnostic: Option<ContentTabDiagnostic>,
     pub icon: String,
     pub closeable: bool,
+    /// None asks for the built-in projection, as used by independent tab strips.
+    pub segments: Option<Vec<chrome::ChromeSegment>>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1296,6 +1299,7 @@ pub struct YankHighlight {
 
 #[derive(Clone, Debug, Default)]
 pub struct UiState {
+    pub chrome: chrome::ChromeLayout,
     pub surface_content: crate::ui::render::SurfaceContentGeometry,
     pub dashboard: bool,
     pub prompt: Option<PromptState>,

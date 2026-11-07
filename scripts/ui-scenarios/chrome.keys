@@ -1,0 +1,23 @@
+# Default statusline and buffer line with two ordinary files open.
+wait 800
+key escape
+wait 1500
+key escape
+wait 300
+key space space
+wait 500
+type src/main.rs
+wait 500
+key enter
+wait 1800
+key escape
+wait 300
+key space space
+wait 500
+type src/lib.rs
+wait 500
+key enter
+wait 1800
+key escape
+wait 300
+shot chrome

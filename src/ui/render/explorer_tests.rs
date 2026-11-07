@@ -35,6 +35,7 @@ fn buffer_line_begins_after_the_explorer_dock() {
                 diagnostic: None,
                 icon: "R".into(),
                 closeable: true,
+                segments: None,
             },
             crate::ui::render::ContentTabEntry {
                 identity: crate::ui::render::ContentTabIdentity(crate::windows::ContentId(2)),
@@ -46,6 +47,7 @@ fn buffer_line_begins_after_the_explorer_dock() {
                 diagnostic: None,
                 icon: "R".into(),
                 closeable: true,
+                segments: None,
             },
         ],
         explorer: Some(crate::ui::render::ExplorerUiState {

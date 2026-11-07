@@ -2571,6 +2571,7 @@ impl App {
             diagnostic: None,
             icon: AGENT_ICON.into(),
             closeable,
+            segments: None,
         };
         let mut tabs = self
             .agent

@@ -1202,7 +1202,17 @@ pub(super) fn render_status_line(
     };
     grid.fill_row(status_y, Style::Status);
     let status = &config.ui.status_line;
-    let shown = |component: &str| status.components.iter().any(|item| item == component);
+    let default_order = crate::ui::render::chrome::ChromeLayout::default().status;
+    let custom_order = ui.chrome.status != default_order;
+    let components = if custom_order {
+        &ui.chrome.status
+    } else {
+        &status.components
+    };
+    let shown = |component: &str| {
+        status.components.iter().any(|item| item == component)
+            && ui.chrome.status.iter().any(|item| item == component)
+    };
     // The agent panel's input has its own Insert and Normal modes.
     let panel = ui
         .agent_panel
@@ -1288,7 +1298,7 @@ pub(super) fn render_status_line(
     let cursor_line = buffer.text.byte_to_line(view.cursor).unwrap_or(0);
     // After the file, in the configured order. These go whole or not at all.
     let mut left_fields = Vec::new();
-    for component in &status.components {
+    for component in components {
         match component.as_str() {
             "breadcrumbs" => {
                 let trail = ui
@@ -1304,6 +1314,7 @@ pub(super) fn render_status_line(
                 if !trail.is_empty() {
                     let deepest = &trail[trail.len().saturating_sub(3)..];
                     left_fields.push((
+                        component.as_str(),
                         format!("\u{203a} {}", deepest.join(" \u{203a} ")),
                         Style::Status,
                     ));
@@ -1311,19 +1322,35 @@ pub(super) fn render_status_line(
             }
             "diagnostics" => {
                 if errors > 0 {
-                    left_fields.push((format!("{error_icon}{errors}"), Style::StatusError));
+                    left_fields.push((
+                        component.as_str(),
+                        format!("{error_icon}{errors}"),
+                        Style::StatusError,
+                    ));
                 }
                 if warnings > 0 {
-                    left_fields.push((format!("{warning_icon}{warnings}"), Style::StatusWarning));
+                    left_fields.push((
+                        component.as_str(),
+                        format!("{warning_icon}{warnings}"),
+                        Style::StatusWarning,
+                    ));
                 }
             }
-            "tasks" if ui.running_tasks > 0 => {
-                left_fields.push((format!("Tasks {}", ui.running_tasks), Style::Status))
+            "tasks" if ui.running_tasks > 0 => left_fields.push((
+                component.as_str(),
+                format!("Tasks {}", ui.running_tasks),
+                Style::Status,
+            )),
+            "large_file" if ui.large_file_buffers.contains(&view.buffer) => left_fields.push((
+                component.as_str(),
+                LARGE_FILE_LABEL.to_owned(),
+                Style::StatusWarning,
+            )),
+            name => {
+                if let Some((text, style)) = ui.chrome.status_text.get(name) {
+                    left_fields.push((component.as_str(), text.clone(), *style));
+                }
             }
-            "large_file" if ui.large_file_buffers.contains(&view.buffer) => {
-                left_fields.push((LARGE_FILE_LABEL.to_owned(), Style::StatusWarning))
-            }
-            _ => {}
         }
     }
     let branch = ui
@@ -1399,15 +1426,6 @@ pub(super) fn render_status_line(
         .filter(|_| shown("lsp"))
         .map(|server| STATUS_LSP_FORMAT.replace("{server}", server))
         .filter(|text| fits(text_cells(text, config).saturating_add(separator_cells)));
-    let right_fields = status
-        .components
-        .iter()
-        .filter_map(|component| match component.as_str() {
-            "root" => root.as_deref(),
-            "lsp" => lsp.as_deref(),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
 
     let left_limit = width.saturating_sub(right_cells);
     let mut x = grid.put_text_clipped(
@@ -1417,39 +1435,100 @@ pub(super) fn render_status_line(
         Style::StatusAccent,
         left_limit,
     );
-    x = grid.put_text_clipped(x, status_y, &mode, mode_style, left_limit);
-    x = grid.put_text_clipped(x, status_y, end_edge, mode_edge, left_limit);
-    x = grid.put_text_clipped(
-        x,
-        status_y,
-        branch.as_deref().unwrap_or(" "),
-        Style::StatusSection,
-        left_limit,
-    );
-    x = grid.put_text_clipped(x, status_y, end_edge, Style::StatusEdgeSection, left_limit);
-    x = x.saturating_add(1);
-    x = grid.put_text_clipped(x, status_y, &file, Style::Status, left_limit);
-    for (text, style) in &left_fields {
-        let next = x.saturating_add(separator_cells);
-        // At least one blank before the right side, so the two never read as one word.
-        if next.saturating_add(text_cells(text, config)) >= left_limit {
-            continue;
+    let left_order: Vec<&str> = if custom_order {
+        components.iter().map(String::as_str).collect()
+    } else {
+        ["mode", "git", "file"]
+            .into_iter()
+            .chain(
+                components
+                    .iter()
+                    .map(String::as_str)
+                    .filter(|name| !matches!(*name, "mode" | "git" | "file")),
+            )
+            .collect()
+    };
+    for name in left_order {
+        match name {
+            "mode" => {
+                x = grid.put_text_clipped(x, status_y, &mode, mode_style, left_limit);
+                x = grid.put_text_clipped(x, status_y, end_edge, mode_edge, left_limit);
+            }
+            "git" => {
+                x = grid.put_text_clipped(
+                    x,
+                    status_y,
+                    branch.as_deref().unwrap_or(" "),
+                    Style::StatusSection,
+                    left_limit,
+                );
+                x = grid.put_text_clipped(
+                    x,
+                    status_y,
+                    end_edge,
+                    Style::StatusEdgeSection,
+                    left_limit,
+                );
+            }
+            "file" => {
+                x = x.saturating_add(1);
+                x = grid.put_text_clipped(x, status_y, &file, Style::Status, left_limit);
+            }
+            _ => {
+                for (_, text, style) in left_fields
+                    .iter()
+                    .filter(|(segment, _, _)| *segment == name)
+                {
+                    let next = x.saturating_add(separator_cells);
+                    // At least one blank before the right side, so the two never read as one word.
+                    if next.saturating_add(text_cells(text, config)) >= left_limit {
+                        continue;
+                    }
+                    x = grid.put_text_clipped(next, status_y, text, *style, left_limit);
+                }
+            }
         }
-        x = grid.put_text_clipped(next, status_y, text, *style, left_limit);
     }
 
     let mut x = left_limit;
-    for text in right_fields {
-        x = grid.put_text_clipped(x, status_y, text, Style::Status, width);
-        x = x.saturating_add(separator_cells);
-    }
-    if let Some(text) = &progress {
-        x = grid.put_text_clipped(x, status_y, start_edge, Style::StatusEdgeSection, width);
-        x = grid.put_text_clipped(x, status_y, text, Style::StatusSection, width);
-    }
-    if let Some(text) = &position {
-        x = grid.put_text_clipped(x, status_y, start_edge, mode_edge, width);
-        grid.put_text_clipped(x, status_y, text, mode_style, width);
+    let right_order: Vec<&str> = if custom_order {
+        components.iter().map(String::as_str).collect()
+    } else {
+        components
+            .iter()
+            .map(String::as_str)
+            .filter(|name| matches!(*name, "root" | "lsp"))
+            .chain(["progress", "position"])
+            .collect()
+    };
+    for name in right_order {
+        match name {
+            "root" | "lsp" => {
+                if let Some(text) = if name == "root" { &root } else { &lsp } {
+                    x = grid.put_text_clipped(x, status_y, text, Style::Status, width);
+                    x = x.saturating_add(separator_cells);
+                }
+            }
+            "progress" => {
+                if let Some(text) = &progress {
+                    x = grid.put_text_clipped(
+                        x,
+                        status_y,
+                        start_edge,
+                        Style::StatusEdgeSection,
+                        width,
+                    );
+                    x = grid.put_text_clipped(x, status_y, text, Style::StatusSection, width);
+                }
+            }
+            "position" => {
+                if let Some(text) = &position {
+                    x = grid.put_text_clipped(x, status_y, start_edge, mode_edge, width);
+                    x = grid.put_text_clipped(x, status_y, text, mode_style, width);
+                }
+            }
+            _ => {}
+        }
     }
 }
 
