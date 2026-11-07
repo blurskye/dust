@@ -74,6 +74,26 @@ fn workspace_trust_is_one_key_cancels_on_focus_loss_and_persists() {
 }
 
 #[test]
+fn dashboard_trust_accepts_the_documented_yes_key_without_opening_a_document() {
+    let (_app_dirs, mut app) = app();
+    prepare_trust_identity(&mut app);
+    app.window_session.observe_size((160, 45));
+    app.reconcile_editor_windows();
+    assert!(app.ui.dashboard);
+    assert!(app.state.active_view().is_none());
+    app.request_workspace_trust();
+    app.handle_configured_key("y".parse().unwrap());
+    assert!(app.ui.prompt.is_none());
+    wait_trust(&mut app);
+    assert_eq!(
+        app.workspace.trust(),
+        crate::workspace::WorkspaceTrust::Trusted
+    );
+    assert!(app.ui.dashboard);
+    assert!(app.state.active_view().is_none());
+}
+
+#[test]
 fn shutdown_waits_for_a_queued_workspace_revocation() {
     let (_app_dirs, mut app) = app();
     prepare_trust_identity(&mut app);

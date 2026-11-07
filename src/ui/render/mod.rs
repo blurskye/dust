@@ -1559,7 +1559,41 @@ pub fn prompt_geometry_for_state(
     config: &Config,
     prompt: &PromptState,
 ) -> PromptGeometry {
-    confirmation_layout(terminal_width, terminal_height, config, prompt).geometry
+    let mut geometry =
+        confirmation_layout(terminal_width, terminal_height, config, prompt).geometry;
+    if prompt.confirmation.is_none()
+        && prompt.error.is_none()
+        && let Some(help) = &prompt.help
+    {
+        // Short prompts retain their usual box. Longer instructions first use the available
+        // width, then wrap above the input instead of losing their ending at the border.
+        let message_width = help
+            .lines()
+            .map(|line| text_width(line, config.editor.ambiguous_width))
+            .max()
+            .unwrap_or(0)
+            .saturating_add(4);
+        geometry.width = geometry.width.max(
+            u16::try_from(message_width)
+                .unwrap_or(u16::MAX)
+                .min(terminal_width.saturating_sub(2).max(1)),
+        );
+        geometry.left = terminal_width.saturating_sub(geometry.width) / 2;
+        let rows = wrap_plain_text(
+            help,
+            usize::from(geometry.width.saturating_sub(4)).max(1),
+            config.editor.ambiguous_width,
+        )
+        .len();
+        geometry.height = u16::try_from(rows)
+            .unwrap_or(u16::MAX)
+            .saturating_add(3)
+            .min(terminal_height.max(1));
+        geometry.top = geometry
+            .top
+            .min(terminal_height.saturating_sub(geometry.height));
+    }
+    geometry
 }
 
 #[must_use]
