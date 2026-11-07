@@ -33,5 +33,12 @@ jobs:
       - name: Keep Git line endings unchanged
         if: runner.os == 'Windows'
         run: git config --system core.autocrlf false
-      - run: cargo test --locked --all-targets
-      - run: cargo clippy --locked --all-targets -- -D warnings
+      # nextest prints each failure as it happens and stops a hung test, so one
+      # stuck test cannot hide every other failure until the job times out.
+      - uses: taiki-e/install-action@v2
+        with: { tool: cargo-nextest }
+      - run: cargo nextest run --locked --all-targets --profile ci
+      - run: cargo test --locked --doc
+      # Lints are reported even when tests fail.
+      - if: success() || failure()
+        run: cargo clippy --locked --all-targets -- -D warnings
