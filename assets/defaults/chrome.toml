@@ -1,0 +1,3 @@
+# Ordered native segment names. Plugin segments use their own names in these lists.
+status = ["mode", "git", "file", "breadcrumbs", "diagnostics", "tasks", "large_file", "lsp", "root", "progress", "position"]
+buffer = ["pin", "icon", "title", "dirty", "diagnostics", "close", "suffix", "separator"]

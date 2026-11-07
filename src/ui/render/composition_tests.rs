@@ -711,6 +711,7 @@ fn buffer_line_lists_unique_dirty_content_and_follows_active_overflow() {
             diagnostic: None,
             icon: "R".into(),
             closeable: true,
+            segments: None,
         },
         crate::ui::render::ContentTabEntry {
             identity: crate::ui::render::ContentTabIdentity(crate::windows::ContentId(2)),
@@ -722,6 +723,7 @@ fn buffer_line_lists_unique_dirty_content_and_follows_active_overflow() {
             diagnostic: None,
             icon: "R".into(),
             closeable: true,
+            segments: None,
         },
         crate::ui::render::ContentTabEntry {
             identity: crate::ui::render::ContentTabIdentity(crate::windows::ContentId(3)),
@@ -733,6 +735,7 @@ fn buffer_line_lists_unique_dirty_content_and_follows_active_overflow() {
             diagnostic: None,
             icon: "R".into(),
             closeable: true,
+            segments: None,
         },
     ];
     let ui = UiState {
@@ -771,6 +774,7 @@ fn content_line_segment_width_and_hit_testing_share_exact_boundaries() {
         }),
         icon: "R".into(),
         closeable: true,
+        segments: None,
     };
     let width = crate::ui::render::content_tab_width(&entry, &config);
     let mut grid = crate::ui::CellGrid::new(u16::try_from(width).unwrap(), 1);

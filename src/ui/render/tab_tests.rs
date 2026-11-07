@@ -449,6 +449,7 @@ fn content_tabs_keep_literal_placeholders_and_measure_visible_replacements() {
         diagnostic: None,
         icon: "R".into(),
         closeable: false,
+        segments: None,
     })
     .collect::<Vec<_>>();
     let mut grid = crate::ui::CellGrid::new(120, 1);
@@ -497,6 +498,7 @@ fn content_tabs_follow_the_last_of_many_entries() {
             diagnostic: None,
             icon: "R".into(),
             closeable: false,
+            segments: None,
         })
         .collect::<Vec<_>>();
     let mut grid = crate::ui::CellGrid::new(40, 1);
