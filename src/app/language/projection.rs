@@ -277,6 +277,36 @@ impl LspSession {
             .map(|(key, _)| key.clone())
             .min()
     }
+    /// Formatting belongs to the requested buffer even if focus moved during a chain.
+    pub(in crate::app) fn request_buffer_format(
+        &mut self,
+        editor: &EditorState,
+        buffer: BufferId,
+        server: &str,
+        feature: LspFeature,
+        document: LspDocument,
+    ) -> Result<(), LspError> {
+        let view = editor
+            .views
+            .iter()
+            .find_map(|(id, view)| (view.buffer == buffer).then_some(id))
+            .or_else(|| editor.active_view())
+            .ok_or_else(|| LspError::Busy(server.into()))?;
+        let owner = LspProjectionOwner {
+            server: server.into(),
+            buffer,
+            view,
+            revision: BufferRevision(document.version),
+            text: editor.buffers[buffer].text.source_version(),
+            uri: document.uri(),
+            language: document.language_id.clone(),
+        };
+        let previous = self.projection.owner.replace(owner);
+        let result = self.request_projected(server, feature, document, ByteOffset(0));
+        self.projection.owner = previous;
+        result
+    }
+
     pub(in crate::app) fn request_projected(
         &mut self,
         server: &str,
