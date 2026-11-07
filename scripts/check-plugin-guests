@@ -1,0 +1,19 @@
+#!/bin/sh
+# Build all six maintained guests and an actual CLI scaffold in the guest flake shell.
+# Usage: nix develop .#guest --command scripts/check-plugin-guests /absolute/path/to/dust
+set -eu
+binary=$(realpath "${1:?pass the built host dust binary}")
+root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+mkdir -p "$root/target"
+scratch=$(mktemp -d "$root/target/plugin-guests.XXXXXX")
+trap 'rm -rf "$scratch"' EXIT HUP INT TERM
+(cd "$scratch" && "$binary" plugin new words)
+for name in autopairs surround oil completion wrappers mode; do
+    cargo build --locked --release --target wasm32-unknown-unknown \
+        --manifest-path "$root/examples/plugins/$name/Cargo.toml" \
+        --target-dir "${CARGO_TARGET_DIR:-$root/target}/plugin-guests"
+done
+cargo build --locked --release --target wasm32-unknown-unknown \
+    --manifest-path "$scratch/words/Cargo.toml" \
+    --target-dir "${CARGO_TARGET_DIR:-$root/target}/plugin-guests"
+printf '%s\n' 'All six examples and the generated words plugin built successfully.'

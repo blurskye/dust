@@ -154,6 +154,12 @@ The production interface is [`wit/dust-plugin.wit`](wit/dust-plugin.wit), packag
 editor's release version. The [Plugin SDK](docs/plugin-sdk.md) specifies manifests,
 limits and request semantics.
 
+`plugins/scaffold.rs` creates standalone Rust guests for `dust plugin new`, using
+`examples/plugins/completion` and `assets/plugin-template/README.md` as templates.
+`app/plugins/browser.rs` lists configured and package-managed plugins in the native
+picker and routes session enable/disable, reload and folder actions to existing
+owners. The package worker remains responsible for installed package discovery.
+
 The flow is:
 
 ```text

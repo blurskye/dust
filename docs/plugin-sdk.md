@@ -12,6 +12,41 @@ Its checked-in core module includes component metadata; tests wrap it with
 for the build command. Other component languages can generate bindings from
 the same WIT. No published SDK crate is required.
 
+## Start a Rust plugin
+
+```sh
+dust plugin new mywords
+cd mywords
+cargo build --locked --release --target wasm32-unknown-unknown
+```
+
+Install the Rust Wasm target first, or use the checkout's `nix develop .#guest`
+shell. The scaffold includes the production WIT, pinned Cargo lockfile, manifest,
+and a working buffer-word completion source copied from the maintained example.
+Names use lowercase letters and digits, start with a letter, and are at most 64
+characters. An existing destination is never overwritten. To edit a file actually
+named `plugin`, use `dust -- plugin`.
+
+Follow the generated README to encode the core module with the checkout's
+`plugin_pack` example and load the component. The packer accepts either an output
+folder for all six examples, or `OUTPUT CORE_WASM MANIFEST` for your own plugin.
+It writes the component digest into the packaged manifest; do not load the source
+manifest's zero digest.
+
+Open **Plugins** on the dashboard, choose **Browse installed plugins** in the
+command palette, or run `:plugins`. The native picker lists version, state, failure
+reason and permissions. Enter opens actions to enable/disable for this session,
+reload, inspect full status/permissions, or add the plugin folder to the workspace
+and open the explorer.
+Set `[plugins.entries.<id>].enabled` in config for a permanent enable/disable choice.
+Safe mode cannot be bypassed by browser actions. `:pkgsearch <name>` and the
+existing package commands install/update registry packages; the browser does not
+maintain another package store.
+
+See [the six examples](../examples/plugins/README.md) for practical autopairs,
+Tree-sitter-aware surround edits, a directory editor, and buffer-word completion,
+plus focused wrapper and named-mode demonstrations.
+
 ## Lifecycle and manifest
 
 The manifest is strict TOML. Required top-level fields are `id`, `version`,

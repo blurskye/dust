@@ -311,6 +311,30 @@ the pull-request picker and review-comment commands also support Gitea/Forgejo v
 
 The debug console is opened with `Space d r`; `Space d R` restarts the session.
 
+## Plugins
+
+Open **Plugins** from the dashboard, **Browse installed plugins** from `F1`, or
+`:plugins`. Type to filter installed/configured plugins. Rows show version,
+loaded/failed/disabled state, and permissions in plain words. Enter opens actions:
+
+- Enable or disable for this editor session; change `enabled` in
+  `[plugins.entries.<id>]` in config to keep the choice after restart.
+- Reload the selected plugin, removing its old commands and UI contributions first.
+- Add its folder to the workspace and open the explorer (open buffers are preserved).
+- Read the full failure reason or permission list if the row is clipped.
+
+As elsewhere, Escape enters picker Normal mode and a second Escape closes.
+Safe mode blocks loading even if you choose Enable. File access is workspace-scoped;
+permission to run processes gives programs your ordinary user access, not a sandbox.
+Use the existing `:pkgsearch <name>` registry flow for installation and package
+commands for updates; see [registry documentation](registry-client.md).
+
+Start writing a plugin with `dust plugin new mywords`. It creates a standalone
+Rust crate, production WIT, manifest and README with build, pack and load commands.
+The starter offers buffer-word completion; [the SDK](plugin-sdk.md) and
+[six examples](../examples/plugins/README.md) cover more integrations. A Rust
+Wasm target is required to build guests, but not to use prebuilt components.
+
 ## Recovery and health
 
 Dirty buffers are journaled asynchronously. Use `:recovery`, `:recover`, or the dashboard recovery action after an unclean exit. Dust never overwrites the original file automatically during recovery.

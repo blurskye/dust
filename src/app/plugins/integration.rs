@@ -444,16 +444,32 @@ impl Plugins {
         safe_mode: bool,
     ) -> Vec<ExtensionUpdate> {
         let mut updates = Vec::new();
+        self.browser_dirty = true;
+        self.browser_packages = activations
+            .iter()
+            .map(|(manifest, path, _)| {
+                (
+                    manifest.id.clone(),
+                    crate::app::plugins::browser::BrowserPlugin {
+                        version: manifest.version.clone(),
+                        capabilities: manifest.capabilities.clone(),
+                        folder: path.parent().unwrap_or(&self.package_store).to_owned(),
+                        error: None,
+                    },
+                )
+            })
+            .collect();
         if safe_mode {
             return updates;
         }
         for (manifest, path, object_lock) in activations {
             let plugin = manifest.id.clone();
             // A failed load may disable a load too; only explicit disablement persists.
-            if config
+            if (config
                 .entries
                 .get(&plugin)
                 .is_some_and(|entry| !entry.enabled)
+                && !self.enabled_plugins.contains(&plugin))
                 || self.disabled_plugins.contains(&plugin)
             {
                 continue;
@@ -539,6 +555,8 @@ impl Plugins {
                         self.package_startup_rollback = None;
                     }
                     if matches!(result.operation.as_str(), "rollback" | "remove") {
+                        self.browser_packages.clear();
+                        self.browser_dirty = true;
                         self.unload_managed(&mut updates);
                         self.package_startup_pending.clear();
                         if !self.package_managed_plugins.is_empty() {
@@ -847,7 +865,12 @@ impl App {
             crate::config::user_state_directory().join(policy.store)
         };
         let limits = self.plugin_limits();
-        for (id, entry) in policy.entries.iter().filter(|(_, entry)| entry.enabled) {
+        for (id, entry) in &policy.entries {
+            if self.extension.disabled_plugins.contains(id)
+                || (!entry.enabled && !self.extension.enabled_plugins.contains(id))
+            {
+                continue;
+            }
             if let Err(error) = self.extension.index_from_store(
                 id.clone(),
                 store.clone(),
@@ -1274,6 +1297,12 @@ impl App {
 
 impl App {
     pub(in crate::app) fn process_plugin_events(&mut self) {
+        self.finish_plugin_folder_open();
+        let browser_view = self
+            .search
+            .plugin_browser_open()
+            .then(|| self.search.picker_bookmark())
+            .flatten();
         self.poll_plugin_callbacks();
         if let Some(request) = self.extension.expire_providers() {
             self.present_plugin_picker(request);
@@ -1309,6 +1338,8 @@ impl App {
                 return;
             }
         };
+        let refresh_browser =
+            std::mem::take(&mut self.extension.browser_dirty) || !events.is_empty();
         let mut failure_diagnostic = None;
         for event in events {
             let event = match event {
@@ -1480,6 +1511,18 @@ impl App {
                         ]),
                     );
                 }
+            }
+        }
+        if refresh_browser {
+            if browser_view.is_some()
+                && (self.search.picker().is_none() || self.search.plugin_browser_open())
+            {
+                // Contribution changes invalidate picker bindings; keep the browser's query and selection.
+                self.present_plugin_browser();
+                self.search.restore_picker_view(browser_view, false);
+                self.sync_picker_ui();
+            } else {
+                self.refresh_plugin_browser();
             }
         }
         self.discard_stale_plugin_edits();

@@ -52,6 +52,11 @@ label = "Tutor — learn by editing"
 icon = "\U000F0186"
 
 [[action]]
+command = "plugin.list"
+label = "Plugins"
+icon = ""
+
+[[action]]
 command = "recovery.inspect"
 label = "Recover Unsaved Work"
 icon = "\U000F0BC4"
