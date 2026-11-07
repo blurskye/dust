@@ -1,0 +1,28 @@
+#!/usr/bin/env python3
+"""Launch one example in ui-shot's disposable XDG directories.
+
+DUST_BINARY is the built editor; DUST_EXAMPLE_PACK is the packaged-plugins directory;
+DUST_EXAMPLE selects the scenario. Run only in a disposable working directory.
+"""
+import json
+import os
+from pathlib import Path
+
+name = os.environ["DUST_EXAMPLE"]
+pack = Path(os.environ["DUST_EXAMPLE_PACK"]).resolve()
+config = Path(os.environ["XDG_CONFIG_HOME"]) / "dust"
+config.mkdir(parents=True, exist_ok=True)
+owners = ["wrappersa", "wrappersb"] if name == "wrappers" else [name]
+text = f"[editor]\nautopairs = false\n[plugins]\nstore = {json.dumps(str(pack))}\n"
+for owner in owners:
+    text += f'\n[plugins.entries.{owner}]\nmanifest = "{owner}/manifest.toml"\ncomponent = "{owner}/guest.wasm"\nenabled = true\n'
+(config / "config.toml").write_text(text)
+source = {
+    "autopairs": "", "surround": "fn greeting() {hello}\n",
+    "completion": "alphabet alpine\nal", "mode": "Review this text with h and l. Press q to leave.\n",
+    "wrappers": "", "oil": "",
+}[name]
+Path("demo.rs").write_text(source)
+if name == "oil":
+    Path("old.txt").write_text("preserve this file\n")
+os.execv(os.environ["DUST_BINARY"], [os.environ["DUST_BINARY"], "demo.rs"])

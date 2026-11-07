@@ -2,6 +2,8 @@
 
 mod drawing;
 mod events;
+#[cfg(test)]
+mod example_tests;
 mod language;
 mod surface;
 mod system;
@@ -491,7 +493,14 @@ impl App {
                     if execution.call_next != waiting.call.pending {
                         return Err("wrong wrapper callback".into());
                     }
-                    CommandWrapperAction::CallNext(invocation(&waiting.call)?)
+                    let mut next = invocation(&waiting.call)?;
+                    if let Some(value) = outcome.value {
+                        let CommandValue::Record(arguments) = value else {
+                            return Err("wrapper arguments must be a record".into());
+                        };
+                        next.arguments = arguments;
+                    }
+                    CommandWrapperAction::CallNext(next)
                 } else {
                     CommandWrapperAction::Complete(outcome)
                 };

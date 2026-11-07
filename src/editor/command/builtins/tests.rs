@@ -17,6 +17,58 @@ use crate::editor::InvocationSource;
 use crate::editor::register_builtin_commands;
 
 #[test]
+fn checked_edit_rejects_stale_ranges_utf8_splits_and_invalid_cursors_atomically() {
+    let (mut state, buffer, view) = editing("λx", 0);
+    let mut registry = CommandRegistry::<()>::default();
+    register_builtin_commands(&mut registry).unwrap();
+    for (revision, start, end, cursor) in [(1, 0, 2, 0), (0, 1, 2, 0), (0, 2, 1, 0), (0, 0, 2, 99)]
+    {
+        let invocation = CommandInvocation::new("edit.apply", InvocationSource::Test)
+            .unwrap()
+            .with_argument("revision", CommandValue::Integer(revision))
+            .with_argument("start", CommandValue::Integer(start))
+            .with_argument("end", CommandValue::Integer(end))
+            .with_argument("cursor", CommandValue::Integer(cursor))
+            .with_argument("text", CommandValue::String("z".into()));
+        match registry.execute(&state, &invocation) {
+            Err(_) => {}
+            Ok(outcome) => assert!(
+                state
+                    .apply_transaction(&outcome.transaction.unwrap())
+                    .is_err()
+            ),
+        }
+        assert_eq!(state.buffers[buffer].text.to_string(), "λx");
+        assert_eq!(state.views[view].cursor.0, 0);
+    }
+}
+
+#[test]
+fn checked_operator_range_uses_native_registers_and_rejects_stale_revisions() {
+    let (mut state, buffer, _) = editing("one two", 0);
+    let mut registry = CommandRegistry::<()>::default();
+    register_builtin_commands(&mut registry).unwrap();
+    let mut invocation = CommandInvocation::new("edit.operator", InvocationSource::Test)
+        .unwrap()
+        .with_argument("operator", CommandValue::String("delete".into()))
+        .with_argument("motion", CommandValue::String("guest_object".into()))
+        .with_argument("linewise", CommandValue::Bool(false))
+        .with_argument("revision", CommandValue::Integer(0))
+        .with_argument("start", CommandValue::Integer(4))
+        .with_argument("end", CommandValue::Integer(7));
+    invocation.register = Some('a');
+    let outcome = registry.execute(&state, &invocation).unwrap();
+    state
+        .apply_transaction(&outcome.transaction.unwrap())
+        .unwrap();
+    assert_eq!(state.buffers[buffer].text.to_string(), "one ");
+    assert_eq!(state.registers.get('a').unwrap().text, "two");
+    assert!(registry.execute(&state, &invocation).is_err());
+    apply(&mut state, "history.undo", &[], 1);
+    assert_eq!(state.buffers[buffer].text.to_string(), "one two");
+}
+
+#[test]
 fn movement_and_edit_commands_apply_through_registry_transactions() {
     let mut state = EditorState::new(PathBuf::from("/tmp"));
     let (_, view) = state

@@ -421,7 +421,6 @@ impl component_api::dust::plugin::host::Host for ComponentHostState {
         if self.editor_requests.pending != Some(pending)
             || self.editor_requests.after
             || self.editor_requests.call_next.is_some()
-            || self.editor_requests.value.is_some()
         {
             return Err("call-next requires the current waiting wrapper".into());
         }

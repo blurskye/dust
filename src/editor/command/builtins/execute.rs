@@ -92,6 +92,29 @@ use crate::editor::command::builtins::transaction::string_argument;
 
 use crate::editor::command::builtins::transaction::transaction_for;
 
+fn checked_offset(invocation: &CommandInvocation, name: &str) -> Result<ByteOffset, CommandError> {
+    let value = crate::editor::command::builtins::transaction::integer_argument(invocation, name)?;
+    usize::try_from(value)
+        .map(ByteOffset)
+        .map_err(|_| CommandError::InvalidArguments(format!("invalid {name}")))
+}
+
+fn checked_range(
+    invocation: &CommandInvocation,
+    text: &crate::editor::text::TextBuffer,
+) -> Result<ByteRange, CommandError> {
+    if checked_offset(invocation, "revision")?.0 as u64 != text.revision().0 {
+        return Err(CommandError::Unavailable("edit revision changed".into()));
+    }
+    let range = ByteRange::new(
+        checked_offset(invocation, "start")?,
+        checked_offset(invocation, "end")?,
+    )
+    .map_err(failed)?;
+    text.slice(range).map_err(failed)?;
+    Ok(range)
+}
+
 pub(super) fn execute_builtin<E>(
     state: &EditorState,
     invocation: &CommandInvocation,
@@ -121,6 +144,35 @@ pub(super) fn execute_builtin<E>(
     let mut transaction = transaction_for(view_id, buffer_id, buffer.text.revision());
 
     match invocation.id.as_str() {
+        "edit.apply" => {
+            let range = checked_range(invocation, &buffer.text)?;
+            let position = checked_offset(invocation, "cursor")?;
+            transaction.undo_policy = if view.mode == EditorMode::Insert {
+                UndoPolicy::Merge
+            } else {
+                UndoPolicy::Record
+            };
+            let replacement = string_argument(invocation, "text")?;
+            if !range.is_empty() || !replacement.is_empty() {
+                transaction.operations.push(EditorOperation::ApplyEdits {
+                    buffer: buffer_id,
+                    edits: TextEditSet::new(
+                        buffer.text.revision(),
+                        vec![TextEdit::new(range, replacement)],
+                    ),
+                });
+            }
+            transaction.operations.push(EditorOperation::SetCursor {
+                view: view_id,
+                position,
+            });
+            if view.mode == EditorMode::OperatorPending {
+                transaction.operations.push(EditorOperation::SetMode {
+                    view: view_id,
+                    mode: EditorMode::Normal,
+                });
+            }
+        }
         "view.cursor.move" => {
             let motion = counted_motion(string_argument(invocation, "motion")?, invocation);
             transaction.undo_policy =
@@ -744,7 +796,16 @@ pub(super) fn execute_builtin<E>(
         }
         "edit.operator" | "edit.repeat_visual" => {
             let operator = string_argument(invocation, "operator")?;
-            let (ranges, shape) = if invocation.id.as_str() == "edit.repeat_visual" {
+            let (ranges, shape) = if invocation.arguments.contains_key("start") {
+                (
+                    vec![checked_range(invocation, &buffer.text)?],
+                    if bool_argument(invocation, "linewise")? {
+                        RegisterShape::Line
+                    } else {
+                        RegisterShape::Character
+                    },
+                )
+            } else if invocation.id.as_str() == "edit.repeat_visual" {
                 repeat_visual_ranges(&buffer.text, view, invocation, state.policy)?
             } else {
                 let motion = counted_motion(string_argument(invocation, "motion")?, invocation);

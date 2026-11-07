@@ -1,0 +1,27 @@
+id = "mode"
+version = "0.1.0"
+component_sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
+capabilities = ["commands", "input", "propose_edits"]
+
+[commands.enter]
+title = "mode: enter"
+context = "buffer"
+activation = "active_only"
+
+[commands.leave]
+title = "mode: leave"
+context = "buffer"
+activation = "active_only"
+
+[commands.left]
+title = "mode: left"
+context = "buffer"
+activation = "active_only"
+
+[commands.right]
+title = "mode: right"
+context = "buffer"
+activation = "active_only"
+
+[contributions]
+schema_version = 1

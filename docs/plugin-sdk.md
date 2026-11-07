@@ -86,7 +86,10 @@ nodes = [text("hello"), integer(3), object([{name:"text", value:0}, {name:"count
   runs first; equal order preserves registration order. At most 16 wrappers may wrap
   one command. Normal calls always enter at the first wrapper.
 - Before native handling, `after` is false. `call-next(call.pending)` continues that
-  exact invocation. The wrapper runs again with `after = true` and the downstream
+  exact invocation. A before-wrapper may call `set-command-result` with a record
+  before `call-next` to replace that invocation's named arguments (not its ID,
+  target, count, register or authority). The native command schema validates the
+  replacement. The wrapper runs again with `after = true` and the downstream
   typed value in `previous`. Its native transaction/effects remain host-owned until
   the chain completes. Returning without `call-next` replaces/suppresses the command.
 - `call-next` cannot be called twice, from an after callback, or with another call's
@@ -94,6 +97,11 @@ nodes = [text("hello"), integer(3), object([{name:"text", value:0}, {name:"count
 
 Later keys wait while a foreground plugin command is pending. Repeat and macro
 recording happen on completion, not queueing. Native edit transactions provide undo.
+`edit.apply` accepts integer `revision`, `start`, `end`, and `cursor`, plus `text`:
+it applies one checked UTF-8 replacement and positions the cursor atomically. In
+Insert mode it joins the native insert undo group. `edit.operator` also accepts
+`revision`, `start`, and `end` to consume a guest-resolved text-object range, keeping
+native register and operator behavior. These are ordinary commands, not new imports.
 Edits from a typed foreground callback are checked against the original document
 and applied through the native transaction owner; they do not require a review
 panel. Existing review-producing integration calls retain their review workflow.
