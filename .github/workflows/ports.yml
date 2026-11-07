@@ -20,5 +20,18 @@ jobs:
       - name: Use the physical temporary directory
         if: runner.os == 'macOS'
         run: echo "TMPDIR=$(cd "$TMPDIR" && pwd -P)" >> "$GITHUB_ENV"
+      # The default TEMP is an 8.3 short path (RUNNER~1) that differs from the
+      # canonical path Git and the explorer report.
+      - name: Use a long temporary directory path
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          echo "TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+          echo "TMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+      # Git for Windows turns on autocrlf system-wide; the tests' repositories
+      # expect Git's default of storing and checking out bytes unchanged.
+      - name: Keep Git line endings unchanged
+        if: runner.os == 'Windows'
+        run: git config --system core.autocrlf false
       - run: cargo test --locked --all-targets
       - run: cargo clippy --locked --all-targets -- -D warnings

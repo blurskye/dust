@@ -1501,8 +1501,7 @@ while read() is not None: pass
 
 #[test]
 fn deterministic_fake_server_proves_lifecycle_sync_and_features() {
-    let python = crate::tools::discover_executable("python3")
-        .expect("python3 is required for the fake LSP server fixture");
+    let python = crate::debugger::test_python();
     let workspace = tempfile::tempdir().expect("workspace");
     let script = workspace.path().join("fake_lsp.py");
     let trace_path = workspace.path().join("trace.jsonl");
@@ -1959,7 +1958,7 @@ fn boundary_service_with_policy(
         .into_iter()
         .find(|d| d.id == "rust-analyzer")
         .unwrap();
-    let python = crate::tools::discover_executable("python3").unwrap();
+    let python = crate::debugger::test_python();
     definition.executable = python.display().to_string();
     let document = LspDocument {
         path: root.path().join("main.rs"),

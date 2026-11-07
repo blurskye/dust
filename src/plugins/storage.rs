@@ -791,7 +791,7 @@ fn persist(context: PersistContext<'_>) -> Result<(), PluginStorageError> {
         }
         fs::rename(&temp, path)?;
         drop(owners);
-        fs::File::open(root)?.sync_all()?;
+        crate::files::sync_directory(root)?;
         Ok::<_, std::io::Error>(())
     })();
     if let Err(error) = result {

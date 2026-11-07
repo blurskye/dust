@@ -242,9 +242,7 @@ pub(super) fn write_protected_atomic(
     file.as_file().sync_all().map_err(PackageError::Io)?;
     file.persist(path)
         .map_err(|error| PackageError::Io(error.error))?;
-    fs::File::open(parent)
-        .and_then(|file| file.sync_all())
-        .map_err(PackageError::Io)
+    crate::files::sync_directory(parent).map_err(PackageError::Io)
 }
 pub fn verify_lock_store(
     lock_path: &Path,
@@ -339,9 +337,7 @@ pub fn commit_store_bytes(
     file.as_file().sync_all().map_err(PackageError::Io)?;
     file.persist(&target)
         .map_err(|error| PackageError::Io(error.error))?;
-    fs::File::open(store)
-        .and_then(|file| file.sync_all())
-        .map_err(PackageError::Io)?;
+    crate::files::sync_directory(store).map_err(PackageError::Io)?;
     Ok(target)
 }
 #[derive(Debug, Error)]

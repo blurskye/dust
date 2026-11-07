@@ -43,11 +43,10 @@ while True:
  if c in ('launch','attach'): send({'type':'event','event':'stopped','body':{'reason':'fixture','threadId':1}})
  if c=='source': send({'type':'request','command':'runInTerminal','arguments':{'cwd':str(pathlib.Path.cwd()),'args':['/owned-disabled-fixture'],'env':{}}})
 "#;
+/// Python 3 for test fixtures; Windows installs it as `python`.
 pub(crate) fn python() -> PathBuf {
-    std::env::split_paths(&std::env::var_os("PATH").expect("test PATH"))
-        .map(|path| path.join("python3"))
-        .find(|p| p.is_file())
-        .expect("owned DAP fixture needs Python 3")
+    let name = if cfg!(windows) { "python" } else { "python3" };
+    crate::tools::discover_executable(name).expect("test fixtures need Python 3")
 }
 fn launch(root: &Path, script: &Path) -> DapLaunch {
     DapLaunch {

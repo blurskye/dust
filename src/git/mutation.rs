@@ -469,8 +469,10 @@ impl IndexWrite {
         })
     }
     fn commit(&self) -> Result<(), GitMutationError> {
-        std::fs::File::open(self.temporary.path())
-            .and_then(|file| file.sync_all())
+        // Flushing needs a writable handle on Windows; the temporary file holds one.
+        self.temporary
+            .as_file()
+            .sync_all()
             .map_err(|_| GitMutationError::Backend)?;
         std::fs::rename(self.temporary.path(), &self.path).map_err(|_| GitMutationError::Backend)
     }

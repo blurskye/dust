@@ -623,9 +623,7 @@ fn write_cache(path: &Path, bytes: &[u8]) -> Result<(), RegistryError> {
         fs::rename(&body_temp, path).map_err(io_error)?;
         fs::rename(&checksum_temp, &checksum_path).map_err(io_error)?;
         let parent = path.parent().ok_or(RegistryError::Cache)?;
-        fs::File::open(parent)
-            .and_then(|directory| directory.sync_all())
-            .map_err(io_error)
+        crate::files::sync_directory(parent).map_err(io_error)
     })();
     if result.is_err() {
         let _ = fs::remove_file(body_temp);

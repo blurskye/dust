@@ -141,9 +141,7 @@ impl PackageStore {
             }
             return Err(PackageError::Io(error.error));
         }
-        fs::File::open(&self.root)
-            .and_then(|file| file.sync_all())
-            .map_err(PackageError::Io)
+        crate::files::sync_directory(&self.root).map_err(PackageError::Io)
     }
     pub fn stage_verified_object(
         &self,

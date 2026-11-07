@@ -35,6 +35,7 @@ pub use vfs::WriteExpectation;
 pub use vfs::atomic_write;
 pub(crate) use vfs::atomic_write_with_executable;
 pub use vfs::checked_atomic_write;
+pub(crate) use vfs::sync_directory;
 #[cfg(unix)]
 pub(crate) use vfs::directory_open_flags;
 pub(crate) use vfs::is_symlink_error;

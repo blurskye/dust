@@ -863,7 +863,7 @@ fn agent_response_transport_failure_stops_children_and_permissions() {
         .permissions
         .push_back(permission(app.agent.sessions[child].number));
     let mut process = AgentProcess::spawn(
-        Path::new("python3"),
+        &crate::debugger::test_python(),
         &["-c".into(), "import os, sys, time; os.close(0); print('ready', file=sys.stderr, flush=True); time.sleep(60)".into()],
         &BTreeMap::new(),
         &app.state.workspace_root,

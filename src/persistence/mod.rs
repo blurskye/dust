@@ -775,9 +775,7 @@ fn write_state(
     file.as_file().sync_all().map_err(PersistenceError::Io)?;
     file.persist(path)
         .map_err(|error| PersistenceError::Io(error.error))?;
-    fs::File::open(parent)
-        .and_then(|file| file.sync_all())
-        .map_err(PersistenceError::Io)
+    crate::files::sync_directory(parent).map_err(PersistenceError::Io)
 }
 fn merge_shared_state(
     state: &mut PersistedState,

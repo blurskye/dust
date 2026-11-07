@@ -1,6 +1,8 @@
 //! Dust library modules.
 
 #![forbid(unsafe_code)]
+// Some test helpers serve only Unix-only tests, so Windows test builds leave them unused.
+#![cfg_attr(all(test, not(unix)), allow(dead_code))]
 
 /// Agent Client Protocol client for AI coding agents.
 pub mod agent;

@@ -2741,20 +2741,24 @@ fn stage_atomic_write(path: &Path, bytes: &[u8]) -> Result<NamedTempFile, VfsErr
     Ok(temporary)
 }
 
-#[cfg(unix)]
 pub(super) fn sync_parent(parent: &Path) -> Result<(), VfsError> {
-    File::open(parent)
-        .and_then(|directory| directory.sync_all())
-        .map_err(|source| VfsError::Io {
-            operation: "sync containing directory",
-            path: parent.to_path_buf(),
-            source,
-        })
+    sync_directory(parent).map_err(|source| VfsError::Io {
+        operation: "sync containing directory",
+        path: parent.to_path_buf(),
+        source,
+    })
 }
 
-#[cfg(not(unix))]
-pub(super) fn sync_parent(_parent: &Path) -> Result<(), VfsError> {
-    Ok(())
+/// Flush a directory's entries, such as a rename into it, to disk. Windows cannot
+/// open a directory as a file and has no such flush.
+pub(crate) fn sync_directory(directory: &Path) -> io::Result<()> {
+    #[cfg(unix)]
+    return File::open(directory)?.sync_all();
+    #[cfg(not(unix))]
+    {
+        let _ = directory;
+        Ok(())
+    }
 }
 
 #[cfg(test)]

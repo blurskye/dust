@@ -309,17 +309,19 @@ fn node_file_preset_uses_installable_server_adapter() {
 fn adapter_terminal_resolves_path_executables_before_preflight() {
     let (_dirs, mut app) = app();
     app.debugger_session.adapter_runs_terminal = true;
+    // Windows installs Python 3 as `python`.
+    let python = String::from(if cfg!(windows) { "python" } else { "python3" });
     let profile = app
         .debugger_session
         .adapter_terminal(
             &app.state.workspace_root,
-            &["python3".into(), "main.py".into()],
+            &[python.clone(), "main.py".into()],
             &Default::default(),
         )
         .unwrap();
     assert_eq!(
         profile.program,
-        crate::tools::discover_executable("python3").unwrap()
+        crate::tools::discover_executable(&python).unwrap()
     );
     assert!(profile.program.is_absolute());
     assert_eq!(profile.arguments, ["main.py"]);
