@@ -241,6 +241,8 @@ pub(crate) const ADAPTER_IN_TERMINAL: &str = "DUST_ADAPTER_IN_TERMINAL";
 const ADAPTER_ANSWER_TIMEOUT: Duration = Duration::from_secs(15);
 /// How long a stopping adapter gets to end its program and clean up before it is killed.
 const ADAPTER_EXIT_GRACE: Duration = Duration::from_secs(2);
+/// How long an exited adapter's output may keep arriving before the session ends.
+const ADAPTER_OUTPUT_GRACE: Duration = Duration::from_millis(500);
 static ADAPTER_SESSION_LAUNCHER: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
 
 /// Name the binary that can start adapters in their own session. `main` does this once.
@@ -647,6 +649,7 @@ fn run_adapter(
     let mut thread_id = None;
     let mut stopping = false;
     let mut debuggee_exited = false;
+    let mut adapter_exited_at = None;
     let mut stop_id = 0_u64;
     let mut pending: HashMap<i64, (String, u64, u64, Option<DapControl>)> = HashMap::new();
     let mut breakpoint_ids = HashMap::<i64, (PathBuf, u64)>::new();
@@ -1276,9 +1279,13 @@ fn run_adapter(
                 stopping = true;
             }
             Err(error) => {
-                // Drain protocol messages before reacting to child exit. A descendant may
-                // retain stdout, so an exited adapter with an idle reader must also finish.
-                if error == mpsc::RecvTimeoutError::Disconnected || adapter_has_exited(child) {
+                // Drain protocol messages before reacting to child exit: the reader can lag
+                // behind on a slow machine. A descendant may retain stdout, so an exited
+                // adapter whose reader stays idle past the grace must also finish.
+                let drained = adapter_has_exited(child)
+                    && adapter_exited_at.get_or_insert_with(Instant::now).elapsed()
+                        >= ADAPTER_OUTPUT_GRACE;
+                if error == mpsc::RecvTimeoutError::Disconnected || drained {
                     if debuggee_exited {
                         events
                             .send(DapEvent::Terminated {

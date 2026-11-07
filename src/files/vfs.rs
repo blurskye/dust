@@ -1737,7 +1737,6 @@ pub(super) fn open_scoped(
     roots: &[PathBuf],
     flags: rustix::fs::OFlags,
 ) -> Result<fs::File, VfsError> {
-    use rustix::fs::OFlags;
     let root = roots
         .iter()
         .filter(|root| path.starts_with(root))

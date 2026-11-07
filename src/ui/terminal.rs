@@ -1048,11 +1048,12 @@ mod tests {
         std::thread::spawn(move || {
             let mut text = String::new();
             let mut byte = [0];
+            // Keep draining after the marker: macOS PTY buffers are small enough
+            // that the child's remaining output would block its exit.
             while output.read(&mut byte).is_ok_and(|count| count != 0) {
                 text.push(char::from(byte[0]));
                 if text.ends_with("resize-ready") {
                     let _ = sender.send(());
-                    break;
                 }
             }
         });

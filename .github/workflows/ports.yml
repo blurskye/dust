@@ -4,7 +4,11 @@ on:
   pull_request:
 jobs:
   tests:
-    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     env:
       RUST_TEST_THREADS: 4
     steps:
@@ -12,6 +16,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.97.0
         with: { components: clippy }
       - name: Use the physical temporary directory
+        if: runner.os == 'macOS'
         run: echo "TMPDIR=$(cd "$TMPDIR" && pwd -P)" >> "$GITHUB_ENV"
       - run: cargo test --locked --all-targets
       - run: cargo clippy --locked --all-targets -- -D warnings
