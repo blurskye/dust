@@ -259,6 +259,7 @@ fn workspace_frame_respects_nonzero_compositor_origin_for_side_and_top_docks() {
         exit_code: None,
         truncated: false,
         focused: false,
+        input_hint: None,
         columns: 5,
         rows: 8,
         cells: Vec::new(),

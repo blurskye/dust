@@ -1103,11 +1103,15 @@ while True:
             config_home=config_home,
         )
         assert code == 0
+        initial_terminal = terminal_screen(snapshots[6], 100, 30)
+        assert "sh ·" in initial_terminal.splitlines()[19]
+        assert pathlib.Path(directory).name in initial_terminal.splitlines()[19]
+        assert "Normal mode" in initial_terminal.splitlines()[19]
         focused = terminal_screen(snapshots[7], 100, 30)
         focused_rows = focused.splitlines()
         assert pathlib.Path(directory).name in focused and "EDITOR-TOP" in focused
         # The ten-row dock ends above the screen's persistent status line.
-        assert "shell" in focused_rows[19]
+        assert "title" in focused_rows[19]
         assert any("DOCKED-TERMINAL" in row for row in focused_rows[20:29])
         assert "[?2004h" not in focused and "[1;32m" not in focused
         assert "]0;title" not in focused
@@ -1117,19 +1121,19 @@ while True:
         assert focused_rows[20][40] != "│"  # terminal spans beneath explorer
 
         hidden = terminal_screen(snapshots[8], 100, 30)
-        assert "shell" not in hidden
+        assert "title" not in hidden
         assert "unsupported" not in hidden
         assert "EDITOR-TOP" in hidden
         assert terminal_cursor(snapshots[8], 100, 30)[1] < 30
 
         resized = terminal_screen(snapshots[9], 60, 20)
-        assert "shell" not in resized
+        assert "title" not in resized
         assert "EDITOR-TOP" in resized
         refocused = terminal_screen(snapshots[10], 60, 20)
-        assert "shell" in refocused
+        assert "title" in refocused
         assert 10 <= terminal_cursor(snapshots[10], 60, 20)[1] < 19
         exited = terminal_screen(snapshots[11], 60, 20)
-        assert "shell" not in exited
+        assert "title" not in exited
         assert "EXIT 0" not in exited
         assert "EDITOR-TOP" in exited
         assert_restored(output)

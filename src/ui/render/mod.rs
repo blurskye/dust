@@ -1007,6 +1007,7 @@ pub struct TerminalPanelState {
     pub exit_code: Option<u32>,
     pub truncated: bool,
     pub focused: bool,
+    pub input_hint: Option<String>,
     pub columns: u16,
     pub rows: u16,
     pub cells: Vec<Vec<crate::ui::pty_screen::PtyCell>>,
@@ -2017,7 +2018,7 @@ pub(crate) fn render_with_documentation_geometry(
         // The compositor already subtracts every dock, including top and bottom docks.
         workspace.map(|bounds| {
             if let Some(window) = dashboard_window
-                && window.layer != crate::windows::CompositorLayer::Overlay
+                && window.layer == crate::windows::CompositorLayer::Docked
             {
                 return window.rect;
             }

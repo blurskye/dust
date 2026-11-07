@@ -575,6 +575,7 @@ fn formatter_stderr_is_visible_without_entering_the_replacement_payload() {
     ));
     assert!(
         tasks.output_items("format")[0]
+            .0
             .label
             .contains("syntax error")
     );
@@ -599,6 +600,69 @@ pub(in crate::app) fn fixture() -> (tempfile::TempDir, EditorState, Workspace, T
     tasks.fixture_formatter_result("task", buffer, b"text", &editor, &workspace, 1);
     (root, editor, workspace, tasks)
 }
+#[test]
+fn finished_output_keeps_its_name_exit_status_and_source_location() {
+    let (root, _editor, workspace, mut tasks) = fixture();
+    tasks.running.get_mut(&JobId(1000)).unwrap().adapter = AdapterContext::Plain;
+    tasks.running.get_mut(&JobId(1000)).unwrap().cwd = root.path().join("nested");
+    tasks.events.clear();
+    tasks.events.push_back(JobEvent::Output {
+        job: JobId(1000),
+        stream: JobStream::Stderr,
+        bytes: b"  --> src/main.rs:2:3\n".to_vec(),
+        truncated: false,
+    });
+    tasks.events.push_back(JobEvent::Exited {
+        job: JobId(1000),
+        code: Some(7),
+        timed_out: false,
+    });
+    assert!(matches!(
+        tasks.next_update(&workspace, 1),
+        Some(TaskUpdate::Output)
+    ));
+    assert!(matches!(
+        tasks.next_update(&workspace, 1),
+        Some(TaskUpdate::Finished { code: Some(7), .. })
+    ));
+    let items = tasks.output_items("task");
+    assert_eq!(items[1].0.label, "[task · exit 7]");
+    let PickerPayload::MatcherSource(source) = &items[0].1 else {
+        panic!("source missing")
+    };
+    assert_eq!(source.path, root.path().join("nested/src/main.rs"));
+    assert_eq!((source.line, source.column), (1, 2));
+}
+
+#[test]
+fn task_output_enter_and_gf_open_the_selected_source() {
+    for keys in [vec!["enter"], vec!["escape", "g", "f"]] {
+        let (_dirs, mut app) = app();
+        let path = app.state.workspace_root.join("task-source.rs");
+        fs::write(&path, "first\nsecond\n").unwrap();
+        app.tasks.rows.insert(
+            "build".into(),
+            vec![TaskOutputRecord {
+                source: output::source_location("task-source.rs:2:3", &app.state.workspace_root),
+                stream: JobStream::Stderr,
+                text: "task-source.rs:2:3: error".into(),
+                truncated: false,
+            }],
+        );
+        app.show_output_picker("build");
+        for key in keys {
+            app.handle_configured_key(key.parse().unwrap());
+        }
+        crate::app::tests::wait_vfs(&mut app);
+        let buffer = app.state.active_buffer_id().expect("opened source");
+        assert_eq!(app.state.buffers[buffer].path.as_ref(), Some(&path));
+        assert_eq!(
+            app.state.views[app.state.active_view().unwrap()].cursor,
+            ByteOffset(8)
+        );
+    }
+}
+
 #[test]
 fn configuration_changes_cancel_pending_statuses_but_keeps_finished_ones() {
     let (_root, _editor, workspace, mut tasks) = fixture();
@@ -693,7 +757,7 @@ fn output_tabs_expand_without_altering_the_matcher_payload() {
         tasks.next_update(&workspace, 1),
         Some(TaskUpdate::Output)
     ));
-    assert_eq!(tasks.output_items("task")[0].label, "A    B");
+    assert_eq!(tasks.output_items("task")[0].0.label, "A    B");
     assert_eq!(tasks.running[&JobId(1000)].output, b"A\tB\n");
 }
 #[test]

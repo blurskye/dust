@@ -126,16 +126,30 @@ Short notifications expire automatically. `:messages` opens the bounded notifica
 
 Task output and LSP logs update while their surfaces are open and follow the tail until you move away from it. Use:
 
-- `:task.list`
-- `:task.output name=<task>`
+- `:task.run name=<task>` runs a configured task;
+- `:task.list` lists named task sessions and their status;
+- `:task.output name=<task>` opens that task's output, including its exit code;
 - `:test.list name=<task>`
 - `:lsp.server.logs`
+
+Task source locations are jumpable: select a `file:line[:column]` row and press
+Enter, or Escape then `gf` in picker Normal mode. Cargo arrows, TypeScript
+`file(line,column)` diagnostics, Go errors, and Python traceback frames are
+recognized without a problem matcher. Relative paths use the task's working
+directory, including dependency tasks. Opening a location uses the existing
+buffer when it is already open, preserving unsaved edits.
 
 The status line runs along the bottom of the screen, under the terminal panel. It shows the mode, Git branch, file, diagnostics and running tasks on the left, and the LSP server, workspace root, progress through the file and cursor position on the right.
 
 ## Terminal
 
 `Ctrl-/` and `Ctrl-\\` are aliases for the same `terminal.toggle` command in the editor, explorer, dashboard and terminal contexts. From the editor, explorer or dashboard they open the default terminal or focus the existing dock; from the terminal they return focus to the editor without hiding or stopping the process. Double Escape enters terminal Normal mode; Visual selection and yanks use the ordinary register system. `:terminal.list` opens a selectable terminal-session menu rather than a transient message.
+
+The pane title shows the shell/program and shortened working directory. A program's
+OSC 0/2 title replaces that title until it is cleared. The first focused terminal
+briefly shows the configured key for leaving terminal input mode (Double Escape
+by default); `[ui.terminal_panel].input_hint_ms` controls its duration, with `0`
+disabling it. The dashboard adapts to the space left above a docked terminal.
 
 Terminal processes are never restored as fake live sessions. Zero-exit terminals close automatically; failed terminals retain bounded output.
 

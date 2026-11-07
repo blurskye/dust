@@ -4184,6 +4184,12 @@ keys = "enter"
 command = "picker.accept"
 
 [[keymap]]
+id = "builtin.picker.normal.picker-accept.gf"
+context = "picker_normal"
+keys = "g f"
+command = "picker.accept"
+
+[[keymap]]
 id = "builtin.picker.normal.picker-cancel.escape"
 context = "picker_normal"
 keys = "escape"

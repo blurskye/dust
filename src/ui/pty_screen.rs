@@ -99,8 +99,10 @@ pub enum PtyMouseEvent {
 struct Replies(Arc<Mutex<Vec<Event>>>);
 impl EventListener for Replies {
     fn send_event(&self, event: Event) {
-        if matches!(event, Event::PtyWrite(_) | Event::ColorRequest(..))
-            && let Ok(mut replies) = self.0.lock()
+        if matches!(
+            event,
+            Event::PtyWrite(_) | Event::ColorRequest(..) | Event::Title(_) | Event::ResetTitle
+        ) && let Ok(mut replies) = self.0.lock()
         {
             replies.push(event);
         }
@@ -128,6 +130,7 @@ pub struct PtyScreen {
     parser: Processor,
     replies: Replies,
     pending_replies: Vec<u8>,
+    title: Option<String>,
     scrollback_bytes: Option<usize>,
     default_colors: (crate::config::ThemeColor, crate::config::ThemeColor),
 }
@@ -144,6 +147,7 @@ impl PtyScreen {
             parser: Processor::new(),
             replies,
             pending_replies: Vec::new(),
+            title: None,
             scrollback_bytes: None,
             default_colors: (
                 theme.styles.terminal_text.foreground,
@@ -252,6 +256,19 @@ impl PtyScreen {
         for event in events {
             let text = match event {
                 Event::PtyWrite(text) => text,
+                Event::Title(title) => {
+                    let title: String = title
+                        .chars()
+                        .filter(|c| !c.is_control())
+                        .take(256)
+                        .collect();
+                    self.title = (!title.is_empty()).then_some(title);
+                    continue;
+                }
+                Event::ResetTitle => {
+                    self.title = None;
+                    continue;
+                }
                 Event::ColorRequest(index, format) => {
                     let default = if index == NamedColor::Background as usize {
                         self.default_colors.1
@@ -275,6 +292,9 @@ impl PtyScreen {
             };
             self.pending_replies.extend_from_slice(text.as_bytes());
         }
+    }
+    pub(crate) fn title(&self) -> Option<&str> {
+        self.title.as_deref()
     }
     pub fn set_theme(&mut self, theme: &crate::config::ThemeConfig) {
         self.default_colors = (
@@ -1117,6 +1137,11 @@ mod tests {
         let mut screen = PtyScreen::new(40, 4, 16);
         screen.feed_bytes(b"\x1b[?2004h\x1b[1;32mgreen \xe7\x95");
         screen.feed_bytes(b"\x8c\x1b[0m\x1b]0;shell title\x07 ready");
+        assert_eq!(screen.title(), Some("shell title"));
+        screen.feed_bytes(b"\x1b]2;new title\x1b\\");
+        assert_eq!(screen.title(), Some("new title"));
+        screen.feed_bytes(b"\x1b]2;\x07");
+        assert_eq!(screen.title(), None);
 
         assert_eq!(screen.lines()[0], "green 界 ready");
         assert_eq!(

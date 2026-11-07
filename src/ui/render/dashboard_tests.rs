@@ -62,6 +62,7 @@ fn dashboard_respects_top_docks_and_floating_window_order() {
             exit_code: None,
             truncated: false,
             focused: false,
+            input_hint: None,
             columns: 80,
             rows: 7,
             cells: Vec::new(),
@@ -112,6 +113,24 @@ fn dashboard_respects_top_docks_and_floating_window_order() {
         for x in 0..workspace.width {
             assert_eq!(actual.grid.get(x, workspace.y + y), expected.grid.get(x, y));
         }
+    }
+
+    // A tiled dashboard also reflows inside the space left by the terminal dock.
+    ui.compositor_layout
+        .as_mut()
+        .unwrap()
+        .projection
+        .windows
+        .iter_mut()
+        .find(|w| w.window == dashboard)
+        .unwrap()
+        .layer = CompositorLayer::Tiled;
+    let tiled = crate::ui::render::render(&state, &ui, &loaded.config, &loaded.dashboard, 80, 30);
+    for y in 0..workspace.height {
+        assert_eq!(
+            tiled.grid.row_text(workspace.y + y),
+            expected.grid.row_text(y)
+        );
     }
 
     let compositor = ui.compositor_layout.as_mut().unwrap();
@@ -194,6 +213,38 @@ fn dashboard_respects_top_docks_and_floating_window_order() {
     );
 }
 use std::path::Path;
+
+#[test]
+fn dashboard_hides_the_entire_logo_when_the_terminal_leaves_a_short_workspace() {
+    let loaded = crate::config::load_bundled_config();
+    let actions = loaded
+        .dashboard
+        .action
+        .iter()
+        .map(|action| crate::ui::render::DashboardAction {
+            command: action.command.clone(),
+            label: action.label.clone(),
+            icon: action.icon.clone(),
+            key: None,
+        })
+        .collect::<Vec<_>>();
+    let frame = crate::ui::render::render_dashboard(
+        Path::new("/workspace"),
+        &actions,
+        0,
+        &loaded.dashboard,
+        &loaded.config,
+        160,
+        16,
+    );
+    let rows = (0..16).map(|y| frame.grid.row_text(y)).collect::<Vec<_>>();
+    assert!(
+        rows.iter()
+            .any(|row| row.contains(&loaded.dashboard.identity))
+    );
+    assert!(rows.iter().any(|row| row.contains("Quit")));
+    assert!(rows.iter().all(|row| !row.contains('█')));
+}
 
 #[test]
 fn dashboard_labels_leave_a_gap_before_shortcut_keys() {

@@ -169,6 +169,8 @@ enabled = true
 
 [ui.terminal_panel]
 height = 16
+# Show the configured escape key briefly on the first focused terminal.
+input_hint_ms = 5000
 # "bottom" docks the terminal under the editor, "float" opens it in a centered window and
 # "fullscreen" draws it over everything. Profiles with `float = true` always float.
 placement = "bottom"
@@ -820,6 +822,7 @@ task_unknown = "unknown task {name}"
 task_no_root = "workspace has no active task root"
 task_cwd_outside_root = "task working directory is outside the active root"
 task_exited = "task {name} exited ({code})"
+terminal_input_hint = "{key} → Normal mode"
 task_failed = "task failed: {diagnostic}"
 task_output = "{name}: {output}"
 plugin_status = "plugins: {status}"

@@ -272,7 +272,7 @@ impl Terminals {
             .map(|(tab_id, tab)| TerminalTabState {
                 phase: tab.phase(),
                 id: tab_id.0,
-                profile: tab.profile.clone(),
+                profile: tab.title(),
                 running: tab.running,
                 exit_code: tab.exit_code,
             })
@@ -287,6 +287,7 @@ impl Terminals {
             exit_code: terminal.exit_code,
             truncated: terminal.truncated,
             focused,
+            input_hint: None,
             columns: u16::try_from(columns).unwrap_or(u16::MAX),
             rows: u16::try_from(rows).unwrap_or(u16::MAX),
             cells,
@@ -297,6 +298,54 @@ impl Terminals {
             scroll_offset: terminal.scroll_offset,
             requested_height,
         })
+    }
+}
+
+impl TerminalRuntime {
+    fn title(&self) -> String {
+        if self.agent {
+            return self.profile.clone();
+        }
+        if let Some(title) = self.screen.title() {
+            return title.to_owned();
+        }
+        let program = self
+            .program
+            .file_name()
+            .unwrap_or(self.program.as_os_str())
+            .to_string_lossy();
+        if self.cwd.as_os_str().is_empty() {
+            return program.into_owned();
+        }
+        let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+        format!(
+            "{program} · {}",
+            terminal_directory(&self.cwd, home.as_deref())
+        )
+    }
+}
+
+fn terminal_directory(path: &std::path::Path, home: Option<&std::path::Path>) -> String {
+    let path = home
+        .and_then(|home| path.strip_prefix(home).ok())
+        .map_or_else(
+            || path.display().to_string(),
+            |relative| {
+                if relative.as_os_str().is_empty() {
+                    "~".into()
+                } else {
+                    format!("~/{}", relative.display())
+                }
+            },
+        );
+    let characters = path.chars().count();
+    if characters > 48 {
+        format!(
+            "…{}",
+            path.chars().skip(characters - 47).collect::<String>()
+        )
+    } else {
+        path
     }
 }
 
@@ -376,6 +425,26 @@ pub(super) fn keep_terminal_cursor_visible(terminal: &mut TerminalRuntime) {
 #[cfg(test)]
 mod tests {
     use crate::app::terminal::input::*;
+
+    #[test]
+    fn terminal_directories_use_home_and_keep_long_path_suffixes() {
+        use std::path::Path;
+        assert_eq!(
+            terminal_directory(
+                Path::new("/home/user/project"),
+                Some(Path::new("/home/user"))
+            ),
+            "~/project"
+        );
+        assert_eq!(
+            terminal_directory(Path::new("/home/user"), Some(Path::new("/home/user"))),
+            "~"
+        );
+        let long = format!("/workspace/{}/project", "界".repeat(60));
+        let title = terminal_directory(Path::new(&long), None);
+        assert_eq!(title.chars().count(), 48);
+        assert!(title.starts_with('…') && title.ends_with("/project"));
+    }
 
     #[test]
     fn terminal_yanks_preserve_empty_rows_without_adding_spaces() {

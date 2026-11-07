@@ -2,6 +2,7 @@
 use crate::app::workspace::Workspace;
 use crate::app::workspace::WorkspaceVersion;
 mod linter;
+mod output;
 mod sources;
 
 /// Limits for every task and tool process Dust runs.
@@ -66,6 +67,7 @@ pub(in crate::app) enum AdapterContext {
 }
 #[derive(Clone, Debug)]
 pub(in crate::app) struct TaskOutputRecord {
+    source: Option<crate::app::picker::MatcherSource>,
     pub(in crate::app) stream: JobStream,
     pub(in crate::app) text: String,
     pub(in crate::app) truncated: bool,
@@ -764,14 +766,11 @@ impl Tasks {
                     }
                     let rows = self.rows.entry(task.requested.clone()).or_default();
                     for line in String::from_utf8_lossy(accepted).lines().take(1024) {
+                        let text = output::plain_line(line);
                         rows.push(TaskOutputRecord {
+                            source: output::source_location(&text, &task.cwd),
                             stream,
-                            text: line
-                                .replace('\t', "    ")
-                                .chars()
-                                .filter(|c| !c.is_control())
-                                .take(4096)
-                                .collect(),
+                            text,
                             truncated,
                         });
                     }
@@ -829,6 +828,19 @@ impl Tasks {
                         }
                         .into(),
                     );
+                    let status = if timed_out {
+                        "timed out".into()
+                    } else {
+                        code.map_or_else(
+                            || "terminated by signal".into(),
+                            |code| format!("exit {code}"),
+                        )
+                    };
+                    self.append_output_status(
+                        &task.requested,
+                        format!("[{} · {status}]", task.name),
+                        truncated,
+                    );
                     return Some(TaskUpdate::Finished {
                         task: Box::new(task),
                         code,
@@ -854,6 +866,11 @@ impl Tasks {
                     self.plans.remove(&task.requested);
                     self.statuses
                         .insert(task.requested.clone(), "failed".into());
+                    self.append_output_status(
+                        &task.requested,
+                        format!("[{} · failed: {message}]", task.name),
+                        false,
+                    );
                     return Some(TaskUpdate::Failed {
                         source: task
                             .diagnostic_source
@@ -879,24 +896,43 @@ impl Tasks {
             })
             .collect()
     }
-    pub(in crate::app) fn output_items(&self, name: &str) -> Vec<PickerItem> {
+    fn append_output_status(&mut self, name: &str, text: String, truncated: bool) {
+        let rows = self.rows.entry(name.into()).or_default();
+        rows.push(TaskOutputRecord {
+            source: None,
+            stream: JobStream::Stdout,
+            text,
+            truncated,
+        });
+        if rows.len() > 10_000 {
+            rows.drain(..rows.len() - 10_000);
+        }
+    }
+    pub(in crate::app) fn output_items(&self, name: &str) -> Vec<(PickerItem, PickerPayload)> {
         self.rows
             .get(name)
             .into_iter()
             .flatten()
             .enumerate()
-            .map(|(index, row)| PickerItem {
-                badge: String::new(),
-                kind: crate::workspace::PickerItemKind::Entry,
-                id: PickerItemId(format!("output:{name}:{index}")),
-                label: row.text.clone(),
-                detail: format!(
-                    "{:?}{}",
-                    row.stream,
-                    if row.truncated { " · truncated" } else { "" }
-                ),
-                source: String::new(),
-                action: PickerAction::None,
+            .map(|(index, row)| {
+                (
+                    PickerItem {
+                        badge: String::new(),
+                        kind: crate::workspace::PickerItemKind::Entry,
+                        id: PickerItemId(format!("output:{name}:{index}")),
+                        label: row.text.clone(),
+                        detail: format!(
+                            "{:?}{}",
+                            row.stream,
+                            if row.truncated { " · truncated" } else { "" }
+                        ),
+                        source: String::new(),
+                        action: PickerAction::None,
+                    },
+                    row.source
+                        .clone()
+                        .map_or(PickerPayload::Section, PickerPayload::MatcherSource),
+                )
             })
             .collect()
     }
@@ -1276,17 +1312,14 @@ impl App {
         let normal = previous.is_some() && self.input.picker_normal();
         let follow_tail = previous.is_none() || self.search.picker_follows_tail();
         self.tasks.select_output(Some(name));
-        let items = self
+        let items = self.tasks.output_items(name);
+        let title = self.message("picker_output_title", &[("name", name.into())]);
+        let title = self
             .tasks
-            .output_items(name)
-            .into_iter()
-            .map(|item| (item, PickerPayload::Command(String::new())))
-            .collect();
-        self.install_surface_picker(
-            PickerSurfaceKind::Output,
-            self.message("picker_output_title", &[("name", name.into())]),
-            items,
-        );
+            .statuses
+            .get(name)
+            .map_or(title.clone(), |status| format!("{title} · {status}"));
+        self.install_surface_picker(PickerSurfaceKind::Output, title, items);
         self.search.restore_picker_view(previous, follow_tail);
         self.input.set_picker_normal(normal);
         self.sync_picker_ui();
@@ -1326,14 +1359,13 @@ impl App {
             else {
                 break;
             };
+            if let Some(name) = self.tasks.active_output().map(str::to_owned)
+                && self.search.picker_surface() == PickerSurfaceKind::Output
+            {
+                self.show_output_picker(&name);
+            }
             match update {
-                crate::app::tasks::TaskUpdate::Output => {
-                    if let Some(name) = self.tasks.active_output().map(str::to_owned)
-                        && self.search.picker_surface() == PickerSurfaceKind::Output
-                    {
-                        self.show_output_picker(&name);
-                    }
-                }
+                crate::app::tasks::TaskUpdate::Output => {}
                 crate::app::tasks::TaskUpdate::Finished {
                     task,
                     code,

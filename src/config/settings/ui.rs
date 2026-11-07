@@ -323,6 +323,8 @@ impl Default for DocumentationPopupConfig {
 pub struct TerminalPanelConfig {
     pub height: u16,
     #[serde(default)]
+    pub input_hint_ms: Option<u32>,
+    #[serde(default)]
     pub placement: TerminalPlacement,
 }
 
@@ -330,6 +332,7 @@ impl Default for TerminalPanelConfig {
     fn default() -> Self {
         Self {
             height: 16,
+            input_hint_ms: None,
             placement: TerminalPlacement::Bottom,
         }
     }

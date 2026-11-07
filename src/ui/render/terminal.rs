@@ -138,6 +138,24 @@ fn terminal_tab_start(terminal: &TerminalPanelState, config: &Config, width: u16
     first
 }
 
+fn terminal_title_width(terminal: &TerminalPanelState, config: &Config, width: u16) -> u16 {
+    let Some(hint) = terminal
+        .input_hint
+        .as_deref()
+        .filter(|_| terminal.focused && terminal.mode == TerminalPanelMode::Input)
+    else {
+        return width;
+    };
+    let reserved = u16::try_from(text_width(hint, config.editor.ambiguous_width))
+        .unwrap_or(u16::MAX)
+        .saturating_add(4);
+    if width > reserved.saturating_add(8) {
+        width - reserved
+    } else {
+        width
+    }
+}
+
 #[must_use]
 pub fn terminal_tab_at_column(
     terminal: &TerminalPanelState,
@@ -145,9 +163,10 @@ pub fn terminal_tab_at_column(
     geometry: TerminalPanelGeometry,
     column: u16,
 ) -> Option<u64> {
-    let right = geometry.x.saturating_add(geometry.width);
+    let title_width = terminal_title_width(terminal, config, geometry.width);
+    let right = geometry.x.saturating_add(title_width);
     let mut x = geometry.x.saturating_add(1);
-    let first = terminal_tab_start(terminal, config, geometry.width);
+    let first = terminal_tab_start(terminal, config, title_width);
     for (index, tab) in terminal.tabs.iter().skip(first).enumerate() {
         if index > 0 {
             x = x.saturating_add(
@@ -238,8 +257,10 @@ pub(super) fn dock_terminal_panel(
             grid.set_cell(x, y, &symbol.to_string(), Style::TerminalBorder);
         }
     }
+    let title_width = terminal_title_width(terminal, config, geometry.width);
+    let title_right = geometry.x.saturating_add(title_width).min(right);
     let mut title_x = geometry.x.saturating_add(1);
-    let first = terminal_tab_start(terminal, config, geometry.width);
+    let first = terminal_tab_start(terminal, config, title_width);
     for (index, tab) in terminal.tabs.iter().skip(first).enumerate() {
         if index > 0 {
             title_x = grid.put_text_clipped(
@@ -247,7 +268,7 @@ pub(super) fn dock_terminal_panel(
                 geometry.top,
                 TERMINAL_TAB_SEPARATOR,
                 Style::TerminalBorder,
-                right,
+                title_right,
             );
         }
         let title = terminal_tab_label(&terminal.tabs, tab);
@@ -260,7 +281,7 @@ pub(super) fn dock_terminal_panel(
             } else {
                 Style::Muted
             },
-            right,
+            title_right,
         );
     }
     // The status line names the mode; only the other modes are repeated at the end of the tab
@@ -270,7 +291,11 @@ pub(super) fn dock_terminal_panel(
         TerminalPanelMode::Normal => Some(TERMINAL_NORMAL_LABEL),
         TerminalPanelMode::Visual => Some(TERMINAL_VISUAL_LABEL),
     };
-    let notice = [mode, terminal.truncated.then_some("output truncated")]
+    let hint = terminal
+        .input_hint
+        .as_deref()
+        .filter(|_| terminal.focused && terminal.mode == TerminalPanelMode::Input);
+    let notice = [hint, mode, terminal.truncated.then_some("output truncated")]
         .into_iter()
         .flatten()
         .map(|text| format!(" {text} "))

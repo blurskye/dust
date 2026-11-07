@@ -27,6 +27,51 @@ use std::time::Instant;
 use tempfile::tempdir;
 
 #[test]
+fn terminal_title_and_first_focus_hint_follow_the_live_session() {
+    let (_dirs, mut app) = app();
+    app.terminal_session.fixture(
+        PtyId(1),
+        crate::app::terminal::TerminalFixture {
+            profile: "bash".into(),
+            screen: PtyScreen::new(80, 8, 100),
+            running: true,
+            exit_code: None,
+            truncated: false,
+        },
+        app.workspace.version(),
+    );
+    app.terminal_session
+        .fixture_cwd(PtyId(1), "/workspace/project".into());
+    app.terminal_session.select(PtyId(1));
+    app.set_terminal_focus(true);
+    app.sync_terminal_panel();
+    let panel = app.ui.terminal_panel.as_ref().unwrap();
+    assert_eq!(panel.tabs[0].profile, "bash · /workspace/project");
+    assert!(
+        panel
+            .input_hint
+            .as_ref()
+            .is_some_and(|hint| hint.contains("Normal mode"))
+    );
+    app.terminal_session
+        .tabs
+        .get_mut(&PtyId(1))
+        .unwrap()
+        .feed_bytes(b"\x1b]2;building project\x07");
+    app.sync_terminal_panel();
+    assert_eq!(
+        app.ui.terminal_panel.as_ref().unwrap().tabs[0].profile,
+        "building project"
+    );
+    app.terminal_session.input_hint_until = Some(Instant::now() - Duration::from_secs(1));
+    app.process_pty_events();
+    assert!(app.ui.terminal_panel.as_ref().unwrap().input_hint.is_none());
+    app.process_effect(AppEffect::TerminalUnfocus);
+    app.process_effect(AppEffect::TerminalFocus(1));
+    assert!(app.ui.terminal_panel.as_ref().unwrap().input_hint.is_none());
+}
+
+#[test]
 fn a_pending_root_switch_rechecks_new_edits_and_terminals() {
     for terminal in [None, Some(false), Some(true)] {
         let (_app_dirs, mut app) = app();
