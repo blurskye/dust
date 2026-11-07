@@ -737,6 +737,7 @@ recovery_restored = "recovered unsaved changes: :w keeps them, u goes back to th
 recovery_none = "no recovery journal is available"
 recovery_discarded = "recovery journal discarded"
 recovery_pruned = "pruned {count} recovery journal(s) under configured retention policy"
+tool_no_matches = "No matching tools · Esc clears the search · Tab changes category"
 tool_install_started = "installing {tool}…"
 tool_install_succeeded = "installed {tool}"
 tool_install_failed = "failed to install {tool}: {diagnostic}"

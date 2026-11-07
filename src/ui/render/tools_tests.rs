@@ -77,6 +77,53 @@ fn tool_menu_title_and_wide_categories_stay_inside_the_modal() {
 }
 
 #[test]
+fn tool_menu_explains_empty_filters_and_keeps_long_progress_inside_its_box() {
+    let config = crate::config::load_bundled_config().config;
+    for (width, height) in [(80, 24), (100, 30), (160, 45)] {
+        let mut menu = tool_menu_for_render();
+        menu.rows.clear();
+        menu.query = "no-such-tool".into();
+        let mut frame = crate::ui::grid::Frame {
+            grid: crate::ui::CellGrid::new(width, height),
+            cursor: None,
+        };
+        crate::ui::render::tools::render_tool_menu(&mut frame, &menu, &config, width, height);
+        let text = (0..height)
+            .map(|y| frame.grid.row_text(y))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(text.contains("No matching tools"), "{text}");
+        assert!(text.contains("Esc clears the search"), "{text}");
+
+        menu = tool_menu_for_render();
+        menu.rows[0].lifecycle =
+            "installing (downloading 123456789 / 987654321 bytes, verifying checksum)".into();
+        menu.rows[0].name = "A language server with a very long display name".repeat(3);
+        let mut frame = crate::ui::grid::Frame {
+            grid: crate::ui::CellGrid::new(width, height),
+            cursor: None,
+        };
+        crate::ui::render::tools::render_tool_menu(&mut frame, &menu, &config, width, height);
+        let box_width = width * 82 / 100;
+        let left = (width - box_width) / 2;
+        let right = left + box_width - 1;
+        let top = (height - height * 84 / 100) / 2;
+        let bottom = top + height * 84 / 100 - 1;
+        for y in top + 1..bottom {
+            for x in [left, right] {
+                assert_eq!(
+                    frame.grid.get(x, y).unwrap().symbol,
+                    "│",
+                    "{width}x{height} row {y}"
+                );
+            }
+            assert_eq!(frame.grid.get(left - 1, y).unwrap().symbol, " ");
+            assert_eq!(frame.grid.get(right + 1, y).unwrap().symbol, " ");
+        }
+    }
+}
+
+#[test]
 fn tool_menu_failed_probe_offers_start_instead_of_stop_and_restart() {
     let config = crate::config::load_bundled_config().config;
     let mut menu = tool_menu_for_render();

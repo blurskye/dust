@@ -2178,7 +2178,7 @@ fn real_pty_reports_exit_io_failure_and_shared_deadline_unknown_distinctly() {
     assert!(
         driver
             .notification()
-            .is_some_and(|message| message.contains("status Some(7)"))
+            .is_some_and(|message| message == "terminal exited with status 7")
     );
 
     loaded.config.terminals.profiles.insert(
@@ -2496,7 +2496,7 @@ fn real_pty_reports_nonzero_exit_and_shared_deadline_unknown_distinctly() {
     assert!(
         driver
             .notification()
-            .is_some_and(|message| message.contains("status Some(7)"))
+            .is_some_and(|message| message == "terminal exited with status 7")
     );
 
     loaded.config.terminals.profiles.insert(

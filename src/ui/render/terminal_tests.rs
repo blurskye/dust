@@ -296,6 +296,47 @@ fn terminal_tabs_keep_the_active_title_visible_and_hit_targets_match_borders() {
             }
         }
     }
+    config.editor.ambiguous_width = crate::config::AmbiguousWidth::Narrow;
+    terminal.tabs.truncate(2);
+    terminal.tabs[0].profile = format!("/{}first-shell", "long-directory/".repeat(20));
+    terminal.tabs[1].profile = format!("/{}second-shell", "long-directory/".repeat(20));
+    terminal.tabs[1].phase = crate::ui::TerminalPhase::Exited;
+    terminal.tabs[1].exit_code = Some(7);
+    terminal.id = terminal.tabs[1].id;
+    terminal.mode = crate::ui::TerminalPanelMode::Normal;
+    for width in [80, 100, 160] {
+        let geometry = crate::ui::TerminalPanelGeometry {
+            x: 0,
+            width,
+            left_border: false,
+            top: 1,
+            height: 3,
+            body_top: 2,
+            body_height: 2,
+        };
+        let frame = crate::ui::render::terminal::dock_terminal_panel(
+            crate::ui::grid::Frame {
+                grid: crate::ui::CellGrid::new(width, 8),
+                cursor: None,
+            },
+            &terminal,
+            geometry,
+            &config,
+            width,
+            8,
+        );
+        let row = frame.grid.row_text(1);
+        for expected in ["first-shell", "second-shell", "[exit 7]", "NORMAL"] {
+            assert!(row.contains(expected), "{width}: {row}");
+        }
+        let second = row.find("second-shell").unwrap();
+        // The title is ASCII, except for the one-cell shortening marks.
+        let column = row[..second].chars().count() as u16;
+        assert_eq!(
+            crate::ui::terminal_tab_at_column(&terminal, &config, geometry, column),
+            Some(terminal.id)
+        );
+    }
 }
 
 #[test]

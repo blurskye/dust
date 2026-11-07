@@ -941,7 +941,10 @@ impl Terminals {
                         && !keep_output
                         && tab.exit_code.is_some_and(|code| code != 0)
                     {
-                        let message = format!("terminal exited with status {:?}", tab.exit_code);
+                        let message = format!(
+                            "terminal exited with status {}",
+                            tab.exit_code.expect("nonzero exit status")
+                        );
                         tab.failure = Some(message.clone());
                         updates.push(TerminalUpdate::Failed(id, message));
                     }
