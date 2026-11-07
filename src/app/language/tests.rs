@@ -467,7 +467,7 @@ fn interactive_lsp_results_follow_the_request_cursor() {
             app.state.views[view].cursor = ByteOffset(6);
         }
         transport.publish_result(
-            app.language.generation(),
+            app.language.request_id(),
             "textDocument/hover",
             &document,
             LspFeatureResult::Hover(LspHover {
@@ -500,7 +500,7 @@ fn an_unavailable_secondary_server_does_not_discard_the_primary_reply() {
     let document = app.active_lsp_document().unwrap().1;
     app.request_lsp(LspFeature::Hover);
     first.publish_result(
-        app.language.generation(),
+        app.language.request_id(),
         "textDocument/hover",
         &document,
         LspFeatureResult::Hover(LspHover {
@@ -513,7 +513,7 @@ fn an_unavailable_secondary_server_does_not_discard_the_primary_reply() {
     );
     app.process_lsp_events();
     assert!(app.ui.documentation_popup.is_some());
-    assert!(!app.language.request_pending(app.language.generation()));
+    assert!(!app.language.request_pending(app.language.request_id()));
     assert!(!app.ui.notification_error);
 }
 
@@ -805,7 +805,7 @@ fn content_modified_before_any_loading_is_asked_again_a_few_times() {
     let failure = |app: &mut App| {
         app.handle_lsp_request_failure(
             "rust-analyzer".into(),
-            app.language.generation(),
+            app.language.request_id(),
             "textDocument/hover".into(),
             r#"{"code":-32801,"message":"content modified"}"#.into(),
         );
@@ -815,11 +815,11 @@ fn content_modified_before_any_loading_is_asked_again_a_few_times() {
         assert!(!app.ui.notification_error);
         assert!(app.lsp_waiting.is_some());
         assert!(app.lsp_retry_at.is_some());
-        let generation = app.language.generation();
+        let request_id = app.language.request_id();
         app.lsp_retry_at = Some(Instant::now());
         app.process_lsp_retry();
         assert!(app.lsp_retry_at.is_none());
-        assert!(app.language.generation() > generation);
+        assert!(app.language.request_id() > request_id);
         assert_eq!(
             transport.requested_feature(),
             Some(crate::language::lsp::LspFeature::Hover)
@@ -834,16 +834,16 @@ fn content_modified_before_any_loading_is_asked_again_a_few_times() {
 fn stale_content_modified_failures_do_not_retry_the_latest_user_feature() {
     let (_app_dirs, mut app) = app();
     app.lsp_asked = Some(crate::language::lsp::LspFeature::Definition);
-    app.lsp_asked_generation = Some(7);
+    app.lsp_asked_request_id = Some(7);
     app.ui.lsp_loading = Some("definition loading".into());
-    for (generation, method) in [
+    for (request_id, method) in [
         (6, "textDocument/hover"),
         (7, "textDocument/semanticTokens/full"),
         (6, "textDocument/definition"),
     ] {
         app.handle_lsp_request_failure(
             "server".into(),
-            generation,
+            request_id,
             method.into(),
             "-32801 content modified".into(),
         );
@@ -1015,7 +1015,7 @@ fn completion_documentation_is_typed_and_exact_request_owned() {
         uri: "file:///completion.rs".into(),
         language: "rust".into(),
     };
-    app.language.fixture_generation(7);
+    app.language.fixture_request_id(7);
     app.language.fixture_projection(Some(owner.clone()));
     app.language
         .fixture_completion_source(Some((7, owner.clone())));
@@ -1080,13 +1080,13 @@ fn completion_documentation_is_typed_and_exact_request_owned() {
     );
     assert!(app.ui.language_completion.is_some());
 
-    // An unrelated request advances the generation without changing the completion document.
-    app.language.fixture_generation(8);
+    // An unrelated request advances the request ID without changing the completion document.
+    app.language.fixture_request_id(8);
     app.invoke_mapped_command("lsp.completion.documentation.open");
     assert!(app.ui.documentation_popup.is_some());
     assert!(!app.ui.notification_error);
 
-    app.language.fixture_generation(7);
+    app.language.fixture_request_id(7);
     let revision = app.state.buffers[buffer].text.revision();
     app.state.buffers[buffer]
         .text
@@ -1411,24 +1411,24 @@ fn code_actions_wait_for_every_server_and_list_them_together() {
         second.requested_feature(),
         Some(crate::language::lsp::LspFeature::CodeAction { .. })
     ));
-    let generation = app.language.generation();
+    let request_id = app.language.request_id();
     first.publish_result(
-        generation,
+        request_id,
         "textDocument/codeAction",
         &document,
         LspFeatureResult::CodeActions(vec![action("from types")]),
     );
     app.process_lsp_events();
     assert!(app.ui.picker.is_none());
-    assert!(app.language.request_pending(generation));
+    assert!(app.language.request_pending(request_id));
     second.publish_result(
-        generation,
+        request_id,
         "textDocument/codeAction",
         &document,
         LspFeatureResult::CodeActions(vec![action("from linter")]),
     );
     app.process_lsp_events();
-    assert!(!app.language.request_pending(generation));
+    assert!(!app.language.request_pending(request_id));
     let labels = app
         .ui
         .picker
@@ -1467,9 +1467,9 @@ fn null_code_actions_finish_aggregation_after_another_server_offers_actions() {
         },
         diagnostics: Vec::new(),
     });
-    let generation = app.language.generation();
+    let request_id = app.language.request_id();
     first.publish_result(
-        generation,
+        request_id,
         "textDocument/codeAction",
         &document,
         LspFeatureResult::CodeActions(vec![LspCodeAction {
@@ -1482,15 +1482,15 @@ fn null_code_actions_finish_aggregation_after_another_server_offers_actions() {
     );
     app.process_lsp_events();
     assert!(app.ui.picker.is_none());
-    assert!(app.language.request_pending(generation));
+    assert!(app.language.request_pending(request_id));
     second.publish_result(
-        generation,
+        request_id,
         "textDocument/codeAction",
         &document,
         LspFeatureResult::Empty,
     );
     app.process_lsp_events();
-    assert!(!app.language.request_pending(generation));
+    assert!(!app.language.request_pending(request_id));
     assert!(
         app.ui
             .picker
@@ -1517,9 +1517,9 @@ fn null_completion_preserves_other_servers_items_without_an_error() {
     app.language.select("first");
     let document = app.active_lsp_document().unwrap().1;
     app.request_lsp(LspFeature::Completion);
-    let generation = app.language.generation();
+    let request_id = app.language.request_id();
     first.publish_result(
-        generation,
+        request_id,
         "textDocument/completion",
         &document,
         LspFeatureResult::Completion {
@@ -1544,7 +1544,7 @@ fn null_completion_preserves_other_servers_items_without_an_error() {
     app.process_lsp_events();
     assert!(app.ui.language_completion.is_some());
     second.publish_result(
-        generation,
+        request_id,
         "textDocument/completion",
         &document,
         LspFeatureResult::Empty,
@@ -2676,10 +2676,10 @@ fn nested_marker_backed_project_gets_its_own_lsp_preflight_root() {
         crate::language::lsp::LspCapabilities::default(),
     );
     app.refresh_lsp_projection_owner();
-    let generation = app.language.generation();
+    let request_id = app.language.request_id();
     app.present_lsp_result(
         &expected_key,
-        generation,
+        request_id,
         "textDocument/completion",
         "",
         crate::language::lsp::LspFeatureResult::Completion {
@@ -2705,8 +2705,8 @@ fn nested_marker_backed_project_gets_its_own_lsp_preflight_root() {
         app.sync_lsp_document();
     }
     assert_eq!(
-        app.language.generation(),
-        generation,
+        app.language.request_id(),
+        request_id,
         "idle frames restarted completion"
     );
     assert!(app.ui.language_completion.is_some());
@@ -3279,7 +3279,7 @@ fn completion_executes_its_command_on_the_offering_server_only_after_insertion()
         };
         app.present_lsp_result(
             "offering",
-            app.language.generation(),
+            app.language.request_id(),
             "textDocument/completion",
             "",
             LspFeatureResult::Completion {
@@ -3359,7 +3359,7 @@ fn unresolved_code_lenses_are_resolved_and_run_on_the_offering_server() {
     assert!(other.requested_feature().is_none());
     app.present_lsp_result_owned(
         "offering",
-        app.language.generation(),
+        app.language.request_id(),
         "codeLens/resolve",
         &file_uri(&path),
         LspFeatureResult::CodeLens(vec![LspCodeLens {
@@ -4132,9 +4132,9 @@ fn typing_narrows_the_completion_menu_instead_of_closing_it() {
         resolve_item: None,
         resolved: true,
     };
-    let generation = app.language.generation();
+    let request_id = app.language.request_id();
     app.language
-        .install_completions(&key, vec![item("log"), item("list")], false, generation);
+        .install_completions(&key, vec![item("log"), item("list")], false, request_id);
     app.narrow_lsp_completion();
     assert_eq!(
         app.ui
@@ -5178,12 +5178,12 @@ fn overlapping_formatting_saves_wait_for_their_own_results() {
             .iter()
             .all(|(_, path, _)| fs::read_to_string(path).unwrap() == "old")
     );
-    for (transport, (buffer, path, (server, generation))) in
+    for (transport, (buffer, path, (server, request_id))) in
         transports.into_iter().rev().zip(pending.into_iter().rev())
     {
         app.present_lsp_result_owned(
             &server,
-            generation,
+            request_id,
             "textDocument/formatting",
             &crate::language::lsp::file_uri(&path),
             crate::language::lsp::LspFeatureResult::WorkspaceEdit(
@@ -5836,13 +5836,13 @@ fn selection_expansion_requests_ranges_and_finishes_when_they_arrive() {
     let _transport = fixture_owned_lsp(&mut app, "owned", buffer);
     app.language.select("owned");
     app.state.views[view].cursor = ByteOffset(5);
-    let generation = app.language.generation();
+    let request_id = app.language.request_id();
     app.process_effect(AppEffect::LspSelectionExpand);
-    assert!(app.language.generation() > generation);
+    assert!(app.language.request_id() > request_id);
     assert!(app.state.views[view].selection.is_none());
     app.present_lsp_result(
         "owned",
-        app.language.generation(),
+        app.language.request_id(),
         "textDocument/selectionRange",
         &crate::language::lsp::file_uri(&path),
         LspFeatureResult::Ranges(vec![
@@ -5880,10 +5880,10 @@ fn selection_expansion_requests_ranges_and_finishes_when_they_arrive() {
     );
     app.state.views[view].selection = None;
     app.state.views[view].cursor = ByteOffset(1);
-    let generation = app.language.generation();
+    let request_id = app.language.request_id();
     app.process_effect(AppEffect::LspSelectionExpand);
     assert!(
-        app.language.generation() > generation,
+        app.language.request_id() > request_id,
         "ranges for another cursor must be requested again"
     );
 }
@@ -6324,7 +6324,7 @@ fn semantic_content_restore_uses_fresh_ids_and_preserves_unclamped_desired_place
         "content_id",
         "view_id",
         "window_id",
-        "generation",
+        "instance_id",
         "capabilities",
     ] {
         assert!(!encoded.contains(forbidden));

@@ -29,14 +29,14 @@ const INLAY_DEBOUNCE: Duration = Duration::from_millis(120);
 const INLAY_EMPTY_RETRY: Duration = Duration::from_millis(500);
 const INLAY_RETRY_LIMIT: u8 = 5;
 const INLAY_STARTUP: Duration = Duration::from_secs(8);
-/// Colour requests sit between projection generations (below half) and inlay ones (above it).
-pub(in crate::app) const COLOR_GENERATION: u64 = u64::MAX / 2;
+/// Colour requests sit between projection request IDs (below half) and inlay ones (above it).
+pub(in crate::app) const COLOR_REQUEST_ID: u64 = u64::MAX / 2;
 /// Answers for the status line's breadcrumbs, which never open the symbol picker.
-pub(in crate::app) const BREADCRUMB_GENERATION: u64 = COLOR_GENERATION + 1;
+pub(in crate::app) const BREADCRUMB_REQUEST_ID: u64 = COLOR_REQUEST_ID + 1;
 #[derive(Default)]
 pub(in crate::app) struct Projection {
-    generation: u64,
-    inlay_generation: u64,
+    request_id: u64,
+    inlay_request_id: u64,
     owner: Option<LspProjectionOwner>,
     request: Option<(u64, LspProjectionOwner)>,
     /// Servers that have not answered the current request; completion asks every one.
@@ -95,8 +95,8 @@ pub(in crate::app) enum ProjectionChange {
 }
 
 impl LspSession {
-    pub(in crate::app) fn generation(&self) -> u64 {
-        self.projection.generation
+    pub(in crate::app) fn request_id(&self) -> u64 {
+        self.projection.request_id
     }
     pub(in crate::app) fn projection(&self) -> Option<&LspProjectionOwner> {
         self.projection.owner.as_ref()
@@ -212,13 +212,13 @@ impl LspSession {
         self.projection.inlay_request = None;
         self.projection.inlay_retries = 0;
     }
-    pub(in crate::app) fn next_generation(&mut self) -> Option<u64> {
+    pub(in crate::app) fn next_request_id(&mut self) -> Option<u64> {
         let next = self
             .projection
-            .generation
+            .request_id
             .checked_add(1)
             .filter(|next| *next < u64::MAX / 2)?;
-        self.projection.generation = next;
+        self.projection.request_id = next;
         Some(next)
     }
     /// The server for `feature` on this document: the active one when it can answer, else one
@@ -347,11 +347,11 @@ impl LspSession {
                 previous_result_id: id.clone(),
             };
         }
-        let generation = self
-            .next_generation()
+        let request_id = self
+            .next_request_id()
             .ok_or_else(|| LspError::Busy(server.into()))?;
         if matches!(feature, LspFeature::SelectionRanges) {
-            self.projection.selection_request = Some((generation, offset, false));
+            self.projection.selection_request = Some((request_id, offset, false));
         }
         let others: Vec<String> = match feature {
             LspFeature::Completion => self
@@ -382,9 +382,9 @@ impl LspSession {
             self.feature_for_server(&feature, &document, &owner.server, server)?,
             document.clone(),
             offset,
-            generation,
+            request_id,
         )?;
-        self.projection.request = Some((generation, owner.clone()));
+        self.projection.request = Some((request_id, owner.clone()));
         self.projection.request_servers = vec![server.to_owned()];
         // Like VS Code, every attached server answers, e.g. Tailwind classes beside TypeScript.
         for other in others {
@@ -402,7 +402,7 @@ impl LspSession {
                     self.feature_for_server(&feature, &document, &owner.server, &other)?,
                     document.clone(),
                     offset,
-                    generation,
+                    request_id,
                 )
                 .is_ok()
             {
@@ -414,7 +414,7 @@ impl LspSession {
             .retain(|_, (_, _, method)| method != feature.method());
         self.projection
             .request_cursors
-            .retain(|generation, _| self.projection.requests.contains_key(generation));
+            .retain(|request_id, _| self.projection.requests.contains_key(request_id));
         if matches!(
             feature,
             LspFeature::Hover
@@ -430,10 +430,10 @@ impl LspSession {
                 | LspFeature::DocumentHighlights
                 | LspFeature::SelectionRanges
         ) {
-            self.projection.request_cursors.insert(generation, offset);
+            self.projection.request_cursors.insert(request_id, offset);
         }
         self.projection.requests.insert(
-            generation,
+            request_id,
             (
                 owner,
                 self.projection.request_servers.clone(),
@@ -509,14 +509,14 @@ impl LspSession {
                     LspFeature::DocumentColors,
                     document.clone(),
                     ByteOffset(0),
-                    COLOR_GENERATION,
+                    COLOR_REQUEST_ID,
                 )
                 .is_ok()
         })
         .collect()
     }
-    pub(in crate::app) fn is_breadcrumb_request(&self, generation: u64) -> bool {
-        generation == BREADCRUMB_GENERATION
+    pub(in crate::app) fn is_breadcrumb_request(&self, request_id: u64) -> bool {
+        request_id == BREADCRUMB_REQUEST_ID
     }
     /// Asks for the document's symbols once its text has been still for a moment.
     pub(in crate::app) fn request_breadcrumbs(
@@ -594,7 +594,7 @@ impl LspSession {
                 LspFeature::DocumentSymbols,
                 document,
                 ByteOffset(0),
-                BREADCRUMB_GENERATION,
+                BREADCRUMB_REQUEST_ID,
             )
             .is_ok()
         {
@@ -641,14 +641,14 @@ impl LspSession {
         };
         let Some(next) = self
             .projection
-            .inlay_generation
+            .inlay_request_id
             .checked_add(1)
             .filter(|next| *next < u64::MAX / 2)
         else {
             return;
         };
-        self.projection.inlay_generation = next;
-        let generation = u64::MAX - next;
+        self.projection.inlay_request_id = next;
+        let request_id = u64::MAX - next;
         let feature = LspFeature::InlayHints {
             range: crate::language::lsp::LspRange {
                 start: crate::language::lsp::LspPosition {
@@ -660,9 +660,9 @@ impl LspSession {
         };
         match self
             .service
-            .request(&owner.server, feature, document, ByteOffset(0), generation)
+            .request(&owner.server, feature, document, ByteOffset(0), request_id)
         {
-            Ok(()) => self.projection.inlay_request = Some((generation, owner)),
+            Ok(()) => self.projection.inlay_request = Some((request_id, owner)),
             Err(LspError::Busy(_)) => {
                 self.projection.inlay_due = Some(Instant::now() + INLAY_DEBOUNCE);
             }
@@ -672,7 +672,7 @@ impl LspSession {
     pub(in crate::app) fn accept_result(
         &mut self,
         server: &str,
-        generation: u64,
+        request_id: u64,
         method: &str,
         uri: &str,
         version: u64,
@@ -681,16 +681,16 @@ impl LspSession {
         if self
             .projection
             .request_cursors
-            .get(&generation)
+            .get(&request_id)
             .is_some_and(|asked| *asked != cursor)
         {
-            self.projection.requests.remove(&generation);
-            self.projection.request_cursors.remove(&generation);
-            self.retire_request(server, generation);
+            self.projection.requests.remove(&request_id);
+            self.projection.request_cursors.remove(&request_id);
+            self.retire_request(server, request_id);
             return false;
         }
         if let Some((owner, servers, expected_method)) =
-            self.projection.requests.get_mut(&generation)
+            self.projection.requests.get_mut(&request_id)
         {
             if expected_method != method
                 || Some(&*owner) != self.projection.owner.as_ref()
@@ -702,14 +702,14 @@ impl LspSession {
             }
             servers.retain(|s| s != server);
             if servers.is_empty() {
-                self.projection.requests.remove(&generation);
-                self.projection.request_cursors.remove(&generation);
+                self.projection.requests.remove(&request_id);
+                self.projection.request_cursors.remove(&request_id);
             }
             if self
                 .projection
                 .request
                 .as_ref()
-                .is_some_and(|(g, _)| *g == generation)
+                .is_some_and(|(g, _)| *g == request_id)
             {
                 self.projection.request_servers.retain(|s| s != server);
                 if self.projection.request_servers.is_empty() {
@@ -719,7 +719,7 @@ impl LspSession {
             return true;
         }
         let inlay = method == "textDocument/inlayHint";
-        if !inlay && generation != self.projection.generation {
+        if !inlay && request_id != self.projection.request_id {
             return false;
         }
         let request = if inlay {
@@ -728,7 +728,7 @@ impl LspSession {
             &mut self.projection.request
         };
         if !request.as_ref().is_some_and(|(g, owner)| {
-            *g == generation
+            *g == request_id
                 && Some(owner) == self.projection.owner.as_ref()
                 && (if inlay {
                     owner.server == server
@@ -750,52 +750,52 @@ impl LspSession {
         true
     }
     /// Whether another server still owes an answer to this request.
-    pub(in crate::app) fn request_pending(&self, generation: u64) -> bool {
+    pub(in crate::app) fn request_pending(&self, request_id: u64) -> bool {
         self.projection
             .requests
-            .get(&generation)
+            .get(&request_id)
             .is_some_and(|(_, servers, _)| !servers.is_empty())
             || (self
                 .projection
                 .request
                 .as_ref()
-                .is_some_and(|(current, _)| *current == generation)
+                .is_some_and(|(current, _)| *current == request_id)
                 && !self.projection.request_servers.is_empty())
     }
-    pub(in crate::app) fn retire_request(&mut self, server: &str, generation: u64) {
-        self.forget_request(server, generation);
+    pub(in crate::app) fn retire_request(&mut self, server: &str, request_id: u64) {
+        self.forget_request(server, request_id);
         if self
             .projection
             .request
             .as_ref()
-            .is_some_and(|(current, _)| *current == generation)
+            .is_some_and(|(current, _)| *current == request_id)
             && self.projection.request_servers.is_empty()
         {
             self.projection.request = None;
         }
     }
-    pub(in crate::app) fn forget_request(&mut self, server: &str, generation: u64) {
-        if let Some((_, servers, _)) = self.projection.requests.get_mut(&generation) {
+    pub(in crate::app) fn forget_request(&mut self, server: &str, request_id: u64) {
+        if let Some((_, servers, _)) = self.projection.requests.get_mut(&request_id) {
             servers.retain(|s| s != server);
             if servers.is_empty() {
-                self.projection.requests.remove(&generation);
+                self.projection.requests.remove(&request_id);
             }
         }
         if self
             .projection
             .request
             .as_ref()
-            .is_some_and(|(current, _)| *current == generation)
+            .is_some_and(|(current, _)| *current == request_id)
         {
             self.projection.request_servers.retain(|s| s != server);
         }
     }
-    pub(in crate::app) fn fail_inlay(&mut self, server: &str, generation: u64) -> bool {
+    pub(in crate::app) fn fail_inlay(&mut self, server: &str, request_id: u64) -> bool {
         if !self
             .projection
             .inlay_request
             .as_ref()
-            .is_some_and(|(g, owner)| *g == generation && owner.server == server)
+            .is_some_and(|(g, owner)| *g == request_id && owner.server == server)
         {
             return false;
         }
@@ -912,19 +912,19 @@ impl LspSession {
         server: &str,
         items: Vec<LspCompletionItem>,
         incomplete: bool,
-        generation: u64,
+        request_id: u64,
     ) {
         self.register_completion_source(server, self.server_encoding(server), false);
         if self
             .projection
             .completion_owner
             .as_ref()
-            .is_none_or(|(id, _)| *id != generation)
+            .is_none_or(|(id, _)| *id != request_id)
             && let Some(owner) = self.projection.owner.clone()
         {
-            self.start_completions(owner, generation);
+            self.start_completions(owner, request_id);
         }
-        self.publish_completions(server, items, incomplete, generation);
+        self.publish_completions(server, items, incomplete, request_id);
     }
 
     /// The first answer replaces the list; later sources merge into it. Publishing again
@@ -1183,15 +1183,15 @@ impl LspSession {
             self.projection
                 .requests
                 .iter()
-                .any(|(generation, (_, _, method))| {
-                    *generation == self.projection.generation
+                .any(|(request_id, (_, _, method))| {
+                    *request_id == self.projection.request_id
                         && (method == "textDocument/completion"
                             || method == "completionItem/resolve")
                 });
-        for (generation, (_, servers, method)) in &self.projection.requests {
+        for (request_id, (_, servers, method)) in &self.projection.requests {
             if method == "textDocument/completion" || method == "completionItem/resolve" {
                 for server in servers {
-                    let _ = self.service.cancel(server, *generation);
+                    let _ = self.service.cancel(server, *request_id);
                 }
             }
         }
@@ -1203,15 +1203,15 @@ impl LspSession {
                 .projection
                 .completion_owner
                 .as_ref()
-                .is_some_and(|(generation, _)| *generation == self.projection.generation)
+                .is_some_and(|(request_id, _)| *request_id == self.projection.request_id)
             || self
                 .projection
                 .resolve
                 .as_ref()
-                .is_some_and(|(generation, _, _, _)| *generation == self.projection.generation)
+                .is_some_and(|(request_id, _, _, _)| *request_id == self.projection.request_id)
         {
             for server in &self.projection.request_servers {
-                let _ = self.service.cancel(server, self.projection.generation);
+                let _ = self.service.cancel(server, self.projection.request_id);
             }
             self.projection.request = None;
             self.projection.request_servers.clear();
@@ -1318,35 +1318,35 @@ impl LspSession {
             .completion_server(selected)
             .unwrap_or(&owner.server)
             .to_owned();
-        let generation = self
-            .next_generation()
+        let request_id = self
+            .next_request_id()
             .ok_or_else(|| LspError::Busy(server.clone()))?;
         self.service.request(
             &server,
             LspFeature::CompletionResolve { item },
             document,
             offset,
-            generation,
+            request_id,
         )?;
-        self.projection.request = Some((generation, owner.clone()));
+        self.projection.request = Some((request_id, owner.clone()));
         self.projection.request_servers = vec![server.clone()];
         self.projection.requests.insert(
-            generation,
+            request_id,
             (owner.clone(), vec![server], "completionItem/resolve".into()),
         );
-        self.projection.resolve = Some((generation, owner, selected, offset));
+        self.projection.resolve = Some((request_id, owner, selected, offset));
         Ok(())
     }
     pub(in crate::app) fn accept_resolved(
         &mut self,
-        generation: u64,
+        request_id: u64,
         item: LspCompletionItem,
         editor: &EditorState,
     ) -> bool {
         let Some((expected, owner, index, offset)) = self.projection.resolve.as_ref() else {
             return false;
         };
-        if generation != *expected
+        if request_id != *expected
             || self.projection.owner.as_ref() != Some(owner)
             || *index >= self.projection.completion_items.len()
         {
@@ -1396,14 +1396,14 @@ impl LspSession {
     }
     pub(in crate::app) fn complete_selection_ranges(
         &mut self,
-        generation: u64,
+        request_id: u64,
         ranges: Vec<ByteRange>,
     ) -> Option<ByteOffset> {
         let request = self
             .projection
             .selection_request
             .take()
-            .filter(|(pending, _, _)| *pending == generation);
+            .filter(|(pending, _, _)| *pending == request_id);
         self.projection.selection_cursor = request.map(|(_, cursor, _)| cursor);
         self.install_selection_ranges(ranges);
         request
@@ -1724,8 +1724,8 @@ impl LspSession {
 
 #[cfg(test)]
 impl LspSession {
-    pub(in crate::app) fn fixture_generation(&mut self, generation: u64) {
-        self.projection.generation = generation;
+    pub(in crate::app) fn fixture_request_id(&mut self, request_id: u64) {
+        self.projection.request_id = request_id;
     }
     pub(in crate::app) fn fixture_projection(&mut self, owner: Option<LspProjectionOwner>) {
         self.projection.owner = owner;
@@ -1802,7 +1802,7 @@ mod tests {
             language: "rust".into(),
         };
         let mut owner = LspSession::default();
-        owner.projection.generation = 7;
+        owner.projection.request_id = 7;
         owner.projection.owner = Some(source.clone());
         owner.projection.request = Some((7, source.clone()));
         owner.projection.request_servers = vec!["second".into()];
@@ -2241,7 +2241,7 @@ mod tests {
     #[test]
     fn dismissed_completion_retires_every_pending_server() {
         let (_, _, document, mut owner) = fixture();
-        owner.projection.generation = 3;
+        owner.projection.request_id = 3;
         owner.projection.request = Some((3, owner.projection.owner.clone().unwrap()));
         owner.projection.request_servers = vec!["owned".into(), "second".into()];
         owner.install_completions("owned", vec![item("first")], false, 3);
@@ -2272,21 +2272,21 @@ mod tests {
         owner
             .resolve_completion(0, document.clone(), ByteOffset(0))
             .unwrap();
-        let generation = owner.generation();
-        assert!(owner.projection.requests.contains_key(&generation));
-        owner.next_generation().unwrap();
+        let request_id = owner.request_id();
+        assert!(owner.projection.requests.contains_key(&request_id));
+        owner.next_request_id().unwrap();
         let source = owner.projection.owner.clone().unwrap();
-        owner.projection.request = Some((owner.generation(), source));
+        owner.projection.request = Some((owner.request_id(), source));
         owner.projection.request_servers = vec!["owned".into()];
         assert!(owner.accept_result(
             "owned",
-            generation,
+            request_id,
             "completionItem/resolve",
             &document.uri(),
             0,
             ByteOffset(0)
         ));
-        assert!(owner.accept_resolved(generation, item("resolved foo"), &editor));
+        assert!(owner.accept_resolved(request_id, item("resolved foo"), &editor));
         assert_eq!(owner.completion_items()[0].label, "resolved foo");
     }
     #[test]
@@ -2363,7 +2363,7 @@ mod tests {
     #[test]
     fn narrowing_keeps_a_resolve_on_its_original_item() {
         let (editor, _, _, mut owner) = fixture();
-        owner.projection.generation = 3;
+        owner.projection.request_id = 3;
         owner.install_completions("owned", vec![item("abX"), item("aXb")], false, 3);
         owner.projection.resolve =
             Some((3, owner.projection.owner.clone().unwrap(), 0, ByteOffset(0)));
@@ -2380,7 +2380,7 @@ mod tests {
     #[test]
     fn narrowing_cannot_resolve_into_a_different_row() {
         let (editor, _, _, mut owner) = fixture();
-        owner.projection.generation = 3;
+        owner.projection.request_id = 3;
         owner.install_completions("owned", vec![item("abX"), item("aXb")], false, 3);
         owner.projection.resolve =
             Some((3, owner.projection.owner.clone().unwrap(), 0, ByteOffset(0)));
@@ -2397,7 +2397,7 @@ mod tests {
     #[test]
     fn narrowing_rejects_a_resolve_when_its_item_is_filtered_out() {
         let (editor, _, _, mut owner) = fixture();
-        owner.projection.generation = 3;
+        owner.projection.request_id = 3;
         owner.install_completions("owned", vec![item("abX"), item("aXb")], false, 3);
         owner.projection.resolve =
             Some((3, owner.projection.owner.clone().unwrap(), 0, ByteOffset(0)));
@@ -2441,7 +2441,7 @@ mod tests {
                 "textDocument/completion".into(),
             ),
         );
-        owner.projection.generation = 2;
+        owner.projection.request_id = 2;
         owner.projection.request = Some((2, source.clone()));
         owner.projection.request_servers = vec!["owned".into()];
         owner.projection.requests.insert(
@@ -2473,7 +2473,7 @@ mod tests {
         ));
     }
     #[test]
-    fn pending_servers_belong_to_the_result_generation() {
+    fn pending_servers_belong_to_the_result_request_id() {
         let (_, _, document, mut owner) = fixture();
         let source = owner.projection.owner.clone().unwrap();
         owner.projection.requests.insert(
@@ -2492,7 +2492,7 @@ mod tests {
                 "textDocument/hover".into(),
             ),
         );
-        owner.projection.generation = 2;
+        owner.projection.request_id = 2;
         owner.projection.request = Some((2, source));
         owner.projection.request_servers = vec!["owned".into()];
         assert!(owner.accept_result(
@@ -2531,7 +2531,7 @@ mod tests {
             2,
             (source, vec!["owned".into()], "textDocument/hover".into()),
         );
-        owner.projection.generation = 2;
+        owner.projection.request_id = 2;
         assert!(owner.accept_result(
             "owned",
             2,
@@ -2743,7 +2743,7 @@ mod tests {
         };
         let mut owner = LspSession::default();
         owner.projection.owner = Some(source.clone());
-        owner.projection.generation = 3;
+        owner.projection.request_id = 3;
         owner.projection.request = Some((3, source.clone()));
         owner.projection.request_servers = vec!["html".into(), "tailwind".into()];
         let accept = |owner: &mut LspSession, server: &str| {
@@ -2797,7 +2797,7 @@ mod tests {
         };
         let mut owner = LspSession::default();
         owner.projection.owner = Some(source.clone());
-        owner.projection.generation = 7;
+        owner.projection.request_id = 7;
         owner.install_completions("owned", vec![item("first"), item("second")], false, 7);
         owner.projection.request = Some((7, source.clone()));
         owner.projection.request_servers = vec!["owned".into()];
@@ -2835,20 +2835,20 @@ mod tests {
         assert_eq!(owner.completion_items()[1].label, "second");
         assert!(!owner.accept_resolved(7, item("duplicate"), &editor));
         owner.move_completion(-1, 10);
-        owner.projection.generation = 8;
+        owner.projection.request_id = 8;
         owner.projection.resolve = Some((8, source.clone(), 0, ByteOffset(0)));
         editor.views[view].cursor = ByteOffset(1);
         assert!(!owner.accept_resolved(8, item("moved cursor"), &editor));
         editor.views[view].cursor = ByteOffset(0);
-        owner.projection.generation = 9;
+        owner.projection.request_id = 9;
         owner.projection.resolve = Some((9, source.clone(), 0, ByteOffset(0)));
         assert!(owner.accept_resolved(9, item("original action"), &editor));
         owner.projection.resolve = Some((9, source, 0, ByteOffset(0)));
         owner.clear_completion();
         assert!(!owner.accept_resolved(9, item("cancelled"), &editor));
-        owner.projection.generation = u64::MAX / 2 - 1;
-        assert!(owner.next_generation().is_none());
-        assert_eq!(owner.generation(), u64::MAX / 2 - 1);
+        owner.projection.request_id = u64::MAX / 2 - 1;
+        assert!(owner.next_request_id().is_none());
+        assert_eq!(owner.request_id(), u64::MAX / 2 - 1);
         let full = LspSemanticTokens {
             result_id: Some("base".into()),
             data: vec![0, 0, 1, 0, 0],
@@ -2929,7 +2929,7 @@ mod tests {
         };
         let mut session = LspSession::default();
         session.projection.owner = Some(source.clone());
-        session.projection.generation = 1;
+        session.projection.request_id = 1;
         session.install_completions("server", vec![item("old")], false, 1);
         assert!(session.completion_current(&editor));
         session.projection.resolve = Some((1, source, 0, ByteOffset(0)));
@@ -2972,7 +2972,7 @@ mod tests {
         };
         let mut session = LspSession::default();
         session.projection.owner = Some(source.clone());
-        session.projection.generation = 1;
+        session.projection.request_id = 1;
         session.projection.request = Some((1, source.clone()));
         session.projection.request_servers = vec!["formatter".into()];
         session.projection.requests.insert(
@@ -3000,7 +3000,7 @@ mod tests {
                 "textDocument/formatting".into(),
             ),
         );
-        session.projection.generation = 2;
+        session.projection.request_id = 2;
         session.projection.request = Some((2, source.clone()));
         session.projection.request_servers = vec!["hover".into()];
         session.projection.requests.insert(

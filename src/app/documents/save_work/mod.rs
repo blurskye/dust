@@ -345,7 +345,7 @@ impl App {
                 self.format_on_save
                     .get_mut(&buffer)
                     .expect("formatting save")
-                    .request = Some((server, self.language.generation()))
+                    .request = Some((server, self.language.request_id()))
             }
             Err(error) => self.show_error(error),
         }

@@ -462,7 +462,7 @@ pub(super) fn handle_response(
             events,
             LspEvent::RequestFailed {
                 server: server.into(),
-                generation: request.generation,
+                request_id: request.request_id,
                 method: request.feature.method().into(),
                 message: error.to_string(),
             },
@@ -476,7 +476,7 @@ pub(super) fn handle_response(
             events,
             LspEvent::Result {
                 server: server.into(),
-                generation: request.generation,
+                request_id: request.request_id,
                 method: request.feature.method().into(),
                 uri: request.document.uri(),
                 version: request.document.version,
@@ -487,7 +487,7 @@ pub(super) fn handle_response(
             events,
             LspEvent::RequestFailed {
                 server: server.into(),
-                generation: request.generation,
+                request_id: request.request_id,
                 method: request.feature.method().into(),
                 message,
             },

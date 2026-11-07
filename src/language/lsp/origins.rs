@@ -191,14 +191,14 @@ impl EditSourceFixture {
     }
     pub(crate) fn publish_result(
         &self,
-        generation: u64,
+        request_id: u64,
         method: &str,
         document: &crate::language::lsp::messages::LspDocument,
         result: crate::language::lsp::messages::LspFeatureResult,
     ) {
         self.events.send(LspEvent::Result {
             server: self.events.context.server.to_string(),
-            generation,
+            request_id,
             method: method.into(),
             uri: document.uri(),
             version: document.version,

@@ -482,7 +482,7 @@ impl App {
             pending_saves: std::collections::VecDeque::new(),
             navigation_reads: std::collections::HashMap::new(),
             lsp_asked: None,
-            lsp_asked_generation: None,
+            lsp_asked_request_id: None,
             lsp_waiting: None,
             lsp_waiting_server: None,
             lsp_retry_at: None,

@@ -266,8 +266,8 @@ impl LspSession {
     pub(in crate::app) fn save(&self, server: &str, document: LspDocument) -> Result<(), LspError> {
         self.service.save(server, document)
     }
-    pub(in crate::app) fn cancel(&self, server: &str, generation: u64) -> Result<(), LspError> {
-        self.service.cancel(server, generation)
+    pub(in crate::app) fn cancel(&self, server: &str, request_id: u64) -> Result<(), LspError> {
+        self.service.cancel(server, request_id)
     }
     pub(in crate::app) fn configure(
         &mut self,
@@ -408,8 +408,8 @@ impl LspSession {
             .and_then(|session| session.documents.values().next())
             .cloned()
             .unwrap_or(fallback);
-        let generation = self
-            .next_generation()
+        let request_id = self
+            .next_request_id()
             .ok_or("language-server request identity exhausted")?;
         self.service
             .request(
@@ -417,7 +417,7 @@ impl LspSession {
                 crate::language::lsp::LspFeature::ExecuteCommand(command),
                 document,
                 crate::editor::text::ByteOffset(0),
-                generation,
+                request_id,
             )
             .map_err(|error| error.to_string())?;
         Ok(())
@@ -1666,35 +1666,35 @@ impl App {
     pub(in crate::app) fn handle_lsp_request_failure(
         &mut self,
         server: String,
-        generation: u64,
+        request_id: u64,
         method: String,
         message: String,
     ) {
         // The status line's own request: an empty trail is the whole result.
-        if self.language.is_breadcrumb_request(generation) {
+        if self.language.is_breadcrumb_request(request_id) {
             self.language.retry_breadcrumbs();
             return;
         }
         // A formatter that fails must not cost the save.
         if method == "textDocument/formatting"
-            && let Some(buffer) = self.formatting_save_for_request(&server, generation)
+            && let Some(buffer) = self.formatting_save_for_request(&server, request_id)
         {
             self.append_lsp_log(format!("format on save failed: {message}"));
             self.finish_format_on_save(buffer);
             return;
         }
         if method == "textDocument/inlayHint" {
-            if self.language.fail_inlay(&server, generation) {
+            if self.language.fail_inlay(&server, request_id) {
                 self.schedule_lsp_inlay_warmup_retry();
                 let server = self.lsp_server_label(&server);
                 self.append_lsp_log(format!("{server}: inlay hint refresh failed: {message}"));
             }
             // Inlay hints are background, revision-owned projections. A failure
-            // for any superseded generation is stale by definition, while a
+            // for any superseded request is stale by definition, while a
             // current failure is retried above. Neither is user-actionable.
             return;
         }
-        let current_asked = self.lsp_asked_generation == Some(generation)
+        let current_asked = self.lsp_asked_request_id == Some(request_id)
             && self
                 .lsp_asked
                 .as_ref()
@@ -1712,7 +1712,7 @@ impl App {
                     .is_some_and(|active| *active != server));
         // A server that fails code actions must not hide what the others offered.
         if method == "textDocument/codeAction" {
-            self.language.forget_request(&server, generation);
+            self.language.forget_request(&server, request_id);
             let main = self
                 .language
                 .active()
@@ -1730,7 +1730,7 @@ impl App {
             } else {
                 self.append_lsp_log(format!("{label}: {method} failed: {message}"));
             }
-            if !self.language.request_pending(generation)
+            if !self.language.request_pending(request_id)
                 && (!main || self.language.has_offered_actions())
             {
                 self.open_lsp_code_actions_picker(&server);
@@ -1738,7 +1738,7 @@ impl App {
             return;
         }
         if method == "textDocument/documentColor" || secondary {
-            self.language.forget_request(&server, generation);
+            self.language.forget_request(&server, request_id);
             let server = self.lsp_server_label(&server);
             self.append_lsp_log(format!("{server}: {method} failed: {message}"));
             return;
@@ -1761,7 +1761,7 @@ impl App {
             }
         }
         if !current_asked && message.contains("-32801") {
-            self.language.forget_request(&server, generation);
+            self.language.forget_request(&server, request_id);
             return;
         }
         let server = self.lsp_server_label(&server);
@@ -1869,7 +1869,7 @@ impl App {
 
             LspEvent::Result {
                 server,
-                generation,
+                request_id,
                 method,
                 uri,
                 version,
@@ -1888,12 +1888,12 @@ impl App {
                 }
                 let save_format = method == "textDocument/formatting"
                     && self
-                        .formatting_save_for_request(&server, generation)
+                        .formatting_save_for_request(&server, request_id)
                         .is_some();
                 if save_format {
                     self.present_lsp_result_owned(
                         &server,
-                        generation,
+                        request_id,
                         &method,
                         &uri,
                         result,
@@ -1911,7 +1911,7 @@ impl App {
                     self.install_lsp_colors(&server, &uri, colors, context.encoding());
                     return;
                 }
-                if self.language.is_breadcrumb_request(generation) {
+                if self.language.is_breadcrumb_request(request_id) {
                     self.refresh_lsp_projection_owner();
                     if !self.language.accept_breadcrumbs(&server, &uri, version) {
                         return;
@@ -1924,7 +1924,7 @@ impl App {
                 self.refresh_lsp_projection_owner();
                 if !self.language.accept_result(
                     &server,
-                    generation,
+                    request_id,
                     &method,
                     &uri,
                     version,
@@ -1937,7 +1937,7 @@ impl App {
                 }
                 self.present_lsp_result_owned(
                     &server,
-                    generation,
+                    request_id,
                     &method,
                     &uri,
                     result,
@@ -2006,10 +2006,10 @@ impl App {
             }
             LspEvent::RequestFailed {
                 server,
-                generation,
+                request_id,
                 method,
                 message,
-            } => self.handle_lsp_request_failure(server, generation, method, message),
+            } => self.handle_lsp_request_failure(server, request_id, method, message),
             LspEvent::Stopped { server, success } => {
                 if context.diagnostic_ambiguous() {
                     self.language.request_start(&server, None);
@@ -2342,7 +2342,7 @@ impl App {
         }
         if asked {
             self.lsp_asked = Some(feature.clone());
-            self.lsp_asked_generation = None;
+            self.lsp_asked_request_id = None;
         }
         if matches!(feature, LspFeature::CodeAction { .. }) {
             self.language.clear_offered_actions();
@@ -2442,7 +2442,7 @@ impl App {
         {
             Ok(()) => {
                 if asked {
-                    self.lsp_asked_generation = Some(self.language.generation());
+                    self.lsp_asked_request_id = Some(self.language.request_id());
                 }
                 if formats
                     && let Some(pending) = self
@@ -2450,7 +2450,7 @@ impl App {
                         .get_mut(&buffer)
                         .filter(|pending| pending.request.is_none())
                 {
-                    pending.request = Some((server.clone(), self.language.generation()));
+                    pending.request = Some((server.clone(), self.language.request_id()));
                 }
             }
             // The worker has already reported (or will imminently report) its
@@ -2509,12 +2509,12 @@ impl App {
     pub(in crate::app) fn present_lsp_result(
         &mut self,
         server: &str,
-        generation: u64,
+        request_id: u64,
         method: &str,
         uri: &str,
         result: LspFeatureResult,
     ) {
-        self.present_lsp_result_owned(server, generation, method, uri, result, None);
+        self.present_lsp_result_owned(server, request_id, method, uri, result, None);
     }
 }
 
@@ -2522,7 +2522,7 @@ impl App {
     pub(in crate::app) fn present_lsp_result_owned(
         &mut self,
         server: &str,
-        generation: u64,
+        request_id: u64,
         method: &str,
         uri: &str,
         result: LspFeatureResult,
@@ -2589,10 +2589,10 @@ impl App {
             }
             LspFeatureResult::Completion { items, incomplete } => {
                 self.language
-                    .install_completions(server, items, incomplete, generation);
+                    .install_completions(server, items, incomplete, request_id);
                 self.narrow_lsp_completion();
                 if self.ui.language_completion.is_none()
-                    && !self.language.request_pending(generation)
+                    && !self.language.request_pending(request_id)
                     && !self.language.completion_automatic()
                 {
                     self.show_lsp_no_result(server);
@@ -2601,7 +2601,7 @@ impl App {
             LspFeatureResult::CompletionResolved(item) => {
                 if self
                     .language
-                    .accept_resolved(generation, *item, &self.state)
+                    .accept_resolved(request_id, *item, &self.state)
                 {
                     self.project_lsp_completion();
                     self.accept_lsp_completion();
@@ -2676,7 +2676,7 @@ impl App {
                         }
                         self.restore_view_positions(positions);
                     }
-                    if let Some(buffer) = self.formatting_save_for_request(server, generation) {
+                    if let Some(buffer) = self.formatting_save_for_request(server, request_id) {
                         self.finish_format_on_save(buffer);
                     }
                     return;
@@ -2691,7 +2691,7 @@ impl App {
             }
             LspFeatureResult::CodeActions(actions) => {
                 self.language.offer_actions(server, uri, actions, context);
-                if !self.language.request_pending(generation) {
+                if !self.language.request_pending(request_id) {
                     self.open_lsp_code_actions_picker(server);
                 }
             }
@@ -2786,7 +2786,7 @@ impl App {
                 if let Some(full) = self.language.semantic_delta(server, uri, delta) {
                     self.present_lsp_result(
                         server,
-                        generation,
+                        request_id,
                         method,
                         uri,
                         LspFeatureResult::SemanticTokens(full),
@@ -2956,7 +2956,7 @@ impl App {
                         }
                         "textDocument/selectionRange" => {
                             let expand =
-                                self.language.complete_selection_ranges(generation, ranges);
+                                self.language.complete_selection_ranges(request_id, ranges);
                             if let Some(cursor) = expand
                                 && self
                                     .state
@@ -2978,18 +2978,18 @@ impl App {
                     "textDocument/formatting" | "textDocument/rangeFormatting"
                 ) =>
             {
-                if let Some(buffer) = self.formatting_save_for_request(server, generation) {
+                if let Some(buffer) = self.formatting_save_for_request(server, request_id) {
                     self.finish_format_on_save(buffer);
                 }
             }
             // Only the last of several servers can say that nobody knows.
             LspFeatureResult::Empty
                 if method == "textDocument/hover"
-                    && (self.language.request_pending(generation) || self.hover_is_showing()) => {}
+                    && (self.language.request_pending(request_id) || self.hover_is_showing()) => {}
             // Completion asks by itself as you type, and nothing to offer is no news.
             LspFeatureResult::Empty
                 if method == "textDocument/completion"
-                    && (self.language.request_pending(generation)
+                    && (self.language.request_pending(request_id)
                         || self.language.completion_automatic()
                         || self.ui.language_completion.is_some()) => {}
             LspFeatureResult::Empty if method == "workspace/executeCommand" => {}
@@ -3374,7 +3374,7 @@ impl App {
             return true;
         }
         typed.is_some_and(completion_word_char)
-            && !self.language.request_pending(self.language.generation())
+            && !self.language.request_pending(self.language.request_id())
             && self
                 .lsp_word_before_cursor()
                 .and_then(|word| word.chars().next())

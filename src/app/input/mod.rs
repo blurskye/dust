@@ -2655,7 +2655,7 @@ impl App {
         }
         self.ui.lsp_loading = None;
         self.lsp_asked = None;
-        self.lsp_asked_generation = None;
+        self.lsp_asked_request_id = None;
         self.lsp_waiting = None;
         self.lsp_waiting_server = None;
         self.lsp_retry_at = None;

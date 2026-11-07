@@ -1450,7 +1450,7 @@ while read() is not None: pass
         );
         match service.try_event() {
             Some(LspEvent::RequestFailed {
-                generation: 13,
+                request_id: 13,
                 method,
                 message,
                 ..
@@ -1663,10 +1663,10 @@ while True:
     let mut inlay = false;
     while Instant::now() < deadline && !(hover && completion && inlay) {
         if let Some(LspEvent::Result {
-            generation, result, ..
+            request_id, result, ..
         }) = service.try_event()
         {
-            match (generation, result) {
+            match (request_id, result) {
                 (11, LspFeatureResult::Hover(result)) => {
                     hover = result
                         .sections
@@ -1703,7 +1703,7 @@ while True:
     let mut timed_out = false;
     while Instant::now() < timeout_deadline && !timed_out {
         if let Some(LspEvent::RequestFailed {
-            generation: 13,
+            request_id: 13,
             message,
             ..
         }) = service.try_event()
@@ -2030,7 +2030,7 @@ fn server_request_ids_dynamic_options_folders_and_saturated_readers_stay_healthy
     loop {
         assert!(Instant::now() < deadline);
         match service.try_event() {
-            Some(LspEvent::Result { generation: 7, .. }) => break,
+            Some(LspEvent::Result { request_id: 7, .. }) => break,
             Some(LspEvent::Failed { message, .. } | LspEvent::RequestFailed { message, .. }) => {
                 panic!("{message}")
             }
@@ -2251,7 +2251,7 @@ time.sleep(30)
 }
 
 #[test]
-fn failed_request_writes_report_the_original_generation() {
+fn failed_request_writes_report_the_original_request_id() {
     let script = BOUNDARY_SERVER
         .split("m=read()\nsend(")
         .next()
@@ -2289,7 +2289,7 @@ time.sleep(30)
         );
         match service.try_event() {
             Some(LspEvent::RequestFailed {
-                generation: 91,
+                request_id: 91,
                 method,
                 ..
             }) => {

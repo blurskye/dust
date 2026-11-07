@@ -457,7 +457,7 @@ pub(super) fn expire_requests(
                 events,
                 LspEvent::RequestFailed {
                     server: server.into(),
-                    generation: request.generation,
+                    request_id: request.request_id,
                     method: request.feature.method().into(),
                     message: "language-server request timed out".into(),
                 },

@@ -546,7 +546,7 @@ pub enum LspEvent {
     },
     Result {
         server: String,
-        generation: u64,
+        request_id: u64,
         method: String,
         uri: String,
         version: u64,
@@ -587,7 +587,7 @@ pub enum LspEvent {
     },
     RequestFailed {
         server: String,
-        generation: u64,
+        request_id: u64,
         method: String,
         message: String,
     },

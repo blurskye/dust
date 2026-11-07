@@ -125,7 +125,7 @@ pub(super) enum SessionCommand {
         feature: LspFeature,
         document: LspDocument,
         offset: ByteOffset,
-        generation: u64,
+        request_id: u64,
     },
     Cancel(u64),
     Configure(LspServerConfiguration),
@@ -356,7 +356,7 @@ impl LspClient {
         feature: LspFeature,
         document: LspDocument,
         offset: ByteOffset,
-        generation: u64,
+        request_id: u64,
     ) -> Result<(), LspError> {
         self.send(
             server,
@@ -364,13 +364,13 @@ impl LspClient {
                 feature,
                 document,
                 offset,
-                generation,
+                request_id,
             },
         )
     }
 
-    pub fn cancel(&self, server: &str, generation: u64) -> Result<(), LspError> {
-        self.send(server, SessionCommand::Cancel(generation))
+    pub fn cancel(&self, server: &str, request_id: u64) -> Result<(), LspError> {
+        self.send(server, SessionCommand::Cancel(request_id))
     }
 
     pub fn configure(
@@ -468,7 +468,7 @@ impl Drop for LspClient {
 pub(super) struct PendingRequest {
     pub(super) feature: LspFeature,
     pub(super) document: LspDocument,
-    pub(super) generation: u64,
+    pub(super) request_id: u64,
     pub(super) deadline: Instant,
     pub(super) encoding: PositionEncoding,
     pub(super) sources: std::sync::Arc<
@@ -1101,7 +1101,7 @@ pub(super) fn handle_command(
             feature,
             document,
             offset,
-            generation,
+            request_id,
         } => {
             // Workspace requests use a document only for routing; their caller may
             // hold an older snapshot, which must not roll back server text.
@@ -1117,7 +1117,7 @@ pub(super) fn handle_command(
             {
                 send_event(events, LspEvent::RequestFailed {
                     server: server.into(),
-                    generation,
+                    request_id,
                     method: feature.method().into(),
                     message: "request document is older than or conflicts with the synchronized document".into(),
                 });
@@ -1135,7 +1135,7 @@ pub(super) fn handle_command(
                     events,
                     LspEvent::RequestFailed {
                         server: server.into(),
-                        generation,
+                        request_id,
                         method: feature.method().into(),
                         message: "language server is still initializing".into(),
                     },
@@ -1171,7 +1171,7 @@ pub(super) fn handle_command(
                     events,
                     LspEvent::RequestFailed {
                         server: server.into(),
-                        generation,
+                        request_id,
                         method: feature.method().into(),
                         message: "language-server pending request limit reached".into(),
                     },
@@ -1186,7 +1186,7 @@ pub(super) fn handle_command(
                     events,
                     LspEvent::RequestFailed {
                         server: server.into(),
-                        generation,
+                        request_id,
                         method: feature.method().into(),
                         message: "request position is invalid for the captured document".into(),
                     },
@@ -1207,7 +1207,7 @@ pub(super) fn handle_command(
                     events,
                     LspEvent::RequestFailed {
                         server: server.into(),
-                        generation,
+                        request_id,
                         method: feature.method().into(),
                         message: format!("document synchronization failed: {error}"),
                     },
@@ -1225,7 +1225,7 @@ pub(super) fn handle_command(
                     events,
                     LspEvent::RequestFailed {
                         server: server.into(),
-                        generation,
+                        request_id,
                         method: feature.method().into(),
                         message: error.to_string(),
                     },
@@ -1257,7 +1257,7 @@ pub(super) fn handle_command(
                     PendingRequest {
                         feature,
                         document,
-                        generation,
+                        request_id,
                         deadline: Instant::now() + request_timeout,
                         encoding: capabilities.position_encoding,
                         sources: std::sync::Arc::new(edit_sources),
@@ -1278,10 +1278,10 @@ pub(super) fn handle_command(
                 )?;
             }
         }
-        SessionCommand::Cancel(generation) => {
+        SessionCommand::Cancel(request_id) => {
             let ids = pending
                 .iter()
-                .filter_map(|(id, request)| (request.generation == generation).then_some(*id))
+                .filter_map(|(id, request)| (request.request_id == request_id).then_some(*id))
                 .collect::<Vec<_>>();
             for id in ids {
                 pending.remove(&id);
@@ -1499,7 +1499,7 @@ while True:
         while Instant::now() < deadline {
             if matches!(
                 service.try_event(),
-                Some(LspEvent::Result { generation: 42, .. })
+                Some(LspEvent::Result { request_id: 42, .. })
             ) {
                 received = true;
                 break;
@@ -1655,7 +1655,7 @@ while True:
                 PendingRequest {
                     feature: LspFeature::Hover,
                     document: captured,
-                    generation: id as u64,
+                    request_id: id as u64,
                     deadline: Instant::now() + Duration::from_secs(1),
                     encoding: PositionEncoding::Utf16,
                     sources: Default::default(),
@@ -1672,7 +1672,7 @@ while True:
                 feature: LspFeature::Hover,
                 document: document.clone(),
                 offset: ByteOffset(1),
-                generation: 999,
+                request_id: 999,
             },
             "owned-edit-fixture",
             Path::new("/fixture"),
@@ -1746,7 +1746,7 @@ while True:
                     feature,
                     document: stale.clone(),
                     offset: ByteOffset(0),
-                    generation: 1000,
+                    request_id: 1000,
                 },
                 "owned-edit-fixture",
                 Path::new("/fixture"),
@@ -1783,7 +1783,7 @@ while True:
                 assert!(matches!(
                     service.try_event(),
                     Some(LspEvent::RequestFailed {
-                        generation: 1000,
+                        request_id: 1000,
                         ..
                     })
                 ));

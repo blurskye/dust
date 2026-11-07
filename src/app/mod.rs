@@ -176,7 +176,7 @@ struct App {
     >,
     /// The last request someone asked for, until their next key.
     lsp_asked: Option<crate::language::lsp::LspFeature>,
-    lsp_asked_generation: Option<u64>,
+    lsp_asked_request_id: Option<u64>,
     /// Asked for before its server could answer, and sent again once it has started and
     /// finished loading.
     lsp_waiting: Option<crate::language::lsp::LspFeature>,
