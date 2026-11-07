@@ -130,8 +130,8 @@ stale revisions and read-only buffers reject mutations.
 Each mark has a plugin-local ID, start/end byte positions, and independent left/right
 insertion gravity. Native decorations move these anchors at every edit, including
 undo/redo; zero-width marks are supported. `read-marks` reads their positions from
-the callback snapshot. Marks are positions, not arbitrary terminal drawing commands;
-retained/private panels remain the custom drawing interfaces. At most 4,096 marks
+the callback snapshot, including their optional decoration fields. See Drawing below
+for highlights, virtual text, and signs; retained/private panels provide custom surfaces. At most 4,096 marks
 belong to a plugin. Unload clears only its namespaces.
 
 `subscribe-events(handler)` enables autonomous occurrence callbacks. Call
@@ -249,3 +249,49 @@ anchored edits and undo, event gaps, menu/inline completion, LSP method filters,
 errors, and permission rejection, alongside the existing panels/storage/provider
 and sandbox tests. The full gate is format check, Clippy with warnings denied, and
 `cargo test --locked`.
+
+## Drawing: decorations, inline completion, and diagnostics
+
+`mark.decoration` is optional. It adds presentation to the same moving mark, not a
+second anchor or a terminal-cell API:
+
+- `highlight` names a theme highlight group over the half-open byte range.
+- `virtual-text` has text, a highlight group, and `inline` (before the mark),
+  `end-of-line`, or `overlay` placement. Inline text participates in wrapping,
+  cursor placement, and mouse hit testing; overlay text does not move source text.
+- `sign` has a one-cell icon and highlight group, drawn in the existing sign column.
+
+Use known theme groups such as `Comment`, `@keyword`, or `DiagnosticWarn`. Unknown
+names, control characters, multiline decoration text, and invalid UTF-8 ranges
+are errors. Each text is limited to 4,096 bytes. Later marks win when overlays
+occupy the same cells; selection and diagnostic underlines take precedence over
+mark highlights. Replacing a namespace is atomic. Empty marks clear it;
+`read-marks` returns decorations and their current positions. Undo/redo moves the
+same marks, and unloading removes only that plugin's namespaces.
+
+A completion source registered with `inline = true` can use the existing
+`publish-completions` import. The selected item's untyped suffix appears before
+the cursor's source text using the same inline drawing path. The cursor stays at
+the beginning of the suggestion. Only the first line is previewed; native
+acceptance still inserts the complete item, including snippets. Moving the cursor,
+editing, dismissing completion, or unloading its source removes the preview.
+
+`publish-diagnostics` replaces a namespace's diagnostics for one buffer and exact
+revision. Items contain a half-open UTF-8 byte range, severity (`error`, `warning`,
+`information`, `hint`), message, and display source. The source is a label, not an
+ownership key: plugins cannot overwrite another plugin or LSP source. An empty
+list clears this namespace for the buffer. File and unnamed buffers are supported.
+These are native diagnostics: signs, underlines, virtual text, the diagnostics
+picker, and `]d`/`[d` use the same store as LSP. Edits move their ranges; closing or
+reloading the document invalidates them. Unloading clears the plugin's diagnostics.
+Limits are 2,000 items per set, 256 namespaces across plugins, 16 KiB per message,
+and 256 bytes per source, within the shared diagnostic-store limits.
+
+Drawing and completion effects require the caller's **ui** command-access grant,
+checked again when queued work is applied through the existing effect authority.
+The current manifest's `show_message` grant supplies UI access (as do `input` and
+`private_cells`); diagnostics imports require `show_message`. Marks additionally
+require `decorations`, and completion imports require `completion`. Delegation
+cannot widen access. Missing grants produce an error, not an empty success.
+The retained guest's `drawing`, `drawing-clear`, `diagnostics`,
+`diagnostics-clear`, and `completion` ABI actions demonstrate these calls.

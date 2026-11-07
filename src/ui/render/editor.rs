@@ -144,19 +144,26 @@ fn diagnostic_label(diagnostic: &UiDiagnostic) -> String {
 
 pub(super) fn expanded_diagnostic_rows(
     text: &crate::editor::text::TextBuffer,
+    buffer: crate::editor::BufferId,
     path: Option<&std::path::Path>,
     ui: &UiState,
     config: &Config,
     content_width: u16,
 ) -> Option<(usize, Vec<(String, Style)>)> {
     let expanded = ui.expanded_diagnostic.as_ref()?;
-    if path != Some(expanded.path.as_path()) {
+    if !expanded
+        .buffer
+        .map_or_else(|| path == Some(expanded.path.as_path()), |id| id == buffer)
+    {
         return None;
     }
     let mut diagnostics = ui
         .diagnostics
         .iter()
-        .filter(|d| path == Some(d.path.as_path()))
+        .filter(|d| {
+            d.buffer
+                .map_or_else(|| path == Some(d.path.as_path()), |id| id == buffer)
+        })
         .take(2_000)
         .filter(|d| {
             text.byte_to_line(d.range.start).ok() == Some(expanded.line)
@@ -430,11 +437,16 @@ pub(super) fn render_editor_view(
         }
         anchor = next;
     }
-    if !large_file && let Some(path) = &buffer.path {
+    if !large_file {
         for diagnostic in ui
             .diagnostics
             .iter()
-            .filter(|diagnostic| &diagnostic.path == path)
+            .filter(|diagnostic| {
+                diagnostic.buffer.map_or_else(
+                    || buffer.path.as_ref() == Some(&diagnostic.path),
+                    |id| id == view.buffer,
+                )
+            })
             .take(2_000)
         {
             if let Ok(line) = buffer.text.byte_to_line(diagnostic.range.start) {
@@ -503,7 +515,8 @@ pub(super) fn render_editor_view(
         .and_then(|card| card.line)
         .filter(|(target, _)| *target == view.buffer)
         .map(|(_, line)| line);
-    let inlay_hints = projected_inlay_hints(&buffer.text, view.buffer, ui);
+    let inlay_hints = projected_inlay_hints(state, view_id, ui);
+    let decorations = buffer.decorations.drawing().collect::<Vec<_>>();
     let mut inlay_cursor = 0usize;
     let color_spans = ui
         .lsp_colors
@@ -669,6 +682,23 @@ pub(super) fn render_editor_view(
                 );
             }
         }
+        if first_line_row == 0
+            && gutter_width > 0
+            && let Some(sign) = decorations.iter().find_map(|(range, decoration)| {
+                (buffer.text.byte_to_line(range.start).ok() == Some(line_index))
+                    .then_some(decoration.sign.as_ref())
+                    .flatten()
+            })
+        {
+            let column = git_sign_column(gutter_width, &config.editor).unwrap_or(gutter_width - 1);
+            grid.set_cell(
+                column,
+                screen_row,
+                &sign.text,
+                crate::ui::render::decorations::style(&sign.style),
+            );
+        }
+        let mut overlays = Vec::new();
         let line_start = buffer
             .text
             .line_to_byte(line_index)
@@ -808,16 +838,19 @@ pub(super) fn render_editor_view(
                 .filter(|hint| hint.position <= global)
             {
                 if rendered_inlays < 32 {
-                    x = grid.put_text_clipped(
-                        x,
-                        screen_row,
-                        &hint.label,
-                        Style::Muted,
-                        inlay_right,
-                    );
+                    x = grid.put_text_clipped(x, screen_row, &hint.label, hint.style, inlay_right);
                     rendered_inlays = rendered_inlays.saturating_add(1);
                 }
                 inlay_cursor = inlay_cursor.saturating_add(1);
+            }
+            for (range, decoration) in &decorations {
+                if global <= range.start
+                    && range.start.get() < global.get() + grapheme.len()
+                    && let Some(text) = &decoration.virtual_text
+                    && text.position == crate::editor::decorations::VirtualTextPosition::Overlay
+                {
+                    overlays.push((x, screen_row, &text.text));
+                }
             }
             if let Some(markdown) = &markdown_line {
                 for (text, style) in markdown.before(global) {
@@ -861,6 +894,13 @@ pub(super) fn render_editor_view(
                     .next()
             }) {
                 style
+            } else if let Some(style) = decorations.iter().find_map(|(range, decoration)| {
+                range
+                    .contains(global)
+                    .then_some(decoration.highlight.as_deref())
+                    .flatten()
+            }) {
+                crate::ui::render::decorations::style(style)
             } else if let Some(span) = {
                 // Colours sort by start; a skipped span ends before this grapheme.
                 while color_spans
@@ -1072,10 +1112,42 @@ pub(super) fn render_editor_view(
             .filter(|hint| hint.position <= line_end)
         {
             if hint.position == line_end && rendered_inlays < 32 {
-                x = grid.put_text_clipped(x, screen_row, &hint.label, Style::Muted, width);
+                x = grid.put_text_clipped(x, screen_row, &hint.label, hint.style, width);
                 rendered_inlays = rendered_inlays.saturating_add(1);
             }
             inlay_cursor = inlay_cursor.saturating_add(1);
+        }
+        for (range, decoration) in &decorations {
+            if let Some(text) = &decoration.virtual_text {
+                match text.position {
+                    crate::editor::decorations::VirtualTextPosition::EndOfLine
+                        if buffer.text.byte_to_line(range.start).ok() == Some(line_index) =>
+                    {
+                        x = grid.put_text_clipped(
+                            x,
+                            screen_row,
+                            &text.text.text,
+                            crate::ui::render::decorations::style(&text.text.style),
+                            width,
+                        );
+                    }
+                    crate::editor::decorations::VirtualTextPosition::Overlay
+                        if range.start == line_end =>
+                    {
+                        overlays.push((x, screen_row, &text.text));
+                    }
+                    _ => {}
+                }
+            }
+        }
+        for (column, row, text) in overlays {
+            grid.put_text_clipped(
+                column,
+                row,
+                &text.text,
+                crate::ui::render::decorations::style(&text.style),
+                width,
+            );
         }
         if let Some(diagnostics) = diagnostic_lines.get(&line_index)
             && let Some(diagnostic) = diagnostics.first()
@@ -1631,7 +1703,7 @@ fn editor_cursor(context: EditorCursorContext<'_>) -> Option<(u16, u16)> {
             .line_to_byte(point.line)
             .unwrap_or(ByteOffset(0));
         let visible_start = ByteOffset(line_start.get().saturating_add(skipped_bytes));
-        let hints = projected_inlay_hints(&buffer.text, view.buffer, ui);
+        let hints = projected_inlay_hints(state, view_id, ui);
         let virtual_cells = hints
             .into_iter()
             .filter(|hint| {
@@ -1639,7 +1711,9 @@ fn editor_cursor(context: EditorCursorContext<'_>) -> Option<(u16, u16)> {
                     && hint.position <= ByteOffset(line_start.get() + content.len())
             })
             .take(32)
-            .filter(|hint| hint.position >= visible_start && hint.position <= view.cursor)
+            .filter(|hint| {
+                !hint.ghost && hint.position >= visible_start && hint.position <= view.cursor
+            })
             .map(|hint| cell_text_width(&hint.label, config.editor.ambiguous_width))
             .fold(0usize, usize::saturating_add);
         let visible_column = column

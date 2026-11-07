@@ -35,6 +35,7 @@ pub(crate) enum EditorRequest {
     PushLayer(wit::KeyLayer),
     PopLayer(String),
     Marks(wit::MarkSet),
+    Diagnostics(wit::DiagnosticSet),
     Subscribe(String),
     CompletionSource(wit::CompletionSource),
     Completions(wit::CompletionBatch),

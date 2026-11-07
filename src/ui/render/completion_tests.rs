@@ -153,6 +153,7 @@ fn language_diagnostics_and_completion_are_projected_without_service_calls() {
     let ui = UiState {
         editor_window_layout: Some(editor_layout(&state)),
         diagnostics: vec![crate::ui::render::UiDiagnostic {
+            buffer: None,
             path,
             severity: crate::workspace::DiagnosticSeverity::Error,
             range: crate::editor::text::ByteRange::new(

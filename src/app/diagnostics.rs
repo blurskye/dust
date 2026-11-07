@@ -27,19 +27,22 @@ pub(in crate::app) const MAXIMUM_DIAGNOSTICS: usize = 10_000;
 pub(super) struct DiagnosticDocument {
     editor: EditorWindowVersion,
     id: BufferId,
-    path: PathBuf,
+    path: Option<PathBuf>,
     text: TextVersion,
 }
 impl DiagnosticDocument {
-    pub(in crate::app) fn path(&self) -> &std::path::Path {
-        &self.path
+    pub(in crate::app) fn path(&self) -> Option<&std::path::Path> {
+        self.path.as_deref()
+    }
+    pub(in crate::app) fn uri(&self) -> String {
+        document_uri(self.id, self.path.as_deref())
     }
     pub(in crate::app) fn capture(editor: &EditorState, id: BufferId) -> Option<Self> {
         let buffer = editor.buffers.get(id)?;
         Some(Self {
             editor: editor.window_version(),
             id,
-            path: buffer.path.clone()?,
+            path: buffer.path.clone(),
             text: buffer.text.source_version(),
         })
     }
@@ -47,8 +50,7 @@ impl DiagnosticDocument {
         self.editor.same_editor(&editor.window_version())
             && editor.window_version().revision().is_some()
             && editor.buffers.get(self.id).is_some_and(|buffer| {
-                buffer.path.as_ref() == Some(&self.path)
-                    && buffer.text.source_version() == self.text
+                buffer.path == self.path && buffer.text.source_version() == self.text
             })
     }
 }
@@ -78,7 +80,7 @@ impl DiagnosticKey {
 }
 struct Batch {
     epoch: Arc<()>,
-    path: PathBuf,
+    path: Option<PathBuf>,
     document: Option<DiagnosticDocument>,
     validity: DiagnosticValidity,
     /// The text the ranges point into; edits since then move them.
@@ -91,7 +93,7 @@ impl Batch {
             None => !editor
                 .buffers
                 .iter()
-                .any(|(_, buffer)| buffer.path.as_ref() == Some(&self.path)),
+                .any(|(_, buffer)| buffer.path == self.path),
         }
     }
 }
@@ -175,18 +177,14 @@ impl Diagnostics {
         &self,
         batch: &DiagnosticBatch,
         editor: &EditorState,
-    ) -> Result<PathBuf, String> {
+    ) -> Result<Option<PathBuf>, String> {
         if !self.current(&batch.producer) {
             return Err("diagnostic producer stale".into());
         }
-        let path =
-            crate::language::lsp::path_from_file_uri(&batch.uri).ok_or("invalid diagnostic URI")?;
+        let path = crate::language::lsp::path_from_file_uri(&batch.uri);
         if match &batch.document {
-            Some(document) => document.path != path || !document.current(editor),
-            None => editor
-                .buffers
-                .iter()
-                .any(|(_, buffer)| buffer.path.as_ref() == Some(&path)),
+            Some(document) => document.uri() != batch.uri || !document.current(editor),
+            None => path.is_none() || editor.buffers.iter().any(|(_, buffer)| buffer.path == path),
         } {
             return Err("diagnostic document changed".into());
         }
@@ -446,14 +444,12 @@ impl Diagnostics {
     pub(super) fn expanded(&self, editor: &EditorState) -> Option<ExpandedDiagnosticState> {
         let (key, severities) = self.expanded.as_ref()?;
         let row = self.resolve(key, editor)?;
-        let path = crate::language::lsp::path_from_file_uri(&row.uri)?;
-        let buffer = editor
-            .buffers
-            .iter()
-            .find(|(_, b)| b.path.as_ref() == Some(&path))?
-            .1;
+        let batch = self.batches.get(&(row.owner.clone(), row.uri.clone()))?;
+        let id = batch.document.as_ref()?.id;
+        let buffer = editor.buffers.get(id)?;
         Some(ExpandedDiagnosticState {
-            path,
+            buffer: Some(id),
+            path: buffer.path.clone().unwrap_or_default(),
             line: buffer.text.byte_to_line(row.range.start).ok()?,
             severities: severities.clone(),
         })
@@ -474,7 +470,7 @@ impl Diagnostics {
             // a reload or another file invalidates them.
             if text.revision() == revision
                 || !document.editor.same_editor(&editor.window_version())
-                || buffer.path.as_ref() != Some(&document.path)
+                || buffer.path != document.path
                 || !text.source_version().same_incarnation(&document.text)
                 || text.map_offset_since(revision, ByteOffset(0)).is_none()
             {
@@ -511,8 +507,12 @@ impl Diagnostics {
             self.rows
                 .iter()
                 .filter_map(|row| {
+                    let batch = self
+                        .batches
+                        .get(&(row.problem.owner.clone(), row.problem.uri.clone()))?;
                     Some(UiDiagnostic {
-                        path: crate::language::lsp::path_from_file_uri(&row.problem.uri)?,
+                        buffer: batch.document.as_ref().map(|document| document.id),
+                        path: batch.path.clone().unwrap_or_default(),
                         range: row.problem.range,
                         severity: row.problem.severity,
                         source: row.problem.source.clone(),
@@ -526,6 +526,12 @@ impl Diagnostics {
                 .collect(),
         )
     }
+}
+
+pub(in crate::app) fn document_uri(id: BufferId, path: Option<&std::path::Path>) -> String {
+    use slotmap::Key;
+    path.map(crate::language::lsp::file_uri)
+        .unwrap_or_else(|| format!("dust-buffer://{}", id.data().as_ffi()))
 }
 
 use crate::app::App;

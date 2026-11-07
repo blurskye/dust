@@ -55,6 +55,7 @@ use workspace::render_workspace;
 
 mod agent;
 
+mod decorations;
 pub(crate) mod editor;
 
 mod markdown;
@@ -435,6 +436,7 @@ pub struct UiFold {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UiDiagnostic {
+    pub buffer: Option<crate::editor::BufferId>,
     pub path: std::path::PathBuf,
     pub range: ByteRange,
     pub severity: crate::workspace::DiagnosticSeverity,
@@ -445,6 +447,7 @@ pub struct UiDiagnostic {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ExpandedDiagnosticState {
+    pub buffer: Option<crate::editor::BufferId>,
     pub path: std::path::PathBuf,
     pub line: usize,
     pub severities: Vec<crate::workspace::DiagnosticSeverity>,
@@ -1299,6 +1302,7 @@ pub struct YankHighlight {
 
 #[derive(Clone, Debug, Default)]
 pub struct UiState {
+    pub(crate) inline_completion: Option<(crate::editor::ViewId, UiInlayHint)>,
     pub chrome: chrome::ChromeLayout,
     pub surface_content: crate::ui::render::SurfaceContentGeometry,
     pub dashboard: bool,
@@ -2460,6 +2464,8 @@ mod composition_tests;
 mod dashboard_tests;
 #[cfg(test)]
 mod debug_tests;
+#[cfg(test)]
+mod decorations_tests;
 #[cfg(test)]
 mod documentation_tests;
 #[cfg(test)]

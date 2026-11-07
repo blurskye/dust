@@ -3489,6 +3489,22 @@ impl App {
 impl App {
     /// Mirrors the current items into the menu the renderer draws.
     pub(in crate::app) fn project_lsp_completion(&mut self) {
+        self.ui.inline_completion =
+            self.language
+                .inline_completion(&self.state)
+                .and_then(|label| {
+                    let id = self.state.active_view()?;
+                    let view = &self.state.views[id];
+                    Some((
+                        id,
+                        crate::ui::UiInlayHint {
+                            buffer: view.buffer,
+                            revision: self.state.buffers[view.buffer].text.revision(),
+                            position: view.cursor,
+                            label,
+                        },
+                    ))
+                });
         let icons = &self
             .configuration
             .settings()
