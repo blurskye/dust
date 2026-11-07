@@ -567,7 +567,7 @@ def main() -> None:
         assert code == 0
         file_picker = terminal_screen(snapshots[1])
         assert "Files" in file_picker and "alpha.rs" in file_picker
-        assert "picker preview" in file_picker and "1/2" in file_picker
+        assert "picker preview" in file_picker and "2/2" in file_picker
         assert_restored(output)
 
     with tempfile.TemporaryDirectory() as directory:
@@ -597,7 +597,7 @@ def main() -> None:
         preview_screen = terminal_screen(snapshots[6])
         assert "Grep" in direct_screen and "Command" not in direct_screen
         assert "Grep" in search_screen and "alpha.txt" in search_screen
-        assert "1/2" in search_screen and "needle alpha" in search_screen
+        assert "2/2" in search_screen and "needle alpha" in search_screen
         assert "Workspace replacement" in preview_screen
         assert "alpha.txt" in preview_screen and "beta.txt" in preview_screen
         assert first.read_text(encoding="utf-8") == "needle alpha\n"
@@ -1166,7 +1166,7 @@ exit 1
         config_home = root / "config"
         config_home.mkdir()
         (config_home / "config.toml").write_text(
-            "[lsp]\nauto_start = false\n",
+            "[lsp]\nauto_start = false\nauto_install = false\n",
             encoding="utf-8",
         )
         code, output, snapshots = run(
@@ -1188,7 +1188,7 @@ exit 1
         )
         assert code == 0
         manager = terminal_screen(snapshots[3])
-        assert "unavailable" in manager
+        assert "unavailable" in manager, manager
         assert "starting" not in manager
         installed = terminal_screen(snapshots[4])
         assert re.search(r"rust-analyzer[^\n]*PATH\s+installed", installed), installed
