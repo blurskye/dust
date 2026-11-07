@@ -79,6 +79,8 @@ pub enum Style {
     Terminal(PtyStyle),
     /// A Neovim highlight group, coloured by the theme's `[highlights]`.
     Syntax(crate::config::Highlight),
+    /// A syntax foreground drawn on the selection background.
+    SelectionSyntax(crate::config::Highlight),
     /// A syntax group drawn on the documentation popup's background.
     DocumentationSyntax(crate::config::Highlight),
     /// A markdown heading's group drawn on its bar.

@@ -454,10 +454,25 @@ pub(super) fn render_picker(
         } else {
             (left + 2, stacked_divider.unwrap_or(top), left + width - 1)
         };
+        let title = if picker.surface == PickerSurfaceKind::Grep {
+            let line = preview
+                .as_text()
+                .and_then(|text| text.highlight_line)
+                .map_or_else(String::new, |line| format!(":{}", line.saturating_add(1)));
+            let room = usize::from(title_right.saturating_sub(title_x)).saturating_sub(2);
+            let path = shortened_grep_path(
+                &preview.title,
+                room.saturating_sub(text_width(&line, config.editor.ambiguous_width)),
+                config.editor.ambiguous_width,
+            );
+            format!("{path}{line}")
+        } else {
+            preview.title.clone()
+        };
         frame.grid.put_text_clipped(
             title_x,
             title_y,
-            &format!(" {} ", preview.title),
+            &format!(" {title} "),
             Style::Accent,
             title_right,
         );
@@ -629,6 +644,11 @@ pub(super) fn render_picker(
                 };
                 let cell_right = cell_x.saturating_add(width).min(list_right);
                 let style = if selected
+                    && picker.surface == PickerSurfaceKind::Grep
+                    && let Style::Syntax(role) = cell.style
+                {
+                    Style::SelectionSyntax(role)
+                } else if selected
                     && (matches!(cell.style, Style::Default | Style::Muted | Style::Syntax(_))
                         || (cell.style == Style::Accent
                             && picker.surface != PickerSurfaceKind::Grep))
@@ -738,7 +758,15 @@ pub(super) fn render_picker(
                             .unwrap_or(0)
                             .saturating_add(1),
                     );
-                    match line_spans.get(offset).filter(|_| !highlighted) {
+                    let plain_style = if highlighted {
+                        Style::Selection
+                    } else {
+                        Style::Default
+                    };
+                    match line_spans
+                        .get(offset)
+                        .filter(|_| !highlighted || picker.surface == PickerSurfaceKind::Grep)
+                    {
                         Some(spans) => {
                             let mut x = text_left;
                             let mut at = 0;
@@ -747,14 +775,18 @@ pub(super) fn render_picker(
                                     x,
                                     y,
                                     &line[at..range.start],
-                                    Style::Default,
+                                    plain_style,
                                     preview_right,
                                 );
                                 x = frame.grid.put_text_clipped(
                                     x,
                                     y,
                                     &line[range.clone()],
-                                    Style::Syntax(*role),
+                                    if highlighted {
+                                        Style::SelectionSyntax(*role)
+                                    } else {
+                                        Style::Syntax(*role)
+                                    },
                                     preview_right,
                                 );
                                 at = range.end;
@@ -763,7 +795,7 @@ pub(super) fn render_picker(
                                 x,
                                 y,
                                 &line[at..],
-                                Style::Default,
+                                plain_style,
                                 preview_right,
                             );
                         }

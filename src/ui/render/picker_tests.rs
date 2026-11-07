@@ -273,11 +273,12 @@ fn grep_keeps_code_and_location_readable_and_centres_the_preview() {
     };
     use crate::windows::WindowRect;
     let config = crate::config::load_bundled_config().config;
-    let path = "packages/workspace/components/deeply/nested/source/main.rs";
+    let path = "packages/workspace-services/customer-platform/components/deeply/nested/provider-integrations/internal/source/main.rs";
     let mut row = PickerRow::text("match", format!("{path}:81:5"), "let needle = 42;", "");
     row.cells = vec![
         PickerCell::new("󱘗 ", Style::ExplorerIcon, 2),
-        PickerCell::new("let needle = 42;", Style::Default, 16),
+        PickerCell::new("let", Style::Syntax(crate::config::Highlight::KEYWORD), 3),
+        PickerCell::new(" needle = 42;", Style::Default, 13),
         PickerCell::new(path, Style::Muted, path.len() as u16),
         PickerCell::new(":81", Style::Accent, 3),
         PickerCell::new(":5", Style::Muted, 2),
@@ -297,10 +298,18 @@ fn grep_keeps_code_and_location_readable_and_centres_the_preview() {
         preview: Some(PickerPreview::text(
             path,
             PickerTextPreview::new(
-                (0..160).map(|line| format!("context {line}")).collect(),
+                (0..160)
+                    .map(|line| {
+                        if line == 80 {
+                            "let needle = 42;".into()
+                        } else {
+                            format!("context {line}")
+                        }
+                    })
+                    .collect(),
                 0,
                 Some(80),
-                None,
+                Some(crate::language::syntax::SyntaxLanguage::Rust),
             ),
         )),
     };
@@ -328,8 +337,31 @@ fn grep_keeps_code_and_location_readable_and_centres_the_preview() {
         let preview_top = geometry.stacked_divider.map_or(1, |divider| divider + 1);
         let preview_rows = height - 1 - preview_top;
         let match_y = preview_top + preview_rows / 2;
-        assert!(frame.grid.row_text(match_y).contains("81 context 80"));
+        assert!(frame.grid.row_text(match_y).contains("81 let needle = 42;"));
         assert!((0..width).any(|x| frame.grid.get(x, match_y).unwrap().style == Style::Selection));
+        for y in [geometry.list.y, match_y] {
+            assert!((0..width).any(|x| matches!(
+                frame.grid.get(x, y).unwrap().style,
+                Style::SelectionSyntax(_)
+            )));
+        }
+        let title_y = geometry.stacked_divider.unwrap_or(0);
+        let title = frame.grid.row_text(title_y);
+        assert!(title.contains("main.rs:81"), "{width}: {title}");
+        assert!(title.contains('…') || title.contains("p/w/"), "{title}");
+
+        // Other pickers retain their existing selected-row and matched-line styles.
+        let mut files = picker.clone();
+        files.surface = PickerSurfaceKind::Files;
+        let mut frame = Frame {
+            grid: crate::ui::CellGrid::new(width, height),
+            cursor: None,
+        };
+        crate::ui::render::picker::render_picker(&mut frame, &files, &config, rect, None);
+        assert!(!(0..height).any(|y| (0..width).any(|x| matches!(
+            frame.grid.get(x, y).unwrap().style,
+            Style::SelectionSyntax(_)
+        ))));
     }
 }
 
