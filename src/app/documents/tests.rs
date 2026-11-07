@@ -3829,7 +3829,7 @@ fn content_line_diagnostics_custom_entries_and_idle_projection_are_pure() {
                 .any(|entry| entry.id == custom)
     );
     app.window_session
-        .remove_plugin_generation("demo", 2, &mut app.state)
+        .remove_plugin_load("demo", 2, &mut app.state)
         .unwrap();
     assert!(
         app.window_session
@@ -3839,7 +3839,7 @@ fn content_line_diagnostics_custom_entries_and_idle_projection_are_pure() {
             .any(|entry| entry.id == custom)
     );
     app.window_session
-        .remove_plugin_generation("demo", 1, &mut app.state)
+        .remove_plugin_load("demo", 1, &mut app.state)
         .unwrap();
     app.reconcile_editor_windows();
     assert!(

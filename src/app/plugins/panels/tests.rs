@@ -1902,7 +1902,7 @@ fn remove_fixture(
     let mut windows = crate::app::windows::Windows::from_test_graph(graph.clone());
     let mut state = crate::editor::EditorState::new(std::path::PathBuf::new());
     state.graph = graph.clone();
-    windows.remove_plugin_generation(plugin, load, &mut state)?;
+    windows.remove_plugin_load(plugin, load, &mut state)?;
     *graph = windows.graph().clone();
     Ok(host.remove_load(plugin, load))
 }

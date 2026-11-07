@@ -3985,7 +3985,7 @@ fn health_virtual_dogfood_opens_refreshes_and_remains_read_only() {
     );
     let encoded = serde_json::to_value(descriptor).expect("virtual descriptor JSON");
     for forbidden in [
-        "generation",
+        "load_id",
         "load",
         "revision",
         "callback",
@@ -4132,7 +4132,7 @@ fn accepted_virtual_snapshot_publishes_through_the_tiled_editor_bridge() {
         app.state.buffers[buffer].origin,
         crate::editor::BufferOrigin::VirtualReadOnly {
             owner: refresh.plugin.clone(),
-            generation: refresh.load.0,
+            load_id: refresh.load.0,
             document: refresh.document,
             revision: refresh.revision,
         }
@@ -4374,7 +4374,7 @@ fn virtual_read_only_origin_never_queues_save_reload_or_recovery_io() {
     app.state.buffers[buffer].read_only = true;
     app.state.buffers[buffer].origin = crate::editor::BufferOrigin::VirtualReadOnly {
         owner: "demo".into(),
-        generation: 7,
+        load_id: 7,
         document: 9,
         revision: 1,
     };

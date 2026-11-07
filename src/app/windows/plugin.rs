@@ -15,7 +15,7 @@ use crate::windows::WindowPlacement;
 use crate::windows::WorkspaceTabId;
 use std::sync::Arc;
 
-/// Detached, generation-scoped proposal. It has no mutable graph escape hatch.
+/// Detached, plugin-load-scoped proposal. It has no mutable graph escape hatch.
 #[derive(Clone)]
 pub(in crate::app) struct PluginWindowDraft {
     origin: Arc<()>,
@@ -23,7 +23,7 @@ pub(in crate::app) struct PluginWindowDraft {
     source: Option<crate::editor::EditorWindowVersion>,
     catalog: crate::plugins::PluginCatalogVersion,
     owner: String,
-    generation: u64,
+    load_id: u64,
     graph: WindowGraph,
 }
 
@@ -66,11 +66,11 @@ impl Windows {
     pub(in crate::app) fn begin_plugin_fixture(
         &self,
         plugin: &str,
-        generation: u64,
+        load_id: u64,
     ) -> PluginWindowDraft {
         self.plugin_draft(
             plugin,
-            generation,
+            load_id,
             None,
             crate::plugins::PluginCatalogVersion::default(),
         )
@@ -86,7 +86,7 @@ impl Windows {
     pub(in crate::app) fn begin_plugin(
         &self,
         plugin: &str,
-        generation: u64,
+        load_id: u64,
         versions: (
             &crate::editor::EditorWindowVersion,
             &crate::plugins::PluginCatalogVersion,
@@ -98,7 +98,7 @@ impl Windows {
             .ok_or("window owner revision is exhausted")?;
         Ok(self.plugin_draft(
             plugin,
-            generation,
+            load_id,
             Some(versions.0.clone()),
             versions.1.clone(),
         ))
@@ -106,7 +106,7 @@ impl Windows {
     fn plugin_draft(
         &self,
         plugin: &str,
-        generation: u64,
+        load_id: u64,
         source: Option<crate::editor::EditorWindowVersion>,
         catalog: crate::plugins::PluginCatalogVersion,
     ) -> PluginWindowDraft {
@@ -116,7 +116,7 @@ impl Windows {
             source,
             catalog,
             owner: format!("plugin.{plugin}"),
-            generation,
+            load_id,
             graph: self.core.graph.clone(),
         }
     }
@@ -181,8 +181,8 @@ impl PluginWindowDraft {
     pub(in crate::app) fn validate(&self) -> Result<(), WindowError> {
         self.graph.validate()
     }
-    fn require_owner(&self, owner: &str, generation: u64) -> Result<(), WindowError> {
-        if owner == self.owner && generation == self.generation {
+    fn require_owner(&self, owner: &str, load_id: u64) -> Result<(), WindowError> {
+        if owner == self.owner && load_id == self.load_id {
             Ok(())
         } else {
             Err(WindowError::InvalidOwner)
@@ -206,9 +206,9 @@ impl PluginWindowDraft {
         title: String,
         dirty: bool,
         owner: &str,
-        generation: u64,
+        load_id: u64,
     ) -> Result<ContentId, WindowError> {
-        self.require_owner(owner, generation)?;
+        self.require_owner(owner, load_id)?;
         if !kind.as_str().starts_with("plugin.")
             || !matches!(
                 contract.adapter,
@@ -218,21 +218,21 @@ impl PluginWindowDraft {
             return Err(WindowError::InvalidContentType(kind.as_str().to_owned()));
         }
         self.graph
-            .create_content_with_contract(kind, contract, title, dirty, owner, generation)
+            .create_content_with_contract(kind, contract, title, dirty, owner, load_id)
     }
     pub(in crate::app) fn create_view(
         &mut self,
         content: ContentId,
         owner: &str,
-        generation: u64,
+        load_id: u64,
     ) -> Result<ViewId, WindowError> {
-        self.require_owner(owner, generation)?;
+        self.require_owner(owner, load_id)?;
         let existing = self
             .graph
             .content(content)
             .ok_or(WindowError::UnknownContent)?;
         self.require_owner(&existing.owner, existing.instance_id)?;
-        self.graph.create_view(content, owner, generation)
+        self.graph.create_view(content, owner, load_id)
     }
     pub(in crate::app) fn open_window(
         &mut self,
@@ -241,9 +241,9 @@ impl PluginWindowDraft {
         placement: WindowPlacement,
         focusable: bool,
         owner: &str,
-        generation: u64,
+        load_id: u64,
     ) -> Result<WindowId, WindowError> {
-        self.require_owner(owner, generation)?;
+        self.require_owner(owner, load_id)?;
         if self.graph.active_tab() != Some(tab) {
             return Err(WindowError::WindowOutsideActiveTab);
         }
@@ -256,7 +256,7 @@ impl PluginWindowDraft {
         let existing = self.graph.view(view).ok_or(WindowError::UnknownView)?;
         self.require_owner(&existing.owner, existing.instance_id)?;
         self.graph
-            .open_window(tab, view, placement, focusable, owner, generation)
+            .open_window(tab, view, placement, focusable, owner, load_id)
     }
     pub(in crate::app) fn place(
         &mut self,

@@ -209,7 +209,7 @@ pub fn manifest() -> Result<ApiManifest, String> {
             ("syntax_registry".into(), "pinned-builtins-8-v1".into()),
             (
                 "plugin_load_ownership".into(),
-                "generation-conditional-bounded-v1".into(),
+                "load-conditional-bounded-v1".into(),
             ),
             ("release_archive".into(), "deterministic-tar-zst-v1".into()),
             ("pty_screen".into(), "bounded-vt-subset-v1".into()),

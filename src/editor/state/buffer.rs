@@ -14,7 +14,7 @@ pub enum BufferOrigin {
     FileOrScratch,
     VirtualReadOnly {
         owner: String,
-        generation: u64,
+        load_id: u64,
         document: u64,
         revision: u64,
     },

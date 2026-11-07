@@ -325,7 +325,7 @@ impl EditorState {
         &mut self,
         text: TextBuffer,
         owner: String,
-        generation: u64,
+        load_id: u64,
         document: u64,
         revision: u64,
     ) -> Result<(BufferId, ViewId), &'static str> {
@@ -333,7 +333,7 @@ impl EditorState {
         target.read_only = true;
         target.origin = BufferOrigin::VirtualReadOnly {
             owner,
-            generation,
+            load_id,
             document,
             revision,
         };
@@ -364,7 +364,7 @@ impl EditorState {
         };
         let BufferOrigin::VirtualReadOnly {
             owner,
-            generation,
+            load_id,
             document,
             revision: current,
         } = target.origin.clone()
@@ -380,7 +380,7 @@ impl EditorState {
         replacement.virtual_language = target.virtual_language.clone();
         replacement.origin = BufferOrigin::VirtualReadOnly {
             owner,
-            generation,
+            load_id,
             document,
             revision,
         };

@@ -278,7 +278,7 @@
   "capabilities": {
     "license": "GPL-3.0-or-later",
     "package_network": "official-https-no-redirect-v1",
-    "plugin_load_ownership": "generation-conditional-bounded-v1",
+    "plugin_load_ownership": "load-conditional-bounded-v1",
     "plugin_runtime": "wasmtime-component-no-wasi",
     "plugin_sdk_license": "Apache-2.0",
     "pty_screen": "bounded-vt-subset-v1",

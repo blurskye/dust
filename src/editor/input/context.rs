@@ -74,7 +74,7 @@ pub struct InputContextDescriptor {
     pub title: String,
     pub parent_surface: Option<String>,
     pub owner: Option<String>,
-    pub generation: u64,
+    pub load_id: u64,
     pub source: String,
     pub layer: InputContextLayer,
 }
@@ -136,7 +136,7 @@ impl InputContexts {
                     title: id.replace('_', " "),
                     parent_surface: None,
                     owner: None,
-                    generation: 0,
+                    load_id: 0,
                     source: "<bundled:input-contexts>".into(),
                     layer: InputContextLayer::Bundled,
                 },
@@ -151,7 +151,7 @@ impl InputContexts {
                     title: format!("editor {mode}"),
                     parent_surface: Some("editor".into()),
                     owner: None,
-                    generation: 0,
+                    load_id: 0,
                     source: "<bundled:input-contexts>".into(),
                     layer: InputContextLayer::Bundled,
                 },
@@ -193,7 +193,7 @@ impl InputContexts {
         local_id: &str,
         title: &str,
         parent_surface: Option<String>,
-        generation: u64,
+        load_id: u64,
         source: String,
     ) -> Result<String, InputContextError> {
         if !valid_segment(owner, 64) {
@@ -246,7 +246,7 @@ impl InputContexts {
                 title: title.into(),
                 parent_surface,
                 owner: Some(owner.into()),
-                generation,
+                load_id,
                 source,
                 layer: InputContextLayer::Plugin,
             },
@@ -254,9 +254,9 @@ impl InputContexts {
         Ok(id)
     }
 
-    pub fn unregister_plugin_generation(&mut self, owner: &str, generation: u64) {
+    pub fn unregister_plugin_load(&mut self, owner: &str, load_id: u64) {
         self.contexts.retain(|_, context| {
-            context.owner.as_deref() != Some(owner) || context.generation != generation
+            context.owner.as_deref() != Some(owner) || context.load_id != load_id
         });
     }
 
@@ -377,7 +377,7 @@ mod tests {
     }
 
     #[test]
-    fn plugin_contexts_are_namespaced_bounded_and_generation_conditional() {
+    fn plugin_contexts_are_namespaced_bounded_and_load_conditional() {
         let mut registry = InputContexts::bundled();
         let id = registry
             .register_plugin(
@@ -399,9 +399,9 @@ mod tests {
             registry.register_plugin("demo", "chat", "Chat", None, 8, "manifest".into()),
             Err(InputContextError::Duplicate(_))
         ));
-        registry.unregister_plugin_generation("demo", 6);
+        registry.unregister_plugin_load("demo", 6);
         assert!(registry.resolve(&id, "").is_ok());
-        registry.unregister_plugin_generation("demo", 7);
+        registry.unregister_plugin_load("demo", 7);
         assert!(registry.resolve(&id, "").is_err());
     }
 }

@@ -221,7 +221,7 @@ impl Windows {
         ),
         scratch: &str,
         mut descriptions: NativeDescriptions<'_>,
-        generations: &[(String, u64)],
+        plugin_loads: &[(String, u64)],
         policy: RestoreWindowPolicy<'_>,
     ) -> Result<crate::app::windows::EditorWindowCandidate, String> {
         descriptions.signature.dashboard_visible = false;
@@ -229,7 +229,7 @@ impl Windows {
         proposal.check_current(source.0)?;
         self.check_editor_source(&proposal.topology())?;
         let mut candidate = self.prepare_editor(&proposal.topology(), scratch)?;
-        for (plugin, load) in generations {
+        for (plugin, load) in plugin_loads {
             candidate
                 .core
                 .graph
@@ -725,7 +725,7 @@ impl Windows {
     #[cfg(test)]
     pub(in crate::app) fn reset_runtime(
         &mut self,
-        plugin_generations: &[(String, u64)],
+        plugin_loads: &[(String, u64)],
         state: &mut crate::editor::EditorState,
     ) -> Result<(), String> {
         let semantic_focus = match self.focus {
@@ -736,7 +736,7 @@ impl Windows {
         };
         let mut candidate = self.candidate()?;
         let core = &mut candidate.core;
-        for (plugin, load) in plugin_generations {
+        for (plugin, load) in plugin_loads {
             core.graph
                 .remove_owner_instance(&format!("plugin.{plugin}"), *load)
                 .map_err(|e| e.to_string())?;
@@ -752,7 +752,7 @@ impl Windows {
         self.origin = Arc::new(());
         Ok(())
     }
-    pub(in crate::app) fn remove_plugin_generation(
+    pub(in crate::app) fn remove_plugin_load(
         &mut self,
         plugin: &str,
         load: u64,

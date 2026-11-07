@@ -28,7 +28,7 @@ pub(in crate::app) struct VirtualDocumentEditorEntry {
 impl VirtualDocumentEditorEntry {
     pub(in crate::app) fn matches(&self, state: crate::editor::EditorTopology<'_>) -> bool {
         state.buffers().get(self.buffer).is_some_and(|buffer| buffer.text.source_version() == self.text && matches!(&buffer.origin,
-            crate::editor::BufferOrigin::VirtualReadOnly { owner, generation: plugin_load, document, revision }
+            crate::editor::BufferOrigin::VirtualReadOnly { owner, load_id: plugin_load, document, revision }
                 if owner == &self.plugin && *plugin_load == self.load.0 && *document == self.document && *revision == self.revision))
     }
 }

@@ -2527,7 +2527,7 @@ fn exhausted_owner_rejects_transition_before_either_live_state_is_replaced() {
 }
 
 #[test]
-fn plugin_drafts_cannot_write_editor_resources_foreign_generations_tabs_or_protected_layers() {
+fn plugin_drafts_cannot_write_editor_resources_foreign_loads_tabs_or_protected_layers() {
     let catalog = crate::plugins::PluginCatalogVersion::default();
     use crate::windows::ContentTypeId;
     use crate::windows::WindowError;
@@ -2649,7 +2649,7 @@ fn plugin_drafts_cannot_write_editor_resources_foreign_generations_tabs_or_prote
         .begin_plugin("demo", 1, (&state.window_version(), &catalog))
         .unwrap();
     windows
-        .remove_plugin_generation("demo", 1, &mut state)
+        .remove_plugin_load("demo", 1, &mut state)
         .unwrap();
     assert!(windows.graph().window(window).is_none());
     assert!(

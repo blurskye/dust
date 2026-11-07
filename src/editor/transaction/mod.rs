@@ -852,12 +852,12 @@ impl EditorDraft {
         &mut self,
         buffer: BufferId,
         owner: &str,
-        generation: u64,
+        load_id: u64,
         document: u64,
     ) -> Result<(), String> {
         if !self.state.buffers.get(buffer).is_some_and(|buffer| matches!(&buffer.origin,
-            crate::editor::BufferOrigin::VirtualReadOnly { owner: current, generation: load, document: id, .. }
-                if current == owner && *load == generation && *id == document)) {
+            crate::editor::BufferOrigin::VirtualReadOnly { owner: current, load_id: load, document: id, .. }
+                if current == owner && *load == load_id && *id == document)) {
             return Err("virtual document removal source changed".into());
         }
         let focus = self.state.focused_window();
@@ -1172,12 +1172,12 @@ impl EditorDraft {
         &mut self,
         text: TextBuffer,
         owner: String,
-        generation: u64,
+        load_id: u64,
         document: u64,
         revision: u64,
     ) -> Result<(BufferId, ViewId), &'static str> {
         self.state
-            .open_virtual_read_only(text, owner, generation, document, revision)
+            .open_virtual_read_only(text, owner, load_id, document, revision)
     }
     pub(crate) fn set_virtual_metadata(
         &mut self,

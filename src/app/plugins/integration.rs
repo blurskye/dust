@@ -1073,7 +1073,7 @@ impl App {
     pub(in crate::app) fn remove_plugin_contributions(&mut self, plugin: &str, load: PluginLoadId) {
         match self
             .window_session
-            .remove_plugin_generation(plugin, load.0, &mut self.state)
+            .remove_plugin_load(plugin, load.0, &mut self.state)
             .map(|()| self.extension.remove_windows(plugin, load.0))
         {
             Ok(removed) => {
