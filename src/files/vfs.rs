@@ -2749,16 +2749,16 @@ pub(super) fn sync_parent(parent: &Path) -> Result<(), VfsError> {
     })
 }
 
-/// Flush a directory's entries, such as a rename into it, to disk. Windows cannot
-/// open a directory as a file and has no such flush.
+/// Flush a directory's entries, such as a rename into it, to disk.
+#[cfg(unix)]
 pub(crate) fn sync_directory(directory: &Path) -> io::Result<()> {
-    #[cfg(unix)]
-    return File::open(directory)?.sync_all();
-    #[cfg(not(unix))]
-    {
-        let _ = directory;
-        Ok(())
-    }
+    File::open(directory)?.sync_all()
+}
+
+/// Windows cannot open a directory as a file and has no directory flush.
+#[cfg(not(unix))]
+pub(crate) fn sync_directory(_directory: &Path) -> io::Result<()> {
+    Ok(())
 }
 
 #[cfg(test)]
