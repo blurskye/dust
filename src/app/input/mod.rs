@@ -89,7 +89,7 @@ pub(super) struct InputState {
     )>,
     capture: Option<crate::app::windows::FocusLease>,
     capture_epoch: std::sync::Arc<()>,
-    completion_generation: u64,
+    completion_request_id: u64,
     last_change: Vec<CommandInvocation>,
     pending_change: Option<Vec<CommandInvocation>>,
     pending_change_edited: bool,
@@ -178,7 +178,7 @@ impl InputState {
             previous_mode: None,
             capture: None,
             capture_epoch: std::sync::Arc::new(()),
-            completion_generation: 0,
+            completion_request_id: 0,
             last_change: Vec::new(),
             pending_change: None,
             pending_change_edited: false,
@@ -930,7 +930,7 @@ impl InputState {
             .map(|(_, view, mode)| (view, mode))
     }
     pub(in crate::app) fn cancel_prompt_completions(&mut self) {
-        self.completion_generation = self.completion_generation.saturating_add(1);
+        self.completion_request_id = self.completion_request_id.saturating_add(1);
     }
     pub(in crate::app) fn prompt_help(&mut self, help: String) {
         if let Some(prompt) = &mut self.prompt {
@@ -976,7 +976,7 @@ impl InputState {
         self.history_draft = None;
     }
     pub(in crate::app) fn completion_current(&self, key: &PromptCompletionKey) -> bool {
-        key.generation == self.completion_generation
+        key.request_id == self.completion_request_id
             && self
                 .prompt
                 .as_ref()
@@ -992,7 +992,7 @@ impl InputState {
         let Some(prompt) = &mut self.prompt else {
             return false;
         };
-        if request.generation != self.completion_generation || prompt.input != request.prompt_input
+        if request.request_id != self.completion_request_id || prompt.input != request.prompt_input
         {
             return false;
         }
@@ -1325,8 +1325,8 @@ impl InputState {
                     candidates.insert(label, detail.clone());
                 }
             }
-            self.completion_generation = self.completion_generation.saturating_add(1);
-            let generation = self.completion_generation;
+            self.completion_request_id = self.completion_request_id.saturating_add(1);
+            let request_id = self.completion_request_id;
             let entered = PathBuf::from(fragment);
             let trailing_separator = fragment.ends_with(std::path::is_separator);
             let parent = if trailing_separator {
@@ -1353,7 +1353,7 @@ impl InputState {
             );
             request = Some(PromptCompletionRequest {
                 key: PromptCompletionKey {
-                    generation,
+                    request_id,
                     prompt_input: input.clone(),
                     prefix,
                 },
@@ -1584,7 +1584,7 @@ impl InputState {
 
 #[derive(Clone, Debug)]
 pub(in crate::app) struct PromptCompletionKey {
-    generation: u64,
+    request_id: u64,
     prompt_input: String,
     pub(in crate::app) prefix: String,
 }

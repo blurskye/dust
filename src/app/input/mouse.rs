@@ -20,14 +20,14 @@ use crate::windows::WindowId;
 
 pub(super) struct MouseState {
     position: Option<(u16, u16)>,
-    generation: Option<u64>,
+    version: Option<u64>,
     anchor: Option<MouseAnchor>,
 }
 impl Default for MouseState {
     fn default() -> Self {
         Self {
             position: None,
-            generation: Some(0),
+            version: Some(0),
             anchor: None,
         }
     }
@@ -55,7 +55,7 @@ pub(in crate::app) struct MouseGeometry<'a> {
 }
 pub(in crate::app) struct MousePlan {
     transaction: EditorTransaction,
-    generation: u64,
+    version: u64,
     before: crate::editor::EditorVersion,
     anchor: Option<MouseAnchor>,
 }
@@ -65,7 +65,7 @@ impl InputState {
         plan: &'a MousePlan,
         current: &crate::editor::EditorVersion,
     ) -> Result<&'a EditorTransaction, &'static str> {
-        if self.mouse.generation != Some(plan.generation) || &plan.before != current {
+        if self.mouse.version != Some(plan.version) || &plan.before != current {
             return Err("mouse plan source changed before acceptance");
         }
         Ok(&plan.transaction)
@@ -73,7 +73,7 @@ impl InputState {
 
     pub(in crate::app) fn observe_mouse(&mut self, column: u16, row: u16) {
         self.mouse.position = Some((column, row));
-        self.mouse.generation = self.mouse.generation.and_then(|n| n.checked_add(1));
+        self.mouse.version = self.mouse.version.and_then(|n| n.checked_add(1));
     }
     pub(in crate::app) fn mouse_position(&self) -> Option<(u16, u16)> {
         self.mouse.position
@@ -97,7 +97,7 @@ impl InputState {
         editor: &EditorWindowVersion,
         current: Option<(ViewId, BufferId, BufferRevision)>,
     ) {
-        if self.mouse.generation != Some(plan.generation) {
+        if self.mouse.version != Some(plan.version) {
             return;
         }
         if let Some(anchor) = plan.anchor
@@ -114,7 +114,7 @@ impl InputState {
         transaction_id: TransactionId,
         extend_selection: bool,
     ) -> Option<MousePlan> {
-        let generation = self.mouse.generation?;
+        let version = self.mouse.version?;
         let MouseGeometry {
             column,
             row,
@@ -213,7 +213,7 @@ impl InputState {
         }
         Some(MousePlan {
             transaction,
-            generation,
+            version,
             before: document.editor.clone(),
             anchor: (!extend_selection).then(|| MouseAnchor {
                 editor: document.editor.window().clone(),
