@@ -85,6 +85,7 @@ pub(in crate::app) enum PickerPayload {
     },
     MatcherSource(MatcherSource),
     TaskTest(crate::app::tasks::TestKey),
+    TaskOutput(String),
     RegistrySummary(RegistryPackageSummary),
     RegistryMetadata(Box<RegistryPackageMetadata>),
     PluginProviderItem {
@@ -2077,6 +2078,7 @@ impl App {
                     self.show_error("Git hunk is stale")
                 }
             }
+            Some(PickerPayload::TaskOutput(name)) => self.show_output_picker(&name),
             Some(PickerPayload::TaskTest(key)) => {
                 if let Some(source) = self.tasks.resolve_test(&key) {
                     self.navigate_matcher_source(source);

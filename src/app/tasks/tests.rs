@@ -665,6 +665,39 @@ fn task_output_enter_and_gf_open_the_selected_source() {
 }
 
 #[test]
+fn task_list_opens_output_and_plain_rows_open_the_full_message() {
+    let (_dirs, mut app) = app();
+    let name = "build with spaces";
+    let message = format!("{}final detail", "a long task message ".repeat(40));
+    app.tasks.statuses.insert(name.into(), "succeeded".into());
+    app.tasks.rows.insert(
+        name.into(),
+        vec![TaskOutputRecord {
+            source: None,
+            stream: JobStream::Stdout,
+            text: message.clone(),
+            truncated: false,
+        }],
+    );
+    app.show_task_picker();
+    app.handle_configured_key("enter".parse().unwrap());
+    assert_eq!(app.tasks.active_output(), Some(name));
+    assert_eq!(
+        app.search.picker_surface(),
+        crate::ui::PickerSurfaceKind::Output
+    );
+    app.handle_configured_key("enter".parse().unwrap());
+    let popup = app.input.documentation().expect("full task message");
+    assert_eq!(popup.kind, crate::ui::DocumentationPopupKind::Notice);
+    assert!(
+        popup
+            .sections
+            .iter()
+            .any(|section| section.lines.join(" ") == message)
+    );
+}
+
+#[test]
 fn configuration_changes_cancel_pending_statuses_but_keeps_finished_ones() {
     let (_root, _editor, workspace, mut tasks) = fixture();
     tasks.statuses.insert("task".into(), "running:task".into());

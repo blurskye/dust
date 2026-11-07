@@ -66,6 +66,7 @@ pub(in crate::app) struct Projection {
     completion_selected: usize,
     completion_scroll: usize,
     resolve: Option<(u64, LspProjectionOwner, usize, ByteOffset)>,
+    resolve_accept: bool,
     selection_ranges: Vec<ByteRange>,
     selection_cursor: Option<ByteOffset>,
     selection_request: Option<(u64, ByteOffset, bool)>,
@@ -1302,7 +1303,17 @@ impl LspSession {
         selected: usize,
         document: LspDocument,
         offset: ByteOffset,
+        accept: bool,
     ) -> Result<(), LspError> {
+        if self
+            .projection
+            .resolve
+            .as_ref()
+            .is_some_and(|(_, _, index, at)| *index == selected && *at == offset)
+        {
+            self.projection.resolve_accept |= accept;
+            return Ok(());
+        }
         let Some(owner) = self.projection.owner.clone() else {
             return Ok(());
         };
@@ -1335,7 +1346,16 @@ impl LspSession {
             (owner.clone(), vec![server], "completionItem/resolve".into()),
         );
         self.projection.resolve = Some((request_id, owner, selected, offset));
+        self.projection.resolve_accept = accept;
         Ok(())
+    }
+    pub(in crate::app) fn completion_resolve_accepts(&self, request_id: u64) -> bool {
+        self.projection.resolve_accept
+            && self
+                .projection
+                .resolve
+                .as_ref()
+                .is_some_and(|(id, ..)| *id == request_id)
     }
     pub(in crate::app) fn accept_resolved(
         &mut self,
@@ -2270,7 +2290,7 @@ mod tests {
         unresolved.resolved = false;
         owner.install_completions("owned", vec![unresolved], false, 0);
         owner
-            .resolve_completion(0, document.clone(), ByteOffset(0))
+            .resolve_completion(0, document.clone(), ByteOffset(0), true)
             .unwrap();
         let request_id = owner.request_id();
         assert!(owner.projection.requests.contains_key(&request_id));
@@ -2289,6 +2309,40 @@ mod tests {
         assert!(owner.accept_resolved(request_id, item("resolved foo"), &editor));
         assert_eq!(owner.completion_items()[0].label, "resolved foo");
     }
+    #[test]
+    fn completion_preview_resolves_once_and_enter_reuses_the_pending_request() {
+        let (editor, buffer, document, mut owner) = fixture();
+        let _endpoint = owner.service.replace_edit_source_fixture_for(
+            "owned",
+            document.uri(),
+            (buffer, editor.buffers[buffer].text.source_version()),
+            crate::editor::text::PositionEncoding::Utf16,
+            4,
+        );
+        let mut unresolved = item("foo");
+        unresolved.resolve_item = Some(serde_json::json!({"label": "foo"}));
+        unresolved.resolved = false;
+        owner.install_completions("owned", vec![unresolved], false, 0);
+        owner
+            .resolve_completion(0, document.clone(), ByteOffset(0), false)
+            .unwrap();
+        let id = owner.request_id();
+        assert!(!owner.completion_resolve_accepts(id));
+        owner
+            .resolve_completion(0, document.clone(), ByteOffset(0), false)
+            .unwrap();
+        assert_eq!(owner.request_id(), id);
+        owner
+            .resolve_completion(0, document, ByteOffset(0), true)
+            .unwrap();
+        assert_eq!(owner.request_id(), id);
+        assert!(owner.completion_resolve_accepts(id));
+        assert!(!owner.completion_resolve_accepts(id + 1));
+        assert!(owner.accept_resolved(id, item("resolved foo"), &editor));
+        assert_eq!(owner.completion_items()[0].label, "resolved foo");
+        assert!(!owner.completion_resolve_accepts(id));
+    }
+
     #[test]
     fn retiring_a_secondary_server_removes_its_items_and_resolve_data() {
         let (editor, _, document, mut owner) = fixture();

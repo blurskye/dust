@@ -158,6 +158,19 @@ pub(super) fn render_language_completion(
         .saturating_sub(1)
         .max(bounds.x)
         .min(right.saturating_sub(panel_width));
+    // Leave a readable documentation column when indentation would strand the menu
+    // between two gaps that are both too narrow for its preview.
+    let left = if bounds.width >= 60
+        && left.saturating_sub(bounds.x) < 20
+        && right.saturating_sub(left.saturating_add(panel_width)) < 20
+    {
+        right
+            .saturating_sub(panel_width)
+            .saturating_sub(20)
+            .max(bounds.x)
+    } else {
+        left
+    };
     let row_count = u16::try_from(rows).unwrap_or(bounds.height);
     let below = cursor_y.saturating_add(1);
     let top = if below.saturating_add(row_count) <= bottom {
@@ -189,7 +202,11 @@ pub(super) fn render_language_completion(
         frame.grid.put_text_clipped(
             label_x,
             y,
-            &item.label,
+            &crate::ui::geometry::ellipsized(
+                &item.label,
+                usize::from(content_right.saturating_sub(label_x)),
+                ambiguous,
+            ),
             styled(Style::DocumentationText),
             content_right,
         );

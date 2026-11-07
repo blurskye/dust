@@ -293,12 +293,28 @@ pub(super) fn render_documentation_popup(
             .put_text_clipped(x, y, line.get(at..wrapped.end).unwrap_or(""), style, limit);
     }
     if scrollable {
-        let footer = format!(
-            " j/k or wheel · {}-{}/{} ",
+        let range = format!(
+            "{}-{}/{}",
             scroll.saturating_add(1),
             scroll.saturating_add(visible_rows).min(display_count),
             display_count
         );
+        let keys = if popup.kind == DocumentationPopupKind::Completion {
+            "Ctrl-d/u"
+        } else {
+            "j/k"
+        };
+        let footer = [
+            format!(" {keys} or wheel · {range} "),
+            format!(" {keys} · {range} "),
+            format!(" {range} "),
+        ]
+        .into_iter()
+        .find(|text| {
+            text_width(text, config.editor.ambiguous_width)
+                <= usize::from(box_width.saturating_sub(2))
+        })
+        .unwrap_or_default();
         frame.grid.put_text_clipped(
             left.saturating_add(1),
             bottom,

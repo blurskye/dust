@@ -477,7 +477,10 @@ impl Debugger {
             launch.program = Some(result.executable);
             launch.phase = Phase::Start;
         } else {
-            launch.executable = Some(result.executable);
+            // Python virtual environments depend on the invoked path, not just its target.
+            // Preflight validates that target; keep the adapter's original invocation path.
+            launch.executable =
+                Some(std::path::absolute(&request.executable).map_err(|error| error.to_string())?);
             launch.cwd = result.cwd;
             if let Some(program) = &mut launch.program {
                 if !program.is_absolute() {
@@ -1118,6 +1121,13 @@ mod tests {
             workspace.fixture_trust_identity(identity);
             workspace.reconcile_trust();
             let python = crate::debugger::test_python();
+            #[cfg(unix)]
+            let python = {
+                let invoked = root_path.join("venv/bin/python");
+                std::fs::create_dir_all(invoked.parent().unwrap()).unwrap();
+                std::os::unix::fs::symlink(python, &invoked).unwrap();
+                invoked
+            };
             let mut policy = DebugConfig::default();
             policy.adapters.insert(
                 adapter_id.into(),
@@ -1146,7 +1156,7 @@ mod tests {
             definition.launch_args = vec!["-u".into(), script.display().to_string()];
             let tools = [ToolEntry {
                 definition,
-                status: ToolStatus::Installed(python),
+                status: ToolStatus::Installed(python.clone()),
             }];
             let mut owner = Debugger::new(&policy, workspace.version());
             let terminals = crate::config::TerminalsConfig::default();
@@ -1180,7 +1190,12 @@ mod tests {
                     for event in workspace.preflight_events() {
                         match event {
                             WorkspacePreflightEvent::Ready(ready) => {
-                                owner.debug_preflight(ready).unwrap()
+                                owner.debug_preflight(ready).unwrap();
+                                assert_eq!(
+                                    owner.launch.as_ref().unwrap().executable.as_ref(),
+                                    Some(&python),
+                                    "adapter invocation must preserve a virtual environment path"
+                                );
                             }
                             _ => panic!("preflight failed"),
                         }

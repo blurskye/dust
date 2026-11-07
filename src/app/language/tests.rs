@@ -1060,6 +1060,11 @@ fn completion_documentation_is_typed_and_exact_request_owned() {
     assert_eq!(popup.kind, DocumentationPopupKind::Completion);
     assert_eq!(popup.provider, "fake-server");
     assert_eq!(popup.sections[0].markup, DocumentationMarkupKind::Markdown);
+    app.handle_key_in_context("key_release", "a".parse::<KeyEvent>().unwrap());
+    assert!(
+        app.ui.documentation_popup.is_some(),
+        "releasing a key must not dismiss the selected completion's documentation"
+    );
     app.language.fixture_documentation(
         0,
         Some(crate::language::lsp::LspMarkupContent {
@@ -6033,6 +6038,24 @@ fn lsp_log_selection_keeps_the_same_message_when_old_entries_are_evicted() {
     let after = app.search.picker().unwrap().selected_item().unwrap();
     assert_eq!(before.id, after.id);
     assert_eq!(before.label, after.label);
+}
+
+#[test]
+fn lsp_log_enter_opens_the_full_message() {
+    let (_app_dirs, mut app) = app();
+    let message = format!("{}final detail", "server startup details ".repeat(40));
+    app.append_lsp_log(message.clone());
+    app.show_lsp_logs();
+    app.handle_configured_key("enter".parse().unwrap());
+    let popup = app.input.documentation().expect("full log message");
+    assert_eq!(popup.kind, crate::ui::DocumentationPopupKind::Notice);
+    assert_eq!(popup.title, "Language server logs");
+    assert!(
+        popup
+            .sections
+            .iter()
+            .any(|section| section.lines.join(" ") == message)
+    );
 }
 
 #[test]

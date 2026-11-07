@@ -59,6 +59,52 @@ fn documentation_popup_preserves_lines_clamps_and_protects_status_row() {
 }
 
 #[test]
+fn completion_footer_uses_its_scroll_keys_and_keeps_the_range_visible() {
+    let config = crate::config::load_bundled_config().config;
+    for width in [40, 80, 160] {
+        let mut frame = crate::ui::grid::Frame {
+            grid: crate::ui::CellGrid::new(width, 24),
+            cursor: Some((0, 0, crossterm::cursor::SetCursorStyle::SteadyBar)),
+        };
+        let popup = DocumentationPopupState {
+            kind: DocumentationPopupKind::Completion,
+            title: "Completion".into(),
+            provider: "test".into(),
+            source_range: None,
+            sections: vec![DocumentationSection {
+                heading: None,
+                markup: DocumentationMarkupKind::PlainText,
+                spans: Vec::new(),
+                lines: vec!["details".into(); 100],
+            }],
+            scroll: 0,
+        };
+        let (visible, total) = crate::ui::render::documentation::render_documentation_popup(
+            &mut frame,
+            &popup,
+            &config,
+            crate::windows::WindowRect {
+                x: 0,
+                y: 0,
+                width,
+                height: 24,
+            },
+            None,
+        )
+        .unwrap();
+        let screen = (0..24)
+            .map(|row| frame.grid.row_text(row))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(screen.contains(&format!("1-{visible}/{total}")), "{screen}");
+        assert!(!screen.contains("j/k"));
+        if width >= 80 {
+            assert!(screen.contains("Ctrl-d/u"));
+        }
+    }
+}
+
+#[test]
 fn documentation_and_key_hints_stay_inside_an_offset_workspace() {
     use crate::ui::CellGrid;
     use crate::ui::Style;

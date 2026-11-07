@@ -322,7 +322,7 @@ fn fill(grid: &mut crate::ui::CellGrid, rect: WindowRect) {
 }
 
 fn rows(pane: DebugPane, panes: &DebugPanesUiState) -> Vec<String> {
-    match pane {
+    let body = match pane {
         DebugPane::Console => panes.console.iter().rev().take(64).rev().cloned().collect(),
         DebugPane::Watches => panes.watches.clone(),
         DebugPane::Breakpoints => panes.breakpoints.clone(),
@@ -330,6 +330,22 @@ fn rows(pane: DebugPane, panes: &DebugPanesUiState) -> Vec<String> {
         DebugPane::Stack => panes.stack.clone(),
         DebugPane::Variables => panes.variables.clone(),
         DebugPane::Sessions => vec![panes.target.clone(), panes.status.clone()],
+    };
+    if body.is_empty() {
+        vec![
+            match pane {
+                DebugPane::Console => "No output yet",
+                DebugPane::Watches => "No watches",
+                DebugPane::Breakpoints => "No breakpoints",
+                DebugPane::Threads => "No threads",
+                DebugPane::Stack => "No stack frames",
+                DebugPane::Variables => "No variables in this frame",
+                DebugPane::Sessions => "No debug session",
+            }
+            .to_owned(),
+        ]
+    } else {
+        body
     }
 }
 
@@ -527,6 +543,48 @@ mod tests {
                     assert_eq!(tabs.len(), DebugPane::ALL.len());
                     let last_tab_y = tabs.last().unwrap().3;
                     assert!(last_tab_y + 2 < strip.y + strip.height);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn empty_inspectors_show_a_hint_at_release_terminal_sizes() {
+        for (width, height) in [(160, 45), (100, 30), (80, 24)] {
+            for selected in DebugPane::ALL {
+                let mut frame = crate::ui::grid::Frame {
+                    grid: crate::ui::CellGrid::new(width, height),
+                    cursor: None,
+                };
+                let panes = DebugPanesUiState {
+                    selected,
+                    target: "python: launched demo.py".into(),
+                    status: "paused: entry".into(),
+                    threads: Vec::new(),
+                    stack: Vec::new(),
+                    breakpoints: Vec::new(),
+                    variables: Vec::new(),
+                    watches: Vec::new(),
+                    console: Vec::new(),
+                };
+                render_debug_panes(&mut frame, debug_layout(width, height).unwrap(), &panes);
+                let screen = (0..height)
+                    .map(|y| frame.grid.row_text(y))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                if width >= DEBUG_WIDE_MIN_WIDTH {
+                    for hint in [
+                        "No threads",
+                        "No stack frames",
+                        "No breakpoints",
+                        "No variables",
+                        "No watches",
+                        "No output yet",
+                    ] {
+                        assert!(screen.contains(hint), "{screen}");
+                    }
+                } else {
+                    assert!(screen.contains(&rows(selected, &panes)[0]), "{screen}");
                 }
             }
         }
