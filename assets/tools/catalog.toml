@@ -491,11 +491,18 @@ name = "JavaScript Debug Adapter"
 kind = "dap"
 languages = ["typescript", "typescriptreact", "javascript", "javascriptreact"]
 executable = "js-debug-adapter"
+version = "1.140.0"
+launch_args = ["{listen_port}", "127.0.0.1"]
+probe_args = ["--help"]
 debug_program_policy = "source"
 project_root_markers = ["tsconfig.json", "jsconfig.json", "package.json"]
 project_root_strategy = "node"
-# The upstream VSIX is a Node program rather than a standalone Linux executable.
-# It remains discovery-only until upstream publishes a portable adapter binary.
+[tool.install]
+method = "javascript_archive"
+url = "https://github.com/microsoft/vscode-js-debug/releases/download/v1.140.0/js-debug-dap-v1.140.0.tar.gz"
+sha256 = "27dab92937ec1ab35821ae955aac867544fe06a1b6307229049f2d789af10968"
+prefix = "js-debug"
+entrypoint = "src/dapDebugServer.js"
 
 [[tool]]
 id = "rustfmt"

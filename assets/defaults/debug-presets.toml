@@ -41,16 +41,17 @@ arguments = { module = "pytest", args = ["{file}"], console = "integratedTermina
 [[preset]]
 id = "node-file"
 label = "JavaScript / TypeScript: Node current file"
-unavailable = "Upstream js-debug needs child-session support, which Dust does not yet provide; configure a compatible adapter in [debug.sessions], then press Space d s"
 languages = ["javascript", "javascriptreact", "typescript", "typescriptreact"]
 markers = ["package.json", "tsconfig.json", "jsconfig.json"]
 adapters = ["js-debug-adapter"]
+runtime = "node"
 target = "file"
 arguments = { type = "pwa-node", runtimeExecutable = "node", console = "integratedTerminal", sourceMaps = true }
 
 [[preset]]
 id = "go-package"
 label = "Go: current package"
+runtime = "go"
 languages = ["go"]
 markers = ["go.mod", "go.work"]
 adapters = ["delve"]
@@ -60,6 +61,7 @@ arguments = { mode = "debug" }
 [[preset]]
 id = "go-tests"
 label = "Go: package tests"
+runtime = "go"
 languages = ["go"]
 markers = ["go.mod", "go.work"]
 adapters = ["delve"]

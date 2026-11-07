@@ -234,7 +234,8 @@ The debug console is opened with `Space d r`; `Space d R` restarts the session.
 `Space d s` opens **Debug launch**, combining saved `[debug.sessions]` configurations
 with project presets. `Space d c` also opens it when no session is running.
 Rust projects offer Cargo binaries and test executables; Python offers the current
-file and pytest; Go offers the current package and package tests. The preset data
+file and pytest; JavaScript/TypeScript offers the current file in Node; Go offers
+the current package and package tests. The preset data
 lives in `assets/defaults/debug-presets.toml`.
 
 Rows name the adapter and say when it is missing. **Enter installs a supported
@@ -260,12 +261,13 @@ tests. Python uses a pytest node ID; Go uses an anchored test-name filter. The
 Tree-sitter function must be available; JavaScript tests and Go subtests do not
 have cursor-test support.
 
-JavaScript/TypeScript current-file presets are detected, but the catalog's
-`js-debug-adapter` is discovery-only: Dust cannot install it. Upstream js-debug
-also needs child-session DAP support that Dust does not yet provide. Use a saved
-configuration with a compatible adapter rather than expecting the upstream TCP
-server to work as a stdio adapter. TypeScript execution additionally depends on
-the Node runtime or the project's configured loader.
+JavaScript/TypeScript current-file launches install the pinned upstream
+`js-debug-adapter` release through Tools. Dust connects to its loopback server
+and follows its child-session request to debug the Node process. The adapter runs
+with Node from PATH, or Dust's managed JavaScript runtime when Node is absent.
+The program itself needs `node` on PATH. TypeScript execution depends on that
+Node version's TypeScript support or the project's configured loader; JSX/TSX
+requires the project's build/loader configuration rather than plain Node.
 
 ## Recovery and health
 

@@ -96,6 +96,13 @@ pub enum ToolInstall {
         #[serde(default)]
         tree: Option<String>,
     },
+    /// A checked upstream JavaScript release, kept with its supporting files.
+    JavascriptArchive {
+        url: String,
+        sha256: String,
+        prefix: String,
+        entrypoint: String,
+    },
     /// Exact npm-registry packages in a Dust-owned Bun prefix. Bun is either a
     /// checked Dust-managed runtime or a directly runnable user-provided binary
     /// (including one supplied by a Nix development shell). The package installer

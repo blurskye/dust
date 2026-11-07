@@ -21,7 +21,7 @@ Paths in this table are under `src/`.
 | `git/` | Repository status, hunks, signs, mutations, branches, conflicts and worktrees. |
 | `forge/` | Pull requests and review comments through the `gh` and `tea` CLIs. |
 | `language/` | Filetype identification, Tree-sitter parsing and queries, LSP transport, sessions, protocol messages, snippets and paths. |
-| `debugger/` | DAP transport and sessions, requests, events and reverse requests. |
+| `debugger/` | DAP transport and sessions, requests, events and reverse requests. `connection.rs` owns pipe/loopback connections, including server adapter child sessions. |
 | `agent/` | ACP clients, conversation history and the MCP subagent endpoint. |
 | `tools/` | Tool catalog, installed executables, runtime discovery, Nix workspace environments, downloads, installers, plugin packages and registry client. |
 | `plugins/` | Wasmtime component loading/execution, manifests, capabilities, bounded host requests, HTTP, storage, picker providers and virtual-document protocols. |

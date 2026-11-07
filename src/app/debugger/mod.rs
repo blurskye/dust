@@ -356,8 +356,16 @@ impl Debugger {
             return None;
         }
         let (program, arguments) = arguments.split_first()?;
+        // DAP argv[0] may name a PATH executable. Terminal preflight expects a
+        // concrete path; joining `node` to the workspace would look for a source file.
+        let path = PathBuf::from(program);
+        let path = if path.components().count() == 1 && !path.is_absolute() {
+            crate::tools::discover_executable(program).unwrap_or(path)
+        } else {
+            path
+        };
         Some(TerminalProfileConfig {
-            program: program.into(),
+            program: path,
             arguments: arguments.to_vec(),
             cwd: (!cwd.as_os_str().is_empty()).then(|| cwd.into()),
             environment: environment

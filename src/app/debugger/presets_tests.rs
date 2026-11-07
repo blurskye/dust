@@ -272,6 +272,75 @@ fn installation_completion_launches_original_python_module_with_fixture() {
 }
 
 #[test]
+fn node_file_preset_uses_installable_server_adapter() {
+    let (_dirs, mut app) = app();
+    let path = source(&mut app, "demo.ts", "const answer: number = 42;\n");
+    let launch = app
+        .detected_debug_presets()
+        .into_iter()
+        .find(|launch| launch.preset.id == "node-file")
+        .unwrap();
+    assert_eq!(launch.document, path);
+    assert_eq!(launch.preset.runtime.as_deref(), Some("node"));
+    assert_eq!(launch.preset.arguments["runtimeExecutable"], "node");
+    let entry = app
+        .tooling
+        .entries()
+        .iter()
+        .find(|entry| entry.definition.id == launch.adapter)
+        .unwrap();
+    assert!(matches!(
+        entry.definition.install,
+        Some(crate::tools::ToolInstall::JavascriptArchive { .. })
+    ));
+    assert!(
+        entry
+            .definition
+            .launch_args
+            .iter()
+            .any(|arg| arg == "{listen_port}")
+    );
+}
+
+#[test]
+fn adapter_terminal_resolves_path_executables_before_preflight() {
+    let (_dirs, mut app) = app();
+    app.debugger_session.adapter_runs_terminal = true;
+    let profile = app
+        .debugger_session
+        .adapter_terminal(
+            &app.state.workspace_root,
+            &["python3".into(), "main.py".into()],
+            &Default::default(),
+        )
+        .unwrap();
+    assert_eq!(
+        profile.program,
+        crate::tools::discover_executable("python3").unwrap()
+    );
+    assert!(profile.program.is_absolute());
+    assert_eq!(profile.arguments, ["main.py"]);
+}
+
+#[test]
+fn missing_preset_runtime_names_the_next_action() {
+    let (_dirs, mut app) = app();
+    source(&mut app, "demo.js", "console.log(42);\n");
+    trust(&mut app);
+    let mut launch = app
+        .detected_debug_presets()
+        .into_iter()
+        .find(|launch| launch.preset.id == "node-file")
+        .unwrap();
+    launch.preset.runtime = Some("dust-missing-debug-runtime-fixture".into());
+    app.start_debug_preset(launch);
+    let message = app.ui.notification.as_deref().unwrap();
+    assert!(message.contains("dust-missing-debug-runtime-fixture is missing"));
+    assert!(message.contains("PATH") && message.contains("Space d s"));
+    assert!(app.debugger_session.install_launch.is_none());
+}
+
+#[test]
 fn rust_cursor_names_are_exact_and_keep_ambiguous_modules_separate() {
     assert_eq!(
         rust_test_names(

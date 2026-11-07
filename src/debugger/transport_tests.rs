@@ -1,6 +1,7 @@
 //! Transport tests for dap connections and protocol messages.
 
 use crate::debugger::*;
+use crate::process::read_content_length_message;
 use std::time::Instant;
 
 pub(crate) const ADAPTER: &str = r#"
@@ -1594,4 +1595,203 @@ fn abnormal_adapter_exit_kills_term_ignoring_descendants_and_releases_pipes() {
         std::fs::read_to_string(format!("/proc/{pid}/stat"))
             .map_or(true, |stat| stat.split_whitespace().nth(2) == Some("Z"))
     });
+}
+
+const SERVER_ADAPTER: &str = r#"
+import socket,threading,json,sys,pathlib
+server=socket.socket()
+server.bind(('127.0.0.1',int(sys.argv[1])))
+server.listen(4)
+lock=threading.Lock()
+def serve(sock,child):
+ stream=sock.makefile('rwb',buffering=0)
+ seq=0
+ def send(value):
+  nonlocal seq
+  seq+=1
+  value['seq']=seq
+  data=json.dumps(value).encode()
+  stream.write(('Content-Length: %d\r\n\r\n'%len(data)).encode()+data)
+ while True:
+  headers={}
+  while True:
+   line=stream.readline()
+   if not line: return
+   if line in (b'\r\n',b'\n'): break
+   k,v=line.decode().split(':',1);headers[k.lower()]=v.strip()
+  m=json.loads(stream.read(int(headers['content-length'])))
+  with lock:
+   with pathlib.Path('server.log').open('a') as log: log.write(json.dumps({'child':child,'message':m})+'\n')
+  if m.get('type')!='request': continue
+  c=m['command'];body={}
+  if c=='initialize': body={'supportsConfigurationDoneRequest':True,'supportTerminateDebuggee':True}
+  if c=='setBreakpoints': body={'breakpoints':[{'verified':True,'line':b['line']} for b in m['arguments']['breakpoints']]}
+  if c=='threads': body={'threads':[{'id':7,'name':'node-child'}]}
+  if c=='evaluate': body={'result':'42','variablesReference':0}
+  send({'type':'response','request_seq':m['seq'],'command':c,'success':True,'body':body})
+  if c=='initialize': send({'type':'event','event':'initialized'})
+  if c=='configurationDone':
+   if child: send({'type':'event','event':'stopped','body':{'reason':'breakpoint','threadId':7}})
+   else: send({'type':'request','command':'startDebugging','arguments':{'request':'attach','configuration':{'type':'pwa-node','__pendingTargetId':'fixture-target'}}})
+  if c=='disconnect': return
+root,_=server.accept()
+threading.Thread(target=serve,args=(root,False),daemon=True).start()
+child,_=server.accept()
+serve(child,True)
+"#;
+
+#[test]
+fn server_child_session_keeps_breakpoints_and_routes_controls_to_the_child() {
+    let root = tempfile::tempdir().unwrap();
+    let script = root.path().join("server.py");
+    std::fs::write(&script, SERVER_ADAPTER).unwrap();
+    let mut configuration = launch(root.path(), &script);
+    configuration.arguments.push("{listen_port}".into());
+    let source = root.path().join("demo.js");
+    configuration.breakpoints = vec![(
+        source.clone(),
+        vec![DapSourceBreakpoint {
+            path: source,
+            line: 3,
+            column: None,
+            condition: None,
+            hit_condition: None,
+            log_message: None,
+        }],
+    )];
+    let mut service = DapClient::new();
+    service.start_absolute(configuration).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(15);
+    let mut stopped = false;
+    let mut verified = 0;
+    while !stopped || verified < 2 {
+        match service.try_event() {
+            Some(DapEvent::Stopped {
+                thread_id: Some(7), ..
+            }) => stopped = true,
+            Some(DapEvent::Response {
+                response: DapResponse::Breakpoints(rows),
+                ..
+            }) => {
+                assert!(rows[0].0);
+                verified += 1;
+            }
+            Some(DapEvent::Failed { message, .. }) => panic!("server adapter failed: {message}"),
+            _ => {}
+        }
+        assert!(Instant::now() < deadline, "child did not stop");
+        thread::sleep(Duration::from_millis(2));
+    }
+    service
+        .control(DapControl::Evaluate {
+            expression: "6*7".into(),
+            frame_id: None,
+            context: "repl".into(),
+        })
+        .unwrap();
+    let mut evaluated = false;
+    while !evaluated {
+        match service.try_event() {
+            Some(DapEvent::Response {
+                response: DapResponse::Evaluate(value),
+                ..
+            }) => {
+                assert_eq!(value.value, "42");
+                evaluated = true;
+            }
+            Some(DapEvent::Failed { message, .. }) => panic!("server adapter failed: {message}"),
+            _ => {}
+        }
+        assert!(Instant::now() < deadline, "child evaluation timed out");
+        thread::sleep(Duration::from_millis(2));
+    }
+    service
+        .control(DapControl::Disconnect {
+            terminate_debuggee: true,
+        })
+        .unwrap();
+    let mut disconnected = false;
+    while !disconnected {
+        if let Some(DapEvent::Response {
+            response:
+                DapResponse::Disconnected {
+                    terminate_debuggee: true,
+                },
+            ..
+        }) = service.try_event()
+        {
+            disconnected = true;
+        }
+        assert!(Instant::now() < deadline, "child disconnect timed out");
+        thread::sleep(Duration::from_millis(2));
+    }
+    let log = std::fs::read_to_string(root.path().join("server.log")).unwrap();
+    let log = log
+        .lines()
+        .map(|line| serde_json::from_str::<Value>(line).unwrap())
+        .collect::<Vec<_>>();
+    assert!(log.iter().any(|row| row["child"] == false
+        && row["message"]["command"] == "startDebugging"
+        && row["message"]["success"] == true));
+    assert!(log.iter().any(|row| row["child"] == true
+        && row["message"]["command"] == "attach"
+        && row["message"]["arguments"]["__pendingTargetId"] == "fixture-target"));
+    assert!(
+        log.iter()
+            .any(|row| row["child"] == true && row["message"]["command"] == "evaluate")
+    );
+    let _ = service.stop();
+}
+
+#[test]
+fn server_child_session_rejects_missing_configuration() {
+    let root = tempfile::tempdir().unwrap();
+    let script = root.path().join("server.py");
+    std::fs::write(
+        &script,
+        SERVER_ADAPTER.replace(
+            "'configuration':{'type':'pwa-node','__pendingTargetId':'fixture-target'}",
+            "'configuration':None",
+        ),
+    )
+    .unwrap();
+    let mut configuration = launch(root.path(), &script);
+    configuration.arguments.push("{listen_port}".into());
+    let mut service = DapClient::new();
+    service.start_absolute(configuration).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(15);
+    loop {
+        if let Some(DapEvent::Failed { message, .. }) = service.try_event() {
+            assert!(message.contains("child configuration missing"), "{message}");
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "invalid child configuration was not rejected"
+        );
+        thread::sleep(Duration::from_millis(2));
+    }
+    let _ = service.stop();
+}
+
+#[test]
+fn stopping_a_server_launch_cancels_the_connection_wait() {
+    let root = tempfile::tempdir().unwrap();
+    let script = root.path().join("server.py");
+    std::fs::write(&script, "import time\ntime.sleep(60)\n").unwrap();
+    let mut configuration = launch(root.path(), &script);
+    configuration.arguments.push("{listen_port}".into());
+    let mut service = DapClient::new();
+    service.start_absolute(configuration).unwrap();
+    thread::sleep(Duration::from_millis(50));
+    service.stop().unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while service.pending() != 0 {
+        service.try_event();
+        assert!(
+            Instant::now() < deadline,
+            "cancelled connection wait retained workers"
+        );
+        thread::sleep(Duration::from_millis(5));
+    }
 }

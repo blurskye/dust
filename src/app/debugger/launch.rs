@@ -588,7 +588,7 @@ impl Debugger {
                 let adapter_runs_terminal = launch.configuration.is_none()
                     && matches!(
                         launch.session.adapter.as_str(),
-                        "debugpy" | "delve" | "codelldb"
+                        "debugpy" | "delve" | "codelldb" | "js-debug-adapter"
                     );
                 // CodeLLDB asks for a terminal without being told to.
                 match launch.session.adapter.as_str() {

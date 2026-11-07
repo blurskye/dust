@@ -22,7 +22,7 @@ struct Preset {
     markers: Vec<String>,
     adapters: Vec<String>,
     target: Target,
-    unavailable: Option<String>,
+    runtime: Option<String>,
     #[serde(default)]
     build: Vec<String>,
     #[serde(default)]
@@ -354,11 +354,6 @@ impl App {
                     launch.adapter
                 ),
             };
-            let detail = if launch.preset.unavailable.is_some() {
-                format!("{} · unavailable · Enter: next steps", launch.adapter)
-            } else {
-                detail
-            };
             rows.push((
                 PickerItem {
                     badge: String::new(),
@@ -383,10 +378,6 @@ impl App {
         if !self.require_effect_access(crate::editor::CommandAccess::Process) {
             return;
         }
-        if let Some(reason) = &launch.preset.unavailable {
-            self.show_error(reason.clone());
-            return;
-        }
         if let Err(failure) = self.workspace.execution_allowed() {
             self.show_workspace_failure(failure);
             return;
@@ -404,6 +395,14 @@ impl App {
             .any(|(_, buffer)| buffer.dirty && buffer.path.as_ref() == Some(&launch.document))
         {
             self.show_error("Save the debug source with :w, then press Space d s");
+            return;
+        }
+        if let Some(runtime) = &launch.preset.runtime
+            && crate::tools::discover_executable(runtime).is_none()
+        {
+            self.show_error(format!(
+                "{runtime} is missing: install it on PATH, then press Space d s"
+            ));
             return;
         }
         self.debugger_session.refresh(
