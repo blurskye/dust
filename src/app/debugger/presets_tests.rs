@@ -247,13 +247,15 @@ fn installation_completion_launches_original_python_module_with_fixture() {
     });
     let deadline = Instant::now() + Duration::from_secs(10);
     let log = app.state.workspace_root.join("launch.json");
-    loop {
+    let value = loop {
         app.process_dap_events();
         app.workspace.poll(&app.state);
         app.process_dap_project_root();
         app.process_execution_preflight();
-        if log.is_file() {
-            break;
+        if let Ok(bytes) = fs::read(&log)
+            && let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes)
+        {
+            break value;
         }
         assert!(
             Instant::now() < deadline,
@@ -261,8 +263,7 @@ fn installation_completion_launches_original_python_module_with_fixture() {
             app.ui.notification
         );
         std::thread::sleep(Duration::from_millis(5));
-    }
-    let value: serde_json::Value = serde_json::from_slice(&fs::read(log).unwrap()).unwrap();
+    };
     assert_eq!(value["module"], "pytest");
     assert_eq!(value["args"], serde_json::json!([path]));
     assert!(value.get("program").is_none());
@@ -327,13 +328,15 @@ fn cargo_build_and_exact_cursor_test_reach_the_dap_fixture() {
     app.start_debug_preset(launch);
     let deadline = Instant::now() + Duration::from_secs(60);
     let log = app.state.workspace_root.join("launch.json");
-    loop {
+    let value = loop {
         app.process_dap_events();
         app.workspace.poll(&app.state);
         app.process_dap_project_root();
         app.process_execution_preflight();
-        if log.is_file() {
-            break;
+        if let Ok(bytes) = fs::read(&log)
+            && let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes)
+        {
+            break value;
         }
         assert!(
             Instant::now() < deadline,
@@ -341,8 +344,7 @@ fn cargo_build_and_exact_cursor_test_reach_the_dap_fixture() {
             app.ui.notification
         );
         std::thread::sleep(Duration::from_millis(10));
-    }
-    let value: serde_json::Value = serde_json::from_slice(&fs::read(log).unwrap()).unwrap();
+    };
     assert_eq!(
         value["args"],
         serde_json::json!(["tests::works", "--exact", "--nocapture"])
