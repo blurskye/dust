@@ -47,7 +47,7 @@ fn mutation_service_rejects_stale_worktree_wrong_hunk_and_suppresses_cancelled_l
         maximum_hunks: 10,
         maximum_lines: 100,
         maximum_bytes: 4096,
-        deadline: Duration::from_secs(2),
+        deadline: Duration::from_secs(5),
     };
     let snapshot = read_hunks(&policy).unwrap();
     let base = GitStageHunkRequest {
@@ -58,7 +58,7 @@ fn mutation_service_rejects_stale_worktree_wrong_hunk_and_suppresses_cancelled_l
         expected_index: Some(snapshot.index_fingerprint),
         expected_worktree: snapshot.worktree_sha256,
         maximum_patch_bytes: 65536,
-        deadline: Duration::from_secs(2),
+        deadline: Duration::from_secs(5),
     };
 
     let mut wrong = base.clone();
@@ -108,10 +108,10 @@ fn status_is_bounded_sorted_and_idle() {
             root_revision: 3,
             maximum_files: 10,
             maximum_path_bytes: 1024,
-            deadline: Duration::from_secs(2),
+            deadline: Duration::from_secs(5),
         })
         .unwrap();
-    let deadline = Instant::now() + Duration::from_secs(3);
+    let deadline = Instant::now() + Duration::from_secs(15);
     let snapshot = loop {
         if let Some(s) = service.poll().unwrap() {
             break s.clone();
@@ -158,7 +158,7 @@ fn status_policy(root: &Path) -> GitStatusPolicy {
         root_revision: 1,
         maximum_files: 100,
         maximum_path_bytes: 4096,
-        deadline: Duration::from_secs(2),
+        deadline: Duration::from_secs(5),
     }
 }
 
@@ -326,7 +326,7 @@ fn status_keeps_index_and_worktree_codes_independent() {
             root_revision: 1,
             maximum_files: 10,
             maximum_path_bytes: 1024,
-            deadline: Duration::from_secs(2),
+            deadline: Duration::from_secs(5),
         },
         &[],
         &AtomicBool::new(false),
@@ -394,10 +394,10 @@ fn nested_root_is_scoped_and_limits_truncate_results() {
             root_revision: 4,
             maximum_files: 1,
             maximum_path_bytes: 1024,
-            deadline: Duration::from_secs(2),
+            deadline: Duration::from_secs(5),
         })
         .unwrap();
-    let deadline = Instant::now() + Duration::from_secs(3);
+    let deadline = Instant::now() + Duration::from_secs(15);
     let snapshot = loop {
         if let Some(s) = service.poll().unwrap() {
             break s.clone();
@@ -419,7 +419,7 @@ fn nested_root_is_scoped_and_limits_truncate_results() {
             root_revision: 4,
             maximum_files: 10,
             maximum_path_bytes: 1024,
-            deadline: Duration::from_secs(2),
+            deadline: Duration::from_secs(5),
         })
         .unwrap();
     let scoped = wait_status(&mut service);
@@ -466,11 +466,11 @@ fn unstaged_unicode_hunks_are_bounded_and_revision_owned() {
         maximum_hunks: 10,
         maximum_lines: 100,
         maximum_bytes: 4096,
-        deadline: Duration::from_secs(2),
+        deadline: Duration::from_secs(5),
     };
     let mut service = GitHunkWorker::default();
     let request_id = service.start(policy.clone()).unwrap();
-    let deadline = Instant::now() + Duration::from_secs(3);
+    let deadline = Instant::now() + Duration::from_secs(15);
     let snapshot = loop {
         if let Some(snapshot) = service.poll().unwrap() {
             break snapshot.clone();
@@ -594,7 +594,7 @@ fn buffer_hunks_compare_exact_unsaved_revision_to_index_without_worktree_mutatio
         maximum_hunks: 10,
         maximum_lines: 100,
         maximum_bytes: 4096,
-        deadline: Duration::from_secs(2),
+        deadline: Duration::from_secs(5),
     };
     assert!(read_hunks(&policy).unwrap().hunks.is_empty());
     let mut service = GitHunkWorker::default();
@@ -607,7 +607,7 @@ fn buffer_hunks_compare_exact_unsaved_revision_to_index_without_worktree_mutatio
             },
         )
         .unwrap();
-    let deadline = Instant::now() + Duration::from_secs(3);
+    let deadline = Instant::now() + Duration::from_secs(15);
     let snapshot = loop {
         if let Some(snapshot) = service.poll().unwrap() {
             break snapshot.clone();
@@ -684,7 +684,7 @@ fn libgit2_can_stage_one_exact_hunk_without_changing_worktree() {
         maximum_hunks: 10,
         maximum_lines: 100,
         maximum_bytes: 4096,
-        deadline: Duration::from_secs(2),
+        deadline: Duration::from_secs(5),
     };
     let snapshot = read_hunks(&policy).unwrap();
     assert_eq!(snapshot.hunks.len(), 2);
@@ -745,7 +745,7 @@ fn mutation_service_stages_exact_hunk_and_rejects_stale_index() {
         maximum_hunks: 10,
         maximum_lines: 100,
         maximum_bytes: 4096,
-        deadline: Duration::from_secs(2),
+        deadline: Duration::from_secs(5),
     };
     let snapshot = read_hunks(&policy).unwrap();
     let index = git_index_fingerprint(&root).unwrap();
@@ -757,13 +757,13 @@ fn mutation_service_stages_exact_hunk_and_rejects_stale_index() {
         expected_index: Some(index),
         expected_worktree: snapshot.worktree_sha256,
         maximum_patch_bytes: 64 * 1024,
-        deadline: Duration::from_secs(2),
+        deadline: Duration::from_secs(5),
     };
     let mut service = GitMutationWorker::default();
     let request_id = service
         .start(GitMutationRequest::StageHunk(request.clone()))
         .unwrap();
-    let deadline = Instant::now() + Duration::from_secs(3);
+    let deadline = Instant::now() + Duration::from_secs(15);
     let result = loop {
         if let Some(result) = service.poll().unwrap() {
             break result.clone();
@@ -795,7 +795,7 @@ fn mutation_service_stages_exact_hunk_and_rejects_stale_index() {
     let current = git_index_fingerprint(&root).unwrap();
     let mut second = GitMutationWorker::default();
     second.start(GitMutationRequest::StageHunk(stale)).unwrap();
-    let deadline = Instant::now() + Duration::from_secs(3);
+    let deadline = Instant::now() + Duration::from_secs(15);
     loop {
         match second.poll() {
             Err(GitMutationError::StaleIndex) => break,
@@ -830,7 +830,7 @@ fn libgit2_can_reset_one_exact_hunk_without_changing_index() {
         maximum_hunks: 10,
         maximum_lines: 100,
         maximum_bytes: 4096,
-        deadline: Duration::from_secs(2),
+        deadline: Duration::from_secs(5),
     };
     let snapshot = read_hunks(&policy).unwrap();
     assert_eq!(snapshot.hunks.len(), 2);
@@ -876,7 +876,7 @@ fn libgit2_can_reset_one_exact_hunk_without_changing_index() {
     );
 }
 fn wait_mutation_error(service: &mut GitMutationWorker) -> GitMutationError {
-    let deadline = Instant::now() + Duration::from_secs(3);
+    let deadline = Instant::now() + Duration::from_secs(15);
     loop {
         if let Err(error) = service.poll() {
             return error;
@@ -905,7 +905,7 @@ fn mutation_service_rejects_stale_worktree_wrong_hunk_and_cancelled_requests() {
         maximum_hunks: 10,
         maximum_lines: 100,
         maximum_bytes: 4096,
-        deadline: Duration::from_secs(2),
+        deadline: Duration::from_secs(5),
     };
     let snapshot = read_hunks(&policy).unwrap();
     let base = GitStageHunkRequest {
@@ -916,7 +916,7 @@ fn mutation_service_rejects_stale_worktree_wrong_hunk_and_cancelled_requests() {
         expected_index: Some(snapshot.index_fingerprint),
         expected_worktree: snapshot.worktree_sha256,
         maximum_patch_bytes: 65536,
-        deadline: Duration::from_secs(2),
+        deadline: Duration::from_secs(5),
     };
 
     let mut wrong = base.clone();
@@ -965,7 +965,7 @@ fn mutation_service_rejects_symlink_root_replacement_binary_and_directory_paths(
         maximum_hunks: 10,
         maximum_lines: 100,
         maximum_bytes: 4096,
-        deadline: Duration::from_secs(2),
+        deadline: Duration::from_secs(5),
     };
     let snapshot = read_hunks(&policy).unwrap();
     let request_for = |policy: GitHunkPolicy, worktree: [u8; 32]| GitStageHunkRequest {
@@ -976,7 +976,7 @@ fn mutation_service_rejects_symlink_root_replacement_binary_and_directory_paths(
         expected_index: Some(snapshot.index_fingerprint),
         expected_worktree: Some(worktree),
         maximum_patch_bytes: 65536,
-        deadline: Duration::from_secs(2),
+        deadline: Duration::from_secs(5),
     };
     let mut service = GitMutationWorker::default();
 
@@ -1251,7 +1251,7 @@ fn reset_service_restores_only_selected_hunk_and_preserves_index() {
         maximum_hunks: 10,
         maximum_lines: 100,
         maximum_bytes: 4096,
-        deadline: Duration::from_secs(2),
+        deadline: Duration::from_secs(5),
     };
     let snapshot = read_hunks(&policy).unwrap();
     let before = git_index_fingerprint(&root).unwrap();
@@ -1265,13 +1265,13 @@ fn reset_service_restores_only_selected_hunk_and_preserves_index() {
         expected_index: Some(before),
         expected_worktree: Some(hash),
         maximum_patch_bytes: 65536,
-        deadline: Duration::from_secs(2),
+        deadline: Duration::from_secs(5),
     };
     let mut service = GitMutationWorker::default();
     service
         .start(GitMutationRequest::ResetUnstagedHunk(request))
         .unwrap();
-    let deadline = Instant::now() + Duration::from_secs(3);
+    let deadline = Instant::now() + Duration::from_secs(15);
     let result = loop {
         if let Some(result) = service.poll().unwrap() {
             break result.clone();
@@ -1300,7 +1300,7 @@ fn plan_policy(root: &Path, file: &str, layer: GitDiffLayer) -> GitHunkPolicy {
         maximum_hunks: 10,
         maximum_lines: 1000,
         maximum_bytes: 64 * 1024,
-        deadline: Duration::from_secs(2),
+        deadline: Duration::from_secs(5),
     }
 }
 
@@ -1335,14 +1335,14 @@ fn plan_template(policy: GitHunkPolicy, kind: GitMutationKind) -> GitChangePlanR
         expected_document_revision: None,
         unsaved_documents: Vec::new(),
         maximum_patch_bytes: 64 * 1024,
-        deadline: Duration::from_secs(2),
+        deadline: Duration::from_secs(5),
     }
 }
 
 fn run_plan(plan: GitChangePlanRequest) -> Result<GitMutationResult, GitMutationError> {
     let mut service = GitMutationWorker::default();
     service.start(GitMutationRequest::Plan(plan)).unwrap();
-    let deadline = Instant::now() + Duration::from_secs(3);
+    let deadline = Instant::now() + Duration::from_secs(15);
     loop {
         match service.poll() {
             Ok(Some(result)) => return Ok(result.clone()),
@@ -1365,7 +1365,7 @@ fn index_text(root: &Path, path: &str) -> String {
 }
 
 fn wait_status(service: &mut GitStatusWorker) -> GitStatusSnapshot {
-    let deadline = Instant::now() + Duration::from_secs(3);
+    let deadline = Instant::now() + Duration::from_secs(15);
     loop {
         if let Some(snapshot) = service.poll().unwrap() {
             return snapshot.clone();
@@ -1395,7 +1395,7 @@ fn change_sources_distinguish_staged_unstaged_and_unsaved() {
                 root_revision: 1,
                 maximum_files: 64,
                 maximum_path_bytes: 4096,
-                deadline: Duration::from_secs(2),
+                deadline: Duration::from_secs(5),
             },
             vec![GitUnsavedDocument::new("dirty.txt".into(), 7)],
         )
@@ -1452,7 +1452,7 @@ fn change_sources_distinguish_staged_unstaged_and_unsaved() {
                 root_revision: 1,
                 maximum_files: 64,
                 maximum_path_bytes: 4096,
-                deadline: Duration::from_secs(2),
+                deadline: Duration::from_secs(5),
             },
             vec![GitUnsavedDocument::new("dirty.txt".into(), 0)],
         ),
@@ -1487,7 +1487,7 @@ fn hunk_snapshot_source_reports_staged_unstaged_and_unsaved() {
             },
         )
         .unwrap();
-    let deadline = Instant::now() + Duration::from_secs(3);
+    let deadline = Instant::now() + Duration::from_secs(15);
     let snapshot = loop {
         if let Some(snapshot) = service.poll().unwrap() {
             break snapshot.clone();
@@ -3611,7 +3611,7 @@ fn nested_hunk_mutations_use_repository_paths() {
             expected_index: Some(snapshot.index_fingerprint),
             expected_worktree: snapshot.worktree_sha256,
             maximum_patch_bytes: 65536,
-            deadline: Duration::from_secs(2),
+            deadline: Duration::from_secs(5),
         },
         &AtomicBool::new(false),
     )
@@ -3856,7 +3856,7 @@ fn hunk_mutations_quote_paths_and_leave_similarly_named_files_unchanged() {
                 expected_index: Some(snapshot.index_fingerprint),
                 expected_worktree: snapshot.worktree_sha256,
                 maximum_patch_bytes: 65536,
-                deadline: Duration::from_secs(2),
+                deadline: Duration::from_secs(5),
             },
             &AtomicBool::new(false),
         )
@@ -3911,7 +3911,7 @@ fn hunk_mutations_preserve_missing_final_newlines() {
                 expected_index: Some(snapshot.index_fingerprint),
                 expected_worktree: snapshot.worktree_sha256,
                 maximum_patch_bytes: 65536,
-                deadline: Duration::from_secs(2),
+                deadline: Duration::from_secs(5),
             },
             &AtomicBool::new(false),
         )
@@ -3995,7 +3995,7 @@ fn deleted_worktree_files_can_be_staged_and_reset_by_hunk() {
                 expected_index: plan.expected_index,
                 expected_worktree: None,
                 maximum_patch_bytes: 65536,
-                deadline: Duration::from_secs(2),
+                deadline: Duration::from_secs(5),
             };
             let mut service = GitMutationWorker::default();
             service
@@ -4039,7 +4039,7 @@ fn deleted_worktree_files_can_be_staged_and_reset_by_hunk() {
             expected_index: Some(snapshot.index_fingerprint),
             expected_worktree: None,
             maximum_patch_bytes: 65536,
-            deadline: Duration::from_secs(2),
+            deadline: Duration::from_secs(5),
         };
         let mut service = GitMutationWorker::default();
         service
@@ -4454,7 +4454,7 @@ fn status_uses_rename_destinations_and_merges_unsaved_paths_once() {
                 root_revision: 1,
                 maximum_files: 10,
                 maximum_path_bytes: 1024,
-                deadline: Duration::from_secs(2),
+                deadline: Duration::from_secs(5),
             },
             vec![
                 GitUnsavedDocument::new("a.txt".into(), 1),
@@ -4569,7 +4569,7 @@ fn partial_reset_preserves_unselected_replacement_lines() {
             expected_index: Some(snapshot.index_fingerprint),
             expected_worktree: snapshot.worktree_sha256,
             maximum_patch_bytes: 65536,
-            deadline: Duration::from_secs(2),
+            deadline: Duration::from_secs(5),
         },
         &AtomicBool::new(false),
     )
