@@ -1816,16 +1816,24 @@ fn the_users_message_is_a_band_and_the_answer_follows() {
             context: vec!["main.rs".into()],
             attachments: Vec::new(),
         },
-        Entry::Tool {
+        Entry::Tool(ToolCall {
             id: "t".into(),
             title: "Read main.rs".into(),
             status: "completed".into(),
-        },
+            ..ToolCall::default()
+        }),
         Entry::Agent("Because.".into()),
     ];
     let mut out = Styled::default();
     let mut bands = Vec::new();
-    transcript(&mut out, &mut bands, "claude", &entries, 80);
+    transcript(
+        &mut out,
+        &mut bands,
+        "claude",
+        Path::new("/work/repo"),
+        &entries,
+        80,
+    );
     assert_eq!(
         out.text,
         "\nwhy\n+ main.rs\n\n\n● Read main.rs\n\nBecause.\n"
@@ -1835,6 +1843,112 @@ fn the_users_message_is_a_band_and_the_answer_follows() {
         .map(|band| &out.text[band.clone()])
         .collect::<Vec<_>>();
     assert_eq!(banded, ["\nwhy\n+ main.rs\n\n"]);
+}
+
+#[test]
+fn tool_calls_show_what_they_did_and_change_in_place() {
+    let (_directories, mut app) = test_app();
+    let index = tab(&mut app);
+    let root = app.agent.sessions[index].root.clone();
+    let file = root.join("hello.tmp").display().to_string();
+    let source = root.join("src/a.rs").display().to_string();
+    let long = (1..=9)
+        .map(|line| format!("line {line}\n"))
+        .collect::<String>();
+    for update in [
+        json!({"sessionUpdate": "tool_call", "toolCallId": "w", "title": "write", "kind": "edit",
+               "status": "pending", "locations": [{"path": file}],
+               "rawInput": {"path": file, "content": "hello world"}}),
+        json!({"sessionUpdate": "tool_call_update", "toolCallId": "w", "status": "completed",
+               "content": [{"type": "diff", "path": file, "oldText": null, "newText": "hello world\n"}]}),
+        json!({"sessionUpdate": "tool_call", "toolCallId": "e", "title": format!("Edit {source}"),
+               "kind": "edit", "status": "in_progress", "locations": [{"path": source, "line": 12}],
+               "content": [{"type": "diff", "path": source, "oldText": "a\nold\nz\n", "newText": format!("a\n{long}z\n")}]}),
+        json!({"sessionUpdate": "tool_call", "toolCallId": "x", "title": "Edit b.rs", "kind": "edit"}),
+        json!({"sessionUpdate": "tool_call_update", "toolCallId": "x", "status": "failed",
+               "content": [{"type": "content", "content": {"type": "text", "text": "old text not found\n"}}]}),
+        json!({"sessionUpdate": "tool_call", "toolCallId": "r", "title": "bash", "kind": "execute",
+               "status": "completed", "rawInput": {"command": "cargo test"}}),
+        json!({"sessionUpdate": "tool_call", "toolCallId": "m", "title": "read", "kind": "read",
+               "status": "completed", "locations": [{"path": source}],
+               "content": [{"type": "content", "content": {"type": "text", "text": "fn main() {}"}}]}),
+        json!({"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "Created hello.tmp."}}),
+    ] {
+        app.handle_agent_message(
+            index,
+            AgentMessage::Notification {
+                method: "session/update".into(),
+                params: json!({"update": update}),
+            },
+        );
+    }
+    let session = &app.agent.sessions[index];
+    let tools = session
+        .entries
+        .iter()
+        .filter(|entry| matches!(entry, Entry::Tool(_)))
+        .count();
+    assert_eq!(tools, 5, "updates change their call, not add one");
+    let mut out = Styled::default();
+    transcript(&mut out, &mut Vec::new(), "pi", &root, &session.entries, 80);
+    assert!(
+        out.text.ends_with(
+            "● Write hello.tmp\n\
+             \x20 + hello world\n\
+             ● Edit src/a.rs\n\
+             \x20 src/a.rs:12\n\
+             \x20 - old\n\
+             \x20 + line 1\n\
+             \x20 + line 2\n\
+             \x20 + line 3\n\
+             \x20 + line 4\n\
+             \x20 + … 5 more lines\n\
+             ● Edit b.rs\n\
+             \x20 old text not found\n\
+             ● Run cargo test\n\
+             ● Read src/a.rs\n\
+             \nCreated hello.tmp.\n"
+        ),
+        "{}",
+        out.text
+    );
+    let failed = out.text.find("old text not found").unwrap();
+    assert!(
+        out.spans
+            .iter()
+            .any(|(range, role)| range.contains(&failed) && *role == Highlight::NUMBER),
+        "a failure shows in the error color"
+    );
+}
+
+#[test]
+fn a_short_option_list_opens_in_a_small_choice_box() {
+    let (_directories, mut app) = test_app();
+    let index = tab(&mut app);
+    app.agent.active = index;
+    let levels = ["low", "medium", "high", "xhigh", "max"]
+        .map(|level| json!({"value": level, "name": level}));
+    let models = (0..30)
+        .map(|model| json!({"value": format!("m{model}"), "name": format!("Model {model}")}))
+        .collect::<Vec<_>>();
+    let session = &mut app.agent.sessions[index];
+    session.id = Some("s".into());
+    session.options = agent::session_options(&json!({"configOptions": [
+        {"id": "effort", "name": "Thinking", "category": "thought_level", "type": "select",
+         "currentValue": "high", "options": levels},
+        {"id": "model", "name": "Model", "category": "model", "type": "select",
+         "currentValue": "m0", "options": models},
+    ]}));
+    app.open_agent_option_picker(Some(THINKING));
+    assert_eq!(app.search.picker_surface(), PickerSurfaceKind::Choice);
+    app.open_agent_option_picker(None);
+    assert_eq!(app.search.picker_surface(), PickerSurfaceKind::Choice);
+    app.open_agent_option_picker(Some("model"));
+    assert_eq!(
+        app.search.picker_surface(),
+        PickerSurfaceKind::Generic,
+        "a long list keeps the searchable picker"
+    );
 }
 
 #[test]
@@ -1942,22 +2056,17 @@ fn streamed_chunks_join_and_option_updates_replace_the_list() {
     apply_update(&mut session, SessionUpdate::AgentText("lo".into()));
     apply_update(
         &mut session,
-        SessionUpdate::ToolCall {
-            id: "1".into(),
-            title: "Edit".into(),
-            status: "pending".into(),
-        },
+        SessionUpdate::Tool(json!({"toolCallId": "1", "title": "Edit"})),
     );
     apply_update(
         &mut session,
-        SessionUpdate::ToolCallUpdate {
-            id: "1".into(),
-            title: None,
-            status: Some("completed".into()),
-        },
+        SessionUpdate::Tool(json!({"toolCallId": "1", "status": "completed"})),
     );
     assert!(matches!(&session.entries[0], Entry::Agent(text) if text == "Hello"));
-    assert!(matches!(&session.entries[1], Entry::Tool { status, .. } if status == "completed"));
+    assert_eq!(session.entries.len(), 2);
+    assert!(
+        matches!(&session.entries[1], Entry::Tool(call) if call.status == "completed" && call.title == "Edit")
+    );
     apply_update(&mut session, SessionUpdate::Mode("plan".into()));
     assert_eq!(value_name(session.option("mode").unwrap()), "Plan");
     assert!(session.set_option("mode", "missing").is_err());

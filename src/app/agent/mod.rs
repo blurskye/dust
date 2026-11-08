@@ -33,6 +33,8 @@ use crate::agent::PromptPart;
 use crate::agent::Rejoin;
 use crate::agent::SessionOption;
 use crate::agent::SessionUpdate;
+use crate::agent::ToolCall;
+use crate::agent::ToolLine;
 use crate::agent::history;
 use crate::agent::history::Conversation;
 use crate::agent::history::Entry;
@@ -54,6 +56,7 @@ use crate::ui::ConfirmationChoice;
 use crate::ui::ContentTabEntry;
 use crate::ui::ContentTabIdentity;
 use crate::ui::ContentTabKind;
+use crate::ui::PickerSurfaceKind;
 use crate::ui::PromptKind;
 use crate::windows::ContentLifecycle;
 use crate::windows::TileAxis;
@@ -77,6 +80,8 @@ const STARTUP_TEXT_WAIT: std::time::Duration = std::time::Duration::from_millis(
 const READ_BYTE_LIMIT: u64 = 16 * 1024 * 1024;
 /// The option category ACP uses for reasoning effort.
 const THINKING: &str = "thought_level";
+/// The most rows a choice box shows; longer lists of choices open the full picker.
+const CHOICE_ROWS: usize = 12;
 /// How much of a saved conversation goes to an agent that starts fresh, in characters.
 const RECAP_CHARACTERS: usize = 60_000;
 /// How long each spinner frame shows, in milliseconds.
@@ -989,7 +994,7 @@ impl App {
                 })
                 .collect();
             let title = format!("{} Options", session.name);
-            self.install_picker(title, items);
+            self.install_choice_picker(title, items);
             self.search
                 .set_picker_footer("Enter Change · Esc Esc Close".to_owned());
             self.sync_picker_ui();
@@ -1016,7 +1021,7 @@ impl App {
         let Some(option) = session.option(key).cloned() else {
             if !others.is_empty() {
                 let title = format!("{} Agent", session.name);
-                self.install_picker(title, others);
+                self.install_choice_picker(title, others);
                 self.search
                     .set_picker_footer("Enter Use · Esc Esc Close".to_owned());
                 self.sync_picker_ui();
@@ -1052,7 +1057,7 @@ impl App {
             })
             .chain(others)
             .collect();
-        self.install_picker(format!("{} {}", session.name, option.name), items);
+        self.install_choice_picker(format!("{} {}", session.name, option.name), items);
         self.search
             .set_picker_footer("Enter Use · Esc Esc Close".to_owned());
         self.sync_picker_ui();
@@ -1118,10 +1123,21 @@ impl App {
             })
             .collect();
         let title = format!("Sign In to {}", session.name);
-        self.install_picker(title, items);
+        self.install_choice_picker(title, items);
         self.search
             .set_picker_footer("Enter Sign in · Esc Esc Close".to_owned());
         self.sync_picker_ui();
+    }
+
+    /// A session's choices are usually a handful, such as its thinking levels, and fit a small
+    /// box; a long list, such as an agent's many models, keeps the full picker to search in.
+    fn install_choice_picker(&mut self, title: String, items: Vec<(PickerItem, PickerPayload)>) {
+        let surface = if items.len() <= CHOICE_ROWS {
+            PickerSurfaceKind::Choice
+        } else {
+            PickerSurfaceKind::Generic
+        };
+        self.install_surface_picker(surface, title, items);
     }
 
     pub(in crate::app) fn accept_agent_choice(&mut self, choice: AgentChoice) {
@@ -2474,6 +2490,7 @@ impl App {
                     &mut text,
                     &mut bands,
                     &session.name,
+                    &session.root,
                     &session.entries,
                     width,
                 );
@@ -3153,27 +3170,7 @@ fn apply_update(session: &mut AgentSession, update: SessionUpdate) {
                 entries.push(Entry::Thought(text));
             }
         }
-        SessionUpdate::ToolCall { id, title, status } => {
-            entries.push(Entry::Tool { id, title, status });
-        }
-        SessionUpdate::ToolCallUpdate { id, title, status } => {
-            let tool = entries.iter_mut().rev().find_map(|entry| match entry {
-                Entry::Tool {
-                    id: candidate,
-                    title,
-                    status,
-                } if *candidate == id => Some((title, status)),
-                _ => None,
-            });
-            if let Some((current_title, current_status)) = tool {
-                if let Some(title) = title {
-                    *current_title = title;
-                }
-                if let Some(status) = status {
-                    *current_status = status;
-                }
-            }
-        }
+        SessionUpdate::Tool(update) => update_tool_call(entries, &update),
         SessionUpdate::Plan(steps) => {
             if let Some(Entry::Plan(current)) = entries
                 .iter_mut()
@@ -3198,6 +3195,23 @@ fn apply_update(session: &mut AgentSession, update: SessionUpdate) {
         }
         SessionUpdate::Commands(commands) => session.commands = commands,
         SessionUpdate::Other => {}
+    }
+}
+
+/// A tool call changes its entry in place, whether the agent sends a `tool_call_update` or the
+/// `tool_call` again; a call the panel has not seen yet gets a new entry.
+fn update_tool_call(entries: &mut Vec<Entry>, update: &Value) {
+    let id = update["toolCallId"].as_str().unwrap_or_default();
+    let known = entries.iter_mut().rev().find_map(|entry| match entry {
+        Entry::Tool(call) if call.id == id => Some(call),
+        _ => None,
+    });
+    if let Some(call) = known {
+        call.update(update);
+    } else {
+        let mut call = ToolCall::new(id);
+        call.update(update);
+        entries.push(Entry::Tool(call));
     }
 }
 
@@ -3249,6 +3263,7 @@ fn transcript(
     out: &mut Styled,
     bands: &mut Vec<std::ops::Range<usize>>,
     name: &str,
+    root: &Path,
     entries: &[Entry],
     width: usize,
 ) {
@@ -3259,8 +3274,7 @@ fn transcript(
         let previous = index.checked_sub(1).map(|previous| &entries[previous]);
         if matches!(
             (previous, entry),
-            (Some(Entry::Agent(_)), Entry::Tool { .. })
-                | (Some(Entry::Tool { .. }), Entry::Agent(_))
+            (Some(Entry::Agent(_)), Entry::Tool(_)) | (Some(Entry::Tool(_)), Entry::Agent(_))
         ) {
             out.push("\n", None);
         }
@@ -3295,17 +3309,7 @@ fn transcript(
                     out.wrapped(text, quote, bar, bar, width);
                 }
             }
-            // A tool call can start without a title; it shows once it has one.
-            Entry::Tool { title, .. } if title.trim().is_empty() => {}
-            Entry::Tool { title, status, .. } => {
-                let role = match status.as_str() {
-                    "completed" => Highlight::STRING,
-                    "failed" => Highlight::NUMBER,
-                    "in_progress" => Highlight::TYPE,
-                    _ => Highlight::COMMENT,
-                };
-                out.wrapped(title, None, ("● ", Some(role)), ("  ", None), width);
-            }
+            Entry::Tool(call) => tool_call(out, call, root, width),
             Entry::Plan(steps) => {
                 out.push("\n", None);
                 out.push("Plan", Some(Highlight::STRONG));
@@ -3332,6 +3336,116 @@ fn transcript(
             }
         }
     }
+}
+
+/// A tool call: a dot colored by its status and what it does, then the files and command the
+/// title leaves out and a few of the lines it changed or printed.
+fn tool_call(out: &mut Styled, call: &ToolCall, root: &Path, width: usize) {
+    let title = tool_title(call, root);
+    // A tool call can start without a title; it shows once it has one.
+    if title.is_empty() {
+        return;
+    }
+    let failed = call.status == "failed";
+    let role = match call.status.as_str() {
+        "completed" => Highlight::STRING,
+        "failed" => Highlight::NUMBER,
+        "in_progress" => Highlight::TYPE,
+        _ => Highlight::COMMENT,
+    };
+    let error = failed.then_some(Highlight::NUMBER);
+    out.wrapped(&title, error, ("● ", Some(role)), ("  ", None), width);
+    let indent = ("  ", None);
+    let line = |out: &mut Styled, text: &str, role: Highlight| {
+        // One row each, so a long line cannot flood the panel.
+        let room = width.saturating_sub(2).max(1);
+        let text = if text.chars().count() > room {
+            let cut: String = text.chars().take(room.saturating_sub(1)).collect();
+            format!("{cut}…")
+        } else {
+            text.to_owned()
+        };
+        out.wrapped(&text, Some(role), indent, indent, width);
+    };
+    let paths: Vec<String> = call
+        .paths
+        .iter()
+        .map(|path| shown_path(path, root))
+        .filter(|path| !title.contains(path.as_str()))
+        .collect();
+    if !paths.is_empty() {
+        line(out, &paths.join(", "), Highlight::COMMENT);
+    }
+    let command = call.command.lines().next().unwrap_or_default();
+    if !command.is_empty() && !title.contains(command) {
+        line(out, &format!("$ {command}"), Highlight::COMMENT);
+    }
+    for change in &call.lines {
+        let role = match change {
+            ToolLine::Added(_) => Highlight::STRING,
+            ToolLine::Removed(_) => Highlight::NUMBER,
+            // A read's output is the file itself, which the agent goes on to talk about.
+            ToolLine::Output(_) if call.kind == "read" && !failed => continue,
+            ToolLine::Output(_) => error.unwrap_or(Highlight::COMMENT),
+        };
+        line(out, &change.marked(), role);
+    }
+}
+
+/// The tool call's title with paths shown from the session's directory. Some agents title a
+/// call with only its tool's name, such as `write`; the file or command it names then says
+/// what it did.
+fn tool_title(call: &ToolCall, root: &Path) -> String {
+    let title = call
+        .title
+        .trim()
+        .replace(&format!("{}/", root.display()), "");
+    let bare = title
+        .chars()
+        .all(|character| character.is_alphanumeric() || matches!(character, '_' | '-'));
+    if !bare {
+        return title;
+    }
+    let mut name: String = match title.chars().next() {
+        Some(first)
+            if title
+                .chars()
+                .all(|character| character.is_ascii_lowercase()) =>
+        {
+            first.to_uppercase().chain(title.chars().skip(1)).collect()
+        }
+        Some(_) => title,
+        None => match call.kind.as_str() {
+            "read" => "Read",
+            "edit" => "Edit",
+            "delete" => "Delete",
+            "move" => "Move",
+            "search" => "Search",
+            "execute" => "Run",
+            "fetch" => "Fetch",
+            "think" => "Think",
+            _ => "",
+        }
+        .to_owned(),
+    };
+    let command = call.command.lines().next().unwrap_or_default();
+    if let Some(path) = call.paths.first() {
+        if name.is_empty() {
+            name = "Tool".into();
+        }
+        format!("{name} {}", shown_path(path, root))
+    } else if !command.is_empty() {
+        format!("Run {command}")
+    } else {
+        name
+    }
+}
+
+/// A path the agent named, from the session's directory when it is inside it.
+fn shown_path(path: &str, root: &Path) -> String {
+    Path::new(path)
+        .strip_prefix(root)
+        .map_or_else(|_| path.to_owned(), |inside| inside.display().to_string())
 }
 
 /// The session's directory with the home directory as `~`, cut from the left to fit.

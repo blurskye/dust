@@ -408,16 +408,9 @@ pub fn prompt_params(session: &str, parts: &[PromptPart]) -> Value {
 pub enum SessionUpdate {
     AgentText(String),
     Thought(String),
-    ToolCall {
-        id: String,
-        title: String,
-        status: String,
-    },
-    ToolCallUpdate {
-        id: String,
-        title: Option<String>,
-        status: Option<String>,
-    },
+    /// A `tool_call` or `tool_call_update`, for [`ToolCall::update`]: each names only the
+    /// fields that changed.
+    Tool(Value),
     Plan(Vec<(String, String)>),
     /// The full list of session options, after the agent changed one.
     Options(Vec<SessionOption>),
@@ -441,16 +434,7 @@ pub fn session_update(params: &Value) -> SessionUpdate {
     match update["sessionUpdate"].as_str().unwrap_or_default() {
         "agent_message_chunk" => SessionUpdate::AgentText(text(update)),
         "agent_thought_chunk" => SessionUpdate::Thought(text(update)),
-        "tool_call" => SessionUpdate::ToolCall {
-            id: string("toolCallId").unwrap_or_default(),
-            title: string("title").unwrap_or_default(),
-            status: string("status").unwrap_or_else(|| "pending".into()),
-        },
-        "tool_call_update" => SessionUpdate::ToolCallUpdate {
-            id: string("toolCallId").unwrap_or_default(),
-            title: string("title"),
-            status: string("status"),
-        },
+        "tool_call" | "tool_call_update" => SessionUpdate::Tool(update.clone()),
         "config_option_update" => SessionUpdate::Options(config_options(update)),
         "current_mode_update" => SessionUpdate::Mode(string("currentModeId").unwrap_or_default()),
         "available_commands_update" => SessionUpdate::Commands(
@@ -487,6 +471,149 @@ pub fn session_update(params: &Value) -> SessionUpdate {
         ),
         _ => SessionUpdate::Other,
     }
+}
+
+/// A tool call as the panel shows it: what the agent says it does and the gist of the result,
+/// cut short because conversations are saved.
+#[derive(Clone, Debug, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+pub struct ToolCall {
+    pub id: String,
+    pub title: String,
+    /// `pending`, `in_progress`, `completed` or `failed`.
+    pub status: String,
+    /// `read`, `edit`, `delete`, `move`, `search`, `execute`, `think`, `fetch` or `other`.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub kind: String,
+    /// The files it works on, as `path` or `path:line`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub paths: Vec<String>,
+    /// The command it runs, if it runs one.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub command: String,
+    /// The lines it changed and its output, a few of each.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub lines: Vec<ToolLine>,
+}
+
+/// One line under a tool call's title.
+#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolLine {
+    Added(String),
+    Removed(String),
+    Output(String),
+}
+
+impl ToolLine {
+    /// The line with a diff's `+ ` or `- ` in front.
+    #[must_use]
+    pub fn marked(&self) -> String {
+        match self {
+            Self::Added(text) => format!("+ {text}"),
+            Self::Removed(text) => format!("- {text}"),
+            Self::Output(text) => text.clone(),
+        }
+    }
+}
+
+/// How many lines of each side of an edit, and of a tool's output, a tool call keeps.
+const TOOL_LINES: usize = 4;
+
+impl ToolCall {
+    #[must_use]
+    pub fn new(id: &str) -> Self {
+        Self {
+            id: id.to_owned(),
+            status: "pending".into(),
+            ..Self::default()
+        }
+    }
+
+    /// Takes the fields a `tool_call` or `tool_call_update` names; the others keep their values.
+    pub fn update(&mut self, update: &Value) {
+        let text = |key: &str| update[key].as_str().map(str::to_owned);
+        if let Some(title) = text("title") {
+            self.title = title;
+        }
+        if let Some(kind) = text("kind") {
+            self.kind = kind;
+        }
+        if let Some(status) = text("status") {
+            self.status = status;
+        }
+        let input = &update["rawInput"];
+        if let Some(command) = input["command"].as_str() {
+            self.command = command.to_owned();
+        }
+        if let Some(locations) = update["locations"].as_array() {
+            self.paths = locations
+                .iter()
+                .filter_map(|location| {
+                    let path = location["path"].as_str()?;
+                    Some(match location["line"].as_u64() {
+                        Some(line) if line > 0 => format!("{path}:{line}"),
+                        _ => path.to_owned(),
+                    })
+                })
+                .collect();
+        }
+        let content = update["content"].as_array();
+        // Without locations, an edit's diff or the tool's own path argument names the file.
+        if self.paths.is_empty() {
+            self.paths = content
+                .into_iter()
+                .flatten()
+                .filter(|item| item["type"] == "diff")
+                .filter_map(|item| item["path"].as_str())
+                .chain(
+                    ["path", "file_path", "filePath"]
+                        .iter()
+                        .find_map(|key| input[*key].as_str()),
+                )
+                .take(1)
+                .map(str::to_owned)
+                .collect();
+        }
+        if let Some(content) = content {
+            self.lines = content
+                .iter()
+                .flat_map(|item| match item["type"].as_str() {
+                    Some("diff") => changed_lines(
+                        item["oldText"].as_str().unwrap_or_default(),
+                        item["newText"].as_str().unwrap_or_default(),
+                        TOOL_LINES,
+                        false,
+                    ),
+                    Some("content") => {
+                        output_lines(item["content"]["text"].as_str().unwrap_or_default())
+                    }
+                    // Dust offers agents no terminals, so terminal items have nothing to show.
+                    _ => Vec::new(),
+                })
+                .collect();
+        } else if let Some(output) = update["rawOutput"].as_str() {
+            self.lines = output_lines(output);
+        }
+    }
+}
+
+/// The first few lines of a tool's output, each cut to a sensible length, and how many more
+/// there are.
+fn output_lines(text: &str) -> Vec<ToolLine> {
+    const LINE: usize = 200;
+    let lines: Vec<&str> = text.trim().lines().collect();
+    let mut shown: Vec<ToolLine> = lines
+        .iter()
+        .take(TOOL_LINES)
+        .map(|line| ToolLine::Output(line.chars().take(LINE).collect()))
+        .collect();
+    if lines.len() > TOOL_LINES {
+        shown.push(ToolLine::Output(format!(
+            "… {} more lines",
+            lines.len() - TOOL_LINES
+        )));
+    }
+    shown
 }
 
 /// A setting of the session the user can change, such as its model, mode or thinking level.
@@ -721,10 +848,15 @@ pub fn permission_detail(params: &Value) -> String {
     for change in call["content"].as_array().into_iter().flatten() {
         if change["type"] == "diff" {
             shows_change = true;
-            detail.push_str(&changed_lines(
+            for line in changed_lines(
                 change["oldText"].as_str().unwrap_or_default(),
                 change["newText"].as_str().unwrap_or_default(),
-            ));
+                6,
+                true,
+            ) {
+                detail.push('\n');
+                detail.push_str(&line.marked());
+            }
         }
     }
     if !shows_change {
@@ -760,9 +892,10 @@ fn tool_arguments(input: &Value) -> String {
     text
 }
 
-/// The lines an edit changes, between what it leaves alone at either end.
-fn changed_lines(old: &str, new: &str) -> String {
-    const SHOWN: usize = 6;
+/// The lines an edit changes, between what it leaves alone at either end, `shown` of each side.
+/// With `endings`, a changed line ending or missing final newline is spelled out, so a
+/// permission preview hides no change.
+fn changed_lines(old: &str, new: &str, shown: usize, endings: bool) -> Vec<ToolLine> {
     let old: Vec<&str> = old.split_inclusive('\n').collect();
     let new: Vec<&str> = new.split_inclusive('\n').collect();
     let front = old
@@ -776,9 +909,9 @@ fn changed_lines(old: &str, new: &str) -> String {
         .zip(new[front..].iter().rev())
         .take_while(|(old, new)| old == new)
         .count();
-    let mut text = String::new();
-    let mut side = |sign: char, lines: &[&str]| {
-        for line in lines.iter().take(SHOWN) {
+    let mut changed = Vec::new();
+    let mut side = |line_of: fn(String) -> ToolLine, lines: &[&str]| {
+        for line in lines.iter().take(shown) {
             let (line, ending) = if let Some(line) = line.strip_suffix("\r\n") {
                 (line, " [CRLF]")
             } else if let Some(line) = line.strip_suffix('\n') {
@@ -786,15 +919,16 @@ fn changed_lines(old: &str, new: &str) -> String {
             } else {
                 (*line, " [no final newline]")
             };
-            text.push_str(&format!("\n{sign} {line}{ending}"));
+            let ending = if endings { ending } else { "" };
+            changed.push(line_of(format!("{line}{ending}")));
         }
-        if lines.len() > SHOWN {
-            text.push_str(&format!("\n{sign} … {} more lines", lines.len() - SHOWN));
+        if lines.len() > shown {
+            changed.push(line_of(format!("… {} more lines", lines.len() - shown)));
         }
     };
-    side('-', &old[front..old.len() - back]);
-    side('+', &new[front..new.len() - back]);
-    text
+    side(ToolLine::Removed, &old[front..old.len() - back]);
+    side(ToolLine::Added, &new[front..new.len() - back]);
+    changed
 }
 
 #[must_use]
@@ -1187,12 +1321,40 @@ mod tests {
         let tool = json!({"update": {"sessionUpdate": "tool_call", "toolCallId": "t", "title": "Read main.rs", "status": "in_progress"}});
         assert_eq!(
             session_update(&tool),
-            SessionUpdate::ToolCall {
-                id: "t".into(),
-                title: "Read main.rs".into(),
-                status: "in_progress".into()
-            }
+            SessionUpdate::Tool(tool["update"].clone())
         );
+    }
+
+    #[test]
+    fn tool_call_updates_replace_only_the_fields_they_name() {
+        let mut call = ToolCall::new("t");
+        call.update(&json!({
+            "toolCallId": "t", "title": "write", "kind": "edit",
+            "rawInput": {"path": "/w/hello.tmp", "content": "hello world"},
+        }));
+        assert_eq!(call.paths, ["/w/hello.tmp"]);
+        assert_eq!(call.status, "pending");
+        call.update(&json!({
+            "toolCallId": "t", "status": "completed",
+            "locations": [{"path": "/w/a.rs", "line": 3}],
+            "content": [
+                {"type": "diff", "path": "/w/a.rs", "oldText": "a\nb\n", "newText": "a\nc\n"},
+                {"type": "content", "content": {"type": "text", "text": "\n1\n2\n3\n4\n5\n6\n"}},
+                {"type": "terminal", "terminalId": "x"},
+            ],
+        }));
+        assert_eq!(call.title, "write");
+        assert_eq!(call.kind, "edit");
+        assert_eq!(call.status, "completed");
+        assert_eq!(call.paths, ["/w/a.rs:3"]);
+        let lines: Vec<String> = call.lines.iter().map(ToolLine::marked).collect();
+        assert_eq!(lines, ["- b", "+ c", "1", "2", "3", "4", "… 2 more lines"]);
+        call.update(&json!({"toolCallId": "t", "rawOutput": "done"}));
+        assert_eq!(call.lines, [ToolLine::Output("done".into())]);
+        let big = (0..10).map(|line| format!("{line}\n")).collect::<String>();
+        call.update(&json!({"content": [{"type": "diff", "path": "/w/b", "newText": big}]}));
+        let lines: Vec<String> = call.lines.iter().map(ToolLine::marked).collect();
+        assert_eq!(lines, ["+ 0", "+ 1", "+ 2", "+ 3", "+ … 6 more lines"]);
     }
 
     #[test]

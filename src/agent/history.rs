@@ -40,11 +40,7 @@ pub enum Entry {
     },
     Agent(String),
     Thought(String),
-    Tool {
-        id: String,
-        title: String,
-        status: String,
-    },
+    Tool(crate::agent::ToolCall),
     Plan(Vec<(String, String)>),
     Notice(String),
 }
@@ -311,7 +307,7 @@ pub fn recap(entries: &[Entry], limit: usize) -> String {
                 }
             }
             Entry::Agent(answer) => text.push_str(&format!("\n\nAssistant: {answer}")),
-            Entry::Tool { title, .. } => text.push_str(&format!("\n[tool: {title}]")),
+            Entry::Tool(call) => text.push_str(&format!("\n[tool: {}]", call.title)),
             _ => {}
         }
     }
@@ -584,11 +580,16 @@ mod tests {
         ] {
             assert!(summary.contains(expected), "missing {expected}: {summary}");
         }
-        let legacy: Vec<Entry> =
-            serde_json::from_str(r#"[{"user":{"text":"old question","context":["old context"]}}]"#)
-                .unwrap();
+        let legacy: Vec<Entry> = serde_json::from_str(
+            r#"[{"user":{"text":"old question","context":["old context"]}},
+                {"tool":{"id":"t","title":"Read a.rs","status":"completed"}}]"#,
+        )
+        .unwrap();
         assert!(recap(&legacy, 1000).contains("[context: old context]"));
         assert!(matches!(&legacy[0], Entry::User { attachments, .. } if attachments.is_empty()));
+        assert!(
+            matches!(&legacy[1], Entry::Tool(call) if call.title == "Read a.rs" && call.lines.is_empty())
+        );
     }
 
     #[test]
