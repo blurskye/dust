@@ -493,6 +493,19 @@ impl ThemeConfig {
         style
     }
 
+    /// Text on the editor's background tinted `percent` toward `colour`, such as an agent's
+    /// tool call block.
+    #[must_use]
+    pub fn tinted(&self, colour: ThemeColor, percent: u16, group: Option<Highlight>) -> ThemeStyle {
+        let base = &self.styles.default;
+        let mut style = group
+            .and_then(|group| self.highlight(group))
+            .unwrap_or(base)
+            .clone();
+        style.fill(blend(colour, base.background, percent));
+        style
+    }
+
     pub(in crate::config) fn resolve<'a>(&'a self, mut name: &'a str) -> Option<ThemeStyle> {
         // Links can loop in a hand-written theme.
         for _ in 0..32 {

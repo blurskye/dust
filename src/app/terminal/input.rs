@@ -263,12 +263,15 @@ impl Terminals {
                 .min(history_rows.saturating_sub(visible_rows))
         };
         let cells = terminal.screen.history_window(cells_start, visible_rows);
-        // A side terminal's window shows only itself; the panel shows the other tabs.
+        // A side terminal's window shows only itself and a float shows no tabs; the panel
+        // shows the other tabs.
         let mut tabs = self
             .tabs
             .iter()
             .filter(|(tab_id, tab)| {
-                if terminal.side {
+                if terminal.float {
+                    false
+                } else if terminal.side {
                     **tab_id == id
                 } else {
                     !tab.side

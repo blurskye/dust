@@ -501,7 +501,11 @@ pub struct ToolCall {
 pub enum ToolLine {
     Added(String),
     Removed(String),
+    /// An unchanged line beside an edit.
+    Context(String),
     Output(String),
+    /// How many lines were left out, such as `… 4 earlier lines`.
+    Skipped(String),
 }
 
 impl ToolLine {
@@ -511,13 +515,18 @@ impl ToolLine {
         match self {
             Self::Added(text) => format!("+ {text}"),
             Self::Removed(text) => format!("- {text}"),
-            Self::Output(text) => text.clone(),
+            Self::Context(text) => format!("  {text}"),
+            Self::Output(text) | Self::Skipped(text) => text.clone(),
         }
     }
 }
 
-/// How many lines of each side of an edit, and of a tool's output, a tool call keeps.
-const TOOL_LINES: usize = 4;
+/// How many lines of each side of an edit a tool call keeps.
+const EDIT_LINES: usize = 8;
+/// How many of the last lines of a tool's output a tool call keeps.
+const OUTPUT_LINES: usize = 6;
+/// Unchanged lines kept on either side of an edit.
+const EDIT_CONTEXT: usize = 2;
 
 impl ToolCall {
     #[must_use]
@@ -578,11 +587,9 @@ impl ToolCall {
             self.lines = content
                 .iter()
                 .flat_map(|item| match item["type"].as_str() {
-                    Some("diff") => changed_lines(
+                    Some("diff") => edit_lines(
                         item["oldText"].as_str().unwrap_or_default(),
                         item["newText"].as_str().unwrap_or_default(),
-                        TOOL_LINES,
-                        false,
                     ),
                     Some("content") => {
                         output_lines(item["content"]["text"].as_str().unwrap_or_default())
@@ -597,22 +604,78 @@ impl ToolCall {
     }
 }
 
-/// The first few lines of a tool's output, each cut to a sensible length, and how many more
-/// there are.
+/// The last few lines of a tool's output, where a command's result and errors are, each cut
+/// to a sensible length, after how many earlier lines there are.
 fn output_lines(text: &str) -> Vec<ToolLine> {
     const LINE: usize = 200;
     let lines: Vec<&str> = text.trim().lines().collect();
-    let mut shown: Vec<ToolLine> = lines
-        .iter()
-        .take(TOOL_LINES)
-        .map(|line| ToolLine::Output(line.chars().take(LINE).collect()))
-        .collect();
-    if lines.len() > TOOL_LINES {
-        shown.push(ToolLine::Output(format!(
-            "… {} more lines",
-            lines.len() - TOOL_LINES
+    let earlier = lines.len().saturating_sub(OUTPUT_LINES);
+    let mut shown = Vec::new();
+    if earlier > 0 {
+        shown.push(ToolLine::Skipped(format!(
+            "… {earlier} earlier {}",
+            lines_word(earlier)
         )));
     }
+    shown.extend(
+        lines[earlier..]
+            .iter()
+            .map(|line| ToolLine::Output(line.chars().take(LINE).collect())),
+    );
+    shown
+}
+
+fn lines_word(count: usize) -> &'static str {
+    if count == 1 { "line" } else { "lines" }
+}
+
+/// An edit as the panel shows it: what changed with a little of what it leaves alone around
+/// it. A file written from scratch or over completely shows only what was written.
+fn edit_lines(old: &str, new: &str) -> Vec<ToolLine> {
+    let old: Vec<&str> = old.lines().collect();
+    let new: Vec<&str> = new.lines().collect();
+    let front = old
+        .iter()
+        .zip(&new)
+        .take_while(|(old, new)| old == new)
+        .count();
+    let back = old[front..]
+        .iter()
+        .rev()
+        .zip(new[front..].iter().rev())
+        .take_while(|(old, new)| old == new)
+        .count();
+    let mut shown = Vec::new();
+    let mut side = |line_of: fn(String) -> ToolLine, lines: &[&str]| {
+        shown.extend(
+            lines
+                .iter()
+                .take(EDIT_LINES)
+                .map(|line| line_of((*line).to_owned())),
+        );
+        if lines.len() > EDIT_LINES {
+            let more = lines.len() - EDIT_LINES;
+            shown.push(ToolLine::Skipped(format!(
+                "… {more} more {}",
+                lines_word(more)
+            )));
+        }
+    };
+    if front == 0 && back == 0 {
+        side(ToolLine::Added, &new);
+        return shown;
+    }
+    side(
+        ToolLine::Context,
+        &old[front.saturating_sub(EDIT_CONTEXT)..front],
+    );
+    side(ToolLine::Removed, &old[front..old.len() - back]);
+    side(ToolLine::Added, &new[front..new.len() - back]);
+    let after = new.len() - back;
+    side(
+        ToolLine::Context,
+        &new[after..(after + EDIT_CONTEXT).min(new.len())],
+    );
     shown
 }
 
@@ -1348,13 +1411,27 @@ mod tests {
         assert_eq!(call.status, "completed");
         assert_eq!(call.paths, ["/w/a.rs:3"]);
         let lines: Vec<String> = call.lines.iter().map(ToolLine::marked).collect();
-        assert_eq!(lines, ["- b", "+ c", "1", "2", "3", "4", "… 2 more lines"]);
+        assert_eq!(lines, ["  a", "- b", "+ c", "1", "2", "3", "4", "5", "6"]);
         call.update(&json!({"toolCallId": "t", "rawOutput": "done"}));
         assert_eq!(call.lines, [ToolLine::Output("done".into())]);
         let big = (0..10).map(|line| format!("{line}\n")).collect::<String>();
-        call.update(&json!({"content": [{"type": "diff", "path": "/w/b", "newText": big}]}));
+        call.update(
+            &json!({"content": [{"type": "content", "content": {"type": "text", "text": big}}]}),
+        );
         let lines: Vec<String> = call.lines.iter().map(ToolLine::marked).collect();
-        assert_eq!(lines, ["+ 0", "+ 1", "+ 2", "+ 3", "+ … 6 more lines"]);
+        assert_eq!(lines, ["… 4 earlier lines", "4", "5", "6", "7", "8", "9"]);
+        // A file written over completely shows what was written, not what it replaced.
+        call.update(&json!({"content": [{"type": "diff", "path": "/w/b", "oldText": big, "newText": "hello\n"}]}));
+        assert_eq!(call.lines, [ToolLine::Added("hello".into())]);
+        let edited = big.replace("5\n", "five\n");
+        call.update(&json!({"content": [{"type": "diff", "path": "/w/b", "oldText": big, "newText": edited}]}));
+        let lines: Vec<String> = call.lines.iter().map(ToolLine::marked).collect();
+        assert_eq!(lines, ["  3", "  4", "- 5", "+ five", "  6", "  7"]);
+        let long = (0..12).map(|line| format!("{line}\n")).collect::<String>();
+        call.update(&json!({"content": [{"type": "diff", "path": "/w/c", "newText": long}]}));
+        let lines: Vec<String> = call.lines.iter().map(ToolLine::marked).collect();
+        assert_eq!(lines.len(), 9);
+        assert_eq!(lines[8], "… 4 more lines");
     }
 
     #[test]

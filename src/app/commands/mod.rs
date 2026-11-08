@@ -177,8 +177,9 @@ pub enum AppEffect {
     SurfaceFocus(SpatialDirection),
     /// Moves the dashboard selection by this many rows in the focused box.
     DashboardSelect(i8),
-    /// Moves to the next (1) or previous (-1) dashboard box.
-    DashboardFocus(i8),
+    /// Moves to the dashboard box in this direction, or past the last one to the surface beside
+    /// the dashboard.
+    DashboardFocus(SpatialDirection),
     /// Opens the selected item in the focused dashboard box.
     DashboardOpen,
     /// Opens the dashboard's recent file at this index.

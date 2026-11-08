@@ -603,7 +603,7 @@ fn render_code(frame: &mut Frame, area: Area) {
         let (sign, style) = if ADDED_LINES.contains(&number) {
             (GIT_SIGN_ADDED, Style::GitSignAdded)
         } else {
-            (GIT_SIGN_UNCHANGED, Style::Muted)
+            (GIT_SIGN_UNCHANGED, Style::Border)
         };
         let x = line(frame, area, row, x, sign, style);
         let mut x = x + GUTTER_PADDING;

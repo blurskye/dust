@@ -1831,8 +1831,7 @@ context = "dashboard"
 keys = "s"
 command = "session.load"
 
-# j and k move within the focused box, Tab and Shift-Tab between boxes; Enter opens the
-# selected item and 1-9 open recent files.
+# j and k move within the focused box; Enter opens the selected item and 1-9 open recent files.
 [[keymap]]
 id = "builtin.dashboard.surface.select-next.j"
 context = "dashboard"
@@ -1858,16 +1857,6 @@ id = "builtin.dashboard.surface.open.enter"
 context = "dashboard"
 keys = "enter"
 command = "dashboard.open"
-[[keymap]]
-id = "builtin.dashboard.surface.focus-next.tab"
-context = "dashboard"
-keys = "tab"
-command = "dashboard.focus.next"
-[[keymap]]
-id = "builtin.dashboard.surface.focus-previous.shift-tab"
-context = "dashboard"
-keys = "shift-tab"
-command = "dashboard.focus.previous"
 [[keymap]]
 id = "builtin.dashboard.surface.recent-open.digit-1"
 context = "dashboard"
@@ -1932,27 +1921,28 @@ id = "builtin.dashboard.surface.plugin-list.p"
 context = "dashboard"
 keys = "p"
 command = "plugin.list"
-# Ctrl-h/j/k/l move to a terminal or panel beside the dashboard, as in the editor.
+# Ctrl-h/j/k/l move between the dashboard's boxes as between windows, and past the last box to
+# a terminal or panel beside the dashboard.
 [[keymap]]
-id = "builtin.dashboard.surface.surface-focus-left.ctrl-h"
+id = "builtin.dashboard.surface.dashboard-focus-left.ctrl-h"
 context = "dashboard"
 keys = "ctrl-h"
-command = "surface.focus.left"
+command = "dashboard.focus.left"
 [[keymap]]
-id = "builtin.dashboard.surface.surface-focus-down.ctrl-j"
+id = "builtin.dashboard.surface.dashboard-focus-down.ctrl-j"
 context = "dashboard"
 keys = "ctrl-j"
-command = "surface.focus.down"
+command = "dashboard.focus.down"
 [[keymap]]
-id = "builtin.dashboard.surface.surface-focus-up.ctrl-k"
+id = "builtin.dashboard.surface.dashboard-focus-up.ctrl-k"
 context = "dashboard"
 keys = "ctrl-k"
-command = "surface.focus.up"
+command = "dashboard.focus.up"
 [[keymap]]
-id = "builtin.dashboard.surface.surface-focus-right.ctrl-l"
+id = "builtin.dashboard.surface.dashboard-focus-right.ctrl-l"
 context = "dashboard"
 keys = "ctrl-l"
-command = "surface.focus.right"
+command = "dashboard.focus.right"
 
 # Command/search prompt controls.
 [[keymap]]
@@ -5786,6 +5776,20 @@ arguments = { rows = -20 }
 desc = "Scroll Down"
 
 [[keymap]]
+id = "builtin.agent.scroll-up.pageup"
+context = "agent"
+keys = "pageup"
+command = "agent.scroll"
+arguments = { rows = 20 }
+
+[[keymap]]
+id = "builtin.agent.scroll-down.pagedown"
+context = "agent"
+keys = "pagedown"
+command = "agent.scroll"
+arguments = { rows = -20 }
+
+[[keymap]]
 id = "builtin.agent.surface-focus-left.ctrl-h"
 context = "agent"
 keys = "ctrl-h"
@@ -5908,11 +5912,11 @@ command = "agent.thinking"
 desc = "Thinking Level"
 
 [[keymap]]
-id = "builtin.agent.options.ctrl-o"
+id = "builtin.agent.tools-toggle.ctrl-o"
 context = "agent"
 keys = "ctrl-o"
-command = "agent.options"
-desc = "Agent Options"
+command = "agent.tools.toggle"
+desc = "Toggle Tool Calls"
 
 [[keymap]]
 id = "builtin.global.git-pr-list"
@@ -6062,6 +6066,20 @@ arguments = { rows = -20 }
 desc = "Scroll Down"
 
 [[keymap]]
+id = "builtin.agent-normal.scroll-up.pageup"
+context = "agent_normal"
+keys = "pageup"
+command = "agent.scroll"
+arguments = { rows = 20 }
+
+[[keymap]]
+id = "builtin.agent-normal.scroll-down.pagedown"
+context = "agent_normal"
+keys = "pagedown"
+command = "agent.scroll"
+arguments = { rows = -20 }
+
+[[keymap]]
 id = "builtin.agent-normal.surface-focus-left.ctrl-h"
 context = "agent_normal"
 keys = "ctrl-h"
@@ -6184,11 +6202,11 @@ command = "agent.thinking"
 desc = "Thinking Level"
 
 [[keymap]]
-id = "builtin.agent-normal.options.ctrl-o"
+id = "builtin.agent-normal.tools-toggle.ctrl-o"
 context = "agent_normal"
 keys = "ctrl-o"
-command = "agent.options"
-desc = "Agent Options"
+command = "agent.tools.toggle"
+desc = "Toggle Tool Calls"
 
 [[keymap]]
 id = "builtin.agent-normal.insert.i"

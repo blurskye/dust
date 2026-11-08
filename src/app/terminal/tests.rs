@@ -529,6 +529,29 @@ fn the_terminal_opens_where_its_placement_setting_says() {
 }
 
 #[test]
+fn a_tool_float_draws_no_tabs_and_is_not_a_panel_tab() {
+    let (_app_dirs, mut app) = app();
+    for id in [7, 8] {
+        app.terminal_session.fixture(
+            PtyId(id),
+            crate::app::terminal::TerminalFixture {
+                profile: "shell".into(),
+                screen: PtyScreen::new(80, 8, 100),
+                running: true,
+                exit_code: None,
+                truncated: false,
+            },
+            app.workspace.version(),
+        );
+    }
+    app.terminal_session.set_float(PtyId(8));
+    let float = app.terminal_session.projection(PtyId(8), true, 8).unwrap();
+    assert!(float.tabs.is_empty());
+    let panel = app.terminal_session.projection(PtyId(7), true, 8).unwrap();
+    assert_eq!(panel.tabs.iter().map(|tab| tab.id).collect::<Vec<_>>(), [7]);
+}
+
+#[test]
 fn showing_a_terminal_with_a_hidden_semantic_default_uses_a_visible_fallback() {
     let (_app_dirs, mut app) = app();
     app.state

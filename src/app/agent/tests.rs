@@ -1833,16 +1833,23 @@ fn the_users_message_is_a_band_and_the_answer_follows() {
         Path::new("/work/repo"),
         &entries,
         80,
+        true,
     );
     assert_eq!(
         out.text,
-        "\nwhy\n+ main.rs\n\n\n● Read main.rs\n\nBecause.\n"
+        "\nwhy\n+ main.rs\n\n\n\n read main.rs\n\n\nBecause.\n"
     );
     let banded = bands
         .iter()
-        .map(|band| &out.text[band.clone()])
+        .map(|(band, kind)| (&out.text[band.clone()], *kind))
         .collect::<Vec<_>>();
-    assert_eq!(banded, ["\nwhy\n+ main.rs\n\n"]);
+    assert_eq!(
+        banded,
+        [
+            ("\nwhy\n+ main.rs\n\n", TranscriptBand::User),
+            ("\n read main.rs\n\n", TranscriptBand::Tool(ToolTint::Done)),
+        ]
+    );
 }
 
 #[test]
@@ -1890,27 +1897,66 @@ fn tool_calls_show_what_they_did_and_change_in_place() {
         .count();
     assert_eq!(tools, 5, "updates change their call, not add one");
     let mut out = Styled::default();
-    transcript(&mut out, &mut Vec::new(), "pi", &root, &session.entries, 80);
+    let mut bands = Vec::new();
+    transcript(
+        &mut out,
+        &mut bands,
+        "pi",
+        &root,
+        &session.entries,
+        80,
+        true,
+    );
+    let added = (1..=8)
+        .map(|line| format!(" + line {line}\n"))
+        .collect::<String>();
+    let expected = [
+        "\n write hello.tmp\n\n + hello world\n\n".to_owned(),
+        format!("\n edit src/a.rs\n\n src/a.rs:12\n   a\n - old\n{added} … 1 more line\n   z\n\n"),
+        "\n edit b.rs\n\n old text not found\n\n".to_owned(),
+        "\n $ cargo test\n\n".to_owned(),
+        "\n read src/a.rs\n\n".to_owned(),
+    ];
     assert!(
-        out.text.ends_with(
-            "● Write hello.tmp\n\
-             \x20 + hello world\n\
-             ● Edit src/a.rs\n\
-             \x20 src/a.rs:12\n\
-             \x20 - old\n\
-             \x20 + line 1\n\
-             \x20 + line 2\n\
-             \x20 + line 3\n\
-             \x20 + line 4\n\
-             \x20 + … 5 more lines\n\
-             ● Edit b.rs\n\
-             \x20 old text not found\n\
-             ● Run cargo test\n\
-             ● Read src/a.rs\n\
-             \nCreated hello.tmp.\n"
-        ),
+        out.text
+            .ends_with(&format!("{}\nCreated hello.tmp.\n", expected.join("\n"))),
         "{}",
         out.text
+    );
+    let tints = bands
+        .iter()
+        .map(|(band, kind)| (&out.text[band.clone()], *kind))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        tints,
+        [
+            (expected[0].as_str(), TranscriptBand::Tool(ToolTint::Done)),
+            (
+                expected[1].as_str(),
+                TranscriptBand::Tool(ToolTint::Running)
+            ),
+            (expected[2].as_str(), TranscriptBand::Tool(ToolTint::Failed)),
+            (expected[3].as_str(), TranscriptBand::Tool(ToolTint::Done)),
+            (expected[4].as_str(), TranscriptBand::Tool(ToolTint::Done)),
+        ]
+    );
+    // Hidden, the run of calls is one line saying what they did and what still runs.
+    let mut hidden = Styled::default();
+    transcript(
+        &mut hidden,
+        &mut Vec::new(),
+        "pi",
+        &root,
+        &session.entries,
+        80,
+        false,
+    );
+    assert!(
+        hidden.text.ends_with(
+            "● Read 1 file, edited 3 files, ran 1 command · Edit src/a.rs\n\nCreated hello.tmp.\n"
+        ),
+        "{}",
+        hidden.text
     );
     let failed = out.text.find("old text not found").unwrap();
     assert!(

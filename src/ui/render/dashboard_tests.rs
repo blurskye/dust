@@ -399,7 +399,7 @@ fn a_large_dashboard_shows_the_wordmark_beside_the_workspace_over_four_boxes() {
     assert_eq!(style(&frame, 83, 24), Style::Accent);
     assert_eq!(style(&frame, 86, 24), Style::Muted);
 
-    assert!(rows[38].starts_with(" tab next panel · j/k move · enter open · 1-9 recent file"));
+    assert!(rows[38].starts_with(" ctrl-h/j/k/l boxes · j/k move · enter open · 1-9 recent file"));
     assert_eq!(style(&frame, 0, 38), Style::StatusMuted);
     assert!(frame.cursor.is_none());
 }
@@ -438,7 +438,7 @@ fn an_80_by_24_dashboard_shows_one_header_line_recent_files_and_the_actions() {
     for text in ["██", "Changes", "Projects", "last commit"] {
         assert!(!rows.iter().any(|row| row.contains(text)), "{rows:#?}");
     }
-    assert!(rows[23].contains("tab next panel"));
+    assert!(rows[23].contains("ctrl-h/j/k/l boxes"));
 }
 
 #[test]

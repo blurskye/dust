@@ -1213,7 +1213,7 @@ keys = "<leader>an<wait><enter><wait><ctrl-t>"
 
 [[step]]
 chapter = "Agents"
-text = "`ctrl-p` picks the model and `shift-tab` how hard it thinks."
+text = "`ctrl-p` picks the model and `shift-tab` how hard it thinks. `ctrl-o` shows tool calls in full or as one line, and `pageup` and `pagedown` scroll."
 press = "Press `ctrl-p` to pick the model, then `esc` `esc` to close it."
 done = ["agent.model"]
 resume_from_previous = true

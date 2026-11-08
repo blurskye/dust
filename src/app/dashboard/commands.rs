@@ -3,9 +3,11 @@
 use crate::app::App;
 use crate::app::commands::AppEffect;
 use crate::ui::DashboardPanel;
+use crate::ui::render::dashboard_cell;
 use crate::ui::render::dashboard_focus;
 use crate::ui::render::dashboard_rows;
 use crate::ui::render::dashboard_selected_row;
+use crate::windows::SpatialDirection;
 
 impl App {
     pub(in crate::app) fn process_dashboard_effect(
@@ -29,25 +31,43 @@ impl App {
                     self.ui.dashboard_row = row;
                 }
             }
-            AppEffect::DashboardFocus(step) => {
-                // Tab skips boxes with nothing to select and wraps around.
-                let usable = self
-                    .dashboard_panels()
-                    .iter()
-                    .copied()
-                    .filter(|panel| dashboard_rows(&self.ui, *panel) > 0)
-                    .collect::<Vec<_>>();
-                let Some(index) = usable.iter().position(|usable| *usable == panel) else {
-                    return Ok(());
+            AppEffect::DashboardFocus(direction) => {
+                // Like moving between windows: boxes with nothing to select are passed over, and
+                // past the last box the move goes on to a terminal or panel beside the dashboard.
+                let shown = self.dashboard_panels();
+                let (columns, rows) = match direction {
+                    SpatialDirection::Left => (-1, 0),
+                    SpatialDirection::Right => (1, 0),
+                    SpatialDirection::Up => (0, -1),
+                    SpatialDirection::Down => (0, 1),
                 };
-                let count = usable.len();
-                let next = if step < 0 {
-                    (index + count - 1) % count
-                } else {
-                    (index + 1) % count
+                let mut cell = dashboard_cell(shown, panel);
+                let target = loop {
+                    let Some((column, row)) = cell else {
+                        break None;
+                    };
+                    let next = column
+                        .checked_add_signed(columns)
+                        .zip(row.checked_add_signed(rows));
+                    let box_there = next.and_then(|next| {
+                        shown
+                            .iter()
+                            .copied()
+                            .find(|panel| dashboard_cell(shown, *panel) == Some(next))
+                    });
+                    match box_there {
+                        Some(found) if dashboard_rows(&self.ui, found) > 0 => break Some(found),
+                        Some(_) => cell = next,
+                        None => break None,
+                    }
                 };
-                self.ui.dashboard_focus = Some(usable[next]);
-                self.ui.dashboard_row = 0;
+                match target {
+                    Some(target) => {
+                        self.ui.dashboard_focus = Some(target);
+                        self.ui.dashboard_row = 0;
+                    }
+                    None => self.focus_surface(direction),
+                }
             }
             AppEffect::DashboardOpenRecent(index) => self.open_dashboard_recent_file(index),
             AppEffect::DashboardOpen => {

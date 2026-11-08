@@ -117,6 +117,14 @@ pub enum SelectedText {
     Error,
 }
 
+/// How an agent's tool call went, which tints its block in the agent panel.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ToolTint {
+    Running,
+    Done,
+    Failed,
+}
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum Style {
     /// A Dusty Git cell: a semantic role on a semantic surface.
@@ -251,6 +259,8 @@ pub enum Style {
     MarkdownHeading(crate::config::Highlight),
     /// A syntax group, or plain text, drawn on a markdown code block's background.
     MarkdownCode(Option<crate::config::Highlight>),
+    /// A syntax group, or plain text, drawn on an agent tool call's tinted block.
+    ToolCall(ToolTint, Option<crate::config::Highlight>),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

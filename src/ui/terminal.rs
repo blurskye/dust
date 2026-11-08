@@ -756,6 +756,16 @@ fn queue_style(
             derived = theme.markdown_code(group);
             &derived
         }
+        // Green when the call worked, red when it failed and grey while it runs, as pi draws them.
+        Style::ToolCall(tint, group) => {
+            let (colour, percent) = match tint {
+                crate::ui::ToolTint::Running => (theme.styles.default.foreground, 8),
+                crate::ui::ToolTint::Done => (theme.styles.git_sign_added.foreground, 14),
+                crate::ui::ToolTint::Failed => (theme.styles.error.foreground, 18),
+            };
+            derived = theme.tinted(colour, percent, group);
+            &derived
+        }
         Style::DocumentationSyntax(group) | Style::SelectionSyntax(group) => {
             let popup = if matches!(style, Style::SelectionSyntax(_)) {
                 &theme.styles.selection

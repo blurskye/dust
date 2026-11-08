@@ -158,6 +158,12 @@ impl Terminals {
             self.displayed = self.panel_fallback();
         }
     }
+    pub(in crate::app) fn set_float(&mut self, id: PtyId) {
+        self.set_side(id);
+        if let Some(tab) = self.tabs.get_mut(&id) {
+            tab.float = true;
+        }
+    }
     pub(in crate::app) fn is_agent(&self, id: PtyId) -> bool {
         self.tabs.get(&id).is_some_and(|tab| tab.agent)
     }
@@ -490,6 +496,7 @@ impl Terminals {
                 close_on_exit: config.close_on_exit,
                 debugger_owned: false,
                 side: false,
+                float: false,
                 pty: None,
                 scope: source.scope,
                 epoch: source.epoch,
@@ -1082,6 +1089,8 @@ struct TerminalRuntime {
     close_on_exit: bool,
     debugger_owned: bool,
     side: bool,
+    /// A float, such as lazygit, is a side terminal whose window draws no tab row.
+    float: bool,
     pty: Option<PtyId>,
     scope: WorkspaceVersion,
     epoch: Arc<()>,
@@ -1147,6 +1156,7 @@ impl Terminals {
                 close_on_exit: false,
                 debugger_owned: false,
                 side: false,
+                float: false,
                 pty: None,
                 scope,
                 epoch: self.epoch.clone(),
@@ -1791,6 +1801,11 @@ impl App {
                             } else if open.float
                                 || placement == crate::config::TerminalPlacement::Float
                             {
+                                // A tool's float, such as lazygit, is not one of the panel's
+                                // tabs; a panel placed as a float keeps them.
+                                if open.float {
+                                    self.terminal_session.set_float(id);
+                                }
                                 self.float_terminal(id);
                             } else if placement == crate::config::TerminalPlacement::Fullscreen {
                                 self.window_session

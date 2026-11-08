@@ -852,7 +852,7 @@ fn content_line_segment_width_and_hit_testing_share_exact_boundaries() {
 }
 
 #[test]
-fn lsp_progress_is_animated_right_aligned_and_hides_transport_identity() {
+fn lsp_progress_shows_one_task_in_the_status_line() {
     let mut state = EditorState::new(PathBuf::from("/workspace"));
     state
         .open_text(
@@ -860,82 +860,68 @@ fn lsp_progress_is_animated_right_aligned_and_hides_transport_identity() {
             Some(PathBuf::from("/workspace/main.rs")),
         )
         .unwrap();
+    let task = |token: &str, title: &str, message: &str, percentage, done| {
+        crate::ui::render::UiLspProgress {
+            server_key: "root:1:rust-analyzer".into(),
+            token: token.into(),
+            server: "rust-analyzer".into(),
+            title: title.into(),
+            message: message.into(),
+            percentage,
+            done,
+            completed_at: done.then(std::time::Instant::now),
+        }
+    };
     let mut ui = UiState {
         editor_window_layout: Some(editor_layout(&state)),
-        explorer: Some(crate::ui::render::ExplorerUiState {
-            title: "Explorer".into(),
-            rows: Vec::new(),
-            scroll: 0,
-            loading: false,
-            total: 0,
-            matches: 0,
-            query: String::new(),
-            searching: false,
-        }),
+        lsp_server: Some("rust-analyzer ✓".into()),
         lsp_progress: vec![
-            crate::ui::render::UiLspProgress {
-                server_key: "root:1:rust-analyzer".into(),
-                token: "roots".into(),
-                server: "rust-analyzer".into(),
-                title: "Roots Scanned".into(),
-                message: String::new(),
-                percentage: None,
-                done: true,
-                completed_at: Some(std::time::Instant::now()),
-            },
-            crate::ui::render::UiLspProgress {
-                server_key: "root:1:rust-analyzer".into(),
-                token: "cargo-check".into(),
-                server: "rust-analyzer".into(),
-                title: "Building".into(),
-                message: "ring (lib)".into(),
-                percentage: Some(72),
-                done: false,
-                completed_at: None,
-            },
+            task("roots", "Roots Scanned", "", None, true),
+            task("indexing", "Indexing", "9/22 (core)", Some(40), false),
+            task("fetch", "Fetching", "cargo metadata", None, false),
         ],
         lsp_progress_frame: 8,
         ..UiState::default()
     };
     let loaded = crate::config::load_bundled_config();
-    let frame = render(&state, &ui, &loaded.config, &loaded.dashboard, 80, 10);
-    let panel =
-        crate::ui::render::explorer_panel_width(&loaded.config, 80).expect("explorer width");
-    let row = (0..10)
-        .find(|row| frame.grid.row_text(*row).contains("ring (lib)"))
-        .unwrap_or_else(|| {
-            panic!(
-                "progress row: {:?}",
-                (0..10)
-                    .map(|row| frame.grid.row_text(row))
-                    .collect::<Vec<_>>()
-            )
-        });
-    assert!(!frame.grid.row_text(row).contains("root:1"));
-    assert!((panel.saturating_add(1)..79).any(|x| {
-        frame
-            .grid
-            .get(x, row)
-            .is_some_and(|cell| cell.symbol == "⠇" && cell.style == crate::ui::Style::Accent)
-    }));
-    assert_eq!(frame.grid.get(78, row).unwrap().symbol, "r");
-    assert_eq!(frame.grid.get(79, row).unwrap().symbol, " ");
-    let completed_row = (0..10)
-        .find(|row| frame.grid.row_text(*row).contains("Roots Scanned"))
-        .expect("completed progress row");
-    assert!((panel.saturating_add(1)..79).any(|x| {
-        frame
-            .grid
-            .get(x, completed_row)
-            .is_some_and(|cell| cell.symbol == "✓")
-    }));
+    let rows = |ui: &UiState| {
+        let frame = render(&state, ui, &loaded.config, &loaded.dashboard, 100, 10);
+        (0..10)
+            .map(|row| frame.grid.row_text(row))
+            .collect::<Vec<_>>()
+    };
 
-    ui.lsp_progress_frame = 4;
-    let next = render(&state, &ui, &loaded.config, &loaded.dashboard, 80, 10);
+    // The task with a percentage wins over the newer one without, and only it shows.
+    let screen = rows(&ui);
+    let status = screen.iter().find(|row| row.contains("NORMAL")).unwrap();
     assert!(
-        (panel.saturating_add(1)..79)
-            .any(|x| next.grid.get(x, row).is_some_and(|cell| cell.symbol == "⠼"))
+        status.contains("⠇ rust-analyzer Indexing 40%"),
+        "{status:?}"
     );
+    for hidden in ["9/22", "Fetching", "Roots Scanned", "root:1"] {
+        assert!(
+            screen.iter().all(|row| !row.contains(hidden)),
+            "{screen:#?}"
+        );
+    }
+    ui.lsp_progress_frame = 4;
+    assert!(
+        rows(&ui)
+            .iter()
+            .any(|row| row.contains("⠼ rust-analyzer Indexing 40%"))
+    );
+
+    // Without a percentage the newest task shows; once all are done the server's name is back.
+    ui.lsp_progress[1].done = true;
+    assert!(
+        rows(&ui)
+            .iter()
+            .any(|row| row.contains("rust-analyzer Fetching"))
+    );
+    ui.lsp_progress[2].done = true;
+    let screen = rows(&ui);
+    let status = screen.iter().find(|row| row.contains("NORMAL")).unwrap();
+    assert!(status.contains("rust-analyzer ✓"), "{status:?}");
 }
 
 #[test]
@@ -1591,7 +1577,7 @@ fn neutral_git_sign_column_continues_through_wraps_and_end_of_buffer_rows() {
             frame
                 .grid
                 .get(sign_column, row)
-                .is_some_and(|cell| cell.symbol == "│" && cell.style == crate::ui::Style::Muted)
+                .is_some_and(|cell| cell.symbol == "│" && cell.style == crate::ui::Style::Border)
         }),
         "the neutral sign rule must span content, wrapped, and end-of-buffer rows"
     );
@@ -2838,97 +2824,4 @@ fn the_status_line_keeps_fields_from_running_into_the_position() {
     let frame = crate::ui::render::render_editor_view(&state, view, &ui, &loaded.config, 22, 5);
     let status = frame.grid.row_text(4);
     assert!(status.trim_end().ends_with(" 1:1"), "{status:?}");
-}
-
-#[test]
-fn lsp_progress_is_animated_right_aligned_and_hides_transport_identity_slot5() {
-    let mut state = EditorState::new(PathBuf::from("/workspace"));
-    state
-        .open_text(
-            crate::editor::text::TextBuffer::from_text("fn main() {}"),
-            Some(PathBuf::from("/workspace/main.rs")),
-        )
-        .unwrap();
-    let mut ui = UiState {
-        editor_window_layout: Some(editor_layout(&state)),
-        explorer: Some(crate::ui::render::ExplorerUiState {
-            title: "Explorer".into(),
-            rows: Vec::new(),
-            scroll: 0,
-            loading: false,
-            total: 0,
-            matches: 0,
-            query: String::new(),
-            searching: false,
-        }),
-        lsp_progress: vec![
-            crate::ui::render::UiLspProgress {
-                server_key: "root:1:rust-analyzer".into(),
-                token: "roots".into(),
-                server: "rust-analyzer".into(),
-                title: "Roots Scanned".into(),
-                message: String::new(),
-                percentage: None,
-                done: true,
-                completed_at: Some(std::time::Instant::now()),
-            },
-            crate::ui::render::UiLspProgress {
-                server_key: "root:1:rust-analyzer".into(),
-                token: "cargo-check".into(),
-                server: "rust-analyzer".into(),
-                title: "Building".into(),
-                message: "ring (lib)".into(),
-                percentage: Some(72),
-                done: false,
-                completed_at: None,
-            },
-        ],
-        lsp_progress_frame: 8,
-        ..UiState::default()
-    };
-    let loaded = crate::config::load_bundled_config();
-    let frame = render(&state, &ui, &loaded.config, &loaded.dashboard, 80, 10);
-    let panel =
-        crate::ui::render::explorer_panel_width(&loaded.config, 80).expect("explorer width");
-    let row = (0..10)
-        .find(|row| frame.grid.row_text(*row).contains("ring (lib)"))
-        .unwrap_or_else(|| {
-            panic!(
-                "progress row: {:?}",
-                (0..10)
-                    .map(|row| frame.grid.row_text(row))
-                    .collect::<Vec<_>>()
-            )
-        });
-    assert!(!frame.grid.row_text(row).contains("root:1"));
-    assert!((panel.saturating_add(1)..79).any(|x| {
-        frame
-            .grid
-            .get(x, row)
-            .is_some_and(|cell| cell.symbol == "⠇" && cell.style == crate::ui::Style::Accent)
-    }));
-    assert_eq!(frame.grid.get(78, row).unwrap().symbol, "r");
-    for x in 66..79 {
-        assert_eq!(
-            frame.grid.get(x, row).unwrap().style,
-            crate::ui::Style::Accent
-        );
-    }
-    assert_eq!(frame.grid.get(79, row).unwrap().symbol, " ");
-    let completed_row = (0..10)
-        .find(|row| frame.grid.row_text(*row).contains("Roots Scanned"))
-        .expect("completed progress row");
-    assert!((panel.saturating_add(1)..79).any(|x| {
-        frame
-            .grid
-            .get(x, completed_row)
-            .is_some_and(|cell| cell.symbol == "✓")
-    }));
-
-    ui.lsp_progress_frame = 4;
-    let next = render(&state, &ui, &loaded.config, &loaded.dashboard, 80, 10);
-    assert!(
-        (panel.saturating_add(1)..79)
-            .any(|x| next.grid.get(x, row).is_some_and(|cell| cell.symbol == "⠼"))
-    );
 }

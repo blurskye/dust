@@ -56,6 +56,8 @@ use crate::ui::render::UiGitSignKind;
 
 use crate::ui::render::UiState;
 
+use crate::ui::render::overlays::SPINNER_FRAMES;
+
 use crate::ui::render::visual_rows::VisualRowAnchor;
 
 use crate::ui::render::visual_rows::VisualRowModel;
@@ -82,6 +84,7 @@ use crate::ui::render::visual_rows::projected_inlay_hints;
 pub(crate) const END_OF_BUFFER_MARKER: &str = " ";
 pub(crate) const LINE_NUMBER_SEPARATOR: &str = " ";
 pub(crate) const GUTTER_PADDING: u16 = 1;
+// Drawn in the border colour, so it matches the window border on the gutter's other side.
 pub(crate) const GIT_SIGN_UNCHANGED: &str = "│";
 // Heavier than the unchanged line beside it, so a change stands out as LazyVim's bar does.
 pub(crate) const GIT_SIGN_ADDED: &str = "┃";
@@ -254,7 +257,7 @@ pub(super) fn render_editor_view(
         git_sign_column(gutter_width, &config.editor),
     ) {
         for row in 0..body_height {
-            grid.set_cell(column, row, symbol, Style::Muted);
+            grid.set_cell(column, row, symbol, Style::Border);
         }
     }
     let indent_guide_symbol = config
@@ -641,7 +644,7 @@ pub(super) fn render_editor_view(
                 git_sign_column,
                 screen_row,
                 one_cell_symbol(GIT_SIGN_UNCHANGED, "|", config.editor.ambiguous_width),
-                Style::Muted,
+                Style::Border,
             );
             let debug_sign = ui.debug_signs.iter().find(|sign| {
                 sign.line == line_index && buffer.path.as_deref() == Some(sign.path.as_path())
@@ -1190,7 +1193,7 @@ pub(super) fn render_editor_view(
             // materialized buffer lines. Keep it continuous through the
             // end-of-buffer region, including a one-cell gutter where the
             // marker and sign occupy the same cell.
-            grid.set_cell(column, screen_row, symbol, Style::Muted);
+            grid.set_cell(column, screen_row, symbol, Style::Border);
         }
         screen_row = screen_row.saturating_add(1);
     }
@@ -1496,7 +1499,10 @@ pub(super) fn render_status_line(
         .lsp_server
         .as_ref()
         .filter(|_| shown("lsp"))
-        .map(|server| STATUS_LSP_FORMAT.replace("{server}", server))
+        .map(|server| {
+            lsp_progress_label(ui, config)
+                .unwrap_or_else(|| STATUS_LSP_FORMAT.replace("{server}", server))
+        })
         .filter(|text| fits(text_cells(text, config).saturating_add(separator_cells)));
 
     let left_limit = width.saturating_sub(right_cells);
@@ -1619,6 +1625,30 @@ fn status_mode_styles(mode: &str) -> (Style, Style) {
         "command_line" | "prompt" => (Style::StatusCommand, Style::StatusEdgeCommand),
         _ => (Style::StatusAccent, Style::StatusEdgeNormal),
     }
+}
+
+/// While a language server works, the status line shows one task in place of its name: the
+/// newest that reports a percentage, else the newest, with a spinner. Finished tasks are left out.
+fn lsp_progress_label(ui: &UiState, config: &Config) -> Option<String> {
+    if !config.ui.lsp_progress.enabled {
+        return None;
+    }
+    let mut active = ui.lsp_progress.iter().filter(|item| !item.done);
+    let item = active
+        .clone()
+        .rfind(|item| item.percentage.is_some())
+        .or_else(|| active.next_back())?;
+    let spinner = SPINNER_FRAMES[ui.lsp_progress_frame % SPINNER_FRAMES.len()];
+    let task = if item.title.is_empty() {
+        &item.message
+    } else {
+        &item.title
+    };
+    let mut label = format!("{spinner} {} {task}", item.server);
+    if let Some(percentage) = item.percentage {
+        label.push_str(&format!(" {percentage}%"));
+    }
+    Some(label.trim_end().to_owned())
 }
 
 /// Where the cursor is in the file, as lualine says it.

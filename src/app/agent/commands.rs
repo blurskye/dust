@@ -41,6 +41,7 @@ pub enum AgentCommand {
     Scroll(i64),
     Escape,
     NewTab,
+    ToggleTools,
 }
 
 pub(in crate::app) fn register_commands(
@@ -109,6 +110,11 @@ pub(in crate::app) fn register_commands(
             "Start another session of the shown agent in a new tab",
             NewTab,
         ),
+        (
+            "agent.tools.toggle",
+            "Show tool calls in full, or one line saying what they did",
+            ToggleTools,
+        ),
     ];
     for (id, description, command) in commands {
         register(
@@ -176,6 +182,10 @@ impl App {
             AgentCommand::Scroll(rows) => self.scroll_agent(rows),
             AgentCommand::Escape => self.agent_escape(),
             AgentCommand::NewTab => self.new_agent_tab(),
+            AgentCommand::ToggleTools => {
+                self.agent.tools_hidden = !self.agent.tools_hidden;
+                self.refresh_agent_transcript();
+            }
         }
     }
 }

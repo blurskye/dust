@@ -202,7 +202,7 @@ recognized without a problem matcher. Relative paths use the task's working
 directory, including dependency tasks. Opening a location uses the existing
 buffer when it is already open, preserving unsaved edits.
 
-The status line runs along the bottom of the screen, under the terminal panel. It shows the mode, Git branch, file, diagnostics and running tasks on the left, and the LSP server, workspace root, progress through the file and cursor position on the right.
+The status line runs along the bottom of the screen, under the terminal panel. It shows the mode, Git branch, file, diagnostics and running tasks on the left, and on the right the LSP server (or, while it works, what it is doing and how far along), workspace root, progress through the file and cursor position.
 
 ## Terminal
 

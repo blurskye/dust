@@ -327,7 +327,8 @@ close_on_exit = true
 
 [terminals.profiles.git_blame_line]
 program = "/bin/sh"
-arguments = ["-c", "git --no-pager log --color -n 3 -u -L \"$2,+1:$1\" 2>&1 | less -Rc", "git", "{file}", "{line}"]
+# A line that is not in the last commit has no history, so say that instead of git's error.
+arguments = ["-c", 'out=$(git --no-pager log --color -n 3 -u -L "$2,+1:$1" 2>&1) || case $out in *"has only"*|*"no such path"*|*"no path"*) out="Line $2 is not committed yet." ;; esac; printf "%s\n" "$out" | less -Rc --tilde', "git", "{file}", "{line}"]
 cwd = "{dir}"
 environment = {}
 columns = 80
@@ -1147,6 +1148,7 @@ workspace = "Project"
 "agent.scroll" = "Scroll Agent Transcript"
 "agent.escape" = "Stop Agent or Back to Code"
 "agent.tab.new" = "New Agent Tab"
+"agent.tools.toggle" = "Toggle Tool Calls"
 "buffer.new_tab" = "New Tab"
 "explorer.search" = "Search"
 "explorer.search.insert" = "Type into the search"
@@ -1240,8 +1242,10 @@ workspace = "Project"
 "dashboard.select.next" = "Next dashboard item"
 "dashboard.select.previous" = "Previous dashboard item"
 "dashboard.open" = "Open dashboard item"
-"dashboard.focus.next" = "Next dashboard box"
-"dashboard.focus.previous" = "Previous dashboard box"
+"dashboard.focus.left" = "Dashboard box left"
+"dashboard.focus.down" = "Dashboard box below"
+"dashboard.focus.up" = "Dashboard box above"
+"dashboard.focus.right" = "Dashboard box right"
 "dashboard.recent.open" = "Open recent file by number"
 "surface.focus.down" = "Focus surface below"
 "surface.focus.up" = "Focus surface above"

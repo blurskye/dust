@@ -31,7 +31,7 @@ pub(crate) fn cell_text_width(text: &str, ambiguous: AmbiguousWidth) -> usize {
 }
 
 /// What fits of `text`, ending in an ellipsis when some had to go.
-pub(super) fn ellipsized(
+pub(crate) fn ellipsized(
     text: &str,
     maximum: usize,
     ambiguous: crate::config::AmbiguousWidth,

@@ -58,6 +58,8 @@ use crate::ui::ContentTabIdentity;
 use crate::ui::ContentTabKind;
 use crate::ui::PickerSurfaceKind;
 use crate::ui::PromptKind;
+use crate::ui::ToolTint;
+use crate::ui::TranscriptBand;
 use crate::windows::ContentLifecycle;
 use crate::windows::TileAxis;
 
@@ -146,6 +148,8 @@ pub(super) struct AgentPanel {
     normal: bool,
     /// The selected row of the slash-command menu.
     selected: usize,
+    /// Tool calls shown as one summary line per run, such as `Edited 2 files, ran 1 command`.
+    tools_hidden: bool,
 }
 
 struct AgentFileRequest {
@@ -2493,6 +2497,7 @@ impl App {
                     &session.root,
                     &session.entries,
                     width,
+                    !self.agent.tools_hidden,
                 );
                 let settings = ["model", "mode", THINKING]
                     .into_iter()
@@ -2735,7 +2740,7 @@ impl App {
         panel.placeholder = if name.is_empty() {
             "Ask an agent…  / for commands".to_owned()
         } else {
-            format!("Ask {name}…  / for commands")
+            format!("Ask {name}…  / for commands · ctrl-o tool calls")
         };
         let menu = self.slash_menu();
         self.agent.selected = self.agent.selected.min(menu.len().saturating_sub(1));
@@ -3258,30 +3263,44 @@ fn selected_text(
 }
 
 /// The conversation, with the Markdown in questions and answers rendered and wrapped to
-/// `width`. The byte ranges of the user's messages go to `bands`.
+/// `width`. The user's messages and tool calls go to `bands`, which draws them on their own
+/// backgrounds. Without `tools`, each run of tool calls is one line saying what they did.
 fn transcript(
     out: &mut Styled,
-    bands: &mut Vec<std::ops::Range<usize>>,
+    bands: &mut Vec<(std::ops::Range<usize>, TranscriptBand)>,
     name: &str,
     root: &Path,
     entries: &[Entry],
     width: usize,
+    tools: bool,
 ) {
     let plain = ("", None);
     let quote = Some(Highlight::QUOTE);
-    for (index, entry) in entries.iter().enumerate() {
-        // A blank line between tool lines and the prose around them.
-        let previous = index.checked_sub(1).map(|previous| &entries[previous]);
+    // A call can start without a title; it shows once it has one.
+    let shown = |entry: &Entry| match entry {
+        Entry::Tool(call) => !tool_title(call, root).is_empty(),
+        _ => true,
+    };
+    let mut previous: Option<&Entry> = None;
+    let mut index = 0;
+    while index < entries.len() {
+        let entry = &entries[index];
+        index += 1;
+        if !shown(entry) {
+            continue;
+        }
+        // A blank line between tool calls and the prose around them, and between two calls.
         if matches!(
             (previous, entry),
-            (Some(Entry::Agent(_)), Entry::Tool(_)) | (Some(Entry::Tool(_)), Entry::Agent(_))
+            (Some(Entry::Agent(_) | Entry::Tool(_)), Entry::Tool(_))
+                | (Some(Entry::Tool(_)), Entry::Agent(_))
         ) {
             out.push("\n", None);
         }
         match entry {
             // The first start is described by the footer; later ones are restarts.
             Entry::Started { root } => {
-                if index > 0 {
+                if index > 1 {
                     out.push("\n", None);
                     let text = format!("{name} restarted in {}.", shown_root(root, width));
                     out.wrapped(&text, quote, plain, plain, width);
@@ -3298,18 +3317,32 @@ fn transcript(
                     out.wrapped(&format!("+ {label}"), None, plain, plain, width);
                 }
                 out.push("\n", None);
-                bands.push(start..out.text.len());
+                bands.push((start..out.text.len(), TranscriptBand::User));
                 out.push("\n", None);
             }
             Entry::Agent(text) => markdown::render(out, text, width),
             Entry::Thought(text) => {
                 // Only the thought still being written is shown; finished ones are noise.
-                if index + 1 == entries.len() {
+                if index == entries.len() {
                     let bar = ("▎ ", quote);
                     out.wrapped(text, quote, bar, bar, width);
                 }
+                continue;
             }
-            Entry::Tool(call) => tool_call(out, call, root, width),
+            Entry::Tool(call) if tools => tool_call(out, bands, call, root, width),
+            Entry::Tool(call) => {
+                // The run goes on past the thoughts between its calls.
+                let mut calls = vec![call];
+                while let Some(next) = entries.get(index) {
+                    match next {
+                        Entry::Tool(call) => calls.push(call),
+                        Entry::Thought(_) if index + 1 < entries.len() => {}
+                        _ => break,
+                    }
+                    index += 1;
+                }
+                tool_summary(out, &calls, root, width);
+            }
             Entry::Plan(steps) => {
                 out.push("\n", None);
                 out.push("Plan", Some(Highlight::STRONG));
@@ -3335,61 +3368,157 @@ fn transcript(
                 out.wrapped(text, quote, plain, plain, width);
             }
         }
+        previous = Some(entry);
     }
 }
 
-/// A tool call: a dot colored by its status and what it does, then the files and command the
-/// title leaves out and a few of the lines it changed or printed.
-fn tool_call(out: &mut Styled, call: &ToolCall, root: &Path, width: usize) {
-    let title = tool_title(call, root);
-    // A tool call can start without a title; it shows once it has one.
-    if title.is_empty() {
-        return;
+fn tool_tint(call: &ToolCall) -> ToolTint {
+    match call.status.as_str() {
+        "completed" => ToolTint::Done,
+        "failed" => ToolTint::Failed,
+        _ => ToolTint::Running,
     }
-    let failed = call.status == "failed";
-    let role = match call.status.as_str() {
-        "completed" => Highlight::STRING,
-        "failed" => Highlight::NUMBER,
-        "in_progress" => Highlight::TYPE,
-        _ => Highlight::COMMENT,
+}
+
+/// A tool call as pi draws it: a block tinted by how it went, with what it did in bold, the
+/// file or command it worked on, then the lines it changed or the last lines it printed.
+fn tool_call(
+    out: &mut Styled,
+    bands: &mut Vec<(std::ops::Range<usize>, TranscriptBand)>,
+    call: &ToolCall,
+    root: &Path,
+    width: usize,
+) {
+    let ambiguous = out.ambiguous_width;
+    // One row each, so a long line cannot flood the panel.
+    let clip = |text: &str| {
+        crate::ui::geometry::ellipsized(text, width.saturating_sub(2).max(1), ambiguous)
     };
-    let error = failed.then_some(Highlight::NUMBER);
-    out.wrapped(&title, error, ("● ", Some(role)), ("  ", None), width);
-    let indent = ("  ", None);
-    let line = |out: &mut Styled, text: &str, role: Highlight| {
-        // One row each, so a long line cannot flood the panel.
-        let room = width.saturating_sub(2).max(1);
-        let text = if text.chars().count() > room {
-            let cut: String = text.chars().take(room.saturating_sub(1)).collect();
-            format!("{cut}…")
-        } else {
-            text.to_owned()
-        };
-        out.wrapped(&text, Some(role), indent, indent, width);
-    };
+    let start = out.text.len();
+    out.push("\n ", None);
+    let title = tool_title(call, root);
+    let command = call.command.lines().next().unwrap_or_default();
+    if call.kind == "execute" && !command.is_empty() {
+        out.push(&clip(&format!("$ {command}")), Some(Highlight::STRONG));
+    } else {
+        let title = clip(&title);
+        let (verb, rest) = title.split_once(' ').unwrap_or((&title, ""));
+        out.push(&verb.to_lowercase(), Some(Highlight::STRONG));
+        if !rest.is_empty() {
+            out.push(" ", None);
+            out.push(rest, Highlight::for_capture("string.special.path"));
+        }
+    }
+    out.push("\n", None);
     let paths: Vec<String> = call
         .paths
         .iter()
         .map(|path| shown_path(path, root))
         .filter(|path| !title.contains(path.as_str()))
         .collect();
+    let failed = call.status == "failed";
+    // A read's output is the file itself, which the agent goes on to talk about.
+    let lines = call
+        .lines
+        .iter()
+        .filter(|line| failed || call.kind != "read" || !matches!(line, ToolLine::Output(_)))
+        .collect::<Vec<_>>();
+    if !paths.is_empty() || !lines.is_empty() {
+        out.push("\n", None);
+    }
     if !paths.is_empty() {
-        line(out, &paths.join(", "), Highlight::COMMENT);
+        out.push(" ", None);
+        out.push(&clip(&paths.join(", ")), Some(Highlight::COMMENT));
+        out.push("\n", None);
     }
-    let command = call.command.lines().next().unwrap_or_default();
-    if !command.is_empty() && !title.contains(command) {
-        line(out, &format!("$ {command}"), Highlight::COMMENT);
-    }
-    for change in &call.lines {
-        let role = match change {
-            ToolLine::Added(_) => Highlight::STRING,
-            ToolLine::Removed(_) => Highlight::NUMBER,
-            // A read's output is the file itself, which the agent goes on to talk about.
-            ToolLine::Output(_) if call.kind == "read" && !failed => continue,
-            ToolLine::Output(_) => error.unwrap_or(Highlight::COMMENT),
+    let added = Highlight::for_capture("diff.plus").unwrap_or(Highlight::STRING);
+    let removed = Highlight::for_capture("diff.minus").unwrap_or(Highlight::NUMBER);
+    for line in lines {
+        let role = match line {
+            ToolLine::Added(_) => Some(added),
+            ToolLine::Removed(_) => Some(removed),
+            ToolLine::Output(_) if failed => Some(Highlight::NUMBER),
+            ToolLine::Context(_) | ToolLine::Output(_) => None,
+            ToolLine::Skipped(_) => Some(Highlight::COMMENT),
         };
-        line(out, &change.marked(), role);
+        out.push(" ", None);
+        out.push(&clip(&line.marked()), role);
+        out.push("\n", None);
     }
+    out.push("\n", None);
+    bands.push((start..out.text.len(), TranscriptBand::Tool(tool_tint(call))));
+}
+
+/// A run of tool calls in one line, such as `● Read 3 files, edited 1 file, ran 2 commands`,
+/// with the one still running named after it.
+fn tool_summary(out: &mut Styled, calls: &[&ToolCall], root: &Path, width: usize) {
+    let distinct = |kinds: &[&str]| {
+        let mut paths: Vec<&str> = calls
+            .iter()
+            .filter(|call| kinds.contains(&call.kind.as_str()))
+            .flat_map(|call| call.paths.first().map(String::as_str).or(Some(&call.id)))
+            // `path:line` names the same file as `path`.
+            .map(|path| match path.rsplit_once(':') {
+                Some((file, line)) if line.parse::<u64>().is_ok() => file,
+                _ => path,
+            })
+            .collect();
+        paths.sort_unstable();
+        paths.dedup();
+        paths.len()
+    };
+    let count = |kinds: &[&str]| {
+        calls
+            .iter()
+            .filter(|call| kinds.contains(&call.kind.as_str()))
+            .count()
+    };
+    let others = calls
+        .iter()
+        .filter(|call| {
+            ![
+                "read", "edit", "delete", "move", "execute", "search", "fetch",
+            ]
+            .contains(&call.kind.as_str())
+        })
+        .count();
+    let plural = |count: usize, one: &str, many: &str| {
+        (count > 0).then(|| format!("{count} {}", if count == 1 { one } else { many }))
+    };
+    let parts = [
+        plural(distinct(&["read"]), "file", "files").map(|text| format!("read {text}")),
+        plural(distinct(&["edit", "delete", "move"]), "file", "files")
+            .map(|text| format!("edited {text}")),
+        plural(count(&["execute"]), "command", "commands").map(|text| format!("ran {text}")),
+        plural(count(&["search"]), "time", "times").map(|text| format!("searched {text}")),
+        plural(count(&["fetch"]), "page", "pages").map(|text| format!("fetched {text}")),
+        plural(others, "tool", "tools").map(|text| format!("used {text}")),
+    ];
+    let mut text = parts.into_iter().flatten().collect::<Vec<_>>().join(", ");
+    if let Some(first) = text.get(..1) {
+        text = first.to_uppercase() + &text[1..];
+    }
+    let running = calls
+        .iter()
+        .rev()
+        .find(|call| tool_tint(call) == ToolTint::Running);
+    if let Some(call) = running {
+        text.push_str(&format!(" · {}", tool_title(call, root)));
+    }
+    let role = if calls.iter().any(|call| call.status == "failed") {
+        Highlight::NUMBER
+    } else if running.is_some() {
+        Highlight::TYPE
+    } else {
+        Highlight::STRING
+    };
+    out.wrapped(
+        &text,
+        Some(Highlight::COMMENT),
+        ("● ", Some(role)),
+        ("  ", None),
+        width,
+    );
 }
 
 /// The tool call's title with paths shown from the session's directory. Some agents title a

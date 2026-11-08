@@ -37,6 +37,14 @@ const INPUT_ROW_LIMIT: usize = 8;
 /// Rows of the slash-command menu and of the subagent list.
 const LIST_ROW_LIMIT: usize = 8;
 
+/// What a stretch of the transcript is drawn on: the user's messages on the selection's
+/// background, tool calls on a tint of how they went.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TranscriptBand {
+    User,
+    Tool(crate::ui::ToolTint),
+}
+
 /// One session of the shown conversation's family: the main session and its subagents.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AgentListRow {
@@ -55,8 +63,8 @@ pub struct AgentPanelUi {
     pub tabs: Vec<ContentTabEntry>,
     /// The conversation, wrapped to the pane's width less the side padding.
     pub transcript: Styled,
-    /// Byte ranges of the transcript drawn as the user's messages.
-    pub bands: Vec<Range<usize>>,
+    /// Byte ranges of the transcript drawn on their own background.
+    pub bands: Vec<(Range<usize>, TranscriptBand)>,
     /// Rows scrolled up from the end; 0 follows new output.
     pub scroll: usize,
     /// What goes with the next question.
@@ -121,17 +129,16 @@ impl AgentPanelUi {
 /// Where the transcript's lines start, without the trailing empty ones outside the bands, so
 /// the user's last message keeps its padding while the answer is awaited.
 #[must_use]
-pub fn transcript_lines(text: &str, bands: &[Range<usize>]) -> Vec<Range<usize>> {
+pub fn transcript_lines(text: &str, bands: &[(Range<usize>, TranscriptBand)]) -> Vec<Range<usize>> {
     let mut lines = Vec::new();
     let mut start = 0;
     for line in text.split('\n') {
         lines.push(start..start + line.len());
         start += line.len() + 1;
     }
-    while lines
-        .last()
-        .is_some_and(|line| line.is_empty() && !bands.iter().any(|band| band.contains(&line.start)))
-    {
+    while lines.last().is_some_and(|line| {
+        line.is_empty() && !bands.iter().any(|(band, _)| band.contains(&line.start))
+    }) {
         lines.pop();
     }
     lines
@@ -377,12 +384,17 @@ fn draw_line(
     grid: &mut CellGrid,
     y: u16,
     transcript: &Styled,
-    bands: &[Range<usize>],
+    bands: &[(Range<usize>, TranscriptBand)],
     line: Range<usize>,
 ) {
-    let banded = bands.iter().any(|band| band.contains(&line.start));
-    if banded {
-        grid.fill_row(y, Style::Selection);
+    let band = bands
+        .iter()
+        .find(|(band, _)| band.contains(&line.start))
+        .map(|(_, band)| *band);
+    match band {
+        Some(TranscriptBand::User) => grid.fill_row(y, Style::Selection),
+        Some(TranscriptBand::Tool(tint)) => grid.fill_row(y, Style::ToolCall(tint, None)),
+        None => {}
     }
     let spans = &transcript.spans;
     let mut span = spans.partition_point(|(range, _)| range.end <= line.start);
@@ -393,10 +405,15 @@ fn draw_line(
         while span < spans.len() && spans[span].0.end <= at {
             span += 1;
         }
-        let style = match spans.get(span) {
-            _ if banded => Style::Selection,
-            Some((range, role)) if range.start <= at => Style::Syntax(*role),
-            _ => Style::Default,
+        let role = spans
+            .get(span)
+            .filter(|(range, _)| range.start <= at)
+            .map(|(_, role)| *role);
+        let style = match (band, role) {
+            (Some(TranscriptBand::User), _) => Style::Selection,
+            (Some(TranscriptBand::Tool(tint)), role) => Style::ToolCall(tint, role),
+            (None, Some(role)) => Style::Syntax(role),
+            (None, None) => Style::Default,
         };
         x = grid.put_text_clipped(x, y, grapheme, style, right);
     }
@@ -650,7 +667,7 @@ mod tests {
     fn trailing_empty_lines_are_not_shown() {
         assert_eq!(transcript_lines("a\n\nb\n\n", &[]), [0..1, 2..2, 3..4]);
         assert_eq!(
-            transcript_lines("a\n\nb\n\n", std::slice::from_ref(&(2..6))),
+            transcript_lines("a\n\nb\n\n", &[(2..6, TranscriptBand::User)]),
             [0..1, 2..2, 3..4, 5..5]
         );
     }

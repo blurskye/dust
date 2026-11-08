@@ -37,6 +37,7 @@ use crate::ui::geometry::text_width;
 
 mod dashboard;
 
+pub(crate) use dashboard::dashboard_cell;
 pub(crate) use dashboard::dashboard_focus;
 pub(crate) use dashboard::dashboard_panels;
 pub(crate) use dashboard::dashboard_rows;
@@ -48,8 +49,6 @@ use documentation::render_documentation_popup;
 use overlays::render_language_completion;
 
 use overlays::render_lsp_loading;
-
-use overlays::render_lsp_progress;
 
 mod workspace;
 
@@ -102,6 +101,7 @@ use visual_rows::VisualRowSlice;
 pub use agent::AgentListRow;
 
 pub use agent::AgentPanelUi;
+pub use agent::TranscriptBand;
 
 pub use agent::transcript_lines;
 
@@ -416,7 +416,7 @@ pub struct DashboardAction {
 /// the first nine recent files.
 pub(crate) const DASHBOARD_LIST_LIMIT: usize = 9;
 
-/// The dashboard's boxes, in the order Tab moves through them.
+/// The dashboard's boxes, in reading order.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DashboardPanel {
     RecentFiles,
@@ -2552,22 +2552,7 @@ pub(crate) fn render_with_documentation_geometry(
             config.editor.ambiguous_width,
         );
     }
-    // A modal's footer is at the bottom right too, and its keys matter more.
-    if config.ui.lsp_progress.enabled && !ui.lsp_progress.is_empty() && !modal_open {
-        render_lsp_progress(
-            &mut frame,
-            &ui.lsp_progress,
-            ui.lsp_progress_frame,
-            config,
-            workspace.unwrap_or(WindowRect {
-                x: 0,
-                y: 0,
-                width,
-                height: workspace_height,
-            }),
-        );
-    }
-    // The tutor card stays on top of popups and server progress so its instruction is readable
+    // The tutor card stays on top of popups so its instruction is readable
     // while they are open, and keeps clear of an agent panel's input.
     if let Some(card) = &ui.tutor {
         let panel = ui

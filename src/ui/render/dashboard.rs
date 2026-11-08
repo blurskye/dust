@@ -34,7 +34,7 @@ const MARGIN: u16 = 2;
 /// Columns between an action's key and its label.
 const KEY_GAP: u16 = 2;
 const HINTS: &str =
-    "tab next panel · j/k move · enter open · 1-9 recent file · space space find · F1 commands";
+    "ctrl-h/j/k/l boxes · j/k move · enter open · 1-9 recent file · space space find · F1 commands";
 const ALL_PANELS: [DashboardPanel; 4] = [
     DashboardPanel::RecentFiles,
     DashboardPanel::Changes,
@@ -57,7 +57,7 @@ const WORDMARK_LETTERS: [[&str; 8]; 4] = [
     ],
 ];
 
-/// The boxes a dashboard this size shows, in the order Tab moves through them.
+/// The boxes a dashboard this size shows, in reading order.
 pub(crate) fn dashboard_panels(width: u16, height: u16) -> &'static [DashboardPanel] {
     if width >= GRID_MIN_WIDTH && height >= GRID_MIN_HEIGHT {
         &ALL_PANELS
@@ -66,6 +66,19 @@ pub(crate) fn dashboard_panels(width: u16, height: u16) -> &'static [DashboardPa
     } else {
         &[DashboardPanel::Start]
     }
+}
+
+/// Where a box sits as (column, row): a 2x2 grid when all four show, else one column.
+pub(crate) fn dashboard_cell(
+    shown: &[DashboardPanel],
+    panel: DashboardPanel,
+) -> Option<(usize, usize)> {
+    let index = shown.iter().position(|shown| *shown == panel)?;
+    Some(if shown.len() == ALL_PANELS.len() {
+        (index % 2, index / 2)
+    } else {
+        (0, index)
+    })
 }
 
 pub(crate) fn dashboard_rows(ui: &UiState, panel: DashboardPanel) -> usize {

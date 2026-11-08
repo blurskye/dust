@@ -342,7 +342,7 @@ fn immutable_git_signs_use_the_reserved_gutter_and_exact_buffer_revision() {
             frame.grid.get(sign_column, 3).unwrap().symbol.as_str(),
             frame.grid.get(sign_column, 3).unwrap().style,
         ),
-        ("│", crate::ui::Style::Muted)
+        ("│", crate::ui::Style::Border)
     );
 
     let mut wide_config = loaded.config.clone();
@@ -414,7 +414,7 @@ fn line_number_gutter_uses_the_largest_open_buffer_across_tabs() {
     assert_eq!(frame.grid.get(short_sign, 0).unwrap().symbol, "│");
     assert_eq!(
         frame.grid.get(short_sign, 0).unwrap().style,
-        crate::ui::Style::Muted
+        crate::ui::Style::Border
     );
     assert_eq!(frame.grid.get(short_sign + 1, 0).unwrap().symbol, " ");
     assert_eq!(frame.grid.get(short_gutter, 0).unwrap().symbol, "s");

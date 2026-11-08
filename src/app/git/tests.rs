@@ -491,7 +491,7 @@ fn explorer_auto_git_status_colors_names_opens_picker_and_idles() {
     assert!(sign_y > 0);
     let normal_sign_cell = frame.grid.get(sign_x, sign_y - 1).unwrap();
     assert_eq!(normal_sign_cell.symbol, "│");
-    assert_eq!(normal_sign_cell.style, crate::ui::Style::Muted);
+    assert_eq!(normal_sign_cell.style, crate::ui::Style::Border);
     let sign_request_id = app.git.sign_request_id();
     let signs = app.ui.git_signs.clone();
     for _ in 0..256 {

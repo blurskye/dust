@@ -32,7 +32,6 @@ use crate::ui::DocumentationPopupKind;
 use crate::ui::UiEvent;
 use crate::ui::UiFold;
 use crate::ui::render::COMPLETION_MAX_ROWS;
-use crate::ui::render::overlays::LSP_PROGRESS_DONE;
 use crate::ui::render::overlays::LSP_PROGRESS_DONE_TIMEOUT_MS;
 use crate::ui::render::overlays::SPINNER_FRAMES;
 use crate::ui::render::overlays::SPINNER_INTERVAL_MS;
@@ -3325,7 +3324,6 @@ fn lsp_progress_hides_transport_keys_preserves_begin_titles_and_animates() {
         None,
     );
     let timeout = LSP_PROGRESS_DONE_TIMEOUT_MS;
-    assert_eq!(LSP_PROGRESS_DONE, "✓");
     let completed = app.ui.lsp_progress.first_mut().expect("completed progress");
     assert!(completed.done);
     assert_eq!(completed.message, "Finished");

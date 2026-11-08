@@ -228,7 +228,7 @@ fn recent_files_saved_without_an_open_time_show_no_age() {
 }
 
 #[test]
-fn tab_moves_between_boxes_and_enter_and_numbers_open_the_right_file() {
+fn ctrl_hjkl_move_between_boxes_and_enter_and_numbers_open_the_right_file() {
     use crate::app::tests::driver::TestSession;
     use crate::ui::DashboardPanel;
     let mut driver = TestSession::new(crate::config::load_bundled_config());
@@ -252,18 +252,20 @@ fn tab_moves_between_boxes_and_enter_and_numbers_open_the_right_file() {
     };
     show_dashboard(&mut driver);
     assert_eq!(focus(&mut driver), DashboardPanel::RecentFiles);
-    // Outside a Git repository the changes box has nothing to select, so Tab passes it.
-    driver.key("tab");
-    assert_eq!(focus(&mut driver), DashboardPanel::Projects);
-    driver.key("tab");
-    assert_eq!(focus(&mut driver), DashboardPanel::Start);
-    driver.key("tab");
-    assert_eq!(focus(&mut driver), DashboardPanel::RecentFiles);
-    driver.key("shift-tab");
-    assert_eq!(focus(&mut driver), DashboardPanel::Start);
-    driver.key("shift-tab");
-    driver.key("shift-tab");
-    assert_eq!(focus(&mut driver), DashboardPanel::RecentFiles);
+    // Ctrl-h/j/k/l move through the 2x2 grid. Outside a Git repository the changes box has
+    // nothing to select, so a move toward it goes past it, here off the edge, and stays put.
+    for (key, expected) in [
+        ("ctrl-l", DashboardPanel::RecentFiles),
+        ("ctrl-j", DashboardPanel::Projects),
+        ("ctrl-l", DashboardPanel::Start),
+        ("ctrl-k", DashboardPanel::Start),
+        ("ctrl-h", DashboardPanel::Projects),
+        ("ctrl-k", DashboardPanel::RecentFiles),
+        ("tab", DashboardPanel::RecentFiles),
+    ] {
+        driver.key(key);
+        assert_eq!(focus(&mut driver), expected, "after {key}");
+    }
 
     // j and k move within the box, and Enter opens the selected file.
     for key in ["j", "j", "k"] {
@@ -275,7 +277,7 @@ fn tab_moves_between_boxes_and_enter_and_numbers_open_the_right_file() {
 
     // A number opens that recent file whichever box is focused.
     show_dashboard(&mut driver);
-    driver.key("tab");
+    driver.key("ctrl-j");
     driver.key("3");
     assert_eq!(driver.wait_for_opened_file().as_deref(), Some("c.txt"));
 }

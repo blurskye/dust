@@ -13,7 +13,6 @@ use crate::ui::render::ContentTabDiagnosticSeverity;
 use crate::ui::render::ContentTabEntry;
 use crate::ui::render::ContentTabIdentity;
 use crate::ui::render::LanguageCompletionState;
-use crate::ui::render::UiLspProgress;
 use crate::ui::render::editor::cursor_style;
 use crate::windows::WindowRect;
 
@@ -52,17 +51,9 @@ pub(crate) const AGENT_ICON: &str = "\u{f06a9}";
 
 pub(crate) const LSP_PROGRESS_MAX_ROWS: u16 = 8;
 
-pub(crate) const LSP_PROGRESS_MAX_WIDTH: u16 = 72;
-
-pub(crate) const LSP_PROGRESS_RIGHT_MARGIN: u16 = 1;
-
-pub(crate) const LSP_PROGRESS_ROWS_FROM_BOTTOM: u16 = 1;
-
 pub(crate) const SPINNER_FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
 pub(crate) const SPINNER_INTERVAL_MS: u64 = 80;
-
-pub(crate) const LSP_PROGRESS_DONE: &str = "✓";
 
 pub(crate) const LSP_PROGRESS_DONE_TIMEOUT_MS: u64 = 3_000;
 
@@ -289,94 +280,6 @@ pub(super) fn truncate_content_title(
     }
     suffix.reverse();
     format!("{ellipsis}{}", suffix.concat())
-}
-
-pub(super) fn render_lsp_progress(
-    frame: &mut Frame,
-    progress: &[UiLspProgress],
-    spinner_frame: usize,
-    config: &Config,
-    bounds: WindowRect,
-) {
-    let available_rows = bounds.height.saturating_sub(LSP_PROGRESS_ROWS_FROM_BOTTOM);
-    let row_count = usize::from(LSP_PROGRESS_MAX_ROWS.min(available_rows)).min(progress.len());
-    if row_count == 0 {
-        return;
-    }
-    let available_width = bounds.width.saturating_sub(LSP_PROGRESS_RIGHT_MARGIN);
-    let maximum_width = usize::from(LSP_PROGRESS_MAX_WIDTH.min(available_width));
-    if maximum_width == 0 {
-        return;
-    }
-    let spinner = SPINNER_FRAMES[spinner_frame % SPINNER_FRAMES.len()];
-    let right = bounds
-        .x
-        .saturating_add(bounds.width)
-        .saturating_sub(LSP_PROGRESS_RIGHT_MARGIN);
-    let top = bounds
-        .y
-        .saturating_add(bounds.height)
-        .saturating_sub(LSP_PROGRESS_ROWS_FROM_BOTTOM)
-        .saturating_sub(u16::try_from(row_count).unwrap_or(u16::MAX));
-    let first = progress.len().saturating_sub(row_count);
-
-    for (row, item) in progress[first..].iter().enumerate() {
-        let marker = if item.done {
-            LSP_PROGRESS_DONE
-        } else {
-            spinner
-        };
-        let activity = match (item.title.is_empty(), item.message.is_empty()) {
-            (false, false) if item.title != item.message => {
-                format!("{}: {}", item.title, item.message)
-            }
-            (false, _) => item.title.clone(),
-            (_, false) => item.message.clone(),
-            _ => "Working".into(),
-        };
-        let mut server = truncate_content_title(
-            &item.server,
-            maximum_width.saturating_sub(2),
-            config.editor.ambiguous_width,
-        );
-        if server.is_empty() {
-            server = "LSP".into();
-        }
-        let server_width = text_width(&server, config.editor.ambiguous_width);
-        let mut percentage = item
-            .percentage
-            .map(|percentage| format!("{percentage:>3}% "))
-            .unwrap_or_default();
-        let fixed = 2_usize
-            .saturating_add(server_width)
-            .saturating_add(text_width(&percentage, config.editor.ambiguous_width));
-        if fixed > maximum_width {
-            percentage.clear();
-        }
-        let suffix_width =
-            server_width.saturating_add(text_width(&percentage, config.editor.ambiguous_width));
-        let activity_width = maximum_width.saturating_sub(3).saturating_sub(suffix_width);
-        let activity =
-            truncate_content_title(&activity, activity_width, config.editor.ambiguous_width);
-        let line = if activity.is_empty() {
-            format!("{marker} {percentage}{server}")
-        } else {
-            format!("{marker} {activity} {percentage}{server}")
-        };
-        let line_width = u16::try_from(text_width(&line, config.editor.ambiguous_width))
-            .unwrap_or(u16::MAX)
-            .min(available_width);
-        let x = right.saturating_sub(line_width);
-        let y = top.saturating_add(u16::try_from(row).unwrap_or(u16::MAX));
-        frame
-            .grid
-            .put_text_clipped(x, y, &line, Style::Muted, right);
-        frame.grid.put_text(x, y, marker, Style::Accent);
-        let server_x = right.saturating_sub(u16::try_from(server_width).unwrap_or(u16::MAX));
-        frame
-            .grid
-            .put_text_clipped(server_x, y, &server, Style::Accent, right);
-    }
 }
 
 pub(super) fn formatted_content_tab(
