@@ -51,13 +51,13 @@ fn creates_worktree_from_entered_branch_and_recovers_after_refusal() {
     git(&root, &["config", "user.name", "Worktree Test"]);
     git(&root, &["config", "user.email", "test@example.invalid"]);
     git(&root, &["commit", "--allow-empty", "-m", "Root commit"]);
-    git(&root, &["branch", "review"]);
+    git(&root, &["branch", "feature/foo"]);
     let target = owner.path().join("review");
     let mut screen = GitScreen::open(&root).unwrap();
     wait(&mut screen, |s| view(s).contains("Root commit"));
     key(&mut screen, KeyCode::Char('2'));
     key(&mut screen, KeyCode::Char('n'));
-    screen.event(UiEvent::Paste("review".into()));
+    screen.event(UiEvent::Paste("feature/foo".into()));
     key(&mut screen, KeyCode::Tab);
     // The default destination is the sibling review directory.
     key(&mut screen, KeyCode::Enter);
@@ -67,7 +67,7 @@ fn creates_worktree_from_entered_branch_and_recovers_after_refusal() {
     let expected = Command::new("git")
         .arg("-C")
         .arg(&root)
-        .args(["rev-parse", "review"])
+        .args(["rev-parse", "feature/foo"])
         .output()
         .unwrap()
         .stdout;
@@ -79,9 +79,15 @@ fn creates_worktree_from_entered_branch_and_recovers_after_refusal() {
         .unwrap()
         .stdout;
     assert_eq!(actual, expected);
+    assert_eq!(
+        std::fs::read_to_string(root.join(".git/worktrees/review/HEAD"))
+            .unwrap()
+            .trim(),
+        "ref: refs/heads/feature/foo"
+    );
     // Creating it again must report a refusal and release the UI's busy state.
     key(&mut screen, KeyCode::Char('n'));
-    screen.event(UiEvent::Paste("review".into()));
+    screen.event(UiEvent::Paste("feature/foo".into()));
     key(&mut screen, KeyCode::Tab);
     key(&mut screen, KeyCode::Enter);
     key(&mut screen, KeyCode::Enter);

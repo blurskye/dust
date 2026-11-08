@@ -1321,6 +1321,32 @@ fn plan_policy_uses_canonical_repository_identity() {
     assert!(read_hunks(&policy).unwrap().hunks.is_empty());
 }
 
+#[test]
+fn unstaging_rename_outside_scope_leaves_the_index_unchanged() {
+    let dir = tempdir().unwrap();
+    let repo = git2::Repository::init(dir.path()).unwrap();
+    commit(&repo, "original", "same content\n");
+    let nested = dir.path().join("nested");
+    std::fs::create_dir(&nested).unwrap();
+    std::fs::rename(dir.path().join("original"), nested.join("renamed")).unwrap();
+    let mut index = repo.index().unwrap();
+    index.remove_path(Path::new("original")).unwrap();
+    index.add_path(Path::new("nested/renamed")).unwrap();
+    index.write().unwrap();
+    let before = git_index_fingerprint(dir.path()).unwrap();
+    let mut policy = plan_policy(dir.path(), "renamed", GitDiffLayer::Staged);
+    policy.scope_root = crate::files::canonicalize(&nested).unwrap();
+    let mut plan = plan_template(policy, GitMutationKind::UnstageFile);
+    plan.expected_index = Some(before);
+    assert_eq!(run_plan(plan), Err(GitMutationError::OutsideScope));
+    assert_eq!(git_index_fingerprint(dir.path()).unwrap(), before);
+    assert!(!dir.path().join("original").exists());
+    assert_eq!(
+        std::fs::read_to_string(nested.join("renamed")).unwrap(),
+        "same content\n"
+    );
+}
+
 fn plan_template(policy: GitHunkPolicy, kind: GitMutationKind) -> GitChangePlanRequest {
     GitChangePlanRequest {
         kind,

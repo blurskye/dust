@@ -1120,14 +1120,52 @@ fn stage_whole_file(
     index.write().map_err(|_| GitMutationError::Backend)
 }
 
-fn unstage_whole_file(repo: &git2::Repository, repo_path: &Path) -> Result<(), GitMutationError> {
+fn unstage_whole_file(
+    repo: &git2::Repository,
+    repo_path: &Path,
+    scope_prefix: &Path,
+) -> Result<(), GitMutationError> {
     let mut index = repo.index().map_err(|_| GitMutationError::Backend)?;
     let tree = match repo.head() {
         Ok(head) => Some(head.peel_to_tree().map_err(|_| GitMutationError::Backend)?),
         Err(error) if error.code() == git2::ErrorCode::UnbornBranch => None,
         Err(_) => return Err(GitMutationError::Backend),
     };
-    let entry = match tree.as_ref().map(|tree| tree.get_path(repo_path)) {
+    // A renamed row represents both paths. Restore them under the same index lock,
+    // rather than leaving the source deletion staged when the destination is removed.
+    let mut paths = vec![repo_path.to_path_buf()];
+    let mut diff = repo
+        .diff_tree_to_index(tree.as_ref(), Some(&index), None)
+        .map_err(|_| GitMutationError::Backend)?;
+    diff.find_similar(Some(git2::DiffFindOptions::new().renames(true)))
+        .map_err(|_| GitMutationError::Backend)?;
+    for delta in diff
+        .deltas()
+        .filter(|delta| delta.status() == git2::Delta::Renamed)
+    {
+        let old = delta.old_file().path().ok_or(GitMutationError::Backend)?;
+        let new = delta.new_file().path().ok_or(GitMutationError::Backend)?;
+        if new == repo_path {
+            paths.push(old.to_path_buf());
+        } else if old == repo_path {
+            paths.push(new.to_path_buf());
+        }
+    }
+    if paths.iter().any(|path| !path.starts_with(scope_prefix)) {
+        return Err(GitMutationError::OutsideScope);
+    }
+    for path in paths {
+        restore_index_entry(&mut index, tree.as_ref(), &path)?;
+    }
+    index.write().map_err(|_| GitMutationError::Backend)
+}
+
+fn restore_index_entry(
+    index: &mut git2::Index,
+    tree: Option<&git2::Tree<'_>>,
+    repo_path: &Path,
+) -> Result<(), GitMutationError> {
+    let entry = match tree.map(|tree| tree.get_path(repo_path)) {
         Some(Ok(entry)) => Some(entry),
         Some(Err(error))
             if error.code() == git2::ErrorCode::NotFound
@@ -1170,7 +1208,7 @@ fn unstage_whole_file(repo: &git2::Repository, repo_path: &Path) -> Result<(), G
             .remove_path(repo_path)
             .map_err(|_| GitMutationError::Backend)?;
     }
-    index.write().map_err(|_| GitMutationError::Backend)
+    Ok(())
 }
 
 /// Apply one captured change plan. Every captured revision is checked before the first write,
@@ -1277,7 +1315,12 @@ pub(super) fn apply_change_plan(
             worktree.as_ref().ok_or(GitMutationError::Invalid)?,
         )?;
     } else {
-        unstage_whole_file(&repo, &repo_path)?;
+        unstage_whole_file(
+            &repo,
+            &repo_path,
+            root.strip_prefix(&workdir)
+                .map_err(|_| GitMutationError::OutsideScope)?,
+        )?;
     }
 
     index_write.commit()?;

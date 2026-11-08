@@ -527,6 +527,7 @@ impl GitScreen {
             _ => vec![
                 "stash".into(),
                 "show".into(),
+                "--include-untracked".into(),
                 "--no-ext-diff".into(),
                 "--no-textconv".into(),
                 "--patch".into(),
@@ -645,7 +646,11 @@ impl GitScreen {
                 self.branches
                     .start(GitBranchRequest::CreateWorktree {
                         repository: self.root.clone(),
-                        name: values[0].clone(),
+                        name: Path::new(&values[1])
+                            .file_name()
+                            .and_then(|name| name.to_str())
+                            .ok_or("Choose a worktree destination with a directory name")?
+                            .to_owned(),
                         path: PathBuf::from(&values[1]),
                         reference: values[0].clone(),
                         deadline: Duration::from_secs(15),
