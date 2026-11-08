@@ -348,6 +348,7 @@ impl App {
                         .set_picker_footer("Enter Go to line · Esc Esc Close".to_owned());
                     self.sync_picker_ui();
                 }
+                ForgeReply::Workspace(_) => {}
                 ForgeReply::Commented(Ok(())) => {
                     self.pull_requests.comment_sending = false;
                     self.pull_requests.comment_target = None;

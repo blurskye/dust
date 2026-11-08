@@ -13,6 +13,7 @@ pub(super) struct PreviewRow {
     pub old: Option<u32>,
     pub new: Option<u32>,
     pub marker: Option<char>,
+    pub path: Option<PathBuf>,
 }
 impl PreviewRow {
     fn message(text: &str) -> Self {
@@ -35,6 +36,7 @@ impl PreviewRow {
             old: None,
             new: None,
             marker: None,
+            path: None,
         }
     }
 }
@@ -81,6 +83,7 @@ impl Preview {
                     old: None,
                     new: Some(i as u32 + 1),
                     marker: None,
+                    path: Some(path.to_path_buf()),
                 }),
         );
         Self { rows, patch: false }
@@ -107,6 +110,7 @@ impl Preview {
             self.rows.extend(text.lines().map(PreviewRow::message));
             return;
         }
+        let first_row = self.rows.len();
         let mut path = fallback_path.map(Path::to_path_buf);
         for line in text.lines().take_while(|line| !line.starts_with("@@")) {
             if let Some(header) = line
@@ -118,10 +122,15 @@ impl Preview {
             }
             self.rows.push(PreviewRow::message(line));
         }
+        for row in &mut self.rows[first_row..] {
+            row.path = path.clone();
+        }
         let language = path.as_deref().and_then(language_for_path);
         for hunk in diff.hunks {
             self.patch = true;
-            self.rows.push(PreviewRow::message(&hunk.header));
+            let mut header = PreviewRow::message(&hunk.header);
+            header.path = path.clone();
+            self.rows.push(header);
             let old = PickerTextPreview::new(
                 hunk.lines
                     .iter()
@@ -156,6 +165,7 @@ impl Preview {
                     old: line.old_number,
                     new: line.new_number,
                     spans: spans.to_vec(),
+                    path: path.clone(),
                 });
                 old_at += usize::from(line.kind != DiffLineKind::Added);
                 new_at += usize::from(line.kind != DiffLineKind::Removed);

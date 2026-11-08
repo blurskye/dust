@@ -235,9 +235,27 @@ push. `n` creates a worktree from an existing branch or saves a stash in its pan
 `a/p/d` apply/pop/drop a stash with confirmation. `r` refreshes. Form fields use
 ordinary typing, arrows, Tab, Enter and Escape; Ctrl-Enter submits.
 
+`[` and `]` switch Git, Issues, Pull requests and Actions. GitHub pages use your
+existing `gh` authentication and show the target host/repository. `/` filters
+issues and pull requests; `n` creates one and `c` comments. Use Tab to select
+visible controls and Enter to open their forms. Multiline descriptions and
+comment drafts survive cancellation and failed submissions. Metadata controls
+edit assignees, labels, projects, milestones, reviewers and subscriptions.
+
+Pull requests have Conversation, Commits, Checks and Files changed views (`H/L`).
+Select commits to inspect their highlighted patches; select changed lines to
+comment inline. Review, resolve conversations, checkout, create a worktree, or
+merge after review/check readiness. Merge confirmation binds to the displayed
+head commit. Creating a PR requires an already-pushed head branch.
+
+Actions keeps workflow definitions and dispatch separate from run history.
+`Ctrl-h/l` changes column; `Ctrl-j/k` switches workflows/run history. Dispatch
+forms use the workflow's required fields, defaults, boolean and choice inputs.
+Run details expose attempts, matrix jobs, dependencies, steps, expandable logs,
+cancellation and reruns. Remote writes require explicit form submission.
+
 The embedded screen refuses writes in untrusted workspaces or while editor
-buffers are unsaved. Repository mutations run in background workers. Issues,
-pull requests, Actions and the Git-specific tutor are not in this screen yet.
+buffers are unsaved. Repository mutations run in background workers.
 Existing editor Git features remain available:
 
 - file and explorer status decorations, and gutter signs for the active buffer;

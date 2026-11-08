@@ -1760,7 +1760,7 @@ fn render_error_notification(
     }
 }
 
-fn wrap_plain_text(text: &str, width: usize, ambiguous: AmbiguousWidth) -> Vec<String> {
+pub(crate) fn wrap_plain_text(text: &str, width: usize, ambiguous: AmbiguousWidth) -> Vec<String> {
     text.split('\n')
         .flat_map(|line| {
             documentation::wrap_ranges(line, width, ambiguous)

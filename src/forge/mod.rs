@@ -60,6 +60,8 @@ pub enum ForgeReply {
     Comments(Result<Vec<ReviewComment>, String>),
     CommentTarget(Result<ReviewCommentTarget, String>),
     Commented(Result<(), String>),
+    /// Native Git workspace requests use the same bounded, cancellable CLI runner.
+    Workspace(Result<String, String>),
 }
 
 #[derive(Debug)]
@@ -97,6 +99,13 @@ impl Default for ForgeJobs {
 
 impl ForgeJobs {
     pub fn try_reply(&self) -> Option<ForgeEvent> {
+        if self
+            .worker
+            .as_ref()
+            .is_some_and(|worker| !worker.is_finished())
+        {
+            return None;
+        }
         self.replies.try_recv().ok()
     }
 
@@ -148,6 +157,50 @@ impl ForgeJobs {
                 .map_err(|error| format!("cannot start forge request: {error}"))?,
         );
         Ok(())
+    }
+
+    pub fn workspace(
+        &mut self,
+        root: PathBuf,
+        request_id: u64,
+        arguments: Vec<String>,
+    ) -> Result<(), String> {
+        self.spawn(root, request_id, move |root, commands| {
+            ForgeReply::Workspace(commands.run(
+                root,
+                "gh",
+                &arguments.iter().map(String::as_str).collect::<Vec<_>>(),
+            ))
+        })
+    }
+
+    pub fn workspace_worktree(
+        &mut self,
+        root: PathBuf,
+        request_id: u64,
+        number: u64,
+        repository: String,
+    ) -> Result<(), String> {
+        self.spawn(root, request_id, move |root, commands| {
+            ForgeReply::Workspace((|| {
+                let target = commands.pr_worktree(root, number)?;
+                commands.prepare_worktree(root, &target)?;
+                commands.run(
+                    &target,
+                    "gh",
+                    &[
+                        "pr",
+                        "checkout",
+                        &number.to_string(),
+                        "--branch",
+                        &format!("pr-{number}"),
+                        "--repo",
+                        &repository,
+                    ],
+                )?;
+                Ok(format!("Pull request worktree: {}", target.display()))
+            })())
+        })
     }
 
     pub fn list(&mut self, root: PathBuf, request_id: u64) -> Result<(), String> {

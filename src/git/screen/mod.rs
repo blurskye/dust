@@ -1,4 +1,5 @@
 //! The shared native Git application. Hosts own terminal lifecycle and opening files/workspaces.
+mod github;
 mod jobs;
 mod preview;
 mod render;
@@ -35,17 +36,41 @@ enum FormAction {
     Stash,
     Worktree,
     Confirm(Vec<OsString>),
+    Github(github::Action),
+}
+struct Field {
+    label: String,
+    input: PromptState,
+    required: bool,
+    multiline: bool,
+    choices: Vec<String>,
+}
+impl Field {
+    fn new(label: &str, value: String) -> Self {
+        let mut input = PromptState::new(PromptKind::Text);
+        input.cursor = value.len();
+        input.input = value;
+        Self {
+            label: label.into(),
+            input,
+            required: true,
+            multiline: false,
+            choices: Vec::new(),
+        }
+    }
 }
 struct Form {
     title: String,
     action: FormAction,
-    fields: Vec<(String, PromptState)>,
+    fields: Vec<Field>,
     selected: usize,
 }
 
 /// One controller and renderer, used in the editor and the standalone executable.
 pub struct GitScreen {
     root: PathBuf,
+    page: usize,
+    github: github::Workspace,
     status: GitStatusWorker,
     snapshot: Option<GitStatusSnapshot>,
     branches: GitBranchWorker,
@@ -84,7 +109,9 @@ impl GitScreen {
             .ok_or("Bare repositories do not have a working tree")?
             .to_path_buf();
         let mut screen = Self {
+            github: github::Workspace::new(root.clone()),
             root,
+            page: 0,
             status: GitStatusWorker::default(),
             snapshot: None,
             branches: GitBranchWorker::default(),
@@ -120,7 +147,7 @@ impl GitScreen {
         &self.root
     }
     pub fn busy(&self) -> bool {
-        self.busy
+        self.busy || self.github.writing()
     }
     fn slot(&self, pane: usize) -> usize {
         if pane == 1 {
@@ -314,6 +341,7 @@ impl GitScreen {
                     .map(|row| row.value.clone())
             })
             .collect::<Vec<_>>();
+        let github_changed = self.github.poll();
         let mut changed = false;
         match self.status.poll() {
             Ok(Some(snapshot)) => {
@@ -433,7 +461,7 @@ impl GitScreen {
             self.clamp();
             self.load_preview();
         }
-        changed
+        changed || github_changed
     }
     fn clamp(&mut self) {
         for pane in 0..4 {
@@ -621,26 +649,28 @@ impl GitScreen {
             action,
             fields: fields
                 .into_iter()
-                .map(|(label, value)| {
-                    let mut input = PromptState::new(PromptKind::Text);
-                    input.cursor = value.len();
-                    input.input = value;
-                    (label.into(), input)
-                })
+                .map(|(label, value)| Field::new(label, value))
                 .collect(),
             selected: 0,
         });
     }
     fn submit(&mut self) -> Result<(), String> {
-        self.allow_write()?;
         let form = self.form.as_ref().ok_or("No open form")?;
+        if !matches!(&form.action, FormAction::Github(action) if !action.writes()) {
+            self.allow_write()?;
+        }
         let values = form
             .fields
             .iter()
-            .map(|(_, p)| p.input.clone())
+            .map(|field| field.input.input.clone())
             .collect::<Vec<_>>();
-        if values.iter().any(|v| v.trim().is_empty()) {
-            return Err("Fill in every field".into());
+        for field in &form.fields {
+            if field.required && field.input.input.trim().is_empty() {
+                return Err(format!("{} is required", field.label));
+            }
+            if !field.choices.is_empty() && !field.choices.contains(&field.input.input) {
+                return Err(format!("Choose a valid {} with Up/Down", field.label));
+            }
         }
         match &form.action {
             FormAction::Commit => {
@@ -671,12 +701,15 @@ impl GitScreen {
                 self.branch_mutation = true;
             }
             FormAction::Confirm(args) => self.write(args.clone())?,
+            FormAction::Github(action) => self.github.submit(action.clone(), values)?,
         }
         self.form = None;
+        self.notice.clear();
         Ok(())
     }
     fn form_key(&mut self, key: &KeyEvent) -> Result<(), String> {
         if key.code == KeyCode::Escape {
+            self.save_form_draft();
             self.form = None;
             return Ok(());
         }
@@ -695,11 +728,28 @@ impl GitScreen {
                 if form.selected == form.fields.len() {
                     return self.submit();
                 }
+                self.save_form_draft();
                 self.form = None;
             }
             return Ok(());
         }
-        let input = &mut form.fields[form.selected].1;
+        let field = &mut form.fields[form.selected];
+        if !field.choices.is_empty() && matches!(key.code, KeyCode::Up | KeyCode::Down) {
+            let index = field
+                .choices
+                .iter()
+                .position(|value| value == &field.input.input)
+                .unwrap_or(0);
+            let index = if key.code == KeyCode::Up {
+                (index + field.choices.len() - 1) % field.choices.len()
+            } else {
+                (index + 1) % field.choices.len()
+            };
+            field.input.input = field.choices[index].clone();
+            field.input.cursor = field.input.input.len();
+            return Ok(());
+        }
+        let input = &mut field.input;
         match key.code {
             KeyCode::Char(c) if !key.modifiers.control && !key.modifiers.alt => {
                 input.insert_text(&c.to_string())
@@ -719,6 +769,7 @@ impl GitScreen {
             }
             KeyCode::Home => input.cursor = 0,
             KeyCode::End => input.cursor = input.input.len(),
+            KeyCode::Enter if field.multiline => input.insert_text("\n"),
             KeyCode::Enter => {
                 form.selected = (form.selected + 1) % count;
             }
@@ -731,15 +782,47 @@ impl GitScreen {
         match event {
             UiEvent::Paste(text) => {
                 if let Some(form) = &mut self.form
-                    && let Some((_, p)) = form.fields.get_mut(form.selected)
+                    && let Some(field) = form.fields.get_mut(form.selected)
                 {
-                    p.insert_text(&text.replace(['\r', '\n'], " "));
+                    let text = if field.multiline {
+                        text.replace("\r\n", "\n").replace('\r', "\n")
+                    } else {
+                        text.replace(['\r', '\n'], " ")
+                    };
+                    field.input.insert_text(&text);
                 }
             }
             UiEvent::Key { key, kind } if kind != KeyInputKind::Release => {
                 if self.form.is_some() {
                     let result = self.form_key(&key);
                     self.report(result);
+                    return ScreenOutcome::Continue;
+                }
+                if !key.modifiers.control
+                    && matches!(key.code, KeyCode::Char('[' | ']'))
+                    && !self.busy()
+                {
+                    self.page =
+                        (self.page + if key.code == KeyCode::Char(']') { 1 } else { 3 }) % 4;
+                    self.github.page(self.page);
+                    if self.page == 0 {
+                        let result = self.refresh();
+                        self.report(result);
+                    }
+                    return ScreenOutcome::Continue;
+                }
+                if self.page != 0 {
+                    self.notice.clear();
+                    let result = self.github.event(&key);
+                    self.page = self.github.current_page();
+                    match result {
+                        Ok(Some(form)) => self.form = Some(form),
+                        Ok(None) => {}
+                        Err(error) if error == "close" && !self.busy() => {
+                            return ScreenOutcome::Close;
+                        }
+                        Err(error) => self.notice = error,
+                    }
                     return ScreenOutcome::Continue;
                 }
                 if key.modifiers.control {
@@ -929,8 +1012,25 @@ impl GitScreen {
                 .min(self.rows(self.focus).len().saturating_sub(1));
         }
     }
+    fn save_form_draft(&mut self) {
+        if let Some(form) = &self.form
+            && let FormAction::Github(action) = &form.action
+        {
+            self.github.save_draft(
+                action,
+                form.fields
+                    .iter()
+                    .map(|field| field.input.input.clone())
+                    .collect(),
+            );
+        }
+    }
     pub fn frame(&mut self, width: u16, height: u16) -> Frame {
-        render::frame(self, width, height)
+        if self.page == 0 {
+            render::frame(self, width, height)
+        } else {
+            github::view::frame(self, width, height)
+        }
     }
 
     pub fn window_frame(

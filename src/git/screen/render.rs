@@ -4,7 +4,15 @@ use crossterm::cursor::SetCursorStyle;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
-fn border(grid: &mut CellGrid, x: u16, y: u16, w: u16, h: u16, title: &str, focused: bool) {
+pub(super) fn border(
+    grid: &mut CellGrid,
+    x: u16,
+    y: u16,
+    w: u16,
+    h: u16,
+    title: &str,
+    focused: bool,
+) {
     if w < 2 || h < 2 {
         return;
     }
@@ -57,13 +65,7 @@ pub(super) fn frame(app: &mut GitScreen, width: u16, height: u16) -> Frame {
         );
         return frame;
     }
-    frame.grid.put_text_clipped(
-        1,
-        0,
-        &format!("Dusty Git  {}", app.root.display()),
-        Style::Accent,
-        width - 1,
-    );
+    navigation(&mut frame, 0, width, &app.root.display().to_string());
     let left = (width * 2 / 5).max(26);
     let body = height - 4;
     let sizes = [
@@ -261,43 +263,120 @@ pub(super) fn frame(app: &mut GitScreen, width: u16, height: u16) -> Frame {
         if app.focus == 4 {
             "Preview · j/k scroll · h/l horizontal · Ctrl+h back · ? keys · q close"
         } else {
-            "1–4 panes · Ctrl+h/j/k/l focus · Space stage · v index · c commit · ? keys · q close"
+            "[ / ] pages · 1–4 panes · Ctrl+h/j/k/l focus · Space stage · c commit · ? keys · q close"
         },
         Style::Muted,
         width - 1,
     );
     if let Some(form) = &app.form {
-        let w = (width - 6).min(78);
-        let h = (form.fields.len() as u16 * 3 + 5).min(height - 2);
-        let x = (width - w) / 2;
-        let y = (height - h) / 2;
-        for row in y..y + h {
-            for col in x..x + w {
-                frame.grid.set_cell(col, row, " ", Style::Default);
-            }
+        render_form(&mut frame, form, width, height);
+    }
+    frame
+}
+
+pub(super) fn navigation(frame: &mut Frame, page: usize, width: u16, repository: &str) {
+    let mut x = frame
+        .grid
+        .put_text_clipped(1, 0, "Dusty Git  ", Style::Accent, width);
+    for (index, label) in ["Git", "Issues", "Pull requests", "Actions"]
+        .iter()
+        .enumerate()
+    {
+        x = frame.grid.put_text_clipped(
+            x,
+            0,
+            &format!("{label}  "),
+            if index == page {
+                Style::Selection
+            } else {
+                Style::Muted
+            },
+            width,
+        );
+    }
+    frame
+        .grid
+        .put_text_clipped(x, 0, repository, Style::Muted, width);
+}
+
+pub(super) fn render_form(frame: &mut Frame, form: &super::Form, width: u16, height: u16) {
+    let w = width.saturating_sub(6).min(90);
+    let total = form
+        .fields
+        .iter()
+        .map(|field| if field.multiline { 6 } else { 3 })
+        .sum::<u16>();
+    let h = (total + 5).min(height.saturating_sub(2));
+    let x = (width - w) / 2;
+    let y = (height - h) / 2;
+    for row in y..y + h {
+        for col in x..x + w {
+            frame.grid.set_cell(col, row, " ", Style::Default);
         }
-        border(&mut frame.grid, x, y, w, h, &form.title, true);
-        for (i, (label, input)) in form.fields.iter().enumerate() {
-            let row = y + 1 + i as u16 * 3;
-            frame
-                .grid
-                .put_text_clipped(x + 2, row, label, Style::Muted, x + w - 2);
-            let before = &input.input[..input.cursor];
-            let max = (w - 5) as usize;
-            let mut start = input.cursor;
-            let mut column = 0;
-            for (at, g) in before.grapheme_indices(true).rev() {
-                let size = UnicodeWidthStr::width(g).max(1);
-                if column + size >= max {
-                    break;
-                }
-                start = at;
-                column += size;
+    }
+    border(&mut frame.grid, x, y, w, h, &form.title, true);
+    let chosen_bottom = form
+        .fields
+        .iter()
+        .take((form.selected + 1).min(form.fields.len()))
+        .map(|field| if field.multiline { 6 } else { 3 })
+        .sum::<u16>();
+    let scroll = chosen_bottom.saturating_sub(h.saturating_sub(5));
+    let mut at = 0u16;
+    for (i, field) in form.fields.iter().enumerate() {
+        let size = if field.multiline { 6 } else { 3 };
+        if at < scroll || at + size > scroll + h.saturating_sub(4) {
+            at += size;
+            continue;
+        }
+        let row = y + 1 + at - scroll;
+        at += size;
+        let label = format!(
+            "{}{}{}",
+            field.label,
+            if field.required { " *" } else { "" },
+            if field.choices.is_empty() {
+                ""
+            } else {
+                " · ↑/↓ choose"
             }
+        );
+        frame
+            .grid
+            .put_text_clipped(x + 2, row, &label, Style::Muted, x + w - 2);
+        let input = &field.input;
+        let cursor_line = input.input[..input.cursor]
+            .bytes()
+            .filter(|byte| *byte == b'\n')
+            .count();
+        let lines = input.input.split('\n').collect::<Vec<_>>();
+        let visible = (size - 2) as usize;
+        let first = cursor_line.saturating_sub(visible.saturating_sub(1));
+        let before = input.input[..input.cursor]
+            .rsplit('\n')
+            .next()
+            .unwrap_or_default();
+        let max = w.saturating_sub(5) as usize;
+        let mut start = before.len();
+        let mut column = 0;
+        for (at, g) in before.grapheme_indices(true).rev() {
+            let size = UnicodeWidthStr::width(g).max(1);
+            if column + size >= max {
+                break;
+            }
+            start = at;
+            column += size;
+        }
+        for (offset, line) in lines.iter().enumerate().skip(first).take(visible) {
+            let text = if offset == cursor_line {
+                &line[start..]
+            } else {
+                line
+            };
             frame.grid.put_text_clipped(
                 x + 2,
-                row + 1,
-                &input.input[start..],
+                row + 1 + (offset - first) as u16,
+                text,
                 if form.selected == i {
                     Style::Selection
                 } else {
@@ -305,46 +384,49 @@ pub(super) fn frame(app: &mut GitScreen, width: u16, height: u16) -> Frame {
                 },
                 x + w - 2,
             );
-            if form.selected == i {
-                frame.cursor = Some((x + 2 + column as u16, row + 1, SetCursorStyle::BlinkingBar));
-            }
         }
-        let row = y + h - 2;
-        let count = form.fields.len();
-        frame.grid.put_text(
-            x + 2,
-            row,
-            "[ Submit ]",
-            if form.selected == count {
-                Style::Selection
-            } else {
-                Style::Accent
-            },
-        );
-        frame.grid.put_text(
-            x + 15,
-            row,
-            "[ Cancel ]",
-            if form.selected == count + 1 {
-                Style::Selection
-            } else {
-                Style::Default
-            },
-        );
-        frame.grid.put_text_clipped(
-            x + 28,
-            row,
-            "Tab · Ctrl+Enter · Esc",
-            Style::Muted,
-            x + w - 2,
-        );
-        if form.selected >= count {
+        if form.selected == i {
             frame.cursor = Some((
-                x + if form.selected == count { 3 } else { 16 },
-                row,
-                SetCursorStyle::SteadyBlock,
+                x + 2 + column as u16,
+                row + 1 + (cursor_line - first) as u16,
+                SetCursorStyle::BlinkingBar,
             ));
         }
     }
-    frame
+    let row = y + h - 2;
+    let count = form.fields.len();
+    frame.grid.put_text(
+        x + 2,
+        row,
+        "[ Submit ]",
+        if form.selected == count {
+            Style::Selection
+        } else {
+            Style::Accent
+        },
+    );
+    frame.grid.put_text(
+        x + 15,
+        row,
+        "[ Cancel ]",
+        if form.selected == count + 1 {
+            Style::Selection
+        } else {
+            Style::Default
+        },
+    );
+    frame.grid.put_text_clipped(
+        x + 28,
+        row,
+        "Tab · Ctrl+Enter · Esc",
+        Style::Muted,
+        x + w - 2,
+    );
+    if form.selected >= count {
+        frame.cursor = Some((
+            x + if form.selected == count { 3 } else { 16 },
+            row,
+            SetCursorStyle::SteadyBlock,
+        ));
+    }
 }
