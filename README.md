@@ -10,19 +10,19 @@ Language servers, debug adapters, agents and outside tools run as separate progr
 
 Starting from the dashboard, finding a file, making Vim edits, then saving to format it.
 
-<video src="https://raw.githubusercontent.com/blurskye/dust/master/docs/media/editing.mp4" controls muted width="100%"></video>
+[![editing](docs/media/editing.gif)](docs/media/editing.mp4)
 
 Browsing the explorer, searching workspace text, and jumping with the file finder.
 
-<video src="https://raw.githubusercontent.com/blurskye/dust/master/docs/media/search.mp4" controls muted width="100%"></video>
+[![search](docs/media/search.gif)](docs/media/search.mp4)
 
 Hover, go to definition, completion, and an inline type error with rust-analyzer.
 
-<video src="https://raw.githubusercontent.com/blurskye/dust/master/docs/media/lsp.mp4" controls muted width="100%"></video>
+[![lsp](docs/media/lsp.gif)](docs/media/lsp.mp4)
 
 Gutter change marks, the built-in terminal, and lazygit opened with Space g g.
 
-<video src="https://raw.githubusercontent.com/blurskye/dust/master/docs/media/git.mp4" controls muted width="100%"></video>
+[![git](docs/media/git.gif)](docs/media/git.mp4)
 
 ## Install on Linux
 
