@@ -1,0 +1,6680 @@
+{
+  "filetypes": {
+    "extensions": {
+      "-sst": "sisu",
+      "4gh": "fgl",
+      "4gl": "fgl",
+      "4th": "forth",
+      "8th": "8th",
+      "ACE": "lace",
+      "BUILD": "bzl",
+      "C": "cpp",
+      "CFG": "cfg",
+      "Cfg": "cfg",
+      "DEF": "modula2",
+      "Dockerfile": "dockerfile",
+      "E": "eiffel",
+      "EC": "esqlc",
+      "EU": "euphoria3",
+      "EW": "euphoria3",
+      "EX": "euphoria3",
+      "EXU": "euphoria3",
+      "EXW": "euphoria3",
+      "F": "fortran",
+      "F03": "fortran",
+      "F08": "fortran",
+      "F77": "fortran",
+      "F90": "fortran",
+      "F95": "fortran",
+      "FOR": "fortran",
+      "FPP": "fortran",
+      "FTN": "fortran",
+      "H": "cpp",
+      "INF": "inform",
+      "INI": "dosini",
+      "JAL": "jal",
+      "JUST": "just",
+      "Just": "just",
+      "KL": "karel",
+      "L": "lisp",
+      "MOD": "modsim3",
+      "MODX": "rapid",
+      "MODx": "rapid",
+      "Mod": "modsim3",
+      "ModX": "rapid",
+      "Modx": "rapid",
+      "NSA": "natural",
+      "NSC": "natural",
+      "NSG": "natural",
+      "NSL": "natural",
+      "NSM": "natural",
+      "NSN": "natural",
+      "NSP": "natural",
+      "NSS": "natural",
+      "OPL": "opl",
+      "OPl": "opl",
+      "OpL": "opl",
+      "Opl": "opl",
+      "PL": "perl",
+      "PRG": "clipper",
+      "Prg": "clipper",
+      "R": "r",
+      "Rd": "rhelp",
+      "Rmd": "rmd",
+      "Rnw": "rnoweb",
+      "Rrst": "rrst",
+      "SUB": "krl",
+      "SYS": "bat",
+      "SYSX": "rapid",
+      "SYSx": "rapid",
+      "Smd": "rmd",
+      "Snw": "rnoweb",
+      "Srst": "rrst",
+      "Sub": "krl",
+      "Sys": "bat",
+      "SysX": "rapid",
+      "Sysx": "rapid",
+      "Tiltfile": "tiltfile",
+      "_sst": "sisu",
+      "a43": "hex",
+      "a65": "a65",
+      "a90": "hex",
+      "aap": "aap",
+      "abap": "abap",
+      "abc": "abc",
+      "abl": "abel",
+      "abnf": "abnf",
+      "ace": "lace",
+      "aconfig": "pbtxt",
+      "action": "privoxy",
+      "ad": "xdefaults",
+      "ada": "ada",
+      "adb": "ada",
+      "ado": "stata",
+      "adoc": "asciidoc",
+      "ads": "ada",
+      "afm": "postscr",
+      "ahk": "autohotkey",
+      "ai": "postscr",
+      "aidl": "aidl",
+      "al": "perl",
+      "am": "elf",
+      "aml": "aml",
+      "applescript": "applescript",
+      "arr": "pyret",
+      "art": "art",
+      "as": "atlas",
+      "asa": "aspvbs",
+      "asciidoc": "asciidoc",
+      "asd": "lisp",
+      "asn": "asn",
+      "asn1": "asn",
+      "asp": "aspvbs",
+      "ass": "ssa",
+      "astro": "astro",
+      "asy": "asy",
+      "at": "config",
+      "atg": "coco",
+      "atl": "atlas",
+      "atom": "xml",
+      "au3": "autoit",
+      "aux": "tex",
+      "ave": "ave",
+      "awk": "awk",
+      "axi": "netlinx",
+      "axs": "netlinx",
+      "bas": "basic",
+      "bash": "sh",
+      "bass": "bass",
+      "bat": "dosbatch",
+      "bats": "sh",
+      "bazel": "bzl",
+      "bb": "bitbake",
+      "bbappend": "bitbake",
+      "bbclass": "bitbake",
+      "bbl": "tex",
+      "bbx": "tex",
+      "bc": "bc",
+      "bd": "json",
+      "bda": "json",
+      "bdf": "bdf",
+      "beamer": "tex",
+      "beancount": "beancount",
+      "bi": "basic",
+      "bib": "bib",
+      "bicep": "bicep",
+      "bicepparam": "bicep-params",
+      "bl": "blank",
+      "blp": "blueprint",
+      "bm": "basic",
+      "bms": "quickbms",
+      "bp": "bp",
+      "brf": "tex",
+      "brs": "brightscript",
+      "bs": "brighterscript",
+      "bsd": "bsdl",
+      "bsdl": "bsdl",
+      "bst": "bst",
+      "bt": "bpftrace",
+      "btm": "btm",
+      "builder": "ruby",
+      "bxl": "bzl",
+      "bxml": "xml",
+      "bzl": "bzl",
+      "c": "c",
+      "c++": "cpp",
+      "c++m": "cpp",
+      "c3": "c3",
+      "c3i": "c3",
+      "c3t": "c3",
+      "cabal": "cabal",
+      "cairo": "cairo",
+      "cake": "cs",
+      "capnp": "capnp",
+      "cbl": "cobol",
+      "cbx": "tex",
+      "cc": "cpp",
+      "ccm": "cpp",
+      "cdc": "cdc",
+      "cdf": "skill",
+      "cdl": "cdl",
+      "cdxml": "xml",
+      "cedar": "cedar",
+      "cel": "cel",
+      "cer": "pem",
+      "cfc": "cf",
+      "cfg": "cfg",
+      "cfi": "cf",
+      "cfm": "cf",
+      "ch": "chill",
+      "chai": "chaiscript",
+      "chatito": "chatito",
+      "chf": "ch",
+      "cho": "chordpro",
+      "chopro": "chordpro",
+      "chordpro": "chordpro",
+      "chs": "chaskell",
+      "cj": "cangjie",
+      "cjs": "javascript",
+      "ck": "chuck",
+      "cl": "lisp",
+      "class": "stata",
+      "clj": "clojure",
+      "cljc": "clojure",
+      "cljs": "clojure",
+      "cljx": "clojure",
+      "clo": "tex",
+      "clp": "jess",
+      "cls": "st",
+      "cm": "voscm",
+      "cmake": "cmake",
+      "cmd": "dosbatch",
+      "cmm": "trace32",
+      "cmmt": "trace32",
+      "cmod": "cmod",
+      "cob": "cobol",
+      "com": "dcl",
+      "comp": "glsl",
+      "con": "cterm",
+      "cook": "cook",
+      "corn": "corn",
+      "cpon": "cpon",
+      "cpp": "cpp",
+      "cppm": "cpp",
+      "cppobjdump": "objdump",
+      "cps": "json",
+      "cpt": "html",
+      "cpy": "cobol",
+      "cql": "cqlang",
+      "cr": "crystal",
+      "crd": "chordpro",
+      "crdpro": "chordpro",
+      "crm": "crm",
+      "crt": "pem",
+      "cs": "cs",
+      "csc": "csc",
+      "csdl": "csdl",
+      "csh": "csh",
+      "cshtml": "razor",
+      "csp": "csp",
+      "csproj": "xml",
+      "csr": "pem",
+      "css": "css",
+      "csv": "csv",
+      "csx": "cs",
+      "ctags": "conf",
+      "ctl": "vb",
+      "cto": "concerto",
+      "ctp": "php",
+      "cts": "typescript",
+      "cu": "cuda",
+      "cue": "cue",
+      "cuh": "cuda",
+      "cxx": "cpp",
+      "cxxm": "cpp",
+      "cygport": "sh",
+      "cyn": "cynpp",
+      "cypher": "cypher",
+      "d": "d",
+      "dart": "dart",
+      "dax": "dax",
+      "dcd": "dcd",
+      "dcl": "clean",
+      "def": "def",
+      "demo": "maxima",
+      "desc": "desc",
+      "desktop": "desktop",
+      "dfy": "dafny",
+      "dhall": "dhall",
+      "diff": "diff",
+      "directory": "desktop",
+      "dj": "djot",
+      "djot": "djot",
+      "dm1": "maxima",
+      "dm2": "maxima",
+      "dm3": "maxima",
+      "dmt": "maxima",
+      "do": "stata",
+      "dob": "vb",
+      "dockerfile": "dockerfile",
+      "dot": "dot",
+      "dpr": "pascal",
+      "drac": "dracula",
+      "drc": "dracula",
+      "drt": "dart",
+      "ds": "datascript",
+      "dsl": "structurizr",
+      "dsm": "vb",
+      "dsp": "faust",
+      "dsr": "vb",
+      "dtd": "dtd",
+      "dtml": "html",
+      "dts": "dts",
+      "dtsi": "dts",
+      "dtso": "dts",
+      "dtx": "tex",
+      "dylan": "dylan",
+      "e": "eiffel",
+      "ebuild": "sh",
+      "ec": "esqlc",
+      "ecd": "ecd",
+      "eclass": "sh",
+      "edf": "edif",
+      "edif": "edif",
+      "edn": "clojure",
+      "edo": "edif",
+      "eex": "eelixir",
+      "el": "lisp",
+      "elm": "elm",
+      "elv": "elvish",
+      "eml": "mail",
+      "eni": "cl",
+      "ent": "dtd",
+      "env": "env",
+      "envrc": "sh",
+      "epp": "epuppet",
+      "epro": "c",
+      "eps": "postscr",
+      "eps_tex": "tex",
+      "epsf": "postscr",
+      "epsi": "postscr",
+      "erb": "eruby",
+      "erl": "erlang",
+      "errsum": "hercules",
+      "es": "javascript",
+      "esdl": "esdl",
+      "eu": "euphoria3",
+      "ev": "hercules",
+      "ew": "euphoria3",
+      "ex": "elixir",
+      "exp": "expect",
+      "exs": "elixir",
+      "exu": "euphoria3",
+      "exw": "euphoria3",
+      "eyaml": "yaml",
+      "f": "fortran",
+      "f03": "fortran",
+      "f08": "fortran",
+      "f77": "fortran",
+      "f90": "fortran",
+      "f95": "fortran",
+      "factor": "factor",
+      "fal": "falcon",
+      "fan": "fan",
+      "fb": "freebasic",
+      "fc": "func",
+      "fdr": "csp",
+      "feature": "cucumber",
+      "fex": "focexec",
+      "fga": "fga",
+      "filter": "poefilter",
+      "fir": "firrtl",
+      "fish": "fish",
+      "flix": "flix",
+      "fnl": "fennel",
+      "fnlm": "fennel",
+      "focexec": "focexec",
+      "for": "fortran",
+      "fortran": "fortran",
+      "fpc": "fpcmake",
+      "fpp": "fortran",
+      "frag": "glsl",
+      "frm": "form",
+      "frt": "reva",
+      "fs": "fsharp",
+      "fsh": "fsh",
+      "fsi": "fsharp",
+      "fsl": "framescript",
+      "fsproj": "xml",
+      "fsx": "fsharp",
+      "ft": "forth",
+      "fth": "forth",
+      "ftl": "fluent",
+      "ftn": "fortran",
+      "fusion": "fusion",
+      "fwt": "fan",
+      "g": "pccts",
+      "g4": "antlr4",
+      "gawk": "awk",
+      "gd": "gdscript",
+      "gdb": "gdb",
+      "gdmo": "gdmo",
+      "gdshader": "gdshader",
+      "ged": "gedcom",
+      "gel": "gel",
+      "gemini": "gemtext",
+      "gemspec": "ruby",
+      "geojson": "json",
+      "geom": "glsl",
+      "gift": "gift",
+      "gjs": "javascript.glimmer",
+      "gleam": "gleam",
+      "glsl": "glsl",
+      "gmi": "gemtext",
+      "gn": "gn",
+      "gni": "gn",
+      "gnuplot": "gnuplot",
+      "go": "go",
+      "gp": "gp",
+      "gpi": "gnuplot",
+      "gpr": "ada",
+      "gql": "graphql",
+      "gradle": "groovy",
+      "graphql": "graphql",
+      "graphqls": "graphql",
+      "grc": "yaml",
+      "gretl": "gretl",
+      "groff": "groff",
+      "groovy": "groovy",
+      "gs": "grads",
+      "gsp": "gsp",
+      "gts": "typescript.glimmer",
+      "gv": "dot",
+      "gyp": "gyp",
+      "gypi": "gyp",
+      "h": "cpp",
+      "h32": "hex",
+      "h80": "hex",
+      "h86": "hex",
+      "ha": "hare",
+      "hack": "hack",
+      "hackpartial": "hack",
+      "haml": "haml",
+      "hb": "hb",
+      "hbs": "handlebars",
+      "hcl": "hcl",
+      "hdl": "vhdl",
+      "heex": "heex",
+      "hex": "hex",
+      "hgrc": "cfg",
+      "hh": "cpp",
+      "hjson": "hjson",
+      "hlp": "smcl",
+      "hog": "hog",
+      "hoon": "hoon",
+      "hpp": "cpp",
+      "hrl": "erlang",
+      "hs": "haskell",
+      "hs-boot": "haskell",
+      "hsc": "haskell",
+      "hsig": "haskell",
+      "hsm": "hamster",
+      "ht": "haste",
+      "htb": "httest",
+      "htm": "html",
+      "html": "html",
+      "htpp": "hastepreproc",
+      "htt": "httest",
+      "http": "http",
+      "hurl": "hurl",
+      "hw": "virata",
+      "hws": "hollywood",
+      "hx": "haxe",
+      "hxx": "cpp",
+      "hy": "hy",
+      "hylo": "hylo",
+      "i": "progress",
+      "i3": "modula3",
+      "iba": "ibasic",
+      "ibi": "ibasic",
+      "ice": "slice",
+      "icl": "clean",
+      "icn": "icon",
+      "idl": "idl",
+      "idr": "idris2",
+      "ig": "modula3",
+      "ih": "ppwiz",
+      "ihe": "hex",
+      "ihex": "hex",
+      "ihlp": "smcl",
+      "ihx": "hex",
+      "ii": "initng",
+      "ijs": "j",
+      "il": "skill",
+      "ils": "skill",
+      "ily": "lilypond",
+      "imata": "stata",
+      "imp": "b",
+      "inc": "pov",
+      "ind": "tex",
+      "inf": "inform",
+      "ini": "dosini",
+      "inko": "inko",
+      "inl": "cpp",
+      "ino": "arduino",
+      "ins": "tex",
+      "install": "sh",
+      "int": "hex",
+      "intr": "dylanintr",
+      "ipd": "starlark",
+      "ipkg": "ipkg",
+      "ipp": "cpp",
+      "ipy": "python",
+      "ipynb": "json",
+      "isc": "monk",
+      "iss": "iss",
+      "ist": "ist",
+      "it": "ppwiz",
+      "itcl": "tcl",
+      "itk": "tcl",
+      "its": "dts",
+      "ixx": "cpp",
+      "j73": "jovial",
+      "jacl": "tcl",
+      "jal": "jal",
+      "janet": "janet",
+      "jav": "java",
+      "java": "java",
+      "javascript": "javascript",
+      "jgr": "jgraph",
+      "jinja": "jinja",
+      "jj": "javacc",
+      "jjdescription": "jjdescription",
+      "jjt": "javacc",
+      "jl": "julia",
+      "journal": "ledger",
+      "jov": "jovial",
+      "jovial": "jovial",
+      "jpl": "jam",
+      "jpr": "jam",
+      "jq": "jq",
+      "jrexx": "rexx",
+      "js": "javascript",
+      "jsh": "java",
+      "jsm": "javascript",
+      "json": "json",
+      "json-patch": "json",
+      "json5": "json5",
+      "jsonc": "jsonc",
+      "jsonl": "jsonl",
+      "jsonnet": "jsonnet",
+      "jsonp": "json",
+      "jsp": "jsp",
+      "jsx": "javascriptreact",
+      "jupyterlab-settings": "json",
+      "just": "just",
+      "k": "kwt",
+      "kdl": "kdl",
+      "kerml": "kerml",
+      "keymap": "dts",
+      "kix": "kix",
+      "kk": "koka",
+      "kl": "karel",
+      "kos": "kos",
+      "ks": "kscript",
+      "ksh": "sh",
+      "kt": "kotlin",
+      "ktm": "kotlin",
+      "kts": "kotlin",
+      "kv": "kivy",
+      "kyaml": "yaml",
+      "kyml": "yaml",
+      "l": "lex",
+      "l++": "lex",
+      "la": "sh",
+      "lai": "sh",
+      "lalrpop": "lalrpop",
+      "latex": "tex",
+      "latte": "latte",
+      "lc": "elsa",
+      "ld": "ld",
+      "ldg": "ledger",
+      "ldif": "ldif",
+      "lean": "lean",
+      "ledger": "ledger",
+      "leex": "eelixir",
+      "leo": "leo",
+      "less": "less",
+      "lex": "lex",
+      "lgt": "logtalk",
+      "lhs": "lhaskell",
+      "lib": "faust",
+      "libsonnet": "jsonnet",
+      "lid": "dylanlid",
+      "lidr": "lidris2",
+      "liq": "liquidsoap",
+      "liquid": "liquid",
+      "lisp": "lisp",
+      "lite": "lite",
+      "livemd": "livebook",
+      "ll": "lifelines",
+      "lm3": "modula3",
+      "lo": "sh",
+      "loe": "tex",
+      "lof": "tex",
+      "lot": "lotos",
+      "lotos": "lotos",
+      "lou": "lout",
+      "lout": "lout",
+      "lpc": "lpc",
+      "lpe": "dracula",
+      "lpr": "pascal",
+      "lrc": "lyrics",
+      "lsl": "lsl",
+      "lsp": "lisp",
+      "lss": "lss",
+      "lt": "lite",
+      "lte": "latte",
+      "ltx": "tex",
+      "lua": "lua",
+      "luau": "luau",
+      "lvs": "dracula",
+      "lxx": "lex",
+      "ly": "lilypond",
+      "m": "matlab",
+      "m3": "modula3",
+      "m3u": "hlsplaylist",
+      "m3u8": "hlsplaylist",
+      "m4": "m4",
+      "m4gl": "fgl",
+      "mak": "make",
+      "man": "nroff",
+      "map": "map",
+      "mar": "vmasm",
+      "markdown": "markdown",
+      "mas": "master",
+      "masm": "masm",
+      "mason": "mason",
+      "master": "master",
+      "mat": "radiance",
+      "mata": "stata",
+      "mbsyncrc": "mbsync",
+      "mc": "m4",
+      "mch": "b",
+      "mcmeta": "json",
+      "mcs": "hex",
+      "md": "markdown",
+      "mdd": "sh",
+      "mdh": "c",
+      "mdown": "markdown",
+      "mdwn": "markdown",
+      "me": "nroff",
+      "mel": "mel",
+      "mermaid": "mermaid",
+      "mf": "mf",
+      "mg": "modula3",
+      "mgl": "mgl",
+      "mgp": "mgp",
+      "mhtml": "mason",
+      "mib": "mib",
+      "mill": "scala",
+      "mix": "mix",
+      "mixal": "mix",
+      "mjs": "javascript",
+      "mk": "make",
+      "mkd": "markdown",
+      "mkdn": "markdown",
+      "mkii": "context",
+      "mkiv": "context",
+      "mklx": "context",
+      "mkvi": "context",
+      "mkxl": "context",
+      "ml": "ocaml",
+      "mli": "ocaml",
+      "mlip": "ocaml",
+      "mlir": "mlir",
+      "mll": "ocaml",
+      "mlp": "ocaml",
+      "mlt": "ocaml",
+      "mly": "ocaml",
+      "mm": "nroff",
+      "mmd": "mermaid",
+      "mmdc": "mermaid",
+      "mmi": "xml",
+      "mmp": "mmp",
+      "mms": "mmix",
+      "mo": "gdmo",
+      "moc": "cpp",
+      "mod": "modsim3",
+      "modX": "rapid",
+      "module": "virata",
+      "modx": "rapid",
+      "mof": "msidl",
+      "mojo": "mojo",
+      "mom": "groff",
+      "monk": "monk",
+      "moo": "moo",
+      "moon": "moonscript",
+      "mot": "srec",
+      "move": "move",
+      "mp": "mp",
+      "mpd": "xml",
+      "mpiv": "mp",
+      "mpl": "maple",
+      "mplstyle": "yaml",
+      "mpp": "cpp",
+      "mpvi": "mp",
+      "mpxl": "mp",
+      "ms": "xmath",
+      "msc": "xmath",
+      "msf": "xmath",
+      "msql": "msql",
+      "mss": "mss",
+      "mst": "ist",
+      "mts": "typescript",
+      "mu": "mupad",
+      "mush": "mush",
+      "mustache": "mustache",
+      "mv": "maple",
+      "mw": "mediawiki",
+      "mws": "maple",
+      "my": "mib",
+      "mysql": "mysql",
+      "n1ql": "n1ql",
+      "nanorc": "nanorc",
+      "nasm": "nasm",
+      "nav": "tex",
+      "nb": "mma",
+      "nbt": "numbat",
+      "ncf": "ncf",
+      "ncl": "nickel",
+      "neon": "neon",
+      "nginx": "nginx",
+      "nim": "nim",
+      "nimble": "nim",
+      "nims": "nim",
+      "ninja": "ninja",
+      "nix": "nix",
+      "nlo": "tex",
+      "nls": "tex",
+      "nmconnection": "confini",
+      "norg": "norg",
+      "nq": "nq",
+      "nqc": "nqc",
+      "nql": "n1ql",
+      "nr": "nroff",
+      "nse": "lua",
+      "nsh": "nsis",
+      "nsi": "nsis",
+      "nt": "ntriples",
+      "nu": "nu",
+      "nut": "squirrel",
+      "oPL": "opl",
+      "oPl": "opl",
+      "obj": "obj",
+      "objdump": "objdump",
+      "obl": "obse",
+      "oblivion": "obse",
+      "obscript": "obse",
+      "obse": "obse",
+      "occ": "occam",
+      "odin": "odin",
+      "odl": "msidl",
+      "opL": "opl",
+      "opam": "opam",
+      "opl": "opl",
+      "or": "openroad",
+      "ora": "ora",
+      "org": "org",
+      "org_archive": "org",
+      "orx": "rexx",
+      "overlay": "dts",
+      "ovpn": "openvpn",
+      "p": "progress",
+      "p36": "plm",
+      "p6": "raku",
+      "pac": "plm",
+      "pag": "vb",
+      "page": "mallard",
+      "pandoc": "pandoc",
+      "papp": "papp",
+      "pas": "pascal",
+      "patch": "diff",
+      "pbtxt": "pbtxt",
+      "pc": "proc",
+      "pcf": "pkl",
+      "pcmk": "pcmk",
+      "pd": "pandoc",
+      "pdb": "prolog",
+      "pdc": "pandoc",
+      "pde": "arduino",
+      "pdf": "pdf",
+      "pdf_tex": "tex",
+      "pdk": "pandoc",
+      "pem": "pem",
+      "persistentmodels": "haskellpersistent",
+      "pfa": "postscr",
+      "pgf": "tex",
+      "php": "php",
+      "php0": "php",
+      "php1": "php",
+      "php2": "php",
+      "php3": "php",
+      "php4": "php",
+      "php5": "php",
+      "php6": "php",
+      "php7": "php",
+      "php8": "php",
+      "php9": "php",
+      "phpt": "php",
+      "phtml": "php",
+      "pike": "pike",
+      "pip": "requirements",
+      "pk": "poke",
+      "pkb": "sql",
+      "pkg": "virata",
+      "pkl": "pkl",
+      "pks": "sql",
+      "pl": "perl",
+      "pl1": "pli",
+      "pld": "cupl",
+      "pli": "pli",
+      "plm": "plm",
+      "plp": "plp",
+      "pls": "plsql",
+      "plsql": "plsql",
+      "plx": "perl",
+      "pm": "perl",
+      "pm6": "raku",
+      "pml": "promela",
+      "pmod": "pike",
+      "po": "po",
+      "pod": "pod",
+      "pod6": "raku",
+      "pony": "pony",
+      "pot": "po",
+      "pov": "pov",
+      "pp": "puppet",
+      "ppd": "ppd",
+      "pq": "pq",
+      "pr": "sdl",
+      "prettierignore": "gitignore",
+      "prg": "clipper",
+      "prisma": "prisma",
+      "pro": "idlang",
+      "properties": "jproperties",
+      "proto": "proto",
+      "prql": "prql",
+      "ps": "postscr",
+      "ps1": "ps1",
+      "ps1xml": "ps1xml",
+      "psc1": "xml",
+      "psd1": "ps1",
+      "psf": "psf",
+      "psgi": "perl",
+      "psl": "psl",
+      "psm1": "ps1",
+      "pssc": "ps1",
+      "pt": "html",
+      "ptl": "python",
+      "ptx": "ptx",
+      "pug": "pug",
+      "purs": "purescript",
+      "pxd": "pyrex",
+      "pxi": "pyrex",
+      "pxml": "papp",
+      "pxsl": "papp",
+      "py": "python",
+      "pygstyle": "tex",
+      "pygtex": "tex",
+      "pyi": "python",
+      "pyw": "python",
+      "pyx": "pyrex",
+      "pyx+": "pyrex",
+      "qbs": "qml",
+      "qc": "c",
+      "ql": "ql",
+      "qll": "ql",
+      "qmd": "quarto",
+      "qml": "qml",
+      "quake": "m3quake",
+      "quark": "supercollider",
+      "r": "r",
+      "rad": "radiance",
+      "rahit": "glsl",
+      "rake": "ruby",
+      "raku": "raku",
+      "rakudoc": "raku",
+      "rakumod": "raku",
+      "rakutest": "raku",
+      "raml": "raml",
+      "rant": "ruby",
+      "rasi": "rasi",
+      "rasinc": "rasi",
+      "razor": "razor",
+      "rb": "ruby",
+      "rbi": "ruby",
+      "rbs": "rbs",
+      "rbw": "ruby",
+      "rc": "rc",
+      "rcall": "glsl",
+      "rch": "rc",
+      "rchit": "glsl",
+      "rcp": "pilrc",
+      "rd": "rhelp",
+      "recipe": "conaryrecipe",
+      "ref": "b",
+      "rego": "rego",
+      "rej": "diff",
+      "rem": "remind",
+      "remind": "remind",
+      "res": "rescript",
+      "resi": "rescript",
+      "resource": "robot",
+      "rex": "rexx",
+      "rexx": "rexx",
+      "rexxj": "rexx",
+      "rgen": "glsl",
+      "rhtml": "eruby",
+      "rib": "rib",
+      "rint": "glsl",
+      "rjs": "ruby",
+      "rkt": "racket",
+      "rktd": "racket",
+      "rktl": "racket",
+      "rmd": "rmd",
+      "rmiss": "glsl",
+      "rnc": "rnc",
+      "rng": "rng",
+      "rnw": "rnoweb",
+      "robot": "robot",
+      "roc": "roc",
+      "rockspec": "lua",
+      "roff": "nroff",
+      "ron": "ron",
+      "rpgle": "rpgle",
+      "rpgleinc": "rpgle",
+      "rpl": "rpl",
+      "rq": "sparql",
+      "rrst": "rrst",
+      "rs": "rust",
+      "rsc": "routeros",
+      "rss": "xml",
+      "rst": "rst",
+      "rtf": "rtf",
+      "ru": "ruby",
+      "rul": "diva",
+      "rules": "hog",
+      "run": "ampl",
+      "rxj": "rexx",
+      "rxml": "ruby",
+      "rxo": "rexx",
+      "s19": "srec",
+      "s28": "srec",
+      "s37": "srec",
+      "s85": "sinda",
+      "sa": "sather",
+      "sage": "sage",
+      "sas": "sas",
+      "sass": "sass",
+      "sba": "vb",
+      "sbt": "sbt",
+      "sc": "scala",
+      "scad": "openscad",
+      "scala": "scala",
+      "scd": "supercollider",
+      "sce": "scilab",
+      "sci": "scilab",
+      "scm": "scheme",
+      "score": "slrnsc",
+      "scpt": "applescript",
+      "scss": "scss",
+      "sd": "sd",
+      "sdc": "sdc",
+      "sdl": "sdl",
+      "sed": "sed",
+      "sexp": "sexplib",
+      "sface": "surface",
+      "sgm": "sgml",
+      "sgml": "sgml",
+      "sh": "sh",
+      "shader": "gdshader",
+      "shtml": "html",
+      "si": "cuplsim",
+      "sieve": "sieve",
+      "sil": "sil",
+      "sim": "simula",
+      "sin": "sinda",
+      "siv": "sieve",
+      "sky": "starlark",
+      "sl": "slang",
+      "slang": "shaderslang",
+      "sld": "scheme",
+      "slint": "slint",
+      "sln": "solution",
+      "slnf": "json",
+      "slnx": "xml",
+      "sls": "salt",
+      "slt": "tsalt",
+      "smali": "smali",
+      "smcl": "smcl",
+      "smd": "rmd",
+      "smi": "mib",
+      "smil": "smil",
+      "smith": "smith",
+      "smithy": "smithy",
+      "smk": "snakemake",
+      "sml": "sml",
+      "smt": "smith",
+      "sno": "snobol4",
+      "snw": "rnoweb",
+      "sol": "solidity",
+      "soy": "soy",
+      "sp": "spice",
+      "sparql": "sparql",
+      "spd": "spup",
+      "spdata": "spup",
+      "spec": "spec",
+      "speedup": "spup",
+      "spfm": "xml",
+      "spi": "spyce",
+      "spice": "spice",
+      "spt": "snobol4",
+      "spy": "spyce",
+      "sqi": "sqr",
+      "sql": "sql",
+      "sqlj": "sqlj",
+      "sqr": "sqr",
+      "srec": "srec",
+      "srst": "rrst",
+      "srt": "srt",
+      "ss": "scheme",
+      "ssa": "ssa",
+      "ssc": "monk",
+      "ssi": "sisu",
+      "ssm": "sisu",
+      "sst": "sisu",
+      "st": "st",
+      "star": "starlark",
+      "starlark": "starlark",
+      "stm": "html",
+      "stp": "stp",
+      "strl": "esterel",
+      "stsg": "scheme",
+      "sty": "tex",
+      "styl": "stylus",
+      "stylus": "stylus",
+      "sub": "krl",
+      "sublime-project": "json",
+      "sublime-settings": "json",
+      "sublime-workspace": "json",
+      "sum": "hercules",
+      "sv": "systemverilog",
+      "svelte": "svelte",
+      "svg": "svg",
+      "svh": "systemverilog",
+      "sw": "sway",
+      "swg": "swig",
+      "swift": "swift",
+      "swiftinterface": "swift",
+      "swig": "swig",
+      "sys": "bat",
+      "sysX": "rapid",
+      "sysml": "sysml",
+      "sysx": "rapid",
+      "t": "tads",
+      "t32": "trace32",
+      "t6": "raku",
+      "tak": "tak",
+      "tal": "tal",
+      "tape": "vhs",
+      "task": "taskedit",
+      "tcc": "cpp",
+      "tcl": "tcl",
+      "tcsh": "tcsh",
+      "td": "tablegen",
+      "tdf": "ahdl",
+      "templ": "templ",
+      "tera": "tera",
+      "tesc": "glsl",
+      "tese": "glsl",
+      "testGroup": "rexx",
+      "testUnit": "rexx",
+      "tex": "plaintex",
+      "texi": "texinfo",
+      "texinfo": "texinfo",
+      "text": "text",
+      "textpb": "pbtxt",
+      "textproto": "pbtxt",
+      "tf": "tf",
+      "tfvars": "terraform-vars",
+      "theme": "php",
+      "thm": "tex",
+      "thrift": "thrift",
+      "ti": "terminfo",
+      "tig": "tiger",
+      "tikz": "tex",
+      "tiltfile": "tiltfile",
+      "tk": "tcl",
+      "tl": "teal",
+      "tla": "tla",
+      "tlh": "cpp",
+      "tli": "tli",
+      "tlu": "lua",
+      "tm": "tcl",
+      "tmac": "nroff",
+      "tmpl": "template",
+      "toc": "cdrtoc",
+      "toml": "toml",
+      "tpl": "smarty",
+      "tpm": "xml",
+      "tpp": "tpp",
+      "tr": "nroff",
+      "treetop": "treetop",
+      "tres": "gdresource",
+      "trig": "trig",
+      "ts": "typescript",
+      "tsc": "monk",
+      "tscn": "gdresource",
+      "tsp": "typespec",
+      "tsscl": "tsscl",
+      "tssgm": "tssgm",
+      "tssop": "tssop",
+      "tsv": "tsv",
+      "tsx": "typescriptreact",
+      "ttl": "teraterm",
+      "tutor": "tutor",
+      "twig": "twig",
+      "txi": "texinfo",
+      "txt": "text",
+      "txtpb": "pbtxt",
+      "tyb": "sql",
+      "tyc": "sql",
+      "typ": "typst",
+      "u": "unison",
+      "uc": "uc",
+      "ui": "xml",
+      "uil": "uil",
+      "uit": "uil",
+      "ulpc": "lpc",
+      "ungram": "ungrammar",
+      "url": "urlshortcut",
+      "usd": "usd",
+      "usda": "usd",
+      "uu": "unison",
+      "v": "v",
+      "va": "verilogams",
+      "vala": "vala",
+      "vams": "verilogams",
+      "vb": "vb",
+      "vba": "vb",
+      "vbe": "vhdl",
+      "vbp": "dosini",
+      "vbproj": "xml",
+      "vbs": "vb",
+      "vc": "hercules",
+      "vdf": "vdf",
+      "vdm": "vdmsl",
+      "vdmpp": "vdmpp",
+      "vdmrt": "vdmrt",
+      "vdmsl": "vdmsl",
+      "vert": "glsl",
+      "vhd": "vhdl",
+      "vhdl": "vhdl",
+      "vho": "vhdl",
+      "vim": "vim",
+      "vpp": "vdmpp",
+      "vr": "vera",
+      "vrb": "tex",
+      "vrh": "vera",
+      "vri": "vera",
+      "vroom": "vroom",
+      "vsh": "v",
+      "vst": "vhdl",
+      "vto": "vento",
+      "vue": "vue",
+      "vv": "v",
+      "w": "cweb",
+      "wast": "wat",
+      "wat": "wat",
+      "wbt": "winbatch",
+      "wdl": "wdl",
+      "web": "winbatch",
+      "webmanifest": "json",
+      "wgsl": "wgsl",
+      "wiki": "mediawiki",
+      "wit": "wit",
+      "wks": "wks",
+      "wl": "mma",
+      "wm": "webmacro",
+      "wml": "wml",
+      "wpl": "xml",
+      "wrap": "dosini",
+      "wrl": "vrml",
+      "wrm": "acedb",
+      "wsc": "wsh",
+      "wsdl": "xml",
+      "wsf": "wsh",
+      "wsml": "wsml",
+      "wxm": "maxima",
+      "x": "rpcgen",
+      "xba": "xml",
+      "xci": "json",
+      "xcu": "xml",
+      "xht": "xhtml",
+      "xhtml": "xhtml",
+      "xin": "omnimark",
+      "xlb": "xml",
+      "xlc": "xml",
+      "xlf": "xml",
+      "xliff": "xml",
+      "xmi": "xml",
+      "xml": "xml",
+      "xom": "omnimark",
+      "xpfm": "xml",
+      "xpm": "xpm",
+      "xpm2": "xpm2",
+      "xpr": "xml",
+      "xq": "xquery",
+      "xql": "xquery",
+      "xqm": "xquery",
+      "xquery": "xquery",
+      "xqy": "xquery",
+      "xrl": "leex",
+      "xs": "xs",
+      "xsd": "xsd",
+      "xsl": "xslt",
+      "xslt": "xslt",
+      "xul": "xml",
+      "y": "yacc",
+      "y++": "yacc",
+      "yaml": "yaml",
+      "yang": "yang",
+      "yar": "yara",
+      "yara": "yara",
+      "yaws": "erlang",
+      "yml": "yaml",
+      "yuck": "yuck",
+      "yxx": "yacc",
+      "yy": "yacc",
+      "z8a": "z8a",
+      "zed": "authzed",
+      "zig": "zig",
+      "ziggy": "ziggy",
+      "ziggy-schema": "ziggy_schema",
+      "zon": "zig",
+      "zone": "bindzone",
+      "zs": "zserio",
+      "zsh": "zsh",
+      "zsh-theme": "zsh",
+      "zsql": "sql",
+      "zu": "zimbu",
+      "zunit": "zsh",
+      "zut": "zimbutempl",
+      "🔥": "mojo"
+    },
+    "filenames": {
+      ".JUSTFILE": "just",
+      ".Justfile": "just",
+      ".Rhistory": "r",
+      ".Rprofile": "r",
+      ".XCompose": "xcompose",
+      ".Xdefaults": "xdefaults",
+      ".Xpdefaults": "xdefaults",
+      ".Xresources": "xdefaults",
+      ".a2psrc": "a2ps",
+      ".alias": "csh",
+      ".alsoftrc": "dosini",
+      ".arch-inventory": "arch",
+      ".article": "mail",
+      ".ash_history": "sh",
+      ".asoundrc": "alsaconf",
+      ".babelrc": "jsonc",
+      ".bash-aliases": "sh",
+      ".bash-history": "sh",
+      ".bash-logout": "sh",
+      ".bash-profile": "sh",
+      ".bash_aliases": "sh",
+      ".bash_history": "sh",
+      ".bash_logout": "sh",
+      ".bash_profile": "sh",
+      ".bashrc": "sh",
+      ".black": "toml",
+      ".bun_repl_history": "javascript",
+      ".busted": "lua",
+      ".cdrdao": "cdrdaoconf",
+      ".chktexrc": "conf",
+      ".clang-format": "yaml",
+      ".clang-tidy": "yaml",
+      ".clangd": "yaml",
+      ".cling_history": "cpp",
+      ".condarc": "yaml",
+      ".containerignore": "gitignore",
+      ".coveragerc": "dosini",
+      ".cshrc": "csh",
+      ".cuda-gdbinit": "gdb",
+      ".cvsrc": "cvsrc",
+      ".devscripts": "sh",
+      ".dictrc": "dictconf",
+      ".dir_colors": "dircolors",
+      ".dircolors": "dircolors",
+      ".dockerignore": "gitignore",
+      ".editorconfig": "editorconfig",
+      ".emacs": "lisp",
+      ".env": "env",
+      ".eslintrc": "jsonc",
+      ".exrc": "vim",
+      ".fdignore": "gitignore",
+      ".fennelrc": "fennel",
+      ".fetchmailrc": "fetchmail",
+      ".firebaserc": "json",
+      ".followup": "mail",
+      ".gdbearlyinit": "gdb",
+      ".gdbinit": "gdb",
+      ".gitattributes": "gitattributes",
+      ".gitconfig": "gitconfig",
+      ".gitignore": "gitignore",
+      ".gitlint": "dosini",
+      ".gitmodules": "gitconfig",
+      ".gitolite.rc": "perl",
+      ".gnashpluginrc": "gnash",
+      ".gnashrc": "gnash",
+      ".gnuplot_history": "gnuplot",
+      ".gprc": "gp",
+      ".gtkrc": "gtkrc",
+      ".guile": "scheme",
+      ".hintrc": "jsonc",
+      ".htaccess": "apache",
+      ".hy-history": "hy",
+      ".ignore": "gitignore",
+      ".indent.pro": "indent",
+      ".inputrc": "readline",
+      ".irb_history": "ruby",
+      ".irbrc": "ruby",
+      ".jline-jython.history": "python",
+      ".jscsrc": "jsonc",
+      ".jsfmtrc": "jsonc",
+      ".jshintrc": "jsonc",
+      ".justfile": "just",
+      ".kshrc": "sh",
+      ".latexmkrc": "perl",
+      ".ldaprc": "ldapconf",
+      ".letter": "mail",
+      ".lftprc": "lftp",
+      ".lintstagedrc": "json",
+      ".lips_repl_history": "scheme",
+      ".login": "csh",
+      ".lsl": "lsl",
+      ".lua_history": "lua",
+      ".luacheckrc": "lua",
+      ".luaurc": "jsonc",
+      ".m4_history": "m4",
+      ".mailcap": "mailcap",
+      ".makepkg.conf": "sh",
+      ".mambarc": "yaml",
+      ".mrxvtrc": "mrxvtrc",
+      ".msmtprc": "msmtp",
+      ".mysql_history": "mysql",
+      ".netrc": "netrc",
+      ".netrwhist": "vim",
+      ".node_repl_history": "javascript",
+      ".notmuch-config": "dosini",
+      ".npmignore": "gitignore",
+      ".npmrc": "dosini",
+      ".ocamlinit": "ocaml",
+      ".octaverc": "octave",
+      ".oelint.cfg": "dosini",
+      ".ondirrc": "ondir",
+      ".pam_environment": "pamenv",
+      ".pinerc": "pine",
+      ".pinercex": "pine",
+      ".povrayrc": "povini",
+      ".prettierrc": "json",
+      ".procmail": "procmail",
+      ".procmailrc": "procmail",
+      ".profile": "sh",
+      ".pylintrc": "dosini",
+      ".pypirc": "dosini",
+      ".python_history": "python",
+      ".pythonrc": "python",
+      ".pythonstartup": "python",
+      ".ratpoisonrc": "ratpoison",
+      ".reminders": "remind",
+      ".replyrc": "dosini",
+      ".rgignore": "gitignore",
+      ".ripgreprc": "conf",
+      ".sawfishrc": "lisp",
+      ".sbclrc": "lisp",
+      ".screenrc": "screen",
+      ".skhdrc": "skhd",
+      ".slrnrc": "slrnrc",
+      ".sqlite_history": "sql",
+      ".stylelintrc": "json",
+      ".swcrc": "json",
+      ".swrc": "jsonc",
+      ".tclsh-history": "tcl",
+      ".tclshrc": "tcl",
+      ".tcshrc": "tcsh",
+      ".tfrc": "tf",
+      ".tidyrc": "tidy",
+      ".tmux.conf": "tmux",
+      ".trans": "clojure",
+      ".ts_node_repl_history": "typescript",
+      ".viminfo": "viminfo",
+      ".vscodeignore": "gitignore",
+      ".vsconfig": "jsonc",
+      ".wakatime.cfg": "dosini",
+      ".wget2rc": "wget2",
+      ".wgetrc": "wget",
+      ".wishrc": "tcl",
+      ".wvdialrc": "wvdial",
+      ".x11vncrc": "conf",
+      ".xprofile": "sh",
+      ".xsctcmdhistory": "tcl",
+      ".xsdbcmdhistory": "tcl",
+      ".zcompdump": "zsh",
+      ".zfbfmarks": "zsh",
+      ".zlogin": "zsh",
+      ".zlogout": "zsh",
+      ".zprofile": "zsh",
+      ".zsh_history": "zsh",
+      ".zshenv": "zsh",
+      ".zshrc": "zsh",
+      "=tagging-method": "arch",
+      "APKBUILD": "apkbuild",
+      "AUTHORS": "text",
+      "BUCK": "bzl",
+      "BUILD": "bzl",
+      "Brewfile": "ruby",
+      "CMakeCache.txt": "cmakecache",
+      "CMakeLists.txt": "cmake",
+      "CODEOWNERS": "codeowners",
+      "COMMIT_EDITMSG": "gitcommit",
+      "COPYING": "text",
+      "Cargo.lock": "toml",
+      "Compose": "xcompose",
+      "Config.in": "kconfig",
+      "Containerfile": "dockerfile",
+      "Directory.Build.props": "xml",
+      "Directory.Build.targets": "xml",
+      "Directory.Packages.props": "xml",
+      "Dockerfile": "dockerfile",
+      "EDIT_DESCRIPTION": "gitcommit",
+      "Earthfile": "earthfile",
+      "GNUmakefile.am": "automake",
+      "Gemfile": "ruby",
+      "Gopkg.lock": "toml",
+      "JUSTFILE": "just",
+      "Jenkinsfile": "groovy",
+      "Justfile": "just",
+      "Kbuild": "make",
+      "Kconfig": "kconfig",
+      "Kconfig.debug": "kconfig",
+      "LICENSE": "text",
+      "MANIFEST.in": "pymanifest",
+      "MERGE_MSG": "gitcommit",
+      "Makefile.am": "automake",
+      "Muttngrc": "muttrc",
+      "Muttrc": "muttrc",
+      "NEWS.Debian": "debchangelog",
+      "NEWS.dch": "debchangelog",
+      "NOTES_EDITMSG": "gitcommit",
+      "Neomuttrc": "neomuttrc",
+      "PKGBUILD": "sh",
+      "Pipfile": "toml",
+      "Pipfile.lock": "json",
+      "Puppetfile": "ruby",
+      "README": "text",
+      "Rakefile": "ruby",
+      "Rantfile": "ruby",
+      "Rprofile": "r",
+      "Rprofile.site": "r",
+      "SConstruct": "python",
+      "Snakefile": "snakemake",
+      "TAG_EDITMSG": "gitcommit",
+      "Tiltfile": "tiltfile",
+      "Vagrantfile": "ruby",
+      "WORKSPACE": "bzl",
+      "WORKSPACE.bzlmod": "bzl",
+      "XF86Config": "xf86conf",
+      "_exrc": "vim",
+      "_viminfo": "viminfo",
+      "a2psrc": "a2ps",
+      "alsoft.conf": "dosini",
+      "alsoft.ini": "dosini",
+      "alsoftrc.sample": "dosini",
+      "apt.conf": "aptconf",
+      "auto.master": "conf",
+      "bash.bashrc": "sh",
+      "bashrc": "sh",
+      "build.xml": "ant",
+      "bun.lock": "jsonc",
+      "cabal.config": "cabalconfig",
+      "cabal.project": "cabalproject",
+      "calendar": "calendar",
+      "catalog": "catalog",
+      "cfengine.conf": "cfengine",
+      "cgdbrc": "cgdbrc",
+      "changelog.Debian": "debchangelog",
+      "changelog.dch": "debchangelog",
+      "cm3.cfg": "m3quake",
+      "completed.data": "taskdata",
+      "composer.lock": "json",
+      "condarc": "yaml",
+      "config.ld": "lua",
+      "configure.ac": "config",
+      "configure.in": "config",
+      "constraints.txt": "requirements",
+      "crontab": "crontab",
+      "csh.cshrc": "csh",
+      "csh.login": "csh",
+      "csh.logout": "csh",
+      "cuda-gdbinit": "gdb",
+      "deno.lock": "json",
+      "deno_history.txt": "javascript",
+      "denyhosts.conf": "denyhosts",
+      "devscripts.conf": "sh",
+      "dict.conf": "dictconf",
+      "dockerfile": "dockerfile",
+      "dune": "dune",
+      "dune-file": "dune",
+      "dune-project": "dune",
+      "dune-workspace": "dune",
+      "elinks.conf": "elinks",
+      "example.gitolite.rc": "perl",
+      "exim.conf": "exim",
+      "exports": "exports",
+      "fdrupstream.log": "upstreamlog",
+      "fennelrc": "fennel",
+      "fglrxrc": "xml",
+      "filter-rules": "elmfilt",
+      "flake.lock": "json",
+      "fonts.conf": "xml",
+      "fstab": "fstab",
+      "gdbearlyinit": "gdb",
+      "gdbinit": "gdb",
+      "git-rebase-todo": "gitrebase",
+      "gitolite.conf": "gitolite",
+      "gitolite.rc": "perl",
+      "gkrellmrc": "gkrellmrc",
+      "gnashpluginrc": "gnash",
+      "gnashrc": "gnash",
+      "go.sum": "gosum",
+      "go.work": "gowork",
+      "go.work.sum": "gosum",
+      "goaccess.conf": "goaccess",
+      "gtkrc": "gtkrc",
+      "hypridle.conf": "hyprlang",
+      "hyprland.conf": "hyprlang",
+      "hyprlock.conf": "hyprlang",
+      "hyprpaper.conf": "hyprlang",
+      "indent.pro": "indent",
+      "indentrc": "indent",
+      "init.trans": "clojure",
+      "inittab": "inittab",
+      "inputrc": "readline",
+      "ipf.conf": "ipfilter",
+      "ipf.rules": "ipfilter",
+      "ipf6.conf": "ipfilter",
+      "irb_history": "ruby",
+      "irbrc": "ruby",
+      "isyncrc": "mbsync",
+      "jbuild": "dune",
+      "justfile": "just",
+      "kitty.conf": "kitty",
+      "latexmkrc": "perl",
+      "ldap.conf": "ldapconf",
+      "ldaprc": "ldapconf",
+      "lfrc": "lf",
+      "lftp.conf": "lftp",
+      "lilo.conf": "lilo",
+      "lltxxxxx.txt": "gedcom",
+      "lynx.cfg": "lynx",
+      "m3makefile": "m3build",
+      "m3overrides": "m3build",
+      "mailcap": "mailcap",
+      "main.cf": "pfmain",
+      "main.cf.proto": "pfmain",
+      "makefile.am": "automake",
+      "makepkg.conf": "sh",
+      "mambarc": "yaml",
+      "man.config": "manconf",
+      "matplotlibrc": "yaml",
+      "maxima-init.mac": "maxima",
+      "meson.build": "meson",
+      "meson.options": "meson",
+      "meson_options.txt": "meson",
+      "mimeapps.list": "dosini",
+      "mix.lock": "elixir",
+      "mplayer.conf": "mplayerconf",
+      "mpv.conf": "confini",
+      "mrxvtrc": "mrxvtrc",
+      "mtab": "fstab",
+      "named.root": "bindzone",
+      "nfs.conf": "dosini",
+      "nfsmount.conf": "dosini",
+      "npmrc": "dosini",
+      "octave.conf": "octave",
+      "octaverc": "octave",
+      "opam": "opam",
+      "opam.locked": "opam",
+      "pacman.conf": "confini",
+      "pam_env.conf": "pamenv",
+      "paru.conf": "confini",
+      "pending.data": "taskdata",
+      "pf.conf": "pf",
+      "pinerc": "pine",
+      "pinercex": "pine",
+      "pip.conf": "dosini",
+      "pixi.lock": "yaml",
+      "printcap": "ptcap",
+      "psprint.conf": "dosini",
+      "pudb.cfg": "dosini",
+      "pylintrc": "dosini",
+      "qmldir": "qmldir",
+      "rakefile": "ruby",
+      "rantfile": "ruby",
+      "ratpoisonrc": "ratpoison",
+      "rebar.config": "erlang",
+      "requirements.in": "requirements",
+      "requirements.txt": "requirements",
+      "resolv.conf": "resolv",
+      "ripgreprc": "conf",
+      "robots.txt": "robots",
+      "rock_manifest": "lua",
+      "sbclrc": "lisp",
+      "screenrc": "screen",
+      "sendmail.cf": "sm",
+      "setup.cfg": "dosini",
+      "skhdrc": "skhd",
+      "smb.conf": "samba",
+      "snort.conf": "hog",
+      "sofficerc": "dosini",
+      "squid.conf": "squid",
+      "ssh_config": "sshconfig",
+      "sshd_config": "sshdconfig",
+      "sudoers.tmp": "sudoers",
+      "symfony.lock": "json",
+      "tags": "tags",
+      "tclsh.rc": "tcl",
+      "tcsh.login": "tcsh",
+      "tcsh.tcshrc": "tcsh",
+      "termcap": "ptcap",
+      "texdoc.cnf": "conf",
+      "texmf.cnf": "texmf",
+      "tfrc": "tf",
+      "tidy.conf": "tidy",
+      "tidyrc": "tidy",
+      "tiltfile": "tiltfile",
+      "trustees.conf": "trustees",
+      "undo.data": "taskdata",
+      "user-dirs.defaults": "sh",
+      "user-dirs.dirs": "sh",
+      "uv.lock": "toml",
+      "vgrindefs": "vgrindefs",
+      "vision.conf": "hog",
+      "wget2rc": "wget2",
+      "wgetrc": "wget",
+      "wvdial.conf": "wvdial",
+      "xdm-config": "xdefaults",
+      "xorg.conf": "xf86conf",
+      "xorg.conf-4": "xf86conf",
+      "yarn.lock": "yaml",
+      "zathurarc": "zathurarc"
+    }
+  },
+  "schema_version": 1,
+  "servers": [
+    {
+      "executable": "ada_language_server",
+      "id": "ada_language_server",
+      "languages": [
+        "*"
+      ],
+      "launch_args": [],
+      "mason_package": "ada-language-server",
+      "name": "ada-language-server",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "air",
+      "id": "air",
+      "languages": [
+        "r"
+      ],
+      "launch_args": [
+        "language-server"
+      ],
+      "mason_package": "air",
+      "name": "air",
+      "project_root_markers": [
+        "air.toml",
+        ".air.toml",
+        ".git"
+      ]
+    },
+    {
+      "executable": "ngserver",
+      "id": "angularls",
+      "languages": [
+        "html",
+        "htmlangular",
+        "typescript",
+        "typescriptreact"
+      ],
+      "launch_args": [
+        "--stdio"
+      ],
+      "mason_package": "angular-language-server",
+      "name": "angular-language-server",
+      "project_root_markers": [
+        "angular.json",
+        "nx.json"
+      ]
+    },
+    {
+      "executable": "ansible-language-server",
+      "id": "ansiblels",
+      "languages": [
+        "yaml.ansible"
+      ],
+      "launch_args": [
+        "--stdio"
+      ],
+      "mason_package": "ansible-language-server",
+      "name": "ansible-language-server",
+      "project_root_markers": [
+        "ansible.cfg",
+        ".ansible-lint"
+      ]
+    },
+    {
+      "executable": "antlersls",
+      "id": "antlersls",
+      "languages": [
+        "antlers",
+        "html"
+      ],
+      "launch_args": [
+        "--stdio"
+      ],
+      "mason_package": "antlers-language-server",
+      "name": "antlers-language-server",
+      "project_root_markers": [
+        "composer.json"
+      ]
+    },
+    {
+      "executable": "arduino-language-server",
+      "id": "arduino_language_server",
+      "languages": [
+        "arduino"
+      ],
+      "launch_args": [],
+      "mason_package": "arduino-language-server",
+      "name": "arduino-language-server",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "asm-lsp",
+      "id": "asm_lsp",
+      "languages": [
+        "asm",
+        "vmasm"
+      ],
+      "launch_args": [],
+      "mason_package": "asm-lsp",
+      "name": "asm-lsp",
+      "project_root_markers": [
+        ".asm-lsp.toml",
+        ".git"
+      ]
+    },
+    {
+      "executable": "ast-grep",
+      "id": "ast_grep",
+      "languages": [
+        "bash",
+        "c",
+        "cpp",
+        "cs",
+        "css",
+        "elixir",
+        "go",
+        "haskell",
+        "html",
+        "java",
+        "javascript",
+        "javascriptreact",
+        "json",
+        "kotlin",
+        "lua",
+        "nix",
+        "php",
+        "python",
+        "ruby",
+        "rust",
+        "scala",
+        "solidity",
+        "swift",
+        "typescript",
+        "typescriptreact",
+        "yaml"
+      ],
+      "launch_args": [
+        "lsp"
+      ],
+      "mason_package": "ast-grep",
+      "name": "ast-grep",
+      "project_root_markers": [
+        "sgconfig.yaml",
+        "sgconfig.yml"
+      ]
+    },
+    {
+      "executable": "astro-ls",
+      "id": "astro",
+      "languages": [
+        "astro"
+      ],
+      "launch_args": [],
+      "mason_package": "astro-language-server",
+      "name": "astro-language-server",
+      "project_root_markers": [
+        "package.json",
+        "tsconfig.json",
+        "jsconfig.json",
+        ".git"
+      ]
+    },
+    {
+      "executable": "autohotkey_lsp",
+      "id": "autohotkey_lsp",
+      "languages": [
+        "autohotkey"
+      ],
+      "launch_args": [
+        "--stdio"
+      ],
+      "mason_package": "autohotkey_lsp",
+      "name": "autohotkey_lsp",
+      "project_root_markers": [
+        "package.json"
+      ]
+    },
+    {
+      "executable": "autotools-language-server",
+      "id": "autotools_ls",
+      "languages": [
+        "automake",
+        "config",
+        "make"
+      ],
+      "launch_args": [],
+      "mason_package": "autotools-language-server",
+      "name": "autotools-language-server",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "awk-language-server",
+      "id": "awk_ls",
+      "languages": [
+        "awk"
+      ],
+      "launch_args": [],
+      "mason_package": "awk-language-server",
+      "name": "awk-language-server",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "azure-pipelines-language-server",
+      "id": "azure_pipelines_ls",
+      "languages": [
+        "yaml"
+      ],
+      "launch_args": [
+        "--stdio"
+      ],
+      "mason_package": "azure-pipelines-language-server",
+      "name": "azure-pipelines-language-server",
+      "project_root_markers": [
+        "azure-pipelines.yml"
+      ]
+    },
+    {
+      "executable": "bacon-ls",
+      "id": "bacon_ls",
+      "languages": [
+        "rust"
+      ],
+      "launch_args": [],
+      "mason_package": "bacon-ls",
+      "name": "bacon-ls",
+      "project_root_markers": [
+        ".bacon-locations",
+        "Cargo.toml"
+      ]
+    },
+    {
+      "executable": "basedpyright-langserver",
+      "id": "basedpyright",
+      "languages": [
+        "python"
+      ],
+      "launch_args": [
+        "--stdio"
+      ],
+      "mason_package": "basedpyright",
+      "name": "basedpyright",
+      "project_root_markers": [
+        "pyrightconfig.json",
+        "pyproject.toml",
+        "setup.py",
+        "setup.cfg",
+        "requirements.txt",
+        "Pipfile",
+        ".git"
+      ]
+    },
+    {
+      "executable": "bash-language-server",
+      "id": "bashls",
+      "languages": [
+        "bash",
+        "sh"
+      ],
+      "launch_args": [
+        "start"
+      ],
+      "mason_package": "bash-language-server",
+      "name": "bash-language-server",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "basics-language-server",
+      "id": "basics_ls",
+      "languages": [
+        "*"
+      ],
+      "launch_args": [],
+      "mason_package": "basics-language-server",
+      "name": "basics-language-server",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "bazelrc-lsp",
+      "id": "bazelrc_lsp",
+      "languages": [
+        "bazelrc"
+      ],
+      "launch_args": [
+        "lsp"
+      ],
+      "mason_package": "bazelrc-lsp",
+      "name": "bazelrc-lsp",
+      "project_root_markers": [
+        "WORKSPACE",
+        "WORKSPACE.bazel",
+        "MODULE.bazel"
+      ]
+    },
+    {
+      "executable": "beancount-language-server",
+      "id": "beancount",
+      "languages": [
+        "bean",
+        "beancount"
+      ],
+      "launch_args": [
+        "--stdio"
+      ],
+      "mason_package": "beancount-language-server",
+      "name": "beancount-language-server",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "bicep-lsp",
+      "id": "bicep",
+      "languages": [
+        "bicep",
+        "bicep-params"
+      ],
+      "launch_args": [],
+      "mason_package": "bicep-lsp",
+      "name": "bicep-lsp",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "biome",
+      "id": "biome",
+      "languages": [
+        "astro",
+        "css",
+        "graphql",
+        "html",
+        "javascript",
+        "javascriptreact",
+        "json",
+        "jsonc",
+        "svelte",
+        "typescript",
+        "typescriptreact",
+        "vue"
+      ],
+      "launch_args": [
+        "lsp-proxy"
+      ],
+      "mason_package": "biome",
+      "name": "biome",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "bqls",
+      "id": "bqls",
+      "languages": [
+        "sql"
+      ],
+      "launch_args": [],
+      "mason_package": "bqls",
+      "name": "bqls",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "bsc",
+      "id": "bright_script",
+      "languages": [
+        "brs"
+      ],
+      "launch_args": [
+        "--lsp",
+        "--stdio"
+      ],
+      "mason_package": "brighterscript",
+      "name": "brighterscript",
+      "project_root_markers": [
+        "makefile",
+        "Makefile",
+        ".git"
+      ]
+    },
+    {
+      "executable": "bsl-language-server",
+      "id": "bsl_ls",
+      "languages": [
+        "bsl",
+        "os"
+      ],
+      "launch_args": [],
+      "mason_package": "bsl-language-server",
+      "name": "bsl-language-server",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "buf",
+      "id": "buf_ls",
+      "languages": [
+        "buf-config",
+        "proto"
+      ],
+      "launch_args": [
+        "lsp",
+        "serve",
+        "--log-format=text"
+      ],
+      "mason_package": "buf",
+      "name": "buf",
+      "project_root_markers": [
+        "buf.yaml",
+        ".git"
+      ]
+    },
+    {
+      "executable": "bzl",
+      "id": "bzl",
+      "languages": [
+        "bzl"
+      ],
+      "launch_args": [
+        "lsp",
+        "serve"
+      ],
+      "mason_package": "bzl",
+      "name": "bzl",
+      "project_root_markers": [
+        "WORKSPACE",
+        "WORKSPACE.bazel"
+      ]
+    },
+    {
+      "executable": "c3lsp",
+      "id": "c3_lsp",
+      "languages": [
+        "c3",
+        "c3i"
+      ],
+      "launch_args": [],
+      "mason_package": "c3-lsp",
+      "name": "c3-lsp",
+      "project_root_markers": [
+        "project.json",
+        "manifest.json",
+        ".git"
+      ]
+    },
+    {
+      "executable": "scarb",
+      "id": "cairo_ls",
+      "languages": [
+        "cairo"
+      ],
+      "launch_args": [
+        "cairo-language-server",
+        "/C",
+        "--node-ipc"
+      ],
+      "mason_package": "cairo-language-server",
+      "name": "cairo-language-server",
+      "project_root_markers": [
+        "Scarb.toml",
+        "cairo_project.toml",
+        ".git"
+      ]
+    },
+    {
+      "executable": "cds-lsp",
+      "id": "cds_lsp",
+      "languages": [
+        "cds"
+      ],
+      "launch_args": [
+        "--stdio"
+      ],
+      "mason_package": "cds-lsp",
+      "name": "cds-lsp",
+      "project_root_markers": [
+        "package.json",
+        "db",
+        "srv"
+      ]
+    },
+    {
+      "executable": "clangd",
+      "id": "clangd",
+      "languages": [
+        "c",
+        "c.doxygen",
+        "cpp",
+        "cpp.doxygen",
+        "cuda",
+        "objc",
+        "objcpp"
+      ],
+      "launch_args": [],
+      "mason_package": "clangd",
+      "name": "clangd",
+      "project_root_markers": [
+        ".clangd",
+        ".clang-tidy",
+        ".clang-format",
+        "compile_commands.json",
+        "compile_flags.txt",
+        "configure.ac",
+        ".git"
+      ]
+    },
+    {
+      "executable": "clojure-lsp",
+      "id": "clojure_lsp",
+      "languages": [
+        "clojure",
+        "edn"
+      ],
+      "launch_args": [],
+      "mason_package": "clojure-lsp",
+      "name": "clojure-lsp",
+      "project_root_markers": [
+        "project.clj",
+        "deps.edn",
+        "build.boot",
+        "shadow-cljs.edn",
+        ".git",
+        "bb.edn"
+      ]
+    },
+    {
+      "executable": "cmake-language-server",
+      "id": "cmake",
+      "languages": [
+        "cmake"
+      ],
+      "launch_args": [],
+      "mason_package": "cmake-language-server",
+      "name": "cmake-language-server",
+      "project_root_markers": [
+        "CMakePresets.json",
+        "CTestConfig.cmake",
+        ".git",
+        "build",
+        "cmake"
+      ]
+    },
+    {
+      "executable": "cobol-language-support",
+      "id": "cobol_ls",
+      "languages": [
+        "cobol"
+      ],
+      "launch_args": [],
+      "mason_package": "cobol-language-support",
+      "name": "cobol-language-support",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "codebook-lsp",
+      "id": "codebook",
+      "languages": [
+        "c",
+        "css",
+        "gitcommit",
+        "go",
+        "haskell",
+        "html",
+        "java",
+        "javascript",
+        "javascriptreact",
+        "lua",
+        "markdown",
+        "php",
+        "python",
+        "ruby",
+        "rust",
+        "swift",
+        "text",
+        "toml",
+        "typescript",
+        "typescriptreact",
+        "zig"
+      ],
+      "launch_args": [
+        "serve"
+      ],
+      "mason_package": "codebook",
+      "name": "codebook",
+      "project_root_markers": [
+        ".git",
+        "codebook.toml",
+        ".codebook.toml"
+      ]
+    },
+    {
+      "executable": "codeql",
+      "id": "codeqlls",
+      "languages": [
+        "*"
+      ],
+      "launch_args": [
+        "execute",
+        "language-server",
+        "--check-errors",
+        "ON_CHANGE",
+        "-q"
+      ],
+      "mason_package": "codeql",
+      "name": "codeql",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "copilot-language-server",
+      "id": "copilot",
+      "languages": [
+        "*"
+      ],
+      "launch_args": [
+        "--stdio"
+      ],
+      "mason_package": "copilot-language-server",
+      "name": "copilot-language-server",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "coq-lsp",
+      "id": "coq_lsp",
+      "languages": [
+        "coq"
+      ],
+      "launch_args": [],
+      "mason_package": "coq-lsp",
+      "name": "coq-lsp",
+      "project_root_markers": [
+        "_CoqProject",
+        ".git"
+      ]
+    },
+    {
+      "executable": "cqlls",
+      "id": "cqlls",
+      "languages": [
+        "cql",
+        "cqlang"
+      ],
+      "launch_args": [],
+      "mason_package": "cqlls",
+      "name": "cqlls",
+      "project_root_markers": [
+        ".cqlls",
+        ".git"
+      ]
+    },
+    {
+      "executable": "crystalline",
+      "id": "crystalline",
+      "languages": [
+        "crystal"
+      ],
+      "launch_args": [],
+      "mason_package": "crystalline",
+      "name": "crystalline",
+      "project_root_markers": [
+        "shard.yml",
+        ".git"
+      ]
+    },
+    {
+      "executable": "csharp-ls",
+      "id": "csharp_ls",
+      "languages": [
+        "cs"
+      ],
+      "launch_args": [],
+      "mason_package": "csharp-language-server",
+      "name": "csharp-language-server",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "cspell-lsp",
+      "id": "cspell_ls",
+      "languages": [
+        "*"
+      ],
+      "launch_args": [
+        "--stdio"
+      ],
+      "mason_package": "cspell-lsp",
+      "name": "cspell-lsp",
+      "project_root_markers": [
+        ".git",
+        "cspell.json",
+        ".cspell.json",
+        ".cSpell.json",
+        "cSpell.json",
+        "cspell.config.js",
+        "cspell.config.cjs",
+        "cspell.config.json",
+        "cspell.config.yaml",
+        "cspell.config.yml",
+        "cspell.yaml",
+        "cspell.yml"
+      ]
+    },
+    {
+      "executable": "css-variables-language-server",
+      "id": "css_variables",
+      "languages": [
+        "css",
+        "less",
+        "scss"
+      ],
+      "launch_args": [
+        "--stdio"
+      ],
+      "mason_package": "css-variables-language-server",
+      "name": "css-variables-language-server",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "csskit",
+      "id": "csskit",
+      "languages": [
+        "css"
+      ],
+      "launch_args": [
+        "lsp"
+      ],
+      "mason_package": "csskit",
+      "name": "csskit",
+      "project_root_markers": [
+        "package.json",
+        ".git"
+      ]
+    },
+    {
+      "executable": "vscode-css-language-server",
+      "id": "cssls",
+      "languages": [
+        "css",
+        "less",
+        "scss"
+      ],
+      "launch_args": [],
+      "mason_package": "css-lsp",
+      "name": "css-lsp",
+      "project_root_markers": [
+        "package.json",
+        ".git"
+      ]
+    },
+    {
+      "executable": "cssmodules-language-server",
+      "id": "cssmodules_ls",
+      "languages": [
+        "javascript",
+        "javascriptreact",
+        "typescript",
+        "typescriptreact"
+      ],
+      "launch_args": [],
+      "mason_package": "cssmodules-language-server",
+      "name": "cssmodules-language-server",
+      "project_root_markers": [
+        "package.json"
+      ]
+    },
+    {
+      "executable": "ctags-lsp",
+      "id": "ctags_lsp",
+      "languages": [
+        "*"
+      ],
+      "launch_args": [],
+      "mason_package": "ctags-lsp",
+      "name": "ctags-lsp",
+      "project_root_markers": [
+        "tags",
+        ".tags",
+        ".git"
+      ]
+    },
+    {
+      "executable": "cucumber-language-server",
+      "id": "cucumber_language_server",
+      "languages": [
+        "cucumber"
+      ],
+      "launch_args": [
+        "--stdio"
+      ],
+      "mason_package": "cucumber-language-server",
+      "name": "cucumber-language-server",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "cue",
+      "id": "cue",
+      "languages": [
+        "cue"
+      ],
+      "launch_args": [
+        "lsp"
+      ],
+      "mason_package": "cue",
+      "name": "cue",
+      "project_root_markers": [
+        "cue.mod",
+        ".git"
+      ]
+    },
+    {
+      "executable": "custom-elements-languageserver",
+      "id": "custom_elements_ls",
+      "languages": [
+        "*"
+      ],
+      "launch_args": [
+        "--stdio"
+      ],
+      "mason_package": "custom-elements-languageserver",
+      "name": "custom-elements-languageserver",
+      "project_root_markers": [
+        "tsconfig.json",
+        "package.json",
+        "jsconfig.json",
+        ".git"
+      ]
+    },
+    {
+      "executable": "cypher-language-server",
+      "id": "cypher_ls",
+      "languages": [
+        "cypher"
+      ],
+      "launch_args": [
+        "--stdio"
+      ],
+      "mason_package": "cypher-language-server",
+      "name": "cypher-language-server",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "cuelsp",
+      "id": "dagger",
+      "languages": [
+        "cue"
+      ],
+      "launch_args": [],
+      "mason_package": "cuelsp",
+      "name": "cuelsp",
+      "project_root_markers": [
+        "cue.mod",
+        ".git"
+      ]
+    },
+    {
+      "executable": "deno",
+      "id": "denols",
+      "languages": [
+        "javascript",
+        "javascriptreact",
+        "typescript",
+        "typescriptreact"
+      ],
+      "launch_args": [
+        "lsp"
+      ],
+      "mason_package": "deno",
+      "name": "deno",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "dexter",
+      "id": "dexter",
+      "languages": [
+        "eelixir",
+        "elixir",
+        "heex"
+      ],
+      "launch_args": [
+        "lsp"
+      ],
+      "mason_package": "dexter",
+      "name": "dexter",
+      "project_root_markers": [
+        ".dexter.db",
+        ".git",
+        "mix.exs"
+      ]
+    },
+    {
+      "executable": "dhall-lsp-server",
+      "id": "dhall_lsp_server",
+      "languages": [
+        "dhall"
+      ],
+      "launch_args": [],
+      "mason_package": "dhall-lsp",
+      "name": "dhall-lsp",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "diagnostic-languageserver",
+      "id": "diagnosticls",
+      "languages": [
+        "*"
+      ],
+      "launch_args": [
+        "--stdio"
+      ],
+      "mason_package": "diagnostic-languageserver",
+      "name": "diagnostic-languageserver",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "djls",
+      "id": "djls",
+      "languages": [
+        "html",
+        "htmldjango",
+        "python"
+      ],
+      "launch_args": [
+        "serve"
+      ],
+      "mason_package": "django-language-server",
+      "name": "django-language-server",
+      "project_root_markers": [
+        "manage.py",
+        "pyproject.toml",
+        ".git"
+      ]
+    },
+    {
+      "executable": "djlsp",
+      "id": "djlsp",
+      "languages": [
+        "html",
+        "htmldjango"
+      ],
+      "launch_args": [],
+      "mason_package": "django-template-lsp",
+      "name": "django-template-lsp",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "docker-compose-langserver",
+      "id": "docker_compose_language_service",
+      "languages": [
+        "yaml.docker-compose"
+      ],
+      "launch_args": [
+        "--stdio"
+      ],
+      "mason_package": "docker-compose-language-service",
+      "name": "docker-compose-language-service",
+      "project_root_markers": [
+        "docker-compose.yaml",
+        "docker-compose.yml",
+        "compose.yaml",
+        "compose.yml"
+      ]
+    },
+    {
+      "executable": "docker-language-server",
+      "id": "docker_language_server",
+      "languages": [
+        "dockerfile",
+        "yaml.docker-compose"
+      ],
+      "launch_args": [
+        "start",
+        "--stdio"
+      ],
+      "mason_package": "docker-language-server",
+      "name": "docker-language-server",
+      "project_root_markers": [
+        "Dockerfile",
+        "docker-compose.yaml",
+        "docker-compose.yml",
+        "compose.yaml",
+        "compose.yml",
+        "docker-bake.json",
+        "docker-bake.hcl",
+        "docker-bake.override.json",
+        "docker-bake.override.hcl"
+      ]
+    },
+    {
+      "executable": "docker-langserver",
+      "id": "dockerls",
+      "languages": [
+        "dockerfile"
+      ],
+      "launch_args": [
+        "--stdio"
+      ],
+      "mason_package": "dockerfile-language-server",
+      "name": "dockerfile-language-server",
+      "project_root_markers": [
+        "Dockerfile"
+      ]
+    },
+    {
+      "executable": "dot-language-server",
+      "id": "dotls",
+      "languages": [
+        "dot"
+      ],
+      "launch_args": [
+        "--stdio"
+      ],
+      "mason_package": "dot-language-server",
+      "name": "dot-language-server",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "dprint",
+      "id": "dprint",
+      "languages": [
+        "graphql",
+        "javascript",
+        "javascriptreact",
+        "json",
+        "jsonc",
+        "markdown",
+        "python",
+        "roslyn",
+        "rust",
+        "toml",
+        "typescript",
+        "typescriptreact"
+      ],
+      "launch_args": [
+        "lsp"
+      ],
+      "mason_package": "dprint",
+      "name": "dprint",
+      "project_root_markers": [
+        "dprint.json",
+        ".dprint.json",
+        "dprint.jsonc",
+        ".dprint.jsonc"
+      ]
+    },
+    {
+      "executable": "earthlyls",
+      "id": "earthlyls",
+      "languages": [
+        "earthfile"
+      ],
+      "launch_args": [],
+      "mason_package": "earthlyls",
+      "name": "earthlyls",
+      "project_root_markers": [
+        "Earthfile"
+      ]
+    },
+    {
+      "executable": "efm-langserver",
+      "id": "efm",
+      "languages": [
+        "*"
+      ],
+      "launch_args": [],
+      "mason_package": "efm",
+      "name": "efm",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "elixir-ls",
+      "id": "elixirls",
+      "languages": [
+        "eelixir",
+        "elixir",
+        "heex",
+        "surface"
+      ],
+      "launch_args": [],
+      "mason_package": "elixir-ls",
+      "name": "elixir-ls",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "elm-language-server",
+      "id": "elmls",
+      "languages": [
+        "elm"
+      ],
+      "launch_args": [],
+      "mason_package": "elm-language-server",
+      "name": "elm-language-server",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "elp",
+      "id": "elp",
+      "languages": [
+        "erlang"
+      ],
+      "launch_args": [
+        "server"
+      ],
+      "mason_package": "elp",
+      "name": "elp",
+      "project_root_markers": [
+        "rebar.config",
+        "erlang.mk",
+        ".git"
+      ]
+    },
+    {
+      "executable": "ember-language-server",
+      "id": "ember",
+      "languages": [
+        "handlebars",
+        "javascript",
+        "javascript.glimmer",
+        "typescript",
+        "typescript.glimmer"
+      ],
+      "launch_args": [
+        "--stdio"
+      ],
+      "mason_package": "ember-language-server",
+      "name": "ember-language-server",
+      "project_root_markers": [
+        "ember-cli-build.js",
+        ".git"
+      ]
+    },
+    {
+      "executable": "emmet-language-server",
+      "id": "emmet_language_server",
+      "languages": [
+        "astro",
+        "css",
+        "eruby",
+        "html",
+        "htmlangular",
+        "htmldjango",
+        "javascriptreact",
+        "less",
+        "sass",
+        "scss",
+        "svelte",
+        "typescriptreact",
+        "vue"
+      ],
+      "launch_args": [
+        "--stdio"
+      ],
+      "mason_package": "emmet-language-server",
+      "name": "emmet-language-server",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "emmet-ls",
+      "id": "emmet_ls",
+      "languages": [
+        "astro",
+        "css",
+        "eruby",
+        "html",
+        "htmlangular",
+        "htmldjango",
+        "javascriptreact",
+        "less",
+        "pug",
+        "sass",
+        "scss",
+        "svelte",
+        "templ",
+        "typescriptreact",
+        "vue"
+      ],
+      "launch_args": [
+        "--stdio"
+      ],
+      "mason_package": "emmet-ls",
+      "name": "emmet-ls",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "emmylua_ls",
+      "id": "emmylua_ls",
+      "languages": [
+        "lua"
+      ],
+      "launch_args": [],
+      "mason_package": "emmylua_ls",
+      "name": "emmylua_ls",
+      "project_root_markers": [
+        ".emmyrc.json",
+        ".emmyrc.lua",
+        ".luarc.json",
+        ".luarc.jsonc",
+        ".luacheckrc",
+        ".stylua.toml",
+        "stylua.toml",
+        "selene.toml",
+        "selene.yml",
+        ".git"
+      ]
+    },
+    {
+      "executable": "erg",
+      "id": "erg_language_server",
+      "languages": [
+        "erg"
+      ],
+      "launch_args": [
+        "--language-server"
+      ],
+      "mason_package": "erg-language-server",
+      "name": "erg-language-server",
+      "project_root_markers": [
+        "package.er",
+        ".git"
+      ]
+    },
+    {
+      "executable": "erlang_ls",
+      "id": "erlangls",
+      "languages": [
+        "*"
+      ],
+      "launch_args": [],
+      "mason_package": "erlang-ls",
+      "name": "erlang-ls",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "python3",
+      "id": "esbonio",
+      "languages": [
+        "rst"
+      ],
+      "launch_args": [
+        "-m",
+        "esbonio.server"
+      ],
+      "mason_package": "esbonio",
+      "name": "esbonio",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "vscode-eslint-language-server",
+      "id": "eslint",
+      "languages": [
+        "astro",
+        "htmlangular",
+        "javascript",
+        "javascriptreact",
+        "svelte",
+        "typescript",
+        "typescriptreact",
+        "vue"
+      ],
+      "launch_args": [
+        "--stdio"
+      ],
+      "mason_package": "eslint-lsp",
+      "name": "eslint-lsp",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "expert",
+      "id": "expert",
+      "languages": [
+        "eelixir",
+        "elixir",
+        "heex",
+        "surface"
+      ],
+      "launch_args": [
+        "--stdio"
+      ],
+      "mason_package": "expert",
+      "name": "expert",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "facility-language-server",
+      "id": "facility_language_server",
+      "languages": [
+        "fsd"
+      ],
+      "launch_args": [],
+      "mason_package": "facility-language-server",
+      "name": "facility-language-server",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "fennel-language-server",
+      "id": "fennel_language_server",
+      "languages": [
+        "fennel"
+      ],
+      "launch_args": [],
+      "mason_package": "fennel-language-server",
+      "name": "fennel-language-server",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "fennel-ls",
+      "id": "fennel_ls",
+      "languages": [
+        "fennel"
+      ],
+      "launch_args": [],
+      "mason_package": "fennel-ls",
+      "name": "fennel-ls",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "fish-lsp",
+      "id": "fish_lsp",
+      "languages": [
+        "fish"
+      ],
+      "launch_args": [
+        "start"
+      ],
+      "mason_package": "fish-lsp",
+      "name": "fish-lsp",
+      "project_root_markers": [
+        "config.fish",
+        ".git"
+      ]
+    },
+    {
+      "executable": "flux-lsp",
+      "id": "flux_lsp",
+      "languages": [
+        "flux"
+      ],
+      "launch_args": [],
+      "mason_package": "flux-lsp",
+      "name": "flux-lsp",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "foam-ls",
+      "id": "foam_ls",
+      "languages": [
+        "OpenFOAM",
+        "foam"
+      ],
+      "launch_args": [
+        "--stdio"
+      ],
+      "mason_package": "foam-language-server",
+      "name": "foam-language-server",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "fortitude",
+      "id": "fortitude",
+      "languages": [
+        "fortran"
+      ],
+      "launch_args": [
+        "server"
+      ],
+      "mason_package": "fortitude",
+      "name": "fortitude",
+      "project_root_markers": [
+        "fpm.toml",
+        "fortitude.toml",
+        ".fortitude.toml",
+        ".git"
+      ]
+    },
+    {
+      "executable": "fortls",
+      "id": "fortls",
+      "languages": [
+        "fortran"
+      ],
+      "launch_args": [
+        "--notify_init",
+        "--hover_signature",
+        "--hover_language=fortran",
+        "--use_signature_help"
+      ],
+      "mason_package": "fortls",
+      "name": "fortls",
+      "project_root_markers": [
+        ".fortls",
+        ".fortlsrc",
+        ".fortls.json",
+        ".git"
+      ]
+    },
+    {
+      "executable": "fsautocomplete",
+      "id": "fsautocomplete",
+      "languages": [
+        "fsharp"
+      ],
+      "launch_args": [
+        "--adaptive-lsp-server-enabled"
+      ],
+      "mason_package": "fsautocomplete",
+      "name": "fsautocomplete",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "gh-actions-language-server",
+      "id": "gh_actions_ls",
+      "languages": [
+        "yaml"
+      ],
+      "launch_args": [
+        "--stdio"
+      ],
+      "mason_package": "gh-actions-language-server",
+      "name": "gh-actions-language-server",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "ginko_ls",
+      "id": "ginko_ls",
+      "languages": [
+        "dts"
+      ],
+      "launch_args": [],
+      "mason_package": "ginko_ls",
+      "name": "ginko_ls",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "gitlab-ci-ls",
+      "id": "gitlab_ci_ls",
+      "languages": [
+        "yaml.gitlab"
+      ],
+      "launch_args": [],
+      "mason_package": "gitlab-ci-ls",
+      "name": "gitlab-ci-ls",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "glint-language-server",
+      "id": "glint",
+      "languages": [
+        "handlebars",
+        "html.handlebars",
+        "javascript",
+        "javascript.glimmer",
+        "typescript",
+        "typescript.glimmer"
+      ],
+      "launch_args": [],
+      "mason_package": "glint",
+      "name": "glint",
+      "project_root_markers": [
+        ".glintrc.yml",
+        ".glintrc",
+        ".glintrc.json",
+        ".glintrc.js",
+        "glint.config.js",
+        "package.json"
+      ]
+    },
+    {
+      "executable": "glsl_analyzer",
+      "id": "glsl_analyzer",
+      "languages": [
+        "comp",
+        "frag",
+        "geom",
+        "glsl",
+        "tesc",
+        "tese",
+        "vert"
+      ],
+      "launch_args": [],
+      "mason_package": "glsl_analyzer",
+      "name": "glsl_analyzer",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "glslls",
+      "id": "glslls",
+      "languages": [
+        "comp",
+        "frag",
+        "geom",
+        "glsl",
+        "tesc",
+        "tese",
+        "vert"
+      ],
+      "launch_args": [
+        "--stdin"
+      ],
+      "mason_package": "glslls",
+      "name": "glslls",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "gn-language-server",
+      "id": "gn_language_server",
+      "languages": [
+        "gn"
+      ],
+      "launch_args": [
+        "--stdio"
+      ],
+      "mason_package": "gn-language-server",
+      "name": "gn-language-server",
+      "project_root_markers": [
+        ".gn",
+        ".git"
+      ]
+    },
+    {
+      "executable": "golangci-lint-langserver",
+      "id": "golangci_lint_ls",
+      "languages": [
+        "go",
+        "gomod"
+      ],
+      "launch_args": [],
+      "mason_package": "golangci-lint-langserver",
+      "name": "golangci-lint-langserver",
+      "project_root_markers": [
+        ".golangci.yml",
+        ".golangci.yaml",
+        ".golangci.toml",
+        ".golangci.json",
+        "go.work",
+        "go.mod",
+        ".git"
+      ]
+    },
+    {
+      "executable": "gopls",
+      "id": "gopls",
+      "languages": [
+        "go",
+        "gomod",
+        "gotmpl",
+        "gowork"
+      ],
+      "launch_args": [],
+      "mason_package": "gopls",
+      "name": "gopls",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "gradle-language-server",
+      "id": "gradle_ls",
+      "languages": [
+        "groovy"
+      ],
+      "launch_args": [],
+      "mason_package": "gradle-language-server",
+      "name": "gradle-language-server",
+      "project_root_markers": [
+        "settings.gradle",
+        "build.gradle"
+      ]
+    },
+    {
+      "executable": "grammarly-languageserver",
+      "id": "grammarly",
+      "languages": [
+        "markdown"
+      ],
+      "launch_args": [
+        "--stdio"
+      ],
+      "mason_package": "grammarly-languageserver",
+      "name": "grammarly-languageserver",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "graphql-lsp",
+      "id": "graphql",
+      "languages": [
+        "graphql",
+        "javascriptreact",
+        "typescriptreact"
+      ],
+      "launch_args": [
+        "server",
+        "-m",
+        "stream"
+      ],
+      "mason_package": "graphql-language-service-cli",
+      "name": "graphql-language-service-cli",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "groovy-language-server",
+      "id": "groovyls",
+      "languages": [
+        "groovy"
+      ],
+      "launch_args": [],
+      "mason_package": "groovy-language-server",
+      "name": "groovy-language-server",
+      "project_root_markers": [
+        "Jenkinsfile",
+        ".git"
+      ]
+    },
+    {
+      "executable": "harper-ls",
+      "id": "harper_ls",
+      "languages": [
+        "asciidoc",
+        "c",
+        "clojure",
+        "cmake",
+        "cpp",
+        "cs",
+        "dart",
+        "gitcommit",
+        "go",
+        "haskell",
+        "html",
+        "java",
+        "javascript",
+        "lua",
+        "markdown",
+        "nix",
+        "php",
+        "python",
+        "ruby",
+        "rust",
+        "sh",
+        "swift",
+        "tex",
+        "toml",
+        "typescript",
+        "typescriptreact",
+        "typst"
+      ],
+      "launch_args": [
+        "--stdio"
+      ],
+      "mason_package": "harper-ls",
+      "name": "harper-ls",
+      "project_root_markers": [
+        ".harper-dictionary.txt",
+        ".git"
+      ]
+    },
+    {
+      "executable": "haxe-language-server",
+      "id": "haxe_language_server",
+      "languages": [
+        "*"
+      ],
+      "launch_args": [],
+      "mason_package": "haxe-language-server",
+      "name": "haxe-language-server",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "hdl_checker",
+      "id": "hdl_checker",
+      "languages": [
+        "systemverilog",
+        "verilog",
+        "vhdl"
+      ],
+      "launch_args": [
+        "--lsp"
+      ],
+      "mason_package": "hdl-checker",
+      "name": "hdl-checker",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "helm_ls",
+      "id": "helm_ls",
+      "languages": [
+        "helm",
+        "yaml.helm-values"
+      ],
+      "launch_args": [
+        "serve"
+      ],
+      "mason_package": "helm-ls",
+      "name": "helm-ls",
+      "project_root_markers": [
+        "Chart.yaml"
+      ]
+    },
+    {
+      "executable": "herb-language-server",
+      "id": "herb_ls",
+      "languages": [
+        "eruby",
+        "html"
+      ],
+      "launch_args": [
+        "--stdio"
+      ],
+      "mason_package": "herb-language-server",
+      "name": "herb-language-server",
+      "project_root_markers": [
+        "Gemfile",
+        ".git"
+      ]
+    },
+    {
+      "executable": "haskell-language-server-wrapper",
+      "id": "hls",
+      "languages": [
+        "haskell",
+        "lhaskell"
+      ],
+      "launch_args": [
+        "--lsp"
+      ],
+      "mason_package": "haskell-language-server",
+      "name": "haskell-language-server",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "vscode-home-assistant",
+      "id": "home_assistant",
+      "languages": [
+        "yaml"
+      ],
+      "launch_args": [
+        "--stdio"
+      ],
+      "mason_package": "vscode-home-assistant",
+      "name": "vscode-home-assistant",
+      "project_root_markers": [
+        "configuration.yaml",
+        "configuration.yml"
+      ]
+    },
+    {
+      "executable": "hoon-language-server",
+      "id": "hoon_ls",
+      "languages": [
+        "hoon"
+      ],
+      "launch_args": [],
+      "mason_package": "hoon-language-server",
+      "name": "hoon-language-server",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "vscode-html-language-server",
+      "id": "html",
+      "languages": [
+        "html"
+      ],
+      "launch_args": [],
+      "mason_package": "html-lsp",
+      "name": "html-lsp",
+      "project_root_markers": [
+        "package.json",
+        ".git"
+      ]
+    },
+    {
+      "executable": "htmx-lsp",
+      "id": "htmx",
+      "languages": [
+        "aspnetcorerazor",
+        "astro",
+        "astro-markdown",
+        "blade",
+        "clojure",
+        "django-html",
+        "edge",
+        "eelixir",
+        "ejs",
+        "elixir",
+        "erb",
+        "eruby",
+        "gohtml",
+        "gohtmltmpl",
+        "haml",
+        "handlebars",
+        "hbs",
+        "heex",
+        "html",
+        "html-eex",
+        "htmlangular",
+        "htmldjango",
+        "jade",
+        "javascript",
+        "javascriptreact",
+        "leaf",
+        "liquid",
+        "markdown",
+        "mdx",
+        "mustache",
+        "njk",
+        "nunjucks",
+        "php",
+        "razor",
+        "reason",
+        "rescript",
+        "slim",
+        "svelte",
+        "templ",
+        "twig",
+        "typescript",
+        "typescriptreact",
+        "vue"
+      ],
+      "launch_args": [],
+      "mason_package": "htmx-lsp",
+      "name": "htmx-lsp",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "hydra-lsp",
+      "id": "hydra_lsp",
+      "languages": [
+        "yaml"
+      ],
+      "launch_args": [],
+      "mason_package": "hydra-lsp",
+      "name": "hydra-lsp",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "hylo-language-server",
+      "id": "hylo_ls",
+      "languages": [
+        "hylo"
+      ],
+      "launch_args": [
+        "--stdio"
+      ],
+      "mason_package": "hylo-language-server",
+      "name": "hylo-language-server",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "hyprls",
+      "id": "hyprls",
+      "languages": [
+        "hyprlang"
+      ],
+      "launch_args": [
+        "--stdio"
+      ],
+      "mason_package": "hyprls",
+      "name": "hyprls",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "intelephense",
+      "id": "intelephense",
+      "languages": [
+        "php"
+      ],
+      "launch_args": [
+        "--stdio"
+      ],
+      "mason_package": "intelephense",
+      "name": "intelephense",
+      "project_root_markers": [
+        ".git",
+        "composer.json"
+      ]
+    },
+    {
+      "executable": "java-language-server",
+      "id": "java_language_server",
+      "languages": [
+        "java"
+      ],
+      "launch_args": [],
+      "mason_package": "java-language-server",
+      "name": "java-language-server",
+      "project_root_markers": [
+        "build.gradle",
+        "build.gradle.kts",
+        "pom.xml",
+        ".git"
+      ]
+    },
+    {
+      "executable": "jdtls",
+      "id": "jdtls",
+      "languages": [
+        "java"
+      ],
+      "launch_args": [],
+      "mason_package": "jdtls",
+      "name": "jdtls",
+      "project_root_markers": [
+        "mvnw",
+        "gradlew",
+        "settings.gradle",
+        "settings.gradle.kts",
+        ".git",
+        "build.xml",
+        "pom.xml",
+        "build.gradle",
+        "build.gradle.kts"
+      ]
+    },
+    {
+      "executable": "jedi-language-server",
+      "id": "jedi_language_server",
+      "languages": [
+        "python"
+      ],
+      "launch_args": [],
+      "mason_package": "jedi-language-server",
+      "name": "jedi-language-server",
+      "project_root_markers": [
+        "pyproject.toml",
+        "setup.py",
+        "setup.cfg",
+        "requirements.txt",
+        "Pipfile",
+        ".git"
+      ]
+    },
+    {
+      "executable": "jinja-lsp",
+      "id": "jinja_lsp",
+      "languages": [
+        "jinja"
+      ],
+      "launch_args": [],
+      "mason_package": "jinja-lsp",
+      "name": "jinja-lsp",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "jq-lsp",
+      "id": "jqls",
+      "languages": [
+        "jq"
+      ],
+      "launch_args": [],
+      "mason_package": "jq-lsp",
+      "name": "jq-lsp",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "vscode-json-language-server",
+      "id": "jsonls",
+      "languages": [
+        "json",
+        "jsonc"
+      ],
+      "launch_args": [],
+      "mason_package": "json-lsp",
+      "name": "json-lsp",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "jsonnet-language-server",
+      "id": "jsonnet_ls",
+      "languages": [
+        "jsonnet",
+        "libsonnet"
+      ],
+      "launch_args": [],
+      "mason_package": "jsonnet-language-server",
+      "name": "jsonnet-language-server",
+      "project_root_markers": [
+        "jsonnetfile.json",
+        ".git"
+      ]
+    },
+    {
+      "executable": "julia",
+      "id": "julials",
+      "languages": [
+        "julia"
+      ],
+      "launch_args": [
+        "--startup-file=no",
+        "--history-file=no",
+        "-e",
+        "    # Load LanguageServer.jl: attempt to load from ~/.julia/environments/nvim-lspconfig\n    # with the regular load path as a fallback\n    ls_install_path = joinpath(\n        get(DEPOT_PATH, 1, joinpath(homedir(), \".julia\")),\n        \"environments\", \"nvim-lspconfig\"\n    )\n    pushfirst!(LOAD_PATH, ls_install_path)\n    using LanguageServer\n    popfirst!(LOAD_PATH)\n    @info \"Running language server\" VERSION pwd()\n    LanguageServer.runserver()\n  "
+      ],
+      "mason_package": "julia-lsp",
+      "name": "julia-lsp",
+      "project_root_markers": [
+        "Project.toml",
+        "JuliaProject.toml"
+      ]
+    },
+    {
+      "executable": "just-lsp",
+      "id": "just",
+      "languages": [
+        "just"
+      ],
+      "launch_args": [],
+      "mason_package": "just-lsp",
+      "name": "just-lsp",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "kakehashi",
+      "id": "kakehashi",
+      "languages": [
+        "*"
+      ],
+      "launch_args": [],
+      "mason_package": "kakehashi",
+      "name": "kakehashi",
+      "project_root_markers": [
+        "kakehashi.toml",
+        ".git"
+      ]
+    },
+    {
+      "executable": "kcl-language-server",
+      "id": "kcl",
+      "languages": [
+        "kcl"
+      ],
+      "launch_args": [],
+      "mason_package": "kcl",
+      "name": "kcl",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "kotlin-language-server",
+      "id": "kotlin_language_server",
+      "languages": [
+        "kotlin"
+      ],
+      "launch_args": [],
+      "mason_package": "kotlin-language-server",
+      "name": "kotlin-language-server",
+      "project_root_markers": [
+        "settings.gradle",
+        "settings.gradle.kts",
+        "build.xml",
+        "pom.xml",
+        "build.gradle",
+        "build.gradle.kts"
+      ]
+    },
+    {
+      "executable": "intellij-server",
+      "id": "kotlin_lsp",
+      "languages": [
+        "kotlin"
+      ],
+      "launch_args": [
+        "--stdio"
+      ],
+      "mason_package": "kotlin-lsp",
+      "name": "kotlin-lsp",
+      "project_root_markers": [
+        "settings.gradle",
+        "settings.gradle.kts",
+        "pom.xml",
+        "build.gradle",
+        "build.gradle.kts",
+        "workspace.json"
+      ]
+    },
+    {
+      "executable": "laravel-ls",
+      "id": "laravel_ls",
+      "languages": [
+        "blade",
+        "php"
+      ],
+      "launch_args": [],
+      "mason_package": "laravel-ls",
+      "name": "laravel-ls",
+      "project_root_markers": [
+        "artisan"
+      ]
+    },
+    {
+      "executable": "lelwel-ls",
+      "id": "lelwel_ls",
+      "languages": [
+        "llw"
+      ],
+      "launch_args": [],
+      "mason_package": "lelwel",
+      "name": "lelwel",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "lemminx",
+      "id": "lemminx",
+      "languages": [
+        "svg",
+        "xml",
+        "xsd",
+        "xsl",
+        "xslt"
+      ],
+      "launch_args": [],
+      "mason_package": "lemminx",
+      "name": "lemminx",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "lexical",
+      "id": "lexical",
+      "languages": [
+        "eelixir",
+        "elixir",
+        "heex",
+        "surface"
+      ],
+      "launch_args": [],
+      "mason_package": "lexical",
+      "name": "lexical",
+      "project_root_markers": [
+        "mix.exs",
+        ".git"
+      ]
+    },
+    {
+      "executable": "ltex-ls",
+      "id": "ltex",
+      "languages": [
+        "bib",
+        "context",
+        "gitcommit",
+        "html",
+        "mail",
+        "markdown",
+        "org",
+        "pandoc",
+        "plaintex",
+        "quarto",
+        "rmd",
+        "rnoweb",
+        "rst",
+        "tex",
+        "text",
+        "xhtml"
+      ],
+      "launch_args": [],
+      "mason_package": "ltex-ls",
+      "name": "ltex-ls",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "ltex-ls-plus",
+      "id": "ltex_plus",
+      "languages": [
+        "asciidoc",
+        "bib",
+        "context",
+        "gitcommit",
+        "html",
+        "mail",
+        "markdown",
+        "mdx",
+        "org",
+        "pandoc",
+        "plaintex",
+        "quarto",
+        "rmd",
+        "rnoweb",
+        "rst",
+        "tex",
+        "text",
+        "typst",
+        "xhtml"
+      ],
+      "launch_args": [],
+      "mason_package": "ltex-ls-plus",
+      "name": "ltex-ls-plus",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "lua-language-server",
+      "id": "lua_ls",
+      "languages": [
+        "lua"
+      ],
+      "launch_args": [],
+      "mason_package": "lua-language-server",
+      "name": "lua-language-server",
+      "project_root_markers": [
+        ".emmyrc.json",
+        ".luarc.json",
+        ".luarc.jsonc",
+        ".luacheckrc",
+        ".stylua.toml",
+        "stylua.toml",
+        "selene.toml",
+        "selene.yml",
+        ".git"
+      ]
+    },
+    {
+      "executable": "luau-lsp",
+      "id": "luau_lsp",
+      "languages": [
+        "luau"
+      ],
+      "launch_args": [
+        "lsp"
+      ],
+      "mason_package": "luau-lsp",
+      "name": "luau-lsp",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "lwc-language-server",
+      "id": "lwc_ls",
+      "languages": [
+        "html",
+        "javascript"
+      ],
+      "launch_args": [
+        "--stdio"
+      ],
+      "mason_package": "lwc-language-server",
+      "name": "lwc-language-server",
+      "project_root_markers": [
+        "sfdx-project.json"
+      ]
+    },
+    {
+      "executable": "markdown-oxide",
+      "id": "markdown_oxide",
+      "languages": [
+        "markdown"
+      ],
+      "launch_args": [],
+      "mason_package": "markdown-oxide",
+      "name": "markdown-oxide",
+      "project_root_markers": [
+        ".git",
+        ".obsidian",
+        ".moxide.toml"
+      ]
+    },
+    {
+      "executable": "marko-language-server",
+      "id": "marko-js",
+      "languages": [
+        "marko"
+      ],
+      "launch_args": [
+        "--stdio"
+      ],
+      "mason_package": "marko-language-server",
+      "name": "marko-language-server",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "marksman",
+      "id": "marksman",
+      "languages": [
+        "markdown",
+        "markdown.mdx"
+      ],
+      "launch_args": [
+        "server"
+      ],
+      "mason_package": "marksman",
+      "name": "marksman",
+      "project_root_markers": [
+        ".marksman.toml",
+        ".git"
+      ]
+    },
+    {
+      "executable": "matlab-language-server",
+      "id": "matlab_ls",
+      "languages": [
+        "matlab"
+      ],
+      "launch_args": [
+        "--stdio"
+      ],
+      "mason_package": "matlab-language-server",
+      "name": "matlab-language-server",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "mdx-language-server",
+      "id": "mdx_analyzer",
+      "languages": [
+        "mdx"
+      ],
+      "launch_args": [
+        "--stdio"
+      ],
+      "mason_package": "mdx-analyzer",
+      "name": "mdx-analyzer",
+      "project_root_markers": [
+        "package.json"
+      ]
+    },
+    {
+      "executable": "mesonlsp",
+      "id": "mesonlsp",
+      "languages": [
+        "meson"
+      ],
+      "launch_args": [
+        "--lsp"
+      ],
+      "mason_package": "mesonlsp",
+      "name": "mesonlsp",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "millet",
+      "id": "millet",
+      "languages": [
+        "sml"
+      ],
+      "launch_args": [],
+      "mason_package": "millet",
+      "name": "millet",
+      "project_root_markers": [
+        "millet.toml"
+      ]
+    },
+    {
+      "executable": "mm0-rs",
+      "id": "mm0_ls",
+      "languages": [
+        "metamath-zero"
+      ],
+      "launch_args": [
+        "server"
+      ],
+      "mason_package": "metamath-zero-lsp",
+      "name": "metamath-zero-lsp",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "motoko-lsp",
+      "id": "motoko_lsp",
+      "languages": [
+        "motoko"
+      ],
+      "launch_args": [
+        "--stdio"
+      ],
+      "mason_package": "motoko-lsp",
+      "name": "motoko-lsp",
+      "project_root_markers": [
+        "dfx.json",
+        ".git"
+      ]
+    },
+    {
+      "executable": "move-analyzer",
+      "id": "move_analyzer",
+      "languages": [
+        "move"
+      ],
+      "launch_args": [],
+      "mason_package": "move-analyzer",
+      "name": "move-analyzer",
+      "project_root_markers": [
+        "Move.toml"
+      ]
+    },
+    {
+      "executable": "mpls",
+      "id": "mpls",
+      "languages": [
+        "markdown"
+      ],
+      "launch_args": [
+        "--theme",
+        "dark",
+        "--enable-emoji",
+        "--enable-footnotes",
+        "--no-auto"
+      ],
+      "mason_package": "mpls",
+      "name": "mpls",
+      "project_root_markers": [
+        ".marksman.toml",
+        ".git"
+      ]
+    },
+    {
+      "executable": "ms-terraform-lsp",
+      "id": "ms_terraform_lsp",
+      "languages": [
+        "terraform"
+      ],
+      "launch_args": [
+        "serve"
+      ],
+      "mason_package": "ms-terraform-lsp",
+      "name": "ms-terraform-lsp",
+      "project_root_markers": [
+        ".terraform",
+        ".git"
+      ]
+    },
+    {
+      "executable": "mutt-language-server",
+      "id": "mutt_ls",
+      "languages": [
+        "muttrc",
+        "neomuttrc"
+      ],
+      "launch_args": [],
+      "mason_package": "mutt-language-server",
+      "name": "mutt-language-server",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "neocmakelsp",
+      "id": "neocmake",
+      "languages": [
+        "cmake"
+      ],
+      "launch_args": [
+        "stdio"
+      ],
+      "mason_package": "neocmakelsp",
+      "name": "neocmakelsp",
+      "project_root_markers": [
+        ".neocmake.toml",
+        ".git",
+        "build",
+        "cmake"
+      ]
+    },
+    {
+      "executable": "nextflow-language-server",
+      "id": "nextflow_ls",
+      "languages": [
+        "nextflow"
+      ],
+      "launch_args": [],
+      "mason_package": "nextflow-language-server",
+      "name": "nextflow-language-server",
+      "project_root_markers": [
+        "nextflow.config",
+        ".git"
+      ]
+    },
+    {
+      "executable": "nextls",
+      "id": "nextls",
+      "languages": [
+        "eelixir",
+        "elixir",
+        "heex",
+        "surface"
+      ],
+      "launch_args": [
+        "--stdio"
+      ],
+      "mason_package": "nextls",
+      "name": "nextls",
+      "project_root_markers": [
+        "mix.exs",
+        ".git"
+      ]
+    },
+    {
+      "executable": "nginx-language-server",
+      "id": "nginx_language_server",
+      "languages": [
+        "nginx"
+      ],
+      "launch_args": [],
+      "mason_package": "nginx-language-server",
+      "name": "nginx-language-server",
+      "project_root_markers": [
+        "nginx.conf",
+        ".git"
+      ]
+    },
+    {
+      "executable": "nls",
+      "id": "nickel_ls",
+      "languages": [
+        "ncl",
+        "nickel"
+      ],
+      "launch_args": [],
+      "mason_package": "nickel-lang-lsp",
+      "name": "nickel-lang-lsp",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "nil",
+      "id": "nil_ls",
+      "languages": [
+        "nix"
+      ],
+      "launch_args": [],
+      "mason_package": "nil",
+      "name": "nil",
+      "project_root_markers": [
+        "flake.nix",
+        ".git"
+      ]
+    },
+    {
+      "executable": "nimlangserver",
+      "id": "nim_langserver",
+      "languages": [
+        "nim"
+      ],
+      "launch_args": [],
+      "mason_package": "nimlangserver",
+      "name": "nimlangserver",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "nimlsp",
+      "id": "nimls",
+      "languages": [
+        "nim"
+      ],
+      "launch_args": [],
+      "mason_package": "nimlsp",
+      "name": "nimlsp",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "ocamllsp",
+      "id": "ocamllsp",
+      "languages": [
+        "dune",
+        "menhir",
+        "ocaml",
+        "ocamlinterface",
+        "ocamllex",
+        "reason"
+      ],
+      "launch_args": [],
+      "mason_package": "ocaml-lsp",
+      "name": "ocaml-lsp",
+      "project_root_markers": [
+        "dune-project",
+        "dune-workspace",
+        "*.opam",
+        "opam",
+        "esy.json",
+        "package.json",
+        ".git"
+      ]
+    },
+    {
+      "executable": "ols",
+      "id": "ols",
+      "languages": [
+        "odin"
+      ],
+      "launch_args": [],
+      "mason_package": "ols",
+      "name": "ols",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "omnisharp",
+      "id": "omnisharp",
+      "languages": [
+        "cs",
+        "vb"
+      ],
+      "launch_args": [
+        "-z",
+        "--hostPID",
+        "157308",
+        "DotNet:enablePackageRestore=false",
+        "--encoding",
+        "utf-8",
+        "--languageserver"
+      ],
+      "mason_package": "omnisharp",
+      "name": "omnisharp",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "omnisharp-mono",
+      "id": "omnisharp_mono",
+      "languages": [
+        "*"
+      ],
+      "launch_args": [],
+      "mason_package": "omnisharp-mono",
+      "name": "omnisharp-mono",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "opencl-language-server",
+      "id": "opencl_ls",
+      "languages": [
+        "opencl"
+      ],
+      "launch_args": [],
+      "mason_package": "opencl-language-server",
+      "name": "opencl-language-server",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "openscad-lsp",
+      "id": "openscad_lsp",
+      "languages": [
+        "openscad"
+      ],
+      "launch_args": [
+        "--stdio"
+      ],
+      "mason_package": "openscad-lsp",
+      "name": "openscad-lsp",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "oxfmt",
+      "id": "oxfmt",
+      "languages": [
+        "css",
+        "graphql",
+        "handlebars",
+        "html",
+        "javascript",
+        "javascriptreact",
+        "json",
+        "json5",
+        "jsonc",
+        "less",
+        "markdown",
+        "scss",
+        "svelte",
+        "toml",
+        "typescript",
+        "typescriptreact",
+        "vue",
+        "yaml"
+      ],
+      "launch_args": [
+        "--lsp"
+      ],
+      "mason_package": "oxfmt",
+      "name": "oxfmt",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "oxlint",
+      "id": "oxlint",
+      "languages": [
+        "astro",
+        "javascript",
+        "javascriptreact",
+        "svelte",
+        "typescript",
+        "typescriptreact",
+        "vue"
+      ],
+      "launch_args": [
+        "--lsp"
+      ],
+      "mason_package": "oxlint",
+      "name": "oxlint",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "panache",
+      "id": "panache",
+      "languages": [
+        "markdown",
+        "quarto",
+        "rmd"
+      ],
+      "launch_args": [
+        "lsp"
+      ],
+      "mason_package": "panache",
+      "name": "panache",
+      "project_root_markers": [
+        ".panache.toml",
+        "panache.toml",
+        "_quarto.yml",
+        "_bookdown.yml",
+        ".git"
+      ]
+    },
+    {
+      "executable": "pbls",
+      "id": "pbls",
+      "languages": [
+        "proto"
+      ],
+      "launch_args": [],
+      "mason_package": "pbls",
+      "name": "pbls",
+      "project_root_markers": [
+        ".pbls.toml",
+        ".git"
+      ]
+    },
+    {
+      "executable": "perlnavigator",
+      "id": "perlnavigator",
+      "languages": [
+        "perl"
+      ],
+      "launch_args": [],
+      "mason_package": "perlnavigator",
+      "name": "perlnavigator",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "pest-language-server",
+      "id": "pest_ls",
+      "languages": [
+        "pest"
+      ],
+      "launch_args": [],
+      "mason_package": "pest-language-server",
+      "name": "pest-language-server",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "phpactor",
+      "id": "phpactor",
+      "languages": [
+        "php"
+      ],
+      "launch_args": [
+        "language-server"
+      ],
+      "mason_package": "phpactor",
+      "name": "phpactor",
+      "project_root_markers": [
+        ".git",
+        "composer.json",
+        ".phpactor.json",
+        ".phpactor.yml"
+      ]
+    },
+    {
+      "executable": "phpantom_lsp",
+      "id": "phpantom_lsp",
+      "languages": [
+        "php"
+      ],
+      "launch_args": [],
+      "mason_package": "phpantom_lsp",
+      "name": "phpantom_lsp",
+      "project_root_markers": [
+        ".phpantom.toml",
+        ".git",
+        "composer.json"
+      ]
+    },
+    {
+      "executable": "pico8-ls",
+      "id": "pico8_ls",
+      "languages": [
+        "p8"
+      ],
+      "launch_args": [
+        "--stdio"
+      ],
+      "mason_package": "pico8-ls",
+      "name": "pico8-ls",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "postgres-language-server",
+      "id": "postgres_lsp",
+      "languages": [
+        "sql"
+      ],
+      "launch_args": [
+        "lsp-proxy"
+      ],
+      "mason_package": "postgres-language-server",
+      "name": "postgres-language-server",
+      "project_root_markers": [
+        "postgres-language-server.jsonc"
+      ]
+    },
+    {
+      "executable": null,
+      "id": "powershell_es",
+      "languages": [
+        "ps1"
+      ],
+      "launch_args": [],
+      "mason_package": "powershell-editor-services",
+      "name": "powershell-editor-services",
+      "project_root_markers": [
+        "PSScriptAnalyzerSettings.psd1",
+        ".git"
+      ]
+    },
+    {
+      "executable": "prisma-language-server",
+      "id": "prismals",
+      "languages": [
+        "prisma"
+      ],
+      "launch_args": [
+        "--stdio"
+      ],
+      "mason_package": "prisma-language-server",
+      "name": "prisma-language-server",
+      "project_root_markers": [
+        ".git",
+        "package.json"
+      ]
+    },
+    {
+      "executable": "prosemd-lsp",
+      "id": "prosemd_lsp",
+      "languages": [
+        "markdown"
+      ],
+      "launch_args": [
+        "--stdio"
+      ],
+      "mason_package": "prosemd-lsp",
+      "name": "prosemd-lsp",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "protols",
+      "id": "protols",
+      "languages": [
+        "proto"
+      ],
+      "launch_args": [],
+      "mason_package": "protols",
+      "name": "protols",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "psalm",
+      "id": "psalm",
+      "languages": [
+        "php"
+      ],
+      "launch_args": [
+        "--language-server"
+      ],
+      "mason_package": "psalm",
+      "name": "psalm",
+      "project_root_markers": [
+        "psalm.xml",
+        "psalm.xml.dist"
+      ]
+    },
+    {
+      "executable": "puppet-languageserver",
+      "id": "puppet",
+      "languages": [
+        "puppet"
+      ],
+      "launch_args": [
+        "--stdio"
+      ],
+      "mason_package": "puppet-editor-services",
+      "name": "puppet-editor-services",
+      "project_root_markers": [
+        "manifests",
+        ".puppet-lint.rc",
+        "hiera.yaml",
+        ".git"
+      ]
+    },
+    {
+      "executable": "purescript-language-server",
+      "id": "purescriptls",
+      "languages": [
+        "purescript"
+      ],
+      "launch_args": [
+        "--stdio"
+      ],
+      "mason_package": "purescript-language-server",
+      "name": "purescript-language-server",
+      "project_root_markers": [
+        "bower.json",
+        "flake.nix",
+        "psc-package.json",
+        "shell.nix",
+        "spago.dhall",
+        "spago.yaml"
+      ]
+    },
+    {
+      "executable": "pylsp",
+      "id": "pylsp",
+      "languages": [
+        "python"
+      ],
+      "launch_args": [],
+      "mason_package": "python-lsp-server",
+      "name": "python-lsp-server",
+      "project_root_markers": [
+        "pyproject.toml",
+        "setup.py",
+        "setup.cfg",
+        "requirements.txt",
+        "Pipfile",
+        ".git"
+      ]
+    },
+    {
+      "executable": "pylyzer",
+      "id": "pylyzer",
+      "languages": [
+        "python"
+      ],
+      "launch_args": [
+        "--server"
+      ],
+      "mason_package": "pylyzer",
+      "name": "pylyzer",
+      "project_root_markers": [
+        "setup.py",
+        "tox.ini",
+        "requirements.txt",
+        "Pipfile",
+        "pyproject.toml",
+        ".git"
+      ]
+    },
+    {
+      "executable": "pyre",
+      "id": "pyre",
+      "languages": [
+        "python"
+      ],
+      "launch_args": [
+        "persistent"
+      ],
+      "mason_package": "pyre",
+      "name": "pyre",
+      "project_root_markers": [
+        ".pyre_configuration"
+      ]
+    },
+    {
+      "executable": "pyrefly",
+      "id": "pyrefly",
+      "languages": [
+        "python"
+      ],
+      "launch_args": [
+        "lsp"
+      ],
+      "mason_package": "pyrefly",
+      "name": "pyrefly",
+      "project_root_markers": [
+        "pyrefly.toml",
+        "pyproject.toml",
+        "setup.py",
+        "setup.cfg",
+        "requirements.txt",
+        "Pipfile",
+        ".git"
+      ]
+    },
+    {
+      "executable": "pyright-langserver",
+      "id": "pyright",
+      "languages": [
+        "python"
+      ],
+      "launch_args": [
+        "--stdio"
+      ],
+      "mason_package": "pyright",
+      "name": "pyright",
+      "project_root_markers": [
+        "pyrightconfig.json",
+        "pyproject.toml",
+        "setup.py",
+        "setup.cfg",
+        "requirements.txt",
+        "Pipfile",
+        ".git"
+      ]
+    },
+    {
+      "executable": "pytest-language-server",
+      "id": "pytest_language_server",
+      "languages": [
+        "python"
+      ],
+      "launch_args": [],
+      "mason_package": "pytest-language-server",
+      "name": "pytest-language-server",
+      "project_root_markers": [
+        "pytest.ini",
+        "pyproject.toml",
+        "setup.py",
+        "setup.cfg",
+        ".git"
+      ]
+    },
+    {
+      "executable": "qmlls",
+      "id": "qmlls",
+      "languages": [
+        "qml",
+        "qmljs"
+      ],
+      "launch_args": [],
+      "mason_package": "qmlls",
+      "name": "qmlls",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "quick-lint-js",
+      "id": "quick_lint_js",
+      "languages": [
+        "javascript",
+        "typescript"
+      ],
+      "launch_args": [
+        "--lsp-server"
+      ],
+      "mason_package": "quick-lint-js",
+      "name": "quick-lint-js",
+      "project_root_markers": [
+        "package.json",
+        "jsconfig.json",
+        ".git"
+      ]
+    },
+    {
+      "executable": "R",
+      "id": "r_language_server",
+      "languages": [
+        "quarto",
+        "r",
+        "rmd"
+      ],
+      "launch_args": [
+        "--no-echo",
+        "-e",
+        "languageserver::run()"
+      ],
+      "mason_package": "r-languageserver",
+      "name": "r-languageserver",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "raku-navigator",
+      "id": "raku_navigator",
+      "languages": [
+        "raku"
+      ],
+      "launch_args": [],
+      "mason_package": "raku-navigator",
+      "name": "raku-navigator",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "reason-language-server",
+      "id": "reason_ls",
+      "languages": [
+        "reason"
+      ],
+      "launch_args": [],
+      "mason_package": "reason-language-server",
+      "name": "reason-language-server",
+      "project_root_markers": [
+        "bsconfig.json",
+        ".git"
+      ]
+    },
+    {
+      "executable": "regal",
+      "id": "regal",
+      "languages": [
+        "rego"
+      ],
+      "launch_args": [
+        "language-server"
+      ],
+      "mason_package": "regal",
+      "name": "regal",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "regols",
+      "id": "regols",
+      "languages": [
+        "rego"
+      ],
+      "launch_args": [],
+      "mason_package": "regols",
+      "name": "regols",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "remark-language-server",
+      "id": "remark_ls",
+      "languages": [
+        "markdown"
+      ],
+      "launch_args": [
+        "--stdio"
+      ],
+      "mason_package": "remark-language-server",
+      "name": "remark-language-server",
+      "project_root_markers": [
+        ".remarkrc",
+        ".remarkrc.json",
+        ".remarkrc.js",
+        ".remarkrc.cjs",
+        ".remarkrc.mjs",
+        ".remarkrc.yml",
+        ".remarkrc.yaml",
+        ".remarkignore"
+      ]
+    },
+    {
+      "executable": "rescript-language-server",
+      "id": "rescriptls",
+      "languages": [
+        "rescript"
+      ],
+      "launch_args": [
+        "--stdio"
+      ],
+      "mason_package": "rescript-language-server",
+      "name": "rescript-language-server",
+      "project_root_markers": [
+        "bsconfig.json",
+        "rescript.json",
+        ".git"
+      ]
+    },
+    {
+      "executable": "rnix-lsp",
+      "id": "rnix",
+      "languages": [
+        "nix"
+      ],
+      "launch_args": [],
+      "mason_package": "rnix-lsp",
+      "name": "rnix-lsp",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "robotcode",
+      "id": "robotcode",
+      "languages": [
+        "resource",
+        "robot"
+      ],
+      "launch_args": [
+        "language-server"
+      ],
+      "mason_package": "robotcode",
+      "name": "robotcode",
+      "project_root_markers": [
+        "robot.toml",
+        "pyproject.toml",
+        "Pipfile",
+        ".git"
+      ]
+    },
+    {
+      "executable": "robotframework_ls",
+      "id": "robotframework_ls",
+      "languages": [
+        "robot"
+      ],
+      "launch_args": [],
+      "mason_package": "robotframework-lsp",
+      "name": "robotframework-lsp",
+      "project_root_markers": [
+        "robotidy.toml",
+        "pyproject.toml",
+        "conda.yaml",
+        "robot.yaml",
+        ".git"
+      ]
+    },
+    {
+      "executable": "roc_language_server",
+      "id": "roc_ls",
+      "languages": [
+        "roc"
+      ],
+      "launch_args": [],
+      "mason_package": "roc_language_server",
+      "name": "roc_language_server",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "roslyn-language-server",
+      "id": "roslyn_ls",
+      "languages": [
+        "cs"
+      ],
+      "launch_args": [
+        "--stdio"
+      ],
+      "mason_package": "roslyn-language-server",
+      "name": "roslyn-language-server",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "rpm_lsp_server",
+      "id": "rpmspec",
+      "languages": [
+        "spec"
+      ],
+      "launch_args": [
+        "--stdio"
+      ],
+      "mason_package": "rpm_lsp_server",
+      "name": "rpm_lsp_server",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "rubocop",
+      "id": "rubocop",
+      "languages": [
+        "ruby"
+      ],
+      "launch_args": [
+        "--lsp"
+      ],
+      "mason_package": "rubocop",
+      "name": "rubocop",
+      "project_root_markers": [
+        "Gemfile",
+        ".git"
+      ]
+    },
+    {
+      "executable": "ruby-lsp",
+      "id": "ruby_lsp",
+      "languages": [
+        "eruby",
+        "ruby"
+      ],
+      "launch_args": [],
+      "mason_package": "ruby-lsp",
+      "name": "ruby-lsp",
+      "project_root_markers": [
+        "Gemfile",
+        ".git"
+      ]
+    },
+    {
+      "executable": "ruff",
+      "id": "ruff",
+      "languages": [
+        "python"
+      ],
+      "launch_args": [
+        "server"
+      ],
+      "mason_package": "ruff",
+      "name": "ruff",
+      "project_root_markers": [
+        "pyproject.toml",
+        "ruff.toml",
+        ".ruff.toml",
+        ".git"
+      ]
+    },
+    {
+      "executable": "rumdl",
+      "id": "rumdl",
+      "languages": [
+        "markdown"
+      ],
+      "launch_args": [
+        "server"
+      ],
+      "mason_package": "rumdl",
+      "name": "rumdl",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "rust-analyzer",
+      "id": "rust_analyzer",
+      "languages": [
+        "rust"
+      ],
+      "launch_args": [],
+      "mason_package": "rust-analyzer",
+      "name": "rust-analyzer",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "salt_lsp_server",
+      "id": "salt_ls",
+      "languages": [
+        "sls"
+      ],
+      "launch_args": [],
+      "mason_package": "salt-lsp",
+      "name": "salt-lsp",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "serve-d",
+      "id": "serve_d",
+      "languages": [
+        "d"
+      ],
+      "launch_args": [],
+      "mason_package": "serve-d",
+      "name": "serve-d",
+      "project_root_markers": [
+        "dub.json",
+        "dub.sdl",
+        ".git"
+      ]
+    },
+    {
+      "executable": "shopify",
+      "id": "shopify_theme_ls",
+      "languages": [
+        "liquid"
+      ],
+      "launch_args": [
+        "theme",
+        "language-server"
+      ],
+      "mason_package": "shopify-cli",
+      "name": "shopify-cli",
+      "project_root_markers": [
+        ".shopifyignore",
+        ".theme-check.yml",
+        ".theme-check.yaml",
+        "shopify.theme.toml"
+      ]
+    },
+    {
+      "executable": "shuck",
+      "id": "shuck",
+      "languages": [
+        "bash",
+        "sh",
+        "zsh"
+      ],
+      "launch_args": [
+        "server"
+      ],
+      "mason_package": "shuck",
+      "name": "shuck",
+      "project_root_markers": [
+        ".shuck.toml",
+        ".git"
+      ]
+    },
+    {
+      "executable": "slang-server",
+      "id": "slang_server",
+      "languages": [
+        "systemverilog",
+        "verilog"
+      ],
+      "launch_args": [],
+      "mason_package": "slang-server",
+      "name": "slang-server",
+      "project_root_markers": [
+        ".git",
+        ".slang"
+      ]
+    },
+    {
+      "executable": "slangd",
+      "id": "slangd",
+      "languages": [
+        "hlsl",
+        "shaderslang"
+      ],
+      "launch_args": [],
+      "mason_package": "slang",
+      "name": "slang",
+      "project_root_markers": [
+        "slangdconfig.json",
+        ".clang-format",
+        ".git"
+      ]
+    },
+    {
+      "executable": "slint-lsp",
+      "id": "slint_lsp",
+      "languages": [
+        "slint"
+      ],
+      "launch_args": [],
+      "mason_package": "slint-lsp",
+      "name": "slint-lsp",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "cs",
+      "id": "smithy_ls",
+      "languages": [
+        "smithy"
+      ],
+      "launch_args": [
+        "launch",
+        "--contrib",
+        "smithy-language-server:0.8.0"
+      ],
+      "mason_package": "smithy-language-server",
+      "name": "smithy-language-server",
+      "project_root_markers": [
+        "smithy-build.json",
+        "build.gradle",
+        "build.gradle.kts",
+        ".git"
+      ]
+    },
+    {
+      "executable": "snakeskin-cli",
+      "id": "snakeskin_ls",
+      "languages": [
+        "ss"
+      ],
+      "launch_args": [
+        "lsp",
+        "--stdio"
+      ],
+      "mason_package": "snakeskin-cli",
+      "name": "snakeskin-cli",
+      "project_root_markers": [
+        "package.json"
+      ]
+    },
+    {
+      "executable": "snyk",
+      "id": "snyk_ls",
+      "languages": [
+        "apex",
+        "apexcode",
+        "c",
+        "cpp",
+        "cs",
+        "dart",
+        "dockerfile",
+        "eelixir",
+        "elixir",
+        "go",
+        "gomod",
+        "groovy",
+        "helm",
+        "java",
+        "javascript",
+        "json",
+        "kotlin",
+        "objc",
+        "objcpp",
+        "php",
+        "python",
+        "requirements",
+        "ruby",
+        "rust",
+        "scala",
+        "swift",
+        "terraform",
+        "terraform-vars",
+        "typescript",
+        "yaml"
+      ],
+      "launch_args": [
+        "language-server",
+        "-l",
+        "info"
+      ],
+      "mason_package": "snyk-ls",
+      "name": "snyk-ls",
+      "project_root_markers": [
+        ".git",
+        ".snyk"
+      ]
+    },
+    {
+      "executable": "snyk",
+      "id": "snyk_ls",
+      "languages": [
+        "apex",
+        "apexcode",
+        "c",
+        "cpp",
+        "cs",
+        "dart",
+        "dockerfile",
+        "eelixir",
+        "elixir",
+        "go",
+        "gomod",
+        "groovy",
+        "helm",
+        "java",
+        "javascript",
+        "json",
+        "kotlin",
+        "objc",
+        "objcpp",
+        "php",
+        "python",
+        "requirements",
+        "ruby",
+        "rust",
+        "scala",
+        "swift",
+        "terraform",
+        "terraform-vars",
+        "typescript",
+        "yaml"
+      ],
+      "launch_args": [
+        "language-server",
+        "-l",
+        "info"
+      ],
+      "mason_package": "snyk",
+      "name": "snyk",
+      "project_root_markers": [
+        ".git",
+        ".snyk"
+      ]
+    },
+    {
+      "executable": "solang",
+      "id": "solang",
+      "languages": [
+        "solidity"
+      ],
+      "launch_args": [
+        "language-server",
+        "--target",
+        "evm"
+      ],
+      "mason_package": "solang",
+      "name": "solang",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "solargraph",
+      "id": "solargraph",
+      "languages": [
+        "ruby"
+      ],
+      "launch_args": [
+        "stdio"
+      ],
+      "mason_package": "solargraph",
+      "name": "solargraph",
+      "project_root_markers": [
+        "Gemfile",
+        ".git"
+      ]
+    },
+    {
+      "executable": "solc",
+      "id": "solc",
+      "languages": [
+        "solidity"
+      ],
+      "launch_args": [
+        "--lsp"
+      ],
+      "mason_package": "solidity",
+      "name": "solidity",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "solidity-ls",
+      "id": "solidity",
+      "languages": [
+        "solidity"
+      ],
+      "launch_args": [
+        "--stdio"
+      ],
+      "mason_package": "solidity-ls",
+      "name": "solidity-ls",
+      "project_root_markers": [
+        ".git",
+        "package.json"
+      ]
+    },
+    {
+      "executable": "vscode-solidity-server",
+      "id": "solidity_ls",
+      "languages": [
+        "solidity"
+      ],
+      "launch_args": [
+        "--stdio"
+      ],
+      "mason_package": "vscode-solidity-server",
+      "name": "vscode-solidity-server",
+      "project_root_markers": [
+        "hardhat.config.js",
+        "hardhat.config.ts",
+        "foundry.toml",
+        "remappings.txt",
+        "truffle.js",
+        "truffle-config.js",
+        "ape-config.yaml",
+        ".git",
+        "package.json"
+      ]
+    },
+    {
+      "executable": "nomicfoundation-solidity-language-server",
+      "id": "solidity_ls_nomicfoundation",
+      "languages": [
+        "solidity"
+      ],
+      "launch_args": [
+        "--stdio"
+      ],
+      "mason_package": "nomicfoundation-solidity-language-server",
+      "name": "nomicfoundation-solidity-language-server",
+      "project_root_markers": [
+        "hardhat.config.js",
+        "hardhat.config.ts",
+        "foundry.toml",
+        "remappings.txt",
+        "truffle.js",
+        "truffle-config.js",
+        "ape-config.yaml",
+        ".git",
+        "package.json"
+      ]
+    },
+    {
+      "executable": "some-sass-language-server",
+      "id": "somesass_ls",
+      "languages": [
+        "sass",
+        "scss"
+      ],
+      "launch_args": [
+        "--stdio"
+      ],
+      "mason_package": "some-sass-language-server",
+      "name": "some-sass-language-server",
+      "project_root_markers": [
+        ".git",
+        ".package.json"
+      ]
+    },
+    {
+      "executable": "srb",
+      "id": "sorbet",
+      "languages": [
+        "ruby"
+      ],
+      "launch_args": [
+        "tc",
+        "--lsp"
+      ],
+      "mason_package": "sorbet",
+      "name": "sorbet",
+      "project_root_markers": [
+        "Gemfile",
+        ".git"
+      ]
+    },
+    {
+      "executable": "sourcery",
+      "id": "sourcery",
+      "languages": [
+        "*"
+      ],
+      "launch_args": [
+        "lsp"
+      ],
+      "mason_package": "sourcery",
+      "name": "sourcery",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "spectral-language-server",
+      "id": "spectral",
+      "languages": [
+        "json",
+        "yaml",
+        "yml"
+      ],
+      "launch_args": [
+        "--stdio"
+      ],
+      "mason_package": "spectral-language-server",
+      "name": "spectral-language-server",
+      "project_root_markers": [
+        ".spectral.yaml",
+        ".spectral.yml",
+        ".spectral.json",
+        ".spectral.js"
+      ]
+    },
+    {
+      "executable": "spyglassmc-language-server",
+      "id": "spyglassmc_language_server",
+      "languages": [
+        "mcfunction"
+      ],
+      "launch_args": [
+        "--stdio"
+      ],
+      "mason_package": "spyglassmc-language-server",
+      "name": "spyglassmc-language-server",
+      "project_root_markers": [
+        "pack.mcmeta"
+      ]
+    },
+    {
+      "executable": "sql-language-server",
+      "id": "sqlls",
+      "languages": [
+        "mysql",
+        "sql"
+      ],
+      "launch_args": [
+        "up",
+        "--method",
+        "stdio"
+      ],
+      "mason_package": "sqlls",
+      "name": "sqlls",
+      "project_root_markers": [
+        ".sqllsrc.json"
+      ]
+    },
+    {
+      "executable": "sqls",
+      "id": "sqls",
+      "languages": [
+        "mysql",
+        "sql"
+      ],
+      "launch_args": [],
+      "mason_package": "sqls",
+      "name": "sqls",
+      "project_root_markers": [
+        "config.yml"
+      ]
+    },
+    {
+      "executable": "sqruff",
+      "id": "sqruff",
+      "languages": [
+        "sql"
+      ],
+      "launch_args": [
+        "lsp"
+      ],
+      "mason_package": "sqruff",
+      "name": "sqruff",
+      "project_root_markers": [
+        ".sqruff",
+        ".git"
+      ]
+    },
+    {
+      "executable": "stan-language-server",
+      "id": "stan_ls",
+      "languages": [
+        "stan"
+      ],
+      "launch_args": [
+        "--stdio"
+      ],
+      "mason_package": "stan-language-server",
+      "name": "stan-language-server",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "standardrb",
+      "id": "standardrb",
+      "languages": [
+        "ruby"
+      ],
+      "launch_args": [
+        "--lsp"
+      ],
+      "mason_package": "standardrb",
+      "name": "standardrb",
+      "project_root_markers": [
+        "Gemfile",
+        ".git"
+      ]
+    },
+    {
+      "executable": "starlark",
+      "id": "starlark_rust",
+      "languages": [
+        "BUILD.bazel",
+        "bzl",
+        "star"
+      ],
+      "launch_args": [
+        "--lsp"
+      ],
+      "mason_package": "starlark-rust",
+      "name": "starlark-rust",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "starpls",
+      "id": "starpls",
+      "languages": [
+        "bzl"
+      ],
+      "launch_args": [],
+      "mason_package": "starpls",
+      "name": "starpls",
+      "project_root_markers": [
+        "WORKSPACE",
+        "WORKSPACE.bazel",
+        "MODULE.bazel"
+      ]
+    },
+    {
+      "executable": "statix",
+      "id": "statix",
+      "languages": [
+        "nix"
+      ],
+      "launch_args": [
+        "check",
+        "--stdin"
+      ],
+      "mason_package": "statix",
+      "name": "statix",
+      "project_root_markers": [
+        "flake.nix",
+        ".git"
+      ]
+    },
+    {
+      "executable": "steep",
+      "id": "steep",
+      "languages": [
+        "eruby",
+        "ruby"
+      ],
+      "launch_args": [
+        "langserver"
+      ],
+      "mason_package": "steep",
+      "name": "steep",
+      "project_root_markers": [
+        "Steepfile",
+        ".git"
+      ]
+    },
+    {
+      "executable": "stimulus-language-server",
+      "id": "stimulus_ls",
+      "languages": [
+        "blade",
+        "eruby",
+        "html",
+        "php",
+        "ruby"
+      ],
+      "launch_args": [
+        "--stdio"
+      ],
+      "mason_package": "stimulus-language-server",
+      "name": "stimulus-language-server",
+      "project_root_markers": [
+        "Gemfile",
+        ".git"
+      ]
+    },
+    {
+      "executable": "stylelint-language-server",
+      "id": "stylelint_lsp",
+      "languages": [
+        "astro",
+        "css",
+        "html",
+        "less",
+        "scss",
+        "vue"
+      ],
+      "launch_args": [
+        "--stdio"
+      ],
+      "mason_package": "stylelint-language-server",
+      "name": "stylelint-language-server",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "stylelint-language-server",
+      "id": "stylelint_lsp",
+      "languages": [
+        "astro",
+        "css",
+        "html",
+        "less",
+        "scss",
+        "vue"
+      ],
+      "launch_args": [
+        "--stdio"
+      ],
+      "mason_package": "stylelint-lsp",
+      "name": "stylelint-lsp",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "stylua",
+      "id": "stylua",
+      "languages": [
+        "lua"
+      ],
+      "launch_args": [
+        "--lsp"
+      ],
+      "mason_package": "stylua",
+      "name": "stylua",
+      "project_root_markers": [
+        ".stylua.toml",
+        "stylua.toml",
+        ".editorconfig"
+      ]
+    },
+    {
+      "executable": "superhtml",
+      "id": "superhtml",
+      "languages": [
+        "html",
+        "superhtml"
+      ],
+      "launch_args": [
+        "lsp"
+      ],
+      "mason_package": "superhtml",
+      "name": "superhtml",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "svelteserver",
+      "id": "svelte",
+      "languages": [
+        "svelte"
+      ],
+      "launch_args": [],
+      "mason_package": "svelte-language-server",
+      "name": "svelte-language-server",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "svlangserver",
+      "id": "svlangserver",
+      "languages": [
+        "systemverilog",
+        "verilog"
+      ],
+      "launch_args": [],
+      "mason_package": "svlangserver",
+      "name": "svlangserver",
+      "project_root_markers": [
+        ".svlangserver",
+        ".git"
+      ]
+    },
+    {
+      "executable": "svls",
+      "id": "svls",
+      "languages": [
+        "systemverilog",
+        "verilog"
+      ],
+      "launch_args": [],
+      "mason_package": "svls",
+      "name": "svls",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "symfony-lsp",
+      "id": "symfony_lsp",
+      "languages": [
+        "env",
+        "javascript",
+        "json",
+        "php",
+        "twig",
+        "typescript",
+        "xml",
+        "yaml"
+      ],
+      "launch_args": [],
+      "mason_package": "symfony-lsp",
+      "name": "symfony-lsp",
+      "project_root_markers": [
+        "composer.json",
+        ".git"
+      ]
+    },
+    {
+      "executable": "systemd-lsp",
+      "id": "systemd_lsp",
+      "languages": [
+        "systemd"
+      ],
+      "launch_args": [],
+      "mason_package": "systemd-lsp",
+      "name": "systemd-lsp",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "tailwindcss-language-server",
+      "id": "tailwindcss",
+      "languages": [
+        "aspnetcorerazor",
+        "astro",
+        "astro-markdown",
+        "blade",
+        "clojure",
+        "css",
+        "django-html",
+        "edge",
+        "eelixir",
+        "ejs",
+        "elixir",
+        "erb",
+        "eruby",
+        "gohtml",
+        "gohtmltmpl",
+        "haml",
+        "handlebars",
+        "hbs",
+        "heex",
+        "html",
+        "html-eex",
+        "htmlangular",
+        "htmldjango",
+        "jade",
+        "javascript",
+        "javascriptreact",
+        "leaf",
+        "less",
+        "liquid",
+        "markdown",
+        "mdx",
+        "mustache",
+        "njk",
+        "nunjucks",
+        "php",
+        "postcss",
+        "razor",
+        "reason",
+        "rescript",
+        "sass",
+        "scss",
+        "slim",
+        "stylus",
+        "sugarss",
+        "svelte",
+        "templ",
+        "twig",
+        "typescript",
+        "typescriptreact",
+        "vue"
+      ],
+      "launch_args": [],
+      "mason_package": "tailwindcss-language-server",
+      "name": "tailwindcss-language-server",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "taplo",
+      "id": "taplo",
+      "languages": [
+        "toml"
+      ],
+      "launch_args": [
+        "lsp",
+        "stdio"
+      ],
+      "mason_package": "taplo",
+      "name": "taplo",
+      "project_root_markers": [
+        ".taplo.toml",
+        "taplo.toml",
+        ".git"
+      ]
+    },
+    {
+      "executable": "tclsp",
+      "id": "tclsp",
+      "languages": [
+        "sdc",
+        "tcl",
+        "upf",
+        "xdc"
+      ],
+      "launch_args": [],
+      "mason_package": "tclint",
+      "name": "tclint",
+      "project_root_markers": [
+        "tclint.toml",
+        ".tclint",
+        "pyproject.toml",
+        ".git"
+      ]
+    },
+    {
+      "executable": "teal-language-server",
+      "id": "teal_ls",
+      "languages": [
+        "teal"
+      ],
+      "launch_args": [],
+      "mason_package": "teal-language-server",
+      "name": "teal-language-server",
+      "project_root_markers": [
+        "tlconfig.lua"
+      ]
+    },
+    {
+      "executable": "templ",
+      "id": "templ",
+      "languages": [
+        "templ"
+      ],
+      "launch_args": [
+        "lsp"
+      ],
+      "mason_package": "templ",
+      "name": "templ",
+      "project_root_markers": [
+        "go.work",
+        "go.mod",
+        ".git"
+      ]
+    },
+    {
+      "executable": "termux-language-server",
+      "id": "termux_language_server",
+      "languages": [
+        "*"
+      ],
+      "launch_args": [],
+      "mason_package": "termux-language-server",
+      "name": "termux-language-server",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "terraform-ls",
+      "id": "terraformls",
+      "languages": [
+        "terraform",
+        "terraform-vars"
+      ],
+      "launch_args": [
+        "serve"
+      ],
+      "mason_package": "terraform-ls",
+      "name": "terraform-ls",
+      "project_root_markers": [
+        ".terraform",
+        ".git"
+      ]
+    },
+    {
+      "executable": "terragrunt-ls",
+      "id": "terragrunt_ls",
+      "languages": [
+        "hcl"
+      ],
+      "launch_args": [],
+      "mason_package": "terragrunt-ls",
+      "name": "terragrunt-ls",
+      "project_root_markers": [
+        "terragrunt.hcl",
+        ".git"
+      ]
+    },
+    {
+      "executable": "texlab",
+      "id": "texlab",
+      "languages": [
+        "bib",
+        "plaintex",
+        "tex"
+      ],
+      "launch_args": [],
+      "mason_package": "texlab",
+      "name": "texlab",
+      "project_root_markers": [
+        ".git",
+        ".latexmkrc",
+        "latexmkrc",
+        ".texlabroot",
+        "texlabroot",
+        "Tectonic.toml"
+      ]
+    },
+    {
+      "executable": "textlsp",
+      "id": "textlsp",
+      "languages": [
+        "org",
+        "tex",
+        "text"
+      ],
+      "launch_args": [],
+      "mason_package": "textlsp",
+      "name": "textlsp",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "tflint",
+      "id": "tflint",
+      "languages": [
+        "terraform"
+      ],
+      "launch_args": [
+        "--langserver"
+      ],
+      "mason_package": "tflint",
+      "name": "tflint",
+      "project_root_markers": [
+        ".terraform",
+        ".git",
+        ".tflint.hcl"
+      ]
+    },
+    {
+      "executable": "thriftls",
+      "id": "thriftls",
+      "languages": [
+        "thrift"
+      ],
+      "launch_args": [],
+      "mason_package": "thriftls",
+      "name": "thriftls",
+      "project_root_markers": [
+        ".thrift"
+      ]
+    },
+    {
+      "executable": "tinymist",
+      "id": "tinymist",
+      "languages": [
+        "typst"
+      ],
+      "launch_args": [],
+      "mason_package": "tinymist",
+      "name": "tinymist",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "tofu-ls",
+      "id": "tofu_ls",
+      "languages": [
+        "opentofu",
+        "opentofu-vars",
+        "terraform"
+      ],
+      "launch_args": [
+        "serve"
+      ],
+      "mason_package": "tofu-ls",
+      "name": "tofu-ls",
+      "project_root_markers": [
+        ".terraform",
+        ".git"
+      ]
+    },
+    {
+      "executable": "tombi",
+      "id": "tombi",
+      "languages": [
+        "toml"
+      ],
+      "launch_args": [
+        "lsp"
+      ],
+      "mason_package": "tombi",
+      "name": "tombi",
+      "project_root_markers": [
+        "tombi.toml",
+        "pyproject.toml",
+        ".git"
+      ]
+    },
+    {
+      "executable": "typescript-language-server",
+      "id": "ts_ls",
+      "languages": [
+        "javascript",
+        "javascriptreact",
+        "typescript",
+        "typescriptreact"
+      ],
+      "launch_args": [],
+      "mason_package": "typescript-language-server",
+      "name": "typescript-language-server",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "ts_query_ls",
+      "id": "ts_query_ls",
+      "languages": [
+        "query"
+      ],
+      "launch_args": [],
+      "mason_package": "ts_query_ls",
+      "name": "ts_query_ls",
+      "project_root_markers": [
+        ".tsqueryrc.json",
+        ".git"
+      ]
+    },
+    {
+      "executable": "tsgo",
+      "id": "tsgo",
+      "languages": [
+        "javascript",
+        "javascriptreact",
+        "typescript",
+        "typescriptreact"
+      ],
+      "launch_args": [
+        "--lsp",
+        "--stdio"
+      ],
+      "mason_package": "tsgo",
+      "name": "tsgo",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "tsp-server",
+      "id": "tsp_server",
+      "languages": [
+        "typespec"
+      ],
+      "launch_args": [
+        "--stdio"
+      ],
+      "mason_package": "tsp-server",
+      "name": "tsp-server",
+      "project_root_markers": [
+        "tspconfig.yaml",
+        ".git"
+      ]
+    },
+    {
+      "executable": "twiggy-language-server",
+      "id": "twiggy_language_server",
+      "languages": [
+        "twig"
+      ],
+      "launch_args": [
+        "--stdio"
+      ],
+      "mason_package": "twiggy-language-server",
+      "name": "twiggy-language-server",
+      "project_root_markers": [
+        "composer.json",
+        ".git"
+      ]
+    },
+    {
+      "executable": "ty",
+      "id": "ty",
+      "languages": [
+        "python"
+      ],
+      "launch_args": [
+        "server"
+      ],
+      "mason_package": "ty",
+      "name": "ty",
+      "project_root_markers": [
+        "ty.toml",
+        "pyproject.toml",
+        "setup.py",
+        "setup.cfg",
+        "requirements.txt",
+        ".git"
+      ]
+    },
+    {
+      "executable": "typos-lsp",
+      "id": "typos_lsp",
+      "languages": [
+        "*"
+      ],
+      "launch_args": [],
+      "mason_package": "typos-lsp",
+      "name": "typos-lsp",
+      "project_root_markers": [
+        "typos.toml",
+        "_typos.toml",
+        ".typos.toml",
+        "pyproject.toml",
+        "Cargo.toml"
+      ]
+    },
+    {
+      "executable": "unocss-language-server",
+      "id": "unocss",
+      "languages": [
+        "astro",
+        "css",
+        "ejs",
+        "erb",
+        "haml",
+        "hbs",
+        "html",
+        "javascript",
+        "javascriptreact",
+        "less",
+        "markdown",
+        "php",
+        "postcss",
+        "rescript",
+        "rust",
+        "sass",
+        "scss",
+        "stylus",
+        "svelte",
+        "typescript",
+        "typescriptreact",
+        "vue",
+        "vue-html"
+      ],
+      "launch_args": [
+        "--stdio"
+      ],
+      "mason_package": "unocss-language-server",
+      "name": "unocss-language-server",
+      "project_root_markers": [
+        "unocss.config.js",
+        "unocss.config.ts",
+        "uno.config.js",
+        "uno.config.ts"
+      ]
+    },
+    {
+      "executable": "v-analyzer",
+      "id": "v_analyzer",
+      "languages": [
+        "v",
+        "vsh",
+        "vv"
+      ],
+      "launch_args": [],
+      "mason_package": "v-analyzer",
+      "name": "v-analyzer",
+      "project_root_markers": [
+        "v.mod",
+        ".git"
+      ]
+    },
+    {
+      "executable": "vacuum",
+      "id": "vacuum",
+      "languages": [
+        "json.openapi",
+        "yaml.openapi"
+      ],
+      "launch_args": [
+        "language-server"
+      ],
+      "mason_package": "vacuum",
+      "name": "vacuum",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "vala-language-server",
+      "id": "vala_ls",
+      "languages": [
+        "genie",
+        "vala"
+      ],
+      "launch_args": [],
+      "mason_package": "vala-language-server",
+      "name": "vala-language-server",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "vale-ls",
+      "id": "vale_ls",
+      "languages": [
+        "asciidoc",
+        "html",
+        "markdown",
+        "rst",
+        "tex",
+        "text",
+        "xml"
+      ],
+      "launch_args": [],
+      "mason_package": "vale-ls",
+      "name": "vale-ls",
+      "project_root_markers": [
+        ".vale.ini"
+      ]
+    },
+    {
+      "executable": "vectorcode-server",
+      "id": "vectorcode_server",
+      "languages": [
+        "*"
+      ],
+      "launch_args": [],
+      "mason_package": "vectorcode",
+      "name": "vectorcode",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "verible-verilog-ls",
+      "id": "verible",
+      "languages": [
+        "systemverilog",
+        "verilog"
+      ],
+      "launch_args": [],
+      "mason_package": "verible",
+      "name": "verible",
+      "project_root_markers": [
+        "verible.filelist",
+        ".git"
+      ]
+    },
+    {
+      "executable": "veryl-ls",
+      "id": "veryl_ls",
+      "languages": [
+        "veryl"
+      ],
+      "launch_args": [],
+      "mason_package": "veryl-ls",
+      "name": "veryl-ls",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "java",
+      "id": "vespa_ls",
+      "languages": [
+        "profile",
+        "sd",
+        "yql"
+      ],
+      "launch_args": [
+        "-jar",
+        "vespa-language-server.jar"
+      ],
+      "mason_package": "vespa-language-server",
+      "name": "vespa-language-server",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "vhdl_ls",
+      "id": "vhdl_ls",
+      "languages": [
+        "vhd",
+        "vhdl"
+      ],
+      "launch_args": [],
+      "mason_package": "rust_hdl",
+      "name": "rust_hdl",
+      "project_root_markers": [
+        "vhdl_ls.toml"
+      ]
+    },
+    {
+      "executable": "vim-language-server",
+      "id": "vimls",
+      "languages": [
+        "vim"
+      ],
+      "launch_args": [
+        "--stdio"
+      ],
+      "mason_package": "vim-language-server",
+      "name": "vim-language-server",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "visualforce-language-server",
+      "id": "visualforce_ls",
+      "languages": [
+        "visualforce"
+      ],
+      "launch_args": [
+        "--stdio"
+      ],
+      "mason_package": "visualforce-language-server",
+      "name": "visualforce-language-server",
+      "project_root_markers": [
+        "sfdx-project.json"
+      ]
+    },
+    {
+      "executable": "v",
+      "id": "vls",
+      "languages": [
+        "v",
+        "vlang"
+      ],
+      "launch_args": [
+        "ls"
+      ],
+      "mason_package": "vls",
+      "name": "vls",
+      "project_root_markers": [
+        "v.mod",
+        ".git"
+      ]
+    },
+    {
+      "executable": "vtsls",
+      "id": "vtsls",
+      "languages": [
+        "javascript",
+        "javascriptreact",
+        "typescript",
+        "typescriptreact"
+      ],
+      "launch_args": [
+        "--stdio"
+      ],
+      "mason_package": "vtsls",
+      "name": "vtsls",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "vue-language-server",
+      "id": "vue_ls",
+      "languages": [
+        "vue"
+      ],
+      "launch_args": [
+        "--stdio"
+      ],
+      "mason_package": "vue-language-server",
+      "name": "vue-language-server",
+      "project_root_markers": [
+        "package.json"
+      ]
+    },
+    {
+      "executable": "vls",
+      "id": "vuels",
+      "languages": [
+        "*"
+      ],
+      "launch_args": [],
+      "mason_package": "vetur-vls",
+      "name": "vetur-vls",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "wat_server",
+      "id": "wasm_language_tools",
+      "languages": [
+        "wat"
+      ],
+      "launch_args": [],
+      "mason_package": "wasm-language-tools",
+      "name": "wasm-language-tools",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "wc-language-server",
+      "id": "wc_ls",
+      "languages": [
+        "*"
+      ],
+      "launch_args": [
+        "--stdio"
+      ],
+      "mason_package": "wc-language-server",
+      "name": "wc-language-server",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "wgsl-analyzer",
+      "id": "wgsl_analyzer",
+      "languages": [
+        "wgsl"
+      ],
+      "launch_args": [],
+      "mason_package": "wgsl-analyzer",
+      "name": "wgsl-analyzer",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "yaml-language-server",
+      "id": "yamlls",
+      "languages": [
+        "yaml",
+        "yaml.docker-compose",
+        "yaml.gitlab",
+        "yaml.helm-values"
+      ],
+      "launch_args": [],
+      "mason_package": "yaml-language-server",
+      "name": "yaml-language-server",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "zizmor",
+      "id": "zizmor",
+      "languages": [
+        "yaml"
+      ],
+      "launch_args": [
+        "--lsp"
+      ],
+      "mason_package": "zizmor",
+      "name": "zizmor",
+      "project_root_markers": [
+        ".git"
+      ]
+    },
+    {
+      "executable": "zk",
+      "id": "zk",
+      "languages": [
+        "markdown"
+      ],
+      "launch_args": [
+        "lsp"
+      ],
+      "mason_package": "zk",
+      "name": "zk",
+      "project_root_markers": [
+        ".zk"
+      ]
+    },
+    {
+      "executable": "zls",
+      "id": "zls",
+      "languages": [
+        "zig",
+        "zir"
+      ],
+      "launch_args": [],
+      "mason_package": "zls",
+      "name": "zls",
+      "project_root_markers": [
+        "zls.json",
+        "build.zig",
+        ".git"
+      ]
+    },
+    {
+      "executable": "zuban",
+      "id": "zuban",
+      "languages": [
+        "python"
+      ],
+      "launch_args": [
+        "server"
+      ],
+      "mason_package": "zuban",
+      "name": "zuban",
+      "project_root_markers": [
+        "pyproject.toml",
+        "setup.py",
+        "setup.cfg",
+        "requirements.txt",
+        "Pipfile",
+        ".git"
+      ]
+    }
+  ],
+  "sources": {
+    "mason_lspconfig_revision": "9d28935aa95fa6c1dc7c4d6747f101a72a8a4bec",
+    "mason_registry_sha256": "904b01b811864bc9b9c64ca0b214e9323fda74766890fd2ac9dff239bed585d7",
+    "neovim_version": "0.12.3",
+    "nvim_lspconfig_revision": "af9adce488c75ca0a81017945c2b7fa7b461bc23"
+  }
+}

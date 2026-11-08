@@ -1,0 +1,32 @@
+Dust editor
+Copyright (C) 2026 Dust contributors
+
+The Dust editor implementation is licensed under GPL-3.0-or-later. See
+LICENSE and LICENSES/GPL-3.0-or-later.txt.
+
+The public plugin ABI in wit/dust-plugin.wit and the SDK contract documented
+in docs/plugin-sdk.md are licensed under Apache-2.0. See
+LICENSES/Apache-2.0.txt. This notice does not relicense the Dust editor.
+
+Explorer icon metadata is derived from mini.icons:
+Copyright (c) 2021 Evgeni Chasnovski, licensed under the MIT License. See
+LICENSES/MIT-mini.icons.txt.
+
+The pinned external language-server and filetype compatibility snapshot is
+derived from mason-lspconfig.nvim and nvim-lspconfig, both licensed under the
+Apache License 2.0. See LICENSES/Apache-2.0.txt. Mason package metadata is
+derived from mason-registry under the Apache License 2.0.
+
+Bundled theme palettes are adapted from Catppuccin (Copyright (c) 2021
+Catppuccin), Nord (Copyright (c) 2016-present Sven Greb), and gruvbox.nvim
+(Copyright (c) 2021 NpX; Gruvbox originally by morhetz), under the MIT License.
+See LICENSES/MIT-catppuccin.txt, LICENSES/MIT-nord.txt,
+LICENSES/MIT-gruvbox.txt and assets/themes/README.md for pinned sources.
+These are Dust semantic-role ports, not the upstream editor implementations.
+
+Additional theme palettes are adapted from folke/tokyonight.nvim under the
+Apache License 2.0, and Rosé Pine (Copyright (c) mvllow) under the MIT License.
+See LICENSES/Apache-2.0.txt, LICENSES/MIT-rose-pine.txt and
+assets/themes/README.md. The upstream palette data has been adapted to Dust
+semantic styles and explicit terminal fallbacks; no upstream theme runtime
+is included.

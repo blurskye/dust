@@ -1,0 +1,37 @@
+# Flatpak of the static release binary. Programs Dust starts (shells, language
+# servers, git) run inside the sandbox with the Freedesktop runtime, not the host's;
+# `flatpak-spawn --host` reaches host programs.
+id: dev.blurskye.Dust
+runtime: org.freedesktop.Platform
+runtime-version: '24.08'
+sdk: org.freedesktop.Sdk
+command: dust
+finish-args:
+  - --share=network
+  - --filesystem=host
+  - --talk-name=org.freedesktop.Flatpak
+modules:
+  - name: dust
+    buildsystem: simple
+    build-commands:
+      - install -Dm 0755 dust /app/bin/dust
+      - install -Dm 0644 dev.blurskye.Dust.desktop /app/share/applications/dev.blurskye.Dust.desktop
+      - install -Dm 0644 dev.blurskye.Dust.svg /app/share/icons/hicolor/scalable/apps/dev.blurskye.Dust.svg
+      - install -Dm 0644 dev.blurskye.Dust.metainfo.xml /app/share/metainfo/dev.blurskye.Dust.metainfo.xml
+      - mkdir -p /app/share/licenses/dust && cp -r LICENSE NOTICE LICENSES /app/share/licenses/dust/
+    sources:
+      - type: file
+        path: ../../target/package-stage/dust/dust
+      - type: file
+        path: ../dev.blurskye.Dust.desktop
+      - type: file
+        path: ../dev.blurskye.Dust.svg
+      - type: file
+        path: ../dev.blurskye.Dust.metainfo.xml
+      - type: file
+        path: ../../LICENSE
+      - type: file
+        path: ../../NOTICE
+      - type: dir
+        path: ../../LICENSES
+        dest: LICENSES

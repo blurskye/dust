@@ -1,0 +1,1572 @@
+schema_version = 1
+
+[editor]
+line_numbers = "relative"
+tab_width = 4
+indent_width = 4
+expand_tabs = true
+wrap = false
+line_endings = "preserve"
+final_newline = "preserve"
+ambiguous_width = "narrow"
+autopairs = true
+
+[editor.viewport]
+horizontal_margin = 4
+vertical_margin = 4
+
+[editor.git_signs]
+enabled = true
+
+[editor.indent_guides]
+enabled = true
+
+# Markdown drawn in place, as render-markdown.nvim does: heading bars, bullets, checkboxes,
+# quotes, rules, code blocks and links without their markup. The cursor's line, and every
+# line outside Normal mode, shows its source.
+[editor.markdown]
+render = true
+# Close a table with a border under its last row, and draw one between its rows.
+table_bottom = true
+table_row_lines = false
+
+[editor.markdown.glyphs]
+headings = ["󰲡 ", "󰲣 ", "󰲥 ", "󰲧 ", "󰲩 ", "󰲫 "]
+bullets = ["●", "○", "◆", "◇"]
+unchecked = "󰄱"
+checked = "󰱒"
+quote = "▋"
+link = "󰌹 "
+image = "󰥶 "
+rule = "─"
+# A table's top, the row under its header, its bottom, then the line between cells and across.
+table = ["┌", "┬", "┐", "├", "┼", "┤", "└", "┴", "┘", "│", "─"]
+table_alignment = "━"
+
+# A link's icon by what its address contains; the longest match wins, `link` otherwise.
+[editor.markdown.glyphs.links]
+"http" = "󰖟 "
+"github.com" = "󰊤 "
+"gitlab.com" = "󰮠 "
+"google.com" = "󰊭 "
+"neovim.io" = " "
+"reddit.com" = "󰑍 "
+"stackoverflow.com" = "󰓌 "
+"wikipedia.org" = "󰖬 "
+"youtube.com" = "󰗃 "
+"youtu.be" = "󰗃 "
+"discord.com" = "󰙯 "
+"mailto:" = "󰀓 "
+
+# Callouts as GitHub writes them, `> [!NOTE]`, with the group that colours them.
+[editor.markdown.glyphs.callouts]
+note = { text = "󰋽 Note", group = "DiagnosticInfo" }
+tip = { text = "󰌶 Tip", group = "DiagnosticOk" }
+important = { text = "󰅾 Important", group = "DiagnosticHint" }
+warning = { text = "󰀪 Warning", group = "DiagnosticWarn" }
+caution = { text = "󰳦 Caution", group = "DiagnosticError" }
+abstract = { text = "󰨸 Abstract", group = "DiagnosticInfo" }
+info = { text = "󰋽 Info", group = "DiagnosticInfo" }
+todo = { text = "󰗡 Todo", group = "DiagnosticInfo" }
+success = { text = "󰄬 Success", group = "DiagnosticOk" }
+question = { text = "󰘥 Question", group = "DiagnosticWarn" }
+failure = { text = "󰅖 Failure", group = "DiagnosticError" }
+danger = { text = "󱐌 Danger", group = "DiagnosticError" }
+bug = { text = "󰨰 Bug", group = "DiagnosticError" }
+example = { text = "󰉹 Example", group = "DiagnosticHint" }
+quote = { text = "󱆨 Quote", group = "@markup.quote" }
+
+[editor.large_file]
+enabled = true
+
+[editor.registers]
+# "unnamedplus" shares yanks and pastes with the system clipboard; "off" keeps them internal.
+clipboard = "unnamedplus"
+
+# Line comment string per file extension for `gc`/`gcc`; `%s` marks where the line goes.
+[editor.comments]
+bash = "#"
+c = "//"
+cc = "//"
+cpp = "//"
+cs = "//"
+css = "/* %s */"
+dart = "//"
+ex = "#"
+exs = "#"
+go = "//"
+h = "//"
+hpp = "//"
+hs = "--"
+html = "<!-- %s -->"
+java = "//"
+js = "//"
+jsx = "//"
+kt = "//"
+lua = "--"
+md = "<!-- %s -->"
+markdown = "<!-- %s -->"
+mjs = "//"
+nix = "#"
+php = "//"
+py = "#"
+rb = "#"
+rs = "//"
+sh = "#"
+sql = "--"
+swift = "//"
+toml = "#"
+ts = "//"
+tsx = "//"
+vim = "\""
+xml = "<!-- %s -->"
+yaml = "#"
+yml = "#"
+zig = "//"
+zsh = "#"
+
+[ui]
+theme = "dust"
+color_mode = "auto"
+mouse = true
+
+[ui.cursor]
+normal = "block"
+insert = "bar"
+
+[ui.status_line]
+enabled = true
+components = ["mode", "git", "file", "breadcrumbs", "diagnostics", "tasks", "large_file", "lsp", "root", "progress", "position"]
+
+[ui.status_line.mode_labels]
+normal = "NORMAL"
+insert = "INSERT"
+replace = "REPLACE"
+visual_char = "VISUAL"
+visual_line = "V-LINE"
+visual_block = "V-BLOCK"
+multi = "MULTI"
+operator_pending = "OPERATOR"
+command_line = "COMMAND"
+prompt = "PROMPT"
+terminal = "TERMINAL"
+
+[ui.buffer_line]
+enabled = true
+# Per-extension overrides; otherwise the explorer's file icons are used.
+extension_icons = {}
+hide_when_single = false
+
+[ui.lsp_progress]
+enabled = true
+
+[ui.key_hints]
+enabled = true
+delay_ms = 250
+
+[ui.documentation_popup]
+enabled = true
+
+[ui.terminal_panel]
+height = 16
+# Show the configured escape key briefly on the first focused terminal.
+input_hint_ms = 5000
+# "bottom" docks the terminal under the editor, "float" opens it in a centered window and
+# "fullscreen" draws it over everything. Profiles with `float = true` always float.
+placement = "bottom"
+
+[ui.tool_manager]
+
+[ui.tool_manager.categories]
+all = "All"
+lsp = "LSP"
+dap = "DAP"
+linter = "Linter"
+formatter = "Formatter"
+agent = "Agent"
+
+[ui.explorer]
+width = 40
+# "left" or "right": the side the file explorer docks on.
+side = "left"
+icon_mode = "nerd_font"
+
+[ui.explorer.glyphs.nerd_font]
+tree_vertical = "│ "
+tree_middle = "├─"
+tree_last = "└─"
+tree_space = "  "
+directory = "󰉋"
+directory_open = "󰝰"
+file = "󰈔"
+symlink = ""
+loading = "…"
+icon_spacing = " "
+
+[ui.explorer.glyphs.unicode]
+tree_vertical = "│ "
+tree_middle = "├─"
+tree_last = "└─"
+tree_space = "  "
+directory = "▸"
+directory_open = "▾"
+file = "·"
+symlink = "↗"
+loading = "…"
+icon_spacing = " "
+
+[ui.explorer.glyphs.ascii]
+tree_vertical = "| "
+tree_middle = "|-"
+tree_last = "\\-"
+tree_space = "  "
+directory = "+"
+directory_open = "-"
+file = "."
+symlink = "@"
+loading = "~"
+icon_spacing = " "
+
+[ui.command_line]
+
+[ui.command_line.completion_kind_icons]
+Text = ""
+Method = ""
+Function = ""
+Constructor = ""
+Field = ""
+Variable = ""
+Class = ""
+Interface = ""
+Module = ""
+Property = ""
+Unit = ""
+Value = ""
+Enum = ""
+Keyword = ""
+Snippet = ""
+Color = ""
+File = ""
+Reference = ""
+Folder = ""
+EnumMember = ""
+Constant = ""
+Struct = ""
+Event = ""
+Operator = ""
+TypeParameter = ""
+Item = ""
+
+[ui.command_line.text]
+command_title = "Command"
+command_marker = ": "
+search_forward_title = "Search Forward"
+search_forward_marker = "/ "
+search_backward_title = "Search Backward"
+search_backward_marker = "? "
+workspace_trust_title = "Do you want to trust this workspace?"
+workspace_trust_marker = "> "
+git_reset_title = "Reset this Git hunk?"
+git_reset_marker = "> "
+explorer_delete_title = "Delete this path?"
+explorer_delete_marker = "> "
+explorer_rename_title = "Rename path"
+explorer_rename_marker = "> "
+
+[startup]
+show_dashboard = true
+
+[search]
+smart_case = true
+wrap = true
+highlight = true
+
+[debug]
+
+[terminals]
+default_profile = "shell"
+
+[terminals.profiles.shell]
+program = "$SHELL"
+arguments = []
+environment = {}
+columns = 80
+rows = 24
+float = false
+close_on_exit = true
+
+[terminals.profiles.lazygit]
+program = "/bin/sh"
+arguments = ["-c", "exec lazygit"]
+environment = {}
+columns = 80
+rows = 24
+float = true
+close_on_exit = true
+
+# `{root}`, `{file}`, `{dir}` and `{line}` are filled from the workspace root and the current
+# buffer. Paths go in as separate arguments ("$1"), never into the shell string.
+[terminals.profiles.lazygit_cwd]
+program = "/bin/sh"
+arguments = ["-c", "exec lazygit"]
+cwd = "{dir}"
+environment = {}
+columns = 80
+rows = 24
+float = true
+close_on_exit = true
+
+[terminals.profiles.git_blame_line]
+program = "/bin/sh"
+arguments = ["-c", "git --no-pager log --color -n 3 -u -L \"$2,+1:$1\" 2>&1 | less -Rc", "git", "{file}", "{line}"]
+cwd = "{dir}"
+environment = {}
+columns = 80
+rows = 24
+float = true
+close_on_exit = true
+
+[terminals.profiles.lazygit_file]
+program = "/bin/sh"
+arguments = ["-c", "exec lazygit -f \"$1\"", "lazygit", "{file}"]
+environment = {}
+columns = 80
+rows = 24
+float = true
+close_on_exit = true
+
+[terminals.profiles.lazygit_log]
+program = "/bin/sh"
+arguments = ["-c", "exec lazygit log"]
+environment = {}
+columns = 80
+rows = 24
+float = true
+close_on_exit = true
+
+# Pull request review through `gh`, for the branch checked out in this worktree.
+[terminals.profiles.gh_pr_view]
+program = "/bin/sh"
+arguments = ["-c", "GH_PAGER='less -Rc' gh pr view --comments"]
+environment = {}
+columns = 80
+rows = 24
+float = true
+close_on_exit = true
+
+[terminals.profiles.gh_pr_diff]
+program = "/bin/sh"
+arguments = ["-c", "gh pr diff --color=always | less -Rc"]
+environment = {}
+columns = 80
+rows = 24
+float = true
+close_on_exit = true
+
+[terminals.profiles.gh_pr_review]
+program = "/bin/sh"
+arguments = ["-c", "gh pr review || { echo; echo 'Press Enter to close'; read _; }"]
+environment = {}
+columns = 80
+rows = 24
+float = true
+close_on_exit = true
+
+# ACP agents for `<leader>a`. Each session runs in the worktree that was open when it
+# started. Every agent that supports MCP gets Dust's `agent` tool for subagents, which run
+# as tabs of their own. The Claude, Codex and pi adapters can be installed from the tool manager
+# (`<leader>cm`, Agent); OpenCode and Gemini speak ACP themselves. `options` picks a model,
+# mode or thinking level at start, e.g. `options = { model = "…", thought_level = "high" }`.
+[agents]
+default = "claude"
+# "acp" talks to the agent in Dust's agent panel; "terminal" runs its own program (`cli`) in a
+# terminal beside the editor, where the panel opens, and it handles its own login, permissions
+# and history there.
+connection = "acp"
+# Share of the editor width the agent panel opens at; drag its border or use ctrl-left and
+# ctrl-right in it to change it.
+panel_width = 35
+# "left" or "right": the side the agent panel or terminal agent opens on.
+side = "right"
+# Agents such as pi read MCP servers only from their own config, so Dust gives them its tools,
+# such as subagents, by running the profile's `add_tools` command before they start. It
+# changes that agent's config; with false each new session says what to run instead.
+add_tools = true
+
+[agents.profiles.claude]
+program = "claude-agent-acp"
+cli = ["claude"]
+arguments = []
+environment = {}
+options = {}
+# Over ACP, subagents come from Dust's `agent` tool, so Claude Code's own subagent tools are
+# off there (Task in older versions, Agent and Workflow in newer ones); the `claude` CLI in a
+# terminal keeps them.
+meta = { claudeCode = { options = { disallowedTools = ["Task", "Agent", "Workflow"] } } }
+
+[agents.profiles.codex]
+program = "codex-acp"
+cli = ["codex"]
+arguments = []
+environment = {}
+# Over ACP, subagents come from Dust's `agent` tool, so Codex's own multi-agent tools are off
+# there; the `codex` CLI in a terminal keeps them.
+acp_environment = { CODEX_CONFIG = '{"features":{"multi_agent":false}}' }
+options = {}
+
+[agents.profiles.pi]
+program = "pi-acp"
+cli = ["pi"]
+arguments = []
+# pi draws its own cursor unless told to show the terminal's, which kitty's cursor trail and
+# screen readers follow.
+environment = { PI_HARDWARE_CURSOR = "1" }
+options = {}
+# pi reads MCP servers only from its own config; `mcp add` replaces an entry of the same name.
+add_tools = ["pi", "mcp", "add", "dust", "--exposure", "direct", "--", "{dust}", "--agent-tools"]
+
+[agents.profiles.opencode]
+program = "opencode"
+cli = ["opencode"]
+arguments = ["acp"]
+environment = {}
+# Over ACP, subagents come from Dust's `agent` tool, so OpenCode's own task tool is off there;
+# `opencode` in a terminal keeps it.
+acp_environment = { OPENCODE_CONFIG_CONTENT = '{"tools":{"task":false}}' }
+options = {}
+
+[agents.profiles.gemini]
+program = "gemini"
+cli = ["gemini"]
+arguments = ["--experimental-acp"]
+environment = {}
+options = {}
+
+[plugins]
+store = "packages/store"
+queue_capacity = 8
+maximum_component_bytes = 67108864
+maximum_commands = 256
+fuel = 10000000
+epoch_deadline_ticks = 10
+maximum_memory_bytes = 67108864
+maximum_table_elements = 10000
+maximum_instances = 16
+
+[plugins.entries]
+
+[tasks]
+
+[persistence]
+enabled = true
+restore_on_startup = true
+# Keep each file's undo history across restarts (Vim's undofile).
+undo_history = true
+
+[syntax]
+enabled = true
+
+[windows]
+rule = [
+  { content_type = "builtin.explorer", placement = { kind = "automatic" } },
+  { content_type = "builtin.terminal", placement = { kind = "automatic" } },
+  { content_type = "builtin.dashboard", placement = { kind = "automatic" } },
+  { content_type = "builtin.picker", placement = { kind = "automatic" } },
+  { content_type = "builtin.problems", placement = { kind = "automatic" } },
+  { content_type = "builtin.output", placement = { kind = "automatic" } },
+  { content_type = "builtin.logs", placement = { kind = "automatic" } },
+  { content_type = "builtin.debug", placement = { kind = "automatic" } },
+  { content_type = "builtin.theme", placement = { kind = "automatic" } },
+]
+
+[workspace]
+
+[workspace.search]
+exclude_globs = ["target/**", ".git/**"]
+include_hidden = false
+include_ignored = false
+
+[lsp]
+enabled = true
+auto_start = true
+auto_install = true
+inlay_hints = true
+inlay_hint_level = "standard"
+auto_completion = true
+# Format with the language server on save, as LazyVim does. <leader>uf turns it off for now.
+format_on_save = true
+nix_workspace_fallback = true
+
+[recovery]
+enabled = true
+
+[input]
+mapping_timeout_ms = 500
+
+[input.keymaps]
+leader = "space"
+local_leader = "\\"
+
+[input.text_commands]
+"editor.insert" = "edit.insert_text"
+"editor.replace" = "edit.replace_text"
+command_prompt = "command_line.insert"
+search_prompt = "command_line.insert"
+workspace_trust_prompt = "command_line.insert"
+completion = "edit.insert_text"
+picker = "picker.insert"
+theme_picker = "picker.insert"
+terminal = "terminal.send"
+agent = "agent.input.insert"
+explorer_search = "explorer.search.insert"
+tool_manager_search = "tools.search.insert"
+settings_search = "settings.page.insert"
+settings_edit = "settings.page.insert"
+
+[input.paste_commands]
+"editor.insert" = "edit.insert_text"
+"editor.replace" = "edit.replace_text"
+command_prompt = "command_line.insert"
+search_prompt = "command_line.insert"
+workspace_trust_prompt = "command_line.insert"
+completion = "edit.insert_text"
+picker = "picker.insert"
+theme_picker = "picker.insert"
+terminal = "terminal.send"
+agent = "agent.input.insert"
+explorer_search = "explorer.search.insert"
+tool_manager_search = "tools.search.insert"
+settings_search = "settings.page.insert"
+settings_edit = "settings.page.insert"
+
+[input.character_fallback_commands]
+register = "input.register.select"
+replace = "input.replace.text"
+character = "input.character"
+macro_record = "input.macro.record.select"
+macro_replay = "input.macro.replay.select"
+
+[input.unmatched_commands]
+prefix = "input.cancel"
+character = "input.cancel"
+documentation = "lsp.documentation.close"
+
+[input.command_aliases]
+w = "file.save"
+write = "file.save"
+rename = "lsp.rename"
+q = "editor.quit"
+quit = "editor.quit"
+wq = "file.save_quit"
+x = "file.save_quit"
+wa = "file.save_all"
+wall = "file.save_all"
+wqa = "file.save_all_quit"
+wqall = "file.save_all_quit"
+xa = "file.save_all_quit"
+xall = "file.save_all_quit"
+qa = "editor.quit"
+qall = "editor.quit"
+saveas = "file.save"
+e = "file.open"
+edit = "file.open"
+new = "file.new"
+enew = "file.new"
+reload = "file.reload"
+bd = "buffer.close"
+bdelete = "buffer.close"
+close = "buffer.close"
+bnext = "buffer.next"
+bn = "buffer.next"
+bprevious = "buffer.previous"
+bp = "buffer.previous"
+health = "health.open"
+checkhealth = "health.open"
+help = "command_palette.open"
+tutor = "session.tutor"
+Tutor = "session.tutor"
+TutorNext = "session.tutor.next"
+tutornext = "session.tutor.next"
+TutorBack = "session.tutor.back"
+tutorback = "session.tutor.back"
+TutorQuit = "session.tutor.quit"
+tutorquit = "session.tutor.quit"
+messages = "application.notifications.open"
+split = "pane.split.vertical"
+vsplit = "pane.split.horizontal"
+tabnew = "tab.new"
+tabclose = "tab.close"
+tabnext = "tab.next"
+tabprevious = "tab.previous"
+recovery = "recovery.inspect"
+tools = "tools.menu.open"
+lsp = "lsp.menu.open"
+lspsessions = "lsp.sessions"
+lspselect = "lsp.session.select"
+dap = "dap.menu.open"
+problems = "diagnostic.open"
+copen = "diagnostic.open"
+marks = "navigation.marks"
+jumps = "navigation.jumps"
+changes = "navigation.changes"
+buffers = "buffer.picker.open"
+commands = "command_palette.open"
+worktree = "workspace.git.worktree.create"
+worktrees = "workspace.git.worktrees.open"
+theme = "theme.select"
+colorscheme = "theme.select"
+colo = "theme.select"
+mason = "tools.menu.open"
+Mason = "tools.menu.open"
+settings = "settings.open"
+setup = "settings.setup"
+shortcuts = "settings.shortcuts"
+keybinds = "settings.shortcuts"
+keymaps = "keymap.open"
+trust = "workspace.trust"
+untrust = "workspace.untrust"
+grep = "workspace.search"
+vimgrep = "workspace.search"
+replaceall = "workspace.replace"
+searchcancel = "workspace.search.cancel"
+rootadd = "workspace.root.add"
+exploreradd = "explorer.create"
+explorerrename = "explorer.rename"
+roots = "workspace.root.list"
+rootactivate = "workspace.root.activate"
+rootremove = "workspace.root.remove"
+rootstatus = "workspace.root.status"
+sessionsave = "session.save"
+sessionload = "session.load"
+historyclear = "history.clear"
+largefile = "buffer.large_file.set"
+largefilestatus = "buffer.large_file.status"
+syntaxstatus = "syntax.status"
+syntaxfold = "syntax.fold.toggle"
+syntaxindent = "syntax.indent.line"
+taskrun = "task.run"
+taskstop = "task.stop"
+taskoutput = "task.output"
+plugins = "plugin.list"
+pluginvalidate = "plugin.validate"
+plugindisable = "plugin.disable"
+crashinspect = "crash.inspect"
+crashclear = "crash.clear"
+terminalopen = "terminal.open"
+terminaltoggle = "terminal.toggle"
+terminals = "terminal.list"
+terminalfocus = "terminal.focus"
+terminalsend = "terminal.send"
+terminalclose = "terminal.close"
+terminalquit = "terminal.quit"
+format = "format.run"
+lint = "lint.run"
+lintclear = "lint.clear"
+test = "test.run"
+teststop = "test.stop"
+tests = "test.list"
+tasks = "task.list"
+taskrestart = "task.restart"
+explore = "explorer.open"
+pkgsearch = "package.registry.search"
+pkgshow = "package.registry.show"
+pkginstall = "package.registry.install"
+
+[messages]
+git_review_footer = "j/k Files · ]h/[h Hunks · s Stage file · u Unstage file · S/U Hunk · r Discard · Enter Open · Tab Diff · Esc Close"
+unsaved_quit = "unsaved changes: :wa saves them, :q! discards them"
+conflict_none = "no conflict markers in this file"
+mark_unset = "mark {name} is not set"
+recovery_too_large = "this file is too large for crash recovery; save it to keep your changes"
+formatter_missing = "no formatter named {name}; install one in the tool manager (<leader>cm)"
+plugin_unknown = "no plugin named {id}"
+save_all_nothing = "nothing to save"
+file_changed_on_disk = "{path} changed on disk: :reload! takes that version, :w! keeps yours"
+new_scratch = "new scratch buffer"
+new_file = "New file {path}, not saved yet"
+macro_recording = "recording macro @{register}"
+macro_recorded = "recorded macro @{register}"
+no_macro_recording = "no macro is being recorded"
+config_reload_queued = "configuration reload queued"
+unknown_config_key = "unknown configuration key `{key}`"
+no_keymap_binding = "no resolved binding in context `{context}`"
+no_keymap_conflicts = "no keymap conflicts"
+healthy = "Dust health — {buffers} buffers · {jobs} jobs · {ptys} PTYs · {preflights} preflights · {tasks} tasks · {plugins} plugins/{plugin_failures} failed · {packages} package ops · {lsp} LSP · DAP {dap} · persistence {persistence} · safe {safe} · workspace {workspace} · terminal {terminal}"
+safe_mode_status = "safe mode: {state}"
+safe_mode_blocked = "safe mode blocks project execution, plugins, and session restore"
+no_previous_change = "no previous change"
+no_previous_macro = "no previous macro"
+repeat_step_limit = "repeat step limit ({limit}) exceeded"
+empty_macro = "macro register @{register} is empty"
+macro_recursion_limit = "macro recursion limit ({limit}) exceeded"
+macro_step_limit = "macro step limit ({limit}) exceeded"
+cursor_not_word = "cursor is not on a word"
+opening_file = "opening file…"
+no_active_reload = "no active buffer to reload"
+dirty_reload = "buffer has unsaved changes; use :reload! to discard them"
+scratch_reload = "scratch buffer cannot be reloaded"
+reloading = "reloading…"
+dirty_close = "buffer has unsaved changes; use :bd! to discard them"
+returned_dashboard = "returned to workspace dashboard"
+buffer_closed = "buffer closed"
+no_active_save = "no active buffer to save"
+scratch_no_name = "scratch buffer has no file name; use :w path"
+saving = "saving…"
+reload_rejected = "configuration reload rejected; keeping previous snapshot: {diagnostic}"
+auto_reload_rejected = "automatic configuration reload rejected; keeping previous snapshot: {diagnostic}"
+auto_reloaded = "configuration automatically reloaded"
+reloaded_restart = "configuration reloaded; terminal lifecycle and worker queue changes apply after restart"
+reloaded = "configuration reloaded"
+reloaded_file = "reloaded {path}"
+reload_closed = "reload target was closed"
+unexpected_read = "unexpected filesystem read completion"
+saved_dirty = "saved revision {revision} of {path}; newer edits remain"
+saved = "saved {path}"
+saved_others_dirty = "saved active file, but other buffers still have unsaved changes"
+unexpected_completion = "unexpected filesystem completion"
+search_empty = "search query is empty"
+search_no_buffer = "search requires an open buffer"
+no_previous_search = "no previous search"
+pattern_not_found = "pattern not found: {query}"
+config_explanation = "{key} = {value} ({source})"
+keymap_inspection = "{id} {context}: {source_keys} => {keys} [{operation}] {command} {arguments} ({source})"
+keymap_context_summary = "keymap context {context}: {count} resolved bindings"
+startup_fallback = "using bundled configuration: {diagnostic}"
+recovery_opened = "recovered into an unsaved buffer: :w <path> keeps it"
+recovery_restored = "recovered unsaved changes: :w keeps them, u goes back to the saved file"
+recovery_none = "no recovery journal is available"
+recovery_discarded = "recovery journal discarded"
+recovery_pruned = "pruned {count} recovery journal(s) under configured retention policy"
+tool_no_matches = "No matching tools · Esc clears the search · Tab changes category"
+tool_install_started = "installing {tool}…"
+tool_install_succeeded = "installed {tool}"
+tool_install_failed = "failed to install {tool}: {diagnostic}"
+tool_no_installer = "{tool} has no portable bundled installer; Dust will not invoke a system package manager"
+lsp_stopped = "language server {server} stopped"
+lsp_install_hint = "{server} can serve {language} files: install it with Space c m"
+lsp_failed = "language server {server} failed: {diagnostic}"
+lsp_status = "language servers: {servers}"
+lsp_no_server = "no installed language server matches the active file"
+lsp_no_buffer = "language-server action requires a saved file buffer"
+lsp_disabled = "language-server support is disabled by configuration"
+lsp_restart_disabled = "language server {server} exceeded its crash restart limit"
+lsp_hover = "{server}: {hover}"
+lsp_hover_title = "Hover · {server}"
+lsp_signature_title = "Signature · {server}"
+lsp_completion_documentation_title = "Completion · {label} · {server}"
+lsp_health = "{server}: {documents} document(s), {pending} pending, {encoding} positions"
+lsp_unsupported = "{server} does not support {method}"
+lsp_request_failed = "{server} request {method} failed: {diagnostic}"
+lsp_completion = "{server} completions: {items}"
+lsp_symbols = "symbols: {symbols}"
+lsp_code_actions = "code actions: {actions}"
+lsp_no_result = "language server returned no result"
+lsp_loading = "󰔟 Loading…"
+syntax_no_fold = "no fold here"
+task_stopped = "task {name} stopped"
+lsp_aux_result = "language server returned {count} item(s)"
+lsp_invalid_uri = "language server returned unsupported URI {uri}"
+lsp_invalid_position = "language server returned an invalid document position"
+lsp_logs = "Language server logs"
+diagnostic_none = "no diagnostic is available in this buffer"
+diagnostic_current = "diagnostic: {message}"
+workspace_trusted = "workspace trusted for project execution"
+workspace_untrusted = "workspace trust revoked; project execution is blocked"
+workspace_trust_trusted = "trusted"
+workspace_trust_untrusted = "untrusted"
+workspace_trust_status = "workspace is {state}"
+workspace_trust_confirmation = "Trusting lets LSP servers, tasks and debuggers run code from this project."
+workspace_trust_declined = "workspace not trusted: LSP, tasks and debugging stay off; run :trust to change this"
+workspace_trust_not_ready = "workspace identity and trust state are not ready; workspace remains untrusted"
+workspace_trust_saving = "saving workspace trust state…"
+workspace_trust_state_failed = "workspace trust state failed; workspace remains untrusted: {diagnostic}"
+workspace_root_operation_busy = "another workspace root operation is pending"
+workspace_root_loading = "resolving workspace root…"
+workspace_root_stale = "workspace roots changed; stale operation was rejected"
+workspace_root_added = "added workspace root {path}; workspace is untrusted"
+workspace_root_add_failed = "cannot add workspace root {path}: {diagnostic}"
+workspace_root_removed = "removed workspace root {path}; workspace is untrusted"
+workspace_root_activated = "active workspace root is {path}"
+workspace_root_dirty_blocker = "cannot remove workspace root containing dirty buffers"
+workspace_root_service_blocker = "cannot remove workspace root while a workspace service or effect is pending"
+workspace_root_status = "active root #{id}: {path}"
+session_saved = "session saved"
+session_disabled = "sessions are turned off by [persistence] enabled = false"
+format_on_save_skipped = "not saved: the active file changed while it was being formatted"
+session_restored = "session restored"
+session_load_none = "no saved session for this project"
+session_load_dirty = "save or discard your changes before loading a session"
+history_cleared = "command and search histories cleared"
+large_file_invalid = "large-file mode must be auto, on, or off"
+large_file_changed = "large-file mode set to {mode}"
+large_file_status = "large-file mode {mode}; effective {effective}"
+syntax_status_title = "Built-in syntax languages"
+syntax_capabilities = "highlights {highlights} · folds {folds} · indents {indents} · {state}"
+syntax_builtin_source = "pinned built-in parser"
+syntax_support_full = "full"
+syntax_support_partial = "partial"
+syntax_support_unsupported = "unsupported"
+syntax_state_active = "active"
+syntax_state_active_truncated = "active · truncated"
+syntax_state_pending = "pending"
+syntax_state_available = "available"
+syntax_state_failed = "failed: {error}"
+syntax_indent_unavailable = "No built-in syntax indentation is available for this buffer"
+syntax_indent_pending = "Current syntax indentation data is not ready"
+syntax_indent_unsupported = "Built-in syntax indentation is unsupported for {language}"
+syntax_indent_truncated = "Syntax indentation reached its configured limit; no edit was applied"
+syntax_indent_unchanged = "Current line indentation already matches syntax structure"
+syntax_indent_applied = "Indented current line from syntax structure"
+syntax_source_too_large = "Source exceeds the configured syntax byte limit"
+task_not_running = "task {name} is not running"
+task_already_running = "task {name} is already running"
+task_unknown = "unknown task {name}"
+task_no_root = "workspace has no active task root"
+task_cwd_outside_root = "task working directory is outside the active root"
+task_exited = "task {name} exited ({code})"
+terminal_input_hint = "{key} → Normal mode"
+task_failed = "task failed: {diagnostic}"
+task_output = "{name}: {output}"
+plugin_status = "plugins: {status}"
+plugin_picker_title = "Plugins"
+plugin_picker_empty = "No plugins yet · :pkgsearch <name> finds one · Esc Esc Close"
+plugin_browser_footer = "Enter Actions · :pkgsearch installs · Esc Esc Close"
+plugin_browser_enable = "Enable for this session"
+plugin_browser_disable = "Disable for this session"
+plugin_browser_reload = "Reload plugin"
+plugin_browser_folder = "Open folder in workspace"
+plugin_browser_registry = "Find / install plugins from registry"
+plugin_browser_back = "Back to plugins / refresh"
+plugin_browser_permissions = "Permissions"
+plugin_browser_status = "Status and failure reason"
+plugin_browser_session = "Enter Select · Toggles last until restart; set enabled in config to keep them"
+package_picker_title = "Installed packages"
+package_picker_empty = "No packages yet · :pkgsearch <name> finds one · Esc Esc Close"
+package_registry_search_title = "Official package registry"
+package_registry_show_title = "Registry package"
+package_registry_failed = "registry request failed: {diagnostic}"
+package_prepared = "package {package} validated; activating before commit"
+package_operation_complete = "package {operation} complete ({count})"
+package_nothing_to_verify = "No packages are installed, so there is nothing to verify."
+package_operation_failed = "package {operation} failed: {diagnostic}"
+package_plugin_conflict = "package plugin `{plugin}` conflicts with an already configured plugin"
+plugin_disabled = "disabled plugin {id}"
+plugin_load_failed = "plugin {id} failed to queue: {diagnostic}"
+plugin_worker_stopped = "Plugin worker stopped; runtime commands were disabled: {diagnostic}"
+previous_crash = "Dust recovered terminal control after a previous crash; use :crashinspect"
+crash_location = "previous crash metadata: {path}"
+crash_cleared = "previous crash metadata cleared"
+terminal_unknown = "unknown terminal profile {profile}"
+terminal_outside_root = "terminal working directory is outside the active root"
+terminal_title = "Terminal #{id} · {profile} · {status} · {unsupported} unsupported sequences"
+terminal_running = "running"
+terminal_exited = "exited ({code})"
+terminal_truncated = "output truncated"
+terminal_list = "terminals: {status}"
+terminal_missing = "terminal does not exist"
+terminal_yanked = "terminal text yanked"
+formatter_invalid_utf8 = "formatter returned invalid UTF-8"
+formatter_stale = "formatter result rejected because the buffer changed"
+formatter_applied = "formatter result applied to dirty buffer"
+formatter_truncated = "formatter result rejected because output was truncated"
+linter_matcher_missing = "linter task has no problem matcher"
+picker_tasks_title = "Tasks"
+picker_tests_title = "Tests · {name}"
+picker_output_title = "Output · {name}"
+picker_code_lens_title = "Code lenses"
+picker_lsp_sessions_title = "Language server sessions"
+explorer_title = "Explorer"
+workspace_search_started = "searching workspace…"
+workspace_search_complete = "{count} match(es) across {files} searched file(s)"
+workspace_search_failed = "workspace search failed: {diagnostic}"
+workspace_search_empty = "workspace search found no matches"
+workspace_search_cancelled = "workspace search cancelled"
+workspace_search_stale_result = "workspace search result is stale; search again"
+workspace_search_title = "Grep"
+workspace_search_row = "{path}:{line}:{column}"
+workspace_replace_label = "Workspace replacement"
+picker_references_title = "References"
+picker_symbols_title = "Symbols"
+picker_symbol_kind = "{kind}"
+picker_code_actions_title = "Code actions"
+picker_diagnostics_title = "Problems"
+picker_buffers_title = "Buffers"
+picker_commands_title = "Commands"
+picker_loading = "Loading…"
+picker_empty = "No items available"
+picker_no_matches = "No matches · Try another query"
+picker_grep_hint = "Type to search the workspace"
+navigation_recents_title = "Recent files"
+navigation_marks_title = "Marks"
+navigation_jumps_title = "Jump list"
+navigation_changes_title = "Change list"
+navigation_recent_source = "recent"
+navigation_mark_source = "mark"
+navigation_jump_source = "jump"
+navigation_change_source = "change"
+navigation_outside_workspace = "navigation target is outside the workspace"
+workspace_edit_lsp_label = "Language-server workspace edit"
+workspace_edit_server_label = "Server workspace edit"
+workspace_edit_busy = "another workspace edit is already being previewed"
+workspace_resource_unsupported = "workspace resource operation options are unsupported or unsafe"
+workspace_resource_rename_row = "rename to {target}"
+workspace_resource_delete_row = "delete after explicit apply"
+workspace_resource_staged = "staged; disk unchanged"
+workspace_resource_buffer_stale = "resource buffer changed after preview: {path}"
+workspace_edit_loading = "loading workspace-edit targets…"
+workspace_edit_failed = "workspace edit failed without mutation: {diagnostic}"
+workspace_edit_included = "{count} edit(s), included"
+workspace_edit_excluded = "{count} edit(s), excluded"
+workspace_edit_rejected = "workspace edit rejected; no files changed"
+workspace_edit_applied = "workspace edit applied atomically to editor buffers; save explicitly"
+dap_started = "starting debug adapter {adapter}"
+dap_stopped = "debug session {adapter} ended: {reason}. <leader>dr shows its output"
+dap_failed = "debug adapter {adapter} failed: {diagnostic} · <leader>dr shows its output"
+dap_status = "debug adapter: {adapter}"
+dap_status_attached = "debug adapter: {adapter}, attached to {target}"
+dap_no_adapter = "no installed debug adapter matches the active file"
+dap_no_buffer = "debugging requires a saved active file"
+dap_picker_title = "Debug: {kind}"
+dap_console_title = "Debug console"
+dap_sessions_title = "Debug sessions"
+dap_session_running = "running"
+dap_session_stopped = "stopped"
+dap_evaluate_result = "{name} = {value}"
+dap_source_loaded = "loaded debug source {name} {mime}"
+dap_no_configuration = "there is no debug session to restart"
+dap_not_paused = "the program is not paused"
+dap_breakpoint_invalid = "breakpoint condition, hit condition, or log message is invalid"
+
+# The command palette (F1, <leader>:): rows read "Category: Label" with the key on the right.
+[command_palette]
+# Plumbing that only keys use. Commands that need typed text are listed only under prompts below.
+hidden = [
+    "lsp.rename.prompt",
+  "input.", "command_line.", "picker.", "surface.", "mode.", "completion.",
+  "edit.", "view.cursor.", "view.selection.", "view.scroll", "explorer.search.",
+  "multi.move", "multi.delete_char", "multi.next", "multi.previous", "multi.skip", "multi.remove",
+  "agent.input.", "agent.escape", "tools.category.", "tools.menu.next", "tools.menu.previous",
+  "tools.menu.close", "terminal.mode.", "terminal.send", "macro.", "workspace.edit.",
+  "search.word", "search.repeat", "settings.page.", "settings.setup.",
+  # These act on the tool manager's selected row, so they only work inside it.
+  "tools.search", "tools.activate", "tools.install", "tools.uninstall", "tools.lsp.",
+  "tools.runtime.",
+]
+
+# Commands that need typed text: choosing one opens the command line with this filled in.
+[command_palette.prompts]
+"buffer.large_file.set" = "largefile mode="
+"config.explain" = "config.explain key="
+"dap.configuration.start" = "dap.configuration.start name="
+"dap.evaluate" = "dap.evaluate "
+"dap.watch.add" = "dap.watch.add "
+"explorer.create" = "exploreradd "
+"file.open" = "e "
+"format.run" = "format name="
+"lint.clear" = "lintclear name="
+"lint.run" = "lint name="
+"lsp.rename" = "rename "
+"lsp.session.select" = "lspselect key="
+"lsp.workspace_symbols" = "lsp.workspace_symbols "
+"navigation.mark.set" = "navigation.mark.set name="
+"package.registry.search" = "pkgsearch query="
+"package.remove" = "package.remove name="
+"plugin.disable" = "plugindisable id="
+"task.output" = "taskoutput name="
+"task.restart" = "taskrestart name="
+"task.run" = "taskrun name="
+"task.stop" = "taskstop name="
+"test.list" = "tests name="
+"test.run" = "test name="
+"test.stop" = "teststop name="
+"workspace.git.worktree.create" = "worktree "
+"workspace.root.add" = "rootadd "
+
+[command_palette.categories]
+agent = "Agent"
+application = "Dust"
+buffer = "Buffer"
+command_palette = "Commands"
+config = "Settings"
+settings = "Settings"
+crash = "Dust"
+dap = "Debug"
+diagnostic = "Diagnostics"
+editor = "Editor"
+explorer = "Explorer"
+file = "File"
+format = "Code"
+health = "Health"
+history = "Edit"
+keymap = "Keys"
+lint = "Code"
+lsp = "Code"
+navigation = "Go"
+package = "Packages"
+pane = "Window"
+plugin = "Plugins"
+recovery = "Recovery"
+search = "Search"
+session = "Session"
+"session.tutor" = "Tutor"
+snippet = "Snippets"
+syntax = "Syntax"
+tab = "Tab"
+task = "Tasks"
+terminal = "Terminal"
+test = "Test"
+theme = "Theme"
+tools = "Tools"
+view = "View"
+window = "Window"
+workspace = "Project"
+"workspace.git" = "Git"
+"workspace.search" = "Search"
+"workspace.replace" = "Search"
+
+[command_labels]
+"dap.inspector.next" = "Show the next debug inspector"
+"buffer.close" = "Close buffer"
+"buffer.next" = "Show next buffer"
+"buffer.previous" = "Show previous buffer"
+"buffer.pin.toggle" = "Toggle active buffer pin"
+"buffer.move_left" = "Move buffer left"
+"buffer.move_right" = "Move buffer right"
+"command_line.backspace" = "Prompt backspace"
+"command_line.delete_to_start" = "Delete to the start of the prompt"
+"command_line.delete_word" = "Delete the word before the cursor"
+"command_line.cancel" = "Cancel prompt"
+"command_line.complete.next" = "Next prompt completion"
+"command_line.complete.previous" = "Previous prompt completion"
+"command_line.history.next" = "Next prompt history"
+"command_line.history.previous" = "Previous prompt history"
+"command_line.insert" = "Insert prompt text"
+"command_line.move_end" = "Prompt end"
+"command_line.move_home" = "Prompt home"
+"command_line.move_left" = "Prompt left"
+"command_line.move_right" = "Prompt right"
+"command_line.move_word_left" = "Prompt word left"
+"command_line.move_word_right" = "Prompt word right"
+"application.notifications.open" = "Open notification history"
+"application.notification.dismiss" = "Dismiss current notification"
+"command_line.open" = "Open command line"
+"command_line.submit" = "Submit prompt"
+"surface.confirmation.select_yes" = "Answer yes"
+"surface.confirmation.select_no" = "Answer no"
+"surface.confirmation.toggle" = "Toggle confirmation choice"
+"config.explain" = "Explain a resolved configuration value"
+"config.open" = "Open Settings File (config.toml)"
+"settings.open" = "Open Settings (UI)"
+"settings.shortcuts" = "Keyboard Shortcuts"
+"settings.setup" = "Run First-Start Setup (layout, terminal, agent, leader)"
+"settings.setup.move" = "Move through setup choices"
+"settings.setup.next" = "Take the choice and continue"
+"settings.setup.back" = "Back to the previous question"
+"settings.setup.skip" = "Skip setup"
+"settings.page.close" = "Close Settings"
+"settings.page.move" = "Move through settings"
+"settings.page.section" = "Jump to another settings section"
+"settings.page.activate" = "Change the selected setting"
+"settings.page.toggle" = "Toggle the selected setting"
+"settings.page.reset" = "Reset the selected setting"
+"settings.page.search" = "Search settings"
+"settings.page.modified" = "Show modified settings"
+"settings.page.open_file" = "Open config.toml"
+"settings.page.cancel" = "Cancel or close"
+"settings.page.insert" = "Type into the settings page"
+"settings.page.backspace" = "Delete a character"
+"settings.page.clear" = "Clear the text"
+"settings.page.left" = "Cursor left"
+"settings.page.right" = "Cursor right"
+"settings.page.word_left" = "Cursor a word left"
+"settings.page.word_right" = "Cursor a word right"
+"settings.page.home" = "Cursor to start"
+"settings.page.end" = "Cursor to end"
+"config.reload" = "Reload Settings"
+"edit.backspace" = "Delete previous character"
+"edit.delete_backward" = "Delete previous character in Normal mode"
+"edit.delete_char" = "Delete character"
+"edit.insert_text" = "Insert text"
+"edit.apply" = "Apply a checked edit and cursor"
+"edit.join_lines" = "Join lines"
+"edit.operator" = "Apply operator"
+"edit.put" = "Put register"
+"edit.repeat_last" = "Repeat last change"
+"edit.repeat_visual" = "Repeat normalized Visual change"
+"edit.replace" = "Replace characters"
+"edit.replace_backspace" = "Restore previous Replace-mode text"
+"edit.replace_text" = "Replace text in Replace mode"
+"edit.substitute" = "Substitute characters"
+"edit.surround" = "Delete or replace surrounding pair"
+"edit.toggle_case" = "Toggle character case"
+"view.selection.swap" = "Other end of selection"
+"editor.quit" = "Quit Dust"
+"file.new" = "New buffer"
+"file.open" = "Open file by path"
+"file.reload" = "Reload file"
+"file.save" = "Save file"
+"file.save_quit" = "Save and quit"
+"health.open" = "Show health"
+"workspace.git.status.refresh" = "Refresh Git status"
+"workspace.git.status.open" = "Review changed files (Git status)"
+"workspace.git.review.hunk" = "Act on a review hunk"
+"workspace.search.todo" = "Todo"
+"agent.ask" = "Ask Agent"
+"workspace.git.pr.list" = "Pull Requests"
+"workspace.git.pr.comments" = "Review Comments"
+"workspace.git.pr.comment" = "Comment on Line"
+"agent.toggle" = "Toggle Agent Panel"
+"agent.add_file" = "Ask About File"
+"agent.add_diagnostics" = "Ask About Diagnostics"
+"agent.new" = "New Agent Session"
+"agent.sessions" = "Agent Sessions"
+"agent.session.next" = "Next Agent Session"
+"agent.session.previous" = "Previous Agent Session"
+"agent.session.close" = "Close Agent Session"
+"agent.resume" = "Resume Agent Conversation"
+"agent.cancel" = "Stop Agent"
+"agent.model" = "Agent Model"
+"agent.mode" = "Agent Mode"
+"agent.thinking" = "Agent Thinking Level"
+"agent.options" = "Agent Options"
+"agent.input.insert" = "Type Into Agent Input"
+"agent.input.edit" = "Edit Agent Input"
+"agent.scroll" = "Scroll Agent Transcript"
+"agent.escape" = "Stop Agent or Back to Code"
+"agent.tab.new" = "New Agent Tab"
+"buffer.new_tab" = "New Tab"
+"explorer.search" = "Search"
+"explorer.search.insert" = "Type into the search"
+"explorer.search.delete" = "Delete a character"
+"explorer.search.done" = "Keep the matches"
+"explorer.search.cancel" = "Clear the search"
+"editor.flash" = "Flash jump"
+"workspace.git.browse" = "Git Browse (open)"
+"workspace.git.browse.copy" = "Git Browse (copy)"
+"workspace.git.diff.layer.switch" = "Switch the diff between the unstaged and staged comparison"
+"workspace.git.hunks.open" = "Open Git hunks"
+"workspace.git.hunk.next" = "Go to next Git hunk"
+"workspace.git.hunk.previous" = "Go to previous Git hunk"
+"workspace.git.hunk.preview" = "Preview selected Git hunk"
+"workspace.git.hunk.stage" = "Stage selected Git hunk"
+"workspace.git.hunk.reset" = "Reset selected Git hunk"
+"workspace.git.file.stage" = "Stage the whole active file"
+"workspace.git.file.unstage" = "Unstage the whole active file"
+"workspace.git.lines.stage" = "Stage the selected lines, or the file lines start to end"
+"workspace.git.hunks.open_staged" = "Open staged Git hunks"
+"workspace.git.hunk.unstage" = "Unstage selected staged Git hunk"
+"workspace.git.worktrees.open" = "Open the Git worktree list"
+"workspace.git.worktree.remove" = "Remove the selected worktree and its directory"
+"workspace.git.worktree.create" = "New Worktree: check out a branch in its own directory"
+"workspace.git.worktree.open" = "Switch to the selected worktree"
+"overlay.help.contextual" = "Show what is available on the focused surface"
+"overlay.help.reference" = "Show the reference for the selected command"
+"overlay.help.form" = "Show help for the form or confirmation in front of you"
+"session.tutor" = "Tutorial"
+"session.tutor.next" = "Next tutor step"
+"session.tutor.back" = "Previous tutor step"
+"session.tutor.quit" = "Stop the tutor"
+"workspace.git.conflicts.open" = "Show the paused operation and each conflicted path's base, ours and theirs"
+"workspace.git.conflict.choose" = "Accept one side of the active conflict into the result buffer"
+"workspace.git.conflict.accept" = "Accept one side of the conflict block at the cursor"
+"workspace.git.conflict.stage" = "Stage the resolved conflict in the active buffer"
+"workspace.git.conflict.next" = "Go to next conflict"
+"workspace.git.conflict.previous" = "Go to previous conflict"
+"file.markdown_preview" = "Preview Markdown"
+"file.save_all" = "Save all files"
+"file.save_all_quit" = "Save all files and quit"
+"navigation.mark.jump" = "Jump to navigation mark"
+"input.mark.begin" = "Set or jump to a mark"
+"workspace.git.conflict.continue" = "Finish the paused operation by recording its merge commit"
+"workspace.git.conflict.abort" = "Abandon the paused operation and return to where it started"
+"workspace.git.conflict.replace" = "Preview replacing whole files with one side, then confirm it"
+"dap.breakpoints.states" = "Show what is true about each breakpoint rather than what was asked for"
+"dap.breakpoint.disable" = "Enable or disable the breakpoint on the cursor line"
+"dap.terminate" = "End the debug session and ask the debuggee to end with it"
+"dap.detach" = "Leave the debug session without asking the debuggee to stop"
+"application.safe_mode.status" = "Show safe-mode status"
+"history.redo" = "Redo"
+"history.undo" = "Undo"
+"input.cancel" = "Cancel focused input"
+"input.character" = "Complete pending character input"
+"input.count" = "Append count digit"
+"input.find.begin" = "Find character on line"
+"input.find.repeat" = "Repeat last find"
+"input.find.reverse" = "Repeat last find backward"
+"input.macro.record.select" = "Record macro register"
+"input.macro.record.toggle" = "Toggle macro recording"
+"input.macro.replay.begin" = "Select macro for replay"
+"input.macro.replay.select" = "Replay macro register"
+"input.mapping.cancel" = "Cancel pending mapping"
+"input.motion" = "Move"
+"input.operator.begin" = "Begin operator"
+"input.operator.repeat" = "Repeat pending operator linewise"
+"input.prefix.begin" = "Begin command prefix"
+"input.register.begin" = "Select register"
+"input.register.select" = "Use register"
+"input.replace.begin" = "Replace character"
+"input.replace.text" = "Replace with text"
+"input.surround.begin" = "Delete or replace surrounding pair"
+"input.visual.operator" = "Apply configured Visual operator"
+"input.zero" = "Count zero or line start"
+"keymap.open" = "Open Keymaps (keymaps.toml)"
+"keymap.conflicts" = "Show keymap conflicts"
+"keymap.inspect" = "Inspect a resolved keymap binding"
+"macro.record.start" = "Start macro recording"
+"macro.record.stop" = "Stop macro recording"
+"macro.replay" = "Replay macro"
+"pane.split.horizontal" = "Split pane horizontally"
+"pane.split.vertical" = "Split pane vertically"
+"pane.close" = "Close pane"
+"pane.focus.next" = "Focus next pane"
+"pane.focus.previous" = "Focus previous pane"
+"pane.resize.grow" = "Grow focused pane"
+"pane.resize.shrink" = "Shrink focused pane"
+"surface.focus.left" = "Focus surface to the left"
+"dashboard.select.next" = "Next dashboard item"
+"dashboard.select.previous" = "Previous dashboard item"
+"dashboard.open" = "Run dashboard item"
+"surface.focus.down" = "Focus surface below"
+"surface.focus.up" = "Focus surface above"
+"surface.focus.right" = "Focus surface to the right"
+"surface.retained.focus.next" = "Focus next retained UI node"
+"surface.retained.focus.previous" = "Focus previous retained UI node"
+"surface.retained.scroll.down" = "Scroll retained UI down"
+"surface.retained.scroll.up" = "Scroll retained UI up"
+"surface.retained.activate" = "Activate focused retained UI node"
+"surface.retained.mouse.select" = "Select retained UI node at mouse position"
+"surface.private.activate" = "Activate private surface action at cursor"
+"surface.private.mouse.activate" = "Activate private surface action at mouse"
+"tab.new" = "Open new tab"
+"pane.zoom" = "Zoom the pane"
+"view.wrap.toggle" = "Toggle line wrap"
+"view.line_numbers.toggle" = "Toggle line numbers"
+"view.relative_numbers.toggle" = "Toggle relative line numbers"
+"view.indent_guides.toggle" = "Toggle indent guides"
+"view.git_signs.toggle" = "Toggle git signs"
+"view.format_on_save.toggle" = "Toggle format on save"
+"view.zen.toggle" = "Toggle zen mode"
+"tab.close" = "Close tab"
+"tab.next" = "Focus next tab"
+"tab.previous" = "Focus previous tab"
+"recovery.inspect" = "Recover unsaved work"
+"mode.insert" = "Enter Insert mode"
+"mode.replace" = "Enter Replace mode"
+"mode.normal" = "Enter Normal mode"
+"mode.visual_char" = "Enter character Visual mode"
+"mode.visual_line" = "Enter line Visual mode"
+"mode.visual_block" = "Enter block Visual mode"
+"multi.add_next" = "Add a cursor at the next match"
+"multi.add_below" = "Add a cursor below"
+"multi.add_above" = "Add a cursor above"
+"multi.insert" = "Type at every cursor"
+"multi.delete" = "Delete at every cursor"
+"multi.add_all" = "Add a cursor at every match"
+"multi.next" = "Go to the next cursor"
+"multi.previous" = "Go to the previous cursor"
+"multi.skip" = "Skip this match and add the next"
+"multi.remove" = "Remove this cursor"
+"multi.move" = "Move every cursor"
+"multi.delete_char" = "Delete the character at every cursor"
+"search.repeat" = "Repeat search"
+"search.select_next" = "Select the next search match"
+"edit.substitute_rest" = "Replace every remaining match"
+"search.word" = "Search word under cursor"
+"view.cursor.move" = "Move cursor"
+"view.scroll" = "Scroll view"
+"workspace.file.find" = "Open file"
+"tools.menu.open" = "Tool Manager: install language servers (Mason)"
+"lsp.menu.open" = "Open language-server manager"
+"dap.menu.open" = "Open debug-adapter manager"
+"tools.menu.close" = "Close tool manager"
+"tools.menu.next" = "Select next tool"
+"tools.search" = "Search Tools"
+"tools.search.insert" = "Type into the tool search"
+"tools.search.delete" = "Delete a character"
+"tools.search.done" = "Keep the matches"
+"tools.search.cancel" = "Clear the search"
+"tools.menu.previous" = "Select previous tool"
+"tools.category.next" = "Next tool category"
+"tools.category.previous" = "Previous tool category"
+"tools.refresh" = "Refresh installed tools"
+"tools.activate" = "Start tool or select runtime"
+"tools.install" = "Install selected runtime"
+"tools.uninstall" = "Uninstall selected runtime"
+"tools.lsp.stop" = "Stop selected language server"
+"tools.lsp.restart" = "Restart selected language server"
+"tools.runtime.toggle" = "Choose language-server runtime"
+"lsp.server.start" = "Start language server"
+"lsp.server.stop" = "Stop language server"
+"lsp.server.restart" = "Restart language server"
+"lsp.server.status" = "Show language-server status"
+"lsp.server.logs" = "Show language-server logs"
+"lsp.sessions" = "List language-server sessions"
+"lsp.session.select" = "Select language-server session"
+"lsp.buffer.attach" = "Attach active buffer"
+"lsp.buffer.detach" = "Detach active buffer"
+"lsp.completion.trigger" = "Trigger language completion"
+"lsp.hover" = "Show language hover"
+"lsp.signature_help" = "Show signature help"
+"lsp.documentation.scroll_up" = "Scroll documentation up"
+"lsp.documentation.scroll_down" = "Scroll documentation down"
+"lsp.documentation.close" = "Close documentation"
+"lsp.completion.documentation.open" = "Open completion documentation"
+"lsp.definition" = "Go to definition"
+"lsp.declaration" = "Go to declaration"
+"lsp.type_definition" = "Go to type definition"
+"lsp.implementation" = "Go to implementation"
+"lsp.references" = "Find references"
+"lsp.rename" = "Rename symbol"
+"lsp.format" = "Format file"
+"lsp.code_action" = "Show language code actions"
+"lsp.pull_diagnostics" = "Pull document diagnostics"
+"lsp.semantic_tokens" = "Refresh semantic tokens"
+"lsp.inlay_hints" = "Refresh inline inlay hints"
+"lsp.inlay_hints.toggle" = "Toggle inline inlay hints"
+"lsp.code_lens" = "Refresh code lens"
+"lsp.document_highlights" = "Refresh document highlights"
+"lsp.folding_ranges" = "Refresh folding ranges"
+"lsp.selection_ranges" = "Refresh selection ranges"
+"lsp.fold.toggle" = "Toggle language fold"
+"lsp.selection.expand" = "Expand language selection"
+"lsp.document_symbols" = "Show document symbols (breadcrumbs)"
+"lsp.workspace_symbols" = "Show workspace symbols"
+"completion.select_next" = "Select next completion"
+"completion.select_previous" = "Select previous completion"
+"completion.accept" = "Accept completion"
+"completion.inline.accept" = "Accept inline completion"
+"lsp.incoming.textdocument.publishdiagnostics" = "Handle incoming LSP diagnostics"
+"lsp.incoming.dollar.progress" = "Handle incoming LSP progress"
+"lsp.incoming.experimental.serverstatus" = "Handle incoming LSP server status"
+"lsp.incoming.window.logmessage" = "Handle incoming LSP log message"
+"lsp.incoming.window.showmessage" = "Handle incoming LSP message"
+"lsp.incoming.client.registercapability" = "Handle incoming LSP capability registration"
+"lsp.incoming.client.unregistercapability" = "Handle incoming LSP capability removal"
+"lsp.incoming.workspace.inlayhint.refresh" = "Handle incoming LSP inlay refresh"
+"lsp.incoming.workspace.applyedit" = "Handle incoming LSP workspace edit"
+"lsp.incoming.textdocument.hover" = "Handle incoming LSP hover"
+"lsp.incoming.textdocument.completion" = "Handle incoming LSP completion"
+"lsp.incoming.completionitem.resolve" = "Handle incoming LSP resolved completion"
+"lsp.incoming.textdocument.signaturehelp" = "Handle incoming LSP signature help"
+"lsp.incoming.textdocument.definition" = "Handle incoming LSP definition"
+"lsp.incoming.textdocument.declaration" = "Handle incoming LSP declaration"
+"lsp.incoming.textdocument.typedefinition" = "Handle incoming LSP type definition"
+"lsp.incoming.textdocument.implementation" = "Handle incoming LSP implementation"
+"lsp.incoming.textdocument.references" = "Handle incoming LSP references"
+"lsp.incoming.textdocument.documentsymbol" = "Handle incoming LSP document symbols"
+"lsp.incoming.workspace.symbol" = "Handle incoming LSP workspace symbols"
+"lsp.incoming.textdocument.rename" = "Handle incoming LSP rename"
+"lsp.incoming.textdocument.formatting" = "Handle incoming LSP formatting"
+"lsp.incoming.textdocument.rangeformatting" = "Handle incoming LSP range formatting"
+"lsp.incoming.textdocument.codeaction" = "Handle incoming LSP code actions"
+"lsp.incoming.workspace.executecommand" = "Handle incoming LSP command result"
+"lsp.incoming.textdocument.diagnostic" = "Handle incoming LSP diagnostic result"
+"lsp.incoming.textdocument.semantictokens.full" = "Handle incoming LSP semantic tokens"
+"lsp.incoming.textdocument.semantictokens.full.delta" = "Handle incoming LSP semantic token changes"
+"lsp.incoming.textdocument.inlayhint" = "Handle incoming LSP inlay hints"
+"lsp.incoming.textdocument.codelens" = "Handle incoming LSP code lenses"
+"lsp.incoming.codelens.resolve" = "Handle incoming LSP resolved code lens"
+"lsp.incoming.textdocument.documenthighlight" = "Handle incoming LSP document highlights"
+"lsp.incoming.textdocument.foldingrange" = "Handle incoming LSP folding ranges"
+"lsp.incoming.textdocument.documentcolor" = "Handle incoming LSP document colors"
+"lsp.incoming.textdocument.selectionrange" = "Handle incoming LSP selection ranges"
+"completion.cancel" = "Cancel completion"
+"snippet.next" = "Next snippet placeholder"
+"snippet.leave" = "Finish the snippet and leave Insert"
+"snippet.previous" = "Previous snippet placeholder"
+"snippet.cancel" = "Cancel snippet session"
+"diagnostic.next" = "Go to next error or warning"
+"diagnostic.previous" = "Go to previous error or warning"
+"diagnostic.error.next" = "Go to next error"
+"diagnostic.error.previous" = "Go to previous error"
+"diagnostic.warning.next" = "Go to next warning"
+"diagnostic.warning.previous" = "Go to previous warning"
+"diagnostic.open" = "Open workspace problems"
+"buffer.picker.open" = "Open buffer picker"
+"command_palette.open" = "Open command picker"
+"workspace.search.prompt" = "Open workspace search prompt"
+"workspace.search.resume" = "Resume workspace search"
+"workspace.search" = "Search workspace"
+"workspace.search.cancel" = "Cancel workspace search"
+"workspace.replace.prompt" = "Open workspace replacement prompt"
+"workspace.replace" = "Replace across workspace"
+"workspace.root.add" = "Add workspace root"
+"workspace.root.list" = "Projects"
+"navigation.recents" = "Open recent files"
+"navigation.marks" = "Open marks"
+"navigation.mark.set" = "Set navigation mark"
+"navigation.jumps" = "Open jump list"
+"navigation.jump.back" = "Jump back"
+"navigation.jump.forward" = "Jump forward"
+"navigation.changes" = "Open change list"
+"workspace.root.activate" = "Activate workspace root"
+"workspace.root.remove" = "Remove workspace root"
+"workspace.root.status" = "Show active workspace root"
+"session.save" = "Save session state"
+"session.load" = "Load session state"
+"history.clear" = "Clear command and search history"
+"buffer.large_file.set" = "Set large-file mode"
+"buffer.large_file.status" = "Show large-file mode"
+"syntax.status" = "Show built-in syntax language status"
+"syntax.selection.grow" = "Grow syntax selection (Ctrl-Space)"
+"syntax.selection.shrink" = "Shrink syntax selection (Backspace)"
+"syntax.function.next" = "Next function (]f)"
+"syntax.function.previous" = "Previous function ([f)"
+"syntax.class.next" = "Next class (]c)"
+"syntax.class.previous" = "Previous class ([c)"
+"syntax.argument.swap_next" = "Swap argument with next (Space c >)"
+"syntax.argument.swap_previous" = "Swap argument with previous (Space c <)"
+"syntax.select.inner_function" = "Select inside function (if)"
+"syntax.select.a_function" = "Select around function (af)"
+"syntax.select.inner_class" = "Select inside class (ic)"
+"syntax.select.a_class" = "Select around class (ac)"
+"syntax.select.inner_argument" = "Select inside argument (ia)"
+"syntax.select.a_argument" = "Select around argument (aa)"
+"syntax.select.inner_comment" = "Select inside comment (i/)"
+"syntax.select.a_comment" = "Select around comment (a/)"
+"syntax.fold.toggle" = "Toggle fold"
+"syntax.fold.open" = "Open fold"
+"syntax.fold.close" = "Close fold"
+"syntax.fold.open_all" = "Open all folds"
+"syntax.fold.close_all" = "Close all folds"
+"lsp.rename.prompt" = "Rename Symbol"
+"edit.substitute_lines" = "Substitute in lines (:s/old/new/g)"
+"edit.global_delete" = "Delete matching lines (:g/pattern/d, :v/pattern/d)"
+"completion.leave" = "Close completion and leave Insert"
+"syntax.indent.line" = "Indent current line from built-in syntax structure"
+"task.run" = "Run configured task"
+"task.stop" = "Stop running task"
+"task.output" = "Show task output"
+"plugin.validate" = "Validate configured plugins"
+"plugin.list" = "Browse installed plugins"
+"plugin.disable" = "Disable plugin"
+"package.install" = "Install verified package"
+"package.update" = "Update verified package"
+"package.registry.search" = "Search official package registry"
+"package.registry.show" = "Show exact registry package"
+"package.registry.install" = "Install exact registry package"
+"package.list" = "List installed packages"
+"package.verify" = "Verify package store"
+"package.rollback" = "Rollback package lock"
+"package.remove" = "Remove installed package"
+"package.gc" = "Collect unreferenced package objects"
+"crash.inspect" = "Inspect previous crash"
+"crash.clear" = "Clear previous crash"
+"terminal.open" = "Open terminal profile"
+"terminal.toggle" = "Toggle terminal focus"
+"terminal.list" = "List terminals"
+"terminal.focus" = "Focus terminal"
+"terminal.focus_active" = "Focus visible terminal panel"
+"terminal.cycle" = "Cycle selected terminal"
+"terminal.resize" = "Resize terminal window"
+"window.list" = "List all windows"
+"window.clone" = "Clone window view"
+"window.dock" = "Dock native window"
+"window.float" = "Float native window"
+"window.fullscreen" = "Fullscreen native window"
+"window.hide" = "Hide native window"
+"window.show" = "Show native window"
+"window.close" = "Close native window"
+"window.resize" = "Resize native window"
+"window.resize.directional" = "Resize focused window"
+"window.move" = "Move floating native window"
+"window.swap" = "Swap native window placements"
+"terminal.dock" = "Dock selected terminal window"
+"terminal.float" = "Float selected terminal window"
+"terminal.fullscreen" = "Fullscreen selected terminal window"
+"terminal.hide" = "Hide selected terminal window"
+"terminal.send" = "Send terminal text"
+"terminal.mode.normal" = "Enter terminal Normal mode"
+"terminal.mode.input" = "Return to terminal input"
+"terminal.normal.move" = "Move terminal Normal cursor"
+"terminal.visual.start" = "Select terminal text"
+"terminal.yank" = "Yank terminal text"
+"terminal.close" = "Close focused terminal"
+"terminal.quit" = "Stop the focused terminal without asking"
+"terminal.unfocus" = "Return focus from terminal to editor"
+"format.run" = "Run configured formatter"
+"lint.run" = "Run configured linter"
+"lint.clear" = "Clear linter diagnostics"
+"test.run" = "Run configured test"
+"test.run.prompt" = "Run test by name"
+"test.list.prompt" = "Show test results by name"
+"test.stop.prompt" = "Stop test by name"
+"test.stop" = "Stop test run"
+"test.list" = "List test results"
+"task.list" = "List task status"
+"task.restart" = "Restart task"
+"explorer.open" = "Open file explorer"
+"explorer.close" = "Close file explorer"
+"explorer.panel.toggle" = "Toggle file explorer"
+"explorer.next" = "Select next explorer row"
+"explorer.previous" = "Select previous explorer row"
+"explorer.page_up" = "Page explorer selection up"
+"explorer.page_down" = "Page explorer selection down"
+"explorer.parent" = "Select explorer parent"
+"explorer.child" = "Select first explorer child"
+"explorer.toggle" = "Expand or collapse explorer node"
+"explorer.refresh" = "Refresh explorer"
+"explorer.follow" = "Follow active file in explorer"
+"explorer.hidden.toggle" = "Toggle hidden explorer entries"
+"explorer.ignored.toggle" = "Toggle ignored explorer entries"
+"explorer.file.open" = "Open explorer file"
+"explorer.file.split_open" = "Split-open explorer file"
+"explorer.create" = "Create explorer file or directory"
+"explorer.rename" = "Rename selected explorer path"
+"explorer.rename.prompt" = "Rename selected explorer path"
+"explorer.delete" = "Delete selected explorer path"
+"explorer.copy" = "Copy selected explorer path"
+"explorer.move" = "Move selected explorer path"
+"explorer.paste" = "Paste copied explorer path"
+"explorer.path.yank" = "Yank selected explorer path"
+"explorer.mouse.select" = "Select explorer row at mouse"
+"picker.insert" = "Insert picker query text"
+"picker.backspace" = "Delete picker query character"
+"picker.next" = "Select next picker item"
+"picker.previous" = "Select previous picker item"
+"picker.preview.down" = "Scroll the picker's diff down"
+"picker.preview.up" = "Scroll the picker's diff up"
+"picker.results" = "Send these results to the shared Results surface"
+"picker.remove" = "Remove the selected row"
+"picker.accept" = "Accept picker item"
+"picker.cancel" = "Close picker"
+"theme.select" = "Select Color Theme (Colorscheme)"
+"picker.mode.normal" = "Navigate picker results"
+"picker.mode.insert" = "Edit picker query"
+"picker.plugin.open" = "Open plugin picker source"
+"buffer.virtual.open" = "Open read-only virtual document"
+"buffer.virtual.refresh" = "Refresh read-only virtual document"
+"health.virtual.open" = "Open read-only health document"
+"health.virtual.refresh" = "Refresh read-only health document"
+"workspace.trust" = "Request workspace trust"
+"workspace.untrust" = "Revoke workspace trust"
+"workspace.trust.status" = "Show workspace trust"
+"workspace.edit.toggle" = "Toggle workspace edit file"
+"workspace.edit.accept" = "Accept workspace edit"
+"workspace.edit.reject" = "Reject workspace edit"
+"workspace.resource.apply" = "Apply staged resource operations"
+"dap.session.start" = "Start debug session"
+"dap.test.cursor" = "Debug test under cursor"
+"dap.session.stop" = "Stop debug session"
+"dap.session.continue" = "Continue debug session"
+"dap.session.pause" = "Pause debug session"
+"dap.session.next" = "Step over"
+"dap.session.step_in" = "Step into"
+"dap.session.step_out" = "Step out"
+"dap.session.status" = "Show debug-session status"
+"dap.configuration.start" = "Start configured debug session"
+"dap.watch.add" = "Add debug watch"
+"dap.watch.remove" = "Remove debug watch"
+"dap.watch.list" = "List debug watches"
+"dap.console" = "Show debug console"
+"dap.sessions" = "Show debug sessions"
+"dap.threads" = "Show debug threads"
+"dap.stack" = "Show debug stack"
+"dap.scopes" = "Inspect debug variables"
+"dap.variables" = "Show debug variables"
+"dap.evaluate" = "Evaluate debug expression"
+"dap.breakpoint.toggle" = "Toggle source breakpoint"
+"dap.breakpoint.configure" = "Configure source breakpoint"
+"dap.session.restart" = "Restart debug session"
+"view.cursor.place_mouse" = "Place cursor at mouse position"
+"view.selection.extend_mouse" = "Extend selection to mouse position"

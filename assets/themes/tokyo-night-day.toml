@@ -1,0 +1,676 @@
+# Adapted to Dust semantic roles and terminal fallbacks; not the upstream editor implementation.
+# Palette source: README.md. License: ../../LICENSES/Apache-2.0.txt
+name = "tokyo-night-day"
+
+[styles.default]
+foreground = "#3760bf"
+background = "#e1e2e7"
+foreground_256 = "indexed:61"
+background_256 = "indexed:254"
+foreground_16 = "black"
+background_16 = "white"
+attributes = []
+
+[styles.muted]
+foreground = "#6172b0"
+background = "#e1e2e7"
+foreground_256 = "indexed:61"
+background_256 = "indexed:254"
+foreground_16 = "dark_grey"
+background_16 = "white"
+attributes = []
+
+[styles.accent]
+foreground = "#2e7de9"
+background = "#e1e2e7"
+foreground_256 = "indexed:32"
+background_256 = "indexed:254"
+foreground_16 = "dark_blue"
+background_16 = "white"
+attributes = ["bold"]
+
+[styles.status]
+foreground = "#3760bf"
+background = "#c1c9df"
+foreground_256 = "indexed:61"
+background_256 = "indexed:252"
+foreground_16 = "black"
+background_16 = "white"
+attributes = []
+
+[styles.status_accent]
+foreground = "#e1e2e7"
+background = "#2e7de9"
+foreground_256 = "indexed:254"
+background_256 = "indexed:32"
+foreground_16 = "white"
+background_16 = "dark_blue"
+attributes = ["bold"]
+
+[styles.selection]
+foreground = "#3760bf"
+background = "#b7c1e3"
+foreground_256 = "indexed:61"
+background_256 = "indexed:146"
+foreground_16 = "black"
+background_16 = "grey"
+attributes = []
+
+[styles.search]
+foreground = "#e1e2e7"
+background = "#8c6c3e"
+foreground_256 = "indexed:254"
+background_256 = "indexed:95"
+foreground_16 = "white"
+background_16 = "dark_yellow"
+attributes = []
+
+[styles.error]
+foreground = "#f52a65"
+background = "#e1e2e7"
+foreground_256 = "indexed:197"
+background_256 = "indexed:254"
+foreground_16 = "dark_red"
+background_16 = "white"
+attributes = ["bold"]
+
+[styles.warning]
+foreground = "#8c6c3e"
+background = "#e1e2e7"
+foreground_256 = "indexed:95"
+background_256 = "indexed:254"
+foreground_16 = "dark_yellow"
+background_16 = "white"
+attributes = []
+
+[styles.border]
+foreground = "#8990b3"
+background = "#e1e2e7"
+foreground_256 = "indexed:103"
+background_256 = "indexed:254"
+foreground_16 = "black"
+background_16 = "white"
+attributes = []
+
+[styles.buffer_line_background]
+foreground = "#6172b0"
+background = "#e1e2e7"
+foreground_256 = "indexed:61"
+background_256 = "indexed:254"
+foreground_16 = "dark_grey"
+background_16 = "white"
+attributes = []
+
+[styles.buffer_line_active]
+foreground = "#3760bf"
+background = "#d0d5e3"
+foreground_256 = "indexed:61"
+background_256 = "indexed:188"
+foreground_16 = "black"
+background_16 = "white"
+attributes = ["bold"]
+
+[styles.buffer_line_inactive]
+foreground = "#6172b0"
+background = "#e1e2e7"
+foreground_256 = "indexed:61"
+background_256 = "indexed:254"
+foreground_16 = "dark_grey"
+background_16 = "white"
+attributes = []
+
+[styles.buffer_line_dirty]
+foreground = "#f52a65"
+background = "#d0d5e3"
+foreground_256 = "indexed:197"
+background_256 = "indexed:188"
+foreground_16 = "dark_red"
+background_16 = "white"
+attributes = ["bold"]
+
+[styles.buffer_line_icon]
+foreground = "#6172b0"
+background = "#d0d5e3"
+foreground_256 = "indexed:61"
+background_256 = "indexed:188"
+foreground_16 = "dark_grey"
+background_16 = "white"
+attributes = []
+
+[styles.buffer_line_pin]
+foreground = "#9854f1"
+background = "#d0d5e3"
+foreground_256 = "indexed:99"
+background_256 = "indexed:188"
+foreground_16 = "dark_magenta"
+background_16 = "white"
+attributes = []
+
+[styles.buffer_line_diagnostic]
+foreground = "#b15c00"
+background = "#d0d5e3"
+foreground_256 = "indexed:130"
+background_256 = "indexed:188"
+foreground_16 = "dark_yellow"
+background_16 = "white"
+attributes = []
+
+[styles.buffer_line_close]
+foreground = "#6172b0"
+background = "#d0d5e3"
+foreground_256 = "indexed:61"
+background_256 = "indexed:188"
+foreground_16 = "dark_grey"
+background_16 = "white"
+attributes = []
+
+[styles.buffer_line_separator]
+foreground = "#8990b3"
+background = "#e1e2e7"
+foreground_256 = "indexed:103"
+background_256 = "indexed:254"
+foreground_16 = "black"
+background_16 = "white"
+attributes = []
+
+[styles.key_hint_background]
+foreground = "#3760bf"
+background = "#d0d5e3"
+foreground_256 = "indexed:61"
+background_256 = "indexed:188"
+foreground_16 = "black"
+background_16 = "white"
+attributes = []
+
+[styles.key_hint_border]
+foreground = "#8990b3"
+background = "#d0d5e3"
+foreground_256 = "indexed:103"
+background_256 = "indexed:188"
+foreground_16 = "black"
+background_16 = "white"
+attributes = []
+
+[styles.key_hint_key]
+foreground = "#2e7de9"
+background = "#d0d5e3"
+foreground_256 = "indexed:32"
+background_256 = "indexed:188"
+foreground_16 = "dark_blue"
+background_16 = "white"
+attributes = ["bold"]
+
+[styles.key_hint_group]
+foreground = "#9854f1"
+background = "#d0d5e3"
+foreground_256 = "indexed:99"
+background_256 = "indexed:188"
+foreground_16 = "dark_magenta"
+background_16 = "white"
+attributes = ["bold"]
+
+[styles.key_hint_command]
+foreground = "#3760bf"
+background = "#d0d5e3"
+foreground_256 = "indexed:61"
+background_256 = "indexed:188"
+foreground_16 = "black"
+background_16 = "white"
+attributes = []
+
+[styles.key_hint_prefix]
+foreground = "#6172b0"
+background = "#d0d5e3"
+foreground_256 = "indexed:61"
+background_256 = "indexed:188"
+foreground_16 = "dark_grey"
+background_16 = "white"
+attributes = []
+
+[styles.documentation_background]
+foreground = "#3760bf"
+background = "#d0d5e3"
+foreground_256 = "indexed:61"
+background_256 = "indexed:188"
+foreground_16 = "black"
+background_16 = "white"
+attributes = []
+
+[styles.documentation_border]
+foreground = "#2e7de9"
+background = "#d0d5e3"
+foreground_256 = "indexed:32"
+background_256 = "indexed:188"
+foreground_16 = "dark_blue"
+background_16 = "white"
+attributes = []
+
+[styles.documentation_title]
+foreground = "#9854f1"
+background = "#d0d5e3"
+foreground_256 = "indexed:99"
+background_256 = "indexed:188"
+foreground_16 = "dark_magenta"
+background_16 = "white"
+attributes = ["bold"]
+
+[styles.documentation_text]
+foreground = "#3760bf"
+background = "#d0d5e3"
+foreground_256 = "indexed:61"
+background_256 = "indexed:188"
+foreground_16 = "black"
+background_16 = "white"
+attributes = []
+
+[styles.git_sign_added]
+foreground = "#587539"
+background = "#e1e2e7"
+foreground_256 = "indexed:240"
+background_256 = "indexed:254"
+foreground_16 = "dark_green"
+background_16 = "white"
+attributes = []
+
+[styles.git_sign_changed]
+foreground = "#8c6c3e"
+background = "#e1e2e7"
+foreground_256 = "indexed:95"
+background_256 = "indexed:254"
+foreground_16 = "dark_yellow"
+background_16 = "white"
+attributes = []
+
+[styles.git_sign_deleted]
+foreground = "#f52a65"
+background = "#e1e2e7"
+foreground_256 = "indexed:197"
+background_256 = "indexed:254"
+foreground_16 = "dark_red"
+background_16 = "white"
+attributes = []
+
+[styles.explorer_background]
+foreground = "#3760bf"
+background = "#e1e2e7"
+foreground_256 = "indexed:61"
+background_256 = "indexed:254"
+foreground_16 = "black"
+background_16 = "white"
+attributes = []
+
+[styles.explorer_header]
+foreground = "#2e7de9"
+background = "#c1c9df"
+foreground_256 = "indexed:32"
+background_256 = "indexed:252"
+foreground_16 = "dark_blue"
+background_16 = "white"
+attributes = ["bold"]
+
+[styles.explorer_count]
+foreground = "#6172b0"
+background = "#c1c9df"
+foreground_256 = "indexed:61"
+background_256 = "indexed:252"
+foreground_16 = "dark_grey"
+background_16 = "white"
+attributes = []
+
+[styles.explorer_tree]
+foreground = "#68709a"
+background = "#e1e2e7"
+foreground_256 = "indexed:60"
+background_256 = "indexed:254"
+foreground_16 = "black"
+background_16 = "white"
+attributes = []
+
+[styles.explorer_icon]
+foreground = "#6172b0"
+background = "#e1e2e7"
+foreground_256 = "indexed:61"
+background_256 = "indexed:254"
+foreground_16 = "dark_grey"
+background_16 = "white"
+attributes = []
+
+[styles.explorer_directory]
+foreground = "#2e7de9"
+background = "#e1e2e7"
+foreground_256 = "indexed:32"
+background_256 = "indexed:254"
+foreground_16 = "dark_blue"
+background_16 = "white"
+attributes = []
+
+[styles.explorer_file]
+foreground = "#3760bf"
+background = "#e1e2e7"
+foreground_256 = "indexed:61"
+background_256 = "indexed:254"
+foreground_16 = "black"
+background_16 = "white"
+attributes = []
+
+[styles.explorer_symlink]
+foreground = "#9854f1"
+background = "#e1e2e7"
+foreground_256 = "indexed:99"
+background_256 = "indexed:254"
+foreground_16 = "dark_magenta"
+background_16 = "white"
+attributes = []
+
+[styles.explorer_git]
+foreground = "#8c6c3e"
+background = "#e1e2e7"
+foreground_256 = "indexed:95"
+background_256 = "indexed:254"
+foreground_16 = "dark_yellow"
+background_16 = "white"
+attributes = []
+
+[styles.explorer_diagnostic]
+foreground = "#f52a65"
+background = "#e1e2e7"
+foreground_256 = "indexed:197"
+background_256 = "indexed:254"
+foreground_16 = "dark_red"
+background_16 = "white"
+attributes = []
+
+[styles.explorer_decoration]
+foreground = "#6172b0"
+background = "#e1e2e7"
+foreground_256 = "indexed:61"
+background_256 = "indexed:254"
+foreground_16 = "dark_grey"
+background_16 = "white"
+attributes = []
+
+[styles.explorer_selection]
+foreground = "#3760bf"
+background = "#b7c1e3"
+foreground_256 = "indexed:61"
+background_256 = "indexed:146"
+foreground_16 = "black"
+background_16 = "grey"
+attributes = []
+
+[styles.explorer_border]
+foreground = "#8990b3"
+background = "#e1e2e7"
+foreground_256 = "indexed:103"
+background_256 = "indexed:254"
+foreground_16 = "black"
+background_16 = "white"
+attributes = []
+
+[styles.terminal_background]
+foreground = "#3760bf"
+background = "#c1c9df"
+foreground_256 = "indexed:61"
+background_256 = "indexed:252"
+foreground_16 = "black"
+background_16 = "white"
+attributes = []
+
+[styles.terminal_border]
+foreground = "#8990b3"
+background = "#c1c9df"
+foreground_256 = "indexed:103"
+background_256 = "indexed:252"
+foreground_16 = "black"
+background_16 = "white"
+attributes = []
+
+[styles.terminal_title]
+foreground = "#2e7de9"
+background = "#c1c9df"
+foreground_256 = "indexed:32"
+background_256 = "indexed:252"
+foreground_16 = "dark_blue"
+background_16 = "white"
+attributes = ["bold"]
+
+[styles.terminal_status]
+foreground = "#6172b0"
+background = "#c1c9df"
+foreground_256 = "indexed:61"
+background_256 = "indexed:252"
+foreground_16 = "dark_grey"
+background_16 = "white"
+attributes = []
+
+[styles.terminal_status_accent]
+foreground = "#e1e2e7"
+background = "#2e7de9"
+foreground_256 = "indexed:254"
+background_256 = "indexed:32"
+foreground_16 = "white"
+background_16 = "dark_blue"
+attributes = ["bold"]
+
+[styles.terminal_text]
+foreground = "#3760bf"
+background = "#c1c9df"
+foreground_256 = "indexed:61"
+background_256 = "indexed:252"
+foreground_16 = "black"
+background_16 = "white"
+attributes = []
+
+[highlights]
+# From the Neovim colorscheme, dumped with scripts/nvim-highlights.lua.
+"@annotation" = { link = "PreProc" }
+"@attribute" = { link = "PreProc" }
+"@attribute.builtin" = { link = "Special" }
+"@boolean" = { link = "Boolean" }
+"@character" = { link = "Character" }
+"@character.printf" = { link = "SpecialChar" }
+"@character.special" = { link = "SpecialChar" }
+"@comment" = { link = "Comment" }
+"@comment.error" = { fg = "#c64343" }
+"@comment.hint" = { fg = "#118c74" }
+"@comment.info" = { fg = "#07879d" }
+"@comment.note" = { fg = "#118c74" }
+"@comment.todo" = { fg = "#2e7de9" }
+"@comment.warning" = { fg = "#8c6c3e" }
+"@constant" = { link = "Constant" }
+"@constant.builtin" = { link = "Special" }
+"@constant.macro" = { link = "Define" }
+"@constructor" = { fg = "#9854f1" }
+"@constructor.tsx" = { fg = "#188092" }
+"@diff.delta" = { link = "DiffChange" }
+"@diff.minus" = { link = "DiffDelete" }
+"@diff.plus" = { link = "DiffAdd" }
+"@function" = { link = "Function" }
+"@function.builtin" = { link = "Special" }
+"@function.call" = { link = "@function" }
+"@function.macro" = { link = "Macro" }
+"@function.method" = { link = "Function" }
+"@function.method.call" = { link = "@function.method" }
+"@keyword" = { fg = "#7847bd", italic = true }
+"@keyword.conditional" = { link = "Conditional" }
+"@keyword.coroutine" = { link = "@keyword" }
+"@keyword.debug" = { link = "Debug" }
+"@keyword.directive" = { link = "PreProc" }
+"@keyword.directive.define" = { link = "Define" }
+"@keyword.exception" = { link = "Exception" }
+"@keyword.function" = { fg = "#9854f1" }
+"@keyword.import" = { link = "Include" }
+"@keyword.operator" = { link = "@operator" }
+"@keyword.repeat" = { link = "Repeat" }
+"@keyword.return" = { link = "@keyword" }
+"@keyword.storage" = { link = "StorageClass" }
+"@label" = { fg = "#2e7de9" }
+"@lsp.mod.deprecated" = { link = "DiagnosticDeprecated" }
+"@lsp.type.boolean" = { link = "@boolean" }
+"@lsp.type.builtinType" = { link = "@type.builtin" }
+"@lsp.type.class" = { link = "@type" }
+"@lsp.type.comment" = { link = "@comment" }
+"@lsp.type.decorator" = { link = "@attribute" }
+"@lsp.type.deriveHelper" = { link = "@attribute" }
+"@lsp.type.enum" = { link = "@type" }
+"@lsp.type.enumMember" = { link = "@constant" }
+"@lsp.type.escapeSequence" = { link = "@string.escape" }
+"@lsp.type.event" = { link = "@type" }
+"@lsp.type.formatSpecifier" = { link = "@markup.list" }
+"@lsp.type.function" = { link = "@function" }
+"@lsp.type.generic" = { link = "@variable" }
+"@lsp.type.interface" = { fg = "#2176a0" }
+"@lsp.type.keyword" = { link = "@keyword" }
+"@lsp.type.lifetime" = { link = "@keyword.storage" }
+"@lsp.type.macro" = { link = "@constant.macro" }
+"@lsp.type.method" = { link = "@function.method" }
+"@lsp.type.modifier" = { link = "@type.qualifier" }
+"@lsp.type.namespace" = { link = "@module" }
+"@lsp.type.namespace.python" = { link = "@variable" }
+"@lsp.type.number" = { link = "@number" }
+"@lsp.type.operator" = { link = "@operator" }
+"@lsp.type.parameter" = { link = "@variable.parameter" }
+"@lsp.type.property" = { link = "@property" }
+"@lsp.type.regexp" = { link = "@string.regexp" }
+"@lsp.type.selfKeyword" = { link = "@variable.builtin" }
+"@lsp.type.selfTypeKeyword" = { link = "@variable.builtin" }
+"@lsp.type.string" = { link = "@string" }
+"@lsp.type.struct" = { link = "@type" }
+"@lsp.type.type" = { link = "@type" }
+"@lsp.type.typeAlias" = { link = "@type.definition" }
+"@lsp.type.typeParameter" = { link = "@type.definition" }
+"@lsp.type.unresolvedReference" = { undercurl = true }
+"@lsp.type.variable" = {  }
+"@lsp.typemod.class.defaultLibrary" = { link = "@type.builtin" }
+"@lsp.typemod.enum.defaultLibrary" = { link = "@type.builtin" }
+"@lsp.typemod.enumMember.defaultLibrary" = { link = "@constant.builtin" }
+"@lsp.typemod.function.defaultLibrary" = { link = "@function.builtin" }
+"@lsp.typemod.keyword.async" = { link = "@keyword.coroutine" }
+"@lsp.typemod.keyword.injected" = { link = "@keyword" }
+"@lsp.typemod.macro.defaultLibrary" = { link = "@function.builtin" }
+"@lsp.typemod.method.defaultLibrary" = { link = "@function.builtin" }
+"@lsp.typemod.operator.injected" = { link = "@operator" }
+"@lsp.typemod.string.injected" = { link = "@string" }
+"@lsp.typemod.struct.defaultLibrary" = { link = "@type.builtin" }
+"@lsp.typemod.type.defaultLibrary" = { fg = "#4094a3" }
+"@lsp.typemod.typeAlias.defaultLibrary" = { fg = "#4094a3" }
+"@lsp.typemod.variable.callable" = { link = "@function" }
+"@lsp.typemod.variable.defaultLibrary" = { link = "@variable.builtin" }
+"@lsp.typemod.variable.injected" = { link = "@variable" }
+"@lsp.typemod.variable.static" = { link = "@constant" }
+"@markup" = { link = "@none" }
+"@markup.emphasis" = { italic = true }
+"@markup.environment" = { link = "Macro" }
+"@markup.environment.name" = { link = "Type" }
+"@markup.heading" = { link = "Title" }
+"@markup.heading.1.delimiter.vimdoc" = { fg = "#e1e2e7", bg = "#e1e2e7" }
+"@markup.heading.1.markdown" = { fg = "#2e7de9", bg = "#cfd8e7", bold = true }
+"@markup.heading.2.delimiter.vimdoc" = { fg = "#e1e2e7", bg = "#e1e2e7", underline = true }
+"@markup.heading.2.markdown" = { fg = "#8c6c3e", bg = "#d9d6d6", bold = true }
+"@markup.heading.3.markdown" = { fg = "#587539", bg = "#d3d7d6", bold = true }
+"@markup.heading.4.markdown" = { fg = "#118c74", bg = "#ccd9dc", bold = true }
+"@markup.heading.5.markdown" = { fg = "#9854f1", bg = "#dad4e8", bold = true }
+"@markup.heading.6.markdown" = { fg = "#7847bd", bg = "#d7d3e3", bold = true }
+"@markup.heading.7.markdown" = { fg = "#b15c00", bg = "#dcd5d0", bold = true }
+"@markup.heading.8.markdown" = { fg = "#f52a65", bg = "#e3d0da", bold = true }
+"@markup.italic" = { italic = true }
+"@markup.link" = { fg = "#118c74" }
+"@markup.link.label" = { link = "SpecialChar" }
+"@markup.link.label.symbol" = { link = "Identifier" }
+"@markup.link.url" = { link = "Underlined" }
+"@markup.list" = { fg = "#006a83" }
+"@markup.list.checked" = { fg = "#387068" }
+"@markup.list.markdown" = { fg = "#b15c00", bold = true }
+"@markup.list.unchecked" = { fg = "#2e7de9" }
+"@markup.math" = { link = "Special" }
+"@markup.raw" = { link = "String" }
+"@markup.raw.markdown_inline" = { fg = "#2e7de9", bg = "#a1a6c5" }
+"@markup.strikethrough" = { strikethrough = true }
+"@markup.strong" = { bold = true }
+"@markup.underline" = { underline = true }
+"@module" = { link = "Include" }
+"@module.builtin" = { fg = "#f52a65" }
+"@namespace.builtin" = { link = "@variable.builtin" }
+"@none" = {  }
+"@number" = { link = "Number" }
+"@number.float" = { link = "Float" }
+"@operator" = { fg = "#006a83" }
+"@property" = { fg = "#387068" }
+"@punctuation" = { link = "Delimiter" }
+"@punctuation.bracket" = { fg = "#6172b0" }
+"@punctuation.delimiter" = { fg = "#006a83" }
+"@punctuation.special" = { fg = "#006a83" }
+"@punctuation.special.markdown" = { fg = "#b15c00" }
+"@string" = { link = "String" }
+"@string.documentation" = { fg = "#8c6c3e" }
+"@string.escape" = { fg = "#9854f1" }
+"@string.regexp" = { fg = "#2e5857" }
+"@string.special" = { link = "SpecialChar" }
+"@string.special.url" = { link = "Underlined" }
+"@tag" = { link = "Label" }
+"@tag.attribute" = { link = "@property" }
+"@tag.builtin" = { link = "Special" }
+"@tag.delimiter" = { link = "Delimiter" }
+"@tag.delimiter.tsx" = { fg = "#649be8" }
+"@tag.javascript" = { fg = "#f52a65" }
+"@tag.tsx" = { fg = "#f52a65" }
+"@type" = { link = "Type" }
+"@type.builtin" = { fg = "#4094a3" }
+"@type.definition" = { link = "Typedef" }
+"@type.qualifier" = { link = "@keyword" }
+"@variable" = { fg = "#3760bf" }
+"@variable.builtin" = { fg = "#f52a65" }
+"@variable.member" = { fg = "#387068" }
+"@variable.parameter" = { fg = "#8c6c3e" }
+"@variable.parameter.builtin" = { fg = "#7b6a58" }
+"Added" = { fg = "#005523" }
+"Boolean" = { link = "Constant" }
+"Changed" = { fg = "#007373" }
+"Character" = { fg = "#587539" }
+"Comment" = { fg = "#848cb5", italic = true }
+"Conditional" = { link = "Statement" }
+"Constant" = { fg = "#b15c00" }
+"Debug" = { fg = "#b15c00" }
+"Define" = { link = "PreProc" }
+"Delimiter" = { link = "Special" }
+"DiagnosticDeprecated" = { strikethrough = true }
+"DiagnosticError" = { fg = "#c64343" }
+"DiagnosticHint" = { fg = "#118c74" }
+"DiagnosticInfo" = { fg = "#07879d" }
+"DiagnosticOk" = { fg = "#005523" }
+"DiagnosticUnnecessary" = { fg = "#a1a6c5" }
+"DiagnosticWarn" = { fg = "#8c6c3e" }
+"DiffAdd" = { bg = "#b7ced5" }
+"DiffChange" = { bg = "#d5d9e4" }
+"DiffDelete" = { bg = "#dababe" }
+"DiffText" = { bg = "#92a6d5" }
+"Error" = { fg = "#c64343" }
+"Exception" = { link = "Statement" }
+"Float" = { link = "Number" }
+"Function" = { fg = "#2e7de9" }
+"Identifier" = { fg = "#9854f1" }
+"Ignore" = { link = "Normal" }
+"Include" = { link = "PreProc" }
+"Keyword" = { fg = "#007197", italic = true }
+"Label" = { link = "Statement" }
+"Macro" = { link = "PreProc" }
+"Normal" = { fg = "#3760bf" }
+"Number" = { link = "Constant" }
+"Operator" = { fg = "#006a83" }
+"PreCondit" = { link = "PreProc" }
+"PreProc" = { fg = "#007197" }
+"Removed" = { fg = "#590008" }
+"Repeat" = { link = "Statement" }
+"Special" = { fg = "#188092" }
+"SpecialChar" = { link = "Special" }
+"SpecialComment" = { link = "Special" }
+"Statement" = { fg = "#9854f1" }
+"StorageClass" = { link = "Type" }
+"String" = { fg = "#587539" }
+"Structure" = { link = "Type" }
+"Tag" = { link = "Special" }
+"Title" = { fg = "#2e7de9", bold = true }
+"Todo" = { fg = "#e1e2e7", bg = "#8c6c3e" }
+"Type" = { fg = "#188092" }
+"Typedef" = { link = "Type" }
+"Underlined" = { underline = true }

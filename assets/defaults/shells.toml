@@ -1,0 +1,3 @@
+# Used when the user's shell environment does not name an available executable.
+unix = ["/bin/sh"]
+windows = ["pwsh", "powershell", "cmd.exe"]

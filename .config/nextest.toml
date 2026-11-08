@@ -1,0 +1,7 @@
+[profile.ci]
+# Report every failure instead of stopping at the first one.
+fail-fast = false
+# A test still running after three minutes is reported as hung and stopped.
+slow-timeout = { period = "60s", terminate-after = 3 }
+# Hosted runners have few cores and many tests spawn processes.
+test-threads = 4

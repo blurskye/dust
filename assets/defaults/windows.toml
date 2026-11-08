@@ -1,0 +1,34 @@
+# Native tool profiles avoid a dependency on a POSIX shell on Windows.
+[terminals.profiles.lazygit]
+program = "lazygit"
+arguments = []
+
+[terminals.profiles.lazygit_cwd]
+program = "lazygit"
+arguments = []
+
+[terminals.profiles.lazygit_file]
+program = "lazygit"
+arguments = ["-f", "{file}"]
+
+[terminals.profiles.lazygit_log]
+program = "lazygit"
+arguments = ["log"]
+
+[terminals.profiles.git_blame_line]
+program = "git"
+arguments = ["--no-pager", "log", "--color=always", "-n", "3", "-u", "-L", "{line},+1:{file}"]
+
+[terminals.profiles.gh_pr_view]
+program = "gh"
+arguments = ["pr", "view", "--comments"]
+environment = { GH_PAGER = "" }
+
+[terminals.profiles.gh_pr_diff]
+program = "gh"
+arguments = ["pr", "diff", "--color=always"]
+environment = { GH_PAGER = "" }
+
+[terminals.profiles.gh_pr_review]
+program = "gh"
+arguments = ["pr", "review"]

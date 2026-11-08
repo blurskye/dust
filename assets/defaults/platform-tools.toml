@@ -1,0 +1,176 @@
+# Native download overrides for the Linux catalogue, with the same exact pins.
+# Digests are upstream release asset SHA-256 values. Other tools remain available on PATH.
+
+[[macos-aarch64.tool]]
+id = "rust-analyzer"
+name = "rust-analyzer"
+kind = "lsp"
+languages = ["rust"]
+executable = "rust-analyzer"
+version = "0.3.3025"
+release = "2026-08-24"
+probe_args = ["--version"]
+project_root_markers = ["Cargo.toml"]
+project_root_strategy = "cargo"
+[macos-aarch64.tool.install]
+method = "archive"
+url = "https://github.com/rust-lang/rust-analyzer/releases/download/2026-08-24/rust-analyzer-aarch64-apple-darwin.gz"
+sha256 = "5f4557c2ea4d62f80f1ffeea2646d0d56fab7172a0db11f3065c4d246b763989"
+archive = "gzip"
+executable_path = "rust-analyzer"
+
+[[macos-aarch64.tool.pins]]
+version = "0.3.3016"
+release = "2026-08-17.4"
+[macos-aarch64.tool.pins.install]
+method = "archive"
+url = "https://github.com/rust-lang/rust-analyzer/releases/download/2026-08-17.4/rust-analyzer-aarch64-apple-darwin.gz"
+sha256 = "ece932daf2f077be87bf745d2eb0a62cbc550f4b1e2e31ca76dfafdd0cc599b3"
+archive = "gzip"
+executable_path = "rust-analyzer"
+
+[[macos-aarch64.tool.pins]]
+version = "0.3.3008"
+release = "2026-08-10.1"
+[macos-aarch64.tool.pins.install]
+method = "archive"
+url = "https://github.com/rust-lang/rust-analyzer/releases/download/2026-08-10.1/rust-analyzer-aarch64-apple-darwin.gz"
+sha256 = "954c1dce00ab43d5a35caac07aff12a787b006b50dd3f4471bae4b13512343ef"
+archive = "gzip"
+executable_path = "rust-analyzer"
+
+[[macos-aarch64.tool.pins]]
+version = "0.3.2997"
+release = "2026-08-03"
+[macos-aarch64.tool.pins.install]
+method = "archive"
+url = "https://github.com/rust-lang/rust-analyzer/releases/download/2026-08-03/rust-analyzer-aarch64-apple-darwin.gz"
+sha256 = "bba6cd8209643cd781f3ee5474fa232d3ee1b77a57f2e77982806e3c80a65207"
+archive = "gzip"
+executable_path = "rust-analyzer"
+
+[[macos-aarch64.tool.pins]]
+version = "0.3.2989"
+release = "2026-07-27"
+[macos-aarch64.tool.pins.install]
+method = "archive"
+url = "https://github.com/rust-lang/rust-analyzer/releases/download/2026-07-27/rust-analyzer-aarch64-apple-darwin.gz"
+sha256 = "102215ae7e7a41c0dda8f24e910a01e757f58091204863e5e3e6696b743f7e97"
+archive = "gzip"
+executable_path = "rust-analyzer"
+
+[[macos-x86_64.tool]]
+id = "rust-analyzer"
+name = "rust-analyzer"
+kind = "lsp"
+languages = ["rust"]
+executable = "rust-analyzer"
+version = "0.3.3025"
+release = "2026-08-24"
+probe_args = ["--version"]
+project_root_markers = ["Cargo.toml"]
+project_root_strategy = "cargo"
+[macos-x86_64.tool.install]
+method = "archive"
+url = "https://github.com/rust-lang/rust-analyzer/releases/download/2026-08-24/rust-analyzer-x86_64-apple-darwin.gz"
+sha256 = "822cc4369562fc2ed26d1cf3953ef93927d8fdda4302d82e2eec407e2734eefd"
+archive = "gzip"
+executable_path = "rust-analyzer"
+
+[[macos-x86_64.tool.pins]]
+version = "0.3.3016"
+release = "2026-08-17.4"
+[macos-x86_64.tool.pins.install]
+method = "archive"
+url = "https://github.com/rust-lang/rust-analyzer/releases/download/2026-08-17.4/rust-analyzer-x86_64-apple-darwin.gz"
+sha256 = "134a7d305991de776864e43d1e6c291f60fa2888d4b9b7749864c562c5dc28b7"
+archive = "gzip"
+executable_path = "rust-analyzer"
+
+[[macos-x86_64.tool.pins]]
+version = "0.3.3008"
+release = "2026-08-10.1"
+[macos-x86_64.tool.pins.install]
+method = "archive"
+url = "https://github.com/rust-lang/rust-analyzer/releases/download/2026-08-10.1/rust-analyzer-x86_64-apple-darwin.gz"
+sha256 = "b84eba6670c7e55869d191f23cc23e8953ed18141db41de0834d7b9fb47a0090"
+archive = "gzip"
+executable_path = "rust-analyzer"
+
+[[macos-x86_64.tool.pins]]
+version = "0.3.2997"
+release = "2026-08-03"
+[macos-x86_64.tool.pins.install]
+method = "archive"
+url = "https://github.com/rust-lang/rust-analyzer/releases/download/2026-08-03/rust-analyzer-x86_64-apple-darwin.gz"
+sha256 = "8966f9429085c243817b9d13afa76e98920668c07a9b432901daaf047397c6cb"
+archive = "gzip"
+executable_path = "rust-analyzer"
+
+[[macos-x86_64.tool.pins]]
+version = "0.3.2989"
+release = "2026-07-27"
+[macos-x86_64.tool.pins.install]
+method = "archive"
+url = "https://github.com/rust-lang/rust-analyzer/releases/download/2026-07-27/rust-analyzer-x86_64-apple-darwin.gz"
+sha256 = "9d1a60991ead6c27baa9d265fc8fd03bba9c39cf0ec2aaf389e37e6155af7cbb"
+archive = "gzip"
+executable_path = "rust-analyzer"
+
+[[windows-x86_64.tool]]
+id = "rust-analyzer"
+name = "rust-analyzer"
+kind = "lsp"
+languages = ["rust"]
+executable = "rust-analyzer.exe"
+version = "0.3.3025"
+release = "2026-08-24"
+probe_args = ["--version"]
+project_root_markers = ["Cargo.toml"]
+project_root_strategy = "cargo"
+[windows-x86_64.tool.install]
+method = "archive"
+url = "https://github.com/rust-lang/rust-analyzer/releases/download/2026-08-24/rust-analyzer-x86_64-pc-windows-msvc.zip"
+sha256 = "f6d80045e6f475606f62d294fa3b618304fd24d2ff86160495440f23d5f7fcdb"
+archive = "zip"
+executable_path = "rust-analyzer.exe"
+
+[[windows-x86_64.tool.pins]]
+version = "0.3.3016"
+release = "2026-08-17.4"
+[windows-x86_64.tool.pins.install]
+method = "archive"
+url = "https://github.com/rust-lang/rust-analyzer/releases/download/2026-08-17.4/rust-analyzer-x86_64-pc-windows-msvc.zip"
+sha256 = "3212cc9e7ab3f6b07f97be681c2a7200f73fb0463e6f8055c214ebe0b00901f2"
+archive = "zip"
+executable_path = "rust-analyzer.exe"
+
+[[windows-x86_64.tool.pins]]
+version = "0.3.3008"
+release = "2026-08-10.1"
+[windows-x86_64.tool.pins.install]
+method = "archive"
+url = "https://github.com/rust-lang/rust-analyzer/releases/download/2026-08-10.1/rust-analyzer-x86_64-pc-windows-msvc.zip"
+sha256 = "f667620d3af202f480faf9e407374509ebddef3b8611922e463aeaa7e6985fc8"
+archive = "zip"
+executable_path = "rust-analyzer.exe"
+
+[[windows-x86_64.tool.pins]]
+version = "0.3.2997"
+release = "2026-08-03"
+[windows-x86_64.tool.pins.install]
+method = "archive"
+url = "https://github.com/rust-lang/rust-analyzer/releases/download/2026-08-03/rust-analyzer-x86_64-pc-windows-msvc.zip"
+sha256 = "a446ba5482b2a43d4010180031d2033b6761dd295117f3d0277af5777c4d8ee5"
+archive = "zip"
+executable_path = "rust-analyzer.exe"
+
+[[windows-x86_64.tool.pins]]
+version = "0.3.2989"
+release = "2026-07-27"
+[windows-x86_64.tool.pins.install]
+method = "archive"
+url = "https://github.com/rust-lang/rust-analyzer/releases/download/2026-07-27/rust-analyzer-x86_64-pc-windows-msvc.zip"
+sha256 = "7abdf50734026de963b3b25eba7714be8acf43a15ffb7f4f9d8b041e796ce2c9"
+archive = "zip"
+executable_path = "rust-analyzer.exe"

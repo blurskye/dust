@@ -1,0 +1,41 @@
+# deb, rpm and pacman packages of the static release binary, built by
+# packaging/build-packages.sh. The package is dust-editor because distributions
+# already ship a disk usage tool named dust, which also installs /usr/bin/dust.
+name: dust-editor
+arch: amd64
+platform: linux
+version: ${VERSION}
+release: 1
+section: editors
+priority: optional
+maintainer: blurskye <blurskye@proton.me>
+description: Terminal IDE with Vim keys, language servers, debugging, git and coding agents.
+vendor: blurskye
+homepage: https://github.com/blurskye/dust
+license: GPL-3.0-or-later
+recommends:
+  - git
+contents:
+  - src: target/package-stage/dust/dust
+    dst: /usr/bin/dust
+    file_info: { mode: 0755 }
+  - src: packaging/dev.blurskye.Dust.desktop
+    dst: /usr/share/applications/dev.blurskye.Dust.desktop
+  - src: packaging/dev.blurskye.Dust.svg
+    dst: /usr/share/icons/hicolor/scalable/apps/dev.blurskye.Dust.svg
+  - src: packaging/dev.blurskye.Dust.metainfo.xml
+    dst: /usr/share/metainfo/dev.blurskye.Dust.metainfo.xml
+  - src: LICENSE
+    dst: /usr/share/licenses/dust-editor/LICENSE
+  - src: NOTICE
+    dst: /usr/share/licenses/dust-editor/NOTICE
+  - src: LICENSES/
+    dst: /usr/share/licenses/dust-editor/LICENSES
+    type: tree
+overrides:
+  deb:
+    conflicts: [du-dust]
+  rpm:
+    conflicts: [du-dust]
+  archlinux:
+    conflicts: [dust]

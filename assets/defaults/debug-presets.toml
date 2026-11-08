@@ -1,0 +1,70 @@
+# Adapter preference is ordered; an installed alternative wins over a download.
+[[preset]]
+id = "rust-binaries"
+label = "Rust: Cargo binaries"
+languages = ["rust"]
+markers = ["Cargo.toml"]
+adapters = ["codelldb", "lldb-dap"]
+build = ["build", "--bins", "--message-format=json"]
+target = "binary"
+
+[[preset]]
+id = "rust-tests"
+label = "Rust: Cargo tests"
+languages = ["rust"]
+markers = ["Cargo.toml"]
+adapters = ["codelldb", "lldb-dap"]
+build = ["test", "--no-run", "--message-format=json"]
+list_tests = ["--list", "--format", "terse"]
+test_arguments = ["{test}", "--exact", "--nocapture"]
+target = "binary"
+
+[[preset]]
+id = "python-file"
+label = "Python: current file"
+languages = ["python"]
+markers = ["pyproject.toml", "setup.py", "requirements.txt"]
+adapters = ["debugpy"]
+target = "file"
+arguments = { console = "integratedTerminal" }
+
+[[preset]]
+id = "python-tests"
+label = "Python: pytest current file"
+languages = ["python"]
+markers = ["pyproject.toml", "pytest.ini", "setup.cfg"]
+adapters = ["debugpy"]
+target = "module"
+test_arguments = ["{file}::{test}"]
+arguments = { module = "pytest", args = ["{file}"], console = "integratedTerminal" }
+
+[[preset]]
+id = "node-file"
+label = "JavaScript / TypeScript: Node current file"
+languages = ["javascript", "javascriptreact", "typescript", "typescriptreact"]
+markers = ["package.json", "tsconfig.json", "jsconfig.json"]
+adapters = ["js-debug-adapter"]
+runtime = "node"
+target = "file"
+arguments = { type = "pwa-node", runtimeExecutable = "node", console = "integratedTerminal", sourceMaps = true }
+
+[[preset]]
+id = "go-package"
+label = "Go: current package"
+runtime = "go"
+languages = ["go"]
+markers = ["go.mod", "go.work"]
+adapters = ["delve"]
+target = "package"
+arguments = { mode = "debug" }
+
+[[preset]]
+id = "go-tests"
+label = "Go: package tests"
+runtime = "go"
+languages = ["go"]
+markers = ["go.mod", "go.work"]
+adapters = ["delve"]
+target = "package"
+arguments = { mode = "test" }
+test_arguments = ["-test.run", "^{test}$"]

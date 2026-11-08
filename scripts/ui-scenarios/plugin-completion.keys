@@ -1,0 +1,17 @@
+# Run with plugin-launch and an isolated working directory.
+wait 2500
+key escape
+wait 200
+type :
+wait 200
+type plugin.completion.enable
+key enter
+wait 400
+type G
+wait 100
+type A
+wait 700
+shot suggestions
+key tab escape
+wait 300
+shot accepted

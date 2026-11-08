@@ -1,0 +1,108 @@
+# The questions Dust asks the first time it starts, and again on :setup. Each choice sets
+# the settings it lists in your config.toml; the Settings page (ctrl-,) changes them later.
+# `preview` names what the small editor beside the choices shows open: the layout, the
+# terminal, the agent or the leader key's shortcuts.
+
+skip_help = "s / Esc · Start editing with defaults"
+
+[[page]]
+title = "Layout"
+question = "Where should the file explorer and the AI agent go?"
+preview = "layout"
+
+[[page.choice]]
+label = "Explorer left, agent right"
+about = "As in VS Code and Cursor."
+settings = { "ui.explorer.side" = "left", "agents.side" = "right" }
+
+[[page.choice]]
+label = "Explorer right, agent left"
+about = "The same, mirrored."
+settings = { "ui.explorer.side" = "right", "agents.side" = "left" }
+
+[[page.choice]]
+label = "Both on the left"
+about = "The code keeps the right side to itself."
+settings = { "ui.explorer.side" = "left", "agents.side" = "left" }
+
+[[page.choice]]
+label = "Both on the right"
+about = "The code starts at the left edge."
+settings = { "ui.explorer.side" = "right", "agents.side" = "right" }
+
+[[page]]
+title = "Terminal"
+question = "How should the terminal (ctrl-/) open?"
+preview = "terminal"
+
+[[page.choice]]
+label = "Docked at the bottom"
+about = "Under the code, as in VS Code and LazyVim."
+settings = { "ui.terminal_panel.placement" = "bottom" }
+
+[[page.choice]]
+label = "Floating"
+about = "A window over the code, like lazygit in LazyVim."
+settings = { "ui.terminal_panel.placement" = "float" }
+
+[[page.choice]]
+label = "Full screen"
+about = "Over everything until you hide it again."
+settings = { "ui.terminal_panel.placement" = "fullscreen" }
+
+[[page]]
+title = "AI agent"
+question = "How should Dust run your AI agent (<leader> a a)?"
+preview = "agent"
+
+[[page.choice]]
+label = "Dust's agent panel"
+about = "Dust shows the conversation and its edits, through ACP."
+settings = { "agents.connection" = "acp" }
+
+[[page.choice]]
+label = "The agent's own program"
+about = "claude, pi, codex and others run as you know them, in a terminal."
+settings = { "agents.connection" = "terminal" }
+
+[[page]]
+title = "Agent"
+question = "Which agent should <leader> a a start?"
+preview = "agent"
+choices_from = "agents.profiles"
+key = "agents.default"
+
+[[page.choice]]
+label = "Ask every time"
+about = "ctrl-t in the agent panel asks which agent."
+settings = { "agents.default" = "" }
+
+[[page]]
+title = "Agent tools"
+question = "May Dust add its tools, such as subagents, to agents that keep them in their own config?"
+preview = "agent"
+
+[[page.choice]]
+label = "Yes, add them"
+about = "For pi, Dust runs pi mcp add dust … before pi starts."
+settings = { "agents.add_tools" = true }
+
+[[page.choice]]
+label = "No"
+about = "Each new session says the command to run yourself."
+settings = { "agents.add_tools" = false }
+
+[[page]]
+title = "Leader key"
+question = "Which key is the leader, the one that starts shortcuts such as <leader> f f?"
+preview = "leader"
+
+[[page.choice]]
+label = "Space"
+about = "As in LazyVim: space f f finds files."
+settings = { "input.keymaps.leader" = "space" }
+
+[[page.choice]]
+label = "Comma"
+about = "As in many Vim setups: , f f finds files."
+settings = { "input.keymaps.leader" = "," }

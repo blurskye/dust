@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Dust
+GenericName=Text Editor
+Comment=Terminal IDE with Vim keys, language servers, git and coding agents
+Exec=dust %F
+Icon=dev.blurskye.Dust
+Terminal=true
+Categories=Development;TextEditor;IDE;
+Keywords=editor;ide;vim;neovim;code;
+MimeType=text/plain;

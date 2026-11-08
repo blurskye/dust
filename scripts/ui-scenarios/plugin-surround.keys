@@ -1,0 +1,16 @@
+# Run with plugin-launch and an isolated working directory.
+wait 2500
+key escape
+wait 200
+type :
+wait 200
+type plugin.surround.enable
+key enter
+wait 1200
+key 1 6 l g s a i f
+type (
+wait 600
+shot surround
+key u period
+wait 600
+shot repeat
