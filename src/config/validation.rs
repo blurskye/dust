@@ -199,6 +199,13 @@ impl Config {
         if !(12..=240).contains(&self.ui.explorer.width) || invalid_explorer_glyph {
             return Err("ui.explorer width or glyph policy is invalid".into());
         }
+        if !(50..=100).contains(&self.ui.git.width_percent)
+            || !(50..=100).contains(&self.ui.git.height_percent)
+        {
+            return Err(
+                "ui.git width_percent and height_percent must be between 50 and 100".into(),
+            );
+        }
         if !(3..=200).contains(&self.ui.terminal_panel.height) {
             return Err("ui.terminal_panel.height must be between 3 and 200".into());
         }

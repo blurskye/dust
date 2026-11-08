@@ -51,6 +51,21 @@ about = "Over everything until you hide it again."
 settings = { "ui.terminal_panel.placement" = "fullscreen" }
 
 [[page]]
+title = "Dusty Git"
+question = "How should Dusty Git (<leader> g g) open?"
+preview = "git"
+
+[[page.choice]]
+label = "Floating (default)"
+about = "A centered Git workspace with your editor visible around it."
+settings = { "ui.git.placement" = "float" }
+
+[[page.choice]]
+label = "Full screen"
+about = "Use the whole terminal until you return to the editor."
+settings = { "ui.git.placement" = "fullscreen" }
+
+[[page]]
 title = "AI agent"
 question = "How should Dust run your AI agent (<leader> a a)?"
 preview = "agent"

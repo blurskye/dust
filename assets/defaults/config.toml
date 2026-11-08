@@ -167,6 +167,11 @@ delay_ms = 250
 [ui.documentation_popup]
 enabled = true
 
+[ui.git]
+placement = "float"
+width_percent = 85
+height_percent = 85
+
 [ui.terminal_panel]
 height = 16
 # Show the configured escape key briefly on the first focused terminal.

@@ -77,6 +77,46 @@ fn wait(screen: &mut GitScreen, ready: impl Fn(&mut GitScreen) -> bool) {
     }
 }
 
+#[test]
+fn floating_is_default_and_fullscreen_is_a_persisted_setting() {
+    use dust::config::{GitPlacement, GitWindowConfig};
+    use dust::ui::{CellGrid, Frame, Style};
+    let dir = repo();
+    let mut screen = GitScreen::open(dir.path()).unwrap();
+    let config = dust::config::load_bundled_config().config.ui.git;
+    assert_eq!(config.placement, GitPlacement::Float);
+    let (rect, foreground) = screen.window_frame(160, 60, &config);
+    assert_eq!((rect.x, rect.y, rect.width, rect.height), (12, 4, 136, 51));
+    let mut background = Frame {
+        grid: CellGrid::new(160, 60),
+        cursor: None,
+    };
+    background
+        .grid
+        .put_text(0, 0, "Editor remains visible", Style::Default);
+    GitScreen::compose(&mut background, rect, &foreground);
+    assert!(
+        background
+            .grid
+            .row_text(0)
+            .contains("Editor remains visible")
+    );
+    assert!(background.grid.row_text(rect.y).contains("Dusty Git"));
+    assert_eq!(
+        background.cursor,
+        foreground
+            .cursor
+            .map(|(x, y, style)| (x + rect.x, y + rect.y, style))
+    );
+    let fullscreen: GitWindowConfig =
+        toml::from_str("placement = 'fullscreen'\nwidth_percent = 85\nheight_percent = 85")
+            .unwrap();
+    let (rect, _) = screen.window_frame(160, 60, &fullscreen);
+    assert_eq!((rect.x, rect.y, rect.width, rect.height), (0, 0, 160, 60));
+    let (small, _) = screen.window_frame(70, 22, &config);
+    assert_eq!((small.width, small.height), (64, 20));
+}
+
 fn code_style(screen: &mut GitScreen, line: &str, token: &str) -> dust::ui::Style {
     use unicode_width::UnicodeWidthStr;
     let frame = screen.frame(160, 60);

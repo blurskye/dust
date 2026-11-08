@@ -214,7 +214,11 @@ Terminal processes are never restored as fake live sessions. Zero-exit terminals
 
 ## Git
 
-`Space g g` (or `:workspace.git.open`) opens the native Dusty Git workspace.
+`Space g g` (or `:workspace.git.open`) opens the native Dusty Git workspace in a
+centered floating window by default, leaving the editor visible behind it.
+Setup and Settings → Dusty Git offer floating or fullscreen. In `config.toml`,
+`ui.git.placement` is `"float"` or `"fullscreen"`; `ui.git.width_percent` and
+`ui.git.height_percent` control the floating size (both default to 85).
 The same screen is available separately with `dusty-git PATH` (`--clean` uses
 bundled theme settings). `q` returns to the editor or exits the standalone tool.
 

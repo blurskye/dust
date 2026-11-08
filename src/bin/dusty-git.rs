@@ -49,7 +49,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         dirty |= screen.poll();
         if dirty {
             let (w, h) = terminal.size()?;
-            terminal.draw(&screen.frame(w, h))?;
+            let (rect, content) = screen.window_frame(w, h, &config.config.ui.git);
+            let mut frame = dust::ui::Frame {
+                grid: dust::ui::CellGrid::new(w, h),
+                cursor: None,
+            };
+            GitScreen::compose(&mut frame, rect, &content);
+            terminal.draw(&frame)?;
             dirty = false;
         }
         if let Some(event) = terminal.poll_event(Duration::from_millis(30))? {

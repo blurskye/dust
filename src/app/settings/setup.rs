@@ -215,9 +215,10 @@ fn setup_choice(choice: &SetupChoiceInfo) -> SetupChoice {
 mod tests {
     use crate::app::commands::SetupAction;
     use crate::app::tests::driver::TestSession;
+    use crate::config::setup_catalog;
 
     #[test]
-    fn every_setup_page_shows_skip_keys_and_keeps_the_six_questions() {
+    fn every_setup_page_shows_skip_keys_and_keeps_the_layout_questions() {
         let mut session = TestSession::new(crate::config::load_bundled_config());
         session.application_mut().setup_action(SetupAction::Open);
         let titles: Vec<_> = session
@@ -238,13 +239,15 @@ mod tests {
             [
                 "Layout",
                 "Terminal",
+                "Dusty Git",
                 "AI agent",
                 "Agent",
                 "Agent tools",
                 "Leader key"
             ]
         );
-        for page in 0..6 {
+        let pages = setup_catalog().pages.len();
+        for page in 0..pages {
             for (width, height) in [(80, 24), (120, 40), (160, 45)] {
                 session.resize(width, height);
                 let frame = session.frame();
@@ -257,7 +260,7 @@ mod tests {
                     "{text}"
                 );
                 assert!(
-                    text.contains(if page == 5 {
+                    text.contains(if page + 1 == pages {
                         "enter finish"
                     } else {
                         "enter next"
@@ -265,7 +268,7 @@ mod tests {
                     "{text}"
                 );
             }
-            if page < 5 {
+            if page + 1 < pages {
                 session.key("enter");
             }
         }
@@ -285,7 +288,7 @@ mod tests {
             let mut session = TestSession::new(crate::config::load_bundled_config());
             session.resize(width, height);
             session.application_mut().setup_action(SetupAction::Open);
-            for page in 0..6 {
+            for page in 0..setup_catalog().pages.len() {
                 let choices = session
                     .application()
                     .ui
@@ -353,7 +356,7 @@ mod tests {
                         question
                     );
                 }
-                if page < 5 {
+                if page + 1 < setup_catalog().pages.len() {
                     session.key("enter");
                 }
             }
@@ -380,7 +383,7 @@ mod tests {
         }
         let path = crate::config::user_config_path();
         for key in ["s", "escape"] {
-            for page in 0..6 {
+            for page in 0..setup_catalog().pages.len() {
                 let mut session = TestSession::new(crate::config::load_user_config());
                 session.resize(120, 40);
                 let initial =
@@ -449,7 +452,7 @@ mod tests {
         session.new_buffer();
         session.application_mut().open_setup_on_first_start();
         session.key("j");
-        for _ in 0..6 {
+        for _ in 0..setup_catalog().pages.len() {
             session.key("enter");
         }
         assert_eq!(

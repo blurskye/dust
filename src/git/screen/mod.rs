@@ -932,4 +932,51 @@ impl GitScreen {
     pub fn frame(&mut self, width: u16, height: u16) -> Frame {
         render::frame(self, width, height)
     }
+
+    pub fn window_frame(
+        &mut self,
+        width: u16,
+        height: u16,
+        config: &crate::config::GitWindowConfig,
+    ) -> (crate::windows::WindowRect, Frame) {
+        let (w, h) = if config.placement == crate::config::GitPlacement::Fullscreen {
+            (width, height)
+        } else {
+            (
+                ((u32::from(width) * u32::from(config.width_percent) / 100) as u16)
+                    .max(64)
+                    .min(width),
+                ((u32::from(height) * u32::from(config.height_percent) / 100) as u16)
+                    .max(20)
+                    .min(height),
+            )
+        };
+        (
+            crate::windows::WindowRect {
+                x: (width - w) / 2,
+                y: (height - h) / 2,
+                width: w,
+                height: h,
+            },
+            self.frame(w, h),
+        )
+    }
+
+    /// Place the shared surface over the host's frame without hiding the editor around it.
+    pub fn compose(background: &mut Frame, rect: crate::windows::WindowRect, foreground: &Frame) {
+        for y in 0..rect.height {
+            for x in 0..rect.width {
+                if let Some(cell) = foreground.grid.get(x, y)
+                    && !cell.continuation
+                {
+                    background
+                        .grid
+                        .set_cell(rect.x + x, rect.y + y, &cell.symbol, cell.style);
+                }
+            }
+        }
+        background.cursor = foreground
+            .cursor
+            .map(|(x, y, style)| (rect.x + x, rect.y + y, style));
+    }
 }

@@ -338,6 +338,31 @@ impl Default for TerminalPanelConfig {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GitPlacement {
+    #[default]
+    Float,
+    Fullscreen,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct GitWindowConfig {
+    pub placement: GitPlacement,
+    pub width_percent: u16,
+    pub height_percent: u16,
+}
+impl Default for GitWindowConfig {
+    fn default() -> Self {
+        Self {
+            placement: GitPlacement::Float,
+            width_percent: 85,
+            height_percent: 85,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct UiConfig {
@@ -352,6 +377,8 @@ pub struct UiConfig {
     pub key_hints: KeyHintConfig,
     pub documentation_popup: DocumentationPopupConfig,
     pub terminal_panel: TerminalPanelConfig,
+    #[serde(default)]
+    pub git: GitWindowConfig,
     pub tool_manager: ToolManagerConfig,
     pub explorer: ExplorerConfig,
 }
@@ -370,6 +397,7 @@ impl Default for UiConfig {
             key_hints: KeyHintConfig::default(),
             documentation_popup: DocumentationPopupConfig::default(),
             terminal_panel: TerminalPanelConfig::default(),
+            git: GitWindowConfig::default(),
             tool_manager: ToolManagerConfig::default(),
             explorer: ExplorerConfig::default(),
         }

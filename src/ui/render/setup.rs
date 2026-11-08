@@ -227,6 +227,7 @@ struct Scene<'a> {
     /// program, and the agent's name.
     agent: Option<(PanelSide, bool, &'a str)>,
     terminal: Option<TerminalPlacement>,
+    git: Option<crate::config::GitPlacement>,
     /// The leader key, with its shortcuts shown.
     leader: Option<&'a str>,
 }
@@ -272,6 +273,11 @@ impl<'a> Scene<'a> {
             explorer: side("ui.explorer.side", config.ui.explorer.side),
             agent: matches!(preview, "layout" | "agent").then_some(agent),
             terminal: (preview == "terminal").then_some(terminal),
+            git: (preview == "git").then_some(match chosen("ui.git.placement") {
+                Some("fullscreen") => crate::config::GitPlacement::Fullscreen,
+                Some("float") => crate::config::GitPlacement::Float,
+                _ => config.ui.git.placement,
+            }),
             leader: (preview == "leader").then_some(leader),
         }
     }
@@ -436,6 +442,41 @@ fn render_preview(frame: &mut Frame, scene: &Scene, config: &Config, area: Area)
         }
         Some(TerminalPlacement::Fullscreen) => render_terminal(frame, body, false),
         None => {}
+    }
+    if let Some(placement) = scene.git {
+        let area = if placement == crate::config::GitPlacement::Fullscreen {
+            body
+        } else {
+            let (width, height) = (
+                body.width * 4 / 5,
+                (body.height * 4 / 5).max(6).min(body.height),
+            );
+            Area {
+                x: body.x + (body.width - width) / 2,
+                y: body.y + (body.height - height) / 2,
+                width,
+                height,
+            }
+        };
+        framed(frame, area, Style::Accent, Style::Default);
+        line(frame, area, 0, area.x + 2, " Dusty Git ", Style::Accent);
+        line(frame, area, 2, area.x + 2, "Changes · main", Style::Accent);
+        line(
+            frame,
+            area,
+            3,
+            area.x + 2,
+            " M src/main.rs",
+            Style::GitSignChanged,
+        );
+        line(
+            frame,
+            area,
+            5,
+            area.x + 2,
+            "Branches · Commits · Stashes",
+            Style::Muted,
+        );
     }
     if let Some(leader) = scene.leader {
         render_leader_keys(frame, leader, code);

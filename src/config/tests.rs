@@ -1572,7 +1572,7 @@ fn every_setup_choice_sets_a_real_setting_to_a_valid_value() {
             page.title
         );
         assert!(
-            ["layout", "terminal", "agent", "leader"].contains(&page.preview.as_str()),
+            ["layout", "terminal", "git", "agent", "leader"].contains(&page.preview.as_str()),
             "setup page {} shows an unknown preview {:?}",
             page.title,
             page.preview

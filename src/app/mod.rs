@@ -448,10 +448,11 @@ pub fn run_interactive(
         );
         let holding = application.hold_first_frame();
         let git_frame = if input_arrived || terminal.needs_full_draw() || drawn != Some(inputs) {
+            let config = application.input_render_config().ui.git.clone();
             application
                 .git_screen
                 .as_mut()
-                .map(|screen| screen.frame(inputs.3, inputs.4))
+                .map(|screen| screen.window_frame(inputs.3, inputs.4, &config))
         } else {
             None
         };
@@ -460,9 +461,6 @@ pub fn run_interactive(
                 Ok(false)
             } else if input_arrived || terminal.needs_full_draw() || drawn != Some(inputs) {
                 drawn = Some(inputs);
-                if let Some(frame) = &git_frame {
-                    return terminal.draw(frame);
-                }
                 let config = application.input_render_config();
                 let mut frame = render_frame(
                     &application.state,
@@ -473,6 +471,9 @@ pub fn run_interactive(
                     application.window_session.height(),
                 );
                 application.project_mode_cursor(&mut frame);
+                if let Some((rect, git_frame)) = &git_frame {
+                    crate::git::screen::GitScreen::compose(&mut frame, *rect, git_frame);
+                }
                 terminal.draw(&frame)
             } else {
                 Ok(false)
