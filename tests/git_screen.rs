@@ -205,7 +205,7 @@ fn working_index_commit_and_stash_diffs_have_source_syntax_and_numbered_markers(
         }
         let mut screen = GitScreen::open(dir.path()).unwrap();
         if staged {
-            key(&mut screen, KeyCode::Char('v'));
+            key(&mut screen, KeyCode::Char('i'));
         }
         wait(&mut screen, |s| view(s).contains("+def after()"));
         assert!(matches!(
@@ -254,7 +254,7 @@ fn unstaging_rename_restores_both_paths_and_preserves_other_staged_changes() {
     std::fs::write(dir.path().join("z-other.txt"), "unrelated staged content\n").unwrap();
     git(dir.path(), &["add", "z-other.txt"]);
     let mut screen = GitScreen::open(dir.path()).unwrap();
-    key(&mut screen, KeyCode::Char('v'));
+    key(&mut screen, KeyCode::Char('i'));
     wait(&mut screen, |s| view(s).contains("renamed.txt"));
     key(&mut screen, KeyCode::Char(' '));
     wait(&mut screen, |s| !s.busy());
@@ -319,11 +319,11 @@ fn stages_unstages_and_commits_through_real_screen_input() {
         git(dir.path(), &["diff", "--cached", "--name-only"]),
         "file.txt"
     );
-    key(&mut screen, KeyCode::Char('v'));
+    key(&mut screen, KeyCode::Char('i'));
     key(&mut screen, KeyCode::Char(' '));
     wait(&mut screen, |s| !s.busy());
     assert_eq!(git(dir.path(), &["diff", "--cached", "--name-only"]), "");
-    key(&mut screen, KeyCode::Char('v'));
+    key(&mut screen, KeyCode::Char('i'));
     wait(&mut screen, |s| view(s).contains("changed"));
     key(&mut screen, KeyCode::Char(' '));
     wait(&mut screen, |s| !s.busy());
@@ -352,6 +352,11 @@ fn branch_preview_is_selected_branch_not_current_head() {
     wait(&mut screen, |s| view(s).contains("feature"));
     key(&mut screen, KeyCode::Char('2'));
     wait(&mut screen, |s| view(s).contains("Feature only"));
+    key(&mut screen, KeyCode::Char('r'));
+    key(&mut screen, KeyCode::Char('3'));
+    wait(&mut screen, |s| view(s).contains("+feature"));
+    assert!(view(&mut screen).contains("3 Commits · feature"));
+    key(&mut screen, KeyCode::Char('2'));
     key(&mut screen, KeyCode::Down);
     wait(&mut screen, |s| {
         view(s).contains("Author: Screen Test") && !view(s).contains("Feature only")
@@ -433,4 +438,157 @@ fn worktrees_tags_and_stashes_are_real_repository_data() {
         "stashed\n"
     );
     assert_eq!(git(dir.path(), &["stash", "list"]), "");
+}
+
+#[test]
+fn all_files_browses_clean_tracked_source_with_syntax() {
+    let dir = repo();
+    std::fs::write(
+        dir.path().join("sample.rs"),
+        "pub fn answer() -> u32 { 42 }\n",
+    )
+    .unwrap();
+    git(dir.path(), &["add", "."]);
+    git(dir.path(), &["commit", "-m", "Add source"]);
+    let mut screen = GitScreen::open(dir.path()).unwrap();
+    wait(&mut screen, |s| view(s).contains("Working tree clean"));
+    key(&mut screen, KeyCode::Char('v'));
+    wait(&mut screen, |s| view(s).contains("sample.rs"));
+    key(&mut screen, KeyCode::Down);
+    wait(&mut screen, |s| view(s).contains("pub fn answer"));
+    assert!(matches!(
+        code_style(&mut screen, "pub fn answer", "fn"),
+        dust::ui::Style::Syntax(_)
+    ));
+    key(&mut screen, KeyCode::Char('v'));
+    wait(&mut screen, |s| view(s).contains("Working tree clean"));
+}
+
+fn select_file(screen: &mut GitScreen, name: &str) {
+    key(screen, KeyCode::Char('1'));
+    for _ in 0..20 {
+        let frame = screen.frame(120, 40);
+        if frame
+            .cursor
+            .is_some_and(|(_, y, _)| frame.grid.row_text(y).contains(name))
+        {
+            return;
+        }
+        key(screen, KeyCode::Down);
+    }
+    panic!("Missing file {name}: {}", view(screen));
+}
+
+#[test]
+fn tutor_completes_real_git_lessons_and_restores_original_screen() {
+    let dir = repo();
+    std::fs::write(dir.path().join("file.txt"), "untouched original work\n").unwrap();
+    let original_head = git(dir.path(), &["rev-parse", "HEAD"]);
+    let mut screen = GitScreen::open(dir.path()).unwrap();
+    screen.write_refusal = Some("Original workspace is untrusted".into());
+    wait(&mut screen, |s| view(s).contains("untouched original work"));
+    let before = view(&mut screen);
+    key(&mut screen, KeyCode::Char(':'));
+    text(&mut screen, "tutor git");
+    key(&mut screen, KeyCode::Enter);
+    wait(&mut screen, |s| view(s).contains("1/6 · Files"));
+    let practice = screen.root().to_owned();
+    let owner = practice.parent().unwrap().to_owned();
+    assert_ne!(practice, dir.path());
+    key(&mut screen, KeyCode::Char('v'));
+    wait(&mut screen, |s| view(s).contains("README.md"));
+    key(&mut screen, KeyCode::Char('v'));
+    wait(&mut screen, |s| view(s).contains("2/6 · Stage"));
+    select_file(&mut screen, "greet.rs");
+    key(&mut screen, KeyCode::Char(' '));
+    wait(&mut screen, |s| view(s).contains("3/6 · Commit and push"));
+    assert_eq!(
+        git(&practice, &["diff", "--cached", "--name-only"]),
+        "src/greet.rs"
+    );
+    key(&mut screen, KeyCode::Char('c'));
+    text(&mut screen, "Complete the practice change");
+    submit(&mut screen);
+    wait(&mut screen, |s| !s.busy());
+    key(&mut screen, KeyCode::Char('P'));
+    key(&mut screen, KeyCode::Enter);
+    wait(&mut screen, |s| view(s).contains("4/6 · Worktrees"));
+    assert_eq!(
+        git(&owner.join("remote.git"), &["rev-parse", "practice"]),
+        git(&practice, &["rev-parse", "HEAD"])
+    );
+    key(&mut screen, KeyCode::Char('2'));
+    key(&mut screen, KeyCode::Char('L'));
+    key(&mut screen, KeyCode::Char('n'));
+    text(&mut screen, "lesson-review");
+    submit(&mut screen);
+    let review = owner.join("review");
+    wait(&mut screen, |s| {
+        !s.busy() && review.join(".git").is_file() && view(s).contains("lesson-review")
+    });
+    key(&mut screen, KeyCode::Down);
+    key(&mut screen, KeyCode::Enter);
+    wait(&mut screen, |s| view(s).contains("5/6 · Stashes"));
+    assert_eq!(screen.root(), review);
+    assert!(review.join("notes.md").is_file());
+    key(&mut screen, KeyCode::Char('4'));
+    key(&mut screen, KeyCode::Char('n'));
+    text(&mut screen, "Practice stash");
+    submit(&mut screen);
+    wait(&mut screen, |s| !s.busy() && view(s).contains("stash@{0}"));
+    assert!(!review.join("notes.md").exists());
+    key(&mut screen, KeyCode::Char('p'));
+    key(&mut screen, KeyCode::Enter);
+    wait(&mut screen, |s| {
+        view(s).contains("6/6 · Conflict resolution")
+    });
+    assert_eq!(
+        git(&review, &["diff", "--name-only", "--diff-filter=U"]),
+        "src/greet.rs"
+    );
+    wait(&mut screen, |s| view(s).contains("UU greet.rs"));
+    select_file(&mut screen, "greet.rs");
+    key(&mut screen, KeyCode::Enter);
+    key(&mut screen, KeyCode::Down);
+    submit(&mut screen);
+    assert!(
+        !std::fs::read_to_string(review.join("src/greet.rs"))
+            .unwrap()
+            .contains("<<<<<<<")
+    );
+    assert!(
+        std::fs::read_to_string(review.join("src/greet.rs"))
+            .unwrap()
+            .contains("their branch")
+    );
+    key(&mut screen, KeyCode::Char(' '));
+    wait(&mut screen, |s| !s.busy());
+    assert_eq!(
+        git(&review, &["diff", "--name-only", "--diff-filter=U"]),
+        ""
+    );
+    key(&mut screen, KeyCode::Char('C'));
+    key(&mut screen, KeyCode::Enter);
+    wait(&mut screen, |s| {
+        view(s).contains("completed all six lessons")
+    });
+    assert_eq!(
+        git(&review, &["rev-list", "--parents", "-1", "HEAD"])
+            .split_whitespace()
+            .count(),
+        3
+    );
+    key(&mut screen, KeyCode::Char('q'));
+    assert_eq!(screen.root(), dir.path());
+    assert_eq!(view(&mut screen), before);
+    assert_eq!(
+        screen.write_refusal.as_deref(),
+        Some("Original workspace is untrusted")
+    );
+    assert!(!owner.exists());
+    assert_eq!(git(dir.path(), &["rev-parse", "HEAD"]), original_head);
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("file.txt")).unwrap(),
+        "untouched original work\n"
+    );
 }

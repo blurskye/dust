@@ -60,6 +60,45 @@ def main():
         assert git(root, "log", "-1", "--format=%s") == "Initial"
         assert_restored(output)
         print("PASS embedded: shared native screen, pane keys, return to editor, terminal cleanup")
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        fixture(root)
+        code, output, snapshots = run(args.editor.resolve(), tmp, ["--safe-mode", "file.txt"], [
+            (3, b":workspace.git.open\r", None),
+            (3, b"\r", None),
+            (1, b":workspace.git.open\r", None),
+            (3, b":tutor git\r", None),
+            (3, b"v", None),
+            (2, b"v", None),
+            (1, b":tutor quit\r", None),
+            (1, b"q", None),
+            (0.3, b":qa!\r", None),
+        ], seen_workspace=False, stage_expectations={1: lambda s: "Dusty Git" in s, 3: lambda s: "Dusty Git" in s, 4: lambda s: "1/6" in s, 5: lambda s: "All files" in s, 6: lambda s: "2/6" in s})
+        assert code == 0, terminal_screen(output)
+        floating = terminal_screen(snapshots[1]).splitlines()
+        position = next((y, line.index("Dusty Git")) for y, line in enumerate(floating) if "Dusty Git" in line)
+        assert position[0] > 0 and position[1] > 1, "Git is not floating over the editor"
+        assert "Dusty Git" not in terminal_screen(snapshots[2])
+        assert "Dusty Git" in terminal_screen(snapshots[3])
+        assert "1/6" in terminal_screen(snapshots[4])
+        assert "All files" in terminal_screen(snapshots[5])
+        assert "2/6" in terminal_screen(snapshots[6])
+        assert "Git tutor" not in terminal_screen(snapshots[7])
+        assert (root / "file.txt").read_text() == "actual terminal input\n"
+        assert git(root, "log", "-1", "--format=%s") == "Initial"
+        assert_restored(output)
+        print("PASS embedded: floating geometry, file-open/resume, real tutor commands and original repository restoration")
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        fixture(root)
+        config = root / ".dust-config"
+        config.mkdir()
+        (config / "config.toml").write_text('[ui.git]\nplacement = "fullscreen"\n')
+        code, output, snapshots = run(args.standalone.resolve(), tmp, [], [(3, b"q", None)], clean=False, config_home=config, seen_workspace=False)
+        assert code == 0, terminal_screen(output)
+        assert "Dusty Git" in terminal_screen(snapshots[0]).splitlines()[0]
+        assert_restored(output)
+        print("PASS standalone: saved fullscreen setting is honored")
 
 
 if __name__ == "__main__":

@@ -336,9 +336,19 @@ impl App {
         let reviewing = self.search.picker_surface() == crate::ui::PickerSurfaceKind::Changes;
         match effect {
             AppEffect::GitScreenOpen => {
-                match crate::git::screen::GitScreen::open(&self.state.workspace_root) {
-                    Ok(screen) => self.git_screen = Some(screen),
-                    Err(error) => self.show_error(error),
+                if let Some(screen) = &mut self.git_screen
+                    && (screen.in_tutor() || screen.root() == self.state.workspace_root)
+                {
+                    screen.resume();
+                    self.git_screen_visible = true;
+                } else {
+                    match crate::git::screen::GitScreen::open(&self.state.workspace_root) {
+                        Ok(screen) => {
+                            self.git_screen = Some(screen);
+                            self.git_screen_visible = true;
+                        }
+                        Err(error) => self.show_error(error),
+                    }
                 }
             }
             AppEffect::GitReviewHunk(action) => {

@@ -67,10 +67,7 @@ impl Preview {
             None,
             language_for_path(path),
         );
-        let mut rows = vec![PreviewRow::message(&format!(
-            "{} (untracked)",
-            path.display()
-        ))];
+        let mut rows = vec![PreviewRow::message(&path.display().to_string())];
         rows.extend(
             highlighted
                 .lines()

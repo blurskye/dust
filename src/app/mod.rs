@@ -266,6 +266,7 @@ struct App {
     next_transaction: u64,
     git: crate::app::git::Git,
     git_screen: Option<crate::git::screen::GitScreen>,
+    git_screen_visible: bool,
     clipboard: crate::app::editing::clipboard::Clipboard,
     macro_replays: Vec<(Vec<CommandInvocation>, usize, u64)>,
     macro_running: bool,
@@ -447,7 +448,9 @@ pub fn run_interactive(
             application.window_session.height(),
         );
         let holding = application.hold_first_frame();
-        let git_frame = if input_arrived || terminal.needs_full_draw() || drawn != Some(inputs) {
+        let git_frame = if application.git_screen_visible
+            && (input_arrived || terminal.needs_full_draw() || drawn != Some(inputs))
+        {
             let config = application.input_render_config().ui.git.clone();
             application
                 .git_screen

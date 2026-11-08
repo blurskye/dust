@@ -2143,7 +2143,9 @@ impl App {
         if matches!(event, UiEvent::Key { .. }) {
             self.last_key_at = Some(Instant::now());
         }
-        if let Some(screen) = &mut self.git_screen {
+        if self.git_screen_visible
+            && let Some(screen) = &mut self.git_screen
+        {
             screen.write_refusal = if self.workspace.safe_mode()
                 || self.workspace.trust() != crate::workspace::WorkspaceTrust::Trusted
             {
@@ -2159,13 +2161,15 @@ impl App {
                 crate::git::screen::ScreenOutcome::Continue => {}
                 crate::git::screen::ScreenOutcome::Close => {
                     self.git_screen = None;
+                    self.git_screen_visible = false;
                 }
                 crate::git::screen::ScreenOutcome::OpenFile(path) => {
-                    self.git_screen = None;
+                    self.git_screen_visible = false;
                     self.edit_path(path);
                 }
                 crate::git::screen::ScreenOutcome::OpenRepository(path) => {
                     self.git_screen = None;
+                    self.git_screen_visible = false;
                     self.switch_workspace_root(path);
                 }
             }

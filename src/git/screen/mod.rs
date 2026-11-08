@@ -3,6 +3,7 @@ mod github;
 mod jobs;
 mod preview;
 mod render;
+mod tutor;
 
 use super::*;
 use crate::editor::input::{KeyCode, KeyEvent};
@@ -37,6 +38,9 @@ enum FormAction {
     Worktree,
     Confirm(Vec<OsString>),
     Github(github::Action),
+    Command,
+    Conflict(PathBuf),
+    ContinueMerge,
 }
 struct Field {
     label: String,
@@ -78,6 +82,7 @@ pub struct GitScreen {
     mutation: GitMutationWorker,
     jobs: Jobs,
     history: Vec<(String, String)>,
+    history_target: Option<(PathBuf, OsString)>,
     stashes: Vec<String>,
     tags: Vec<String>,
     remotes: Vec<String>,
@@ -91,6 +96,9 @@ pub struct GitScreen {
     preview_line: usize,
     preview_column: usize,
     staged: bool,
+    all_files: bool,
+    files: BTreeSet<PathBuf>,
+    tutor: Option<tutor::Session>,
     branch: String,
     notice: String,
     form: Option<Form>,
@@ -119,6 +127,7 @@ impl GitScreen {
             mutation: GitMutationWorker::default(),
             jobs: Jobs::default(),
             history: Vec::new(),
+            history_target: None,
             stashes: Vec::new(),
             tags: Vec::new(),
             remotes: Vec::new(),
@@ -132,6 +141,9 @@ impl GitScreen {
             preview_line: 0,
             preview_column: 0,
             staged: false,
+            all_files: false,
+            files: BTreeSet::new(),
+            tutor: None,
             branch: String::new(),
             notice: String::new(),
             form: None,
@@ -169,8 +181,18 @@ impl GitScreen {
                 let mut rows = Vec::new();
                 let mut seen = BTreeSet::new();
                 if let Some(snapshot) = &self.snapshot {
-                    for entry in &snapshot.entries {
-                        let parts = entry.relative_path.components().collect::<Vec<_>>();
+                    let mut paths = snapshot
+                        .entries
+                        .iter()
+                        .map(|entry| (entry.relative_path.clone(), entry.change_code()))
+                        .collect::<std::collections::BTreeMap<_, _>>();
+                    if self.all_files {
+                        for path in &self.files {
+                            paths.entry(path.clone()).or_insert("  ".into());
+                        }
+                    }
+                    for (path, code) in paths {
+                        let parts = path.components().collect::<Vec<_>>();
                         let mut parent = PathBuf::new();
                         let mut hidden = false;
                         for part in parts.iter().take(parts.len().saturating_sub(1)) {
@@ -202,14 +224,10 @@ impl GitScreen {
                                 format!(
                                     "{}{} {}",
                                     "  ".repeat(parts.len().saturating_sub(1)),
-                                    entry.change_code(),
-                                    entry
-                                        .relative_path
-                                        .file_name()
-                                        .unwrap_or_default()
-                                        .to_string_lossy()
+                                    code,
+                                    path.file_name().unwrap_or_default().to_string_lossy()
                                 ),
-                                entry.relative_path.clone(),
+                                path.clone(),
                             ));
                         }
                     }
@@ -310,6 +328,9 @@ impl GitScreen {
                 deadline: Duration::from_secs(10),
             }))
             .map_err(|e| e.to_string())?;
+        if self.all_files {
+            self.list_files()?;
+        }
         self.branch = git2::Repository::open(&self.root)
             .ok()
             .and_then(|r| {
@@ -319,11 +340,8 @@ impl GitScreen {
                 })
             })
             .unwrap_or_else(|| "detached HEAD".into());
+        self.reload_history()?;
         for (request, args) in [
-            (
-                Request::History,
-                vec!["log", "-100", "--format=%H%x09%s", "HEAD", "--"],
-            ),
             (Request::Stashes, vec!["stash", "list"]),
             (Request::Tags, vec!["tag", "--list"]),
             (Request::Remotes, vec!["remote", "-v"]),
@@ -430,6 +448,10 @@ impl GitScreen {
                     self.stashes = text.lines().map(Into::into).collect();
                     reload_preview = true;
                 }
+                (Request::Files, Ok(text)) => {
+                    self.files = text.split_terminator('\0').map(PathBuf::from).collect();
+                    reload_preview = true;
+                }
                 (Request::Tags, Ok(text)) => {
                     self.tags = text.lines().map(Into::into).collect();
                     reload_preview = true;
@@ -461,7 +483,8 @@ impl GitScreen {
             self.clamp();
             self.load_preview();
         }
-        changed || github_changed
+        let tutor_changed = if changed { self.advance_tutor() } else { false };
+        changed || github_changed || tutor_changed
     }
     fn clamp(&mut self) {
         for pane in 0..4 {
@@ -500,7 +523,11 @@ impl GitScreen {
                     .as_ref()
                     .and_then(|s| s.entries.iter().find(|e| e.relative_path == row.value));
                 let untracked = entry.is_some_and(|e| e.status == GitFileStatus::Untracked);
-                if untracked && !self.staged {
+                if self.all_files
+                    || (untracked
+                        || entry.is_some_and(|entry| entry.status == GitFileStatus::Conflicted))
+                        && !self.staged
+                {
                     if !std::fs::symlink_metadata(self.root.join(&row.value))
                         .is_ok_and(|m| m.file_type().is_file())
                     {
@@ -577,10 +604,65 @@ impl GitScreen {
         let result = self.run(Request::Preview, args);
         self.report(result);
     }
+    fn reload_history(&mut self) -> Result<(), String> {
+        let (root, reference) = self
+            .history_target
+            .clone()
+            .unwrap_or_else(|| (self.root.clone(), "HEAD".into()));
+        self.jobs.start(
+            &root,
+            Request::History,
+            vec![
+                "log".into(),
+                "-100".into(),
+                "--format=%H%x09%s".into(),
+                reference,
+                "--".into(),
+            ],
+        )
+    }
+    fn select_history(&mut self) {
+        if self.last_list != 1 || self.subview == 2 {
+            return;
+        }
+        let Some(row) = self.selected_row() else {
+            return;
+        };
+        let target = if self.subview == 1 {
+            (row.value, "HEAD".into())
+        } else {
+            (self.root.clone(), row.value.into_os_string())
+        };
+        if self.history_target.as_ref() == Some(&target) {
+            return;
+        }
+        self.history_target = Some(target);
+        self.history.clear();
+        self.selected[5] = 0;
+        let result = self.reload_history();
+        self.report(result);
+    }
+    fn list_files(&mut self) -> Result<(), String> {
+        self.run(
+            Request::Files,
+            [
+                "ls-files",
+                "--cached",
+                "--others",
+                "--exclude-standard",
+                "-z",
+            ]
+            .into_iter()
+            .map(Into::into)
+            .collect(),
+        )
+    }
     fn allow_write(&self) -> Result<(), String> {
         if self.busy {
             Err("Wait for the current Git operation to finish".into())
-        } else if let Some(reason) = &self.write_refusal {
+        } else if let Some(reason) = &self.write_refusal
+            && self.tutor.is_none()
+        {
             Err(reason.clone())
         } else {
             Ok(())
@@ -654,9 +736,21 @@ impl GitScreen {
             selected: 0,
         });
     }
+    fn conflict_form(&mut self, path: PathBuf, side: &str) {
+        let mut choice = Field::new("Keep side (Up/Down selects)", side.into());
+        choice.choices = vec!["ours".into(), "theirs".into()];
+        self.form = Some(Form {
+            title: format!("Replace {} with one side; stage separately", path.display()),
+            action: FormAction::Conflict(path),
+            fields: vec![choice],
+            selected: 0,
+        });
+    }
     fn submit(&mut self) -> Result<(), String> {
         let form = self.form.as_ref().ok_or("No open form")?;
-        if !matches!(&form.action, FormAction::Github(action) if !action.writes()) {
+        if !matches!(&form.action, FormAction::Command)
+            && !matches!(&form.action, FormAction::Github(action) if !action.writes())
+        {
             self.allow_write()?;
         }
         let values = form
@@ -684,6 +778,9 @@ impl GitScreen {
                 values[0].clone().into(),
             ])?,
             FormAction::Worktree => {
+                if let Some(tutor) = &self.tutor {
+                    tutor.check_destination(Path::new(&values[1]))?;
+                }
                 self.branches
                     .start(GitBranchRequest::CreateWorktree {
                         repository: self.root.clone(),
@@ -702,6 +799,29 @@ impl GitScreen {
             }
             FormAction::Confirm(args) => self.write(args.clone())?,
             FormAction::Github(action) => self.github.submit(action.clone(), values)?,
+            FormAction::Command => {
+                match values[0].trim() {
+                    "tutor git" => self.start_tutor()?,
+                    "tutor quit" => self.stop_tutor()?,
+                    _ => return Err("Available commands: tutor git · tutor quit".into()),
+                }
+                return Ok(());
+            }
+            FormAction::Conflict(path) => {
+                let choice = GitConflictChoice::parse(&values[0]).ok_or("Choose ours or theirs")?;
+                let plan = plan_replacement(&self.root, std::slice::from_ref(path), choice)
+                    .map_err(|error| error.to_string())?;
+                apply_replacement(&plan).map_err(|error| error.to_string())?;
+                self.refresh()?;
+            }
+            FormAction::ContinueMerge => {
+                let outcome =
+                    continue_operation(&self.root, "").map_err(|error| error.to_string())?;
+                if let Some(warning) = outcome.cleanup_warning {
+                    return Err(warning);
+                }
+                self.refresh()?;
+            }
         }
         self.form = None;
         self.notice.clear();
@@ -713,7 +833,13 @@ impl GitScreen {
             self.form = None;
             return Ok(());
         }
-        if key.code == KeyCode::Enter && key.modifiers.control {
+        if key.code == KeyCode::Enter
+            && (key.modifiers.control
+                || self
+                    .form
+                    .as_ref()
+                    .is_some_and(|form| matches!(form.action, FormAction::Command)))
+        {
             return self.submit();
         }
         let form = self.form.as_mut().expect("checked form");
@@ -798,10 +924,22 @@ impl GitScreen {
                     self.report(result);
                     return ScreenOutcome::Continue;
                 }
+                if !key.modifiers.control && key.code == KeyCode::Char(':') {
+                    self.form(
+                        "Command",
+                        FormAction::Command,
+                        vec![("Command", String::new())],
+                    );
+                    return ScreenOutcome::Continue;
+                }
                 if !key.modifiers.control
                     && matches!(key.code, KeyCode::Char('[' | ']'))
                     && !self.busy()
                 {
+                    if self.tutor.is_some() {
+                        self.notice = "Use :tutor quit before opening GitHub pages".into();
+                        return ScreenOutcome::Continue;
+                    }
                     self.page =
                         (self.page + if key.code == KeyCode::Char(']') { 1 } else { 3 }) % 4;
                     self.github.page(self.page);
@@ -838,6 +976,11 @@ impl GitScreen {
                 } else {
                     match key.code {
                         KeyCode::Char('q') => {
+                            if self.tutor.is_some() {
+                                let result = self.stop_tutor();
+                                self.report(result);
+                                return ScreenOutcome::Continue;
+                            }
                             if !self.busy {
                                 return ScreenOutcome::Close;
                             }
@@ -847,6 +990,10 @@ impl GitScreen {
                         KeyCode::Escape => {
                             if self.focus == 4 {
                                 self.focus = self.last_list
+                            } else if self.tutor.is_some() {
+                                let result = self.stop_tutor();
+                                self.report(result);
+                                return ScreenOutcome::Continue;
                             } else if !self.busy {
                                 return ScreenOutcome::Close;
                             }
@@ -893,11 +1040,42 @@ impl GitScreen {
                                 }
                             }
                         }
-                        KeyCode::Char('v') if self.last_list == 0 => self.staged = !self.staged,
+                        KeyCode::Char('v') if self.last_list == 0 => {
+                            self.all_files = !self.all_files;
+                            self.staged = false;
+                            if self.all_files {
+                                let result = self.list_files();
+                                self.report(result);
+                            }
+                            self.load_preview();
+                        }
+                        KeyCode::Char('i') if self.last_list == 0 => {
+                            self.staged = !self.staged;
+                            self.all_files = false;
+                        }
                         KeyCode::Char(' ') if self.last_list == 0 => {
                             let result = self.stage();
                             self.report(result);
                         }
+                        KeyCode::Char('o' | 't') if self.last_list == 0 => {
+                            if let Some(row) = self.selected_row()
+                                && !row.directory
+                            {
+                                self.conflict_form(
+                                    row.value,
+                                    if key.code == KeyCode::Char('o') {
+                                        "ours"
+                                    } else {
+                                        "theirs"
+                                    },
+                                );
+                            }
+                        }
+                        KeyCode::Char('C') => self.form(
+                            "Continue the resolved merge?",
+                            FormAction::ContinueMerge,
+                            Vec::new(),
+                        ),
                         KeyCode::Char('c') => self.form(
                             "Commit staged changes",
                             FormAction::Commit,
@@ -909,7 +1087,7 @@ impl GitScreen {
                             vec![("Message", String::new())],
                         ),
                         KeyCode::Char('n') if self.focus == 1 => self.form(
-                            "Create worktree from an existing branch",
+                            "Create worktree (existing or new branch)",
                             FormAction::Worktree,
                             vec![
                                 ("Branch", String::new()),
@@ -958,8 +1136,24 @@ impl GitScreen {
                                         self.collapsed.insert(row.value);
                                     }
                                 } else if self.last_list == 0 {
-                                    return ScreenOutcome::OpenFile(self.root.join(row.value));
+                                    if self.snapshot.as_ref().is_some_and(|snapshot| {
+                                        snapshot.entries.iter().any(|entry| {
+                                            entry.relative_path == row.value
+                                                && entry.status == GitFileStatus::Conflicted
+                                        })
+                                    }) {
+                                        self.conflict_form(row.value, "ours");
+                                    } else if self.tutor.is_some() {
+                                        self.focus = 4;
+                                    } else {
+                                        return ScreenOutcome::OpenFile(self.root.join(row.value));
+                                    }
                                 } else if self.last_list == 1 && self.subview == 1 && !self.busy {
+                                    if self.tutor.is_some() {
+                                        let result = self.tutor_worktree(&row.value);
+                                        self.report(result);
+                                        return ScreenOutcome::Continue;
+                                    }
                                     return ScreenOutcome::OpenRepository(row.value);
                                 } else if self.last_list == 1 && self.subview == 0 {
                                     self.form(
@@ -979,7 +1173,7 @@ impl GitScreen {
                         KeyCode::Char('?') => {
                             self.jobs.cancel_preview();
                             self.focus = 4;
-                            self.preview="1 Changes · 2 Branches · 3 Commits · 4 Stashes\nCtrl+h/j/k/l: spatial pane focus\nTab / Shift+Tab: next / previous pane\nj/k or arrows: move · Enter: open\nh/l: collapse/expand directory · H/L: branch subview\nPreview: h/l or Left/Right scroll horizontally\nSpace: stage · v: switch working tree/index\nc: commit · P: push · r: refresh\nn: new worktree/stash · a/p/d: apply/pop/drop stash\nForms: type, arrows edit, Tab visits fields and buttons\nCtrl+Enter: submit · Esc: cancel/back · q: close".into();
+                            self.preview="1 Changes · 2 Branches · 3 Commits · 4 Stashes\nCtrl+h/j/k/l: spatial pane focus\nTab / Shift+Tab: next / previous pane\nj/k or arrows: move · Enter: open\nh/l: collapse/expand directory · H/L: branch subview\nPreview: h/l or Left/Right scroll horizontally\nSpace: stage · v: Changes/All files · i: working tree/index\nc: commit · P: push · r: refresh\nConflicts: Enter chooses a side · o/t: ours/theirs · C: continue merge\n:tutor git: disposable lessons · :tutor quit: restore workspace\nn: new worktree/stash · a/p/d: apply/pop/drop stash\nForms: type, arrows edit, Tab visits fields and buttons\nCtrl+Enter: submit · Esc: cancel/back · q: close".into();
                             return ScreenOutcome::Continue;
                         }
                         _ => {}
@@ -989,6 +1183,7 @@ impl GitScreen {
                     self.last_list = self.focus;
                     self.clamp();
                     if previous != (self.last_list, self.subview, self.selected, self.staged) {
+                        self.select_history();
                         self.preview_line = 0;
                         self.preview_column = 0;
                         self.load_preview();
@@ -997,6 +1192,7 @@ impl GitScreen {
             }
             _ => {}
         }
+        self.advance_tutor();
         ScreenOutcome::Continue
     }
     fn move_selection(&mut self, delta: isize) {

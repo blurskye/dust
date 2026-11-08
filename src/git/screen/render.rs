@@ -67,7 +67,7 @@ pub(super) fn frame(app: &mut GitScreen, width: u16, height: u16) -> Frame {
     }
     navigation(&mut frame, 0, width, &app.root.display().to_string());
     let left = (width * 2 / 5).max(26);
-    let body = height - 4;
+    let body = height - 4 - if app.tutor.is_some() { 4 } else { 0 };
     let sizes = [
         body * 3 / 10,
         body / 4,
@@ -75,12 +75,33 @@ pub(super) fn frame(app: &mut GitScreen, width: u16, height: u16) -> Frame {
         body - (body * 3 / 10 + body / 4 + body / 4),
     ];
     let titles = [
-        format!("1 Changes · {}", app.branch),
+        format!(
+            "1 {} · {}",
+            if app.all_files {
+                "All files"
+            } else {
+                "Changes"
+            },
+            app.branch
+        ),
         format!(
             "2 {}",
             ["Branches", "Worktrees", "Remotes", "Tags"][app.subview]
         ),
-        "3 Commits".into(),
+        format!(
+            "3 Commits · {}",
+            app.history_target
+                .as_ref()
+                .map(|(root, reference)| if reference == "HEAD" {
+                    root.file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .into_owned()
+                } else {
+                    reference.to_string_lossy().into_owned()
+                })
+                .unwrap_or_else(|| app.branch.clone())
+        ),
         "4 Stashes".into(),
     ];
     let mut top = 1;
@@ -151,7 +172,9 @@ pub(super) fn frame(app: &mut GitScreen, width: u16, height: u16) -> Frame {
     }
     let title = match app.last_list {
         0 => {
-            if app.staged {
+            if app.all_files {
+                "Source"
+            } else if app.staged {
                 "Index"
             } else {
                 "Working tree"
@@ -245,6 +268,32 @@ pub(super) fn frame(app: &mut GitScreen, width: u16, height: u16) -> Frame {
                 .min(visible.saturating_sub(1))) as u16,
             SetCursorStyle::SteadyBlock,
         ));
+    }
+    if let Some(tutor) = &app.tutor {
+        frame
+            .grid
+            .put_text_clipped(1, height - 7, &tutor.title(), Style::Accent, width - 2);
+        let lines = crate::ui::render::wrap_plain_text(
+            tutor.instruction(),
+            usize::from(width - 2),
+            crate::config::AmbiguousWidth::Narrow,
+        );
+        for (index, line) in lines.iter().take(2).enumerate() {
+            frame.grid.put_text_clipped(
+                1,
+                height - 6 + index as u16,
+                line,
+                Style::Default,
+                width - 2,
+            );
+        }
+        frame.grid.put_text_clipped(
+            1,
+            height - 4,
+            "Disposable repository · :tutor quit restores your workspace",
+            Style::Muted,
+            width - 2,
+        );
     }
     frame.grid.put_text_clipped(
         1,

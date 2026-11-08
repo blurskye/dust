@@ -11,6 +11,7 @@ pub(super) enum Request {
     Stashes,
     Tags,
     Remotes,
+    Files,
     Preview,
     Write,
 }
@@ -66,6 +67,17 @@ impl Jobs {
     ) -> Result<(), String> {
         if request == Request::Preview {
             self.cancel_preview();
+        }
+        if request == Request::History {
+            let ids = self
+                .pending
+                .iter()
+                .filter_map(|(id, pending)| (pending.request == request).then_some(*id))
+                .collect::<Vec<_>>();
+            for id in ids {
+                let _ = self.supervisor.cancel(id);
+                self.pending.remove(&id);
+            }
         }
         let mut arguments: Vec<OsString> = [
             "--no-pager",
@@ -143,6 +155,8 @@ impl Jobs {
                     if let Some(pending) = self.pending.remove(&job) {
                         let result = if timed_out {
                             Err("Git command timed out".into())
+                        } else if pending.truncated && pending.request == Request::Files {
+                            Err("Repository file listing exceeds the preview limit".into())
                         } else if code == Some(0) {
                             let mut text = String::from_utf8_lossy(&pending.stdout).into_owned();
                             if pending.truncated {

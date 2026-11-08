@@ -229,9 +229,11 @@ separate addition/deletion markers. In the preview, `h/l` or Left/Right scroll
 horizontally while the line-number gutter stays fixed. The Changes tree
 expands/collapses with `l/h`. `H/L` cycles Branches, Worktrees, Remotes and Tags. Enter opens files in
 Dust, or `$VISUAL`/`$EDITOR` from the standalone tool. Worktree Enter opens that
-repository. Branch Enter confirms checkout. `Space` stages a file; `v` switches
-to the index where `Space` unstages. `c` commits staged files and `P` confirms a
-push. `n` creates a worktree from an existing branch or saves a stash in its pane;
+repository. Branch Enter confirms checkout. `v` switches Changes/All files,
+including highlighted source for clean tracked files. `Space` stages a file;
+`i` switches to the index where `Space` unstages. The Commits pane follows the
+selected branch, worktree or tag. `c` commits staged files and `P` confirms a
+push. `n` creates a worktree from an existing or new branch, or saves a stash in its pane;
 `a/p/d` apply/pop/drop a stash with confirmation. `r` refreshes. Form fields use
 ordinary typing, arrows, Tab, Enter and Escape; Ctrl-Enter submits.
 
@@ -254,8 +256,21 @@ forms use the workflow's required fields, defaults, boolean and choice inputs.
 Run details expose attempts, matrix jobs, dependencies, steps, expandable logs,
 cancellation and reruns. Remote writes require explicit form submission.
 
-The embedded screen refuses writes in untrusted workspaces or while editor
-buffers are unsaved. Repository mutations run in background workers.
+On a conflicted file, Enter opens a side-selection form; `o/t` choose ours/theirs.
+The replacement stays unstaged until Space. `C` confirms continuation of a resolved
+merge, using the existing conflict checks. Opening a normal file in Dust preserves
+the Git screen; `Space g g` resumes it.
+
+Inside Dusty Git, `:tutor git` starts six real lessons: file browsing, staging,
+commit/push, worktrees, stash/restore, and conflict resolution. Both repository
+and bare remote are disposable local directories. Tutor worktrees stay inside
+that directory. `:tutor quit` or `q` restores your previous Git screen, including
+its selections and drafts; practice data is removed. Enter previews practice
+files inside Dusty Git, so the editor's buffers remain untouched.
+
+The embedded screen refuses writes to your workspace while it is untrusted or
+editor buffers are unsaved. The tutor is independent of that workspace.
+Repository mutations run in background workers.
 Existing editor Git features remain available:
 
 - file and explorer status decorations, and gutter signs for the active buffer;
