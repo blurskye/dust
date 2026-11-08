@@ -65,7 +65,7 @@ fn encode_component(value: &[u8]) -> String {
 }
 
 /// Convert Git transports to HTTPS; keep HTTP(S) schemes and web ports intact.
-fn web_base(remote: &str) -> Option<reqwest::Url> {
+pub(crate) fn web_base(remote: &str) -> Option<reqwest::Url> {
     let remote = remote.trim().trim_end_matches('/');
     let remote = remote.strip_suffix(".git").unwrap_or(remote);
     let (scheme, authority, path) = if let Some((scheme, rest)) = remote.split_once("://") {

@@ -2,6 +2,8 @@
 //! `gh` for GitHub and `tea` for Gitea and Forgejo. Each request runs the CLI (and `git`) on a
 //! worker thread; replies arrive on a channel.
 
+pub(crate) mod pull_request;
+
 use serde_json::Value;
 use std::path::Path;
 use std::path::PathBuf;

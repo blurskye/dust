@@ -250,7 +250,15 @@ Pull requests have Conversation, Commits, Checks and Files changed views (`H/L`)
 Select commits to inspect their highlighted patches; select changed lines to
 comment inline. Review, resolve conversations, checkout, create a worktree, or
 merge after review/check readiness. Merge confirmation binds to the displayed
-head commit. Creating a PR requires an already-pushed head branch.
+head commit. PR creation detects a fork and its upstream, and lets you choose or
+type the base repository/branch and head repository/branch. Existing user-owned
+and organization-owned forks are supported. Choose Already pushed or Push local
+branch, then review the exact source and destination before creating the PR.
+Pushing publishes only the reviewed commit to the selected fork, never force
+pushes, and refuses if the local branch moved. Escape from review returns to the
+draft. If the push succeeds but PR creation fails, the draft remains available;
+choose Already pushed to retry only the PR. Both repositories must be on the
+displayed GitHub host, with an existing fork relationship for cross-repository PRs.
 
 Actions keeps workflow definitions and dispatch separate from run history.
 `Ctrl-h/l` changes column; `Ctrl-j/k` switches workflows/run history. Dispatch

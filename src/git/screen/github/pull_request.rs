@@ -1,0 +1,251 @@
+//! Fork-aware PR forms. Reading metadata never publishes a branch or creates a PR.
+use super::*;
+use crate::forge::pull_request::{
+    CreatePullRequest, PullRequestPush, repository_from_url, valid_repository,
+};
+
+impl Workspace {
+    fn remotes(&self) -> Vec<(String, String)> {
+        let Ok(repo) = git2::Repository::open(&self.root) else {
+            return Vec::new();
+        };
+        let Ok(names) = repo.remotes() else {
+            return Vec::new();
+        };
+        names
+            .iter()
+            .flatten()
+            .filter_map(|name| {
+                let remote = repo.find_remote(name).ok()?;
+                Some((
+                    name.into(),
+                    repository_from_url(remote.pushurl().or(remote.url())?, &self.host)?,
+                ))
+            })
+            .collect()
+    }
+
+    fn head_repository(&self) -> String {
+        let remotes = self.remotes();
+        if let Ok(repo) = git2::Repository::open(&self.root)
+            && let Ok(config) = repo.config()
+        {
+            let branch = crate::git::git_branch_name(&self.root)
+                .ok()
+                .flatten()
+                .unwrap_or_default();
+            for name in [
+                config
+                    .get_string(&format!("branch.{branch}.pushRemote"))
+                    .ok(),
+                config.get_string("remote.pushDefault").ok(),
+                config.get_string(&format!("branch.{branch}.remote")).ok(),
+                Some("origin".into()),
+            ]
+            .into_iter()
+            .flatten()
+            {
+                if let Some((_, repository)) = remotes.iter().find(|(remote, _)| remote == &name) {
+                    return repository.clone();
+                }
+            }
+        }
+        remotes
+            .first()
+            .map_or_else(|| self.repo.clone(), |(_, repository)| repository.clone())
+    }
+
+    pub(super) fn create_pr_form(&mut self) -> Result<Option<Form>, String> {
+        let head = self.head_repository();
+        let Some(reply) = self.cache.get(&Key::PullRequestDefaults) else {
+            self.pending_pr = true;
+            self.enqueue(
+                Key::PullRequestDefaults,
+                vec![
+                    "api".into(),
+                    "--hostname".into(),
+                    self.host.clone(),
+                    format!("repos/{head}"),
+                ],
+            );
+            self.notice = "Loading fork and upstream repositories…".into();
+            return Ok(None);
+        };
+        let info = &reply.as_ref().map_err(Clone::clone)?.value;
+        let base_info = if info["parent"]["full_name"].is_string() {
+            &info["parent"]
+        } else {
+            info
+        };
+        let base = string(base_info, "full_name");
+        if !valid_repository(base) {
+            return Err("GitHub returned an invalid repository".into());
+        }
+        let branch = crate::git::git_branch_name(&self.root)
+            .map_err(|error| error.to_string())?
+            .unwrap_or_default();
+        let mut repositories = vec![base.to_owned(), head.clone(), self.repo.clone()];
+        repositories.extend(self.remotes().into_iter().map(|(_, repository)| repository));
+        repositories.sort();
+        repositories.dedup();
+        let mut base_field = actions::field("Base repository", base, true, false);
+        base_field.choices = repositories.clone();
+        base_field.custom_choices = true;
+        let mut head_field = actions::field("Head repository (fork)", &head, true, false);
+        head_field.choices = repositories;
+        head_field.custom_choices = true;
+        let mut head_branch = actions::field("Head branch", &branch, true, false);
+        if let Ok(repo) = git2::Repository::open(&self.root)
+            && let Ok(branches) = repo.branches(Some(git2::BranchType::Local))
+        {
+            head_branch.choices = branches
+                .flatten()
+                .filter_map(|(branch, _)| branch.name().ok().flatten().map(str::to_owned))
+                .collect();
+        }
+        head_branch.custom_choices = true;
+        self.pending_pr = false;
+        self.notice.clear();
+        Ok(Some(self.form(
+            "Create pull request",
+            Action::CreatePullRequest,
+            vec![
+                actions::field("Title", "", true, false),
+                actions::field("Description", "", false, true),
+                base_field,
+                actions::field(
+                    "Base branch",
+                    string(base_info, "default_branch"),
+                    true,
+                    false,
+                ),
+                head_field,
+                head_branch,
+                actions::choice(
+                    "Publish branch",
+                    "Already pushed",
+                    &["Already pushed", "Push local branch"],
+                ),
+                actions::choice("Draft", "true", &["true", "false"]),
+            ],
+        )))
+    }
+
+    pub(in crate::git::screen) fn review_pr(
+        &mut self,
+        values: Vec<String>,
+    ) -> Result<Form, String> {
+        self.save_draft(&Action::CreatePullRequest, values.clone());
+        let [
+            title,
+            body,
+            base_repository,
+            base_branch,
+            head_repository,
+            head_branch,
+            publish,
+            draft,
+        ] = values.as_slice()
+        else {
+            return Err("Invalid PR form".into());
+        };
+        for repository in [base_repository, head_repository] {
+            if !valid_repository(repository) {
+                return Err("Repository must be OWNER/NAME on the displayed GitHub host".into());
+            }
+        }
+        for branch in [base_branch, head_branch] {
+            if !git2::Reference::is_valid_name(&format!("refs/heads/{branch}"))
+                || branch.starts_with('-')
+            {
+                return Err("Choose a valid branch name, without an owner prefix".into());
+            }
+        }
+        if base_repository == head_repository && base_branch == head_branch {
+            return Err("Head and base must be different branches or repositories".into());
+        }
+        let push = if publish == "Push local branch" {
+            let remote = self.remotes().into_iter().find(|(_, repository)| repository == head_repository)
+                .map(|(remote, _)| remote).ok_or("No push remote points to the head repository; add one or publish the branch first")?;
+            let repo = git2::Repository::open(&self.root).map_err(|error| error.to_string())?;
+            let commit = repo
+                .find_branch(head_branch, git2::BranchType::Local)
+                .map_err(|_| "Head branch is not local; choose an existing local branch to push")?
+                .get()
+                .peel_to_commit()
+                .map_err(|error| error.to_string())?
+                .id()
+                .to_string();
+            Some(PullRequestPush { remote, commit })
+        } else {
+            None
+        };
+        let request = CreatePullRequest {
+            host: self.host.clone(),
+            base_repository: base_repository.clone(),
+            base_branch: base_branch.clone(),
+            head_repository: head_repository.clone(),
+            head_branch: head_branch.clone(),
+            title: title.clone(),
+            body: body.clone(),
+            draft: draft == "true",
+            push,
+        };
+        let publication = request.push.as_ref().map_or_else(
+            || "Use the published branch; do not push".into(),
+            |push| {
+                format!(
+                    "Push {} to {} (no force push)",
+                    &push.commit[..8],
+                    push.remote
+                )
+            },
+        );
+        let mut fields = vec![
+            actions::field(
+                "From",
+                &format!("{}/{} : {}", request.host, head_repository, head_branch),
+                false,
+                false,
+            ),
+            actions::field(
+                "Into",
+                &format!("{}/{} : {}", request.host, base_repository, base_branch),
+                false,
+                false,
+            ),
+            actions::field(
+                "Publish · committed changes only",
+                &publication,
+                false,
+                false,
+            ),
+            actions::field("Title", title, false, false),
+            actions::field("Description", body, false, true),
+        ];
+        for field in &mut fields {
+            field.read_only = true;
+            field.input.cursor = 0;
+        }
+        let title = if request.draft {
+            "Review draft pull request"
+        } else {
+            "Review pull request"
+        };
+        Ok(self.form(title, Action::ConfirmPullRequest(Box::new(request)), fields))
+    }
+
+    pub(super) fn poll_pr_form(&mut self) {
+        if self.pending_pr && self.cache.contains_key(&Key::PullRequestDefaults) {
+            self.pending_pr = false;
+            match self.create_pr_form() {
+                Ok(form) => self.ready_form = form,
+                Err(error) => self.notice = error,
+            }
+        }
+    }
+
+    pub fn take_form(&mut self) -> Option<Form> {
+        self.ready_form.take()
+    }
+}

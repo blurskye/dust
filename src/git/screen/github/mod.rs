@@ -2,6 +2,7 @@
 //! owns process limits and cancellation. Every response is keyed to its requested item.
 mod actions;
 mod logs;
+mod pull_request;
 pub(super) mod view;
 mod workflow;
 use super::{Field, Form, FormAction};
@@ -15,6 +16,7 @@ use std::path::PathBuf;
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 enum Key {
     Repository,
+    PullRequestDefaults,
     List(usize),
     Item(usize, u64),
     Timeline(u64),
@@ -36,6 +38,7 @@ struct Reply {
 struct Request {
     key: Key,
     args: Vec<String>,
+    pull_request: Option<crate::forge::pull_request::CreatePullRequest>,
 }
 pub(super) struct Workspace {
     root: PathBuf,
@@ -72,6 +75,8 @@ pub(super) struct Workspace {
     drafts: BTreeMap<String, Vec<String>>,
     notice: String,
     writing_draft: Option<String>,
+    pending_pr: bool,
+    ready_form: Option<Form>,
 }
 impl Workspace {
     pub fn new(root: PathBuf) -> Self {
@@ -110,6 +115,8 @@ impl Workspace {
             drafts: BTreeMap::new(),
             notice: String::new(),
             writing_draft: None,
+            pending_pr: false,
+            ready_form: None,
         }
     }
     pub fn writing(&self) -> bool {
@@ -122,6 +129,9 @@ impl Workspace {
                 .any(|request| matches!(request.key, Key::Write | Key::WorktreeWrite(_)))
     }
     pub fn page(&mut self, page: usize) {
+        self.pending_pr = false;
+        self.ready_form = None;
+        self.notice.clear();
         self.page = page;
         self.focus = 0;
         self.detail_cursor = 0;
@@ -177,7 +187,11 @@ impl Workspace {
         {
             return;
         }
-        self.queue.push_back(Request { key, args });
+        self.queue.push_back(Request {
+            key,
+            args,
+            pull_request: None,
+        });
     }
     fn value(&self, key: &Key) -> Option<&Value> {
         self.cache.get(key)?.as_ref().ok().map(|reply| &reply.value)
@@ -231,16 +245,17 @@ impl Workspace {
         self.value(&Key::Item(self.page, self.number()))
     }
     fn ensure(&mut self) {
-        if self.repo.is_empty() {
-            self.enqueue(
-                Key::Repository,
-                vec![
-                    "repo".into(),
-                    "view".into(),
-                    "--json".into(),
-                    "nameWithOwner,url,defaultBranchRef".into(),
-                ],
-            );
+        if self.repo.is_empty() || !self.cache.contains_key(&Key::Repository) {
+            let mut args = vec![
+                "repo".into(),
+                "view".into(),
+                "--json".into(),
+                "nameWithOwner,url,defaultBranchRef".into(),
+            ];
+            if !self.repo.is_empty() {
+                args.extend(["--repo".into(), format!("{}/{}", self.host, self.repo)]);
+            }
+            self.enqueue(Key::Repository, args);
             return;
         }
         match self.page {
@@ -382,11 +397,22 @@ impl Workspace {
                 if matches!(request.key, Key::Write | Key::WorktreeWrite(_)) {
                     match result {
                         Ok(text) => {
-                            self.notice = if text.trim().is_empty() {
-                                "Saved on GitHub".into()
+                            if let Some(pr) = &request.pull_request {
+                                self.repo = pr.base_repository.clone();
+                                self.cache.clear();
+                                if let Ok(value) = serde_json::from_str::<Value>(&text) {
+                                    self.opened = Some((2, number(&value, "number")));
+                                    self.focus = 2;
+                                    self.detail_cursor = 0;
+                                    self.notice = string(&value, "html_url").into();
+                                }
                             } else {
-                                text.trim().into()
-                            };
+                                self.notice = if text.trim().is_empty() {
+                                    "Saved on GitHub".into()
+                                } else {
+                                    text.trim().into()
+                                };
+                            }
                             if let Some(key) = self.writing_draft.take() {
                                 self.drafts.remove(&key);
                             }
@@ -444,16 +470,21 @@ impl Workspace {
             && let Some(request) = self.queue.pop_front()
         {
             self.next += 1;
-            let started = match request.key {
-                Key::WorktreeWrite(number) => self.jobs.workspace_worktree(
-                    self.root.clone(),
-                    self.next,
-                    number,
-                    request.args[0].clone(),
-                ),
-                _ => self
-                    .jobs
-                    .workspace(self.root.clone(), self.next, request.args.clone()),
+            let started = if let Some(pr) = &request.pull_request {
+                self.jobs
+                    .create_pull_request(self.root.clone(), self.next, pr.clone())
+            } else {
+                match request.key {
+                    Key::WorktreeWrite(number) => self.jobs.workspace_worktree(
+                        self.root.clone(),
+                        self.next,
+                        number,
+                        request.args[0].clone(),
+                    ),
+                    _ => self
+                        .jobs
+                        .workspace(self.root.clone(), self.next, request.args.clone()),
+                }
             };
             match started {
                 Ok(()) => self.active = Some(request),
@@ -464,10 +495,13 @@ impl Workspace {
             }
             changed = true;
         }
+        self.poll_pr_form();
         changed
     }
     pub fn save_draft(&mut self, action: &Action, values: Vec<String>) {
-        self.drafts.insert(format!("{action:?}"), values);
+        if !matches!(action, Action::ConfirmPullRequest(_)) {
+            self.drafts.insert(format!("{action:?}"), values);
+        }
     }
     fn form(&self, title: &str, action: Action, mut fields: Vec<Field>) -> Form {
         if let Some(draft) = self.drafts.get(&format!("{action:?}")) {
@@ -484,6 +518,11 @@ impl Workspace {
         }
     }
     pub fn event(&mut self, key: &KeyEvent) -> Result<Option<Form>, String> {
+        if key.code == KeyCode::Escape && self.pending_pr {
+            self.pending_pr = false;
+            self.notice.clear();
+            return Ok(None);
+        }
         if key.modifiers.control {
             match key.code {
                 KeyCode::Char('h') => self.focus = self.last_list,

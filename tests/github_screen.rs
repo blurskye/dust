@@ -215,16 +215,23 @@ fn native_github_controls_forms_reviews_and_workflow_logs() {
     );
     key(&mut screen, KeyCode::Char(']'));
     wait(&mut screen, "feature/native → main");
+    git(
+        Path::new(&std::env::var("DUST_GITHUB_ROOT").unwrap()),
+        &["switch", "-c", "feature/native"],
+    );
     key(&mut screen, KeyCode::Char('n'));
+    wait(&mut screen, "Create pull request");
     paste(&mut screen, "New draft PR");
+    control(&mut screen, KeyCode::Enter);
+    wait(&mut screen, "Review draft pull request");
     control(&mut screen, KeyCode::Enter);
     idle(&mut screen);
     assert!(
         calls()
             .iter()
-            .any(|args| args.starts_with(&["pr".into(), "create".into()])
-                && args.contains(&"--head".into())
-                && args.contains(&"--draft".into()))
+            .any(|args| args.contains(&"repos/example/demo/pulls".into())
+                && args.contains(&"head=example:feature/native".into())
+                && args.contains(&"draft=true".into()))
     );
     wait(&mut screen, "feature/native → main");
     key(&mut screen, KeyCode::Char('L'));

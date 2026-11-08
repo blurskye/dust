@@ -494,8 +494,12 @@ pub(super) fn render_form(frame: &mut Frame, form: &super::Form, width: u16, hei
             "{}{}{}",
             field.label,
             if field.required { " *" } else { "" },
-            if field.choices.is_empty() {
+            if field.read_only {
+                " · read only"
+            } else if field.choices.is_empty() {
                 ""
+            } else if field.custom_choices {
+                " · ↑/↓ choose or type"
             } else {
                 " · ↑/↓ choose"
             }
@@ -537,7 +541,7 @@ pub(super) fn render_form(frame: &mut Frame, form: &super::Form, width: u16, hei
                 row + 1 + (offset - first) as u16,
                 text,
                 if form.selected == i {
-                    Style::Selection
+                    Style::GitSelected(None)
                 } else {
                     Style::Default
                 },
@@ -554,10 +558,25 @@ pub(super) fn render_form(frame: &mut Frame, form: &super::Form, width: u16, hei
     }
     let row = y + h - 2;
     let count = form.fields.len();
+    let (submit, cancel) = match &form.action {
+        super::FormAction::Github(super::github::Action::CreatePullRequest) => {
+            ("[ Review → ]", "[ Cancel ]")
+        }
+        super::FormAction::Github(super::github::Action::ConfirmPullRequest(request)) => (
+            if request.push.is_some() {
+                "[ Push + create PR ]"
+            } else {
+                "[ Create PR ]"
+            },
+            "[ Back ]",
+        ),
+        _ => ("[ Submit ]", "[ Cancel ]"),
+    };
+    let cancel_x = x + 4 + submit.width() as u16;
     frame.grid.put_text(
         x + 2,
         row,
-        "[ Submit ]",
+        submit,
         if form.selected == count {
             Style::Selection
         } else {
@@ -565,9 +584,9 @@ pub(super) fn render_form(frame: &mut Frame, form: &super::Form, width: u16, hei
         },
     );
     frame.grid.put_text(
-        x + 15,
+        cancel_x,
         row,
-        "[ Cancel ]",
+        cancel,
         if form.selected == count + 1 {
             Style::Selection
         } else {
@@ -575,7 +594,7 @@ pub(super) fn render_form(frame: &mut Frame, form: &super::Form, width: u16, hei
         },
     );
     frame.grid.put_text_clipped(
-        x + 28,
+        cancel_x + cancel.width() as u16 + 2,
         row,
         "Tab · Ctrl+Enter · Esc",
         Style::Muted,
@@ -583,7 +602,11 @@ pub(super) fn render_form(frame: &mut Frame, form: &super::Form, width: u16, hei
     );
     if form.selected >= count {
         frame.cursor = Some((
-            x + if form.selected == count { 3 } else { 16 },
+            if form.selected == count {
+                x + 3
+            } else {
+                cancel_x + 1
+            },
             row,
             SetCursorStyle::SteadyBlock,
         ));

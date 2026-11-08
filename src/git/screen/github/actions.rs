@@ -6,6 +6,7 @@ pub(in crate::git::screen) enum Action {
     Filter,
     CreateIssue,
     CreatePullRequest,
+    ConfirmPullRequest(Box<crate::forge::pull_request::CreatePullRequest>),
     Develop(u64),
     Commit(String),
     Edit(usize, u64),
@@ -55,13 +56,13 @@ impl Action {
         )
     }
 }
-fn field(label: &str, value: &str, required: bool, multiline: bool) -> Field {
+pub(super) fn field(label: &str, value: &str, required: bool, multiline: bool) -> Field {
     let mut field = Field::new(label, value.into());
     field.required = required;
     field.multiline = multiline;
     field
 }
-fn choice(label: &str, value: &str, choices: &[&str]) -> Field {
+pub(super) fn choice(label: &str, value: &str, choices: &[&str]) -> Field {
     let mut field = field(label, value, true, false);
     field.choices = choices.iter().map(|s| (*s).into()).collect();
     field
@@ -70,11 +71,18 @@ fn kind(page: usize) -> &'static str {
     if page == 1 { "issue" } else { "pr" }
 }
 impl Workspace {
-    pub(super) fn activate(&mut self, action: Action) -> Result<Option<Form>, String> {
+    pub(in crate::git::screen) fn activate(
+        &mut self,
+        action: Action,
+    ) -> Result<Option<Form>, String> {
         if self.repo.is_empty() {
             return Err(
                 "GitHub repository is not loaded; check gh authentication and refresh".into(),
             );
+        }
+        if action != Action::CreatePullRequest {
+            self.pending_pr = false;
+            self.ready_form = None;
         }
         let fields;
         let title;
@@ -171,22 +179,9 @@ impl Workspace {
                     field("Assignees (comma separated)", "", false, false),
                 ];
             }
-            Action::CreatePullRequest => {
-                title = "Create pull request (head branch must already be pushed)";
-                let branch = crate::git::git_branch_name(&self.root)
-                    .map_err(|error| error.to_string())?
-                    .unwrap_or_default();
-                let base = self
-                    .value(&Key::Repository)
-                    .and_then(|value| value["defaultBranchRef"]["name"].as_str())
-                    .unwrap_or("");
-                fields = vec![
-                    field("Title", "", true, false),
-                    field("Description", "", false, true),
-                    field("Head branch", &branch, true, false),
-                    field("Base branch", base, true, false),
-                    choice("Draft", "true", &["true", "false"]),
-                ];
+            Action::CreatePullRequest => return self.create_pr_form(),
+            Action::ConfirmPullRequest(_) => {
+                return Err("Open the PR form to review its source and destination".into());
             }
             Action::Develop(id) => {
                 title = "Create linked branch on GitHub (current checkout stays unchanged)";
@@ -357,14 +352,20 @@ impl Workspace {
                     }
                 }
             }
-            Action::CreatePullRequest => {
-                args = self.cli(&[
-                    "pr", "create", "--title", &values[0], "--body", &values[1], "--head",
-                    &values[2], "--base", &values[3],
-                ]);
-                if values[4] == "true" {
-                    args.push("--draft".into());
+            Action::ConfirmPullRequest(request) => {
+                self.writing_draft = Some(format!("{:?}", Action::CreatePullRequest));
+                self.queue.push_back(Request {
+                    key: Key::Write,
+                    args: Vec::new(),
+                    pull_request: Some((**request).clone()),
+                });
+                self.notice = if request.push.is_some() {
+                    "Pushing the reviewed branch, then creating the PR…"
+                } else {
+                    "Creating pull request…"
                 }
+                .into();
+                return Ok(());
             }
             Action::Develop(id) => {
                 args = self.cli(&[
@@ -517,6 +518,7 @@ impl Workspace {
                 self.queue.push_back(Request {
                     key: Key::WorktreeWrite(*id),
                     args: vec![format!("{}/{}", self.host, self.repo)],
+                    pull_request: None,
                 });
                 self.writing_draft = Some(format!("{action:?}"));
                 return Ok(());

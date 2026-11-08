@@ -59,7 +59,8 @@ if state.get("run_views", 0) < 2:
     run.update(status="in_progress", conclusion="")
     run["jobs"][1].update(status="in_progress", conclusion="")
 if args[:2] == ["repo", "view"]:
-    emit({"nameWithOwner": "example/demo", "url": "https://github.com/example/demo", "defaultBranchRef": {"name": "main"}})
+    name = flag("--repo", "github.com/example/demo").removeprefix("github.com/")
+    emit({"nameWithOwner": name, "url": "https://github.com/" + name, "defaultBranchRef": {"name": "main"}})
 if args[:2] == ["issue", "list"]: emit([] if state.get("empty") else [item])
 if args[:2] == ["pr", "list"]: emit([pr])
 if args[:2] == ["issue", "view"]: emit(item)
@@ -85,6 +86,16 @@ if args and args[0] == "api":
             state["resolved"] = "unresolveReviewThread" not in query
         emit({"data": {"saved": True}})
     path = next((arg for arg in args if arg.startswith("repos/")), "")
+    if path.count("/") == 2:
+        name = path.removeprefix("repos/")
+        emit(state.get("repo_info", {}).get(name, {"full_name": name, "default_branch": "main"}))
+    if path.endswith("/pulls") and flag("--method") == "POST":
+        if state.get("fail_create"):
+            state["fail_create"] -= 1
+            save()
+            print("GitHub rejected PR creation", file=sys.stderr)
+            sys.exit(1)
+        emit({"number": 9, "html_url": "https://github.com/" + path.removeprefix("repos/").removesuffix("/pulls") + "/pull/9"})
     if "/commits/" in path:
         emit('diff --git a/example.rs b/example.rs\n--- a/example.rs\n+++ b/example.rs\n@@ -1 +1 @@\n-fn before() {}\n+fn after() {}\n')
     if "timeline" in path:

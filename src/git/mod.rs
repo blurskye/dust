@@ -6,6 +6,7 @@ pub mod screen;
 mod branches;
 mod browse;
 pub use browse::git_browse_url;
+pub(crate) use browse::web_base;
 mod conflict;
 pub use conflict::GitConflictChoice;
 pub use conflict::GitConflictEntry;

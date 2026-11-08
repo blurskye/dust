@@ -48,6 +48,8 @@ struct Field {
     required: bool,
     multiline: bool,
     choices: Vec<String>,
+    custom_choices: bool,
+    read_only: bool,
 }
 impl Field {
     fn new(label: &str, value: String) -> Self {
@@ -60,6 +62,8 @@ impl Field {
             required: true,
             multiline: false,
             choices: Vec::new(),
+            custom_choices: false,
+            read_only: false,
         }
     }
 }
@@ -364,6 +368,11 @@ impl GitScreen {
             })
             .collect::<Vec<_>>();
         let github_changed = self.github.poll();
+        if self.form.is_none()
+            && let Some(form) = self.github.take_form()
+        {
+            self.form = Some(form);
+        }
         let mut changed = false;
         match self.status.poll() {
             Ok(Some(snapshot)) => {
@@ -766,7 +775,10 @@ impl GitScreen {
             if field.required && field.input.input.trim().is_empty() {
                 return Err(format!("{} is required", field.label));
             }
-            if !field.choices.is_empty() && !field.choices.contains(&field.input.input) {
+            if !field.custom_choices
+                && !field.choices.is_empty()
+                && !field.choices.contains(&field.input.input)
+            {
                 return Err(format!("Choose a valid {} with Up/Down", field.label));
             }
         }
@@ -802,6 +814,11 @@ impl GitScreen {
                 self.branch_mutation = true;
             }
             FormAction::Confirm(args) => self.write(args.clone())?,
+            FormAction::Github(github::Action::CreatePullRequest) => {
+                self.form = Some(self.github.review_pr(values)?);
+                self.notice.clear();
+                return Ok(());
+            }
             FormAction::Github(action) => self.github.submit(action.clone(), values)?,
             FormAction::Command => {
                 match values[0].trim() {
@@ -833,8 +850,17 @@ impl GitScreen {
     }
     fn form_key(&mut self, key: &KeyEvent) -> Result<(), String> {
         if key.code == KeyCode::Escape {
-            self.save_form_draft();
-            self.form = None;
+            if self.form.as_ref().is_some_and(|form| {
+                matches!(
+                    form.action,
+                    FormAction::Github(github::Action::ConfirmPullRequest(_))
+                )
+            }) {
+                self.form = self.github.activate(github::Action::CreatePullRequest)?;
+            } else {
+                self.save_form_draft();
+                self.form = None;
+            }
             return Ok(());
         }
         if key.code == KeyCode::Enter
@@ -858,12 +884,24 @@ impl GitScreen {
                 if form.selected == form.fields.len() {
                     return self.submit();
                 }
-                self.save_form_draft();
-                self.form = None;
+                return self.form_key(&KeyEvent::plain(KeyCode::Escape));
             }
             return Ok(());
         }
         let field = &mut form.fields[form.selected];
+        if field.read_only
+            && !matches!(
+                key.code,
+                KeyCode::Left
+                    | KeyCode::Right
+                    | KeyCode::Up
+                    | KeyCode::Down
+                    | KeyCode::Home
+                    | KeyCode::End
+            )
+        {
+            return Ok(());
+        }
         if !field.choices.is_empty() && matches!(key.code, KeyCode::Up | KeyCode::Down) {
             let index = field
                 .choices
@@ -926,6 +964,7 @@ impl GitScreen {
             UiEvent::Paste(text) => {
                 if let Some(form) = &mut self.form
                     && let Some(field) = form.fields.get_mut(form.selected)
+                    && !field.read_only
                 {
                     let text = if field.multiline {
                         text.replace("\r\n", "\n").replace('\r', "\n")
@@ -1233,6 +1272,7 @@ impl GitScreen {
     fn save_form_draft(&mut self) {
         if let Some(form) = &self.form
             && let FormAction::Github(action) = &form.action
+            && !matches!(action, github::Action::ConfirmPullRequest(_))
         {
             self.github.save_draft(
                 action,
