@@ -770,6 +770,12 @@ impl PickerTextPreview {
         self.language
     }
 
+    /// Cached byte ranges for one source line, shared by editor and Git previews.
+    #[must_use]
+    pub fn line_spans(&self, line: usize) -> &[(std::ops::Range<usize>, crate::config::Highlight)] {
+        self.spans.get(line).map(Vec::as_slice).unwrap_or_default()
+    }
+
     /// Replace text and its cached byte ranges together.
     pub fn set_content(
         &mut self,

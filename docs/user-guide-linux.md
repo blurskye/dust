@@ -219,8 +219,11 @@ The same screen is available separately with `dusty-git PATH` (`--clean` uses
 bundled theme settings). `q` returns to the editor or exits the standalone tool.
 
 Use `1` Changes, `2` Branches, `3` Commits, and `4` Stashes. `Ctrl-h/j/k/l`
-moves between panes; `j/k` selects rows. The Changes tree expands/collapses with
-`l/h`. `H/L` cycles Branches, Worktrees, Remotes and Tags. Enter opens files in
+moves between panes; `j/k` selects rows. Source previews and working-tree, staged,
+commit and stash diffs use Dust's syntax highlighting, with line numbers and
+separate addition/deletion markers. In the preview, `h/l` or Left/Right scroll
+horizontally while the line-number gutter stays fixed. The Changes tree
+expands/collapses with `l/h`. `H/L` cycles Branches, Worktrees, Remotes and Tags. Enter opens files in
 Dust, or `$VISUAL`/`$EDITOR` from the standalone tool. Worktree Enter opens that
 repository. Branch Enter confirms checkout. `Space` stages a file; `v` switches
 to the index where `Space` unstages. `c` commits staged files and `P` confirms a

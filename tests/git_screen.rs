@@ -77,6 +77,136 @@ fn wait(screen: &mut GitScreen, ready: impl Fn(&mut GitScreen) -> bool) {
     }
 }
 
+fn code_style(screen: &mut GitScreen, line: &str, token: &str) -> dust::ui::Style {
+    use unicode_width::UnicodeWidthStr;
+    let frame = screen.frame(160, 60);
+    for y in 2..55 {
+        let row = frame.grid.row_text(y);
+        if let Some(start) = row.find(line) {
+            let at = start + line.find(token).unwrap();
+            return frame.grid.get(row[..at].width() as u16, y).unwrap().style;
+        }
+    }
+    panic!("missing preview line {line}: {}", view(screen));
+}
+
+#[test]
+fn untracked_source_has_syntax_line_numbers_and_horizontal_scrolling() {
+    let dir = repo();
+    let code = format!(
+        "// a comment\nfn main() {{\n    let message = \"hello λ\";\n    let long = \"{}TAIL_VISIBLE\";\n}}\n",
+        "x".repeat(100)
+    );
+    std::fs::write(dir.path().join("sample.rs"), code).unwrap();
+    let mut screen = GitScreen::open(dir.path()).unwrap();
+    wait(&mut screen, |s| view(s).contains("fn main()"));
+    let keyword = code_style(&mut screen, "fn main()", "fn");
+    let string = code_style(&mut screen, "\"hello λ\"", "hello");
+    let comment = code_style(&mut screen, "// a comment", "comment");
+    assert!(matches!(keyword, dust::ui::Style::Syntax(_)));
+    assert!(matches!(string, dust::ui::Style::Syntax(_)));
+    assert!(matches!(comment, dust::ui::Style::Syntax(_)));
+    assert_ne!(keyword, string);
+    assert_ne!(keyword, comment);
+    assert!(view(&mut screen).contains("2 │ fn main()"));
+    assert!(!view(&mut screen).contains("TAIL_VISIBLE"));
+    screen.event(UiEvent::Key {
+        key: KeyEvent {
+            code: KeyCode::Char('l'),
+            modifiers: Modifiers {
+                control: true,
+                ..Modifiers::default()
+            },
+        },
+        kind: KeyInputKind::Press,
+    });
+    for _ in 0..10 {
+        key(&mut screen, KeyCode::Right);
+    }
+    assert!(view(&mut screen).contains("TAIL_VISIBLE"));
+    assert!(matches!(
+        code_style(&mut screen, "TAIL_VISIBLE", "TAIL_VISIBLE"),
+        dust::ui::Style::Syntax(_)
+    ));
+    for _ in 0..10 {
+        key(&mut screen, KeyCode::Left);
+    }
+    assert!(view(&mut screen).contains("2 │ fn main()"));
+}
+
+#[test]
+fn working_index_commit_and_stash_diffs_have_source_syntax_and_numbered_markers() {
+    let dir = repo();
+    std::fs::write(
+        dir.path().join("sample.rs"),
+        "fn before() { let value = \"before\"; }\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("sample.py"),
+        "def before():\n    return 'before'\n",
+    )
+    .unwrap();
+    git(dir.path(), &["add", "."]);
+    git(dir.path(), &["commit", "-m", "Code baseline"]);
+    std::fs::write(
+        dir.path().join("sample.rs"),
+        "fn after() { let value = \"after\"; }\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("sample.py"),
+        "def after():\n    return 'after'\n",
+    )
+    .unwrap();
+    for staged in [false, true] {
+        if staged {
+            git(dir.path(), &["add", "."]);
+        }
+        let mut screen = GitScreen::open(dir.path()).unwrap();
+        if staged {
+            key(&mut screen, KeyCode::Char('v'));
+        }
+        wait(&mut screen, |s| view(s).contains("+def after()"));
+        assert!(matches!(
+            code_style(&mut screen, "+def after()", "def"),
+            dust::ui::Style::Syntax(_)
+        ));
+        key(&mut screen, KeyCode::Down);
+        wait(&mut screen, |s| view(s).contains("+fn after()"));
+        assert!(matches!(
+            code_style(&mut screen, "-fn before()", "fn"),
+            dust::ui::Style::Syntax(_)
+        ));
+        assert!(matches!(
+            code_style(&mut screen, "+fn after()", "after"),
+            dust::ui::Style::Syntax(_)
+        ));
+        assert!(view(&mut screen).contains("1 +fn after()"));
+    }
+    git(dir.path(), &["commit", "-m", "Changed both languages"]);
+    let mut screen = GitScreen::open(dir.path()).unwrap();
+    key(&mut screen, KeyCode::Char('3'));
+    wait(&mut screen, |s| view(s).contains("+fn after()"));
+    assert!(matches!(
+        code_style(&mut screen, "+def after()", "def"),
+        dust::ui::Style::Syntax(_)
+    ));
+    assert!(matches!(
+        code_style(&mut screen, "+fn after()", "fn"),
+        dust::ui::Style::Syntax(_)
+    ));
+    std::fs::write(dir.path().join("sample.rs"), "fn stashed() {}\n").unwrap();
+    git(dir.path(), &["stash", "push", "-m", "Colored stash"]);
+    key(&mut screen, KeyCode::Char('r'));
+    key(&mut screen, KeyCode::Char('4'));
+    wait(&mut screen, |s| view(s).contains("+fn stashed()"));
+    assert!(matches!(
+        code_style(&mut screen, "+fn stashed()", "fn"),
+        dust::ui::Style::Syntax(_)
+    ));
+}
+
 #[test]
 fn unstaging_rename_restores_both_paths_and_preserves_other_staged_changes() {
     let dir = repo();

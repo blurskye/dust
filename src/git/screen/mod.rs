@@ -1,11 +1,13 @@
 //! The shared native Git application. Hosts own terminal lifecycle and opening files/workspaces.
 mod jobs;
+mod preview;
 mod render;
 
 use super::*;
 use crate::editor::input::{KeyCode, KeyEvent};
 use crate::ui::{Frame, KeyInputKind, PromptKind, PromptState, UiEvent};
 use jobs::{Jobs, Request};
+use preview::Preview;
 use std::collections::BTreeSet;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -60,8 +62,9 @@ pub struct GitScreen {
     selected: [usize; 7],
     offsets: [usize; 4],
     collapsed: BTreeSet<PathBuf>,
-    preview: String,
+    preview: Preview,
     preview_line: usize,
+    preview_column: usize,
     staged: bool,
     branch: String,
     notice: String,
@@ -98,8 +101,9 @@ impl GitScreen {
             selected: [0; 7],
             offsets: [0; 4],
             collapsed: BTreeSet::new(),
-            preview: String::new(),
+            preview: Preview::default(),
             preview_line: 0,
+            preview_column: 0,
             staged: false,
             branch: String::new(),
             notice: String::new(),
@@ -364,8 +368,14 @@ impl GitScreen {
         for (request, result) in self.jobs.poll() {
             changed = true;
             match (request, result) {
-                (Request::Preview, Ok(text)) => self.preview = text,
-                (Request::Preview, Err(error)) => self.preview = error,
+                (Request::Preview, Ok(text)) => {
+                    let path = self
+                        .selected_row()
+                        .filter(|_| self.last_list == 0)
+                        .map(|row| row.value);
+                    self.preview = Preview::git(&text, path.as_deref());
+                }
+                (Request::Preview, Err(error)) => self.preview = error.into(),
                 (Request::Write, result) => {
                     self.busy = false;
                     match result {
@@ -451,7 +461,8 @@ impl GitScreen {
             self.preview = format!(
                 "{}\n\nEnter expands or collapses this directory.",
                 row.value.display()
-            );
+            )
+            .into();
             return;
         }
         let args: Vec<OsString> = match self.last_list {
@@ -473,9 +484,9 @@ impl GitScreen {
                             use std::io::Read;
                             let mut text = String::new();
                             let _ = file.take(128 * 1024).read_to_string(&mut text);
-                            self.preview = format!("{} (untracked)\n{}", row.value.display(), text);
+                            self.preview = Preview::source(&row.value, &text);
                         }
-                        Err(e) => self.preview = e.to_string(),
+                        Err(e) => self.preview = e.to_string().into(),
                     }
                     return;
                 }
@@ -771,6 +782,23 @@ impl GitScreen {
                                 % 4;
                             self.offsets[1] = 0;
                         }
+                        KeyCode::Left | KeyCode::Char('h') if self.focus == 4 => {
+                            self.preview_column = self.preview_column.saturating_sub(8);
+                        }
+                        KeyCode::Right | KeyCode::Char('l') if self.focus == 4 => {
+                            use unicode_width::UnicodeWidthStr;
+                            let maximum = self
+                                .preview
+                                .rows
+                                .iter()
+                                .map(|row| row.text.width())
+                                .max()
+                                .unwrap_or(0);
+                            self.preview_column = self
+                                .preview_column
+                                .saturating_add(8)
+                                .min(maximum.saturating_sub(1));
+                        }
                         KeyCode::Char('h' | 'l') if self.focus == 0 => {
                             if let Some(row) = self.selected_row()
                                 && row.directory
@@ -868,7 +896,7 @@ impl GitScreen {
                         KeyCode::Char('?') => {
                             self.jobs.cancel_preview();
                             self.focus = 4;
-                            self.preview="1 Changes · 2 Branches · 3 Commits · 4 Stashes\nCtrl+h/j/k/l: spatial pane focus\nTab / Shift+Tab: next / previous pane\nj/k or arrows: move · Enter: open\nh/l: collapse/expand directory · H/L: branch subview\nSpace: stage · v: switch working tree/index\nc: commit · P: push · r: refresh\nn: new worktree/stash · a/p/d: apply/pop/drop stash\nForms: type, arrows edit, Tab visits fields and buttons\nCtrl+Enter: submit · Esc: cancel/back · q: close".into();
+                            self.preview="1 Changes · 2 Branches · 3 Commits · 4 Stashes\nCtrl+h/j/k/l: spatial pane focus\nTab / Shift+Tab: next / previous pane\nj/k or arrows: move · Enter: open\nh/l: collapse/expand directory · H/L: branch subview\nPreview: h/l or Left/Right scroll horizontally\nSpace: stage · v: switch working tree/index\nc: commit · P: push · r: refresh\nn: new worktree/stash · a/p/d: apply/pop/drop stash\nForms: type, arrows edit, Tab visits fields and buttons\nCtrl+Enter: submit · Esc: cancel/back · q: close".into();
                             return ScreenOutcome::Continue;
                         }
                         _ => {}
@@ -879,6 +907,7 @@ impl GitScreen {
                     self.clamp();
                     if previous != (self.last_list, self.subview, self.selected, self.staged) {
                         self.preview_line = 0;
+                        self.preview_column = 0;
                         self.load_preview();
                     }
                 }
@@ -892,7 +921,7 @@ impl GitScreen {
             self.preview_line = self
                 .preview_line
                 .saturating_add_signed(delta)
-                .min(self.preview.lines().count().saturating_sub(1));
+                .min(self.preview.rows.len().saturating_sub(1));
         } else {
             let slot = self.slot(self.focus);
             self.selected[slot] = self.selected[slot]

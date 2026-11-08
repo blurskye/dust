@@ -169,25 +169,70 @@ pub(super) fn frame(app: &mut GitScreen, width: u16, height: u16) -> Frame {
         app.focus == 4,
     );
     let visible = body.saturating_sub(2) as usize;
-    let offset = if app.focus == 4 {
-        app.preview_line.saturating_sub(visible.saturating_sub(1))
-    } else {
-        0
-    };
-    for (i, line) in app.preview.lines().enumerate().skip(offset).take(visible) {
+    let offset = app.preview_line.saturating_sub(visible.saturating_sub(1));
+    let number_width = app.preview.number_width();
+    for (i, row) in app
+        .preview
+        .rows
+        .iter()
+        .enumerate()
+        .skip(offset)
+        .take(visible)
+    {
         let y = 2 + (i - offset) as u16;
-        let style = if line.starts_with('+') {
-            Style::GitSignAdded
-        } else if line.starts_with('-') {
-            Style::GitSignDeleted
-        } else if line.starts_with("commit ") || line.starts_with("@@") {
-            Style::Accent
-        } else {
-            Style::Default
-        };
-        frame
-            .grid
-            .put_text_clipped(left + 2, y, line, style, width - 1);
+        let old = row.old.map(|number| number.to_string()).unwrap_or_default();
+        let new = row.new.map(|number| number.to_string()).unwrap_or_default();
+        let mut x = left + 2;
+        if row.old.is_some() || row.new.is_some() {
+            let numbers = if app.preview.patch {
+                format!("{old:>number_width$} {new:>number_width$} ")
+            } else {
+                format!("{new:>number_width$} │ ")
+            };
+            x = frame
+                .grid
+                .put_text_clipped(x, y, &numbers, Style::Muted, width - 1);
+        }
+        if let Some(marker) = row.marker {
+            x = frame
+                .grid
+                .put_text_clipped(x, y, &marker.to_string(), row.style, width - 1);
+        }
+        let mut column = 0;
+        for (at, grapheme) in row.text.grapheme_indices(true) {
+            let size = if grapheme == "\t" {
+                4 - column % 4
+            } else {
+                UnicodeWidthStr::width(grapheme).max(1)
+            };
+            let end = column + size;
+            if end > app.preview_column {
+                let style = row
+                    .spans
+                    .iter()
+                    .find(|(range, _)| range.start <= at && at < range.end)
+                    .map(|(_, role)| Style::Syntax(*role))
+                    .unwrap_or(row.style);
+                let next = if grapheme == "\t" || column < app.preview_column {
+                    frame.grid.put_text_clipped(
+                        x,
+                        y,
+                        &" ".repeat(end - column.max(app.preview_column)),
+                        style,
+                        width - 1,
+                    )
+                } else {
+                    frame
+                        .grid
+                        .put_text_clipped(x, y, grapheme, style, width - 1)
+                };
+                if next == x {
+                    break;
+                }
+                x = next;
+            }
+            column = end;
+        }
     }
     if app.focus == 4 {
         frame.cursor = Some((
@@ -213,7 +258,11 @@ pub(super) fn frame(app: &mut GitScreen, width: u16, height: u16) -> Frame {
     frame.grid.put_text_clipped(
         1,
         height - 2,
-        "1–4 panes · Ctrl+h/j/k/l focus · Space stage · v index · c commit · ? keys · q close",
+        if app.focus == 4 {
+            "Preview · j/k scroll · h/l horizontal · Ctrl+h back · ? keys · q close"
+        } else {
+            "1–4 panes · Ctrl+h/j/k/l focus · Space stage · v index · c commit · ? keys · q close"
+        },
         Style::Muted,
         width - 1,
     );
