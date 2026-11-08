@@ -68,15 +68,16 @@ fn the_dashboard_lists_recent_files_with_their_projects_and_this_workspace_first
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_secs();
+    let elsewhere = tempfile::tempdir().unwrap();
+    let elsewhere = elsewhere.path().canonicalize().unwrap().join("x.rs");
+    std::fs::create_dir_all(second_path.join("src")).unwrap();
     for (path, minutes_ago) in [
         (first.join("old.rs"), 3 * 60),
         (second_path.join("src/lib.rs"), 14),
-        (
-            std::path::PathBuf::from("/never-opened-as-a-workspace/x.rs"),
-            5,
-        ),
+        (elsewhere.clone(), 5),
         (second_path.join("main.rs"), 2),
     ] {
+        std::fs::write(&path, "").unwrap();
         app.persistence
             .record_recent(path, now - minutes_ago * 60, 256);
     }
@@ -98,7 +99,7 @@ fn the_dashboard_lists_recent_files_with_their_projects_and_this_workspace_first
         files,
         [
             ("main.rs", None, "2m"),
-            ("/never-opened-as-a-workspace/x.rs", None, "5m"),
+            (elsewhere.to_str().unwrap(), None, "5m"),
             ("src/lib.rs", None, "14m"),
             ("old.rs", Some(first_name.as_str()), "3h"),
         ]
@@ -170,9 +171,49 @@ fn projects_leave_out_tutor_folders_missing_folders_and_symlinked_duplicates() {
 }
 
 #[test]
+fn tutor_files_are_not_recent_and_deleted_files_leave_the_dashboard() {
+    let (_app_dirs, mut app) = app();
+    let root = app.state.workspace_root.clone();
+    let practice = tempfile::Builder::new()
+        .prefix("dust-tutor-")
+        .tempdir()
+        .unwrap();
+    let lesson = practice.path().join("practice.rs");
+    let kept = root.join("kept.rs");
+    let deleted = root.join("deleted.rs");
+    for file in [&lesson, &kept, &deleted] {
+        std::fs::write(file, "fn main() {}\n").unwrap();
+    }
+    app.record_recent_file(lesson.clone());
+    assert!(app.persistence.recent_files().is_empty());
+
+    // A session saved by an older version may still list a tutor file.
+    app.persistence.record_recent(lesson, 0, 256);
+    app.record_recent_file(deleted.clone());
+    app.record_recent_file(kept);
+    std::fs::remove_file(&deleted).unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    app.sync_dashboard_ui();
+    while app.dashboard.reading.is_some() {
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        app.sync_dashboard_ui();
+    }
+    let labels = app
+        .ui
+        .dashboard_workspace
+        .recent_files
+        .iter()
+        .map(|file| file.label.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(labels, ["kept.rs"]);
+}
+
+#[test]
 fn recent_files_saved_without_an_open_time_show_no_age() {
     let (_app_dirs, mut app) = app();
     let root = app.state.workspace_root.clone();
+    std::fs::write(root.join("notes.md"), "").unwrap();
     let mut saved = crate::persistence::PersistedState {
         recent_files: vec![crate::persistence::RecentFile {
             path: root.join("notes.md"),

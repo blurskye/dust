@@ -810,3 +810,20 @@ fn scratch_jump_uses_the_newest_entry_and_live_marks_follow_edits() {
     owner.reconcile_marks(&editor);
     assert_eq!(owner.marks()[0].location.byte, 4);
 }
+
+#[test]
+fn jumps_into_a_tutor_practice_project_are_not_saved() {
+    let location = |path: std::path::PathBuf| PersistedLocation {
+        path,
+        byte: 0,
+        anchor: 0,
+        scroll_line: 0,
+        scroll_column: 0,
+    };
+    let own = location(std::path::PathBuf::from("/work/tally/src/main.rs"));
+    let lesson = location(std::env::temp_dir().join("dust-tutor-Iefcko/practice.rs"));
+    assert_eq!(
+        super::outside_practice_projects(&[lesson, own.clone()]),
+        [own]
+    );
+}

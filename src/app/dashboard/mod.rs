@@ -11,6 +11,7 @@ use crate::ui::DashboardProject;
 use crate::ui::DashboardWorkspace;
 use crate::ui::render::DASHBOARD_LIST_LIMIT;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::mpsc;
@@ -20,16 +21,25 @@ const COUNTED_FILES_LIMIT: usize = 500;
 /// Projects checked for existence and branch in one read.
 const PROJECT_CANDIDATES_LIMIT: usize = 32;
 
-/// What the dashboard reads on a worker thread, since each read opens a repository: line counts
-/// for the changed files, the last commit, and each project's branch.
+/// What the dashboard reads on a worker thread, since each read touches the disk: line counts
+/// for the changed files, the last commit, each project's branch and which recent files are
+/// gone.
 #[derive(Default)]
 pub(in crate::app) struct Dashboard {
-    /// What the last read was for: the workspace, its Git status revision and the projects.
-    read_for: Option<(PathBuf, Option<u64>, Vec<PathBuf>)>,
+    read_for: Option<ReadFor>,
     reading: Option<mpsc::Receiver<GitFacts>>,
     facts: GitFacts,
     /// A recent file in another project, opened once the switch to that project finishes.
     open_after_switch: Option<PathBuf>,
+}
+
+/// What a read was for; another read starts when any of it changes.
+#[derive(Clone, PartialEq)]
+struct ReadFor {
+    root: PathBuf,
+    status_revision: Option<u64>,
+    projects: Vec<PathBuf>,
+    recent_files: Vec<PathBuf>,
 }
 
 #[derive(Default)]
@@ -38,6 +48,8 @@ struct GitFacts {
     last_commit: Option<(String, i64)>,
     /// What was found for each project the dashboard asked about.
     projects: Vec<ProjectFacts>,
+    /// Recent files that no longer exist or are in a tutor practice project.
+    hidden_files: BTreeSet<PathBuf>,
 }
 
 struct ProjectFacts {
@@ -48,8 +60,13 @@ struct ProjectFacts {
     branch: Option<String>,
 }
 
-fn read_git_facts(root: &Path, projects: &[PathBuf]) -> GitFacts {
+fn read_git_facts(root: &Path, projects: &[PathBuf], recent_files: &[PathBuf]) -> GitFacts {
     GitFacts {
+        hidden_files: recent_files
+            .iter()
+            .filter(|file| !file.exists() || crate::app::tutor::in_practice_project(file))
+            .cloned()
+            .collect(),
         lines: crate::git::git_line_counts(root, COUNTED_FILES_LIMIT).unwrap_or_default(),
         last_commit: crate::git::git_last_commit(root),
         projects: projects
@@ -59,7 +76,7 @@ fn read_git_facts(root: &Path, projects: &[PathBuf]) -> GitFacts {
                     .canonicalize()
                     .ok()
                     .filter(|canonical| canonical.is_dir())
-                    .filter(|canonical| !crate::app::tutor::is_practice_project(canonical));
+                    .filter(|canonical| !crate::app::tutor::in_practice_project(canonical));
                 let branch = canonical
                     .as_ref()
                     .and_then(|_| crate::git::git_branch_name(project).ok().flatten());
@@ -99,35 +116,19 @@ impl App {
         let mut summary = DashboardWorkspace::default();
         // This workspace first, then projects in the order their files were last opened.
         let mut projects = vec![root.clone()];
+        let mut recent = Vec::new();
         for file in self.persistence.recent_files() {
             let project = if file.path.starts_with(&root) {
-                Some(&root)
+                Some(root.clone())
             } else {
-                project_of(&seen, &file.path)
+                project_of(&seen, &file.path).cloned()
             };
-            if let Some(project) = project
+            if let Some(project) = &project
                 && !projects.contains(project)
             {
                 projects.push(project.clone());
             }
-            if summary.recent_files.len() < DASHBOARD_LIST_LIMIT {
-                let label = project
-                    .and_then(|project| file.path.strip_prefix(project).ok())
-                    .unwrap_or(&file.path)
-                    .display()
-                    .to_string();
-                summary.recent_files.push(DashboardFile {
-                    path: file.path.clone(),
-                    label,
-                    project: project
-                        .filter(|project| **project != root)
-                        .map(|project| directory_name(project)),
-                    age: file
-                        .opened_at
-                        .map(|opened| short_age(now.saturating_sub(opened)))
-                        .unwrap_or_default(),
-                });
-            }
+            recent.push((file.clone(), project));
         }
         let mut others = seen
             .into_iter()
@@ -137,17 +138,22 @@ impl App {
         projects.extend(others);
         projects.truncate(PROJECT_CANDIDATES_LIMIT);
 
-        let status_revision = self.git.status().map(|status| status.revision);
-        let read_for = (root.clone(), status_revision, projects.clone());
+        let read_for = ReadFor {
+            root: root.clone(),
+            status_revision: self.git.status().map(|status| status.revision),
+            projects: projects.clone(),
+            recent_files: recent.iter().map(|(file, _)| file.path.clone()).collect(),
+        };
         if self.dashboard.read_for.as_ref() != Some(&read_for) {
-            self.dashboard.read_for = Some(read_for);
             let (sender, receiver) = mpsc::channel();
-            let (read_root, read_projects) = (root.clone(), projects.clone());
+            let read = read_for.clone();
             let started = std::thread::Builder::new()
                 .name("dust-dashboard".into())
                 .spawn(move || {
-                    let _ = sender.send(read_git_facts(&read_root, &read_projects));
+                    let facts = read_git_facts(&read.root, &read.projects, &read.recent_files);
+                    let _ = sender.send(facts);
                 });
+            self.dashboard.read_for = Some(read_for);
             self.dashboard.reading = started.is_ok().then_some(receiver);
         }
         if let Some(receiver) = &self.dashboard.reading {
@@ -161,6 +167,33 @@ impl App {
             }
         }
         let facts = &self.dashboard.facts;
+
+        // Deleted files, and files of tutor practice projects saved by older versions, are
+        // left out once the worker has checked them.
+        for (file, project) in recent
+            .iter()
+            .filter(|(file, _)| !facts.hidden_files.contains(&file.path))
+            .take(DASHBOARD_LIST_LIMIT)
+        {
+            let label = project
+                .as_ref()
+                .and_then(|project| file.path.strip_prefix(project).ok())
+                .unwrap_or(&file.path)
+                .display()
+                .to_string();
+            summary.recent_files.push(DashboardFile {
+                path: file.path.clone(),
+                label,
+                project: project
+                    .as_ref()
+                    .filter(|project| **project != root)
+                    .map(|project| directory_name(project)),
+                age: file
+                    .opened_at
+                    .map(|opened| short_age(now.saturating_sub(opened)))
+                    .unwrap_or_default(),
+            });
+        }
 
         summary.changes = self.git.status().map(|status| {
             // Files that differ only in an unsaved buffer are left out; the disk is shown.

@@ -475,10 +475,19 @@ impl App {
         let state = PersistedState {
             version: STATE_VERSION,
             session,
-            recent_files: self.persistence.recent_files().to_vec(),
+            // Older sessions saved tutor files as recent; saving again drops them.
+            recent_files: self
+                .persistence
+                .recent_files()
+                .iter()
+                .filter(|file| !crate::app::tutor::in_practice_project(&file.path))
+                .cloned()
+                .collect(),
             marks: self.persistence.marks().to_vec(),
-            jumps: self.persistence.jumps().to_vec(),
-            changes: self.persistence.changes().to_vec(),
+            // The tutor's lessons walk jumps and changes in its practice project, which is
+            // deleted when the tutor ends, so they are kept only until then.
+            jumps: outside_practice_projects(self.persistence.jumps()),
+            changes: outside_practice_projects(self.persistence.changes()),
             command_history: self.input.command_history().to_vec(),
             search_history: self.input.search_history().to_vec(),
             breakpoints: self.debugger_session.persisted_breakpoints(),
@@ -802,8 +811,21 @@ impl App {
     }
 }
 
+fn outside_practice_projects(
+    locations: &[crate::persistence::PersistedLocation],
+) -> Vec<crate::persistence::PersistedLocation> {
+    locations
+        .iter()
+        .filter(|location| !crate::app::tutor::in_practice_project(&location.path))
+        .cloned()
+        .collect()
+}
+
 impl App {
     pub(in crate::app) fn record_recent_file(&mut self, path: PathBuf) {
+        if crate::app::tutor::in_practice_project(&path) {
+            return;
+        }
         let opened_at = self
             .clock
             .system_time()

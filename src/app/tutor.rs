@@ -311,15 +311,23 @@ pub(super) fn lessons(language: Language) -> Result<Vec<Step>, String> {
 /// The start of each practice project's temporary folder name.
 const PRACTICE_FOLDER_PREFIX: &str = "dust-tutor-";
 
-/// Whether the folder at the canonical path `path` is a tutor practice project, which is not
-/// one of the user's projects. Reads the file system to resolve the temporary folder.
-pub(in crate::app) fn is_practice_project(path: &Path) -> bool {
+/// Whether `path` is a tutor practice project or inside one. Practice projects are deleted
+/// when the tutor ends, so they are not the user's projects or recent files. Reads the file
+/// system to resolve the temporary folder.
+pub(in crate::app) fn in_practice_project(path: &Path) -> bool {
     let temporary = std::env::temp_dir();
-    let temporary = temporary.canonicalize().unwrap_or(temporary);
-    path.parent() == Some(temporary.as_path())
-        && path
-            .file_name()
-            .is_some_and(|name| name.to_string_lossy().starts_with(PRACTICE_FOLDER_PREFIX))
+    let real = temporary.canonicalize().ok();
+    [Some(temporary), real].into_iter().flatten().any(|folder| {
+        path.strip_prefix(&folder)
+            .ok()
+            .and_then(|inside| inside.components().next())
+            .is_some_and(|first| {
+                first
+                    .as_os_str()
+                    .to_string_lossy()
+                    .starts_with(PRACTICE_FOLDER_PREFIX)
+            })
+    })
 }
 
 /// Write the practice project to a new temporary folder and commit it, then change the greet
