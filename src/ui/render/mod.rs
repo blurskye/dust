@@ -35,7 +35,9 @@ pub(crate) mod overlays;
 
 use crate::ui::geometry::text_width;
 
-use overlays::render_dashboard;
+mod dashboard;
+
+use dashboard::render_dashboard;
 
 use documentation::render_documentation_popup;
 
@@ -404,6 +406,21 @@ pub struct DashboardAction {
     pub label: String,
     pub icon: String,
     pub key: Option<String>,
+}
+
+/// Recent files or projects the dashboard lists at most.
+pub(crate) const DASHBOARD_LIST_LIMIT: usize = 8;
+
+/// What the dashboard shows about its workspace, gathered by the application from state it
+/// already keeps so drawing reads no files and waits on nothing.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct DashboardWorkspace {
+    /// Recently opened files in this workspace, newest first, relative to its root.
+    pub recent_files: Vec<String>,
+    /// Other workspaces with recently opened files, newest first.
+    pub recent_projects: Vec<std::path::PathBuf>,
+    /// Changed and untracked file counts from the last Git status, when there is one.
+    pub git_changes: Option<(usize, usize)>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1373,6 +1390,7 @@ pub struct UiState {
     pub dashboard_actions: Vec<DashboardAction>,
     /// The dashboard item under the cursor.
     pub dashboard_selected: usize,
+    pub dashboard_workspace: DashboardWorkspace,
     pub tool_menu: Option<ToolMenuState>,
     /// The Settings page, while it is open.
     pub settings: Option<SettingsPageState>,
@@ -2143,8 +2161,7 @@ pub(crate) fn render_with_documentation_geometry(
     } else if ui.dashboard || state.active_view().is_none() {
         render_dashboard(
             &state.workspace_root,
-            &ui.dashboard_actions,
-            ui.dashboard_selected,
+            ui,
             dashboard,
             config,
             content_width,
@@ -2303,8 +2320,7 @@ pub(crate) fn render_with_documentation_geometry(
                 let rect = projected.rect;
                 let dashboard = render_dashboard(
                     &state.workspace_root,
-                    &ui.dashboard_actions,
-                    ui.dashboard_selected,
+                    ui,
                     dashboard,
                     config,
                     rect.width,

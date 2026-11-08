@@ -44,6 +44,40 @@ fn showing_the_last_editor_dismisses_the_dashboard() {
 }
 
 #[test]
+fn the_dashboard_lists_recent_files_here_and_other_recent_projects() {
+    use crate::app::workspace::tests::wait_root_operation;
+    let (_app_dirs, mut app) = app();
+    prepare_trust_identity(&mut app);
+    app.process_trust_events();
+    app.maybe_prompt_for_unseen_workspace();
+    app.close_prompt();
+    wait_trust(&mut app);
+    let first = app.state.workspace_root.clone();
+    let second = tempfile::tempdir().unwrap();
+    let second_path = second.path().canonicalize().unwrap();
+    app.switch_workspace_root(second_path.clone());
+    wait_root_operation(&mut app);
+    wait_trust(&mut app);
+    assert_eq!(app.state.workspace_root, second_path);
+    assert!(app.workspace.seen_roots().contains(&first));
+
+    // Recorded oldest first; the newest comes first in each list.
+    for path in [
+        first.join("old.rs"),
+        second_path.join("src/lib.rs"),
+        std::path::PathBuf::from("/never-opened-as-a-workspace/x.rs"),
+        first.join("newer.rs"),
+        second_path.join("main.rs"),
+    ] {
+        app.persistence.record_recent(path, 256);
+    }
+    app.sync_dashboard_ui();
+    let summary = &app.ui.dashboard_workspace;
+    assert_eq!(summary.recent_files, ["main.rs", "src/lib.rs"]);
+    assert_eq!(summary.recent_projects, [first]);
+}
+
+#[test]
 fn configured_text_and_dashboard_commands_are_schema_validated() {
     let (_app_dirs, app) = app();
     let mut loaded = crate::config::load_bundled_config();
@@ -150,9 +184,10 @@ fn ctrl_h_from_an_agent_beside_the_dashboard_returns_to_it_and_it_stays_beside_t
     assert_eq!(app.window_session.focused_terminal(), None);
     assert!(app.window_session.dashboard_visible());
     let rect = app.terminal_rect(agent).expect("the agent stays");
-    // The menu is centred in the room left of the agent, not under it.
+    // The dashboard is centred in the room left of the agent, not under it; the rule under
+    // its header spans its whole width.
     let frame = driver.frame();
-    let menu = (0..rect.y + rect.height)
+    let rows = (0..rect.y + rect.height)
         .map(|y| {
             (0..rect.x)
                 .map(|x| {
@@ -163,14 +198,26 @@ fn ctrl_h_from_an_agent_beside_the_dashboard_returns_to_it_and_it_stays_beside_t
                 })
                 .collect::<Vec<_>>()
         })
-        .find(|cells| cells.concat().contains("Find File"))
-        .expect("the dashboard draws");
-    let start = menu.iter().position(|cell| cell.trim() != "").unwrap();
-    let end = menu.iter().rposition(|cell| cell.trim() != "").unwrap();
+        .collect::<Vec<_>>();
+    assert!(
+        rows.iter()
+            .any(|cells| cells.concat().contains("Find File"))
+    );
+    let header = rows
+        .iter()
+        .position(|cells| cells.concat().contains("⠿ dust"))
+        .expect("the dashboard draws its header");
+    let rule = &rows[header + 1];
+    let start = rule.iter().position(|cell| cell == "─").unwrap();
+    let end = rule.iter().rposition(|cell| cell == "─").unwrap();
+    assert_eq!(
+        rows[header].iter().position(|cell| cell == "⠿"),
+        Some(start)
+    );
     let middle = (start + end) / 2;
     assert!(
         middle.abs_diff(usize::from(rect.x) / 2) <= 2,
-        "menu from {start} to {end}, agent at {}",
+        "dashboard from {start} to {end}, agent at {}",
         rect.x
     );
     driver.key("ctrl-l");

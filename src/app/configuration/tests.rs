@@ -567,7 +567,7 @@ pub(in crate::app) fn resolved_explain_reports_exact_layered_and_replacement_pro
         env!("CARGO_MANIFEST_DIR"),
         "/assets/defaults/dashboard.toml"
     ))
-    .replace("D U S T", "PROVENANCE DASH");
+    .replace("⠿ dust", "PROVENANCE DASH");
     loaded.dashboard = toml::from_str(&dashboard_source).expect("dashboard");
     loaded.dashboard_path = dashboard_path.clone();
     loaded.dashboard_spans = crate::config::setting_spans(&dashboard_source);

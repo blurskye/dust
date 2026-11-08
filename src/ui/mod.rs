@@ -52,6 +52,7 @@ pub use render::ContentTabEntry;
 pub use render::ContentTabIdentity;
 pub use render::ContentTabKind;
 pub use render::DashboardAction;
+pub use render::DashboardWorkspace;
 pub use render::DebugPane;
 pub use render::DebugPanesUiState;
 pub use render::DebugSign;

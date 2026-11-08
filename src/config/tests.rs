@@ -534,7 +534,7 @@ fn configuration_bundle(theme: &str, revision: u8, valid: bool) -> Configuration
                 env!("CARGO_MANIFEST_DIR"),
                 "/assets/defaults/dashboard.toml"
             ))
-            .replace("D U S T", &format!("dashboard-{revision}")),
+            .replace("⠿ dust", &format!("dashboard-{revision}")),
             Some(_) => BUNDLED_THEME
                 .replace("name = \"dust\"", &format!("name = \"{theme}\""))
                 .replace("#c9d1d9", if revision == 0 { "#c9d1d9" } else { "#c9d1d8" }),
@@ -552,7 +552,7 @@ fn captured_bundle_identity_exposes_aba_and_uses_the_same_text_for_spans() {
         env!("CARGO_MANIFEST_DIR"),
         "/assets/defaults/dashboard.toml"
     ))
-    .replace("D U S T", "CAPTURED DASH");
+    .replace("⠿ dust", "CAPTURED DASH");
     let theme = include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/assets/themes/dust.toml"

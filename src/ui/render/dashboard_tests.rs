@@ -101,8 +101,7 @@ fn dashboard_respects_top_docks_and_floating_window_order() {
     let actual = crate::ui::render::render(&state, &ui, &loaded.config, &loaded.dashboard, 80, 30);
     let expected = crate::ui::render::render_dashboard(
         &state.workspace_root,
-        &[],
-        0,
+        &ui,
         &loaded.dashboard,
         &loaded.config,
         workspace.width,
@@ -184,8 +183,7 @@ fn dashboard_respects_top_docks_and_floating_window_order() {
     let actual = crate::ui::render::render(&state, &ui, &loaded.config, &loaded.dashboard, 80, 30);
     let expected = crate::ui::render::render_dashboard(
         &state.workspace_root,
-        &[],
-        0,
+        &ui,
         &loaded.dashboard,
         &loaded.config,
         rect.width,
@@ -212,109 +210,251 @@ fn dashboard_respects_top_docks_and_floating_window_order() {
         actual.grid.get(rect.x, rect.y)
     );
 }
+
+use crate::ui::render::DashboardAction;
+use crate::ui::render::DashboardWorkspace;
 use std::path::Path;
 
-#[test]
-fn dashboard_hides_the_entire_logo_when_the_terminal_leaves_a_short_workspace() {
-    let loaded = crate::config::load_bundled_config();
-    let actions = loaded
+fn bundled_actions() -> Vec<DashboardAction> {
+    // The bundled keymaps give Plugins no dashboard key.
+    let keys = [
+        Some("f"),
+        Some("n"),
+        Some("g"),
+        Some("r"),
+        Some("e"),
+        Some("s"),
+        Some("t"),
+        None,
+        Some("R"),
+        Some("q"),
+    ];
+    crate::config::load_bundled_config()
         .dashboard
         .action
         .iter()
-        .map(|action| crate::ui::render::DashboardAction {
+        .zip(keys)
+        .map(|(action, key)| DashboardAction {
             command: action.command.clone(),
             label: action.label.clone(),
             icon: action.icon.clone(),
-            key: None,
+            key: key.map(Into::into),
         })
-        .collect::<Vec<_>>();
-    // Each header line needs one more row than the entries alone; with the bundled
-    // entries a 16-row terminal leaves a workspace about this tall.
-    let entries = actions.len() as u16;
-    let identity_fits = entries + 7;
-    let version_fits = entries + 5;
-    for height in [entries + 20, identity_fits, version_fits, entries + 2] {
-        let frame = crate::ui::render::render_dashboard(
-            Path::new("/workspace"),
-            &actions,
+        .collect()
+}
+
+fn workspace_ui() -> UiState {
+    UiState {
+        dashboard: true,
+        dashboard_actions: bundled_actions(),
+        git_branch: Some("main".into()),
+        dashboard_workspace: DashboardWorkspace {
+            recent_files: vec!["src/ui/render/overlays.rs".into(), "README.md".into()],
+            recent_projects: vec![PathBuf::from("/srv/blurskye-site")],
+            git_changes: Some((3, 1)),
+        },
+        ..UiState::default()
+    }
+}
+
+fn draw(ui: &UiState, width: u16, height: u16) -> (crate::ui::Frame, Vec<String>) {
+    let loaded = crate::config::load_bundled_config();
+    let frame = crate::ui::render::render_dashboard(
+        Path::new("/tmp/dust-workspace"),
+        ui,
+        &loaded.dashboard,
+        &loaded.config,
+        width,
+        height,
+    );
+    let rows = (0..height).map(|y| frame.grid.row_text(y)).collect();
+    (frame, rows)
+}
+
+#[test]
+fn the_dashboard_shows_the_workspace_actions_in_columns_and_recent_lists() {
+    let (frame, rows) = draw(&workspace_ui(), 120, 35);
+    let row = |text: &str| {
+        rows.iter()
+            .position(|row| row.contains(text))
+            .unwrap_or_else(|| panic!("{text} missing: {rows:#?}"))
+    };
+    let header = row("⠿ dust");
+    assert!(rows[header].contains(&format!("v{}", env!("CARGO_PKG_VERSION"))));
+    assert!(rows[header + 1].trim().chars().all(|c| c == '─'));
+    let workspace = row("dust-workspace   ");
+    assert!(header < workspace);
+    for text in ["main", "3 changed", "1 untracked"] {
+        assert!(rows[workspace].contains(text), "{}", rows[workspace]);
+    }
+    assert!(rows[workspace + 1].contains("dust-workspace"));
+    // Ten actions fill three columns top to bottom, each key before its label.
+    let first = row("f  Find File");
+    assert!(workspace < first);
+    for (offset, labels) in [
+        (
             0,
-            &loaded.dashboard,
-            &loaded.config,
-            160,
-            height,
-        );
-        let rows = (0..height)
-            .map(|y| frame.grid.row_text(y))
-            .collect::<Vec<_>>();
-        assert!(rows.iter().all(|row| !row.contains('█')), "height {height}");
-        for action in &actions {
+            &["f  Find File", "e  Explorer", "R  Recover Unsaved Work"][..],
+        ),
+        (1, &["n  New File", "s  Restore Session", "q  Quit"]),
+        (2, &["g  Find Text", "t  Tutor — learn by editing"]),
+        (3, &["r  Recent Files", "   Plugins"]),
+    ] {
+        for label in labels {
+            assert!(rows[first + offset].contains(*label), "{rows:#?}");
+        }
+    }
+    let lists = row("Recent files");
+    assert!(first + 3 < lists);
+    assert!(rows[lists].contains("Projects"));
+    assert!(rows[lists + 1].contains("src/ui/render/overlays.rs"));
+    assert!(rows[lists + 1].contains("blurskye-site"));
+    assert!(rows[lists + 2].contains("README.md"));
+    // The cursor rests on the first label.
+    let (x, y, _) = frame.cursor.expect("dashboard cursor");
+    assert_eq!(usize::from(y), first);
+    assert_eq!(frame.grid.get(x, y).unwrap().symbol, "F");
+}
+
+#[test]
+fn moving_through_the_dashboard_goes_down_a_column_then_to_the_next() {
+    let mut ui = workspace_ui();
+    let cursor = |ui: &UiState| {
+        let (frame, _) = draw(ui, 120, 35);
+        let (x, y, _) = frame.cursor.expect("dashboard cursor");
+        let label = frame
+            .grid
+            .row_text(y)
+            .chars()
+            .skip(usize::from(x))
+            .collect::<String>();
+        (x, y, label)
+    };
+    let (first_x, first_y, label) = cursor(&ui);
+    assert!(label.starts_with("Find File"));
+    ui.dashboard_selected = 2;
+    let (x, y, label) = cursor(&ui);
+    assert_eq!((x, y), (first_x, first_y + 2));
+    assert!(label.starts_with("Find Text"));
+    ui.dashboard_selected = 4;
+    let (x, y, label) = cursor(&ui);
+    assert!(x > first_x && y == first_y);
+    assert!(label.starts_with("Explorer"));
+    ui.dashboard_selected = 99;
+    assert!(cursor(&ui).2.starts_with("Quit"));
+}
+
+#[test]
+fn the_dashboard_keeps_every_action_as_the_window_shrinks() {
+    let ui = workspace_ui();
+    for width in (20..=140).step_by(6) {
+        for height in 7..=40 {
+            let (frame, rows) = draw(&ui, width, height);
+            if rows.iter().any(|row| row.contains("Dust — resize")) {
+                // Only when the actions alone are taller than the window.
+                assert!(height < 10, "{width}x{height}: {rows:#?}");
+                continue;
+            }
+            for action in &ui.dashboard_actions {
+                let start: String = action.label.chars().take(4).collect();
+                assert!(
+                    rows.iter().any(|row| row.contains(&start)),
+                    "{width}x{height}: {rows:#?}"
+                );
+            }
+            assert!(frame.cursor.is_some());
+        }
+    }
+    // At 80x24 nothing gives way.
+    let (_, rows) = draw(&ui, 80, 24);
+    for text in [
+        "⠿ dust",
+        "3 changed",
+        "Recent files",
+        "Projects",
+        "README.md",
+    ] {
+        assert!(rows.iter().any(|row| row.contains(text)), "{rows:#?}");
+    }
+    // A short window drops the lists before the workspace name.
+    let (_, rows) = draw(&ui, 80, 10);
+    assert!(rows.iter().any(|row| row.contains("dust-workspace")));
+    assert!(!rows.iter().any(|row| row.contains("Recent files")));
+}
+
+#[test]
+fn a_terminal_dock_shortens_the_dashboard_from_the_top_parts_down() {
+    // A dock above or below leaves the dashboard a short window: the lists and header give
+    // way, every action stays, and what is left stays centred.
+    let ui = workspace_ui();
+    for height in 7..=30 {
+        let (_, rows) = draw(&ui, 160, height);
+        for action in &ui.dashboard_actions {
             assert!(
                 rows.iter().any(|row| row.contains(&action.label)),
-                "height {height}: {}",
-                action.label
+                "height {height}: {rows:#?}"
             );
         }
-        let version = format!("v{}", env!("CARGO_PKG_VERSION"));
-        assert_eq!(
-            rows.iter().any(|row| row.contains(&version)),
-            height >= version_fits
-        );
-        assert_eq!(
-            rows.iter()
-                .any(|row| row.contains(&loaded.dashboard.identity)),
-            height >= identity_fits
-        );
         let first = rows.iter().position(|row| !row.trim().is_empty()).unwrap();
         let last = rows.iter().rposition(|row| !row.trim().is_empty()).unwrap();
         assert!(
             first.abs_diff(rows.len() - last - 1) <= 1,
-            "height {height}"
+            "height {height}: {rows:#?}"
         );
-    }
-    // Once the complete header fits, every logo row is present with breathing room.
-    let render = |height| {
-        crate::ui::render::render_dashboard(
-            Path::new("/workspace"),
-            &actions,
-            0,
-            &loaded.dashboard,
-            &loaded.config,
-            160,
-            height,
-        )
-    };
-    let frame = (entries..80)
-        .map(render)
-        .find(|frame| (0..frame.grid.height()).any(|y| frame.grid.row_text(y).contains('█')))
-        .expect("the logo fits on a tall dashboard");
-    assert!(frame.grid.row_text(0).trim().is_empty());
-    for (index, line) in loaded.dashboard.logo.lines().enumerate() {
-        assert_eq!(frame.grid.row_text(index as u16 + 1).trim(), line);
+        let header = rows.iter().any(|row| row.contains("⠿ dust"));
+        let lists = rows.iter().any(|row| row.contains("Recent files"));
+        assert!(!lists || header, "height {height}: {rows:#?}");
+        assert_eq!(header, height >= 8, "height {height}: {rows:#?}");
     }
 }
 
 #[test]
-fn dashboard_labels_leave_a_gap_before_shortcut_keys() {
-    let loaded = crate::config::load_bundled_config();
-    let mut dashboard = loaded.dashboard;
-    dashboard.minimum_width = 1;
-    dashboard.minimum_height = 1;
-    let actions = vec![crate::ui::render::DashboardAction {
-        command: "recovery.open".into(),
-        icon: String::new(),
-        label: "Recover Unsaved Work".into(),
-        key: Some("R".into()),
-    }];
-    let frame = crate::ui::render::overlays::render_dashboard(
-        Path::new("/tmp"),
-        &actions,
-        0,
-        &dashboard,
-        &loaded.config,
-        20,
-        24,
-    );
+fn a_narrow_dashboard_keeps_keys_apart_from_clipped_labels() {
+    let ui = UiState {
+        dashboard_actions: vec![DashboardAction {
+            command: "recovery.inspect".into(),
+            icon: String::new(),
+            label: "Recover Unsaved Work".into(),
+            key: Some("R".into()),
+        }],
+        ..UiState::default()
+    };
+    let (frame, _) = draw(&ui, 20, 24);
     let (x, y, _) = frame.cursor.unwrap();
-    assert!(frame.grid.row_text(y).contains("Recover Unsave R"));
-    assert_eq!(frame.grid.get(x + 14, y).unwrap().symbol, " ");
+    assert!(frame.grid.row_text(y).contains("R  Recover Unsav"));
+    assert_eq!(frame.grid.get(x - 1, y).unwrap().symbol, " ");
+}
+
+#[test]
+fn user_actions_without_keys_or_with_icons_line_up_their_labels() {
+    let ui = UiState {
+        dashboard_actions: vec![
+            DashboardAction {
+                command: "command_line.open".into(),
+                label: "Console".into(),
+                icon: "»".into(),
+                key: None,
+            },
+            DashboardAction {
+                command: "editor.quit".into(),
+                label: "Exit".into(),
+                icon: String::new(),
+                key: Some("z".into()),
+            },
+        ],
+        ..UiState::default()
+    };
+    let (frame, rows) = draw(&ui, 80, 24);
+    let row = rows.iter().find(|row| row.contains("Console")).unwrap();
+    assert!(row.contains("   » Console"), "{row}");
+    assert!(row.contains("z    Exit"), "{row}");
+    assert!(!rows.iter().any(|row| row.contains("Recent files")));
+    let (x, y, _) = frame.cursor.unwrap();
+    let label = frame
+        .grid
+        .row_text(y)
+        .chars()
+        .skip(usize::from(x))
+        .collect::<String>();
+    assert!(label.starts_with("Console"));
 }

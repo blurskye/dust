@@ -1330,7 +1330,7 @@ exit 1
         )
         assert code == 0
         startup_screen = terminal_screen(snapshots[0])
-        assert "D U S T" not in startup_screen and "[scratch]" in startup_screen
+        assert "⠿ dust" not in startup_screen and "[scratch]" in startup_screen
         assert_restored(output)
 
     with tempfile.TemporaryDirectory() as directory:
@@ -1372,7 +1372,7 @@ exit 1
         )
         assert code == 0
         initial = terminal_screen(snapshots[0])
-        assert "focus.txt" in initial and "NORMAL" in initial and "D U S T" not in initial
+        assert "focus.txt" in initial and "NORMAL" in initial and "⠿ dust" not in initial
         assert "Search Forward" in terminal_screen(snapshots[1])
         assert "Search Backward" in terminal_screen(snapshots[3])
         assert_restored(output)
@@ -1834,11 +1834,7 @@ arguments = { force = false }
 
         watched_dashboard = (
             repository / "assets/defaults/dashboard.toml"
-        ).read_text(encoding="utf-8").replace("D U S T", "WATCHED DASHBOARD")
-        # Keep the watched identity visible instead of the bundled large logo.
-        watched_dashboard = re.sub(
-            r'logo = """.*?"""', 'logo = ""', watched_dashboard, count=1, flags=re.S
-        )
+        ).read_text(encoding="utf-8").replace("⠿ dust", "WATCHED DASHBOARD")
 
         def update_watched_sources() -> None:
             config_path.write_text(watched_config("WATCH-NEW"), encoding="utf-8")

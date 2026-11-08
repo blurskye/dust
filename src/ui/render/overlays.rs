@@ -2,25 +2,20 @@
 
 use crate::config::AmbiguousWidth;
 use crate::config::Config;
-use crate::config::DashboardConfig;
 use crate::ui::CellGrid;
 use crate::ui::Style;
 use crate::ui::geometry::cell_text_width;
 use crate::ui::geometry::text_width;
-use crate::ui::grid::CONTROL_CHARACTER_REPLACEMENT;
 use crate::ui::grid::Frame;
-use crate::ui::grid::ZERO_WIDTH_REPLACEMENT;
 use crate::ui::render::COMPLETION_DETAIL_GAP;
 use crate::ui::render::COMPLETION_MAX_ROWS;
 use crate::ui::render::ContentTabDiagnosticSeverity;
 use crate::ui::render::ContentTabEntry;
 use crate::ui::render::ContentTabIdentity;
-use crate::ui::render::DashboardAction;
 use crate::ui::render::LanguageCompletionState;
 use crate::ui::render::UiLspProgress;
 use crate::ui::render::editor::cursor_style;
 use crate::windows::WindowRect;
-use std::path::Path;
 
 use crate::ui::render::documentation::SWATCH_WIDTH;
 use crate::ui::render::documentation::color_swatch_style;
@@ -263,151 +258,6 @@ pub(super) fn render_lsp_loading(frame: &mut Frame, text: &str, config: &Config)
     frame
         .grid
         .put_text(left.saturating_add(1), y, text, Style::DocumentationText);
-}
-
-pub(super) fn render_dashboard(
-    root: &Path,
-    configured_actions: &[DashboardAction],
-    selected: usize,
-    configured: &DashboardConfig,
-    editor_config: &Config,
-    width: u16,
-    height: u16,
-) -> Frame {
-    let ambiguous = editor_config.editor.ambiguous_width;
-    let mut grid = CellGrid::new_with_policy(
-        width,
-        height,
-        CONTROL_CHARACTER_REPLACEMENT,
-        ZERO_WIDTH_REPLACEMENT,
-        ambiguous == AmbiguousWidth::Wide,
-    );
-    let measure = |text: &str| u16::try_from(text_width(text, ambiguous)).unwrap_or(u16::MAX);
-    let logo: Vec<&str> = configured.logo.lines().collect();
-    let logo_width = logo.iter().map(|line| measure(line)).max().unwrap_or(0);
-    let actions = u16::try_from(configured_actions.len()).unwrap_or(u16::MAX);
-    let footer = if configured.show_path { 2 } else { 0 };
-    // Keep a full logo away from the window edges. Drop it before compressing entries,
-    // rather than squeezing the header against the top of a terminal dock's workspace.
-    let big_logo = !logo.is_empty() && logo_width.saturating_add(2) <= width;
-    let layouts = [
-        (true, false, configured.show_version, 2),
-        (false, configured.show_identity, configured.show_version, 2),
-        (false, configured.show_identity, configured.show_version, 1),
-        (false, false, configured.show_version, 1),
-        (false, false, false, 1),
-    ];
-    let fitting = layouts
-        .into_iter()
-        .find_map(|(use_logo, identity, version, row_step)| {
-            if use_logo && !big_logo {
-                return None;
-            }
-            let header = if use_logo {
-                u16::try_from(logo.len())
-                    .unwrap_or(u16::MAX)
-                    .saturating_add(u16::from(version))
-            } else {
-                u16::from(identity).saturating_add(u16::from(version))
-            };
-            let rows = actions
-                .saturating_mul(row_step)
-                .saturating_sub(row_step - 1);
-            let header = header.saturating_add(if header > 0 { 2 } else { 0 });
-            let total = header.saturating_add(rows).saturating_add(footer);
-            let required = total.saturating_add(if use_logo { 2 } else { 0 });
-            (required <= height).then_some((use_logo, identity, version, row_step, header, total))
-        });
-    let Some((use_logo, identity, version, row_step, header, total)) = fitting
-        .filter(|_| width >= configured.minimum_width && height >= configured.minimum_height)
-    else {
-        grid.put_text(
-            1.min(width.saturating_sub(1)),
-            1.min(height.saturating_sub(1)),
-            &configured.resize_message,
-            Style::Accent,
-        );
-        return Frame { grid, cursor: None };
-    };
-    let top = height.saturating_sub(total) / 2;
-    let mut y = top;
-    if use_logo {
-        let left = width.saturating_sub(logo_width) / 2;
-        for line in &logo {
-            grid.put_text(left, y, line, Style::Accent);
-            y = y.saturating_add(1);
-        }
-    } else if identity {
-        center_text(&mut grid, y, &configured.identity, Style::Accent, ambiguous);
-        y = y.saturating_add(1);
-    }
-    if version {
-        center_text(
-            &mut grid,
-            y,
-            &configured
-                .version_format
-                .replace("{version}", env!("CARGO_PKG_VERSION")),
-            Style::Muted,
-            ambiguous,
-        );
-    }
-    y = top.saturating_add(header);
-    let row_width = configured.content_width.min(width.saturating_sub(4));
-    let left = width.saturating_sub(row_width) / 2;
-    let right = left.saturating_add(row_width);
-    let selected = selected.min(configured_actions.len().saturating_sub(1));
-    let mut cursor = None;
-    for (index, action) in configured_actions.iter().enumerate() {
-        if !action.icon.is_empty() {
-            grid.put_text_clipped(left, y, &action.icon, Style::Accent, right);
-        }
-        let label_x = if action.icon.is_empty() {
-            left
-        } else {
-            left.saturating_add(3)
-        };
-        let key_x = action
-            .key
-            .as_ref()
-            .map(|key| right.saturating_sub(measure(key)));
-        let label_right = key_x.map_or(right, |x| x.saturating_sub(1));
-        grid.put_text_clipped(label_x, y, &action.label, Style::Default, label_right);
-        // Like LazyVim, the cursor rests on the label of the item Enter runs.
-        if index == selected && label_x < right && y < height {
-            cursor = Some((label_x, y, cursor_style(editor_config.ui.cursor.normal)));
-        }
-        if let (Some(key), Some(key_x)) = (&action.key, key_x) {
-            grid.put_text_clipped(key_x, y, key, Style::Accent, right);
-        }
-        y = y.saturating_add(row_step);
-    }
-    if configured.show_path {
-        let y = y.saturating_sub(row_step).saturating_add(2);
-        center_text(
-            &mut grid,
-            y,
-            &dashboard_path(root, usize::from(width.saturating_sub(4)), ambiguous),
-            Style::Muted,
-            ambiguous,
-        );
-    }
-    Frame { grid, cursor }
-}
-
-pub(super) fn center_text(
-    grid: &mut CellGrid,
-    y: u16,
-    text: &str,
-    style: Style,
-    ambiguous_width: AmbiguousWidth,
-) {
-    if y >= grid.height() {
-        return;
-    }
-    let text_width = u16::try_from(text_width(text, ambiguous_width)).unwrap_or(u16::MAX);
-    let x = grid.width().saturating_sub(text_width) / 2;
-    grid.put_text(x, y, text, style);
 }
 
 pub(super) fn truncate_content_title(
@@ -798,16 +648,6 @@ pub(super) fn render_content_tab_line(
     }
 }
 
-/// The workspace path for the dashboard: home as `~`, and the end kept when it is too wide.
-fn dashboard_path(root: &Path, width: usize, ambiguous_width: AmbiguousWidth) -> String {
-    let mut text = root.display().to_string();
-    if let Some(home) = std::env::var_os("HOME").filter(|home| !home.is_empty())
-        && let Ok(rest) = root.strip_prefix(&home)
-    {
-        text = format!("~/{}", rest.display());
-    }
-    truncate_content_title(&text, width, ambiguous_width)
-}
 use unicode_segmentation::UnicodeSegmentation;
 
 pub(crate) const NOTIFICATION_MAX_WIDTH: u16 = 120;
@@ -821,24 +661,4 @@ pub(crate) fn error_notification_geometry(width: u16, height: u16) -> Option<Win
         width: available,
         height: 3,
     })
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::ui::render::overlays::*;
-
-    #[test]
-    fn dashboard_paths_keep_their_suffix_within_display_columns() {
-        for ambiguous in [AmbiguousWidth::Narrow, AmbiguousWidth::Wide] {
-            let path = format!("/tmp/{}e\u{301}.rs", "界".repeat(20));
-            let shown = dashboard_path(Path::new(&path), 36, ambiguous);
-            assert!(shown.starts_with('…'));
-            assert!(shown.ends_with("e\u{301}.rs"));
-            assert!(cell_text_width(&shown, ambiguous) <= 36);
-            for width in 0..4 {
-                let shown = dashboard_path(Path::new(&path), width, ambiguous);
-                assert!(cell_text_width(&shown, ambiguous) <= width);
-            }
-        }
-    }
 }
