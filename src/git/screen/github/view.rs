@@ -12,6 +12,7 @@ pub(super) struct Line {
     pub action: Option<Action>,
     spans: Vec<(Range<usize>, Highlight)>,
     gutter: String,
+    gutter_style: Style,
     sidebar: bool,
 }
 impl Line {
@@ -22,11 +23,18 @@ impl Line {
             action: None,
             spans: Vec::new(),
             gutter: String::new(),
+            gutter_style: Style::Muted,
             sidebar: false,
         }
     }
     fn button(text: impl Into<String>, action: Action) -> Self {
-        let mut line = Self::text(text, Style::Accent);
+        let text = text.into();
+        let text = text
+            .strip_prefix("[ ")
+            .and_then(|text| text.strip_suffix(" ]"))
+            .unwrap_or(&text)
+            .to_owned();
+        let mut line = Self::text(text, Style::Default);
         line.action = Some(action);
         line
     }
@@ -309,7 +317,24 @@ fn issue_or_pr(workspace: &Workspace, width: usize, sidebar: bool) -> Vec<Line> 
     let id = workspace.number();
     let mut rows = Vec::new();
     if id == 0 {
-        rows.push(Line::text("Select an item · / search/filter", Style::Muted));
+        rows.push(Line::text(
+            if workspace.page == 1 {
+                "No issues match this view"
+            } else {
+                "No pull requests match this view"
+            },
+            Style::Default,
+        ));
+        rows.push(Line::text("", Style::Default));
+        rows.push(Line::text(
+            "Your repository is connected. Change the filter with /,",
+            Style::Muted,
+        ));
+        rows.push(Line::text(
+            "or create a new item with n. Ctrl+l focuses these controls.",
+            Style::Muted,
+        ));
+        rows.push(Line::text("", Style::Default));
         if workspace.page == 1 {
             rows.push(Line::button("[ New issue ]", Action::CreateIssue));
         } else {
@@ -520,6 +545,63 @@ fn issue_or_pr(workspace: &Workspace, width: usize, sidebar: bool) -> Vec<Line> 
     rows.extend(metadata(workspace, item, sidebar));
     rows
 }
+fn ellipsize(text: &str, width: usize) -> String {
+    if text.width() <= width {
+        return text.into();
+    }
+    let mut result = String::new();
+    let mut columns = 0;
+    for g in text.graphemes(true) {
+        columns += g.width().max(1);
+        if columns >= width {
+            break;
+        }
+        result.push_str(g);
+    }
+    result.push('…');
+    result
+}
+fn status(value: &Value) -> (&'static str, Style) {
+    match string(value, "conclusion") {
+        "success" => ("✓", Style::GitSignAdded),
+        "failure" | "timed_out" | "action_required" => ("×", Style::Error),
+        "skipped" | "neutral" => ("−", Style::Muted),
+        "cancelled" => ("⊘", Style::Muted),
+        _ if string(value, "status") == "in_progress" => ("●", Style::Warning),
+        _ => ("○", Style::Muted),
+    }
+}
+fn log_ready(workspace: &Workspace, job: &Value, rows: &mut Vec<Line>) -> bool {
+    if string(job, "status") != "completed" {
+        rows.push(Line::text(
+            "      Job running · GitHub has not published its downloadable log yet",
+            Style::Muted,
+        ));
+        rows.push(Line::text(
+            "      Status refreshes automatically; logs load when the job completes",
+            Style::Muted,
+        ));
+        return false;
+    }
+    match workspace.cache.get(&Key::Log(number(job, "databaseId"))) {
+        Some(Ok(_)) => true,
+        Some(Err(error)) => {
+            rows.push(Line::text(format!("      {error}"), Style::Error));
+            rows.push(Line::text("      r retries loading the log", Style::Muted));
+            false
+        }
+        None => {
+            rows.push(Line::text("      Loading job log…", Style::Muted));
+            false
+        }
+    }
+}
+fn log_line(rows: &mut Vec<Line>, text: &str) {
+    let text = logs::display(text);
+    let mut row = Line::text(text, Style::MarkdownCode(None));
+    row.gutter = "    │ ".into();
+    rows.push(row);
+}
 fn workflow_lines(workspace: &Workspace, width: usize) -> Vec<Line> {
     let mut rows = Vec::new();
     let workflow = workspace.workflow_id();
@@ -618,7 +700,10 @@ fn workflow_lines(workspace: &Workspace, width: usize) -> Vec<Line> {
             ));
         }
     }
-    rows.push(Line::button("[ Re-run jobs ]", Action::Rerun(id)));
+    rows.push(Line::text("", Style::Default));
+    if string(run, "status") == "completed" {
+        rows.push(Line::button("[ Re-run jobs ]", Action::Rerun(id)));
+    }
     if string(run, "status") != "completed" {
         rows.push(Line::button("[ Cancel run ]", Action::Cancel(id)));
     }
@@ -631,10 +716,16 @@ fn workflow_lines(workspace: &Workspace, width: usize) -> Vec<Line> {
             Action::Attempt(attempt as u32),
         ));
     }
+    rows.push(Line::text("", Style::Default));
+    rows.push(Line::text(
+        "JOBS  ·  Enter expands  ·  Tab jumps between controls",
+        Style::Muted,
+    ));
     for job in array(run, "jobs") {
         let id = number(job, "databaseId");
         let expanded = workspace.expanded_jobs.contains(&id);
-        rows.push(Line::button(
+        rows.push(Line::text("", Style::Default));
+        let mut job_row = Line::button(
             format!(
                 "{} {} · {}",
                 if expanded { "▾" } else { "▸" },
@@ -645,16 +736,36 @@ fn workflow_lines(workspace: &Workspace, width: usize) -> Vec<Line> {
                     .unwrap_or(string(job, "status"))
             ),
             Action::Job(id),
-        ));
+        );
+        let (symbol, style) = status(job);
+        job_row.gutter = format!("{symbol} ");
+        job_row.gutter_style = style;
+        rows.push(job_row);
         if !expanded {
+            continue;
+        }
+        rows.push(Line::button(
+            if workspace.full_logs.contains(&id) {
+                "  ▾ Full job log · Enter returns to steps"
+            } else {
+                "  ▸ Full job log"
+            },
+            Action::FullLog(id),
+        ));
+        if workspace.full_logs.contains(&id) {
+            if log_ready(workspace, job, &mut rows) {
+                for line in workspace.raw(&Key::Log(id)).unwrap_or_default().lines() {
+                    log_line(&mut rows, logs::unpack(line).1);
+                }
+            }
             continue;
         }
         for step in array(job, "steps") {
             let number = number(step, "number");
             let expanded = workspace.expanded_steps.contains(&(id, number));
-            rows.push(Line::button(
+            let mut step_row = Line::button(
                 format!(
-                    "  {} {} · {}",
+                    "{} {} · {}",
                     if expanded { "▾" } else { "▸" },
                     string(step, "name"),
                     step["conclusion"]
@@ -663,27 +774,35 @@ fn workflow_lines(workspace: &Workspace, width: usize) -> Vec<Line> {
                         .unwrap_or(string(step, "status"))
                 ),
                 Action::Step(id, number),
-            ));
+            );
+            let (symbol, style) = status(step);
+            step_row.gutter = format!("  {symbol} ");
+            step_row.gutter_style = style;
+            rows.push(step_row);
             if expanded {
-                if error_or_loading(workspace, &Key::Log(id), &mut rows) {
+                if string(step, "conclusion") == "skipped" {
+                    rows.push(Line::text("      Skipped · no commands ran", Style::Muted));
                     continue;
                 }
-                let mut found = false;
-                for line in workspace.raw(&Key::Log(id)).unwrap_or_default().lines() {
-                    let mut parts = line.splitn(3, '\t');
-                    let _job = parts.next();
-                    let name = parts.next().unwrap_or("");
-                    let text = parts.next().unwrap_or(line);
-                    if name == string(step, "name") {
-                        body(&mut rows, text, width);
-                        found = true;
-                    }
+                if !log_ready(workspace, job, &mut rows) {
+                    continue;
                 }
-                if !found {
+                let (lines, approximate) =
+                    logs::step_lines(workspace.raw(&Key::Log(id)).unwrap_or_default(), step);
+                if approximate && !lines.is_empty() {
                     rows.push(Line::text(
-                        "No step log available yet. GitHub publishes job logs after completion.",
+                        "      Logs matched by step timestamps · Full job log is also available",
                         Style::Muted,
                     ));
+                }
+                if lines.is_empty() {
+                    rows.push(Line::text(
+                        "      Step boundaries unavailable · expand Full job log above",
+                        Style::Muted,
+                    ));
+                }
+                for line in lines {
+                    log_line(&mut rows, line);
                 }
             }
         }
@@ -717,8 +836,16 @@ pub(in crate::git::screen) fn frame(
         width,
         &format!("{}/{}", workspace.host, workspace.repo),
     );
-    let left = (width / 4).clamp(24, 40);
-    let body_height = height - 4;
+    let left = (if workspace.page == 3 {
+        width / 3
+    } else {
+        width * 2 / 5
+    })
+    .clamp(24, 64)
+    .min(width - 36);
+    let body_height = height - 5;
+    let workflow_height =
+        (workspace.workflows().len() as u16 + 3).clamp(4, (body_height / 3).max(4));
     let right = width - 1;
     let sidebar = workspace.page < 3 && width - left >= 90;
     let meta_width = if sidebar { 26 } else { 0 };
@@ -733,11 +860,11 @@ pub(in crate::git::screen) fn frame(
     let lists = if workspace.page == 3 { 2 } else { 1 };
     for pane in 0..lists {
         let (y, h) = if lists == 1 {
-            (1, body_height)
+            (2, body_height)
         } else if pane == 0 {
-            (1, body_height / 3)
+            (2, workflow_height)
         } else {
-            (1 + body_height / 3, body_height - body_height / 3)
+            (2 + workflow_height, body_height - workflow_height)
         };
         super::super::render::border(
             &mut frame.grid,
@@ -748,24 +875,36 @@ pub(in crate::git::screen) fn frame(
             if pane == 0 { title } else { "Run history" },
             workspace.focus == pane,
         );
-        let (items, selected): (Vec<String>, usize) = if workspace.page < 3 {
+        let (items, selected): (Vec<(String, String, &'static str, Style)>, usize) = if workspace
+            .page
+            < 3
+        {
             (
                 workspace
                     .items()
                     .iter()
-                    .map(|item| format!("#{} {}", number(item, "number"), string(item, "title")))
+                    .map(|item| {
+                        (
+                            format!("#{} {}", number(item, "number"), string(item, "title")),
+                            format!("{} · {}", login(item), string(item, "state").to_lowercase()),
+                            if workspace.page == 1 { "○" } else { "⑂" },
+                            Style::Accent,
+                        )
+                    })
                     .collect(),
                 workspace.selected[workspace.page - 1],
             )
         } else if pane == 0 {
             (
-                std::iter::once("All workflows".into())
-                    .chain(
-                        workspace
-                            .workflows()
-                            .iter()
-                            .map(|workflow| string(workflow, "name").into()),
-                    )
+                std::iter::once(("All workflows".into(), String::new(), "≡", Style::Muted))
+                    .chain(workspace.workflows().iter().map(|workflow| {
+                        (
+                            string(workflow, "name").into(),
+                            String::new(),
+                            "◇",
+                            Style::Muted,
+                        )
+                    }))
                     .collect(),
                 workspace.workflow_selected,
             )
@@ -775,59 +914,126 @@ pub(in crate::git::screen) fn frame(
                     .runs()
                     .iter()
                     .map(|run| {
-                        format!(
-                            "{} {} · {}",
-                            if string(run, "conclusion") == "success" {
-                                "✓"
-                            } else if string(run, "status") == "completed" {
-                                "✗"
-                            } else {
-                                "◌"
-                            },
-                            string(run, "displayTitle"),
-                            string(run, "headBranch")
+                        let (symbol, style) = status(run);
+                        (
+                            string(run, "displayTitle").into(),
+                            format!(
+                                "{} · {} · #{}",
+                                string(run, "workflowName"),
+                                string(run, "headBranch"),
+                                number(run, "databaseId")
+                            ),
+                            symbol,
+                            style,
                         )
                     })
                     .collect(),
                 workspace.run_selected,
             )
         };
-        let visible = h.saturating_sub(2) as usize;
+        let query_height = u16::from(workspace.page < 3) * 2;
+        if workspace.page < 3 {
+            let at = workspace.page - 1;
+            let query = if workspace.queries[at].is_empty() {
+                format!(
+                    "{} · {} items · / filter",
+                    workspace.states[at],
+                    items.len()
+                )
+            } else {
+                format!("{} · {}", workspace.states[at], workspace.queries[at])
+            };
+            frame
+                .grid
+                .put_text_clipped(2, y + 1, &query, Style::Muted, left - 2);
+        }
+        let row_height = if workspace.page == 3 && pane == 0 {
+            1
+        } else {
+            2
+        };
+        let visible = (h.saturating_sub(2 + query_height) / row_height).max(1) as usize;
         let offset = selected.saturating_sub(visible.saturating_sub(1));
-        for (i, text) in items.iter().enumerate().skip(offset).take(visible) {
-            let row = y + 1 + (i - offset) as u16;
-            let focused = workspace.focus == pane && i == selected;
-            if focused {
-                for x in 1..left - 1 {
-                    frame.grid.set_cell(x, row, " ", Style::Selection);
+        for (i, (title, subtitle, symbol, status_style)) in
+            items.iter().enumerate().skip(offset).take(visible)
+        {
+            let row = y + 1 + query_height + (i - offset) as u16 * row_height;
+            if row >= y + h - 1 {
+                break;
+            }
+            let selected = i == selected;
+            let focused = workspace.focus == pane && selected;
+            if selected {
+                for yy in row..(row + row_height).min(y + h - 1) {
+                    for x in 1..left - 1 {
+                        frame.grid.set_cell(x, yy, " ", Style::GitSelected(None));
+                    }
                 }
+            }
+            if focused {
                 frame.cursor = Some((2, row, SetCursorStyle::SteadyBlock));
             }
+            frame
+                .grid
+                .put_text_clipped(2, row, symbol, *status_style, left - 1);
             frame.grid.put_text_clipped(
-                2,
+                4,
                 row,
-                text,
-                if focused {
-                    Style::Selection
+                &ellipsize(title, usize::from(left - 6)),
+                if selected {
+                    Style::GitSelected(None)
                 } else {
                     Style::Default
                 },
-                left - 1,
+                left - 2,
             );
+            if row_height == 2 && row + 1 < y + h - 1 {
+                frame.grid.put_text_clipped(
+                    4,
+                    row + 1,
+                    &ellipsize(subtitle, usize::from(left - 6)),
+                    if selected {
+                        Style::GitSelected(Some(Highlight::COMMENT))
+                    } else {
+                        Style::Muted
+                    },
+                    left - 2,
+                );
+            }
         }
         if items.is_empty() {
-            frame
-                .grid
-                .put_text_clipped(2, y + 1, "No entries", Style::Muted, left - 1);
+            frame.grid.put_text_clipped(
+                2,
+                y + 1 + query_height,
+                "No entries",
+                Style::Muted,
+                left - 1,
+            );
+            if h > 5 {
+                frame.grid.put_text_clipped(
+                    2,
+                    y + 3 + query_height,
+                    "n create · / change filter",
+                    Style::Muted,
+                    left - 1,
+                );
+            }
+            if workspace.focus == pane {
+                frame.cursor = Some((2, y + 1 + query_height, SetCursorStyle::SteadyBlock));
+            }
         }
     }
     super::super::render::border(
         &mut frame.grid,
         left,
-        1,
+        2,
         width - left,
         body_height,
-        "Details · Tab controls · Enter activate",
+        if workspace.page == 3 {
+            "Actions"
+        } else {
+            "Overview"
+        },
         workspace.focus == 2,
     );
     let mut rows = Vec::new();
@@ -839,6 +1045,17 @@ pub(in crate::git::screen) fn frame(
         }
     } else {
         rows = workflow_lines(workspace, (content_right - left - 4) as usize);
+    }
+    if workspace.focus == 2
+        && let Some(action) = workspace
+            .detail_rows
+            .get(workspace.detail_cursor)
+            .and_then(|row| row.action.as_ref())
+        && let Some(index) = rows
+            .iter()
+            .position(|row| row.action.as_ref() == Some(action))
+    {
+        workspace.detail_cursor = index;
     }
     workspace.detail_cursor = workspace.detail_cursor.min(rows.len().saturating_sub(1));
     let visible = body_height.saturating_sub(2) as usize;
@@ -861,30 +1078,24 @@ pub(in crate::git::screen) fn frame(
         if relative >= visible {
             continue;
         }
-        let y = 2 + relative as u16;
+        let y = 3 + relative as u16;
         let selected = workspace.focus == 2 && i == workspace.detail_cursor;
-        let style = if selected {
-            Style::Selection
+        let style = if selected || i == 0 {
+            Style::GitSelected(None)
         } else {
             row.style
         };
-        if selected {
+        if selected || i == 0 || matches!(style, Style::MarkdownCode(_)) {
             for at in x..right {
-                frame.grid.set_cell(at, y, " ", Style::Selection);
+                frame.grid.set_cell(at, y, " ", style);
             }
+        }
+        if selected {
             frame.cursor = Some((x, y, SetCursorStyle::SteadyBlock));
         }
-        let mut x = frame.grid.put_text_clipped(
-            x,
-            y,
-            &row.gutter,
-            if selected {
-                Style::Selection
-            } else {
-                Style::Muted
-            },
-            right,
-        );
+        let mut x = frame
+            .grid
+            .put_text_clipped(x, y, &row.gutter, row.gutter_style, right);
         let mut column = 0;
         for (at, g) in row.text.grapheme_indices(true) {
             let size = g.width().max(1);
@@ -895,7 +1106,7 @@ pub(in crate::git::screen) fn frame(
                     .find(|(range, _)| range.contains(&at))
                     .map(|(_, role)| {
                         if selected {
-                            Style::SelectionSyntax(*role)
+                            Style::GitSelected(Some(*role))
                         } else {
                             Style::Syntax(*role)
                         }
@@ -909,6 +1120,9 @@ pub(in crate::git::screen) fn frame(
             }
             column += size;
         }
+    }
+    if workspace.focus == 2 && frame.cursor.is_none() {
+        frame.cursor = Some((left + 2, 3, SetCursorStyle::SteadyBlock));
     }
     workspace.detail_rows = rows;
     let notice = if app.notice.is_empty() {
@@ -927,7 +1141,10 @@ pub(in crate::git::screen) fn frame(
         Style::Warning,
         width - 1,
     );
-    frame.grid.put_text_clipped(1,height-2,"[ / ] pages · Ctrl+h/l focus · Tab controls · Enter activate · / filter · r refresh · q close",Style::Muted,width-1);
+    for x in 0..width {
+        frame.grid.set_cell(x, height - 2, " ", Style::Status);
+    }
+    frame.grid.put_text_clipped(1,height-2,if workspace.page == 3 { "[ ] pages   Ctrl+h/j/k/l focus   Tab controls   Enter expand   PgUp/PgDn scroll   r refresh   q close" } else { "[ ] pages   Ctrl+h/l focus   Tab controls   Enter open   n create   / filter   r refresh   q close" },Style::StatusMuted,width-1);
     if let Some(form) = &app.form {
         super::super::render::render_form(&mut frame, form, width, height);
     }

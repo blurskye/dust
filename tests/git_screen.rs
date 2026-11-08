@@ -78,6 +78,103 @@ fn wait(screen: &mut GitScreen, ready: impl Fn(&mut GitScreen) -> bool) {
 }
 
 #[test]
+fn preview_focus_updates_index_diff_when_toggling_layers() {
+    let dir = repo();
+    std::fs::write(dir.path().join("file.txt"), "index version\n").unwrap();
+    git(dir.path(), &["add", "file.txt"]);
+    std::fs::write(dir.path().join("file.txt"), "working version\n").unwrap();
+    let mut screen = GitScreen::open(dir.path()).unwrap();
+    wait(&mut screen, |s| view(s).contains("+working version"));
+    screen.event(UiEvent::Key {
+        key: KeyEvent {
+            code: KeyCode::Char('l'),
+            modifiers: Modifiers {
+                control: true,
+                ..Modifiers::default()
+            },
+        },
+        kind: KeyInputKind::Press,
+    });
+    key(&mut screen, KeyCode::Char('i'));
+    wait(&mut screen, |s| {
+        view(s).contains("+index version") && !view(s).contains("+working version")
+    });
+    key(&mut screen, KeyCode::Char('i'));
+    wait(&mut screen, |s| view(s).contains("+working version"));
+    key(&mut screen, KeyCode::Char('v'));
+    wait(&mut screen, |s| view(s).contains("Source"));
+    key(&mut screen, KeyCode::Char('i'));
+    wait(&mut screen, |s| {
+        view(s).contains("+index version") && !view(s).contains("+working version")
+    });
+    assert_eq!(git(dir.path(), &["show", ":file.txt"]), "index version");
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("file.txt")).unwrap(),
+        "working version\n"
+    );
+}
+
+#[test]
+fn wide_diff_aligns_old_and_new_code_with_tinted_syntax() {
+    let dir = repo();
+    std::fs::write(dir.path().join("sample.rs"), "fn before() {}\n").unwrap();
+    git(dir.path(), &["add", "."]);
+    git(dir.path(), &["commit", "-m", "Source"]);
+    std::fs::write(dir.path().join("sample.rs"), "fn after() {}\n").unwrap();
+    let mut screen = GitScreen::open(dir.path()).unwrap();
+    wait(&mut screen, |s| view(s).contains("+fn after()"));
+    let frame = screen.frame(180, 40);
+    let row = (0..40)
+        .find(|y| frame.grid.row_text(*y).contains("fn before()"))
+        .unwrap();
+    assert!(frame.grid.row_text(row).contains("fn after()"));
+    assert!((0..180).any(|x| matches!(
+        frame.grid.get(x, row).unwrap().style,
+        dust::ui::Style::GitDiff {
+            added: true,
+            syntax: Some(_)
+        }
+    )));
+    screen.event(UiEvent::Key {
+        key: KeyEvent {
+            code: KeyCode::Char('l'),
+            modifiers: Modifiers {
+                control: true,
+                ..Modifiers::default()
+            },
+        },
+        kind: KeyInputKind::Press,
+    });
+    key(&mut screen, KeyCode::Char('s'));
+    let frame = screen.frame(180, 40);
+    let old = (0..40)
+        .find(|y| frame.grid.row_text(*y).contains("fn before()"))
+        .unwrap();
+    let new = (0..40)
+        .find(|y| frame.grid.row_text(*y).contains("fn after()"))
+        .unwrap();
+    assert_ne!(old, new);
+}
+
+#[test]
+fn multiline_prompt_moves_by_display_column_without_splitting_graphemes() {
+    let mut prompt = dust::ui::PromptState::new(dust::ui::PromptKind::Text);
+    prompt.input = "界áx\n12\n👩‍💻bc".into();
+    prompt.cursor = "界áx\n12\n👩‍💻".len();
+    prompt.move_vertical(true);
+    assert_eq!(prompt.cursor, "界áx\n12".len());
+    prompt.move_vertical(true);
+    assert_eq!(prompt.cursor, "界".len());
+    prompt.move_vertical(true);
+    assert_eq!(prompt.cursor, "界".len());
+    prompt.move_vertical(false);
+    prompt.move_vertical(false);
+    assert_eq!(prompt.cursor, "界áx\n12\n👩‍💻".len());
+    prompt.move_vertical(false);
+    assert_eq!(prompt.cursor, "界áx\n12\n👩‍💻".len());
+}
+
+#[test]
 fn floating_is_default_and_fullscreen_is_a_persisted_setting() {
     use dust::config::{GitPlacement, GitWindowConfig};
     use dust::ui::{CellGrid, Frame, Style};
@@ -124,7 +221,12 @@ fn code_style(screen: &mut GitScreen, line: &str, token: &str) -> dust::ui::Styl
         let row = frame.grid.row_text(y);
         if let Some(start) = row.find(line) {
             let at = start + line.find(token).unwrap();
-            return frame.grid.get(row[..at].width() as u16, y).unwrap().style;
+            return match frame.grid.get(row[..at].width() as u16, y).unwrap().style {
+                dust::ui::Style::GitDiff {
+                    syntax: Some(role), ..
+                } => dust::ui::Style::Syntax(role),
+                style => style,
+            };
         }
     }
     panic!("missing preview line {line}: {}", view(screen));

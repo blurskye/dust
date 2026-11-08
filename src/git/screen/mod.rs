@@ -95,6 +95,8 @@ pub struct GitScreen {
     preview: Preview,
     preview_line: usize,
     preview_column: usize,
+    split_diff: bool,
+    preview_rows: usize,
     staged: bool,
     all_files: bool,
     files: BTreeSet<PathBuf>,
@@ -140,6 +142,8 @@ impl GitScreen {
             preview: Preview::default(),
             preview_line: 0,
             preview_column: 0,
+            split_diff: true,
+            preview_rows: 0,
             staged: false,
             all_files: false,
             files: BTreeSet::new(),
@@ -893,6 +897,19 @@ impl GitScreen {
                     .next()
                     .map_or(0, str::len)
             }
+            KeyCode::Up | KeyCode::Down if field.multiline => {
+                input.move_vertical(key.code == KeyCode::Up);
+            }
+            KeyCode::Home if field.multiline && !key.modifiers.control => {
+                input.cursor = input.input[..input.cursor]
+                    .rfind('\n')
+                    .map_or(0, |at| at + 1);
+            }
+            KeyCode::End if field.multiline && !key.modifiers.control => {
+                input.cursor = input.input[input.cursor..]
+                    .find('\n')
+                    .map_or(input.input.len(), |at| input.cursor + at);
+            }
             KeyCode::Home => input.cursor = 0,
             KeyCode::End => input.cursor = input.input.len(),
             KeyCode::Enter if field.multiline => input.insert_text("\n"),
@@ -1011,6 +1028,11 @@ impl GitScreen {
                                 + if key.code == KeyCode::Char('L') { 1 } else { 3 })
                                 % 4;
                             self.offsets[1] = 0;
+                        }
+                        KeyCode::Char('s') if self.focus == 4 => {
+                            self.split_diff = !self.split_diff;
+                            self.preview_line = 0;
+                            self.preview_column = 0;
                         }
                         KeyCode::Left | KeyCode::Char('h') if self.focus == 4 => {
                             self.preview_column = self.preview_column.saturating_sub(8);
@@ -1173,7 +1195,7 @@ impl GitScreen {
                         KeyCode::Char('?') => {
                             self.jobs.cancel_preview();
                             self.focus = 4;
-                            self.preview="1 Changes · 2 Branches · 3 Commits · 4 Stashes\nCtrl+h/j/k/l: spatial pane focus\nTab / Shift+Tab: next / previous pane\nj/k or arrows: move · Enter: open\nh/l: collapse/expand directory · H/L: branch subview\nPreview: h/l or Left/Right scroll horizontally\nSpace: stage · v: Changes/All files · i: working tree/index\nc: commit · P: push · r: refresh\nConflicts: Enter chooses a side · o/t: ours/theirs · C: continue merge\n:tutor git: disposable lessons · :tutor quit: restore workspace\nn: new worktree/stash · a/p/d: apply/pop/drop stash\nForms: type, arrows edit, Tab visits fields and buttons\nCtrl+Enter: submit · Esc: cancel/back · q: close".into();
+                            self.preview="1 Changes · 2 Branches · 3 Commits · 4 Stashes\nCtrl+h/j/k/l: spatial pane focus\nTab / Shift+Tab: next / previous pane\nj/k or arrows: move · Enter: open\nh/l: collapse/expand directory · H/L: branch subview\nPreview: h/l scroll horizontally · s toggles split diff\nSpace: stage · v: Changes/All files · i: working tree/index\nc: commit · P: push · r: refresh\nConflicts: Enter chooses a side · o/t: ours/theirs · C: continue merge\n:tutor git: disposable lessons · :tutor quit: restore workspace\nn: new worktree/stash · a/p/d: apply/pop/drop stash\nForms: type, arrows edit, Tab visits fields and buttons\nCtrl+Enter: submit · Esc: cancel/back · q: close".into();
                             return ScreenOutcome::Continue;
                         }
                         _ => {}
@@ -1182,12 +1204,12 @@ impl GitScreen {
                 if self.focus < 4 {
                     self.last_list = self.focus;
                     self.clamp();
-                    if previous != (self.last_list, self.subview, self.selected, self.staged) {
-                        self.select_history();
-                        self.preview_line = 0;
-                        self.preview_column = 0;
-                        self.load_preview();
-                    }
+                }
+                if previous != (self.last_list, self.subview, self.selected, self.staged) {
+                    self.select_history();
+                    self.preview_line = 0;
+                    self.preview_column = 0;
+                    self.load_preview();
                 }
             }
             _ => {}
@@ -1200,7 +1222,7 @@ impl GitScreen {
             self.preview_line = self
                 .preview_line
                 .saturating_add_signed(delta)
-                .min(self.preview.rows.len().saturating_sub(1));
+                .min(self.preview_rows.saturating_sub(1));
         } else {
             let slot = self.slot(self.focus);
             self.selected[slot] = self.selected[slot]

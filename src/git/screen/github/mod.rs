@@ -1,6 +1,7 @@
 //! GitHub workspace state. GitHub CLI owns authentication; the existing forge worker
 //! owns process limits and cancellation. Every response is keyed to its requested item.
 mod actions;
+mod logs;
 pub(super) mod view;
 mod workflow;
 use super::{Field, Form, FormAction};
@@ -64,6 +65,8 @@ pub(super) struct Workspace {
     attempt: u32,
     expanded_jobs: BTreeSet<u64>,
     expanded_steps: BTreeSet<(u64, u64)>,
+    full_logs: BTreeSet<u64>,
+    refreshed_at: std::time::Instant,
     viewed: BTreeSet<(u64, String)>,
     collapsed: BTreeSet<(u64, String)>,
     drafts: BTreeMap<String, Vec<String>>,
@@ -100,6 +103,8 @@ impl Workspace {
             attempt: 0,
             expanded_jobs: BTreeSet::new(),
             expanded_steps: BTreeSet::new(),
+            full_logs: BTreeSet::new(),
+            refreshed_at: std::time::Instant::now(),
             viewed: BTreeSet::new(),
             collapsed: BTreeSet::new(),
             drafts: BTreeMap::new(),
@@ -158,11 +163,16 @@ impl Workspace {
         ]
     }
     fn enqueue(&mut self, key: Key, args: Vec<String>) {
-        if self.cache.contains_key(&key)
-            || self
-                .active
-                .as_ref()
-                .is_some_and(|request| request.key == key)
+        if self.cache.contains_key(&key) {
+            return;
+        }
+        self.enqueue_refresh(key, args);
+    }
+    fn enqueue_refresh(&mut self, key: Key, args: Vec<String>) {
+        if self
+            .active
+            .as_ref()
+            .is_some_and(|request| request.key == key)
             || self.queue.iter().any(|request| request.key == key)
         {
             return;
@@ -300,6 +310,11 @@ impl Workspace {
                     }
                     self.enqueue(Key::Run(id, self.attempt), args);
                     if let Some(run) = self.value(&Key::Run(id, self.attempt)) {
+                        let jobs = array(run, "jobs")
+                            .iter()
+                            .filter(|job| string(job, "status") == "completed")
+                            .map(|job| number(job, "databaseId"))
+                            .collect::<Vec<_>>();
                         let workflow = number(run, "workflowDatabaseId");
                         let revision = string(run, "headSha").to_owned();
                         self.enqueue(
@@ -313,6 +328,16 @@ impl Workspace {
                                 &revision,
                             ]),
                         );
+                        for job in jobs {
+                            if self.full_logs.contains(&job)
+                                || self.expanded_steps.iter().any(|(id, _)| *id == job)
+                            {
+                                self.enqueue(
+                                    Key::Log(job),
+                                    self.cli(&["run", "view", "--job", &job.to_string(), "--log"]),
+                                );
+                            }
+                        }
                     }
                 }
             }
@@ -320,6 +345,30 @@ impl Workspace {
         }
     }
     pub fn poll(&mut self) -> bool {
+        if self.page == 3
+            && self.refreshed_at.elapsed() >= std::time::Duration::from_secs(8)
+            && self.active.is_none()
+            && self.queue.is_empty()
+        {
+            self.refreshed_at = std::time::Instant::now();
+            if let Some(id) = self.run_id
+                && self
+                    .value(&Key::Run(id, self.attempt))
+                    .is_some_and(|run| string(run, "status") != "completed")
+            {
+                let mut args = self.cli(&["run","view",&id.to_string(),"--json","databaseId,displayTitle,workflowName,status,conclusion,headBranch,headSha,event,attempt,jobs,workflowDatabaseId"]);
+                if self.attempt > 0 {
+                    args.extend(["--attempt".into(), self.attempt.to_string()]);
+                }
+                self.enqueue_refresh(Key::Run(id, self.attempt), args);
+            }
+            let workflow = self.workflow_id();
+            let mut args = self.cli(&["run","list","--limit","100","--json","databaseId,displayTitle,workflowName,status,conclusion,headBranch,headSha,event,createdAt,attempt,workflowDatabaseId"]);
+            if workflow != 0 {
+                args.extend(["--workflow".into(), workflow.to_string()]);
+            }
+            self.enqueue_refresh(Key::Runs(workflow), args);
+        }
         let mut changed = false;
         while let Some(event) = self.jobs.try_reply() {
             if event.request_id != self.next {
@@ -371,7 +420,22 @@ impl Workspace {
                             .unwrap_or("")
                             .into();
                     }
+                    let selected_run = if request.key == Key::Runs(self.workflow_id()) {
+                        self.runs()
+                            .get(self.run_selected)
+                            .map(|run| number(run, "databaseId"))
+                    } else {
+                        None
+                    };
                     self.cache.insert(request.key, parsed);
+                    if let Some(id) = selected_run
+                        && let Some(index) = self
+                            .runs()
+                            .iter()
+                            .position(|run| number(run, "databaseId") == id)
+                    {
+                        self.run_selected = index;
+                    }
                 }
                 self.ensure();
             }
@@ -433,7 +497,11 @@ impl Workspace {
                 KeyCode::Char('q') => return Err("close".into()),
                 KeyCode::Escape if self.focus == 2 => self.focus = self.last_list,
                 KeyCode::Char('r') => {
-                    self.cache.clear();
+                    if self.writing() {
+                        return Err("Wait for the confirmed operation before refreshing".into());
+                    }
+                    self.cache
+                        .retain(|key, result| matches!(key, Key::Repository) && result.is_ok());
                     self.queue.clear();
                     self.ensure();
                 }

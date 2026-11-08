@@ -49,6 +49,12 @@ pub enum Style {
     StatusError,
     StatusWarning,
     Selection,
+    /// A quiet, theme-tinted Git row, retaining syntax or metadata foregrounds.
+    GitSelected(Option<crate::config::Highlight>),
+    GitDiff {
+        added: bool,
+        syntax: Option<crate::config::Highlight>,
+    },
     Search,
     Error,
     Warning,

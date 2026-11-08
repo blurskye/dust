@@ -58,11 +58,19 @@ fn activate(screen: &mut GitScreen, label: &str) {
     control(screen, KeyCode::Char('l'));
     for _ in 0..80 {
         let frame = screen.frame(190, 65);
-        if let Some((_, y, _)) = frame.cursor
-            && frame.grid.row_text(y).contains(label)
-        {
-            key(screen, KeyCode::Enter);
-            return;
+        if let Some((x, y, _)) = frame.cursor {
+            let tail = (x..190)
+                .filter_map(|column| frame.grid.get(column, y))
+                .map(|cell| cell.symbol.as_str())
+                .collect::<String>();
+            if let Some(at) = tail.find(label)
+                && tail[..at]
+                    .chars()
+                    .all(|c| c.is_whitespace() || c.is_ascii_digit() || "[]+-│▾▸✓○●×⑂".contains(c))
+            {
+                key(screen, KeyCode::Enter);
+                return;
+            }
         }
         key(screen, KeyCode::Tab);
     }
@@ -130,14 +138,35 @@ fn native_github_controls_forms_reviews_and_workflow_logs() {
         );
         return;
     }
+    let state_path = std::env::var("DUST_GITHUB_FIXTURE").unwrap();
+    std::fs::write(&state_path, r#"{"calls":[],"comments":[],"empty":true}"#).unwrap();
     let mut screen =
         GitScreen::open(Path::new(&std::env::var("DUST_GITHUB_ROOT").unwrap())).unwrap();
     key(&mut screen, KeyCode::Char(']'));
+    wait(&mut screen, "No issues match this view");
+    for (width, height) in [(100, 30), (180, 45)] {
+        let frame = screen.frame(width, height);
+        let (_, y, _) = frame
+            .cursor
+            .expect("empty list must keep a terminal cursor");
+        assert!(frame.grid.row_text(y).contains("No entries"));
+    }
+    let mut fixture: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&state_path).unwrap()).unwrap();
+    fixture["empty"] = false.into();
+    std::fs::write(&state_path, serde_json::to_string(&fixture).unwrap()).unwrap();
+    key(&mut screen, KeyCode::Char('r'));
     wait(&mut screen, "A real native issue layout.");
     assert!(view(&mut screen).contains("github.com/example/demo"));
     assert!(view(&mut screen).contains("Edit Assignees"));
     key(&mut screen, KeyCode::Char('c'));
     paste(&mut screen, "First line\nq[] keep this draft");
+    key(&mut screen, KeyCode::Up);
+    key(&mut screen, KeyCode::Home);
+    paste(&mut screen, "界e\u{0301} ");
+    key(&mut screen, KeyCode::Down);
+    key(&mut screen, KeyCode::End);
+    key(&mut screen, KeyCode::Char('X'));
     key(&mut screen, KeyCode::Escape);
     key(&mut screen, KeyCode::Char('c'));
     assert!(view(&mut screen).contains("q[] keep this draft"));
@@ -159,7 +188,10 @@ fn native_github_controls_forms_reviews_and_workflow_logs() {
         .find(|args| args.starts_with(&["issue".into(), "comment".into()]))
         .unwrap();
     let at = comment.iter().position(|arg| arg == "--body").unwrap();
-    assert_eq!(comment[at + 1], "First line\nq[] keep this draft");
+    assert_eq!(
+        comment[at + 1],
+        "界e\u{0301} First line\nq[] keep this draftX"
+    );
     assert!(comment.contains(&"github.com/example/demo".into()));
     activate(&mut screen, "Edit Labels");
     key(&mut screen, KeyCode::End);
@@ -224,7 +256,7 @@ fn native_github_controls_forms_reviews_and_workflow_logs() {
                 && args.contains(&"--approve".into()))
     );
     key(&mut screen, KeyCode::Char('L'));
-    wait(&mut screen, "Resolve conversation ]");
+    wait(&mut screen, "Resolve conversation");
     assert!(!view(&mut screen).contains("Merge pull request"));
     activate(&mut screen, "Resolve conversation");
     control(&mut screen, KeyCode::Enter);
@@ -278,7 +310,20 @@ fn native_github_controls_forms_reviews_and_workflow_logs() {
     wait(&mut screen, "test (windows)");
     activate(&mut screen, "test (linux)");
     activate(&mut screen, "Check · success");
+    wait(&mut screen, "Job running");
+    assert!(!calls().iter().any(|args| args.contains(&"--log".into())));
     wait(&mut screen, "all native checks passed");
+    assert!(view(&mut screen).contains("Logs matched by step timestamps"));
+    assert!(!view(&mut screen).contains("[32m"));
+    let frame = screen.frame(190, 65);
+    let (_, row, _) = frame.cursor.unwrap();
+    assert!(
+        frame.grid.row_text(row).contains("Check · success"),
+        "loading logs must preserve the selected step"
+    );
+    activate(&mut screen, "Full job log");
+    wait(&mut screen, "Current runner version");
+    assert!(!view(&mut screen).contains("UNKNOWN STEP"));
     activate(&mut screen, "Attempt 1");
     let end = Instant::now() + Duration::from_secs(20);
     loop {

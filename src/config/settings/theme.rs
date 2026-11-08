@@ -349,6 +349,32 @@ impl ThemeConfig {
         style
     }
 
+    /// Git selections follow the UI accent rather than a language's token palette.
+    pub fn git_selection(&self, group: Option<Highlight>) -> ThemeStyle {
+        let base = &self.styles.default;
+        let mut style = group
+            .and_then(|group| self.highlight(group))
+            .unwrap_or(base)
+            .clone();
+        style.fill(blend(self.styles.accent.foreground, base.background, 12));
+        style
+    }
+
+    pub fn git_diff(&self, added: bool, group: Option<Highlight>) -> ThemeStyle {
+        let base = &self.styles.default;
+        let mut style = group
+            .and_then(|group| self.highlight(group))
+            .unwrap_or(base)
+            .clone();
+        let color = if added {
+            self.styles.git_sign_added.foreground
+        } else {
+            self.styles.git_sign_deleted.foreground
+        };
+        style.fill(blend(color, base.background, 8));
+        style
+    }
+
     pub(in crate::config) fn resolve<'a>(&'a self, mut name: &'a str) -> Option<ThemeStyle> {
         // Links can loop in a hand-written theme.
         for _ in 0..32 {

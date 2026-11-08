@@ -16,11 +16,7 @@ pub(super) fn border(
     if w < 2 || h < 2 {
         return;
     }
-    let style = if focused {
-        Style::Accent
-    } else {
-        Style::Border
-    };
+    let style = Style::Border;
     for col in x..x + w {
         grid.set_cell(col, y, "─", style);
         grid.set_cell(col, y + h - 1, "─", style);
@@ -30,10 +26,10 @@ pub(super) fn border(
         grid.set_cell(x + w - 1, row, "│", style);
     }
     for (col, row, text) in [
-        (x, y, "┌"),
-        (x + w - 1, y, "┐"),
-        (x, y + h - 1, "└"),
-        (x + w - 1, y + h - 1, "┘"),
+        (x, y, "╭"),
+        (x + w - 1, y, "╮"),
+        (x, y + h - 1, "╰"),
+        (x + w - 1, y + h - 1, "╯"),
     ] {
         grid.set_cell(col, row, text, style);
     }
@@ -42,9 +38,9 @@ pub(super) fn border(
         y,
         title,
         if focused {
-            Style::Accent
+            Style::GitSelected(None)
         } else {
-            Style::Default
+            Style::Muted
         },
         x + w - 2,
     );
@@ -66,7 +62,7 @@ pub(super) fn frame(app: &mut GitScreen, width: u16, height: u16) -> Frame {
         return frame;
     }
     navigation(&mut frame, 0, width, &app.root.display().to_string());
-    let left = (width * 2 / 5).max(26);
+    let left = (width / 3).clamp(26, 40);
     let body = height - 4 - if app.tutor.is_some() { 4 } else { 0 };
     let sizes = [
         body * 3 / 10,
@@ -133,14 +129,14 @@ pub(super) fn frame(app: &mut GitScreen, width: u16, height: u16) -> Frame {
             .take(visible)
         {
             let y = top + 1 + (index - app.offsets[pane]) as u16;
-            let style = if index == selected && app.focus == pane {
-                Style::Selection
+            let style = if index == selected {
+                Style::GitSelected(None)
             } else if row.directory {
                 Style::Accent
             } else {
                 Style::Default
             };
-            if style == Style::Selection {
+            if index == selected {
                 for x in 1..left - 1 {
                     frame.grid.set_cell(x, y, " ", style);
                 }
@@ -193,79 +189,133 @@ pub(super) fn frame(app: &mut GitScreen, width: u16, height: u16) -> Frame {
         title,
         app.focus == 4,
     );
-    let visible = body.saturating_sub(2) as usize;
+    let split = app.split_diff && app.preview.patch && width - left >= 96;
+    app.preview_rows = if split {
+        app.preview.split.len()
+    } else {
+        app.preview.rows.len()
+    };
+    app.preview_line = app.preview_line.min(app.preview_rows.saturating_sub(1));
+    let first_line = if split { 3 } else { 2 };
+    let visible = body.saturating_sub(first_line) as usize;
     let offset = app.preview_line.saturating_sub(visible.saturating_sub(1));
     let number_width = app.preview.number_width();
-    for (i, row) in app
-        .preview
-        .rows
-        .iter()
-        .enumerate()
-        .skip(offset)
-        .take(visible)
-    {
-        let y = 2 + (i - offset) as u16;
-        let old = row.old.map(|number| number.to_string()).unwrap_or_default();
-        let new = row.new.map(|number| number.to_string()).unwrap_or_default();
-        let mut x = left + 2;
-        if row.old.is_some() || row.new.is_some() {
-            let numbers = if app.preview.patch {
-                format!("{old:>number_width$} {new:>number_width$} ")
-            } else {
-                format!("{new:>number_width$} │ ")
-            };
-            x = frame
-                .grid
-                .put_text_clipped(x, y, &numbers, Style::Muted, width - 1);
-        }
-        if let Some(marker) = row.marker {
-            x = frame
-                .grid
-                .put_text_clipped(x, y, &marker.to_string(), row.style, width - 1);
-        }
-        let mut column = 0;
-        for (at, grapheme) in row.text.grapheme_indices(true) {
-            let size = if grapheme == "\t" {
-                4 - column % 4
-            } else {
-                UnicodeWidthStr::width(grapheme).max(1)
-            };
-            let end = column + size;
-            if end > app.preview_column {
-                let style = row
-                    .spans
-                    .iter()
-                    .find(|(range, _)| range.start <= at && at < range.end)
-                    .map(|(_, role)| Style::Syntax(*role))
-                    .unwrap_or(row.style);
-                let next = if grapheme == "\t" || column < app.preview_column {
-                    frame.grid.put_text_clipped(
+    if split {
+        let middle = left + (width - left) / 2;
+        frame
+            .grid
+            .put_text_clipped(left + 2, 2, "BEFORE", Style::Muted, middle);
+        frame
+            .grid
+            .put_text_clipped(middle + 2, 2, "AFTER", Style::Muted, width - 1);
+        for (i, pair) in app
+            .preview
+            .split
+            .iter()
+            .enumerate()
+            .skip(offset)
+            .take(visible)
+        {
+            let y = first_line + (i - offset) as u16;
+            if let Some(index) = pair.heading {
+                paint_source(
+                    &mut frame.grid,
+                    &app.preview.rows[index],
+                    left + 2,
+                    y,
+                    width - 1,
+                    app.preview_column,
+                    None,
+                );
+                continue;
+            }
+            frame.grid.set_cell(middle, y, "│", Style::Border);
+            for (index, x, right, old) in [
+                (pair.old, left + 2, middle, true),
+                (pair.new, middle + 2, width - 1, false),
+            ] {
+                if let Some(index) = index {
+                    let row = &app.preview.rows[index];
+                    let number = if old { row.old } else { row.new }
+                        .map(|n| n.to_string())
+                        .unwrap_or_default();
+                    let x = frame.grid.put_text_clipped(
                         x,
                         y,
-                        &" ".repeat(end - column.max(app.preview_column)),
-                        style,
-                        width - 1,
-                    )
-                } else {
-                    frame
-                        .grid
-                        .put_text_clipped(x, y, grapheme, style, width - 1)
-                };
-                if next == x {
-                    break;
+                        &format!("{number:>number_width$} │ "),
+                        Style::Muted,
+                        right,
+                    );
+                    let x = frame.grid.put_text_clipped(
+                        x,
+                        y,
+                        &row.marker.unwrap_or(' ').to_string(),
+                        row.style,
+                        right,
+                    );
+                    paint_source(
+                        &mut frame.grid,
+                        row,
+                        x,
+                        y,
+                        right,
+                        app.preview_column,
+                        match row.marker {
+                            Some('+') => Some(true),
+                            Some('-') => Some(false),
+                            _ => None,
+                        },
+                    );
                 }
-                x = next;
             }
-            column = end;
+        }
+    } else {
+        for (i, row) in app
+            .preview
+            .rows
+            .iter()
+            .enumerate()
+            .skip(offset)
+            .take(visible)
+        {
+            let y = 2 + (i - offset) as u16;
+            let old = row.old.map(|number| number.to_string()).unwrap_or_default();
+            let new = row.new.map(|number| number.to_string()).unwrap_or_default();
+            let mut x = left + 2;
+            if row.old.is_some() || row.new.is_some() {
+                let numbers = if app.preview.patch {
+                    format!("{old:>number_width$} {new:>number_width$} ")
+                } else {
+                    format!("{new:>number_width$} │ ")
+                };
+                x = frame
+                    .grid
+                    .put_text_clipped(x, y, &numbers, Style::Muted, width - 1);
+            }
+            if let Some(marker) = row.marker {
+                x = frame
+                    .grid
+                    .put_text_clipped(x, y, &marker.to_string(), row.style, width - 1);
+            }
+            paint_source(
+                &mut frame.grid,
+                row,
+                x,
+                y,
+                width - 1,
+                app.preview_column,
+                None,
+            );
         }
     }
     if app.focus == 4 {
         frame.cursor = Some((
             left + 2,
-            2 + (app
-                .preview_line
-                .saturating_sub(offset)
-                .min(visible.saturating_sub(1))) as u16,
+            first_line
+                + (app
+                    .preview_line
+                    .saturating_sub(offset)
+                    .min(visible.saturating_sub(1))) as u16,
             SetCursorStyle::SteadyBlock,
         ));
     }
@@ -310,7 +360,7 @@ pub(super) fn frame(app: &mut GitScreen, width: u16, height: u16) -> Frame {
         1,
         height - 2,
         if app.focus == 4 {
-            "Preview · j/k scroll · h/l horizontal · Ctrl+h back · ? keys · q close"
+            "Preview · j/k scroll · h/l horizontal · s split/unified · Ctrl+h back · q close"
         } else {
             "[ / ] pages · 1–4 panes · Ctrl+h/j/k/l focus · Space stage · c commit · ? keys · q close"
         },
@@ -323,10 +373,70 @@ pub(super) fn frame(app: &mut GitScreen, width: u16, height: u16) -> Frame {
     frame
 }
 
+pub(super) fn paint_source(
+    grid: &mut CellGrid,
+    row: &super::preview::PreviewRow,
+    mut x: u16,
+    y: u16,
+    right: u16,
+    offset: usize,
+    diff: Option<bool>,
+) {
+    if let Some(added) = diff {
+        for at in x..right {
+            grid.set_cell(
+                at,
+                y,
+                " ",
+                Style::GitDiff {
+                    added,
+                    syntax: None,
+                },
+            );
+        }
+    }
+    let mut column = 0;
+    for (at, grapheme) in row.text.grapheme_indices(true) {
+        let size = if grapheme == "\t" {
+            4 - column % 4
+        } else {
+            grapheme.width().max(1)
+        };
+        let end = column + size;
+        if end > offset {
+            let role = row
+                .spans
+                .iter()
+                .find(|(range, _)| range.contains(&at))
+                .map(|(_, role)| *role);
+            let style = diff.map_or_else(
+                || role.map(Style::Syntax).unwrap_or(row.style),
+                |added| Style::GitDiff {
+                    added,
+                    syntax: role,
+                },
+            );
+            let next = if grapheme == "\t" || column < offset {
+                grid.put_text_clipped(x, y, &" ".repeat(end - column.max(offset)), style, right)
+            } else {
+                grid.put_text_clipped(x, y, grapheme, style, right)
+            };
+            if next == x {
+                break;
+            }
+            x = next;
+        }
+        column = end;
+    }
+}
+
 pub(super) fn navigation(frame: &mut Frame, page: usize, width: u16, repository: &str) {
+    for x in 0..width {
+        frame.grid.set_cell(x, 0, " ", Style::Status);
+    }
     let mut x = frame
         .grid
-        .put_text_clipped(1, 0, "Dusty Git  ", Style::Accent, width);
+        .put_text_clipped(1, 0, "Dusty Git  ", Style::StatusAccent, width);
     for (index, label) in ["Git", "Issues", "Pull requests", "Actions"]
         .iter()
         .enumerate()
@@ -334,18 +444,18 @@ pub(super) fn navigation(frame: &mut Frame, page: usize, width: u16, repository:
         x = frame.grid.put_text_clipped(
             x,
             0,
-            &format!("{label}  "),
+            &format!(" {label} "),
             if index == page {
-                Style::Selection
+                Style::GitSelected(None)
             } else {
-                Style::Muted
+                Style::StatusMuted
             },
             width,
         );
     }
     frame
         .grid
-        .put_text_clipped(x, 0, repository, Style::Muted, width);
+        .put_text_clipped(x + 1, 0, repository, Style::StatusMuted, width);
 }
 
 pub(super) fn render_form(frame: &mut Frame, form: &super::Form, width: u16, height: u16) {

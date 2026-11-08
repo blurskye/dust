@@ -41,15 +41,22 @@ impl PreviewRow {
     }
 }
 
+pub(super) struct SplitRow {
+    pub heading: Option<usize>,
+    pub old: Option<usize>,
+    pub new: Option<usize>,
+}
 #[derive(Default)]
 pub(super) struct Preview {
     pub rows: Vec<PreviewRow>,
+    pub split: Vec<SplitRow>,
     pub patch: bool,
 }
 impl From<&str> for Preview {
     fn from(text: &str) -> Self {
         Self {
             rows: text.lines().map(PreviewRow::message).collect(),
+            split: Vec::new(),
             patch: false,
         }
     }
@@ -83,7 +90,11 @@ impl Preview {
                     path: Some(path.to_path_buf()),
                 }),
         );
-        Self { rows, patch: false }
+        Self {
+            rows,
+            split: Vec::new(),
+            patch: false,
+        }
     }
 
     pub fn git(text: &str, fallback_path: Option<&Path>) -> Self {
@@ -104,9 +115,17 @@ impl Preview {
     fn append_patch(&mut self, text: &str, fallback_path: Option<&Path>) {
         let diff = parse_unified_patch(text, "");
         if diff.hunks.is_empty() {
+            let first = self.rows.len();
             self.rows.extend(text.lines().map(PreviewRow::message));
+            self.split
+                .extend((first..self.rows.len()).map(|index| SplitRow {
+                    heading: Some(index),
+                    old: None,
+                    new: None,
+                }));
             return;
         }
+        let side_rows = diff.side_by_side_rows();
         let first_row = self.rows.len();
         let mut path = fallback_path.map(Path::to_path_buf);
         for line in text.lines().take_while(|line| !line.starts_with("@@")) {
@@ -122,6 +141,12 @@ impl Preview {
         for row in &mut self.rows[first_row..] {
             row.path = path.clone();
         }
+        self.split
+            .extend((first_row..self.rows.len()).map(|index| SplitRow {
+                heading: Some(index),
+                old: None,
+                new: None,
+            }));
         let language = path.as_deref().and_then(language_for_path);
         for hunk in diff.hunks {
             self.patch = true;
@@ -166,6 +191,42 @@ impl Preview {
                 });
                 old_at += usize::from(line.kind != DiffLineKind::Added);
                 new_at += usize::from(line.kind != DiffLineKind::Removed);
+            }
+        }
+        let old = self.rows[first_row..]
+            .iter()
+            .enumerate()
+            .filter_map(|(index, row)| row.old.map(|number| (number, first_row + index)))
+            .collect::<std::collections::BTreeMap<_, _>>();
+        let new = self.rows[first_row..]
+            .iter()
+            .enumerate()
+            .filter_map(|(index, row)| row.new.map(|number| (number, first_row + index)))
+            .collect::<std::collections::BTreeMap<_, _>>();
+        for row in side_rows {
+            if let Some(text) = row.spanning {
+                if let Some(index) = self.rows[first_row..]
+                    .iter()
+                    .position(|row| row.marker.is_none() && row.text == text)
+                {
+                    self.split.push(SplitRow {
+                        heading: Some(first_row + index),
+                        old: None,
+                        new: None,
+                    });
+                }
+            } else {
+                self.split.push(SplitRow {
+                    heading: None,
+                    old: row
+                        .old
+                        .and_then(|cell| cell.number)
+                        .and_then(|number| old.get(&number).copied()),
+                    new: row
+                        .new
+                        .and_then(|cell| cell.number)
+                        .and_then(|number| new.get(&number).copied()),
+                });
             }
         }
     }

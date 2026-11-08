@@ -346,6 +346,43 @@ impl PromptState {
         self.selected_completion = None;
     }
 
+    /// Move to an adjacent logical line without splitting a grapheme.
+    pub fn move_vertical(&mut self, up: bool) {
+        use unicode_segmentation::UnicodeSegmentation;
+        use unicode_width::UnicodeWidthStr;
+        if self.confirmation.is_some() || !self.input.is_char_boundary(self.cursor) {
+            return;
+        }
+        let start = self.input[..self.cursor].rfind('\n').map_or(0, |at| at + 1);
+        let column: usize = self.input[start..self.cursor]
+            .graphemes(true)
+            .map(|g| g.width().max(1))
+            .sum();
+        let target = if up {
+            if start == 0 {
+                return;
+            }
+            self.input[..start - 1].rfind('\n').map_or(0, |at| at + 1)
+        } else {
+            let Some(end) = self.input[self.cursor..].find('\n') else {
+                return;
+            };
+            self.cursor + end + 1
+        };
+        let end = self.input[target..]
+            .find('\n')
+            .map_or(self.input.len(), |at| target + at);
+        let mut width = 0;
+        self.cursor = target;
+        for g in self.input[target..end].graphemes(true) {
+            width += g.width().max(1);
+            if width > column {
+                break;
+            }
+            self.cursor += g.len();
+        }
+    }
+
     #[must_use]
     pub fn new(kind: PromptKind) -> Self {
         Self {

@@ -576,6 +576,14 @@ fn queue_style(
             &derived
         }
         Style::Selection => &theme.styles.selection,
+        Style::GitSelected(group) => {
+            derived = theme.git_selection(group);
+            &derived
+        }
+        Style::GitDiff { added, syntax } => {
+            derived = theme.git_diff(added, syntax);
+            &derived
+        }
         Style::Search => &theme.styles.search,
         Style::Error => &theme.styles.error,
         Style::Warning => &theme.styles.warning,

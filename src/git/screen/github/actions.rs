@@ -1,6 +1,6 @@
 use super::*;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(in crate::git::screen) enum Action {
     OpenItem(usize, u64),
     Filter,
@@ -31,6 +31,7 @@ pub(in crate::git::screen) enum Action {
     Run(u64),
     Job(u64),
     Step(u64, u64),
+    FullLog(u64),
     Dispatch(u64),
     Cancel(u64),
     Rerun(u64),
@@ -49,6 +50,7 @@ impl Action {
                 | Self::Run(_)
                 | Self::Job(_)
                 | Self::Step(..)
+                | Self::FullLog(_)
                 | Self::Attempt(_)
         )
     }
@@ -141,11 +143,15 @@ impl Workspace {
             Action::Step(job, step) => {
                 if !self.expanded_steps.remove(&(*job, *step)) {
                     self.expanded_steps.insert((*job, *step));
-                    self.enqueue(
-                        Key::Log(*job),
-                        self.cli(&["run", "view", "--job", &job.to_string(), "--log"]),
-                    );
                 }
+                self.ensure();
+                return Ok(None);
+            }
+            Action::FullLog(job) => {
+                if !self.full_logs.remove(job) {
+                    self.full_logs.insert(*job);
+                }
+                self.ensure();
                 return Ok(None);
             }
             Action::Filter => {

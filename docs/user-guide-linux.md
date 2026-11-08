@@ -226,7 +226,9 @@ Use `1` Changes, `2` Branches, `3` Commits, and `4` Stashes. `Ctrl-h/j/k/l`
 moves between panes; `j/k` selects rows. Source previews and working-tree, staged,
 commit and stash diffs use Dust's syntax highlighting, with line numbers and
 separate addition/deletion markers. In the preview, `h/l` or Left/Right scroll
-horizontally while the line-number gutter stays fixed. The Changes tree
+horizontally while the line-number gutter stays fixed. Wide Git previews show
+aligned, syntax-highlighted before/after columns with tinted changes; `s` in the
+preview toggles split/unified layout. The Changes tree
 expands/collapses with `l/h`. `H/L` cycles Branches, Worktrees, Remotes and Tags. Enter opens files in
 Dust, or `$VISUAL`/`$EDITOR` from the standalone tool. Worktree Enter opens that
 repository. Branch Enter confirms checkout. `v` switches Changes/All files,
@@ -254,7 +256,11 @@ Actions keeps workflow definitions and dispatch separate from run history.
 `Ctrl-h/l` changes column; `Ctrl-j/k` switches workflows/run history. Dispatch
 forms use the workflow's required fields, defaults, boolean and choice inputs.
 Run details expose attempts, matrix jobs, dependencies, steps, expandable logs,
-cancellation and reruns. Remote writes require explicit form submission.
+cancellation and reruns. Run rows include workflow, branch and ID. Running status
+refreshes automatically, and expanded logs load when the job completes. If GitHub
+omits step names, timestamp-matched output is labelled; Full job log remains
+available without guessing step boundaries. Empty lists retain the terminal
+cursor. Remote writes require explicit form submission.
 
 On a conflicted file, Enter opens a side-selection form; `o/t` choose ours/theirs.
 The replacement stays unstaged until Space. `C` confirms continuation of a resolved

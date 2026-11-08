@@ -53,9 +53,14 @@ jobs:
       - run: cargo test
 """
 run = {"databaseId": 91, "displayTitle": "Validate native workspace", "workflowName": "Native CI", "workflowDatabaseId": 31, "headBranch": "main", "headSha": "a"*40, "event": "push", "attempt": 2, "status": "completed", "conclusion": "success", "jobs": [{"databaseId": 41, "name": "build", "status": "completed", "conclusion": "success", "steps": [{"name": "Build", "number": 1, "status": "completed", "conclusion": "success"}]}, {"databaseId": 42, "name": "test (linux)", "status": "completed", "conclusion": "success", "steps": [{"name": "Check", "number": 1, "status": "completed", "conclusion": "success"}]}, {"databaseId": 43, "name": "test (windows)", "status": "completed", "conclusion": "success", "steps": []}]}
+if args[:2] == ["run", "view"] and "--log" not in args:
+    state["run_views"] = state.get("run_views", 0) + 1
+if state.get("run_views", 0) < 2:
+    run.update(status="in_progress", conclusion="")
+    run["jobs"][1].update(status="in_progress", conclusion="")
 if args[:2] == ["repo", "view"]:
     emit({"nameWithOwner": "example/demo", "url": "https://github.com/example/demo", "defaultBranchRef": {"name": "main"}})
-if args[:2] == ["issue", "list"]: emit([item])
+if args[:2] == ["issue", "list"]: emit([] if state.get("empty") else [item])
 if args[:2] == ["pr", "list"]: emit([pr])
 if args[:2] == ["issue", "view"]: emit(item)
 if args[:2] == ["pr", "view"]: emit(pr)
@@ -64,7 +69,12 @@ if args[:2] == ["pr", "diff"]:
 if args[:2] == ["workflow", "view"]: emit(workflow)
 if args[:2] == ["run", "list"]: emit([run])
 if args[:2] == ["run", "view"]:
-    if "--log" in args: emit("test (linux)\tCheck\t2026-11-08T10:00:00Z all native checks passed\n")
+    if "--log" in args:
+        emit("test (linux)\tUNKNOWN STEP\t\ufeff2026-11-08T09:59:58.100Z Current runner version: fixture\n"
+             "test (linux)\tUNKNOWN STEP\t2026-11-08T10:00:00.200Z \x1b[32mall native checks passed\x1b[0m\n")
+    for job in run["jobs"]:
+        for step in job["steps"]:
+            step.update(startedAt="2026-11-08T10:00:00Z", completedAt="2026-11-08T10:00:01Z")
     emit(run)
 if args and args[0] == "api":
     if "graphql" in args:
