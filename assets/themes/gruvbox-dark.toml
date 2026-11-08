@@ -1,0 +1,679 @@
+# Dust semantic-role port; palette attribution: README.md and ../../LICENSES/MIT-gruvbox.txt
+name = "gruvbox-dark"
+
+[styles.default]
+foreground = "#ebdbb2"
+background = "#282828"
+foreground_256 = "indexed:187"
+background_256 = "indexed:235"
+foreground_16 = "white"
+background_16 = "black"
+attributes = []
+
+[styles.muted]
+foreground = "#bdae93"
+background = "#282828"
+foreground_256 = "indexed:144"
+background_256 = "indexed:235"
+foreground_16 = "grey"
+background_16 = "black"
+attributes = []
+
+[styles.accent]
+foreground = "#83a598"
+background = "#282828"
+foreground_256 = "indexed:108"
+background_256 = "indexed:235"
+foreground_16 = "blue"
+background_16 = "black"
+attributes = ["bold"]
+
+[styles.status]
+foreground = "#ebdbb2"
+background = "#1d2021"
+foreground_256 = "indexed:187"
+background_256 = "indexed:234"
+foreground_16 = "white"
+background_16 = "black"
+attributes = []
+
+[styles.status_accent]
+foreground = "#282828"
+background = "#83a598"
+foreground_256 = "indexed:235"
+background_256 = "indexed:108"
+foreground_16 = "white"
+background_16 = "dark_blue"
+attributes = ["bold"]
+
+[styles.selection]
+foreground = "#ebdbb2"
+background = "#504945"
+foreground_256 = "indexed:187"
+background_256 = "indexed:239"
+foreground_16 = "white"
+background_16 = "dark_grey"
+attributes = []
+
+[styles.search]
+foreground = "#282828"
+background = "#fabd2f"
+foreground_256 = "indexed:235"
+background_256 = "indexed:214"
+foreground_16 = "white"
+background_16 = "dark_yellow"
+attributes = []
+
+[styles.error]
+foreground = "#fb4934"
+background = "#282828"
+foreground_256 = "indexed:203"
+background_256 = "indexed:235"
+foreground_16 = "red"
+background_16 = "black"
+attributes = ["bold"]
+
+[styles.warning]
+foreground = "#fabd2f"
+background = "#282828"
+foreground_256 = "indexed:214"
+background_256 = "indexed:235"
+foreground_16 = "yellow"
+background_16 = "black"
+attributes = []
+
+[styles.border]
+foreground = "#665c54"
+background = "#282828"
+foreground_256 = "indexed:59"
+background_256 = "indexed:235"
+foreground_16 = "white"
+background_16 = "black"
+attributes = []
+
+[styles.buffer_line_background]
+foreground = "#bdae93"
+background = "#282828"
+foreground_256 = "indexed:144"
+background_256 = "indexed:235"
+foreground_16 = "grey"
+background_16 = "black"
+attributes = []
+
+[styles.buffer_line_active]
+foreground = "#ebdbb2"
+background = "#3c3836"
+foreground_256 = "indexed:187"
+background_256 = "indexed:237"
+foreground_16 = "white"
+background_16 = "black"
+attributes = ["bold"]
+
+[styles.buffer_line_inactive]
+foreground = "#bdae93"
+background = "#282828"
+foreground_256 = "indexed:144"
+background_256 = "indexed:235"
+foreground_16 = "grey"
+background_16 = "black"
+attributes = []
+
+[styles.buffer_line_dirty]
+foreground = "#fb4934"
+background = "#3c3836"
+foreground_256 = "indexed:203"
+background_256 = "indexed:237"
+foreground_16 = "red"
+background_16 = "black"
+attributes = ["bold"]
+
+[styles.buffer_line_icon]
+foreground = "#bdae93"
+background = "#3c3836"
+foreground_256 = "indexed:144"
+background_256 = "indexed:237"
+foreground_16 = "grey"
+background_16 = "black"
+attributes = []
+
+[styles.buffer_line_pin]
+foreground = "#d3869b"
+background = "#3c3836"
+foreground_256 = "indexed:174"
+background_256 = "indexed:237"
+foreground_16 = "magenta"
+background_16 = "black"
+attributes = []
+
+[styles.buffer_line_diagnostic]
+foreground = "#fe8019"
+background = "#3c3836"
+foreground_256 = "indexed:208"
+background_256 = "indexed:237"
+foreground_16 = "yellow"
+background_16 = "black"
+attributes = []
+
+[styles.buffer_line_close]
+foreground = "#bdae93"
+background = "#3c3836"
+foreground_256 = "indexed:144"
+background_256 = "indexed:237"
+foreground_16 = "grey"
+background_16 = "black"
+attributes = []
+
+[styles.buffer_line_separator]
+foreground = "#665c54"
+background = "#282828"
+foreground_256 = "indexed:59"
+background_256 = "indexed:235"
+foreground_16 = "white"
+background_16 = "black"
+attributes = []
+
+[styles.key_hint_background]
+foreground = "#ebdbb2"
+background = "#3c3836"
+foreground_256 = "indexed:187"
+background_256 = "indexed:237"
+foreground_16 = "white"
+background_16 = "black"
+attributes = []
+
+[styles.key_hint_border]
+foreground = "#665c54"
+background = "#3c3836"
+foreground_256 = "indexed:59"
+background_256 = "indexed:237"
+foreground_16 = "white"
+background_16 = "black"
+attributes = []
+
+[styles.key_hint_key]
+foreground = "#83a598"
+background = "#3c3836"
+foreground_256 = "indexed:108"
+background_256 = "indexed:237"
+foreground_16 = "blue"
+background_16 = "black"
+attributes = ["bold"]
+
+[styles.key_hint_group]
+foreground = "#d3869b"
+background = "#3c3836"
+foreground_256 = "indexed:174"
+background_256 = "indexed:237"
+foreground_16 = "magenta"
+background_16 = "black"
+attributes = ["bold"]
+
+[styles.key_hint_command]
+foreground = "#ebdbb2"
+background = "#3c3836"
+foreground_256 = "indexed:187"
+background_256 = "indexed:237"
+foreground_16 = "white"
+background_16 = "black"
+attributes = []
+
+[styles.key_hint_prefix]
+foreground = "#bdae93"
+background = "#3c3836"
+foreground_256 = "indexed:144"
+background_256 = "indexed:237"
+foreground_16 = "grey"
+background_16 = "black"
+attributes = []
+
+[styles.documentation_background]
+foreground = "#ebdbb2"
+background = "#3c3836"
+foreground_256 = "indexed:187"
+background_256 = "indexed:237"
+foreground_16 = "white"
+background_16 = "black"
+attributes = []
+
+[styles.documentation_border]
+foreground = "#83a598"
+background = "#3c3836"
+foreground_256 = "indexed:108"
+background_256 = "indexed:237"
+foreground_16 = "blue"
+background_16 = "black"
+attributes = []
+
+[styles.documentation_title]
+foreground = "#d3869b"
+background = "#3c3836"
+foreground_256 = "indexed:174"
+background_256 = "indexed:237"
+foreground_16 = "magenta"
+background_16 = "black"
+attributes = ["bold"]
+
+[styles.documentation_text]
+foreground = "#ebdbb2"
+background = "#3c3836"
+foreground_256 = "indexed:187"
+background_256 = "indexed:237"
+foreground_16 = "white"
+background_16 = "black"
+attributes = []
+
+[styles.git_sign_added]
+foreground = "#b8bb26"
+background = "#282828"
+foreground_256 = "indexed:142"
+background_256 = "indexed:235"
+foreground_16 = "green"
+background_16 = "black"
+attributes = []
+
+[styles.git_sign_changed]
+foreground = "#fabd2f"
+background = "#282828"
+foreground_256 = "indexed:214"
+background_256 = "indexed:235"
+foreground_16 = "yellow"
+background_16 = "black"
+attributes = []
+
+[styles.git_sign_deleted]
+foreground = "#fb4934"
+background = "#282828"
+foreground_256 = "indexed:203"
+background_256 = "indexed:235"
+foreground_16 = "red"
+background_16 = "black"
+attributes = []
+
+[styles.explorer_background]
+foreground = "#ebdbb2"
+background = "#282828"
+foreground_256 = "indexed:187"
+background_256 = "indexed:235"
+foreground_16 = "white"
+background_16 = "black"
+attributes = []
+
+[styles.explorer_header]
+foreground = "#83a598"
+background = "#1d2021"
+foreground_256 = "indexed:108"
+background_256 = "indexed:234"
+foreground_16 = "blue"
+background_16 = "black"
+attributes = ["bold"]
+
+[styles.explorer_count]
+foreground = "#bdae93"
+background = "#1d2021"
+foreground_256 = "indexed:144"
+background_256 = "indexed:234"
+foreground_16 = "grey"
+background_16 = "black"
+attributes = []
+
+[styles.explorer_tree]
+foreground = "#7c6f64"
+background = "#282828"
+foreground_256 = "indexed:242"
+background_256 = "indexed:235"
+foreground_16 = "white"
+background_16 = "black"
+attributes = []
+
+[styles.explorer_icon]
+foreground = "#bdae93"
+background = "#282828"
+foreground_256 = "indexed:144"
+background_256 = "indexed:235"
+foreground_16 = "grey"
+background_16 = "black"
+attributes = []
+
+[styles.explorer_directory]
+foreground = "#83a598"
+background = "#282828"
+foreground_256 = "indexed:108"
+background_256 = "indexed:235"
+foreground_16 = "blue"
+background_16 = "black"
+attributes = []
+
+[styles.explorer_file]
+foreground = "#ebdbb2"
+background = "#282828"
+foreground_256 = "indexed:187"
+background_256 = "indexed:235"
+foreground_16 = "white"
+background_16 = "black"
+attributes = []
+
+[styles.explorer_symlink]
+foreground = "#d3869b"
+background = "#282828"
+foreground_256 = "indexed:174"
+background_256 = "indexed:235"
+foreground_16 = "magenta"
+background_16 = "black"
+attributes = []
+
+[styles.explorer_git]
+foreground = "#fabd2f"
+background = "#282828"
+foreground_256 = "indexed:214"
+background_256 = "indexed:235"
+foreground_16 = "yellow"
+background_16 = "black"
+attributes = []
+
+[styles.explorer_diagnostic]
+foreground = "#fb4934"
+background = "#282828"
+foreground_256 = "indexed:203"
+background_256 = "indexed:235"
+foreground_16 = "red"
+background_16 = "black"
+attributes = []
+
+[styles.explorer_decoration]
+foreground = "#bdae93"
+background = "#282828"
+foreground_256 = "indexed:144"
+background_256 = "indexed:235"
+foreground_16 = "grey"
+background_16 = "black"
+attributes = []
+
+[styles.explorer_selection]
+foreground = "#ebdbb2"
+background = "#504945"
+foreground_256 = "indexed:187"
+background_256 = "indexed:239"
+foreground_16 = "white"
+background_16 = "dark_grey"
+attributes = []
+
+[styles.explorer_border]
+foreground = "#665c54"
+background = "#282828"
+foreground_256 = "indexed:59"
+background_256 = "indexed:235"
+foreground_16 = "white"
+background_16 = "black"
+attributes = []
+
+[styles.terminal_background]
+foreground = "#ebdbb2"
+background = "#1d2021"
+foreground_256 = "indexed:187"
+background_256 = "indexed:234"
+foreground_16 = "white"
+background_16 = "black"
+attributes = []
+
+[styles.terminal_border]
+foreground = "#665c54"
+background = "#1d2021"
+foreground_256 = "indexed:59"
+background_256 = "indexed:234"
+foreground_16 = "white"
+background_16 = "black"
+attributes = []
+
+[styles.terminal_title]
+foreground = "#83a598"
+background = "#1d2021"
+foreground_256 = "indexed:108"
+background_256 = "indexed:234"
+foreground_16 = "blue"
+background_16 = "black"
+attributes = ["bold"]
+
+[styles.terminal_status]
+foreground = "#bdae93"
+background = "#1d2021"
+foreground_256 = "indexed:144"
+background_256 = "indexed:234"
+foreground_16 = "grey"
+background_16 = "black"
+attributes = []
+
+[styles.terminal_status_accent]
+foreground = "#282828"
+background = "#83a598"
+foreground_256 = "indexed:235"
+background_256 = "indexed:108"
+foreground_16 = "white"
+background_16 = "dark_blue"
+attributes = ["bold"]
+
+[styles.terminal_text]
+foreground = "#ebdbb2"
+background = "#1d2021"
+foreground_256 = "indexed:187"
+background_256 = "indexed:234"
+foreground_16 = "white"
+background_16 = "black"
+attributes = []
+
+[highlights]
+# From the Neovim colorscheme, dumped with scripts/nvim-highlights.lua.
+"@attribute" = { link = "PreProc" }
+"@attribute.builtin" = { link = "Special" }
+"@boolean" = { link = "Boolean" }
+"@character" = { link = "Character" }
+"@character.special" = { link = "SpecialChar" }
+"@comment" = { link = "Comment" }
+"@comment.error" = { link = "ErrorMsg" }
+"@comment.note" = { link = "SpecialComment" }
+"@comment.todo" = { link = "Todo" }
+"@comment.warning" = { link = "WarningMsg" }
+"@conditional" = { link = "Conditional" }
+"@constant" = { link = "Constant" }
+"@constant.builtin" = { link = "Special" }
+"@constant.macro" = { link = "Define" }
+"@constructor" = { link = "Special" }
+"@debug" = { link = "Debug" }
+"@define" = { link = "Define" }
+"@diff.delta" = { link = "diffChanged" }
+"@diff.minus" = { link = "diffRemoved" }
+"@diff.plus" = { link = "diffAdded" }
+"@exception" = { link = "Exception" }
+"@field" = { link = "Identifier" }
+"@float" = { link = "Float" }
+"@function" = { link = "Function" }
+"@function.builtin" = { link = "Special" }
+"@function.call" = { link = "Function" }
+"@function.macro" = { link = "Macro" }
+"@function.method" = { link = "Function" }
+"@include" = { link = "Include" }
+"@keyword" = { link = "Keyword" }
+"@keyword.conditional" = { link = "Conditional" }
+"@keyword.debug" = { link = "Debug" }
+"@keyword.directive" = { link = "PreProc" }
+"@keyword.directive.define" = { link = "Define" }
+"@keyword.exception" = { link = "Exception" }
+"@keyword.function" = { link = "Keyword" }
+"@keyword.import" = { link = "Include" }
+"@keyword.operator" = { link = "GruvboxRed" }
+"@keyword.repeat" = { link = "Repeat" }
+"@keyword.return" = { link = "Keyword" }
+"@keyword.storage" = { link = "StorageClass" }
+"@label" = { link = "Label" }
+"@lsp.mod.deprecated" = { link = "DiagnosticDeprecated" }
+"@lsp.type.class" = { link = "@type" }
+"@lsp.type.comment" = { link = "@comment" }
+"@lsp.type.decorator" = { link = "@macro" }
+"@lsp.type.enum" = { link = "@type" }
+"@lsp.type.enumMember" = { link = "@constant" }
+"@lsp.type.event" = { link = "@type" }
+"@lsp.type.function" = { link = "@function" }
+"@lsp.type.interface" = { link = "@constructor" }
+"@lsp.type.keyword" = { link = "@keyword" }
+"@lsp.type.macro" = { link = "@macro" }
+"@lsp.type.method" = { link = "@method" }
+"@lsp.type.modifier" = { link = "@type.qualifier" }
+"@lsp.type.modifier.java" = { link = "@keyword.type.java" }
+"@lsp.type.namespace" = { link = "@namespace" }
+"@lsp.type.number" = { link = "@number" }
+"@lsp.type.operator" = { link = "@operator" }
+"@lsp.type.parameter" = { link = "@parameter" }
+"@lsp.type.property" = { link = "@property" }
+"@lsp.type.regexp" = { link = "@string.regexp" }
+"@lsp.type.string" = { link = "@string" }
+"@lsp.type.struct" = { link = "@type" }
+"@lsp.type.type" = { link = "@type" }
+"@lsp.type.typeParameter" = { link = "@type.definition" }
+"@lsp.type.variable" = { link = "@variable" }
+"@macro" = { link = "Macro" }
+"@markup" = { link = "GruvboxFg1" }
+"@markup.environment" = { link = "Macro" }
+"@markup.environment.name" = { link = "Type" }
+"@markup.heading" = { link = "Title" }
+"@markup.heading.1.delimiter.vimdoc" = { fg = "#282828", bg = "#282828" }
+"@markup.heading.2.delimiter.vimdoc" = { fg = "#282828", bg = "#282828", underline = true }
+"@markup.italic" = { link = "@text.emphasis" }
+"@markup.link" = { link = "Underlined" }
+"@markup.link.label" = { link = "SpecialChar" }
+"@markup.list" = { link = "Delimiter" }
+"@markup.list.checked" = { link = "GruvboxGreen" }
+"@markup.list.unchecked" = { link = "GruvboxGray" }
+"@markup.math" = { link = "Special" }
+"@markup.raw" = { link = "String" }
+"@markup.strikethrough" = { strikethrough = true }
+"@markup.strong" = { bold = true }
+"@markup.underline" = { underline = true }
+"@method" = { link = "Function" }
+"@method.call" = { link = "Function" }
+"@module" = { link = "GruvboxFg1" }
+"@module.builtin" = { link = "Special" }
+"@namespace" = { link = "GruvboxFg1" }
+"@none" = {  }
+"@number" = { link = "Number" }
+"@number.float" = { link = "Float" }
+"@operator" = { link = "Operator" }
+"@parameter" = { link = "Identifier" }
+"@preproc" = { link = "PreProc" }
+"@property" = { link = "Identifier" }
+"@punctuation" = { link = "Delimiter" }
+"@punctuation.bracket" = { link = "Delimiter" }
+"@punctuation.delimiter" = { link = "Delimiter" }
+"@punctuation.special" = { link = "Delimiter" }
+"@repeat" = { link = "Repeat" }
+"@storageclass" = { link = "StorageClass" }
+"@string" = { link = "String" }
+"@string.escape" = { link = "SpecialChar" }
+"@string.regex" = { link = "String" }
+"@string.regexp" = { link = "String" }
+"@string.special" = { link = "SpecialChar" }
+"@string.special.path" = { link = "Underlined" }
+"@string.special.symbol" = { link = "Identifier" }
+"@string.special.url" = { link = "Underlined" }
+"@structure" = { link = "Structure" }
+"@symbol" = { link = "Identifier" }
+"@tag" = { link = "Tag" }
+"@tag.attribute" = { link = "Identifier" }
+"@tag.builtin" = { link = "Special" }
+"@tag.delimiter" = { link = "Delimiter" }
+"@text" = { link = "GruvboxFg1" }
+"@text.danger" = { link = "ErrorMsg" }
+"@text.danger.comment" = { fg = "#fbf1c7", bg = "#fb4934", bold = true }
+"@text.diff.add" = { link = "diffAdded" }
+"@text.diff.delete" = { link = "diffRemoved" }
+"@text.emphasis" = { italic = true }
+"@text.environment" = { link = "Macro" }
+"@text.environment.name" = { link = "Type" }
+"@text.literal" = { link = "String" }
+"@text.math" = { link = "Special" }
+"@text.note" = { link = "SpecialComment" }
+"@text.note.comment" = { fg = "#d3869b", bold = true }
+"@text.reference" = { link = "Constant" }
+"@text.strike" = { strikethrough = true }
+"@text.strong" = { bold = true }
+"@text.title" = { link = "Title" }
+"@text.todo" = { link = "Todo" }
+"@text.todo.checked" = { link = "GruvboxGreen" }
+"@text.todo.unchecked" = { link = "GruvboxGray" }
+"@text.underline" = { underline = true }
+"@text.uri" = { link = "Underlined" }
+"@text.warning" = { link = "WarningMsg" }
+"@type" = { link = "Type" }
+"@type.builtin" = { link = "Type" }
+"@type.definition" = { link = "Typedef" }
+"@type.qualifier" = { link = "Type" }
+"@variable" = { link = "GruvboxFg1" }
+"@variable.builtin" = { link = "Special" }
+"@variable.member" = { link = "Identifier" }
+"@variable.parameter" = { link = "Identifier" }
+"@variable.parameter.builtin" = { link = "Special" }
+"Added" = { fg = "#b3f6c0" }
+"Boolean" = { link = "GruvboxPurple" }
+"Changed" = { fg = "#8cf8f7" }
+"Character" = { link = "GruvboxPurple" }
+"Comment" = { fg = "#928374", italic = true }
+"Conditional" = { link = "GruvboxRed" }
+"Constant" = { link = "GruvboxPurple" }
+"Debug" = { link = "Special" }
+"Define" = { link = "GruvboxAqua" }
+"Delimiter" = { link = "GruvboxOrange" }
+"DiagnosticDeprecated" = { strikethrough = true }
+"DiagnosticError" = { link = "GruvboxRed" }
+"DiagnosticHint" = { link = "GruvboxAqua" }
+"DiagnosticInfo" = { link = "GruvboxBlue" }
+"DiagnosticOk" = { link = "GruvboxGreen" }
+"DiagnosticUnnecessary" = { link = "Comment" }
+"DiagnosticWarn" = { link = "GruvboxYellow" }
+"DiffAdd" = { bg = "#62693e" }
+"DiffChange" = { bg = "#49503b" }
+"DiffDelete" = { bg = "#722529" }
+"DiffText" = { fg = "#282828", bg = "#fabd2f" }
+"Error" = { fg = "#fb4934", bold = true, reverse = true }
+"ErrorMsg" = { fg = "#282828", bg = "#fb4934", bold = true }
+"Exception" = { link = "GruvboxRed" }
+"Float" = { link = "GruvboxPurple" }
+"Function" = { link = "GruvboxGreenBold" }
+"GruvboxAqua" = { fg = "#8ec07c" }
+"GruvboxBlue" = { fg = "#83a598" }
+"GruvboxFg1" = { fg = "#ebdbb2" }
+"GruvboxGray" = { fg = "#928374" }
+"GruvboxGreen" = { fg = "#b8bb26" }
+"GruvboxGreenBold" = { fg = "#b8bb26", bold = true }
+"GruvboxOrange" = { fg = "#fe8019" }
+"GruvboxPurple" = { fg = "#d3869b" }
+"GruvboxRed" = { fg = "#fb4934" }
+"GruvboxRedBold" = { fg = "#fb4934", bold = true }
+"GruvboxYellow" = { fg = "#fabd2f" }
+"Identifier" = { link = "GruvboxBlue" }
+"Ignore" = { link = "Normal" }
+"Include" = { link = "GruvboxAqua" }
+"Keyword" = { link = "GruvboxRed" }
+"Label" = { link = "GruvboxRed" }
+"Macro" = { link = "GruvboxAqua" }
+"Normal" = { fg = "#ebdbb2" }
+"Number" = { link = "GruvboxPurple" }
+"Operator" = { fg = "#fe8019" }
+"PreCondit" = { link = "GruvboxAqua" }
+"PreProc" = { link = "GruvboxAqua" }
+"Removed" = { fg = "#ffc0b9" }
+"Repeat" = { link = "GruvboxRed" }
+"Special" = { link = "GruvboxOrange" }
+"SpecialChar" = { link = "Special" }
+"SpecialComment" = { link = "Special" }
+"Statement" = { link = "GruvboxRed" }
+"StorageClass" = { link = "GruvboxOrange" }
+"String" = { fg = "#b8bb26", italic = true }
+"Structure" = { link = "GruvboxAqua" }
+"Tag" = { link = "Special" }
+"Title" = { link = "GruvboxGreenBold" }
+"Todo" = { fg = "#282828", bg = "#fabd2f", bold = true, italic = true }
+"Type" = { link = "GruvboxYellow" }
+"Typedef" = { link = "GruvboxYellow" }
+"Underlined" = { fg = "#83a598", underline = true }
+"WarningMsg" = { link = "GruvboxRedBold" }
+"diffAdded" = { link = "DiffAdd" }
+"diffChanged" = { link = "DiffChange" }
+"diffRemoved" = { link = "DiffDelete" }

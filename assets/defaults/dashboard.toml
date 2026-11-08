@@ -1,0 +1,68 @@
+# The start screen. `logo` shows when the window is big enough, `identity` otherwise.
+logo = """
+██████╗ ██╗   ██╗███████╗████████╗
+██╔══██╗██║   ██║██╔════╝╚══██╔══╝
+██║  ██║██║   ██║███████╗   ██║
+██║  ██║██║   ██║╚════██║   ██║
+██████╔╝╚██████╔╝███████║   ██║
+╚═════╝  ╚═════╝ ╚══════╝   ╚═╝"""
+show_identity = true
+identity = "D U S T"
+show_version = true
+version_format = "v{version}"
+show_path = true
+resize_message = "Dust — resize terminal"
+content_width = 50
+minimum_width = 20
+minimum_height = 7
+
+[[action]]
+command = "workspace.file.find"
+label = "Find File"
+icon = ""
+
+[[action]]
+command = "file.new"
+label = "New File"
+icon = ""
+
+[[action]]
+command = "workspace.search.prompt"
+label = "Find Text"
+icon = "\U000F021E"
+
+[[action]]
+command = "navigation.recents"
+label = "Recent Files"
+icon = ""
+
+[[action]]
+command = "explorer.open"
+label = "Explorer"
+icon = ""
+
+[[action]]
+command = "session.load"
+label = "Restore Session"
+icon = ""
+
+[[action]]
+command = "session.tutor"
+label = "Tutor — learn by editing"
+icon = "\U000F0186"
+
+[[action]]
+command = "plugin.list"
+label = "Plugins"
+icon = ""
+
+[[action]]
+command = "recovery.inspect"
+label = "Recover Unsaved Work"
+icon = "\U000F0BC4"
+
+[[action]]
+command = "editor.quit"
+label = "Quit"
+icon = ""
+arguments = { force = false }

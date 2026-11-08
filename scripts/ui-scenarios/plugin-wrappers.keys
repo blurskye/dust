@@ -1,0 +1,19 @@
+# Run with plugin-launch and an isolated working directory.
+wait 2500
+key escape
+wait 200
+type :
+wait 200
+type plugin.wrappersb.enable
+key enter
+wait 400
+type :
+wait 200
+type plugin.wrappersa.enable
+key enter
+wait 400
+key i x y escape
+wait 800
+key space n
+wait 300
+shot order

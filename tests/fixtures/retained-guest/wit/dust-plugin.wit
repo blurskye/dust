@@ -1,0 +1,521 @@
+// SPDX-License-Identifier: Apache-2.0
+// Public plugin ABI; see LICENSES/Apache-2.0.txt.
+package dust:plugin@0.4.0;
+
+interface host {
+  record snapshot { buffer: u64, revision: u64, utf8: string }
+  record edit { start: u64, end: u64, replacement: string }
+
+  enum window-placement {
+    docked-left,
+    docked-right,
+    docked-top,
+    docked-bottom,
+    floating,
+    fullscreen,
+    hidden,
+  }
+
+  enum ui-node-kind { container, text, list-node, button }
+
+  enum ui-style { default, muted, accent, warning, error, selected, border }
+
+  record ui-node {
+    id: u64,
+    kind: ui-node-kind,
+    text: string,
+    style: ui-style,
+    action: option<string>,
+    children: list<u64>,
+  }
+
+  record ui-tree {
+    revision: u64,
+    root: u64,
+    nodes: list<ui-node>,
+  }
+
+  record open-window-request {
+    expected-graph-revision: u64,
+    content-type: string,
+    title: string,
+    placement: window-placement,
+    x: u16,
+    y: u16,
+    width: u16,
+    height: u16,
+    size: u16,
+    tree: option<ui-tree>,
+  }
+
+  record replace-ui-request {
+    handle: u64,
+    expected-tree-revision: u64,
+    tree: ui-tree,
+  }
+
+  record place-window-request {
+    handle: u64,
+    expected-graph-revision: u64,
+    placement: window-placement,
+    x: u16,
+    y: u16,
+    width: u16,
+    height: u16,
+    size: u16,
+  }
+
+  record private-style { id: u16, style: ui-style }
+
+  record private-cell {
+    x: u16,
+    y: u16,
+    grapheme: string,
+    continuation: bool,
+    style: u16,
+  }
+
+  record private-rect { x: u16, y: u16, width: u16, height: u16 }
+  record private-cursor { x: u16, y: u16 }
+  record private-hit-region { x: u16, y: u16, width: u16, height: u16, action: string }
+
+  record private-snapshot {
+    revision: u64,
+    dimensions-revision: u64,
+    styles: list<private-style>,
+    cells: list<private-cell>,
+    cursor: option<private-cursor>,
+    hit-regions: list<private-hit-region>,
+  }
+
+  record replace-private-request { handle: u64, snapshot: private-snapshot }
+
+  record private-patch {
+    revision: u64,
+    expected-surface-revision: u64,
+    dimensions-revision: u64,
+    dirty: list<private-rect>,
+    styles: list<private-style>,
+    cells: list<private-cell>,
+    replace-cursor: bool,
+    cursor: option<private-cursor>,
+    replace-hit-regions: bool,
+    hit-regions: list<private-hit-region>,
+  }
+
+  record patch-private-request { handle: u64, patch: private-patch }
+
+  record checked-window-request {
+    handle: u64,
+    expected-graph-revision: u64,
+  }
+
+  variant ui-request {
+    open-window(open-window-request),
+    replace-ui(replace-ui-request),
+    place-window(place-window-request),
+    focus-window(checked-window-request),
+    close-window(checked-window-request),
+    replace-private(replace-private-request),
+    patch-private(patch-private-request),
+  }
+
+  enum ui-error-code {
+    queue-full,
+    stale-graph,
+    stale-tree,
+    stale-handle,
+    foreign-load,
+    undeclared-content,
+    undeclared-action,
+    disallowed-placement,
+    hidden-focus,
+    cross-tab,
+    instance-limit,
+    graph-limit,
+    invalid-tree,
+    invalid-placement,
+    close-order,
+    load-unavailable,
+    internal-rejected,
+    wrong-presenter,
+    stale-surface,
+    stale-dimensions,
+    invalid-local-bounds,
+    cell-overlap,
+    split-wide-grapheme,
+    invalid-grapheme,
+    invalid-style,
+    invalid-cursor,
+    invalid-hit-region,
+    patch-limit,
+  }
+
+  record ui-error { code: ui-error-code, detail: string }
+
+  record surface-geometry { handle: u64, width: u16, height: u16, dimensions-revision: u64 }
+
+  record ui-event {
+    token: u64,
+    handle: option<u64>,
+    graph-revision: option<u64>,
+    tree-revision: option<u64>,
+    surface-revision: option<u64>,
+    geometry: option<surface-geometry>,
+    action: option<string>,
+    error: option<ui-error>,
+  }
+
+  enum confirmation-answer { yes, no, cancelled }
+  enum confirmation-error-code { queue-full, invalid-request, load-unavailable, stale-source, unavailable }
+  record confirmation-error { code: confirmation-error-code, detail: string }
+  record confirmation-request {
+    title: string,
+    message: string,
+    default-answer: confirmation-answer,
+  }
+  variant confirmation-outcome {
+    answered(confirmation-answer),
+    failed(confirmation-error),
+  }
+  record confirmation-result { request: u64, outcome: confirmation-outcome }
+
+  enum host-event-kind {
+    workspace-metadata-changed,
+    active-surface-changed,
+    buffer-summary-changed,
+    plugin-surface-changed,
+  }
+
+  record host-event {
+    id: u64,
+    sequence: u64,
+    kind: host-event-kind,
+    revision: u64,
+    payload: string,
+    coalesced: u16,
+    dropped: u16,
+  }
+
+  record storage-cas-request {
+    key: string,
+    expected-revision: option<u64>,
+    value: list<u8>,
+  }
+  record storage-delete-request { key: string, expected-revision: u64 }
+  record storage-list-request { prefix: string, maximum: u16 }
+  variant storage-request {
+    get(string),
+    compare-and-set(storage-cas-request),
+    delete(storage-delete-request),
+    prefix-list(storage-list-request),
+  }
+  enum storage-error-code {
+    queue-full,
+    invalid-key,
+    invalid-value,
+    stale-revision,
+    quota-exceeded,
+    unavailable,
+    corrupt,
+    load-unavailable,
+  }
+  record storage-error { code: storage-error-code, detail: string }
+  record storage-entry { key: string, revision: u64, value: list<u8> }
+  record storage-result {
+    token: u64,
+    value: option<list<u8>>,
+    revision: option<u64>,
+    entries: list<storage-entry>,
+    truncated: bool,
+    error: option<storage-error>,
+  }
+
+  record picker-provider-request {
+    id: u64,
+    provider: string,
+    query: string,
+    context: string,
+    workspace-revision: option<u64>,
+    buffer-revision: option<u64>,
+    deadline-milliseconds: u32,
+    cancellation-id: u64,
+    maximum-items: u16,
+    maximum-bytes: u32,
+  }
+  record picker-provider-item {
+    id: string,
+    primary: string,
+    secondary: option<string>,
+    action-data: list<u8>,
+  }
+  enum provider-terminal-kind { more, complete, truncated, error }
+  enum provider-error-code {
+    queue-full,
+    unknown-request,
+    unknown-provider,
+    stale-load,
+    stale-revision,
+    cancelled,
+    expired,
+    invalid-sequence,
+    duplicate-item,
+    item-limit,
+    byte-limit,
+    malformed,
+    unavailable,
+    internal,
+  }
+  record provider-error { code: provider-error-code, detail: string }
+  record provider-terminal {
+    kind: provider-terminal-kind,
+    error: option<provider-error>,
+  }
+  record picker-provider-chunk {
+    request: u64,
+    sequence: u64,
+    items: list<picker-provider-item>,
+    terminal: provider-terminal,
+  }
+
+  enum virtual-document-request-kind { open, refresh, close-notice }
+  record virtual-document-request {
+    request: u64,
+    document: u64,
+    source: string,
+    key: string,
+    kind: virtual-document-request-kind,
+    current-revision: option<u64>,
+    deadline-milliseconds: u32,
+    cancellation-id: u64,
+    maximum-document-bytes: u32,
+    maximum-document-lines: u32,
+    maximum-patch-bytes: u32,
+    maximum-patches: u16,
+  }
+  record virtual-document-full {
+    expected-revision: option<u64>,
+    revision: u64,
+    title: string,
+    language: string,
+    text: string,
+  }
+  record virtual-document-patch { start: u32, end: u32, replacement: string }
+  record virtual-document-patch-set {
+    expected-revision: u64,
+    revision: u64,
+    patches: list<virtual-document-patch>,
+  }
+  enum virtual-document-error-code {
+    queue-full, unknown-source, unknown-request, unknown-document,
+    stale-load, stale-revision, cancelled, expired, invalid-title,
+    invalid-language, invalid-utf8-range, invalid-control, byte-limit,
+    line-limit, patch-limit, read-only, malformed, internal,
+  }
+  record virtual-document-error { code: virtual-document-error-code, detail: string }
+  variant virtual-document-proposal-kind {
+    full(virtual-document-full),
+    patches(virtual-document-patch-set),
+    close-acknowledged,
+    error(virtual-document-error),
+  }
+  record virtual-document-proposal {
+    request: u64,
+    document: u64,
+    cancellation-id: u64,
+    kind: virtual-document-proposal-kind,
+  }
+
+  // Values are postorder trees. Child indices must precede their parent; the
+  // final node is the root. This represents nested lists/records without JSON.
+  record value-field { name: string, value: u32 }
+  variant value-node {
+    text(string), boolean(bool), integer(s64), number(f64),
+    sequence(list<u32>), object(list<value-field>),
+  }
+  record command-value { nodes: list<value-node> }
+  record command-call {
+    command: string,
+    arguments: command-value,
+    buffer: option<u64>, view: option<u64>, count: option<u64>, register: option<char>,
+    pending: option<u64>, after: bool, previous: option<command-value>,
+  }
+  enum command-access { edit, ui, files, process, network }
+  enum argument-kind { text, boolean, integer, number, sequence, object }
+  record argument-field { name: string, kind: argument-kind, required: bool }
+  record command-definition { name: string, title: string, handler: string, arguments: list<argument-field>, result-kind: option<argument-kind>, access: list<command-access> }
+  record command-wrapper { command: string, handler: string, order: s32 }
+  record command-reply { request: u64, value: option<command-value>, error: option<string> }
+
+  enum base-mode { normal, insert, replace, visual-char, visual-line, visual-block, multi }
+  enum mode-cursor { default, block, bar, underline, blinking-block, blinking-bar, blinking-underline }
+  record key-binding { keys: string, command: string, arguments: command-value }
+  record key-layer { name: string, bindings: list<key-binding> }
+  record named-mode {
+    name: string, label: string, cursor: mode-cursor, layer: key-layer,
+    base: option<base-mode>, capture: option<string>,
+  }
+
+  enum gravity { left, right }
+  record mark { id: u64, start: u64, end: u64, start-gravity: gravity, end-gravity: gravity, decoration: option<mark-decoration> }
+  record mark-set { buffer: u64, revision: u64, namespace: string, marks: list<mark> }
+
+  record buffer-state { buffer: u64, revision: u64, text: string, dirty: bool, read-only: bool }
+  record view-state { view: u64, buffer: u64, cursor: u64, mode: string }
+  record editor-snapshot { buffers: list<buffer-state>, views: list<view-state>, active-view: option<u64>, workspace: string }
+  record buffer-change { buffer: u64, revision: u64, edits: list<edit> }
+  variant occurrence {
+    opened(u64), closed(u64), changed(buffer-change), saved(u64),
+    cursor(view-state), mode(view-state), workspace(string),
+  }
+  record event-record { sequence: u64, value: occurrence }
+  record event-batch { sequence: u64, records: list<event-record>, snapshot: option<editor-snapshot> }
+
+  record completion-source { name: string, handler: string, inline: bool }
+  record completion-item { label: string, detail: option<string>, start: u64, end: u64, text: string, snippet: bool }
+  record completion-batch { source: string, request: u64, buffer: u64, revision: u64, items: list<completion-item>, incomplete: bool }
+  record lsp-filter { method: string, handler: string, order: s32 }
+
+  record timer-request { milliseconds: u32, handler: string }
+  record http-request { url: string, method: string, headers: list<tuple<string, string>>, body: list<u8>, handler: string }
+  record http-response { request: u64, status: u16, headers: list<tuple<string, string>>, body: list<u8>, error: option<string> }
+
+  // Imports enqueue work; editor owners apply it after the guest returns.
+  register-command: func(definition: command-definition) -> result<_, string>;
+  run-command: func(call: command-call) -> result<u64, string>;
+  call-next: func(pending: u64) -> result<_, string>;
+  set-command-result: func(value: command-value) -> result<_, string>;
+  take-command-replies: func() -> list<command-reply>;
+  wrap-command: func(wrapper: command-wrapper) -> result<_, string>;
+  enter-mode: func(mode: named-mode) -> result<_, string>;
+  leave-mode: func() -> result<_, string>;
+  push-key-layer: func(layer: key-layer) -> result<_, string>;
+  pop-key-layer: func(name: string) -> result<_, string>;
+  replace-marks: func(marks: mark-set) -> result<_, string>;
+  read-marks: func(buffer: u64, namespace: string) -> result<list<mark>, string>;
+  subscribe-events: func(handler: string) -> result<_, string>;
+  take-editor-events: func() -> option<event-batch>;
+  register-completion-source: func(source: completion-source) -> result<_, string>;
+  publish-completions: func(batch: completion-batch) -> result<_, string>;
+  filter-lsp: func(filter: lsp-filter) -> result<_, string>;
+  start-timer: func(request: timer-request) -> result<u64, string>;
+  cancel-timer: func(request: u64) -> result<_, string>;
+  request-http: func(request: http-request) -> result<u64, string>;
+  take-http-responses: func() -> list<http-response>;
+
+  current-view: func() -> option<view-state>;
+  current-buffer: func() -> result<snapshot, string>;
+  propose-edits: func(buffer: u64, revision: u64, edits: list<edit>) -> result<u64, string>;
+  show-message: func(message: string) -> result<_, string>;
+  config-get: func(key: string) -> option<string>;
+  // Immutable starting revision for queued UI proposals; it grants no graph handle.
+  current-ui-revision: func() -> option<u64>;
+
+  // These calls only enqueue bounded proposals in the component worker. The
+  // application validates and applies them asynchronously after execution.
+  queue-ui-request: func(request: ui-request) -> result<u64, ui-error>;
+  take-ui-events: func() -> list<ui-event>;
+
+  // Ordinary confirmation is a host-owned interaction, not a permission grant.
+  // A result is delivered once during a later command execution.
+  queue-confirmation: func(request: confirmation-request) -> result<u64, confirmation-error>;
+  take-confirmation-results: func() -> list<confirmation-result>;
+
+  // Subscription declarations are accepted before Component bytes. Delivery
+  // occurs only in a later command execution; acknowledgement is bounded and
+  // plugin load ownership remains host-private.
+  take-host-events: func() -> list<host-event>;
+  acknowledge-host-events: func(ids: list<u64>) -> result<_, string>;
+
+  // Storage requests contain logical keys only. The host derives plugin and
+  // load ownership and performs all persistence on a bounded worker.
+  queue-storage-request: func(request: storage-request) -> result<u64, storage-error>;
+  take-storage-results: func() -> list<storage-result>;
+
+  // Picker-source requests are delivered later. Chunks contain no command;
+  // the statically accepted provider declaration owns the only action command.
+  take-picker-provider-requests: func() -> list<picker-provider-request>;
+  queue-picker-provider-chunk: func(chunk: picker-provider-chunk) -> result<_, provider-error>;
+
+  // Read-only virtual documents are proposals only. Handles and source keys are
+  // opaque and never expose paths, editor IDs, graph IDs, or URI authority.
+  take-virtual-document-requests: func() -> list<virtual-document-request>;
+  queue-virtual-document-proposal: func(proposal: virtual-document-proposal) -> result<_, virtual-document-error>;
+
+  // Drawing: decorations on existing marks and namespaced diagnostics.
+  enum virtual-text-position { end-of-line, inline, overlay }
+  record virtual-text { text: string, style: string, position: virtual-text-position }
+  record mark-decoration { highlight: option<string>, virtual-text: option<virtual-text>, sign: option<styled-text> }
+  enum diagnostic-severity { error, warning, information, hint }
+  record diagnostic { start: u64, end: u64, severity: diagnostic-severity, message: string, source: string }
+  record diagnostic-set { buffer: u64, revision: u64, namespace: string, diagnostics: list<diagnostic> }
+  publish-diagnostics: func(diagnostics: diagnostic-set) -> result<_, string>;
+
+  // System access: workspace files, streaming processes and buffer syntax.
+  record process-start {
+    program: string, arguments: list<string>, cwd: string,
+    environment: list<tuple<string, string>>, stdin: option<list<u8>>, handler: string,
+  }
+  record process-input { process: u64, bytes: list<u8>, close: bool }
+  variant process-output { stdout(list<u8>), stderr(list<u8>), exited(option<s32>) }
+  record file-write { path: string, bytes: list<u8> }
+  record file-rename { source: string, target: string }
+  variant file-operation {
+    read(string), write(file-write), create-directory(string), list-directory(string),
+    stat(string), rename(file-rename), delete(string),
+  }
+  enum file-kind { file, directory, other }
+  record file-info { name: string, kind: file-kind, bytes: u64 }
+  variant file-value { done, bytes(list<u8>), entries(list<file-info>), info(file-info) }
+  record byte-range { start: u64, end: u64 }
+  record syntax-query { buffer: u64, query: string, range: option<byte-range> }
+  record syntax-node { kind: string, range: byte-range }
+  record syntax-capture { name: string, range: byte-range }
+  variant syntax-value { captures(list<syntax-capture>), nodes(list<syntax-node>) }
+  variant system-value { done, process(process-output), file(file-value), syntax(syntax-value) }
+  record system-event { request: u64, value: result<system-value, string> }
+  start-process: func(request: process-start) -> result<u64, string>;
+  write-process-stdin: func(input: process-input) -> result<u64, string>;
+  kill-process: func(process: u64) -> result<u64, string>;
+  request-file: func(operation: file-operation, handler: string) -> result<u64, string>;
+  query-syntax: func(query: syntax-query, handler: string) -> result<u64, string>;
+  node-at-position: func(buffer: u64, position: u64, handler: string) -> result<u64, string>;
+  take-system-events: func() -> list<system-event>;
+
+  // Surface: ordinary interactions, editable documents, save steps and chrome.
+  record editable-document { source: string, key: string, title: string, language: string, text: string }
+  record document-write { request: u64, buffer: u64, revision: u64, text: string }
+  record formatter { name: string, handler: string, order: s32 }
+  record format-request { request: u64, buffer: u64, revision: u64, start: option<u64>, end: option<u64>, before-save: bool }
+  record input-request { title: string, initial: string, secret: bool }
+  record select-item { id: string, label: string, detail: option<string> }
+  record select-request { title: string, items: list<select-item> }
+  enum notice-level { info, warning, error }
+  record notify-request { level: notice-level, message: string }
+  record styled-text { text: string, style: string }
+  enum segment-location { statusline, buffer-line }
+  record chrome-segment { name: string, location: segment-location, order: s32, text: list<styled-text>, command: option<string> }
+  enum presenter-kind { input, select, notifications }
+
+  // Replies use take-command-replies in the named handler; cancellation has no value.
+  ui-input: func(request: input-request, handler: string) -> result<u64, string>;
+  ui-select: func(request: select-request, handler: string) -> result<u64, string>;
+  notify: func(request: notify-request) -> result<_, string>;
+  // None restores the host presenter. Permission and confirmation UI is never replaced.
+  set-presenter: func(kind: presenter-kind, handler: option<string>) -> result<_, string>;
+  answer-input: func(request: u64, text: option<string>) -> result<_, string>;
+  answer-select: func(request: u64, item: option<string>) -> result<_, string>;
+  open-editable-document: func(document: editable-document, handler: string) -> result<u64, string>;
+  register-formatter: func(filetype: string, step: formatter) -> result<_, string>;
+  register-before-save: func(filetype: string, step: formatter) -> result<_, string>;
+  set-chrome-segment: func(segment: chrome-segment) -> result<_, string>;
+  remove-chrome-segment: func(location: segment-location, name: string) -> result<_, string>;
+}
+
+world editor-plugin {
+  import host;
+  export activate: func() -> result<list<string>, string>;
+  use host.{command-call};
+  // The string is an optional display message; structured results use set-command-result.
+  export execute-command: func(command: string, call: command-call) -> result<string, string>;
+}

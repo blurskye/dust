@@ -1,0 +1,71 @@
+Moving around
+
+    h  left      j  down      k  up      l  right
+
+    The X marks the spot.
+
+    A fly flew past, but you can reach this flash word in three keys.
+
+    First part, second part.
+
+    call(first, (second))
+
+Changing text
+
+    Thhe cow jumpped over thee moon.
+
+    Dust is a editor
+
+    Dust runs in a
+
+    Open a line below this one.
+
+    This line has has some some repeated repeated words.
+
+    DELETE THIS WHOLE LINE
+
+    This is a red apple.
+
+    Dusk is fast.
+
+    one line,
+    joined.
+
+    copy me
+
+Visual mode
+
+    alpha
+    beta
+    gamma
+
+    milk
+    eggs
+    bread
+    butter
+
+Search
+
+    The cat sat. The cat ran. Every cat naps.
+
+Power edits
+
+    A fox ran. A fox hid. A fox slept.
+
+    colour, colour, colour
+
+    scratch: remove me
+    keep me
+    scratch: and me
+
+    let size = 1; total = size + size;
+
+    item one, item two, item three
+
+    north
+    south
+    east
+
+    x = 1
+    y = 2
+    z = 3

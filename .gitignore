@@ -1,0 +1,26 @@
+/target
+/tests/fixtures/retained-guest/target/
+/examples/plugins/*/target/
+/hello
+__pycache__/
+*.pyc
+/references/
+/.dust-state/
+
+# Local credentials and agent artifacts
+.env
+.env.*
+!.env.example
+.secrets
+.vars
+*.key
+*.pem
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+session-ses_*.md
+pi-session-*.html
+/.dust-build/
+/dist/
+/.worktree/

@@ -1,0 +1,19 @@
+# Run with plugin-launch and an isolated working directory.
+wait 2500
+key escape
+wait 200
+type :
+wait 200
+type plugin.autopairs.enable
+key enter
+wait 600
+key i
+type (hello)
+wait 500
+shot pair
+key escape u
+wait 250
+shot undo
+key period
+wait 600
+shot repeat

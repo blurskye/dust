@@ -1,0 +1,41 @@
+name: linux
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: '23 3 * * 1'
+jobs:
+  implementation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.88.0
+      - run: scripts/qualify-linux.sh implementation
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.97.0
+        with: { components: clippy }
+      - run: scripts/qualify-linux.sh test
+      - run: scripts/qualify-linux.sh clippy
+  release-and-pty:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.97.0
+      - run: scripts/qualify-linux.sh release
+      - run: scripts/qualify-linux.sh pty
+  periodic-security-and-soak:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.97.0
+      - name: Advisory scan when cargo-audit is provisioned
+        run: scripts/qualify-linux.sh advisory || test $? -eq 77
+      - name: Fuzz smoke when targets/tool are provisioned
+        run: scripts/qualify-linux.sh fuzz || test $? -eq 77
+      - run: scripts/qualify-linux.sh soak
+      - run: scripts/qualify-linux.sh limited-terminal

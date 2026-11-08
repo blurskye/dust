@@ -1,0 +1,272 @@
+# Neovim's highlight groups: the names syntax captures, language-server tokens and themes share.
+# `[defaults]` are Neovim's own default links and attributes (dumped from `nvim --clean` with
+# scripts/nvim-highlights.lua), plus links from the older nvim-treesitter capture names. A theme's
+# `[highlights]` table overrides any of them, and a group nothing defines falls back to its parent:
+# `@function.method.call`, then `@function.method`, then `@function`.
+
+# Groups that have no default but that captures and tokens produce, so themes can colour them.
+names = [
+  # Markdown groups Neovim themes colour per language, tried before the general group.
+  "@markup.heading.1.markdown",
+  "@markup.heading.2.markdown",
+  "@markup.heading.3.markdown",
+  "@markup.heading.4.markdown",
+  "@markup.heading.5.markdown",
+  "@markup.heading.6.markdown",
+  "@markup.list.markdown",
+  "@punctuation.special.markdown",
+  "@markup.raw.markdown_inline",
+  "@markup.link.markdown_inline",
+  "@markup.link.label.markdown_inline",
+  "@comment.block",
+  "@comment.block.documentation",
+  "@comment.discard",
+  "@comment.documentation",
+  "@comment.unused",
+  "@constant.macro",
+  "@function.call",
+  "@function.macro",
+  "@function.method",
+  "@function.method.builtin",
+  "@function.method.call",
+  "@function.special",
+  "@keyword.conditional",
+  "@keyword.conditional.ternary",
+  "@keyword.coroutine",
+  "@keyword.debug",
+  "@keyword.directive",
+  "@keyword.directive.define",
+  "@keyword.exception",
+  "@keyword.function",
+  "@keyword.import",
+  "@keyword.modifier",
+  "@keyword.operator",
+  "@keyword.repeat",
+  "@keyword.return",
+  "@keyword.type",
+  "@lsp.type.angle",
+  "@lsp.type.arithmetic",
+  "@lsp.type.attribute",
+  "@lsp.type.attributeBracket",
+  "@lsp.type.bitwise",
+  "@lsp.type.boolean",
+  "@lsp.type.brace",
+  "@lsp.type.bracket",
+  "@lsp.type.builtinAttribute",
+  "@lsp.type.builtinType",
+  "@lsp.type.character",
+  "@lsp.type.colon",
+  "@lsp.type.comma",
+  "@lsp.type.comparison",
+  "@lsp.type.const",
+  "@lsp.type.constParameter",
+  "@lsp.type.derive",
+  "@lsp.type.deriveHelper",
+  "@lsp.type.dot",
+  "@lsp.type.escapeSequence",
+  "@lsp.type.field",
+  "@lsp.type.formatSpecifier",
+  "@lsp.type.generic",
+  "@lsp.type.invalidEscapeSequence",
+  "@lsp.type.label",
+  "@lsp.type.lifetime",
+  "@lsp.type.logical",
+  "@lsp.type.macroBang",
+  "@lsp.type.parenthesis",
+  "@lsp.type.procMacro",
+  "@lsp.type.punctuation",
+  "@lsp.type.selfKeyword",
+  "@lsp.type.selfTypeKeyword",
+  "@lsp.type.semicolon",
+  "@lsp.type.static",
+  "@lsp.type.toolModule",
+  "@lsp.type.typeAlias",
+  "@lsp.type.union",
+  "@lsp.type.unresolvedReference",
+  "@markup.heading.1",
+  "@markup.heading.2",
+  "@markup.heading.3",
+  "@markup.heading.4",
+  "@markup.heading.5",
+  "@markup.heading.6",
+  "@markup.link.label",
+  "@markup.link.url",
+  "@markup.list",
+  "@markup.list.checked",
+  "@markup.list.unchecked",
+  "@markup.math",
+  "@markup.quote",
+  "@markup.raw",
+  "@markup.raw.block",
+  # Markdown callouts, such as `> [!NOTE]`, are coloured like diagnostics.
+  "DiagnosticError",
+  "DiagnosticWarn",
+  "DiagnosticInfo",
+  "DiagnosticHint",
+  "DiagnosticOk",
+  "@property.definition",
+  "@punctuation.bracket",
+  "@punctuation.delimiter",
+  "@string.documentation",
+  "@string.special.key",
+  "@string.special.path",
+  "@string.special.regex",
+  "@string.special.symbol",
+  "@tag.attribute",
+  "@tag.delimiter",
+  "@tag.error",
+  "@type.definition",
+  "@variable.member",
+  "@variable.parameter",
+]
+
+[defaults]
+"@attribute" = { link = "Macro" }
+"@attribute.builtin" = { link = "Special" }
+"@boolean" = { link = "Boolean" }
+"@character" = { link = "Character" }
+"@character.special" = { link = "SpecialChar" }
+"@comment" = { link = "Comment" }
+"@comment.error" = { link = "DiagnosticError" }
+"@comment.note" = { link = "DiagnosticInfo" }
+"@comment.todo" = { link = "Todo" }
+"@comment.warning" = { link = "DiagnosticWarn" }
+"@constant" = { link = "Constant" }
+"@constant.builtin" = { link = "Special" }
+"@constructor" = { link = "Special" }
+"@diff.delta" = { link = "Changed" }
+"@diff.minus" = { link = "Removed" }
+"@diff.plus" = { link = "Added" }
+"@function" = { link = "Function" }
+"@function.builtin" = { link = "Special" }
+"@keyword" = { link = "Keyword" }
+"@label" = { link = "Label" }
+"@lsp.mod.deprecated" = { link = "DiagnosticDeprecated" }
+"@lsp.type.class" = { link = "@type" }
+"@lsp.type.comment" = { link = "@comment" }
+"@lsp.type.decorator" = { link = "@attribute" }
+"@lsp.type.enum" = { link = "@type" }
+"@lsp.type.enumMember" = { link = "@constant" }
+"@lsp.type.event" = { link = "@type" }
+"@lsp.type.function" = { link = "@function" }
+"@lsp.type.interface" = { link = "@type" }
+"@lsp.type.keyword" = { link = "@keyword" }
+"@lsp.type.macro" = { link = "@constant.macro" }
+"@lsp.type.method" = { link = "@function.method" }
+"@lsp.type.modifier" = { link = "@type.qualifier" }
+"@lsp.type.namespace" = { link = "@module" }
+"@lsp.type.number" = { link = "@number" }
+"@lsp.type.operator" = { link = "@operator" }
+"@lsp.type.parameter" = { link = "@variable.parameter" }
+"@lsp.type.property" = { link = "@property" }
+"@lsp.type.regexp" = { link = "@string.regexp" }
+"@lsp.type.string" = { link = "@string" }
+"@lsp.type.struct" = { link = "@type" }
+"@lsp.type.type" = { link = "@type" }
+"@lsp.type.typeParameter" = { link = "@type.definition" }
+"@lsp.type.variable" = { link = "@variable" }
+"@markup" = { link = "Special" }
+"@markup.heading" = { link = "Title" }
+"@markup.italic" = { italic = true }
+"@markup.link" = { link = "Underlined" }
+"@markup.strikethrough" = { strikethrough = true }
+"@markup.strong" = { bold = true }
+"@markup.underline" = { underline = true }
+"@module" = { link = "Structure" }
+"@module.builtin" = { link = "Special" }
+"@number" = { link = "Number" }
+"@number.float" = { link = "Float" }
+"@operator" = { link = "Operator" }
+"@property" = { link = "Identifier" }
+"@punctuation" = { link = "Delimiter" }
+"@punctuation.special" = { link = "Special" }
+"@string" = { link = "String" }
+"@string.escape" = { link = "@string.special" }
+"@string.regexp" = { link = "@string.special" }
+"@string.special" = { link = "SpecialChar" }
+"@string.special.url" = { link = "Underlined" }
+"@tag" = { link = "Tag" }
+"@tag.builtin" = { link = "Special" }
+"@type" = { link = "Type" }
+"@type.builtin" = { link = "Special" }
+"@variable" = {  }
+"@variable.builtin" = { link = "Special" }
+"@variable.parameter.builtin" = { link = "Special" }
+"Added" = {  }
+"Boolean" = { link = "Constant" }
+"Changed" = {  }
+"Character" = { link = "Constant" }
+"Comment" = {  }
+"Conditional" = { link = "Statement" }
+"Constant" = {  }
+"Debug" = { link = "Special" }
+"Define" = { link = "PreProc" }
+"Delimiter" = {  }
+"Error" = {  }
+"Exception" = { link = "Statement" }
+"Float" = { link = "Number" }
+"Function" = {  }
+"Identifier" = {  }
+"Ignore" = { link = "Normal" }
+"Include" = { link = "PreProc" }
+"Keyword" = { link = "Statement" }
+"Label" = { link = "Statement" }
+"Macro" = { link = "PreProc" }
+"Number" = { link = "Constant" }
+"Operator" = {  }
+"PreCondit" = { link = "PreProc" }
+"PreProc" = {  }
+"Removed" = {  }
+"Repeat" = { link = "Statement" }
+"Special" = {  }
+"SpecialChar" = { link = "Special" }
+"SpecialComment" = { link = "Special" }
+"Statement" = { bold = true }
+"StorageClass" = { link = "Type" }
+"String" = {  }
+"Structure" = { link = "Type" }
+"Tag" = { link = "Special" }
+"Title" = { bold = true }
+"Todo" = { bold = true }
+"Type" = {  }
+"Typedef" = { link = "Type" }
+"Underlined" = { underline = true }
+"@charset" = { link = "@keyword.directive" }
+"@comment.doc" = { link = "@comment.documentation" }
+"@conditional" = { link = "@keyword.conditional" }
+"@debug" = { link = "@keyword.debug" }
+"@define" = { link = "@keyword.directive.define" }
+"@delimiter" = { link = "@punctuation.delimiter" }
+"@embedded" = { link = "@variable" }
+"@escape" = { link = "@string.escape" }
+"@exception" = { link = "@keyword.exception" }
+"@field" = { link = "@variable.member" }
+"@float" = { link = "@number.float" }
+"@import" = { link = "@keyword.import" }
+"@include" = { link = "@keyword.import" }
+"@keyframes" = { link = "@keyword.directive" }
+"@markup.bold" = { link = "@markup.strong" }
+"@markup.emphasis" = { link = "@markup.italic" }
+"@media" = { link = "@keyword.directive" }
+"@method" = { link = "@function.method" }
+"@method.call" = { link = "@function.method.call" }
+"@namespace" = { link = "@module" }
+"@parameter" = { link = "@variable.parameter" }
+"@preproc" = { link = "@keyword.directive" }
+"@repeat" = { link = "@keyword.repeat" }
+"@storageclass" = { link = "@keyword.modifier" }
+"@string.regex" = { link = "@string.regexp" }
+"@string.special.uri" = { link = "@string.special.url" }
+"@supports" = { link = "@keyword.directive" }
+"@symbol" = { link = "@string.special.symbol" }
+"@text.danger" = { link = "@comment.error" }
+"@text.literal" = { link = "@markup.raw" }
+"@text.note" = { link = "@comment.note" }
+"@text.reference" = { link = "@markup.link" }
+"@text.title" = { link = "@markup.heading" }
+"@text.uri" = { link = "@markup.link.url" }
+"@text.warning" = { link = "@comment.warning" }
+"@type.parameter" = { link = "@type.definition" }
+"@type.qualifier" = { link = "@keyword.modifier" }
+"DiagnosticDeprecated" = { strikethrough = true }
+"DiagnosticUnnecessary" = { link = "Comment" }

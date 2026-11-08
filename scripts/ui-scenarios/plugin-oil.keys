@@ -1,0 +1,19 @@
+# Run with plugin-launch and an isolated working directory.
+wait 2500
+key escape
+wait 200
+type :
+wait 200
+type plugin.oil.open
+key enter
+wait 1000
+shot listing
+type G
+key o
+type new.txt
+key escape ctrl+s
+wait 600
+shot confirm
+key down enter
+wait 1200
+shot saved

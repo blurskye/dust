@@ -1,0 +1,44 @@
+name: ports
+on:
+  push:
+  pull_request:
+jobs:
+  tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    # A hung test fails the job instead of holding the runner for hours.
+    timeout-minutes: 90
+    env:
+      RUST_TEST_THREADS: 4
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.97.0
+        with: { components: clippy }
+      - name: Use the physical temporary directory
+        if: runner.os == 'macOS'
+        run: echo "TMPDIR=$(cd "$TMPDIR" && pwd -P)" >> "$GITHUB_ENV"
+      # The default TEMP is an 8.3 short path (RUNNER~1) that differs from the
+      # canonical path Git and the explorer report.
+      - name: Use a long temporary directory path
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          echo "TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+          echo "TMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+      # Git for Windows turns on autocrlf system-wide; the tests' repositories
+      # expect Git's default of storing and checking out bytes unchanged.
+      - name: Keep Git line endings unchanged
+        if: runner.os == 'Windows'
+        run: git config --system core.autocrlf false
+      # nextest prints each failure as it happens and stops a hung test, so one
+      # stuck test cannot hide every other failure until the job times out.
+      - uses: taiki-e/install-action@v2
+        with: { tool: cargo-nextest }
+      - run: cargo nextest run --locked --all-targets --profile ci
+      - run: cargo test --locked --doc
+      # Lints are reported even when tests fail.
+      - if: success() || failure()
+        run: cargo clippy --locked --all-targets -- -D warnings
