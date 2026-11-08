@@ -1516,7 +1516,7 @@ pub(in crate::app) fn the_documented_git_and_debugger_keys_each_reach_their_comm
     let (_app_dirs, app) = app();
     let keymaps = bundled_keymaps(&app);
     let cases = [
-        ("<leader> g g", "terminal.open"),
+        ("<leader> g g", "workspace.git.open"),
         ("<leader> g s", "workspace.git.status.open"),
         ("<leader> g G", "terminal.open"),
         ("<leader> g c", "terminal.open"),
@@ -1549,7 +1549,6 @@ pub(in crate::app) fn the_documented_git_and_debugger_keys_each_reach_their_comm
         );
     }
     for (keys, profile) in [
-        ("<leader> g g", "lazygit"),
         ("<leader> g G", "lazygit_cwd"),
         ("<leader> g c", "lazygit_log"),
         ("<leader> g f", "lazygit_file"),

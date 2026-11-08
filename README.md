@@ -94,7 +94,7 @@ processes and can run even in untrusted workspaces or safe mode.
 - Space is the leader key. `Space Space` finds files, `Space e` opens the explorer,
   and `Space /` searches the workspace.
 - `F1` opens the command palette; `:Tutor` opens the interactive tutor.
-- `Space c m` opens the tool installer; `Space g g` opens lazygit when installed.
+- `Space c m` opens the tool installer; `Space g g` opens native Dusty Git (also available as `dusty-git PATH`).
 
 On Linux, configuration defaults to `~/.config/dust/config.toml`, with `keymaps.toml` and
 `dashboard.toml` beside it. See the [Linux user guide](docs/user-guide-linux.md)

@@ -214,7 +214,24 @@ Terminal processes are never restored as fake live sessions. Zero-exit terminals
 
 ## Git
 
-Dust does what needs the buffer natively and runs lazygit for the rest:
+`Space g g` (or `:workspace.git.open`) opens the native Dusty Git workspace.
+The same screen is available separately with `dusty-git PATH` (`--clean` uses
+bundled theme settings). `q` returns to the editor or exits the standalone tool.
+
+Use `1` Changes, `2` Branches, `3` Commits, and `4` Stashes. `Ctrl-h/j/k/l`
+moves between panes; `j/k` selects rows. The Changes tree expands/collapses with
+`l/h`. `H/L` cycles Branches, Worktrees, Remotes and Tags. Enter opens files in
+Dust, or `$VISUAL`/`$EDITOR` from the standalone tool. Worktree Enter opens that
+repository. Branch Enter confirms checkout. `Space` stages a file; `v` switches
+to the index where `Space` unstages. `c` commits staged files and `P` confirms a
+push. `n` creates a worktree from an existing branch or saves a stash in its pane;
+`a/p/d` apply/pop/drop a stash with confirmation. `r` refreshes. Form fields use
+ordinary typing, arrows, Tab, Enter and Escape; Ctrl-Enter submits.
+
+The embedded screen refuses writes in untrusted workspaces or while editor
+buffers are unsaved. Repository mutations run in background workers. Issues,
+pull requests, Actions and the Git-specific tutor are not in this screen yet.
+Existing editor Git features remain available:
 
 - file and explorer status decorations, and gutter signs for the active buffer;
 - `]h` / `[h` move between hunks; `Space g h p` previews, `Space g h s` stages, `Space g h u`
@@ -229,11 +246,11 @@ Dust does what needs the buffer natively and runs lazygit for the rest:
   `reset this hunk`. Tab switches between disk and staged diffs; `Ctrl-d`/`Ctrl-u`
   scroll. `i` filters files; Escape returns to Normal, then closes. Save unsaved
   buffers before acting on their disk hunks. Binary files have file actions but no
-  text hunks; deleted files cannot be opened. Full Git work remains in lazygit;
+  text hunks; deleted files cannot be opened;
 - `Space g x` shows conflicts and lets you pick a side; `Space g w` lists worktrees;
-- `Space g g` opens lazygit at the workspace root, `Space g G` in the current file's
-  directory, `Space g f` on the current file's history, and `Space g l` / `Space g c` on the
-  log. Commit, branch, stash, rebase, push and pull all happen there.
+- `Space g G` opens lazygit in the current file's directory, `Space g f` on the
+  current file's history, and `Space g l` / `Space g c` on the log. These optional
+  external profiles remain available for workflows such as interactive rebase.
 
 The lazygit commands are ordinary terminal profiles in `[terminals.profiles]`. A profile's
 arguments and `cwd` may use `{root}`, `{file}`, `{dir}` and `{line}`; for example
@@ -274,7 +291,7 @@ the pull-request picker and review-comment commands also support Gitea/Forgejo v
 
 | Keys | Action | Status |
 |---|---|---|
-| `Space g g` | Lazygit at the workspace root | bound |
+| `Space g g` | Native Dusty Git workspace | bound |
 | `Space g G` | Lazygit in the current file's directory | bound |
 | `Space g c` | Lazygit log | bound |
 | `Space g l` | Lazygit log | bound |

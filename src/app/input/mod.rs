@@ -1079,22 +1079,14 @@ impl InputState {
                     Some("rename path must contain no controls and at most 4096 bytes".into());
                 return;
             }
-            if prompt.input.is_char_boundary(prompt.cursor) {
-                prompt.input.insert_str(prompt.cursor, text);
-                prompt.cursor += text.len();
-                prompt.error = None;
-                prompt.selected_completion = None;
-            }
+            prompt.insert_text(text);
         }
     }
 
     pub(in crate::app) fn prompt_backspace(&mut self) {
-        self.prompt_delete_back(|before| {
-            before
-                .grapheme_indices(true)
-                .next_back()
-                .map_or(before.len(), |(index, _)| index)
-        });
+        if let Some(prompt) = &mut self.prompt {
+            prompt.delete_previous_grapheme();
+        }
     }
 
     /// Vim's ctrl-w: the word or run of punctuation before the cursor, and the spaces after it.
@@ -2150,6 +2142,36 @@ impl App {
         }
         if matches!(event, UiEvent::Key { .. }) {
             self.last_key_at = Some(Instant::now());
+        }
+        if let Some(screen) = &mut self.git_screen {
+            screen.write_refusal = if self.workspace.safe_mode()
+                || self.workspace.trust() != crate::workspace::WorkspaceTrust::Trusted
+            {
+                Some("Git writes require a trusted workspace".into())
+            } else if self.state.buffers.values().any(|buffer| buffer.dirty) {
+                Some("Save or close unsaved editor buffers before changing the repository".into())
+            } else {
+                None
+            };
+            let resized = matches!(event, UiEvent::Resize(_, _));
+            let outcome = screen.event(event.clone());
+            match outcome {
+                crate::git::screen::ScreenOutcome::Continue => {}
+                crate::git::screen::ScreenOutcome::Close => {
+                    self.git_screen = None;
+                }
+                crate::git::screen::ScreenOutcome::OpenFile(path) => {
+                    self.git_screen = None;
+                    self.edit_path(path);
+                }
+                crate::git::screen::ScreenOutcome::OpenRepository(path) => {
+                    self.git_screen = None;
+                    self.switch_workspace_root(path);
+                }
+            }
+            if !resized {
+                return;
+            }
         }
         // Information has been read once the user moves on, and must not cover what comes next.
         // Errors and warnings keep their time, and everything stays in `:messages`.

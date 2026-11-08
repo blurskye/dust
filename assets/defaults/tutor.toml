@@ -500,9 +500,9 @@ at = "message)"
 
 [[step]]
 chapter = "Git"
-text = "This project is a git repository. lazygit opens on top of everything and `q` closes it."
-press = "Press `<leader>` `g` `g` to open lazygit."
-done = ["terminal.open profile=lazygit", "terminal.open profile=lazygit_file"]
+text = "This project is a git repository. Dusty Git opens its native workspace; `q` returns to the editor."
+press = "Press `<leader>` `g` `g` to open Dusty Git."
+done = ["workspace.git.open"]
 
 [[step]]
 chapter = "Git"

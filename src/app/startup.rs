@@ -512,6 +512,7 @@ impl App {
             ),
             next_transaction: 1_000_000,
             git: crate::app::git::Git::default(),
+            git_screen: None,
             clipboard: crate::app::editing::clipboard::Clipboard::default(),
             macro_replays: Vec::new(),
             macro_running: false,

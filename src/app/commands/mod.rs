@@ -71,6 +71,7 @@ pub enum AppEffect {
     OpenWorkspaceFilePicker,
     GitStatusRefresh,
     GitStatusOpen,
+    GitScreenOpen,
     GitBrowse {
         copy: bool,
     },
@@ -1266,6 +1267,7 @@ impl App {
             | AppEffect::GitHunkUnstage
             | AppEffect::GitStatusRefresh
             | AppEffect::GitStatusOpen
+            | AppEffect::GitScreenOpen
             | AppEffect::GitBrowse { .. }
             | AppEffect::PullRequestList
             | AppEffect::PullRequestComments

@@ -15,6 +15,14 @@ pub(in crate::app) fn register_commands(
 ) -> Result<(), CommandError> {
     register(
         registry,
+        "workspace.git.open",
+        "Open Dusty Git",
+        ContextRequirement::Workspace,
+        ArgumentSchema::default(),
+        |_| AppEffect::GitScreenOpen,
+    )?;
+    register(
+        registry,
         "workspace.git.pr.list",
         "Pick a pull request and check it out in its own worktree",
         ContextRequirement::Workspace,
@@ -327,6 +335,12 @@ impl App {
     ) -> Result<(), AppEffect> {
         let reviewing = self.search.picker_surface() == crate::ui::PickerSurfaceKind::Changes;
         match effect {
+            AppEffect::GitScreenOpen => {
+                match crate::git::screen::GitScreen::open(&self.state.workspace_root) {
+                    Ok(screen) => self.git_screen = Some(screen),
+                    Err(error) => self.show_error(error),
+                }
+            }
             AppEffect::GitReviewHunk(action) => {
                 if reviewing {
                     match action.as_str() {

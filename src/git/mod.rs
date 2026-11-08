@@ -1,5 +1,8 @@
 //! Repository status, hunks and mutations.
 
+/// Shared native Git application, embedded or standalone.
+pub mod screen;
+
 mod branches;
 mod browse;
 pub use browse::git_browse_url;

@@ -265,6 +265,7 @@ struct App {
     recovery: crate::app::documents::recovery::Recovery,
     next_transaction: u64,
     git: crate::app::git::Git,
+    git_screen: Option<crate::git::screen::GitScreen>,
     clipboard: crate::app::editing::clipboard::Clipboard,
     macro_replays: Vec<(Vec<CommandInvocation>, usize, u64)>,
     macro_running: bool,
@@ -402,6 +403,9 @@ pub fn run_interactive(
         application.process_pty_events();
         application.process_agent_events();
         application.process_pull_request_events();
+        if let Some(screen) = &mut application.git_screen {
+            input_arrived |= screen.poll();
+        }
         application.process_remote_opens();
         application.process_plugin_storage_events();
         application.process_plugin_events();
@@ -443,11 +447,22 @@ pub fn run_interactive(
             application.window_session.height(),
         );
         let holding = application.hold_first_frame();
+        let git_frame = if input_arrived || terminal.needs_full_draw() || drawn != Some(inputs) {
+            application
+                .git_screen
+                .as_mut()
+                .map(|screen| screen.frame(inputs.3, inputs.4))
+        } else {
+            None
+        };
         let painted = application.draw_before_startup_reads(|application| {
             if holding {
                 Ok(false)
             } else if input_arrived || terminal.needs_full_draw() || drawn != Some(inputs) {
                 drawn = Some(inputs);
+                if let Some(frame) = &git_frame {
+                    return terminal.draw(frame);
+                }
                 let config = application.input_render_config();
                 let mut frame = render_frame(
                     &application.state,

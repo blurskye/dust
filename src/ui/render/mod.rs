@@ -321,6 +321,31 @@ pub struct PromptState {
 }
 
 impl PromptState {
+    /// Insert literal text without interpreting application shortcuts.
+    pub fn insert_text(&mut self, text: &str) {
+        if self.confirmation.is_none() && self.input.is_char_boundary(self.cursor) {
+            self.input.insert_str(self.cursor, text);
+            self.cursor += text.len();
+            self.error = None;
+            self.selected_completion = None;
+        }
+    }
+
+    pub fn delete_previous_grapheme(&mut self) {
+        use unicode_segmentation::UnicodeSegmentation;
+        if self.confirmation.is_some() || !self.input.is_char_boundary(self.cursor) {
+            return;
+        }
+        let start = self.input[..self.cursor]
+            .grapheme_indices(true)
+            .next_back()
+            .map_or(0, |(at, _)| at);
+        self.input.replace_range(start..self.cursor, "");
+        self.cursor = start;
+        self.error = None;
+        self.selected_completion = None;
+    }
+
     #[must_use]
     pub fn new(kind: PromptKind) -> Self {
         Self {
