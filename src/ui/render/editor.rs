@@ -78,7 +78,8 @@ use crate::ui::render::visual_rows::one_cell_symbol;
 
 use crate::ui::render::visual_rows::projected_inlay_hints;
 
-pub(crate) const END_OF_BUFFER_MARKER: &str = "~";
+/// Rows past the last line stay blank; a column of `~` is noise.
+pub(crate) const END_OF_BUFFER_MARKER: &str = " ";
 pub(crate) const LINE_NUMBER_SEPARATOR: &str = " ";
 pub(crate) const GUTTER_PADDING: u16 = 1;
 pub(crate) const GIT_SIGN_UNCHANGED: &str = "│";

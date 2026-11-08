@@ -228,6 +228,11 @@ pub enum Style {
     Syntax(crate::config::Highlight),
     /// A syntax foreground drawn on the selection background.
     SelectionSyntax(crate::config::Highlight),
+    /// Picker text that matches the query: the accent colour over the row's own background,
+    /// which is the selection's when the row is selected.
+    QueryMatch {
+        selected: bool,
+    },
     /// A syntax group drawn on the documentation popup's background.
     DocumentationSyntax(crate::config::Highlight),
     /// A markdown heading's group drawn on its bar.

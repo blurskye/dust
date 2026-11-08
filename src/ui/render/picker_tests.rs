@@ -564,7 +564,7 @@ fn picker_queries_emphasise_fuzzy_words_and_literal_grep_without_touching_border
         crate::ui::render::picker::highlight_picker_matches(&mut frame, query, literal, row);
         let highlighted = (1..31)
             .filter_map(|x| frame.grid.get(x, 0))
-            .filter(|cell| cell.style == Style::Search && !cell.continuation)
+            .filter(|cell| cell.style == Style::QueryMatch { selected: true } && !cell.continuation)
             .map(|cell| cell.symbol.as_str())
             .collect::<String>();
         assert_eq!(highlighted, expected);

@@ -847,7 +847,7 @@ fn a_table_without_blank_lines_around_it_is_still_closed_and_its_borders_follow_
             "│ e │ f │",
             "└───┴───┘",
             "last",
-            "~"
+            ""
         ]
     );
     config.editor.markdown.table_row_lines = true;
@@ -862,7 +862,7 @@ fn a_table_without_blank_lines_around_it_is_still_closed_and_its_borders_follow_
             "├───┼───┤",
             "│ e │ f │",
             "last",
-            "~"
+            ""
         ]
     );
 }
@@ -911,7 +911,7 @@ fn a_table_at_the_end_of_a_file_with_a_final_newline_is_closed() {
             "├───┼───┤",
             "│ c │ d │",
             "└───┴───┘",
-            "~"
+            ""
         ]
     );
 }

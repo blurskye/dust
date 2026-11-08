@@ -56,10 +56,10 @@ background_16 = "grey"
 attributes = []
 
 [styles.search]
-foreground = "#eff1f5"
-background = "#df8e1d"
-foreground_256 = "indexed:255"
-background_256 = "indexed:172"
+foreground = "#4c4f69"
+background = "#91b2f5"
+foreground_256 = "indexed:240"
+background_256 = "indexed:111"
 foreground_16 = "white"
 background_16 = "dark_yellow"
 attributes = []

@@ -667,6 +667,20 @@ fn queue_style(
             &derived
         }
         Style::Search => &theme.styles.search,
+        Style::QueryMatch { selected } => {
+            let row = if selected {
+                &theme.styles.selection
+            } else {
+                &theme.styles.default
+            };
+            derived = crate::config::ThemeStyle {
+                background: row.background,
+                background_256: row.background_256,
+                background_16: row.background_16,
+                ..theme.styles.accent.clone()
+            };
+            &derived
+        }
         Style::Error => &theme.styles.error,
         Style::Warning => &theme.styles.warning,
         Style::DiagnosticError | Style::DiagnosticWarning | Style::DiagnosticHint => {

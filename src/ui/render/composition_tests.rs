@@ -1628,7 +1628,7 @@ fn end_of_buffer_markers_right_align_with_line_number_digits() {
         crate::ui::render::visual_rows::git_sign_column(gutter, &config.editor).unwrap();
     for row in 1..frame.grid.height() {
         assert_eq!(frame.grid.get(0, row).unwrap().symbol, " ");
-        assert_eq!(frame.grid.get(3, row).unwrap().symbol, "~");
+        assert_eq!(frame.grid.get(3, row).unwrap().symbol, " ");
         assert_eq!(frame.grid.get(sign_column, row).unwrap().symbol, "│");
     }
 }

@@ -273,7 +273,10 @@ pub(super) fn highlight_picker_matches(
     for x in matched {
         if let Some(cell) = frame.grid.get(x, row.y) {
             let symbol = cell.symbol.clone();
-            frame.grid.set_cell(x, row.y, &symbol, Style::Search);
+            let selected = matches!(cell.style, Style::Selection | Style::SelectionSyntax(_));
+            frame
+                .grid
+                .set_cell(x, row.y, &symbol, Style::QueryMatch { selected });
         }
     }
 }
