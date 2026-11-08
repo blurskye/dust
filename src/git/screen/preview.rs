@@ -19,12 +19,10 @@ impl PreviewRow {
     fn message(text: &str) -> Self {
         Self {
             text: text.into(),
-            style: if text.starts_with("commit ")
-                || text.starts_with("diff --git ")
-                || text.starts_with("@@")
-            {
+            style: if text.starts_with("commit ") || text.starts_with("diff --git ") {
                 Style::Accent
-            } else if text.starts_with("index ")
+            } else if text.starts_with("@@")
+                || text.starts_with("index ")
                 || text.starts_with("--- ")
                 || text.starts_with("+++ ")
             {
@@ -75,6 +73,7 @@ impl Preview {
             language_for_path(path),
         );
         let mut rows = vec![PreviewRow::message(&path.display().to_string())];
+        rows[0].style = Style::GitHeading;
         rows.extend(
             highlighted
                 .lines()
@@ -136,8 +135,33 @@ impl Preview {
             {
                 path = Some(file);
             }
-            self.rows.push(PreviewRow::message(line));
+            if !["diff --git ", "index ", "--- ", "+++ "]
+                .iter()
+                .any(|prefix| line.starts_with(prefix))
+            {
+                self.rows.push(PreviewRow::message(line));
+            }
         }
+        let added = diff
+            .hunks
+            .iter()
+            .flat_map(|hunk| &hunk.lines)
+            .filter(|line| line.kind == DiffLineKind::Added)
+            .count();
+        let removed = diff
+            .hunks
+            .iter()
+            .flat_map(|hunk| &hunk.lines)
+            .filter(|line| line.kind == DiffLineKind::Removed)
+            .count();
+        let mut heading = PreviewRow::message(&format!(
+            "{}   +{added} −{removed}",
+            path.as_deref()
+                .map(|path| path.display().to_string())
+                .unwrap_or_else(|| "Changes".into())
+        ));
+        heading.style = Style::GitHeading;
+        self.rows.push(heading);
         for row in &mut self.rows[first_row..] {
             row.path = path.clone();
         }

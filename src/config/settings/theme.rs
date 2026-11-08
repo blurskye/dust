@@ -360,6 +360,37 @@ impl ThemeConfig {
         style
     }
 
+    pub fn git_surface(&self, group: Option<Highlight>, selected: bool) -> ThemeStyle {
+        let base = &self.styles.default;
+        let mut style = group
+            .and_then(|group| self.highlight(group))
+            .unwrap_or(base)
+            .clone();
+        style.fill(if selected {
+            blend(self.styles.accent.foreground, base.background, 5)
+        } else {
+            blend(base.foreground, base.background, 3)
+        });
+        style
+    }
+
+    pub fn git_heading(&self, control: bool) -> ThemeStyle {
+        let mut style = if control {
+            self.styles.accent.clone()
+        } else {
+            self.styles.default.clone()
+        };
+        style.fill(blend(
+            self.styles.accent.foreground,
+            self.styles.default.background,
+            if control { 6 } else { 3 },
+        ));
+        if !style.attributes.contains(&ThemeAttribute::Bold) {
+            style.attributes.push(ThemeAttribute::Bold);
+        }
+        style
+    }
+
     pub fn git_diff(&self, added: bool, group: Option<Highlight>) -> ThemeStyle {
         let base = &self.styles.default;
         let mut style = group

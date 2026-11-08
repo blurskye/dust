@@ -66,7 +66,7 @@ fn activate(screen: &mut GitScreen, label: &str) {
             if let Some(at) = tail.find(label)
                 && tail[..at]
                     .chars()
-                    .all(|c| c.is_whitespace() || c.is_ascii_digit() || "[]+-│▾▸✓○●×⑂".contains(c))
+                    .all(|c| c.is_whitespace() || c.is_ascii_digit() || "[]+-│▾▸✓○●×⑂›".contains(c))
             {
                 key(screen, KeyCode::Enter);
                 return;
@@ -322,6 +322,32 @@ fn native_github_controls_forms_reviews_and_workflow_logs() {
     wait(&mut screen, "all native checks passed");
     assert!(view(&mut screen).contains("Logs matched by step timestamps"));
     assert!(!view(&mut screen).contains("[32m"));
+    let compact = screen.frame(100, 30);
+    let compact_text = (0..30)
+        .map(|y| compact.grid.row_text(y))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        compact_text.contains("all native checks passed"),
+        "expansion must reveal its log, not leave it below the viewport:\n{compact_text}"
+    );
+    assert!(
+        compact_text.contains("refresh")
+            && compact_text.contains("close")
+            && compact_text.contains("h/l")
+    );
+    key(&mut screen, KeyCode::Char('?'));
+    let help = screen.frame(100, 30);
+    let help_text = (0..30)
+        .map(|y| help.grid.row_text(y))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        help_text.contains("Keyboard")
+            && help_text.contains("Horizontal scroll")
+            && help_text.contains("Ctrl+j/k")
+    );
+    key(&mut screen, KeyCode::Escape);
     let frame = screen.frame(190, 65);
     let (_, row, _) = frame.cursor.unwrap();
     assert!(

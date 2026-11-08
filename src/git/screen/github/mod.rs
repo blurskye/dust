@@ -511,7 +511,18 @@ impl Workspace {
             }
         }
         Form {
-            title: format!("{} · {}", title, self.repo),
+            title: format!(
+                "{} · {}",
+                title,
+                if matches!(
+                    action,
+                    Action::CreatePullRequest | Action::ConfirmPullRequest(_)
+                ) {
+                    &self.host
+                } else {
+                    &self.repo
+                }
+            ),
             action: FormAction::Github(action),
             fields,
             selected: 0,
@@ -548,6 +559,10 @@ impl Workspace {
                 KeyCode::Char('n') if self.page == 1 => return self.activate(Action::CreateIssue),
                 KeyCode::Char('n') if self.page == 2 => {
                     return self.activate(Action::CreatePullRequest);
+                }
+                KeyCode::Home if self.focus == 2 => self.detail_cursor = 0,
+                KeyCode::End if self.focus == 2 => {
+                    self.detail_cursor = self.detail_rows.len().saturating_sub(1)
                 }
                 KeyCode::PageDown if self.focus == 2 => {
                     self.detail_cursor = self

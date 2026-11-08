@@ -51,6 +51,10 @@ pub enum Style {
     Selection,
     /// A quiet, theme-tinted Git row, retaining syntax or metadata foregrounds.
     GitSelected(Option<crate::config::Highlight>),
+    GitInactiveSelection(Option<crate::config::Highlight>),
+    GitSurface(Option<crate::config::Highlight>),
+    GitHeading,
+    GitControl,
     GitDiff {
         added: bool,
         syntax: Option<crate::config::Highlight>,

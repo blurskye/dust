@@ -1,3 +1,4 @@
+use super::super::render::{ellipsize, footer, section, viewport};
 use super::*;
 use crate::config::{AmbiguousWidth, Highlight};
 use crate::ui::{CellGrid, Frame, PickerTextPreview, Style};
@@ -14,6 +15,7 @@ pub(super) struct Line {
     gutter: String,
     gutter_style: Style,
     sidebar: bool,
+    diff: Option<bool>,
 }
 impl Line {
     fn text(text: impl Into<String>, style: Style) -> Self {
@@ -25,6 +27,7 @@ impl Line {
             gutter: String::new(),
             gutter_style: Style::Muted,
             sidebar: false,
+            diff: None,
         }
     }
     fn button(text: impl Into<String>, action: Action) -> Self {
@@ -34,7 +37,27 @@ impl Line {
             .and_then(|text| text.strip_suffix(" ]"))
             .unwrap_or(&text)
             .to_owned();
-        let mut line = Self::text(text, Style::Default);
+        let expandable = matches!(
+            action,
+            Action::Job(_)
+                | Action::Step(..)
+                | Action::FullLog(_)
+                | Action::Collapse(..)
+                | Action::Commit(_)
+                | Action::PrTab(_)
+        );
+        let mut line = Self::text(
+            if expandable {
+                text
+            } else {
+                format!("› {text}")
+            },
+            if expandable {
+                Style::Default
+            } else {
+                Style::GitControl
+            },
+        );
         line.action = Some(action);
         line
     }
@@ -286,6 +309,11 @@ fn files(workspace: &Workspace, id: u64, item: &Value, rows: &mut Vec<Line>) {
             .filter(|row| row.path.as_deref() == Some(std::path::Path::new(path)))
         {
             let mut row = Line::text(&source.text, source.style);
+            row.diff = match source.marker {
+                Some('+') => Some(true),
+                Some('-') => Some(false),
+                _ => None,
+            };
             row.spans = source.spans.clone();
             if source.marker.is_some() {
                 row.gutter = format!(
@@ -326,14 +354,11 @@ fn issue_or_pr(workspace: &Workspace, width: usize, sidebar: bool) -> Vec<Line> 
             Style::Default,
         ));
         rows.push(Line::text("", Style::Default));
-        rows.push(Line::text(
-            "Your repository is connected. Change the filter with /,",
-            Style::Muted,
-        ));
-        rows.push(Line::text(
-            "or create a new item with n. Ctrl+l focuses these controls.",
-            Style::Muted,
-        ));
+        body(
+            &mut rows,
+            "Your repository is connected. Change the filter with / or create a new item with n. Ctrl+l focuses these controls.",
+            width,
+        );
         rows.push(Line::text("", Style::Default));
         if workspace.page == 1 {
             rows.push(Line::button("[ New issue ]", Action::CreateIssue));
@@ -494,6 +519,11 @@ fn issue_or_pr(workspace: &Workspace, width: usize, sidebar: bool) -> Vec<Line> 
                     );
                     for source in preview.rows {
                         let mut row = Line::text(source.text, source.style);
+                        row.diff = match source.marker {
+                            Some('+') => Some(true),
+                            Some('-') => Some(false),
+                            _ => None,
+                        };
                         row.spans = source.spans;
                         if let Some(marker) = source.marker {
                             row.gutter = format!(
@@ -544,22 +574,6 @@ fn issue_or_pr(workspace: &Workspace, width: usize, sidebar: bool) -> Vec<Line> 
     }
     rows.extend(metadata(workspace, item, sidebar));
     rows
-}
-fn ellipsize(text: &str, width: usize) -> String {
-    if text.width() <= width {
-        return text.into();
-    }
-    let mut result = String::new();
-    let mut columns = 0;
-    for g in text.graphemes(true) {
-        columns += g.width().max(1);
-        if columns >= width {
-            break;
-        }
-        result.push_str(g);
-    }
-    result.push('…');
-    result
 }
 fn status(value: &Value) -> (&'static str, Style) {
     match string(value, "conclusion") {
@@ -866,7 +880,7 @@ pub(in crate::git::screen) fn frame(
         } else {
             (2 + workflow_height, body_height - workflow_height)
         };
-        super::super::render::border(
+        section(
             &mut frame.grid,
             0,
             y,
@@ -943,9 +957,13 @@ pub(in crate::git::screen) fn frame(
             } else {
                 format!("{} · {}", workspace.states[at], workspace.queries[at])
             };
-            frame
-                .grid
-                .put_text_clipped(2, y + 1, &query, Style::Muted, left - 2);
+            frame.grid.put_text_clipped(
+                2,
+                y + 1,
+                &ellipsize(&query, usize::from(left - 4)),
+                Style::GitSurface(Some(Highlight::COMMENT)),
+                left - 2,
+            );
         }
         let row_height = if workspace.page == 3 && pane == 0 {
             1
@@ -966,7 +984,16 @@ pub(in crate::git::screen) fn frame(
             if selected {
                 for yy in row..(row + row_height).min(y + h - 1) {
                     for x in 1..left - 1 {
-                        frame.grid.set_cell(x, yy, " ", Style::GitSelected(None));
+                        frame.grid.set_cell(
+                            x,
+                            yy,
+                            " ",
+                            if workspace.focus == pane {
+                                Style::GitSelected(None)
+                            } else {
+                                Style::GitInactiveSelection(None)
+                            },
+                        );
                     }
                 }
             }
@@ -981,9 +1008,13 @@ pub(in crate::git::screen) fn frame(
                 row,
                 &ellipsize(title, usize::from(left - 6)),
                 if selected {
-                    Style::GitSelected(None)
+                    if workspace.focus == pane {
+                        Style::GitSelected(None)
+                    } else {
+                        Style::GitInactiveSelection(None)
+                    }
                 } else {
-                    Style::Default
+                    Style::GitSurface(None)
                 },
                 left - 2,
             );
@@ -993,9 +1024,13 @@ pub(in crate::git::screen) fn frame(
                     row + 1,
                     &ellipsize(subtitle, usize::from(left - 6)),
                     if selected {
-                        Style::GitSelected(Some(Highlight::COMMENT))
+                        if workspace.focus == pane {
+                            Style::GitSelected(Some(Highlight::COMMENT))
+                        } else {
+                            Style::GitInactiveSelection(Some(Highlight::COMMENT))
+                        }
                     } else {
-                        Style::Muted
+                        Style::GitSurface(Some(Highlight::COMMENT))
                     },
                     left - 2,
                 );
@@ -1013,8 +1048,12 @@ pub(in crate::git::screen) fn frame(
                 frame.grid.put_text_clipped(
                     2,
                     y + 3 + query_height,
-                    "n create · / change filter",
-                    Style::Muted,
+                    if workspace.page == 3 {
+                        "r refresh"
+                    } else {
+                        "n create · / filter"
+                    },
+                    Style::GitSurface(Some(Highlight::COMMENT)),
                     left - 1,
                 );
             }
@@ -1022,18 +1061,48 @@ pub(in crate::git::screen) fn frame(
                 frame.cursor = Some((2, y + 1 + query_height, SetCursorStyle::SteadyBlock));
             }
         }
+        viewport(
+            &mut frame,
+            left - 2,
+            y + h - 1,
+            offset,
+            visible,
+            items.len(),
+        );
     }
+    let detail_title = if workspace.page == 3 {
+        if workspace.last_list == 1
+            && let Some(id) = workspace.run_id
+        {
+            let name = workspace
+                .value(&Key::Run(id, workspace.attempt))
+                .map(|run| string(run, "workflowName"))
+                .unwrap_or("Run");
+            format!("{name} · #{id}")
+        } else {
+            "Workflows".into()
+        }
+    } else if workspace.number() > 0 {
+        format!(
+            "{} #{} · {}",
+            if workspace.page == 1 { "Issue" } else { "PR" },
+            workspace.number(),
+            if workspace.page == 1 {
+                "Conversation"
+            } else {
+                ["Conversation", "Commits", "Checks", "Files changed"][workspace.pr_tab]
+            }
+        )
+    } else {
+        "Overview".into()
+    };
     super::super::render::border(
         &mut frame.grid,
         left,
         2,
         width - left,
         body_height,
-        if workspace.page == 3 {
-            "Actions"
-        } else {
-            "Overview"
-        },
+        &detail_title,
         workspace.focus == 2,
     );
     let mut rows = Vec::new();
@@ -1062,9 +1131,21 @@ pub(in crate::git::screen) fn frame(
     let main_count = rows.iter().take_while(|row| !row.sidebar).count();
     let in_sidebar = workspace.detail_cursor >= main_count && sidebar;
     if !in_sidebar {
+        let margin = (visible / 3).min(6);
+        if workspace.detail_cursor < workspace.detail_scroll {
+            workspace.detail_scroll = workspace.detail_cursor;
+        } else if workspace.detail_cursor + margin >= workspace.detail_scroll + visible {
+            workspace.detail_scroll =
+                (workspace.detail_cursor + margin + 1).saturating_sub(visible);
+        }
         workspace.detail_scroll = workspace
-            .detail_cursor
-            .saturating_sub(visible.saturating_sub(1));
+            .detail_scroll
+            .min(main_count.saturating_sub(visible));
+    }
+    if sidebar {
+        for y in 3..body_height + 1 {
+            frame.grid.set_cell(content_right, y, "│", Style::Border);
+        }
     }
     for (i, row) in rows.iter().enumerate() {
         let (x, right, relative) = if row.sidebar {
@@ -1080,12 +1161,25 @@ pub(in crate::git::screen) fn frame(
         }
         let y = 3 + relative as u16;
         let selected = workspace.focus == 2 && i == workspace.detail_cursor;
-        let style = if selected || i == 0 {
+        let style = if selected {
             Style::GitSelected(None)
+        } else if i == 0 {
+            Style::GitHeading
+        } else if let Some(added) = row.diff {
+            Style::GitDiff {
+                added,
+                syntax: None,
+            }
         } else {
             row.style
         };
-        if selected || i == 0 || matches!(style, Style::MarkdownCode(_)) {
+        if selected
+            || i == 0
+            || matches!(
+                style,
+                Style::MarkdownCode(_) | Style::GitDiff { .. } | Style::GitHeading
+            )
+        {
             for at in x..right {
                 frame.grid.set_cell(at, y, " ", style);
             }
@@ -1107,6 +1201,11 @@ pub(in crate::git::screen) fn frame(
                     .map(|(_, role)| {
                         if selected {
                             Style::GitSelected(Some(*role))
+                        } else if let Some(added) = row.diff {
+                            Style::GitDiff {
+                                added,
+                                syntax: Some(*role),
+                            }
                         } else {
                             Style::Syntax(*role)
                         }
@@ -1114,6 +1213,7 @@ pub(in crate::git::screen) fn frame(
                     .unwrap_or(style);
                 let next = frame.grid.put_text_clipped(x, y, g, style, right);
                 if next == x {
+                    frame.grid.set_cell(right - 1, y, "›", Style::Muted);
                     break;
                 }
                 x = next;
@@ -1124,6 +1224,14 @@ pub(in crate::git::screen) fn frame(
     if workspace.focus == 2 && frame.cursor.is_none() {
         frame.cursor = Some((left + 2, 3, SetCursorStyle::SteadyBlock));
     }
+    viewport(
+        &mut frame,
+        width - 2,
+        body_height + 1,
+        workspace.detail_scroll,
+        visible,
+        main_count,
+    );
     workspace.detail_rows = rows;
     let notice = if app.notice.is_empty() {
         &workspace.notice
@@ -1141,10 +1249,44 @@ pub(in crate::git::screen) fn frame(
         Style::Warning,
         width - 1,
     );
-    for x in 0..width {
-        frame.grid.set_cell(x, height - 2, " ", Style::Status);
-    }
-    frame.grid.put_text_clipped(1,height-2,if workspace.page == 3 { "[ ] pages   Ctrl+h/j/k/l focus   Tab controls   Enter expand   PgUp/PgDn scroll   r refresh   q close" } else { "[ ] pages   Ctrl+h/l focus   Tab controls   Enter open   n create   / filter   r refresh   q close" },Style::StatusMuted,width-1);
+    footer(
+        &mut frame,
+        width,
+        height,
+        if workspace.page == 3 && workspace.focus == 2 {
+            &[
+                ("Tab", "next"),
+                ("Enter", "open"),
+                ("PgUp/Dn", "scroll"),
+                ("h/l", "pan"),
+                ("[ ]", "pages"),
+                ("Ctrl+h", "list"),
+            ]
+        } else if workspace.page == 3 {
+            &[
+                ("Enter", "open"),
+                ("Ctrl+j/k", "lists"),
+                ("[ ]", "pages"),
+                ("Tab", "controls"),
+            ]
+        } else if workspace.page == 2 && workspace.focus == 2 {
+            &[
+                ("H/L", "tabs"),
+                ("Tab", "controls"),
+                ("Enter", "open"),
+                ("h/l", "pan"),
+                ("[ ]", "pages"),
+            ]
+        } else {
+            &[
+                ("n", "create"),
+                ("/", "filter"),
+                ("Enter", "open"),
+                ("[ ]", "pages"),
+                ("Tab", "controls"),
+            ]
+        },
+    );
     if let Some(form) = &app.form {
         super::super::render::render_form(&mut frame, form, width, height);
     }

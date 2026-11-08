@@ -580,6 +580,14 @@ fn queue_style(
             derived = theme.git_selection(group);
             &derived
         }
+        Style::GitInactiveSelection(group) | Style::GitSurface(group) => {
+            derived = theme.git_surface(group, matches!(style, Style::GitInactiveSelection(_)));
+            &derived
+        }
+        Style::GitHeading | Style::GitControl => {
+            derived = theme.git_heading(style == Style::GitControl);
+            &derived
+        }
         Style::GitDiff { added, syntax } => {
             derived = theme.git_diff(added, syntax);
             &derived

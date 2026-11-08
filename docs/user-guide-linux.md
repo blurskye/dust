@@ -242,7 +242,11 @@ ordinary typing, arrows, Tab, Enter and Escape; Ctrl-Enter submits.
 `[` and `]` switch Git, Issues, Pull requests and Actions. GitHub pages use your
 existing `gh` authentication and show the target host/repository. `/` filters
 issues and pull requests; `n` creates one and `c` comments. Use Tab to select
-visible controls and Enter to open their forms. Multiline descriptions and
+visible controls and Enter to open their forms. `?` opens a page-specific key
+reference without losing your selection. Refresh/close hints remain visible in
+compact layouts. Details support `h/l` horizontal scrolling and Home/End;
+scroll-position labels show when more content is outside the viewport.
+Multiline descriptions and
 comment drafts survive cancellation and failed submissions. Metadata controls
 edit assignees, labels, projects, milestones, reviewers and subscriptions.
 
@@ -267,7 +271,8 @@ Run details expose attempts, matrix jobs, dependencies, steps, expandable logs,
 cancellation and reruns. Run rows include workflow, branch and ID. Running status
 refreshes automatically, and expanded logs load when the job completes. If GitHub
 omits step names, timestamp-matched output is labelled; Full job log remains
-available without guessing step boundaries. Empty lists retain the terminal
+available without guessing step boundaries. Expanding a step reveals its output
+without an extra scroll; the run identity stays in the pane heading. Empty lists retain the terminal
 cursor. Remote writes require explicit form submission.
 
 On a conflicted file, Enter opens a side-selection form; `o/t` choose ours/theirs.

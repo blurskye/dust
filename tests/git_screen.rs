@@ -78,6 +78,38 @@ fn wait(screen: &mut GitScreen, ready: impl Fn(&mut GitScreen) -> bool) {
 }
 
 #[test]
+fn compact_help_and_long_names_preserve_selection() {
+    let dir = repo();
+    let path = format!("{}-tail.rs", "long文件".repeat(12));
+    std::fs::write(dir.path().join(&path), "fn visible() {}\n").unwrap();
+    let mut screen = GitScreen::open(dir.path()).unwrap();
+    wait(&mut screen, |s| view(s).contains("fn visible()"));
+    let before = screen.frame(80, 24);
+    let (_, y, _) = before.cursor.unwrap();
+    assert!(before.grid.row_text(y).contains('…'));
+    let footer = before.grid.row_text(22);
+    assert!(footer.contains("keys") && footer.contains("refresh") && footer.contains("close"));
+    key(&mut screen, KeyCode::Char('?'));
+    let help = screen.frame(80, 24);
+    let text = (0..24)
+        .map(|y| help.grid.row_text(y))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        text.contains("Keyboard")
+            && text.contains("Split / unified")
+            && text.contains("Ctrl+h/j/k/l")
+    );
+    assert!(help.cursor.is_some());
+    key(&mut screen, KeyCode::Escape);
+    let after = screen.frame(80, 24);
+    assert_eq!(before.cursor, after.cursor);
+    for y in 0..24 {
+        assert_eq!(before.grid.row_text(y), after.grid.row_text(y));
+    }
+}
+
+#[test]
 fn preview_focus_updates_index_diff_when_toggling_layers() {
     let dir = repo();
     std::fs::write(dir.path().join("file.txt"), "index version\n").unwrap();

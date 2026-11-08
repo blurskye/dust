@@ -108,6 +108,7 @@ pub struct GitScreen {
     branch: String,
     notice: String,
     form: Option<Form>,
+    help: bool,
     busy: bool,
     branch_mutation: bool,
     refreshing: bool,
@@ -155,6 +156,7 @@ impl GitScreen {
             branch: String::new(),
             notice: String::new(),
             form: None,
+            help: false,
             busy: false,
             branch_mutation: false,
             refreshing: false,
@@ -975,6 +977,16 @@ impl GitScreen {
                 }
             }
             UiEvent::Key { key, kind } if kind != KeyInputKind::Release => {
+                if self.help {
+                    if matches!(key.code, KeyCode::Escape | KeyCode::Char('?' | 'q')) {
+                        self.help = false;
+                    }
+                    return ScreenOutcome::Continue;
+                }
+                if self.form.is_none() && key.code == KeyCode::Char('?') {
+                    self.help = true;
+                    return ScreenOutcome::Continue;
+                }
                 if self.form.is_some() {
                     let result = self.form_key(&key);
                     self.report(result);
@@ -1231,12 +1243,6 @@ impl GitScreen {
                                 }
                             }
                         }
-                        KeyCode::Char('?') => {
-                            self.jobs.cancel_preview();
-                            self.focus = 4;
-                            self.preview="1 Changes · 2 Branches · 3 Commits · 4 Stashes\nCtrl+h/j/k/l: spatial pane focus\nTab / Shift+Tab: next / previous pane\nj/k or arrows: move · Enter: open\nh/l: collapse/expand directory · H/L: branch subview\nPreview: h/l scroll horizontally · s toggles split diff\nSpace: stage · v: Changes/All files · i: working tree/index\nc: commit · P: push · r: refresh\nConflicts: Enter chooses a side · o/t: ours/theirs · C: continue merge\n:tutor git: disposable lessons · :tutor quit: restore workspace\nn: new worktree/stash · a/p/d: apply/pop/drop stash\nForms: type, arrows edit, Tab visits fields and buttons\nCtrl+Enter: submit · Esc: cancel/back · q: close".into();
-                            return ScreenOutcome::Continue;
-                        }
                         _ => {}
                     }
                 }
@@ -1284,11 +1290,15 @@ impl GitScreen {
         }
     }
     pub fn frame(&mut self, width: u16, height: u16) -> Frame {
-        if self.page == 0 {
+        let mut frame = if self.page == 0 {
             render::frame(self, width, height)
         } else {
             github::view::frame(self, width, height)
+        };
+        if self.help {
+            render::help(&mut frame, width, height, self.page);
         }
+        frame
     }
 
     pub fn window_frame(
