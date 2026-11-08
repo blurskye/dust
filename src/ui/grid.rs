@@ -107,6 +107,16 @@ pub enum Emphasis {
     Underline,
 }
 
+/// The foregrounds a selected list row keeps.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SelectedText {
+    Muted,
+    Added,
+    Changed,
+    Deleted,
+    Error,
+}
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum Style {
     /// A Dusty Git cell: a semantic role on a semantic surface.
@@ -233,6 +243,8 @@ pub enum Style {
     QueryMatch {
         selected: bool,
     },
+    /// Muted, Git or error text on the selection background, keeping its own colour.
+    SelectionText(SelectedText),
     /// A syntax group drawn on the documentation popup's background.
     DocumentationSyntax(crate::config::Highlight),
     /// A markdown heading's group drawn on its bar.

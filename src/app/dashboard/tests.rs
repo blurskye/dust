@@ -114,6 +114,61 @@ fn the_dashboard_lists_recent_files_with_their_projects_and_this_workspace_first
     assert_eq!(app.ui.dashboard_workspace.projects[1].path, first);
 }
 
+#[cfg(unix)]
+#[test]
+fn projects_leave_out_tutor_folders_missing_folders_and_symlinked_duplicates() {
+    use crate::app::workspace::tests::wait_root_operation;
+    let (_app_dirs, mut app) = app();
+    prepare_trust_identity(&mut app);
+    app.process_trust_events();
+    app.maybe_prompt_for_unseen_workspace();
+    app.close_prompt();
+    wait_trust(&mut app);
+    let home = app.state.workspace_root.clone();
+    let folders = tempfile::tempdir().unwrap();
+    let folders = folders.path().canonicalize().unwrap();
+    let tally = folders.join("tally");
+    let gone = folders.join("gone");
+    let proj = folders.join("proj");
+    std::fs::create_dir(&tally).unwrap();
+    std::fs::create_dir(&gone).unwrap();
+    std::os::unix::fs::symlink(&tally, &proj).unwrap();
+    let practice = tempfile::Builder::new()
+        .prefix("dust-tutor-")
+        .tempdir()
+        .unwrap();
+    // Open each as the workspace so Dust remembers it, ending in the symlink to tally.
+    for root in [
+        tally.clone(),
+        practice.path().to_path_buf(),
+        gone.clone(),
+        home.clone(),
+        proj.clone(),
+    ] {
+        app.switch_workspace_root(root);
+        wait_root_operation(&mut app);
+        wait_trust(&mut app);
+        app.close_prompt();
+    }
+    std::fs::remove_dir(&gone).unwrap();
+    let root = app.state.workspace_root.clone();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    app.sync_dashboard_ui();
+    while app.dashboard.reading.is_some() {
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        app.sync_dashboard_ui();
+    }
+    let projects = app
+        .ui
+        .dashboard_workspace
+        .projects
+        .iter()
+        .map(|project| project.path.clone())
+        .collect::<Vec<_>>();
+    assert_eq!(projects, [root, home]);
+}
+
 #[test]
 fn recent_files_saved_without_an_open_time_show_no_age() {
     let (_app_dirs, mut app) = app();
@@ -245,7 +300,12 @@ fn the_dashboard_selection_runs_actions_and_ctrl_h_l_reach_an_agent_beside_it() 
     let selected = (0..frame.grid.height())
         .flat_map(|y| (0..frame.grid.width()).map(move |x| (x, y)))
         .filter_map(|(x, y)| frame.grid.get(x, y))
-        .filter(|cell| cell.style == crate::ui::Style::Selection)
+        .filter(|cell| {
+            matches!(
+                cell.style,
+                crate::ui::Style::Selection | crate::ui::Style::SelectionText(_)
+            )
+        })
         .map(|cell| cell.symbol.as_str())
         .collect::<String>();
     assert!(selected.contains("tutor"), "{selected:?}");

@@ -24,6 +24,7 @@ pub use diff::parse_unified_patch;
 pub use grid::Cell;
 pub use grid::CellGrid;
 pub use grid::Frame;
+pub use grid::SelectedText;
 pub use grid::Style;
 pub use grid::{Emphasis, GitChip, GitRole, GitSurface};
 pub use pty_screen::PtyCell;

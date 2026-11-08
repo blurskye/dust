@@ -212,6 +212,7 @@ fn dashboard_respects_top_docks_and_floating_window_order() {
 }
 
 use crate::config::DashboardConfig;
+use crate::ui::SelectedText;
 use crate::ui::Style;
 use crate::ui::render::DashboardAction;
 use crate::ui::render::DashboardChange;
@@ -336,7 +337,7 @@ fn a_large_dashboard_shows_the_wordmark_beside_the_workspace_over_four_boxes() {
     assert!(rows[4].starts_with("    ██▄▄▄▄▄▄▀▀"), "{rows:#?}");
     assert_eq!(style(&frame, 4, 1), Style::Accent);
     assert_eq!(column(&rows[2], "tally · "), 58);
-    for text in ["master", " · 1 changed"] {
+    for text in ["master", " · 1 changed · 1 new"] {
         assert!(rows[2].contains(text), "{}", rows[2]);
     }
     assert_eq!(rows[2].trim_end().chars().count(), 156);
@@ -364,7 +365,12 @@ fn a_large_dashboard_shows_the_wordmark_beside_the_workspace_over_four_boxes() {
     assert!(rows[9].contains("2m │"), "{}", rows[9]);
     assert_eq!(style(&frame, 3, 9), Style::Selection);
     assert_eq!(style(&frame, 4, 9), Style::QueryMatch { selected: true });
-    assert_eq!(style(&frame, 8, 9), Style::Selection);
+    // On the selected row the folder stays muted and the name takes the selection's text.
+    assert_eq!(
+        style(&frame, 8, 9),
+        Style::SelectionText(SelectedText::Muted)
+    );
+    assert_eq!(style(&frame, 11, 9), Style::Selection);
     assert_eq!(style(&frame, 4, 10), Style::Accent);
     assert_eq!(column(&rows[10], "2  README.md"), 4);
     assert!(rows[11].contains("3  src/lib.rs  dust"), "{}", rows[11]);
@@ -494,7 +500,29 @@ fn the_selection_follows_the_focused_box_and_falls_back_when_it_is_hidden() {
     assert!(!rows[7].contains("1-9"));
     assert_eq!(style(&frame, 81, 22), Style::Accent);
     assert_eq!(style(&frame, 83, 24), Style::QueryMatch { selected: true });
-    assert_eq!(style(&frame, 86, 24), Style::Selection);
+    assert_eq!(
+        style(&frame, 86, 24),
+        Style::SelectionText(SelectedText::Muted)
+    );
+
+    // A selected change keeps its letter's and counts' colours on the selection background.
+    ui.dashboard_focus = Some(DashboardPanel::Changes);
+    ui.dashboard_row = 0;
+    let (frame, rows) = draw(&ui, 160, 39);
+    assert_eq!(column(&rows[9], "M src/count.rs"), 83);
+    let plus = u16::try_from(column(&rows[9], "+12")).unwrap();
+    let minus = u16::try_from(column(&rows[9], "-3")).unwrap();
+    for (x, expected) in [
+        (82, Style::Selection),
+        (83, Style::SelectionText(SelectedText::Changed)),
+        (85, Style::SelectionText(SelectedText::Muted)),
+        (89, Style::Selection),
+        (plus, Style::SelectionText(SelectedText::Added)),
+        (minus, Style::SelectionText(SelectedText::Deleted)),
+    ] {
+        assert_eq!(style(&frame, x, 9), expected, "column {x}");
+    }
+    assert_eq!(style(&frame, 83, 10), Style::GitSignAdded);
 }
 
 #[test]

@@ -308,12 +308,26 @@ pub(super) fn lessons(language: Language) -> Result<Vec<Step>, String> {
     Ok(steps)
 }
 
+/// The start of each practice project's temporary folder name.
+const PRACTICE_FOLDER_PREFIX: &str = "dust-tutor-";
+
+/// Whether the folder at the canonical path `path` is a tutor practice project, which is not
+/// one of the user's projects. Reads the file system to resolve the temporary folder.
+pub(in crate::app) fn is_practice_project(path: &Path) -> bool {
+    let temporary = std::env::temp_dir();
+    let temporary = temporary.canonicalize().unwrap_or(temporary);
+    path.parent() == Some(temporary.as_path())
+        && path
+            .file_name()
+            .is_some_and(|name| name.to_string_lossy().starts_with(PRACTICE_FOLDER_PREFIX))
+}
+
 /// Write the practice project to a new temporary folder and commit it, then change the greet
 /// file so the git lessons have something to show.
 fn create_practice_project(
     language: Language,
 ) -> Result<crate::files::TempTree, Box<dyn std::error::Error>> {
-    let folder = crate::files::TempTree::new("dust-tutor-")?;
+    let folder = crate::files::TempTree::new(PRACTICE_FOLDER_PREFIX)?;
     for (name, text) in language.practice_files() {
         let path = folder.path().join(name);
         if let Some(parent) = path.parent() {

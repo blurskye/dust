@@ -681,6 +681,23 @@ fn queue_style(
             };
             &derived
         }
+        Style::SelectionText(text) => {
+            let foreground = match text {
+                crate::ui::grid::SelectedText::Muted => &theme.styles.muted,
+                crate::ui::grid::SelectedText::Added => &theme.styles.git_sign_added,
+                crate::ui::grid::SelectedText::Changed => &theme.styles.git_sign_changed,
+                crate::ui::grid::SelectedText::Deleted => &theme.styles.git_sign_deleted,
+                crate::ui::grid::SelectedText::Error => &theme.styles.error,
+            };
+            let row = &theme.styles.selection;
+            derived = crate::config::ThemeStyle {
+                background: row.background,
+                background_256: row.background_256,
+                background_16: row.background_16,
+                ..foreground.clone()
+            };
+            &derived
+        }
         Style::Error => &theme.styles.error,
         Style::Warning => &theme.styles.warning,
         Style::DiagnosticError | Style::DiagnosticWarning | Style::DiagnosticHint => {

@@ -36,8 +36,16 @@ pub(in crate::app) struct Dashboard {
 struct GitFacts {
     lines: BTreeMap<PathBuf, (usize, usize)>,
     last_commit: Option<(String, i64)>,
-    /// The projects that still exist, each with its checked-out branch.
-    projects: Vec<(PathBuf, Option<String>)>,
+    /// What was found for each project the dashboard asked about.
+    projects: Vec<ProjectFacts>,
+}
+
+struct ProjectFacts {
+    path: PathBuf,
+    /// Where the project really is, after symlinks; `None` when it no longer exists or is a
+    /// tutor practice project, so it is not listed.
+    canonical: Option<PathBuf>,
+    branch: Option<String>,
 }
 
 fn read_git_facts(root: &Path, projects: &[PathBuf]) -> GitFacts {
@@ -46,10 +54,20 @@ fn read_git_facts(root: &Path, projects: &[PathBuf]) -> GitFacts {
         last_commit: crate::git::git_last_commit(root),
         projects: projects
             .iter()
-            .filter(|project| project.is_dir())
             .map(|project| {
-                let branch = crate::git::git_branch_name(project).ok().flatten();
-                (project.clone(), branch)
+                let canonical = project
+                    .canonicalize()
+                    .ok()
+                    .filter(|canonical| canonical.is_dir())
+                    .filter(|canonical| !crate::app::tutor::is_practice_project(canonical));
+                let branch = canonical
+                    .as_ref()
+                    .and_then(|_| crate::git::git_branch_name(project).ok().flatten());
+                ProjectFacts {
+                    path: project.clone(),
+                    canonical,
+                    branch,
+                }
             })
             .collect(),
     }
@@ -183,19 +201,31 @@ impl App {
             };
             (subject.clone(), age)
         });
+        // Each folder once, however it was reached; until the worker has looked, only this
+        // workspace is listed.
+        let mut listed = Vec::new();
         summary.projects = projects
             .iter()
             .filter_map(|project| {
-                let read = facts.projects.iter().find(|(path, _)| path == project);
+                let read = facts.projects.iter().find(|read| read.path == *project);
+                let canonical = match read {
+                    Some(read) => read.canonical.clone()?,
+                    None if *project == root => project.clone(),
+                    None => return None,
+                };
+                if listed.contains(&canonical) {
+                    return None;
+                }
+                listed.push(canonical);
                 let branch = if *project == root {
                     self.ui.git_branch.clone()
                 } else {
-                    read?.1.clone()
+                    None
                 };
                 Some(DashboardProject {
                     path: project.clone(),
                     name: directory_name(project),
-                    branch: branch.or_else(|| read.and_then(|(_, branch)| branch.clone())),
+                    branch: branch.or_else(|| read.and_then(|read| read.branch.clone())),
                 })
             })
             .take(DASHBOARD_LIST_LIMIT)

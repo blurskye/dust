@@ -8,6 +8,7 @@ use crate::config::Config;
 use crate::config::DashboardConfig;
 use crate::config::ExplorerIconMode;
 use crate::ui::CellGrid;
+use crate::ui::SelectedText;
 use crate::ui::Style;
 use crate::ui::geometry::ellipsized;
 use crate::ui::geometry::text_width;
@@ -337,18 +338,24 @@ impl Screen<'_> {
         let Some(changes) = &ui.dashboard_workspace.changes else {
             return;
         };
-        let (summary, style) = if changes.changed > 0 {
-            (
+        // The same files the changes box lists: tracked changes, then new files.
+        let mut parts = Vec::new();
+        if changes.changed > 0 {
+            parts.push((
                 format!("{} changed", changes.changed),
                 Style::GitSignChanged,
-            )
-        } else if changes.untracked > 0 {
-            (format!("{} new", changes.untracked), Style::GitSignAdded)
-        } else {
-            ("clean".to_owned(), Style::Muted)
-        };
-        x = self.put(x, y, " · ", Style::Muted, right);
-        self.put(x, y, &summary, style, right);
+            ));
+        }
+        if changes.untracked > 0 {
+            parts.push((format!("{} new", changes.untracked), Style::GitSignAdded));
+        }
+        if parts.is_empty() {
+            parts.push(("clean".to_owned(), Style::Muted));
+        }
+        for (summary, style) in parts {
+            x = self.put(x, y, " · ", Style::Muted, right);
+            x = self.put(x, y, &summary, style, right);
+        }
     }
 
     fn draw_path(&mut self, x: u16, y: u16, right: u16) {
@@ -750,13 +757,20 @@ fn visible_rows(
     (content.y..content.y + content.rows).zip(first..count)
 }
 
-/// A style as it shows on the selected row: the selection's colours, with accented text
+/// A style as it shows on the selected row: the selection's background, with coloured text
 /// keeping its colour.
 fn tone(style: Style, selected: bool) -> Style {
-    match (selected, style) {
-        (false, style) => style,
-        (true, Style::Accent) => Style::QueryMatch { selected: true },
-        (true, _) => Style::Selection,
+    if !selected {
+        return style;
+    }
+    match style {
+        Style::Accent => Style::QueryMatch { selected: true },
+        Style::Muted => Style::SelectionText(SelectedText::Muted),
+        Style::GitSignAdded => Style::SelectionText(SelectedText::Added),
+        Style::GitSignChanged => Style::SelectionText(SelectedText::Changed),
+        Style::GitSignDeleted => Style::SelectionText(SelectedText::Deleted),
+        Style::Error => Style::SelectionText(SelectedText::Error),
+        _ => Style::Selection,
     }
 }
 
