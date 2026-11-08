@@ -335,14 +335,13 @@ fn dashboard_and_prompt_render_at_multiple_sizes() {
                 rows.iter().any(|row| row.contains("dust-workspace")),
                 "{rows:?}"
             );
-            assert!(dashboard.cursor.is_some());
         } else {
             assert!(
                 rows.iter().any(|row| row.contains("Dust — resize")),
                 "{rows:?}"
             );
-            assert!(dashboard.cursor.is_none());
         }
+        assert!(dashboard.cursor.is_none());
         ui.prompt = Some(PromptState::new(PromptKind::Command));
         let prompt = render(&state, &ui, &config, &dashboard_config, width, height);
         let geometry = prompt_geometry(width, height, false);

@@ -44,7 +44,7 @@ fn showing_the_last_editor_dismisses_the_dashboard() {
 }
 
 #[test]
-fn the_dashboard_lists_recent_files_here_and_other_recent_projects() {
+fn the_dashboard_lists_recent_files_with_their_projects_and_this_workspace_first() {
     use crate::app::workspace::tests::wait_root_operation;
     let (_app_dirs, mut app) = app();
     prepare_trust_identity(&mut app);
@@ -61,20 +61,127 @@ fn the_dashboard_lists_recent_files_here_and_other_recent_projects() {
     assert_eq!(app.state.workspace_root, second_path);
     assert!(app.workspace.seen_roots().contains(&first));
 
-    // Recorded oldest first; the newest comes first in each list.
-    for path in [
-        first.join("old.rs"),
-        second_path.join("src/lib.rs"),
-        std::path::PathBuf::from("/never-opened-as-a-workspace/x.rs"),
-        first.join("newer.rs"),
-        second_path.join("main.rs"),
+    // Recorded oldest first; the newest comes first.
+    let now = app
+        .clock
+        .system_time()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    for (path, minutes_ago) in [
+        (first.join("old.rs"), 3 * 60),
+        (second_path.join("src/lib.rs"), 14),
+        (
+            std::path::PathBuf::from("/never-opened-as-a-workspace/x.rs"),
+            5,
+        ),
+        (second_path.join("main.rs"), 2),
     ] {
-        app.persistence.record_recent(path, 256);
+        app.persistence
+            .record_recent(path, now - minutes_ago * 60, 256);
     }
     app.sync_dashboard_ui();
+    let first_name = first.file_name().unwrap().to_string_lossy().into_owned();
     let summary = &app.ui.dashboard_workspace;
-    assert_eq!(summary.recent_files, ["main.rs", "src/lib.rs"]);
-    assert_eq!(summary.recent_projects, [first]);
+    let files = summary
+        .recent_files
+        .iter()
+        .map(|file| {
+            (
+                file.label.as_str(),
+                file.project.as_deref(),
+                file.age.as_str(),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        files,
+        [
+            ("main.rs", None, "2m"),
+            ("/never-opened-as-a-workspace/x.rs", None, "5m"),
+            ("src/lib.rs", None, "14m"),
+            ("old.rs", Some(first_name.as_str()), "3h"),
+        ]
+    );
+    assert_eq!(summary.projects[0].path, second_path);
+    // Other projects appear once the background read confirms they still exist.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while app.ui.dashboard_workspace.projects.len() < 2 {
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        app.sync_dashboard_ui();
+    }
+    assert_eq!(app.ui.dashboard_workspace.projects[1].path, first);
+}
+
+#[test]
+fn recent_files_saved_without_an_open_time_show_no_age() {
+    let (_app_dirs, mut app) = app();
+    let root = app.state.workspace_root.clone();
+    let mut saved = crate::persistence::PersistedState {
+        recent_files: vec![crate::persistence::RecentFile {
+            path: root.join("notes.md"),
+            opened_at: None,
+        }],
+        ..crate::persistence::PersistedState::default()
+    };
+    app.persistence.restore_history(&mut saved);
+    app.sync_dashboard_ui();
+    let file = &app.ui.dashboard_workspace.recent_files[0];
+    assert_eq!((file.label.as_str(), file.age.as_str()), ("notes.md", ""));
+}
+
+#[test]
+fn tab_moves_between_boxes_and_enter_and_numbers_open_the_right_file() {
+    use crate::app::tests::driver::TestSession;
+    use crate::ui::DashboardPanel;
+    let mut driver = TestSession::new(crate::config::load_bundled_config());
+    driver.resize(160, 40);
+    let root = driver.application_mut().state.workspace_root.clone();
+    for name in ["a.txt", "b.txt", "c.txt"] {
+        std::fs::write(root.join(name), format!("{name}\n")).unwrap();
+    }
+    let show_dashboard = |driver: &mut TestSession| {
+        let app = driver.application_mut();
+        app.set_dashboard_visibility(true);
+        for name in ["c.txt", "b.txt", "a.txt"] {
+            app.persistence.record_recent(root.join(name), 0, 256);
+        }
+        app.sync_dashboard_ui();
+        assert_eq!(app.active_input_context(), "dashboard");
+    };
+    let focus = |driver: &mut TestSession| {
+        let app = driver.application_mut();
+        crate::ui::render::dashboard_focus(&app.ui, app.dashboard_panels())
+    };
+    show_dashboard(&mut driver);
+    assert_eq!(focus(&mut driver), DashboardPanel::RecentFiles);
+    // Outside a Git repository the changes box has nothing to select, so Tab passes it.
+    driver.key("tab");
+    assert_eq!(focus(&mut driver), DashboardPanel::Projects);
+    driver.key("tab");
+    assert_eq!(focus(&mut driver), DashboardPanel::Start);
+    driver.key("tab");
+    assert_eq!(focus(&mut driver), DashboardPanel::RecentFiles);
+    driver.key("shift-tab");
+    assert_eq!(focus(&mut driver), DashboardPanel::Start);
+    driver.key("shift-tab");
+    driver.key("shift-tab");
+    assert_eq!(focus(&mut driver), DashboardPanel::RecentFiles);
+
+    // j and k move within the box, and Enter opens the selected file.
+    for key in ["j", "j", "k"] {
+        driver.key(key);
+    }
+    assert_eq!(driver.application_mut().ui.dashboard_row, 1);
+    driver.key("enter");
+    assert_eq!(driver.wait_for_opened_file().as_deref(), Some("b.txt"));
+
+    // A number opens that recent file whichever box is focused.
+    show_dashboard(&mut driver);
+    driver.key("tab");
+    driver.key("3");
+    assert_eq!(driver.wait_for_opened_file().as_deref(), Some("c.txt"));
 }
 
 #[test]
@@ -96,7 +203,7 @@ fn configured_text_and_dashboard_commands_are_schema_validated() {
 
 #[cfg(unix)]
 #[test]
-fn the_dashboard_cursor_runs_items_and_ctrl_h_l_reach_an_agent_beside_it() {
+fn the_dashboard_selection_runs_actions_and_ctrl_h_l_reach_an_agent_beside_it() {
     use crate::app::tests::driver::TestSession;
     let mut loaded = crate::config::load_bundled_config();
     let agents = &mut loaded.config.agents;
@@ -128,25 +235,23 @@ fn the_dashboard_cursor_runs_items_and_ctrl_h_l_reach_an_agent_beside_it() {
     assert!(driver.application_mut().window_session.terminal_focused());
     driver.key("ctrl-h");
 
-    // The cursor stops at the ends and sits on the label of the item Enter runs.
-    for key in ["k", "j", "j", "k", "down"] {
+    // With no recent files the actions are selected; the selection stops at the ends, and
+    // Enter runs the highlighted action.
+    for key in ["k", "j", "j", "k", "down", "down", "down"] {
         driver.key(key);
     }
-    assert_eq!(driver.application_mut().ui.dashboard_selected, 2);
-    driver.key("up");
+    assert_eq!(driver.application_mut().ui.dashboard_selected, 4);
     let frame = driver.frame();
-    let (x, y, _) = frame.cursor.expect("dashboard cursor");
-    let label = (x..x + 8)
-        .filter_map(|column| {
-            frame
-                .grid
-                .get(column, y)
-                .map(|cell| cell.symbol.to_string())
-        })
+    let selected = (0..frame.grid.height())
+        .flat_map(|y| (0..frame.grid.width()).map(move |x| (x, y)))
+        .filter_map(|(x, y)| frame.grid.get(x, y))
+        .filter(|cell| cell.style == crate::ui::Style::Selection)
+        .map(|cell| cell.symbol.as_str())
         .collect::<String>();
-    assert_eq!(label, "New File");
+    assert!(selected.contains("tutor"), "{selected:?}");
+    // The tutor action offers its languages.
     driver.key("enter");
-    assert!(driver.application_mut().state.active_view().is_some());
+    assert!(driver.application_mut().ui.picker.is_some());
 }
 
 #[cfg(unix)]
@@ -184,8 +289,8 @@ fn ctrl_h_from_an_agent_beside_the_dashboard_returns_to_it_and_it_stays_beside_t
     assert_eq!(app.window_session.focused_terminal(), None);
     assert!(app.window_session.dashboard_visible());
     let rect = app.terminal_rect(agent).expect("the agent stays");
-    // The dashboard is centred in the room left of the agent, not under it; the rule under
-    // its header spans its whole width.
+    // The dashboard is drawn in the room left of the agent, not under it: its boxes close
+    // before the agent's first column.
     let frame = driver.frame();
     let rows = (0..rect.y + rect.height)
         .map(|y| {
@@ -196,30 +301,15 @@ fn ctrl_h_from_an_agent_beside_the_dashboard_returns_to_it_and_it_stays_beside_t
                         .get(x, y)
                         .map_or(" ".into(), |cell| cell.symbol.to_string())
                 })
-                .collect::<Vec<_>>()
+                .collect::<String>()
         })
         .collect::<Vec<_>>();
-    assert!(
-        rows.iter()
-            .any(|cells| cells.concat().contains("Find File"))
-    );
-    let header = rows
+    assert!(rows.iter().any(|row| row.contains("find file")));
+    let start = rows
         .iter()
-        .position(|cells| cells.concat().contains("⠿ dust"))
-        .expect("the dashboard draws its header");
-    let rule = &rows[header + 1];
-    let start = rule.iter().position(|cell| cell == "─").unwrap();
-    let end = rule.iter().rposition(|cell| cell == "─").unwrap();
-    assert_eq!(
-        rows[header].iter().position(|cell| cell == "⠿"),
-        Some(start)
-    );
-    let middle = (start + end) / 2;
-    assert!(
-        middle.abs_diff(usize::from(rect.x) / 2) <= 2,
-        "dashboard from {start} to {end}, agent at {}",
-        rect.x
-    );
+        .find(|row| row.contains("Start"))
+        .expect("the dashboard draws its actions box");
+    assert!(start.trim_end().ends_with('╮'), "{start:?}");
     driver.key("ctrl-l");
     assert_eq!(
         driver.application_mut().window_session.focused_terminal(),

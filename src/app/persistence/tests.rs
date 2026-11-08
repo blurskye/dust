@@ -472,13 +472,16 @@ fn restore_reads_preserve_newer_edits_capture_and_original_editor_identity() {
     app.persistence
         .set_mark("x".into(), location(3), 8, &app.state);
     let live = app.state.workspace_root.join("live.txt");
-    app.persistence.record_recent(live.clone(), 8);
+    app.persistence.record_recent(live.clone(), 1, 8);
     let mut saved = PersistedState {
         marks: vec![PersistedMark {
             name: "x".into(),
             location: location(0),
         }],
-        recent_files: vec![path],
+        recent_files: vec![crate::persistence::RecentFile {
+            path,
+            opened_at: None,
+        }],
         ..PersistedState::default()
     };
     app.persistence.restore_history(&mut saved);
@@ -492,7 +495,7 @@ fn restore_reads_preserve_newer_edits_capture_and_original_editor_identity() {
             .byte,
         3
     );
-    assert_eq!(app.persistence.recent_files()[0], live);
+    assert_eq!(app.persistence.recent_files()[0].path, live);
 }
 
 #[test]

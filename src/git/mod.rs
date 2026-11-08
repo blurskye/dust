@@ -42,6 +42,7 @@ pub use status::GitStatusSnapshot;
 pub use status::GitStatusWorker;
 pub use status::GitUnsavedDocument;
 pub use status::aggregate_git_status;
+pub use status::git_line_counts;
 pub use status::unsaved_document_revision;
 pub use status::validate_unsaved_documents;
 mod hunks;
@@ -90,6 +91,7 @@ pub use mutation::GitStageHunkRequest;
 pub use mutation::git_branch_name;
 pub use mutation::git_head_id;
 pub use mutation::git_index_fingerprint;
+pub use mutation::git_last_commit;
 pub use mutation::worktree_hash;
 
 #[cfg(test)]

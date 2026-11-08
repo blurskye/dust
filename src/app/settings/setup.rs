@@ -422,7 +422,7 @@ mod tests {
                     .map(|y| frame.grid.row_text(y))
                     .collect::<Vec<_>>()
                     .join("\n");
-                assert!(text.contains("Tutor — learn by editing"), "{text}");
+                assert!(text.contains("t  tutor"), "{text}");
                 session.key("t");
                 assert!(
                     session.application().ui.picker.is_some(),

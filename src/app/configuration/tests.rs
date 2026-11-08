@@ -567,7 +567,7 @@ pub(in crate::app) fn resolved_explain_reports_exact_layered_and_replacement_pro
         env!("CARGO_MANIFEST_DIR"),
         "/assets/defaults/dashboard.toml"
     ))
-    .replace("⠿ dust", "PROVENANCE DASH");
+    .replace("identity = \"dust\"", "identity = \"PROVENANCE DASH\"");
     loaded.dashboard = toml::from_str(&dashboard_source).expect("dashboard");
     loaded.dashboard_path = dashboard_path.clone();
     loaded.dashboard_spans = crate::config::setting_spans(&dashboard_source);
@@ -636,7 +636,7 @@ pub(in crate::app) fn resolved_explain_reports_exact_layered_and_replacement_pro
     for (source, explanation, expected) in [
         (config_source, setting, "7"),
         (dashboard_source.as_str(), dashboard, "\"PROVENANCE DASH\""),
-        (dashboard_source.as_str(), dashboard_action, "\"Find File\""),
+        (dashboard_source.as_str(), dashboard_action, "\"find file\""),
         (theme_source.as_str(), theme, "\"provenance\""),
     ] {
         let range = explanation

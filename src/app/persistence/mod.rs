@@ -28,7 +28,7 @@ pub(in crate::app) use session::capture_persisted_layout;
 pub(in crate::app) struct Persistence {
     load_source: Option<session::RestoreSource>,
     restore: Option<session::PendingRestore>,
-    recent_files: Vec<PathBuf>,
+    recent_files: Vec<crate::persistence::RecentFile>,
     marks: Vec<crate::persistence::PersistedMark>,
     mark_sources: std::collections::HashMap<
         String,
@@ -804,7 +804,13 @@ impl App {
 
 impl App {
     pub(in crate::app) fn record_recent_file(&mut self, path: PathBuf) {
-        self.persistence.record_recent(path, RECENT_FILE_LIMIT);
+        let opened_at = self
+            .clock
+            .system_time()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |since| since.as_secs());
+        self.persistence
+            .record_recent(path, opened_at, RECENT_FILE_LIMIT);
     }
 }
 

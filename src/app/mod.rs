@@ -245,6 +245,8 @@ struct App {
     /// switches.
     switch_ends_terminals: Option<PathBuf>,
     switch_approved_terminals: Vec<PtyId>,
+    /// What the dashboard reads in the background, and a file it opens after a switch.
+    dashboard: dashboard::Dashboard,
     /// The parse results and views `ui.syntax_spans` and `ui.syntax_folds` were built from.
     #[allow(clippy::type_complexity)]
     syntax_spans_source: (

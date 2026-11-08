@@ -303,8 +303,18 @@ pub(in crate::app) fn register_commands(
         ),
         (
             "dashboard.open",
-            "Run the dashboard item under the cursor",
+            "Open the item selected on the dashboard",
             AppEffect::DashboardOpen,
+        ),
+        (
+            "dashboard.focus.next",
+            "Move to the next dashboard box",
+            AppEffect::DashboardFocus(1),
+        ),
+        (
+            "dashboard.focus.previous",
+            "Move to the previous dashboard box",
+            AppEffect::DashboardFocus(-1),
         ),
     ] {
         register(
@@ -316,6 +326,22 @@ pub(in crate::app) fn register_commands(
             move |_| effect.clone(),
         )?;
     }
+    register(
+        registry,
+        "dashboard.recent.open",
+        "Open a recent file from the dashboard by its number",
+        ContextRequirement::Application,
+        ArgumentSchema::default().field("number", ArgumentType::Integer, true),
+        |invocation| {
+            let number = usize::try_from(integer_arg(invocation, "number")?)
+                .ok()
+                .filter(|number| *number > 0)
+                .ok_or_else(|| {
+                    CommandError::InvalidArguments("recent file numbers start at 1".into())
+                })?;
+            Ok(AppEffect::DashboardOpenRecent(number - 1))
+        },
+    )?;
     for (id, title, at_mouse) in [
         (
             "surface.private.activate",

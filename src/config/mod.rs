@@ -285,17 +285,17 @@ pub struct DashboardActionConfig {
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct DashboardConfig {
-    /// Optional lines (block letters, say) drawn above the header when everything fits.
+    /// Lines (block letters, say) drawn in place of the DUST wordmark; empty for the wordmark.
     #[serde(default)]
     pub logo: String,
     pub show_identity: bool,
-    /// The name at the start of the header row.
+    /// The name that starts the header when the window is too small for the wordmark.
     pub identity: String,
     pub show_version: bool,
     pub version_format: String,
     pub show_path: bool,
     pub resize_message: String,
-    /// The widest the dashboard grows; the actions and lists share this width.
+    /// The widest the dashboard grows; wider windows centre it.
     pub content_width: u16,
     pub minimum_width: u16,
     pub minimum_height: u16,
@@ -333,12 +333,12 @@ impl Default for DashboardConfig {
         Self {
             logo: String::new(),
             show_identity: true,
-            identity: "⠿ dust".into(),
+            identity: "dust".into(),
             show_version: true,
             version_format: "v{version}".into(),
             show_path: true,
             resize_message: "Dust — resize terminal".into(),
-            content_width: 96,
+            content_width: 160,
             minimum_width: 20,
             minimum_height: 7,
             action: Vec::new(),

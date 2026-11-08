@@ -20,6 +20,7 @@ use crate::persistence::PersistedSession;
 use crate::persistence::PersistedState;
 use crate::persistence::PersistedTab;
 use crate::persistence::PersistedWindowRule;
+use crate::persistence::RecentFile;
 use crate::persistence::validate_content_descriptors;
 use crate::persistence::validate_window_rules;
 use std::collections::BTreeSet;
@@ -305,7 +306,7 @@ impl Persistence {
             loaded: restore.loaded,
         })))
     }
-    pub(in crate::app) fn recent_files(&self) -> &[PathBuf] {
+    pub(in crate::app) fn recent_files(&self) -> &[RecentFile] {
         &self.recent_files
     }
     pub(in crate::app) fn marks(&self) -> &[PersistedMark] {
@@ -317,9 +318,15 @@ impl Persistence {
     pub(in crate::app) fn changes(&self) -> &[PersistedLocation] {
         &self.changes
     }
-    pub(in crate::app) fn record_recent(&mut self, path: PathBuf, maximum: usize) {
-        self.recent_files.retain(|previous| previous != &path);
-        self.recent_files.insert(0, path);
+    pub(in crate::app) fn record_recent(&mut self, path: PathBuf, opened_at: u64, maximum: usize) {
+        self.recent_files.retain(|previous| previous.path != path);
+        self.recent_files.insert(
+            0,
+            RecentFile {
+                path,
+                opened_at: Some(opened_at),
+            },
+        );
         self.recent_files.truncate(maximum);
     }
     pub(in crate::app) fn reconcile_marks(&mut self, editor: &EditorState) {
@@ -438,7 +445,7 @@ impl Persistence {
         self.recent_files = std::mem::take(&mut self.recent_files)
             .into_iter()
             .chain(std::mem::take(&mut state.recent_files))
-            .filter(|path| seen.insert(path.clone()))
+            .filter(|file| seen.insert(file.path.clone()))
             .take(crate::app::persistence::RECENT_FILE_LIMIT)
             .collect();
         let mut seen = std::collections::HashSet::new();

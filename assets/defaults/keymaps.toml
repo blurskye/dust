@@ -1831,7 +1831,8 @@ context = "dashboard"
 keys = "s"
 command = "session.load"
 
-# The cursor moves between items as in LazyVim; Enter runs the one under it.
+# j and k move within the focused box, Tab and Shift-Tab between boxes; Enter opens the
+# selected item and 1-9 open recent files.
 [[keymap]]
 id = "builtin.dashboard.surface.select-next.j"
 context = "dashboard"
@@ -1857,6 +1858,80 @@ id = "builtin.dashboard.surface.open.enter"
 context = "dashboard"
 keys = "enter"
 command = "dashboard.open"
+[[keymap]]
+id = "builtin.dashboard.surface.focus-next.tab"
+context = "dashboard"
+keys = "tab"
+command = "dashboard.focus.next"
+[[keymap]]
+id = "builtin.dashboard.surface.focus-previous.shift-tab"
+context = "dashboard"
+keys = "shift-tab"
+command = "dashboard.focus.previous"
+[[keymap]]
+id = "builtin.dashboard.surface.recent-open.digit-1"
+context = "dashboard"
+keys = "1"
+command = "dashboard.recent.open"
+arguments = { number = 1 }
+[[keymap]]
+id = "builtin.dashboard.surface.recent-open.digit-2"
+context = "dashboard"
+keys = "2"
+command = "dashboard.recent.open"
+arguments = { number = 2 }
+[[keymap]]
+id = "builtin.dashboard.surface.recent-open.digit-3"
+context = "dashboard"
+keys = "3"
+command = "dashboard.recent.open"
+arguments = { number = 3 }
+[[keymap]]
+id = "builtin.dashboard.surface.recent-open.digit-4"
+context = "dashboard"
+keys = "4"
+command = "dashboard.recent.open"
+arguments = { number = 4 }
+[[keymap]]
+id = "builtin.dashboard.surface.recent-open.digit-5"
+context = "dashboard"
+keys = "5"
+command = "dashboard.recent.open"
+arguments = { number = 5 }
+[[keymap]]
+id = "builtin.dashboard.surface.recent-open.digit-6"
+context = "dashboard"
+keys = "6"
+command = "dashboard.recent.open"
+arguments = { number = 6 }
+[[keymap]]
+id = "builtin.dashboard.surface.recent-open.digit-7"
+context = "dashboard"
+keys = "7"
+command = "dashboard.recent.open"
+arguments = { number = 7 }
+[[keymap]]
+id = "builtin.dashboard.surface.recent-open.digit-8"
+context = "dashboard"
+keys = "8"
+command = "dashboard.recent.open"
+arguments = { number = 8 }
+[[keymap]]
+id = "builtin.dashboard.surface.recent-open.digit-9"
+context = "dashboard"
+keys = "9"
+command = "dashboard.recent.open"
+arguments = { number = 9 }
+[[keymap]]
+id = "builtin.dashboard.surface.config-open.c"
+context = "dashboard"
+keys = "c"
+command = "config.open"
+[[keymap]]
+id = "builtin.dashboard.surface.plugin-list.p"
+context = "dashboard"
+keys = "p"
+command = "plugin.list"
 # Ctrl-h/j/k/l move to a terminal or panel beside the dashboard, as in the editor.
 [[keymap]]
 id = "builtin.dashboard.surface.surface-focus-left.ctrl-h"

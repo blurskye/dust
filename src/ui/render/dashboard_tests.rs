@@ -211,58 +211,87 @@ fn dashboard_respects_top_docks_and_floating_window_order() {
     );
 }
 
+use crate::config::DashboardConfig;
+use crate::ui::Style;
 use crate::ui::render::DashboardAction;
+use crate::ui::render::DashboardChange;
+use crate::ui::render::DashboardChanges;
+use crate::ui::render::DashboardFile;
+use crate::ui::render::DashboardPanel;
+use crate::ui::render::DashboardProject;
 use crate::ui::render::DashboardWorkspace;
 use std::path::Path;
 
 fn bundled_actions() -> Vec<DashboardAction> {
-    // The bundled keymaps give Plugins no dashboard key.
-    let keys = [
-        Some("f"),
-        Some("n"),
-        Some("g"),
-        Some("r"),
-        Some("e"),
-        Some("s"),
-        Some("t"),
-        None,
-        Some("R"),
-        Some("q"),
-    ];
-    crate::config::load_bundled_config()
-        .dashboard
-        .action
+    let keys = ["f", "g", "e", "r", "t", "s", "c", "p", "q"];
+    let actions = crate::config::load_bundled_config().dashboard.action;
+    assert_eq!(actions.len(), keys.len());
+    actions
         .iter()
         .zip(keys)
         .map(|(action, key)| DashboardAction {
             command: action.command.clone(),
             label: action.label.clone(),
             icon: action.icon.clone(),
-            key: key.map(Into::into),
+            key: Some(key.into()),
         })
         .collect()
 }
 
 fn workspace_ui() -> UiState {
+    let file = |label: &str, project: Option<&str>, age: &str| DashboardFile {
+        path: Path::new("/work/tally").join(label),
+        label: label.into(),
+        project: project.map(Into::into),
+        age: age.into(),
+    };
+    let change = |label: &str, code, lines| DashboardChange {
+        path: Path::new("/work/tally").join(label),
+        label: label.into(),
+        code,
+        lines,
+    };
+    let project = |name: &str, branch: &str| DashboardProject {
+        path: Path::new("/work").join(name),
+        name: name.into(),
+        branch: Some(branch.into()),
+    };
     UiState {
         dashboard: true,
         dashboard_actions: bundled_actions(),
-        git_branch: Some("main".into()),
+        git_branch: Some("master".into()),
         dashboard_workspace: DashboardWorkspace {
-            recent_files: vec!["src/ui/render/overlays.rs".into(), "README.md".into()],
-            recent_projects: vec![PathBuf::from("/srv/blurskye-site")],
-            git_changes: Some((3, 1)),
+            recent_files: vec![
+                file("src/count.rs", None, "2m"),
+                file("README.md", None, "1h"),
+                file("src/lib.rs", Some("dust"), "3d"),
+            ],
+            changes: Some(DashboardChanges {
+                files: vec![
+                    change("src/count.rs", 'M', Some((12, 3))),
+                    change("notes.txt", '?', None),
+                ],
+                changed: 1,
+                untracked: 1,
+            }),
+            projects: vec![project("tally", "master"), project("dust", "main")],
+            last_commit: Some(("Count characters too".into(), "3h ago".into())),
         },
         ..UiState::default()
     }
 }
 
-fn draw(ui: &UiState, width: u16, height: u16) -> (crate::ui::Frame, Vec<String>) {
+fn draw_with(
+    ui: &UiState,
+    configured: &DashboardConfig,
+    width: u16,
+    height: u16,
+) -> (crate::ui::Frame, Vec<String>) {
     let loaded = crate::config::load_bundled_config();
     let frame = crate::ui::render::render_dashboard(
-        Path::new("/tmp/dust-workspace"),
+        Path::new("/work/tally"),
         ui,
-        &loaded.dashboard,
+        configured,
         &loaded.config,
         width,
         height,
@@ -271,158 +300,235 @@ fn draw(ui: &UiState, width: u16, height: u16) -> (crate::ui::Frame, Vec<String>
     (frame, rows)
 }
 
+fn draw(ui: &UiState, width: u16, height: u16) -> (crate::ui::Frame, Vec<String>) {
+    draw_with(
+        ui,
+        &crate::config::load_bundled_config().dashboard,
+        width,
+        height,
+    )
+}
+
+/// The column `text` starts at in `row`.
+fn column(row: &str, text: &str) -> usize {
+    let at = row
+        .find(text)
+        .unwrap_or_else(|| panic!("{text:?} missing from {row:?}"));
+    row[..at].chars().count()
+}
+
+fn style(frame: &crate::ui::Frame, x: u16, y: u16) -> Style {
+    frame.grid.get(x, y).unwrap().style
+}
+
+fn version() -> String {
+    format!("v{}", env!("CARGO_PKG_VERSION"))
+}
+
 #[test]
-fn the_dashboard_shows_the_workspace_actions_in_columns_and_recent_lists() {
-    let (frame, rows) = draw(&workspace_ui(), 120, 35);
-    let row = |text: &str| {
-        rows.iter()
-            .position(|row| row.contains(text))
-            .unwrap_or_else(|| panic!("{text} missing: {rows:#?}"))
-    };
-    let header = row("⠿ dust");
-    assert!(rows[header].contains(&format!("v{}", env!("CARGO_PKG_VERSION"))));
-    assert!(rows[header + 1].trim().chars().all(|c| c == '─'));
-    let workspace = row("dust-workspace   ");
-    assert!(header < workspace);
-    for text in ["main", "3 changed", "1 untracked"] {
-        assert!(rows[workspace].contains(text), "{}", rows[workspace]);
+fn a_large_dashboard_shows_the_wordmark_beside_the_workspace_over_four_boxes() {
+    let (frame, rows) = draw(&workspace_ui(), 160, 39);
+    // The wordmark takes rows 1 to 4, with the workspace beside it.
+    assert!(
+        rows[1].starts_with("    ██▀▀▀▀▀▀▄▄  ██      ██"),
+        "{rows:#?}"
+    );
+    assert!(rows[4].starts_with("    ██▄▄▄▄▄▄▀▀"), "{rows:#?}");
+    assert_eq!(style(&frame, 4, 1), Style::Accent);
+    assert_eq!(column(&rows[2], "tally · "), 58);
+    for text in ["master", " · 1 changed"] {
+        assert!(rows[2].contains(text), "{}", rows[2]);
     }
-    assert!(rows[workspace + 1].contains("dust-workspace"));
-    // Ten actions fill three columns top to bottom, each key before its label.
-    let first = row("f  Find File");
-    assert!(workspace < first);
-    for (offset, labels) in [
-        (
-            0,
-            &["f  Find File", "e  Explorer", "R  Recover Unsaved Work"][..],
-        ),
-        (1, &["n  New File", "s  Restore Session", "q  Quit"]),
-        (2, &["g  Find Text", "t  Tutor — learn by editing"]),
-        (3, &["r  Recent Files", "   Plugins"]),
+    assert_eq!(rows[2].trim_end().chars().count(), 156);
+    assert!(rows[2].trim_end().ends_with(&version()));
+    assert_eq!(column(&rows[3], "/work/tally"), 58);
+    assert_eq!(
+        column(&rows[5], "last commit Count characters too 3h ago"),
+        58
+    );
+
+    // Recent files and changes on row 7, projects and the actions below them.
+    assert_eq!(column(&rows[7], "╭─ Recent files "), 2);
+    assert!(rows[7].contains(" 1-9 ─╮"), "{}", rows[7]);
+    assert_eq!(column(&rows[7], "╮"), 78);
+    assert_eq!(column(&rows[7], "╭─ Changes "), 81);
+    assert!(rows[7].trim_end().ends_with(" master ─╮"), "{}", rows[7]);
+    assert_eq!(column(&rows[22], "╭─ Projects "), 2);
+    assert_eq!(column(&rows[22], "╭─ Start "), 81);
+    assert_eq!(column(&rows[36], "╰"), 2);
+
+    // The focused box has an accent border and its selected row the selection colours.
+    assert_eq!(style(&frame, 2, 7), Style::Accent);
+    assert_eq!(style(&frame, 81, 7), Style::Border);
+    assert_eq!(column(&rows[9], "1  src/count.rs"), 4);
+    assert!(rows[9].contains("2m │"), "{}", rows[9]);
+    assert_eq!(style(&frame, 3, 9), Style::Selection);
+    assert_eq!(style(&frame, 4, 9), Style::QueryMatch { selected: true });
+    assert_eq!(style(&frame, 8, 9), Style::Selection);
+    assert_eq!(style(&frame, 4, 10), Style::Accent);
+    assert_eq!(column(&rows[10], "2  README.md"), 4);
+    assert!(rows[11].contains("3  src/lib.rs  dust"), "{}", rows[11]);
+    assert_eq!(style(&frame, 7, 11), Style::Muted);
+    assert_eq!(style(&frame, 11, 11), Style::Default);
+
+    assert_eq!(column(&rows[9], "M src/count.rs"), 83);
+    assert!(rows[9].contains("+12 -3 │"), "{}", rows[9]);
+    assert!(rows[10].contains("? notes.txt"), "{}", rows[10]);
+    assert!(rows[10].contains("new │"), "{}", rows[10]);
+
+    assert_eq!(column(&rows[24], "tally"), 4);
+    assert!(rows[24].contains("/work/tally"), "{}", rows[24]);
+    assert_eq!(column(&rows[25], "dust"), 4);
+    assert!(rows[25].contains("main │"), "{}", rows[25]);
+
+    // The actions run in three columns, each key before its label.
+    for (y, labels) in [
+        (24, ["f  find file", "g  find text", "e  explorer"]),
+        (25, ["r  recent files", "t  tutor", "s  restore session"]),
+        (26, ["c  config", "p  plugins", "q  quit"]),
     ] {
-        for label in labels {
-            assert!(rows[first + offset].contains(*label), "{rows:#?}");
-        }
+        let columns = labels.map(|label| column(&rows[y], label));
+        assert_eq!(columns, [83, 107, 131], "{}", rows[y]);
     }
-    let lists = row("Recent files");
-    assert!(first + 3 < lists);
-    assert!(rows[lists].contains("Projects"));
-    assert!(rows[lists + 1].contains("src/ui/render/overlays.rs"));
-    assert!(rows[lists + 1].contains("blurskye-site"));
-    assert!(rows[lists + 2].contains("README.md"));
-    // The cursor rests on the first label.
-    let (x, y, _) = frame.cursor.expect("dashboard cursor");
-    assert_eq!(usize::from(y), first);
-    assert_eq!(frame.grid.get(x, y).unwrap().symbol, "F");
+    assert_eq!(style(&frame, 83, 24), Style::Accent);
+    assert_eq!(style(&frame, 86, 24), Style::Muted);
+
+    assert!(rows[38].starts_with(" tab next panel · j/k move · enter open · 1-9 recent file"));
+    assert_eq!(style(&frame, 0, 38), Style::StatusMuted);
+    assert!(frame.cursor.is_none());
 }
 
 #[test]
-fn moving_through_the_dashboard_goes_down_a_column_then_to_the_next() {
-    let mut ui = workspace_ui();
-    let cursor = |ui: &UiState| {
-        let (frame, _) = draw(ui, 120, 35);
-        let (x, y, _) = frame.cursor.expect("dashboard cursor");
-        let label = frame
-            .grid
-            .row_text(y)
-            .chars()
-            .skip(usize::from(x))
-            .collect::<String>();
-        (x, y, label)
-    };
-    let (first_x, first_y, label) = cursor(&ui);
-    assert!(label.starts_with("Find File"));
-    ui.dashboard_selected = 2;
-    let (x, y, label) = cursor(&ui);
-    assert_eq!((x, y), (first_x, first_y + 2));
-    assert!(label.starts_with("Find Text"));
-    ui.dashboard_selected = 4;
-    let (x, y, label) = cursor(&ui);
-    assert!(x > first_x && y == first_y);
-    assert!(label.starts_with("Explorer"));
-    ui.dashboard_selected = 99;
-    assert!(cursor(&ui).2.starts_with("Quit"));
+fn an_80_by_24_dashboard_shows_one_header_line_recent_files_and_the_actions() {
+    let (_, rows) = draw(&workspace_ui(), 80, 24);
+    assert_eq!(
+        rows[0].trim(),
+        format!("dust {} · tally · master", version())
+    );
+    assert_eq!(column(&rows[2], "╭─ Recent files "), 2);
+    assert_eq!(rows[2].trim_end().chars().count(), 78);
+    assert_eq!(column(&rows[4], "1  src/count.rs"), 4);
+    assert!(rows[6].contains("3  src/lib.rs  dust"));
+    let start = rows
+        .iter()
+        .position(|row| row.contains("─ Start "))
+        .unwrap();
+    for label in [
+        "find file",
+        "find text",
+        "explorer",
+        "recent files",
+        "tutor",
+        "restore session",
+        "config",
+        "plugins",
+        "quit",
+    ] {
+        assert!(
+            rows[start..].iter().any(|row| row.contains(label)),
+            "{label}: {rows:#?}"
+        );
+    }
+    for text in ["██", "Changes", "Projects", "last commit"] {
+        assert!(!rows.iter().any(|row| row.contains(text)), "{rows:#?}");
+    }
+    assert!(rows[23].contains("tab next panel"));
 }
 
 #[test]
-fn the_dashboard_keeps_every_action_as_the_window_shrinks() {
+fn shorter_windows_drop_the_wordmark_before_the_boxes() {
     let ui = workspace_ui();
-    for width in (20..=140).step_by(6) {
-        for height in 7..=40 {
+    // The pty smoke test's size still fits the wordmark.
+    let (_, rows) = draw(&ui, 100, 30);
+    assert!(rows[1].contains("██"), "{rows:#?}");
+    let (_, rows) = draw(&ui, 120, 24);
+    assert!(!rows.iter().any(|row| row.contains("██")), "{rows:#?}");
+    assert!(rows[1].starts_with("    tally · "), "{}", rows[1]);
+    assert!(rows[1].contains("master · 1 changed"), "{}", rows[1]);
+    assert!(rows[1].trim_end().ends_with(&format!("dust {}", version())));
+    assert!(rows[3].contains("last commit Count characters too"));
+    for title in ["Recent files", "Changes", "Projects", "Start"] {
+        assert!(rows.iter().any(|row| row.contains(title)), "{rows:#?}");
+    }
+    // Below the boxes' height only recent files and the actions are left.
+    let (_, rows) = draw(&ui, 120, 18);
+    assert!(rows.iter().any(|row| row.contains("Recent files")));
+    assert!(!rows.iter().any(|row| row.contains("Changes")));
+}
+
+#[test]
+fn a_configured_logo_replaces_the_wordmark() {
+    let mut configured = crate::config::load_bundled_config().dashboard;
+    configured.logo = "TALLY\nworks".into();
+    let (_, rows) = draw_with(&workspace_ui(), &configured, 160, 39);
+    assert!(rows[1].starts_with("    TALLY"), "{rows:#?}");
+    assert!(rows[2].starts_with("    works"), "{rows:#?}");
+    assert!(!rows.iter().any(|row| row.contains("██")));
+    // The workspace sits beside the logo.
+    assert_eq!(column(&rows[2], "tally · "), 4 + 5 + 8);
+}
+
+#[test]
+fn the_selection_follows_the_focused_box_and_falls_back_when_it_is_hidden() {
+    let mut ui = workspace_ui();
+    ui.dashboard_focus = Some(DashboardPanel::Projects);
+    ui.dashboard_row = 1;
+    let (frame, rows) = draw(&ui, 160, 39);
+    assert_eq!(style(&frame, 2, 22), Style::Accent);
+    assert_eq!(style(&frame, 2, 7), Style::Border);
+    assert_eq!(style(&frame, 3, 25), Style::Selection);
+    assert_ne!(style(&frame, 3, 24), Style::Selection);
+    assert_ne!(style(&frame, 3, 9), Style::Selection);
+    assert_eq!(column(&rows[25], "dust"), 4);
+
+    // At 80x24 there is no projects box, so recent files hold the selection.
+    let (frame, _) = draw(&ui, 80, 24);
+    assert_eq!(style(&frame, 2, 2), Style::Accent);
+    assert_eq!(style(&frame, 3, 5), Style::Selection);
+
+    // With no recent files the first action is selected.
+    ui.dashboard_focus = None;
+    ui.dashboard_workspace.recent_files.clear();
+    let (frame, rows) = draw(&ui, 160, 39);
+    assert!(rows[9].contains("Files you open show up here"));
+    assert!(!rows[7].contains("1-9"));
+    assert_eq!(style(&frame, 81, 22), Style::Accent);
+    assert_eq!(style(&frame, 83, 24), Style::QueryMatch { selected: true });
+    assert_eq!(style(&frame, 86, 24), Style::Selection);
+}
+
+#[test]
+fn the_changes_box_says_when_the_tree_is_clean_or_not_a_repository() {
+    let mut ui = workspace_ui();
+    ui.dashboard_workspace.changes = Some(DashboardChanges::default());
+    let (_, rows) = draw(&ui, 160, 39);
+    assert!(rows[2].contains("master · clean"), "{}", rows[2]);
+    assert_eq!(column(&rows[9], "clean"), 83);
+    ui.dashboard_workspace.changes = None;
+    ui.git_branch = None;
+    let (_, rows) = draw(&ui, 160, 39);
+    assert_eq!(column(&rows[9], "Not a Git repository"), 83);
+    // Without a branch or a status the name stands alone before the version.
+    assert_eq!(column(&rows[2], "tally"), 58);
+    assert!(!rows[2].contains('·'), "{}", rows[2]);
+}
+
+#[test]
+fn every_size_draws_without_overflowing() {
+    let ui = workspace_ui();
+    for width in (1..=220).step_by(7) {
+        for height in 1..=50 {
             let (frame, rows) = draw(&ui, width, height);
-            if rows.iter().any(|row| row.contains("Dust — resize")) {
-                // Only when the actions alone are taller than the window.
-                assert!(height < 10, "{width}x{height}: {rows:#?}");
+            assert!(frame.cursor.is_none());
+            if width < 20 || height < 7 {
                 continue;
             }
-            for action in &ui.dashboard_actions {
-                let start: String = action.label.chars().take(4).collect();
-                assert!(
-                    rows.iter().any(|row| row.contains(&start)),
-                    "{width}x{height}: {rows:#?}"
-                );
-            }
-            assert!(frame.cursor.is_some());
-        }
-    }
-    // At 80x24 nothing gives way.
-    let (_, rows) = draw(&ui, 80, 24);
-    for text in [
-        "⠿ dust",
-        "3 changed",
-        "Recent files",
-        "Projects",
-        "README.md",
-    ] {
-        assert!(rows.iter().any(|row| row.contains(text)), "{rows:#?}");
-    }
-    // A short window drops the lists before the workspace name.
-    let (_, rows) = draw(&ui, 80, 10);
-    assert!(rows.iter().any(|row| row.contains("dust-workspace")));
-    assert!(!rows.iter().any(|row| row.contains("Recent files")));
-}
-
-#[test]
-fn a_terminal_dock_shortens_the_dashboard_from_the_top_parts_down() {
-    // A dock above or below leaves the dashboard a short window: the lists and header give
-    // way, every action stays, and what is left stays centred.
-    let ui = workspace_ui();
-    for height in 7..=30 {
-        let (_, rows) = draw(&ui, 160, height);
-        for action in &ui.dashboard_actions {
             assert!(
-                rows.iter().any(|row| row.contains(&action.label)),
-                "height {height}: {rows:#?}"
+                rows.iter().any(|row| row.contains("Start")),
+                "{width}x{height}: {rows:#?}"
             );
         }
-        let first = rows.iter().position(|row| !row.trim().is_empty()).unwrap();
-        let last = rows.iter().rposition(|row| !row.trim().is_empty()).unwrap();
-        assert!(
-            first.abs_diff(rows.len() - last - 1) <= 1,
-            "height {height}: {rows:#?}"
-        );
-        let header = rows.iter().any(|row| row.contains("⠿ dust"));
-        let lists = rows.iter().any(|row| row.contains("Recent files"));
-        assert!(!lists || header, "height {height}: {rows:#?}");
-        assert_eq!(header, height >= 8, "height {height}: {rows:#?}");
     }
-}
-
-#[test]
-fn a_narrow_dashboard_keeps_keys_apart_from_clipped_labels() {
-    let ui = UiState {
-        dashboard_actions: vec![DashboardAction {
-            command: "recovery.inspect".into(),
-            icon: String::new(),
-            label: "Recover Unsaved Work".into(),
-            key: Some("R".into()),
-        }],
-        ..UiState::default()
-    };
-    let (frame, _) = draw(&ui, 20, 24);
-    let (x, y, _) = frame.cursor.unwrap();
-    assert!(frame.grid.row_text(y).contains("R  Recover Unsav"));
-    assert_eq!(frame.grid.get(x - 1, y).unwrap().symbol, " ");
 }
 
 #[test]
@@ -444,17 +550,22 @@ fn user_actions_without_keys_or_with_icons_line_up_their_labels() {
         ],
         ..UiState::default()
     };
-    let (frame, rows) = draw(&ui, 80, 24);
+    let (_, rows) = draw(&ui, 160, 39);
     let row = rows.iter().find(|row| row.contains("Console")).unwrap();
     assert!(row.contains("   » Console"), "{row}");
     assert!(row.contains("z    Exit"), "{row}");
-    assert!(!rows.iter().any(|row| row.contains("Recent files")));
-    let (x, y, _) = frame.cursor.unwrap();
-    let label = frame
-        .grid
-        .row_text(y)
-        .chars()
-        .skip(usize::from(x))
-        .collect::<String>();
-    assert!(label.starts_with("Console"));
+    assert_eq!(
+        column(row, "Console") - column(row, "   »"),
+        column(row, "Exit") - column(row, "z ")
+    );
+}
+
+#[test]
+fn a_long_branch_name_gives_way_to_the_project_name_and_path() {
+    let mut ui = workspace_ui();
+    ui.dashboard_workspace.projects[0].branch = Some("worktree-agent-a87150a942f7389cd".into());
+    let (_, rows) = draw(&ui, 100, 30);
+    let row = rows.iter().find(|row| row.contains("│ tally")).unwrap();
+    assert!(row.contains("│ tally   /work/tally"), "{row}");
+    assert!(row.contains('…'), "{row}");
 }

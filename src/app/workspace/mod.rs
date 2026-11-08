@@ -1074,7 +1074,10 @@ impl App {
         self.state.set_workspace_root(path.clone());
         self.invalidate_root_scoped_operations();
         self.start_git_status_refresh_silent();
-        if let Some(location) = reopen {
+        // A recent file chosen on the dashboard comes before the one that was in front.
+        if let Some(file) = self.take_dashboard_file_after_switch(&path) {
+            self.open_dashboard_file(file);
+        } else if let Some(location) = reopen {
             self.navigate_persisted_location(location);
         }
         let name = path.file_name().map_or_else(

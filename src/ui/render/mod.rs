@@ -37,6 +37,10 @@ use crate::ui::geometry::text_width;
 
 mod dashboard;
 
+pub(crate) use dashboard::dashboard_focus;
+pub(crate) use dashboard::dashboard_panels;
+pub(crate) use dashboard::dashboard_rows;
+pub(crate) use dashboard::dashboard_selected_row;
 use dashboard::render_dashboard;
 
 use documentation::render_documentation_popup;
@@ -408,19 +412,69 @@ pub struct DashboardAction {
     pub key: Option<String>,
 }
 
-/// Recent files or projects the dashboard lists at most.
-pub(crate) const DASHBOARD_LIST_LIMIT: usize = 8;
+/// Recent files, changed files or projects the dashboard lists at most; the number keys reach
+/// the first nine recent files.
+pub(crate) const DASHBOARD_LIST_LIMIT: usize = 9;
 
-/// What the dashboard shows about its workspace, gathered by the application from state it
-/// already keeps so drawing reads no files and waits on nothing.
+/// The dashboard's boxes, in the order Tab moves through them.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DashboardPanel {
+    RecentFiles,
+    Changes,
+    Projects,
+    Start,
+}
+
+/// What the dashboard shows about its workspace, gathered by the application so drawing reads
+/// no files and waits on nothing.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct DashboardWorkspace {
-    /// Recently opened files in this workspace, newest first, relative to its root.
-    pub recent_files: Vec<String>,
-    /// Other workspaces with recently opened files, newest first.
-    pub recent_projects: Vec<std::path::PathBuf>,
-    /// Changed and untracked file counts from the last Git status, when there is one.
-    pub git_changes: Option<(usize, usize)>,
+    /// Recently opened files in any project, newest first.
+    pub recent_files: Vec<DashboardFile>,
+    /// The workspace's changed files, or `None` outside a Git repository.
+    pub changes: Option<DashboardChanges>,
+    /// This workspace first, then other projects Dust has opened.
+    pub projects: Vec<DashboardProject>,
+    /// The last commit's subject and when it was made, such as `3h ago`.
+    pub last_commit: Option<(String, String)>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DashboardFile {
+    pub path: std::path::PathBuf,
+    /// The path inside its project.
+    pub label: String,
+    /// The project's name when it is not this workspace.
+    pub project: Option<String>,
+    /// How long ago it was opened, such as `14m`; empty when that is not known.
+    pub age: String,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct DashboardChanges {
+    /// Changed files, tracked ones first, at most [`DASHBOARD_LIST_LIMIT`].
+    pub files: Vec<DashboardChange>,
+    /// All tracked files that differ from HEAD, and all untracked ones.
+    pub changed: usize,
+    pub untracked: usize,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DashboardChange {
+    pub path: std::path::PathBuf,
+    /// The path inside the workspace.
+    pub label: String,
+    /// `M`, `A`, `D`, `R`, `T`, `U` for a conflict, or `?` for an untracked file.
+    pub code: char,
+    /// Lines added and removed, once they have been counted.
+    pub lines: Option<(usize, usize)>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DashboardProject {
+    pub path: std::path::PathBuf,
+    pub name: String,
+    pub branch: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1388,8 +1442,12 @@ pub struct UiState {
     pub yanked: Option<YankHighlight>,
     pub config_diagnostic: Option<String>,
     pub dashboard_actions: Vec<DashboardAction>,
-    /// The dashboard item under the cursor.
+    /// The action selected in the dashboard's Start box.
     pub dashboard_selected: usize,
+    /// The box Tab last moved to; `None` until then.
+    pub dashboard_focus: Option<DashboardPanel>,
+    /// The row selected in the focused box when that is not Start.
+    pub dashboard_row: usize,
     pub dashboard_workspace: DashboardWorkspace,
     pub tool_menu: Option<ToolMenuState>,
     /// The Settings page, while it is open.
@@ -2033,6 +2091,47 @@ fn render_tutor_card(
     }
 }
 
+/// Where the dashboard is drawn: its own window when that floats or docks, otherwise its window
+/// inside the workspace area, from which the compositor has already taken every dock.
+fn dashboard_rect(compositor: &CompositorLayoutState) -> WindowRect {
+    let bounds = compositor.projection.workspace_bounds;
+    let window = compositor
+        .surfaces
+        .dashboard
+        .and_then(|window| compositor.projection.window(window));
+    if let Some(window) = window
+        && matches!(
+            window.layer,
+            crate::windows::CompositorLayer::Docked | crate::windows::CompositorLayer::Floating
+        )
+    {
+        return window.rect;
+    }
+    let rect = window.map_or(bounds, |window| window.rect);
+    let x = rect.x.max(bounds.x);
+    let y = rect.y.max(bounds.y);
+    WindowRect {
+        x,
+        y,
+        width: rect
+            .x
+            .saturating_add(rect.width)
+            .min(bounds.x.saturating_add(bounds.width))
+            .saturating_sub(x),
+        height: rect
+            .y
+            .saturating_add(rect.height)
+            .min(bounds.y.saturating_add(bounds.height))
+            .saturating_sub(y),
+    }
+}
+
+/// The size the dashboard was last laid out at, so keys move through the boxes it shows.
+pub(crate) fn dashboard_size(ui: &UiState) -> Option<(u16, u16)> {
+    let rect = dashboard_rect(ui.compositor_layout.as_ref()?);
+    Some((rect.width, rect.height))
+}
+
 #[must_use]
 pub fn render(
     state: &EditorState,
@@ -2117,31 +2216,7 @@ pub(crate) fn render_with_documentation_geometry(
             })
         });
     let content_bounds = if (ui.dashboard || state.active_view().is_none()) && !dashboard_floating {
-        // The compositor already subtracts every dock, including top and bottom docks.
-        workspace.map(|bounds| {
-            if let Some(window) = dashboard_window
-                && window.layer == crate::windows::CompositorLayer::Docked
-            {
-                return window.rect;
-            }
-            let rect = dashboard_window.map_or(bounds, |window| window.rect);
-            let x = rect.x.max(bounds.x);
-            let y = rect.y.max(bounds.y);
-            WindowRect {
-                x,
-                y,
-                width: rect
-                    .x
-                    .saturating_add(rect.width)
-                    .min(bounds.x.saturating_add(bounds.width))
-                    .saturating_sub(x),
-                height: rect
-                    .y
-                    .saturating_add(rect.height)
-                    .min(bounds.y.saturating_add(bounds.height))
-                    .saturating_sub(y),
-            }
-        })
+        compositor.map(dashboard_rect)
     } else {
         workspace
     };

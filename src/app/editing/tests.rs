@@ -100,6 +100,15 @@ fn deferred_startup_additional_files_restore_the_primary_buffer() {
             .any(|(_, buffer)| { buffer.path.as_deref() == Some(additional.as_path()) })
     );
     app.state.validate_layout().expect("valid startup layout");
+    // Files opened from the command line are recent files.
+    let mut recent = app
+        .persistence
+        .recent_files()
+        .iter()
+        .map(|file| file.path.clone())
+        .collect::<Vec<_>>();
+    recent.sort();
+    assert_eq!(recent, [additional, primary]);
 }
 
 #[test]

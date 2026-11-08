@@ -181,6 +181,34 @@ pub fn validate_unsaved_documents(
     }
     Ok(())
 }
+/// Lines added and removed in each file that differs from HEAD, staged or not, as
+/// `git diff --numstat HEAD` counts them. Keys are absolute paths in the working tree; untracked
+/// and binary files are left out, and so is everything past the first `limit` files.
+pub fn git_line_counts(path: &Path, limit: usize) -> Option<BTreeMap<PathBuf, (usize, usize)>> {
+    let repo = git2::Repository::discover(path).ok()?;
+    let workdir = repo.workdir()?.to_path_buf();
+    let head = repo.head().ok().and_then(|head| head.peel_to_tree().ok());
+    let diff = repo
+        .diff_tree_to_workdir_with_index(head.as_ref(), None)
+        .ok()?;
+    let mut counts = BTreeMap::new();
+    for index in 0..diff.deltas().len().min(limit) {
+        let Ok(Some(patch)) = git2::Patch::from_diff(&diff, index) else {
+            continue;
+        };
+        let delta = patch.delta();
+        let Some(file) = delta.new_file().path().or_else(|| delta.old_file().path()) else {
+            continue;
+        };
+        if delta.flags().is_binary() {
+            continue;
+        }
+        if let Ok((_, added, removed)) = patch.line_stats() {
+            counts.insert(workdir.join(file), (added, removed));
+        }
+    }
+    Some(counts)
+}
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, serde::Serialize, serde::Deserialize)]
 pub struct GitStatusEntry {
     pub relative_path: PathBuf,

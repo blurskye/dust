@@ -106,6 +106,14 @@ pub fn git_branch_name(repository: &Path) -> Result<Option<String>, GitMutationE
         Err(_) => Err(GitMutationError::Backend),
     }
 }
+/// The subject of the commit HEAD points at and when it was made, in seconds since the Unix
+/// epoch; `None` outside a repository or before the first commit.
+pub fn git_last_commit(path: &Path) -> Option<(String, i64)> {
+    let repo = git2::Repository::discover(path).ok()?;
+    let commit = repo.head().ok()?.peel_to_commit().ok()?;
+    let subject = commit.summary().unwrap_or_default().to_owned();
+    Some((subject, commit.time().seconds()))
+}
 /// Which HEAD a caller captured when it built a plan.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum GitHeadExpectation {

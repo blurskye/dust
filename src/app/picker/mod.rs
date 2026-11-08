@@ -1316,7 +1316,7 @@ impl App {
                     .persistence
                     .recent_files()
                     .iter()
-                    .cloned()
+                    .map(|file| file.path.clone())
                     .enumerate()
                     .map(|(index, path)| {
                         let location = PersistedLocation {

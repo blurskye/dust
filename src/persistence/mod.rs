@@ -186,13 +186,57 @@ pub struct PersistedLargeFileOverride {
     pub path: PathBuf,
     pub mode: String,
 }
+/// A file from the recent list and when it was last opened, in seconds since the Unix epoch.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(from = "SavedRecentFile", into = "SavedRecentFile")]
+pub struct RecentFile {
+    pub path: PathBuf,
+    /// `None` for files saved before the time was kept.
+    pub opened_at: Option<u64>,
+}
+/// How a recent file is written: a bare path, as older state files have it, or a path with
+/// the time it was opened.
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+enum SavedRecentFile {
+    Opened {
+        #[serde(with = "crate::files::path_encoding")]
+        path: PathBuf,
+        opened_at: u64,
+    },
+    Path(#[serde(with = "crate::files::path_encoding")] PathBuf),
+}
+impl From<SavedRecentFile> for RecentFile {
+    fn from(saved: SavedRecentFile) -> Self {
+        match saved {
+            SavedRecentFile::Opened { path, opened_at } => Self {
+                path,
+                opened_at: Some(opened_at),
+            },
+            SavedRecentFile::Path(path) => Self {
+                path,
+                opened_at: None,
+            },
+        }
+    }
+}
+impl From<RecentFile> for SavedRecentFile {
+    fn from(file: RecentFile) -> Self {
+        match file.opened_at {
+            Some(opened_at) => Self::Opened {
+                path: file.path,
+                opened_at,
+            },
+            None => Self::Path(file.path),
+        }
+    }
+}
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PersistedState {
     pub version: u32,
     pub session: Option<PersistedSession>,
-    #[serde(with = "crate::files::path_encoding::list")]
-    pub recent_files: Vec<PathBuf>,
+    pub recent_files: Vec<RecentFile>,
     pub marks: Vec<PersistedMark>,
     pub jumps: Vec<PersistedLocation>,
     pub changes: Vec<PersistedLocation>,
@@ -792,14 +836,16 @@ fn merge_shared_state(
         .recent_files
         .iter()
         .rev()
-        .take_while(|path| previous_order.by_ref().any(|old| old == *path))
+        .take_while(|file| previous_order.by_ref().any(|old| old.path == file.path))
         .count();
     let mut recent_files = state.recent_files[..state.recent_files.len() - unchanged].to_vec();
-    for path in &current.recent_files {
-        if !recent_files.contains(path)
-            && (state.recent_files.contains(path) || !previous.recent_files.contains(path))
+    let listed = |files: &[RecentFile], path: &Path| files.iter().any(|file| file.path == path);
+    for file in &current.recent_files {
+        if !listed(&recent_files, &file.path)
+            && (listed(&state.recent_files, &file.path)
+                || !listed(&previous.recent_files, &file.path))
         {
-            recent_files.push(path.clone());
+            recent_files.push(file.clone());
         }
     }
     recent_files.truncate(maximum);
@@ -974,6 +1020,8 @@ mod tests {
 
     use crate::persistence::PersistencePolicy;
 
+    use crate::persistence::RecentFile;
+
     use crate::persistence::STATE_VERSION;
 
     use crate::persistence::read_state;
@@ -1020,7 +1068,10 @@ mod tests {
             key: None,
             desired_placement: PersistedWindowPlacement::Tiled,
         }];
-        state.recent_files = vec![path.clone()];
+        state.recent_files = vec![RecentFile {
+            path: path.clone(),
+            opened_at: Some(1_700_000_000),
+        }];
         state.marks = vec![crate::persistence::PersistedMark {
             name: "A".into(),
             location: location.clone(),
@@ -1047,7 +1098,7 @@ mod tests {
             serde_json::to_value(&state).unwrap(),
             serde_json::to_value(&loaded).unwrap()
         );
-        assert_eq!(loaded.recent_files[0], path);
+        assert_eq!(loaded.recent_files[0].path, path);
         let session = loaded.session.unwrap();
         assert_eq!(session.content_descriptors[0].path, Some(path.clone()));
         assert_eq!(session.tabs[0].focused_path, Some(path));
@@ -1095,8 +1146,43 @@ mod tests {
     }
 
     #[test]
+    fn recent_files_saved_without_an_open_time_still_load() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("state.json");
+        let mut saved = serde_json::to_value(PersistedState::default()).unwrap();
+        saved["recent_files"] =
+            serde_json::json!(["/old.rs", { "path": "/new.rs", "opened_at": 1_700_000_000 }]);
+        fs::write(&path, serde_json::to_vec(&saved).unwrap()).unwrap();
+        let loaded = read_state(&path, &PersistencePolicy::default()).unwrap();
+        assert_eq!(
+            loaded.recent_files,
+            [
+                RecentFile {
+                    path: PathBuf::from("/old.rs"),
+                    opened_at: None,
+                },
+                RecentFile {
+                    path: PathBuf::from("/new.rs"),
+                    opened_at: Some(1_700_000_000),
+                },
+            ]
+        );
+        // A file without a time is written back the old way.
+        let written = serde_json::to_value(&loaded).unwrap();
+        assert_eq!(written["recent_files"][0], "/old.rs");
+    }
+
+    #[test]
     fn recent_file_merges_keep_newest_first_and_apply_the_limit_after_merging() {
-        let paths = |names: &[&str]| names.iter().map(PathBuf::from).collect::<Vec<_>>();
+        let paths = |names: &[&str]| {
+            names
+                .iter()
+                .map(|name| RecentFile {
+                    path: PathBuf::from(name),
+                    opened_at: None,
+                })
+                .collect::<Vec<_>>()
+        };
         let previous = PersistedState {
             recent_files: paths(&["/a", "/b"]),
             ..PersistedState::default()
@@ -1136,9 +1222,10 @@ mod tests {
         original.metadata.insert("old".into(), "old".into());
         write_state(&path, &original, None, &policy).unwrap();
         let mut first = original.clone();
-        first
-            .recent_files
-            .push(crate::files::absolute_test_path("/first"));
+        first.recent_files.push(RecentFile {
+            path: crate::files::absolute_test_path("/first"),
+            opened_at: Some(1),
+        });
         first.command_history.clear();
         first.command_history.push("first".into());
         first.metadata.clear();
@@ -1154,9 +1241,10 @@ mod tests {
             },
         });
         let mut second = original.clone();
-        second
-            .recent_files
-            .push(crate::files::absolute_test_path("/second"));
+        second.recent_files.push(RecentFile {
+            path: crate::files::absolute_test_path("/second"),
+            opened_at: Some(1),
+        });
         second.command_history.push("second".into());
         second.metadata.insert("second".into(), "second".into());
         second.marks.push(crate::persistence::PersistedMark {
@@ -1186,12 +1274,14 @@ mod tests {
         assert!(
             saved
                 .recent_files
-                .contains(&crate::files::absolute_test_path("/first"))
+                .iter()
+                .any(|file| file.path == crate::files::absolute_test_path("/first"))
         );
         assert!(
             saved
                 .recent_files
-                .contains(&crate::files::absolute_test_path("/second"))
+                .iter()
+                .any(|file| file.path == crate::files::absolute_test_path("/second"))
         );
         assert!(saved.command_history.contains(&"first".into()));
         assert!(saved.command_history.contains(&"second".into()));

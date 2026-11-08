@@ -534,7 +534,10 @@ fn configuration_bundle(theme: &str, revision: u8, valid: bool) -> Configuration
                 env!("CARGO_MANIFEST_DIR"),
                 "/assets/defaults/dashboard.toml"
             ))
-            .replace("⠿ dust", &format!("dashboard-{revision}")),
+            .replace(
+                "identity = \"dust\"",
+                &format!("identity = \"dashboard-{revision}\""),
+            ),
             Some(_) => BUNDLED_THEME
                 .replace("name = \"dust\"", &format!("name = \"{theme}\""))
                 .replace("#c9d1d9", if revision == 0 { "#c9d1d9" } else { "#c9d1d8" }),
@@ -552,7 +555,7 @@ fn captured_bundle_identity_exposes_aba_and_uses_the_same_text_for_spans() {
         env!("CARGO_MANIFEST_DIR"),
         "/assets/defaults/dashboard.toml"
     ))
-    .replace("⠿ dust", "CAPTURED DASH");
+    .replace("identity = \"dust\"", "identity = \"CAPTURED DASH\"");
     let theme = include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/assets/themes/dust.toml"
@@ -1048,7 +1051,7 @@ fn bundled_assets_share_the_typed_configuration_loaders() {
     assert_eq!(loaded.config.input.keymaps.leader, "space");
     assert_eq!(loaded.config.input.keymaps.local_leader, "\\");
     assert!(loaded.config.editor.indent_guides.enabled);
-    assert_eq!(loaded.dashboard.action.len(), 10);
+    assert_eq!(loaded.dashboard.action.len(), 9);
     assert!(
         loaded
             .dashboard

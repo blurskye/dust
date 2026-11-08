@@ -175,9 +175,14 @@ pub enum AppEffect {
     ExtendMouseSelection,
     Layout(LayoutAction),
     SurfaceFocus(SpatialDirection),
-    /// Moves the dashboard cursor by this many items.
+    /// Moves the dashboard selection by this many rows in the focused box.
     DashboardSelect(i8),
+    /// Moves to the next (1) or previous (-1) dashboard box.
+    DashboardFocus(i8),
+    /// Opens the selected item in the focused dashboard box.
     DashboardOpen,
+    /// Opens the dashboard's recent file at this index.
+    DashboardOpenRecent(usize),
     WindowList,
     WindowClone {
         target: String,
@@ -1187,9 +1192,10 @@ impl App {
             | AppEffect::ExplainConfig(..)
             | AppEffect::InspectKeymap { .. }
             | AppEffect::ShowKeymapConflicts) => self.process_configuration_effect(effect),
-            effect @ (AppEffect::DashboardSelect(..) | AppEffect::DashboardOpen) => {
-                self.process_dashboard_effect(effect)
-            }
+            effect @ (AppEffect::DashboardSelect(..)
+            | AppEffect::DashboardFocus(..)
+            | AppEffect::DashboardOpen
+            | AppEffect::DashboardOpenRecent(..)) => self.process_dashboard_effect(effect),
             effect @ (AppEffect::PackageInstall { .. }
             | AppEffect::PackageRegistrySearch(..)
             | AppEffect::PackageRegistryShow { .. }

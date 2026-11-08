@@ -483,6 +483,7 @@ impl App {
             remote: None,
             switch_ends_terminals: None,
             switch_approved_terminals: Vec::new(),
+            dashboard: crate::app::dashboard::Dashboard::default(),
             syntax_spans_source: (Vec::new(), Vec::new()),
             syntax_fold_positions: Vec::new(),
             format_on_save: std::collections::HashMap::new(),
@@ -573,11 +574,13 @@ impl App {
             .documents
             .startup_activation(&self.state, &self.window_session);
         let buffer = if activate {
-            candidate.open_document(text, path)?.0
+            candidate.open_document(text, path.clone())?.0
         } else {
-            candidate.load_document(text, path)?
+            candidate.load_document(text, path.clone())?
         };
         self.commit_editor_draft(candidate, None, activate)?;
+        // Files named on the command line are opened files too, so the dashboard lists them.
+        self.record_recent_file(path);
         if activate {
             self.documents
                 .startup_activated(&self.state, &self.window_session);
