@@ -298,25 +298,28 @@ pub(crate) fn fixture() {
     live.store(false, Ordering::Release);
     assert!(!closed.current());
     assert!(closed.respond(true, None).is_err());
-    let invalid = json!({"arguments":{"cwd":"/owned","args":["ok",12],"env":{}}});
+    // Reverse requests need an absolute cwd, which on Windows has a drive.
+    let cwd = crate::files::absolute_test_path("/owned");
+    let cwd = cwd.to_str().unwrap();
+    let invalid = json!({"arguments":{"cwd":cwd,"args":["ok",12],"env":{}}});
     assert!(terminal_arguments(&invalid).is_none());
-    let oversized = json!({"arguments":{"cwd":"/owned","args":vec!["x";4097],"env":{}}});
+    let oversized = json!({"arguments":{"cwd":cwd,"args":vec!["x";4097],"env":{}}});
     assert!(terminal_arguments(&oversized).is_none());
     assert!(
         terminal_arguments(
-            &json!({"arguments":{"cwd":"/owned","args":["ok"],"env":{"UNSET":null}}})
+            &json!({"arguments":{"cwd":cwd,"args":["ok"],"env":{"UNSET":null}}})
         )
         .is_none()
     );
     assert!(
-        terminal_arguments(&json!({"arguments":{"cwd":"/owned","args":["ok"],"kind":"external"}}))
+        terminal_arguments(&json!({"arguments":{"cwd":cwd,"args":["ok"],"kind":"external"}}))
             .is_none()
     );
     assert!(
         terminal_arguments(
-            &json!({"arguments":{"cwd":"/owned","args":["ok"],"argsCanBeInterpretedByShell":true}})
+            &json!({"arguments":{"cwd":cwd,"args":["ok"],"argsCanBeInterpretedByShell":true}})
         )
         .is_none()
     );
-    assert!(terminal_arguments(&json!({"arguments":{"cwd":"/owned","args":["ok"]}})).is_some());
+    assert!(terminal_arguments(&json!({"arguments":{"cwd":cwd,"args":["ok"]}})).is_some());
 }

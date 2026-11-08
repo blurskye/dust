@@ -930,7 +930,8 @@ fn shutdown_server(
     {
         return;
     }
-    let deadline = Instant::now() + Duration::from_millis(200);
+    // As long as VS Code's client waits; servers such as rust-analyzer can take a moment.
+    let deadline = Instant::now() + Duration::from_secs(2);
     while let Some(remaining) = deadline.checked_duration_since(Instant::now()) {
         match messages.recv_timeout(remaining) {
             Ok(Ok(message))
