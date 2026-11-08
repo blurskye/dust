@@ -570,7 +570,7 @@ mod tests {
             now += Duration::from_millis(SYNTAX_DEBOUNCE_MS);
             std::thread::sleep(Duration::from_millis(5));
         }
-        assert!(session.result(buffer).is_some());
+        let old_document = session.result(buffer).expect("first parse").document;
         let replacement = TextBuffer::from_text("// replacement\n");
         assert_eq!(original.revision(), replacement.revision());
         session.tick(
@@ -585,7 +585,12 @@ mod tests {
             now,
             "large",
         );
-        assert!(session.result(buffer).is_none());
+        // A reopened buffer parses at once, so a fast worker may already have answered.
+        assert!(
+            session
+                .result(buffer)
+                .is_none_or(|result| result.document != old_document)
+        );
         assert_eq!(
             session
                 .submitted

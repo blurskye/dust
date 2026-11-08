@@ -271,6 +271,10 @@ fn production_binary_ignores_external_tui_fixture_environment() {
 }
 
 #[test]
+#[cfg_attr(
+    windows,
+    ignore = "ConPTY redraws the screen itself and does not pass the child's terminal modes or VT key input through"
+)]
 fn canonical_preflight_portable_pty_drives_external_tui_fixture_without_shell() {
     let executable = dust::files::canonicalize(std::env::current_exe().unwrap()).unwrap();
     let cwd = dust::files::canonicalize(std::env::temp_dir()).unwrap();

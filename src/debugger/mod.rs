@@ -540,11 +540,11 @@ fn run_adapter(
         }
     }
     let clean_disconnect = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let mut child = Child(child, clean_disconnect.clone());
+    let mut process = Child(child, clean_disconnect.clone());
     // Invalidate replies and contexts before potentially blocking child cleanup,
     // including unwind; rebinding transfers this guard's drop order.
     let _live = _live;
-    let child = &mut child.0;
+    let child = &mut process.0;
     let connection = match server_address {
         Some(address) => connection::Connection::socket(address, child, events.clone()),
         None => connection::Connection::stdio(child, events.clone()),
@@ -1311,8 +1311,17 @@ fn run_adapter(
     drop(stdin);
     drop(reader);
     drop(writer);
+    // Stop the adapter before draining stderr: a Windows pipe read only ends when every
+    // writer has closed, and a descendant may keep it open, so the wait is bounded.
+    drop(process);
     if let Some(stderr) = stderr {
-        let _ = stderr.join();
+        let deadline = Instant::now() + ADAPTER_OUTPUT_GRACE;
+        while !stderr.is_finished() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(5));
+        }
+        if stderr.is_finished() {
+            let _ = stderr.join();
+        }
     }
 }
 

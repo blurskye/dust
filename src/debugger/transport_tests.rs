@@ -1638,7 +1638,12 @@ def serve(sock,child):
   if c=='configurationDone':
    if child: send({'type':'event','event':'stopped','body':{'reason':'breakpoint','threadId':7}})
    else: send({'type':'request','command':'startDebugging','arguments':{'request':'attach','configuration':{'type':'pwa-node','__pendingTargetId':'fixture-target'}}})
-  if c=='disconnect': return
+  if c=='disconnect':
+   # Close after Dust does: Windows drops unread data when a peer resets the connection.
+   try:
+    while stream.read(4096): pass
+   except OSError: pass
+   return
 root,_=server.accept()
 threading.Thread(target=serve,args=(root,False),daemon=True).start()
 child,_=server.accept()
@@ -1717,15 +1722,16 @@ fn server_child_session_keeps_breakpoints_and_routes_controls_to_the_child() {
         .unwrap();
     let mut disconnected = false;
     while !disconnected {
-        if let Some(DapEvent::Response {
-            response:
-                DapResponse::Disconnected {
-                    terminate_debuggee: true,
-                },
-            ..
-        }) = service.try_event()
-        {
-            disconnected = true;
+        match service.try_event() {
+            Some(DapEvent::Response {
+                response:
+                    DapResponse::Disconnected {
+                        terminate_debuggee: true,
+                    },
+                ..
+            }) => disconnected = true,
+            Some(DapEvent::Failed { message, .. }) => panic!("server adapter failed: {message}"),
+            _ => {}
         }
         assert!(Instant::now() < deadline, "child disconnect timed out");
         thread::sleep(Duration::from_millis(2));

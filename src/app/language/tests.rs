@@ -2977,6 +2977,9 @@ fn untrusted_workspace_blocks_project_local_language_server_launch() {
         )
         .unwrap();
     }
+    // Windows has no execute bit; a missing server fails the same launch check.
+    #[cfg(windows)]
+    fs::remove_file(app.state.workspace_root.join(server)).unwrap();
     app.start_lsp(Some("project-local".into()));
     let deadline = Instant::now() + Duration::from_secs(10);
     while app.language.project_pending() && Instant::now() < deadline {
@@ -6033,7 +6036,7 @@ fn selection_expansion_requests_ranges_and_finishes_when_they_arrive() {
 #[test]
 fn explicit_detach_survives_autostart_until_attach() {
     let (_app_dirs, mut app) = app();
-    // A Rust server installed on this machine would autostart beside the fixture.
+    // A Rust server on this machine's PATH would autostart beside the fixture.
     let servers = app
         .tooling
         .entries()
@@ -6045,6 +6048,7 @@ fn explicit_detach_survives_autostart_until_attach() {
         .fixture_retain(|entry| entry.definition.kind != crate::tools::ToolKind::Lsp);
     for mut server in servers {
         server.status = crate::tools::ToolStatus::Available;
+        server.definition.executable = "dust-missing-language-server".into();
         app.tooling.fixture_insert(server);
     }
     prepare_trust_identity(&mut app);

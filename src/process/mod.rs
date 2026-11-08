@@ -689,11 +689,34 @@ impl<T: Write + Send + 'static> Write for CancellablePipe<T> {
                 .ok_or_else(|| io::Error::from(io::ErrorKind::BrokenPipe))?;
             let (requests, pending) = mpsc::sync_channel::<Vec<u8>>(0);
             let (finished, results) = mpsc::sync_channel(1);
+            let cancelled = self.cancelled.clone();
             thread::Builder::new()
                 .name("dust-pipe-writer".into())
                 .spawn(move || {
                     for bytes in pending {
-                        let result = pipe.write_all(&bytes).and_then(|()| pipe.flush());
+                        // A nonblocking socket reports a full send buffer as WouldBlock.
+                        let mut rest = &bytes[..];
+                        let result = loop {
+                            if rest.is_empty() {
+                                break pipe.flush();
+                            }
+                            if cancelled.load(std::sync::atomic::Ordering::Acquire) {
+                                break Err(io::ErrorKind::BrokenPipe.into());
+                            }
+                            match pipe.write(rest) {
+                                Ok(0) => break Err(io::ErrorKind::WriteZero.into()),
+                                Ok(count) => rest = &rest[count..],
+                                Err(error)
+                                    if matches!(
+                                        error.kind(),
+                                        io::ErrorKind::WouldBlock | io::ErrorKind::Interrupted
+                                    ) =>
+                                {
+                                    thread::sleep(std::time::Duration::from_millis(1));
+                                }
+                                Err(error) => break Err(error),
+                            }
+                        };
                         if finished.send(result).is_err() {
                             break;
                         }
