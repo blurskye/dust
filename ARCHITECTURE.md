@@ -209,6 +209,6 @@ need no guest compiler. `scripts/ui-shot` captures the real terminal for visual
 checks. Build and test commands are in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 `packaging/` and `.github/workflows/release.yml` build Linux distribution packages
-and native macOS archives. The [Linux release guide](docs/release-linux.md)
-describes packages and checksum signatures; the [macOS guide](docs/user-guide-macos-windows.md)
+and native macOS and Windows archives. The [Linux release guide](docs/release-linux.md)
+describes packages and checksum signatures; the [macOS and Windows guide](docs/user-guide-macos-windows.md)
 covers unsigned native archives, paths and shells.

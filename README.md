@@ -56,8 +56,24 @@ notarized**. If macOS quarantines the verified executable, run:
 xattr -d com.apple.quarantine ~/.local/bin/dust
 ```
 
-See the [macOS guide](docs/user-guide-macos-windows.md) for configuration paths
-and shell selection. Windows support is planned separately.
+See the [macOS and Windows guide](docs/user-guide-macos-windows.md) for
+configuration paths and shell selection.
+
+## Install on Windows
+
+Download `dust-0.2.0-x86_64-windows.zip` from
+[releases](https://github.com/blurskye/dust/releases) and check its SHA-256
+against its entry in `SHA256SUMS`. In PowerShell:
+
+```powershell
+Get-FileHash dust-0.2.0-x86_64-windows.zip
+Expand-Archive dust-0.2.0-x86_64-windows.zip -DestinationPath "$env:LOCALAPPDATA\Programs\Dust"
+```
+
+Add `%LOCALAPPDATA%\Programs\Dust` to your user `PATH` and run `dust` in Windows
+Terminal. The binary is **not Authenticode-signed**, so SmartScreen may ask before
+the first run. The [macOS and Windows guide](docs/user-guide-macos-windows.md)
+covers configuration paths, shells and what differs on Windows.
 
 ## First run
 

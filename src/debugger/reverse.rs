@@ -306,10 +306,8 @@ pub(crate) fn fixture() {
     let oversized = json!({"arguments":{"cwd":cwd,"args":vec!["x";4097],"env":{}}});
     assert!(terminal_arguments(&oversized).is_none());
     assert!(
-        terminal_arguments(
-            &json!({"arguments":{"cwd":cwd,"args":["ok"],"env":{"UNSET":null}}})
-        )
-        .is_none()
+        terminal_arguments(&json!({"arguments":{"cwd":cwd,"args":["ok"],"env":{"UNSET":null}}}))
+            .is_none()
     );
     assert!(
         terminal_arguments(&json!({"arguments":{"cwd":cwd,"args":["ok"],"kind":"external"}}))
