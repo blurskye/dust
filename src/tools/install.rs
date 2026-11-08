@@ -233,10 +233,9 @@ fn prepare_javascript_archive(
     prepare_executable(output)
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
-    #[cfg(unix)]
     #[test]
     fn javascript_archive_launcher_keeps_support_files_and_literal_paths() {
         use std::io::Write;

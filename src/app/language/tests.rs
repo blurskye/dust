@@ -2911,17 +2911,20 @@ fn untrusted_workspace_blocks_project_local_language_server_launch() {
             Some(path),
         )
         .unwrap();
+    // Windows only runs files with an executable extension.
+    let server = if cfg!(windows) {
+        "bin/server.exe"
+    } else {
+        "bin/server"
+    };
     fs::create_dir_all(app.state.workspace_root.join("bin")).expect("server bin");
-    fs::write(
-        app.state.workspace_root.join("bin/server"),
-        b"not executable",
-    )
-    .expect("project-local server");
+    fs::write(app.state.workspace_root.join(server), b"not executable")
+        .expect("project-local server");
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         fs::set_permissions(
-            app.state.workspace_root.join("bin/server"),
+            app.state.workspace_root.join(server),
             fs::Permissions::from_mode(0o700),
         )
         .unwrap();
@@ -2932,12 +2935,7 @@ fn untrusted_workspace_blocks_project_local_language_server_launch() {
             name: "Project local".into(),
             kind: crate::tools::ToolKind::Lsp,
             languages: vec!["rust".into()],
-            executable: app
-                .state
-                .workspace_root
-                .join("bin/server")
-                .display()
-                .to_string(),
+            executable: app.state.workspace_root.join(server).display().to_string(),
             version: None,
             release: None,
             launch_args: Vec::new(),
@@ -2949,7 +2947,7 @@ fn untrusted_workspace_blocks_project_local_language_server_launch() {
             install: None,
             pins: Vec::new(),
         },
-        status: crate::tools::ToolStatus::Installed(app.state.workspace_root.join("bin/server")),
+        status: crate::tools::ToolStatus::Installed(app.state.workspace_root.join(server)),
     });
     app.start_lsp(Some("project-local".into()));
     assert!(app.language.active().is_none());

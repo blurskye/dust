@@ -568,9 +568,20 @@ mod preflight_lifecycle_tests {
 
 /// Nonblocking child I/O that yields to session cancellation while a pipe is idle.
 pub(crate) struct CancellablePipe<T> {
-    pipe: T,
+    // Windows moves a written pipe to its writer thread on the first write.
+    pipe: Option<T>,
     cancelled: std::sync::Arc<std::sync::atomic::AtomicBool>,
     write_timeout: Option<std::time::Duration>,
+    #[cfg(windows)]
+    writer: Option<PipeWriter>,
+}
+/// Windows pipes cannot be made nonblocking, so writes run on a thread and the caller
+/// waits with its deadline and cancellation. A write that times out leaves the thread
+/// blocked until the child is stopped, and later writes fail.
+#[cfg(windows)]
+struct PipeWriter {
+    requests: SyncSender<Vec<u8>>,
+    results: Receiver<io::Result<()>>,
 }
 impl<T> CancellablePipe<T> {
     #[cfg(unix)]
@@ -587,7 +598,7 @@ impl<T> CancellablePipe<T> {
         let flags = OFlag::from_bits_truncate(fcntl(&pipe, FcntlArg::F_GETFL)?);
         fcntl(&pipe, FcntlArg::F_SETFL(flags | OFlag::O_NONBLOCK))?;
         Ok(Self {
-            pipe,
+            pipe: Some(pipe),
             cancelled,
             write_timeout: None,
         })
@@ -598,13 +609,18 @@ impl<T> CancellablePipe<T> {
         cancelled: std::sync::Arc<std::sync::atomic::AtomicBool>,
     ) -> io::Result<Self> {
         Ok(Self {
-            pipe,
+            pipe: Some(pipe),
             cancelled,
             write_timeout: None,
+            writer: None,
         })
     }
     pub(crate) fn set_write_timeout(&mut self, timeout: std::time::Duration) {
         self.write_timeout = Some(timeout);
+    }
+    fn deadline(&self) -> Option<std::time::Instant> {
+        self.write_timeout
+            .map(|timeout| std::time::Instant::now() + timeout)
     }
     fn retry<R>(
         &mut self,
@@ -618,7 +634,11 @@ impl<T> CancellablePipe<T> {
             if self.cancelled.load(std::sync::atomic::Ordering::Acquire) {
                 return Err(io::ErrorKind::BrokenPipe.into());
             }
-            match operation(&mut self.pipe) {
+            let pipe = self
+                .pipe
+                .as_mut()
+                .ok_or_else(|| io::Error::from(io::ErrorKind::BrokenPipe))?;
+            match operation(pipe) {
                 Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
                     thread::sleep(std::time::Duration::from_millis(5));
                 }
@@ -632,17 +652,14 @@ impl<T: io::Read> io::Read for CancellablePipe<T> {
         self.retry(None, |pipe| pipe.read(bytes))
     }
 }
+#[cfg(unix)]
 impl<T: Write> Write for CancellablePipe<T> {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-        let deadline = self
-            .write_timeout
-            .map(|timeout| std::time::Instant::now() + timeout);
+        let deadline = self.deadline();
         self.retry(deadline, |pipe| pipe.write(bytes))
     }
     fn write_all(&mut self, mut bytes: &[u8]) -> io::Result<()> {
-        let deadline = self
-            .write_timeout
-            .map(|timeout| std::time::Instant::now() + timeout);
+        let deadline = self.deadline();
         while !bytes.is_empty() {
             match self.retry(deadline, |pipe| pipe.write(bytes)) {
                 Ok(0) => return Err(io::ErrorKind::WriteZero.into()),
@@ -654,10 +671,69 @@ impl<T: Write> Write for CancellablePipe<T> {
         Ok(())
     }
     fn flush(&mut self) -> io::Result<()> {
-        let deadline = self
-            .write_timeout
-            .map(|timeout| std::time::Instant::now() + timeout);
+        let deadline = self.deadline();
         self.retry(deadline, Write::flush)
+    }
+}
+#[cfg(windows)]
+impl<T: Write + Send + 'static> Write for CancellablePipe<T> {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        self.write_all(bytes).map(|()| bytes.len())
+    }
+    fn write_all(&mut self, bytes: &[u8]) -> io::Result<()> {
+        let deadline = self.deadline();
+        if self.writer.is_none() {
+            let mut pipe = self
+                .pipe
+                .take()
+                .ok_or_else(|| io::Error::from(io::ErrorKind::BrokenPipe))?;
+            let (requests, pending) = mpsc::sync_channel::<Vec<u8>>(0);
+            let (finished, results) = mpsc::sync_channel(1);
+            thread::Builder::new()
+                .name("dust-pipe-writer".into())
+                .spawn(move || {
+                    for bytes in pending {
+                        let result = pipe.write_all(&bytes).and_then(|()| pipe.flush());
+                        if finished.send(result).is_err() {
+                            break;
+                        }
+                    }
+                })?;
+            self.writer = Some(PipeWriter { requests, results });
+        }
+        let writer = self.writer.as_ref().expect("pipe writer started");
+        writer
+            .requests
+            .send(bytes.to_vec())
+            .map_err(|_| io::Error::from(io::ErrorKind::BrokenPipe))?;
+        loop {
+            match writer
+                .results
+                .recv_timeout(std::time::Duration::from_millis(5))
+            {
+                Ok(result) => return result,
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    let failure =
+                        if deadline.is_some_and(|deadline| std::time::Instant::now() >= deadline) {
+                            io::ErrorKind::TimedOut
+                        } else if self.cancelled.load(std::sync::atomic::Ordering::Acquire) {
+                            io::ErrorKind::BrokenPipe
+                        } else {
+                            continue;
+                        };
+                    // The blocked write still owns the pipe; later writes fail at once.
+                    self.writer = None;
+                    return Err(failure.into());
+                }
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    return Err(io::ErrorKind::BrokenPipe.into());
+                }
+            }
+        }
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        // Each write flushes on the writer thread.
+        Ok(())
     }
 }
 
@@ -678,7 +754,7 @@ mod cancellable_pipe_tests {
             }
         }
         let mut input = CancellablePipe {
-            pipe: SlowWriter,
+            pipe: Some(SlowWriter),
             cancelled: Default::default(),
             write_timeout: Some(std::time::Duration::from_millis(20)),
         };

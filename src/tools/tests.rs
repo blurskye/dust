@@ -55,6 +55,7 @@ use crate::tools::runtimes::install_nix_lsp_profile;
 
 use crate::tools::runtimes::uninstall_managed_tool;
 
+#[cfg(unix)]
 use crate::tools::runtimes::uninstall_nix_lsp_profile;
 
 use crate::tools::version::ToolVersionRequest;
