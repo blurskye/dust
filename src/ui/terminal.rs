@@ -588,6 +588,21 @@ fn queue_style(
             derived = theme.git_heading(style == Style::GitControl);
             &derived
         }
+        Style::GitHash(selection) => {
+            derived = theme.git_label(&theme.styles.git_sign_changed, selection);
+            &derived
+        }
+        Style::GitBranch { current, selection } => {
+            derived = theme.git_label(
+                if current {
+                    &theme.styles.git_sign_added
+                } else {
+                    &theme.styles.accent
+                },
+                selection,
+            );
+            &derived
+        }
         Style::GitDiff { added, syntax } => {
             derived = theme.git_diff(added, syntax);
             &derived

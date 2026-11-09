@@ -70,12 +70,14 @@ pub(super) fn frame(app: &mut GitScreen, width: u16, height: u16) -> Frame {
     let left = (width / 3).clamp(26, 40);
     let body = height - 4 - if app.tutor.is_some() { 4 } else { 0 };
     let mut sizes = [4, 4, 4, 3];
-    let wanted = std::array::from_fn::<_, 4, _>(|pane| {
+    let mut wanted = std::array::from_fn::<_, 4, _>(|pane| {
         u16::try_from(app.rows(pane).len())
             .unwrap_or(u16::MAX)
             .saturating_add(2)
             .max(sizes[pane])
     });
+    wanted[1] = wanted[1].min(8);
+    wanted[3] = wanted[3].min(5);
     let mut remaining = body.saturating_sub(sizes.iter().sum());
     while remaining > 0 {
         let before = remaining;
@@ -125,7 +127,7 @@ pub(super) fn frame(app: &mut GitScreen, width: u16, height: u16) -> Frame {
         "4 Stashes".into(),
     ];
     let mut top = 1;
-    for pane in 0..4 {
+    for pane in 0..(if app.commit_open { 0 } else { 4 }) {
         let h = sizes[pane];
         section(
             &mut frame.grid,
@@ -176,6 +178,42 @@ pub(super) fn frame(app: &mut GitScreen, width: u16, height: u16) -> Frame {
                 style,
                 left - 1,
             );
+            if pane == 2 {
+                frame.grid.put_text_clipped(
+                    2,
+                    y,
+                    row.label.split(' ').next().unwrap_or(""),
+                    Style::GitHash((index == selected).then_some(app.focus == pane)),
+                    left - 1,
+                );
+            } else if pane == 1 && app.subview == 0 {
+                let current = row.value == std::path::Path::new(&app.branch);
+                frame.grid.put_text_clipped(
+                    2,
+                    y,
+                    &ellipsize(&row.label, usize::from(left - 3)),
+                    Style::GitBranch {
+                        current,
+                        selection: (index == selected).then_some(app.focus == pane),
+                    },
+                    left - 1,
+                );
+            } else if pane == 0 && !row.directory {
+                let indent = row.label.len() - row.label.trim_start().len();
+                let code = row.label.trim_start().split(' ').next().unwrap_or("");
+                let color = if code.contains('U') {
+                    Style::Error
+                } else if code.contains('D') {
+                    Style::GitSignDeleted
+                } else if code.contains('A') {
+                    Style::GitSignAdded
+                } else {
+                    Style::GitSignChanged
+                };
+                frame
+                    .grid
+                    .put_text_clipped(2 + indent as u16, y, code, color, left - 1);
+            }
             if index == selected && app.focus == pane {
                 frame.cursor = Some((2, y, SetCursorStyle::SteadyBlock));
             }
@@ -211,6 +249,9 @@ pub(super) fn frame(app: &mut GitScreen, width: u16, height: u16) -> Frame {
         );
         top += h;
     }
+    if app.commit_open {
+        super::commit::files(&mut frame, app, left, body);
+    }
     let title = match app.last_list {
         0 => {
             if app.all_files {
@@ -241,7 +282,43 @@ pub(super) fn frame(app: &mut GitScreen, width: u16, height: u16) -> Frame {
         app.preview.rows.len()
     };
     app.preview_line = app.preview_line.min(app.preview_rows.saturating_sub(1));
-    let first_line = if split { 3 } else { 2 };
+    let mut first_line = 2;
+    if let Some(commit) = &app.commit {
+        let lines = crate::ui::render::wrap_plain_text(
+            &commit.title,
+            usize::from(width - left - 4),
+            crate::config::AmbiguousWidth::Narrow,
+        );
+        for line in lines.iter().take(2) {
+            frame
+                .grid
+                .put_text_clipped(left + 2, first_line, line, Style::GitHeading, width - 2);
+            first_line += 1;
+        }
+        let meta = format!(
+            "{} · {} · {} · {} files{}",
+            &commit.id[..7],
+            commit.author,
+            commit.date,
+            commit.files.len(),
+            if app.commit_open {
+                ""
+            } else {
+                " · Enter: browse files"
+            }
+        );
+        frame.grid.put_text_clipped(
+            left + 2,
+            first_line,
+            &ellipsize(&meta, usize::from(width - left - 4)),
+            Style::Muted,
+            width - 2,
+        );
+        first_line += 1;
+    }
+    if split {
+        first_line += 1;
+    }
     let visible = body.saturating_sub(first_line) as usize;
     let offset = app.preview_line.saturating_sub(visible.saturating_sub(1));
     let number_width = app.preview.number_width();
@@ -249,10 +326,10 @@ pub(super) fn frame(app: &mut GitScreen, width: u16, height: u16) -> Frame {
         let middle = left + (width - left) / 2;
         frame
             .grid
-            .put_text_clipped(left + 2, 2, "BEFORE", Style::Muted, middle);
+            .put_text_clipped(left + 2, first_line - 1, "BEFORE", Style::Muted, middle);
         frame
             .grid
-            .put_text_clipped(middle + 2, 2, "AFTER", Style::Muted, width - 1);
+            .put_text_clipped(middle + 2, first_line - 1, "AFTER", Style::Muted, width - 1);
         for (i, pair) in app
             .preview
             .split
@@ -323,7 +400,7 @@ pub(super) fn frame(app: &mut GitScreen, width: u16, height: u16) -> Frame {
             .skip(offset)
             .take(visible)
         {
-            let y = 2 + (i - offset) as u16;
+            let y = first_line + (i - offset) as u16;
             let old = row.old.map(|number| number.to_string()).unwrap_or_default();
             let new = row.new.map(|number| number.to_string()).unwrap_or_default();
             let mut x = left + 2;
@@ -417,7 +494,15 @@ pub(super) fn frame(app: &mut GitScreen, width: u16, height: u16) -> Frame {
         &mut frame,
         width,
         height,
-        if app.focus == 4 {
+        if app.commit_open {
+            &[
+                ("Tab", "focus"),
+                ("J/K", "files"),
+                ("h/l", "pan"),
+                ("s", "split"),
+                ("Esc", "back"),
+            ]
+        } else if app.focus == 4 {
             &[
                 ("j/k", "scroll"),
                 ("h/l", "pan"),
@@ -436,6 +521,7 @@ pub(super) fn frame(app: &mut GitScreen, width: u16, height: u16) -> Frame {
                 ("Ctrl+h/j/k/l", "focus"),
             ]
         },
+        app.commit_open,
     );
     if let Some(form) = &app.form {
         render_form(&mut frame, form, width, height);
@@ -585,12 +671,22 @@ pub(super) fn viewport(
     );
 }
 
-pub(super) fn footer(frame: &mut Frame, width: u16, height: u16, hints: &[(&str, &str)]) {
+pub(super) fn footer(
+    frame: &mut Frame,
+    width: u16,
+    height: u16,
+    hints: &[(&str, &str)],
+    back: bool,
+) {
     let y = height - 2;
     for x in 0..width {
         frame.grid.set_cell(x, y, " ", Style::Status);
     }
-    let fixed = [("?", "keys"), ("r", "refresh"), ("q", "close")];
+    let fixed = [
+        ("?", "keys"),
+        ("r", "refresh"),
+        ("q", if back { "back" } else { "close" }),
+    ];
     let size = |(key, label): &(&str, &str)| (key.width() + label.width() + 4) as u16;
     let right = width.saturating_sub(fixed.iter().map(size).sum::<u16>() + 1);
     let draw = |frame: &mut Frame, x, key, label| {
@@ -617,7 +713,19 @@ pub(super) fn help(frame: &mut Frame, width: u16, height: u16, page: usize) {
     if width < 40 || height < 18 {
         return;
     }
-    let mut rows = if page == 0 {
+    let mut rows = if page == 4 {
+        vec![
+            "Tab / Ctrl+h/l  Files / diff",
+            "j/k or ↑/↓  Select file / scroll diff",
+            "J/K  Next / previous file",
+            "h/l or ←/→  Horizontal scroll",
+            "PgUp/PgDn  Scroll diff",
+            "Home / End  First / last diff line",
+            "s  Toggle optional split view",
+            "r  Refresh commit",
+            "Esc / q  Return to history",
+        ]
+    } else if page == 0 {
         vec![
             "[ / ]  Switch page",
             "1–4 / Tab  Select pane",

@@ -13,6 +13,7 @@ pub(super) enum Request {
     Remotes,
     Files,
     Preview,
+    CommitInfo,
     Write,
 }
 
@@ -68,7 +69,7 @@ impl Jobs {
         if request == Request::Preview {
             self.cancel_preview();
         }
-        if request == Request::History {
+        if matches!(request, Request::History | Request::CommitInfo) {
             let ids = self
                 .pending
                 .iter()
@@ -155,7 +156,9 @@ impl Jobs {
                     if let Some(pending) = self.pending.remove(&job) {
                         let result = if timed_out {
                             Err("Git command timed out".into())
-                        } else if pending.truncated && pending.request == Request::Files {
+                        } else if pending.truncated
+                            && matches!(pending.request, Request::Files | Request::CommitInfo)
+                        {
                             Err("Repository file listing exceeds the preview limit".into())
                         } else if code == Some(0) {
                             let mut text = String::from_utf8_lossy(&pending.stdout).into_owned();

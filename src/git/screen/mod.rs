@@ -1,4 +1,5 @@
 //! The shared native Git application. Hosts own terminal lifecycle and opening files/workspaces.
+mod commit;
 mod github;
 mod jobs;
 mod preview;
@@ -97,6 +98,8 @@ pub struct GitScreen {
     offsets: [usize; 4],
     collapsed: BTreeSet<PathBuf>,
     preview: Preview,
+    commit: Option<commit::Commit>,
+    commit_open: bool,
     preview_line: usize,
     preview_column: usize,
     split_diff: bool,
@@ -145,9 +148,11 @@ impl GitScreen {
             offsets: [0; 4],
             collapsed: BTreeSet::new(),
             preview: Preview::default(),
+            commit: None,
+            commit_open: false,
             preview_line: 0,
             preview_column: 0,
-            split_diff: true,
+            split_diff: false,
             preview_rows: 0,
             staged: false,
             all_files: false,
@@ -254,7 +259,8 @@ impl GitScreen {
                             .map(|b| {
                                 plain(
                                     format!(
-                                        "{}{}",
+                                        "{}{}{}",
+                                        if b.name == self.branch { "● " } else { "  " },
                                         b.name,
                                         if b.checked_out.is_some() { "  wt" } else { "" }
                                     ),
@@ -322,6 +328,7 @@ impl GitScreen {
     }
     fn refresh(&mut self) -> Result<(), String> {
         self.jobs.cancel_reads();
+        self.commit = None;
         self.refreshing = true;
         self.status
             .start(GitStatusPolicy {
@@ -437,6 +444,23 @@ impl GitScreen {
                     self.preview = Preview::git(&text, path.as_deref());
                 }
                 (Request::Preview, Err(error)) => self.preview = error.into(),
+                (Request::CommitInfo, Ok(text)) => {
+                    if let Some(commit) = commit::Commit::parse(&text)
+                        && self.last_list == 2
+                        && self
+                            .commit
+                            .as_ref()
+                            .is_some_and(|current| current.id == commit.id)
+                    {
+                        self.commit = Some(commit);
+                        self.load_commit_file();
+                    }
+                }
+                (Request::CommitInfo, Err(error)) => {
+                    if self.last_list == 2 {
+                        self.preview = error.into();
+                    }
+                }
                 (Request::Write, result) => {
                     self.busy = false;
                     match result {
@@ -513,6 +537,16 @@ impl GitScreen {
         }
     }
     fn load_preview(&mut self) {
+        if self.last_list == 2 {
+            if let Some(row) = self.selected_row() {
+                self.load_commit(row.value.to_string_lossy().into_owned());
+            } else {
+                self.commit = None;
+                self.preview = "No commits yet".into();
+            }
+            return;
+        }
+        self.commit = None;
         self.jobs.cancel_preview();
         let Some(row) = self.selected_row() else {
             self.preview = if self.last_list == 0 {
@@ -596,15 +630,7 @@ impl GitScreen {
                 row.value.into_os_string(),
                 "--".into(),
             ],
-            2 => vec![
-                "show".into(),
-                "--no-ext-diff".into(),
-                "--no-textconv".into(),
-                "--stat".into(),
-                "--patch".into(),
-                row.value.into_os_string(),
-                "--".into(),
-            ],
+
             _ => vec![
                 "stash".into(),
                 "show".into(),
@@ -992,6 +1018,9 @@ impl GitScreen {
                     self.report(result);
                     return ScreenOutcome::Continue;
                 }
+                if self.commit_key(&key) {
+                    return ScreenOutcome::Continue;
+                }
                 if !key.modifiers.control && key.code == KeyCode::Char(':') {
                     self.form(
                         "Command",
@@ -1221,6 +1250,9 @@ impl GitScreen {
                                     } else {
                                         return ScreenOutcome::OpenFile(self.root.join(row.value));
                                     }
+                                } else if self.last_list == 2 {
+                                    self.commit_open = true;
+                                    self.focus = 2;
                                 } else if self.last_list == 1 && self.subview == 1 && !self.busy {
                                     if self.tutor.is_some() {
                                         let result = self.tutor_worktree(&row.value);
@@ -1296,7 +1328,12 @@ impl GitScreen {
             github::view::frame(self, width, height)
         };
         if self.help {
-            render::help(&mut frame, width, height, self.page);
+            render::help(
+                &mut frame,
+                width,
+                height,
+                if self.commit_open { 4 } else { self.page },
+            );
         }
         frame
     }

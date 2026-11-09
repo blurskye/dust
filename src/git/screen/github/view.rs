@@ -1286,6 +1286,7 @@ pub(in crate::git::screen) fn frame(
                 ("Tab", "controls"),
             ]
         },
+        false,
     );
     if let Some(form) = &app.form {
         super::super::render::render_form(&mut frame, form, width, height);

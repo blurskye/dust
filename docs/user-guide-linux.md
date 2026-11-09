@@ -226,15 +226,18 @@ Use `1` Changes, `2` Branches, `3` Commits, and `4` Stashes. `Ctrl-h/j/k/l`
 moves between panes; `j/k` selects rows. Source previews and working-tree, staged,
 commit and stash diffs use Dust's syntax highlighting, with line numbers and
 separate addition/deletion markers. In the preview, `h/l` or Left/Right scroll
-horizontally while the line-number gutter stays fixed. Wide Git previews show
-aligned, syntax-highlighted before/after columns with tinted changes; `s` in the
-preview toggles split/unified layout. The Changes tree
+horizontally while the line-number gutter stays fixed. Diffs use the full preview
+width by default, with tinted additions/deletions. `s` in the preview opts into
+aligned before/after columns when there is enough room, or returns to unified view. The Changes tree
 expands/collapses with `l/h`. `H/L` cycles Branches, Worktrees, Remotes and Tags. Enter opens files in
 Dust, or `$VISUAL`/`$EDITOR` from the standalone tool. Worktree Enter opens that
 repository. Branch Enter confirms checkout. `v` switches Changes/All files,
 including highlighted source for clean tracked files. `Space` stages a file;
 `i` switches to the index where `Space` unstages. The Commits pane follows the
-selected branch, worktree or tag. `c` commits staged files and `P` confirms a
+selected branch, worktree or tag. Commit previews show a compact summary and one
+file's diff, not a dump of every patch. Enter on a commit opens its changed-file
+navigator. Tab or Ctrl-h/l switches files/diff; `J/K` changes files from either
+pane. Escape or `q` returns to the same history selection. `c` commits staged files and `P` confirms a
 push. `n` creates a worktree from an existing or new branch, or saves a stash in its pane;
 `a/p/d` apply/pop/drop a stash with confirmation. `r` refreshes. Form fields use
 ordinary typing, arrows, Tab, Enter and Escape; Ctrl-Enter submits.

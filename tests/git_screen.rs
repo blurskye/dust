@@ -155,6 +155,22 @@ fn wide_diff_aligns_old_and_new_code_with_tinted_syntax() {
     std::fs::write(dir.path().join("sample.rs"), "fn after() {}\n").unwrap();
     let mut screen = GitScreen::open(dir.path()).unwrap();
     wait(&mut screen, |s| view(s).contains("+fn after()"));
+    let unified = screen.frame(180, 40);
+    assert!(
+        !(0..40).any(|y| unified.grid.row_text(y).contains("BEFORE")),
+        "split must be opt-in, even on wide terminals"
+    );
+    screen.event(UiEvent::Key {
+        key: KeyEvent {
+            code: KeyCode::Char('l'),
+            modifiers: Modifiers {
+                control: true,
+                ..Modifiers::default()
+            },
+        },
+        kind: KeyInputKind::Press,
+    });
+    key(&mut screen, KeyCode::Char('s'));
     let frame = screen.frame(180, 40);
     let row = (0..40)
         .find(|y| frame.grid.row_text(*y).contains("fn before()"))
@@ -186,6 +202,41 @@ fn wide_diff_aligns_old_and_new_code_with_tinted_syntax() {
         .find(|y| frame.grid.row_text(*y).contains("fn after()"))
         .unwrap();
     assert_ne!(old, new);
+}
+
+#[test]
+fn commits_browse_one_changed_file_at_a_time_without_raw_statistics() {
+    let dir = repo();
+    std::fs::write(dir.path().join("alpha.rs"), "fn alpha() {}\n").unwrap();
+    std::fs::write(dir.path().join("beta.rs"), "fn beta() {}\n").unwrap();
+    git(dir.path(), &["add", "."]);
+    git(dir.path(), &["commit", "-m", "A multi-file commit"]);
+    let head = git(dir.path(), &["rev-parse", "HEAD"]);
+    let mut screen = GitScreen::open(dir.path()).unwrap();
+    wait(&mut screen, |s| view(s).contains("A multi-file commit"));
+    key(&mut screen, KeyCode::Char('3'));
+    wait(&mut screen, |s| view(s).contains("+fn alpha()"));
+    let overview = view(&mut screen);
+    assert!(
+        overview.contains("2 files")
+            && !overview.contains("fn beta()")
+            && !overview.contains("files changed,")
+    );
+    key(&mut screen, KeyCode::Enter);
+    assert!(view(&mut screen).contains("Changed files"));
+    key(&mut screen, KeyCode::Down);
+    wait(&mut screen, |s| view(s).contains("+fn beta()"));
+    assert!(!view(&mut screen).contains("fn alpha()"));
+    key(&mut screen, KeyCode::Tab);
+    key(&mut screen, KeyCode::Char('K'));
+    wait(&mut screen, |s| view(s).contains("+fn alpha()"));
+    key(&mut screen, KeyCode::Char('?'));
+    assert!(view(&mut screen).contains("Next / previous file"));
+    key(&mut screen, KeyCode::Escape);
+    key(&mut screen, KeyCode::Escape);
+    assert!(!view(&mut screen).contains("Changed files"));
+    assert_eq!(git(dir.path(), &["rev-parse", "HEAD"]), head);
+    assert_eq!(git(dir.path(), &["status", "--porcelain"]), "");
 }
 
 #[test]
@@ -361,15 +412,19 @@ fn working_index_commit_and_stash_diffs_have_source_syntax_and_numbered_markers(
     git(dir.path(), &["commit", "-m", "Changed both languages"]);
     let mut screen = GitScreen::open(dir.path()).unwrap();
     key(&mut screen, KeyCode::Char('3'));
-    wait(&mut screen, |s| view(s).contains("+fn after()"));
+    wait(&mut screen, |s| view(s).contains("+def after()"));
     assert!(matches!(
         code_style(&mut screen, "+def after()", "def"),
         dust::ui::Style::Syntax(_)
     ));
+    key(&mut screen, KeyCode::Enter);
+    key(&mut screen, KeyCode::Down);
+    wait(&mut screen, |s| view(s).contains("+fn after()"));
     assert!(matches!(
         code_style(&mut screen, "+fn after()", "fn"),
         dust::ui::Style::Syntax(_)
     ));
+    key(&mut screen, KeyCode::Escape);
     std::fs::write(dir.path().join("sample.rs"), "fn stashed() {}\n").unwrap();
     git(dir.path(), &["stash", "push", "-m", "Colored stash"]);
     key(&mut screen, KeyCode::Char('r'));

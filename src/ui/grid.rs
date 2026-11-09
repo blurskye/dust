@@ -55,6 +55,12 @@ pub enum Style {
     GitSurface(Option<crate::config::Highlight>),
     GitHeading,
     GitControl,
+    /// Some(active) retains a selected row's surface beneath the semantic foreground.
+    GitHash(Option<bool>),
+    GitBranch {
+        current: bool,
+        selection: Option<bool>,
+    },
     GitDiff {
         added: bool,
         syntax: Option<crate::config::Highlight>,

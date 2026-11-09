@@ -391,6 +391,23 @@ impl ThemeConfig {
         style
     }
 
+    pub fn git_label(&self, source: &ThemeStyle, selection: Option<bool>) -> ThemeStyle {
+        let mut style = source.clone();
+        style.fill(match selection {
+            Some(active) => blend(
+                self.styles.accent.foreground,
+                self.styles.default.background,
+                if active { 12 } else { 5 },
+            ),
+            None => blend(
+                self.styles.default.foreground,
+                self.styles.default.background,
+                3,
+            ),
+        });
+        style
+    }
+
     pub fn git_diff(&self, added: bool, group: Option<Highlight>) -> ThemeStyle {
         let base = &self.styles.default;
         let mut style = group
