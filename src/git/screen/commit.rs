@@ -12,7 +12,7 @@ pub(super) struct Commit {
     pub id: String,
     pub author: String,
     pub date: String,
-    pub title: String,
+    pub message: String,
     pub files: Vec<ChangedFile>,
     pub selected: usize,
 }
@@ -22,7 +22,7 @@ impl Commit {
             id,
             author: String::new(),
             date: String::new(),
-            title: "Loading commit…".into(),
+            message: "Loading commit…".into(),
             files: Vec::new(),
             selected: 0,
         }
@@ -33,7 +33,7 @@ impl Commit {
         git2::Oid::from_str(&id).ok()?;
         let author = parts.next()?.into();
         let date = parts.next()?.into();
-        let title = parts.next()?.into();
+        let message = parts.next()?.trim_end().into();
         let files = parts
             .filter_map(|record| {
                 let mut fields = record.trim_start_matches('\n').splitn(3, '\t');
@@ -48,7 +48,7 @@ impl Commit {
             id,
             author,
             date,
-            title,
+            message,
             files,
             selected: 0,
         })
@@ -68,7 +68,7 @@ impl GitScreen {
                 "show".into(),
                 "--no-ext-diff".into(),
                 "--no-textconv".into(),
-                "--format=%H%x00%an%x00%as%x00%s%x00".into(),
+                "--format=%H%x00%an%x00%as%x00%B%x00".into(),
                 "--numstat".into(),
                 "-z".into(),
                 "--first-parent".into(),
@@ -81,7 +81,7 @@ impl GitScreen {
     }
     pub(super) fn load_commit_file(&mut self) {
         self.jobs.cancel_preview();
-        self.preview_line = 0;
+        self.preview_offset = 0;
         self.preview_column = 0;
         let Some(commit) = &self.commit else { return };
         let Some(file) = commit.files.get(commit.selected) else {
@@ -106,6 +106,23 @@ impl GitScreen {
         );
         self.report(result);
     }
+    pub(super) fn message_key(&mut self, key: &KeyEvent) -> bool {
+        let Some(offset) = self.message_scroll.as_mut() else {
+            return false;
+        };
+        match key.code {
+            KeyCode::Escape | KeyCode::Char('q' | 'm') => self.message_scroll = None,
+            KeyCode::Down | KeyCode::Char('j') => *offset = offset.saturating_add(1),
+            KeyCode::Up | KeyCode::Char('k') => *offset = offset.saturating_sub(1),
+            KeyCode::PageDown => *offset = offset.saturating_add(10),
+            KeyCode::PageUp => *offset = offset.saturating_sub(10),
+            KeyCode::Home => *offset = 0,
+            KeyCode::End => *offset = usize::MAX,
+            _ => {}
+        }
+        true
+    }
+
     pub(super) fn commit_key(&mut self, key: &KeyEvent) -> bool {
         if !self.commit_open {
             return false;
@@ -125,7 +142,7 @@ impl GitScreen {
             KeyCode::Enter => self.focus = 4,
             KeyCode::Char('s') => {
                 self.split_diff = !self.split_diff;
-                self.preview_line = 0;
+                self.preview_offset = 0;
             }
             KeyCode::Char('J' | 'K') | KeyCode::Down | KeyCode::Up | KeyCode::Char('j' | 'k') => {
                 let down = matches!(key.code, KeyCode::Down | KeyCode::Char('j' | 'J'));
@@ -149,12 +166,18 @@ impl GitScreen {
                 self.preview_column = self.preview_column.saturating_add(8)
             }
             KeyCode::PageDown => {
-                self.preview_line =
-                    (self.preview_line + 20).min(self.preview_rows.saturating_sub(1))
+                self.preview_offset = (self.preview_offset + self.preview_visible.max(1))
+                    .min(self.preview_rows.saturating_sub(self.preview_visible))
             }
-            KeyCode::PageUp => self.preview_line = self.preview_line.saturating_sub(20),
-            KeyCode::Home => self.preview_line = 0,
-            KeyCode::End => self.preview_line = self.preview_rows.saturating_sub(1),
+            KeyCode::PageUp => {
+                self.preview_offset = self
+                    .preview_offset
+                    .saturating_sub(self.preview_visible.max(1))
+            }
+            KeyCode::Home => self.preview_offset = 0,
+            KeyCode::End => {
+                self.preview_offset = self.preview_rows.saturating_sub(self.preview_visible)
+            }
             KeyCode::Char('r') => {
                 self.commit = None;
                 self.load_preview();
@@ -163,6 +186,60 @@ impl GitScreen {
         }
         true
     }
+}
+
+pub(super) fn message(frame: &mut Frame, app: &mut GitScreen, width: u16, height: u16) {
+    if width < 40 || height < 12 {
+        return;
+    }
+    let Some(commit) = &app.commit else { return };
+    let w = width;
+    let h = height.saturating_sub(2);
+    let x = 0;
+    let y = 1;
+    let lines = crate::ui::render::wrap_plain_text(
+        &commit.message,
+        usize::from(w - 4),
+        crate::config::AmbiguousWidth::Narrow,
+    );
+    let visible = usize::from(h - 4);
+    let offset = app
+        .message_scroll
+        .unwrap_or(0)
+        .min(lines.len().saturating_sub(visible));
+    app.message_scroll = Some(offset);
+    for row in y..y + h {
+        for col in x..x + w {
+            frame.grid.set_cell(col, row, " ", Style::GitSurface(None));
+        }
+    }
+    super::render::border(
+        &mut frame.grid,
+        x,
+        y,
+        w,
+        h,
+        &format!("Commit message · {}", &commit.id[..7]),
+        true,
+    );
+    for (index, line) in lines.iter().skip(offset).take(visible).enumerate() {
+        frame.grid.put_text_clipped(
+            x + 2,
+            y + 1 + index as u16,
+            line,
+            Style::GitSurface(None),
+            x + w - 2,
+        );
+    }
+    frame.grid.put_text_clipped(
+        x + 2,
+        y + h - 2,
+        "Esc back · j/k scroll · PgUp/PgDn · Home/End",
+        Style::Muted,
+        x + w - 2,
+    );
+    super::render::viewport(frame, x + w - 2, y + h - 1, offset, visible, lines.len());
+    frame.cursor = Some((x + 2, y + 1, SetCursorStyle::SteadyBlock));
 }
 
 pub(super) fn files(frame: &mut Frame, app: &GitScreen, left: u16, body: u16) {

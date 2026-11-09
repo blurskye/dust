@@ -237,7 +237,10 @@ including highlighted source for clean tracked files. `Space` stages a file;
 selected branch, worktree or tag. Commit previews show a compact summary and one
 file's diff, not a dump of every patch. Enter on a commit opens its changed-file
 navigator. Tab or Ctrl-h/l switches files/diff; `J/K` changes files from either
-pane. Escape or `q` returns to the same history selection. `c` commits staged files and `P` confirms a
+pane. The selected path and change counts stay pinned while code scrolls. `m`
+opens the complete commit message; j/k, Page Up/Down and Home/End scroll it, and
+Escape returns to the same diff position. Long summary subjects show a more cue.
+Escape or `q` in the file navigator returns to the same history selection. `c` commits staged files and `P` confirms a
 push. `n` creates a worktree from an existing or new branch, or saves a stash in its pane;
 `a/p/d` apply/pop/drop a stash with confirmation. `r` refreshes. Form fields use
 ordinary typing, arrows, Tab, Enter and Escape; Ctrl-Enter submits.

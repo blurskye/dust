@@ -276,36 +276,52 @@ pub(super) fn frame(app: &mut GitScreen, width: u16, height: u16) -> Frame {
         app.focus == 4,
     );
     let split = app.split_diff && app.preview.patch && width - left >= 96;
-    app.preview_rows = if split {
+    let pinned_heading = app
+        .commit
+        .as_ref()
+        .and_then(|commit| commit.files.get(commit.selected))
+        .and_then(|_| {
+            app.preview
+                .rows
+                .iter()
+                .position(|row| row.style == Style::GitHeading)
+        });
+    app.preview_rows = (if split {
         app.preview.split.len()
     } else {
         app.preview.rows.len()
-    };
-    app.preview_line = app.preview_line.min(app.preview_rows.saturating_sub(1));
+    })
+    .saturating_sub(usize::from(pinned_heading.is_some()));
     let mut first_line = 2;
     if let Some(commit) = &app.commit {
         let lines = crate::ui::render::wrap_plain_text(
-            &commit.title,
+            commit.message.lines().next().unwrap_or_default(),
             usize::from(width - left - 4),
             crate::config::AmbiguousWidth::Narrow,
         );
-        for line in lines.iter().take(2) {
+        for (index, line) in lines.iter().take(2).enumerate() {
+            let text = if index == 1 && lines.len() > 2 {
+                format!(
+                    "{}  [m: more]",
+                    ellipsize(
+                        &format!("{line} …"),
+                        usize::from(width - left - 4).saturating_sub(11)
+                    )
+                )
+            } else {
+                line.clone()
+            };
             frame
                 .grid
-                .put_text_clipped(left + 2, first_line, line, Style::GitHeading, width - 2);
+                .put_text_clipped(left + 2, first_line, &text, Style::GitHeading, width - 2);
             first_line += 1;
         }
         let meta = format!(
-            "{} · {} · {} · {} files{}",
+            "{} · {} · {} · {} files",
             &commit.id[..7],
             commit.author,
             commit.date,
-            commit.files.len(),
-            if app.commit_open {
-                ""
-            } else {
-                " · Enter: browse files"
-            }
+            commit.files.len()
         );
         frame.grid.put_text_clipped(
             left + 2,
@@ -315,12 +331,48 @@ pub(super) fn frame(app: &mut GitScreen, width: u16, height: u16) -> Frame {
             width - 2,
         );
         first_line += 1;
+        if let Some(file) = commit.files.get(commit.selected) {
+            let counts = if file.added == "-" {
+                "binary".into()
+            } else {
+                format!("+{} −{}", file.added, file.removed)
+            };
+            let stats = format!(
+                " {counts} · {}/{} ",
+                commit.selected + 1,
+                commit.files.len()
+            );
+            let stats_x = (width - 2)
+                .saturating_sub(stats.width() as u16)
+                .max(left + 2);
+            for x in left + 2..width - 2 {
+                frame.grid.set_cell(x, first_line, " ", Style::GitHeading);
+            }
+            frame.grid.put_text_clipped(
+                left + 2,
+                first_line,
+                &ellipsize(
+                    &file.path.display().to_string(),
+                    usize::from(stats_x.saturating_sub(left + 3)),
+                ),
+                Style::GitHeading,
+                stats_x,
+            );
+            frame
+                .grid
+                .put_text_clipped(stats_x, first_line, &stats, Style::GitHeading, width - 2);
+            first_line += 1;
+        }
     }
     if split {
         first_line += 1;
     }
     let visible = body.saturating_sub(first_line) as usize;
-    let offset = app.preview_line.saturating_sub(visible.saturating_sub(1));
+    app.preview_visible = visible;
+    app.preview_offset = app
+        .preview_offset
+        .min(app.preview_rows.saturating_sub(visible));
+    let offset = app.preview_offset;
     let number_width = app.preview.number_width();
     if split {
         let middle = left + (width - left) / 2;
@@ -334,6 +386,7 @@ pub(super) fn frame(app: &mut GitScreen, width: u16, height: u16) -> Frame {
             .preview
             .split
             .iter()
+            .filter(|pair| pinned_heading.is_none() || pair.heading != pinned_heading)
             .enumerate()
             .skip(offset)
             .take(visible)
@@ -346,7 +399,11 @@ pub(super) fn frame(app: &mut GitScreen, width: u16, height: u16) -> Frame {
                     left + 2,
                     y,
                     width - 1,
-                    app.preview_column,
+                    if app.commit.is_some() {
+                        0
+                    } else {
+                        app.preview_column
+                    },
                     None,
                 );
                 continue;
@@ -397,6 +454,9 @@ pub(super) fn frame(app: &mut GitScreen, width: u16, height: u16) -> Frame {
             .rows
             .iter()
             .enumerate()
+            .filter(|(index, _)| Some(*index) != pinned_heading)
+            .map(|(_, row)| row)
+            .enumerate()
             .skip(offset)
             .take(visible)
         {
@@ -425,7 +485,11 @@ pub(super) fn frame(app: &mut GitScreen, width: u16, height: u16) -> Frame {
                 x,
                 y,
                 width - 1,
-                app.preview_column,
+                if app.commit.is_some() && row.marker.is_none() {
+                    0
+                } else {
+                    app.preview_column
+                },
                 match row.marker {
                     Some('+') => Some(true),
                     Some('-') => Some(false),
@@ -443,15 +507,7 @@ pub(super) fn frame(app: &mut GitScreen, width: u16, height: u16) -> Frame {
         app.preview_rows,
     );
     if app.focus == 4 {
-        frame.cursor = Some((
-            left + 2,
-            first_line
-                + (app
-                    .preview_line
-                    .saturating_sub(offset)
-                    .min(visible.saturating_sub(1))) as u16,
-            SetCursorStyle::SteadyBlock,
-        ));
+        frame.cursor = Some((left + 2, first_line, SetCursorStyle::SteadyBlock));
     }
     if let Some(tutor) = &app.tutor {
         frame
@@ -498,9 +554,18 @@ pub(super) fn frame(app: &mut GitScreen, width: u16, height: u16) -> Frame {
             &[
                 ("Tab", "focus"),
                 ("J/K", "files"),
+                ("m", "message"),
                 ("h/l", "pan"),
                 ("s", "split"),
                 ("Esc", "back"),
+            ]
+        } else if app.last_list == 2 {
+            &[
+                ("Enter", "files"),
+                ("m", "message"),
+                ("Tab", "focus"),
+                ("j/k", "move"),
+                ("h/l", "pan"),
             ]
         } else if app.focus == 4 {
             &[
@@ -722,6 +787,7 @@ pub(super) fn help(frame: &mut Frame, width: u16, height: u16, page: usize) {
             "PgUp/PgDn  Scroll diff",
             "Home / End  First / last diff line",
             "s  Toggle optional split view",
+            "m  Full commit message",
             "r  Refresh commit",
             "Esc / q  Return to history",
         ]

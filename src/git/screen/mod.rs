@@ -100,10 +100,12 @@ pub struct GitScreen {
     preview: Preview,
     commit: Option<commit::Commit>,
     commit_open: bool,
-    preview_line: usize,
+    preview_offset: usize,
     preview_column: usize,
     split_diff: bool,
     preview_rows: usize,
+    preview_visible: usize,
+    message_scroll: Option<usize>,
     staged: bool,
     all_files: bool,
     files: BTreeSet<PathBuf>,
@@ -150,10 +152,12 @@ impl GitScreen {
             preview: Preview::default(),
             commit: None,
             commit_open: false,
-            preview_line: 0,
+            preview_offset: 0,
             preview_column: 0,
             split_diff: false,
             preview_rows: 0,
+            preview_visible: 0,
+            message_scroll: None,
             staged: false,
             all_files: false,
             files: BTreeSet::new(),
@@ -1003,6 +1007,9 @@ impl GitScreen {
                 }
             }
             UiEvent::Key { key, kind } if kind != KeyInputKind::Release => {
+                if self.message_key(&key) {
+                    return ScreenOutcome::Continue;
+                }
                 if self.help {
                     if matches!(key.code, KeyCode::Escape | KeyCode::Char('?' | 'q')) {
                         self.help = false;
@@ -1016,6 +1023,15 @@ impl GitScreen {
                 if self.form.is_some() {
                     let result = self.form_key(&key);
                     self.report(result);
+                    return ScreenOutcome::Continue;
+                }
+                if self.page == 0
+                    && self.last_list == 2
+                    && self.commit.is_some()
+                    && key.code == KeyCode::Char('m')
+                    && !key.modifiers.control
+                {
+                    self.message_scroll = Some(0);
                     return ScreenOutcome::Continue;
                 }
                 if self.commit_key(&key) {
@@ -1101,8 +1117,21 @@ impl GitScreen {
                         }
                         KeyCode::Char('j') | KeyCode::Down => self.move_selection(1),
                         KeyCode::Char('k') | KeyCode::Up => self.move_selection(-1),
-                        KeyCode::PageDown => self.move_selection(15),
-                        KeyCode::PageUp => self.move_selection(-15),
+                        KeyCode::PageDown => self.move_selection(if self.focus == 4 {
+                            self.preview_visible.max(1) as isize
+                        } else {
+                            15
+                        }),
+                        KeyCode::PageUp => self.move_selection(if self.focus == 4 {
+                            -(self.preview_visible.max(1) as isize)
+                        } else {
+                            -15
+                        }),
+                        KeyCode::Home if self.focus == 4 => self.preview_offset = 0,
+                        KeyCode::End if self.focus == 4 => {
+                            self.preview_offset =
+                                self.preview_rows.saturating_sub(self.preview_visible)
+                        }
                         KeyCode::Char('H' | 'L') if self.focus == 1 => {
                             self.subview = (self.subview
                                 + if key.code == KeyCode::Char('L') { 1 } else { 3 })
@@ -1111,7 +1140,7 @@ impl GitScreen {
                         }
                         KeyCode::Char('s') if self.focus == 4 => {
                             self.split_diff = !self.split_diff;
-                            self.preview_line = 0;
+                            self.preview_offset = 0;
                             self.preview_column = 0;
                         }
                         KeyCode::Left | KeyCode::Char('h') if self.focus == 4 => {
@@ -1284,7 +1313,7 @@ impl GitScreen {
                 }
                 if previous != (self.last_list, self.subview, self.selected, self.staged) {
                     self.select_history();
-                    self.preview_line = 0;
+                    self.preview_offset = 0;
                     self.preview_column = 0;
                     self.load_preview();
                 }
@@ -1296,10 +1325,10 @@ impl GitScreen {
     }
     fn move_selection(&mut self, delta: isize) {
         if self.focus == 4 {
-            self.preview_line = self
-                .preview_line
+            self.preview_offset = self
+                .preview_offset
                 .saturating_add_signed(delta)
-                .min(self.preview_rows.saturating_sub(1));
+                .min(self.preview_rows.saturating_sub(self.preview_visible));
         } else {
             let slot = self.slot(self.focus);
             self.selected[slot] = self.selected[slot]
@@ -1327,6 +1356,9 @@ impl GitScreen {
         } else {
             github::view::frame(self, width, height)
         };
+        if self.message_scroll.is_some() {
+            commit::message(&mut frame, self, width, height);
+        }
         if self.help {
             render::help(
                 &mut frame,

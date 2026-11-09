@@ -240,6 +240,89 @@ fn commits_browse_one_changed_file_at_a_time_without_raw_statistics() {
 }
 
 #[test]
+fn commit_scrolls_immediately_pins_identity_and_exposes_the_full_message() {
+    let dir = repo();
+    let source = (0..180)
+        .map(|i| {
+            format!("fn numbered_{i:03}() {{ let description = \"a long readable code line\"; }}\n")
+        })
+        .collect::<String>();
+    std::fs::write(dir.path().join("scroll.rs"), source).unwrap();
+    git(dir.path(), &["add", "."]);
+    let subject = "A deliberately long commit subject describing the complete behavior of the native workspace, its keyboard navigation, scrolling, focus restoration, and careful preservation of all user drafts";
+    let body = (0..70)
+        .map(|i| format!("Detailed message paragraph {i:02}.\n"))
+        .collect::<String>()
+        + "FULL MESSAGE END";
+    git(dir.path(), &["commit", "-m", subject, "-m", &body]);
+    for (width, height) in [(100, 30), (190, 48)] {
+        let mut screen = GitScreen::open(dir.path()).unwrap();
+        key(&mut screen, KeyCode::Char('3'));
+        wait(&mut screen, |s| view(s).contains("numbered_000"));
+        let text_at = |s: &mut GitScreen| {
+            let frame = s.frame(width, height);
+            (0..height)
+                .map(|y| frame.grid.row_text(y))
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        let overview = text_at(&mut screen);
+        assert!(
+            overview.contains("Enter")
+                && overview.contains("files")
+                && overview.contains("message")
+        );
+        if width == 100 {
+            assert!(overview.contains("[m: more]"), "{overview}");
+        }
+        key(&mut screen, KeyCode::Enter);
+        key(&mut screen, KeyCode::Tab);
+        let first = text_at(&mut screen);
+        key(&mut screen, KeyCode::Char('j'));
+        let moved = text_at(&mut screen);
+        assert_ne!(
+            first, moved,
+            "the first j must scroll, not move an invisible cursor"
+        );
+        key(&mut screen, KeyCode::Home);
+        text_at(&mut screen);
+        key(&mut screen, KeyCode::PageDown);
+        let paged = text_at(&mut screen);
+        assert!(
+            !paged.contains("numbered_000"),
+            "the first page-down must expose new code"
+        );
+        let identity = paged
+            .lines()
+            .find(|line| line.contains("scroll.rs") && line.contains("1/1"))
+            .unwrap()
+            .to_owned();
+        key(&mut screen, KeyCode::Char('l'));
+        let panned = text_at(&mut screen);
+        assert!(panned.lines().any(|line| line == identity));
+        key(&mut screen, KeyCode::Char('m'));
+        let message = text_at(&mut screen);
+        let message_text = message
+            .lines()
+            .map(|line| line.trim().trim_matches('│').trim())
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(
+            message.contains("Commit message") && message_text.contains(subject),
+            "{width}x{height}:\n{message}"
+        );
+        key(&mut screen, KeyCode::End);
+        assert!(text_at(&mut screen).contains("FULL MESSAGE END"));
+        key(&mut screen, KeyCode::Escape);
+        assert_eq!(
+            text_at(&mut screen),
+            panned,
+            "closing the message must preserve the diff position"
+        );
+    }
+}
+
+#[test]
 fn multiline_prompt_moves_by_display_column_without_splitting_graphemes() {
     let mut prompt = dust::ui::PromptState::new(dust::ui::PromptKind::Text);
     prompt.input = "界áx\n12\n👩‍💻bc".into();
