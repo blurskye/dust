@@ -114,8 +114,8 @@ impl GitScreen {
             KeyCode::Escape | KeyCode::Char('q' | 'm') => self.message_scroll = None,
             KeyCode::Down | KeyCode::Char('j') => *offset = offset.saturating_add(1),
             KeyCode::Up | KeyCode::Char('k') => *offset = offset.saturating_sub(1),
-            KeyCode::PageDown => *offset = offset.saturating_add(10),
-            KeyCode::PageUp => *offset = offset.saturating_sub(10),
+            KeyCode::PageDown => *offset = offset.saturating_add(self.message_visible.max(1)),
+            KeyCode::PageUp => *offset = offset.saturating_sub(self.message_visible.max(1)),
             KeyCode::Home => *offset = 0,
             KeyCode::End => *offset = usize::MAX,
             _ => {}
@@ -203,6 +203,7 @@ pub(super) fn message(frame: &mut Frame, app: &mut GitScreen, width: u16, height
         crate::config::AmbiguousWidth::Narrow,
     );
     let visible = usize::from(h - 4);
+    app.message_visible = visible;
     let offset = app
         .message_scroll
         .unwrap_or(0)
@@ -282,6 +283,10 @@ pub(super) fn files(frame: &mut Frame, app: &GitScreen, left: u16, body: u16) {
             style,
             left - 2,
         );
+        let detail = |added| Style::GitDetail {
+            added,
+            selection: selected.then_some(app.focus != 4),
+        };
         let parent = file
             .path
             .parent()
@@ -291,20 +296,20 @@ pub(super) fn files(frame: &mut Frame, app: &GitScreen, left: u16, body: u16) {
         let x = if file.added == "-" {
             frame
                 .grid
-                .put_text_clipped(2, y + 1, "binary", Style::Muted, left - 2)
+                .put_text_clipped(2, y + 1, "binary", detail(None), left - 2)
         } else {
             let x = frame.grid.put_text_clipped(
                 2,
                 y + 1,
                 &format!("+{} ", file.added),
-                Style::GitSignAdded,
+                detail(Some(true)),
                 left - 2,
             );
             frame.grid.put_text_clipped(
                 x,
                 y + 1,
                 &format!("−{}", file.removed),
-                Style::GitSignDeleted,
+                detail(Some(false)),
                 left - 2,
             )
         };
@@ -312,7 +317,7 @@ pub(super) fn files(frame: &mut Frame, app: &GitScreen, left: u16, body: u16) {
             x + 1,
             y + 1,
             &super::render::ellipsize(&parent, usize::from((left - 2).saturating_sub(x + 1))),
-            Style::Muted,
+            detail(None),
             left - 2,
         );
         if selected && app.focus != 4 {

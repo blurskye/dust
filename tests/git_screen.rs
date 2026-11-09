@@ -250,7 +250,7 @@ fn commit_scrolls_immediately_pins_identity_and_exposes_the_full_message() {
     std::fs::write(dir.path().join("scroll.rs"), source).unwrap();
     git(dir.path(), &["add", "."]);
     let subject = "A deliberately long commit subject describing the complete behavior of the native workspace, its keyboard navigation, scrolling, focus restoration, and careful preservation of all user drafts";
-    let body = (0..70)
+    let body = (0..120)
         .map(|i| format!("Detailed message paragraph {i:02}.\n"))
         .collect::<String>()
         + "FULL MESSAGE END";
@@ -276,8 +276,29 @@ fn commit_scrolls_immediately_pins_identity_and_exposes_the_full_message() {
             assert!(overview.contains("[m: more]"), "{overview}");
         }
         key(&mut screen, KeyCode::Enter);
+        assert_eq!(
+            screen.frame(width, height).grid.get(2, 3).unwrap().style,
+            dust::ui::Style::GitDetail {
+                added: Some(true),
+                selection: Some(true)
+            }
+        );
         key(&mut screen, KeyCode::Tab);
+        assert_eq!(
+            screen.frame(width, height).grid.get(2, 3).unwrap().style,
+            dust::ui::Style::GitDetail {
+                added: Some(true),
+                selection: Some(false)
+            }
+        );
         let first = text_at(&mut screen);
+        assert!(
+            first
+                .lines()
+                .nth(usize::from(height - 2))
+                .unwrap()
+                .contains("scroll")
+        );
         key(&mut screen, KeyCode::Char('j'));
         let moved = text_at(&mut screen);
         assert_ne!(
@@ -300,6 +321,10 @@ fn commit_scrolls_immediately_pins_identity_and_exposes_the_full_message() {
         key(&mut screen, KeyCode::Char('l'));
         let panned = text_at(&mut screen);
         assert!(panned.lines().any(|line| line == identity));
+        assert!(
+            panned.contains('‹'),
+            "panned code must signal hidden text on the left"
+        );
         key(&mut screen, KeyCode::Char('m'));
         let message = text_at(&mut screen);
         let message_text = message
@@ -311,6 +336,29 @@ fn commit_scrolls_immediately_pins_identity_and_exposes_the_full_message() {
             message.contains("Commit message") && message_text.contains(subject),
             "{width}x{height}:\n{message}"
         );
+        let next_page_line = message
+            .lines()
+            .nth(usize::from(height - 5))
+            .unwrap()
+            .trim()
+            .trim_matches('│')
+            .trim();
+        let paragraph = next_page_line
+            .strip_prefix("Detailed message paragraph ")
+            .unwrap()
+            .trim_end_matches('.')
+            .parse::<usize>()
+            .unwrap();
+        key(&mut screen, KeyCode::PageDown);
+        assert!(
+            text_at(&mut screen)
+                .lines()
+                .nth(2)
+                .unwrap()
+                .contains(&format!("Detailed message paragraph {:02}.", paragraph + 1))
+        );
+        key(&mut screen, KeyCode::PageUp);
+        assert_eq!(text_at(&mut screen), message);
         key(&mut screen, KeyCode::End);
         assert!(text_at(&mut screen).contains("FULL MESSAGE END"));
         key(&mut screen, KeyCode::Escape);

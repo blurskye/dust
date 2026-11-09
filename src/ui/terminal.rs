@@ -603,6 +603,17 @@ fn queue_style(
             );
             &derived
         }
+        Style::GitDetail { added, selection } => {
+            derived = theme.git_label(
+                match added {
+                    Some(true) => &theme.styles.git_sign_added,
+                    Some(false) => &theme.styles.git_sign_deleted,
+                    None => &theme.styles.muted,
+                },
+                selection,
+            );
+            &derived
+        }
         Style::GitDiff { added, syntax } => {
             derived = theme.git_diff(added, syntax);
             &derived

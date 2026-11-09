@@ -420,6 +420,25 @@ impl ThemeConfig {
             self.styles.git_sign_deleted.foreground
         };
         style.fill(blend(color, base.background, 8));
+        // Pale diff surfaces need darker syntax, without changing the theme's hues.
+        if let Some(background) = luminance(style.background).filter(|value| *value > 0.5) {
+            let maximum = (background + 0.05) / 4.5 - 0.05;
+            if luminance(style.foreground).is_some_and(|value| value > maximum) {
+                for percent in (0..100).step_by(10).rev() {
+                    let Some(foreground) =
+                        blend(style.foreground, ThemeColor::Rgb(0, 0, 0), percent)
+                    else {
+                        break;
+                    };
+                    if luminance(foreground).is_some_and(|value| value <= maximum) {
+                        style.foreground = foreground;
+                        style.foreground_256 = nearest_256(foreground);
+                        style.foreground_16 = nearest_16(foreground);
+                        break;
+                    }
+                }
+            }
+        }
         style
     }
 
@@ -626,6 +645,20 @@ impl ThemeStyle {
             self.background_16 = nearest_16(background);
         }
     }
+}
+
+// sRGB relative luminance, as defined by WCAG's contrast calculation.
+fn luminance(colour: ThemeColor) -> Option<f64> {
+    let (red, green, blue) = colour.rgb()?;
+    let linear = |channel: u8| {
+        let value = f64::from(channel) / 255.0;
+        if value <= 0.04045 {
+            value / 12.92
+        } else {
+            ((value + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    Some(0.2126 * linear(red) + 0.7152 * linear(green) + 0.0722 * linear(blue))
 }
 
 /// `percent` of `colour` over `background`, when both are RGB.

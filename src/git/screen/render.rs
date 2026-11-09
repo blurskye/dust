@@ -546,19 +546,20 @@ pub(super) fn frame(app: &mut GitScreen, width: u16, height: u16) -> Frame {
         Style::Warning,
         width - 1,
     );
+    let commit_hints = [
+        ("j/k", if app.focus == 4 { "scroll" } else { "files" }),
+        ("Tab", "focus"),
+        ("J/K", "files"),
+        ("m", "message"),
+        ("h/l", "pan"),
+        ("s", "split"),
+    ];
     footer(
         &mut frame,
         width,
         height,
         if app.commit_open {
-            &[
-                ("Tab", "focus"),
-                ("J/K", "files"),
-                ("m", "message"),
-                ("h/l", "pan"),
-                ("s", "split"),
-                ("Esc", "back"),
-            ]
+            &commit_hints
         } else if app.last_list == 2 {
             &[
                 ("Enter", "files"),
@@ -620,6 +621,10 @@ pub(super) fn paint_source(
         for at in x..right {
             grid.set_cell(at, y, " ", Style::GitHeading);
         }
+    }
+    if offset > 0 && !row.text.is_empty() && x < right {
+        grid.set_cell(x, y, "‹", Style::Muted);
+        x += 1;
     }
     let mut column = 0;
     for (at, grapheme) in row.text.grapheme_indices(true) {
@@ -747,11 +752,11 @@ pub(super) fn footer(
     for x in 0..width {
         frame.grid.set_cell(x, y, " ", Style::Status);
     }
-    let fixed = [
-        ("?", "keys"),
-        ("r", "refresh"),
-        ("q", if back { "back" } else { "close" }),
-    ];
+    let fixed: &[(&str, &str)] = if back {
+        &[("?", "keys"), ("Esc", "back")]
+    } else {
+        &[("?", "keys"), ("r", "refresh"), ("q", "close")]
+    };
     let size = |(key, label): &(&str, &str)| (key.width() + label.width() + 4) as u16;
     let right = width.saturating_sub(fixed.iter().map(size).sum::<u16>() + 1);
     let draw = |frame: &mut Frame, x, key, label| {
@@ -769,7 +774,7 @@ pub(super) fn footer(
         }
     }
     x = right;
-    for (key, label) in fixed {
+    for &(key, label) in fixed {
         x = draw(frame, x, key, label);
     }
 }

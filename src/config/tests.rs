@@ -1921,6 +1921,71 @@ fn terminal_highlights_prefer_explicit_cterm_over_rgb_for_ansi16() {
 }
 
 #[test]
+fn git_diff_preserves_dark_syntax_and_darkens_low_contrast_light_syntax() {
+    use crate::config::{Highlight, ThemeColor, ThemeConfig};
+    let light: ThemeConfig =
+        toml::from_str(include_str!("../../assets/themes/catppuccin-latte.toml")).unwrap();
+    let dark = load_bundled_config().theme;
+    let luminance = |color: ThemeColor| {
+        let (r, g, b) = color.rgb().unwrap();
+        let linear = |c: u8| {
+            let s = f64::from(c) / 255.0;
+            if s <= 0.04045 {
+                s / 12.92
+            } else {
+                ((s + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b)
+    };
+    for group in [
+        Highlight::STRING,
+        Highlight::FUNCTION,
+        Highlight::COMMENT,
+        Highlight::named("@constant.builtin").unwrap(),
+    ] {
+        for added in [false, true] {
+            let style = light.git_diff(added, Some(group));
+            let contrast =
+                (luminance(style.background) + 0.05) / (luminance(style.foreground) + 0.05);
+            assert!(contrast >= 4.5, "{}: {contrast}", group.name());
+            assert!(style.foreground_256.is_some() && style.foreground_16.is_some());
+            assert_eq!(
+                dark.git_diff(added, Some(group)).foreground,
+                dark.highlight(group).unwrap().foreground
+            );
+        }
+    }
+    for theme in [&light, &dark] {
+        for selection in [Some(true), Some(false), None] {
+            let surface = match selection {
+                Some(true) => theme.git_selection(None),
+                other => theme.git_surface(None, other == Some(false)),
+            };
+            for source in [
+                &theme.styles.git_sign_added,
+                &theme.styles.git_sign_deleted,
+                &theme.styles.muted,
+            ] {
+                let detail = theme.git_label(source, selection);
+                assert_eq!(
+                    (
+                        detail.background,
+                        detail.background_256,
+                        detail.background_16
+                    ),
+                    (
+                        surface.background,
+                        surface.background_256,
+                        surface.background_16
+                    )
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn markdown_code_recomputes_both_background_fallbacks() {
     use crate::config::Highlight;
     use crate::config::HighlightDefinition;

@@ -61,6 +61,10 @@ pub enum Style {
         current: bool,
         selection: Option<bool>,
     },
+    GitDetail {
+        added: Option<bool>,
+        selection: Option<bool>,
+    },
     GitDiff {
         added: bool,
         syntax: Option<crate::config::Highlight>,
