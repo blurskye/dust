@@ -1,0 +1,19 @@
+# F3 search (FORGE.md §7.4): cached hits while typing, the forge's results streamed in below
+# a "From github.com" divider. Prime the cache first (forge-cached.keys, phase prime), then:
+#   FORGE_CACHED_PHASE=search scripts/ui-shot scripts/ui-scenarios/forge-search.keys \
+#     --binary scripts/ui-scenarios/forge-cached-launch --cwd /tmp/orbit --out target/ui-shots/forge-search
+wait 1500
+# Git → Pull requests → Issues
+type >
+wait 100
+type >
+wait 400
+type /
+wait 150
+type crash
+wait 120
+shot local
+wait 3000
+shot remote
+key escape
+wait 300

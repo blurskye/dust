@@ -1,0 +1,43 @@
+[
+  {
+    "id": 386007,
+    "user": {
+      "id": 2021,
+      "login": "leo",
+      "type": "User",
+      "login_name": "",
+      "source_id": 0,
+      "full_name": "",
+      "email": "leo@example.invalid",
+      "avatar_url": "https://gitea.com/avatars/leo.png",
+      "html_url": "https://gitea.com/leo",
+      "language": "",
+      "is_admin": false,
+      "last_login": "0001-01-01T00:00:00Z",
+      "created": "2019-12-02T18:51:38Z",
+      "restricted": false,
+      "active": false,
+      "prohibit_login": false,
+      "location": "",
+      "website": "",
+      "description": "",
+      "visibility": "public",
+      "followers_count": 1,
+      "following_count": 1,
+      "starred_repos_count": 29,
+      "username": "leo"
+    },
+    "team": null,
+    "state": "REQUEST_CHANGES",
+    "body": "This does not need an opt-in and should be the default behaviour in host mode if we can guarantee stable dirs via kernel namespaces on Linux. On OS that don't support the required features, it should be documented as a caveat.",
+    "commit_id": "835b43f8c53b0fa2e2d5f9ad0fc5099cacac6e32",
+    "stale": false,
+    "official": true,
+    "dismissed": false,
+    "comments_count": 0,
+    "submitted_at": "2026-11-07T03:33:20Z",
+    "updated_at": "2026-11-07T03:33:20Z",
+    "html_url": "https://gitea.com/orbit/orbit/pulls/1402#pullrequestreview-386007",
+    "pull_request_url": "https://gitea.com/orbit/orbit/pulls/1402"
+  }
+]

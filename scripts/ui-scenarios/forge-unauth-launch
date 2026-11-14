@@ -1,0 +1,75 @@
+#!/usr/bin/env python3
+"""Launch Dusty Git against the loopback fake forge in one F2 host state (forge-unauth.keys).
+
+FORGE_UNAUTH_STATE picks the state: signed-out, cli-missing, unknown-provider or rate-limited.
+DUSTY_GIT_BINARY is the built `dusty-git`. Run only in a disposable repository (the orbit
+fixture): unknown-provider adds a remote. Nothing here reaches a real forge: the fake server
+(tests/fixtures/forge/server.py) answers every API request and probe, and PATH holds only the
+fake gh (none for cli-missing) plus the tools Dusty Git needs.
+"""
+import json
+import os
+import pathlib
+import shutil
+import subprocess
+import sys
+import tempfile
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
+FIXTURES = ROOT / "tests/fixtures/forge"
+STATE = os.environ.get("FORGE_UNAUTH_STATE", "signed-out")
+BINARY = os.environ.get("DUSTY_GIT_BINARY", str(ROOT / "target/release/dusty-git"))
+FOREVER = 1_000_000
+
+worlds = {
+    # gh is installed but signed out: every passthrough request answers 401.
+    "signed-out": {"gh_auth": {"*": "missing"},
+                   "fail": [{"transport": "gh", "status": 401, "message": "Bad credentials", "times": FOREVER}]},
+    "cli-missing": {"gh_auth": {"*": "missing"}},
+    # No CLI holds a credential for the host and no version endpoint answers.
+    "unknown-provider": {"gh_auth": {"*": "missing"}},
+    # Signed in; every request, direct or through gh, is answered 429 for ten minutes.
+    "rate-limited": {"fail": [{"status": 429, "headers": {"Retry-After": "600"},
+                               "message": "API rate limit exceeded", "times": FOREVER}]},
+}
+if STATE not in worlds:
+    sys.exit(f"FORGE_UNAUTH_STATE must be one of {', '.join(worlds)}")
+
+work = pathlib.Path(tempfile.mkdtemp(prefix="forge-unauth-"))
+state_path = work / "state.json"
+state_path.write_text(json.dumps(worlds[STATE]))
+server = subprocess.Popen([sys.executable, str(FIXTURES / "server.py"), "--state", str(state_path)],
+                          stdout=subprocess.PIPE, stdin=subprocess.DEVNULL)
+port = int(server.stdout.readline().strip())
+url = f"http://127.0.0.1:{port}"
+
+bin_dir = work / "bin"
+bin_dir.mkdir()
+for tool in ("git", "ssh", "sh", "env", "python3"):
+    found = shutil.which(tool)
+    if found:
+        (bin_dir / tool).symlink_to(found)
+if STATE != "cli-missing":
+    shutil.copy(FIXTURES / "fake_gh.py", bin_dir / "gh")
+    (bin_dir / "gh").chmod(0o755)
+    (bin_dir / "fake_gh.json").write_text(json.dumps({"server": url}))
+
+env = {key: value for key, value in os.environ.items()
+       if not key.startswith(("GH_", "GITHUB_", "GITLAB_", "GITEA_", "FORGEJO_", "DUSTY_FORGE_", "GL_"))}
+env.update(
+    PATH=str(bin_dir),
+    DUSTY_FORGE_API_BASE=f"{url}/{{host}}/api/v3",
+    DUSTY_FORGE_ORIGIN=f"{url}/{{host}}",
+    DUSTY_FORGE_STATE_DIR=str(work / "forge-state"),
+)
+if STATE == "unknown-provider":
+    subprocess.run(["git", "remote", "remove", "forge"], stderr=subprocess.DEVNULL)
+    subprocess.run(["git", "remote", "add", "forge", "https://git.unknown.example/orbit-dev/orbit.git"], check=True)
+    env["DUSTY_FORGE_REMOTE"] = "forge"
+try:
+    code = subprocess.call([BINARY, *sys.argv[1:]], env=env)
+finally:
+    server.terminate()
+    server.wait()
+    shutil.rmtree(work, ignore_errors=True)
+sys.exit(code)

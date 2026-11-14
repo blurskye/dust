@@ -1,0 +1,339 @@
+{
+  "data": {
+    "project": {
+      "mergeRequests": {
+        "pageInfo": {
+          "hasNextPage": false,
+          "endCursor": "eyJ1cGRhdGVkX2F0IjoiMjAyNi0xMS0wMiAwMzoxNzowOC4xMTQyMDMwMDAgKzAwMDAiLCJpZCI6IjU0OTg4Mjc0MSJ9"
+        },
+        "nodes": [
+          {
+            "iid": "564",
+            "id": "gid://gitlab/MergeRequest/555850478",
+            "title": "Update outdated tool versions in the CI pipeline",
+            "draft": false,
+            "webUrl": "https://gitlab.com/orbit/team/orbit/-/merge_requests/564",
+            "updatedAt": "2026-11-12T09:39:26Z",
+            "userNotesCount": 16,
+            "mergeStatusEnum": "CAN_BE_MERGED",
+            "author": {
+              "username": "maya"
+            },
+            "labels": {
+              "nodes": [
+                {
+                  "title": "1st contribution",
+                  "color": "#428bca"
+                },
+                {
+                  "title": "Category:Cloud Native Installation",
+                  "color": "#428BCA"
+                },
+                {
+                  "title": "Category:Runner Core",
+                  "color": "#6699cc"
+                },
+                {
+                  "title": "Community contribution",
+                  "color": "#a8d695"
+                },
+                {
+                  "title": "automation:ml",
+                  "color": "#ffecdb"
+                },
+                {
+                  "title": "automation:reviewers-reminded",
+                  "color": "#FFECDB"
+                },
+                {
+                  "title": "backend",
+                  "color": "#D10069"
+                },
+                {
+                  "title": "devops::gitlab delivery",
+                  "color": "#e44d2a"
+                },
+                {
+                  "title": "group::runner core",
+                  "color": "#a8d695"
+                },
+                {
+                  "title": "idle",
+                  "color": "#dc143c"
+                },
+                {
+                  "title": "linked-issue",
+                  "color": "#6699cc"
+                },
+                {
+                  "title": "maintenance::dependency",
+                  "color": "#7f8c8d"
+                },
+                {
+                  "title": "primitives::runner functions runtime",
+                  "color": "#6699cc"
+                },
+                {
+                  "title": "section::gitlab delivery",
+                  "color": "#f0ad4e"
+                },
+                {
+                  "title": "type::maintenance",
+                  "color": "#330066"
+                },
+                {
+                  "title": "workflow::ready for review",
+                  "color": "#428BCA"
+                }
+              ]
+            },
+            "approved": false,
+            "approvedBy": {
+              "nodes": [
+                {
+                  "username": "alex"
+                }
+              ]
+            },
+            "reviewers": {
+              "nodes": [
+                {
+                  "username": "sam"
+                },
+                {
+                  "username": "alex"
+                }
+              ]
+            },
+            "headPipeline": {
+              "status": "SUCCESS"
+            },
+            "diffStatsSummary": {
+              "additions": 15,
+              "deletions": 12,
+              "fileCount": 1
+            }
+          },
+          {
+            "iid": "565",
+            "id": "gid://gitlab/MergeRequest/562264237",
+            "title": "Add support for Kubernetes user namespaces (closes #440)",
+            "draft": false,
+            "webUrl": "https://gitlab.com/orbit/team/orbit/-/merge_requests/565",
+            "updatedAt": "2026-11-12T04:51:00Z",
+            "userNotesCount": 15,
+            "mergeStatusEnum": "CAN_BE_MERGED",
+            "author": {
+              "username": "leo"
+            },
+            "labels": {
+              "nodes": [
+                {
+                  "title": "1st contribution",
+                  "color": "#428bca"
+                },
+                {
+                  "title": "Category:Runner Core",
+                  "color": "#6699cc"
+                },
+                {
+                  "title": "Community contribution",
+                  "color": "#a8d695"
+                },
+                {
+                  "title": "ci::components",
+                  "color": "#ed9121"
+                },
+                {
+                  "title": "devops::verify",
+                  "color": "#E44D2A"
+                },
+                {
+                  "title": "group::runner core",
+                  "color": "#a8d695"
+                },
+                {
+                  "title": "linked-issue",
+                  "color": "#6699cc"
+                },
+                {
+                  "title": "primitives::runner functions runtime",
+                  "color": "#6699cc"
+                },
+                {
+                  "title": "section::ci",
+                  "color": "#f0ad4e"
+                },
+                {
+                  "title": "type::feature",
+                  "color": "#009966"
+                },
+                {
+                  "title": "workflow::ready for review",
+                  "color": "#428BCA"
+                }
+              ]
+            },
+            "approved": false,
+            "approvedBy": {
+              "nodes": [
+                {
+                  "username": "alex"
+                }
+              ]
+            },
+            "reviewers": {
+              "nodes": [
+                {
+                  "username": "sam"
+                },
+                {
+                  "username": "alex"
+                }
+              ]
+            },
+            "headPipeline": {
+              "status": "SUCCESS"
+            },
+            "diffStatsSummary": {
+              "additions": 130,
+              "deletions": 1,
+              "fileCount": 4
+            }
+          },
+          {
+            "iid": "566",
+            "id": "gid://gitlab/MergeRequest/562457610",
+            "title": "feat: allow hpa.minReplicas to be set to 0",
+            "draft": false,
+            "webUrl": "https://gitlab.com/orbit/team/orbit/-/merge_requests/566",
+            "updatedAt": "2026-11-11T16:23:25Z",
+            "userNotesCount": 4,
+            "mergeStatusEnum": "CAN_BE_MERGED",
+            "author": {
+              "username": "nina"
+            },
+            "labels": {
+              "nodes": [
+                {
+                  "title": "Category:Cloud Native Installation",
+                  "color": "#428BCA"
+                },
+                {
+                  "title": "Community contribution",
+                  "color": "#a8d695"
+                },
+                {
+                  "title": "automation:ml",
+                  "color": "#ffecdb"
+                },
+                {
+                  "title": "backend",
+                  "color": "#D10069"
+                },
+                {
+                  "title": "ci::components",
+                  "color": "#ed9121"
+                },
+                {
+                  "title": "devops::gitlab delivery",
+                  "color": "#e44d2a"
+                },
+                {
+                  "title": "feature::enhancement",
+                  "color": "#f0ad4e"
+                },
+                {
+                  "title": "group::operate",
+                  "color": "#6699cc"
+                },
+                {
+                  "title": "section::gitlab delivery",
+                  "color": "#f0ad4e"
+                },
+                {
+                  "title": "type::feature",
+                  "color": "#009966"
+                },
+                {
+                  "title": "workflow::in dev",
+                  "color": "#428bca"
+                }
+              ]
+            },
+            "approved": false,
+            "approvedBy": {
+              "nodes": []
+            },
+            "reviewers": {
+              "nodes": [
+                {
+                  "username": "sam"
+                }
+              ]
+            },
+            "headPipeline": {
+              "status": "FAILED"
+            },
+            "diffStatsSummary": {
+              "additions": 67,
+              "deletions": 1,
+              "fileCount": 3
+            }
+          },
+          {
+            "iid": "562",
+            "id": "gid://gitlab/MergeRequest/549882741",
+            "title": "fix: reject unknown keys and non-map entries in rbac.rules",
+            "draft": false,
+            "webUrl": "https://gitlab.com/orbit/team/orbit/-/merge_requests/562",
+            "updatedAt": "2026-11-02T03:08:49Z",
+            "userNotesCount": 4,
+            "mergeStatusEnum": "CAN_BE_MERGED",
+            "author": {
+              "username": "maya2"
+            },
+            "labels": {
+              "nodes": [
+                {
+                  "title": "ci::components",
+                  "color": "#ed9121"
+                },
+                {
+                  "title": "type::bug",
+                  "color": "#cc0000"
+                }
+              ]
+            },
+            "approved": false,
+            "approvedBy": {
+              "nodes": [
+                {
+                  "username": "alex"
+                }
+              ]
+            },
+            "reviewers": {
+              "nodes": [
+                {
+                  "username": "alex2"
+                },
+                {
+                  "username": "alex"
+                }
+              ]
+            },
+            "headPipeline": {
+              "status": "SUCCESS"
+            },
+            "diffStatsSummary": {
+              "additions": 67,
+              "deletions": 1,
+              "fileCount": 3
+            }
+          }
+        ]
+      }
+    }
+  }
+}

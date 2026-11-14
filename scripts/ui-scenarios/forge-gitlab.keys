@@ -1,0 +1,49 @@
+# F5 GitLab (FORGE.md §4.2/§4.3): merge requests, a merge request with discussions and
+# approvals, issues and pipelines from the loopback fake GitLab (nested group orbit/team/orbit),
+# in GitLab's words: "Merge requests", "!13", "Pipelines".
+#   scripts/ui-scenarios/make-orbit-fixture.sh /tmp/orbit
+#   DUSTY_GIT_BINARY=$PWD/target/release/dusty-git \
+#     scripts/ui-shot scripts/ui-scenarios/forge-gitlab.keys \
+#     --binary scripts/ui-scenarios/forge-gitlab-launch --cwd /tmp/orbit \
+#     --size 190x48 --size 120x36 --size 100x30 --out target/ui-shots/forge-gitlab
+wait 1500
+# Git → Merge requests
+type >
+wait 3000
+shot merge-requests
+key enter
+wait 2500
+shot merge-request
+# Activity (the tab before Overview): discussions and threads as cards
+type H
+wait 1500
+shot merge-request-activity
+# Files: the diff with its threads inline
+type H
+wait 1500
+shot merge-request-files
+type L
+type L
+wait 300
+key escape
+wait 300
+# !10: approved by alex, pipeline passed
+key j j
+key enter
+wait 2500
+shot merge-request-approved
+key escape
+wait 300
+# → Issues
+type >
+wait 2500
+shot issues
+# → Pipelines
+type >
+wait 2500
+shot pipelines
+# Run history (focus 2), newest first: !13's failed merge request pipeline
+type 2
+key enter
+wait 2000
+shot pipeline

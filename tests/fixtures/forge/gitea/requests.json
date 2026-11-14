@@ -1,0 +1,830 @@
+{
+  "schema": 1,
+  "provider": "gitea",
+  "host": "gitea.com",
+  "api_base": "https://gitea.com/api/v1",
+  "server_version": "29.0.0+dev-160-g55186ca39b",
+  "recorded_at": "2026-11-14T05:15:56Z",
+  "repo": "orbit/orbit",
+  "redaction": {
+    "hashes": [
+      "00014c0d9ef3e4ae45748965c86412ab936203ff8f3a33be9512dab08192fc1b",
+      "08ea44779a238034437b74cd74f8a5128e0b9b72bbd617fc6c127414527b0027",
+      "098078d0c283055ec95e3e3976def723505c08ba56954a1302ee81326d18f55b",
+      "10d4b0cefdf2ff063ba6a778c9706fb7f7f00056d5d42343f556471257ddff23",
+      "35bc26e99c603363e0cdbde7678eca5a3921e7b6877046363d01e8c55c9aa3da",
+      "62f378d0582e59583c551be5dbf67326638e809bc162a67975dd8e3ff255fe7b",
+      "712340fdddd3197b018a68a209f2c70aa9e427b6300266112ca3a0cd08b130ad",
+      "75667e30e6f0e79dab7082b7797569f28c1e8184f118ad4bc7da83130a7a7bde",
+      "85c419484873c5e333efff7e725542a262f4bba1d8253194f0c9a99c33ed35e6",
+      "8ec96c12171b4de81539b9ae1dc0cfc01f28cefa9cf900c0e89457aae0592c61",
+      "aac68054eae8d27dad25df9c5c31f6a8dc4e2291880ad39cfadf9d35568a62d6",
+      "adc329b96ae5f3f718153e524af59093d6a9daf4d7b8ca10fea3139a3232d262",
+      "c721a91727f583a700dbfcd2541bf49e083c198822b1c0598769f90e61fa1dc7",
+      "caa55aa288f68dd3fb8b665cde94e35623bb72546727c223c1cac99496860db6",
+      "d074350d108cfdf82a859bc324a24f8432881e2cdfede7241d1d2bce000f25c9",
+      "ded8ccfd8042f70b8a5d51ad67f2e2612b68004aa3fb69f722d0332dfa086f2e",
+      "df1bc4984a055e10b2863eb03abf11701cb63a1e2371dc398889e8291812fb80",
+      "fe98041e18c74b6b258210b379492d7975579dc5fc1d27e73d5f3360abbb48c8"
+    ],
+    "logins": {
+      "85c419484873c5e333efff7e725542a262f4bba1d8253194f0c9a99c33ed35e6": "maya",
+      "caa55aa288f68dd3fb8b665cde94e35623bb72546727c223c1cac99496860db6": "alex",
+      "d074350d108cfdf82a859bc324a24f8432881e2cdfede7241d1d2bce000f25c9": "sam",
+      "098078d0c283055ec95e3e3976def723505c08ba56954a1302ee81326d18f55b": "leo",
+      "75667e30e6f0e79dab7082b7797569f28c1e8184f118ad4bc7da83130a7a7bde": "nina",
+      "62f378d0582e59583c551be5dbf67326638e809bc162a67975dd8e3ff255fe7b": "maya2",
+      "adc329b96ae5f3f718153e524af59093d6a9daf4d7b8ca10fea3139a3232d262": "alex2",
+      "10d4b0cefdf2ff063ba6a778c9706fb7f7f00056d5d42343f556471257ddff23": "sam2",
+      "00014c0d9ef3e4ae45748965c86412ab936203ff8f3a33be9512dab08192fc1b": "leo2",
+      "ded8ccfd8042f70b8a5d51ad67f2e2612b68004aa3fb69f722d0332dfa086f2e": "nina2",
+      "fe98041e18c74b6b258210b379492d7975579dc5fc1d27e73d5f3360abbb48c8": "maya3",
+      "8ec96c12171b4de81539b9ae1dc0cfc01f28cefa9cf900c0e89457aae0592c61": "alex3",
+      "c721a91727f583a700dbfcd2541bf49e083c198822b1c0598769f90e61fa1dc7": "sam3",
+      "df1bc4984a055e10b2863eb03abf11701cb63a1e2371dc398889e8291812fb80": "leo3",
+      "35bc26e99c603363e0cdbde7678eca5a3921e7b6877046363d01e8c55c9aa3da": "nina3",
+      "08ea44779a238034437b74cd74f8a5128e0b9b72bbd617fc6c127414527b0027": "maya4",
+      "aac68054eae8d27dad25df9c5c31f6a8dc4e2291880ad39cfadf9d35568a62d6": "alex4"
+    },
+    "date_shift_seconds": 1497
+  },
+  "entries": [
+    {
+      "key": "GET /api/v1/version",
+      "read": "Version",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json;charset=utf-8"
+      },
+      "body": "version.json",
+      "synthesized": false
+    },
+    {
+      "key": "GET /api/v1/user",
+      "read": "Viewer",
+      "method": "GET",
+      "status": 401,
+      "headers": {
+        "content-type": "application/json;charset=utf-8"
+      },
+      "body": "viewer.json",
+      "synthesized": false,
+      "auth": "none"
+    },
+    {
+      "key": "GET /api/v1/repos/orbit/orbit",
+      "read": "Repository",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json;charset=utf-8"
+      },
+      "body": "repository.json",
+      "synthesized": false
+    },
+    {
+      "key": "GET /api/v1/repos/orbit/orbit/labels",
+      "read": "Labels",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json;charset=utf-8",
+        "x-total-count": "24"
+      },
+      "body": "labels.json",
+      "synthesized": false
+    },
+    {
+      "key": "GET /api/v1/repos/orbit/orbit/milestones?state=all",
+      "read": "Milestones",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json;charset=utf-8",
+        "x-total-count": "3"
+      },
+      "body": "milestones.json",
+      "synthesized": false
+    },
+    {
+      "key": "GET /api/v1/repos/orbit/orbit/collaborators",
+      "read": "Collaborators",
+      "method": "GET",
+      "status": 401,
+      "headers": {
+        "content-type": "application/json;charset=utf-8"
+      },
+      "body": "collaborators.json",
+      "synthesized": false,
+      "auth": "none"
+    },
+    {
+      "key": "GET /api/v1/repos/orbit/orbit/issues?page=1&state=open&type=pulls",
+      "read": "List",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json;charset=utf-8",
+        "x-total-count": "4"
+      },
+      "body": "list-pulls.json",
+      "synthesized": false,
+      "kind": "pulls"
+    },
+    {
+      "key": "GET /api/v1/repos/orbit/orbit/issues?page=2&state=open&type=pulls",
+      "read": "List",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json;charset=utf-8",
+        "x-total-count": "4"
+      },
+      "body": "list-pulls-2.json",
+      "synthesized": false,
+      "kind": "pulls"
+    },
+    {
+      "key": "GET /api/v1/repos/orbit/orbit/pulls?page=1&state=open",
+      "read": "List",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json;charset=utf-8",
+        "x-total-count": "4"
+      },
+      "body": "list-pulls-3.json",
+      "synthesized": false,
+      "kind": "pulls",
+      "part": "pulls"
+    },
+    {
+      "key": "GET /api/v1/repos/orbit/orbit/issues?page=1&state=open&type=issues",
+      "read": "List",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json;charset=utf-8",
+        "link": "<https://gitea.com/api/v1/repos/orbit/orbit/issues?limit=10&page=2&state=open&type=issues>; rel=\"next\",<https://gitea.com/api/v1/repos/orbit/orbit/issues?limit=10&page=2&state=open&type=issues>; rel=\"last\"",
+        "x-total-count": "17"
+      },
+      "body": "list-issues.json",
+      "synthesized": false,
+      "kind": "issues"
+    },
+    {
+      "key": "GET /api/v1/repos/orbit/orbit/issues?page=2&state=open&type=issues",
+      "read": "List",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json;charset=utf-8",
+        "link": "<https://gitea.com/api/v1/repos/orbit/orbit/issues?limit=10&page=1&state=open&type=issues>; rel=\"first\",<https://gitea.com/api/v1/repos/orbit/orbit/issues?limit=10&page=1&state=open&type=issues>; rel=\"prev\"",
+        "x-total-count": "17"
+      },
+      "body": "list-issues-2.json",
+      "synthesized": false,
+      "kind": "issues"
+    },
+    {
+      "key": "GET /api/v1/repos/orbit/orbit/pulls/1402",
+      "read": "PullRequest",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json;charset=utf-8"
+      },
+      "body": "pull-request.json",
+      "synthesized": false
+    },
+    {
+      "key": "GET /api/v1/repos/orbit/orbit/pulls/1402/commits",
+      "read": "PullRequest",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json;charset=utf-8",
+        "x-page": "1",
+        "x-total-count": "5"
+      },
+      "body": "pull-request-2.json",
+      "synthesized": false,
+      "part": "commits"
+    },
+    {
+      "key": "GET /api/v1/repos/orbit/orbit/pulls/1402/files",
+      "read": "PullRequest",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json;charset=utf-8",
+        "link": "<https://gitea.com/api/v1/repos/orbit/orbit/pulls/1402/files?page=2>; rel=\"next\",<https://gitea.com/api/v1/repos/orbit/orbit/pulls/1402/files?page=2>; rel=\"last\"",
+        "x-page": "1",
+        "x-total-count": "13"
+      },
+      "body": "pull-request-3.json",
+      "synthesized": false,
+      "part": "files"
+    },
+    {
+      "key": "GET /api/v1/repos/orbit/orbit/pulls/1402/reviews",
+      "read": "PullRequest",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json;charset=utf-8",
+        "x-total-count": "1"
+      },
+      "body": "pull-request-4.json",
+      "synthesized": false,
+      "part": "reviews"
+    },
+    {
+      "key": "GET /api/v1/repos/orbit/orbit/pulls/1402/reviews/386007/comments",
+      "read": "Threads",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json;charset=utf-8"
+      },
+      "body": "threads.json",
+      "synthesized": false
+    },
+    {
+      "key": "GET /api/v1/repos/orbit/orbit/commits/835b43f8c53b0fa2e2d5f9ad0fc5099cacac6e32/status",
+      "read": "PullRequest",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json;charset=utf-8",
+        "x-total-count": "5"
+      },
+      "body": "pull-request-5.json",
+      "synthesized": false,
+      "part": "status"
+    },
+    {
+      "key": "GET /api/v1/repos/orbit/orbit/statuses/835b43f8c53b0fa2e2d5f9ad0fc5099cacac6e32",
+      "read": "PullRequest",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json;charset=utf-8",
+        "link": "<https://gitea.com/api/v1/repos/orbit/orbit/statuses/835b43f8c53b0fa2e2d5f9ad0fc5099cacac6e32?page=2>; rel=\"next\",<https://gitea.com/api/v1/repos/orbit/orbit/statuses/835b43f8c53b0fa2e2d5f9ad0fc5099cacac6e32?page=2>; rel=\"last\"",
+        "x-total-count": "16"
+      },
+      "body": "pull-request-6.json",
+      "synthesized": false,
+      "part": "statuses"
+    },
+    {
+      "key": "GET /api/v1/repos/orbit/orbit/issues/1402/timeline",
+      "read": "Timeline",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json;charset=utf-8",
+        "x-total-count": "6"
+      },
+      "body": "timeline.json",
+      "synthesized": false
+    },
+    {
+      "key": "GET /api/v1/repos/orbit/orbit/issues/1402/comments",
+      "read": "Timeline",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json;charset=utf-8",
+        "x-total-count": "2"
+      },
+      "body": "timeline-2.json",
+      "synthesized": false,
+      "part": "comments"
+    },
+    {
+      "key": "GET /api/v1/repos/orbit/orbit/pulls/1402.diff",
+      "read": "Diff",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "text/plain; charset=utf-8"
+      },
+      "body": "diff.diff",
+      "synthesized": false,
+      "accept": "text/plain"
+    },
+    {
+      "key": "GET /api/v1/repos/orbit/orbit/git/commits/835b43f8c53b0fa2e2d5f9ad0fc5099cacac6e32.diff",
+      "read": "CommitDiff",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "text/plain; charset=utf-8"
+      },
+      "body": "commit-diff.diff",
+      "synthesized": false,
+      "accept": "text/plain"
+    },
+    {
+      "key": "GET /api/v1/repos/orbit/orbit/pulls/main/enhance/stable-host-workdir",
+      "read": "PullRequestForBranch",
+      "method": "GET",
+      "status": 404,
+      "headers": {
+        "content-type": "application/json;charset=utf-8"
+      },
+      "body": "pull-request-for-branch.json",
+      "synthesized": false
+    },
+    {
+      "key": "GET /api/v1/repos/orbit/orbit/pulls/main/enhance/macos-vm-executor",
+      "read": "PullRequestForBranch",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json;charset=utf-8"
+      },
+      "body": "pull-request-for-branch-2.json",
+      "synthesized": false
+    },
+    {
+      "key": "GET /api/v1/repos/orbit/orbit/branch_protections/main",
+      "read": "PullRequest",
+      "method": "GET",
+      "status": 401,
+      "headers": {
+        "content-type": "application/json;charset=utf-8"
+      },
+      "body": "pull-request-7.json",
+      "synthesized": false,
+      "part": "protection",
+      "auth": "none"
+    },
+    {
+      "key": "GET /api/v1/repos/orbit/orbit/issues/1393",
+      "read": "Issue",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json;charset=utf-8"
+      },
+      "body": "issue.json",
+      "synthesized": false
+    },
+    {
+      "key": "GET /api/v1/repos/orbit/orbit/issues/1393/comments",
+      "read": "Issue",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json;charset=utf-8",
+        "x-total-count": "6"
+      },
+      "body": "issue-2.json",
+      "synthesized": false,
+      "part": "comments"
+    },
+    {
+      "key": "GET /api/v1/repos/orbit/orbit/issues/1393/timeline",
+      "read": "Timeline",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json;charset=utf-8",
+        "x-total-count": "8"
+      },
+      "body": "timeline-3.json",
+      "synthesized": false,
+      "kind": "issue"
+    },
+    {
+      "key": "GET /api/v1/repos/issues/search?owner=orbit&state=open&type=pulls",
+      "read": "Search",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json;charset=utf-8",
+        "link": "<https://gitea.com/api/v1/repos/issues/search?limit=10&owner=orbit&page=2&state=open&type=pulls>; rel=\"next\",<https://gitea.com/api/v1/repos/issues/search?limit=10&owner=orbit&page=11&state=open&type=pulls>; rel=\"last\"",
+        "x-total-count": "105"
+      },
+      "body": "search.json",
+      "synthesized": false
+    },
+    {
+      "key": "GET /api/v1/repos/orbit/orbit/actions/workflows",
+      "read": "Workflows",
+      "method": "GET",
+      "status": 401,
+      "headers": {
+        "content-type": "application/json;charset=utf-8"
+      },
+      "body": "workflows.json",
+      "synthesized": false,
+      "auth": "none"
+    },
+    {
+      "key": "GET /api/v1/repos/orbit/orbit/actions/runs?page=1",
+      "read": "Runs",
+      "method": "GET",
+      "status": 401,
+      "headers": {
+        "content-type": "application/json;charset=utf-8"
+      },
+      "body": "runs.json",
+      "synthesized": false,
+      "auth": "none"
+    },
+    {
+      "key": "GET /api/v1/repos/orbit/orbit/actions/tasks?page=1",
+      "read": "Runs",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json;charset=utf-8",
+        "link": "<https://gitea.com/api/v1/repos/orbit/orbit/actions/tasks?limit=10&page=2>; rel=\"next\",<https://gitea.com/api/v1/repos/orbit/orbit/actions/tasks?limit=10&page=769>; rel=\"last\"",
+        "x-total-count": "7685"
+      },
+      "body": "runs-2.json",
+      "synthesized": false,
+      "part": "tasks"
+    },
+    {
+      "key": "GET /api/v1/repos/orbit/orbit/actions/runs/1243376",
+      "read": "Run",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json;charset=utf-8"
+      },
+      "body": "run.json",
+      "synthesized": false
+    },
+    {
+      "key": "GET /api/v1/repos/orbit/orbit/actions/runs/1243376/jobs",
+      "read": "Run",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json;charset=utf-8",
+        "x-total-count": "4"
+      },
+      "body": "run-2.json",
+      "synthesized": false,
+      "part": "jobs"
+    },
+    {
+      "key": "GET /api/v1/repos/orbit/orbit/actions/runs/1243376/artifacts",
+      "read": "Artifacts",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json;charset=utf-8"
+      },
+      "body": "artifacts.json",
+      "synthesized": false
+    },
+    {
+      "key": "GET /api/v1/repos/orbit/orbit/actions/jobs/1745533",
+      "read": "Job",
+      "method": "GET",
+      "status": 401,
+      "headers": {
+        "content-type": "application/json;charset=utf-8"
+      },
+      "body": "job.json",
+      "synthesized": false,
+      "auth": "none"
+    },
+    {
+      "key": "GET /api/v1/repos/orbit/orbit/actions/jobs/1745533/logs",
+      "read": "JobLog",
+      "method": "GET",
+      "status": 401,
+      "headers": {
+        "content-type": "application/json;charset=utf-8"
+      },
+      "body": "job-log.log",
+      "synthesized": false,
+      "accept": "text/plain",
+      "auth": "none"
+    },
+    {
+      "key": "GET /api/v1/notifications?status-types=unread",
+      "read": "Notifications",
+      "method": "GET",
+      "status": 401,
+      "headers": {
+        "content-type": "application/json;charset=utf-8"
+      },
+      "body": "notifications.json",
+      "synthesized": false,
+      "auth": "none"
+    },
+    {
+      "key": "GET /api/v1/user",
+      "read": "Viewer",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "body": "viewer-synth.json",
+      "synthesized": true,
+      "doc": "https://gitea.com/api/swagger#/user/userGetCurrent",
+      "auth": "token"
+    },
+    {
+      "key": "GET /api/v1/notifications?status-types=unread",
+      "read": "Notifications",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "body": "notifications-synth.json",
+      "synthesized": true,
+      "doc": "https://gitea.com/api/swagger#/notification/notifyGetList",
+      "auth": "token"
+    },
+    {
+      "key": "GET /api/v1/repos/orbit/orbit/actions/workflows",
+      "read": "Workflows",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "body": "workflows-synth.json",
+      "synthesized": true,
+      "doc": "https://gitea.com/api/swagger#/repository/ActionsListRepositoryWorkflows",
+      "auth": "token"
+    },
+    {
+      "key": "GET /api/v1/repos/orbit/orbit/actions/runs?page=1",
+      "read": "Runs",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "body": "runs-synth.json",
+      "synthesized": true,
+      "doc": "https://gitea.com/api/swagger#/repository/getWorkflowRuns",
+      "auth": "token"
+    },
+    {
+      "key": "GET /api/v1/repos/orbit/orbit/actions/runs/91",
+      "read": "Run",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "body": "run-synth.json",
+      "synthesized": true,
+      "doc": "https://gitea.com/api/swagger#/repository/GetWorkflowRun"
+    },
+    {
+      "key": "GET /api/v1/repos/orbit/orbit/actions/runs/91/jobs",
+      "read": "Run",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "body": "run-synth-2.json",
+      "synthesized": true,
+      "doc": "https://gitea.com/api/swagger#/repository/listWorkflowRunJobs"
+    },
+    {
+      "key": "GET /api/v1/repos/orbit/orbit/actions/jobs/42",
+      "read": "Job",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "body": "job-synth.json",
+      "synthesized": true,
+      "doc": "https://gitea.com/api/swagger#/repository/getWorkflowJob"
+    },
+    {
+      "key": "GET /api/v1/repos/orbit/orbit/actions/jobs/42/logs",
+      "read": "JobLog",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "text/plain; charset=utf-8"
+      },
+      "body": "job-log-synth.log",
+      "synthesized": true,
+      "doc": "https://gitea.com/api/swagger#/repository/downloadActionsRunJobLogs",
+      "accept": "text/plain"
+    },
+    {
+      "key": "GET /api/v1/repos/orbit/orbit/actions/runs/91/artifacts",
+      "read": "Artifacts",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "body": "artifacts-synth.json",
+      "synthesized": true,
+      "doc": "https://gitea.com/api/swagger#/repository/getArtifactsOfRun"
+    },
+    {
+      "key": "POST /api/v1/repos/orbit/orbit/issues/13/comments#54c8c686d137",
+      "read": "Comment",
+      "method": "POST",
+      "status": 201,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "body": "comment-synth.json",
+      "synthesized": true,
+      "doc": "https://gitea.com/api/swagger#/issue/issueCreateComment",
+      "request": {
+        "body": "Looks good to me."
+      }
+    },
+    {
+      "key": "PUT /api/v1/repos/orbit/orbit/issues/13/labels#40db418dbf49",
+      "read": "SetLabels",
+      "method": "PUT",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "body": "set-labels-synth.json",
+      "synthesized": true,
+      "doc": "https://gitea.com/api/swagger#/issue/issueReplaceLabels",
+      "request": {
+        "labels": [
+          77
+        ]
+      }
+    },
+    {
+      "key": "PATCH /api/v1/repos/orbit/orbit/issues/13#f8022682813f",
+      "read": "SetState",
+      "method": "PATCH",
+      "status": 201,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "body": "set-state-synth.json",
+      "synthesized": true,
+      "doc": "https://gitea.com/api/swagger#/issue/issueEditIssue",
+      "request": {
+        "state": "closed"
+      }
+    },
+    {
+      "key": "POST /api/v1/repos/orbit/orbit/pulls/13/reviews#3eaabfd27bcc",
+      "read": "SubmitReview",
+      "method": "POST",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "body": "submit-review-synth.json",
+      "synthesized": true,
+      "doc": "https://gitea.com/api/swagger#/repository/repoCreatePullReview",
+      "request": {
+        "event": "APPROVED",
+        "body": "Ship it",
+        "commit_id": "c92ad11000000000000000000000000000000000",
+        "comments": []
+      }
+    },
+    {
+      "key": "POST /api/v1/repos/orbit/orbit/pulls/13/merge#542d4acbf0c7",
+      "read": "Merge",
+      "method": "POST",
+      "status": 200,
+      "headers": {},
+      "body": null,
+      "synthesized": true,
+      "doc": "https://gitea.com/api/swagger#/repository/repoMergePullRequest",
+      "request": {
+        "Do": "squash",
+        "head_commit_id": "c92ad11000000000000000000000000000000000",
+        "delete_branch_after_merge": true
+      }
+    },
+    {
+      "key": "POST /api/v1/repos/orbit/orbit/pulls/13/merge#19b9c573c135",
+      "read": "Merge",
+      "method": "POST",
+      "status": 409,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "body": "merge-synth.json",
+      "synthesized": true,
+      "doc": "https://gitea.com/api/swagger#/repository/repoMergePullRequest",
+      "request": {
+        "Do": "squash",
+        "head_commit_id": "0000000000000000000000000000000000000000",
+        "delete_branch_after_merge": true
+      }
+    },
+    {
+      "key": "POST /api/v1/repos/orbit/orbit/pulls/13/reviews#c3058d94c01c",
+      "read": "InlineComment",
+      "method": "POST",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "body": "inline-comment-synth.json",
+      "synthesized": true,
+      "doc": "https://gitea.com/api/swagger#/repository/repoCreatePullReview",
+      "request": {
+        "event": "COMMENT",
+        "body": "",
+        "commit_id": "c92ad11000000000000000000000000000000000",
+        "comments": [
+          {
+            "path": "src/lib.rs",
+            "new_position": 12,
+            "body": "nit: rename"
+          }
+        ]
+      }
+    },
+    {
+      "key": "POST /api/v1/repos/orbit/orbit/pulls/13/reviews#702c96502b0e",
+      "read": "Reply",
+      "method": "POST",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "body": "reply-synth.json",
+      "synthesized": true,
+      "doc": "https://gitea.com/api/swagger#/repository/repoCreatePullReview",
+      "request": {
+        "event": "COMMENT",
+        "body": "",
+        "commit_id": "c92ad11000000000000000000000000000000000",
+        "comments": [
+          {
+            "path": "src/lib.rs",
+            "new_position": 12,
+            "body": "Done."
+          }
+        ]
+      }
+    },
+    {
+      "key": "POST /api/v1/repos/orbit/orbit/actions/runs/91/rerun",
+      "read": "Rerun",
+      "method": "POST",
+      "status": 201,
+      "headers": {},
+      "body": null,
+      "synthesized": true,
+      "doc": "https://gitea.com/api/swagger#/repository/rerunWorkflowRun"
+    },
+    {
+      "key": "POST /api/v1/repos/orbit/orbit/actions/runs/91/cancel",
+      "read": "CancelRun",
+      "method": "POST",
+      "status": 200,
+      "headers": {},
+      "body": null,
+      "synthesized": true,
+      "doc": "https://gitea.com/api/swagger#/repository/cancelWorkflowRun"
+    },
+    {
+      "key": "POST /api/v1/repos/orbit/orbit/actions/workflows/ci.yml/dispatches#23ccdb21c43a",
+      "read": "Dispatch",
+      "method": "POST",
+      "status": 204,
+      "headers": {},
+      "body": null,
+      "synthesized": true,
+      "doc": "https://gitea.com/api/swagger#/repository/ActionsDispatchWorkflow",
+      "request": {
+        "ref": "main",
+        "inputs": {
+          "target": "staging"
+        }
+      }
+    },
+    {
+      "key": "PATCH /api/v1/notifications/threads/9001?to-status=read",
+      "read": "MarkRead",
+      "method": "PATCH",
+      "status": 205,
+      "headers": {},
+      "body": null,
+      "synthesized": true,
+      "doc": "https://gitea.com/api/swagger#/notification/notifyReadThread"
+    }
+  ]
+}

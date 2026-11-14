@@ -1,0 +1,106 @@
+#!/usr/bin/env python3
+"""Launch Dusty Git against the loopback fake forge with the F3 disk cache (forge-cached.keys,
+forge-search.keys).
+
+FORGE_CACHED_PHASE picks the run:
+  prime   an ordinary first session; fills DUSTY_FORGE_CACHE_DIR.
+  cached  an hour later: the cache is aged by an hour, the forge answers after 1.2 s and has
+          changed meanwhile (a new issue, a renamed one, one closed), so the first frame is the
+          cache and the merge lands later.
+  search  the forge answers after 1.5 s and knows two issues the cache has never seen.
+DUSTY_FORGE_CACHE_DIR must name a directory kept between the runs. DUSTY_GIT_BINARY is the
+built `dusty-git`. Nothing here reaches a real forge.
+"""
+import json
+import os
+import pathlib
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
+FIXTURES = ROOT / "tests/fixtures/forge"
+PHASE = os.environ.get("FORGE_CACHED_PHASE", "prime")
+BINARY = os.environ.get("DUSTY_GIT_BINARY", str(ROOT / "target/release/dusty-git"))
+CACHE = os.environ.get("DUSTY_FORGE_CACHE_DIR")
+if not CACHE:
+    sys.exit("DUSTY_FORGE_CACHE_DIR must name a directory kept between the runs")
+
+
+def issue(number, title, **extra):
+    return dict({"number": number, "title": title,
+                 "body": f"{title}.\n\nReported against orbit 0.9."}, **extra)
+
+
+ISSUES = [
+    issue(48, "Scheduler drops jobs after a crash on resume"),
+    issue(47, "Crash when the queue file is empty"),
+    issue(45, "Retry backoff ignores the configured ceiling"),
+    issue(44, "Docs: explain worker pools"),
+    issue(41, "Crash in orbit.cli on Python 3.13"),
+    issue(39, "Expose queue depth as a metric"),
+    issue(36, "Flaky test_resume_after_restart"),
+]
+world = {"comments": ["Thanks — I can reproduce this on main."], "issues": ISSUES}
+if PHASE == "cached":
+    world["issues"] = [issue(50, "Worker leaks file handles on shutdown"),
+                       issue(49, "Crash on SIGTERM during a flush")] + [
+        issue(48, "Scheduler drops jobs after a crash on resume (regression in 0.9)")
+        if entry["number"] == 48 else entry
+        for entry in ISSUES if entry["number"] != 44]
+    world["delay_ms"] = 1200
+    for path in pathlib.Path(CACHE).rglob("*.json"):
+        if path.name == "index.json":
+            continue
+        try:
+            envelope = json.loads(path.read_text())
+            envelope["fetched_at"] -= 3600 * 1000
+            path.write_text(json.dumps(envelope))
+        except (ValueError, KeyError, TypeError):
+            pass
+elif PHASE == "search":
+    world["delay_ms"] = 1500
+    world["issue_queries"] = {"crash": [
+        issue(47, "Crash when the queue file is empty"),
+        issue(31, "Crash after upgrading from 0.8", state="closed"),
+        issue(22, "Crash reporter sends empty stack traces"),
+    ]}
+
+work = pathlib.Path(tempfile.mkdtemp(prefix="forge-cached-"))
+state_path = work / "state.json"
+state_path.write_text(json.dumps(world))
+server = subprocess.Popen([sys.executable, str(FIXTURES / "server.py"), "--state", str(state_path)],
+                          stdout=subprocess.PIPE, stdin=subprocess.DEVNULL)
+port = int(server.stdout.readline().strip())
+url = f"http://127.0.0.1:{port}"
+
+bin_dir = work / "bin"
+bin_dir.mkdir()
+for tool in ("git", "ssh", "sh", "env", "python3"):
+    found = shutil.which(tool)
+    if found:
+        (bin_dir / tool).symlink_to(found)
+shutil.copy(FIXTURES / "fake_gh.py", bin_dir / "gh")
+(bin_dir / "gh").chmod(0o755)
+(bin_dir / "fake_gh.json").write_text(json.dumps({"server": url}))
+
+env = {key: value for key, value in os.environ.items()
+       if not key.startswith(("GH_", "GITHUB_", "GITLAB_", "GITEA_", "FORGEJO_", "DUSTY_FORGE_", "GL_"))}
+env.update(
+    PATH=str(bin_dir),
+    DUSTY_FORGE_API_BASE=f"{url}/{{host}}/api/v3",
+    DUSTY_FORGE_ORIGIN=f"{url}/{{host}}",
+    DUSTY_FORGE_STATE_DIR=str(work / "forge-state"),
+    DUSTY_FORGE_CACHE_DIR=CACHE,
+)
+try:
+    code = subprocess.call([BINARY, *sys.argv[1:]], env=env)
+finally:
+    # Let the warm worker's last write land before the next phase reads the cache.
+    time.sleep(0.2)
+    server.terminate()
+    server.wait()
+    shutil.rmtree(work, ignore_errors=True)
+sys.exit(code)

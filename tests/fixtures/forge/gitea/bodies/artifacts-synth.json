@@ -1,0 +1,20 @@
+{
+  "total_count": 1,
+  "artifacts": [
+    {
+      "id": 7,
+      "name": "coverage",
+      "size_in_bytes": 2048,
+      "expired": false,
+      "created_at": "2026-11-14T04:50:56Z",
+      "expires_at": "2027-02-12T05:15:56Z",
+      "archive_download_url": "https://gitea.com/api/v1/repos/orbit/orbit/actions/artifacts/7/zip",
+      "url": "https://gitea.com/api/v1/repos/orbit/orbit/actions/artifacts/7",
+      "workflow_run": {
+        "id": 91,
+        "head_sha": "c92ad11000000000000000000000000000000000",
+        "repository_id": 4242
+      }
+    }
+  ]
+}

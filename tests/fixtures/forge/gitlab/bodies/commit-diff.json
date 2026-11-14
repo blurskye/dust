@@ -1,0 +1,15 @@
+[
+  {
+    "diff": "@@ -185,8 +185,7 @@ release beta:\n     S3_URL: s3://${S3_BUCKET}${S3_PATH}\n     REPO_URL: https://${S3_BUCKET}.s3.amazonaws.com${S3_PATH}\n   script:\n-  - apk add --no-cache py-pip\n-  - pip install awscli\n+  - apk add --no-cache aws-cli\n   - git config --global --add safe.directory \"$CI_PROJECT_DIR\"\n   - 'beta_info=$(git describe --long | sed -r \"s/v[0-9\\.]+(-rc[0-9]+)?-//\")'\n   - 'build_time=$(date +%s)'\n",
+    "collapsed": false,
+    "too_large": false,
+    "new_path": ".gitlab-ci.yml",
+    "old_path": ".gitlab-ci.yml",
+    "a_mode": "100644",
+    "b_mode": "100644",
+    "new_file": false,
+    "renamed_file": false,
+    "deleted_file": false,
+    "generated_file": null
+  }
+]

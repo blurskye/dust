@@ -1,0 +1,163 @@
+[
+  {
+    "id": 424038,
+    "run_id": 200481,
+    "attempt": 1,
+    "handle": "d16a5e84-6dae-4061-a819-5f1236bf6650",
+    "repo_id": 2,
+    "owner_id": 3,
+    "name": "arm64",
+    "html_url": "https://code.forgejo.org/orbit/orbit/actions/runs/24108/jobs/0/attempt/1",
+    "needs": [
+      "__namespace.10ca442981b5e78305e863a4ddb83aafddd99a3481e29bc92745f1b2b3190706.build",
+      "__namespace.10ca442981b5e78305e863a4ddb83aafddd99a3481e29bc92745f1b2b3190706.build-unsupported-platforms",
+      "__namespace.10ca442981b5e78305e863a4ddb83aafddd99a3481e29bc92745f1b2b3190706.runner-exec-tests-with-docker",
+      "__namespace.10ca442981b5e78305e863a4ddb83aafddd99a3481e29bc92745f1b2b3190706.integration-tests-with-docker",
+      "__namespace.10ca442981b5e78305e863a4ddb83aafddd99a3481e29bc92745f1b2b3190706.integration-tests-with-docker",
+      "__namespace.10ca442981b5e78305e863a4ddb83aafddd99a3481e29bc92745f1b2b3190706.integration-tests-with-podman",
+      "__namespace.10ca442981b5e78305e863a4ddb83aafddd99a3481e29bc92745f1b2b3190706.validate-mocks",
+      "__namespace.10ca442981b5e78305e863a4ddb83aafddd99a3481e29bc92745f1b2b3190706.validate-pre-commit"
+    ],
+    "runs_on": [],
+    "task_id": 336092,
+    "status": "failure"
+  },
+  {
+    "id": 424039,
+    "run_id": 200481,
+    "attempt": 1,
+    "handle": "75c17ca9-7913-4498-be0f-d268f1e44cc1",
+    "repo_id": 2,
+    "owner_id": 3,
+    "name": "Build Forgejo Runner",
+    "html_url": "https://code.forgejo.org/orbit/orbit/actions/runs/24108/jobs/1/attempt/1",
+    "needs": null,
+    "runs_on": [
+      "arm64-docker"
+    ],
+    "task_id": 336086,
+    "status": "success"
+  },
+  {
+    "id": 424040,
+    "run_id": 200481,
+    "attempt": 1,
+    "handle": "cb613db4-e998-44d8-bc7b-bd966a651c72",
+    "repo_id": 2,
+    "owner_id": 3,
+    "name": "Build unsupported platforms",
+    "html_url": "https://code.forgejo.org/orbit/orbit/actions/runs/24108/jobs/2/attempt/1",
+    "needs": [
+      "build"
+    ],
+    "runs_on": [
+      "docker"
+    ],
+    "task_id": 0,
+    "status": "skipped"
+  },
+  {
+    "id": 424041,
+    "run_id": 200481,
+    "attempt": 1,
+    "handle": "04ea73e5-90e9-4d42-b285-98b8b5ccf98d",
+    "repo_id": 2,
+    "owner_id": 3,
+    "name": "Run exec tests with Docker (docker-latest)",
+    "html_url": "https://code.forgejo.org/orbit/orbit/actions/runs/24108/jobs/3/attempt/1",
+    "needs": [
+      "build"
+    ],
+    "runs_on": [
+      "arm64-lxc-trixie"
+    ],
+    "task_id": 336087,
+    "status": "success"
+  },
+  {
+    "id": 424042,
+    "run_id": 200481,
+    "attempt": 1,
+    "handle": "9cb69732-f53d-47d5-9a07-6276074ff619",
+    "repo_id": 2,
+    "owner_id": 3,
+    "name": "Run integration tests with Docker (docker-latest)",
+    "html_url": "https://code.forgejo.org/orbit/orbit/actions/runs/24108/jobs/4/attempt/1",
+    "needs": [
+      "build"
+    ],
+    "runs_on": [
+      "arm64-lxc-trixie"
+    ],
+    "task_id": 336088,
+    "status": "failure"
+  },
+  {
+    "id": 424043,
+    "run_id": 200481,
+    "attempt": 1,
+    "handle": "3f2c7d6f-362b-4c41-b9d9-d85c1770360f",
+    "repo_id": 2,
+    "owner_id": 3,
+    "name": "Run integration tests with Docker (docker-stable)",
+    "html_url": "https://code.forgejo.org/orbit/orbit/actions/runs/24108/jobs/5/attempt/1",
+    "needs": [
+      "build"
+    ],
+    "runs_on": [
+      "arm64-lxc-trixie"
+    ],
+    "task_id": 336089,
+    "status": "failure"
+  },
+  {
+    "id": 424044,
+    "run_id": 200481,
+    "attempt": 1,
+    "handle": "b78f64ae-2845-460e-8e4f-af02bac63b8f",
+    "repo_id": 2,
+    "owner_id": 3,
+    "name": "Run integration tests with Podman",
+    "html_url": "https://code.forgejo.org/orbit/orbit/actions/runs/24108/jobs/6/attempt/1",
+    "needs": [
+      "build"
+    ],
+    "runs_on": [
+      "arm64-lxc-trixie"
+    ],
+    "task_id": 336091,
+    "status": "success"
+  },
+  {
+    "id": 424045,
+    "run_id": 200481,
+    "attempt": 1,
+    "handle": "4a526aa8-fca9-4c13-b17d-016b864428cb",
+    "repo_id": 2,
+    "owner_id": 3,
+    "name": "validate mocks",
+    "html_url": "https://code.forgejo.org/orbit/orbit/actions/runs/24108/jobs/7/attempt/1",
+    "needs": null,
+    "runs_on": [
+      "docker"
+    ],
+    "task_id": 0,
+    "status": "skipped"
+  },
+  {
+    "id": 424046,
+    "run_id": 200481,
+    "attempt": 1,
+    "handle": "1e239d65-609c-439d-bae4-3fd5321bcef1",
+    "repo_id": 2,
+    "owner_id": 3,
+    "name": "validate pre-commit-hooks file",
+    "html_url": "https://code.forgejo.org/orbit/orbit/actions/runs/24108/jobs/8/attempt/1",
+    "needs": null,
+    "runs_on": [
+      "docker"
+    ],
+    "task_id": 0,
+    "status": "skipped"
+  }
+]

@@ -1,0 +1,5 @@
+{
+  "message": "Must have push access to view repository collaborators.",
+  "documentation_url": "https://docs.github.com/rest/collaborators/collaborators#list-repository-collaborators",
+  "status": "403"
+}

@@ -1,0 +1,1267 @@
+{
+  "schema": 1,
+  "provider": "gitlab",
+  "host": "gitlab.com",
+  "api_base": "https://gitlab.com/api/v4",
+  "server_version": null,
+  "recorded_at": "2026-11-14T05:31:33Z",
+  "repo": "orbit/team/orbit",
+  "redaction": {
+    "hashes": [
+      "0662aae283f8c4fa88c6dcf46dd84e62f4bc0943a58ebd4e8258c2aaa736d9ac",
+      "0a11ada02dc8fbd618bfaf9c371b0292c57ae8697395adb2873ee92b38080357",
+      "0a3989f41a3e47a52d0961c087043ba293d81cb77f2b253d4f50f01ecd60acf0",
+      "1703387ec99c2e17ee6efdcbf37e05fe23b4e08c09f544118fc2939628528ce4",
+      "225b92f3558acddfba8b2bcfc9e2e7cffb22c07ffd9e04bdcb4866bb1b0df719",
+      "24866651a5bb2b210212f49c29fbfeb0c7ed1934304f7a83eee7c2d9cfd9f849",
+      "25cb2e2ad56a6b94fde53d29903d2f0c7b83de1ecb6d5d126d3440ffa0f3ee34",
+      "286e06324e4928db0a4f63dff34dc1f9a3dd9cacdbdf8c7de3ea0fa784822258",
+      "3d73bebe21dc7fb6118f198ce2795316aa675dfb40bc2d110f8ee0760878778d",
+      "4034e0be2fa66b23fcb020bd19c952bd9d0fc58444da3b1b68e986d8ebe2716d",
+      "409840a4567d04303e0d0da66b6df0a718dee66b8e605f276d35aa087eb609ee",
+      "513677152d0640986e1aa806481641f7ee2d4223b8f126de0cac0b7b2b1aa14e",
+      "617ff815cd8ba042e3f70d60f7ab0a04927f0bdcfb7274f44944b51ff1e216f1",
+      "694898adc94a9438d1598110a87180bcc95acf3adddac7f6f03402894e888270",
+      "73622a5614d0aad456d5b7d22ac909a0ad7904ba5adb2c2c7beb84a15b6fadf2",
+      "760d8fedff44f0d27735a749931c2f1ae2d3c99aa8498b38d6be6d5a1223ca4c",
+      "7d3c43853d847f20bdfafef1c4e382162863b35cb3e4bfabc80556f1dd13aeb5",
+      "8706df03cb8575023ba25815c6cfe326c239c05bb0628f435945ecf4299abd19",
+      "87e6b2ae1b69f70387e300994917d9517eeda40bcb059a762c7af2266cab706d",
+      "92b2e6b34003cc4ef45801c4f9f22e2f3329de3e91284c627ef0d74b861ba44b",
+      "9b0335dbc338ac2efd208dda102f0632aa1d9f50360221e27fdfe1f617fa6f4b",
+      "9b282dffe5db5afeb41e884ee6d7a34c1b5bca1c49355d1b3c6442628961feb4",
+      "9bbab383453f9bbbda6f2ea1fb71da1d7b7a27a9388d0631fb4554d3c5190f6b",
+      "a55941978a7a1e5c34e5edc00c44f334f9b9565416e39bc66ce026e6693b5c29",
+      "a64e7315c8b94929d51ea8490e1e3e136e11ad5bf78cfe37594e59438daa2b63",
+      "aab726e05e540dd746f673a37a6ffe3adf548bb09c497b824303885c6884e784",
+      "ac0ad3b73fb846d6b1677b1ab3b14975eb4a72c2d9ceb992fe543f50761dfaa4",
+      "b442b592f43075c3faa4f7cb5471ee1d73f7324c76feb52cbbfc88fcc63eeddc",
+      "b59edf5288fc8a52d94ee9ba6593ba2cbc33b1b6952f7a3030c024381193e3e0",
+      "c84998595907e2efda49ac0659271f550850725857929dcc5f0daf62ea9a2b4e",
+      "d3fb3f5c0607cc26095301d3f08b20d3c0cfc819d61fff69ce9e6a011cbbff8c",
+      "d7ea430fe0ed50ec035364e9c4568911ce54f3b5ae3843e63a1203cf913343a9",
+      "dcc7cc9d49a87c4ba6302a119185abb6759438e49f5c1320a1049508cc502dec",
+      "e1b615ee0d4c144081ab631b64e4303080cb6a9585470f8fe7cb5dcab97aa731",
+      "ed0516900fb7678a1f5053bc1119b5c9b81791167ad9b616f38a5e184e69b60f",
+      "ee8517be4e5727f85d00417915c2a35a23ee501e0ec70e5e9f74202ce19cfc00",
+      "fa1ad23a674678fe0fb888d144b8ecced251196fe745852f0098446f6da49ba5"
+    ],
+    "logins": {
+      "ee8517be4e5727f85d00417915c2a35a23ee501e0ec70e5e9f74202ce19cfc00": "maya",
+      "9b282dffe5db5afeb41e884ee6d7a34c1b5bca1c49355d1b3c6442628961feb4": "alex",
+      "0a11ada02dc8fbd618bfaf9c371b0292c57ae8697395adb2873ee92b38080357": "sam",
+      "d7ea430fe0ed50ec035364e9c4568911ce54f3b5ae3843e63a1203cf913343a9": "leo",
+      "0a3989f41a3e47a52d0961c087043ba293d81cb77f2b253d4f50f01ecd60acf0": "nina",
+      "8706df03cb8575023ba25815c6cfe326c239c05bb0628f435945ecf4299abd19": "maya2",
+      "a64e7315c8b94929d51ea8490e1e3e136e11ad5bf78cfe37594e59438daa2b63": "alex2",
+      "9bbab383453f9bbbda6f2ea1fb71da1d7b7a27a9388d0631fb4554d3c5190f6b": "sam2",
+      "1703387ec99c2e17ee6efdcbf37e05fe23b4e08c09f544118fc2939628528ce4": "leo2",
+      "0662aae283f8c4fa88c6dcf46dd84e62f4bc0943a58ebd4e8258c2aaa736d9ac": "nina2",
+      "b59edf5288fc8a52d94ee9ba6593ba2cbc33b1b6952f7a3030c024381193e3e0": "maya3",
+      "617ff815cd8ba042e3f70d60f7ab0a04927f0bdcfb7274f44944b51ff1e216f1": "alex3",
+      "25cb2e2ad56a6b94fde53d29903d2f0c7b83de1ecb6d5d126d3440ffa0f3ee34": "sam3",
+      "b442b592f43075c3faa4f7cb5471ee1d73f7324c76feb52cbbfc88fcc63eeddc": "leo3",
+      "513677152d0640986e1aa806481641f7ee2d4223b8f126de0cac0b7b2b1aa14e": "nina3",
+      "c84998595907e2efda49ac0659271f550850725857929dcc5f0daf62ea9a2b4e": "maya4",
+      "87e6b2ae1b69f70387e300994917d9517eeda40bcb059a762c7af2266cab706d": "alex4",
+      "73622a5614d0aad456d5b7d22ac909a0ad7904ba5adb2c2c7beb84a15b6fadf2": "sam4",
+      "ac0ad3b73fb846d6b1677b1ab3b14975eb4a72c2d9ceb992fe543f50761dfaa4": "leo4",
+      "aab726e05e540dd746f673a37a6ffe3adf548bb09c497b824303885c6884e784": "nina4",
+      "92b2e6b34003cc4ef45801c4f9f22e2f3329de3e91284c627ef0d74b861ba44b": "maya5",
+      "fa1ad23a674678fe0fb888d144b8ecced251196fe745852f0098446f6da49ba5": "alex5",
+      "694898adc94a9438d1598110a87180bcc95acf3adddac7f6f03402894e888270": "sam5",
+      "7d3c43853d847f20bdfafef1c4e382162863b35cb3e4bfabc80556f1dd13aeb5": "leo5",
+      "9b0335dbc338ac2efd208dda102f0632aa1d9f50360221e27fdfe1f617fa6f4b": "nina5",
+      "c273e4678fa43af9a431f97595dbf14c73dc0ea899e8392112d958ee847c204c": "maya6",
+      "a55941978a7a1e5c34e5edc00c44f334f9b9565416e39bc66ce026e6693b5c29": "alex6",
+      "ed0516900fb7678a1f5053bc1119b5c9b81791167ad9b616f38a5e184e69b60f": "sam6",
+      "d3fb3f5c0607cc26095301d3f08b20d3c0cfc819d61fff69ce9e6a011cbbff8c": "leo6",
+      "286e06324e4928db0a4f63dff34dc1f9a3dd9cacdbdf8c7de3ea0fa784822258": "nina6",
+      "dcc7cc9d49a87c4ba6302a119185abb6759438e49f5c1320a1049508cc502dec": "maya7",
+      "ccc8cb84dfc0ddf54cb5cda2673afbd7dcd6be45f2d6e34b4e505fe7c773a085": "alex7",
+      "e1b615ee0d4c144081ab631b64e4303080cb6a9585470f8fe7cb5dcab97aa731": "sam7",
+      "0362dc81176fab9acc215256c38d34c3a8006758fe44c5177436d34e2db688ad": "leo7",
+      "24866651a5bb2b210212f49c29fbfeb0c7ed1934304f7a83eee7c2d9cfd9f849": "nina7",
+      "05eef0f7e19a52e2825338f492f07b12bbc5a73ea8d6bea357cd4f6c4849e982": "maya8",
+      "225b92f3558acddfba8b2bcfc9e2e7cffb22c07ffd9e04bdcb4866bb1b0df719": "alex8",
+      "760d8fedff44f0d27735a749931c2f1ae2d3c99aa8498b38d6be6d5a1223ca4c": "sam8"
+    },
+    "date_shift_seconds": -499
+  },
+  "entries": [
+    {
+      "key": "GET /api/v4/version",
+      "read": "Version",
+      "method": "GET",
+      "status": 401,
+      "headers": {
+        "content-type": "application/json",
+        "ratelimit-limit": "500",
+        "ratelimit-name": "throttle_unauthenticated_api",
+        "ratelimit-observed": "4",
+        "ratelimit-remaining": "496",
+        "ratelimit-reset": "1794634260"
+      },
+      "body": "version.json",
+      "synthesized": false,
+      "auth": "none"
+    },
+    {
+      "key": "GET /api/v4/user",
+      "read": "Viewer",
+      "method": "GET",
+      "status": 401,
+      "headers": {
+        "content-type": "application/json",
+        "ratelimit-limit": "500",
+        "ratelimit-name": "throttle_unauthenticated_api",
+        "ratelimit-observed": "5",
+        "ratelimit-remaining": "495",
+        "ratelimit-reset": "1794634260"
+      },
+      "body": "viewer.json",
+      "synthesized": false,
+      "auth": "none"
+    },
+    {
+      "key": "GET /api/v4/projects/orbit%2Fteam%2Forbit",
+      "read": "Repository",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json",
+        "etag": "W/\"2658afefc37cf5f048969dd7c666585a\"",
+        "ratelimit-limit": "500",
+        "ratelimit-name": "throttle_unauthenticated_api",
+        "ratelimit-observed": "6",
+        "ratelimit-remaining": "494",
+        "ratelimit-reset": "1794634260"
+      },
+      "body": "repository.json",
+      "synthesized": false
+    },
+    {
+      "key": "GET /api/v4/projects/orbit%2Fteam%2Forbit/labels",
+      "read": "Labels",
+      "method": "GET",
+      "status": 401,
+      "headers": {
+        "content-type": "application/json",
+        "ratelimit-limit": "500",
+        "ratelimit-name": "throttle_unauthenticated_api",
+        "ratelimit-observed": "7",
+        "ratelimit-remaining": "493",
+        "ratelimit-reset": "1794634260"
+      },
+      "body": "labels.json",
+      "synthesized": false,
+      "auth": "none"
+    },
+    {
+      "key": "GET /api/v4/projects/orbit%2Fteam%2Forbit/milestones",
+      "read": "Milestones",
+      "method": "GET",
+      "status": 401,
+      "headers": {
+        "content-type": "application/json",
+        "ratelimit-limit": "500",
+        "ratelimit-name": "throttle_unauthenticated_api",
+        "ratelimit-observed": "8",
+        "ratelimit-remaining": "492",
+        "ratelimit-reset": "1794634260"
+      },
+      "body": "milestones.json",
+      "synthesized": false,
+      "auth": "none"
+    },
+    {
+      "key": "GET /api/v4/projects/orbit%2Fteam%2Forbit/members/all",
+      "read": "Collaborators",
+      "method": "GET",
+      "status": 401,
+      "headers": {
+        "content-type": "application/json",
+        "ratelimit-limit": "500",
+        "ratelimit-name": "throttle_unauthenticated_api",
+        "ratelimit-observed": "9",
+        "ratelimit-remaining": "491",
+        "ratelimit-reset": "1794634260"
+      },
+      "body": "collaborators.json",
+      "synthesized": false,
+      "auth": "none"
+    },
+    {
+      "key": "POST /api/graphql op=ProjectLabels",
+      "read": "Labels",
+      "method": "POST",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8",
+        "etag": "W/\"942e92b3a956522e2c565b6b4dbeccf8\"",
+        "ratelimit-limit": "500",
+        "ratelimit-name": "throttle_unauthenticated_api",
+        "ratelimit-observed": "10",
+        "ratelimit-remaining": "490",
+        "ratelimit-reset": "1794634260"
+      },
+      "body": "labels-2.json",
+      "synthesized": false,
+      "graphql": {
+        "operation": "ProjectLabels",
+        "variables": {
+          "fullPath": "orbit/team/orbit",
+          "first": 10
+        },
+        "document": "query ProjectLabels($fullPath: ID!, $first: Int) {\n  project(fullPath: $fullPath) {\n    labels(first: $first, includeAncestorGroups: true) {\n      nodes { id title color textColor description }\n      pageInfo { hasNextPage endCursor }\n    }\n  }\n}"
+      }
+    },
+    {
+      "key": "POST /api/graphql op=ProjectMilestones",
+      "read": "Milestones",
+      "method": "POST",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8",
+        "etag": "W/\"ddc67365a8cff4f9d8483dc31db5c020\"",
+        "ratelimit-limit": "500",
+        "ratelimit-name": "throttle_unauthenticated_api",
+        "ratelimit-observed": "11",
+        "ratelimit-remaining": "489",
+        "ratelimit-reset": "1794634260"
+      },
+      "body": "milestones-2.json",
+      "synthesized": false,
+      "graphql": {
+        "operation": "ProjectMilestones",
+        "variables": {
+          "fullPath": "orbit/team/orbit",
+          "first": 10
+        },
+        "document": "query ProjectMilestones($fullPath: ID!, $first: Int) {\n  project(fullPath: $fullPath) {\n    milestones(first: $first, includeAncestors: true, state: active) {\n      nodes { id iid title state dueDate startDate webPath }\n      pageInfo { hasNextPage endCursor }\n    }\n  }\n}"
+      }
+    },
+    {
+      "key": "POST /api/graphql op=MergeRequestList",
+      "read": "List",
+      "method": "POST",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8",
+        "etag": "W/\"182e5d74cf880b13a6235ecb411d29d0\"",
+        "ratelimit-limit": "500",
+        "ratelimit-name": "throttle_unauthenticated_api",
+        "ratelimit-observed": "12",
+        "ratelimit-remaining": "488",
+        "ratelimit-reset": "1794634260"
+      },
+      "body": "list-pulls.json",
+      "synthesized": false,
+      "kind": "pulls",
+      "graphql": {
+        "operation": "MergeRequestList",
+        "variables": {
+          "fullPath": "orbit/team/orbit",
+          "state": "opened",
+          "first": 10
+        },
+        "document": "query MergeRequestList($fullPath: ID!, $state: MergeRequestState, $first: Int, $after: String) {\n  project(fullPath: $fullPath) {\n    mergeRequests(state: $state, sort: UPDATED_DESC, first: $first, after: $after) {\n      pageInfo { hasNextPage endCursor }\n      nodes {\n        iid id title draft webUrl updatedAt userNotesCount mergeStatusEnum\n        author { username }\n        labels { nodes { title color } }\n        approved approvedBy { nodes { username } }\n        reviewers { nodes { username } }\n        headPipeline { status }\n        diffStatsSummary { additions deletions fileCount }\n      }\n    }\n  }\n}"
+      }
+    },
+    {
+      "key": "GET /api/v4/projects/orbit%2Fteam%2Forbit/merge_requests?page=1&state=opened",
+      "read": "List",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json",
+        "etag": "W/\"6f219c15236cbf23d54394d9602c3346\"",
+        "link": "<https://gitlab.com/api/v4/projects/orbit%2Fteam%2Forbit/merge_requests?id=orbit%2Fteam%2Forbit&order_by=created_at&page=1&per_page=10&sort=desc&state=opened&with_labels_details=false&with_merge_status_recheck=false>; rel=\"first\", <https://gitlab.com/api/v4/projects/orbit%2Fteam%2Forbit/merge_requests?id=orbit%2Fteam%2Forbit&order_by=created_at&page=1&per_page=10&sort=desc&state=opened&with_labels_details=false&with_merge_status_recheck=false>; rel=\"last\"",
+        "ratelimit-limit": "500",
+        "ratelimit-name": "throttle_unauthenticated_api",
+        "ratelimit-observed": "13",
+        "ratelimit-remaining": "487",
+        "ratelimit-reset": "1794634260",
+        "x-next-page": "",
+        "x-page": "1",
+        "x-total": "4",
+        "x-total-pages": "1"
+      },
+      "body": "list-pulls-2.json",
+      "synthesized": false,
+      "kind": "pulls"
+    },
+    {
+      "key": "GET /api/v4/projects/orbit%2Fteam%2Forbit/merge_requests?page=2&state=opened",
+      "read": "List",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json",
+        "etag": "W/\"4f53cda18c2baa0c0354bb5f9a3ecbe5\"",
+        "link": "<https://gitlab.com/api/v4/projects/orbit%2Fteam%2Forbit/merge_requests?id=orbit%2Fteam%2Forbit&order_by=created_at&page=1&per_page=10&sort=desc&state=opened&with_labels_details=false&with_merge_status_recheck=false>; rel=\"first\", <https://gitlab.com/api/v4/projects/orbit%2Fteam%2Forbit/merge_requests?id=orbit%2Fteam%2Forbit&order_by=created_at&page=1&per_page=10&sort=desc&state=opened&with_labels_details=false&with_merge_status_recheck=false>; rel=\"last\"",
+        "ratelimit-limit": "500",
+        "ratelimit-name": "throttle_unauthenticated_api",
+        "ratelimit-observed": "14",
+        "ratelimit-remaining": "486",
+        "ratelimit-reset": "1794634260",
+        "x-next-page": "",
+        "x-page": "2",
+        "x-total": "4",
+        "x-total-pages": "1"
+      },
+      "body": "list-pulls-3.json",
+      "synthesized": false,
+      "kind": "pulls"
+    },
+    {
+      "key": "GET /api/v4/projects/orbit%2Fteam%2Forbit/issues?page=1&state=opened",
+      "read": "List",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json",
+        "etag": "W/\"5436adf01d3b5f9c1747982e58f598f6\"",
+        "link": "<https://gitlab.com/api/v4/projects/orbit%2Fteam%2Forbit/issues?id=orbit%2Fteam%2Forbit&order_by=created_at&page=2&per_page=10&sort=desc&state=opened&with_labels_details=false>; rel=\"next\", <https://gitlab.com/api/v4/projects/orbit%2Fteam%2Forbit/issues?id=orbit%2Fteam%2Forbit&order_by=created_at&page=1&per_page=10&sort=desc&state=opened&with_labels_details=false>; rel=\"first\", <https://gitlab.com/api/v4/projects/orbit%2Fteam%2Forbit/issues?id=orbit%2Fteam%2Forbit&order_by=created_at&page=26&per_page=10&sort=desc&state=opened&with_labels_details=false>; rel=\"last\"",
+        "ratelimit-limit": "500",
+        "ratelimit-name": "throttle_unauthenticated_api",
+        "ratelimit-observed": "1",
+        "ratelimit-remaining": "499",
+        "ratelimit-reset": "1794634260",
+        "x-next-page": "2",
+        "x-page": "1",
+        "x-total": "255",
+        "x-total-pages": "26"
+      },
+      "body": "list-issues.json",
+      "synthesized": false,
+      "kind": "issues"
+    },
+    {
+      "key": "GET /api/v4/projects/orbit%2Fteam%2Forbit/issues?page=2&state=opened",
+      "read": "List",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json",
+        "etag": "W/\"c0fee54138b5df51b0d44ba5990330ad\"",
+        "link": "<https://gitlab.com/api/v4/projects/orbit%2Fteam%2Forbit/issues?id=orbit%2Fteam%2Forbit&order_by=created_at&page=1&per_page=10&sort=desc&state=opened&with_labels_details=false>; rel=\"prev\", <https://gitlab.com/api/v4/projects/orbit%2Fteam%2Forbit/issues?id=orbit%2Fteam%2Forbit&order_by=created_at&page=3&per_page=10&sort=desc&state=opened&with_labels_details=false>; rel=\"next\", <https://gitlab.com/api/v4/projects/orbit%2Fteam%2Forbit/issues?id=orbit%2Fteam%2Forbit&order_by=created_at&page=1&per_page=10&sort=desc&state=opened&with_labels_details=false>; rel=\"first\", <https://gitlab.com/api/v4/projects/orbit%2Fteam%2Forbit/issues?id=orbit%2Fteam%2Forbit&order_by=created_at&page=26&per_page=10&sort=desc&state=opened&with_labels_details=false>; rel=\"last\"",
+        "ratelimit-limit": "500",
+        "ratelimit-name": "throttle_unauthenticated_api",
+        "ratelimit-observed": "2",
+        "ratelimit-remaining": "498",
+        "ratelimit-reset": "1794634260",
+        "x-next-page": "3",
+        "x-page": "2",
+        "x-total": "255",
+        "x-total-pages": "26"
+      },
+      "body": "list-issues-2.json",
+      "synthesized": false,
+      "kind": "issues"
+    },
+    {
+      "key": "GET /api/v4/projects/orbit%2Fteam%2Forbit/merge_requests/564",
+      "read": "PullRequest",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json",
+        "etag": "W/\"68a3cc8bad9e07e2c3d1184025e0a1e9\"",
+        "ratelimit-limit": "500",
+        "ratelimit-name": "throttle_unauthenticated_api",
+        "ratelimit-observed": "4",
+        "ratelimit-remaining": "496",
+        "ratelimit-reset": "1794634260"
+      },
+      "body": "pull-request.json",
+      "synthesized": false
+    },
+    {
+      "key": "GET /api/v4/projects/orbit%2Fteam%2Forbit/merge_requests/564/approvals",
+      "read": "PullRequest",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json",
+        "etag": "W/\"07360fac8c52afc11ec1e4992c8dea55\"",
+        "ratelimit-limit": "500",
+        "ratelimit-name": "throttle_unauthenticated_api",
+        "ratelimit-observed": "5",
+        "ratelimit-remaining": "495",
+        "ratelimit-reset": "1794634260"
+      },
+      "body": "pull-request-2.json",
+      "synthesized": false,
+      "part": "approvals"
+    },
+    {
+      "key": "GET /api/v4/projects/orbit%2Fteam%2Forbit/merge_requests/564/commits",
+      "read": "PullRequest",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json",
+        "etag": "W/\"caad5f8f11d7d64226001630a2370be8\"",
+        "link": "<https://gitlab.com/api/v4/projects/orbit%2Fteam%2Forbit/merge_requests/564/commits?id=orbit%2Fteam%2Forbit&merge_request_iid=564&page=1&per_page=20>; rel=\"first\", <https://gitlab.com/api/v4/projects/orbit%2Fteam%2Forbit/merge_requests/564/commits?id=orbit%2Fteam%2Forbit&merge_request_iid=564&page=1&per_page=20>; rel=\"last\"",
+        "ratelimit-limit": "500",
+        "ratelimit-name": "throttle_unauthenticated_api",
+        "ratelimit-observed": "6",
+        "ratelimit-remaining": "494",
+        "ratelimit-reset": "1794634260",
+        "x-next-page": "",
+        "x-page": "1",
+        "x-total": "2",
+        "x-total-pages": "1"
+      },
+      "body": "pull-request-3.json",
+      "synthesized": false,
+      "part": "commits"
+    },
+    {
+      "key": "GET /api/v4/projects/orbit%2Fteam%2Forbit/merge_requests/564/diffs?page=1",
+      "read": "Diff",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json",
+        "etag": "W/\"2e645b05b5991b8ea90c5b207b56ba60\"",
+        "link": "<https://gitlab.com/api/v4/projects/orbit%2Fteam%2Forbit/merge_requests/564/diffs?id=orbit%2Fteam%2Forbit&merge_request_iid=564&page=1&per_page=100&unidiff=false>; rel=\"first\", <https://gitlab.com/api/v4/projects/orbit%2Fteam%2Forbit/merge_requests/564/diffs?id=orbit%2Fteam%2Forbit&merge_request_iid=564&page=1&per_page=100&unidiff=false>; rel=\"last\"",
+        "ratelimit-limit": "500",
+        "ratelimit-name": "throttle_unauthenticated_api",
+        "ratelimit-observed": "7",
+        "ratelimit-remaining": "493",
+        "ratelimit-reset": "1794634260",
+        "x-next-page": "",
+        "x-page": "1",
+        "x-total": "1",
+        "x-total-pages": "1"
+      },
+      "body": "diff.json",
+      "synthesized": false
+    },
+    {
+      "key": "GET /api/v4/projects/orbit%2Fteam%2Forbit/merge_requests/564/discussions",
+      "read": "Threads",
+      "method": "GET",
+      "status": 401,
+      "headers": {
+        "content-type": "application/json",
+        "ratelimit-limit": "500",
+        "ratelimit-name": "throttle_unauthenticated_api",
+        "ratelimit-observed": "8",
+        "ratelimit-remaining": "492",
+        "ratelimit-reset": "1794634260"
+      },
+      "body": "threads.json",
+      "synthesized": false,
+      "auth": "none"
+    },
+    {
+      "key": "POST /api/graphql op=MergeRequestThreads",
+      "read": "Threads",
+      "method": "POST",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8",
+        "etag": "W/\"1bce2020710c362784f83b453de34f07\"",
+        "ratelimit-limit": "500",
+        "ratelimit-name": "throttle_unauthenticated_api",
+        "ratelimit-observed": "9",
+        "ratelimit-remaining": "491",
+        "ratelimit-reset": "1794634260"
+      },
+      "body": "threads-2.json",
+      "synthesized": false,
+      "graphql": {
+        "operation": "MergeRequestThreads",
+        "variables": {
+          "fullPath": "orbit/team/orbit",
+          "iid": "564",
+          "first": 20
+        },
+        "document": "query MergeRequestThreads($fullPath: ID!, $iid: String!, $first: Int) {\n  project(fullPath: $fullPath) {\n    mergeRequest(iid: $iid) {\n      iid\n      diffRefs { baseSha headSha startSha }\n      discussions(first: $first) {\n        nodes {\n          id resolved resolvable\n          notes {\n            nodes {\n              id body system internal createdAt updatedAt\n              author { username name }\n              position { positionType newPath newLine oldPath oldLine diffRefs { headSha } }\n            }\n          }\n        }\n        pageInfo { hasNextPage endCursor }\n      }\n    }\n  }\n}"
+      }
+    },
+    {
+      "key": "GET /api/v4/projects/orbit%2Fteam%2Forbit/merge_requests/564/notes?sort=asc",
+      "read": "Timeline",
+      "method": "GET",
+      "status": 401,
+      "headers": {
+        "content-type": "application/json",
+        "ratelimit-limit": "500",
+        "ratelimit-name": "throttle_unauthenticated_api",
+        "ratelimit-observed": "10",
+        "ratelimit-remaining": "490",
+        "ratelimit-reset": "1794634260"
+      },
+      "body": "timeline.json",
+      "synthesized": false,
+      "part": "notes",
+      "auth": "none"
+    },
+    {
+      "key": "GET /api/v4/projects/orbit%2Fteam%2Forbit/merge_requests/564/resource_label_events",
+      "read": "Timeline",
+      "method": "GET",
+      "status": 401,
+      "headers": {
+        "content-type": "application/json",
+        "ratelimit-limit": "500",
+        "ratelimit-name": "throttle_unauthenticated_api",
+        "ratelimit-observed": "11",
+        "ratelimit-remaining": "489",
+        "ratelimit-reset": "1794634260"
+      },
+      "body": "timeline-2.json",
+      "synthesized": false,
+      "part": "label_events",
+      "auth": "none"
+    },
+    {
+      "key": "GET /api/v4/projects/orbit%2Fteam%2Forbit/merge_requests/564/resource_state_events",
+      "read": "Timeline",
+      "method": "GET",
+      "status": 401,
+      "headers": {
+        "content-type": "application/json",
+        "ratelimit-limit": "500",
+        "ratelimit-name": "throttle_unauthenticated_api",
+        "ratelimit-observed": "12",
+        "ratelimit-remaining": "488",
+        "ratelimit-reset": "1794634260"
+      },
+      "body": "timeline-3.json",
+      "synthesized": false,
+      "part": "state_events",
+      "auth": "none"
+    },
+    {
+      "key": "GET /api/v4/projects/orbit%2Fteam%2Forbit/merge_requests/564/pipelines",
+      "read": "PullRequest",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json",
+        "etag": "W/\"207785c461bb4f60054ce4604ec5e1fc\"",
+        "link": "<https://gitlab.com/api/v4/projects/orbit%2Fteam%2Forbit/merge_requests/564/pipelines?id=orbit%2Fteam%2Forbit&merge_request_iid=564&page=1&per_page=15>; rel=\"first\", <https://gitlab.com/api/v4/projects/orbit%2Fteam%2Forbit/merge_requests/564/pipelines?id=orbit%2Fteam%2Forbit&merge_request_iid=564&page=1&per_page=15>; rel=\"last\"",
+        "ratelimit-limit": "500",
+        "ratelimit-name": "throttle_unauthenticated_api",
+        "ratelimit-observed": "13",
+        "ratelimit-remaining": "487",
+        "ratelimit-reset": "1794634260",
+        "x-next-page": "",
+        "x-page": "1",
+        "x-total": "2",
+        "x-total-pages": "1"
+      },
+      "body": "pull-request-4.json",
+      "synthesized": false,
+      "part": "pipelines"
+    },
+    {
+      "key": "GET /api/v4/projects/88123353/pipelines/2993171647/jobs",
+      "read": "PullRequest",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json",
+        "etag": "W/\"562330ad028df06bb62478b8a5574d3d\"",
+        "link": "<https://gitlab.com/api/v4/projects/88123353/pipelines/2993171647/jobs?id=88123353&include_retried=false&page=1&per_page=100&pipeline_id=2993171647>; rel=\"first\", <https://gitlab.com/api/v4/projects/88123353/pipelines/2993171647/jobs?id=88123353&include_retried=false&page=1&per_page=100&pipeline_id=2993171647>; rel=\"last\"",
+        "ratelimit-limit": "500",
+        "ratelimit-name": "throttle_unauthenticated_api",
+        "ratelimit-observed": "14",
+        "ratelimit-remaining": "486",
+        "ratelimit-reset": "1794634260",
+        "x-next-page": "",
+        "x-page": "1",
+        "x-total": "6",
+        "x-total-pages": "1"
+      },
+      "body": "pull-request-5.json",
+      "synthesized": false,
+      "part": "checks"
+    },
+    {
+      "key": "GET /api/v4/projects/orbit%2Fteam%2Forbit/repository/commits/cd2d1286c97c1b78e3f6e6f607d9841136eb1ead/diff",
+      "read": "CommitDiff",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json",
+        "etag": "W/\"5b4da848d69d4de9b8ca1b4b2916b755\"",
+        "link": "<https://gitlab.com/api/v4/projects/orbit%2Fteam%2Forbit/repository/commits/cd2d1286c97c1b78e3f6e6f607d9841136eb1ead/diff?id=orbit%2Fteam%2Forbit&page=1&per_page=20&sha=cd2d1286c97c1b78e3f6e6f607d9841136eb1ead&unidiff=false>; rel=\"first\", <https://gitlab.com/api/v4/projects/orbit%2Fteam%2Forbit/repository/commits/cd2d1286c97c1b78e3f6e6f607d9841136eb1ead/diff?id=orbit%2Fteam%2Forbit&page=1&per_page=20&sha=cd2d1286c97c1b78e3f6e6f607d9841136eb1ead&unidiff=false>; rel=\"last\"",
+        "ratelimit-limit": "500",
+        "ratelimit-name": "throttle_unauthenticated_api",
+        "ratelimit-observed": "15",
+        "ratelimit-remaining": "485",
+        "ratelimit-reset": "1794634260",
+        "x-next-page": "",
+        "x-page": "1",
+        "x-total": "1",
+        "x-total-pages": "1"
+      },
+      "body": "commit-diff.json",
+      "synthesized": false
+    },
+    {
+      "key": "GET /api/v4/projects/orbit%2Fteam%2Forbit/merge_requests?source_branch=renovate-ci-dependencies&state=opened",
+      "read": "PullRequestForBranch",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json",
+        "etag": "W/\"2df64cb94d6c8fb45ecb6bf23d7cb168\"",
+        "link": "<https://gitlab.com/api/v4/projects/orbit%2Fteam%2Forbit/merge_requests?id=orbit%2Fteam%2Forbit&order_by=created_at&page=1&per_page=20&sort=desc&source_branch=renovate-ci-dependencies&state=opened&with_labels_details=false&with_merge_status_recheck=false>; rel=\"first\", <https://gitlab.com/api/v4/projects/orbit%2Fteam%2Forbit/merge_requests?id=orbit%2Fteam%2Forbit&order_by=created_at&page=1&per_page=20&sort=desc&source_branch=renovate-ci-dependencies&state=opened&with_labels_details=false&with_merge_status_recheck=false>; rel=\"last\"",
+        "ratelimit-limit": "500",
+        "ratelimit-name": "throttle_unauthenticated_api",
+        "ratelimit-observed": "16",
+        "ratelimit-remaining": "484",
+        "ratelimit-reset": "1794634320",
+        "x-next-page": "",
+        "x-page": "1",
+        "x-total": "1",
+        "x-total-pages": "1"
+      },
+      "body": "pull-request-for-branch.json",
+      "synthesized": false
+    },
+    {
+      "key": "GET /api/v4/projects/orbit%2Fteam%2Forbit/issues/603",
+      "read": "Issue",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json",
+        "etag": "W/\"e3c002c2880c51b1837ced7fd8431962\"",
+        "ratelimit-limit": "500",
+        "ratelimit-name": "throttle_unauthenticated_api",
+        "ratelimit-observed": "17",
+        "ratelimit-remaining": "483",
+        "ratelimit-reset": "1794634320"
+      },
+      "body": "issue.json",
+      "synthesized": false
+    },
+    {
+      "key": "GET /api/v4/projects/orbit%2Fteam%2Forbit/issues/603/notes?sort=asc",
+      "read": "Issue",
+      "method": "GET",
+      "status": 401,
+      "headers": {
+        "content-type": "application/json",
+        "ratelimit-limit": "500",
+        "ratelimit-name": "throttle_unauthenticated_api",
+        "ratelimit-observed": "18",
+        "ratelimit-remaining": "482",
+        "ratelimit-reset": "1794634320"
+      },
+      "body": "issue-2.json",
+      "synthesized": false,
+      "part": "notes",
+      "auth": "none"
+    },
+    {
+      "key": "GET /api/v4/merge_requests?scope=all&state=opened",
+      "read": "Search",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json",
+        "etag": "W/\"5d89ec7a661c1133b93904c2bb3a7d96\"",
+        "link": "<https://gitlab.com/api/v4/merge_requests?non_archived=false&order_by=created_at&page=2&per_page=10&scope=all&sort=desc&state=opened&with_labels_details=false&with_merge_status_recheck=false>; rel=\"next\", <https://gitlab.com/api/v4/merge_requests?non_archived=false&order_by=created_at&page=1&per_page=10&scope=all&sort=desc&state=opened&with_labels_details=false&with_merge_status_recheck=false>; rel=\"first\"",
+        "ratelimit-limit": "500",
+        "ratelimit-name": "throttle_unauthenticated_api",
+        "ratelimit-observed": "19",
+        "ratelimit-remaining": "481",
+        "ratelimit-reset": "1794634320",
+        "x-next-page": "2",
+        "x-page": "1"
+      },
+      "body": "search.json",
+      "synthesized": false
+    },
+    {
+      "key": "GET /api/v4/projects/orbit%2Fteam%2Forbit/pipelines?order_by=updated_at&page=1",
+      "read": "Runs",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json",
+        "etag": "W/\"2fafaf22efa0353b31879208cce6a0a0\"",
+        "link": "<https://gitlab.com/api/v4/projects/orbit%2Fteam%2Forbit/pipelines?id=orbit%2Fteam%2Forbit&order_by=updated_at&page=2&per_page=10&sort=desc>; rel=\"next\", <https://gitlab.com/api/v4/projects/orbit%2Fteam%2Forbit/pipelines?id=orbit%2Fteam%2Forbit&order_by=updated_at&page=1&per_page=10&sort=desc>; rel=\"first\", <https://gitlab.com/api/v4/projects/orbit%2Fteam%2Forbit/pipelines?id=orbit%2Fteam%2Forbit&order_by=updated_at&page=192&per_page=10&sort=desc>; rel=\"last\"",
+        "ratelimit-limit": "500",
+        "ratelimit-name": "throttle_unauthenticated_api",
+        "ratelimit-observed": "20",
+        "ratelimit-remaining": "480",
+        "ratelimit-reset": "1794634320",
+        "x-next-page": "2",
+        "x-page": "1",
+        "x-total": "1918",
+        "x-total-pages": "192"
+      },
+      "body": "runs.json",
+      "synthesized": false
+    },
+    {
+      "key": "GET /api/v4/projects/orbit%2Fteam%2Forbit/pipelines?order_by=updated_at&page=2",
+      "read": "Runs",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json",
+        "etag": "W/\"9a09519a9920ddf7e03ddc6c0bb61b1e\"",
+        "link": "<https://gitlab.com/api/v4/projects/orbit%2Fteam%2Forbit/pipelines?id=orbit%2Fteam%2Forbit&order_by=updated_at&page=1&per_page=10&sort=desc>; rel=\"prev\", <https://gitlab.com/api/v4/projects/orbit%2Fteam%2Forbit/pipelines?id=orbit%2Fteam%2Forbit&order_by=updated_at&page=3&per_page=10&sort=desc>; rel=\"next\", <https://gitlab.com/api/v4/projects/orbit%2Fteam%2Forbit/pipelines?id=orbit%2Fteam%2Forbit&order_by=updated_at&page=1&per_page=10&sort=desc>; rel=\"first\", <https://gitlab.com/api/v4/projects/orbit%2Fteam%2Forbit/pipelines?id=orbit%2Fteam%2Forbit&order_by=updated_at&page=192&per_page=10&sort=desc>; rel=\"last\"",
+        "ratelimit-limit": "500",
+        "ratelimit-name": "throttle_unauthenticated_api",
+        "ratelimit-observed": "21",
+        "ratelimit-remaining": "479",
+        "ratelimit-reset": "1794634320",
+        "x-next-page": "3",
+        "x-page": "2",
+        "x-total": "1918",
+        "x-total-pages": "192"
+      },
+      "body": "runs-2.json",
+      "synthesized": false
+    },
+    {
+      "key": "GET /api/v4/projects/orbit%2Fteam%2Forbit/repository/commits/8c0997fd5bc2f17611ce150ecaaf589f34026dd1",
+      "read": "Runs",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json",
+        "etag": "W/\"ca1c9b8eab6de8aae710de3597040a0b\"",
+        "ratelimit-limit": "500",
+        "ratelimit-name": "throttle_unauthenticated_api",
+        "ratelimit-observed": "22",
+        "ratelimit-remaining": "478",
+        "ratelimit-reset": "1794634320"
+      },
+      "body": "runs-3.json",
+      "synthesized": false,
+      "part": "commit"
+    },
+    {
+      "key": "GET /api/v4/projects/orbit%2Fteam%2Forbit/pipelines/3052768430",
+      "read": "Run",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json",
+        "etag": "W/\"8cd36c3bf3547790fbf66c043cc4d6a3\"",
+        "ratelimit-limit": "500",
+        "ratelimit-name": "throttle_unauthenticated_api",
+        "ratelimit-observed": "23",
+        "ratelimit-remaining": "477",
+        "ratelimit-reset": "1794634320"
+      },
+      "body": "run.json",
+      "synthesized": false
+    },
+    {
+      "key": "GET /api/v4/projects/orbit%2Fteam%2Forbit/pipelines/3052768430/jobs?include_retried=true",
+      "read": "Run",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json",
+        "etag": "W/\"ce079214fa159578b9f0591e1d50541e\"",
+        "link": "<https://gitlab.com/api/v4/projects/orbit%2Fteam%2Forbit/pipelines/3052768430/jobs?id=orbit%2Fteam%2Forbit&include_retried=true&page=1&per_page=100&pipeline_id=3052768430>; rel=\"first\", <https://gitlab.com/api/v4/projects/orbit%2Fteam%2Forbit/pipelines/3052768430/jobs?id=orbit%2Fteam%2Forbit&include_retried=true&page=1&per_page=100&pipeline_id=3052768430>; rel=\"last\"",
+        "ratelimit-limit": "500",
+        "ratelimit-name": "throttle_unauthenticated_api",
+        "ratelimit-observed": "24",
+        "ratelimit-remaining": "476",
+        "ratelimit-reset": "1794634320",
+        "x-next-page": "",
+        "x-page": "1",
+        "x-total": "2",
+        "x-total-pages": "1"
+      },
+      "body": "run-2.json",
+      "synthesized": false,
+      "part": "jobs"
+    },
+    {
+      "key": "GET /api/v4/projects/orbit%2Fteam%2Forbit/pipelines/3052768430/bridges",
+      "read": "Run",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json",
+        "etag": "W/\"4f53cda18c2baa0c0354bb5f9a3ecbe5\"",
+        "link": "<https://gitlab.com/api/v4/projects/orbit%2Fteam%2Forbit/pipelines/3052768430/bridges?id=orbit%2Fteam%2Forbit&page=1&per_page=100&pipeline_id=3052768430>; rel=\"first\", <https://gitlab.com/api/v4/projects/orbit%2Fteam%2Forbit/pipelines/3052768430/bridges?id=orbit%2Fteam%2Forbit&page=1&per_page=100&pipeline_id=3052768430>; rel=\"last\"",
+        "ratelimit-limit": "500",
+        "ratelimit-name": "throttle_unauthenticated_api",
+        "ratelimit-observed": "25",
+        "ratelimit-remaining": "475",
+        "ratelimit-reset": "1794634320",
+        "x-next-page": "",
+        "x-page": "1",
+        "x-total": "0",
+        "x-total-pages": "1"
+      },
+      "body": "run-3.json",
+      "synthesized": false,
+      "part": "bridges"
+    },
+    {
+      "key": "GET /api/v4/projects/orbit%2Fteam%2Forbit/jobs/17922587026",
+      "read": "Job",
+      "method": "GET",
+      "status": 401,
+      "headers": {
+        "content-type": "application/json",
+        "ratelimit-limit": "500",
+        "ratelimit-name": "throttle_unauthenticated_api",
+        "ratelimit-observed": "26",
+        "ratelimit-remaining": "474",
+        "ratelimit-reset": "1794634320"
+      },
+      "body": "job.json",
+      "synthesized": false,
+      "auth": "none"
+    },
+    {
+      "key": "GET /api/v4/projects/orbit%2Fteam%2Forbit/jobs/17922587026/trace",
+      "read": "JobLog",
+      "method": "GET",
+      "status": 401,
+      "headers": {
+        "content-type": "application/json",
+        "ratelimit-limit": "500",
+        "ratelimit-name": "throttle_unauthenticated_api",
+        "ratelimit-observed": "1",
+        "ratelimit-remaining": "499",
+        "ratelimit-reset": "1794634320"
+      },
+      "body": "job-log.log",
+      "synthesized": false,
+      "accept": "text/plain",
+      "auth": "none"
+    },
+    {
+      "key": "POST /api/graphql op=PipelineJobs",
+      "read": "Job",
+      "method": "POST",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8",
+        "etag": "W/\"d4ae43f984494755c03a92b0de7d9843\"",
+        "ratelimit-limit": "500",
+        "ratelimit-name": "throttle_unauthenticated_api",
+        "ratelimit-observed": "2",
+        "ratelimit-remaining": "498",
+        "ratelimit-reset": "1794634320"
+      },
+      "body": "job-2.json",
+      "synthesized": false,
+      "graphql": {
+        "operation": "PipelineJobs",
+        "variables": {
+          "fullPath": "orbit/team/orbit",
+          "iid": "2013",
+          "first": 5
+        },
+        "document": "query PipelineJobs($fullPath: ID!, $iid: ID!, $first: Int) {\n  project(fullPath: $fullPath) {\n    pipeline(iid: $iid) {\n      iid status\n      jobs(first: $first) {\n        nodes {\n          id name status stage { name } allowFailure retryable duration startedAt finishedAt webPath\n          trace { htmlSummary }\n        }\n        pageInfo { hasNextPage endCursor }\n      }\n    }\n  }\n}"
+      }
+    },
+    {
+      "key": "GET /api/v4/todos?state=pending",
+      "read": "Notifications",
+      "method": "GET",
+      "status": 401,
+      "headers": {
+        "content-type": "application/json",
+        "ratelimit-limit": "500",
+        "ratelimit-name": "throttle_unauthenticated_api",
+        "ratelimit-observed": "3",
+        "ratelimit-remaining": "497",
+        "ratelimit-reset": "1794634320"
+      },
+      "body": "notifications.json",
+      "synthesized": false,
+      "auth": "none"
+    },
+    {
+      "key": "GET /api/v4/user",
+      "read": "Viewer",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "body": "viewer-synth.json",
+      "synthesized": true,
+      "doc": "https://docs.gitlab.com/api/users/#retrieve-the-current-user",
+      "auth": "token"
+    },
+    {
+      "key": "GET /api/v4/todos?state=pending",
+      "read": "Notifications",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "body": "notifications-synth.json",
+      "synthesized": true,
+      "doc": "https://docs.gitlab.com/api/todos/#list-all-to-do-items",
+      "auth": "token"
+    },
+    {
+      "key": "POST /api/v4/projects/orbit%2Fteam%2Forbit/merge_requests/13/notes#54c8c686d137",
+      "read": "Comment",
+      "method": "POST",
+      "status": 201,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "body": "comment-synth.json",
+      "synthesized": true,
+      "doc": "https://docs.gitlab.com/api/notes/#create-new-merge-request-note",
+      "request": {
+        "body": "Looks good to me."
+      }
+    },
+    {
+      "key": "PUT /api/v4/projects/orbit%2Fteam%2Forbit/merge_requests/13#bdee2263e820",
+      "read": "SetLabels",
+      "method": "PUT",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "body": "set-labels-synth.json",
+      "synthesized": true,
+      "doc": "https://docs.gitlab.com/api/merge_requests/#update-a-merge-request",
+      "request": {
+        "add_labels": "bug"
+      }
+    },
+    {
+      "key": "PUT /api/v4/projects/orbit%2Fteam%2Forbit/merge_requests/13#39228e0dc338",
+      "read": "SetState",
+      "method": "PUT",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "body": "set-state-synth.json",
+      "synthesized": true,
+      "doc": "https://docs.gitlab.com/api/merge_requests/#update-a-merge-request",
+      "request": {
+        "state_event": "close"
+      }
+    },
+    {
+      "key": "POST /api/v4/projects/orbit%2Fteam%2Forbit/merge_requests/13/approve#fd86be38732f",
+      "read": "SubmitReview",
+      "method": "POST",
+      "status": 201,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "body": "submit-review-synth.json",
+      "synthesized": true,
+      "doc": "https://docs.gitlab.com/api/merge_request_approvals/#approve-merge-request",
+      "request": {
+        "sha": "c92ad11000000000000000000000000000000000"
+      }
+    },
+    {
+      "key": "POST /api/graphql op=MergeRequestRequestChanges",
+      "read": "SubmitReview",
+      "method": "POST",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "body": "submit-review-synth-2.json",
+      "synthesized": true,
+      "doc": "https://docs.gitlab.com/api/graphql/reference/#mutationmergerequestrequestchanges",
+      "graphql": {
+        "operation": "MergeRequestRequestChanges",
+        "variables": {
+          "projectPath": "orbit/team/orbit",
+          "iid": "13"
+        }
+      }
+    },
+    {
+      "key": "PUT /api/v4/projects/orbit%2Fteam%2Forbit/merge_requests/13/merge#d146935d98ca",
+      "read": "Merge",
+      "method": "PUT",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "body": "merge-synth.json",
+      "synthesized": true,
+      "doc": "https://docs.gitlab.com/api/merge_requests/#merge-a-merge-request",
+      "request": {
+        "sha": "c92ad11000000000000000000000000000000000",
+        "squash": true,
+        "should_remove_source_branch": true
+      }
+    },
+    {
+      "key": "PUT /api/v4/projects/orbit%2Fteam%2Forbit/merge_requests/13/merge#10650abc3141",
+      "read": "Merge",
+      "method": "PUT",
+      "status": 409,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "body": "merge-synth-2.json",
+      "synthesized": true,
+      "doc": "https://docs.gitlab.com/api/merge_requests/#merge-a-merge-request",
+      "request": {
+        "sha": "0000000000000000000000000000000000000000",
+        "squash": true,
+        "should_remove_source_branch": true
+      }
+    },
+    {
+      "key": "POST /api/v4/projects/orbit%2Fteam%2Forbit/merge_requests/13/discussions#1a8baf8367e7",
+      "read": "InlineComment",
+      "method": "POST",
+      "status": 201,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "body": "inline-comment-synth.json",
+      "synthesized": true,
+      "doc": "https://docs.gitlab.com/api/discussions/#create-a-new-thread-in-the-merge-request-diff",
+      "request": {
+        "body": "nit: rename",
+        "position": {
+          "position_type": "text",
+          "base_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "start_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "head_sha": "c92ad11000000000000000000000000000000000",
+          "new_path": "src/lib.rs",
+          "new_line": 12
+        }
+      }
+    },
+    {
+      "key": "POST /api/v4/projects/orbit%2Fteam%2Forbit/merge_requests/13/discussions/6a9c1750b37d513a43987b574953fceb50b03ce7/notes#20a8fe8167cf",
+      "read": "Reply",
+      "method": "POST",
+      "status": 201,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "body": "reply-synth.json",
+      "synthesized": true,
+      "doc": "https://docs.gitlab.com/api/discussions/#add-note-to-existing-merge-request-thread",
+      "request": {
+        "body": "Done."
+      }
+    },
+    {
+      "key": "POST /api/v4/projects/orbit%2Fteam%2Forbit/pipelines/91/retry",
+      "read": "Rerun",
+      "method": "POST",
+      "status": 201,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "body": "rerun-synth.json",
+      "synthesized": true,
+      "doc": "https://docs.gitlab.com/api/pipelines/#retry-jobs-in-a-pipeline"
+    },
+    {
+      "key": "POST /api/v4/projects/orbit%2Fteam%2Forbit/pipelines/91/cancel",
+      "read": "CancelRun",
+      "method": "POST",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "body": "cancel-run-synth.json",
+      "synthesized": true,
+      "doc": "https://docs.gitlab.com/api/pipelines/#cancel-all-jobs-for-a-pipeline"
+    },
+    {
+      "key": "POST /api/v4/projects/orbit%2Fteam%2Forbit/pipeline#e12a09d94cd1",
+      "read": "Dispatch",
+      "method": "POST",
+      "status": 201,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "body": "dispatch-synth.json",
+      "synthesized": true,
+      "doc": "https://docs.gitlab.com/api/pipelines/#create-a-new-pipeline",
+      "request": {
+        "ref": "main",
+        "variables": [
+          {
+            "key": "TARGET",
+            "value": "staging"
+          }
+        ]
+      }
+    },
+    {
+      "key": "POST /api/v4/todos/9001/mark_as_done",
+      "read": "MarkRead",
+      "method": "POST",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "body": "mark-read-synth.json",
+      "synthesized": true,
+      "doc": "https://docs.gitlab.com/api/todos/#mark-a-to-do-item-as-done"
+    },
+    {
+      "key": "GET /api/v4/version",
+      "read": "Version",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "body": "version-synth.json",
+      "synthesized": true,
+      "doc": "https://docs.gitlab.com/api/version/",
+      "auth": "token"
+    },
+    {
+      "key": "GET /api/v4/projects/orbit%2Fteam%2Forbit/labels",
+      "read": "Labels",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "body": "labels-synth.json",
+      "synthesized": true,
+      "doc": "https://docs.gitlab.com/api/labels/#list-labels",
+      "auth": "token"
+    },
+    {
+      "key": "GET /api/v4/projects/orbit%2Fteam%2Forbit/milestones",
+      "read": "Milestones",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "body": "milestones-synth.json",
+      "synthesized": true,
+      "doc": "https://docs.gitlab.com/api/milestones/#list-project-milestones",
+      "auth": "token"
+    },
+    {
+      "key": "GET /api/v4/projects/orbit%2Fteam%2Forbit/members/all",
+      "read": "Collaborators",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "body": "collaborators-synth.json",
+      "synthesized": true,
+      "doc": "https://docs.gitlab.com/api/members/#list-all-members-of-a-group-or-project-including-inherited-and-invited-members",
+      "auth": "token"
+    },
+    {
+      "key": "GET /api/v4/projects/orbit%2Fteam%2Forbit/merge_requests/13/discussions",
+      "read": "Threads",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "body": "threads-synth.json",
+      "synthesized": true,
+      "doc": "https://docs.gitlab.com/api/discussions/#list-project-merge-request-discussion-items",
+      "auth": "token"
+    },
+    {
+      "key": "GET /api/v4/projects/orbit%2Fteam%2Forbit/merge_requests/13/notes?sort=asc",
+      "read": "Timeline",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "body": "timeline-synth.json",
+      "synthesized": true,
+      "doc": "https://docs.gitlab.com/api/notes/#list-all-merge-request-notes",
+      "part": "notes",
+      "auth": "token"
+    },
+    {
+      "key": "GET /api/v4/projects/orbit%2Fteam%2Forbit/issues/13/notes?sort=asc",
+      "read": "Issue",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "body": "issue-synth.json",
+      "synthesized": true,
+      "doc": "https://docs.gitlab.com/api/notes/#list-project-issue-notes",
+      "part": "notes",
+      "auth": "token"
+    },
+    {
+      "key": "GET /api/v4/projects/orbit%2Fteam%2Forbit/jobs/42",
+      "read": "Job",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "body": "job-synth.json",
+      "synthesized": true,
+      "doc": "https://docs.gitlab.com/api/jobs/#retrieve-a-single-job",
+      "auth": "token"
+    },
+    {
+      "key": "GET /api/v4/projects/orbit%2Fteam%2Forbit/jobs/42/trace",
+      "read": "JobLog",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "text/plain; charset=utf-8"
+      },
+      "body": "job-log-synth.log",
+      "synthesized": true,
+      "doc": "https://docs.gitlab.com/api/jobs/#get-a-log-file",
+      "accept": "text/plain",
+      "auth": "token"
+    },
+    {
+      "key": "GET /api/v4/projects/orbit%2Fteam%2Forbit/merge_requests/564/reviewers",
+      "read": "PullRequest",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json",
+        "etag": "W/\"d820d1c5a2c82b7f8db013421f53c876\"",
+        "link": "<https://gitlab.com/api/v4/projects/orbit%2Fteam%2Forbit/merge_requests/564/reviewers?id=orbit%2Fteam%2Forbit&merge_request_iid=564&page=1&per_page=20>; rel=\"first\", <https://gitlab.com/api/v4/projects/orbit%2Fteam%2Forbit/merge_requests/564/reviewers?id=orbit%2Fteam%2Forbit&merge_request_iid=564&page=1&per_page=20>; rel=\"last\"",
+        "ratelimit-limit": "500",
+        "ratelimit-name": "throttle_unauthenticated_api",
+        "ratelimit-observed": "4",
+        "ratelimit-remaining": "496",
+        "ratelimit-reset": "1794634320",
+        "x-next-page": "",
+        "x-page": "1",
+        "x-total": "2",
+        "x-total-pages": "1"
+      },
+      "body": "pull-request-6.json",
+      "synthesized": false,
+      "part": "reviewers"
+    }
+  ],
+  "updated_at": "2026-11-14T05:31:36Z"
+}

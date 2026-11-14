@@ -1,0 +1,33 @@
+{
+  "id": 91,
+  "run_number": 12,
+  "display_title": "Validate orbit",
+  "event": "push",
+  "status": "completed",
+  "conclusion": "failure",
+  "head_branch": "main",
+  "head_sha": "c92ad11000000000000000000000000000000000",
+  "path": "ci.yml@refs/heads/main",
+  "run_attempt": 1,
+  "started_at": "2026-11-14T04:45:56Z",
+  "completed_at": "2026-11-14T04:50:56Z",
+  "html_url": "https://gitea.com/orbit/orbit/actions/runs/12",
+  "url": "https://gitea.com/api/v1/repos/orbit/orbit/actions/runs/91",
+  "actor": {
+    "id": 1001,
+    "login": "maya",
+    "full_name": "Maya",
+    "email": "maya@example.invalid",
+    "avatar_url": "https://gitea.com/avatars/maya.png",
+    "html_url": "https://gitea.com/maya"
+  },
+  "trigger_actor": {
+    "id": 1001,
+    "login": "maya",
+    "full_name": "Maya",
+    "email": "maya@example.invalid",
+    "avatar_url": "https://gitea.com/avatars/maya.png",
+    "html_url": "https://gitea.com/maya"
+  },
+  "repository_id": 4242
+}

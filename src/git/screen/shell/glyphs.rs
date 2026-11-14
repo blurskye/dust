@@ -1,0 +1,258 @@
+//! Every glyph Dusty Git paints, in one table (DESIGN.md §4.3). ASCII fallbacks keep
+//! the same cell count as the Unicode glyph wherever a column depends on it.
+use crate::config::ExplorerIconMode;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum Glyph {
+    Repo,
+    Branch,
+    Remote,
+    Tag,
+    CommitHead,
+    Commit,
+    CommitMerge,
+    Stash,
+    Worktree,
+    Submodule,
+    ChangesPane,
+    HistoryPane,
+    Diff,
+    PullRequest,
+    Issue,
+    Actions,
+    Notification,
+    Cursor,
+    Mark,
+    Partial,
+    FoldClosed,
+    FoldOpen,
+    Ahead,
+    Behind,
+    Conflict,
+    Running,
+    RangeEdge,
+    ReceiptOk,
+    ReceiptErr,
+    Warning,
+    ClipLeft,
+    ClipRight,
+    Search,
+    // Forge (§4.3): lifecycle, checks, reviews and the reader's metadata icons.
+    PullMerged,
+    IssueClosed,
+    NotPlanned,
+    CheckPassed,
+    CheckFailed,
+    CheckPending,
+    CheckSkipped,
+    CheckUnknown,
+    ReviewRequested,
+    Comment,
+    Person,
+    Label,
+    Milestone,
+    Viewed,
+    Link,
+    Dot,
+    Unchecked,
+    Checked,
+    File,
+    Folder,
+}
+
+/// The Nerd Font check (nf-md-check). Nerd fonts built on Fira Code draw U+2713 as a
+/// shallow tick that reads as a square root (√), so check marks use the font's own icon.
+const CHECK: &str = "\u{f012c}";
+/// U+2714 in text presentation: U+2713 is a hairline in most monospace fonts and reads as
+/// `√` beside bold text (DESIGN.md §4.3 status glyphs).
+const HEAVY_CHECK: &str = "\u{2714}";
+
+pub(crate) fn glyph(glyph: Glyph, mode: ExplorerIconMode) -> &'static str {
+    use ExplorerIconMode::{Ascii, NerdFont, Unicode};
+    use Glyph::*;
+    match (glyph, mode) {
+        (Repo, NerdFont) => "󰊢",
+        (Repo, Unicode) => "◆",
+        (Repo, Ascii) => "#",
+        (Branch, NerdFont) => "󰘬",
+        (Branch, Unicode) => "⎇",
+        (Branch, Ascii) => "Y",
+        (Remote, NerdFont) => "󰒍",
+        (Remote, Unicode) => "⇅",
+        (Remote, Ascii) => "@",
+        (Tag, NerdFont) => "󰓹",
+        (Tag, Unicode) => "◇",
+        (Tag, Ascii) => "t",
+        (CommitHead, Ascii) => "*",
+        (CommitHead, _) => "●",
+        (Commit, Ascii) => "o",
+        (Commit, _) => "○",
+        (CommitMerge, Ascii) => "M",
+        (CommitMerge, _) => "◆",
+        (Stash, NerdFont) => "󰆓",
+        (Stash, Unicode) => "≡",
+        (Stash, Ascii) => "=",
+        (Worktree, NerdFont) => "󰙅",
+        (Worktree, Unicode) => "⌂",
+        (Worktree, Ascii) => "w",
+        (Submodule, NerdFont) => "󰍲",
+        (Submodule, Unicode) => "⊞",
+        (Submodule, Ascii) => "s",
+        (ChangesPane, NerdFont) => "󰊢",
+        (ChangesPane, Unicode) => "±",
+        (ChangesPane, Ascii) => "+",
+        (HistoryPane, NerdFont) => "󰜘",
+        (HistoryPane, Unicode) => "⌁",
+        (HistoryPane, Ascii) => "~",
+        (Diff, NerdFont) => "󰈙",
+        (Diff, Unicode) => "≠",
+        (Diff, Ascii) => "d",
+        (PullRequest, NerdFont) => "",
+        (PullRequest, Unicode) => "⎇",
+        (PullRequest, Ascii) => "P",
+        (Issue, Ascii) => "o",
+        (Issue, _) => "○",
+        (Actions, Ascii) => "*",
+        (Actions, _) => "●",
+        (Notification, NerdFont) => "󰂚",
+        (Notification, Unicode) => "●",
+        (Notification, Ascii) => "!",
+        (Cursor, Ascii) => ">",
+        // A focus edge, not an arrow: it sits under the native bar cursor.
+        (Cursor, _) => "▎",
+        (Mark, Ascii) => "*",
+        (Mark, _) => "✓",
+        (Partial, Ascii) => "%",
+        (Partial, _) => "◐",
+        (FoldClosed, Ascii) => ">",
+        (FoldClosed, _) => "▸",
+        (FoldOpen, Ascii) => "v",
+        (FoldOpen, _) => "▾",
+        (Ahead, Ascii) => "^",
+        (Ahead, _) => "↑",
+        (Behind, Ascii) => "v",
+        (Behind, _) => "↓",
+        (Conflict, Ascii) => "!",
+        (Conflict, _) => "⇄",
+        (Running, Ascii) => "~",
+        (Running, _) => "⟳",
+        (RangeEdge, Ascii) => "|",
+        (RangeEdge, _) => "▎",
+        (ReceiptOk, Ascii) => "+",
+        (ReceiptOk, NerdFont) => CHECK,
+        (ReceiptOk, _) => HEAVY_CHECK,
+        (ReceiptErr, Ascii) => "x",
+        (ReceiptErr, _) => "✕",
+        (Warning, Ascii) => "!",
+        (Warning, _) => "⚠",
+        (ClipLeft, Ascii) => "<",
+        (ClipLeft, _) => "‹",
+        (ClipRight, Ascii) => ">",
+        (ClipRight, _) => "›",
+        (Search, NerdFont) => "󰍉",
+        (Search, _) => "/",
+        (PullMerged, NerdFont) => "󰘭",
+        (PullMerged, Unicode) => "⎇",
+        (PullMerged, Ascii) => "P",
+        (IssueClosed, Ascii) => "x",
+        (IssueClosed, NerdFont) => CHECK,
+        (IssueClosed, _) => HEAVY_CHECK,
+        (NotPlanned, Ascii) => "-",
+        (NotPlanned, _) => "⊘",
+        (CheckPassed, Ascii) => "+",
+        (CheckPassed, NerdFont) => CHECK,
+        (CheckPassed, _) => HEAVY_CHECK,
+        (CheckFailed, Ascii) => "x",
+        (CheckFailed, _) => "✕",
+        (CheckPending, Ascii) => ".",
+        // One clock everywhere a check waits or a review is still owed.
+        (CheckPending, NerdFont) => "\u{f0150}",
+        (CheckPending, _) => "◷",
+        (CheckSkipped, Ascii) => "-",
+        (CheckSkipped, _) => "⊘",
+        (CheckUnknown, _) => "?",
+        (ReviewRequested, Ascii) => "o",
+        (ReviewRequested, _) => "◌",
+        (Comment, NerdFont) => "󰆈",
+        (Comment, Unicode) => "❝",
+        (Comment, Ascii) => "\"",
+        (Person, NerdFont) => "󰀄",
+        (Person, Unicode) => "☺",
+        (Person, Ascii) => "@",
+        (Label, NerdFont) => "󰓹",
+        (Label, Unicode) => "◆",
+        (Label, Ascii) => "#",
+        (Milestone, NerdFont) => "󰐃",
+        (Milestone, Unicode) => "◈",
+        (Milestone, Ascii) => "m",
+        (Viewed, NerdFont) => "󰈈",
+        (Viewed, Unicode) => "◉",
+        (Viewed, Ascii) => "v",
+        (Link, Ascii) => ">",
+        (Link, _) => "↗",
+        (Dot, Ascii) => "*",
+        (Dot, _) => "●",
+        (Unchecked, Ascii) => "o",
+        (Unchecked, _) => "☐",
+        (Checked, Ascii) => "x",
+        (Checked, _) => "☑",
+        (File, NerdFont) => "󰈙",
+        (File, Unicode) => "◇",
+        (File, Ascii) => "-",
+        (Folder, NerdFont) => "󰉋",
+        (Folder, Unicode) => "▸",
+        (Folder, Ascii) => "+",
+    }
+}
+
+/// Graph lane glyphs; ASCII substitutes cell for cell.
+pub(crate) fn lane(symbol: char, mode: ExplorerIconMode) -> &'static str {
+    let ascii = mode == ExplorerIconMode::Ascii;
+    match symbol {
+        '│' if ascii => "|",
+        '│' => "│",
+        '─' if ascii => "-",
+        '─' => "─",
+        '╮' if ascii => "\\",
+        '╮' => "╮",
+        '╯' if ascii => "/",
+        '╯' => "╯",
+        '╭' if ascii => "/",
+        '╭' => "╭",
+        '╰' if ascii => "\\",
+        '╰' => "╰",
+        '┼' if ascii => "+",
+        '┼' => "┼",
+        '…' if ascii => ".",
+        '…' => "…",
+        _ => " ",
+    }
+}
+
+/// A file-type glyph and the highlight group that colours it.
+pub(crate) fn file(
+    path: &std::path::Path,
+    mode: ExplorerIconMode,
+) -> (&'static str, crate::config::Highlight) {
+    use crate::config::Highlight;
+    use crate::files::ExplorerIconColor;
+    let icon = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .and_then(crate::files::file_icon);
+    let role = match icon.map(|icon| icon.color) {
+        Some(ExplorerIconColor::Azure | ExplorerIconColor::Blue | ExplorerIconColor::Cyan) => {
+            Highlight::FUNCTION
+        }
+        Some(ExplorerIconColor::Green) => Highlight::STRING,
+        Some(ExplorerIconColor::Orange | ExplorerIconColor::Yellow) => Highlight::NUMBER,
+        Some(ExplorerIconColor::Purple | ExplorerIconColor::Red) => Highlight::KEYWORD,
+        _ => Highlight::TYPE,
+    };
+    let glyph = match mode {
+        ExplorerIconMode::NerdFont => icon.map_or("", |icon| icon.glyph),
+        ExplorerIconMode::Unicode => "◇",
+        ExplorerIconMode::Ascii => "-",
+    };
+    (glyph, role)
+}

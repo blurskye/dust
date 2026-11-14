@@ -200,6 +200,8 @@ pub enum GitMutationKind {
     UnstageHunk,
     /// An exact line range inside one unstaged hunk, from the worktree into the index.
     StageLines,
+    /// Selected lines inside one staged hunk back to HEAD; the worktree is untouched.
+    UnstageLines,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct GitMutationResult {
@@ -740,6 +742,17 @@ pub(super) fn validate_change_plan(plan: &GitChangePlanRequest) -> Result<(), Gi
             }
             Ok(())
         }
+        GitMutationKind::UnstageLines => {
+            if plan.hunk_snapshot_revision == 0
+                || plan.policy.layer != GitDiffLayer::Staged
+                || plan.hunk_id.is_none()
+                || plan.selected.is_none()
+                || plan.selected_lines.is_empty()
+            {
+                return Err(GitMutationError::Invalid);
+            }
+            Ok(())
+        }
         GitMutationKind::StageLines => {
             if plan.hunk_snapshot_revision == 0
                 || plan.policy.layer != GitDiffLayer::Unstaged
@@ -914,33 +927,41 @@ fn whole_hunk_patch(name: &str, hunk: &GitHunk) -> Vec<u8> {
     patch.into_bytes()
 }
 
-/// Build a patch for an exact line range inside one hunk. Unselected additions are dropped
-/// because they must not enter the index; unselected deletions become context because the
-/// original line stays. Line counts are recomputed from the emitted body, and the new side
-/// starts where the old side does because only this hunk is being applied.
+/// Build a patch for selected changes in one hunk. For unstaging, reverse the sides first.
+/// Unselected additions are dropped; unselected deletions become context. Recompute the
+/// counts and anchor the new side to the old side because only this hunk is being applied.
 fn selected_lines_patch(
     name: &str,
     hunk: &GitHunk,
     selected: &[u32],
+    reverse: bool,
 ) -> Result<Vec<u8>, GitMutationError> {
     validate_selected_lines(hunk, selected)?;
-    let mut body = String::new();
+    let (old_mode, new_mode, old_start) = if reverse {
+        (hunk.new_mode, hunk.old_mode, hunk.new_start)
+    } else {
+        (hunk.old_mode, hunk.new_mode, hunk.old_start)
+    };
+    let mut body = Vec::new();
     let mut old_lines = 0u32;
     let mut new_lines = 0u32;
     let mut applied = 0usize;
     for index in lines_in_pairs(hunk) {
         let line = &hunk.lines[index];
         let chosen = selected.binary_search(&(index as u32)).is_ok();
-        match line.kind {
+        let kind = match (line.kind, reverse) {
+            (GitDiffLineKind::Add, true) => GitDiffLineKind::Delete,
+            (GitDiffLineKind::Delete, true) => GitDiffLineKind::Add,
+            (kind, _) => kind,
+        };
+        match kind {
             GitDiffLineKind::Context => {
-                body.push(' ');
-                append_patch_text(&mut body, &line.text);
+                body.push((' ', line.text.as_str()));
                 old_lines += 1;
                 new_lines += 1;
             }
             GitDiffLineKind::Delete => {
-                body.push(if chosen { '-' } else { ' ' });
-                append_patch_text(&mut body, &line.text);
+                body.push((if chosen { '-' } else { ' ' }, line.text.as_str()));
                 old_lines += 1;
                 if chosen {
                     applied += 1;
@@ -950,8 +971,7 @@ fn selected_lines_patch(
             }
             GitDiffLineKind::Add => {
                 if chosen {
-                    body.push('+');
-                    append_patch_text(&mut body, &line.text);
+                    body.push(('+', line.text.as_str()));
                     new_lines += 1;
                     applied += 1;
                 }
@@ -963,21 +983,21 @@ fn selected_lines_patch(
     }
     let modes = patch_header(
         name,
-        hunk.old_mode,
-        if new_lines == 0 {
+        old_mode,
+        if new_lines == 0 && new_mode == 0 {
             0
-        } else if hunk.old_mode == 0 {
-            hunk.new_mode
+        } else if old_mode == 0 {
+            new_mode
         } else {
-            hunk.old_mode
+            old_mode
         },
     );
-    let header = format!(
-        "{modes}@@ -{},{old_lines} +{},{new_lines} @@\n",
-        hunk.old_start,
-        patch_start(hunk.old_start, old_lines, new_lines)
+    let mut patch = format!(
+        "{modes}@@ -{old_start},{old_lines} +{},{new_lines} @@\n",
+        patch_start(old_start, old_lines, new_lines)
     );
-    Ok(format!("{header}{body}").into_bytes())
+    append_patch_lines(&mut patch, body);
+    Ok(patch.into_bytes())
 }
 
 fn validate_selected_lines(hunk: &GitHunk, selected: &[u32]) -> Result<(), GitMutationError> {
@@ -1099,7 +1119,12 @@ fn captured_hunk_patch(
     Ok(match (p.kind, selection) {
         (GitMutationKind::UnstageHunk, _) => reverse_hunk_patch(name, current),
         (_, None) => whole_hunk_patch(name, current),
-        (_, Some(lines)) => selected_lines_patch(name, current, lines)?,
+        (_, Some(lines)) => selected_lines_patch(
+            name,
+            current,
+            lines,
+            p.kind == GitMutationKind::UnstageLines,
+        )?,
     })
 }
 
@@ -1267,19 +1292,17 @@ pub(super) fn apply_change_plan(
         }
     }
 
-    let patch = match p.kind {
-        GitMutationKind::StageFile | GitMutationKind::UnstageFile => None,
-        GitMutationKind::StageHunk | GitMutationKind::UnstageHunk => {
-            Some(captured_hunk_patch(p, &repo_path, None, cancel)?)
-        }
-        GitMutationKind::StageLines => Some(captured_hunk_patch(
-            p,
-            &repo_path,
-            Some(&p.selected_lines),
-            cancel,
-        )?),
-        GitMutationKind::ResetUnstagedHunk => return Err(GitMutationError::Invalid),
-    };
+    let patch =
+        match p.kind {
+            GitMutationKind::StageFile | GitMutationKind::UnstageFile => None,
+            GitMutationKind::StageHunk | GitMutationKind::UnstageHunk => {
+                Some(captured_hunk_patch(p, &repo_path, None, cancel)?)
+            }
+            GitMutationKind::StageLines | GitMutationKind::UnstageLines => Some(
+                captured_hunk_patch(p, &repo_path, Some(&p.selected_lines), cancel)?,
+            ),
+            GitMutationKind::ResetUnstagedHunk => return Err(GitMutationError::Invalid),
+        };
 
     if cancel.load(Ordering::Acquire) {
         return Err(GitMutationError::Cancelled);

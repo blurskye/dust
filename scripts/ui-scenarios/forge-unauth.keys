@@ -1,0 +1,20 @@
+# F2 host states in the forge tabs (FORGE.md §2.5; DESIGN §3.45 X-OFFLINE / X-PROVIDER).
+# One run per state against the loopback fake forge; each writes `notice` (the list's notice
+# row) and `accounts` (the `a` popover):
+#   scripts/ui-scenarios/make-orbit-fixture.sh /tmp/orbit
+#   for state in signed-out cli-missing unknown-provider rate-limited; do
+#     FORGE_UNAUTH_STATE=$state DUSTY_GIT_BINARY=$PWD/target/release/dusty-git \
+#       scripts/ui-shot scripts/ui-scenarios/forge-unauth.keys \
+#       --binary scripts/ui-scenarios/forge-unauth-launch --cwd /tmp/orbit \
+#       --out target/ui-shots/forge-unauth-$state
+#   done
+wait 1500
+# `>` steps the top tabs: Git → Pull requests → Issues → Actions.
+key > >
+wait 3500
+shot notice
+key a
+wait 500
+shot accounts
+key escape
+wait 300

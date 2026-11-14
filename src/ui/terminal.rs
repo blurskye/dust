@@ -576,6 +576,18 @@ fn queue_style(
             &derived
         }
         Style::Selection => &theme.styles.selection,
+        Style::Git {
+            role,
+            surface,
+            emphasis,
+        } => {
+            derived = theme.git(role, surface, emphasis);
+            &derived
+        }
+        Style::GitSyntax { group, surface } => {
+            derived = theme.git_syntax(group, surface);
+            &derived
+        }
         Style::GitSelected(group) => {
             derived = theme.git_selection(group);
             &derived
@@ -584,26 +596,61 @@ fn queue_style(
             derived = theme.git_surface(group, matches!(style, Style::GitInactiveSelection(_)));
             &derived
         }
+        Style::GitFocusedSurface(group) => {
+            derived = theme.git_focused_surface(group);
+            &derived
+        }
         Style::GitHeading | Style::GitControl => {
             derived = theme.git_heading(style == Style::GitControl);
             &derived
         }
-        Style::GitHash(selection) => {
-            derived = theme.git_label(&theme.styles.git_sign_changed, selection);
+        Style::GitTab(active) => {
+            derived = theme.git_tab(active);
             &derived
         }
-        Style::GitBranch { current, selection } => {
+        Style::GitHash(selection, focused) => {
+            derived = theme.git_label(&theme.styles.accent, selection, focused);
+            &derived
+        }
+        Style::GitBranch {
+            current,
+            selection,
+            focused,
+        } => {
             derived = theme.git_label(
                 if current {
                     &theme.styles.git_sign_added
                 } else {
-                    &theme.styles.accent
+                    theme
+                        .highlight(crate::config::Highlight::FUNCTION)
+                        .unwrap_or(&theme.styles.accent)
                 },
                 selection,
+                focused,
             );
             &derived
         }
-        Style::GitDetail { added, selection } => {
+        Style::GitFile {
+            staged,
+            selection,
+            focused,
+        } => {
+            derived = theme.git_label(
+                match staged {
+                    Some(true) => &theme.styles.git_sign_added,
+                    Some(false) => &theme.styles.git_sign_changed,
+                    None => &theme.styles.default,
+                },
+                selection,
+                focused,
+            );
+            &derived
+        }
+        Style::GitDetail {
+            added,
+            selection,
+            focused,
+        } => {
             derived = theme.git_label(
                 match added {
                     Some(true) => &theme.styles.git_sign_added,
@@ -611,6 +658,7 @@ fn queue_style(
                     None => &theme.styles.muted,
                 },
                 selection,
+                focused,
             );
             &derived
         }
@@ -1044,6 +1092,7 @@ pub enum TerminalError {
 mod tests {
     use crate::editor::input::KeyCode as DustKeyCode;
     use crate::editor::input::Modifiers;
+    use crate::ui::Style;
     use crossterm::event::Event;
     use crossterm::event::KeyCode;
     use crossterm::event::KeyEvent;
@@ -1308,6 +1357,31 @@ mod tests {
             )
             .unwrap();
             assert_eq!(actual, expected);
+        }
+    }
+
+    #[test]
+    fn git_hashes_keep_accent_on_active_and_inactive_surfaces_in_every_color_tier() {
+        let theme = crate::config::load_bundled_config().theme;
+        for selection in [None, Some(false), Some(true)] {
+            for focused in [false, true] {
+                for tier in [ColorTier::TrueColor, ColorTier::Ansi256, ColorTier::Ansi16] {
+                    let mut expected_theme = theme.clone();
+                    expected_theme.styles.accent =
+                        theme.git_label(&theme.styles.accent, selection, focused);
+                    let mut expected = Vec::new();
+                    queue_style(&mut expected, Style::Accent, &expected_theme, tier).unwrap();
+                    let mut actual = Vec::new();
+                    queue_style(
+                        &mut actual,
+                        Style::GitHash(selection, focused),
+                        &theme,
+                        tier,
+                    )
+                    .unwrap();
+                    assert_eq!(actual, expected);
+                }
+            }
         }
     }
 

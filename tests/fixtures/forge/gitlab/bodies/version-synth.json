@@ -1,0 +1,10 @@
+{
+  "version": "18.6.0-pre",
+  "revision": "c92ad11a0b1",
+  "kas": {
+    "enabled": true,
+    "externalUrl": "wss://kas.gitlab.com",
+    "version": "18.6.0"
+  },
+  "enterprise": true
+}

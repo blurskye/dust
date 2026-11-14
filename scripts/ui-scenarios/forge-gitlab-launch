@@ -1,0 +1,61 @@
+#!/usr/bin/env python3
+"""Launch Dusty Git against the loopback fake GitLab (forge-gitlab.keys, FORGE.md F5).
+
+The disposable repository (the orbit fixture) gets a `gitlab` remote for the nested-group
+project `orbit/team/orbit` on gitlab.com; `DUSTY_FORGE_REMOTE` picks it. The fake server runs
+`--world gitlab` (tests/fixtures/forge/world_gitlab.py): merge requests, discussions, approvals,
+issues, pipelines and To-dos. The token is the fake's (`GITLAB_TOKEN`, direct HTTP); PATH holds
+only a signed-in fake `glab` plus the tools Dusty Git needs. Nothing reaches a real forge.
+DUSTY_GIT_BINARY is the built `dusty-git`.
+"""
+import json
+import os
+import pathlib
+import shutil
+import subprocess
+import sys
+import tempfile
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
+FIXTURES = ROOT / "tests/fixtures/forge"
+BINARY = os.environ.get("DUSTY_GIT_BINARY", str(ROOT / "target/release/dusty-git"))
+FAKE_TOKEN = "ghp_fixture0123456789abcdefABCDEF0123"
+
+work = pathlib.Path(tempfile.mkdtemp(prefix="forge-gitlab-"))
+state_path = work / "state.json"
+state_path.write_text(json.dumps({"glab_auth": {"*": "token"}, "viewer": "tester"}))
+server = subprocess.Popen([sys.executable, str(FIXTURES / "server.py"), "--state", str(state_path),
+                           "--world", "gitlab"], stdout=subprocess.PIPE, stdin=subprocess.DEVNULL)
+port = int(server.stdout.readline().strip())
+url = f"http://127.0.0.1:{port}"
+
+bin_dir = work / "bin"
+bin_dir.mkdir()
+for tool in ("git", "ssh", "sh", "env", "python3"):
+    found = shutil.which(tool)
+    if found:
+        (bin_dir / tool).symlink_to(found)
+shutil.copy(FIXTURES / "fake_glab.py", bin_dir / "glab")
+(bin_dir / "glab").chmod(0o755)
+(bin_dir / "fake_glab.json").write_text(json.dumps({"server": url}))
+
+env = {key: value for key, value in os.environ.items()
+       if not key.startswith(("GH_", "GITHUB_", "GITLAB_", "GITEA_", "FORGEJO_", "DUSTY_FORGE_", "GL_"))}
+env.update(
+    PATH=str(bin_dir),
+    GITLAB_TOKEN=FAKE_TOKEN,
+    DUSTY_FORGE_ORIGIN=f"{url}/{{host}}",
+    DUSTY_FORGE_STATE_DIR=str(work / "forge-state"),
+    DUSTY_FORGE_REMOTE="gitlab",
+)
+subprocess.run(["git", "remote", "remove", "gitlab"], stderr=subprocess.DEVNULL)
+subprocess.run(["git", "remote", "add", "gitlab", "https://gitlab.com/orbit/team/orbit.git"], check=True)
+try:
+    code = subprocess.call([BINARY, *sys.argv[1:]], env=env)
+finally:
+    server.terminate()
+    server.wait()
+    if os.environ.get("FORGE_GITLAB_KEEP_STATE"):
+        shutil.copy(state_path, os.environ["FORGE_GITLAB_KEEP_STATE"])
+    shutil.rmtree(work, ignore_errors=True)
+sys.exit(code)

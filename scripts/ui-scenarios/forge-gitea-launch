@@ -1,0 +1,75 @@
+#!/usr/bin/env python3
+"""Launch Dusty Git against the loopback fake Forgejo or Gitea (forge-gitea.keys, FORGE.md F4).
+
+FORGE_GITEA_WORLD picks `forgejo` (default: code.forgejo.org, Forgejo 17) or `gitea` (gitea.com,
+Gitea main). The disposable repository (the orbit fixture) gets a `forge` remote for
+`orbit/orbit` on that host; `DUSTY_FORGE_REMOTE` picks it. The fake server runs
+`--world forgejo|gitea` (tests/fixtures/forge/world_gitea.py), answering from the recorded
+fixtures. The token is the fake's (`FORGEJO_TOKEN`, direct HTTP); PATH holds only a fake `tea`
+plus the tools Dusty Git needs. Nothing reaches a real forge. DUSTY_GIT_BINARY is the built
+`dusty-git`.
+"""
+import json
+import os
+import pathlib
+import shutil
+import subprocess
+import sys
+import tempfile
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
+FIXTURES = ROOT / "tests/fixtures/forge"
+BINARY = os.environ.get("DUSTY_GIT_BINARY", str(ROOT / "target/release/dusty-git"))
+FAKE_TOKEN = "ghp_fixture0123456789abcdefABCDEF0123"
+WORLD = os.environ.get("FORGE_GITEA_WORLD", "forgejo")
+HOSTS = {
+    "forgejo": ("code.forgejo.org", "17.0.0-26-363f3dc30b+gitea-1.22.0"),
+    "gitea": ("gitea.com", "29.0.0+dev-160-g55186ca39b"),
+}
+if WORLD not in HOSTS:
+    sys.exit("FORGE_GITEA_WORLD must be forgejo or gitea")
+host, version = HOSTS[WORLD]
+
+work = pathlib.Path(tempfile.mkdtemp(prefix="forge-gitea-"))
+state_path = work / "state.json"
+probe = {"body": {"version": version}}
+state_path.write_text(json.dumps({"probes": {host: {"api/v1/version": probe}}}))
+server = subprocess.Popen([sys.executable, str(FIXTURES / "server.py"), "--state", str(state_path),
+                           "--world", WORLD], stdout=subprocess.PIPE, stdin=subprocess.DEVNULL)
+port = int(server.stdout.readline().strip())
+url = f"http://127.0.0.1:{port}"
+
+bin_dir = work / "bin"
+bin_dir.mkdir()
+for tool in ("git", "ssh", "sh", "env", "python3"):
+    found = shutil.which(tool)
+    if found:
+        (bin_dir / tool).symlink_to(found)
+shutil.copy(FIXTURES / "fake_tea.py", bin_dir / "tea")
+(bin_dir / "tea").chmod(0o755)
+(bin_dir / "fake_tea.json").write_text(json.dumps(
+    {"server": url, "logins": [{"name": "work", "url": f"https://{host}", "user": "maya", "default": True}]}))
+
+home = work / "home"
+home.mkdir()
+env = {key: value for key, value in os.environ.items()
+       if not key.startswith(("GH_", "GITHUB_", "GITLAB_", "GITEA_", "FORGEJO_", "DUSTY_FORGE_", "GL_"))}
+env.update(
+    PATH=str(bin_dir),
+    FORGEJO_TOKEN=FAKE_TOKEN,
+    XDG_DATA_HOME=str(home / "share"),
+    DUSTY_FORGE_ORIGIN=f"{url}/{{host}}",
+    DUSTY_FORGE_STATE_DIR=str(work / "forge-state"),
+    DUSTY_FORGE_REMOTE="forge",
+)
+subprocess.run(["git", "remote", "remove", "forge"], stderr=subprocess.DEVNULL)
+subprocess.run(["git", "remote", "add", "forge", f"https://{host}/orbit/orbit.git"], check=True)
+try:
+    code = subprocess.call([BINARY, *sys.argv[1:]], env=env)
+finally:
+    server.terminate()
+    server.wait()
+    if os.environ.get("FORGE_GITEA_KEEP_STATE"):
+        shutil.copy(state_path, os.environ["FORGE_GITEA_KEEP_STATE"])
+    shutil.rmtree(work, ignore_errors=True)
+sys.exit(code)

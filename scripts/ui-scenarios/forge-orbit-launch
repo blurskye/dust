@@ -1,0 +1,311 @@
+#!/usr/bin/env python3
+"""Launch Dusty Git against the loopback fake forge with the orbit world of DESIGN.md §0.1
+(forge-issues.keys, forge-prs.keys): ten issues and eight pull requests with label colours,
+reviews, checks, files and timelines whose times are relative to now, so the screenshots
+read "2h ago" like the mockups.
+
+DUSTY_GIT_BINARY is the built `dusty-git`. FORGE_ORBIT_PHASE=offline makes every read fail
+after the first session's cache (X-OFFLINE). Nothing here reaches a real forge.
+"""
+import datetime
+import json
+import os
+import pathlib
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
+FIXTURES = ROOT / "tests/fixtures/forge"
+BINARY = os.environ.get("DUSTY_GIT_BINARY", str(ROOT / "target/release/dusty-git"))
+NOW = datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0)
+
+
+def ago(**delta):
+    return (NOW - datetime.timedelta(**delta)).isoformat().replace("+00:00", "Z")
+
+
+LABELS = {
+    "bug": "d73a4a", "enhancement": "a2eeef", "design": "c5a3f2", "accessibility": "7aa2f7",
+    "documentation": "0075ca", "priority: high": "e4c46a", "priority: medium": "f0a35e",
+    "recovery": "e4c46a",
+}
+
+
+def labels(*names):
+    return [{"name": name, "color": LABELS[name]} for name in names]
+
+
+def person(login):
+    return {"login": login}
+
+
+# The fake forge merges each entry over its own default item; clear what orbit does not have.
+CLEAR = dict(assignees=[], milestone=None, projectItems=[], closedByPullRequestsReferences=[], comments=[])
+
+
+ISSUE_ONE_BODY = """## Context
+When a worker reconnects, tasks already in the queue can remain stalled until another task is submitted.
+
+## Steps to reproduce
+1. Queue two tasks while the worker is offline.
+2. Reconnect the worker.
+3. Watch the queued tasks remain idle.
+
+## Acceptance criteria
+- [ ] Queued tasks resume after reconnect.
+- [ ] Each task runs once, in queue order.
+- [x] Add a regression test for worker reconnect.
+"""
+
+ISSUES = [
+    dict(CLEAR, number=20, title="Support reduced-motion terminal themes", author=person("maya"),
+         labels=labels("design", "accessibility"), updatedAt=ago(seconds=20), createdAt=ago(seconds=20),
+         body="Some terminals render the spinner as flicker.\n\nOffer a **reduced motion** theme flag."),
+    dict(CLEAR, number=19, title="Preserve scroll position in long logs", author=person("alex"),
+         labels=labels("bug"), updatedAt=ago(minutes=18), createdAt=ago(hours=5),
+         body="Scrolling a long job log jumps back to the top when new lines arrive."),
+    dict(CLEAR, number=18, title="Add keyboard shortcuts to issue filters", author=person("sam"),
+         labels=labels("enhancement"), updatedAt=ago(hours=1), createdAt=ago(days=1),
+         body="`[` and `]` should move between saved sections."),
+    dict(CLEAR, number=17, title="Improve empty repository guidance", author=person("nina"),
+         labels=labels("design"), updatedAt=ago(hours=2), createdAt=ago(days=2), body="Say what to do next."),
+    dict(CLEAR, number=16, title="Restore focus after closing a diff", author=person("leo"),
+         labels=labels("bug"), updatedAt=ago(hours=3), createdAt=ago(days=2), body="Focus returns to the rail."),
+    dict(CLEAR, number=15, title="Show milestone progress in issue list", author=person("maya"),
+         labels=labels("enhancement"), updatedAt=ago(hours=5), createdAt=ago(days=3), body="A small bar per milestone."),
+    dict(CLEAR, number=14, title="Clarify failed check summaries", author=person("alex"),
+         labels=labels("documentation"), updatedAt=ago(days=1), createdAt=ago(days=4), body="Name the failing step."),
+    dict(CLEAR, number=12, title="Respect terminal color preferences", author=person("nina"),
+         labels=labels("accessibility"), updatedAt=ago(days=1, hours=2), createdAt=ago(days=5), body="Honour NO_COLOR."),
+    dict(CLEAR, number=7, title="Reconnect loses queued progress", author=person("nina"),
+         labels=labels("bug", "priority: medium"), updatedAt=ago(days=2), createdAt=ago(days=6),
+         comments=[{"body": "Seen on 0.4.0 as well."}], body="Progress counters reset after a reconnect."),
+    dict(CLEAR, number=1, title="Queue stalls after a worker reconnects", author=person("alex"),
+         labels=labels("bug", "priority: high"), updatedAt=ago(minutes=38), createdAt=ago(hours=2),
+         assignees=[person("maya")], milestone={"title": "0.5 reliability"},
+         comments=[{"body": "a"}, {"body": "b"}, {"body": "c"}],
+         closedByPullRequestsReferences=[{"number": 11, "title": "Recover queued tasks after worker reconnect"}],
+         body=ISSUE_ONE_BODY),
+]
+
+TIMELINE_ONE = [
+    {"event": "labeled", "actor": person("alex"), "label": {"name": "bug", "color": LABELS["bug"]},
+     "created_at": ago(hours=2)},
+    {"event": "commented", "user": person("alex"), "created_at": ago(hours=2), "node_id": "C1",
+     "body": "When a worker reconnects, queued tasks can stay pending.\n"
+             "Expected: queued tasks resume after the connection returns."},
+    {"event": "labeled", "actor": person("sam"), "label": {"name": "priority: high", "color": LABELS["priority: high"]},
+     "created_at": ago(hours=1, minutes=40)},
+    {"event": "assigned", "actor": person("sam"), "assignee": person("maya"), "created_at": ago(hours=1, minutes=30)},
+    {"event": "commented", "user": person("ari"), "created_at": ago(minutes=38), "node_id": "C2",
+     "body": "I can reproduce this with three queued tasks. Reconnect twice while the worker is idle:\n\n"
+             "```sh\n$ orbit worker disconnect\n$ orbit worker reconnect\n$ orbit worker reconnect\n```\n\n"
+             "Tasks remain queued until the worker restarts."},
+    {"event": "cross-referenced", "actor": person("alex"), "created_at": ago(minutes=30),
+     "source": {"issue": {"number": 11, "title": "Recover queued tasks after worker reconnect",
+                          "pull_request": {"url": "x"},
+                          "html_url": "https://github.com/orbit-dev/orbit/pull/11"}}},
+    {"event": "commented", "user": person("sam"), "created_at": ago(minutes=12), "node_id": "C3",
+     "body": "> Tasks remain queued until the worker restarts.\n\nConfirmed on `main`; the fix in #11 covers it."},
+]
+
+
+def check(name, conclusion, run, seconds=3):
+    started = NOW - datetime.timedelta(minutes=9)
+    return {"__typename": "CheckRun", "name": name, "conclusion": conclusion,
+            "status": "COMPLETED" if conclusion else "IN_PROGRESS",
+            "startedAt": started.isoformat().replace("+00:00", "Z"),
+            "completedAt": (started + datetime.timedelta(seconds=seconds)).isoformat().replace("+00:00", "Z"),
+            "detailsUrl": f"https://github.com/orbit-dev/orbit/actions/runs/{run}/job/{run * 10}",
+            "workflowName": "Quality checks"}
+
+
+PASSED = [check("Python tests", "SUCCESS", 6), check("Lint", "SUCCESS", 6, 2), check("Docs", "SUCCESS", 6, 5)]
+BACKOFF_BODY = """## Summary
+Cap retry delays at sixty seconds, even after a long outage. Bound the exponent before computing the delay so large attempt counts remain cheap.
+
+## Changes
+- Clamp the attempt to the range 0–6.
+- Keep negative attempts at a one-second delay.
+"""
+
+
+def pr(number, title, author, decision, checks, add, delete, updated, **extra):
+    entry = dict(CLEAR, closingIssuesReferences=[], reviews=[], reviewRequests=[], commits=[
+                     {"oid": f"{number:02d}c91d2" + "0" * 33, "messageHeadline": title, "messageBody": "",
+                      "committedDate": updated, "authors": [{"login": author}]}],
+                 mergeable="MERGEABLE", headRefOid=f"{number:02d}" + "a" * 38,
+                 number=number, title=title, author=person(author), reviewDecision=decision,
+                 statusCheckRollup=checks, additions=add, deletions=delete, changedFiles=2,
+                 updatedAt=updated, createdAt=updated, labels=[], isDraft=False,
+                 headRefName=f"feat/{number}", baseRefName="main", mergeStateStatus="BLOCKED",
+                 files=[{"path": "orbit/queue.py", "additions": add - 2 if add > 2 else add, "deletions": delete},
+                        {"path": "tests/test_queue.py", "additions": 2 if add > 2 else 0, "deletions": 0}],
+                 body=f"{title}.")
+    entry.update(extra)
+    return entry
+
+
+PRS = [
+    pr(13, "Clamp exponential backoff to sixty seconds", "maya", "REVIEW_REQUIRED", PASSED, 6, 2, ago(minutes=9),
+       labels=labels("priority: high"), headRefName="fix/backoff", reviewRequests=["alex", "sam"],
+       body=BACKOFF_BODY, commits=[
+           {"oid": "a7c91d2" + "0" * 33, "messageHeadline": "Bound retry exponent", "messageBody": "",
+            "committedDate": ago(hours=2), "authors": [{"login": "maya"}]},
+           {"oid": "bf028a1" + "0" * 33, "messageHeadline": "Add backoff regression test", "messageBody": "",
+            "committedDate": ago(hours=3), "authors": [{"login": "maya"}]}],
+       files=[{"path": "orbit/queue.py", "additions": 4, "deletions": 1},
+              {"path": "tests/test_queue.py", "additions": 2, "deletions": 1}],
+       closingIssuesReferences=[{"number": 1, "title": "Queue stalls after a worker reconnects"}]),
+    pr(17, "Export completed task history as JSON", "leo", "REVIEW_REQUIRED", PASSED, 13, 0, ago(minutes=40),
+       reviewRequests=["maya"]),
+    pr(14, "Introduce a quiet status indicator", "nina", "APPROVED", PASSED, 11, 0, ago(hours=2),
+       mergeStateStatus="CLEAN", reviews=[{"author": person("maya"), "state": "APPROVED", "body": "Looks good."}]),
+    pr(12, "Add fuzzy matching for task history", "sam", "CHANGES_REQUESTED", PASSED, 13, 0, ago(hours=5),
+       reviews=[{"author": person("maya"), "state": "CHANGES_REQUESTED", "body": "Please cover empty queries."}]),
+    pr(11, "Recover queued tasks after worker reconnect", "alex", "REVIEW_REQUIRED", PASSED, 12, 0, ago(hours=8),
+       reviewRequests=["maya"]),
+    pr(18, "Exercise the retry-limit regression check", "leo", "REVIEW_REQUIRED",
+       [check("Python tests", "FAILURE", 7), check("Lint", "SUCCESS", 7, 2)], 17, 0, ago(days=1),
+       reviewRequests=["maya"]),
+    pr(15, "Write a focused contributor quickstart", "nina", "APPROVED", PASSED, 11, 0, ago(days=1, hours=3)),
+    pr(16, "Batch terminal progress notifications", "sam", "", [check("Python tests", None, 8)], 15, 0,
+       ago(days=2), isDraft=True),
+]
+
+DIFF = """diff --git a/orbit/queue.py b/orbit/queue.py
+index 1111111..2222222 100644
+--- a/orbit/queue.py
++++ b/orbit/queue.py
+@@ -10,7 +10,9 @@ import time
+ def retry_delay(attempt: int) -> int:
+     \"\"\"Return retry delay in seconds.\"\"\"
+
+-    return min(2 ** max(0, attempt), 60)
++    # Cap the exponent before computing the delay.
++    bounded_attempt = min(max(0, attempt), 6)
++    return min(1 << bounded_attempt, 60)
+
+
+ RETRY_LIMIT = 8
+diff --git a/tests/test_queue.py b/tests/test_queue.py
+index 3333333..4444444 100644
+--- a/tests/test_queue.py
++++ b/tests/test_queue.py
+@@ -1,4 +1,5 @@
+ from orbit.queue import retry_delay
+
+-def test_delay():
++def test_delay_is_capped():
+     assert retry_delay(3) == 8
++    assert retry_delay(40) == 60
+"""
+
+# Context lines that are blank in the source keep their one-space marker (editors strip it).
+DIFF = "\n".join(line or " " for line in DIFF.split("\n")[:-1]) + "\n"
+
+# Every issue's own short history: the author labelled it when opening it.
+TIMELINES = {str(entry["number"]): [
+    {"event": "labeled", "actor": entry["author"], "label": label, "created_at": entry["createdAt"]}
+    for label in entry["labels"]] for entry in ISSUES}
+TIMELINES["1"] = TIMELINE_ONE
+TIMELINES["13"] = [
+    {"event": "labeled", "actor": person("maya"), "label": labels("priority: high")[0], "created_at": ago(hours=3)},
+    {"event": "review_requested", "actor": person("maya"), "requested_reviewer": person("alex"),
+     "created_at": ago(hours=3)},
+    {"event": "commented", "user": person("alex"), "created_at": ago(hours=1), "node_id": "C13",
+     "body": "Does this keep **negative** attempts at one second? The old code raised on `2 ** -1`."},
+    {"event": "commented", "user": person("maya"), "created_at": ago(minutes=40), "node_id": "C14",
+     "body": "Yes: `max(0, attempt)` clamps them first, and `test_delay_is_capped` covers it."},
+]
+TIMELINES["11"] = []
+
+
+def thread(ident, path, line, author, body, resolved=False):
+    return {"id": ident, "isResolved": resolved, "comments": {"nodes": [
+        {"author": person(author), "body": body, "path": path, "line": line, "originalLine": line,
+         "createdAt": ago(minutes=50), "commit": {"oid": "13" + "a" * 38}}]}}
+
+
+# Review threads: the fake forge keys them by `owner/name#number`; every PR gets its own.
+THREADS = {f"orbit-dev/orbit#{entry['number']}": [] for entry in PRS}
+THREADS["orbit-dev/orbit#13"] = [
+    thread("T1", "orbit/queue.py", 14, "alex", "Could the bound live in a named constant?"),
+    thread("T2", "tests/test_queue.py", 5, "sam", "Nice: this pins the cap.", resolved=True),
+]
+
+def notification(ident, reason, kind, number, title, unread=True, **delta):
+    path = {"PullRequest": "pulls", "Issue": "issues"}.get(kind)
+    url = f"https://api.github.com/repos/orbit-dev/orbit/{path}/{number}" if path else None
+    return {"id": ident, "unread": unread, "reason": reason, "updated_at": ago(**delta),
+            "repository": {"full_name": "orbit-dev/orbit"},
+            "subject": {"title": title, "type": kind, "url": url, "latest_comment_url": None}}
+
+
+world = {
+    "repository": "orbit-dev/orbit",
+    "comments": [],
+    "posted_at": ago(seconds=5),
+    "issues": ISSUES,
+    "prs": PRS,
+    "timelines": TIMELINES,
+    "filter_terms": True,
+    # The signed-in user (`@me`): Review and Mine count what maya is asked to review and wrote.
+    "viewer": "maya",
+    "review_threads": THREADS,
+    "diffs": {"13": DIFF},
+    "diff": DIFF,
+    # §3.35: the signed-in user's inbox (GitHub `notifications` threads).
+    "notifications": [
+        notification("8101", "review_requested", "PullRequest", 13,
+                     "Clamp exponential backoff to sixty seconds", minutes=2),
+        notification("8102", "mention", "Issue", 7, "Reconnect loses queued progress", minutes=14),
+        notification("8103", "ci_activity", "CheckSuite", None,
+                     "Quality checks failed for fix/ci-regression", minutes=26),
+        notification("8104", "comment", "PullRequest", 11,
+                     "Recover queued tasks after worker reconnect", hours=2),
+        notification("8105", "review_requested", "PullRequest", 18,
+                     "Exercise the retry-limit regression check", hours=3, unread=False),
+        notification("8106", "author", "Issue", 1, "Queue stalls after a worker reconnects", days=1,
+                     unread=False),
+    ],
+}
+
+work = pathlib.Path(tempfile.mkdtemp(prefix="forge-orbit-"))
+state_path = work / "state.json"
+state_path.write_text(json.dumps(world))
+server = subprocess.Popen([sys.executable, str(FIXTURES / "server.py"), "--state", str(state_path)],
+                          stdout=subprocess.PIPE, stdin=subprocess.DEVNULL)
+port = int(server.stdout.readline().strip())
+url = f"http://127.0.0.1:{port}"
+
+bin_dir = work / "bin"
+bin_dir.mkdir()
+for tool in ("git", "ssh", "sh", "env", "python3"):
+    found = shutil.which(tool)
+    if found:
+        (bin_dir / tool).symlink_to(found)
+shutil.copy(FIXTURES / "fake_gh.py", bin_dir / "gh")
+(bin_dir / "gh").chmod(0o755)
+(bin_dir / "fake_gh.json").write_text(json.dumps({"server": url}))
+
+env = {key: value for key, value in os.environ.items()
+       if not key.startswith(("GH_", "GITHUB_", "GITLAB_", "GITEA_", "FORGEJO_", "DUSTY_FORGE_", "GL_"))}
+env.update(
+    PATH=str(bin_dir),
+    DUSTY_FORGE_API_BASE=f"{url}/{{host}}/api/v3",
+    DUSTY_FORGE_ORIGIN=f"{url}/{{host}}",
+    DUSTY_FORGE_STATE_DIR=str(work / "forge-state"),
+    DUSTY_FORGE_CACHE_DIR=str(work / "forge-cache"),
+)
+try:
+    code = subprocess.call([BINARY, *sys.argv[1:]], env=env)
+finally:
+    time.sleep(0.2)
+    server.terminate()
+    server.wait()
+    shutil.rmtree(work, ignore_errors=True)
+sys.exit(code)

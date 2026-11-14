@@ -1,0 +1,45 @@
+{
+  "id": 42,
+  "name": "test",
+  "stage": "test",
+  "status": "failed",
+  "ref": "main",
+  "allow_failure": false,
+  "created_at": "2026-11-14T05:00:33Z",
+  "started_at": "2026-11-14T05:01:33Z",
+  "finished_at": "2026-11-14T05:06:33Z",
+  "duration": 300.0,
+  "failure_reason": "script_failure",
+  "user": {
+    "id": 1001,
+    "username": "maya",
+    "name": "Maya",
+    "state": "active",
+    "avatar_url": "https://gitlab.com/avatars/maya.png",
+    "web_url": "https://gitlab.com/maya"
+  },
+  "commit": {
+    "id": "c92ad11000000000000000000000000000000000",
+    "short_id": "c92ad11",
+    "title": "Keep drafts across reloads"
+  },
+  "pipeline": {
+    "id": 91,
+    "iid": 12,
+    "project_id": 4242,
+    "sha": "c92ad11000000000000000000000000000000000",
+    "ref": "main",
+    "status": "failed",
+    "web_url": "https://gitlab.com/orbit/team/orbit/-/pipelines/91"
+  },
+  "runner": {
+    "id": 7,
+    "description": "shared-runner",
+    "is_shared": true
+  },
+  "web_url": "https://gitlab.com/orbit/team/orbit/-/jobs/42",
+  "artifacts": [],
+  "tag_list": [
+    "docker"
+  ]
+}

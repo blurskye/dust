@@ -1,0 +1,52 @@
+{
+  "data": {
+    "project": {
+      "pipeline": {
+        "iid": "2013",
+        "status": "SUCCESS",
+        "jobs": {
+          "nodes": [
+            {
+              "id": "gid://gitlab/Ci::Build/17922587026",
+              "name": "dependency-scanning-0",
+              "status": "SUCCESS",
+              "stage": {
+                "name": "test"
+              },
+              "allowFailure": true,
+              "retryable": true,
+              "duration": 16,
+              "startedAt": "2026-11-11T04:06:24Z",
+              "finishedAt": "2026-11-11T04:06:40Z",
+              "webPath": "/orbit/team/orbit/-/jobs/17922587026",
+              "trace": {
+                "htmlSummary": "<span class=\"term-fg-yellow\">WARNING: **/gl-sbom-*.cdx.json: no matching files. Ensure that the artifact path is relative to the working directory (/builds/orbit/team/orbit)</span><span> <br/></span><span class=\"term-fg-l-red term-bold\">ERROR: No files to upload                         </span><span> <br/></span><span class=\"term-fg-l-green term-bold\">Uploading artifacts...</span><span><br/></span><span class=\"term-fg-yellow\">WARNING: gl-dependency-scanning-report.json: no matching files. Ensure that the artifact path is relative to the working directory (/builds/orbit/team/orbit)</span><span> <br/></span><span class=\"term-fg-l-red term-bold\">ERROR: No files to upload                         </span><span> <br/></span><div class=\"section-start\" data-timestamp=\"1794370499\" data-section=\"cleanup-file-variables\" role=\"button\"></div><span class=\"term-fg-l-cyan term-bold section section-header js-s-cleanup-file-variables\">Cleaning up project directory and file based variables</span><span class=\"section section-header js-s-cleanup-file-variables\"><br/></span><div class=\"section-end\" data-section=\"cleanup-file-variables\"></div><span><br/></span><span class=\"term-fg-l-green term-bold\">Job succeeded</span><span><br/></span>"
+              }
+            },
+            {
+              "id": "gid://gitlab/Ci::Build/17922587025",
+              "name": "dependency-scanning-profile-0",
+              "status": "SUCCESS",
+              "stage": {
+                "name": "application-security-testing"
+              },
+              "allowFailure": true,
+              "retryable": true,
+              "duration": 26,
+              "startedAt": "2026-11-11T04:05:56Z",
+              "finishedAt": "2026-11-11T04:06:23Z",
+              "webPath": "/orbit/team/orbit/-/jobs/17922587025",
+              "trace": {
+                "htmlSummary": "<span class=\"term-fg-yellow\">WARNING: **/gl-sbom-*.cdx.json: no matching files. Ensure that the artifact path is relative to the working directory (/builds/orbit/team/orbit)</span><span> <br/></span><span class=\"term-fg-l-red term-bold\">ERROR: No files to upload                         </span><span> <br/></span><span class=\"term-fg-l-green term-bold\">Uploading artifacts...</span><span><br/></span><span class=\"term-fg-yellow\">WARNING: gl-dependency-scanning-report.json: no matching files. Ensure that the artifact path is relative to the working directory (/builds/orbit/team/orbit)</span><span> <br/></span><span class=\"term-fg-l-red term-bold\">ERROR: No files to upload                         </span><span> <br/></span><div class=\"section-start\" data-timestamp=\"1794370481\" data-section=\"cleanup-file-variables\" role=\"button\"></div><span class=\"term-fg-l-cyan term-bold section section-header js-s-cleanup-file-variables\">Cleaning up project directory and file based variables</span><span class=\"section section-header js-s-cleanup-file-variables\"><br/></span><div class=\"section-end\" data-section=\"cleanup-file-variables\"></div><span><br/></span><span class=\"term-fg-l-green term-bold\">Job succeeded</span><span><br/></span>"
+              }
+            }
+          ],
+          "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": "eyJpZCI6IjE3OTIyNTg3MDI1In0"
+          }
+        }
+      }
+    }
+  }
+}

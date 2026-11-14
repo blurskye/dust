@@ -1,0 +1,26 @@
+[
+  {
+    "id": 2993171647,
+    "iid": 2,
+    "project_id": 88123353,
+    "sha": "cd2d1286c97c1b78e3f6e6f607d9841136eb1ead",
+    "ref": "renovate-ci-dependencies",
+    "status": "success",
+    "source": "merge_request_event",
+    "created_at": "2026-10-27T07:34:10.282Z",
+    "updated_at": "2026-10-27T07:37:38.628Z",
+    "web_url": "https://gitlab.com/maya/orbit/-/pipelines/2993171647"
+  },
+  {
+    "id": 2991300214,
+    "iid": 1,
+    "project_id": 88123353,
+    "sha": "aef20d9e895fcb8ff014b03a395612ee730d55ce",
+    "ref": "renovate-ci-dependencies",
+    "status": "success",
+    "source": "merge_request_event",
+    "created_at": "2026-10-26T18:50:26.550Z",
+    "updated_at": "2026-10-26T19:00:53.524Z",
+    "web_url": "https://gitlab.com/maya/orbit/-/pipelines/2991300214"
+  }
+]

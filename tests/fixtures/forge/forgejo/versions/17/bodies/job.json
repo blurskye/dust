@@ -1,0 +1,39 @@
+{
+  "id": 424038,
+  "run_id": 200481,
+  "attempt": 1,
+  "handle": "d16a5e84-6dae-4061-a819-5f1236bf6650",
+  "repo_id": 2,
+  "owner_id": 3,
+  "name": "arm64",
+  "html_url": "https://code.forgejo.org/orbit/orbit/actions/runs/24108/jobs/0/attempt/1",
+  "needs": [
+    "__namespace.10ca442981b5e78305e863a4ddb83aafddd99a3481e29bc92745f1b2b3190706.build",
+    "__namespace.10ca442981b5e78305e863a4ddb83aafddd99a3481e29bc92745f1b2b3190706.build-unsupported-platforms",
+    "__namespace.10ca442981b5e78305e863a4ddb83aafddd99a3481e29bc92745f1b2b3190706.runner-exec-tests-with-docker",
+    "__namespace.10ca442981b5e78305e863a4ddb83aafddd99a3481e29bc92745f1b2b3190706.integration-tests-with-docker",
+    "__namespace.10ca442981b5e78305e863a4ddb83aafddd99a3481e29bc92745f1b2b3190706.integration-tests-with-docker",
+    "__namespace.10ca442981b5e78305e863a4ddb83aafddd99a3481e29bc92745f1b2b3190706.integration-tests-with-podman",
+    "__namespace.10ca442981b5e78305e863a4ddb83aafddd99a3481e29bc92745f1b2b3190706.validate-mocks",
+    "__namespace.10ca442981b5e78305e863a4ddb83aafddd99a3481e29bc92745f1b2b3190706.validate-pre-commit"
+  ],
+  "runs_on": [],
+  "task_id": 336092,
+  "status": "failure",
+  "steps": [
+    {
+      "number": 0,
+      "name": "Set up job",
+      "status": "failure",
+      "started": "2026-11-14T05:19:29Z",
+      "stopped": "2026-11-14T05:19:29Z"
+    },
+    {
+      "number": 1,
+      "name": "Complete job",
+      "status": "cancelled",
+      "started": "2026-11-14T05:19:29Z",
+      "stopped": "2026-11-14T05:19:29Z"
+    }
+  ]
+}

@@ -1,0 +1,51 @@
+# DESIGN.md §3.33/§3.34 (screens 34, 35, 47): the Issues list and reader on the orbit world.
+#   scripts/ui-scenarios/make-orbit-fixture.sh /tmp/orbit
+#   DUSTY_GIT_BINARY=$PWD/target/debug/dusty-git scripts/ui-shot scripts/ui-scenarios/forge-issues.keys \
+#     --binary scripts/ui-scenarios/forge-orbit-launch --cwd /tmp/orbit --out target/ui-shots/forge-issues \
+#     --size 190x48 --size 120x36 --size 100x30
+wait 1500
+# Git → Pull requests → Issues
+type >
+wait 100
+type >
+wait 900
+shot issues-list
+# #1 is the last row; open it in the reader
+key end
+wait 700
+key enter
+wait 700
+shot issue-overview
+type ]
+wait 500
+shot issue-discussion
+type ]
+wait 500
+shot issue-activity
+type C
+wait 300
+type Confirmed on main as well.
+wait 200
+shot issue-reply
+key escape
+wait 200
+type 2
+wait 200
+type ]
+wait 600
+shot issues-section
+type /
+wait 200
+type queue
+wait 600
+shot issues-filter
+key escape
+wait 300
+type x
+wait 400
+shot issue-close
+key escape
+wait 200
+type ?
+wait 300
+shot issues-help

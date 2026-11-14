@@ -59,15 +59,8 @@ impl Workspace {
         let head = self.head_repository();
         let Some(reply) = self.cache.get(&Key::PullRequestDefaults) else {
             self.pending_pr = true;
-            self.enqueue(
-                Key::PullRequestDefaults,
-                vec![
-                    "api".into(),
-                    "--hostname".into(),
-                    self.host.clone(),
-                    format!("repos/{head}"),
-                ],
-            );
+            let read = self.read(Read::RepositoryNamed(head));
+            self.enqueue(Key::PullRequestDefaults, read, false);
             self.notice = "Loading fork and upstream repositories…".into();
             return Ok(None);
         };
@@ -106,12 +99,30 @@ impl Workspace {
         head_branch.custom_choices = true;
         self.pending_pr = false;
         self.notice.clear();
+        // §3.31: the description starts from the base branch's pull request template; when
+        // the repository keeps several, a Template picker swaps between them.
+        let templates = templates(&self.root, self.forge_kind());
+        let description = templates
+            .first()
+            .map(|(_, text)| text.clone())
+            .unwrap_or_default();
+        let picker = (templates.len() > 1).then(|| {
+            let names = templates.iter().map(|(path, _)| path.clone()).collect::<Vec<_>>();
+            let mut field = actions::choice("Template", &names[0], &names.iter().map(String::as_str).collect::<Vec<_>>());
+            field.custom_choices = false;
+            field
+        });
+        let title = if self.forge_kind() == Some(crate::forge::provider::ProviderKind::GitLab) {
+            "Create merge request"
+        } else {
+            "Create pull request"
+        };
         Ok(Some(self.form(
-            "Create pull request",
+            title,
             Action::CreatePullRequest,
-            vec![
+            [
                 actions::field("Title", "", true, false),
-                actions::field("Description", "", false, true),
+                actions::field("Description", &description, false, true),
                 base_field,
                 actions::field(
                     "Base branch",
@@ -127,7 +138,10 @@ impl Workspace {
                     &["Already pushed", "Push local branch"],
                 ),
                 actions::choice("Draft", "true", &["true", "false"]),
-            ],
+            ]
+            .into_iter()
+            .chain(picker)
+            .collect(),
         )))
     }
 
@@ -136,6 +150,8 @@ impl Workspace {
         values: Vec<String>,
     ) -> Result<Form, String> {
         self.save_draft(&Action::CreatePullRequest, values.clone());
+        // The Template picker (last, when shown) only seeded the description.
+        let values = if values.len() == 9 { values[..8].to_vec() } else { values };
         let [
             title,
             body,
@@ -247,5 +263,55 @@ impl Workspace {
 
     pub fn take_form(&mut self) -> Option<Form> {
         self.ready_form.take()
+    }
+}
+
+/// The base branch's pull request templates (path, text), the forge's default first.
+fn templates(
+    root: &std::path::Path,
+    kind: Option<crate::forge::provider::ProviderKind>,
+) -> Vec<(String, String)> {
+    use crate::forge::template;
+    let kind = kind.unwrap_or(crate::forge::provider::ProviderKind::GitHub);
+    let remote = crate::forge::detect::choose_remote(root).ok().map(|remote| remote.remote);
+    let base = template::base_ref(root, remote.as_deref());
+    let Ok(repository) = git2::Repository::open(root) else {
+        return Vec::new();
+    };
+    template::candidates(root, kind, &base)
+        .into_iter()
+        .filter_map(|path| {
+            let blob = repository
+                .revparse_single(&format!("{base}:{path}"))
+                .ok()?
+                .peel_to_blob()
+                .ok()?;
+            let text = String::from_utf8_lossy(blob.content()).into_owned();
+            (!text.trim().is_empty()).then_some((path, text))
+        })
+        .take(16)
+        .collect()
+}
+
+/// A new Template choice replaces the description while it is still an untouched template
+/// (or empty); text the author wrote is never thrown away.
+pub(in crate::git::screen) fn template_chosen(workspace: &Workspace, form: &mut Form) {
+    let (root, kind) = (workspace.root.as_path(), workspace.forge_kind());
+    if !matches!(form.action, FormAction::Github(Action::CreatePullRequest)) {
+        return;
+    }
+    let Some(chosen) = form.fields.iter().find(|field| field.label == "Template").map(|field| field.input.input.clone()) else {
+        return;
+    };
+    let templates = templates(root, kind);
+    let Some((_, text)) = templates.iter().find(|(path, _)| *path == chosen) else {
+        return;
+    };
+    if let Some(description) = form.fields.iter_mut().find(|field| field.label == "Description") {
+        let current = description.input.input.trim().to_owned();
+        if current.is_empty() || templates.iter().any(|(_, template)| template.trim() == current) {
+            description.input.input = text.clone();
+            description.input.cursor = 0;
+        }
     }
 }

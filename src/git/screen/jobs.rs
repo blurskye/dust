@@ -1,13 +1,28 @@
 //! Bounded Git CLI requests for history, previews and operations not owned by a Git worker.
 use crate::process::{JobEvent, JobId, JobPolicy, JobRequest, JobStream, JobSupervisor};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::ffi::OsString;
 use std::path::Path;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
+
+/// Git jobs in flight across the process; the forge's cache-warming worker waits while this
+/// is non-zero so it never competes with the user's Git work (FORGE.md §7.2).
+static RUNNING: AtomicUsize = AtomicUsize::new(0);
+
+pub(super) fn running() -> usize {
+    RUNNING.load(Ordering::Relaxed)
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum Request {
     History,
+    Numstat,
+    /// `diff --cached --numstat`: what the next commit contains.
+    StagedNumstat,
+    /// `diff --cached`: the commit sheet's staged patch.
+    StagedPatch,
+    Reflog,
     Stashes,
     Tags,
     Remotes,
@@ -40,7 +55,24 @@ impl Default for Jobs {
     }
 }
 
+impl Drop for Jobs {
+    fn drop(&mut self) {
+        self.pending.clear();
+        self.count();
+    }
+}
+
 impl Jobs {
+    fn count(&self) {
+        RUNNING.store(self.pending.len(), Ordering::Relaxed);
+    }
+
+    pub fn preview_loading(&self) -> bool {
+        self.pending
+            .values()
+            .any(|pending| matches!(pending.request, Request::Preview | Request::CommitInfo))
+    }
+
     pub fn cancel_reads(&mut self) {
         let ids = self
             .pending
@@ -52,6 +84,7 @@ impl Jobs {
             self.pending.remove(&id);
         }
         self.preview = None;
+        self.count();
     }
 
     pub fn cancel_preview(&mut self) {
@@ -59,6 +92,7 @@ impl Jobs {
             let _ = self.supervisor.cancel(id);
             self.pending.remove(&id);
         }
+        self.count();
     }
     pub fn start(
         &mut self,
@@ -66,10 +100,28 @@ impl Jobs {
         request: Request,
         args: Vec<OsString>,
     ) -> Result<(), String> {
+        self.start_with_input(root, request, args, None)
+    }
+
+    pub fn start_with_input(
+        &mut self,
+        root: &Path,
+        request: Request,
+        args: Vec<OsString>,
+        stdin: Option<Vec<u8>>,
+    ) -> Result<(), String> {
         if request == Request::Preview {
             self.cancel_preview();
         }
-        if matches!(request, Request::History | Request::CommitInfo) {
+        if matches!(
+            request,
+            Request::History
+                | Request::Numstat
+                | Request::StagedNumstat
+                | Request::StagedPatch
+                | Request::Reflog
+                | Request::CommitInfo
+        ) {
             let ids = self
                 .pending
                 .iter()
@@ -90,7 +142,21 @@ impl Jobs {
         .into_iter()
         .map(Into::into)
         .collect();
+        if request != Request::Write {
+            // Optional-lock suppression alone does not prevent diff's stat refresh
+            // with all fsmonitor configurations. Reads must leave the index alone.
+            arguments.extend(
+                ["-c", "diff.autoRefreshIndex=false"]
+                    .into_iter()
+                    .map(Into::into),
+            );
+        }
         arguments.extend(args);
+        let mut environment = crate::git::command::environment();
+        if request != Request::Write {
+            // Even a content-clean diff can refresh stat data in the index.
+            environment.insert("GIT_OPTIONAL_LOCKS".into(), "0".into());
+        }
         let id = self
             .supervisor
             .start(JobRequest {
@@ -99,12 +165,9 @@ impl Jobs {
                 argv0: None,
                 arguments,
                 cwd: root.into(),
-                environment: BTreeMap::from([
-                    ("GIT_TERMINAL_PROMPT".into(), "0".into()),
-                    ("GIT_PAGER".into(), "cat".into()),
-                ]),
+                environment,
                 root_revision: 0,
-                stdin: None,
+                stdin,
                 policy: JobPolicy {
                     maximum_output_bytes: 2 * 1024 * 1024,
                     timeout: Duration::from_secs(30),
@@ -124,6 +187,7 @@ impl Jobs {
         if request == Request::Preview {
             self.preview = Some(id);
         }
+        self.count();
         Ok(())
     }
 
@@ -157,9 +221,12 @@ impl Jobs {
                         let result = if timed_out {
                             Err("Git command timed out".into())
                         } else if pending.truncated
-                            && matches!(pending.request, Request::Files | Request::CommitInfo)
+                            && matches!(
+                                pending.request,
+                                Request::Files | Request::CommitInfo | Request::Reflog
+                            )
                         {
-                            Err("Repository file listing exceeds the preview limit".into())
+                            Err("Git response exceeds the preview limit".into())
                         } else if code == Some(0) {
                             let mut text = String::from_utf8_lossy(&pending.stdout).into_owned();
                             if pending.truncated {
@@ -167,7 +234,17 @@ impl Jobs {
                             }
                             Ok(text)
                         } else {
-                            Err(String::from_utf8_lossy(&pending.stderr).trim().to_owned())
+                            let stderr = String::from_utf8_lossy(&pending.stderr);
+                            let message = if stderr.trim().is_empty() {
+                                String::from_utf8_lossy(&pending.stdout).trim().to_owned()
+                            } else {
+                                stderr.trim().to_owned()
+                            };
+                            Err(if message.is_empty() {
+                                "Git command failed".into()
+                            } else {
+                                message
+                            })
                         };
                         replies.push((pending.request, result));
                     }
@@ -180,6 +257,145 @@ impl Jobs {
                 JobEvent::Started { .. } => {}
             }
         }
+        self.count();
         replies
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Jobs, Request};
+    use std::fs::{self, File};
+    use std::path::Path;
+    use std::process::Command;
+    use std::time::{Duration, Instant, UNIX_EPOCH};
+
+    fn git(root: &Path, args: &[&str]) -> Vec<u8> {
+        let output =
+            Command::new(crate::process::discover_executable("git").expect("Git installed"))
+                .current_dir(root)
+                .env_clear()
+                .envs(crate::git::command::environment())
+                .env("GIT_OPTIONAL_LOCKS", "1")
+                .args(args)
+                .output()
+                .unwrap();
+        assert!(
+            output.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        output.stdout
+    }
+
+    fn committed_file() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        git(root, &["init", "--template="]);
+        git(root, &["config", "user.name", "Jobs test"]);
+        git(root, &["config", "user.email", "jobs@example.invalid"]);
+        git(root, &["config", "commit.gpgsign", "false"]);
+        git(root, &["config", "core.autocrlf", "false"]);
+        git(root, &["config", "core.fsmonitor", "false"]);
+        let hooks = root.join("empty-hooks");
+        fs::create_dir(&hooks).unwrap();
+        git(root, &["config", "core.hooksPath", hooks.to_str().unwrap()]);
+        let file = root.join("tracked.txt");
+        fs::write(&file, b"committed\n").unwrap();
+        File::options()
+            .write(true)
+            .open(&file)
+            .unwrap()
+            .set_modified(UNIX_EPOCH + Duration::from_secs(1_600_000_000))
+            .unwrap();
+        git(root, &["add", "--", "tracked.txt"]);
+        git(root, &["commit", "-m", "fixture"]);
+        dir
+    }
+
+    fn complete(jobs: &mut Jobs, request: Request) -> String {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let replies = jobs.poll();
+            if !replies.is_empty() {
+                assert_eq!(replies.len(), 1);
+                let (completed, result) = replies.into_iter().next().unwrap();
+                assert_eq!(completed, request);
+                return result.expect("Git job must complete successfully");
+            }
+            assert!(
+                Instant::now() < deadline,
+                "timed out waiting for {request:?}"
+            );
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    #[test]
+    fn preview_diff_preserves_stat_dirty_index_bytes() {
+        let dir = committed_file();
+        let root = dir.path();
+        let file = root.join("tracked.txt");
+        let original_modified = fs::metadata(&file).unwrap().modified().unwrap();
+        // A whole-minute difference is deterministic even on coarse timestamp filesystems.
+        let modified = original_modified + Duration::from_secs(60);
+        File::options()
+            .write(true)
+            .open(&file)
+            .unwrap()
+            .set_modified(modified)
+            .unwrap();
+        assert_eq!(fs::metadata(&file).unwrap().modified().unwrap(), modified);
+        assert_eq!(fs::read(&file).unwrap(), b"committed\n");
+        let index = root.join(".git/index");
+        let before = fs::read(&index).unwrap();
+        let args = [
+            "diff",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--",
+            "tracked.txt",
+        ];
+        let mut jobs = Jobs::default();
+        jobs.start(
+            root,
+            Request::Preview,
+            args.into_iter().map(Into::into).collect(),
+        )
+        .unwrap();
+        assert_eq!(complete(&mut jobs, Request::Preview), "");
+        assert_eq!(fs::read(&index).unwrap(), before);
+        assert_eq!(fs::read(&file).unwrap(), b"committed\n");
+
+        // Positive control: the same diff with optional locks enabled refreshes
+        // this fixture's index, so the byte comparison above is not vacuous.
+        assert!(git(root, &args).is_empty());
+        assert_ne!(fs::read(&index).unwrap(), before);
+    }
+
+    #[test]
+    fn write_add_stages_changed_file_without_changing_worktree() {
+        let dir = committed_file();
+        let root = dir.path();
+        let file = root.join("tracked.txt");
+        let index = root.join(".git/index");
+        let before = fs::read(&index).unwrap();
+        let changed = b"changed worktree\n";
+        fs::write(&file, changed).unwrap();
+        let mut jobs = Jobs::default();
+        jobs.start(
+            root,
+            Request::Write,
+            ["add", "--", "tracked.txt"]
+                .into_iter()
+                .map(Into::into)
+                .collect(),
+        )
+        .unwrap();
+        assert_eq!(complete(&mut jobs, Request::Write), "");
+        assert_ne!(fs::read(&index).unwrap(), before);
+        assert_eq!(git(root, &["show", ":tracked.txt"]), changed);
+        assert_eq!(git(root, &["show", "HEAD:tracked.txt"]), b"committed\n");
+        assert_eq!(fs::read(&file).unwrap(), changed);
     }
 }

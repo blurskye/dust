@@ -167,6 +167,7 @@ const NOTICE_TIMEOUT: Duration = Duration::from_secs(4);
 
 impl App {
     pub(in crate::app) fn notify_message(&mut self, message: String, error: bool) {
+        self.tutor.errors += u64::from(error);
         self.notices.notify(
             message,
             error,

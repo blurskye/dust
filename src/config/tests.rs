@@ -1957,6 +1957,23 @@ fn git_diff_preserves_dark_syntax_and_darkens_low_contrast_light_syntax() {
         }
     }
     for theme in [&light, &dark] {
+        let focused = theme.git_focused_surface(None);
+        assert_ne!(
+            focused.background,
+            theme.git_surface(None, false).background
+        );
+        assert_ne!(focused.background, theme.git_selection(None).background);
+        for source in [
+            &theme.styles.git_sign_added,
+            &theme.styles.git_sign_changed,
+            &theme.styles.muted,
+        ] {
+            let label = theme.git_label(source, None, true);
+            assert_eq!(label.foreground, source.foreground);
+            assert_eq!(label.background, focused.background);
+            assert_eq!(label.background_256, focused.background_256);
+            assert_eq!(label.background_16, focused.background_16);
+        }
         for selection in [Some(true), Some(false), None] {
             let surface = match selection {
                 Some(true) => theme.git_selection(None),
@@ -1967,7 +1984,7 @@ fn git_diff_preserves_dark_syntax_and_darkens_low_contrast_light_syntax() {
                 &theme.styles.git_sign_deleted,
                 &theme.styles.muted,
             ] {
-                let detail = theme.git_label(source, selection);
+                let detail = theme.git_label(source, selection, false);
                 assert_eq!(
                     (
                         detail.background,

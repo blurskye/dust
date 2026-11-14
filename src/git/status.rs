@@ -513,18 +513,7 @@ pub(super) fn status_command(
         .saturating_mul(2)
         .saturating_add(policy.maximum_files.saturating_mul(128))
         .clamp(1024, 64 * 1024 * 1024);
-    let mut environment = std::env::vars_os()
-        .filter_map(|(key, value)| Some((key.into_string().ok()?, value)))
-        .collect::<BTreeMap<_, _>>();
-    // Do not let inherited Git directory overrides retarget this repository.
-    for key in [
-        "GIT_DIR",
-        "GIT_WORK_TREE",
-        "GIT_INDEX_FILE",
-        "GIT_COMMON_DIR",
-    ] {
-        environment.remove(key);
-    }
+    let mut environment = super::command::environment();
     environment.insert("GIT_OPTIONAL_LOCKS".into(), "0".into());
     let mut jobs = JobSupervisor::new(16);
     let job = jobs

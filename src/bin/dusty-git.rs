@@ -1,4 +1,5 @@
-//! Standalone host for the same Git screen the editor opens.
+//! Standalone host for the same Git screen the editor opens, and `dusty-git forge …`, the
+//! forge layer as JSON for other editors (FORGE.md §5.3).
 use clap::Parser;
 use dust::git::screen::{GitScreen, ScreenOutcome};
 use dust::ui::{TerminalOptions, TerminalSession};
@@ -18,8 +19,19 @@ struct Cli {
     /// Use bundled configuration instead of the editor's user theme/settings.
     #[arg(long)]
     clean: bool,
+    /// Start on a forge tab: git, prs (mrs), issues or actions.
+    #[arg(long, value_parser = ["git", "prs", "mrs", "issues", "actions"])]
+    page: Option<String>,
+    /// Open this pull request or issue once the list shows it (with --page prs|issues).
+    #[arg(long, value_name = "N")]
+    open: Option<u64>,
 }
+
 fn main() -> std::process::ExitCode {
+    let args = std::env::args_os().collect::<Vec<_>>();
+    if args.get(1).is_some_and(|arg| arg == "forge") {
+        return std::process::ExitCode::from(dust::forge::command::main(args[1..].to_vec()));
+    }
     match run() {
         Ok(()) => std::process::ExitCode::SUCCESS,
         Err(e) => {
@@ -43,18 +55,18 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         mouse: false,
     };
     let mut screen = GitScreen::open(&cli.path)?;
+    screen.set_icon_mode(config.config.ui.explorer.icon_mode);
+    // `--page prs --open 13`: the screen's own deep-link entry point.
+    if let Some(page) = cli.page.as_deref() {
+        screen.open_target(page, cli.open);
+    }
     let mut terminal = TerminalSession::enter(options, config.theme.clone())?;
     let mut dirty = true;
     loop {
         dirty |= screen.poll();
         if dirty {
             let (w, h) = terminal.size()?;
-            let (rect, content) = screen.window_frame(w, h, &config.config.ui.git);
-            let mut frame = dust::ui::Frame {
-                grid: dust::ui::CellGrid::new(w, h),
-                cursor: None,
-            };
-            GitScreen::compose(&mut frame, rect, &content);
+            let frame = screen.frame(w, h);
             terminal.draw(&frame)?;
             dirty = false;
         }
@@ -63,7 +75,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             match screen.event(event) {
                 ScreenOutcome::Continue => {}
                 ScreenOutcome::Close => break,
-                ScreenOutcome::OpenRepository(path) => screen = GitScreen::open(&path)?,
+                ScreenOutcome::OpenRepository(path) => {
+                    screen = GitScreen::open(&path)?;
+                    screen.set_icon_mode(config.config.ui.explorer.icon_mode);
+                }
                 ScreenOutcome::OpenFile(path) => {
                     drop(terminal);
                     let editor = std::env::var("VISUAL")

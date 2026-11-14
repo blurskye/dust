@@ -1,0 +1,12 @@
+[
+  {
+    "filename": "internal/app/cmd/exec.go",
+    "status": "changed",
+    "additions": 24,
+    "deletions": 1,
+    "changes": 25,
+    "html_url": "https://code.forgejo.org/sam/runner/src/commit/00e904b87815eed672ae56afe6fcac095a725828/internal/app/cmd/exec.go",
+    "contents_url": "https://code.forgejo.org/api/v1/repos/sam/runner/contents/internal/app/cmd/exec.go?ref=00e904b87815eed672ae56afe6fcac095a725828",
+    "raw_url": "https://code.forgejo.org/sam/runner/raw/commit/00e904b87815eed672ae56afe6fcac095a725828/internal/app/cmd/exec.go"
+  }
+]

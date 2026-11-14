@@ -1,0 +1,92 @@
+[
+  {
+    "id": 57359,
+    "name": "docs-update-needed",
+    "exclusive": false,
+    "is_archived": false,
+    "color": "fc4331",
+    "description": "",
+    "url": "https://gitea.com/api/v1/repos/orbit/orbit/labels/57359"
+  },
+  {
+    "id": 46702,
+    "name": "kind/breaking",
+    "exclusive": true,
+    "is_archived": false,
+    "color": "bd2426",
+    "description": "",
+    "url": "https://gitea.com/api/v1/repos/orbit/orbit/labels/46702"
+  },
+  {
+    "id": 10369,
+    "name": "kind/bug",
+    "exclusive": true,
+    "is_archived": false,
+    "color": "f94144",
+    "description": "",
+    "url": "https://gitea.com/api/v1/repos/orbit/orbit/labels/10369"
+  },
+  {
+    "id": 10851,
+    "name": "kind/build",
+    "exclusive": true,
+    "is_archived": false,
+    "color": "577590",
+    "description": "",
+    "url": "https://gitea.com/api/v1/repos/orbit/orbit/labels/10851"
+  },
+  {
+    "id": 19382,
+    "name": "kind/compatible",
+    "exclusive": true,
+    "is_archived": false,
+    "color": "fbca04",
+    "description": "",
+    "url": "https://gitea.com/api/v1/repos/orbit/orbit/labels/19382"
+  },
+  {
+    "id": 11500,
+    "name": "kind/dependencies",
+    "exclusive": true,
+    "is_archived": false,
+    "color": "c47f4b",
+    "description": "",
+    "url": "https://gitea.com/api/v1/repos/orbit/orbit/labels/11500"
+  },
+  {
+    "id": 10879,
+    "name": "kind/docs",
+    "exclusive": true,
+    "is_archived": false,
+    "color": "277da1",
+    "description": "",
+    "url": "https://gitea.com/api/v1/repos/orbit/orbit/labels/10879"
+  },
+  {
+    "id": 10371,
+    "name": "kind/enhancement",
+    "exclusive": true,
+    "is_archived": false,
+    "color": "4d908e",
+    "description": "",
+    "url": "https://gitea.com/api/v1/repos/orbit/orbit/labels/10371"
+  },
+  {
+    "id": 10805,
+    "name": "kind/feature",
+    "exclusive": true,
+    "is_archived": false,
+    "color": "90be6d",
+    "description": "",
+    "url": "https://gitea.com/api/v1/repos/orbit/orbit/labels/10805"
+  },
+  {
+    "id": 10372,
+    "name": "kind/help wanted",
+    "exclusive": true,
+    "is_archived": false,
+    "color": "f9c74f",
+    "description": "",
+    "url": "https://gitea.com/api/v1/repos/orbit/orbit/labels/10372"
+  }
+]

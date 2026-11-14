@@ -78,6 +78,325 @@ fn wait(screen: &mut GitScreen, ready: impl Fn(&mut GitScreen) -> bool) {
 }
 
 #[test]
+fn project_header_is_compact_and_branch_badges_are_separate() {
+    use unicode_width::UnicodeWidthStr;
+    let dir = repo();
+    let checkout = tempfile::tempdir().unwrap();
+    git(
+        dir.path(),
+        &[
+            "worktree",
+            "add",
+            "-b",
+            "feature",
+            checkout.path().to_str().unwrap(),
+        ],
+    );
+    let mut screen = GitScreen::open(dir.path()).unwrap();
+    wait(&mut screen, |s| {
+        view(s).contains("feature") && view(s).contains("wt")
+    });
+    // Narrow layouts show only the focused pane; focus Branches so its row is visible.
+    key(&mut screen, KeyCode::Char('3'));
+    for (width, height) in [(64, 20), (80, 24), (120, 40), (190, 48)] {
+        let frame = screen.frame(width, height);
+        let header = frame.grid.row_text(0);
+        // Top tabs always keep their glyphs; full labels shorten on narrow bars.
+        for glyph in ["◆", "○", "●"] {
+            assert!(header.contains(glyph), "{width}: {header}");
+        }
+        if width >= 120 {
+            for label in ["Git", "Issues", "Pull requests", "Actions"] {
+                assert!(header.contains(label), "{width}: {header}");
+            }
+        }
+        assert!(!header.contains("keys"), "{width}: {header}");
+        let footer = frame.grid.row_text(height - 1);
+        let footer_words = footer.split_whitespace().collect::<Vec<_>>();
+        assert!(
+            footer_words.windows(2).any(|pair| pair == ["?", "keys"]),
+            "{width}: {footer}"
+        );
+        let rendered = (0..height)
+            .map(|y| frame.grid.row_text(y))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let words = rendered.split_whitespace().collect::<Vec<_>>();
+        assert_eq!(
+            words
+                .windows(2)
+                .filter(|pair| *pair == ["?", "keys"])
+                .count(),
+            1,
+            "help must appear once in the footer at {width} columns"
+        );
+        // The top bar names the checked-out head (DESIGN §2.1) but never a forge host.
+        assert!(
+            !header.contains("Dusty Git")
+                && header.contains("⎇ main")
+                && !header.contains("github.com"),
+            "{width}: {header}"
+        );
+        // The Branches row (not the reader's title, which also names the branch).
+        let branch = (2..height - 1)
+            .find(|&y| {
+                let text = frame.grid.row_text(y);
+                text.starts_with('│') && text.contains("⎇ feature")
+            })
+            .unwrap_or_else(|| panic!("{width}x{height}: no feature branch row"));
+        let text = frame.grid.row_text(branch);
+        let badge = text.find("wt").unwrap();
+        assert!(badge > text.find("feature").unwrap() + "feature".len() + 2);
+        assert_eq!(
+            frame
+                .grid
+                .get(text[..badge].width() as u16, branch)
+                .unwrap()
+                .style,
+            dust::ui::Style::Git {
+                role: dust::ui::GitRole::Modified,
+                surface: dust::ui::GitSurface::Chip(dust::ui::GitChip::Modified),
+                emphasis: dust::ui::Emphasis::None,
+            }
+        );
+    }
+    let mut linked = GitScreen::open(checkout.path()).unwrap();
+    for _ in 0..4 {
+        let header = linked.frame(120, 40).grid.row_text(0);
+        assert!(header.contains(dir.path().file_name().unwrap().to_str().unwrap()));
+        assert!(!header.contains(checkout.path().file_name().unwrap().to_str().unwrap()));
+        key(&mut linked, KeyCode::Char('>'));
+    }
+}
+
+#[test]
+fn changes_and_commit_files_share_a_single_collapsible_sidebar_tree() {
+    let dir = repo();
+    std::fs::create_dir_all(dir.path().join("src/nested")).unwrap();
+    std::fs::write(dir.path().join("src/nested/alpha.rs"), "fn alpha() {}\n").unwrap();
+    std::fs::write(dir.path().join("src/nested/beta.rs"), "fn beta() {}\n").unwrap();
+    let mut screen = GitScreen::open(dir.path()).unwrap();
+    wait(&mut screen, |s| view(s).contains("alpha.rs") && view(s).contains("beta.rs"));
+    // Changes is flat by default; `t` shows it as a foldable tree.
+    key(&mut screen, KeyCode::Char('t'));
+    wait(&mut screen, |s| view(s).contains("nested/"));
+    key(&mut screen, KeyCode::Char('h'));
+    key(&mut screen, KeyCode::Char('h'));
+    let folded = view(&mut screen);
+    let rail = {
+        let frame = screen.frame(120, 40);
+        let right = rail_right(&frame) as usize;
+        (0..40)
+            .map(|y| frame.grid.row_text(y).chars().take(right + 1).collect::<String>())
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    assert!(
+        rail.contains("l / Enter expand") && !rail.contains("nested/"),
+        "folded view:\n{folded}"
+    );
+    // Checked at the end so the rest of the test still runs: with every row folded
+    // away nothing is selected, so the reader must not keep showing a hidden file.
+    let stale_reader = folded.contains("nested/");
+    key(&mut screen, KeyCode::Enter);
+    key(&mut screen, KeyCode::Char('l'));
+    assert!(view(&mut screen).contains("nested/"));
+    git(dir.path(), &["add", "."]);
+    git(dir.path(), &["commit", "-m", "Nested commit"]);
+    let head = git(dir.path(), &["rev-parse", "--short=7", "HEAD"]);
+    screen = GitScreen::open(dir.path()).unwrap();
+    // Narrow layouts show one pane at a time, so pane rectangles are compared where
+    // the rail is visible.
+    let sizes = [(100, 30), (120, 40), (190, 48)];
+    let headers = |screen: &mut GitScreen, width, height| {
+        let frame = screen.frame(width, height);
+        ["Branches", "History", "Stashes"].map(|title| {
+            (0..height)
+                .find(|&y| {
+                    let text = frame.grid.row_text(y);
+                    text.starts_with('╭') && text.contains(title)
+                })
+                .unwrap()
+        })
+    };
+    wait(&mut screen, |s| view(s).contains("Nested commit"));
+    let initial = sizes.map(|(width, height)| headers(&mut screen, width, height));
+    key(&mut screen, KeyCode::Char('4'));
+    wait(&mut screen, |s| view(s).contains("+ fn alpha()"));
+    assert!(view(&mut screen).contains(&format!("{head} · Files")));
+    for (index, (width, height)) in sizes.into_iter().enumerate() {
+        assert_eq!(headers(&mut screen, width, height), initial[index]);
+    }
+    key(&mut screen, KeyCode::Enter);
+    let frame = screen.frame(120, 40);
+    let (_, row, _) = frame.cursor.unwrap();
+    assert!(frame.grid.row_text(row).contains("alpha.rs"));
+    key(&mut screen, KeyCode::Char('h'));
+    let frame = screen.frame(120, 40);
+    let (_, row, _) = frame.cursor.unwrap();
+    assert!(frame.grid.row_text(row).contains("▸ src/nested/"));
+    assert!(!(0..40).any(|y| frame.grid.row_text(y).contains("beta.rs")));
+    assert!(view(&mut screen).contains("+ fn alpha()"));
+    key(&mut screen, KeyCode::Char('J'));
+    wait(&mut screen, |s| view(s).contains("+ fn beta()"));
+    for (index, (width, height)) in sizes.into_iter().enumerate() {
+        assert_eq!(headers(&mut screen, width, height), initial[index]);
+        let frame = screen.frame(width, height);
+        let (_, row, _) = frame.cursor.unwrap();
+        assert!(
+            row < initial[index][0],
+            "files belong inside the commit-file pane"
+        );
+        let rail = rail_right(&frame);
+        assert!(frame.grid.row_text(row).contains("beta.rs"));
+        assert_eq!(
+            (0..height)
+                .filter(|&y| frame.grid.row_text(y).contains(&format!("{head} · Files")))
+                .count(),
+            1
+        );
+        // No interior divider may split the reader's code field; its outer edge is reserved.
+        assert!(!(rail + 3..width - 1).any(|x| frame.grid.get(x, row).unwrap().symbol == "│"));
+        assert_eq!(frame.grid.get(rail + 2, row).unwrap().symbol, "│");
+        assert_eq!(frame.grid.get(width - 1, row).unwrap().symbol, "│");
+    }
+    key(&mut screen, KeyCode::Tab);
+    key(&mut screen, KeyCode::Char('K'));
+    wait(&mut screen, |s| view(s).contains("+ fn alpha()"));
+    key(&mut screen, KeyCode::Escape);
+    assert!(view(&mut screen).contains("History"));
+    assert_eq!(git(dir.path(), &["status", "--porcelain"]), "");
+    assert!(
+        !stale_reader,
+        "folding every Changes row away left the reader showing the hidden file:\n{folded}"
+    );
+}
+
+/// The x of the rail's right border: the first `╮` on the top pane row.
+fn rail_right(frame: &dust::ui::Frame) -> u16 {
+    (0..frame.grid.width())
+        .find(|&x| frame.grid.get(x, 1).unwrap().symbol == "╮")
+        .unwrap()
+}
+
+/// The two-letter XY status painted for `name` in the Changes pane.
+fn change_code(screen: &mut GitScreen, name: &str) -> Option<String> {
+    let frame = screen.frame(120, 40);
+    let rail = rail_right(&frame) as usize;
+    (2..39).find_map(|y| {
+        let row = frame.grid.row_text(y).chars().take(rail).collect::<String>();
+        row.contains(name).then(|| {
+            format!(
+                "{}{}",
+                frame.grid.get(3, y).unwrap().symbol,
+                frame.grid.get(4, y).unwrap().symbol
+            )
+        })
+    })
+}
+
+#[test]
+fn commit_selection_updates_changes_without_hiding_other_panes_or_staging() {
+    let dir = repo();
+    let initial = git(dir.path(), &["rev-parse", "--short=7", "HEAD"]);
+    std::fs::write(dir.path().join("alpha.rs"), "fn alpha() {}\n").unwrap();
+    git(dir.path(), &["add", "."]);
+    git(dir.path(), &["commit", "-m", "Add alpha"]);
+    let head = git(dir.path(), &["rev-parse", "--short=7", "HEAD"]);
+    std::fs::write(dir.path().join("file.txt"), "working change\n").unwrap();
+    let mut screen = GitScreen::open(dir.path()).unwrap();
+    wait(&mut screen, |s| view(s).contains("+ working change"));
+    let changes = |screen: &mut GitScreen| {
+        let frame = screen.frame(120, 40);
+        let left = rail_right(&frame) + 1;
+        (1..40)
+            .take_while(|&y| !frame.grid.row_text(y).contains("Branches"))
+            .map(|y| {
+                frame
+                    .grid
+                    .row_text(y)
+                    .chars()
+                    .take(left as usize)
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    key(&mut screen, KeyCode::Char('4'));
+    wait(&mut screen, |s| view(s).contains("+ fn alpha()"));
+    assert!(changes(&mut screen).contains(&format!("{head} · Files")));
+    assert!(changes(&mut screen).contains("alpha.rs"));
+    assert!(!changes(&mut screen).contains("file.txt"));
+    key(&mut screen, KeyCode::Down);
+    wait(&mut screen, |s| view(s).contains("+ old"));
+    assert!(changes(&mut screen).contains(&format!("{initial} · Files")));
+    assert!(changes(&mut screen).contains("file.txt"));
+    assert!(!changes(&mut screen).contains("alpha.rs"));
+    key(&mut screen, KeyCode::Char('2'));
+    key(&mut screen, KeyCode::Char(' '));
+    assert_eq!(git(dir.path(), &["diff", "--cached", "--name-only"]), "");
+    key(&mut screen, KeyCode::Char('3'));
+    assert!(!changes(&mut screen).contains("· Files"));
+    assert!(changes(&mut screen).contains("file.txt"));
+    key(&mut screen, KeyCode::Char('4'));
+    wait(&mut screen, |s| view(s).contains("+ fn alpha()"));
+    key(&mut screen, KeyCode::Enter);
+    key(&mut screen, KeyCode::Char('5'));
+    assert!(view(&mut screen).contains("No stashes"));
+    assert!(
+        !changes(&mut screen).contains("· Files"),
+        "`5` must leave the open commit's files for Stashes:\n{}",
+        view(&mut screen)
+    );
+    key(&mut screen, KeyCode::Char('4'));
+    wait(&mut screen, |s| view(s).contains("+ fn alpha()"));
+    key(&mut screen, KeyCode::Enter);
+    assert_eq!(key(&mut screen, KeyCode::Escape), ScreenOutcome::Continue);
+    assert!(changes(&mut screen).contains(&format!("{head} · Files")));
+    assert_eq!(key(&mut screen, KeyCode::Escape), ScreenOutcome::Continue);
+    wait(&mut screen, |s| view(s).contains("+ working change"));
+    assert!(!changes(&mut screen).contains("· Files"));
+    assert_eq!(git(dir.path(), &["status", "--porcelain"]), "M file.txt");
+}
+
+#[test]
+fn file_kind_modes_preserve_status_cells_identity_and_native_cursor() {
+    use dust::config::ExplorerIconMode;
+    let dir = repo();
+    std::fs::write(
+        dir.path().join("queue.py"),
+        "def size(items):\n    return len(items)\n",
+    )
+    .unwrap();
+    let mut screen = GitScreen::open(dir.path()).unwrap();
+    wait(&mut screen, |s| view(s).contains("queue.py"));
+    let original = git(dir.path(), &["status", "--porcelain"]);
+    for (width, height) in [(64, 20), (100, 30), (190, 48)] {
+        screen.set_icon_mode(ExplorerIconMode::Ascii);
+        let plain = screen.frame(width, height);
+        let (_, row, _) = plain.cursor.unwrap();
+        // XY status sits in the pane's interior columns 2–3, the file glyph at 5.
+        assert!(
+            plain.grid.row_text(row).contains("?? - queue.py"),
+            "{}",
+            plain.grid.row_text(row)
+        );
+        assert_eq!(plain.grid.get(3, row).unwrap().symbol, "?");
+        assert_eq!(plain.grid.get(4, row).unwrap().symbol, "?");
+        for mode in [ExplorerIconMode::Unicode, ExplorerIconMode::NerdFont] {
+            screen.set_icon_mode(mode);
+            let rich = screen.frame(width, height);
+            assert_eq!(plain.cursor, rich.cursor);
+            assert_eq!(rich.grid.get(3, row), plain.grid.get(3, row));
+            assert_eq!(rich.grid.get(4, row), plain.grid.get(4, row));
+            assert!(rich.grid.row_text(row).contains("queue.py"));
+            assert_ne!(rich.grid.get(6, row).unwrap().symbol, "-");
+        }
+    }
+    assert_eq!(git(dir.path(), &["status", "--porcelain"]), original);
+}
+
+#[test]
 fn compact_help_and_long_names_preserve_selection() {
     let dir = repo();
     let path = format!("{}-tail.rs", "long文件".repeat(12));
@@ -87,8 +406,11 @@ fn compact_help_and_long_names_preserve_selection() {
     let before = screen.frame(80, 24);
     let (_, y, _) = before.cursor.unwrap();
     assert!(before.grid.row_text(y).contains('…'));
-    let footer = before.grid.row_text(22);
-    assert!(footer.contains("keys") && footer.contains("refresh") && footer.contains("close"));
+    // The compact footer keeps the focused pane's main actions and the help key.
+    let footer = before.grid.row_text(23);
+    assert!(footer.contains("stage") && footer.contains("commit"), "{footer}");
+    // Checked at the end: `? keys` must survive a long path in the footer context.
+    let help_hint = footer.contains("? keys");
     key(&mut screen, KeyCode::Char('?'));
     let help = screen.frame(80, 24);
     let text = (0..24)
@@ -96,10 +418,11 @@ fn compact_help_and_long_names_preserve_selection() {
         .collect::<Vec<_>>()
         .join("\n");
     assert!(
-        text.contains("Keyboard")
-            && text.contains("Split / unified")
-            && text.contains("Ctrl+h/j/k/l")
+        text.contains("Keys · Changes") && text.contains("C-h/j/k/l"),
+        "{text}"
     );
+    // Checked at the end: the compact help still lists the split/unified toggle.
+    let split_listed = text.contains("Split · unified");
     assert!(help.cursor.is_some());
     key(&mut screen, KeyCode::Escape);
     let after = screen.frame(80, 24);
@@ -107,6 +430,10 @@ fn compact_help_and_long_names_preserve_selection() {
     for y in 0..24 {
         assert_eq!(before.grid.row_text(y), after.grid.row_text(y));
     }
+    assert!(
+        split_listed && help_hint,
+        "compact help must list `s` split/unified ({split_listed}) and the footer must keep `? keys` ({help_hint}): {footer}\n{text}"
+    );
 }
 
 #[test]
@@ -116,7 +443,7 @@ fn preview_focus_updates_index_diff_when_toggling_layers() {
     git(dir.path(), &["add", "file.txt"]);
     std::fs::write(dir.path().join("file.txt"), "working version\n").unwrap();
     let mut screen = GitScreen::open(dir.path()).unwrap();
-    wait(&mut screen, |s| view(s).contains("+working version"));
+    wait(&mut screen, |s| view(s).contains("+ working version"));
     screen.event(UiEvent::Key {
         key: KeyEvent {
             code: KeyCode::Char('l'),
@@ -129,15 +456,16 @@ fn preview_focus_updates_index_diff_when_toggling_layers() {
     });
     key(&mut screen, KeyCode::Char('i'));
     wait(&mut screen, |s| {
-        view(s).contains("+index version") && !view(s).contains("+working version")
+        view(s).contains("+ index version") && !view(s).contains("+ working version")
     });
     key(&mut screen, KeyCode::Char('i'));
-    wait(&mut screen, |s| view(s).contains("+working version"));
-    key(&mut screen, KeyCode::Char('v'));
-    wait(&mut screen, |s| view(s).contains("Source"));
+    wait(&mut screen, |s| view(s).contains("+ working version"));
+    // `F` browses every file; the rail retitles itself and the reader shows source.
+    key(&mut screen, KeyCode::Char('F'));
+    wait(&mut screen, |s| view(s).contains("± Files") && view(s).contains("working version"));
     key(&mut screen, KeyCode::Char('i'));
     wait(&mut screen, |s| {
-        view(s).contains("+index version") && !view(s).contains("+working version")
+        view(s).contains("+ index version") && !view(s).contains("+ working version")
     });
     assert_eq!(git(dir.path(), &["show", ":file.txt"]), "index version");
     assert_eq!(
@@ -149,15 +477,15 @@ fn preview_focus_updates_index_diff_when_toggling_layers() {
 #[test]
 fn wide_diff_aligns_old_and_new_code_with_tinted_syntax() {
     let dir = repo();
-    std::fs::write(dir.path().join("sample.rs"), "fn before() {}\n").unwrap();
+    std::fs::write(dir.path().join("sample.rs"), "fn before() {}\n".repeat(80)).unwrap();
     git(dir.path(), &["add", "."]);
     git(dir.path(), &["commit", "-m", "Source"]);
-    std::fs::write(dir.path().join("sample.rs"), "fn after() {}\n").unwrap();
+    std::fs::write(dir.path().join("sample.rs"), "fn after() {}\n".repeat(80)).unwrap();
     let mut screen = GitScreen::open(dir.path()).unwrap();
-    wait(&mut screen, |s| view(s).contains("+fn after()"));
+    wait(&mut screen, |s| view(s).contains("− fn before()"));
     let unified = screen.frame(180, 40);
     assert!(
-        !(0..40).any(|y| unified.grid.row_text(y).contains("BEFORE")),
+        !(0..40).any(|y| unified.grid.row_text(y).contains("Before")),
         "split must be opt-in, even on wide terminals"
     );
     screen.event(UiEvent::Key {
@@ -170,19 +498,35 @@ fn wide_diff_aligns_old_and_new_code_with_tinted_syntax() {
         },
         kind: KeyInputKind::Press,
     });
-    key(&mut screen, KeyCode::Char('s'));
+    key(&mut screen, KeyCode::Down);
     let frame = screen.frame(180, 40);
+    let (x, y, _) = frame.cursor.unwrap();
+    assert_eq!(frame.grid.get(x, y).unwrap().symbol, "f");
+    key(&mut screen, KeyCode::Home);
+    key(&mut screen, KeyCode::Char('s'));
+    screen.frame(180, 40);
+    key(&mut screen, KeyCode::Down);
+    let frame = screen.frame(180, 40);
+    let (x, y, _) = frame.cursor.unwrap();
+    assert_eq!(frame.grid.get(x, y).unwrap().symbol, "f");
     let row = (0..40)
         .find(|y| frame.grid.row_text(*y).contains("fn before()"))
         .unwrap();
     assert!(frame.grid.row_text(row).contains("fn after()"));
-    assert!((0..180).any(|x| matches!(
-        frame.grid.get(x, row).unwrap().style,
-        dust::ui::Style::GitDiff {
-            added: true,
-            syntax: Some(_)
-        }
-    )));
+    // Added code keeps its syntax colours on top of the added band.
+    assert!((0..40).any(|y| {
+        frame.grid.row_text(y).contains("fn after()")
+            && (0..180).any(|x| {
+                matches!(
+                    frame.grid.get(x, y).unwrap().style,
+                    dust::ui::Style::GitSyntax {
+                        surface: dust::ui::GitSurface::AddedBand
+                            | dust::ui::GitSurface::AddedEmphasis,
+                        ..
+                    }
+                )
+            })
+    }));
     screen.event(UiEvent::Key {
         key: KeyEvent {
             code: KeyCode::Char('l'),
@@ -194,6 +538,10 @@ fn wide_diff_aligns_old_and_new_code_with_tinted_syntax() {
         kind: KeyInputKind::Press,
     });
     key(&mut screen, KeyCode::Char('s'));
+    screen.frame(180, 40);
+    for _ in 0..78 {
+        key(&mut screen, KeyCode::Down);
+    }
     let frame = screen.frame(180, 40);
     let old = (0..40)
         .find(|y| frame.grid.row_text(*y).contains("fn before()"))
@@ -213,9 +561,9 @@ fn commits_browse_one_changed_file_at_a_time_without_raw_statistics() {
     git(dir.path(), &["commit", "-m", "A multi-file commit"]);
     let head = git(dir.path(), &["rev-parse", "HEAD"]);
     let mut screen = GitScreen::open(dir.path()).unwrap();
-    wait(&mut screen, |s| view(s).contains("A multi-file commit"));
-    key(&mut screen, KeyCode::Char('3'));
-    wait(&mut screen, |s| view(s).contains("+fn alpha()"));
+    wait(&mut screen, |s| view(s).contains("A multi-file com"));
+    key(&mut screen, KeyCode::Char('4'));
+    wait(&mut screen, |s| view(s).contains("+ fn alpha()"));
     let overview = view(&mut screen);
     assert!(
         overview.contains("2 files")
@@ -223,18 +571,20 @@ fn commits_browse_one_changed_file_at_a_time_without_raw_statistics() {
             && !overview.contains("files changed,")
     );
     key(&mut screen, KeyCode::Enter);
-    assert!(view(&mut screen).contains("Changed files"));
+    assert!(view(&mut screen).contains(&format!("{} · Files", &head[..7])));
     key(&mut screen, KeyCode::Down);
-    wait(&mut screen, |s| view(s).contains("+fn beta()"));
+    wait(&mut screen, |s| view(s).contains("+ fn beta()"));
     assert!(!view(&mut screen).contains("fn alpha()"));
     key(&mut screen, KeyCode::Tab);
     key(&mut screen, KeyCode::Char('K'));
-    wait(&mut screen, |s| view(s).contains("+fn alpha()"));
+    wait(&mut screen, |s| view(s).contains("+ fn alpha()"));
     key(&mut screen, KeyCode::Char('?'));
-    assert!(view(&mut screen).contains("Next / previous file"));
+    assert!(view(&mut screen).contains("Next · previous file"));
     key(&mut screen, KeyCode::Escape);
     key(&mut screen, KeyCode::Escape);
-    assert!(!view(&mut screen).contains("Changed files"));
+    assert!(view(&mut screen).contains(&format!("{} · Files", &head[..7])));
+    key(&mut screen, KeyCode::Escape);
+    assert!(!view(&mut screen).contains(&format!("{} · Files", &head[..7])));
     assert_eq!(git(dir.path(), &["rev-parse", "HEAD"]), head);
     assert_eq!(git(dir.path(), &["status", "--porcelain"]), "");
 }
@@ -257,7 +607,7 @@ fn commit_scrolls_immediately_pins_identity_and_exposes_the_full_message() {
     git(dir.path(), &["commit", "-m", subject, "-m", &body]);
     for (width, height) in [(100, 30), (190, 48)] {
         let mut screen = GitScreen::open(dir.path()).unwrap();
-        key(&mut screen, KeyCode::Char('3'));
+        key(&mut screen, KeyCode::Char('4'));
         wait(&mut screen, |s| view(s).contains("numbered_000"));
         let text_at = |s: &mut GitScreen| {
             let frame = s.frame(width, height);
@@ -267,37 +617,50 @@ fn commit_scrolls_immediately_pins_identity_and_exposes_the_full_message() {
                 .join("\n")
         };
         let overview = text_at(&mut screen);
-        assert!(
-            overview.contains("Enter")
-                && overview.contains("files")
-                && overview.contains("message")
-        );
-        if width == 100 {
-            assert!(overview.contains("[m: more]"), "{overview}");
-        }
+        let footer = overview.lines().nth(usize::from(height - 1)).unwrap();
+        assert!(footer.contains("Enter files"), "{overview}");
+        // The long subject is clipped in the overview; `m` shows the whole message.
+        assert!(overview.contains("A deliberately long commit subject"), "{overview}");
+        assert!(!overview.contains("careful preservation of all user drafts"));
         key(&mut screen, KeyCode::Enter);
-        assert_eq!(
-            screen.frame(width, height).grid.get(2, 3).unwrap().style,
-            dust::ui::Style::GitDetail {
-                added: Some(true),
-                selection: Some(true)
-            }
-        );
+        let files = screen.frame(width, height);
+        let (_, file_y, _) = files.cursor.unwrap();
+        assert!(files.grid.row_text(file_y).contains("scroll.rs"));
+        let added = |surface| dust::ui::Style::Git {
+            role: dust::ui::GitRole::Added,
+            surface,
+            emphasis: dust::ui::Emphasis::None,
+        };
+        let stats_x = (0..width)
+            .find(|&x| {
+                files.grid.get(x, file_y).unwrap().style == added(dust::ui::GitSurface::Cursor)
+            })
+            .expect("selected file must show added-line statistics");
         key(&mut screen, KeyCode::Tab);
         assert_eq!(
-            screen.frame(width, height).grid.get(2, 3).unwrap().style,
-            dust::ui::Style::GitDetail {
-                added: Some(true),
-                selection: Some(false)
-            }
+            screen
+                .frame(width, height)
+                .grid
+                .get(stats_x, file_y)
+                .unwrap()
+                .style,
+            added(dust::ui::GitSurface::CursorInactive)
         );
         let first = text_at(&mut screen);
-        assert!(
-            first
-                .lines()
-                .nth(usize::from(height - 2))
-                .unwrap()
-                .contains("scroll")
+        let footer = first.lines().nth(usize::from(height - 1)).unwrap();
+        assert!(footer.contains("find") && footer.contains("message") && footer.contains("keys"));
+        let focused = screen.frame(width, height);
+        let (x, y, _) = focused.cursor.expect("native source cursor");
+        assert!(x > (width * 3 / 10).clamp(26, 52));
+        assert!(!focused.grid.get(x, y).unwrap().symbol.trim().is_empty());
+        key(&mut screen, KeyCode::Char('?'));
+        let help = text_at(&mut screen);
+        assert!(help.contains("Keys ·") && help.contains("Scroll"), "{help}");
+        key(&mut screen, KeyCode::Escape);
+        assert_eq!(
+            text_at(&mut screen),
+            first,
+            "help must preserve the source viewport"
         );
         key(&mut screen, KeyCode::Char('j'));
         let moved = text_at(&mut screen);
@@ -313,10 +676,13 @@ fn commit_scrolls_immediately_pins_identity_and_exposes_the_full_message() {
             !paged.contains("numbered_000"),
             "the first page-down must expose new code"
         );
+        // The reader's pinned file band names the file while its code scrolls.
+        let rail = if width >= 160 { 52 } else { 30 };
         let identity = paged
             .lines()
-            .find(|line| line.contains("scroll.rs") && line.contains("1/1"))
-            .unwrap()
+            .skip(2)
+            .find(|line| line.chars().skip(rail + 1).collect::<String>().contains("scroll.rs"))
+            .unwrap_or_else(|| panic!("{paged}"))
             .to_owned();
         key(&mut screen, KeyCode::Char('l'));
         let panned = text_at(&mut screen);
@@ -412,7 +778,16 @@ fn floating_is_default_and_fullscreen_is_a_persisted_setting() {
             .row_text(0)
             .contains("Editor remains visible")
     );
-    assert!(background.grid.row_text(rect.y).contains("Dusty Git"));
+    assert!(
+        background.grid.row_text(rect.y).contains(
+            &dir.path()
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_string()
+        )
+    );
+    assert!(!background.grid.row_text(rect.y).contains("Dusty Git"));
     assert_eq!(
         background.cursor,
         foreground
@@ -436,9 +811,7 @@ fn code_style(screen: &mut GitScreen, line: &str, token: &str) -> dust::ui::Styl
         if let Some(start) = row.find(line) {
             let at = start + line.find(token).unwrap();
             return match frame.grid.get(row[..at].width() as u16, y).unwrap().style {
-                dust::ui::Style::GitDiff {
-                    syntax: Some(role), ..
-                } => dust::ui::Style::Syntax(role),
+                dust::ui::Style::GitSyntax { group, .. } => dust::ui::Style::Syntax(group),
                 style => style,
             };
         }
@@ -476,6 +849,12 @@ fn untracked_source_has_syntax_line_numbers_and_horizontal_scrolling() {
         },
         kind: KeyInputKind::Press,
     });
+    for (width, height) in [(64, 20), (100, 30), (190, 48)] {
+        let frame = screen.frame(width, height);
+        let (x, y, _) = frame.cursor.unwrap();
+        assert_eq!(frame.grid.get(x, y).unwrap().symbol, "/");
+        assert!(frame.grid.row_text(y).contains("│ // a comment"));
+    }
     for _ in 0..10 {
         key(&mut screen, KeyCode::Right);
     }
@@ -523,46 +902,46 @@ fn working_index_commit_and_stash_diffs_have_source_syntax_and_numbered_markers(
         if staged {
             key(&mut screen, KeyCode::Char('i'));
         }
-        wait(&mut screen, |s| view(s).contains("+def after()"));
+        wait(&mut screen, |s| view(s).contains("+ def after()"));
         assert!(matches!(
-            code_style(&mut screen, "+def after()", "def"),
+            code_style(&mut screen, "+ def after()", "def"),
             dust::ui::Style::Syntax(_)
         ));
         key(&mut screen, KeyCode::Down);
-        wait(&mut screen, |s| view(s).contains("+fn after()"));
+        wait(&mut screen, |s| view(s).contains("+ fn after()"));
         assert!(matches!(
-            code_style(&mut screen, "-fn before()", "fn"),
+            code_style(&mut screen, "− fn before()", "fn"),
             dust::ui::Style::Syntax(_)
         ));
         assert!(matches!(
-            code_style(&mut screen, "+fn after()", "after"),
+            code_style(&mut screen, "+ fn after()", "after"),
             dust::ui::Style::Syntax(_)
         ));
-        assert!(view(&mut screen).contains("1 +fn after()"));
+        assert!(view(&mut screen).contains("1  + fn after()"));
     }
     git(dir.path(), &["commit", "-m", "Changed both languages"]);
     let mut screen = GitScreen::open(dir.path()).unwrap();
-    key(&mut screen, KeyCode::Char('3'));
-    wait(&mut screen, |s| view(s).contains("+def after()"));
+    key(&mut screen, KeyCode::Char('4'));
+    wait(&mut screen, |s| view(s).contains("+ def after()"));
     assert!(matches!(
-        code_style(&mut screen, "+def after()", "def"),
+        code_style(&mut screen, "+ def after()", "def"),
         dust::ui::Style::Syntax(_)
     ));
     key(&mut screen, KeyCode::Enter);
     key(&mut screen, KeyCode::Down);
-    wait(&mut screen, |s| view(s).contains("+fn after()"));
+    wait(&mut screen, |s| view(s).contains("+ fn after()"));
     assert!(matches!(
-        code_style(&mut screen, "+fn after()", "fn"),
+        code_style(&mut screen, "+ fn after()", "fn"),
         dust::ui::Style::Syntax(_)
     ));
     key(&mut screen, KeyCode::Escape);
     std::fs::write(dir.path().join("sample.rs"), "fn stashed() {}\n").unwrap();
     git(dir.path(), &["stash", "push", "-m", "Colored stash"]);
     key(&mut screen, KeyCode::Char('r'));
-    key(&mut screen, KeyCode::Char('4'));
-    wait(&mut screen, |s| view(s).contains("+fn stashed()"));
+    key(&mut screen, KeyCode::Char('5'));
+    wait(&mut screen, |s| view(s).contains("+ fn stashed()"));
     assert!(matches!(
-        code_style(&mut screen, "+fn stashed()", "fn"),
+        code_style(&mut screen, "+ fn stashed()", "fn"),
         dust::ui::Style::Syntax(_)
     ));
 }
@@ -608,12 +987,12 @@ fn stash_preview_includes_untracked_files() {
     std::fs::write(dir.path().join("new.txt"), "untracked stash contents\n").unwrap();
     let mut screen = GitScreen::open(dir.path()).unwrap();
     wait(&mut screen, |s| view(s).contains("new.txt"));
-    key(&mut screen, KeyCode::Char('4'));
+    key(&mut screen, KeyCode::Char('5'));
     key(&mut screen, KeyCode::Char('n'));
     text(&mut screen, "Untracked-only stash");
     submit(&mut screen);
     wait(&mut screen, |s| {
-        !s.busy() && view(s).contains("+untracked stash contents")
+        !s.busy() && view(s).contains("+ untracked stash contents")
     });
     assert!(!dir.path().join("new.txt").exists());
     assert!(view(&mut screen).contains("new.txt"));
@@ -629,22 +1008,74 @@ fn stash_preview_includes_untracked_files() {
 
 #[test]
 fn stages_unstages_and_commits_through_real_screen_input() {
+    use unicode_width::UnicodeWidthStr;
     let dir = repo();
     std::fs::write(dir.path().join("file.txt"), "changed\n").unwrap();
     let mut screen = GitScreen::open(dir.path()).unwrap();
     wait(&mut screen, |s| view(s).contains("changed"));
+    let assert_file_action = |screen: &mut GitScreen, verb: &str| {
+        for (width, height) in [(64, 20), (100, 30), (190, 48)] {
+            let frame = screen.frame(width, height);
+            let footer = frame.grid.row_text(height - 1);
+            let words = footer.split_whitespace().collect::<Vec<_>>();
+            assert!(
+                words.windows(2).any(|words| words == ["Space", verb]),
+                "{width}×{height}: {footer}"
+            );
+        }
+    };
+    assert_file_action(&mut screen, "stage");
+    screen.write_refusal = Some("Test write refused".into());
+    key(&mut screen, KeyCode::Char(' '));
+    assert!(view(&mut screen).contains("Test write refused"));
+    screen.write_refusal = None;
     key(&mut screen, KeyCode::Char(' '));
     wait(&mut screen, |s| !s.busy());
+    assert!(!view(&mut screen).contains("Test write refused"));
     assert_eq!(
         git(dir.path(), &["diff", "--cached", "--name-only"]),
         "file.txt"
     );
-    key(&mut screen, KeyCode::Char('i'));
+    wait(&mut screen, |s| {
+        change_code(s, "file.txt").as_deref() == Some("M ") && view(s).contains("+ changed")
+    });
+    assert_file_action(&mut screen, "unstage");
+    let staged = screen.frame(120, 40);
+    let (_, row, _) = staged.cursor.unwrap();
+    let label = staged.grid.row_text(row);
+    let filename = label[..label.find("file.txt").unwrap()].width();
+    // A fully staged name is painted in the Staged (added) role on the cursor row.
+    assert_eq!(
+        staged.grid.get(filename as u16, row).unwrap().style,
+        dust::ui::Style::Git {
+            role: dust::ui::GitRole::Added,
+            surface: dust::ui::GitSurface::Cursor,
+            emphasis: dust::ui::Emphasis::None,
+        }
+    );
+    // No index-layer switch: Space itself must toggle the selected file.
     key(&mut screen, KeyCode::Char(' '));
     wait(&mut screen, |s| !s.busy());
     assert_eq!(git(dir.path(), &["diff", "--cached", "--name-only"]), "");
-    key(&mut screen, KeyCode::Char('i'));
-    wait(&mut screen, |s| view(s).contains("changed"));
+    wait(&mut screen, |s| view(s).contains("+ changed"));
+    assert!(!view(&mut screen).contains("operation would change nothing"));
+    assert_file_action(&mut screen, "stage");
+    let unstaged = screen.frame(120, 40);
+    let (_, row, _) = unstaged.cursor.unwrap();
+    let label = unstaged.grid.row_text(row);
+    let unstaged_name = label[..label.find("file.txt").unwrap()].width();
+    assert_eq!(
+        filename, unstaged_name,
+        "staging must not move the filename"
+    );
+    assert_eq!(
+        unstaged.grid.get(unstaged_name as u16, row).unwrap().style,
+        dust::ui::Style::Git {
+            role: dust::ui::GitRole::Text,
+            surface: dust::ui::GitSurface::Cursor,
+            emphasis: dust::ui::Emphasis::None,
+        }
+    );
     key(&mut screen, KeyCode::Char(' '));
     wait(&mut screen, |s| !s.busy());
     key(&mut screen, KeyCode::Char('c'));
@@ -661,6 +1092,110 @@ fn stages_unstages_and_commits_through_real_screen_input() {
 }
 
 #[test]
+fn partial_staging_finishes_the_file_then_space_unstages_without_changing_disk() {
+    let dir = repo();
+    std::fs::write(dir.path().join("file.txt"), "staged version\n").unwrap();
+    git(dir.path(), &["add", "file.txt"]);
+    std::fs::write(dir.path().join("file.txt"), "working version\n").unwrap();
+    let mut screen = GitScreen::open(dir.path()).unwrap();
+    wait(&mut screen, |s| {
+        view(s).contains("◐MM") && view(s).contains("+ working version")
+    });
+    key(&mut screen, KeyCode::Char(' '));
+    wait(&mut screen, |s| !s.busy());
+    wait(&mut screen, |s| {
+        change_code(s, "file.txt").as_deref() == Some("M ")
+            && !view(s).contains("◐MM")
+            && view(s).contains("+ working version")
+    });
+    assert_eq!(git(dir.path(), &["show", ":file.txt"]), "working version");
+    key(&mut screen, KeyCode::Char(' '));
+    wait(&mut screen, |s| !s.busy());
+    assert_eq!(git(dir.path(), &["diff", "--cached", "--name-only"]), "");
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("file.txt")).unwrap(),
+        "working version\n"
+    );
+}
+
+#[test]
+fn sidebar_rectangles_and_focus_surfaces_survive_folding_refresh_and_navigation() {
+    let dir = repo();
+    std::fs::create_dir(dir.path().join("docs")).unwrap();
+    for index in 0..18 {
+        std::fs::write(
+            dir.path().join(format!("docs/file-{index:02}.md")),
+            "sample\n",
+        )
+        .unwrap();
+        git(dir.path(), &["branch", &format!("branch-{index:02}")]);
+    }
+    let mut screen = GitScreen::open(dir.path()).unwrap();
+    wait(&mut screen, |s| {
+        view(s).contains("file-00.md") && view(s).contains("Initial commit")
+    });
+    let headers = |screen: &mut GitScreen, width, height| {
+        let frame = screen.frame(width, height);
+        ["Branches", "History", "Stashes"].map(|name| {
+            (0..height)
+                .find(|&y| {
+                    let text = frame.grid.row_text(y);
+                    text.starts_with('╭') && text.contains(name)
+                })
+                .unwrap_or_else(|| panic!("{width}x{height} missing {name}"))
+        })
+    };
+    let edge = |role| dust::ui::Style::Git {
+        role,
+        surface: dust::ui::GitSurface::Pane,
+        emphasis: dust::ui::Emphasis::None,
+    };
+    // Narrow layouts show one pane at a time; pane rectangles are compared where the
+    // rail is visible.
+    for (width, height) in [(100, 30), (120, 40), (190, 48)] {
+        let initial = headers(&mut screen, width, height);
+        let right = rail_right(&screen.frame(width, height));
+        // The focused Changes pane carries the accent border.
+        for (x, y) in [(0, 2), (right, 2), (right, 3)] {
+            assert_eq!(
+                screen.frame(width, height).grid.get(x, y).unwrap().style,
+                edge(dust::ui::GitRole::Focus)
+            );
+        }
+        key(&mut screen, KeyCode::Char('t'));
+        key(&mut screen, KeyCode::Char('h'));
+        assert_eq!(headers(&mut screen, width, height), initial);
+        key(&mut screen, KeyCode::Char('h'));
+        assert_eq!(headers(&mut screen, width, height), initial);
+        key(&mut screen, KeyCode::Enter);
+        key(&mut screen, KeyCode::Char('l'));
+        key(&mut screen, KeyCode::Char('t'));
+        key(&mut screen, KeyCode::Char('3'));
+        for (x, y) in [(0, 2), (right, 2), (right, 3)] {
+            assert_eq!(
+                screen.frame(width, height).grid.get(x, y).unwrap().style,
+                edge(dust::ui::GitRole::Border)
+            );
+        }
+        for _ in 0..5 {
+            key(&mut screen, KeyCode::Down);
+            let during = view(&mut screen);
+            assert!(during.contains("Initial commit") && !during.contains("No commits yet"));
+            assert_eq!(headers(&mut screen, width, height), initial);
+            screen.poll();
+        }
+        key(&mut screen, KeyCode::Char('2'));
+    }
+    select_file(&mut screen, "file-00.md");
+    wait(&mut screen, |s| view(s).contains("│ sample"));
+    key(&mut screen, KeyCode::Char('r'));
+    assert!(
+        view(&mut screen).contains("│ sample"),
+        "refresh must keep the loaded preview"
+    );
+}
+
+#[test]
 fn branch_preview_is_selected_branch_not_current_head() {
     let dir = repo();
     git(dir.path(), &["checkout", "-b", "feature"]);
@@ -670,16 +1205,21 @@ fn branch_preview_is_selected_branch_not_current_head() {
     git(dir.path(), &["checkout", "main"]);
     let mut screen = GitScreen::open(dir.path()).unwrap();
     wait(&mut screen, |s| view(s).contains("feature"));
-    key(&mut screen, KeyCode::Char('2'));
+    key(&mut screen, KeyCode::Char('3'));
     wait(&mut screen, |s| view(s).contains("Feature only"));
     key(&mut screen, KeyCode::Char('r'));
+    key(&mut screen, KeyCode::Char('4'));
+    wait(&mut screen, |s| view(s).contains("+ feature"));
+    // The History pane's border title names its pinned reference.
+    let history_heading = (0..48)
+        .map(|y| screen.frame(190, 48).grid.row_text(y))
+        .find(|row| row.contains("History · feature"))
+        .expect("history heading names its pinned reference");
+    assert!(history_heading.starts_with('╭'), "{history_heading}");
     key(&mut screen, KeyCode::Char('3'));
-    wait(&mut screen, |s| view(s).contains("+feature"));
-    assert!(view(&mut screen).contains("3 Commits · feature"));
-    key(&mut screen, KeyCode::Char('2'));
     key(&mut screen, KeyCode::Down);
     wait(&mut screen, |s| {
-        view(s).contains("Author: Screen Test") && !view(s).contains("Feature only")
+        view(s).contains("Initial commit") && !view(s).contains("Feature only")
     });
     assert_eq!(git(dir.path(), &["branch", "--show-current"]), "main");
 }
@@ -693,12 +1233,33 @@ fn file_tree_and_real_cursor_do_not_shift_row_text() {
     wait(&mut screen, |s| view(s).contains("new.rs"));
     let before = screen.frame(120, 40);
     assert!(before.cursor.is_some());
-    key(&mut screen, KeyCode::Char('2'));
+    key(&mut screen, KeyCode::Char('3'));
     let after = screen.frame(120, 40);
-    assert_eq!(before.grid.row_text(3), after.grid.row_text(3));
-    key(&mut screen, KeyCode::Char('1'));
+    let (_, y, _) = before.cursor.unwrap();
+    let separator = rail_right(&before);
+    // Column 1 holds the focused cursor marker; everything right of it stays put.
+    for x in 2..separator {
+        assert_eq!(
+            before.grid.get(x, y).unwrap().symbol,
+            after.grid.get(x, y).unwrap().symbol
+        );
+    }
+    key(&mut screen, KeyCode::Char('2'));
+    // Folding needs the tree view; Changes is flat by default.
+    key(&mut screen, KeyCode::Char('t'));
     key(&mut screen, KeyCode::Char('h'));
-    assert!(!view(&mut screen).contains("new.rs"));
+    let folded = view(&mut screen);
+    let rail = {
+        let frame = screen.frame(120, 40);
+        let right = rail_right(&frame) as usize;
+        (0..40)
+            .map(|y| frame.grid.row_text(y).chars().take(right + 1).collect::<String>())
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    // The reader may list a selected directory's descendants (DESIGN §3.1), so only
+    // the rail must hide the folded file.
+    assert!(!rail.contains("new.rs"), "{folded}");
     key(&mut screen, KeyCode::Char('l'));
     assert!(view(&mut screen).contains("new.rs"));
     key(&mut screen, KeyCode::Char('j'));
@@ -746,10 +1307,11 @@ fn worktrees_tags_and_stashes_are_real_repository_data() {
     key(&mut screen, KeyCode::Char('2'));
     key(&mut screen, KeyCode::Char('L'));
     wait(&mut screen, |s| view(s).contains("screen-review"));
+    key(&mut screen, KeyCode::Char('3'));
     key(&mut screen, KeyCode::Char('L'));
     key(&mut screen, KeyCode::Char('L'));
     assert!(view(&mut screen).contains("v1"));
-    key(&mut screen, KeyCode::Char('4'));
+    key(&mut screen, KeyCode::Char('5'));
     key(&mut screen, KeyCode::Char('p'));
     submit(&mut screen);
     wait(&mut screen, |s| !s.busy());
@@ -772,7 +1334,7 @@ fn all_files_browses_clean_tracked_source_with_syntax() {
     git(dir.path(), &["commit", "-m", "Add source"]);
     let mut screen = GitScreen::open(dir.path()).unwrap();
     wait(&mut screen, |s| view(s).contains("Working tree clean"));
-    key(&mut screen, KeyCode::Char('v'));
+    key(&mut screen, KeyCode::Char('F'));
     wait(&mut screen, |s| view(s).contains("sample.rs"));
     key(&mut screen, KeyCode::Down);
     wait(&mut screen, |s| view(s).contains("pub fn answer"));
@@ -780,12 +1342,12 @@ fn all_files_browses_clean_tracked_source_with_syntax() {
         code_style(&mut screen, "pub fn answer", "fn"),
         dust::ui::Style::Syntax(_)
     ));
-    key(&mut screen, KeyCode::Char('v'));
+    key(&mut screen, KeyCode::Char('F'));
     wait(&mut screen, |s| view(s).contains("Working tree clean"));
 }
 
 fn select_file(screen: &mut GitScreen, name: &str) {
-    key(screen, KeyCode::Char('1'));
+    key(screen, KeyCode::Char('2'));
     for _ in 0..20 {
         let frame = screen.frame(120, 40);
         if frame
@@ -800,115 +1362,65 @@ fn select_file(screen: &mut GitScreen, name: &str) {
 }
 
 #[test]
-fn tutor_completes_real_git_lessons_and_restores_original_screen() {
+fn short_current_ref_header_has_no_old_title_suffix_and_resize_keeps_native_cursor_geometry() {
     let dir = repo();
-    std::fs::write(dir.path().join("file.txt"), "untouched original work\n").unwrap();
-    let original_head = git(dir.path(), &["rev-parse", "HEAD"]);
+    git(dir.path(), &["branch", "-m", "main", "a"]);
+    let head = std::fs::read(dir.path().join(".git/HEAD")).unwrap();
+    let index = std::fs::read(dir.path().join(".git/index")).unwrap();
+    let refs = git(
+        dir.path(),
+        &["for-each-ref", "--format=%(refname) %(objectname)"],
+    );
+    let source = std::fs::read(dir.path().join("file.txt")).unwrap();
     let mut screen = GitScreen::open(dir.path()).unwrap();
-    screen.write_refusal = Some("Original workspace is untrusted".into());
-    wait(&mut screen, |s| view(s).contains("untouched original work"));
-    let before = view(&mut screen);
-    key(&mut screen, KeyCode::Char(':'));
-    text(&mut screen, "tutor git");
-    key(&mut screen, KeyCode::Enter);
-    wait(&mut screen, |s| view(s).contains("1/6 · Files"));
-    let practice = screen.root().to_owned();
-    let owner = practice.parent().unwrap().to_owned();
-    assert_ne!(practice, dir.path());
-    key(&mut screen, KeyCode::Char('v'));
-    wait(&mut screen, |s| view(s).contains("README.md"));
-    key(&mut screen, KeyCode::Char('v'));
-    wait(&mut screen, |s| view(s).contains("2/6 · Stage"));
-    select_file(&mut screen, "greet.rs");
-    key(&mut screen, KeyCode::Char(' '));
-    wait(&mut screen, |s| view(s).contains("3/6 · Commit and push"));
-    assert_eq!(
-        git(&practice, &["diff", "--cached", "--name-only"]),
-        "src/greet.rs"
-    );
-    key(&mut screen, KeyCode::Char('c'));
-    text(&mut screen, "Complete the practice change");
-    submit(&mut screen);
-    wait(&mut screen, |s| !s.busy());
-    key(&mut screen, KeyCode::Char('P'));
-    key(&mut screen, KeyCode::Enter);
-    wait(&mut screen, |s| view(s).contains("4/6 · Worktrees"));
-    assert_eq!(
-        git(&owner.join("remote.git"), &["rev-parse", "practice"]),
-        git(&practice, &["rev-parse", "HEAD"])
-    );
-    key(&mut screen, KeyCode::Char('2'));
-    key(&mut screen, KeyCode::Char('L'));
-    key(&mut screen, KeyCode::Char('n'));
-    text(&mut screen, "lesson-review");
-    submit(&mut screen);
-    let review = owner.join("review");
-    wait(&mut screen, |s| {
-        !s.busy() && review.join(".git").is_file() && view(s).contains("lesson-review")
+    wait(&mut screen, |screen| {
+        view(screen).contains("Initial comm")
     });
-    key(&mut screen, KeyCode::Down);
-    key(&mut screen, KeyCode::Enter);
-    wait(&mut screen, |s| view(s).contains("5/6 · Stashes"));
-    assert_eq!(screen.root(), review);
-    assert!(review.join("notes.md").is_file());
-    key(&mut screen, KeyCode::Char('4'));
-    key(&mut screen, KeyCode::Char('n'));
-    text(&mut screen, "Practice stash");
-    submit(&mut screen);
-    wait(&mut screen, |s| !s.busy() && view(s).contains("stash@{0}"));
-    assert!(!review.join("notes.md").exists());
-    key(&mut screen, KeyCode::Char('p'));
-    key(&mut screen, KeyCode::Enter);
-    wait(&mut screen, |s| {
-        view(s).contains("6/6 · Conflict resolution")
+    key(&mut screen, KeyCode::Char('3'));
+    // The reader's border title names the selected branch and nothing else.
+    let reader_title = |frame: &dust::ui::Frame| {
+        let rail = rail_right(frame);
+        (rail + 1..frame.grid.width())
+            .map(|x| frame.grid.get(x, 1).unwrap().symbol.clone())
+            .collect::<String>()
+            .trim_matches(|c| matches!(c, '╭' | '╮' | '─' | ' '))
+            .to_owned()
+    };
+    wait(&mut screen, |screen| {
+        let frame = screen.frame(190, 48);
+        reader_title(&frame) == "⎇ a" && view(screen).contains("Initial commit")
     });
+    let native = screen.frame(190, 48).cursor;
+    for (width, height) in [(64, 20), (100, 30), (190, 48)] {
+        let frame = screen.frame(width, height);
+        if width >= 100 {
+            let left = rail_right(&frame) + 2;
+            assert_eq!(reader_title(&frame), "⎇ a", "{width}×{height}");
+            assert!(frame.grid.row_text(2).contains("Initial commit"));
+            for y in 1..height - 1 {
+                let expected = if y == 1 {
+                    "╭"
+                } else if y == height - 2 {
+                    "╰"
+                } else {
+                    "│"
+                };
+                assert_eq!(frame.grid.get(left, y).unwrap().symbol, expected);
+            }
+        }
+        let (x, y, _) = frame.cursor.expect("native branch-list cursor");
+        assert_eq!(x, 1);
+        assert!(frame.grid.row_text(y).contains("● ⎇ a"), "{}", frame.grid.row_text(y));
+    }
+    assert_eq!(screen.frame(190, 48).cursor, native);
+    assert_eq!(std::fs::read(dir.path().join(".git/HEAD")).unwrap(), head);
+    assert_eq!(std::fs::read(dir.path().join(".git/index")).unwrap(), index);
     assert_eq!(
-        git(&review, &["diff", "--name-only", "--diff-filter=U"]),
-        "src/greet.rs"
+        git(
+            dir.path(),
+            &["for-each-ref", "--format=%(refname) %(objectname)"]
+        ),
+        refs
     );
-    wait(&mut screen, |s| view(s).contains("UU greet.rs"));
-    select_file(&mut screen, "greet.rs");
-    key(&mut screen, KeyCode::Enter);
-    key(&mut screen, KeyCode::Down);
-    submit(&mut screen);
-    assert!(
-        !std::fs::read_to_string(review.join("src/greet.rs"))
-            .unwrap()
-            .contains("<<<<<<<")
-    );
-    assert!(
-        std::fs::read_to_string(review.join("src/greet.rs"))
-            .unwrap()
-            .contains("their branch")
-    );
-    key(&mut screen, KeyCode::Char(' '));
-    wait(&mut screen, |s| !s.busy());
-    assert_eq!(
-        git(&review, &["diff", "--name-only", "--diff-filter=U"]),
-        ""
-    );
-    key(&mut screen, KeyCode::Char('C'));
-    key(&mut screen, KeyCode::Enter);
-    wait(&mut screen, |s| {
-        view(s).contains("completed all six lessons")
-    });
-    assert_eq!(
-        git(&review, &["rev-list", "--parents", "-1", "HEAD"])
-            .split_whitespace()
-            .count(),
-        3
-    );
-    key(&mut screen, KeyCode::Char('q'));
-    assert_eq!(screen.root(), dir.path());
-    assert_eq!(view(&mut screen), before);
-    assert_eq!(
-        screen.write_refusal.as_deref(),
-        Some("Original workspace is untrusted")
-    );
-    assert!(!owner.exists());
-    assert_eq!(git(dir.path(), &["rev-parse", "HEAD"]), original_head);
-    assert_eq!(
-        std::fs::read_to_string(dir.path().join("file.txt")).unwrap(),
-        "untouched original work\n"
-    );
+    assert_eq!(std::fs::read(dir.path().join("file.txt")).unwrap(), source);
 }

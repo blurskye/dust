@@ -10,6 +10,10 @@ Moving around
 
     call(first, (second))
 
+    path/to/file.txt counts as one WORD, then this.
+
+    red, green, blue: pick one.
+
 Changing text
 
     Thhe cow jumpped over thee moon.
@@ -32,6 +36,20 @@ Changing text
     joined.
 
     copy me
+
+    The year is 1999.
+
+    Replace this whole line.
+
+    Say hello loudly.
+
+    indent me
+
+Marks and registers
+
+    Mark this line.
+
+    yank me into a
 
 Visual mode
 

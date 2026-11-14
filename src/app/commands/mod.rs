@@ -120,6 +120,7 @@ pub enum AppEffect {
     Tutor,
     TutorNext,
     TutorBack,
+    TutorChapters,
     TutorQuit,
     /// `ctrl-o` (true) or `ctrl-i` through the jump list.
     WalkJumps(bool),
@@ -1110,6 +1111,7 @@ impl App {
             effect @ (AppEffect::Tutor
             | AppEffect::TutorNext
             | AppEffect::TutorBack
+            | AppEffect::TutorChapters
             | AppEffect::TutorQuit) => self.process_tutor_effect(effect),
             effect @ AppEffect::Quit { .. } => self.process_shutdown_effect(effect),
             effect @ (AppEffect::ExplorerPanelToggle
@@ -1663,6 +1665,7 @@ impl App {
             repeat_override,
             suppress_repeat,
         } = invocation;
+        let errors = self.tutor.errors;
         match outcome {
             Ok(outcome) => {
                 if let Some(pending) = outcome.pending {
@@ -1790,7 +1793,7 @@ impl App {
                         text_changed,
                     );
                 }
-                self.tutor_observe(&invocation);
+                self.tutor_observe(&invocation, errors);
                 self.sync_flash_ui();
                 self.plugin_command_result(outcome.value.as_ref(), None);
                 true

@@ -55,15 +55,24 @@ fn creates_worktree_from_entered_branch_and_recovers_after_refusal() {
     let target = owner.path().join("review");
     let mut screen = GitScreen::open(&root).unwrap();
     wait(&mut screen, |s| view(s).contains("Root commit"));
-    key(&mut screen, KeyCode::Char('2'));
+    key(&mut screen, KeyCode::Char('1'));
+    key(&mut screen, KeyCode::Char('L'));
+    wait(&mut screen, |s| view(s).contains("main  repository"));
     key(&mut screen, KeyCode::Char('n'));
+    let form = view(&mut screen);
+    assert!(
+        form.contains("Create worktree (existing or new branch)"),
+        "{form}"
+    );
+    assert!(form.contains(&target.display().to_string()), "{form}");
     screen.event(UiEvent::Paste("feature/foo".into()));
     key(&mut screen, KeyCode::Tab);
     // The default destination is the sibling review directory.
     key(&mut screen, KeyCode::Enter);
     key(&mut screen, KeyCode::Enter);
+    assert!(screen.busy(), "{}", view(&mut screen));
     wait(&mut screen, |s| !s.busy());
-    assert!(target.join(".git").is_file());
+    assert!(target.join(".git").is_file(), "{}", view(&mut screen));
     let expected = Command::new("git")
         .arg("-C")
         .arg(&root)
@@ -87,10 +96,17 @@ fn creates_worktree_from_entered_branch_and_recovers_after_refusal() {
     );
     // Creating it again must report a refusal and release the UI's busy state.
     key(&mut screen, KeyCode::Char('n'));
+    let form = view(&mut screen);
+    assert!(
+        form.contains("Create worktree (existing or new branch)"),
+        "{form}"
+    );
+    assert!(form.contains(&target.display().to_string()), "{form}");
     screen.event(UiEvent::Paste("feature/foo".into()));
     key(&mut screen, KeyCode::Tab);
     key(&mut screen, KeyCode::Enter);
     key(&mut screen, KeyCode::Enter);
+    assert!(screen.busy(), "{}", view(&mut screen));
     wait(&mut screen, |s| !s.busy());
     let refusal = view(&mut screen);
     assert!(refusal.contains("is not empty"), "{refusal}");

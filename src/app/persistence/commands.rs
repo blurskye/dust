@@ -43,6 +43,11 @@ pub(in crate::app) fn register_commands(
             AppEffect::TutorBack,
         ),
         (
+            "session.tutor.chapters",
+            "List the tutor's chapters and go to one",
+            AppEffect::TutorChapters,
+        ),
+        (
             "session.tutor.quit",
             "Stop the tutor; :Tutor picks up where it stopped",
             AppEffect::TutorQuit,

@@ -1,0 +1,14 @@
+{
+  "data": {
+    "addPullRequestReviewThreadReply": {
+      "comment": {
+        "id": "PRRC_orbit602",
+        "body": "Done.",
+        "author": {
+          "login": "maya"
+        },
+        "createdAt": "2026-11-14T05:18:02Z"
+      }
+    }
+  }
+}

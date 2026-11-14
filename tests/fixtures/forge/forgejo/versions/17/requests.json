@@ -1,0 +1,784 @@
+{
+  "schema": 1,
+  "provider": "forgejo",
+  "host": "code.forgejo.org",
+  "api_base": "https://code.forgejo.org/api/v1",
+  "server_version": "17.0.0-26-363f3dc30b+gitea-1.22.0",
+  "recorded_at": "2026-11-14T05:28:29Z",
+  "repo": "orbit/orbit",
+  "redaction": {
+    "hashes": [
+      "03d4b2185672482b7a71285c2a3bb60075020acaae92ddc3f31f21b3facf810f",
+      "052389b650e383ccd17d7fe4321aae6d047d9f725ae1f5081cd505dcc5908c99",
+      "0dd6f05856a6a52dfc935962a1316381d9682cc724fac9567182d108ba9a879c",
+      "1bb1bac86300287d4a45e2a8065b8f19c30367244c334ff5e598f8173c4706d5",
+      "1f0f01739dbd925c24f78ed4da729658e765af6cc0157d1fb205af195cec217a",
+      "29fb2c7e139e4ccfd1caba735a7e3b76c3e9f9d446ed873e99a7fed9c4362607",
+      "2f38dc77ef1f5af2f0bbd1476cc4ca0cbdeb433f962972357e9cdb153452022e",
+      "38b07acf05fae2630aaa9777bd8aafc692dfe9dbee3ccb23b34ee8f1ca438579",
+      "3ba423ccd980fdf953e6e2707928a6cab0b84e4202e388b524b83fce7aed7a2f",
+      "4c183798bc3c3bd8cb98d82fbe3ecf951048cef37ad4b3d6eae3f5a1f1a2d7a9",
+      "51e6b1d639e6de5c82f3218f4a36effe39674b718b81fac5a99a619b646fcc52",
+      "5586882d12307774ec5e4544094aefed41f00bc3173e30a7d57d3c881bd148c3",
+      "5f62271ab11ec5333e82d111d7db3fa0e62fcdc95983ebb5fc3b41c64b51e24f",
+      "63fbb2aa7ec3ad21de885de1248aa2daa479d77ec3e88254d4f58d297c488b3c",
+      "65df7676f38d24a215a7ace309f3624da72cdaba5e57c59d7beeb5999fe13eb6",
+      "750699886ea7138f9c848d33ea995641d1c0a2a97be480b993e59f2700021844",
+      "8ca0a53e1f124d94f2f2197e5de674ad82eb65134246c664db7dd3588ab74745",
+      "8ca5014885e2cfc6d0023f3c9ef3d9d14504576d89df6871564d3aad8f14e669",
+      "909a69de3967b7b6e85830083499cf87634efcc42b94050963ba1bd3219d1389",
+      "a1ac3de8b6c1239c4af24a976c453028cce99380908343eb1d11f91e2d18f6ef",
+      "abcd611b26c9851fc18bfb5f40c143247a3f6ffdf6f5453de456dd7535c6f951",
+      "af2247ebefe129a5541596ae3345534fd4ba759801955699b796561f281dbbf0",
+      "ba03a1f4aaa74e0c9f8732f6ec5166129dabd090f0210f23f4659d511931527e",
+      "c735ed1b3b641c4df863b546d218d641a38022d4de18d6b8ae7ba83f8cd06d86",
+      "ce5788fc22943b3d2b25225ec89d294890d09d464c9a167615f8eac8a07d2bd3",
+      "d60c3e5bde5149428512b7ff9d99980312e5743b61201bd74ed2223b55d04b79",
+      "e87df75fc0b0572c5a0807973ae23129673274c799f711f5ddd4d78fa473eef9",
+      "e8f2a239e2ca9b29453c9766f9ab867fa6294118940e55218820b1082ff0ac1c",
+      "ee445eaa7a62c713912d6d9d80718c7869776c2ae5487d31bc326dfedf826e00",
+      "f407f6c0f5ec7c3b7e3b79a4b7a25d40641ee7a108483ae05d1d7893e2ccf349",
+      "f6261850a7bd6787387ec4e532129bb94cfd9618bfaed6cf39889d5804b6f5c3",
+      "fe03b74dedad0e6cf77a0d5b29a41c5984e0c59027d1b8a493505b73aee0378b"
+    ],
+    "logins": {
+      "4c183798bc3c3bd8cb98d82fbe3ecf951048cef37ad4b3d6eae3f5a1f1a2d7a9": "maya",
+      "f407f6c0f5ec7c3b7e3b79a4b7a25d40641ee7a108483ae05d1d7893e2ccf349": "alex",
+      "909a69de3967b7b6e85830083499cf87634efcc42b94050963ba1bd3219d1389": "sam",
+      "a1ac3de8b6c1239c4af24a976c453028cce99380908343eb1d11f91e2d18f6ef": "leo",
+      "5f62271ab11ec5333e82d111d7db3fa0e62fcdc95983ebb5fc3b41c64b51e24f": "nina",
+      "ce5788fc22943b3d2b25225ec89d294890d09d464c9a167615f8eac8a07d2bd3": "maya2",
+      "38b07acf05fae2630aaa9777bd8aafc692dfe9dbee3ccb23b34ee8f1ca438579": "alex2",
+      "af2247ebefe129a5541596ae3345534fd4ba759801955699b796561f281dbbf0": "sam2",
+      "2f38dc77ef1f5af2f0bbd1476cc4ca0cbdeb433f962972357e9cdb153452022e": "leo2",
+      "8ca5014885e2cfc6d0023f3c9ef3d9d14504576d89df6871564d3aad8f14e669": "nina2",
+      "ee445eaa7a62c713912d6d9d80718c7869776c2ae5487d31bc326dfedf826e00": "maya3",
+      "ba03a1f4aaa74e0c9f8732f6ec5166129dabd090f0210f23f4659d511931527e": "alex3",
+      "63fbb2aa7ec3ad21de885de1248aa2daa479d77ec3e88254d4f58d297c488b3c": "sam3",
+      "8ca0a53e1f124d94f2f2197e5de674ad82eb65134246c664db7dd3588ab74745": "leo3",
+      "5586882d12307774ec5e4544094aefed41f00bc3173e30a7d57d3c881bd148c3": "nina3",
+      "51e6b1d639e6de5c82f3218f4a36effe39674b718b81fac5a99a619b646fcc52": "maya4",
+      "052389b650e383ccd17d7fe4321aae6d047d9f725ae1f5081cd505dcc5908c99": "alex4",
+      "65df7676f38d24a215a7ace309f3624da72cdaba5e57c59d7beeb5999fe13eb6": "sam4",
+      "03d4b2185672482b7a71285c2a3bb60075020acaae92ddc3f31f21b3facf810f": "leo4",
+      "e8f2a239e2ca9b29453c9766f9ab867fa6294118940e55218820b1082ff0ac1c": "nina4",
+      "29fb2c7e139e4ccfd1caba735a7e3b76c3e9f9d446ed873e99a7fed9c4362607": "maya5",
+      "1f0f01739dbd925c24f78ed4da729658e765af6cc0157d1fb205af195cec217a": "alex5",
+      "0dd6f05856a6a52dfc935962a1316381d9682cc724fac9567182d108ba9a879c": "sam5",
+      "abcd611b26c9851fc18bfb5f40c143247a3f6ffdf6f5453de456dd7535c6f951": "leo5",
+      "c735ed1b3b641c4df863b546d218d641a38022d4de18d6b8ae7ba83f8cd06d86": "nina5",
+      "750699886ea7138f9c848d33ea995641d1c0a2a97be480b993e59f2700021844": "maya6",
+      "1bb1bac86300287d4a45e2a8065b8f19c30367244c334ff5e598f8173c4706d5": "alex6",
+      "fe03b74dedad0e6cf77a0d5b29a41c5984e0c59027d1b8a493505b73aee0378b": "sam6",
+      "e87df75fc0b0572c5a0807973ae23129673274c799f711f5ddd4d78fa473eef9": "leo6",
+      "17c1943c4abcee2a8ba899b25157240ff10a3d1feb7eab43206f8d003f4218dc": "nina6",
+      "d60c3e5bde5149428512b7ff9d99980312e5743b61201bd74ed2223b55d04b79": "maya7",
+      "f321f2a22c3e146461935636a9a083538451d1e7cfdfa14628b04fa748dfa499": "alex7",
+      "f6261850a7bd6787387ec4e532129bb94cfd9618bfaed6cf39889d5804b6f5c3": "sam7"
+    },
+    "date_shift_seconds": 58880
+  },
+  "entries": [
+    {
+      "key": "GET /api/v1/version",
+      "read": "Version",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json;charset=utf-8"
+      },
+      "body": "version.json",
+      "synthesized": false
+    },
+    {
+      "key": "GET /api/v1/user",
+      "read": "Viewer",
+      "method": "GET",
+      "status": 401,
+      "headers": {
+        "content-type": "application/json;charset=utf-8"
+      },
+      "body": "viewer.json",
+      "synthesized": false,
+      "auth": "none"
+    },
+    {
+      "key": "GET /api/v1/repos/orbit/orbit",
+      "read": "Repository",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json;charset=utf-8"
+      },
+      "body": "repository.json",
+      "synthesized": false
+    },
+    {
+      "key": "GET /api/v1/repos/orbit/orbit/labels",
+      "read": "Labels",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json;charset=utf-8",
+        "x-total-count": "28"
+      },
+      "body": "labels.json",
+      "synthesized": false
+    },
+    {
+      "key": "GET /api/v1/repos/orbit/orbit/milestones?state=all",
+      "read": "Milestones",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json;charset=utf-8",
+        "x-total-count": "0"
+      },
+      "body": "milestones.json",
+      "synthesized": false
+    },
+    {
+      "key": "GET /api/v1/repos/orbit/orbit/collaborators",
+      "read": "Collaborators",
+      "method": "GET",
+      "status": 401,
+      "headers": {
+        "content-type": "application/json;charset=utf-8"
+      },
+      "body": "collaborators.json",
+      "synthesized": false,
+      "auth": "none"
+    },
+    {
+      "key": "GET /api/v1/repos/orbit/orbit/issues?page=1&state=open&type=pulls",
+      "read": "List",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json;charset=utf-8",
+        "link": "<https://code.forgejo.org/api/v1/repos/orbit/orbit/issues?limit=10&page=2&state=open&type=pulls>; rel=\"next\",<https://code.forgejo.org/api/v1/repos/orbit/orbit/issues?limit=10&page=2&state=open&type=pulls>; rel=\"last\"",
+        "x-total-count": "17"
+      },
+      "body": "list-pulls.json",
+      "synthesized": false,
+      "kind": "pulls"
+    },
+    {
+      "key": "GET /api/v1/repos/orbit/orbit/issues?page=2&state=open&type=pulls",
+      "read": "List",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json;charset=utf-8",
+        "link": "<https://code.forgejo.org/api/v1/repos/orbit/orbit/issues?limit=10&page=1&state=open&type=pulls>; rel=\"first\",<https://code.forgejo.org/api/v1/repos/orbit/orbit/issues?limit=10&page=1&state=open&type=pulls>; rel=\"prev\"",
+        "x-total-count": "17"
+      },
+      "body": "list-pulls-2.json",
+      "synthesized": false,
+      "kind": "pulls"
+    },
+    {
+      "key": "GET /api/v1/repos/orbit/orbit/pulls?page=1&state=open",
+      "read": "List",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json;charset=utf-8",
+        "link": "<https://code.forgejo.org/api/v1/repos/orbit/orbit/pulls?limit=10&page=2&state=open>; rel=\"next\",<https://code.forgejo.org/api/v1/repos/orbit/orbit/pulls?limit=10&page=2&state=open>; rel=\"last\"",
+        "x-total-count": "17"
+      },
+      "body": "list-pulls-3.json",
+      "synthesized": false,
+      "kind": "pulls",
+      "part": "pulls"
+    },
+    {
+      "key": "GET /api/v1/repos/orbit/orbit/issues?page=1&state=open&type=issues",
+      "read": "List",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json;charset=utf-8",
+        "link": "<https://code.forgejo.org/api/v1/repos/orbit/orbit/issues?limit=10&page=2&state=open&type=issues>; rel=\"next\",<https://code.forgejo.org/api/v1/repos/orbit/orbit/issues?limit=10&page=6&state=open&type=issues>; rel=\"last\"",
+        "x-total-count": "58"
+      },
+      "body": "list-issues.json",
+      "synthesized": false,
+      "kind": "issues"
+    },
+    {
+      "key": "GET /api/v1/repos/orbit/orbit/issues?page=2&state=open&type=issues",
+      "read": "List",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json;charset=utf-8",
+        "link": "<https://code.forgejo.org/api/v1/repos/orbit/orbit/issues?limit=10&page=3&state=open&type=issues>; rel=\"next\",<https://code.forgejo.org/api/v1/repos/orbit/orbit/issues?limit=10&page=6&state=open&type=issues>; rel=\"last\",<https://code.forgejo.org/api/v1/repos/orbit/orbit/issues?limit=10&page=1&state=open&type=issues>; rel=\"first\",<https://code.forgejo.org/api/v1/repos/orbit/orbit/issues?limit=10&page=1&state=open&type=issues>; rel=\"prev\"",
+        "x-total-count": "58"
+      },
+      "body": "list-issues-2.json",
+      "synthesized": false,
+      "kind": "issues"
+    },
+    {
+      "key": "GET /api/v1/repos/orbit/orbit/pulls/1784",
+      "read": "PullRequest",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json;charset=utf-8"
+      },
+      "body": "pull-request.json",
+      "synthesized": false
+    },
+    {
+      "key": "GET /api/v1/repos/orbit/orbit/pulls/1784/commits",
+      "read": "PullRequest",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json;charset=utf-8",
+        "x-page": "1",
+        "x-total-count": "1"
+      },
+      "body": "pull-request-2.json",
+      "synthesized": false,
+      "part": "commits"
+    },
+    {
+      "key": "GET /api/v1/repos/orbit/orbit/pulls/1784/files",
+      "read": "PullRequest",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json;charset=utf-8",
+        "x-page": "1",
+        "x-total-count": "1"
+      },
+      "body": "pull-request-3.json",
+      "synthesized": false,
+      "part": "files"
+    },
+    {
+      "key": "GET /api/v1/repos/orbit/orbit/pulls/1784/reviews",
+      "read": "PullRequest",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json;charset=utf-8",
+        "x-total-count": "2"
+      },
+      "body": "pull-request-4.json",
+      "synthesized": false,
+      "part": "reviews"
+    },
+    {
+      "key": "GET /api/v1/repos/orbit/orbit/pulls/1784/reviews/11617/comments",
+      "read": "Threads",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json;charset=utf-8"
+      },
+      "body": "threads.json",
+      "synthesized": false
+    },
+    {
+      "key": "GET /api/v1/repos/orbit/orbit/commits/00e904b87815eed672ae56afe6fcac095a725828/status",
+      "read": "PullRequest",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json;charset=utf-8",
+        "x-total-count": "21"
+      },
+      "body": "pull-request-5.json",
+      "synthesized": false,
+      "part": "status"
+    },
+    {
+      "key": "GET /api/v1/repos/orbit/orbit/statuses/00e904b87815eed672ae56afe6fcac095a725828",
+      "read": "PullRequest",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json;charset=utf-8",
+        "link": "<https://code.forgejo.org/api/v1/repos/orbit/orbit/statuses/00e904b87815eed672ae56afe6fcac095a725828?page=2>; rel=\"next\",<https://code.forgejo.org/api/v1/repos/orbit/orbit/statuses/00e904b87815eed672ae56afe6fcac095a725828?page=2>; rel=\"last\"",
+        "x-total-count": "45"
+      },
+      "body": "pull-request-6.json",
+      "synthesized": false,
+      "part": "statuses"
+    },
+    {
+      "key": "GET /api/v1/repos/orbit/orbit/issues/1784/timeline",
+      "read": "Timeline",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json;charset=utf-8",
+        "x-total-count": "8"
+      },
+      "body": "timeline.json",
+      "synthesized": false
+    },
+    {
+      "key": "GET /api/v1/repos/orbit/orbit/issues/1784/comments",
+      "read": "Timeline",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json;charset=utf-8",
+        "x-total-count": "0"
+      },
+      "body": "timeline-2.json",
+      "synthesized": false,
+      "part": "comments"
+    },
+    {
+      "key": "GET /api/v1/repos/orbit/orbit/pulls/1784.diff",
+      "read": "Diff",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "text/plain; charset=utf-8"
+      },
+      "body": "diff.diff",
+      "synthesized": false,
+      "accept": "text/plain"
+    },
+    {
+      "key": "GET /api/v1/repos/orbit/orbit/git/commits/00e904b87815eed672ae56afe6fcac095a725828.diff",
+      "read": "CommitDiff",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "text/plain; charset=utf-8"
+      },
+      "body": "commit-diff.diff",
+      "synthesized": false,
+      "accept": "text/plain"
+    },
+    {
+      "key": "GET /api/v1/repos/orbit/orbit/pulls/main/docker-socket",
+      "read": "PullRequestForBranch",
+      "method": "GET",
+      "status": 404,
+      "headers": {
+        "content-type": "application/json;charset=utf-8"
+      },
+      "body": "pull-request-for-branch.json",
+      "synthesized": false
+    },
+    {
+      "key": "GET /api/v1/repos/orbit/orbit/branch_protections/main",
+      "read": "PullRequest",
+      "method": "GET",
+      "status": 401,
+      "headers": {
+        "content-type": "application/json;charset=utf-8"
+      },
+      "body": "pull-request-7.json",
+      "synthesized": false,
+      "part": "protection",
+      "auth": "none"
+    },
+    {
+      "key": "GET /api/v1/repos/orbit/orbit/issues/1792",
+      "read": "Issue",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json;charset=utf-8"
+      },
+      "body": "issue.json",
+      "synthesized": false
+    },
+    {
+      "key": "GET /api/v1/repos/orbit/orbit/issues/1792/comments",
+      "read": "Issue",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json;charset=utf-8",
+        "x-total-count": "1"
+      },
+      "body": "issue-2.json",
+      "synthesized": false,
+      "part": "comments"
+    },
+    {
+      "key": "GET /api/v1/repos/orbit/orbit/issues/1792/timeline",
+      "read": "Timeline",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json;charset=utf-8",
+        "x-total-count": "2"
+      },
+      "body": "timeline-3.json",
+      "synthesized": false,
+      "kind": "issue"
+    },
+    {
+      "key": "GET /api/v1/repos/issues/search?owner=orbit&state=open&type=pulls",
+      "read": "Search",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json;charset=utf-8",
+        "link": "<https://code.forgejo.org/api/v1/repos/issues/search?limit=10&owner=orbit&page=2&state=open&type=pulls>; rel=\"next\",<https://code.forgejo.org/api/v1/repos/issues/search?limit=10&owner=orbit&page=7&state=open&type=pulls>; rel=\"last\"",
+        "x-total-count": "67"
+      },
+      "body": "search.json",
+      "synthesized": false
+    },
+    {
+      "key": "GET /api/v1/repos/orbit/orbit/actions/workflows",
+      "read": "Workflows",
+      "method": "GET",
+      "status": 404,
+      "headers": {
+        "content-type": "text/plain; charset=utf-8"
+      },
+      "body": "workflows.txt",
+      "synthesized": false
+    },
+    {
+      "key": "GET /api/v1/repos/orbit/orbit/actions/runs?page=1",
+      "read": "Runs",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json;charset=utf-8"
+      },
+      "body": "runs.json",
+      "synthesized": false
+    },
+    {
+      "key": "GET /api/v1/repos/orbit/orbit/actions/tasks?page=1",
+      "read": "Runs",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json;charset=utf-8"
+      },
+      "body": "runs-2.json",
+      "synthesized": false,
+      "part": "tasks"
+    },
+    {
+      "key": "GET /api/v1/repos/orbit/orbit/actions/runs?page=2",
+      "read": "Runs",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json;charset=utf-8"
+      },
+      "body": "runs-3.json",
+      "synthesized": false
+    },
+    {
+      "key": "GET /api/v1/repos/orbit/orbit/actions/runs/200481",
+      "read": "Run",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json;charset=utf-8"
+      },
+      "body": "run.json",
+      "synthesized": false
+    },
+    {
+      "key": "GET /api/v1/repos/orbit/orbit/actions/runs/200481/jobs",
+      "read": "Run",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json;charset=utf-8"
+      },
+      "body": "run-2.json",
+      "synthesized": false,
+      "part": "jobs"
+    },
+    {
+      "key": "GET /api/v1/repos/orbit/orbit/actions/runs/200481/artifacts",
+      "read": "Artifacts",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json;charset=utf-8",
+        "x-total-count": "1"
+      },
+      "body": "artifacts.json",
+      "synthesized": false
+    },
+    {
+      "key": "GET /api/v1/repos/orbit/orbit/actions/jobs/424038",
+      "read": "Job",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json;charset=utf-8"
+      },
+      "body": "job.json",
+      "synthesized": false
+    },
+    {
+      "key": "GET /api/v1/repos/orbit/orbit/actions/jobs/424038/logs",
+      "read": "JobLog",
+      "method": "GET",
+      "status": 500,
+      "headers": {
+        "content-type": "application/json;charset=utf-8"
+      },
+      "body": "job-log.log",
+      "synthesized": false,
+      "accept": "text/plain"
+    },
+    {
+      "key": "GET /api/v1/repos/orbit/orbit/actions/jobs/424039/logs",
+      "read": "JobLog",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "text/plain; charset=utf-8",
+        "last-modified": "Fri, 13 Nov 2026 12:01:54 GMT"
+      },
+      "body": "job-log-2.log",
+      "synthesized": false,
+      "accept": "text/plain"
+    },
+    {
+      "key": "GET /api/v1/notifications?status-types=unread",
+      "read": "Notifications",
+      "method": "GET",
+      "status": 401,
+      "headers": {
+        "content-type": "application/json;charset=utf-8"
+      },
+      "body": "notifications.json",
+      "synthesized": false,
+      "auth": "none"
+    },
+    {
+      "key": "GET /api/v1/user",
+      "read": "Viewer",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "body": "viewer-synth.json",
+      "synthesized": true,
+      "doc": "https://code.forgejo.org/api/swagger#/user/userGetCurrent",
+      "auth": "token"
+    },
+    {
+      "key": "GET /api/v1/notifications?status-types=unread",
+      "read": "Notifications",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "body": "notifications-synth.json",
+      "synthesized": true,
+      "doc": "https://code.forgejo.org/api/swagger#/notification/notifyGetList",
+      "auth": "token"
+    },
+    {
+      "key": "POST /api/v1/repos/orbit/orbit/issues/13/comments#54c8c686d137",
+      "read": "Comment",
+      "method": "POST",
+      "status": 201,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "body": "comment-synth.json",
+      "synthesized": true,
+      "doc": "https://code.forgejo.org/api/swagger#/issue/issueCreateComment",
+      "request": {
+        "body": "Looks good to me."
+      }
+    },
+    {
+      "key": "PUT /api/v1/repos/orbit/orbit/issues/13/labels#40db418dbf49",
+      "read": "SetLabels",
+      "method": "PUT",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "body": "set-labels-synth.json",
+      "synthesized": true,
+      "doc": "https://code.forgejo.org/api/swagger#/issue/issueReplaceLabels",
+      "request": {
+        "labels": [
+          77
+        ]
+      }
+    },
+    {
+      "key": "PATCH /api/v1/repos/orbit/orbit/issues/13#f8022682813f",
+      "read": "SetState",
+      "method": "PATCH",
+      "status": 201,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "body": "set-state-synth.json",
+      "synthesized": true,
+      "doc": "https://code.forgejo.org/api/swagger#/issue/issueEditIssue",
+      "request": {
+        "state": "closed"
+      }
+    },
+    {
+      "key": "POST /api/v1/repos/orbit/orbit/pulls/13/reviews#3eaabfd27bcc",
+      "read": "SubmitReview",
+      "method": "POST",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "body": "submit-review-synth.json",
+      "synthesized": true,
+      "doc": "https://code.forgejo.org/api/swagger#/repository/repoCreatePullReview",
+      "request": {
+        "event": "APPROVED",
+        "body": "Ship it",
+        "commit_id": "c92ad11000000000000000000000000000000000",
+        "comments": []
+      }
+    },
+    {
+      "key": "POST /api/v1/repos/orbit/orbit/pulls/13/merge#542d4acbf0c7",
+      "read": "Merge",
+      "method": "POST",
+      "status": 200,
+      "headers": {},
+      "body": null,
+      "synthesized": true,
+      "doc": "https://code.forgejo.org/api/swagger#/repository/repoMergePullRequest",
+      "request": {
+        "Do": "squash",
+        "head_commit_id": "c92ad11000000000000000000000000000000000",
+        "delete_branch_after_merge": true
+      }
+    },
+    {
+      "key": "POST /api/v1/repos/orbit/orbit/pulls/13/merge#19b9c573c135",
+      "read": "Merge",
+      "method": "POST",
+      "status": 409,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "body": "merge-synth.json",
+      "synthesized": true,
+      "doc": "https://code.forgejo.org/api/swagger#/repository/repoMergePullRequest",
+      "request": {
+        "Do": "squash",
+        "head_commit_id": "0000000000000000000000000000000000000000",
+        "delete_branch_after_merge": true
+      }
+    },
+    {
+      "key": "POST /api/v1/repos/orbit/orbit/pulls/13/reviews#c3058d94c01c",
+      "read": "InlineComment",
+      "method": "POST",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "body": "inline-comment-synth.json",
+      "synthesized": true,
+      "doc": "https://code.forgejo.org/api/swagger#/repository/repoCreatePullReview",
+      "request": {
+        "event": "COMMENT",
+        "body": "",
+        "commit_id": "c92ad11000000000000000000000000000000000",
+        "comments": [
+          {
+            "path": "src/lib.rs",
+            "new_position": 12,
+            "body": "nit: rename"
+          }
+        ]
+      }
+    },
+    {
+      "key": "POST /api/v1/repos/orbit/orbit/pulls/13/reviews#702c96502b0e",
+      "read": "Reply",
+      "method": "POST",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "body": "reply-synth.json",
+      "synthesized": true,
+      "doc": "https://code.forgejo.org/api/swagger#/repository/repoCreatePullReview",
+      "request": {
+        "event": "COMMENT",
+        "body": "",
+        "commit_id": "c92ad11000000000000000000000000000000000",
+        "comments": [
+          {
+            "path": "src/lib.rs",
+            "new_position": 12,
+            "body": "Done."
+          }
+        ]
+      }
+    },
+    {
+      "key": "POST /api/v1/repos/orbit/orbit/actions/runs/91/rerun",
+      "read": "Rerun",
+      "method": "POST",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "body": "rerun-synth.json",
+      "synthesized": true,
+      "doc": "https://code.forgejo.org/api/swagger#/repository/RerunWorkflowRun"
+    },
+    {
+      "key": "POST /api/v1/repos/orbit/orbit/actions/runs/91/cancel",
+      "read": "CancelRun",
+      "method": "POST",
+      "status": 200,
+      "headers": {},
+      "body": null,
+      "synthesized": true,
+      "doc": "https://code.forgejo.org/api/swagger#/repository/cancelWorkflowRun"
+    },
+    {
+      "key": "POST /api/v1/repos/orbit/orbit/actions/workflows/ci.yml/dispatches#23ccdb21c43a",
+      "read": "Dispatch",
+      "method": "POST",
+      "status": 204,
+      "headers": {},
+      "body": null,
+      "synthesized": true,
+      "doc": "https://code.forgejo.org/api/swagger#/repository/ActionsDispatchWorkflow",
+      "request": {
+        "ref": "main",
+        "inputs": {
+          "target": "staging"
+        }
+      }
+    },
+    {
+      "key": "PATCH /api/v1/notifications/threads/9001?to-status=read",
+      "read": "MarkRead",
+      "method": "PATCH",
+      "status": 205,
+      "headers": {},
+      "body": null,
+      "synthesized": true,
+      "doc": "https://code.forgejo.org/api/swagger#/notification/notifyReadThread"
+    }
+  ]
+}

@@ -191,7 +191,7 @@ pub(in crate::app) fn register_commands(
     register(
         registry,
         "workspace.git.conflict.continue",
-        "Finish the paused operation by recording its merge commit",
+        "Finish the paused merge or resume the resolved rebase",
         ContextRequirement::Workspace,
         ArgumentSchema::default(),
         |_invocation| Ok(AppEffect::GitConflictContinue),
@@ -339,11 +339,13 @@ impl App {
                 if let Some(screen) = &mut self.git_screen
                     && (screen.in_tutor() || screen.root() == self.state.workspace_root)
                 {
+                    screen.set_icon_mode(self.configuration.settings().ui.explorer.icon_mode);
                     screen.resume();
                     self.git_screen_visible = true;
                 } else {
                     match crate::git::screen::GitScreen::open(&self.state.workspace_root) {
-                        Ok(screen) => {
+                        Ok(mut screen) => {
+                            screen.set_icon_mode(self.configuration.settings().ui.explorer.icon_mode);
                             self.git_screen = Some(screen);
                             self.git_screen_visible = true;
                         }

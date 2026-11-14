@@ -1635,7 +1635,7 @@ impl App {
     }
 
     /// The program to run: a path as given, a Dust-installed adapter, or one on `PATH`.
-    fn agent_program(&self, program: &Path) -> Option<PathBuf> {
+    pub(in crate::app) fn agent_program(&self, program: &Path) -> Option<PathBuf> {
         if program.components().count() > 1 {
             return program.is_file().then(|| program.to_path_buf());
         }

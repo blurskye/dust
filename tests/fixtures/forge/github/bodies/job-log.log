@@ -1,0 +1,311 @@
+﻿2026-11-12T15:17:12.2657518Z Current runner version: '2.338.2'
+2026-11-12T15:17:12.2685477Z ##[group]Runner Image Provisioner
+2026-11-12T15:17:12.2686540Z Hosted Compute Agent
+2026-11-12T15:17:12.2687273Z Version: 20261028.624
+2026-11-12T15:17:12.2688001Z Commit: 54898b74c23fde5556c9b3c3a2290865feef0dfe
+2026-11-12T15:17:12.2688894Z Build Date: 2026-10-28T22:07:15Z
+2026-11-12T15:17:12.2689704Z Worker ID: {3530295c-5e2b-45f1-9bc2-3416e08aec0e}
+2026-11-12T15:17:12.2690549Z Region: centralus
+2026-11-12T15:17:12.2691211Z Cloud: Azure
+2026-11-12T15:17:12.2691805Z ##[endgroup]
+2026-11-12T15:17:12.2693903Z ##[group]Operating System
+2026-11-12T15:17:12.2694643Z Ubuntu
+2026-11-12T15:17:12.2695183Z 26.04.1
+2026-11-12T15:17:12.2695886Z LTS
+2026-11-12T15:17:12.2696474Z ##[endgroup]
+2026-11-12T15:17:12.2697124Z ##[group]Runner Image
+2026-11-12T15:17:12.2697879Z Image: ubuntu-26.04
+2026-11-12T15:17:12.2698522Z Version: 20261101.186.1
+2026-11-12T15:17:12.2700106Z Included Software: https://github.com/actions/runner-images/blob/ubuntu26/20261101.186/images/ubuntu/Ubuntu2604-Readme.md
+2026-11-12T15:17:12.2702248Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu26%2F20261101.186
+2026-11-12T15:17:12.2703563Z ##[endgroup]
+2026-11-12T15:17:12.2707289Z ##[group]GITHUB_TOKEN Permissions
+2026-11-12T15:17:12.2710345Z Actions: write
+2026-11-12T15:17:12.2711132Z ArtifactMetadata: write
+2026-11-12T15:17:12.2711944Z Attestations: write
+2026-11-12T15:17:12.2712699Z Checks: write
+2026-11-12T15:17:12.2713660Z CodeQuality: write
+2026-11-12T15:17:12.2714307Z Contents: write
+2026-11-12T15:17:12.2714996Z CopilotRequests: write
+2026-11-12T15:17:12.2715757Z Deployments: write
+2026-11-12T15:17:12.2716405Z Discussions: write
+2026-11-12T15:17:12.2717046Z Drives: write
+2026-11-12T15:17:12.2717738Z Issues: write
+2026-11-12T15:17:12.2718492Z Metadata: read
+2026-11-12T15:17:12.2719191Z Models: read
+2026-11-12T15:17:12.2719789Z Packages: write
+2026-11-12T15:17:12.2720439Z Pages: write
+2026-11-12T15:17:12.2721089Z PullRequests: write
+2026-11-12T15:17:12.2721787Z RepositoryProjects: write
+2026-11-12T15:17:12.2722545Z SecurityEvents: write
+2026-11-12T15:17:12.2723464Z Statuses: write
+2026-11-12T15:17:12.2724119Z VulnerabilityAlerts: read
+2026-11-12T15:17:12.2724887Z ##[endgroup]
+2026-11-12T15:17:12.2727435Z Secret source: Actions
+2026-11-12T15:17:12.2728741Z Cache mode: write
+2026-11-12T15:17:12.2729943Z Prepare workflow directory
+2026-11-12T15:17:12.3168188Z Prepare all required actions
+2026-11-12T15:17:12.3210978Z Getting action download info
+2026-11-12T15:17:12.5552111Z Download action repository 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1' (SHA:3d3c42e5aac5ba805825da76410c181273ba90b1)
+2026-11-12T15:17:12.6386204Z Download action repository 'actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e' (SHA:b7ad1dad31e06c5925ef5d2fc7ad053ef454303e)
+2026-11-12T15:17:13.1577437Z Uses: orbit/meta/.github/workflows/build.yml@refs/heads/main (2031836b979f4138001f6b31cee3fc2cf3dc9c28)
+2026-11-12T15:17:13.1581181Z ##[group] Inputs
+2026-11-12T15:17:13.1582292Z   go_version: 
+2026-11-12T15:17:13.1582799Z   go-version: 
+2026-11-12T15:17:13.1583561Z   go-version-file: ./go.mod
+2026-11-12T15:17:13.1584296Z   working-directory: 
+2026-11-12T15:17:13.1584849Z ##[endgroup]
+2026-11-12T15:17:13.1585426Z Complete job name: build-go-mod / govulncheck
+2026-11-12T15:17:13.2296764Z ##[group]Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+2026-11-12T15:17:13.2297749Z with:
+2026-11-12T15:17:13.2298274Z   repository: orbit/orbit
+2026-11-12T15:17:13.2302253Z   token: ***
+2026-11-12T15:17:13.2302738Z   ssh-strict: true
+2026-11-12T15:17:13.2303731Z   ssh-user: git
+2026-11-12T15:17:13.2304321Z   persist-credentials: true
+2026-11-12T15:17:13.2304889Z   clean: true
+2026-11-12T15:17:13.2305404Z   sparse-checkout-cone-mode: true
+2026-11-12T15:17:13.2305977Z   fetch-depth: 1
+2026-11-12T15:17:13.2306507Z   fetch-tags: false
+2026-11-12T15:17:13.2307010Z   show-progress: true
+2026-11-12T15:17:13.2307494Z   lfs: false
+2026-11-12T15:17:13.2307985Z   submodules: false
+2026-11-12T15:17:13.2308722Z   set-safe-directory: true
+2026-11-12T15:17:13.2309353Z   allow-unsafe-pr-checkout: false
+2026-11-12T15:17:13.2310139Z env:
+2026-11-12T15:17:13.2310666Z   GH_PAT: 
+2026-11-12T15:17:13.2311358Z ##[endgroup]
+2026-11-12T15:17:13.5200864Z Syncing repository: orbit/orbit
+2026-11-12T15:17:13.5204053Z ##[group]Getting Git version info
+2026-11-12T15:17:13.5205218Z Working directory is '/home/runner/work/orbit/orbit'
+2026-11-12T15:17:13.5206988Z [command]/usr/bin/git version
+2026-11-12T15:17:13.5207790Z git version 2.56.0
+2026-11-12T15:17:13.5215658Z ##[endgroup]
+2026-11-12T15:17:13.5222847Z Temporarily overriding HOME='/home/runner/work/_temp/d568ada4-8e1a-434c-ae58-3f87b0e275c0' before making global git config changes
+2026-11-12T15:17:13.5225202Z Adding repository directory to the temporary git global config as a safe directory
+2026-11-12T15:17:13.5227889Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/orbit/orbit
+2026-11-12T15:17:13.5287535Z Deleting the contents of '/home/runner/work/orbit/orbit'
+2026-11-12T15:17:13.5290100Z ##[group]Determining repository object format
+2026-11-12T15:17:13.5291720Z ##[endgroup]
+2026-11-12T15:17:13.5293163Z ##[group]Initializing the repository
+2026-11-12T15:17:13.5295793Z [command]/usr/bin/git init /home/runner/work/orbit/orbit
+2026-11-12T15:17:13.5402954Z hint: Using 'master' as the name for the initial branch. This default branch name
+2026-11-12T15:17:13.5404344Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+2026-11-12T15:17:13.5405487Z hint: to use in all of your new repositories, which will suppress this warning,
+2026-11-12T15:17:13.5406332Z hint: call:
+2026-11-12T15:17:13.5406800Z hint:
+2026-11-12T15:17:13.5407372Z hint: 	git config --global init.defaultBranch <name>
+2026-11-12T15:17:13.5408052Z hint:
+2026-11-12T15:17:13.5408767Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+2026-11-12T15:17:13.5409782Z hint: 'development'. The just-created branch can be renamed via this command:
+2026-11-12T15:17:13.5410589Z hint:
+2026-11-12T15:17:13.5411050Z hint: 	git branch -m <name>
+2026-11-12T15:17:13.5411601Z hint:
+2026-11-12T15:17:13.5412582Z hint: Disable this message with "git config set advice.defaultBranchName false"
+2026-11-12T15:17:13.5420848Z Initialized empty Git repository in /home/runner/work/orbit/orbit/.git/
+2026-11-12T15:17:13.5428446Z [command]/usr/bin/git remote add origin https://github.com/orbit/orbit
+2026-11-12T15:17:13.5471498Z ##[endgroup]
+2026-11-12T15:17:13.5472438Z ##[group]Disabling automatic garbage collection
+2026-11-12T15:17:13.5473635Z [command]/usr/bin/git config --local gc.auto 0
+2026-11-12T15:17:13.5499391Z ##[endgroup]
+2026-11-12T15:17:13.5500711Z ##[group]Setting up auth
+2026-11-12T15:17:13.5501600Z Removing SSH command configuration
+2026-11-12T15:17:13.5505199Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-11-12T15:17:13.5529243Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-11-12T15:17:13.5902104Z Removing HTTP extra header
+2026-11-12T15:17:13.5907632Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/alex6\.com\/\.extraheader
+2026-11-12T15:17:13.5932100Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/alex6\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-11-12T15:17:13.6117100Z Removing includeIf entries pointing to credentials config files
+2026-11-12T15:17:13.6120895Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-11-12T15:17:13.6144425Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-11-12T15:17:13.6335869Z [command]/usr/bin/git config --file /home/runner/work/_temp/git-credentials-6be29483-5f81-4dfa-ae04-c4d627bbd3ea.config http.https://github.com/.extraheader AUTHORIZATION: <redacted> ***
+2026-11-12T15:17:13.6364439Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/orbit/orbit/.git.path /home/runner/work/_temp/git-credentials-6be29483-5f81-4dfa-ae04-c4d627bbd3ea.config
+2026-11-12T15:17:13.6388361Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/orbit/orbit/.git/worktrees/*.path /home/runner/work/_temp/git-credentials-6be29483-5f81-4dfa-ae04-c4d627bbd3ea.config
+2026-11-12T15:17:13.6414744Z [command]/usr/bin/git config --local includeIf.gitdir:/alex6/workspace/.git.path /alex6/runner_temp/git-credentials-6be29483-5f81-4dfa-ae04-c4d627bbd3ea.config
+2026-11-12T15:17:13.6438669Z [command]/usr/bin/git config --local includeIf.gitdir:/alex6/workspace/.git/worktrees/*.path /alex6/runner_temp/git-credentials-6be29483-5f81-4dfa-ae04-c4d627bbd3ea.config
+2026-11-12T15:17:13.6460289Z ##[endgroup]
+2026-11-12T15:17:13.6461180Z ##[group]Fetching the repository
+2026-11-12T15:17:13.6466021Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +87ca664a295061e6861004bd6580695b53a0a448:refs/remotes/pull/1894/merge
+2026-11-12T15:17:14.1524218Z From https://github.com/orbit/orbit
+2026-11-12T15:17:14.1526815Z  * [new ref]         87ca664a295061e6861004bd6580695b53a0a448 -> pull/1894/merge
+2026-11-12T15:17:14.1531207Z ##[endgroup]
+2026-11-12T15:17:14.1532963Z ##[group]Determining the checkout info
+2026-11-12T15:17:14.1534831Z ##[endgroup]
+2026-11-12T15:17:14.1535805Z [command]/usr/bin/git sparse-checkout disable
+2026-11-12T15:17:14.1581513Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+2026-11-12T15:17:14.1608275Z ##[group]Checking out the ref
+2026-11-12T15:17:14.1610455Z [command]/usr/bin/git checkout --progress --force refs/remotes/pull/1894/merge
+2026-11-12T15:17:14.1830979Z Note: switching to 'refs/remotes/pull/1894/merge'.
+2026-11-12T15:17:14.1832040Z 
+2026-11-12T15:17:14.1832907Z You are in 'detached HEAD' state. You can look around, make experimental
+2026-11-12T15:17:14.1834990Z changes and commit them, and you can discard any commits you make in this
+2026-11-12T15:17:14.1836854Z state without impacting any branches by switching back to a branch.
+2026-11-12T15:17:14.1838200Z 
+2026-11-12T15:17:14.1838918Z If you want to create a new branch to retain commits you create, you may
+2026-11-12T15:17:14.1840498Z do so (now or later) by using -c with the switch command. Example:
+2026-11-12T15:17:14.1841401Z 
+2026-11-12T15:17:14.1841958Z   git switch -c <new-branch-name>
+2026-11-12T15:17:14.1842812Z 
+2026-11-12T15:17:14.1843609Z Or undo this operation with:
+2026-11-12T15:17:14.1844341Z 
+2026-11-12T15:17:14.1844871Z   git switch -
+2026-11-12T15:17:14.1845483Z 
+2026-11-12T15:17:14.1846411Z Turn off this advice by setting config variable advice.detachedHead to false
+2026-11-12T15:17:14.1847913Z 
+2026-11-12T15:17:14.1849340Z HEAD is now at 87ca664 Merge 0528b351e83ffcc428aafa49e80b46e0badd8190 into 6b30ecf3280d88d949dcc916bb91fc5e9d56f667
+2026-11-12T15:17:14.1854596Z ##[endgroup]
+2026-11-12T15:17:14.1875435Z [command]/usr/bin/git log -1 --format=%H
+2026-11-12T15:17:14.1895763Z 87ca664a295061e6861004bd6580695b53a0a448
+2026-11-12T15:17:14.2238412Z ##[group]Run actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+2026-11-12T15:17:14.2239909Z with:
+2026-11-12T15:17:14.2240803Z   go-version-file: go.mod
+2026-11-12T15:17:14.2241787Z   cache: true
+2026-11-12T15:17:14.2242677Z   check-latest: true
+2026-11-12T15:17:14.2252170Z   token: ***
+2026-11-12T15:17:14.2253134Z env:
+2026-11-12T15:17:14.2253961Z   GH_PAT: 
+2026-11-12T15:17:14.2254776Z ##[endgroup]
+2026-11-12T15:17:14.3289289Z Setup go version spec 1.26.0
+2026-11-12T15:17:14.3291578Z Attempting to resolve the latest version from the manifest...
+2026-11-12T15:17:15.2376038Z matching 1.26.0...
+2026-11-12T15:17:15.2413205Z Resolved as '1.26.0'
+2026-11-12T15:17:15.2422356Z Attempting to download 1.26.0...
+2026-11-12T15:17:16.1987718Z matching 1.26.0...
+2026-11-12T15:17:16.1997343Z Acquiring 1.26.0 from https://github.com/actions/go-versions/releases/download/1.26.0-21889650668/go-1.26.0-linux-x64.tar.gz
+2026-11-12T15:17:16.6940890Z Extracting Go...
+2026-11-12T15:17:16.7062463Z [command]/usr/bin/tar xz --warning=no-unknown-keyword --overwrite -C /home/runner/work/_temp/20016f76-1ea2-4ef7-a151-524a0035fb22 -f /home/runner/work/_temp/1599f931-9e5d-456b-a473-510558fbb503
+2026-11-12T15:17:17.6005257Z Successfully extracted go to /home/runner/work/_temp/20016f76-1ea2-4ef7-a151-524a0035fb22
+2026-11-12T15:17:17.6006189Z Adding to the cache ...
+2026-11-12T15:17:21.4547481Z Successfully cached go to /opt/hostedtoolcache/go/1.26.0/x64
+2026-11-12T15:17:21.4548144Z Added go to the path
+2026-11-12T15:17:21.4548783Z Successfully set up Go version 1.26.0
+2026-11-12T15:17:21.4707119Z [command]/opt/hostedtoolcache/go/1.26.0/x64/bin/go env GOMODCACHE
+2026-11-12T15:17:21.4732139Z [command]/opt/hostedtoolcache/go/1.26.0/x64/bin/go env GOCACHE
+2026-11-12T15:17:21.4756730Z /home/runner/go/pkg/mod
+2026-11-12T15:17:21.4770944Z /home/runner/.cache/go-build
+2026-11-12T15:17:21.6036765Z Cache hit for: setup-go-Linux-x64-ubuntu26-go-1.26.0-b5d28c548a00438405214de3cb7cc62e67826433dab4c42f08bbad2571526acd
+2026-11-12T15:17:22.4750050Z Received 51118226 of 51118226 (100.0%), 69.0 MBs/sec
+2026-11-12T15:17:22.4751038Z Cache Size: ~49 MB (51118226 B)
+2026-11-12T15:17:22.4860205Z [command]/usr/bin/tar -xf /home/runner/work/_temp/d5930744-cc71-40ce-b632-c29b0159db07/cache.tzst -P -C /home/runner/work/orbit/orbit --use-compress-program unzstd
+2026-11-12T15:17:22.7757915Z Cache restored successfully
+2026-11-12T15:17:22.7781540Z Cache restored from key: setup-go-Linux-x64-ubuntu26-go-1.26.0-b5d28c548a00438405214de3cb7cc62e67826433dab4c42f08bbad2571526acd
+2026-11-12T15:17:22.7810403Z go version go1.26.0 linux/amd64
+2026-11-12T15:17:22.7810686Z 
+2026-11-12T15:17:22.7811055Z ##[group]go env
+2026-11-12T15:17:22.7920483Z AR='ar'
+2026-11-12T15:17:22.7920999Z CC='gcc'
+2026-11-12T15:17:22.7921577Z CGO_CFLAGS='-O2 -g'
+2026-11-12T15:17:22.7922013Z CGO_CPPFLAGS=''
+2026-11-12T15:17:22.7922407Z CGO_CXXFLAGS='-O2 -g'
+2026-11-12T15:17:22.7922877Z CGO_ENABLED='1'
+2026-11-12T15:17:22.7923507Z CGO_FFLAGS='-O2 -g'
+2026-11-12T15:17:22.7924003Z CGO_LDFLAGS='-O2 -g'
+2026-11-12T15:17:22.7924387Z CXX='g++'
+2026-11-12T15:17:22.7924753Z GCCGO='gccgo'
+2026-11-12T15:17:22.7925093Z GO111MODULE=''
+2026-11-12T15:17:22.7925427Z GOAMD64='v1'
+2026-11-12T15:17:22.7925799Z GOARCH='amd64'
+2026-11-12T15:17:22.7926150Z GOAUTH='netrc'
+2026-11-12T15:17:22.7926470Z GOBIN=''
+2026-11-12T15:17:22.7926838Z GOCACHE='/home/runner/.cache/go-build'
+2026-11-12T15:17:22.7927262Z GOCACHEPROG=''
+2026-11-12T15:17:22.7927662Z GODEBUG=''
+2026-11-12T15:17:22.7928000Z GOENV='/home/runner/.config/go/env'
+2026-11-12T15:17:22.7928407Z GOEXE=''
+2026-11-12T15:17:22.7928732Z GOEXPERIMENT=''
+2026-11-12T15:17:22.7929128Z GOFIPS140='off'
+2026-11-12T15:17:22.7929505Z GOFLAGS=''
+2026-11-12T15:17:22.7930385Z GOGCCFLAGS='-fPIC -m64 -pthread -Wl,--no-gc-sections -fmessage-length=0 -ffile-prefix-map=/tmp/go-build3901356734=/tmp/go-build -gno-record-gcc-switches'
+2026-11-12T15:17:22.7931252Z GOHOSTARCH='amd64'
+2026-11-12T15:17:22.7931639Z GOHOSTOS='linux'
+2026-11-12T15:17:22.7932254Z GOINSECURE=''
+2026-11-12T15:17:22.7932722Z GOMOD='/home/runner/work/orbit/orbit/go.mod'
+2026-11-12T15:17:22.7933382Z GOMODCACHE='/home/runner/go/pkg/mod'
+2026-11-12T15:17:22.7933845Z GONOPROXY=''
+2026-11-12T15:17:22.7934234Z GONOSUMDB=''
+2026-11-12T15:17:22.7934538Z GOOS='linux'
+2026-11-12T15:17:22.7934887Z GOPATH='/home/runner/go'
+2026-11-12T15:17:22.7935232Z GOPRIVATE=''
+2026-11-12T15:17:22.7935700Z GOPROXY='https://proxy.golang.org,direct'
+2026-11-12T15:17:22.7936215Z GOROOT='/opt/hostedtoolcache/go/1.26.0/x64'
+2026-11-12T15:17:22.7936626Z GOSUMDB='sum.golang.org'
+2026-11-12T15:17:22.7937046Z GOTELEMETRY='local'
+2026-11-12T15:17:22.7937488Z GOTELEMETRYDIR='/home/runner/.config/go/telemetry'
+2026-11-12T15:17:22.7938164Z GOTMPDIR=''
+2026-11-12T15:17:22.7938538Z GOTOOLCHAIN='local'
+2026-11-12T15:17:22.7939110Z GOTOOLDIR='/opt/hostedtoolcache/go/1.26.0/x64/pkg/tool/linux_amd64'
+2026-11-12T15:17:22.7939742Z GOVCS=''
+2026-11-12T15:17:22.7940086Z GOVERSION='go1.26.0'
+2026-11-12T15:17:22.7940467Z GOWORK=''
+2026-11-12T15:17:22.7940864Z PKG_CONFIG='pkg-config'
+2026-11-12T15:17:22.7941097Z 
+2026-11-12T15:17:22.7941574Z ##[endgroup]
+2026-11-12T15:17:22.8102632Z ##[group]Run go install golang.org/x/vuln/cmd/govulncheck@latest
+2026-11-12T15:17:22.8103661Z [36;1mgo install golang.org/x/vuln/cmd/govulncheck@latest[0m
+2026-11-12T15:17:22.8139257Z shell: /usr/bin/bash -e {0}
+2026-11-12T15:17:22.8139667Z env:
+2026-11-12T15:17:22.8139934Z   GH_PAT: 
+2026-11-12T15:17:22.8140240Z   GOTOOLCHAIN: local
+2026-11-12T15:17:22.8140541Z ##[endgroup]
+2026-11-12T15:17:23.5255715Z ##[group]Run go mod tidy
+2026-11-12T15:17:23.5255976Z [36;1mgo mod tidy[0m
+2026-11-12T15:17:23.5283987Z shell: /usr/bin/bash -e {0}
+2026-11-12T15:17:23.5284257Z env:
+2026-11-12T15:17:23.5284436Z   GH_PAT: 
+2026-11-12T15:17:23.5284615Z   GOTOOLCHAIN: local
+2026-11-12T15:17:23.5284816Z ##[endgroup]
+2026-11-12T15:17:23.5718037Z ##[group]Run govulncheck ./...
+2026-11-12T15:17:23.5718306Z [36;1mgovulncheck ./...[0m
+2026-11-12T15:17:23.5743353Z shell: /usr/bin/bash -e {0}
+2026-11-12T15:17:23.5743594Z env:
+2026-11-12T15:17:23.5743772Z   GH_PAT: 
+2026-11-12T15:17:23.5743954Z   GOTOOLCHAIN: local
+2026-11-12T15:17:23.5744148Z ##[endgroup]
+2026-11-12T15:17:25.3097531Z === Symbol Results ===
+2026-11-12T15:17:25.3097874Z 
+2026-11-12T15:17:25.3098188Z No vulnerabilities found.
+2026-11-12T15:17:25.3098708Z 
+2026-11-12T15:17:25.3098911Z Your code is affected by 0 vulnerabilities.
+2026-11-12T15:17:25.3099592Z This scan also found 6 vulnerabilities in packages you import and 42
+2026-11-12T15:17:25.3100353Z vulnerabilities in modules you require, but your code doesn't appear to call
+2026-11-12T15:17:25.3100950Z these vulnerabilities.
+2026-11-12T15:17:25.3101340Z Use '-show verbose' for more details.
+2026-11-12T15:17:25.3340501Z Post job cleanup.
+2026-11-12T15:17:25.4307837Z [command]/opt/hostedtoolcache/go/1.26.0/x64/bin/go env GOMODCACHE
+2026-11-12T15:17:25.4342059Z [command]/opt/hostedtoolcache/go/1.26.0/x64/bin/go env GOCACHE
+2026-11-12T15:17:25.4372917Z /home/runner/go/pkg/mod
+2026-11-12T15:17:25.4387493Z /home/runner/.cache/go-build
+2026-11-12T15:17:25.4391850Z Cache hit occurred on the primary key setup-go-Linux-x64-ubuntu26-go-1.26.0-b5d28c548a00438405214de3cb7cc62e67826433dab4c42f08bbad2571526acd, not saving cache.
+2026-11-12T15:17:25.4508888Z Post job cleanup.
+2026-11-12T15:17:25.5199626Z [command]/usr/bin/git version
+2026-11-12T15:17:25.5263642Z git version 2.56.0
+2026-11-12T15:17:25.5289306Z Temporarily overriding HOME='/home/runner/work/_temp/425afcdd-4130-4482-a587-d3584236c9ae' before making global git config changes
+2026-11-12T15:17:25.5290032Z Adding repository directory to the temporary git global config as a safe directory
+2026-11-12T15:17:25.5294105Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/orbit/orbit
+2026-11-12T15:17:25.5318022Z Removing SSH command configuration
+2026-11-12T15:17:25.5323112Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-11-12T15:17:25.5349546Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-11-12T15:17:25.5553782Z Removing HTTP extra header
+2026-11-12T15:17:25.5557959Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/alex6\.com\/\.extraheader
+2026-11-12T15:17:25.5586249Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/alex6\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-11-12T15:17:25.5775932Z Removing includeIf entries pointing to credentials config files
+2026-11-12T15:17:25.5779996Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-11-12T15:17:25.5799093Z includeif.gitdir:/home/runner/work/orbit/orbit/.git.path
+2026-11-12T15:17:25.5799767Z includeif.gitdir:/home/runner/work/orbit/orbit/.git/worktrees/*.path
+2026-11-12T15:17:25.5800385Z includeif.gitdir:/alex6/workspace/.git.path
+2026-11-12T15:17:25.5800849Z includeif.gitdir:/alex6/workspace/.git/worktrees/*.path
+2026-11-12T15:17:25.5805391Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/orbit/orbit/.git.path
+2026-11-12T15:17:25.5822115Z /home/runner/work/_temp/git-credentials-6be29483-5f81-4dfa-ae04-c4d627bbd3ea.config
+2026-11-12T15:17:25.5829296Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/orbit/orbit/.git.path \/home\/runner\/work\/_temp\/git\-credentials\-6be29483\-5f81\-4dfa\-ae04\-c4d627bbd3ea\.config
+2026-11-12T15:17:25.5861851Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/orbit/orbit/.git/worktrees/*.path
+2026-11-12T15:17:25.5878690Z /home/runner/work/_temp/git-credentials-6be29483-5f81-4dfa-ae04-c4d627bbd3ea.config
+2026-11-12T15:17:25.5885848Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/orbit/orbit/.git/worktrees/*.path \/home\/runner\/work\/_temp\/git\-credentials\-6be29483\-5f81\-4dfa\-ae04\-c4d627bbd3ea\.config
+2026-11-12T15:17:25.5910191Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/alex6/workspace/.git.path
+2026-11-12T15:17:25.5927289Z /alex6/runner_temp/git-credentials-6be29483-5f81-4dfa-ae04-c4d627bbd3ea.config
+2026-11-12T15:17:25.5932672Z [command]/usr/bin/git config --local --unset includeif.gitdir:/alex6/workspace/.git.path \/alex6\/runner_temp\/git\-credentials\-6be29483\-5f81\-4dfa\-ae04\-c4d627bbd3ea\.config
+2026-11-12T15:17:25.5956799Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/alex6/workspace/.git/worktrees/*.path
+2026-11-12T15:17:25.5973273Z /alex6/runner_temp/git-credentials-6be29483-5f81-4dfa-ae04-c4d627bbd3ea.config
+2026-11-12T15:17:25.5979350Z [command]/usr/bin/git config --local --unset includeif.gitdir:/alex6/workspace/.git/worktrees/*.path \/alex6\/runner_temp\/git\-credentials\-6be29483\-5f81\-4dfa\-ae04\-c4d627bbd3ea\.config
+2026-11-12T15:17:25.6004831Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-11-12T15:17:25.6189718Z Removing credentials config '/home/runner/work/_temp/git-credentials-6be29483-5f81-4dfa-ae04-c4d627bbd3ea.config'
+2026-11-12T15:17:25.6309414Z Cleaning up orphan processes

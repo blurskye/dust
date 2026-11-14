@@ -1,0 +1,320 @@
+2026-11-14T04:22:04.5239335Z Runner 5e659bd7-f44d-454a-9e96-d1b0b2a418aa (version:v13.2.0) received task 336086 of job build, triggered by event: workflow_call
+2026-11-14T04:22:04.5302084Z workflow prepared
+2026-11-14T04:22:04.5499608Z 🚀  Start image=data.forgejo.org/oci/ci:3
+2026-11-14T04:22:04.5502100Z The network alias is build_forgejo_runner (sanitized version of Build Forgejo Runner)
+2026-11-14T04:22:04.5911213Z Cleaning up network for job Build Forgejo Runner, and network name is: WORKFLOW-f2abd42add6084aa9980c1bcbe093b06
+2026-11-14T04:22:04.8813661Z   🐳  docker create image=data.forgejo.org/oci/ci:3 platform=linux/arm64 entrypoint=["tail" "-f" "/dev/null"] cmd=[] network="WORKFLOW-f2abd42add6084aa9980c1bcbe093b06"
+2026-11-14T04:22:05.0028475Z   🐳  docker run image=data.forgejo.org/oci/ci:3 platform=linux/arm64 entrypoint=["tail" "-f" "/dev/null"] cmd=[] network="WORKFLOW-f2abd42add6084aa9980c1bcbe093b06"
+2026-11-14T04:22:05.8327798Z   ☁️  git fetch 'https://data.forgejo.org/actions/checkout' skipped; ref=fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 cached
+2026-11-14T04:22:05.9163762Z   ☁️  git fetch 'https://data.forgejo.org/actions/setup-go' skipped; ref=924ae3a1cded613372ab5595356fb5720e22ba16 cached
+2026-11-14T04:22:06.0620613Z   ☁️  git fetch 'https://data.forgejo.org/actions/upload-artifact' skipped; ref=c6a366c94c3e0affe28c06c8df20a878f24da3cf cached
+2026-11-14T04:22:06.1382874Z ⭐ Run Main https://data.forgejo.org/actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+2026-11-14T04:22:06.1465198Z   🐳  docker cp src=/home/runner/.cache/act/1a/f3858685de30955f42fbd8ac4a1cc999715ed348bcf49e17465ded53a64d67/ dst=/var/run/act/actions/1a/f3858685de30955f42fbd8ac4a1cc999715ed348bcf49e17465ded53a64d67/
+2026-11-14T04:22:06.2925538Z   🐳  docker exec cmd=[node /var/run/act/actions/1a/f3858685de30955f42fbd8ac4a1cc999715ed348bcf49e17465ded53a64d67/dist/index.js] user= workdir=
+2026-11-14T04:22:07.1921057Z   ❓ add-matcher /run/act/actions/1a/f3858685de30955f42fbd8ac4a1cc999715ed348bcf49e17465ded53a64d67/dist/problem-matcher.json
+2026-11-14T04:22:07.1921493Z ::add-matcher::/run/act/actions/1a/f3858685de30955f42fbd8ac4a1cc999715ed348bcf49e17465ded53a64d67/dist/problem-matcher.json
+2026-11-14T04:22:07.1928039Z Syncing repository: orbit/orbit
+2026-11-14T04:22:07.1935900Z ##[group]Getting Git version info
+2026-11-14T04:22:07.1936279Z Working directory is '/workspace/orbit/orbit'
+2026-11-14T04:22:07.2009862Z [command]/usr/bin/git version
+2026-11-14T04:22:07.2470275Z git version 2.47.3
+2026-11-14T04:22:07.2517244Z ##[endgroup]
+2026-11-14T04:22:07.2586321Z Temporarily overriding HOME='/tmp/ebf895ab-1f1f-4a45-98ee-0bdbb8d1224a' before making global git config changes
+2026-11-14T04:22:07.2587860Z Adding repository directory to the temporary git global config as a safe directory
+2026-11-14T04:22:07.2601693Z [command]/usr/bin/git config --global --add safe.directory /workspace/orbit/orbit
+2026-11-14T04:22:07.2711178Z Deleting the contents of '/workspace/orbit/orbit'
+2026-11-14T04:22:07.2727894Z ##[group]Initializing the repository
+2026-11-14T04:22:07.2740915Z [command]/usr/bin/git init /workspace/orbit/orbit
+2026-11-14T04:22:07.3089600Z hint: Using 'master' as the name for the initial branch. This default branch name
+2026-11-14T04:22:07.3092372Z hint: is subject to change. To configure the initial branch name to use in all
+2026-11-14T04:22:07.3093740Z hint: of your new repositories, which will suppress this warning, call:
+2026-11-14T04:22:07.3095227Z hint:
+2026-11-14T04:22:07.3096522Z hint: 	git config --global init.defaultBranch <name>
+2026-11-14T04:22:07.3097791Z hint:
+2026-11-14T04:22:07.3099082Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+2026-11-14T04:22:07.3100330Z hint: 'development'. The just-created branch can be renamed via this command:
+2026-11-14T04:22:07.3101917Z hint:
+2026-11-14T04:22:07.3103285Z hint: 	git branch -m <name>
+2026-11-14T04:22:07.3104626Z Initialized empty Git repository in /workspace/orbit/orbit/.git/
+2026-11-14T04:22:07.3134996Z [command]/usr/bin/git remote add origin https://code.forgejo.org/orbit/orbit
+2026-11-14T04:22:07.3274651Z ##[endgroup]
+2026-11-14T04:22:07.3277910Z ##[group]Disabling automatic garbage collection
+2026-11-14T04:22:07.3289464Z [command]/usr/bin/git config --local gc.auto 0
+2026-11-14T04:22:07.3402116Z ##[endgroup]
+2026-11-14T04:22:07.3406750Z ##[group]Setting up auth
+2026-11-14T04:22:07.3433769Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-11-14T04:22:07.3557959Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-11-14T04:22:07.5594923Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/code\.forgejo\.org\/\.extraheader
+2026-11-14T04:22:07.5716385Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/code\.forgejo\.org\/\.extraheader' && git config --local --unset-all 'http.https://code.forgejo.org/.extraheader' || :"
+2026-11-14T04:22:07.7184689Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-11-14T04:22:07.7314348Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-11-14T04:22:07.9107824Z [command]/usr/bin/git config --local http.https://code.forgejo.org/.extraheader AUTHORIZATION: <redacted> ***
+2026-11-14T04:22:07.9279577Z ##[endgroup]
+2026-11-14T04:22:07.9280443Z ##[group]Fetching the repository
+2026-11-14T04:22:07.9320675Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +80c990d7b734abe6f09fbf31f81afd6aa6ec8473:refs/remotes/origin/main
+2026-11-14T04:22:10.3005572Z From https://code.forgejo.org/orbit/orbit
+2026-11-14T04:22:10.3006399Z  * [new ref]         80c990d7b734abe6f09fbf31f81afd6aa6ec8473 -> origin/main
+2026-11-14T04:22:10.3093029Z ##[endgroup]
+2026-11-14T04:22:10.3093713Z ##[group]Determining the checkout info
+2026-11-14T04:22:10.3100603Z ##[endgroup]
+2026-11-14T04:22:10.3120664Z [command]/usr/bin/git sparse-checkout disable
+2026-11-14T04:22:10.3272690Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+2026-11-14T04:22:10.3380733Z ##[group]Checking out the ref
+2026-11-14T04:22:10.3402501Z [command]/usr/bin/git checkout --progress --force -B main refs/remotes/origin/main
+2026-11-14T04:22:10.5475235Z Switched to a new branch 'main'
+2026-11-14T04:22:10.5477837Z branch 'main' set up to track 'origin/main'.
+2026-11-14T04:22:10.5503857Z ##[endgroup]
+2026-11-14T04:22:10.5634975Z [command]/usr/bin/git log -1 --format=%H
+2026-11-14T04:22:10.5682200Z 80c990d7b734abe6f09fbf31f81afd6aa6ec8473
+2026-11-14T04:22:10.5726255Z ::remove-matcher owner=checkout-git::
+2026-11-14T04:22:11.2531525Z Setup go version spec 1.26.8
+2026-11-14T04:22:11.2534596Z Attempting to download 1.26.8...
+2026-11-14T04:22:11.8499247Z matching 1.26.8...
+2026-11-14T04:22:11.8617450Z Acquiring 1.26.8 from https://github.com/actions/go-versions/releases/download/1.26.8-33583485350/go-1.26.8-linux-arm64.tar.gz
+2026-11-14T04:22:13.6441485Z Extracting Go...
+2026-11-14T04:22:13.6798437Z [command]/usr/bin/tar xz --warning=no-unknown-keyword --overwrite -C /tmp/2b516505-24b4-49ed-ae76-7776a0508c63 -f /tmp/15bb4388-4175-4bee-bcdb-0828f0d3b8f1
+2026-11-14T04:22:15.8116609Z Successfully extracted go to /tmp/2b516505-24b4-49ed-ae76-7776a0508c63
+2026-11-14T04:22:15.8117366Z Adding to the cache ...
+2026-11-14T04:22:22.5826335Z Successfully cached go to /opt/hostedtoolcache/go/1.26.8/arm64
+2026-11-14T04:22:22.5839875Z Added go to the path
+2026-11-14T04:22:22.5842815Z Successfully set up Go version 1.26.8
+2026-11-14T04:22:22.6213502Z [command]/opt/hostedtoolcache/go/1.26.8/arm64/bin/go env GOMODCACHE
+2026-11-14T04:22:22.6299533Z [command]/opt/hostedtoolcache/go/1.26.8/arm64/bin/go env GOCACHE
+2026-11-14T04:22:22.6366758Z /root/.cache/go-build
+2026-11-14T04:22:22.6451300Z /root/go/pkg/mod
+2026-11-14T04:22:24.3317373Z Cache Size: ~395 MB (414026307 B)
+2026-11-14T04:22:24.3397930Z [command]/usr/bin/tar -xf /tmp/bfcc56af-0f95-4404-bed4-89b12319888a/cache.tzst -P -C /workspace/orbit/orbit --use-compress-program unzstd
+2026-11-14T04:22:29.8511624Z Cache restored successfully
+2026-11-14T04:22:29.9148342Z Cache restored from key: setup-go-linux-arm64-arm64docker-go-1.26.8-644cf42ef4c752dd4d93fc8f9e2ca2a40a8c426be4a3214f598c8b55ad851b6b
+2026-11-14T04:22:29.9149692Z ##[add-matcher]/run/act/actions/74/747457fae1f31e63029a50eaab19438813f8093f03ce824b5b9d2108bb7b32/matchers.json
+2026-11-14T04:22:29.9149889Z go version go1.26.8 linux/arm64
+2026-11-14T04:22:29.9150068Z 
+2026-11-14T04:22:29.9152098Z ##[group]go env
+2026-11-14T04:22:29.9832000Z AR='ar'
+2026-11-14T04:22:29.9832532Z CC='gcc'
+2026-11-14T04:22:29.9832767Z CGO_CFLAGS='-O2 -g'
+2026-11-14T04:22:29.9832996Z CGO_CPPFLAGS=''
+2026-11-14T04:22:29.9833285Z CGO_CXXFLAGS='-O2 -g'
+2026-11-14T04:22:29.9833499Z CGO_ENABLED='1'
+2026-11-14T04:22:29.9833763Z CGO_FFLAGS='-O2 -g'
+2026-11-14T04:22:29.9833967Z CGO_LDFLAGS='-O2 -g'
+2026-11-14T04:22:29.9834191Z CXX='g++'
+2026-11-14T04:22:29.9834401Z GCCGO='gccgo'
+2026-11-14T04:22:29.9834607Z GO111MODULE=''
+2026-11-14T04:22:29.9834851Z GOARCH='arm64'
+2026-11-14T04:22:29.9835058Z GOARM64='v8.0'
+2026-11-14T04:22:29.9835277Z GOAUTH='netrc'
+2026-11-14T04:22:29.9835492Z GOBIN=''
+2026-11-14T04:22:29.9835719Z GOCACHE='/root/.cache/go-build'
+2026-11-14T04:22:29.9835957Z GOCACHEPROG=''
+2026-11-14T04:22:29.9836217Z GODEBUG=''
+2026-11-14T04:22:29.9836438Z GOENV='/root/.config/go/env'
+2026-11-14T04:22:29.9836645Z GOEXE=''
+2026-11-14T04:22:29.9836846Z GOEXPERIMENT=''
+2026-11-14T04:22:29.9837061Z GOFIPS140='off'
+2026-11-14T04:22:29.9837288Z GOFLAGS=''
+2026-11-14T04:22:29.9837497Z GOGCCFLAGS='-fPIC -pthread -Wl,--no-gc-sections -fmessage-length=0 -ffile-prefix-map=/tmp/go-build423990392=/tmp/go-build -gno-record-gcc-switches'
+2026-11-14T04:22:29.9837754Z GOHOSTARCH='arm64'
+2026-11-14T04:22:29.9837969Z GOHOSTOS='linux'
+2026-11-14T04:22:29.9838167Z GOINSECURE=''
+2026-11-14T04:22:29.9838608Z GOMOD='/workspace/orbit/orbit/go.mod'
+2026-11-14T04:22:29.9838808Z GOMODCACHE='/root/go/pkg/mod'
+2026-11-14T04:22:29.9839023Z GONOPROXY=''
+2026-11-14T04:22:29.9839225Z GONOSUMDB=''
+2026-11-14T04:22:29.9839425Z GOOS='linux'
+2026-11-14T04:22:29.9839644Z GOPATH='/root/go'
+2026-11-14T04:22:29.9839840Z GOPRIVATE=''
+2026-11-14T04:22:29.9840043Z GOPROXY='https://proxy.golang.org,direct'
+2026-11-14T04:22:29.9840254Z GOROOT='/opt/hostedtoolcache/go/1.26.8/arm64'
+2026-11-14T04:22:29.9840471Z GOSUMDB='sum.golang.org'
+2026-11-14T04:22:29.9840677Z GOTELEMETRY='local'
+2026-11-14T04:22:29.9840871Z GOTELEMETRYDIR='/root/.config/go/telemetry'
+2026-11-14T04:22:29.9841070Z GOTMPDIR=''
+2026-11-14T04:22:29.9841264Z GOTOOLCHAIN='local'
+2026-11-14T04:22:29.9841530Z GOTOOLDIR='/opt/hostedtoolcache/go/1.26.8/arm64/pkg/tool/linux_arm64'
+2026-11-14T04:22:29.9841760Z GOVCS=''
+2026-11-14T04:22:29.9841960Z GOVERSION='go1.26.8'
+2026-11-14T04:22:29.9842157Z GOWORK=''
+2026-11-14T04:22:29.9842351Z PKG_CONFIG='pkg-config'
+2026-11-14T04:22:29.9842566Z 
+2026-11-14T04:22:29.9843145Z ##[endgroup]
+2026-11-14T04:22:30.4578651Z ++ grep -oP '(?<=toolchain ).+' go.mod
+2026-11-14T04:22:30.4666703Z + toolchain=go1.26.8
+2026-11-14T04:22:30.4682489Z ++ go version
+2026-11-14T04:22:30.4701178Z ++ cut '-d ' -f3
+2026-11-14T04:22:30.4880545Z + version=go1.26.8
+2026-11-14T04:22:30.4881057Z + dpkg --compare-versions 1.26.8 lt 1.26.8
+2026-11-14T04:22:31.0114622Z /opt/hostedtoolcache/go/1.26.8/arm64/bin/go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0  run 
+2026-11-14T04:22:31.9430019Z level=warning msg="[formatter] gofumpt: `extra-rules` is deprecated, please use `extra.group-params` instead."
+2026-11-14T04:22:34.0893486Z level=warning msg="[formatter] gofumpt: `extra-rules` is deprecated, please use `extra.group-params` instead."
+2026-11-14T04:22:42.9737911Z 0 issues.
+2026-11-14T04:22:43.9610449Z Running go vet...
+2026-11-14T04:22:49.0374299Z /opt/hostedtoolcache/go/1.26.8/arm64/bin/go build -v -tags 'netgo osusergo ' -ldflags '-extldflags "-static" -s -w -X "code.forgejo.org/orbit/orbit/v13/internal/pkg/ver.version=v80c990d"' -o forgejo-runner
+2026-11-14T04:22:49.3774419Z net
+2026-11-14T04:22:49.3857816Z os/user
+2026-11-14T04:22:49.4875972Z github.com/opencontainers/selinux/go-selinux
+2026-11-14T04:22:49.4885953Z archive/tar
+2026-11-14T04:22:49.4889498Z code.forgejo.org/orbit/orbit/v13/act/common/gitignore
+2026-11-14T04:22:49.7775780Z github.com/moby/go-archive/tarheader
+2026-11-14T04:22:49.8452865Z github.com/moby/go-archive
+2026-11-14T04:22:49.9850373Z code.forgejo.org/orbit/orbit/v13/act/common
+2026-11-14T04:22:49.9852496Z vendor/golang.org/x/net/http/httpproxy
+2026-11-14T04:22:49.9854260Z github.com/docker/go-connections/nat
+2026-11-14T04:22:49.9859744Z crypto/x509
+2026-11-14T04:22:49.9859931Z net/textproto
+2026-11-14T04:22:49.9864629Z github.com/moby/moby/api/types/network
+2026-11-14T04:22:49.9873616Z github.com/go-viper/mapstructure/v2
+2026-11-14T04:22:49.9874272Z github.com/docker/cli/cli/connhelper/commandconn
+2026-11-14T04:22:49.9933978Z github.com/docker/cli/cli/config/credentials
+2026-11-14T04:22:49.9944963Z google.golang.org/grpc/internal
+2026-11-14T04:22:50.0049006Z github.com/spf13/pflag
+2026-11-14T04:22:50.0670866Z github.com/docker/cli/cli/config/memorystore
+2026-11-14T04:22:50.0747831Z google.golang.org/grpc/internal/syscall
+2026-11-14T04:22:50.0817797Z github.com/docker/cli/cli/compose/schema
+2026-11-14T04:22:50.1169015Z google.golang.org/grpc/metadata
+2026-11-14T04:22:50.1354001Z vendor/golang.org/x/net/http/httpguts
+2026-11-14T04:22:50.1388745Z mime/multipart
+2026-11-14T04:22:50.1467018Z github.com/docker/cli/cli/config/configfile
+2026-11-14T04:22:50.1567061Z code.forgejo.org/orbit/orbit/v13/act/common/git
+2026-11-14T04:22:50.1602579Z github.com/docker/cli/cli/connhelper
+2026-11-14T04:22:50.1811977Z google.golang.org/grpc/codes
+2026-11-14T04:22:50.1821659Z google.golang.org/grpc/internal/mem
+2026-11-14T04:22:50.1936081Z google.golang.org/grpc/stats
+2026-11-14T04:22:50.2357688Z google.golang.org/grpc/internal/grpcutil
+2026-11-14T04:22:50.2538481Z google.golang.org/grpc/internal/balancerload
+2026-11-14T04:22:50.2637237Z google.golang.org/grpc/internal/status
+2026-11-14T04:22:50.2745176Z google.golang.org/grpc/experimental/stats
+2026-11-14T04:22:50.2938277Z golang.org/x/net/http/httpguts
+2026-11-14T04:22:50.2996493Z code.forgejo.org/orbit/orbit/v13/act/model
+2026-11-14T04:22:50.2997388Z code.forgejo.org/orbit/orbit/v13/act/filecollector
+2026-11-14T04:22:50.3119336Z github.com/docker/cli/cli/config
+2026-11-14T04:22:50.3260146Z google.golang.org/grpc/tap
+2026-11-14T04:22:50.3392711Z google.golang.org/grpc/mem
+2026-11-14T04:22:50.3628473Z google.golang.org/grpc/status
+2026-11-14T04:22:50.3794448Z google.golang.org/grpc/internal/stats
+2026-11-14T04:22:50.3795032Z google.golang.org/grpc/internal/resolver/dns/internal
+2026-11-14T04:22:50.3832141Z code.forgejo.org/orbit/orbit/v13/act/container
+2026-11-14T04:22:50.3832676Z github.com/google/uuid
+2026-11-14T04:22:50.4146030Z github.com/moby/moby/api/types/container
+2026-11-14T04:22:50.4476839Z google.golang.org/grpc/internal/binarylog
+2026-11-14T04:22:50.4741006Z google.golang.org/grpc/encoding
+2026-11-14T04:22:50.4742913Z google.golang.org/grpc/internal/transport/readyreader
+2026-11-14T04:22:50.5061617Z code.forgejo.org/orbit/orbit/v13/act/exprparser
+2026-11-14T04:22:50.5083100Z google.golang.org/grpc/encoding/proto
+2026-11-14T04:22:50.5886536Z code.forgejo.org/orbit/orbit/v13/internal/pkg/config
+2026-11-14T04:22:50.6118768Z github.com/moby/moby/api/types/swarm
+2026-11-14T04:22:50.6775679Z github.com/moby/moby/api/types/volume
+2026-11-14T04:22:50.6776244Z github.com/docker/cli/opts/swarmopts
+2026-11-14T04:22:50.7256595Z github.com/moby/moby/api/types/system
+2026-11-14T04:22:50.7599331Z crypto/tls
+2026-11-14T04:22:50.7978888Z github.com/spf13/cobra
+2026-11-14T04:22:51.4999124Z net/http/httptrace
+2026-11-14T04:22:51.4999717Z github.com/docker/go-connections/tlsconfig
+2026-11-14T04:22:51.4999849Z google.golang.org/grpc/internal/credentials
+2026-11-14T04:22:51.5547027Z net/http/internal/httpcommon
+2026-11-14T04:22:51.5547790Z golang.org/x/net/internal/httpcommon
+2026-11-14T04:22:51.5592344Z google.golang.org/grpc/credentials
+2026-11-14T04:22:51.6216702Z net/http
+2026-11-14T04:22:51.6324553Z google.golang.org/grpc/credentials/insecure
+2026-11-14T04:22:51.6325324Z google.golang.org/grpc/peer
+2026-11-14T04:22:51.6325462Z google.golang.org/grpc/resolver
+2026-11-14T04:22:51.6325679Z google.golang.org/grpc/internal/channelz
+2026-11-14T04:22:51.6945966Z google.golang.org/grpc/experimental/balancer/weight
+2026-11-14T04:22:51.6946548Z google.golang.org/grpc/internal/metadata
+2026-11-14T04:22:51.6946717Z google.golang.org/grpc/internal/proxyattributes
+2026-11-14T04:22:51.6948280Z google.golang.org/grpc/internal/transport/networktype
+2026-11-14T04:22:51.6948484Z google.golang.org/grpc/internal/resolver/passthrough
+2026-11-14T04:22:51.6961826Z google.golang.org/grpc/balancer/grpclb/state
+2026-11-14T04:22:51.7240270Z google.golang.org/grpc/internal/resolver/unix
+2026-11-14T04:22:51.7280166Z google.golang.org/grpc/internal/resolver/dns
+2026-11-14T04:22:51.7613398Z google.golang.org/grpc/channelz
+2026-11-14T04:22:51.7765320Z google.golang.org/grpc/balancer
+2026-11-14T04:22:51.7982043Z google.golang.org/grpc/resolver/dns
+2026-11-14T04:22:51.8225786Z google.golang.org/grpc/balancer/base
+2026-11-14T04:22:51.8226556Z google.golang.org/grpc/internal/serviceconfig
+2026-11-14T04:22:51.8232929Z google.golang.org/grpc/balancer/pickfirst
+2026-11-14T04:22:51.8593536Z google.golang.org/grpc/internal/resolver
+2026-11-14T04:22:51.8887268Z google.golang.org/grpc/balancer/endpointsharding
+2026-11-14T04:22:51.8887778Z google.golang.org/grpc/internal/balancer/gracefulswitch
+2026-11-14T04:22:51.9410625Z google.golang.org/grpc/balancer/roundrobin
+2026-11-14T04:22:52.9085494Z github.com/containerd/errdefs/pkg/errhttp
+2026-11-14T04:22:52.9090802Z github.com/docker/go-connections/sockets
+2026-11-14T04:22:52.9094201Z github.com/felixge/httpsnoop
+2026-11-14T04:22:52.9096398Z golang.org/x/net/trace
+2026-11-14T04:22:52.9096745Z golang.org/x/net/http2
+2026-11-14T04:22:52.9106643Z go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp/internal/request
+2026-11-14T04:22:52.9107017Z go.opentelemetry.io/otel/propagation
+2026-11-14T04:22:52.9107671Z net/http/httputil
+2026-11-14T04:22:52.9160723Z connectrpc.com/connect
+2026-11-14T04:22:52.9212778Z github.com/julienschmidt/httprouter
+2026-11-14T04:22:52.9490887Z github.com/moby/moby/client/internal
+2026-11-14T04:22:53.0408867Z code.forgejo.org/orbit/orbit/v13/act/artifactcache
+2026-11-14T04:22:53.0677882Z go.opentelemetry.io/otel/internal/global
+2026-11-14T04:22:53.2519344Z code.forgejo.org/orbit/orbit/v13/act/cacheproxy
+2026-11-14T04:22:53.2830494Z go.opentelemetry.io/otel
+2026-11-14T04:22:53.3401223Z go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp/internal/semconv
+2026-11-14T04:22:53.4121603Z code.forgejo.org/orbit/actions-proto/ping/v1/pingv1connect
+2026-11-14T04:22:53.4122944Z code.forgejo.org/orbit/actions-proto/runner/v1/runnerv1connect
+2026-11-14T04:22:53.6954132Z google.golang.org/grpc/internal/transport
+2026-11-14T04:22:53.8688364Z code.forgejo.org/orbit/orbit/v13/internal/pkg/client
+2026-11-14T04:22:54.1370568Z google.golang.org/grpc/internal/resolver/delegatingresolver
+2026-11-14T04:22:54.1884209Z google.golang.org/grpc
+2026-11-14T04:22:54.1942686Z go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp
+2026-11-14T04:22:54.3267021Z github.com/moby/moby/client
+2026-11-14T04:22:54.8481706Z google.golang.org/grpc/health/grpc_health_v1
+2026-11-14T04:22:54.8482204Z code.forgejo.org/orbit/orbit/v13/act/plugin/proto/v1alpha
+2026-11-14T04:22:54.9085249Z github.com/docker/cli/opts
+2026-11-14T04:22:54.9121259Z code.forgejo.org/orbit/orbit/v13/internal/pkg/envcheck
+2026-11-14T04:22:55.0268987Z github.com/docker/cli/cli/compose/loader
+2026-11-14T04:22:55.0313984Z code.forgejo.org/orbit/orbit/v13/act/plugin
+2026-11-14T04:22:55.2189322Z code.forgejo.org/orbit/orbit/v13/act/container/docker
+2026-11-14T04:22:55.5274027Z code.forgejo.org/orbit/orbit/v13/act/runner
+2026-11-14T04:22:56.1984898Z code.forgejo.org/orbit/orbit/v13/internal/pkg/report
+2026-11-14T04:22:56.4663403Z code.forgejo.org/orbit/orbit/v13/internal/app/run
+2026-11-14T04:22:56.7601873Z code.forgejo.org/orbit/orbit/v13/internal/app/poll
+2026-11-14T04:22:56.9559858Z code.forgejo.org/orbit/orbit/v13/internal/app/cmd
+2026-11-14T04:22:57.3255768Z code.forgejo.org/orbit/orbit/v13
+2026-11-14T04:22:58.7235784Z With the provided path, there will be 1 file uploaded
+2026-11-14T04:22:58.7236747Z Starting artifact upload
+2026-11-14T04:22:58.7237035Z For more detailed logs during the artifact upload process, enable step-debugging: https://docs.github.com/actions/monitoring-and-troubleshooting-workflows/enabling-debug-logging#enabling-step-debug-logging
+2026-11-14T04:22:58.7237441Z Artifact name is valid!
+2026-11-14T04:22:59.2793739Z Container for artifact "forgejo-runner" successfully created. Starting upload of file(s)
+2026-11-14T04:23:04.3958361Z Total size of all the files uploaded is 7627715 bytes
+2026-11-14T04:23:04.3959225Z File upload process has finished. Finalizing the artifact upload
+2026-11-14T04:23:04.5617249Z Artifact has been finalized. All files have been successfully uploaded!
+2026-11-14T04:23:04.5617691Z 
+2026-11-14T04:23:04.5617933Z The raw size of all the files that were specified for upload is 20840610 bytes
+2026-11-14T04:23:04.5618196Z The size of all the files that were uploaded is 7627715 bytes. This takes into account any gzip compression used to reduce the upload size, time and storage
+2026-11-14T04:23:04.5618481Z 
+2026-11-14T04:23:04.5618750Z Note: The size of downloaded zips can differ significantly from the reported size. For more information see: https://github.com/actions/upload-artifact#zipped-artifact-downloads 
+2026-11-14T04:23:04.5619090Z 
+2026-11-14T04:23:04.5619899Z Artifact forgejo-runner has been successfully uploaded!
+2026-11-14T04:23:04.6415273Z ⭐ Run Post https://data.forgejo.org/actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16
+2026-11-14T04:23:04.6586905Z   🐳  docker exec cmd=[node /var/run/act/actions/74/747457fae1f31e63029a50eaab19438813f8093f03ce824b5b9d2108bb7b32/dist/cache-save/index.js] user= workdir=
+2026-11-14T04:23:04.9670508Z [command]/opt/hostedtoolcache/go/1.26.8/arm64/bin/go env GOMODCACHE
+2026-11-14T04:23:04.9734800Z [command]/opt/hostedtoolcache/go/1.26.8/arm64/bin/go env GOCACHE
+2026-11-14T04:23:04.9799563Z /root/go/pkg/mod
+2026-11-14T04:23:04.9952371Z /root/.cache/go-build
+2026-11-14T04:23:05.0343345Z [command]/usr/bin/tar --posix -cf cache.tzst --exclude cache.tzst -P -C /workspace/orbit/orbit --files-from manifest.txt --use-compress-program zstdmt
+2026-11-14T04:23:09.5476568Z Cache Size: ~395 MB (413847084 B)
+2026-11-14T04:23:09.9357883Z Cache saved successfully
+2026-11-14T04:23:09.9954273Z Cache saved with the key: setup-go-Linux-arm64-arm64docker-go-1.26.8-644cf42ef4c752dd4d93fc8f9e2ca2a40a8c426be4a3214f598c8b55ad851b6b
+2026-11-14T04:23:10.0268977Z   ✅  Success - Post https://data.forgejo.org/actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16
+2026-11-14T04:23:10.1241869Z ⭐ Run Post https://data.forgejo.org/actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+2026-11-14T04:23:10.1490452Z   🐳  docker exec cmd=[node /var/run/act/actions/1a/f3858685de30955f42fbd8ac4a1cc999715ed348bcf49e17465ded53a64d67/dist/index.js] user= workdir=
+2026-11-14T04:23:10.4537350Z [command]/usr/bin/git version
+2026-11-14T04:23:10.4692058Z git version 2.47.3
+2026-11-14T04:23:10.4728807Z   ⚙  ***
+2026-11-14T04:23:10.4772314Z Temporarily overriding HOME='/tmp/72a636e8-41bc-4c6e-9120-033cfd877137' before making global git config changes
+2026-11-14T04:23:10.4773179Z Adding repository directory to the temporary git global config as a safe directory
+2026-11-14T04:23:10.4783004Z [command]/usr/bin/git config --global --add safe.directory /workspace/orbit/orbit
+2026-11-14T04:23:10.4966702Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-11-14T04:23:10.5130572Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-11-14T04:23:10.7011966Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/code\.forgejo\.org\/\.extraheader
+2026-11-14T04:23:10.7097384Z http.https://code.forgejo.org/.extraheader
+2026-11-14T04:23:10.7146308Z [command]/usr/bin/git config --local --unset-all http.https://code.forgejo.org/.extraheader
+2026-11-14T04:23:10.7440677Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/code\.forgejo\.org\/\.extraheader' && git config --local --unset-all 'http.https://code.forgejo.org/.extraheader' || :"
+2026-11-14T04:23:10.9072025Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-11-14T04:23:10.9189401Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-11-14T04:23:11.1043422Z   ✅  Success - Post https://data.forgejo.org/actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+2026-11-14T04:23:11.1538642Z 🏁  Job succeeded

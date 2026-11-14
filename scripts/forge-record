@@ -1,0 +1,1248 @@
+#!/usr/bin/env python3
+"""Record read-only forge API fixtures for Dusty's forge tests (FORGE.md §8.1).
+
+    scripts/forge-record <provider> <host> <owner/repo> --out tests/fixtures/forge/<provider>/
+                         [--check] [--plan plan.json] [--token-from gh|env:NAME|none]
+
+Only GET requests (and GraphQL *query* documents) are ever sent to the real host.
+Write fixtures are synthesized from the official API docs and marked as such.
+Tokens are held in memory only and never printed, stored or put in argv.
+
+Fixture format (read by tests/fixtures/forge/server.py):
+  requests.json {schema, provider, host, api_base, server_version, recorded_at, repo,
+                 redaction{hashes, logins, date_shift_seconds}, entries[]}
+  entry {key, read, [kind], [part], method, status, headers, body, synthesized,
+         [graphql{operation, variables}], [accept], [truncated], [note], [doc]}
+  key   "METHOD /path?sorted-query" (path relative to the host root, per_page/limit dropped,
+        query = urllib.parse.urlencode(sorted(pairs))); with a body "#"+sha256(canonical)[:12];
+        GraphQL "POST /graphql op=Name" (variables in entry.graphql.variables).
+"""
+import argparse
+import datetime as dt
+import hashlib
+import json
+import os
+import pathlib
+import re
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+
+CAST = ["maya", "alex", "sam", "leo", "nina"]
+CAP = 256 * 1024
+PAGE = 10
+# Words too common to replace on their own; such owners/names are only replaced as full paths.
+GENERIC = {"cli", "docs", "tea", "runner", "gitea", "forgejo", "gitlab", "github", "website",
+           "charts", "app", "api", "web", "core", "main", "test", "tests", "server", "client"}
+KEEP_HEADERS = ("content-type", "etag", "last-modified", "link", "x-next-page", "x-page",
+                "x-total", "x-total-pages", "x-total-count", "retry-after")
+TOKEN_PATTERNS = [
+    re.compile(r"gh[pousr]_[A-Za-z0-9]{20,}"),
+    re.compile(r"github_pat_[A-Za-z0-9_]{20,}"),
+    re.compile(r"glpat-[A-Za-z0-9_\-]{10,}"),
+    re.compile(r"glrt-[A-Za-z0-9_\-]{10,}"),
+    re.compile(r"(?i)(token=)[0-9a-f]{40}"),
+    re.compile(r"(?i)(private-token:\s*)\S+"),
+    re.compile(r"(?i)(authorization:\s*)(?:bearer |token )?\S+"),
+]
+EMAIL = re.compile(r"(?<![\w.+-])([\w.+-]+)@([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,})(?![\w-])")
+AVATAR = re.compile(r"https?://[^\s\"'<>)\\]*(?:avatar|gravatar)[^\s\"'<>)\\]*", re.I)
+ISO = re.compile(r"(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}:\d{2})(\.\d+)?(Z|[+-]\d{2}:?\d{2})?")
+DATE = re.compile(r"(?<![\d-])(\d{4}-\d{2}-\d{2})(?![\dT:-])")
+API_PREFIX = {"github": "", "gitlab": "/api/v4", "gitea": "/api/v1", "forgejo": "/api/v1"}
+
+# Reads (FORGE.md §3.4) every provider fixture must cover; value = labels that satisfy it.
+COMMON_READS = {
+    "Repository": ["Repository"], "Viewer": ["Viewer"], "Labels": ["Labels"],
+    "Milestones": ["Milestones"], "Collaborators": ["Collaborators"],
+    "List:pulls": ["List:pulls"], "List:issues": ["List:issues"],
+    "PullRequest": ["PullRequest"], "Fingerprint": ["Fingerprint", "PullRequest"],
+    "Issue": ["Issue"], "Timeline": ["Timeline"], "Threads": ["Threads"], "Diff": ["Diff"],
+    "CommitDiff": ["CommitDiff"], "PullRequestForBranch": ["PullRequestForBranch"],
+    "Runs": ["Runs"], "Run": ["Run"], "Job": ["Job"], "JobLog": ["JobLog"],
+    "Artifacts": ["Artifacts", "Job"], "Notifications": ["Notifications"],
+}
+WRITES = ["Comment", "SetLabels", "SetState", "SubmitReview", "Merge", "Rerun", "CancelRun",
+          "Dispatch", "MarkRead", "Reply", "InlineComment"]
+READS = {
+    "github": dict(COMMON_READS, Workflows=["Workflows"], WorkflowSource=["WorkflowSource"]),
+    "gitlab": dict(COMMON_READS, Version=["Version"], Search=["Search"]),
+    "gitea": dict(COMMON_READS, Version=["Version"], Workflows=["Workflows"], Search=["Search"]),
+    "forgejo": dict(COMMON_READS, Version=["Version"], Workflows=["Workflows"], Search=["Search"]),
+}
+
+
+def sha(text):
+    return hashlib.sha256(text.encode()).hexdigest()
+
+
+def canonical(body):
+    return json.dumps(body, sort_keys=True, separators=(",", ":"))
+
+
+def make_key(method, path, query=None, body=None, graphql_op=None):
+    if graphql_op:
+        return f"{method} {path} op={graphql_op}"
+    pairs = sorted((k, str(v)) for k, v in (query or {}).items() if k not in ("per_page", "limit"))
+    key = f"{method} {path}" + ("?" + urllib.parse.urlencode(pairs) if pairs else "")
+    if body is not None:
+        key += "#" + sha(canonical(body))[:12]
+    return key
+
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args, **kwargs):
+        return None
+
+
+OPENER = urllib.request.build_opener(NoRedirect)
+
+
+def http(method, url, headers, data=None, timeout=150):
+    request = urllib.request.Request(url, data=data, method=method, headers=headers)
+    try:
+        with OPENER.open(request, timeout=timeout) as response:
+            return response.status, {k.lower(): v for k, v in response.headers.items()}, response.read()
+    except urllib.error.HTTPError as error:
+        return error.code, {k.lower(): v for k, v in error.headers.items()}, error.read()
+
+
+class Recorder:
+    def __init__(self, provider, host, repo, token, api_base, delay, auth_scheme):
+        self.provider, self.host, self.repo = provider, host, repo
+        self.token, self.api_base, self.delay = token, api_base.rstrip("/"), delay
+        self.auth_scheme = auth_scheme
+        self.entries = []
+        self.last = 0.0
+        self.root_prefix = urllib.parse.urlparse(self.api_base).path  # e.g. /api/v4 or ""
+
+    def _send(self, method, url, headers, data=None):
+        wait = self.last + self.delay - time.monotonic()
+        if wait > 0:
+            time.sleep(wait)
+        try:
+            return http(method, url, headers, data)
+        finally:
+            self.last = time.monotonic()
+
+    def get(self, read, path, query=None, accept=None, kind=None, part=None, text=False, record=True):
+        """path is relative to api_base; the recorded key is relative to the host root."""
+        query = dict(query or {})
+        if read.startswith(("List", "Runs", "Search")):
+            query.setdefault("limit" if self.provider in ("gitea", "forgejo") else "per_page", PAGE)
+        url = self.api_base + path + ("?" + urllib.parse.urlencode(query) if query else "")
+        headers = {"User-Agent": "dusty-forge-record/1", "Accept": accept or "application/json"}
+        if self.token:
+            headers["Authorization"] = f"{self.auth_scheme} {self.token}"
+        status, response_headers, body = self._send("GET", url, headers)
+        redirected = False
+        if status in (301, 302, 303, 307, 308) and "location" in response_headers:
+            # Blob redirects (job logs, artifacts): follow once without the token.
+            target = urllib.parse.urljoin(url, response_headers["location"])
+            plain = {"User-Agent": headers["User-Agent"], "Accept": "*/*"}
+            if urllib.parse.urlparse(target).netloc == urllib.parse.urlparse(url).netloc:
+                plain = headers
+            status, response_headers, body = self._send("GET", target, plain)
+            redirected = True
+        truncated = text and len(body) > CAP  # logs and diffs only; JSON stays whole
+        if truncated:
+            body = body[:CAP]
+        entry = {"read": read, "method": "GET", "path": self.root_prefix + path, "query": query,
+                 "status": status, "headers": response_headers, "raw": body, "accept": accept,
+                 "truncated": truncated, "text": text}
+        if kind:
+            entry["kind"] = kind
+        if part:
+            entry["part"] = part
+        if redirected:
+            entry["note"] = "followed a blob redirect without the token"
+        if record:
+            self.entries.append(entry)
+        try:
+            value = json.loads(body) if not text else None
+        except ValueError:
+            value = None
+        return status, value, body
+
+    def graphql(self, read, path, document, variables, kind=None, part=None):
+        """path is relative to the host root of api_base (GitHub /graphql, GitLab /api/graphql)."""
+        match = re.match(r"\s*query\s+(\w+)", document)
+        if not match:
+            raise SystemExit("refusing a GraphQL document that is not a named query")
+        operation = match.group(1)
+        headers = {"User-Agent": "dusty-forge-record/1", "Content-Type": "application/json",
+                   "Accept": "application/json"}
+        if self.token:
+            headers["Authorization"] = f"{self.auth_scheme} {self.token}"
+        body = json.dumps({"query": document, "variables": variables, "operationName": operation}).encode()
+        origin = urllib.parse.urlparse(self.api_base)
+        status, response_headers, raw = self._send("POST", f"{origin.scheme}://{origin.netloc}{path}", headers, body)
+        entry = {"read": read, "method": "POST", "path": path, "query": {},
+                 "status": status, "headers": response_headers, "raw": raw, "accept": None,
+                 "truncated": False, "text": False,
+                 "graphql": {"operation": operation, "variables": variables, "document": document}}
+        if kind:
+            entry["kind"] = kind
+        if part:
+            entry["part"] = part
+        self.entries.append(entry)
+        try:
+            return status, json.loads(raw)
+        except ValueError:
+            return status, None
+
+
+# ---------------------------------------------------------------- provider recordings
+
+def first(items, predicate=lambda item: True):
+    return next((item for item in items or [] if predicate(item)), None)
+
+
+def record_github(rec):
+    r = f"/repos/{rec.repo}"
+    owner = rec.repo.split("/")[0]
+    rec.get("Repository", r)
+    rec.get("Labels", r + "/labels", {"per_page": 30})
+    rec.get("Milestones", r + "/milestones", {"state": "all"})
+    rec.get("Collaborators", r + "/collaborators")
+    _, pulls, _ = rec.get("List:pulls", r + "/pulls", {"state": "open", "page": 1}, kind="pulls")
+    rec.get("List:pulls", r + "/pulls", {"state": "open", "page": 2}, kind="pulls")
+    _, issues, _ = rec.get("List:issues", r + "/issues", {"state": "open", "page": 1}, kind="issues")
+    rec.get("List:issues", r + "/issues", {"state": "open", "page": 2}, kind="issues")
+    chosen = None
+    _, candidates, _ = rec.get("List:pulls", r + "/pulls", {"state": "all", "sort": "updated", "direction": "desc", "per_page": 30},
+                               kind="pulls", record=False)
+    for pull in (candidates or [])[:12]:
+        _, detail, _ = rec.get("PullRequest", f"{r}/pulls/{pull['number']}", record=False)
+        if detail and detail.get("review_comments", 0) > 0 and detail.get("comments", 0) > 0:
+            chosen = detail
+            break
+    chosen = chosen or (candidates or [{}])[0]
+    n, head = chosen["number"], chosen["head"]["sha"]
+    rec.get("PullRequest", f"{r}/pulls/{n}")
+    rec.get("PullRequest", f"{r}/pulls/{n}/commits", part="commits")
+    rec.get("PullRequest", f"{r}/pulls/{n}/files", part="files")
+    rec.get("PullRequest", f"{r}/pulls/{n}/reviews", part="reviews")
+    rec.get("PullRequest", f"{r}/commits/{head}/check-runs", part="checks")
+    rec.get("PullRequest", f"{r}/commits/{head}/status", part="status")
+    rec.get("Threads", f"{r}/pulls/{n}/comments")
+    rec.get("Timeline", f"{r}/issues/{n}/timeline")
+    rec.get("Timeline", f"{r}/issues/{n}/comments", part="comments")
+    rec.get("Diff", f"{r}/pulls/{n}", accept="application/vnd.github.diff", text=True)
+    rec.get("CommitDiff", f"{r}/commits/{head}", accept="application/vnd.github.diff", text=True)
+    branch = chosen["head"]["ref"]
+    head_owner = (chosen["head"].get("repo") or {}).get("owner", {}).get("login", owner)
+    rec.get("PullRequestForBranch", r + "/pulls", {"head": f"{head_owner}:{branch}", "state": "open"})
+    issue = first(issues, lambda item: "pull_request" not in item and item.get("comments", 0) > 0) or \
+        first(issues, lambda item: "pull_request" not in item)
+    if issue:
+        rec.get("Issue", f"{r}/issues/{issue['number']}")
+        rec.get("Issue", f"{r}/issues/{issue['number']}/comments", part="comments")
+        rec.get("Timeline", f"{r}/issues/{issue['number']}/timeline", kind="issue")
+    _, workflows, _ = rec.get("Workflows", r + "/actions/workflows")
+    workflow = first((workflows or {}).get("workflows"))
+    if workflow:
+        rec.get("WorkflowSource", f"{r}/contents/{workflow['path']}", {"ref": chosen["base"]["ref"]})
+    _, runs, _ = rec.get("Runs", r + "/actions/runs", {"page": 1})
+    rec.get("Runs", r + "/actions/runs", {"page": 2})
+    run = None
+    for candidate in ((runs or {}).get("workflow_runs") or [])[:8]:
+        _, artifacts, _ = rec.get("Artifacts", f"{r}/actions/runs/{candidate['id']}/artifacts", record=False)
+        if artifacts and artifacts.get("total_count", 0) > 0:
+            run = candidate
+            break
+    run = run or first((runs or {}).get("workflow_runs"))
+    if run:
+        rec.get("Run", f"{r}/actions/runs/{run['id']}")
+        _, jobs, _ = rec.get("Run", f"{r}/actions/runs/{run['id']}/jobs", {"filter": "all"}, part="jobs")
+        rec.get("Artifacts", f"{r}/actions/runs/{run['id']}/artifacts")
+        job = first((jobs or {}).get("jobs"))
+        if job:
+            rec.get("Job", f"{r}/actions/jobs/{job['id']}")
+            rec.get("JobLog", f"{r}/actions/jobs/{job['id']}/logs", accept="*/*", text=True)
+
+
+GITLAB_MR_LIST = """query MergeRequestList($fullPath: ID!, $state: MergeRequestState, $first: Int, $after: String) {
+  project(fullPath: $fullPath) {
+    mergeRequests(state: $state, sort: UPDATED_DESC, first: $first, after: $after) {
+      pageInfo { hasNextPage endCursor }
+      nodes {
+        iid id title draft webUrl updatedAt userNotesCount mergeStatusEnum
+        author { username }
+        labels { nodes { title color } }
+        approved approvedBy { nodes { username } }
+        reviewers { nodes { username } }
+        headPipeline { status }
+        diffStatsSummary { additions deletions fileCount }
+      }
+    }
+  }
+}"""
+
+
+GITLAB_LABELS = """query ProjectLabels($fullPath: ID!, $first: Int) {
+  project(fullPath: $fullPath) {
+    labels(first: $first, includeAncestorGroups: true) {
+      nodes { id title color textColor description }
+      pageInfo { hasNextPage endCursor }
+    }
+  }
+}"""
+
+GITLAB_MILESTONES = """query ProjectMilestones($fullPath: ID!, $first: Int) {
+  project(fullPath: $fullPath) {
+    milestones(first: $first, includeAncestors: true, state: active) {
+      nodes { id iid title state dueDate startDate webPath }
+      pageInfo { hasNextPage endCursor }
+    }
+  }
+}"""
+
+GITLAB_THREADS = """query MergeRequestThreads($fullPath: ID!, $iid: String!, $first: Int) {
+  project(fullPath: $fullPath) {
+    mergeRequest(iid: $iid) {
+      iid
+      diffRefs { baseSha headSha startSha }
+      discussions(first: $first) {
+        nodes {
+          id resolved resolvable
+          notes {
+            nodes {
+              id body system internal createdAt updatedAt
+              author { username name }
+              position { positionType newPath newLine oldPath oldLine diffRefs { headSha } }
+            }
+          }
+        }
+        pageInfo { hasNextPage endCursor }
+      }
+    }
+  }
+}"""
+
+GITLAB_PIPELINE_JOBS = """query PipelineJobs($fullPath: ID!, $iid: ID!, $first: Int) {
+  project(fullPath: $fullPath) {
+    pipeline(iid: $iid) {
+      iid status
+      jobs(first: $first) {
+        nodes {
+          id name status stage { name } allowFailure retryable duration startedAt finishedAt webPath
+          trace { htmlSummary }
+        }
+        pageInfo { hasNextPage endCursor }
+      }
+    }
+  }
+}"""
+
+
+def record_gitlab(rec):
+    p = "/projects/" + urllib.parse.quote(rec.repo, safe="")
+    rec.get("Version", "/version")
+    rec.get("Viewer", "/user")
+    rec.get("Repository", p)
+    rec.get("Labels", p + "/labels")
+    rec.get("Milestones", p + "/milestones")
+    rec.get("Collaborators", p + "/members/all")
+    # gitlab.com answers 401 to anonymous REST reads of labels, milestones, notes, discussions and jobs
+    # even on public projects; GraphQL serves the same data anonymously.
+    rec.graphql("Labels", "/api/graphql", GITLAB_LABELS, {"fullPath": rec.repo, "first": PAGE})
+    rec.graphql("Milestones", "/api/graphql", GITLAB_MILESTONES, {"fullPath": rec.repo, "first": PAGE})
+    status, page = rec.graphql("List:pulls", "/api/graphql", GITLAB_MR_LIST,
+                               {"fullPath": rec.repo, "state": "opened", "first": PAGE}, kind="pulls")
+    info = (((page or {}).get("data") or {}).get("project") or {}).get("mergeRequests", {}).get("pageInfo", {})
+    if info.get("hasNextPage"):
+        rec.graphql("List:pulls", "/api/graphql", GITLAB_MR_LIST,
+                    {"fullPath": rec.repo, "state": "opened", "first": PAGE, "after": info["endCursor"]},
+                    kind="pulls")
+    _, mrs, _ = rec.get("List:pulls", p + "/merge_requests", {"state": "opened", "page": 1}, kind="pulls")
+    rec.get("List:pulls", p + "/merge_requests", {"state": "opened", "page": 2}, kind="pulls")
+    _, issues, _ = rec.get("List:issues", p + "/issues", {"state": "opened", "page": 1}, kind="issues")
+    rec.get("List:issues", p + "/issues", {"state": "opened", "page": 2}, kind="issues")
+    chosen = None
+    for mr in sorted(mrs or [], key=lambda mr: -mr.get("user_notes_count", 0))[:6]:
+        _, detail, _ = rec.get("PullRequest", f"{p}/merge_requests/{mr['iid']}", record=False)
+        if detail and detail.get("head_pipeline"):
+            chosen = detail
+            break
+    chosen = chosen or (mrs or [{}])[0]
+    m = f"{p}/merge_requests/{chosen['iid']}"
+    rec.get("PullRequest", m)
+    rec.get("PullRequest", m + "/approvals", part="approvals")
+    rec.get("PullRequest", m + "/commits", part="commits")
+    rec.get("Diff", m + "/diffs", {"page": 1, "per_page": 100})
+    rec.get("Threads", m + "/discussions", {"per_page": 100})
+    rec.graphql("Threads", "/api/graphql", GITLAB_THREADS, {"fullPath": rec.repo, "iid": str(chosen["iid"]), "first": 20})
+    rec.get("Timeline", m + "/notes", {"sort": "asc", "per_page": 100}, part="notes")
+    rec.get("Timeline", m + "/resource_label_events", part="label_events")
+    rec.get("Timeline", m + "/resource_state_events", part="state_events")
+    rec.get("PullRequest", m + "/pipelines", part="pipelines")
+    pipeline = chosen.get("head_pipeline") or {}
+    if pipeline:
+        # A fork MR's head pipeline can belong to the source project; jobs live under that project's id.
+        owner_path = f"/projects/{pipeline['project_id']}" if pipeline.get("project_id") else p
+        rec.get("PullRequest", f"{owner_path}/pipelines/{pipeline['id']}/jobs", {"per_page": 100}, part="checks")
+    sha_ = chosen.get("sha")
+    if sha_:
+        rec.get("CommitDiff", f"{p}/repository/commits/{sha_}/diff")
+    rec.get("PullRequestForBranch", p + "/merge_requests",
+            {"source_branch": chosen.get("source_branch", ""), "state": "opened"})
+    issue = first(issues, lambda item: item.get("user_notes_count", 0) > 0) or first(issues)
+    if issue:
+        rec.get("Issue", f"{p}/issues/{issue['iid']}")
+        rec.get("Issue", f"{p}/issues/{issue['iid']}/notes", {"sort": "asc", "per_page": 100}, part="notes")
+    rec.get("Search", "/merge_requests", {"scope": "all", "state": "opened"})
+    _, pipelines, _ = rec.get("Runs", p + "/pipelines", {"page": 1, "order_by": "updated_at"})
+    rec.get("Runs", p + "/pipelines", {"page": 2, "order_by": "updated_at"})
+    run = first(pipelines, lambda item: item.get("status") == "failed") or first(pipelines)
+    if run:
+        rec.get("Runs", f"{p}/repository/commits/{run['sha']}", part="commit")
+        rec.get("Run", f"{p}/pipelines/{run['id']}")
+        _, jobs, _ = rec.get("Run", f"{p}/pipelines/{run['id']}/jobs",
+                             {"include_retried": "true", "per_page": 100}, part="jobs")
+        rec.get("Run", f"{p}/pipelines/{run['id']}/bridges", {"per_page": 100}, part="bridges")
+        job = first(jobs, lambda item: item.get("status") == "failed") or first(jobs)
+        if job:
+            rec.get("Job", f"{p}/jobs/{job['id']}")
+            rec.get("JobLog", f"{p}/jobs/{job['id']}/trace", accept="text/plain", text=True)
+            rec.graphql("Job", "/api/graphql", GITLAB_PIPELINE_JOBS,
+                        {"fullPath": rec.repo, "iid": str(run["iid"]), "first": 5})
+    rec.get("Notifications", "/todos", {"state": "pending"})
+
+
+def record_gitea(rec):
+    r = f"/repos/{rec.repo}"
+    rec.get("Version", "/version")
+    rec.get("Viewer", "/user")
+    rec.get("Repository", r)
+    rec.get("Labels", r + "/labels")
+    rec.get("Milestones", r + "/milestones", {"state": "all"})
+    rec.get("Collaborators", r + "/collaborators")
+    _, rows, _ = rec.get("List:pulls", r + "/issues", {"type": "pulls", "state": "open", "page": 1}, kind="pulls")
+    rec.get("List:pulls", r + "/issues", {"type": "pulls", "state": "open", "page": 2}, kind="pulls")
+    _, open_pulls, _ = rec.get("List:pulls", r + "/pulls", {"state": "open", "page": 1}, kind="pulls", part="pulls")
+    _, issues, _ = rec.get("List:issues", r + "/issues", {"type": "issues", "state": "open", "page": 1}, kind="issues")
+    rec.get("List:issues", r + "/issues", {"type": "issues", "state": "open", "page": 2}, kind="issues")
+    _, candidates, _ = rec.get("List:pulls", r + "/pulls", {"state": "all", "sort": "recentupdate", "limit": 20},
+                               record=False)
+    chosen, review = None, None
+    for pull in (candidates or [])[:12]:
+        _, reviews, _ = rec.get("PullRequest", f"{r}/pulls/{pull['number']}/reviews", record=False)
+        review = first(reviews, lambda item: item.get("comments_count", 0) > 0)
+        if review:
+            chosen = pull
+            break
+    chosen = chosen or first(candidates, lambda item: item.get("state") == "open") or (candidates or [{}])[0]
+    n, head = chosen["number"], chosen["head"]["sha"]
+    rec.get("PullRequest", f"{r}/pulls/{n}")
+    rec.get("PullRequest", f"{r}/pulls/{n}/commits", part="commits")
+    rec.get("PullRequest", f"{r}/pulls/{n}/files", part="files")
+    _, reviews, _ = rec.get("PullRequest", f"{r}/pulls/{n}/reviews", part="reviews")
+    for item in [review] if review else (reviews or [])[:1]:
+        rec.get("Threads", f"{r}/pulls/{n}/reviews/{item['id']}/comments")
+    rec.get("PullRequest", f"{r}/commits/{head}/status", part="status")
+    rec.get("PullRequest", f"{r}/statuses/{head}", part="statuses")
+    rec.get("Timeline", f"{r}/issues/{n}/timeline")
+    rec.get("Timeline", f"{r}/issues/{n}/comments", part="comments")
+    rec.get("Diff", f"{r}/pulls/{n}.diff", accept="text/plain", text=True)
+    rec.get("CommitDiff", f"{r}/git/commits/{head}.diff", accept="text/plain", text=True)
+    status, _, _ = rec.get("PullRequestForBranch", f"{r}/pulls/{chosen['base']['ref']}/{chosen['head']['ref']}")
+    if status == 404:
+        # pulls/{base}/{head} only finds heads in the base repository, not fork heads.
+        local = first((open_pulls or []) + (candidates or []), lambda item: item.get("state") == "open" and
+                      ((item["head"].get("repo") or {}).get("full_name") == rec.repo))
+        if local:
+            rec.get("PullRequestForBranch", f"{r}/pulls/{local['base']['ref']}/{local['head']['ref']}")
+    rec.get("PullRequest", f"{r}/branch_protections/{chosen['base']['ref']}", part="protection")
+    issue = first(issues, lambda item: item.get("comments", 0) > 0) or first(issues)
+    if issue:
+        rec.get("Issue", f"{r}/issues/{issue['number']}")
+        rec.get("Issue", f"{r}/issues/{issue['number']}/comments", part="comments")
+        rec.get("Timeline", f"{r}/issues/{issue['number']}/timeline", kind="issue")
+    rec.get("Search", "/repos/issues/search",
+            {"type": "pulls", "state": "open", "owner": rec.repo.split("/")[0]})
+    rec.get("Workflows", r + "/actions/workflows")
+    status, runs, _ = rec.get("Runs", r + "/actions/runs", {"page": 1})
+    _, tasks, _ = rec.get("Runs", r + "/actions/tasks", {"page": 1}, part="tasks")
+    # Gitea reports status "completed"; Forgejo reports the result ("success", "failure").
+    run = first((runs or {}).get("workflow_runs") or [],
+                lambda item: item.get("status") in ("completed", "success", "failure")) or \
+        first((runs or {}).get("workflow_runs") or [])
+    run_id = (run or {}).get("id")
+    if not run_id:
+        # Task rows only name their run in `url` (…/actions/runs/<run id>).
+        task = first((tasks or {}).get("workflow_runs"))
+        match = re.search(r"/actions/runs/(\d+)", (task or {}).get("url", ""))
+        run_id = match and int(match.group(1))
+    if status == 200 and runs:
+        rec.get("Runs", r + "/actions/runs", {"page": 2})
+    if run_id:
+        rec.get("Run", f"{r}/actions/runs/{run_id}")
+        _, jobs, _ = rec.get("Run", f"{r}/actions/runs/{run_id}/jobs", part="jobs")
+        rec.get("Artifacts", f"{r}/actions/runs/{run_id}/artifacts")
+        rows = jobs.get("jobs") if isinstance(jobs, dict) else jobs if isinstance(jobs, list) else []
+        job = first(rows)
+        if job:
+            rec.get("Job", f"{r}/actions/jobs/{job['id']}")
+        # A job that never ran (or whose log was pruned) answers 500 with an empty message on Forgejo;
+        # keep that response and go on to the next job until one log comes back.
+        for job in [row for row in rows or [] if row.get("status") not in ("skipped", "waiting", "blocked")][:4]:
+            status, _, _ = rec.get("JobLog", f"{r}/actions/jobs/{job['id']}/logs", accept="text/plain", text=True)
+            if status == 200:
+                break
+    rec.get("Notifications", "/notifications", {"status-types": "unread"})
+
+
+RECORDERS = {"github": record_github, "gitlab": record_gitlab, "gitea": record_gitea, "forgejo": record_gitea}
+
+
+# ---------------------------------------------------------------- redaction
+
+class Redactor:
+    def __init__(self, provider, host, repo, logins_by_hash=None, shift=None):
+        self.provider, self.host, self.repo = provider, host, repo
+        self.target = "orbit/team/orbit" if provider == "gitlab" else "orbit/orbit"
+        self.logins = {}            # original -> cast
+        self.known = dict(logins_by_hash or {})  # sha(original) -> cast
+        self.names = {}             # original full name -> Cast
+        self.shift = shift
+        self.hashes = set()
+        source, target = repo.split("/"), self.target.split("/")
+        self.paths = [(repo, self.target), (urllib.parse.quote(repo, safe=""),
+                                            urllib.parse.quote(self.target, safe=""))]
+        if len(source) == 3:
+            self.paths.append(("/".join(source[:2]), "/".join(target[:2])))
+        self.hashes.add(sha(repo))
+        self.words = []
+        owner, name = source[0], source[-1]
+        host_words = set(re.split(r"[.\-]", host))
+        for word, replacement in ((owner, "orbit"), (name, "orbit")):
+            if word.lower() not in GENERIC and word.lower() not in host_words and len(word) > 3:
+                self.words.append((word, replacement))
+                self.hashes.add(sha(word))
+        self.owner = owner
+
+    def cast_for(self, original, sensitive=True):
+        if original in self.logins:
+            return self.logins[original]
+        if original == self.owner:
+            self.logins[original] = "orbit"
+            return "orbit"
+        digest = sha(original)
+        if digest in self.known:
+            cast = self.known[digest]
+        else:
+            index = len([c for c in self.known.values() if c != "orbit"])
+            cast = CAST[index % 5] + (str(index // 5 + 1) if index >= 5 else "")
+            self.known[digest] = cast
+        self.logins[original] = cast
+        # Bot and organisation accounts are mapped too, but are not personal data, so they are
+        # not leak-checked (their names reappear legitimately, e.g. codecov.io).
+        if sensitive and original.lower() not in GENERIC and len(original) > 2 and original != cast:
+            self.hashes.add(digest)
+        return cast
+
+    def collect(self, value, parent=None, identities=False):
+        """Find people in a JSON value: logins/usernames first, then commit identities."""
+        if isinstance(value, dict) and identities:
+            if isinstance(value.get("email"), str) and isinstance(value.get("name"), str) and \
+                    "login" not in value and "username" not in value:
+                name = value["name"]
+                known = next((cast for original, cast in self.logins.items()
+                              if original.lower() == name.lower()), None)
+                cast = known or self.cast_for("email:" + value["email"].lower())
+                self.logins.setdefault("email:" + value["email"].lower(), cast)
+                if not known:
+                    self.names.setdefault(name, cast.capitalize())
+            for key, item in value.items():
+                self.collect(item, key, True)
+            return
+        if isinstance(value, list):
+            for item in value:
+                self.collect(item, parent, identities)
+            return
+        if isinstance(value, dict):
+            for key in ("login", "username"):
+                if isinstance(value.get(key), str) and value[key]:
+                    sensitive = value.get("type") not in ("Bot", "Organization") and \
+                        not value.get("bot") and not value[key].endswith(("[bot]", "-bot"))
+                    cast = self.cast_for(value[key], sensitive)
+                    for name_key in ("full_name", "name"):
+                        name = value.get(name_key)
+                        if isinstance(name, str) and name and name.lower() != value[key].lower() and \
+                                not (parent == "owner" and key == "login" and value[key] == self.owner):
+                            self.names.setdefault(name, cast.capitalize())
+            for key, item in value.items():
+                self.collect(item, key)
+
+    def structured(self, value, parent=None):
+        if isinstance(value, dict):
+            login = value.get("login") or value.get("username")
+            cast = self.logins.get(login) if isinstance(login, str) else None
+            out = {}
+            for key, item in value.items():
+                if cast and key in ("avatar_url", "avatarUrl"):
+                    out[key] = f"https://{self.host}/avatars/{cast}.png" if item else item
+                elif cast and key == "email" and isinstance(item, str):
+                    out[key] = f"{cast}@example.invalid" if item else item
+                elif cast and key in ("bio", "blog", "company", "location", "twitter_username",
+                                      "website", "description") and parent in (None, "user", "author", "owner", "assignee", "committer", "actor"):
+                    out[key] = "" if isinstance(item, str) else item
+                else:
+                    out[key] = self.structured(item, key)
+            return out
+        if isinstance(value, list):
+            return [self.structured(item, parent) for item in value]
+        if isinstance(value, str):
+            return self.text(value)
+        return value
+
+    def text(self, text):
+        for pattern in TOKEN_PATTERNS:
+            text = pattern.sub(lambda m: (m.group(1) if m.groups() and m.group(1) else "") + "<redacted>", text)
+        kept = re.compile(r"https://" + re.escape(self.host) + r"/avatars/[a-z]+\d*\.png$")
+        text = AVATAR.sub(lambda m: m.group(0) if kept.match(m.group(0)) else f"https://{self.host}/avatars/user.png", text)
+
+        def email(match):
+            local = match.group(1)
+            if local in ("git",) or match.group(2) == "example.invalid":
+                return match.group(0)
+            cast = self.logins.get("email:" + match.group(0).lower()) or self.logins.get(local) or "user"
+            return f"{cast}@example.invalid"
+        text = EMAIL.sub(email, text)
+        for original, replacement in self.paths:
+            text = text.replace(original, replacement)
+        logins = {original.lower() for original in self.logins}
+        for original, replacement in sorted(self.names.items(), key=lambda kv: -len(kv[0])):
+            if len(original) >= 4 and original.lower() not in logins:
+                text = re.sub(r"(?<![\w-])" + re.escape(original) + r"(?![\w-])", replacement, text)
+        for original, cast in sorted(self.logins.items(), key=lambda kv: -len(kv[0])):
+            if original.startswith("email:") or len(original) < 2:
+                continue
+            # Not inside host names (gitea.com) or other identifiers.
+            text = re.sub(r"(?<![\w.-])" + re.escape(original) + r"(?![\w-]|\.\w)", cast, text)
+        for original, replacement in self.words:
+            text = re.sub(r"(?i)(?<![\w-])" + re.escape(original) + r"(?![\w])", replacement, text)
+        if self.shift is not None:
+            text = shift_dates(text, self.shift)
+        return text
+
+
+def iso_times(text):
+    for match in ISO.finditer(text):
+        try:
+            stamp = dt.datetime.fromisoformat(f"{match.group(1)}T{match.group(2)}" +
+                                              normalize_zone(match.group(4)))
+        except ValueError:
+            continue
+        yield stamp
+
+
+def normalize_zone(zone):
+    if not zone or zone == "Z":
+        return "+00:00"
+    return zone if ":" in zone else zone[:3] + ":" + zone[3:]
+
+
+def shift_dates(text, seconds):
+    delta = dt.timedelta(seconds=seconds)
+
+    def iso(match):
+        try:
+            stamp = dt.datetime.fromisoformat(f"{match.group(1)}T{match.group(2)}" + normalize_zone(match.group(4)))
+        except ValueError:
+            return match.group(0)
+        if stamp.year < 1971:  # zero-value sentinels such as 0001-01-01T00:00:00Z
+            return match.group(0)
+        moved = (stamp + delta).astimezone(stamp.tzinfo)
+        return moved.strftime("%Y-%m-%dT%H:%M:%S") + (match.group(3) or "") + (match.group(4) or "")
+
+    def day(match):
+        try:
+            stamp = dt.date.fromisoformat(match.group(1))
+        except ValueError:
+            return match.group(0)
+        if stamp.year < 1971:
+            return match.group(0)
+        return (stamp + dt.timedelta(days=round(seconds / 86400))).isoformat()
+    return DATE.sub(day, ISO.sub(iso, text))
+
+
+# ---------------------------------------------------------------- synthesized fixtures
+
+def synth(provider, host, target, now):
+    """Write and auth-only endpoints, hand-written from the official docs."""
+    def at(minutes):
+        return (now - dt.timedelta(minutes=minutes)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    owner, name = target.split("/")[0], target.split("/")[-1]
+    web = f"https://{host}/{target}"
+    user = lambda login, uid: {"login": login, "id": uid, "avatar_url": f"https://{host}/avatars/{login}.png",
+                               "html_url": f"https://{host}/{login}", "type": "User"}
+    out = []
+
+    def add(read, method, path, status, body, doc, query=None, request=None, graphql=None, accept=None, text=False,
+            auth=None, part=None):
+        out.append({"read": read, "method": method, "path": path, "query": query or {}, "status": status,
+                    "auth": auth, "part": part,
+                    "headers": {"content-type": "text/plain; charset=utf-8" if text else "application/json; charset=utf-8"} if body is not None else {},
+                    "value": body, "request": request, "doc": doc, "graphql": graphql, "accept": accept,
+                    "text": text, "synthesized": True})
+    if provider == "github":
+        r = f"/repos/{target}"
+        d = "https://docs.github.com/en/rest"
+        add("Viewer", "GET", "/user", 200, dict(user("maya", 1001), name="Maya", email=None), d + "/users/users#get-the-authenticated-user")
+        add("Notifications", "GET", "/notifications", 200, [{
+            "id": "9001", "unread": True, "reason": "review_requested", "updated_at": at(9),
+            "last_read_at": None, "subject": {"title": "Keep drafts across reloads", "type": "PullRequest",
+                                              "url": f"https://api.{host}{r}/pulls/13",
+                                              "latest_comment_url": f"https://api.{host}{r}/issues/comments/501"},
+            "repository": {"full_name": target, "html_url": web}, "url": f"https://api.{host}/notifications/threads/9001",
+            "subscription_url": f"https://api.{host}/notifications/threads/9001/subscription"}],
+            d + "/activity/notifications#list-notifications-for-the-authenticated-user", query={"all": "false"})
+        comment = {"id": 501, "node_id": "IC_kwDOorbit501", "body": "Looks good to me.", "user": user("maya", 1001),
+                   "created_at": at(5), "updated_at": at(5), "html_url": f"{web}/issues/13#issuecomment-501",
+                   "author_association": "MEMBER"}
+        add("Comment", "POST", f"{r}/issues/13/comments", 201, comment, d + "/issues/comments#create-an-issue-comment",
+            request={"body": "Looks good to me."})
+        label = {"id": 77, "node_id": "LA_orbit77", "name": "bug", "color": "d73a4a", "default": True,
+                 "description": "Something isn't working"}
+        add("SetLabels", "PATCH", f"{r}/issues/13", 200, {"number": 13, "state": "open", "labels": [label]},
+            d + "/issues/issues#update-an-issue", request={"labels": ["bug"]})
+        add("SetState", "PATCH", f"{r}/issues/13", 200, {"number": 13, "state": "closed", "state_reason": "completed"},
+            d + "/issues/issues#update-an-issue", request={"state": "closed"})
+        add("SubmitReview", "POST", f"{r}/pulls/13/reviews", 200, {
+            "id": 801, "node_id": "PRR_orbit801", "user": user("maya", 1001), "body": "Ship it", "state": "APPROVED",
+            "commit_id": "c92ad11" + "0" * 33, "submitted_at": at(4), "html_url": f"{web}/pull/13#pullrequestreview-801"},
+            d + "/pulls/reviews#create-a-review-for-a-pull-request",
+            request={"event": "APPROVE", "body": "Ship it", "commit_id": "c92ad11" + "0" * 33, "comments": []})
+        add("Merge", "PUT", f"{r}/pulls/13/merge", 200, {"sha": "d6f8a21" + "0" * 33, "merged": True,
+                                                        "message": "Pull Request successfully merged"},
+            d + "/pulls/pulls#merge-a-pull-request", request={"sha": "c92ad11" + "0" * 33, "merge_method": "squash"})
+        add("Merge", "PUT", f"{r}/pulls/13/merge", 409, {"message": "Head branch was modified. Review and try the merge again.",
+                                                        "documentation_url": "https://docs.github.com/rest/pulls/pulls#merge-a-pull-request"},
+            d + "/pulls/pulls#merge-a-pull-request", request={"sha": "0" * 40, "merge_method": "squash"})
+        add("InlineComment", "POST", f"{r}/pulls/13/comments", 201, {
+            "id": 601, "node_id": "PRRC_orbit601", "path": "src/lib.rs", "line": 12, "side": "RIGHT",
+            "commit_id": "c92ad11" + "0" * 33, "body": "nit: rename", "user": user("maya", 1001),
+            "created_at": at(3), "updated_at": at(3), "html_url": f"{web}/pull/13#discussion_r601"},
+            d + "/pulls/comments#create-a-review-comment-for-a-pull-request",
+            request={"body": "nit: rename", "commit_id": "c92ad11" + "0" * 33, "path": "src/lib.rs", "line": 12, "side": "RIGHT"})
+        add("Reply", "POST", "/graphql", 200, {"data": {"addPullRequestReviewThreadReply": {"comment": {
+            "id": "PRRC_orbit602", "body": "Done.", "author": {"login": "maya"}, "createdAt": at(2)}}}},
+            "https://docs.github.com/en/graphql/reference/mutations#addpullrequestreviewthreadreply",
+            graphql={"operation": "AddPullRequestReviewThreadReply",
+                     "variables": {"thread": "PRRT_orbit1", "body": "Done."}})
+        add("Rerun", "POST", f"{r}/actions/runs/91/rerun", 201, {}, d + "/actions/workflow-runs#re-run-a-workflow",
+            request={"enable_debug_logging": False})
+        add("Rerun", "POST", f"{r}/actions/runs/91/rerun-failed-jobs", 201, {},
+            d + "/actions/workflow-runs#re-run-failed-jobs-from-a-workflow-run", request={"enable_debug_logging": False})
+        add("CancelRun", "POST", f"{r}/actions/runs/91/cancel", 202, {}, d + "/actions/workflow-runs#cancel-a-workflow-run")
+        add("Dispatch", "POST", f"{r}/actions/workflows/31/dispatches", 204, None,
+            d + "/actions/workflows#create-a-workflow-dispatch-event", request={"ref": "main", "inputs": {"target": "staging"}})
+        add("MarkRead", "PATCH", "/notifications/threads/9001", 205, None,
+            d + "/activity/notifications#mark-a-thread-as-read")
+    elif provider == "gitlab":
+        p = "/api/v4/projects/" + urllib.parse.quote(target, safe="")
+        d = "https://docs.gitlab.com/api"
+        gl_user = lambda login, uid: {"id": uid, "username": login, "name": login.capitalize(), "state": "active",
+                                      "avatar_url": f"https://{host}/avatars/{login}.png", "web_url": f"https://{host}/{login}"}
+        add("Viewer", "GET", "/api/v4/user", 200, dict(gl_user("maya", 1001), email="maya@example.invalid"), d + "/users/#retrieve-the-current-user")
+        add("Notifications", "GET", "/api/v4/todos", 200, [{
+            "id": 9001, "project": {"id": 4242, "path_with_namespace": target}, "author": gl_user("alex", 1002),
+            "action_name": "review_requested", "target_type": "MergeRequest",
+            "target": {"iid": 13, "title": "Keep drafts across reloads", "web_url": f"{web}/-/merge_requests/13"},
+            "target_url": f"{web}/-/merge_requests/13", "body": "Keep drafts across reloads", "state": "pending",
+            "created_at": at(9)}], d + "/todos/#list-all-to-do-items", query={"state": "pending"})
+        note = {"id": 501, "type": None, "body": "Looks good to me.", "author": gl_user("maya", 1001), "created_at": at(5),
+                "updated_at": at(5), "system": False, "noteable_type": "MergeRequest", "noteable_iid": 13, "resolvable": False}
+        add("Comment", "POST", f"{p}/merge_requests/13/notes", 201, note, d + "/notes/#create-new-merge-request-note",
+            request={"body": "Looks good to me."})
+        add("SetLabels", "PUT", f"{p}/merge_requests/13", 200, {"iid": 13, "state": "opened", "labels": ["bug"]},
+            d + "/merge_requests/#update-a-merge-request", request={"add_labels": "bug"})
+        add("SetState", "PUT", f"{p}/merge_requests/13", 200, {"iid": 13, "state": "closed"},
+            d + "/merge_requests/#update-a-merge-request", request={"state_event": "close"})
+        add("SubmitReview", "POST", f"{p}/merge_requests/13/approve", 201, {
+            "id": 13, "iid": 13, "approved": True, "approved_by": [{"user": gl_user("maya", 1001)}]},
+            d + "/merge_request_approvals/#approve-merge-request", request={"sha": "c92ad11" + "0" * 33})
+        add("SubmitReview", "POST", "/api/graphql", 200, {"data": {"mergeRequestRequestChanges": {
+            "errors": [], "mergeRequest": {"iid": "13"}}}},
+            "https://docs.gitlab.com/api/graphql/reference/#mutationmergerequestrequestchanges",
+            graphql={"operation": "MergeRequestRequestChanges", "variables": {"projectPath": target, "iid": "13"}})
+        add("Merge", "PUT", f"{p}/merge_requests/13/merge", 200, {"iid": 13, "state": "merged",
+                                                                  "merge_commit_sha": "d6f8a21" + "0" * 33},
+            d + "/merge_requests/#merge-a-merge-request",
+            request={"sha": "c92ad11" + "0" * 33, "squash": True, "should_remove_source_branch": True})
+        add("Merge", "PUT", f"{p}/merge_requests/13/merge", 409, {"message": "SHA does not match HEAD of source branch: d6f8a21" + "0" * 33},
+            d + "/merge_requests/#merge-a-merge-request",
+            request={"sha": "0" * 40, "squash": True, "should_remove_source_branch": True})
+        add("InlineComment", "POST", f"{p}/merge_requests/13/discussions", 201, {
+            "id": "6a9c1750b37d513a43987b574953fceb50b03ce7", "individual_note": False, "notes": [dict(
+                note, id=601, body="nit: rename", type="DiffNote", resolvable=True, resolved=False,
+                position={"position_type": "text", "new_path": "src/lib.rs", "new_line": 12,
+                          "base_sha": "a" * 40, "start_sha": "a" * 40, "head_sha": "c92ad11" + "0" * 33})]},
+            d + "/discussions/#create-a-new-thread-in-the-merge-request-diff",
+            request={"body": "nit: rename", "position": {"position_type": "text", "base_sha": "a" * 40, "start_sha": "a" * 40,
+                                                          "head_sha": "c92ad11" + "0" * 33, "new_path": "src/lib.rs", "new_line": 12}})
+        add("Reply", "POST", f"{p}/merge_requests/13/discussions/6a9c1750b37d513a43987b574953fceb50b03ce7/notes", 201,
+            dict(note, id=602, body="Done.", type="DiffNote"), d + "/discussions/#add-note-to-existing-merge-request-thread",
+            request={"body": "Done."})
+        add("Rerun", "POST", f"{p}/pipelines/91/retry", 201, {"id": 91, "status": "pending", "ref": "main"},
+            d + "/pipelines/#retry-jobs-in-a-pipeline")
+        add("CancelRun", "POST", f"{p}/pipelines/91/cancel", 200, {"id": 91, "status": "canceled", "ref": "main"},
+            d + "/pipelines/#cancel-all-jobs-for-a-pipeline")
+        add("Dispatch", "POST", f"{p}/pipeline", 201, {"id": 92, "status": "created", "ref": "main", "source": "api",
+                                                     "web_url": f"{web}/-/pipelines/92"},
+            d + "/pipelines/#create-a-new-pipeline", request={"ref": "main", "variables": [{"key": "TARGET", "value": "staging"}]})
+        add("MarkRead", "POST", "/api/v4/todos/9001/mark_as_done", 200, {"id": 9001, "state": "done"},
+            d + "/todos/#mark-a-to-do-item-as-done")
+        # Reads gitlab.com refuses anonymously (401) even on public projects: token-authenticated shapes.
+        add("Version", "GET", "/api/v4/version", 200, {"version": "18.6.0-pre", "revision": "c92ad11a0b1",
+                                                     "kas": {"enabled": True, "externalUrl": f"wss://kas.{host}", "version": "18.6.0"},
+                                                     "enterprise": True}, d + "/version/", auth="token")
+        add("Labels", "GET", f"{p}/labels", 200, [
+            {"id": 77, "name": "bug", "color": "#d9534f", "text_color": "#FFFFFF", "description": "Something is broken",
+             "open_issues_count": 3, "closed_issues_count": 9, "open_merge_requests_count": 1, "subscribed": False,
+             "priority": None, "is_project_label": False},
+            {"id": 78, "name": "scope::backend", "color": "#428bca", "text_color": "#FFFFFF", "description": None,
+             "open_issues_count": 0, "closed_issues_count": 2, "open_merge_requests_count": 2, "subscribed": False,
+             "priority": 1, "is_project_label": True}], d + "/labels/#list-labels", auth="token")
+        add("Milestones", "GET", f"{p}/milestones", 200, [
+            {"id": 12, "iid": 3, "project_id": 4242, "title": "v1.4", "description": "", "state": "active",
+             "due_date": (now + dt.timedelta(days=14)).strftime("%Y-%m-%d"), "start_date": at(60 * 24 * 14)[:10],
+             "created_at": at(60 * 24 * 20), "updated_at": at(60 * 24), "expired": False,
+             "web_url": f"{web}/-/milestones/3"}], d + "/milestones/#list-project-milestones", auth="token")
+        add("Collaborators", "GET", f"{p}/members/all", 200, [
+            dict(gl_user("maya", 1001), access_level=40, created_at=at(60 * 24 * 300), expires_at=None),
+            dict(gl_user("alex", 1002), access_level=30, created_at=at(60 * 24 * 200), expires_at=None)],
+            d + "/members/#list-all-members-of-a-group-or-project-including-inherited-and-invited-members", auth="token")
+        position = {"position_type": "text", "base_sha": "a" * 40, "start_sha": "a" * 40, "head_sha": "c92ad11" + "0" * 33,
+                    "old_path": "src/lib.rs", "new_path": "src/lib.rs", "old_line": None, "new_line": 12,
+                    "line_range": None}
+        diff_note = dict(note, id=601, body="nit: rename", type="DiffNote", resolvable=True, resolved=False,
+                         resolved_by=None, position=position, author=gl_user("alex", 1002))
+        add("Threads", "GET", f"{p}/merge_requests/13/discussions", 200, [
+            {"id": "6a9c1750b37d513a43987b574953fceb50b03ce7", "individual_note": False,
+             "notes": [diff_note, dict(note, id=602, body="Done.", type="DiffNote", resolvable=True, resolved=False,
+                                       position=position)]},
+            {"id": "0bb7cdbd7a6c9e3e8a54e5f1b61d1f3d7b5d2e61", "individual_note": True, "notes": [note]}],
+            d + "/discussions/#list-project-merge-request-discussion-items", auth="token")
+        add("Timeline", "GET", f"{p}/merge_requests/13/notes", 200, [
+            dict(note, id=500, body="requested review from @alex", system=True, author=gl_user("maya", 1001)), note],
+            d + "/notes/#list-all-merge-request-notes", query={"sort": "asc"}, auth="token", part="notes")
+        add("Issue", "GET", f"{p}/issues/13/notes", 200, [dict(note, noteable_type="Issue")],
+            d + "/notes/#list-project-issue-notes", query={"sort": "asc"}, auth="token", part="notes")
+        job = {"id": 42, "name": "test", "stage": "test", "status": "failed", "ref": "main", "allow_failure": False,
+               "created_at": at(31), "started_at": at(30), "finished_at": at(25), "duration": 300.0,
+               "failure_reason": "script_failure", "user": gl_user("maya", 1001),
+               "commit": {"id": "c92ad11" + "0" * 33, "short_id": "c92ad11", "title": "Keep drafts across reloads"},
+               "pipeline": {"id": 91, "iid": 12, "project_id": 4242, "sha": "c92ad11" + "0" * 33, "ref": "main",
+                            "status": "failed", "web_url": f"{web}/-/pipelines/91"},
+               "runner": {"id": 7, "description": "shared-runner", "is_shared": True},
+               "web_url": f"{web}/-/jobs/42", "artifacts": [], "tag_list": ["docker"]}
+        add("Job", "GET", f"{p}/jobs/42", 200, job, d + "/jobs/#retrieve-a-single-job", auth="token")
+        add("JobLog", "GET", f"{p}/jobs/42/trace", 200,
+            "\x1b[0KRunning with runner 18.5.0\n\x1b[0Ksection_start:1700000000:step_script\r\x1b[0K"
+            "\x1b[32;1m$ cargo test\x1b[0;m\ntest result: FAILED. 1 failed\n"
+            "section_end:1700000300:step_script\r\x1b[0K\x1b[31;1mERROR: Job failed: exit code 101\x1b[0;m\n",
+            d + "/jobs/#get-a-log-file", text=True, accept="text/plain", auth="token")
+    else:
+        r = f"/api/v1/repos/{target}"
+        d = f"https://{host}/api/swagger"
+        g_user = lambda login, uid: {"id": uid, "login": login, "full_name": login.capitalize(), "email": f"{login}@example.invalid",
+                                     "avatar_url": f"https://{host}/avatars/{login}.png", "html_url": f"https://{host}/{login}"}
+        add("Viewer", "GET", "/api/v1/user", 200, g_user("maya", 1001), d + "#/user/userGetCurrent")
+        add("Notifications", "GET", "/api/v1/notifications", 200, [{
+            "id": 9001, "unread": True, "pinned": False, "updated_at": at(9),
+            "subject": {"title": "Keep drafts across reloads", "type": "Pull", "state": "open",
+                        "url": f"https://{host}{r}/pulls/13", "html_url": f"{web}/pulls/13",
+                        "latest_comment_url": f"https://{host}{r}/issues/comments/501",
+                        "latest_comment_html_url": f"{web}/pulls/13#issuecomment-501"},
+            "repository": {"id": 4242, "full_name": target, "html_url": web, "owner": g_user(owner, 1000)},
+            "url": f"https://{host}/api/v1/notifications/threads/9001"}], d + "#/notification/notifyGetList",
+            query={"status-types": "unread"})
+        if provider == "gitea":
+            run = {"id": 91, "run_number": 12, "display_title": "Validate orbit", "event": "push", "status": "completed",
+                   "conclusion": "failure", "head_branch": "main", "head_sha": "c92ad11" + "0" * 33, "path": "ci.yml@refs/heads/main",
+                   "run_attempt": 1, "started_at": at(30), "completed_at": at(25), "html_url": f"{web}/actions/runs/12",
+                   "url": f"https://{host}{r}/actions/runs/91", "actor": g_user("maya", 1001), "trigger_actor": g_user("maya", 1001),
+                   "repository_id": 4242}
+            add("Workflows", "GET", f"{r}/actions/workflows", 200, {"total_count": 1, "workflows": [{
+                "id": "ci.yml", "name": "ci", "path": ".gitea/workflows/ci.yml", "state": "active",
+                "html_url": f"{web}/actions?workflow=ci.yml", "url": f"https://{host}{r}/actions/workflows/ci.yml",
+                "badge_url": f"{web}/actions/workflows/ci.yml/badge.svg", "created_at": at(600), "updated_at": at(60)}]},
+                d + "#/repository/ActionsListRepositoryWorkflows")
+            add("Runs", "GET", f"{r}/actions/runs", 200, {"total_count": 1, "workflow_runs": [run]},
+                d + "#/repository/getWorkflowRuns", query={"page": 1})
+            add("Run", "GET", f"{r}/actions/runs/91", 200, run, d + "#/repository/GetWorkflowRun")
+            job = {"id": 42, "run_id": 91, "name": "test", "status": "completed", "conclusion": "failure",
+                   "head_branch": "main", "head_sha": run["head_sha"], "started_at": at(29), "completed_at": at(25),
+                   "runner_name": "runner-1", "labels": ["ubuntu-latest"], "steps": [],
+                   "html_url": f"{web}/actions/runs/12/jobs/0", "url": f"https://{host}{r}/actions/jobs/42", "run_attempt": 1}
+            add("Run", "GET", f"{r}/actions/runs/91/jobs", 200, {"total_count": 1, "jobs": [job]},
+                d + "#/repository/listWorkflowRunJobs")
+            add("Job", "GET", f"{r}/actions/jobs/42", 200, job, d + "#/repository/getWorkflowJob")
+            add("JobLog", "GET", f"{r}/actions/jobs/42/logs", 200,
+                f"{at(29)} Run actions/checkout@v4\n{at(27)} cargo test\n{at(25)} test result: FAILED. 1 failed\n",
+                d + "#/repository/downloadActionsRunJobLogs", text=True, accept="text/plain")
+            add("Artifacts", "GET", f"{r}/actions/runs/91/artifacts", 200, {"total_count": 1, "artifacts": [{
+                "id": 7, "name": "coverage", "size_in_bytes": 2048, "expired": False, "created_at": at(25),
+                "expires_at": (now + dt.timedelta(days=90)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "archive_download_url": f"https://{host}{r}/actions/artifacts/7/zip",
+                "url": f"https://{host}{r}/actions/artifacts/7", "workflow_run": {"id": 91, "head_sha": run["head_sha"],
+                                                                                    "repository_id": 4242}}]},
+                d + "#/repository/getArtifactsOfRun")
+        comment = {"id": 501, "body": "Looks good to me.", "user": g_user("maya", 1001), "created_at": at(5),
+                   "updated_at": at(5), "html_url": f"{web}/pulls/13#issuecomment-501",
+                   "issue_url": f"{web}/issues/13", "pull_request_url": f"{web}/pulls/13"}
+        add("Comment", "POST", f"{r}/issues/13/comments", 201, comment, d + "#/issue/issueCreateComment",
+            request={"body": "Looks good to me."})
+        add("SetLabels", "PUT", f"{r}/issues/13/labels", 200, [{"id": 77, "name": "bug", "color": "ee0701",
+                                                               "description": "", "exclusive": False}],
+            d + "#/issue/issueReplaceLabels", request={"labels": [77]})
+        add("SetState", "PATCH", f"{r}/issues/13", 201, {"number": 13, "state": "closed"}, d + "#/issue/issueEditIssue",
+            request={"state": "closed"})
+        review = {"id": 801, "user": g_user("maya", 1001), "body": "Ship it", "state": "APPROVED",
+                  "commit_id": "c92ad11" + "0" * 33, "stale": False, "official": True, "comments_count": 0,
+                  "submitted_at": at(4), "html_url": f"{web}/pulls/13#issuecomment-801"}
+        add("SubmitReview", "POST", f"{r}/pulls/13/reviews", 200, review, d + "#/repository/repoCreatePullReview",
+            request={"event": "APPROVED", "body": "Ship it", "commit_id": "c92ad11" + "0" * 33, "comments": []})
+        add("Merge", "POST", f"{r}/pulls/13/merge", 200, None, d + "#/repository/repoMergePullRequest",
+            request={"Do": "squash", "head_commit_id": "c92ad11" + "0" * 33, "delete_branch_after_merge": True})
+        add("Merge", "POST", f"{r}/pulls/13/merge", 409, {"message": "head out of date", "url": d},
+            d + "#/repository/repoMergePullRequest",
+            request={"Do": "squash", "head_commit_id": "0" * 40, "delete_branch_after_merge": True})
+        inline = dict(review, id=802, body="", state="COMMENT", comments_count=1)
+        add("InlineComment", "POST", f"{r}/pulls/13/reviews", 200, inline, d + "#/repository/repoCreatePullReview",
+            request={"event": "COMMENT", "body": "", "commit_id": "c92ad11" + "0" * 33,
+                     "comments": [{"path": "src/lib.rs", "new_position": 12, "body": "nit: rename"}]})
+        add("Reply", "POST", f"{r}/pulls/13/reviews", 200, dict(inline, id=803), d + "#/repository/repoCreatePullReview",
+            request={"event": "COMMENT", "body": "", "commit_id": "c92ad11" + "0" * 33,
+                     "comments": [{"path": "src/lib.rs", "new_position": 12, "body": "Done."}]})
+        add("Rerun", "POST", f"{r}/actions/runs/91/rerun", 201 if provider == "gitea" else 200,
+            None if provider == "gitea" else {"id": 91, "status": "waiting"},
+            d + ("#/repository/rerunWorkflowRun" if provider == "gitea" else "#/repository/RerunWorkflowRun"))
+        add("CancelRun", "POST", f"{r}/actions/runs/91/cancel", 200, None, d + "#/repository/cancelWorkflowRun")
+        dispatch_id = "ci.yml"
+        add("Dispatch", "POST", f"{r}/actions/workflows/{dispatch_id}/dispatches", 204, None,
+            d + "#/repository/ActionsDispatchWorkflow", request={"ref": "main", "inputs": {"target": "staging"}})
+        add("MarkRead", "PATCH", "/api/v1/notifications/threads/9001", 205, None, d + "#/notification/notifyReadThread",
+            query={"to-status": "read"})
+    return out
+
+
+# ---------------------------------------------------------------- writing / checking
+
+def slug(read):
+    return re.sub(r"[^a-z0-9]+", "-", re.sub(r"([a-z])([A-Z])", r"\1-\2", read).lower()).strip("-")
+
+
+def write_fixture(args, rec, plan_mode):
+    out = pathlib.Path(args.out)
+    bodies = out / "bodies"
+    bodies.mkdir(parents=True, exist_ok=True)
+    manifest_path = out / "requests.json"
+    existing = json.loads(manifest_path.read_text()) if manifest_path.exists() else None
+    if existing and not plan_mode:
+        raise SystemExit(f"{manifest_path} exists; delete it to re-record or use --plan to merge")
+    redaction = (existing or {}).get("redaction", {})
+    now = dt.datetime.now(dt.timezone.utc).replace(microsecond=0)
+    red = Redactor(args.provider, args.host, args.repo, redaction.get("logins"), redaction.get("date_shift_seconds"))
+    parsed = []
+    for entry in rec.entries:
+        value = None
+        if not entry["text"]:
+            try:
+                value = json.loads(entry["raw"]) if entry["raw"] else None
+            except ValueError:
+                entry["text"] = True
+        parsed.append(value)
+        red.collect(value)
+    for value in parsed:
+        red.collect(value, identities=True)
+    if red.shift is None:
+        newest = None
+        for entry, value in zip(rec.entries, parsed):
+            blob = json.dumps(value) if value is not None else entry["raw"].decode("utf-8", "replace")
+            for stamp in iso_times(blob):
+                if stamp <= now and (newest is None or stamp > newest):
+                    newest = stamp
+        red.shift = int(((now - dt.timedelta(minutes=9)) - newest).total_seconds()) if newest else 0
+    entries = list((existing or {}).get("entries", []))
+    counters = {}
+    for entry in entries:
+        counters[slug(entry["read"])] = counters.get(slug(entry["read"]), 0) + 1
+    target = red.target
+
+    def body_name(read, ext):
+        base = slug(read)
+        counters[base] = counters.get(base, 0) + 1
+        name = f"{base}.{ext}" if counters[base] == 1 else f"{base}-{counters[base]}.{ext}"
+        while (bodies / name).exists():
+            counters[base] += 1
+            name = f"{base}-{counters[base]}.{ext}"
+        return name
+
+    def store(new):
+        for index, old in enumerate(entries):
+            if old["key"] == new["key"] and old.get("graphql", {}).get("variables") == new.get("graphql", {}).get("variables") \
+                    and old.get("accept") == new.get("accept") and old.get("auth") == new.get("auth"):
+                (bodies / old["body"]).unlink(missing_ok=True) if old.get("body") else None
+                entries[index] = new
+                return
+        entries.append(new)
+
+    for entry, value in zip(rec.entries, parsed):
+        path = red.text(entry["path"])
+        query = {k: red.text(str(v)) for k, v in entry["query"].items()}
+        headers = {}
+        for name, header in entry["headers"].items():
+            if name in KEEP_HEADERS or name.startswith(("x-ratelimit-", "ratelimit-")):
+                headers[name] = red.text(header)
+        graphql = None
+        if entry.get("graphql"):
+            graphql = {"operation": entry["graphql"]["operation"],
+                       "variables": red.structured(entry["graphql"]["variables"]),
+                       "document": entry["graphql"]["document"]}
+        key = make_key(entry["method"], path, query, graphql_op=graphql and graphql["operation"])
+        if value is not None:
+            ext, data = "json", json.dumps(red.structured(value), indent=2, ensure_ascii=False) + "\n"
+        else:
+            text = entry["raw"].decode("utf-8", "replace")
+            ext = "diff" if entry["read"] in ("Diff", "CommitDiff") else "log" if entry["read"] == "JobLog" else "txt"
+            data = red.text(text)
+        name = body_name(entry["read"], ext) if entry["raw"] else None
+        if name:
+            (bodies / name).write_text(data)
+        new = {"key": key, "read": entry["read"].split(":")[0], "method": entry["method"], "status": entry["status"],
+               "headers": headers, "body": name, "synthesized": False}
+        if ":" in entry["read"]:
+            new["kind"] = entry["read"].split(":")[1]
+        for field in ("kind", "part", "accept", "note"):
+            if entry.get(field):
+                new[field] = entry[field]
+        if graphql:
+            new["graphql"] = graphql
+        if not rec.token and entry["status"] in (401, 403):
+            new["auth"] = "none"
+        if entry["truncated"]:
+            new["truncated"] = True
+            new["note"] = (new.get("note", "") + "; " if new.get("note") else "") + f"body capped at {CAP // 1024} KiB"
+        store(new)
+    if not plan_mode:
+        for item in synth(args.provider, args.host, target, now):
+            path = item["path"]
+            body = item["request"]
+            graphql = item["graphql"]
+            key = make_key(item["method"], path, item["query"], body, graphql and graphql["operation"])
+            name = None
+            if item["value"] is not None:
+                ext = "log" if item["text"] else "json"
+                name = body_name(item["read"] + "Synth", ext)
+                data = item["value"] if item["text"] else json.dumps(item["value"], indent=2) + "\n"
+                (bodies / name).write_text(data)
+            new = {"key": key, "read": item["read"], "method": item["method"], "status": item["status"],
+                   "headers": item["headers"], "body": name, "synthesized": True, "doc": item["doc"]}
+            if body is not None:
+                new["request"] = body
+            if graphql:
+                new["graphql"] = graphql
+            if item["accept"]:
+                new["accept"] = item["accept"]
+            if item.get("part"):
+                new["part"] = item["part"]
+            if item.get("auth") or any(old["key"] == key and old.get("auth") == "none" for old in entries):
+                new["auth"] = "token"
+            store(new)
+    version = (existing or {}).get("server_version")
+    for entry, value in zip(rec.entries, parsed):
+        if entry["read"] == "Version" and isinstance(value, dict) and value.get("version"):
+            version = value["version"]
+    hashes = sorted(set(redaction.get("hashes", [])) | red.hashes)
+    manifest = {"schema": 1, "provider": args.provider, "host": args.host, "api_base": args.api_base,
+                "server_version": version, "recorded_at": (existing or {}).get("recorded_at") or now.isoformat().replace("+00:00", "Z"),
+                "repo": target,
+                "redaction": {"hashes": hashes, "logins": red.known, "date_shift_seconds": red.shift},
+                "entries": entries}
+    if plan_mode and existing:
+        manifest["updated_at"] = now.isoformat().replace("+00:00", "Z")
+    manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n")
+    print(f"wrote {manifest_path} ({len(entries)} entries)")
+
+
+def tokens(text):
+    found = set()
+    for pattern in (r"[\w.\-\[\]]+", r"[\w\-\[\]]+"):
+        found.update(token.strip(".") for token in re.findall(pattern, text))
+    for path in re.findall(r"[\w.\-]+(?:/[\w.\-]+)+", text):
+        parts = path.split("/")
+        for size in (2, 3):
+            for start in range(len(parts) - size + 1):
+                found.add("/".join(parts[start:start + size]))
+    return found
+
+
+def check_dir(directory, provider):
+    problems = []
+    manifest_path = directory / "requests.json"
+    try:
+        manifest = json.loads(manifest_path.read_text())
+    except (OSError, ValueError) as error:
+        return [f"{manifest_path}: {error}"]
+    hashes = set(manifest.get("redaction", {}).get("hashes", []))
+    for field in ("schema", "provider", "host", "recorded_at", "repo", "entries"):
+        if field not in manifest:
+            problems.append(f"{manifest_path}: missing {field}")
+    seen = set()
+    texts = []  # (where, text)
+    for entry in manifest.get("entries", []):
+        where = f"{manifest_path.name}:{entry.get('key')}"
+        for field in ("key", "read", "status", "headers", "synthesized"):
+            if field not in entry:
+                problems.append(f"{where}: missing {field}")
+        identity = (entry.get("key"), json.dumps(entry.get("graphql", {}).get("variables"), sort_keys=True),
+                    entry.get("accept"), entry.get("auth"))
+        if identity in seen:
+            problems.append(f"{where}: duplicate entry")
+        seen.add(identity)
+        if entry.get("synthesized") and not entry.get("doc"):
+            problems.append(f"{where}: synthesized without a doc URL")
+        texts.append((manifest_path.name, json.dumps({k: v for k, v in entry.items() if k != "doc"})))
+        if entry.get("body"):
+            path = directory / "bodies" / entry["body"]
+            try:
+                text = path.read_text()
+            except OSError as error:
+                problems.append(f"{where}: {error}")
+                continue
+            if path.suffix == ".json":
+                try:
+                    json.loads(text)
+                except ValueError as error:
+                    problems.append(f"{path}: invalid JSON: {error}")
+            texts.append((entry["body"], text))
+    for where, text in texts:
+        for pattern in TOKEN_PATTERNS[:4]:
+            if pattern.search(text):
+                problems.append(f"{where}: token-like text left: {pattern.pattern}")
+        for match in EMAIL.finditer(text):
+            if match.group(2) != "example.invalid" and match.group(1) != "git" and not match.group(2).endswith(".png"):
+                problems.append(f"{where}: email left: {match.group(0)[:2]}…@{match.group(2)}")
+        for match in AVATAR.finditer(text):
+            if not re.search(r"/avatars/[\w.-]+\.png$", match.group(0)):
+                problems.append(f"{where}: avatar URL left: {match.group(0)[:40]}")
+        for token in tokens(text):
+            if sha(token) in hashes:
+                problems.append(f"{where}: original identifier left ({token[:2]}…, sha {sha(token)[:10]})")
+    labels = {entry.get("read") + (":" + entry["kind"] if entry.get("kind") and entry.get("read") == "List" else "")
+              for entry in manifest.get("entries", [])}
+    for read, satisfied_by in READS.get(provider, {}).items():
+        if not any(label in labels for label in satisfied_by):
+            problems.append(f"coverage: no entry for Read {read}")
+    for write in WRITES:
+        if write not in labels:
+            problems.append(f"coverage: no entry for Write {write}")
+    return sorted(set(problems))
+
+
+def check(args):
+    root = pathlib.Path(args.out)
+    directories = [root] if (root / "requests.json").exists() else sorted(p.parent for p in root.glob("versions/*/requests.json"))
+    if not directories:
+        print(f"{root}: no requests.json found")
+        return 1
+    failed = False
+    for directory in directories:
+        problems = check_dir(directory, args.provider)
+        manifest = json.loads((directory / "requests.json").read_text()) if (directory / "requests.json").exists() else {}
+        count = len(manifest.get("entries", []))
+        synthesized = sum(1 for entry in manifest.get("entries", []) if entry.get("synthesized"))
+        if problems:
+            failed = True
+            print(f"FAIL {directory} ({count} entries, {synthesized} synthesized)")
+            for problem in problems:
+                print("  - " + problem)
+        else:
+            print(f"ok   {directory} ({count} entries, {synthesized} synthesized, "
+                  f"server {manifest.get('server_version')}, recorded {manifest.get('recorded_at')})")
+    return 1 if failed else 0
+
+
+def token_from(source, host):
+    if source in (None, "none"):
+        return None
+    if source == "gh":
+        result = subprocess.run(["gh", "auth", "token", "--hostname", host], capture_output=True, text=True,
+                                env=dict(os.environ, GH_PROMPT_DISABLED="1", GH_DEBUG=""), timeout=10)
+        if result.returncode != 0 or not result.stdout.strip():
+            raise SystemExit("gh has no token for " + host)
+        return result.stdout.strip()
+    if source.startswith("env:"):
+        value = os.environ.get(source[4:])
+        if not value:
+            raise SystemExit(f"{source[4:]} is not set")
+        return value
+    raise SystemExit("--token-from must be gh, env:NAME or none")
+
+
+def run_plan(rec, plan_path):
+    plan = json.loads(pathlib.Path(plan_path).read_text())
+    owner, name = rec.repo.split("/")[0], rec.repo.split("/")[-1]
+
+    def fill(value):
+        if isinstance(value, str):
+            return value.replace("{owner}", owner).replace("{repo}", name).replace("{fullPath}", rec.repo)
+        if isinstance(value, dict):
+            return {k: fill(v) for k, v in value.items()}
+        if isinstance(value, list):
+            return [fill(v) for v in value]
+        return value
+    for item in plan:
+        item = fill(item)
+        method = item.get("method", "GET").upper()
+        body = item.get("body")
+        if method == "POST" and isinstance(body, dict) and "query" in body:
+            rec.graphql(item["read"], item["path"], body["query"], body.get("variables") or {},
+                        kind=item.get("kind"), part=item.get("part"))
+        elif method == "GET":
+            rec.get(item["read"], item["path"], item.get("query"), accept=item.get("accept"),
+                    kind=item.get("kind"), part=item.get("part"),
+                    text=not (item.get("accept") or "application/json").endswith("json"))
+        else:
+            raise SystemExit(f"refusing {method} {item['path']}: forge-record never writes")
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("provider", choices=sorted(RECORDERS))
+    parser.add_argument("host")
+    parser.add_argument("repo", help="owner/repo (GitLab: group/sub/project)")
+    parser.add_argument("--out", required=True)
+    parser.add_argument("--check", action="store_true")
+    parser.add_argument("--plan")
+    parser.add_argument("--token-from", default=None)
+    parser.add_argument("--api-base")
+    parser.add_argument("--delay", type=float, default=1.0)
+    args = parser.parse_args()
+    if args.check:
+        return check(args)
+    if not args.api_base:
+        if args.provider == "github":
+            args.api_base = "https://api.github.com" if args.host == "github.com" else f"https://{args.host}/api/v3"
+        else:
+            args.api_base = f"https://{args.host}{API_PREFIX[args.provider]}"
+    token = token_from(args.token_from, args.host)
+    scheme = {"github": "Bearer", "gitlab": "Bearer"}.get(args.provider, "token")
+    rec = Recorder(args.provider, args.host, args.repo, token, args.api_base, args.delay, scheme)
+    if args.plan:
+        run_plan(rec, args.plan)
+    else:
+        RECORDERS[args.provider](rec)
+    write_fixture(args, rec, bool(args.plan))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

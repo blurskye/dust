@@ -1,0 +1,46 @@
+{
+  "id": 555850478,
+  "iid": 564,
+  "project_id": 6329679,
+  "title": "Update outdated tool versions in the CI pipeline",
+  "description": "## What does this MR do?\n\nUpdates the tool versions used by the CI pipeline and makes them maintainable by Renovate:\n\n- `helm-unittest` 0.3.4 → 1.2.1, `kind` v0.20.0 → v0.33.0, `kubectl` v1.27.4 → v1.37.1, `docker` 20.10.16 → 29.9.2, `alpine` 3.18 → 3.24.\n- Base image `gitlab-build-images:gitlab-charts-build-base-helm-3.7` (Helm 3.7, 2021) → `alpine/helm:${HELM_VERSION}` (3.22.1). `gitlab-build-images` has no newer Helm-only image (the latest is `helm-3.9`). `alpine/helm` ships `git`, `curl` and `bash`, which the `unit_tests` and `release beta` jobs need.\n- The integration test installs the same `HELM_VERSION` instead of whatever `get-helm-3` resolves as \"latest\" (which is now Helm 4).\n- `kubectl` is downloaded from `dl.k8s.io`: the legacy `storage.googleapis.com/kubernetes-release` bucket returns 404 for current versions.\n- `docker:<version>-git` images are no longer published (last one is 25.0.5); the integration job uses `docker:<version>-cli` instead. The job never needed `git`.\n- `release beta` installs `aws-cli` from the Alpine community repository instead of `pip install awscli`, which fails with externally-managed-environment (PEP 668) on Alpine 3.24, the base of `alpine/helm:3.22.1`.\n- Every version is a `variables:` entry so that the Renovate bot can bump them (see the linked issue for the bot onboarding MRs).\n\n## Verification\n\n- `helm lint .` and `helm unittest .` pass locally under Helm 3.22.1 with helm-unittest 1.2.1 (89 tests, 3 snapshots).\n- `.gitlab-ci.yml` validated with `glab ci lint`.\n- The integration tests can only run in the canonical project (they need the `AUTHENTICATION_TOKEN` variable), so please run the MR pipeline from there.\n\nCloses #602\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)",
+  "state": "opened",
+  "created_at": "2026-10-26T18:50:21.452Z",
+  "updated_at": "2026-11-12T09:39:26.246Z",
+  "merge_status": "can_be_merged",
+  "approved": false,
+  "approvals_required": 1,
+  "approvals_left": 1,
+  "require_password_to_approve": false,
+  "approved_by": [
+    {
+      "user": {
+        "id": 21826781,
+        "username": "alex",
+        "public_email": null,
+        "name": "Alex",
+        "state": "active",
+        "locked": false,
+        "avatar_url": "https://gitlab.com/avatars/alex.png",
+        "web_url": "https://gitlab.com/alex"
+      },
+      "approved_at": "2026-10-27T07:44:19.464Z"
+    }
+  ],
+  "suggested_approvers": [],
+  "approvers": [],
+  "approver_groups": [],
+  "user_has_approved": false,
+  "user_can_approve": false,
+  "approval_rules_left": [
+    {
+      "id": 77453,
+      "name": "All Members",
+      "rule_type": "any_approver"
+    }
+  ],
+  "has_approval_rules": true,
+  "merge_request_approvers_available": true,
+  "multiple_approval_rules_available": true,
+  "invalid_approvers_rules": []
+}

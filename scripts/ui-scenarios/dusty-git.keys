@@ -1,0 +1,38 @@
+# Run with --binary target/try/dusty-git --cwd a disposable Git repository.
+wait 1200
+key j j j
+wait 600
+shot changes
+key 2
+wait 600
+shot branches
+key 3
+wait 900
+key enter
+wait 500
+shot commit-files
+key tab
+key pagedown
+shot commit-diff
+key ?
+shot keyboard
+key escape
+key escape
+key ]
+wait 1600
+shot issues
+key ]
+wait 1600
+type LLL
+wait 900
+shot pr-files
+key ]
+wait 1600
+shot actions
+key ctrl+j enter
+wait 1500
+key tab tab tab tab tab enter
+wait 500
+key tab tab enter
+wait 6500
+shot action-log

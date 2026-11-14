@@ -26,8 +26,95 @@ pub enum ExplorerSegmentRole {
     Diagnostic,
 }
 
+/// What a Dusty Git cell means (DESIGN.md §4.1). The theme turns a role into a colour;
+/// screens never name colours.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum GitRole {
+    Text,
+    Muted,
+    Focus,
+    Link,
+    Added,
+    Removed,
+    Modified,
+    Untracked,
+    Ref,
+    RemoteRef,
+    Tag,
+    Hash,
+    Author,
+    Conflict,
+    Border,
+    /// Dark text on an accent fill: the active top tab and sub-tab chips.
+    OnFocus,
+    /// A graph lane colour, `Lane(i % 5)`.
+    Lane(u8),
+    /// A forge label's own colour, lifted until it reads on the pane (label chips).
+    Label(u8, u8, u8),
+}
+
+/// The background a Dusty Git cell is painted on.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum GitSurface {
+    Canvas,
+    Pane,
+    TopBar,
+    Cursor,
+    CursorInactive,
+    HunkBand,
+    FileBand,
+    AddedBand,
+    RemovedBand,
+    AddedEmphasis,
+    RemovedEmphasis,
+    ReceiptOk,
+    ReceiptErr,
+    /// The operation banner and other warnings: the Modified hue blended into the bar.
+    Warning,
+    Chip(GitChip),
+    ChipActive,
+    Sheet,
+    /// Code blocks in rendered Markdown: one step darker than the pane.
+    Code,
+    /// A forge label chip: the label's colour blended into the pane.
+    Label(u8, u8, u8),
+}
+
+/// A chip's hue; a subset of roles so `GitSurface` stays small and `Copy`.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum GitChip {
+    Focus,
+    Added,
+    Removed,
+    Modified,
+    Ref,
+    RemoteRef,
+    Tag,
+    Muted,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+pub enum Emphasis {
+    #[default]
+    None,
+    Bold,
+    Dim,
+    Strike,
+}
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum Style {
+    /// A Dusty Git cell: a semantic role on a semantic surface.
+    Git {
+        role: GitRole,
+        surface: GitSurface,
+        emphasis: Emphasis,
+    },
+    /// Highlighted code drawn on a Dusty Git surface (diff bands, cursor rows).
+    GitSyntax {
+        group: crate::config::Highlight,
+        surface: GitSurface,
+    },
     #[default]
     Default,
     Muted,
@@ -53,17 +140,28 @@ pub enum Style {
     GitSelected(Option<crate::config::Highlight>),
     GitInactiveSelection(Option<crate::config::Highlight>),
     GitSurface(Option<crate::config::Highlight>),
+    GitFocusedSurface(Option<crate::config::Highlight>),
     GitHeading,
     GitControl,
+    /// A section tab: the active one is an accent chip, the rest stay muted.
+    GitTab(bool),
     /// Some(active) retains a selected row's surface beneath the semantic foreground.
-    GitHash(Option<bool>),
+    GitHash(Option<bool>, bool),
     GitBranch {
         current: bool,
         selection: Option<bool>,
+        focused: bool,
+    },
+    GitFile {
+        /// None is a clean file; partial staging stays amber and has a separate marker.
+        staged: Option<bool>,
+        selection: Option<bool>,
+        focused: bool,
     },
     GitDetail {
         added: Option<bool>,
         selection: Option<bool>,
+        focused: bool,
     },
     GitDiff {
         added: bool,

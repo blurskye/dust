@@ -1,0 +1,84 @@
+{
+  "data": {
+    "project": {
+      "labels": {
+        "nodes": [
+          {
+            "id": "gid://gitlab/GroupLabel/16558712",
+            "title": "#field-fyi",
+            "color": "#34495E",
+            "textColor": "#FFFFFF",
+            "description": "Earmarked to notify the sales team of issue updates."
+          },
+          {
+            "id": "gid://gitlab/GroupLabel/42745071",
+            "title": "18.5",
+            "color": "#6699cc",
+            "textColor": "#FFFFFF",
+            "description": null
+          },
+          {
+            "id": "gid://gitlab/GroupLabel/8745578",
+            "title": "1st contribution",
+            "color": "#428bca",
+            "textColor": "#FFFFFF",
+            "description": "First contribution from a community member (DRI: Contributor Success group)"
+          },
+          {
+            "id": "gid://gitlab/GroupLabel/21333869",
+            "title": "2021-db-training",
+            "color": "#cc338b",
+            "textColor": "#FFFFFF",
+            "description": "Issues that you want to look with the trainer and other trainees in the working sessions of 2021 PostgreSQL database training"
+          },
+          {
+            "id": "gid://gitlab/GroupLabel/18275109",
+            "title": "2021Q1 gitlab.com Latency Degradation",
+            "color": "#AD4363",
+            "textColor": "#FFFFFF",
+            "description": null
+          },
+          {
+            "id": "gid://gitlab/GroupLabel/3063810",
+            "title": "2FA",
+            "color": "#428bca",
+            "textColor": "#FFFFFF",
+            "description": "Issues related to Two-Factor Authentication: https://docs.gitlab.com/ee/user/profile/account/two_factor_authentication.html"
+          },
+          {
+            "id": "gid://gitlab/GroupLabel/36776850",
+            "title": "AI",
+            "color": "#9400d3",
+            "textColor": "#FFFFFF",
+            "description": "This label will help group all AI-related issues "
+          },
+          {
+            "id": "gid://gitlab/GroupLabel/33870510",
+            "title": "AI Agents",
+            "color": "#8fbc8f",
+            "textColor": "#1F1E24",
+            "description": "Issues, MRs related to AI Agents"
+          },
+          {
+            "id": "gid://gitlab/GroupLabel/52856487",
+            "title": "AI Governance Capability: AI Asset Catalog",
+            "color": "#9400d3",
+            "textColor": "#FFFFFF",
+            "description": ""
+          },
+          {
+            "id": "gid://gitlab/GroupLabel/52856492",
+            "title": "AI Governance Capability: AI Compliance Audit",
+            "color": "#9400d3",
+            "textColor": "#FFFFFF",
+            "description": ""
+          }
+        ],
+        "pageInfo": {
+          "hasNextPage": true,
+          "endCursor": "eyJ0aXRsZSI6IkFJIEdvdmVybmFuY2UgQ2FwYWJpbGl0eTogQUkgQ29tcGxpYW5jZSBBdWRpdCIsImlkIjoiNTI4NTY0OTIifQ"
+        }
+      }
+    }
+  }
+}

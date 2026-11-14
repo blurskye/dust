@@ -435,6 +435,20 @@ impl Configuration {
         editor.indent_guides.enabled = false;
         None
     }
+    /// Put `task` in place of the task called `name`, or remove it, until the next reload, and
+    /// return the one it replaced. The tutor's practice tasks come and go like this.
+    pub(in crate::app) fn replace_task(
+        &mut self,
+        name: &str,
+        task: Option<crate::config::TaskConfig>,
+    ) -> Option<crate::config::TaskConfig> {
+        self.stamp = Arc::new(());
+        let tasks = &mut self.accepted.settings.tasks;
+        match task {
+            Some(task) => tasks.insert(name.to_owned(), task),
+            None => tasks.remove(name),
+        }
+    }
     pub(in crate::app) fn toggle_inlay_hints(&mut self) -> bool {
         self.stamp = Arc::new(());
         self.accepted.settings.lsp.inlay_hints = !self.accepted.settings.lsp.inlay_hints;

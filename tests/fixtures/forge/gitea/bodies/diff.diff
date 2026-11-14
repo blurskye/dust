@@ -1,0 +1,605 @@
+diff --git a/README.md b/README.md
+index 37e3b8b6..c8a4448c 100644
+--- a/README.md
++++ b/README.md
+@@ -184,6 +184,7 @@ Setup actions like `setup-go` install tools into `RUNNER_TOOL_CACHE`. `runner.to
+ | --- | --- |
+ | `none` (default) | Provided by the job image. Versions it lacks are downloaded in every job. |
+ | `shared` | One volume for all jobs. Only safe with `runner.capacity: 1`. |
++| `per_slot` | One volume per `runner.capacity` slot. Parallel jobs of a called workflow share their slot's volume. Takes more disk, as each slot downloads its own tools. |
+ 
+ To ship tools in a job image, install them to `/opt/hostedtoolcache/<tool>/<version>/<arch>` with an empty `<arch>.complete` file next to it, as the `-full` [runner images](https://gitea.com/orbit/orbit-images) do:
+ 
+diff --git a/act/runner/run_context.go b/act/runner/run_context.go
+index e038ab4c..d01b8774 100644
+--- a/act/runner/run_context.go
++++ b/act/runner/run_context.go
+@@ -271,7 +271,7 @@ func (rc *RunContext) validVolumes() []string {
+ 		volumes = append(volumes, hostEnv.Path, hostEnv.GetActPath())
+ 	}
+ 	if rc.Config.SharedToolCache {
+-		volumes = append(volumes, sharedToolCacheVolume)
++		volumes = append(volumes, rc.toolCacheVolume())
+ 	}
+ 	if rc.Config.BindWorkdir {
+ 		volumes = append(volumes, rc.Config.Workdir, rc.workdirMountRoot())
+@@ -331,6 +331,10 @@ func (rc *RunContext) startDockerProxy(ctx context.Context) {
+ 	rc.dockerProxy = container.NewDockerProxy(ctx, rc.jobContainerName())
+ }
+ 
++func (rc *RunContext) toolCacheVolume() string {
++	return sharedToolCacheVolume + rc.Config.ToolCacheSuffix
++}
++
+ // toolCache returns the tool cache path the job sees, relocatable through RUNNER_TOOL_CACHE.
+ func (rc *RunContext) toolCache(fallback string) string {
+ 	return cmp.Or(rc.GetEnv()["RUNNER_TOOL_CACHE"], fallback)
+@@ -391,7 +395,7 @@ func (rc *RunContext) GetBindsAndMounts(ctx context.Context) ([]string, map[stri
+ 	}
+ 	if rc.Config.SharedToolCache {
+ 		if toolCache := rc.toolCache(container.DefaultToolCache); !claimed[toolCache] {
+-			mounts[sharedToolCacheVolume] = toolCache
++			mounts[rc.toolCacheVolume()] = toolCache
+ 		}
+ 	}
+ 	if hostEnv, ok := rc.JobContainer.(*container.HostEnvironment); ok {
+@@ -422,13 +426,34 @@ func (rc *RunContext) GetBindsAndMounts(ctx context.Context) ([]string, map[stri
+ 	return binds, mounts
+ }
+ 
++// claimStableHostRoot creates the stable directory exclusively, since parallel jobs of a called
++// workflow, another runner, or a failed removal can hold it. It returns empty when it can't.
++func (rc *RunContext) claimStableHostRoot(ctx context.Context) string {
++	root := rc.Config.StableHostRoot
++	if root == "" {
++		return ""
++	}
++	err := os.MkdirAll(filepath.Dir(root), 0o777)
++	if err == nil {
++		err = os.Mkdir(root, 0o777)
++	}
++	if err != nil {
++		common.Logger(ctx).Warnf("using a random job directory, cannot claim %s: %v", root, err)
++		return ""
++	}
++	return root
++}
++
+ func (rc *RunContext) startHostEnvironment() common.Executor {
+ 	return func(ctx context.Context) error {
+ 		logWriter := rc.commandLogWriter(ctx)
+ 		cacheDir := rc.ActionCacheDir()
+-		randBytes := make([]byte, 8)
+-		_, _ = rand.Read(randBytes)
+-		miscpath := filepath.Join(cacheDir, hex.EncodeToString(randBytes))
++		miscpath := rc.claimStableHostRoot(ctx)
++		if miscpath == "" {
++			randBytes := make([]byte, 8)
++			_, _ = rand.Read(randBytes)
++			miscpath = filepath.Join(cacheDir, hex.EncodeToString(randBytes))
++		}
+ 		rc.cleanUpJobContainer = func(_ctx context.Context) error { return os.RemoveAll(miscpath) }
+ 		actPath := filepath.Join(miscpath, "act")
+ 		if err := os.MkdirAll(actPath, 0o777); err != nil {
+@@ -446,7 +471,10 @@ func (rc *RunContext) startHostEnvironment() common.Executor {
+ 		if rc.Config.SharedToolCache {
+ 			toolCacheParent = cacheDir
+ 		}
+-		toolCache := rc.toolCache(filepath.Join(toolCacheParent, "tool_cache"))
++		if override := rc.GetEnv()["RUNNER_TOOL_CACHE"]; override != "" {
++			rc.Env["RUNNER_TOOL_CACHE"] = override + rc.Config.ToolCacheSuffix // on the host, slots share the path without it
++		}
++		toolCache := rc.toolCache(filepath.Join(toolCacheParent, "tool_cache"+rc.Config.ToolCacheSuffix))
+ 		if err := os.MkdirAll(toolCache, 0o777); err != nil {
+ 			return err
+ 		}
+diff --git a/act/runner/run_context_test.go b/act/runner/run_context_test.go
+index c81b3ec9..4790e402 100644
+--- a/act/runner/run_context_test.go
++++ b/act/runner/run_context_test.go
+@@ -558,6 +558,11 @@ func TestRunContext_GetBindsAndMounts(t *testing.T) {
+ 		rc.containerSpec.Volumes = []string{"/unapproved:" + container.DefaultToolCache}
+ 		_, gotmount = rc.GetBindsAndMounts(t.Context())
+ 		assert.Equal(t, container.DefaultToolCache, gotmount[sharedToolCacheVolume])
++
++		rc.Config.ToolCacheSuffix = "-1"
++		_, gotmount = rc.GetBindsAndMounts(t.Context())
++		assert.Equal(t, container.DefaultToolCache, gotmount[sharedToolCacheVolume+"-1"])
++		assert.NotContains(t, gotmount, sharedToolCacheVolume)
+ 	})
+ 
+ 	t.Run("DaemonMountsAboveOwnerRepo", func(t *testing.T) {
+@@ -597,6 +602,11 @@ func TestRunContextValidVolumes(t *testing.T) {
+ 	assert.Equal(t, []string{"my-vol", "/host/path"}, rc.Config.ValidVolumes)
+ 	assert.Len(t, rc.validVolumes(), len(got), "repeated calls must be stable, not accumulate")
+ 
++	rc.Config.ToolCacheSuffix = "-1"
++	assert.Contains(t, rc.validVolumes(), sharedToolCacheVolume+"-1")
++	assert.NotContains(t, rc.validVolumes(), sharedToolCacheVolume)
++	rc.Config.ToolCacheSuffix = ""
++
+ 	rc.Config.SharedToolCache = false
+ 	assert.NotContains(t, rc.validVolumes(), sharedToolCacheVolume)
+ 
+@@ -1181,6 +1191,59 @@ func TestPrintStartJobContainerGroupGolden(t *testing.T) {
+ 	assert.Equal(t, want, buf.String())
+ }
+ 
++func TestStartHostEnvironmentToolCacheSuffix(t *testing.T) {
++	cacheDir := t.TempDir()
++	rc := &RunContext{
++		Config: &Config{ActionCacheDir: cacheDir, SharedToolCache: true, ToolCacheSuffix: "-1"},
++		Env:    map[string]string{},
++		Run:    &model.Run{Workflow: &model.Workflow{Name: "wf"}},
++	}
++	require.NoError(t, rc.startHostEnvironment()(t.Context()))
++	t.Cleanup(func() { require.NoError(t, rc.cleanUpJobContainer(context.Background())) })
++	assert.Equal(t, filepath.Join(cacheDir, "tool_cache-1"), rc.JobContainer.(*container.HostEnvironment).ToolCache)
++
++	override := filepath.Join(cacheDir, "override")
++	rc = &RunContext{
++		Config: &Config{ActionCacheDir: cacheDir, SharedToolCache: true, ToolCacheSuffix: "-1"},
++		Env:    map[string]string{"RUNNER_TOOL_CACHE": override},
++		Run:    &model.Run{Workflow: &model.Workflow{Name: "wf"}},
++	}
++	require.NoError(t, rc.startHostEnvironment()(t.Context()))
++	t.Cleanup(func() { require.NoError(t, rc.cleanUpJobContainer(context.Background())) })
++	assert.Equal(t, override+"-1", rc.JobContainer.(*container.HostEnvironment).ToolCache)
++	assert.Equal(t, override+"-1", rc.Env["RUNNER_TOOL_CACHE"])
++}
++
++func TestStartHostEnvironmentStableRoot(t *testing.T) {
++	cacheDir := t.TempDir()
++	root := filepath.Join(cacheDir, "workspaces", "owner", "repo", "0")
++	start := func() *RunContext {
++		rc := &RunContext{
++			Config: &Config{ActionCacheDir: cacheDir, StableHostRoot: root},
++			Env:    map[string]string{},
++			Run:    &model.Run{Workflow: &model.Workflow{Name: "wf"}},
++		}
++		require.NoError(t, rc.startHostEnvironment()(t.Context()))
++		return rc
++	}
++	path := func(rc *RunContext) string { return rc.JobContainer.(*container.HostEnvironment).Path }
++
++	first := start()
++	assert.Equal(t, filepath.Join(root, "hostexecutor"), path(first))
++
++	second := start()
++	assert.NotContains(t, path(second), root)
++	require.NoError(t, second.cleanUpJobContainer(context.Background()))
++	assert.DirExists(t, root)
++
++	require.NoError(t, first.cleanUpJobContainer(context.Background()))
++	assert.NoDirExists(t, root)
++
++	third := start()
++	assert.Equal(t, filepath.Join(root, "hostexecutor"), path(third))
++	require.NoError(t, third.cleanUpJobContainer(context.Background()))
++}
++
+ func TestRunContext_cleanupFailedStart(t *testing.T) {
+ 	type ctxKey string
+ 	const sentinel = ctxKey("sentinel")
+diff --git a/act/runner/runner.go b/act/runner/runner.go
+index 240f9331..8358994c 100644
+--- a/act/runner/runner.go
++++ b/act/runner/runner.go
+@@ -86,6 +86,8 @@ type Config struct {
+ 	ValidVolumes                      []string       // only volumes (and bind mounts) in this slice can be mounted on the job container or service containers
+ 	ContainerVolumes                  []string       // mounted into every job, service and docker action container
+ 	SharedToolCache                   bool           // one tool cache for all jobs instead of one per job
++	ToolCacheSuffix                   string         // distinguishes the reused tool cache, so concurrent jobs each get their own
++	StableHostRoot                    string         // host-mode job directory when free, instead of a random one
+ 	InsecureSkipTLS                   bool           // whether to skip verifying TLS certificate of the Gitea instance
+ 	ClientCertFile, ClientKeyFile     string         // PEM client certificate for the Gitea instance
+ 	CAFile                            string         // PEM CA certificates the Gitea instance's certificate chains to
+diff --git a/docs/host-mode.md b/docs/host-mode.md
+index 8c8d194d..4f796df7 100644
+--- a/docs/host-mode.md
++++ b/docs/host-mode.md
+@@ -1,4 +1,15 @@
+-# Host-mode background processes
++# Host mode
++
++## Stable working directory
++
++Host jobs run in a random `<host.workdir_parent>/<16 hex>/hostexecutor` directory by default. With `host.stable_workdir: true` they run in `<host.workdir_parent>/workspaces/<owner>/<repo>/<slot>/hostexecutor`, where `slot` is a free `runner.capacity` slot starting at `0`.
++
++- The path is fully stable only at `runner.capacity: 1`. At higher capacity it depends on which slot the job gets.
++- Only the path is stable. The directory is removed after each job, so no checkout or other state carries over.
++- A job uses a random directory when its repository name is unsafe in a path. It does too, with a warning in its log, when the stable directory is taken: by a parallel job of a called workflow, another runner sharing `host.workdir_parent`, or an earlier job's failed removal. While the option is on, idle cleanup removes such leftovers after `runner.workdir_cleanup_age`.
++- Concurrent jobs still share the host, so a stable path gives no isolation.
++
++## Background processes
+ 
+ Host jobs clean up background step processes at job completion. A step can opt out:
+ 
+diff --git a/internal/app/cmd/exec.go b/internal/app/cmd/exec.go
+index 7f4edfae..3090eef1 100644
+--- a/internal/app/cmd/exec.go
++++ b/internal/app/cmd/exec.go
+@@ -81,6 +81,9 @@ func sharedToolCache(mode string) (bool, error) {
+ 	if !slices.Contains(config.ToolCacheModes, mode) {
+ 		return false, fmt.Errorf("invalid --tool-cache-mode %q: must be one of %q", mode, config.ToolCacheModes)
+ 	}
++	if mode == config.ToolCacheModePerSlot {
++		return false, fmt.Errorf("--tool-cache-mode %q needs runner.capacity slots, which exec has none of", mode)
++	}
+ 	return mode == config.ToolCacheModeShared, nil
+ }
+ 
+diff --git a/internal/app/cmd/exec_test.go b/internal/app/cmd/exec_test.go
+index f6ad98d1..23eaf638 100644
+--- a/internal/app/cmd/exec_test.go
++++ b/internal/app/cmd/exec_test.go
+@@ -40,8 +40,10 @@ func TestSharedToolCache(t *testing.T) {
+ 	require.NoError(t, err)
+ 	require.False(t, shared)
+ 
+-	_, err = sharedToolCache("everyone")
+-	require.ErrorContains(t, err, "tool-cache-mode")
++	for _, mode := range []string{"everyone", config.ToolCacheModePerSlot} {
++		_, err = sharedToolCache(mode)
++		require.ErrorContains(t, err, "tool-cache-mode")
++	}
+ }
+ 
+ func TestExecuteArgsPaths(t *testing.T) {
+diff --git a/internal/app/run/runner.go b/internal/app/run/runner.go
+index 66a15fa1..f558f8f9 100644
+--- a/internal/app/run/runner.go
++++ b/internal/app/run/runner.go
+@@ -11,6 +11,7 @@ import (
+ 	"encoding/json/v2"
+ 	"errors"
+ 	"fmt"
++	"io/fs"
+ 	"maps"
+ 	"net"
+ 	"net/http"
+@@ -79,6 +80,7 @@ type Runner struct {
+ 	runningTasks            sync.Map
+ 	runningCount            atomic.Int64
+ 	lastIdleCleanupUnixNano atomic.Int64
++	slots                   slotAllocator
+ 	now                     func() time.Time
+ 	healthCheckLast         time.Time
+ 	healthCheckReady        bool
+@@ -178,6 +180,9 @@ func (r *Runner) OnIdle(ctx context.Context) {
+ 	// match leaves untouched. No-op when no host-mode job ever ran.
+ 	if hostRoot := filepath.FromSlash(r.cfg.Host.WorkdirParent); hostRoot != "" {
+ 		r.cleanupStaleDirs(ctx, hostRoot, isHostScratchDir)
++		if r.cfg.Host.StableWorkdir {
++			r.cleanupStaleStableDirs(ctx, filepath.Join(hostRoot, stableWorkdirDir))
++		}
+ 	}
+ 	r.cleanupOrphanDockerResources(ctx)
+ 	if r.uuid != "" && r.usesKubernetes() {
+@@ -289,6 +294,31 @@ func (r *Runner) cleanupStaleDirs(ctx context.Context, root string, match func(n
+ 	}
+ }
+ 
++// cleanupStaleStableDirs removes stale <owner>/<repo>/<slot> dirs under root, and the owner and repo dirs that leaves empty.
++func (r *Runner) cleanupStaleStableDirs(ctx context.Context, root string) {
++	dirs := func(pattern string) []string {
++		matches, _ := fs.Glob(os.DirFS(root), pattern) // fs.Glob, as root is no pattern; no root means no stable job ever ran
++		var found []string
++		for _, match := range matches {
++			dir := filepath.Join(root, filepath.FromSlash(match))
++			if info, err := os.Lstat(dir); err == nil && info.IsDir() {
++				found = append(found, dir)
++			}
++		}
++		return found
++	}
++	for _, repoDir := range dirs("*/*") {
++		if ctx.Err() != nil {
++			return
++		}
++		r.cleanupStaleDirs(ctx, repoDir, isTaskIDDir)
++		_ = os.Remove(repoDir) // fails unless empty, a job starting now falls back to a random dir
++	}
++	for _, ownerDir := range dirs("*") {
++		_ = os.Remove(ownerDir)
++	}
++}
++
+ func (r *Runner) Run(ctx context.Context, task *runnerv1.Task) (err error) {
+ 	if _, ok := r.runningTasks.LoadOrStore(task.Id, struct{}{}); ok {
+ 		return fmt.Errorf("task %d is already running", task.Id)
+@@ -452,6 +482,9 @@ func (r *Runner) run(ctx context.Context, task *runnerv1.Task, reporter *report.
+ 		}
+ 	}()
+ 
++	slot := r.slots.acquire()
++	defer r.slots.release(slot)
++
+ 	workflowCallInputs := restoreCalledWorkflowContext(task)
+ 	for _, line := range r.setupLines(task) {
+ 		reporter.Logf("%s", line)
+@@ -559,6 +592,11 @@ func (r *Runner) run(ctx context.Context, task *runnerv1.Task, reporter *report.
+ 		actionCloneDepth = 0
+ 	}
+ 
++	stableRoot := ""
++	if r.cfg.Host.StableWorkdir {
++		stableRoot = stableHostPath(r.cfg.Host.WorkdirParent, preset.Repository, slot)
++	}
++
+ 	workdirParent := containerWorkdirRoot(r.cfg.Container.WorkdirParent)
+ 	if r.cfg.Container.BindWorkdir {
+ 		// Append the task ID to isolate concurrent jobs from the same repo.
+@@ -623,7 +661,9 @@ func (r *Runner) run(ctx context.Context, task *runnerv1.Task, reporter *report.
+ 		Vars:                              task.Vars,
+ 		ValidVolumes:                      r.cfg.Container.ValidVolumes,
+ 		ContainerVolumes:                  r.cfg.Container.Volumes,
+-		SharedToolCache:                   r.cfg.Runner.ToolCacheMode == config.ToolCacheModeShared,
++		SharedToolCache:                   r.cfg.Runner.ToolCacheMode != config.ToolCacheModeNone,
++		ToolCacheSuffix:                   toolCacheSuffix(r.cfg.Runner.ToolCacheMode, slot),
++		StableHostRoot:                    stableRoot,
+ 		InsecureSkipTLS:                   r.cfg.Runner.Insecure,
+ 		ClientCertFile:                    r.cfg.Runner.ClientCertFile,
+ 		ClientKeyFile:                     r.cfg.Runner.ClientKeyFile,
+diff --git a/internal/app/run/runner_idle_cleanup_test.go b/internal/app/run/runner_idle_cleanup_test.go
+index de26a5d8..4285a15d 100644
+--- a/internal/app/run/runner_idle_cleanup_test.go
++++ b/internal/app/run/runner_idle_cleanup_test.go
+@@ -64,9 +64,11 @@ func TestRunnerOnIdleCleansStaleHostScratchDirs(t *testing.T) {
+ 	freshScratch := filepath.Join(hostRoot, "fedcba9876543210")
+ 	toolCache := filepath.Join(hostRoot, "tool_cache")
+ 	operatorData := filepath.Join(hostRoot, "keep-me")
+-	for _, path := range []string{staleScratch, freshScratch, toolCache, operatorData} {
++	stableLookalike := filepath.Join(hostRoot, stableWorkdirDir, "owner", "repo", "0")
++	for _, path := range []string{staleScratch, freshScratch, toolCache, operatorData, stableLookalike} {
+ 		require.NoError(t, os.MkdirAll(path, 0o700))
+ 	}
++	require.NoError(t, os.Chtimes(stableLookalike, now.Add(-72*time.Hour), now.Add(-72*time.Hour)))
+ 	require.NoError(t, os.Chtimes(staleScratch, now.Add(-48*time.Hour), now.Add(-48*time.Hour)))
+ 	require.NoError(t, os.Chtimes(freshScratch, now.Add(-10*time.Minute), now.Add(-10*time.Minute)))
+ 	require.NoError(t, os.Chtimes(toolCache, now.Add(-72*time.Hour), now.Add(-72*time.Hour)))
+@@ -85,10 +87,11 @@ func TestRunnerOnIdleCleansStaleHostScratchDirs(t *testing.T) {
+ 
+ 	r.OnIdle(t.Context())
+ 
+-	assert.NoDirExists(t, staleScratch) // stale scratch reclaimed
+-	assert.DirExists(t, freshScratch)   // within cleanup age, kept
+-	assert.DirExists(t, toolCache)      // shared cache, never a scratch match
+-	assert.DirExists(t, operatorData)   // non-hex name, untouched
++	assert.NoDirExists(t, staleScratch)  // stale scratch reclaimed
++	assert.DirExists(t, freshScratch)    // within cleanup age, kept
++	assert.DirExists(t, toolCache)       // shared cache, never a scratch match
++	assert.DirExists(t, operatorData)    // non-hex name, untouched
++	assert.DirExists(t, stableLookalike) // host.stable_workdir is off
+ }
+ 
+ func TestIsHostScratchDir(t *testing.T) {
+diff --git a/internal/app/run/slots.go b/internal/app/run/slots.go
+new file mode 100644
+index 00000000..168b0566
+--- /dev/null
++++ b/internal/app/run/slots.go
+@@ -0,0 +1,60 @@
++// Copyright 2026 The Gitea Authors. All rights reserved.
++// SPDX-License-Identifier: MIT
++
++package run
++
++import (
++	"path/filepath"
++	"regexp"
++	"slices"
++	"strconv"
++	"strings"
++	"sync"
++
++	"gitea.com/orbit/orbit/internal/pkg/config"
++)
++
++// slotAllocator numbers running tasks with the lowest free slot, so at most capacity tasks stay within 0..capacity-1.
++type slotAllocator struct {
++	mu   sync.Mutex
++	used []bool
++}
++
++func (a *slotAllocator) acquire() int {
++	a.mu.Lock()
++	defer a.mu.Unlock()
++	slot := slices.Index(a.used, false)
++	if slot < 0 {
++		slot = len(a.used)
++		a.used = append(a.used, false)
++	}
++	a.used[slot] = true
++	return slot
++}
++
++func (a *slotAllocator) release(slot int) {
++	a.mu.Lock()
++	defer a.mu.Unlock()
++	a.used[slot] = false
++}
++
++const stableWorkdirDir = "workspaces"
++
++var safePathName = regexp.MustCompile(`^[A-Za-z0-9._-]*[A-Za-z0-9_-]$`) // no trailing dot, which Windows drops
++
++// stableHostPath returns a job's stable host directory, empty when the repository is unsafe in a path.
++func stableHostPath(parent, repository string, slot int) string {
++	owner, repo, ok := strings.Cut(repository, "/")
++	if !ok || !safePathName.MatchString(owner) || !safePathName.MatchString(repo) ||
++		!filepath.IsLocal(owner) || !filepath.IsLocal(repo) { // rejects Windows device names
++		return ""
++	}
++	return filepath.Join(filepath.FromSlash(parent), stableWorkdirDir, owner, repo, strconv.Itoa(slot))
++}
++
++func toolCacheSuffix(mode string, slot int) string {
++	if mode != config.ToolCacheModePerSlot {
++		return ""
++	}
++	return "-" + strconv.Itoa(slot)
++}
+diff --git a/internal/app/run/slots_test.go b/internal/app/run/slots_test.go
+new file mode 100644
+index 00000000..7c7094a1
+--- /dev/null
++++ b/internal/app/run/slots_test.go
+@@ -0,0 +1,93 @@
++// Copyright 2026 The Gitea Authors. All rights reserved.
++// SPDX-License-Identifier: MIT
++
++package run
++
++import (
++	"os"
++	"path/filepath"
++	"sync"
++	"sync/atomic"
++	"testing"
++	"time"
++
++	"gitea.com/orbit/orbit/internal/pkg/config"
++
++	"github.com/stretchr/testify/assert"
++	"github.com/stretchr/testify/require"
++)
++
++func TestSlotAllocatorReusesLowestFree(t *testing.T) {
++	var slots slotAllocator
++	require.Equal(t, 0, slots.acquire())
++	require.Equal(t, 1, slots.acquire())
++	require.Equal(t, 2, slots.acquire())
++	slots.release(1)
++	assert.Equal(t, 1, slots.acquire())
++	assert.Equal(t, 3, slots.acquire())
++
++	assert.Equal(t, "-3", toolCacheSuffix(config.ToolCacheModePerSlot, 3))
++	assert.Empty(t, toolCacheSuffix(config.ToolCacheModeShared, 3))
++}
++
++func TestSlotAllocatorConcurrent(t *testing.T) {
++	const capacity = 4
++	var slots slotAllocator
++	var holders [capacity]atomic.Int32
++	sem := make(chan struct{}, capacity)
++	var wg sync.WaitGroup
++	for range 500 {
++		sem <- struct{}{}
++		wg.Go(func() {
++			defer func() { <-sem }()
++			slot := slots.acquire()
++			defer slots.release(slot)
++			if !assert.Less(t, slot, capacity) {
++				return
++			}
++			assert.Equal(t, int32(1), holders[slot].Add(1), "slot %d held twice", slot)
++			holders[slot].Add(-1)
++		})
++	}
++	wg.Wait()
++}
++
++func TestStableHostPath(t *testing.T) {
++	assert.Equal(t, filepath.Join("/p", "workspaces", "owner", "my.repo-1", "2"), stableHostPath("/p", "owner/my.repo-1", 2))
++	for _, repository := range []string{"", "owner", "../repo", "owner/..", "owner/.", "owner/a/b", "owner/", "/repo", "owner/a\\b", "owner/repo."} {
++		assert.Empty(t, stableHostPath("/p", repository, 0), repository)
++	}
++}
++
++func TestCleanupStaleStableDirs(t *testing.T) {
++	now := time.Date(2026, time.April, 29, 20, 0, 0, 0, time.UTC)
++	root := t.TempDir()
++	old := now.Add(-48 * time.Hour)
++	stale := filepath.Join(root, "gone", "repo", "0")
++	fresh := filepath.Join(root, "owner", "repo", "0")
++	staleSibling := filepath.Join(root, "owner", "repo", "1")
++	operatorData := filepath.Join(root, "other", "repo", "keep-me")
++	for _, path := range []string{stale, fresh, staleSibling, operatorData} {
++		require.NoError(t, os.MkdirAll(path, 0o700))
++	}
++	for _, path := range []string{stale, staleSibling, operatorData} {
++		require.NoError(t, os.Chtimes(path, old, old))
++	}
++	require.NoError(t, os.Chtimes(fresh, now, now))
++	strayFiles := []string{filepath.Join(root, "file"), filepath.Join(root, "other", "file")}
++	for _, path := range strayFiles {
++		require.NoError(t, os.WriteFile(path, nil, 0o600))
++	}
++
++	r := &Runner{cfg: &config.Config{Runner: config.Runner{WorkdirCleanupAge: 24 * time.Hour}}, now: func() time.Time { return now }}
++	r.cleanupStaleStableDirs(t.Context(), root)
++
++	assert.NoDirExists(t, filepath.Join(root, "gone"))
++	assert.DirExists(t, fresh)
++	assert.NoDirExists(t, staleSibling)
++	assert.DirExists(t, operatorData)
++	for _, path := range strayFiles {
++		assert.FileExists(t, path)
++	}
++	r.cleanupStaleStableDirs(t.Context(), filepath.Join(root, "missing"))
++}
+diff --git a/internal/pkg/config/config.example.yaml b/internal/pkg/config/config.example.yaml
+index 39df3766..b8d22c29 100644
+--- a/internal/pkg/config/config.example.yaml
++++ b/internal/pkg/config/config.example.yaml
+@@ -133,6 +133,9 @@ runner:
+   #           either way what it installs is gone when the job ends.
+   #   shared: one tool cache every job reuses. Two jobs writing the same tool version at once
+   #           corrupt it, so use it only with capacity 1.
++  #   per_slot: one tool cache per capacity slot. Parallel jobs of a called workflow still share
++  #           their slot's. Disk use grows with capacity, and a slot downloads a tool again even
++  #           if another slot has it.
+   #tool_cache_mode: none
+   # Optional executable on the host, run once after each task's built-in cleanup
+   # (post-steps, container teardown, bind-workdir removal). Additive only.
+@@ -313,6 +316,9 @@ host:
+   # The parent directory of a job's working directory.
+   # If it's empty, $HOME/.cache/act/ will be used.
+   #workdir_parent:
++  # Run host jobs in workdir_parent/workspaces/<owner>/<repo>/<slot>/hostexecutor instead of a random
++  # directory. The contents are still removed after each job, see docs/host-mode.md.
++  #stable_workdir: false
+ 
+ # Jobs that run as Kubernetes pods, see docs/kubernetes.md.
+ kubernetes:
+diff --git a/internal/pkg/config/config.go b/internal/pkg/config/config.go
+index e6a39ade..9f18556a 100644
+--- a/internal/pkg/config/config.go
++++ b/internal/pkg/config/config.go
+@@ -90,7 +90,7 @@ type Runner struct {
+ 	PatchActions          *bool             `yaml:"patch_actions"`            // PatchActions applies compatibility patches to the actions a job runs, so actions written for GitHub work against Gitea, see act/runner/patch_actions.go. It is a pointer to distinguish between false and not set; if not set, it defaults to true. Set it to false to run every action exactly as published, at the price of the artifact actions refusing.
+ 	AllocatePTY           bool              `yaml:"allocate_pty"`             // AllocatePTY allocates a pseudo-TTY for each step's process. Default is false, matching GitHub's actions/runner. Enable only for jobs that need an interactive terminal; tools like docker build emit redrawing progress frames into the captured log when a TTY is present. Applies to both host and docker backends.
+ 	DefaultImage          string            `yaml:"default_image"`            // DefaultImage is the image a job runs in when its runs-on matches none of the runner's labels. A runner without docker runs such a job on the host instead.
+-	ToolCacheMode         string            `yaml:"tool_cache_mode"`          // ToolCacheMode is what the runner mounts at RUNNER_TOOL_CACHE on both backends: ToolCacheModeNone or ToolCacheModeShared.
++	ToolCacheMode         string            `yaml:"tool_cache_mode"`          // ToolCacheMode is what the runner mounts at RUNNER_TOOL_CACHE on both backends: ToolCacheModeNone, ToolCacheModeShared or ToolCacheModePerSlot.
+ 	PostTaskScript        string            `yaml:"post_task_script"`         // PostTaskScript is the path to an executable script run on the host after each task's cleanup completes. Empty disables the hook. On Windows use .exe/.bat/.cmd; PowerShell (.ps1) is not supported yet as the configured path.
+ 	PostTaskScriptTimeout time.Duration     `yaml:"post_task_script_timeout"` // PostTaskScriptTimeout caps how long the post-task script may run. Default is 5m when post_task_script is set.
+ 	Hooks                 RunnerHooks       `yaml:"hooks"`                    // Hooks are scripts run inside the job environment around the job's steps.
+@@ -193,13 +193,14 @@ type Container struct {
+ 	Sweep                bool                          `yaml:"sweep"`                  // Sweep removes the containers, networks and volumes a job creates through its Docker proxy when the job ends.
+ }
+ 
+-// Values of Runner.ToolCacheMode: the runner mounts no tool cache, or one that every job reuses.
++// Values of Runner.ToolCacheMode: the runner mounts no tool cache, one that every job reuses, or one per capacity slot.
+ const (
+-	ToolCacheModeNone   = "none"
+-	ToolCacheModeShared = "shared"
++	ToolCacheModeNone    = "none"
++	ToolCacheModeShared  = "shared"
++	ToolCacheModePerSlot = "per_slot"
+ )
+ 
+-var ToolCacheModes = []string{ToolCacheModeNone, ToolCacheModeShared}
++var ToolCacheModes = []string{ToolCacheModeNone, ToolCacheModeShared, ToolCacheModePerSlot}
+ 
+ type ContainerNetworkCreateOptions struct {
+ 	EnableIPv4 *bool `yaml:"enable_ipv4"` // Enable or disable IPv4 for the network (true for docker by default)
+@@ -209,6 +210,7 @@ type ContainerNetworkCreateOptions struct {
+ // Host represents the configuration for the host.
+ type Host struct {
+ 	WorkdirParent string `yaml:"workdir_parent"` // WorkdirParent specifies the parent directory for the host's working directory.
++	StableWorkdir bool   `yaml:"stable_workdir"` // StableWorkdir keeps jobs under workspaces/<owner>/<repo>/<slot> in WorkdirParent instead of a random directory.
+ }
+ 
+ // Kubernetes configures the pods jobs run in.

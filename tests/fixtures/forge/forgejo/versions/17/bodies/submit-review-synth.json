@@ -1,0 +1,19 @@
+{
+  "id": 801,
+  "user": {
+    "id": 1001,
+    "login": "maya",
+    "full_name": "Maya",
+    "email": "maya@example.invalid",
+    "avatar_url": "https://code.forgejo.org/avatars/maya.png",
+    "html_url": "https://code.forgejo.org/maya"
+  },
+  "body": "Ship it",
+  "state": "APPROVED",
+  "commit_id": "c92ad11000000000000000000000000000000000",
+  "stale": false,
+  "official": true,
+  "comments_count": 0,
+  "submitted_at": "2026-11-14T05:24:29Z",
+  "html_url": "https://code.forgejo.org/orbit/orbit/pulls/13#issuecomment-801"
+}

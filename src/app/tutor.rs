@@ -46,7 +46,9 @@ const PRACTICE_LINES: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/assets/defaults/tutor/practice.txt"
 ));
-const FOOTER: &str = ":TutorNext skip · :TutorBack back · :TutorQuit quit";
+const FOOTER: &str = ":TutorNext skip · :TutorBack · :TutorChapters · :TutorQuit";
+/// How often a step that waits on the repository looks at it.
+const STATE_CHECK: Duration = Duration::from_millis(200);
 /// How long the card says a step is done before the next one comes.
 const PRAISE: Duration = Duration::from_millis(1200);
 /// The pointer before the step's instruction, one frame every `POINTER_FRAME`.
@@ -89,6 +91,24 @@ impl Language {
         }
     }
 
+    /// The program that runs the practice project's tests.
+    fn runner(self) -> &'static str {
+        match self {
+            Self::Rust => "cargo",
+            Self::TypeScript => "node",
+            Self::Python => "python3",
+        }
+    }
+
+    /// The arguments that run the practice project's tests with `runner`.
+    fn test_arguments(self) -> &'static [&'static str] {
+        match self {
+            Self::Rust => &["test"],
+            Self::TypeScript => &["--test"],
+            Self::Python => &["-m", "unittest", "discover", "-s", "src"],
+        }
+    }
+
     /// The practice file, then the main and greet files of the code lessons.
     fn practice_names(self) -> [&'static str; 3] {
         match self {
@@ -120,21 +140,29 @@ impl Language {
                 practice_file!("src/greet.rs", "rust/src/greet.rs"),
                 practice_file!("Cargo.toml", "rust/Cargo.toml.in"),
                 practice_file!(".gitignore", "rust/gitignore"),
+                practice_file!("README.md", "README.md"),
+                practice_file!("notes.txt", "notes.txt"),
             ],
             Self::TypeScript => &[
                 practice_file!("practice.ts", "typescript/practice.ts"),
                 practice_file!("src/main.ts", "typescript/src/main.ts"),
                 practice_file!("src/greet.ts", "typescript/src/greet.ts"),
+                practice_file!("src/greet.test.mjs", "typescript/src/greet.test.mjs"),
                 practice_file!("package.json", "typescript/package.json"),
                 practice_file!("tsconfig.json", "typescript/tsconfig.json"),
                 practice_file!(".gitignore", "typescript/gitignore"),
+                practice_file!("README.md", "README.md"),
+                practice_file!("notes.txt", "notes.txt"),
             ],
             Self::Python => &[
                 practice_file!("practice.py", "python/practice.py"),
                 practice_file!("src/main.py", "python/src/main.py"),
                 practice_file!("src/greet.py", "python/src/greet.py"),
+                practice_file!("src/test_greet.py", "python/src/test_greet.py"),
                 practice_file!("pyproject.toml", "python/pyproject.toml"),
                 practice_file!(".gitignore", "python/gitignore"),
+                practice_file!("README.md", "README.md"),
+                practice_file!("notes.txt", "notes.txt"),
             ],
         }
     }
@@ -197,6 +225,22 @@ pub(super) struct Step {
     /// A fresh project needs the preceding lesson's state before this step can be resumed.
     #[serde(default)]
     resume_from_previous: bool,
+    /// What the step can't work without: "server" (the language server), "debugger" (a debug
+    /// adapter for the language), "agent" (a coding agent program) or programs on PATH,
+    /// separated by spaces.
+    /// Without it the card says why and the step waits for :TutorNext.
+    needs: Option<String>,
+    /// Something the practice project must have before the step: "conflict" (a merge stopped
+    /// on a conflict in notes.txt) or "tasks" (the practice tasks in the configuration).
+    setup: Option<String>,
+    /// A file with changes staged in the index.
+    staged: Option<String>,
+    /// A file that is the same as in the last commit, in the index and on disk.
+    clean: Option<String>,
+    /// The keys that do the step, which the tests press: characters stand for themselves and
+    /// `<name>` for a named key, `<leader>` for the leader and `<lt>` for `<`.
+    #[serde(default)]
+    pub(super) keys: String,
     /// The language's practice file.
     #[serde(skip)]
     practice: &'static str,
@@ -235,6 +279,7 @@ pub(super) fn lessons(language: Language) -> Result<Vec<Step>, String> {
     let fill = |text: &str| {
         text.replace("{language}", language.name())
             .replace("{server}", language.server())
+            .replace("{runner}", language.runner())
             .replace("{practice}", practice)
             .replace("{main}", main)
             .replace("{greet}", greet)
@@ -244,6 +289,10 @@ pub(super) fn lessons(language: Language) -> Result<Vec<Step>, String> {
         step.text = fill(&step.text);
         step.press = fill(&step.press);
         step.open = step.open.as_deref().map(fill);
+        step.needs = step.needs.as_deref().map(fill);
+        step.staged = step.staged.as_deref().map(fill);
+        step.clean = step.clean.as_deref().map(fill);
+        step.keys = fill(&step.keys);
         step.practice = practice;
         if let (Some(wanted), Some((_, text))) = (
             &step.indented,
@@ -273,6 +322,10 @@ fn create_practice_project(
         std::fs::write(path, text)?;
     }
     let repository = git2::Repository::init(folder.path())?;
+    // Commits made in the lessons, such as finishing a merge, need a name to sign with.
+    let mut config = repository.config()?;
+    config.set_str("user.name", "Dust tutor")?;
+    config.set_str("user.email", "tutor@dust.invalid")?;
     let mut index = repository.index()?;
     index.add_all(["*"], git2::IndexAddOption::DEFAULT, None)?;
     index.write()?;
@@ -289,6 +342,53 @@ fn create_practice_project(
     let (greet, changed) = language.changed_greet();
     std::fs::write(folder.path().join(greet), changed)?;
     Ok(folder)
+}
+
+/// The line of notes.txt both sides of the practice merge change.
+const CONFLICT_LINE: &str = "Favourite colour: red";
+
+/// Stop a merge on a conflict in notes.txt, as after `git merge colours`: the current branch
+/// made the colour blue and the `colours` branch green. A merge already stopped stays as it is.
+fn start_practice_conflict(root: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    let repository = git2::Repository::open(root)?;
+    if repository.state() != git2::RepositoryState::Clean {
+        return Ok(());
+    }
+    let notes = Path::new("notes.txt");
+    let signature = git2::Signature::now("Dust tutor", "tutor@dust.invalid")?;
+    let head = repository.head()?.peel_to_commit()?;
+    let original = repository
+        .find_blob(head.tree()?.get_path(notes)?.id())?
+        .content()
+        .to_vec();
+    let original = String::from_utf8(original)?;
+    if !original.contains(CONFLICT_LINE) {
+        return Err("notes.txt has changed since the practice project was made".into());
+    }
+    let commit = |text: &str, message: &str| -> Result<git2::Oid, git2::Error> {
+        let blob = repository.blob(text.as_bytes())?;
+        let mut tree = repository.treebuilder(Some(&head.tree()?))?;
+        tree.insert(notes, blob, 0o100_644)?;
+        let tree = repository.find_tree(tree.write()?)?;
+        repository.commit(None, &signature, &signature, message, &tree, &[&head])
+    };
+    let theirs = original.replacen(CONFLICT_LINE, "Favourite colour: green", 1);
+    let theirs = commit(&theirs, "Make the colour green")?;
+    repository.branch("colours", &repository.find_commit(theirs)?, true)?;
+    let ours_text = original.replacen(CONFLICT_LINE, "Favourite colour: blue", 1);
+    let ours = commit(&ours_text, "Make the colour blue")?;
+    repository
+        .head()?
+        .set_target(ours, "tutor: make the colour blue")?;
+    std::fs::write(root.join(notes), &ours_text)?;
+    let mut index = repository.index()?;
+    index.add_path(notes)?;
+    index.write()?;
+    // `git merge --abort` goes back to where the merge started.
+    repository.reference("ORIG_HEAD", ours, true, "tutor: merge colours")?;
+    let annotated = repository.find_annotated_commit(theirs)?;
+    repository.merge(&[&annotated], None, None)?;
+    Ok(())
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -312,6 +412,60 @@ struct Practice {
     language: Language,
     /// The step to show once the editor is in the practice project.
     start: usize,
+    /// The practice tasks in the configuration, with the user's own task each one replaced.
+    tasks: Vec<(&'static str, Option<crate::config::TaskConfig>)>,
+}
+
+/// The practice tasks, with their programs found on PATH: `status` lists the changed files,
+/// `todo` is a linter that finds TODO notes and `tests` runs the language's tests. A task whose
+/// program isn't installed is left out.
+fn practice_tasks(language: Language) -> Vec<(&'static str, crate::config::TaskConfig)> {
+    use crate::config::TaskConfig;
+    use crate::config::TaskKind;
+    let task = |kind, program: &str, arguments: &[&str], matcher| {
+        Some(TaskConfig {
+            kind,
+            executable: crate::process::discover_executable(program)?,
+            arguments: arguments.iter().map(|argument| (*argument).to_owned()).collect(),
+            cwd: None,
+            environment: std::collections::BTreeMap::new(),
+            dependencies: Vec::new(),
+            timeout_ms: Some(120_000),
+            stdin: false,
+            matcher,
+        })
+    };
+    let todo = crate::config::ProblemMatcherConfig {
+        pattern: r"(?m)^(?P<path>[^:\n]+):(?P<line>\d+):(?P<message>.*)$".into(),
+        path_group: "path".into(),
+        line_group: "line".into(),
+        column_group: None,
+        column_encoding: None,
+        severity_group: None,
+        message_group: "message".into(),
+        name_group: None,
+        status_group: None,
+        duration_group: None,
+    };
+    [
+        ("status", task(TaskKind::Task, "git", &["status", "--short"], None)),
+        (
+            "todo",
+            task(TaskKind::Linter, "git", &["grep", "-n", "TODO"], Some(todo)),
+        ),
+        (
+            "tests",
+            task(
+                TaskKind::Test,
+                language.runner(),
+                language.test_arguments(),
+                None,
+            ),
+        ),
+    ]
+    .into_iter()
+    .filter_map(|(name, task)| Some((name, task?)))
+    .collect()
 }
 
 pub(super) struct Tutor {
@@ -332,6 +486,16 @@ pub(super) struct Tutor {
     checked: Option<u64>,
     progress: PathBuf,
     practice: Option<Practice>,
+    /// The steps the user has done, for the chapters' progress.
+    completed: std::collections::BTreeSet<usize>,
+    /// Error notices so far; a command that raised one doesn't count as the step done.
+    pub(in crate::app) errors: u64,
+    /// When the step's git state was last looked at.
+    state_checked: Option<Instant>,
+    /// The commands run during the step, and whether each ran without an error, for the
+    /// tests to say what happened when a step wasn't done.
+    #[cfg(test)]
+    pub(in crate::app) seen: Vec<String>,
 }
 
 impl Tutor {
@@ -347,6 +511,11 @@ impl Tutor {
             checked: None,
             progress: state_directory.join("tutor-step"),
             practice: None,
+            completed: std::collections::BTreeSet::new(),
+            errors: 0,
+            state_checked: None,
+            #[cfg(test)]
+            seen: Vec::new(),
         }
     }
 
@@ -354,7 +523,8 @@ impl Tutor {
         self.current.and_then(|index| self.steps.get(index))
     }
 
-    /// The step and language the user stopped at, saved as "12 python".
+    /// The step and language the user stopped at and the steps done, saved as
+    /// "12 python 0,1,2,5".
     fn saved_start(&self) -> Option<TutorStart> {
         let text = std::fs::read_to_string(&self.progress).ok()?;
         let mut parts = text.split_whitespace();
@@ -370,11 +540,44 @@ impl Tutor {
         Some(TutorStart { language, step })
     }
 
+    /// The steps done, as saved with the progress.
+    fn saved_completed(&self) -> std::collections::BTreeSet<usize> {
+        std::fs::read_to_string(&self.progress)
+            .ok()
+            .and_then(|text| {
+                text.split_whitespace().nth(2).map(|done| {
+                    done.split(',')
+                        .filter_map(|step| step.parse::<usize>().ok())
+                        .collect()
+                })
+            })
+            .unwrap_or_default()
+    }
+
     fn save_progress(&self, step: usize) -> std::io::Result<()> {
         if let Some(practice) = &self.practice {
-            std::fs::write(&self.progress, format!("{step} {}", practice.language.id()))?;
+            let done = self
+                .completed
+                .iter()
+                .map(usize::to_string)
+                .collect::<Vec<_>>()
+                .join(",");
+            let line = format!("{step} {} {done}", practice.language.id());
+            std::fs::write(&self.progress, line.trim_end())?;
         }
         Ok(())
+    }
+
+    /// The chapters in order: each one's name and its steps.
+    fn chapters(&self) -> Vec<(&str, std::ops::Range<usize>)> {
+        let mut chapters: Vec<(&str, std::ops::Range<usize>)> = Vec::new();
+        for (index, step) in self.steps.iter().enumerate() {
+            match chapters.last_mut() {
+                Some((name, range)) if *name == step.chapter => range.end = index + 1,
+                _ => chapters.push((&step.chapter, index..index + 1)),
+            }
+        }
+        chapters
     }
 
     /// The user's own layout while the tutor has the editor in its practice project.
@@ -497,13 +700,22 @@ impl App {
 
     /// Move into a fresh practice project in the picked language and show the picked step.
     pub(in crate::app) fn start_tutor(&mut self, start: TutorStart) {
-        if self.tutor.practice.is_some() {
+        if let Some(practice) = &self.tutor.practice {
+            // A chapter picked from :TutorChapters.
+            if practice.stage == Stage::Running && self.tutor_in_project() {
+                return self.tutor_go(start.step.min(self.tutor.steps.len()), false);
+            }
             return self.open_tutor();
         }
         match lessons(start.language) {
             Ok(steps) => self.tutor.steps = steps,
             Err(error) => return self.show_error(error),
         }
+        self.tutor.completed = if start.step == 0 {
+            std::collections::BTreeSet::new()
+        } else {
+            self.tutor.saved_completed()
+        };
         // Session restoration cannot replace dirty buffers, including unnamed scratch tabs.
         if self.state.buffers.values().any(|buffer| buffer.dirty) {
             return self.show_error("save or close unsaved buffers before starting the tutor");
@@ -542,6 +754,7 @@ impl App {
             stage: Stage::Entering,
             language: start.language,
             start: step,
+            tasks: Vec::new(),
         });
     }
 
@@ -551,6 +764,74 @@ impl App {
         } else {
             self.notify_message("The tutor is not running: :Tutor starts it.".into(), false);
         }
+    }
+
+    /// `:TutorChapters`: every chapter with how much of it is done; `enter` goes to its first
+    /// step not done yet.
+    pub(in crate::app) fn open_tutor_chapters(&mut self) {
+        let (Some(current), Some(practice)) = (self.tutor.current, &self.tutor.practice) else {
+            self.notify_message("The tutor is not running: :Tutor starts it.".into(), false);
+            return;
+        };
+        let language = practice.language;
+        let chapters = self.tutor.chapters();
+        let count = chapters.len();
+        let mut selected = None;
+        let items = chapters
+            .into_iter()
+            .enumerate()
+            .map(|(number, (name, range))| {
+                let done = range
+                    .clone()
+                    .filter(|step| self.tutor.completed.contains(step))
+                    .count();
+                let first = range
+                    .clone()
+                    .find(|step| !self.tutor.completed.contains(step))
+                    .unwrap_or(range.start);
+                let id = PickerItemId(format!("tutor-chapter:{number}"));
+                if range.contains(&current) {
+                    selected = Some(id.clone());
+                }
+                (
+                    PickerItem {
+                        badge: if done == range.len() {
+                            "✓".into()
+                        } else if range.contains(&current) {
+                            "here".into()
+                        } else {
+                            String::new()
+                        },
+                        kind: crate::workspace::PickerItemKind::Entry,
+                        id,
+                        label: format!("{}. {name}", number + 1),
+                        detail: format!(
+                            "{done}/{} done · steps {}-{}",
+                            range.len(),
+                            range.start + 1,
+                            range.end
+                        ),
+                        source: String::new(),
+                        action: PickerAction::None,
+                    },
+                    PickerPayload::Tutor(TutorStart {
+                        language,
+                        step: first,
+                    }),
+                )
+            })
+            .collect();
+        self.install_surface_picker(
+            crate::ui::PickerSurfaceKind::Choice,
+            format!("Tutor chapters ({count})"),
+            items,
+        );
+        if let Some(selected) = selected {
+            self.search.select_picker_item(&selected);
+        }
+        self.search
+            .set_picker_footer("Enter go there · Esc Esc close".to_owned());
+        self.sync_picker_ui();
     }
 
     pub(in crate::app) fn tutor_back(&mut self) {
@@ -568,12 +849,20 @@ impl App {
         self.tutor_leave();
     }
 
-    /// Called for every command that ran without an error.
-    pub(in crate::app) fn tutor_observe(&mut self, invocation: &CommandInvocation) {
+    /// Called for every command that ran without an error; `errors` is how many error notices
+    /// there were before it ran, so one that reported an error doesn't count.
+    pub(in crate::app) fn tutor_observe(&mut self, invocation: &CommandInvocation, errors: u64) {
+        #[cfg(test)]
+        self.tutor.seen.push(format!(
+            "{}{}",
+            invocation.id.as_str(),
+            if self.tutor.errors == errors { "" } else { " (error)" }
+        ));
         let Some(step) = self.tutor.step() else {
             return;
         };
-        if step
+        if self.tutor.errors == errors
+            && step
             .done
             .iter()
             .any(|pattern| invocation_matches(pattern, invocation))
@@ -641,15 +930,28 @@ impl App {
         }
         self.tutor_show_line();
         let observed = std::mem::take(&mut self.tutor.observed);
+        let missing = self.tutor_missing(index).is_some();
+        let step = &self.tutor.steps[index];
+        let trust = step.done.iter().any(|command| command == "workspace.trust");
+        let git = step.staged.is_some() || step.clean.is_some();
+        let text = step.checks_text();
         // Trust is persisted asynchronously after confirmation; dispatching :trust is not
         // enough, since the user can decline or the write can fail.
-        let done = if self.tutor.steps[index]
-            .done
-            .iter()
-            .any(|command| command == "workspace.trust")
-        {
+        let done = if missing {
+            false
+        } else if trust {
             self.workspace.trust() == crate::workspace::WorkspaceTrust::Trusted
-        } else if self.tutor.steps[index].checks_text() {
+        } else if git {
+            // The index and the files on disk change in the background after the command.
+            let due = self
+                .tutor
+                .state_checked
+                .is_none_or(|checked| checked.elapsed() >= STATE_CHECK);
+            due && {
+                self.tutor.state_checked = Some(Instant::now());
+                self.tutor_git_done(index)
+            }
+        } else if text {
             let revision = self.state.revision;
             self.tutor.checked != Some(revision) && {
                 self.tutor.checked = Some(revision);
@@ -660,8 +962,74 @@ impl App {
         };
         if done {
             self.tutor.done_at = Some(Instant::now());
+            self.tutor.completed.insert(index);
+            if let Err(error) = self.tutor.save_progress(index) {
+                self.show_error(format!("could not save tutor progress: {error}"));
+            }
         }
         self.sync_tutor_card();
+    }
+
+    /// Why step `index` can't be done here, or `None` when it can.
+    pub(in crate::app) fn tutor_missing(&self, index: usize) -> Option<String> {
+        let step = self.tutor.steps.get(index)?;
+        let need = step.needs.as_deref()?;
+        let language = self.tutor.practice.as_ref()?.language;
+        match need {
+            "server" => {
+                let ready = self
+                    .language
+                    .sessions()
+                    .values()
+                    .any(|session| session.capabilities.is_some());
+                (!ready).then(|| {
+                    format!(
+                        "{} isn't running here, so nothing can answer this yet. `<leader>` `c` `m` installs it and it starts by itself; `:TutorNext` skips this step.",
+                        language.server()
+                    )
+                })
+            }
+            "debugger" => (!self.tutor_debugger_ready()).then(|| {
+                format!(
+                    "No {} debugger is installed, so there is no program to stop in. `<leader>` `c` `m` installs one; `:TutorNext` skips this step.",
+                    language.name()
+                )
+            }),
+            "agent" => (!self.any_agent_installed()).then(|| {
+                "No coding agent (claude, codex, pi, opencode, gemini) is installed, so no session can start here. Install one and `<leader>` `c` `m` adds its adapter; `:TutorNext` skips this step.".to_owned()
+            }),
+            programs => programs
+                .split_whitespace()
+                .find(|program| self.tooling.path_executable(program).is_none())
+                .map(|program| {
+                    format!(
+                        "`{program}` isn't installed, so this can't run here. Install it to try this; `:TutorNext` skips this step."
+                    )
+                }),
+        }
+    }
+
+    /// The step's file is staged, or the same as in the last commit.
+    fn tutor_git_done(&self, index: usize) -> bool {
+        let (Some(practice), Some(step)) = (&self.tutor.practice, self.tutor.steps.get(index))
+        else {
+            return false;
+        };
+        let Ok(repository) = git2::Repository::open(&practice.root) else {
+            return false;
+        };
+        let status = |file: &str| repository.status_file(Path::new(file)).ok();
+        let index_changes = git2::Status::INDEX_NEW
+            | git2::Status::INDEX_MODIFIED
+            | git2::Status::INDEX_DELETED
+            | git2::Status::INDEX_RENAMED;
+        step.staged
+            .as_deref()
+            .is_none_or(|file| status(file).is_some_and(|status| status.intersects(index_changes)))
+            && step
+                .clean
+                .as_deref()
+                .is_none_or(|file| status(file).is_some_and(|status| status.is_empty()))
     }
 
     /// The practice project's folder is the workspace.
@@ -697,6 +1065,8 @@ impl App {
         self.tutor.observed = false;
         self.tutor.done_at = None;
         self.tutor.shown_at = Instant::now();
+        #[cfg(test)]
+        self.tutor.seen.clear();
         self.tutor.target = None;
         if index >= self.tutor.steps.len() {
             let _ = std::fs::remove_file(&self.tutor.progress);
@@ -730,6 +1100,17 @@ impl App {
         else {
             return;
         };
+        let step = &self.tutor.steps[index];
+        match step.setup.as_deref() {
+            Some("conflict") => {
+                if let Err(error) = start_practice_conflict(&root) {
+                    self.show_error(format!("could not stop a practice merge on a conflict: {error}"));
+                }
+                self.start_git_status_refresh_silent();
+            }
+            Some("tasks") => self.add_practice_tasks(),
+            _ => {}
+        }
         let step = &self.tutor.steps[index];
         let (split, explorer, terminal) = (step.split, step.explorer, step.terminal);
         // A step without a file of its own still needs a practice file in front, such as when
@@ -786,6 +1167,61 @@ impl App {
                 self.start_open(path);
             }
         }
+    }
+
+    /// Put the practice tasks in the configuration while the tutor runs.
+    fn add_practice_tasks(&mut self) {
+        let Some(language) = self.tutor.practice.as_ref().map(|practice| practice.language)
+        else {
+            return;
+        };
+        let mut changed = false;
+        for (name, task) in practice_tasks(language) {
+            if self.configuration.settings().tasks.get(name) == Some(&task) {
+                continue;
+            }
+            let replaced = self.configuration.replace_task(name, Some(task));
+            changed = true;
+            if let Some(practice) = &mut self.tutor.practice
+                && !practice.tasks.iter().any(|(added, _)| *added == name)
+            {
+                practice.tasks.push((name, replaced));
+            }
+        }
+        if changed {
+            self.rebuild_matcher_cache();
+        }
+    }
+
+    /// A debug adapter for the practice language is installed.
+    fn tutor_debugger_ready(&self) -> bool {
+        let Some(language) = self.tutor.practice.as_ref().map(|practice| practice.language)
+        else {
+            return false;
+        };
+        self.tooling.entries().iter().any(|entry| {
+            entry.definition.kind == crate::tools::ToolKind::Dap
+                && entry
+                    .definition
+                    .languages
+                    .iter()
+                    .any(|name| name == language.id())
+                && (matches!(entry.status, crate::tools::ToolStatus::Installed(_))
+                    || self
+                        .tooling
+                        .path_executable(&entry.definition.executable)
+                        .is_some())
+        })
+    }
+
+    /// One of the configured coding agents can start.
+    fn any_agent_installed(&self) -> bool {
+        self.configuration
+            .settings()
+            .agents
+            .profiles
+            .values()
+            .any(|profile| self.agent_program(&profile.program).is_some())
     }
 
     fn tutor_command(&mut self, id: &str) {
@@ -847,6 +1283,12 @@ impl App {
             return;
         };
         self.close_agent_sessions_in_root(&practice.root);
+        if !practice.tasks.is_empty() {
+            for (name, task) in practice.tasks {
+                self.configuration.replace_task(name, task);
+            }
+            self.rebuild_matcher_cache();
+        }
         if let Err(error) = self.workspace.forget_folder(&practice.root) {
             self.show_workspace_failure(error);
         }
@@ -886,14 +1328,29 @@ impl App {
             let step = &self.tutor.steps[*index];
             self.tutor.jump = step.at.is_some() || step.mark.is_some();
         }
+        let chapters = self.tutor.chapters();
         let card = place.map(|(index, (place, away, line))| {
             let step = &self.tutor.steps[index];
+            let (number, (_, range)) = chapters
+                .iter()
+                .enumerate()
+                .find(|(_, (_, range))| range.contains(&index))
+                .expect("every step is in a chapter");
+            // A step that can't be done here says why where the card says where it happens.
+            let (place, away) = match self.tutor_missing(index) {
+                Some(missing) if !away && self.tutor.done_at.is_none() => (missing, true),
+                _ => (place, away),
+            };
             crate::ui::TutorCard {
                 title: format!(
-                    "Tutor {}/{} · {}",
+                    "Tutor {}/{} · {}/{} {} · {}/{}",
                     index + 1,
                     self.tutor.steps.len(),
-                    step.chapter
+                    number + 1,
+                    chapters.len(),
+                    step.chapter,
+                    index - range.start + 1,
+                    range.len()
                 ),
                 text: step.text.replace("<leader>", leader),
                 press: step.press.replace("<leader>", leader),
@@ -901,7 +1358,7 @@ impl App {
                 praised: self.tutor.done_at.is_some(),
                 footer: FOOTER.into(),
                 target: self.tutor.target.clone(),
-                place,
+                place: place.replace("<leader>", leader),
                 away,
                 line,
             }
@@ -1100,6 +1557,7 @@ impl App {
             AppEffect::Tutor => self.open_tutor(),
             AppEffect::TutorNext => self.tutor_next(),
             AppEffect::TutorBack => self.tutor_back(),
+            AppEffect::TutorChapters => self.open_tutor_chapters(),
             AppEffect::TutorQuit => self.tutor_quit(),
             effect => return Err(effect),
         }
@@ -1416,7 +1874,7 @@ mod tests {
         for language in Language::ALL {
             for (dependent, prerequisite) in [
                 ("The dog sat. The dog ran. Every dog naps.", "/cat"),
-                ("agent.model", "agent.new"),
+                ("agent.model", "agent.tab.new"),
                 ("terminal.mode.normal", "workspace.trust"),
             ] {
                 let mut app = app();
@@ -1579,10 +2037,13 @@ mod tests {
                 .find(|entry| entry.keys.as_deref() == Some(sequence.as_str()))
                 .and_then(|entry| entry.command.clone())
                 .unwrap_or_else(|| panic!("no key {sequence} for step {:?}", step.press));
+            // A step judged by what changed, not by a command, only needs the key to exist.
             assert!(
-                step.done
+                step.done.is_empty()
+                    || step
+                        .done
                     .iter()
-                    .any(|pattern| pattern.split_whitespace().next() == Some(command.as_str())),
+                        .any(|pattern| pattern.split_whitespace().next() == Some(command.as_str())),
                 "{sequence} runs {command}, but step {:?} waits for {:?}",
                 step.press,
                 step.done
@@ -1608,6 +2069,362 @@ mod tests {
                 practice.contains("    The X marks the spot.\n")
                     && !practice.contains("PRACTICE_LINES")
             );
+        }
+    }
+
+    /// The key presses a step's `keys` stand for: characters stand for themselves and
+    /// `<name>` for a named key, with `<leader>` the leader key and `<lt>` a `<`.
+    /// The keys of a step's `keys` script: characters stand for themselves, `<name>` is a named
+    /// key (`<escape>`, `<ctrl-o>`, `<leader>`, `<lt>` for `<`) and `<wait>`, `None` here, lets
+    /// the background work the keys started finish before the next key.
+    fn key_script(keys: &str, leader: &str) -> Vec<Option<crate::editor::input::KeyEvent>> {
+        use crate::editor::input::KeyEvent;
+        let mut events = Vec::new();
+        let mut rest = keys;
+        while let Some(character) = rest.chars().next() {
+            if character == '<'
+                && let Some(end) = rest.find('>')
+                && end > 1
+            {
+                let name = &rest[1..end];
+                events.push(match name {
+                    "wait" => None,
+                    "leader" => Some(leader.parse().expect("leader key")),
+                    "lt" => Some(KeyEvent::character('<')),
+                    name => Some(
+                        name.parse()
+                            .unwrap_or_else(|_| panic!("unknown key <{name}> in {keys:?}")),
+                    ),
+                });
+                rest = &rest[end + 1..];
+                continue;
+            }
+            events.push(Some(KeyEvent::character(character)));
+            rest = &rest[character.len_utf8()..];
+        }
+        events
+    }
+
+    /// One pass of the main loop's background work, then the tutor's tick.
+    fn pump(app: &mut App) {
+        app.queue_startup_reads();
+        app.process_vfs_results();
+        app.start_git_status_refresh_silent();
+        app.process_git_status_events();
+        app.process_git_hunk_events();
+        app.process_git_sign_events();
+        app.process_git_mutation_events();
+        app.process_git_branch_events();
+        app.process_workspace_file_events();
+        app.process_workspace_search_events();
+        app.process_explorer_watch_events();
+        app.process_explorer_result();
+        app.process_trust_events();
+        app.process_configuration_result();
+        app.process_theme_results();
+        app.process_workspace_approval();
+        app.process_disk_changes();
+        app.process_dap_events();
+        app.process_execution_preflight();
+        app.process_pty_events();
+        app.process_agent_events();
+        app.process_job_events();
+        app.process_syntax();
+        app.process_persistence_events();
+        app.tutor_tick();
+    }
+
+    /// An app whose practice project starts no language server, so the steps that need one
+    /// take the path they take on a machine without it.
+    fn app_without_servers() -> App {
+        let mut app = app();
+        let mut config = app.configuration.fixture_snapshot();
+        config.settings.lsp.enabled = false;
+        config.settings.lsp.auto_start = false;
+        config.settings.lsp.auto_install = false;
+        app.configuration.install_fixture(config);
+        app
+    }
+
+    /// Walk the whole tutor in `language` with each step's own keys: every step must be done
+    /// by them, or, when what it needs isn't here, say so on the card and wait for :TutorNext.
+    fn walk_every_lesson(language: Language) {
+        let mut app = app_without_servers();
+        // A screen, so prompts and confirmations have room to show and be answered.
+        app.handle_event(crate::ui::UiEvent::Resize(120, 40));
+        app.start_tutor(TutorStart { language, step: 0 });
+        enter(&mut app);
+        let root = app.workspace.active_root().unwrap();
+        let identity = crate::files::RootIdentity::capture(&app.state.workspace_root).unwrap();
+        app.workspace.fixture_identity(root, identity).unwrap();
+        // The new identity drops the file the first step was opening; open it again.
+        app.tutor_go(0, false);
+        let leader = app.configuration.settings().input.keymaps.leader.clone();
+        let count = app.tutor.steps.len();
+        let mut skipped = Vec::new();
+        let mut failures = Vec::new();
+        for index in 0..count {
+            assert_eq!(app.tutor.current, Some(index), "{language:?}");
+            // The scene: its file open and the cursor on its line.
+            // A step that starts in another mode (after Visual mode, say) puts the cursor on
+            // its line only once its keys go back to Normal mode.
+            // Git work started by the step before (staging, say) finishes first, as it would
+            // while a person reads the next card.
+            let deadline = Instant::now() + Duration::from_secs(10);
+            let mut settled = None;
+            let mut git_seen = false;
+            loop {
+                pump(&mut app);
+                let git_busy = app.git.mutation_pending()
+                    || app.git.status_pending()
+                    || app.git.hunks_pending();
+                git_seen |= git_busy;
+                if !app.documents.has_work() && !git_busy {
+                    let since = *settled.get_or_insert_with(Instant::now);
+                    let quiet = !app.tutor.jump && !git_seen;
+                    if quiet || since.elapsed() > Duration::from_millis(300) {
+                        break;
+                    }
+                } else {
+                    settled = None;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "{language:?} step {}: the scene never settled",
+                    index + 1
+                );
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            let step = &app.tutor.steps[index];
+            let what = format!(
+                "{language:?} step {} ({}): {}",
+                index + 1,
+                step.chapter,
+                step.press
+            );
+            assert!(!step.keys.is_empty(), "{what} has no keys");
+            if let Some(missing) = app.tutor_missing(index) {
+                let card = app.ui.tutor.as_ref().expect("card");
+                assert!(card.away, "{what}");
+                assert!(card.place.contains(":TutorNext"), "{what}: {missing}");
+                skipped.push(index + 1);
+                app.tutor_next();
+                continue;
+            }
+            let keys = step.keys.clone();
+            let read_only = step.done.is_empty()
+                && [&step.line, &step.gone, &step.twice, &step.indented, &step.commented]
+                    .iter()
+                    .all(|check| check.is_none())
+                && step.cursor.is_none()
+                && step.staged.is_none()
+                && step.clean.is_none();
+            for key in key_script(&keys, &leader) {
+                let Some(key) = key else {
+                    let until = Instant::now() + Duration::from_millis(1500);
+                    while Instant::now() < until {
+                        pump(&mut app);
+                        std::thread::sleep(Duration::from_millis(5));
+                    }
+                    continue;
+                };
+                app.handle_event(crate::ui::UiEvent::Key {
+                    key,
+                    kind: crate::ui::KeyInputKind::Press,
+                });
+                pump(&mut app);
+            }
+            if read_only {
+                // A step with nothing to check is read and left with :TutorNext, and leaving
+                // the last one moves back out of the practice project in the background.
+                let deadline = Instant::now() + Duration::from_secs(5);
+                while app.tutor.practice.is_some()
+                    && app.tutor.current == Some(index)
+                    && Instant::now() < deadline
+                {
+                    std::thread::sleep(Duration::from_millis(5));
+                    pump(&mut app);
+                }
+                // Terminals still running in the practice project make leaving ask first,
+                // and `:TutorQuit` goes ahead, as the refusal says.
+                if index + 1 == count && app.tutor.practice.is_some() {
+                    let notice = format!("{:?}", app.notices.history().collect::<Vec<_>>());
+                    assert!(notice.contains(":TutorQuit"), "{what}: {notice}");
+                    for key in key_script(":TutorQuit<enter>", &leader).into_iter().flatten() {
+                        app.handle_event(crate::ui::UiEvent::Key {
+                            key,
+                            kind: crate::ui::KeyInputKind::Press,
+                        });
+                        pump(&mut app);
+                    }
+                    let deadline = Instant::now() + Duration::from_secs(5);
+                    while app.tutor.practice.is_some() && Instant::now() < deadline {
+                        std::thread::sleep(Duration::from_millis(5));
+                        pump(&mut app);
+                    }
+                }
+                if app.tutor.practice.is_some() && app.tutor.current == Some(index) {
+                    failures.push(format!(
+                        "{what}: still here. Notice: {:?}, ran {:?}, context {}",
+                        app.ui.notification,
+                        app.tutor.seen,
+                        app.active_input_context()
+                    ));
+                }
+                continue;
+            }
+            let deadline = Instant::now() + Duration::from_secs(8);
+            while !app.tutor.completed.contains(&index) && Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(5));
+                pump(&mut app);
+            }
+            if !app.tutor.completed.contains(&index) {
+                failures.push(format!(
+                    "{what}: not done. Notice: {:?}, recent {:?}, ran {:?}, mode {:?}, context {}",
+                    app.ui.notification,
+                    app.notices.history().rev().take(6).collect::<Vec<_>>(),
+                    app.tutor.seen,
+                    app.state
+                        .active_view()
+                        .and_then(|view| app.state.views.get(view))
+                        .map(|view| view.mode),
+                    app.active_input_context()
+                ));
+            }
+            // A step done during a `<wait>` may already have moved on after its praise.
+            if app.tutor.current == Some(index) {
+                app.tutor_go(index + 1, true);
+            }
+        }
+        assert!(failures.is_empty(), "{} steps failed:\n{}", failures.len(), failures.join("\n"));
+        // The last step's :TutorNext finishes the tutor and leaves the practice project.
+        assert!(app.tutor.practice.is_none(), "{language:?}: the tutor never finished");
+        println!("{language:?}: skipped steps without their tools: {skipped:?}");
+    }
+
+    #[test]
+    fn every_rust_lesson_is_done_by_its_keys() {
+        walk_every_lesson(Language::Rust);
+    }
+
+    #[test]
+    fn every_python_lesson_is_done_by_its_keys() {
+        walk_every_lesson(Language::Python);
+    }
+
+    #[test]
+    fn every_typescript_lesson_is_done_by_its_keys() {
+        walk_every_lesson(Language::TypeScript);
+    }
+
+    #[test]
+    fn chapters_show_progress_and_jump_to_the_first_step_not_done() {
+        let mut app = app();
+        app.start_tutor(TutorStart {
+            language: Language::Rust,
+            step: 0,
+        });
+        enter(&mut app);
+        let chapters = app
+            .tutor
+            .chapters()
+            .into_iter()
+            .map(|(name, range)| (name.to_owned(), range))
+            .collect::<Vec<_>>();
+        assert!(chapters.len() > 20);
+        // Every chapter is one run of steps: no name comes back later.
+        let mut names = chapters.iter().map(|(name, _)| name).collect::<Vec<_>>();
+        names.sort();
+        names.dedup();
+        assert_eq!(names.len(), chapters.len());
+        let title = app.ui.tutor.as_ref().unwrap().title.clone();
+        assert!(title.starts_with("Tutor 1/"), "{title}");
+        assert!(title.contains(&format!("1/{} Welcome", chapters.len())), "{title}");
+        let (_, third) = &chapters[2];
+        app.tutor.completed.insert(third.start);
+        app.process_effect(AppEffect::TutorChapters);
+        assert!(app.ui.picker.is_some());
+        for _ in 0..2 {
+            crate::app::editing::tests::press(&mut app, "down");
+        }
+        crate::app::editing::tests::press(&mut app, "enter");
+        app.tutor_tick();
+        assert_eq!(app.tutor.current, Some(third.start + 1));
+        let title = app.ui.tutor.as_ref().unwrap().title.clone();
+        assert!(title.contains(&format!("2/{}", third.len())), "{title}");
+        // The progress keeps what was done.
+        let saved = std::fs::read_to_string(&app.tutor.progress).unwrap();
+        assert!(saved.ends_with(&format!(" rust {}", third.start)), "{saved}");
+        assert!(app.tutor.saved_completed().contains(&third.start));
+    }
+
+    #[test]
+    fn a_step_that_needs_a_server_says_so_until_one_is_ready() {
+        let mut app = app_without_servers();
+        let step = lessons(Language::Rust)
+            .unwrap()
+            .iter()
+            .position(|step| step.needs.as_deref() == Some("server"))
+            .unwrap();
+        app.start_tutor(TutorStart {
+            language: Language::Rust,
+            step,
+        });
+        enter(&mut app);
+        let index = app.tutor.current.unwrap();
+        assert!(app.tutor.steps[index].needs.is_some() || index < step);
+        app.tutor_go(step, false);
+        let card = app.ui.tutor.as_ref().unwrap();
+        assert!(card.away && card.place.contains("rust-analyzer"), "{}", card.place);
+        // The command alone doesn't do a step that can't work here.
+        app.tutor.observed = true;
+        app.tutor_tick();
+        assert!(app.tutor.done_at.is_none());
+        app.tutor_next();
+        assert_eq!(app.tutor.current, Some(step + 1));
+    }
+
+    #[test]
+    fn a_command_that_reports_an_error_does_not_do_the_step() {
+        let mut app = app();
+        app.start_tutor(TutorStart {
+            language: Language::Rust,
+            step: 0,
+        });
+        enter(&mut app);
+        let invocation = CommandInvocation::new("input.motion", InvocationSource::Keymap)
+            .unwrap()
+            .with_argument("motion", CommandValue::String("down".into()));
+        let before = app.tutor.errors;
+        app.show_error("something went wrong");
+        app.tutor_observe(&invocation, before);
+        assert!(!app.tutor.observed);
+        app.tutor_observe(&invocation, app.tutor.errors);
+        assert!(app.tutor.observed);
+    }
+
+    #[test]
+    fn the_practice_conflict_stops_a_merge_on_notes() {
+        for language in Language::ALL {
+            let folder = create_practice_project(language).expect("practice project");
+            start_practice_conflict(folder.path()).expect("conflict");
+            // Once stopped it stays as it is.
+            start_practice_conflict(folder.path()).expect("conflict again");
+            let repository = git2::Repository::open(folder.path()).unwrap();
+            assert_eq!(repository.state(), git2::RepositoryState::Merge);
+            assert!(repository.index().unwrap().has_conflicts());
+            assert!(repository.find_reference("ORIG_HEAD").is_ok());
+            let notes = std::fs::read_to_string(folder.path().join("notes.txt")).unwrap();
+            assert!(
+                notes.contains("<<<<<<< ")
+                    && notes.contains("Favourite colour: blue")
+                    && notes.contains("Favourite colour: green"),
+                "{notes}"
+            );
+            // The greet file keeps its change for the git lessons.
+            let greet = language.practice_names()[2];
+            let status = repository.status_file(Path::new(greet)).unwrap();
+            assert!(status.contains(git2::Status::WT_MODIFIED));
         }
     }
 

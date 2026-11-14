@@ -1496,7 +1496,13 @@ impl App {
                 operation: bar.operation,
                 phase: bar.phase,
                 blockers: bar.blockers,
-                actions: bar.actions.iter().map(|a| a.name().to_owned()).collect(),
+                // Skip is available through the Git screen, where it has a destructive-action confirmation.
+                actions: bar
+                    .actions
+                    .iter()
+                    .filter(|a| a.name() != "skip")
+                    .map(|a| a.name().to_owned())
+                    .collect(),
                 abort_binding: self
                     .configuration
                     .keymaps()

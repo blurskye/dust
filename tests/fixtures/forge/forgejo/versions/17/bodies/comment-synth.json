@@ -1,0 +1,17 @@
+{
+  "id": 501,
+  "body": "Looks good to me.",
+  "user": {
+    "id": 1001,
+    "login": "maya",
+    "full_name": "Maya",
+    "email": "maya@example.invalid",
+    "avatar_url": "https://code.forgejo.org/avatars/maya.png",
+    "html_url": "https://code.forgejo.org/maya"
+  },
+  "created_at": "2026-11-14T05:23:29Z",
+  "updated_at": "2026-11-14T05:23:29Z",
+  "html_url": "https://code.forgejo.org/orbit/orbit/pulls/13#issuecomment-501",
+  "issue_url": "https://code.forgejo.org/orbit/orbit/issues/13",
+  "pull_request_url": "https://code.forgejo.org/orbit/orbit/pulls/13"
+}

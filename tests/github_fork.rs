@@ -6,6 +6,9 @@ use std::path::Path;
 use std::process::Command;
 use std::time::{Duration, Instant};
 
+#[path = "support/forge_fake.rs"]
+mod forge_fake;
+
 fn key(screen: &mut GitScreen, code: KeyCode, control: bool) {
     screen.event(UiEvent::Key {
         key: KeyEvent {
@@ -54,12 +57,9 @@ fn git(root: &Path, args: &[&str]) -> String {
     );
     String::from_utf8_lossy(&output.stdout).trim().into()
 }
+/// The fake forge server's request log in the gh-CLI form the legacy fixture logged.
 fn calls() -> Vec<Vec<String>> {
-    let state: serde_json::Value = serde_json::from_str(
-        &std::fs::read_to_string(std::env::var("DUST_GITHUB_FIXTURE").unwrap()).unwrap(),
-    )
-    .unwrap();
-    serde_json::from_value(state["calls"].clone()).unwrap()
+    forge_fake::calls(Path::new(&std::env::var("DUST_GITHUB_FIXTURE").unwrap()))
 }
 fn creates() -> usize {
     calls()
@@ -104,27 +104,26 @@ fn fork_submission_reviews_exact_targets_and_recovers_after_push() {
             &["remote", "add", "upstream", "git@github.com:team/demo.git"],
         );
         let bin = owner.path().join("bin");
-        std::fs::create_dir(&bin).unwrap();
-        let gh = bin.join("gh");
-        std::fs::write(&gh, include_bytes!("fixtures/github_cli.py")).unwrap();
-        std::fs::set_permissions(&gh, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let state = owner.path().join("github.json");
+        let server = forge_fake::ForgeServer::start(&state, "legacy");
+        server.install_gh(&bin);
         let git_executable = dust::tools::discover_executable("git").unwrap();
         let wrapper = bin.join("git");
         // The real push writes only to our disposable bare repository; all other Git calls are real.
         std::fs::write(&wrapper, "#!/usr/bin/env python3\nimport os,sys\na=sys.argv[1:]\nif a[:3]==['push','--','https://github.com/team/demo-fork.git']:\n a[2]=os.environ['DUST_FORK_BARE']\nos.execv(os.environ['DUST_REAL_GIT'],['git']+a)\n").unwrap();
         std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o755)).unwrap();
-        let state = owner.path().join("github.json");
         std::fs::write(&state, serde_json::json!({"calls":[],"comments":[],"fail_create":1,"repo_info":{
             "team/demo-fork":{"full_name":"team/demo-fork","default_branch":"fork-default","fork":true,"parent":{"full_name":"team/demo","default_branch":"trunk"}}
         }}).to_string()).unwrap();
-        let output = Command::new(std::env::current_exe().unwrap())
+        let output = server
+            .configure(&mut Command::new(std::env::current_exe().unwrap()))
             .args([
                 "--exact",
                 "fork_submission_reviews_exact_targets_and_recovers_after_push",
                 "--nocapture",
             ])
             .env("DUST_FORK_CHILD", "1")
-            .env("DUST_GITHUB_FIXTURE", state)
+            .env("DUST_GITHUB_FIXTURE", &state)
             .env("DUST_GITHUB_ROOT", &root)
             .env("DUST_FORK_BARE", &bare)
             .env("DUST_REAL_GIT", git_executable)
@@ -147,8 +146,8 @@ fn fork_submission_reviews_exact_targets_and_recovers_after_push() {
     let bare = std::env::var("DUST_FORK_BARE").unwrap();
     let bare = Path::new(&bare);
     let mut screen = GitScreen::open(root).unwrap();
-    key(&mut screen, KeyCode::Char(']'), false);
-    key(&mut screen, KeyCode::Char(']'), false);
+    // Pull requests is the tab right after Git.
+    key(&mut screen, KeyCode::Char('>'), false);
     wait(&mut screen, "Native review");
     open(&mut screen);
     let form = view(&mut screen);

@@ -3637,14 +3637,18 @@ impl App {
         match crate::git::continue_operation(&repository, "") {
             Ok(outcome) => {
                 self.notify_message(
-                    format!(
-                        "{} completed as {}",
-                        outcome.operation,
-                        outcome
-                            .commit
-                            .map(|oid| oid.to_string()[..8].to_owned())
-                            .unwrap_or_else(|| "a commit".to_owned())
-                    ),
+                    match &outcome.stopped {
+                        // The step was recorded and Git paused on the next one.
+                        Some(stop) => format!("{} continued · {}", outcome.operation, stop.summary()),
+                        None => format!(
+                            "{} completed as {}",
+                            outcome.operation,
+                            outcome
+                                .commit
+                                .map(|oid| oid.to_string()[..8].to_owned())
+                                .unwrap_or_else(|| "a commit".to_owned())
+                        ),
+                    },
                     false,
                 );
                 if let Some(warning) = outcome.cleanup_warning {
@@ -3652,7 +3656,10 @@ impl App {
                 }
                 self.after_conflict_recovery();
             }
-            Err(refusal) => self.show_error(refusal.to_string()),
+            Err(refusal) => {
+                self.after_conflict_recovery();
+                self.show_error(refusal.to_string());
+            }
         }
     }
 }
@@ -3679,13 +3686,20 @@ impl App {
                 );
                 self.after_conflict_recovery();
             }
-            Err(refusal) => self.show_error(refusal.to_string()),
+            Err(refusal) => {
+                self.after_conflict_recovery();
+                self.show_error(refusal.to_string());
+            }
         }
     }
 }
 
 impl App {
     fn conflict_repository(&mut self) -> Option<std::path::PathBuf> {
+        if self.workspace.trust() != WorkspaceTrust::Trusted {
+            self.show_error("Git recovery requires a trusted workspace");
+            return None;
+        }
         match self.git.status() {
             Some(status) => Some(status.repository.clone()),
             None => {

@@ -1,0 +1,665 @@
+[
+  {
+    "url": "https://gitea.com/api/v1/repos/orbit/orbit/git/commits/835b43f8c53b0fa2e2d5f9ad0fc5099cacac6e32",
+    "sha": "835b43f8c53b0fa2e2d5f9ad0fc5099cacac6e32",
+    "created": "2026-11-06T22:16:04+01:00",
+    "html_url": "https://gitea.com/orbit/orbit/commit/835b43f8c53b0fa2e2d5f9ad0fc5099cacac6e32",
+    "commit": {
+      "url": "https://gitea.com/api/v1/repos/orbit/orbit/git/commits/835b43f8c53b0fa2e2d5f9ad0fc5099cacac6e32",
+      "author": {
+        "name": "maya",
+        "email": "maya@example.invalid",
+        "date": "2026-11-06T22:16:04+01:00"
+      },
+      "committer": {
+        "name": "maya",
+        "email": "maya@example.invalid",
+        "date": "2026-11-06T22:16:04+01:00"
+      },
+      "message": "fix: sweep stable workdirs only when host.stable_workdir is on\n\nThe sweep could remove directories an operator keeps under workspaces/ with\nthe option off, and could delete a stray file while pruning. Also passes the\nrepository from the preset context and drops the wrapper method.\n",
+      "tree": {
+        "url": "https://gitea.com/api/v1/repos/orbit/orbit/git/trees/056900ce63cdc6a4b37bae29b50fb59a652ae2ff",
+        "sha": "056900ce63cdc6a4b37bae29b50fb59a652ae2ff",
+        "created": "2026-11-06T22:16:04+01:00"
+      },
+      "verification": {
+        "verified": true,
+        "reason": "maya / 9BA6A5FDF1283D78",
+        "signature": "-----BEGIN PGP SIGNATURE-----\n\niQHPBAABCAA5FiEEQmEm+vLCz6G+6pICm6al/fEoPXgFAmruPbsbFIAAAAAABAAO\nbWFudTIsMi41KzEuMTIsMCwzAAoJEJumpf3xKD14k/oL/1bIDWI3IYdwP/JgmT7M\ntif7V6DNzLvxIMOvRnyDl0OF8vYg13mUjYNLYp9nIXq8wL09icGWG2S8PRvHj6qU\nLpZFF5XbqmwjZWqSIqYXpAe6rCfyEe456cIoPohTe5Y4gZBfAx4eGhUKJO1QHise\n6OWtA5OLGTxk3PH0TIlR0Uz+Y2YTy1EE1ynqZx4WCQ4Va70Az9FiVkIs2qySXzgg\nSXCmURnd6cBxt2z9WWfqZjm1qohNXDyFMg3tJ5hdrnp8d9R4s6ePZjfg5Wr+ahM5\n1QxzVK7Uov0CMVQ/C84wAaqq4nK+pOC2nDQrBTP2eYqPim5V9TbhxxPgXXs1Jv3S\nGFVpHzhrKSgUeLx08boK8mdd0UhG8/9SGOmnXKeEf2agfIxzAq3vTycjvk7pUO4i\n+EN5ozjlT/1QBcClK1VrT5OXJgT4K4ZUP6p5RrUto2Ehq8hKomqVy84zGuB1gdQ4\nhmWcSBJdbtbNBASBPoUH5rb1caSclbLtHObfUbWvGtTZTw==\n=lv0N\n-----END PGP SIGNATURE-----",
+        "signer": {
+          "name": "maya",
+          "email": "maya@example.invalid",
+          "username": "maya"
+        },
+        "payload": "tree 056900ce63cdc6a4b37bae29b50fb59a652ae2ff\nparent 001f0e73dceb03269da598a99d93f586d9f21f0b\nauthor maya <maya@example.invalid> 1793998267 +0100\ncommitter maya <maya@example.invalid> 1793998267 +0100\n\nfix: sweep stable workdirs only when host.stable_workdir is on\n\nThe sweep could remove directories an operator keeps under workspaces/ with\nthe option off, and could delete a stray file while pruning. Also passes the\nrepository from the preset context and drops the wrapper method.\n"
+      }
+    },
+    "author": {
+      "id": 173651,
+      "login": "maya",
+      "type": "User",
+      "login_name": "",
+      "source_id": 0,
+      "full_name": "maya",
+      "email": "maya@example.invalid",
+      "avatar_url": "https://gitea.com/avatars/maya.png",
+      "html_url": "https://gitea.com/maya",
+      "language": "",
+      "is_admin": false,
+      "last_login": "0001-01-01T00:00:00Z",
+      "created": "2026-01-25T11:39:20Z",
+      "restricted": false,
+      "active": false,
+      "prohibit_login": false,
+      "location": "",
+      "website": "",
+      "description": "",
+      "visibility": "public",
+      "followers_count": 0,
+      "following_count": 2,
+      "starred_repos_count": 2,
+      "username": "maya"
+    },
+    "committer": {
+      "id": 173651,
+      "login": "maya",
+      "type": "User",
+      "login_name": "",
+      "source_id": 0,
+      "full_name": "maya",
+      "email": "maya@example.invalid",
+      "avatar_url": "https://gitea.com/avatars/maya.png",
+      "html_url": "https://gitea.com/maya",
+      "language": "",
+      "is_admin": false,
+      "last_login": "0001-01-01T00:00:00Z",
+      "created": "2026-01-25T11:39:20Z",
+      "restricted": false,
+      "active": false,
+      "prohibit_login": false,
+      "location": "",
+      "website": "",
+      "description": "",
+      "visibility": "public",
+      "followers_count": 0,
+      "following_count": 2,
+      "starred_repos_count": 2,
+      "username": "maya"
+    },
+    "parents": [
+      {
+        "url": "https://gitea.com/api/v1/repos/orbit/orbit/git/commits/001f0e73dceb03269da598a99d93f586d9f21f0b",
+        "sha": "001f0e73dceb03269da598a99d93f586d9f21f0b",
+        "created": "0001-01-01T00:00:00Z"
+      }
+    ],
+    "files": [
+      {
+        "filename": "docs/host-mode.md",
+        "status": "modified"
+      },
+      {
+        "filename": "internal/app/run/runner.go",
+        "status": "modified"
+      },
+      {
+        "filename": "internal/app/run/runner_idle_cleanup_test.go",
+        "status": "modified"
+      },
+      {
+        "filename": "internal/app/run/slots.go",
+        "status": "modified"
+      },
+      {
+        "filename": "internal/app/run/slots_test.go",
+        "status": "modified"
+      }
+    ],
+    "stats": {
+      "total": 80,
+      "additions": 41,
+      "deletions": 39
+    }
+  },
+  {
+    "url": "https://gitea.com/api/v1/repos/orbit/orbit/git/commits/001f0e73dceb03269da598a99d93f586d9f21f0b",
+    "sha": "001f0e73dceb03269da598a99d93f586d9f21f0b",
+    "created": "2026-11-06T22:15:22+01:00",
+    "html_url": "https://gitea.com/orbit/orbit/commit/001f0e73dceb03269da598a99d93f586d9f21f0b",
+    "commit": {
+      "url": "https://gitea.com/api/v1/repos/orbit/orbit/git/commits/001f0e73dceb03269da598a99d93f586d9f21f0b",
+      "author": {
+        "name": "maya",
+        "email": "maya@example.invalid",
+        "date": "2026-11-06T22:15:22+01:00"
+      },
+      "committer": {
+        "name": "maya",
+        "email": "maya@example.invalid",
+        "date": "2026-11-06T22:15:22+01:00"
+      },
+      "message": "Merge branch 'enhance/tool-cache-per-slot' into enhance/stable-host-workdir\n\n# Conflicts:\n#\tinternal/app/run/slots_test.go\n",
+      "tree": {
+        "url": "https://gitea.com/api/v1/repos/orbit/orbit/git/trees/94c0554bd2c3d141177626dfdffb5907e3967c51",
+        "sha": "94c0554bd2c3d141177626dfdffb5907e3967c51",
+        "created": "2026-11-06T22:15:22+01:00"
+      },
+      "verification": {
+        "verified": true,
+        "reason": "maya / 9BA6A5FDF1283D78",
+        "signature": "-----BEGIN PGP SIGNATURE-----\n\niQHPBAABCAA5FiEEQmEm+vLCz6G+6pICm6al/fEoPXgFAmruPZEbFIAAAAAABAAO\nbWFudTIsMi41KzEuMTIsMCwzAAoJEJumpf3xKD14DwAMAL25yfAkUbW5R54Eo399\nGVEeGONRwCTOefSHrXpcz2YzH7geIe4wfIX7D3tknHxcOuSmdLjg0oWcfkxJBxjb\nUE/YondcXzh9TiDJoBqsc73qNscHNTW/+eheA4JQT9fYYFERvkuBiV8uLXR8NUiN\nSzLQihDaOjqL3zpoB29kHDFxUyCRIYzNmjm04d/0IRjTaBepYXbjdzRJrCoYYnks\nlvqVmszoUlm2yhrjW0L/LMe4/SXUh0cp/Q7vMz8XPIuyHOz8CKPvs21bgGZZyCNQ\nLdVJjy57Fi1Qtm3e9dabAs+LPbu0GpFYQb0mAnlulUdQYLYcMEIEO/m5p1/0yNm0\nYPW635Wz0OCF6MYHP7exSxFGeB1DZEaT6JFKe9uMHbBMKdFr+aj1jSemZT44BOJd\n7lYPdxYmgXuZXLQivKz6yU8sm1rRusxE/EfUxyigYxH2p0ljgsTl6LJUgVH1k8r2\nRzCUQXVOTMwHO160TB078oeIzyMlMmf0Qedfu4+X62/6Ag==\n=LJ+N\n-----END PGP SIGNATURE-----",
+        "signer": {
+          "name": "maya",
+          "email": "maya@example.invalid",
+          "username": "maya"
+        },
+        "payload": "tree 94c0554bd2c3d141177626dfdffb5907e3967c51\nparent 0813592478d7661d6c5df1013c4d20d0077165a4\nparent b67ea49abc010d6d427707b0727eed22accf4903\nauthor maya <maya@example.invalid> 1793998225 +0100\ncommitter maya <maya@example.invalid> 1793998225 +0100\n\nMerge branch 'enhance/tool-cache-per-slot' into enhance/stable-host-workdir\n\n# Conflicts:\n#\tinternal/app/run/slots_test.go\n"
+      }
+    },
+    "author": {
+      "id": 173651,
+      "login": "maya",
+      "type": "User",
+      "login_name": "",
+      "source_id": 0,
+      "full_name": "maya",
+      "email": "maya@example.invalid",
+      "avatar_url": "https://gitea.com/avatars/maya.png",
+      "html_url": "https://gitea.com/maya",
+      "language": "",
+      "is_admin": false,
+      "last_login": "0001-01-01T00:00:00Z",
+      "created": "2026-01-25T11:39:20Z",
+      "restricted": false,
+      "active": false,
+      "prohibit_login": false,
+      "location": "",
+      "website": "",
+      "description": "",
+      "visibility": "public",
+      "followers_count": 0,
+      "following_count": 2,
+      "starred_repos_count": 2,
+      "username": "maya"
+    },
+    "committer": {
+      "id": 173651,
+      "login": "maya",
+      "type": "User",
+      "login_name": "",
+      "source_id": 0,
+      "full_name": "maya",
+      "email": "maya@example.invalid",
+      "avatar_url": "https://gitea.com/avatars/maya.png",
+      "html_url": "https://gitea.com/maya",
+      "language": "",
+      "is_admin": false,
+      "last_login": "0001-01-01T00:00:00Z",
+      "created": "2026-01-25T11:39:20Z",
+      "restricted": false,
+      "active": false,
+      "prohibit_login": false,
+      "location": "",
+      "website": "",
+      "description": "",
+      "visibility": "public",
+      "followers_count": 0,
+      "following_count": 2,
+      "starred_repos_count": 2,
+      "username": "maya"
+    },
+    "parents": [
+      {
+        "url": "https://gitea.com/api/v1/repos/orbit/orbit/git/commits/0813592478d7661d6c5df1013c4d20d0077165a4",
+        "sha": "0813592478d7661d6c5df1013c4d20d0077165a4",
+        "created": "0001-01-01T00:00:00Z"
+      },
+      {
+        "url": "https://gitea.com/api/v1/repos/orbit/orbit/git/commits/b67ea49abc010d6d427707b0727eed22accf4903",
+        "sha": "b67ea49abc010d6d427707b0727eed22accf4903",
+        "created": "0001-01-01T00:00:00Z"
+      }
+    ],
+    "files": [
+      {
+        "filename": "README.md",
+        "status": "modified"
+      },
+      {
+        "filename": "act/runner/run_context.go",
+        "status": "modified"
+      },
+      {
+        "filename": "act/runner/run_context_test.go",
+        "status": "modified"
+      },
+      {
+        "filename": "internal/app/cmd/exec.go",
+        "status": "modified"
+      },
+      {
+        "filename": "internal/app/run/slots_test.go",
+        "status": "modified"
+      },
+      {
+        "filename": "internal/pkg/config/config.example.yaml",
+        "status": "modified"
+      }
+    ],
+    "stats": {
+      "total": 52,
+      "additions": 39,
+      "deletions": 13
+    }
+  },
+  {
+    "url": "https://gitea.com/api/v1/repos/orbit/orbit/git/commits/b67ea49abc010d6d427707b0727eed22accf4903",
+    "sha": "b67ea49abc010d6d427707b0727eed22accf4903",
+    "created": "2026-11-06T22:14:55+01:00",
+    "html_url": "https://gitea.com/orbit/orbit/commit/b67ea49abc010d6d427707b0727eed22accf4903",
+    "commit": {
+      "url": "https://gitea.com/api/v1/repos/orbit/orbit/git/commits/b67ea49abc010d6d427707b0727eed22accf4903",
+      "author": {
+        "name": "maya",
+        "email": "maya@example.invalid",
+        "date": "2026-11-06T22:14:55+01:00"
+      },
+      "committer": {
+        "name": "maya",
+        "email": "maya@example.invalid",
+        "date": "2026-11-06T22:14:55+01:00"
+      },
+      "message": "fix: keep per_slot caches apart under a host RUNNER_TOOL_CACHE\n\nA RUNNER_TOOL_CACHE override gave host jobs of every slot one directory.\nKeeps ToolCacheModes as the only mode list and notes that parallel jobs of\na called workflow share their slot's cache.\n",
+      "tree": {
+        "url": "https://gitea.com/api/v1/repos/orbit/orbit/git/trees/66c52f400f27fd46d81e1c8b8cc377b6d7a58a79",
+        "sha": "66c52f400f27fd46d81e1c8b8cc377b6d7a58a79",
+        "created": "2026-11-06T22:14:55+01:00"
+      },
+      "verification": {
+        "verified": true,
+        "reason": "maya / 9BA6A5FDF1283D78",
+        "signature": "-----BEGIN PGP SIGNATURE-----\n\niQHPBAABCAA5FiEEQmEm+vLCz6G+6pICm6al/fEoPXgFAmruPXYbFIAAAAAABAAO\nbWFudTIsMi41KzEuMTIsMCwzAAoJEJumpf3xKD14sgUMALcMMEIZ909pSMZrii/7\nRRJBcTTHkcDSdTu7hC+jl72BeSpiBnYKqGM0917+rueYRt7SuIAy5GTqqwlHZItW\nz5XAp+VYYqEfdftM0TwtMXLGzWU3XkcyroUVxB0fxUN6VXgONDlmcfGa27c0yRuw\n25syfX0zSA7Ud2xY4jDGbANna0sm4EcB63vXeOrgO9vhgawlxydHTjKM/H/PCiFu\n4pC3UseloOoeEGph2NnRDI5UXZe0y59aYVV/7eBcwGrdjlGHNQL2WnySqRgQ5Q7M\nzj2jEbO5CrJzJGb8R1smaMukWTRps5FHK4NyM/OmBeUBBdVvw+7TjpeMFTj3xuF+\nklBaVtB15CjjT18aa/5kuxjpDxLqEHgjqSQIl1LKmiveCVyhREmrDppJDQBUJTnl\nLgpRSZPoiuGGhwJUplRTNw8rHIosgYV5H2owX4RrtJotaqeLRVRlDiJd+gnSfQeG\nRIihs1WnMwdT7yPTu91wei66Bb4IOgKSvWQcnPVSa87FlA==\n=yd2E\n-----END PGP SIGNATURE-----",
+        "signer": {
+          "name": "maya",
+          "email": "maya@example.invalid",
+          "username": "maya"
+        },
+        "payload": "tree 66c52f400f27fd46d81e1c8b8cc377b6d7a58a79\nparent 99ec0bac7b05942826ca78f08cb4f962063ee007\nauthor maya <maya@example.invalid> 1793998198 +0100\ncommitter maya <maya@example.invalid> 1793998198 +0100\n\nfix: keep per_slot caches apart under a host RUNNER_TOOL_CACHE\n\nA RUNNER_TOOL_CACHE override gave host jobs of every slot one directory.\nKeeps ToolCacheModes as the only mode list and notes that parallel jobs of\na called workflow share their slot's cache.\n"
+      }
+    },
+    "author": {
+      "id": 173651,
+      "login": "maya",
+      "type": "User",
+      "login_name": "",
+      "source_id": 0,
+      "full_name": "maya",
+      "email": "maya@example.invalid",
+      "avatar_url": "https://gitea.com/avatars/maya.png",
+      "html_url": "https://gitea.com/maya",
+      "language": "",
+      "is_admin": false,
+      "last_login": "0001-01-01T00:00:00Z",
+      "created": "2026-01-25T11:39:20Z",
+      "restricted": false,
+      "active": false,
+      "prohibit_login": false,
+      "location": "",
+      "website": "",
+      "description": "",
+      "visibility": "public",
+      "followers_count": 0,
+      "following_count": 2,
+      "starred_repos_count": 2,
+      "username": "maya"
+    },
+    "committer": {
+      "id": 173651,
+      "login": "maya",
+      "type": "User",
+      "login_name": "",
+      "source_id": 0,
+      "full_name": "maya",
+      "email": "maya@example.invalid",
+      "avatar_url": "https://gitea.com/avatars/maya.png",
+      "html_url": "https://gitea.com/maya",
+      "language": "",
+      "is_admin": false,
+      "last_login": "0001-01-01T00:00:00Z",
+      "created": "2026-01-25T11:39:20Z",
+      "restricted": false,
+      "active": false,
+      "prohibit_login": false,
+      "location": "",
+      "website": "",
+      "description": "",
+      "visibility": "public",
+      "followers_count": 0,
+      "following_count": 2,
+      "starred_repos_count": 2,
+      "username": "maya"
+    },
+    "parents": [
+      {
+        "url": "https://gitea.com/api/v1/repos/orbit/orbit/git/commits/99ec0bac7b05942826ca78f08cb4f962063ee007",
+        "sha": "99ec0bac7b05942826ca78f08cb4f962063ee007",
+        "created": "0001-01-01T00:00:00Z"
+      }
+    ],
+    "files": [
+      {
+        "filename": "README.md",
+        "status": "modified"
+      },
+      {
+        "filename": "act/runner/run_context.go",
+        "status": "modified"
+      },
+      {
+        "filename": "act/runner/run_context_test.go",
+        "status": "modified"
+      },
+      {
+        "filename": "internal/app/cmd/exec.go",
+        "status": "modified"
+      },
+      {
+        "filename": "internal/app/run/slots_test.go",
+        "status": "modified"
+      },
+      {
+        "filename": "internal/pkg/config/config.example.yaml",
+        "status": "modified"
+      }
+    ],
+    "stats": {
+      "total": 45,
+      "additions": 32,
+      "deletions": 13
+    }
+  },
+  {
+    "url": "https://gitea.com/api/v1/repos/orbit/orbit/git/commits/0813592478d7661d6c5df1013c4d20d0077165a4",
+    "sha": "0813592478d7661d6c5df1013c4d20d0077165a4",
+    "created": "2026-11-06T21:44:09+01:00",
+    "html_url": "https://gitea.com/orbit/orbit/commit/0813592478d7661d6c5df1013c4d20d0077165a4",
+    "commit": {
+      "url": "https://gitea.com/api/v1/repos/orbit/orbit/git/commits/0813592478d7661d6c5df1013c4d20d0077165a4",
+      "author": {
+        "name": "maya",
+        "email": "maya@example.invalid",
+        "date": "2026-11-06T21:44:09+01:00"
+      },
+      "committer": {
+        "name": "maya",
+        "email": "maya@example.invalid",
+        "date": "2026-11-06T21:44:09+01:00"
+      },
+      "message": "enhance: add host.stable_workdir for predictable host job paths\n\nHost jobs run in a random directory, which makes them hard to find and to set permissions on. This opt-in runs them under workspaces/<owner>/<repo>/<slot> instead.\n\nFixes: https://gitea.com/orbit/orbit/issues/1373\n",
+      "tree": {
+        "url": "https://gitea.com/api/v1/repos/orbit/orbit/git/trees/74bcdde0ae0248e832ef11fe95545879b3f04f61",
+        "sha": "74bcdde0ae0248e832ef11fe95545879b3f04f61",
+        "created": "2026-11-06T21:44:09+01:00"
+      },
+      "verification": {
+        "verified": true,
+        "reason": "maya / 9BA6A5FDF1283D78",
+        "signature": "-----BEGIN PGP SIGNATURE-----\n\niQHPBAABCAA5FiEEQmEm+vLCz6G+6pICm6al/fEoPXgFAmruNkAbFIAAAAAABAAO\nbWFudTIsMi41KzEuMTIsMCwzAAoJEJumpf3xKD14MroL/iROAW/bQJV/a6IYtG09\nn/eBgX2AmAs/qnVoL38XhehC7jnPbVw8SXUw2WDQ+9ZEfJbf5MKp+cQWyLZlVyot\ndImsNljR7wIVTW9u33Bw/igptum77WlujFy8FsvFi8/Wp/D0ha2wKqgLe485zNo4\naONhdKbmfh+mYqCL7LS/GB5GGnJUVYq+MQYtRQapP0RKaw7pneK8Zw9WzF1pOO1Y\nJVaSZ4X/ALLuWnqmrO5KfJ3ODr3wsgZgzeqXLl2N0aqkJySnZ7Uh1RftLWrra4ZH\nFU/EQ67gcyHHIU1UIBmen2Xcevmc0oELlDBtzetMvTl/ZseILBbFgVWdsOzsz+Pi\n0cxc2xd0KrUBffBg9wY0+PNTcwF05IoGIixdCD92KwuWgJXiVMs7T/QhxANf1T87\n/+ONTYM7Xr4EGZp5ykH6zpdY4q2Jx/q+mlngC8C8/W/d1B2wwcdpRNaMcJclf1fS\n8lbln1QoHqYkUv2cKx08hODhCYhZNr5HbDFDYLj3v8bD3g==\n=KLZ2\n-----END PGP SIGNATURE-----",
+        "signer": {
+          "name": "maya",
+          "email": "maya@example.invalid",
+          "username": "maya"
+        },
+        "payload": "tree 74bcdde0ae0248e832ef11fe95545879b3f04f61\nparent 99ec0bac7b05942826ca78f08cb4f962063ee007\nauthor maya <maya@example.invalid> 1793996352 +0100\ncommitter maya <maya@example.invalid> 1793996352 +0100\n\nenhance: add host.stable_workdir for predictable host job paths\n\nHost jobs run in a random directory, which makes them hard to find and to set permissions on. This opt-in runs them under workspaces/<owner>/<repo>/<slot> instead.\n\nFixes: https://gitea.com/orbit/orbit/issues/1373\n"
+      }
+    },
+    "author": {
+      "id": 173651,
+      "login": "maya",
+      "type": "User",
+      "login_name": "",
+      "source_id": 0,
+      "full_name": "maya",
+      "email": "maya@example.invalid",
+      "avatar_url": "https://gitea.com/avatars/maya.png",
+      "html_url": "https://gitea.com/maya",
+      "language": "",
+      "is_admin": false,
+      "last_login": "0001-01-01T00:00:00Z",
+      "created": "2026-01-25T11:39:20Z",
+      "restricted": false,
+      "active": false,
+      "prohibit_login": false,
+      "location": "",
+      "website": "",
+      "description": "",
+      "visibility": "public",
+      "followers_count": 0,
+      "following_count": 2,
+      "starred_repos_count": 2,
+      "username": "maya"
+    },
+    "committer": {
+      "id": 173651,
+      "login": "maya",
+      "type": "User",
+      "login_name": "",
+      "source_id": 0,
+      "full_name": "maya",
+      "email": "maya@example.invalid",
+      "avatar_url": "https://gitea.com/avatars/maya.png",
+      "html_url": "https://gitea.com/maya",
+      "language": "",
+      "is_admin": false,
+      "last_login": "0001-01-01T00:00:00Z",
+      "created": "2026-01-25T11:39:20Z",
+      "restricted": false,
+      "active": false,
+      "prohibit_login": false,
+      "location": "",
+      "website": "",
+      "description": "",
+      "visibility": "public",
+      "followers_count": 0,
+      "following_count": 2,
+      "starred_repos_count": 2,
+      "username": "maya"
+    },
+    "parents": [
+      {
+        "url": "https://gitea.com/api/v1/repos/orbit/orbit/git/commits/99ec0bac7b05942826ca78f08cb4f962063ee007",
+        "sha": "99ec0bac7b05942826ca78f08cb4f962063ee007",
+        "created": "0001-01-01T00:00:00Z"
+      }
+    ],
+    "files": [
+      {
+        "filename": "act/runner/run_context.go",
+        "status": "modified"
+      },
+      {
+        "filename": "act/runner/run_context_test.go",
+        "status": "modified"
+      },
+      {
+        "filename": "act/runner/runner.go",
+        "status": "modified"
+      },
+      {
+        "filename": "docs/host-mode.md",
+        "status": "modified"
+      },
+      {
+        "filename": "internal/app/run/runner.go",
+        "status": "modified"
+      },
+      {
+        "filename": "internal/app/run/slots.go",
+        "status": "modified"
+      },
+      {
+        "filename": "internal/app/run/slots_test.go",
+        "status": "modified"
+      },
+      {
+        "filename": "internal/pkg/config/config.example.yaml",
+        "status": "modified"
+      },
+      {
+        "filename": "internal/pkg/config/config.go",
+        "status": "modified"
+      }
+    ],
+    "stats": {
+      "total": 164,
+      "additions": 160,
+      "deletions": 4
+    }
+  },
+  {
+    "url": "https://gitea.com/api/v1/repos/orbit/orbit/git/commits/99ec0bac7b05942826ca78f08cb4f962063ee007",
+    "sha": "99ec0bac7b05942826ca78f08cb4f962063ee007",
+    "created": "2026-11-06T21:43:15+01:00",
+    "html_url": "https://gitea.com/orbit/orbit/commit/99ec0bac7b05942826ca78f08cb4f962063ee007",
+    "commit": {
+      "url": "https://gitea.com/api/v1/repos/orbit/orbit/git/commits/99ec0bac7b05942826ca78f08cb4f962063ee007",
+      "author": {
+        "name": "maya",
+        "email": "maya@example.invalid",
+        "date": "2026-11-06T21:43:15+01:00"
+      },
+      "committer": {
+        "name": "maya",
+        "email": "maya@example.invalid",
+        "date": "2026-11-06T21:43:15+01:00"
+      },
+      "message": "enhance: add per_slot tool cache mode\n\nGives each runner.capacity slot its own tool cache, so setup actions keep their cache at capacity above 1 without two jobs writing the same one.\n\nFixes: https://gitea.com/orbit/orbit/issues/1392\n",
+      "tree": {
+        "url": "https://gitea.com/api/v1/repos/orbit/orbit/git/trees/a04ab59ead106c34793fb901854b3be2341c492c",
+        "sha": "a04ab59ead106c34793fb901854b3be2341c492c",
+        "created": "2026-11-06T21:43:15+01:00"
+      },
+      "verification": {
+        "verified": true,
+        "reason": "maya / 9BA6A5FDF1283D78",
+        "signature": "-----BEGIN PGP SIGNATURE-----\n\niQHPBAABCAA5FiEEQmEm+vLCz6G+6pICm6al/fEoPXgFAmruNgobFIAAAAAABAAO\nbWFudTIsMi41KzEuMTIsMCwzAAoJEJumpf3xKD14XFEMANeCSLxtZGTXjTuv3rtY\n6KIG3t4V2DoCwNmYjrjr+Nm+Wen7k2N5tG3K6mjSoBmqqlMZ7f9hutISgI3DQTks\nwn+wkM2egAvgqmauAvBSCcrND5U2iAe0nSIieMAGj54rT3PSvQUi0CNcOOXetjpr\nFNTQmFQxew1y0Ui1997/0LT+qk/soj0F9X8V8MRYyk3+T997bnDmCG1ULsZP9pSf\nnSF0yqxAZMsv18+IIiZzHMefiNwHxXdWI1m3flowYOe+UE+ZGdY/nxXzdhyaZU2x\nKrcgeetrJxKA3H/RCrEx2Pdql0jd2YXXvb40y9FeOA07k7q5Ft6tJmL9rLesV9wa\nSluIDiG4rn1C82BjXvIaSVLlygRN8QMHLJgYPuE0tFZ/1p3yg7fqgGZr6591TGyY\n+Tt4CvVt7vKYTgI+62btlUyE1YRSFtXo5LokCMLrueE5OWaO+/oeMYscLP6+IjKl\niK5Pky+wEopkxmcdaoJytEgP4ZK1QDUWkRZEA5/8ac03Gg==\n=Y9J6\n-----END PGP SIGNATURE-----",
+        "signer": {
+          "name": "maya",
+          "email": "maya@example.invalid",
+          "username": "maya"
+        },
+        "payload": "tree a04ab59ead106c34793fb901854b3be2341c492c\nparent db76fd5159bd7f9956fdeec75be6cac06c2cb8d4\nauthor maya <maya@example.invalid> 1793996298 +0100\ncommitter maya <maya@example.invalid> 1793996298 +0100\n\nenhance: add per_slot tool cache mode\n\nGives each runner.capacity slot its own tool cache, so setup actions keep their cache at capacity above 1 without two jobs writing the same one.\n\nFixes: https://gitea.com/orbit/orbit/issues/1392\n"
+      }
+    },
+    "author": {
+      "id": 173651,
+      "login": "maya",
+      "type": "User",
+      "login_name": "",
+      "source_id": 0,
+      "full_name": "maya",
+      "email": "maya@example.invalid",
+      "avatar_url": "https://gitea.com/avatars/maya.png",
+      "html_url": "https://gitea.com/maya",
+      "language": "",
+      "is_admin": false,
+      "last_login": "0001-01-01T00:00:00Z",
+      "created": "2026-01-25T11:39:20Z",
+      "restricted": false,
+      "active": false,
+      "prohibit_login": false,
+      "location": "",
+      "website": "",
+      "description": "",
+      "visibility": "public",
+      "followers_count": 0,
+      "following_count": 2,
+      "starred_repos_count": 2,
+      "username": "maya"
+    },
+    "committer": {
+      "id": 173651,
+      "login": "maya",
+      "type": "User",
+      "login_name": "",
+      "source_id": 0,
+      "full_name": "maya",
+      "email": "maya@example.invalid",
+      "avatar_url": "https://gitea.com/avatars/maya.png",
+      "html_url": "https://gitea.com/maya",
+      "language": "",
+      "is_admin": false,
+      "last_login": "0001-01-01T00:00:00Z",
+      "created": "2026-01-25T11:39:20Z",
+      "restricted": false,
+      "active": false,
+      "prohibit_login": false,
+      "location": "",
+      "website": "",
+      "description": "",
+      "visibility": "public",
+      "followers_count": 0,
+      "following_count": 2,
+      "starred_repos_count": 2,
+      "username": "maya"
+    },
+    "parents": [
+      {
+        "url": "https://gitea.com/api/v1/repos/orbit/orbit/git/commits/db76fd5159bd7f9956fdeec75be6cac06c2cb8d4",
+        "sha": "db76fd5159bd7f9956fdeec75be6cac06c2cb8d4",
+        "created": "0001-01-01T00:00:00Z"
+      }
+    ],
+    "files": [
+      {
+        "filename": "README.md",
+        "status": "modified"
+      },
+      {
+        "filename": "act/runner/run_context.go",
+        "status": "modified"
+      },
+      {
+        "filename": "act/runner/run_context_test.go",
+        "status": "modified"
+      },
+      {
+        "filename": "act/runner/runner.go",
+        "status": "modified"
+      },
+      {
+        "filename": "internal/app/cmd/exec.go",
+        "status": "modified"
+      },
+      {
+        "filename": "internal/app/cmd/exec_test.go",
+        "status": "modified"
+      },
+      {
+        "filename": "internal/app/run/runner.go",
+        "status": "modified"
+      },
+      {
+        "filename": "internal/pkg/config/config.example.yaml",
+        "status": "modified"
+      },
+      {
+        "filename": "internal/pkg/config/config.go",
+        "status": "modified"
+      },
+      {
+        "filename": "internal/app/run/slots.go",
+        "status": "added"
+      },
+      {
+        "filename": "internal/app/run/slots_test.go",
+        "status": "added"
+      }
+    ],
+    "stats": {
+      "total": 156,
+      "additions": 143,
+      "deletions": 13
+    }
+  }
+]

@@ -14,6 +14,7 @@ use serde::Serializer;
 use serde::de;
 
 use crate::config::Highlight;
+use crate::ui::{Emphasis, GitChip, GitRole, GitSurface};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ThemeColor {
@@ -282,9 +283,24 @@ pub struct ThemeConfig {
     /// `"@lsp.type.property" = { link = "@property" }`.
     #[serde(default, deserialize_with = "deserialize_highlights")]
     pub highlights: BTreeMap<String, HighlightDefinition>,
+    /// Dusty Git's semantic role colours (DESIGN.md §4.1).
+    #[serde(default)]
+    pub git: GitPalette,
     #[serde(skip)]
     resolved: ResolvedHighlights,
+    #[serde(skip)]
+    git_resolved: ResolvedGit,
 }
+
+/// The Git roles, worked out on first use.
+#[derive(Clone, Debug, Default)]
+struct ResolvedGit(OnceLock<GitColours>);
+impl PartialEq for ResolvedGit {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+impl Eq for ResolvedGit {}
 
 fn deserialize_highlights<'de, D: Deserializer<'de>>(
     deserializer: D,
@@ -350,13 +366,30 @@ impl ThemeConfig {
     }
 
     /// Git selections follow the UI accent rather than a language's token palette.
+    /// A selection is a pane-wide band: one fill for the whole row, strong enough
+    /// to read as a cursor without turning the row into a second heading.
     pub fn git_selection(&self, group: Option<Highlight>) -> ThemeStyle {
         let base = &self.styles.default;
         let mut style = group
             .and_then(|group| self.highlight(group))
             .unwrap_or(base)
             .clone();
-        style.fill(blend(self.styles.accent.foreground, base.background, 12));
+        style.fill(blend(self.styles.accent.foreground, base.background, 30));
+        style
+    }
+
+    /// The active section tab: the accent as a solid chip, the design concept's
+    /// single loud mark in an otherwise quiet sidebar.
+    #[must_use]
+    pub fn git_tab(&self, active: bool) -> ThemeStyle {
+        if !active {
+            return self.styles.muted.clone();
+        }
+        let mut style = self.styles.accent.clone();
+        style.fill(Some(self.styles.default.background));
+        if !style.attributes.contains(&ThemeAttribute::Bold) {
+            style.attributes.push(ThemeAttribute::Bold);
+        }
         style
     }
 
@@ -367,10 +400,20 @@ impl ThemeConfig {
             .unwrap_or(base)
             .clone();
         style.fill(if selected {
-            blend(self.styles.accent.foreground, base.background, 5)
+            blend(self.styles.accent.foreground, base.background, 10)
         } else {
-            blend(base.foreground, base.background, 3)
+            Some(base.background)
         });
+        style
+    }
+
+    pub fn git_focused_surface(&self, group: Option<Highlight>) -> ThemeStyle {
+        let mut style = self.git_surface(group, false);
+        style.fill(blend(
+            self.styles.accent.foreground,
+            self.styles.default.background,
+            4,
+        ));
         style
     }
 
@@ -383,7 +426,7 @@ impl ThemeConfig {
         style.fill(blend(
             self.styles.accent.foreground,
             self.styles.default.background,
-            if control { 6 } else { 3 },
+            if control { 8 } else { 3 },
         ));
         if !style.attributes.contains(&ThemeAttribute::Bold) {
             style.attributes.push(ThemeAttribute::Bold);
@@ -391,20 +434,27 @@ impl ThemeConfig {
         style
     }
 
-    pub fn git_label(&self, source: &ThemeStyle, selection: Option<bool>) -> ThemeStyle {
+    pub fn git_label(
+        &self,
+        source: &ThemeStyle,
+        selection: Option<bool>,
+        focused: bool,
+    ) -> ThemeStyle {
+        // One surface, taken from the row helper itself, so a label can never
+        // drift a few shades away from the band it is drawn on.
+        let surface = match selection {
+            Some(true) => self.git_selection(None),
+            Some(false) => self.git_surface(None, true),
+            None if focused => self.git_focused_surface(None),
+            None => self.git_surface(None, false),
+        };
         let mut style = source.clone();
-        style.fill(match selection {
-            Some(active) => blend(
-                self.styles.accent.foreground,
-                self.styles.default.background,
-                if active { 12 } else { 5 },
-            ),
-            None => blend(
-                self.styles.default.foreground,
-                self.styles.default.background,
-                3,
-            ),
-        });
+        style.foreground = source.foreground;
+        style.foreground_256 = source.foreground_256;
+        style.foreground_16 = source.foreground_16;
+        style.background = surface.background;
+        style.background_256 = surface.background_256;
+        style.background_16 = surface.background_16;
         style
     }
 
@@ -419,7 +469,8 @@ impl ThemeConfig {
         } else {
             self.styles.git_sign_deleted.foreground
         };
-        style.fill(blend(color, base.background, 8));
+        // A restrained changed-row surface must remain visible beneath syntax.
+        style.fill(blend(color, base.background, 12));
         // Pale diff surfaces need darker syntax, without changing the theme's hues.
         if let Some(background) = luminance(style.background).filter(|value| *value > 0.5) {
             let maximum = (background + 0.05) / 4.5 - 0.05;
@@ -635,6 +686,264 @@ impl ThemeConfig {
     }
 }
 
+/// Optional overrides for Dusty Git's semantic roles (DESIGN.md §4.1), under `[git]` in a
+/// theme file. Anything left out comes from the theme's own styles, or for a dark theme the
+/// Dusty Git defaults.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct GitPalette {
+    pub canvas: Option<ThemeColor>,
+    pub pane: Option<ThemeColor>,
+    pub top_bar: Option<ThemeColor>,
+    pub text: Option<ThemeColor>,
+    pub muted: Option<ThemeColor>,
+    pub focus: Option<ThemeColor>,
+    pub link: Option<ThemeColor>,
+    pub added: Option<ThemeColor>,
+    pub removed: Option<ThemeColor>,
+    pub modified: Option<ThemeColor>,
+    pub untracked: Option<ThemeColor>,
+    #[serde(rename = "ref")]
+    pub reference: Option<ThemeColor>,
+    pub tag: Option<ThemeColor>,
+    pub hash: Option<ThemeColor>,
+    pub author: Option<ThemeColor>,
+    pub conflict: Option<ThemeColor>,
+    pub border: Option<ThemeColor>,
+    pub lanes: Option<Vec<ThemeColor>>,
+}
+
+/// Every Git role resolved to one colour.
+#[derive(Clone, Debug)]
+struct GitColours {
+    canvas: ThemeColor,
+    pane: ThemeColor,
+    top_bar: ThemeColor,
+    text: ThemeColor,
+    muted: ThemeColor,
+    focus: ThemeColor,
+    link: ThemeColor,
+    added: ThemeColor,
+    removed: ThemeColor,
+    modified: ThemeColor,
+    untracked: ThemeColor,
+    reference: ThemeColor,
+    tag: ThemeColor,
+    hash: ThemeColor,
+    author: ThemeColor,
+    conflict: ThemeColor,
+    border: ThemeColor,
+    lanes: Vec<ThemeColor>,
+}
+
+impl ThemeConfig {
+    fn git_colours(&self) -> &GitColours {
+        self.git_resolved.0.get_or_init(|| self.resolve_git_colours())
+    }
+
+    fn resolve_git_colours(&self) -> GitColours {
+        let styles = &self.styles;
+        let base = styles.default.background;
+        let dark = luminance(base).is_none_or(|value| value < 0.4);
+        let hex = |r, g, b| ThemeColor::Rgb(r, g, b);
+        // Dark themes get the designed palette; light themes derive from their own styles
+        // so a pale background never meets a dark-theme pane.
+        let pick = |configured: Option<ThemeColor>, designed: ThemeColor, derived: ThemeColor| {
+            configured.unwrap_or(if dark { designed } else { derived })
+        };
+        let palette = &self.git;
+        let near = |percent| blend(styles.default.foreground, base, percent).unwrap_or(base);
+        let function = self
+            .highlight(Highlight::FUNCTION)
+            .map_or(styles.accent.foreground, |style| style.foreground);
+        let number = self
+            .highlight(Highlight::NUMBER)
+            .map_or(styles.warning.foreground, |style| style.foreground);
+        let keyword = self
+            .highlight(Highlight::KEYWORD)
+            .map_or(styles.accent.foreground, |style| style.foreground);
+        let canvas = pick(palette.canvas, hex(0x15, 0x19, 0x23), base);
+        let pane = pick(palette.pane, hex(0x1b, 0x21, 0x30), near(3));
+        let top_bar = pick(palette.top_bar, hex(0x1f, 0x26, 0x36), near(7));
+        let added = pick(
+            palette.added,
+            hex(0xa6, 0xda, 0x95),
+            styles.git_sign_added.foreground,
+        );
+        let removed = pick(
+            palette.removed,
+            hex(0xf3, 0x8b, 0xa8),
+            styles.git_sign_deleted.foreground,
+        );
+        let modified = pick(
+            palette.modified,
+            hex(0xee, 0xd4, 0x9f),
+            styles.git_sign_changed.foreground,
+        );
+        let focus = pick(palette.focus, hex(0x6b, 0xda, 0xd5), styles.accent.foreground);
+        let reference = pick(palette.reference, hex(0xc6, 0xa0, 0xf6), keyword);
+        GitColours {
+            canvas,
+            pane,
+            top_bar,
+            text: pick(
+                palette.text,
+                hex(0xdc, 0xe4, 0xf2),
+                styles.default.foreground,
+            ),
+            muted: pick(palette.muted, hex(0x9a, 0xa8, 0xc1), styles.muted.foreground),
+            focus,
+            link: pick(palette.link, hex(0x7a, 0xa2, 0xf7), function),
+            added,
+            removed,
+            modified,
+            untracked: pick(palette.untracked, hex(0xf5, 0xa9, 0x7f), styles.warning.foreground),
+            reference,
+            tag: pick(palette.tag, hex(0xee, 0xd4, 0x9f), number),
+            hash: pick(palette.hash, hex(0xf0, 0xc6, 0x74), number),
+            author: pick(palette.author, hex(0xb8, 0xc0, 0xe0), styles.default.foreground),
+            conflict: pick(palette.conflict, hex(0xed, 0x87, 0x96), styles.error.foreground),
+            border: pick(
+                palette.border,
+                hex(0x3b, 0x45, 0x5c),
+                styles.border.foreground,
+            ),
+            lanes: palette
+                .lanes
+                .clone()
+                .filter(|lanes| !lanes.is_empty())
+                .unwrap_or_else(|| vec![reference, focus, added, modified, removed]),
+        }
+    }
+
+    fn git_role_colour(colours: &GitColours, role: GitRole) -> ThemeColor {
+        match role {
+            GitRole::Text => colours.text,
+            GitRole::Muted => colours.muted,
+            GitRole::Focus => colours.focus,
+            GitRole::Link => colours.link,
+            GitRole::Added => colours.added,
+            GitRole::Removed => colours.removed,
+            GitRole::Modified => colours.modified,
+            GitRole::Untracked => colours.untracked,
+            GitRole::Ref => colours.reference,
+            GitRole::RemoteRef => {
+                blend(colours.reference, colours.pane, 70).unwrap_or(colours.reference)
+            }
+            GitRole::Tag => colours.tag,
+            GitRole::Hash => colours.hash,
+            GitRole::Author => colours.author,
+            GitRole::Conflict => colours.conflict,
+            GitRole::Border => colours.border,
+            GitRole::OnFocus => colours.pane,
+            GitRole::Lane(index) => colours.lanes[usize::from(index) % colours.lanes.len()],
+            GitRole::Label(red, green, blue) => {
+                readable(ThemeColor::Rgb(red, green, blue), colours.text, colours.pane)
+            }
+        }
+    }
+
+    fn git_surface_colour(colours: &GitColours, surface: GitSurface) -> ThemeColor {
+        let over = |colour, percent| blend(colour, colours.pane, percent).unwrap_or(colours.pane);
+        match surface {
+            GitSurface::Canvas => colours.canvas,
+            GitSurface::Pane => colours.pane,
+            GitSurface::TopBar => colours.top_bar,
+            GitSurface::Sheet => blend(colours.text, colours.pane, 6).unwrap_or(colours.pane),
+            GitSurface::Cursor => over(colours.focus, 30),
+            GitSurface::CursorInactive => over(colours.focus, 12),
+            GitSurface::HunkBand => over(colours.focus, 16),
+            GitSurface::FileBand => over(colours.text, 7),
+            GitSurface::AddedBand => over(colours.added, 20),
+            GitSurface::RemovedBand => over(colours.removed, 20),
+            GitSurface::AddedEmphasis => over(colours.added, 34),
+            GitSurface::RemovedEmphasis => over(colours.removed, 34),
+            GitSurface::ReceiptOk => over(colours.added, 18),
+            GitSurface::ReceiptErr => over(colours.removed, 18),
+            GitSurface::Warning => {
+                blend(colours.modified, colours.top_bar, 16).unwrap_or(colours.top_bar)
+            }
+            GitSurface::ChipActive => colours.focus,
+            GitSurface::Code => blend(colours.canvas, colours.pane, 75).unwrap_or(colours.canvas),
+            GitSurface::Label(red, green, blue) => over(ThemeColor::Rgb(red, green, blue), 24),
+            GitSurface::Chip(chip) => {
+                let hue = match chip {
+                    GitChip::Focus => colours.focus,
+                    GitChip::Added => colours.added,
+                    GitChip::Removed => colours.removed,
+                    GitChip::Modified => colours.modified,
+                    GitChip::Ref => colours.reference,
+                    GitChip::RemoteRef => over(colours.reference, 60),
+                    GitChip::Tag => colours.tag,
+                    GitChip::Muted => colours.muted,
+                };
+                over(hue, 22)
+            }
+        }
+    }
+
+    /// A Dusty Git cell: `role` text on `surface`.
+    #[must_use]
+    pub fn git(&self, role: GitRole, surface: GitSurface, emphasis: Emphasis) -> ThemeStyle {
+        let colours = self.git_colours();
+        let mut foreground = Self::git_role_colour(colours, role);
+        let background = Self::git_surface_colour(colours, surface);
+        if surface == GitSurface::ChipActive {
+            foreground = colours.pane;
+        }
+        let attributes = match emphasis {
+            Emphasis::None => Vec::new(),
+            Emphasis::Bold => vec![ThemeAttribute::Bold],
+            Emphasis::Dim => vec![ThemeAttribute::Dim],
+            Emphasis::Strike => vec![ThemeAttribute::Strikethrough],
+        };
+        let mut style = ThemeStyle {
+            foreground,
+            background,
+            foreground_256: nearest_256(foreground),
+            background_256: nearest_256(background),
+            foreground_16: nearest_16(foreground),
+            background_16: nearest_16(background),
+            attributes,
+        };
+        if surface == GitSurface::ChipActive && !style.attributes.contains(&ThemeAttribute::Bold) {
+            style.attributes.push(ThemeAttribute::Bold);
+        }
+        style
+    }
+
+    /// Highlighted code on a Git surface; syntax colours survive on diff bands.
+    #[must_use]
+    pub fn git_syntax(&self, group: Highlight, surface: GitSurface) -> ThemeStyle {
+        let colours = self.git_colours();
+        let background = Self::git_surface_colour(colours, surface);
+        let mut style = self
+            .highlight(group)
+            .cloned()
+            .unwrap_or_else(|| self.git(GitRole::Text, surface, Emphasis::None));
+        style.fill(Some(background));
+        if let Some(value) = luminance(background).filter(|value| *value > 0.5) {
+            let maximum = (value + 0.05) / 4.5 - 0.05;
+            if luminance(style.foreground).is_some_and(|value| value > maximum) {
+                for percent in (0..100).step_by(10).rev() {
+                    let Some(foreground) =
+                        blend(style.foreground, ThemeColor::Rgb(0, 0, 0), percent)
+                    else {
+                        break;
+                    };
+                    if luminance(foreground).is_some_and(|value| value <= maximum) {
+                        style.foreground = foreground;
+                        style.foreground_256 = nearest_256(foreground);
+                        style.foreground_16 = nearest_16(foreground);
+                        break;
+                    }
+                }
+            }
+        }
+        style
+    }
+}
+
 const XTERM_LEVELS: [u8; 6] = [0, 95, 135, 175, 215, 255];
 
 impl ThemeStyle {
@@ -645,6 +954,27 @@ impl ThemeStyle {
             self.background_16 = nearest_16(background);
         }
     }
+}
+
+/// `colour` mixed towards `text` until it has at least 4.5:1 contrast on `background`
+/// (dark label colours on a dark pane, GitHub's dark-mode label treatment).
+fn readable(colour: ThemeColor, text: ThemeColor, background: ThemeColor) -> ThemeColor {
+    let Some(under) = luminance(background) else {
+        return colour;
+    };
+    let contrast = |value: f64| {
+        let (light, dark) = if value > under { (value, under) } else { (under, value) };
+        (light + 0.05) / (dark + 0.05)
+    };
+    for percent in (0..=100).step_by(10) {
+        let Some(mixed) = blend(text, colour, percent) else {
+            return colour;
+        };
+        if luminance(mixed).is_some_and(|value| contrast(value) >= 4.5) {
+            return mixed;
+        }
+    }
+    text
 }
 
 // sRGB relative luminance, as defined by WCAG's contrast calculation.

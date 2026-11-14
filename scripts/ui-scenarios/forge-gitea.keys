@@ -1,0 +1,46 @@
+# F4 Gitea/Forgejo (FORGE.md §4.2): pull requests, a pull request with checks from commit
+# statuses, issues and Actions from the loopback fake Forgejo 17 (code.forgejo.org, orbit/orbit;
+# FORGE_GITEA_WORLD=gitea serves gitea.com instead).
+#   scripts/ui-scenarios/make-orbit-fixture.sh /tmp/orbit
+#   DUSTY_GIT_BINARY=$PWD/target/release/dusty-git \
+#     scripts/ui-shot scripts/ui-scenarios/forge-gitea.keys \
+#     --binary scripts/ui-scenarios/forge-gitea-launch --cwd /tmp/orbit \
+#     --size 190x48 --size 120x36 --size 100x30 --out target/ui-shots/forge-gitea
+wait 1500
+# Git → Pull requests
+type >
+wait 3000
+shot pull-requests
+key j j
+wait 300
+key enter
+wait 3000
+shot pull-request
+# Checks from commit statuses
+type L
+type L
+wait 1500
+shot pull-request-checks
+type H
+type H
+wait 300
+key escape
+wait 300
+# → Issues
+type >
+wait 2500
+shot issues
+key enter
+wait 2000
+shot issue
+key escape
+wait 300
+# → Actions
+type >
+wait 3000
+shot actions
+# Run history (focus 2), newest first: run 24108, the failed scheduled test-multi-platform
+type 2
+key enter
+wait 2500
+shot run

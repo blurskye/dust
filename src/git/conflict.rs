@@ -104,6 +104,8 @@ pub enum GitOperationAction {
     Resolve,
     /// Finish the operation. Valid only when nothing is left conflicted.
     Continue,
+    /// Drop the current replayed commit and resume a rebase.
+    Skip,
     /// Abandon the operation. Always valid while an operation is paused.
     Abort,
 }
@@ -114,6 +116,7 @@ impl GitOperationAction {
         match self {
             Self::Resolve => "resolve",
             Self::Continue => "continue",
+            Self::Skip => "skip",
             Self::Abort => "abort",
         }
     }
@@ -146,11 +149,14 @@ impl GitOperationBar {
             .collect::<Vec<_>>();
         let mut actions = Vec::new();
         if blockers.is_empty() {
-            if operation == "merge" {
+            if matches!(operation.as_str(), "merge" | "rebase") {
                 actions.push(GitOperationAction::Continue);
             }
         } else {
             actions.push(GitOperationAction::Resolve);
+        }
+        if operation == "rebase" {
+            actions.push(GitOperationAction::Skip);
         }
         actions.push(GitOperationAction::Abort);
         Some(Self {
@@ -381,7 +387,7 @@ fn conflict_relative_path(
     Ok(normalized)
 }
 
-/// Why a recovery action was refused. Every reason is decided BEFORE the first write.
+/// Why a recovery action was refused or failed.
 #[derive(Clone, Debug, Error, Eq, PartialEq)]
 pub enum GitRecoveryRefusal {
     #[error("repository could not be opened")]
@@ -390,10 +396,7 @@ pub enum GitRecoveryRefusal {
     NotPaused(&'static str),
     #[error("{0} conflicted path(s) remain; resolve and stage them first")]
     ConflictsRemain(usize),
-    #[error(
-        "aborting would discard uncommitted changes in {0}; commit or stash them first, because \
-         abort never throws work away"
-    )]
+    #[error("would discard unrelated changes: {0}")]
     WouldDiscard(String),
     #[error("the operation's recorded starting point could not be read")]
     NoRecordedStart,
@@ -408,9 +411,47 @@ pub struct GitRecoveryOutcome {
     pub commit: Option<git2::Oid>,
     pub restored_to: Option<git2::Oid>,
     pub cleanup_warning: Option<String>,
+    /// Set when the operation advanced but paused again instead of finishing.
+    pub stopped: Option<GitOperationStop>,
 }
 
-/// Finish a paused operation by writing the merge commit its recorded parents describe.
+/// Where a resumed replay paused again. Git exits non-zero when a continued or skipped
+/// rebase stops on the next conflicting commit, but the step the user confirmed DID happen,
+/// so this is progress to report, not a failure.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GitOperationStop {
+    /// The commit now being replayed, when Git records one.
+    pub current: Option<git2::Oid>,
+    /// Paths conflicted at the new stop, sorted; empty for an `edit` or `break` stop.
+    pub conflicts: Vec<PathBuf>,
+    /// `(step, total)` of the replay, when Git records it.
+    pub progress: Option<(usize, usize)>,
+}
+
+impl GitOperationStop {
+    /// `stopped on conflict in a.txt (3/5)`: what a receipt says after the action's verb.
+    #[must_use]
+    pub fn summary(&self) -> String {
+        let progress = self
+            .progress
+            .map(|(step, total)| format!(" ({step}/{total})"))
+            .unwrap_or_default();
+        match self.conflicts.as_slice() {
+            [] => match self.current {
+                Some(current) => format!("paused at {}{progress}", &current.to_string()[..8]),
+                None => format!("paused{progress}"),
+            },
+            [path] => format!("stopped on conflict in {}{progress}", path.display()),
+            [first, rest @ ..] => format!(
+                "stopped on conflicts in {} and {} more{progress}",
+                first.display(),
+                rest.len()
+            ),
+        }
+    }
+}
+
+/// Finish a merge or resume a rebase. The optional message is used for merge commits.
 ///
 /// Refuses while ANY conflict remains: a half-resolved tree is not a merge, and committing one
 /// would record a state the user never chose.
@@ -421,7 +462,7 @@ pub fn continue_operation(
     let repo = git2::Repository::open(repository).map_err(|_| GitRecoveryRefusal::NotRepository)?;
     let operation =
         operation_name(repo.state()).ok_or(GitRecoveryRefusal::NotPaused("continue"))?;
-    if operation != "merge" {
+    if !matches!(operation.as_str(), "merge" | "rebase") {
         return Err(GitRecoveryRefusal::Backend(format!(
             "continuing {operation} is not supported"
         )));
@@ -429,6 +470,17 @@ pub fn continue_operation(
     let remaining = conflict_count(&repo)?;
     if remaining > 0 {
         return Err(GitRecoveryRefusal::ConflictsRemain(remaining));
+    }
+    if operation == "rebase" {
+        let (original, current) = rebase_info(&repo)?;
+        let touched = operation_touched_paths(&repo, original, &operation, current)?;
+        let risky = risky_changes(&repo, &touched, true)?;
+        if !risky.is_empty() {
+            return Err(GitRecoveryRefusal::WouldDiscard(risky.join(", ")));
+        }
+        let before = replay_position(&repo);
+        let result = run_operation_git(&repo, &["rebase", "--continue"]);
+        return replay_outcome(repository, operation, before, result);
     }
     let mut index = repo
         .index()
@@ -500,21 +552,19 @@ pub fn continue_operation(
         commit: Some(oid),
         restored_to: None,
         cleanup_warning,
+        stopped: None,
     })
 }
 
-/// Abandon a paused operation and return the branch to the revision git recorded for it.
+/// Abort a paused operation without discarding unrelated user work.
 ///
-/// There is deliberately NO hard-reset fallback: when the working tree holds changes that
-/// returning to the recorded revision would destroy, the abort is REFUSED and names them.
+/// Git's merge abort preserves working drafts, but can delete unrelated newly staged files.
+/// Refuse those staged changes first. Other operations keep their conservative working-change check.
 pub fn abort_operation(repository: &Path) -> Result<GitRecoveryOutcome, GitRecoveryRefusal> {
     let repo = git2::Repository::open(repository).map_err(|_| GitRecoveryRefusal::NotRepository)?;
     let operation = operation_name(repo.state()).ok_or(GitRecoveryRefusal::NotPaused("abort"))?;
-    let mut rebase = if operation == "rebase" {
-        Some(
-            repo.open_rebase(None)
-                .map_err(|error| GitRecoveryRefusal::Backend(error.message().to_owned()))?,
-        )
+    let rebase = if operation == "rebase" {
+        Some(rebase_info(&repo)?)
     } else {
         None
     };
@@ -530,7 +580,7 @@ pub fn abort_operation(repository: &Path) -> Result<GitRecoveryOutcome, GitRecov
                 repo.head().ok().and_then(|head| head.target())
             }
         }
-        "rebase" => rebase.as_ref().and_then(|rebase| rebase.orig_head_id()),
+        "rebase" => rebase.as_ref().map(|(original, _)| *original),
         _ => {
             return Err(GitRecoveryRefusal::Backend(format!(
                 "aborting {operation} is not supported"
@@ -538,26 +588,23 @@ pub fn abort_operation(repository: &Path) -> Result<GitRecoveryOutcome, GitRecov
         }
     }
     .ok_or(GitRecoveryRefusal::NoRecordedStart)?;
-    let rebase_current = rebase.as_mut().and_then(|rebase| {
-        rebase
-            .operation_current()
-            .and_then(|index| rebase.nth(index))
-            .map(|operation| operation.id())
-    });
+    let rebase_current = rebase.and_then(|(_, current)| current);
     let touched = operation_touched_paths(&repo, recorded, &operation, rebase_current)?;
-    let risky = risky_changes(&repo, &touched)?;
+    let risky = risky_changes(&repo, &touched, operation == "merge")?;
     if !risky.is_empty() {
         return Err(GitRecoveryRefusal::WouldDiscard(risky.join(", ")));
     }
-    if let Some(rebase) = &mut rebase {
-        rebase
-            .abort()
-            .map_err(|error| GitRecoveryRefusal::Backend(error.message().to_owned()))?;
+    if matches!(operation.as_str(), "merge" | "rebase") {
+        run_operation_git(&repo, &[&operation, "--abort"])?;
         return Ok(GitRecoveryOutcome {
             operation,
             commit: None,
-            restored_to: Some(recorded),
+            restored_to: repo
+                .head()
+                .map_err(|error| GitRecoveryRefusal::Backend(error.message().to_owned()))?
+                .target(),
             cleanup_warning: None,
+            stopped: None,
         });
     }
     let object = repo
@@ -594,7 +641,214 @@ pub fn abort_operation(repository: &Path) -> Result<GitRecoveryOutcome, GitRecov
         commit: None,
         restored_to: Some(recorded),
         cleanup_warning: None,
+        stopped: None,
     })
+}
+
+/// Read-only snapshot of unrelated paths that prevent a rebase action.
+/// Submission always recomputes these checks before invoking Git.
+pub(super) fn rebase_action_blockers(
+    repository: &Path,
+    action: GitOperationAction,
+) -> Result<Vec<String>, GitRecoveryRefusal> {
+    let repo = git2::Repository::open(repository).map_err(|_| GitRecoveryRefusal::NotRepository)?;
+    if operation_name(repo.state()).as_deref() != Some("rebase") {
+        return Ok(Vec::new());
+    }
+    let (original, current) = rebase_info(&repo)?;
+    let touched = operation_touched_paths(&repo, original, "rebase", current)?;
+    risky_changes(&repo, &touched, action == GitOperationAction::Continue)
+}
+
+/// Drop the current rebase commit, never unrelated changes.
+pub fn skip_operation(repository: &Path) -> Result<GitRecoveryOutcome, GitRecoveryRefusal> {
+    let repo = git2::Repository::open(repository).map_err(|_| GitRecoveryRefusal::NotRepository)?;
+    let operation = operation_name(repo.state()).ok_or(GitRecoveryRefusal::NotPaused("skip"))?;
+    if operation != "rebase" {
+        return Err(GitRecoveryRefusal::Backend(format!(
+            "skipping {operation} is not supported"
+        )));
+    }
+    let (original, current) = rebase_info(&repo)?;
+    let touched = operation_touched_paths(&repo, original, &operation, current)?;
+    let risky = risky_changes(&repo, &touched, false)?;
+    if !risky.is_empty() {
+        return Err(GitRecoveryRefusal::WouldDiscard(risky.join(", ")));
+    }
+    let before = replay_position(&repo);
+    let result = run_operation_git(&repo, &["rebase", "--skip"]);
+    replay_outcome(repository, operation, before, result)
+}
+
+/// The replayed commit and step a rebase is paused at, to tell whether Git moved on.
+fn replay_position(repo: &git2::Repository) -> (Option<git2::Oid>, Option<(usize, usize)>) {
+    (
+        rebase_info(repo).ok().and_then(|(_, current)| current),
+        rebase_progress(repo),
+    )
+}
+
+/// `(step, total)` from the rebase's own bookkeeping: `msgnum`/`end` for the merge backend,
+/// `next`/`last` for the apply backend.
+fn rebase_progress(repo: &git2::Repository) -> Option<(usize, usize)> {
+    let read = |path: PathBuf| -> Option<usize> {
+        std::fs::read_to_string(path).ok()?.trim().parse().ok()
+    };
+    let merge = repo.path().join("rebase-merge");
+    if merge.is_dir() {
+        return Some((read(merge.join("msgnum"))?, read(merge.join("end"))?));
+    }
+    let apply = repo.path().join("rebase-apply");
+    Some((read(apply.join("next"))?, read(apply.join("last"))?))
+}
+
+/// Turn the result of `rebase --continue`/`--skip` into an outcome. A non-zero exit that left
+/// the rebase paused on a DIFFERENT step with fresh conflicts means the confirmed step
+/// happened and Git stopped on the next conflict: that is reported as an outcome with
+/// `stopped`, never as a failure, so the caller can close its confirmation.
+fn replay_outcome(
+    repository: &Path,
+    operation: String,
+    before: (Option<git2::Oid>, Option<(usize, usize)>),
+    result: Result<(), GitRecoveryRefusal>,
+) -> Result<GitRecoveryOutcome, GitRecoveryRefusal> {
+    // Git changed the repository behind this process; read it afresh.
+    let repo = git2::Repository::open(repository).map_err(|_| GitRecoveryRefusal::NotRepository)?;
+    let stopped = if operation_name(repo.state()).as_deref() == Some(operation.as_str()) {
+        let (current, progress) = replay_position(&repo);
+        let conflicts = read_conflict_state(repository)
+            .map(|state| {
+                state
+                    .conflicts
+                    .into_iter()
+                    .map(|conflict| conflict.path)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let advanced = current != before.0
+            || matches!((progress, before.1), (Some((now, _)), Some((then, _))) if now > then);
+        Some((
+            GitOperationStop {
+                current,
+                conflicts,
+                progress,
+            },
+            advanced,
+        ))
+    } else {
+        None
+    };
+    let stopped = match (result, stopped) {
+        (Ok(()), stopped) => stopped.map(|(stop, _)| stop),
+        (Err(_), Some((stop, true))) if !stop.conflicts.is_empty() => Some(stop),
+        (Err(error), _) => return Err(error),
+    };
+    Ok(GitRecoveryOutcome {
+        operation,
+        commit: repo
+            .head()
+            .map_err(|error| GitRecoveryRefusal::Backend(error.message().to_owned()))?
+            .target(),
+        restored_to: None,
+        cleanup_warning: None,
+        stopped,
+    })
+}
+
+fn rebase_info(
+    repo: &git2::Repository,
+) -> Result<(git2::Oid, Option<git2::Oid>), GitRecoveryRefusal> {
+    let directory = ["rebase-merge", "rebase-apply"]
+        .into_iter()
+        .map(|name| repo.path().join(name))
+        .find(|path| path.is_dir())
+        .ok_or(GitRecoveryRefusal::NoRecordedStart)?;
+    let original = std::fs::read_to_string(directory.join("orig-head"))
+        .ok()
+        .and_then(|id| git2::Oid::from_str(id.trim()).ok())
+        .ok_or(GitRecoveryRefusal::NoRecordedStart)?;
+    // Git records REBASE_HEAD; libgit2 exposes its current pick through the rebase API.
+    let current = repo.refname_to_id("REBASE_HEAD").ok().or_else(|| {
+        let mut rebase = repo.open_rebase(None).ok()?;
+        rebase
+            .operation_current()
+            .and_then(|index| rebase.nth(index))
+            .map(|operation| operation.id())
+    });
+    Ok((original, current))
+}
+
+fn run_operation_git(
+    repo: &git2::Repository,
+    arguments: &[&str],
+) -> Result<(), GitRecoveryRefusal> {
+    use crate::process::{JobEvent, JobPolicy, JobRequest, JobSupervisor};
+    use std::time::Duration;
+
+    let workdir = repo.workdir().ok_or(GitRecoveryRefusal::NotRepository)?;
+    let program = crate::process::discover_executable("git")
+        .ok_or_else(|| GitRecoveryRefusal::Backend("Git is not installed or not on PATH".into()))?;
+    let mut environment = super::command::environment();
+    environment.insert("GIT_EDITOR".into(), "true".into());
+    let mut jobs = JobSupervisor::try_new(16)
+        .map_err(|error| GitRecoveryRefusal::Backend(error.to_string()))?;
+    jobs.start(JobRequest {
+        program,
+        argv0: None,
+        arguments: arguments
+            .iter()
+            .map(|argument| (*argument).into())
+            .collect(),
+        cwd: workdir.to_path_buf(),
+        environment,
+        root_revision: 0,
+        stdin: None,
+        policy: JobPolicy {
+            maximum_output_bytes: 64 * 1024,
+            maximum_line_bytes: 64 * 1024,
+            timeout: Duration::from_secs(30),
+            ..JobPolicy::default()
+        },
+    })
+    .map_err(|error| GitRecoveryRefusal::Backend(error.to_string()))?;
+    let mut message = Vec::new();
+    loop {
+        for event in jobs.poll() {
+            match event {
+                JobEvent::Output { bytes, .. } => {
+                    message.extend(
+                        bytes
+                            .into_iter()
+                            .take(4096usize.saturating_sub(message.len())),
+                    );
+                }
+                JobEvent::Exited {
+                    code, timed_out, ..
+                } => {
+                    if timed_out {
+                        return Err(GitRecoveryRefusal::Backend(format!(
+                            "Git {} timed out",
+                            arguments.join(" ")
+                        )));
+                    }
+                    if code != Some(0) {
+                        let message = String::from_utf8_lossy(&message).trim().to_owned();
+                        return Err(GitRecoveryRefusal::Backend(if message.is_empty() {
+                            format!("Git {} failed (exit {code:?})", arguments.join(" "))
+                        } else {
+                            message
+                        }));
+                    }
+                    return Ok(());
+                }
+                JobEvent::Failed { message, .. } => {
+                    return Err(GitRecoveryRefusal::Backend(message));
+                }
+                JobEvent::Started { .. } => {}
+            }
+        }
+        std::thread::sleep(Duration::from_millis(2));
+    }
 }
 
 fn conflict_count(repo: &git2::Repository) -> Result<usize, GitRecoveryRefusal> {
@@ -607,7 +861,9 @@ fn conflict_count(repo: &git2::Repository) -> Result<usize, GitRecoveryRefusal> 
     Ok(conflicts.count())
 }
 
-fn recorded_merge_heads(repo: &git2::Repository) -> Result<Vec<git2::Oid>, GitRecoveryRefusal> {
+pub(super) fn recorded_merge_heads(
+    repo: &git2::Repository,
+) -> Result<Vec<git2::Oid>, GitRecoveryRefusal> {
     let contents = std::fs::read_to_string(repo.path().join("MERGE_HEAD"))
         .map_err(|_| GitRecoveryRefusal::NoRecordedStart)?;
     let heads = contents
@@ -717,11 +973,11 @@ fn operation_touched_paths(
     Ok(touched)
 }
 
-/// Changes the user made that aborting would destroy: modified or untracked paths the operation
-/// itself did not touch.
+/// Unrelated changes an abort would overwrite. Git's merge abort preserves working-only changes.
 fn risky_changes(
     repo: &git2::Repository,
     touched: &std::collections::BTreeSet<PathBuf>,
+    index_only: bool,
 ) -> Result<Vec<String>, GitRecoveryRefusal> {
     let mut options = git2::StatusOptions::new();
     options.include_untracked(true).recurse_untracked_dirs(true);
@@ -736,6 +992,17 @@ fn risky_changes(
         let status = entry.status();
         // A conflicted entry belongs to the operation; so does a change the operation made.
         if status.contains(git2::Status::CONFLICTED) || touched.contains(&path) {
+            continue;
+        }
+        if index_only
+            && !status.intersects(
+                git2::Status::INDEX_NEW
+                    | git2::Status::INDEX_MODIFIED
+                    | git2::Status::INDEX_DELETED
+                    | git2::Status::INDEX_RENAMED
+                    | git2::Status::INDEX_TYPECHANGE,
+            )
+        {
             continue;
         }
         risky.push(path.display().to_string());

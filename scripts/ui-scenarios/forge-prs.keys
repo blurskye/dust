@@ -1,0 +1,46 @@
+# DESIGN.md §3.26–§3.32 (screens 27–33, 47): the pull request inbox and reader on the orbit world.
+#   DUSTY_GIT_BINARY=$PWD/target/debug/dusty-git scripts/ui-shot scripts/ui-scenarios/forge-prs.keys \
+#     --binary scripts/ui-scenarios/forge-orbit-launch --cwd /tmp/orbit --out target/ui-shots/forge-prs \
+#     --size 190x48 --size 120x36 --size 100x30
+wait 1500
+type >
+wait 1200
+shot prs-inbox
+# #13 is the first row
+key enter
+wait 800
+shot pr-overview
+type ]
+wait 600
+shot pr-commits
+type ]
+wait 500
+shot pr-checks
+type ]
+wait 900
+shot pr-files
+# u toggles split; narrow terminals refuse with a notice
+type u
+wait 500
+shot pr-files-split
+type u
+wait 300
+type ]
+wait 600
+shot pr-activity
+type m
+wait 500
+shot pr-merge
+type r
+wait 400
+shot pr-review
+key escape
+wait 200
+type 2
+wait 200
+type ]
+wait 500
+shot prs-section
+type ?
+wait 300
+shot prs-help

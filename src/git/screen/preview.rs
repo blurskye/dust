@@ -21,8 +21,10 @@ impl PreviewRow {
             text: text.into(),
             style: if text.starts_with("commit ") || text.starts_with("diff --git ") {
                 Style::Accent
-            } else if text.starts_with("@@")
-                || text.starts_with("index ")
+            } else if text.starts_with("@@") {
+                // Only the native cursor's containing hunk gets an active band.
+                Style::Muted
+            } else if text.starts_with("index ")
                 || text.starts_with("--- ")
                 || text.starts_with("+++ ")
             {
@@ -49,6 +51,9 @@ pub(super) struct Preview {
     pub rows: Vec<PreviewRow>,
     pub split: Vec<SplitRow>,
     pub patch: bool,
+    pub search: super::search::SourceSearch,
+    /// A byte within the real code cursor's row; independent of search feedback.
+    pub cursor_byte: Option<(usize, usize)>,
 }
 impl From<&str> for Preview {
     fn from(text: &str) -> Self {
@@ -56,6 +61,8 @@ impl From<&str> for Preview {
             rows: text.lines().map(PreviewRow::message).collect(),
             split: Vec::new(),
             patch: false,
+            search: super::search::SourceSearch::default(),
+            cursor_byte: None,
         }
     }
 }
@@ -65,6 +72,18 @@ impl From<String> for Preview {
     }
 }
 impl Preview {
+    pub fn same_content(&self, other: &Self) -> bool {
+        self.patch == other.patch
+            && self.rows.len() == other.rows.len()
+            && self.rows.iter().zip(&other.rows).all(|(left, right)| {
+                left.path == right.path
+                    && left.old == right.old
+                    && left.new == right.new
+                    && left.marker == right.marker
+                    && left.text == right.text
+            })
+    }
+
     pub fn source(path: &Path, source: &str) -> Self {
         let highlighted = PickerTextPreview::new(
             source.lines().map(Into::into).collect(),
@@ -93,6 +112,8 @@ impl Preview {
             rows,
             split: Vec::new(),
             patch: false,
+            search: super::search::SourceSearch::default(),
+            cursor_byte: None,
         }
     }
 
@@ -255,6 +276,103 @@ impl Preview {
         }
     }
 
+    /// Contiguous parsed hunk containing a real code row, including its header.
+    /// Never cross a metadata/file boundary or borrow the previous file's hunk.
+    pub fn hunk_rows(&self, cursor: usize) -> Option<Range<usize>> {
+        let row = self.rows.get(cursor)?;
+        row.marker?;
+        let header = (0..cursor).rev().find(|&index| {
+            self.rows[index].marker.is_none() && self.rows[index].text.starts_with("@@")
+        })?;
+        if self.rows[header].path != row.path {
+            return None;
+        }
+        let end = self.rows[header + 1..]
+            .iter()
+            .position(|row| row.marker.is_none())
+            .map_or(self.rows.len(), |offset| header + 1 + offset);
+        (cursor < end).then_some(header..end)
+    }
+
+    /// Resolve a rendered code row against the complete captured hunk. Matching a
+    /// line number alone is unsafe when either Git read raced with an external edit.
+    pub fn captured_line(
+        &self,
+        cursor: usize,
+        snapshot: &super::GitHunkSnapshot,
+    ) -> Option<(usize, usize)> {
+        let row = self.rows.get(cursor)?;
+        if row.path.as_deref() != Some(snapshot.file.as_path()) || row.marker.is_none() {
+            return None;
+        }
+        let range = self.hunk_rows(cursor)?;
+        let header = range.start;
+        let displayed = &self.rows[header + 1..range.end];
+        let hunk = snapshot.hunks.iter().position(|hunk| {
+            hunk.header.split("@@").nth(1) == self.rows[header].text.split("@@").nth(1)
+                && hunk.lines.len() == displayed.len()
+                && hunk.lines.iter().zip(displayed).all(|(line, row)| {
+                    let marker = match line.kind {
+                        super::GitDiffLineKind::Context => ' ',
+                        super::GitDiffLineKind::Add => '+',
+                        super::GitDiffLineKind::Delete => '-',
+                    };
+                    row.old == line.old_line
+                        && row.new == line.new_line
+                        && row.marker == Some(marker)
+                        && row.text == line.text.trim_end_matches(['\r', '\n'])
+                })
+        })?;
+        Some((hunk, cursor.checked_sub(header + 1)?))
+    }
+
+    pub fn cursor_rows(&self, split: bool) -> Vec<usize> {
+        let mut rows = if split {
+            self.split
+                .iter()
+                .flat_map(|row| [row.old, row.new.filter(|new| Some(*new) != row.old)])
+                .flatten()
+                .collect::<Vec<_>>()
+        } else {
+            self.rows
+                .iter()
+                .enumerate()
+                .filter(|(_, row)| row.old.is_some() || row.new.is_some())
+                .map(|(index, _)| index)
+                .collect()
+        };
+        if rows.is_empty() {
+            rows = self
+                .rows
+                .iter()
+                .enumerate()
+                .filter(|(_, row)| row.style != Style::GitHeading)
+                .map(|(index, _)| index)
+                .collect();
+        }
+        rows
+    }
+
+    pub fn display_position(
+        &self,
+        index: usize,
+        split: bool,
+        pinned: Option<usize>,
+    ) -> Option<usize> {
+        if split {
+            self.split
+                .iter()
+                .filter(|row| pinned.is_none() || row.heading != pinned)
+                .position(|row| {
+                    row.heading == Some(index) || row.old == Some(index) || row.new == Some(index)
+                })
+        } else {
+            (0..self.rows.len())
+                .filter(|row| Some(*row) != pinned)
+                .position(|row| row == index)
+        }
+    }
+
     pub fn number_width(&self) -> usize {
         self.rows
             .iter()
@@ -264,6 +382,81 @@ impl Preview {
             .unwrap_or(1)
             .to_string()
             .len()
+    }
+}
+
+impl super::GitScreen {
+    /// Keep both the real cursor and its byte-level search target on an unchanged
+    /// refresh. Any changed source owns a fresh search, with no stale row indices.
+    pub(super) fn update_preview(&mut self, mut preview: Preview) {
+        if self.preview.same_content(&preview) {
+            preview.search = std::mem::take(&mut self.preview.search);
+            preview.cursor_byte = self.preview.cursor_byte;
+        } else {
+            self.preview_cursor = None;
+            if self.preview.search.active() {
+                self.preview_column = 0;
+            }
+        }
+        self.preview = preview;
+    }
+
+    pub(super) fn pinned_preview_heading(&self) -> Option<usize> {
+        (self.commit.is_some() || self.last_list == 0)
+            .then(|| {
+                self.preview
+                    .rows
+                    .iter()
+                    .position(|row| row.style == Style::GitHeading)
+            })
+            .flatten()
+    }
+
+    pub(super) fn normalize_preview_cursor(&mut self) {
+        let rows = self.preview.cursor_rows(self.preview_split);
+        if self
+            .preview_cursor
+            .is_none_or(|cursor| !rows.contains(&cursor))
+        {
+            self.preview_cursor = rows.first().copied();
+        }
+    }
+
+    pub(super) fn move_preview(&mut self, delta: isize) {
+        self.preview.search.leave_match();
+        self.preview.cursor_byte = None;
+        let rows = self.preview.cursor_rows(self.preview_split);
+        let Some(first) = rows.first().copied() else {
+            return;
+        };
+        let position = self
+            .preview_cursor
+            .and_then(|cursor| rows.iter().position(|&row| row == cursor))
+            .unwrap_or(0);
+        let index = rows
+            .get(position.saturating_add_signed(delta).min(rows.len() - 1))
+            .copied()
+            .unwrap_or(first);
+        self.preview_cursor = Some(index);
+        // Scroll on the very first motion, as before. Once the viewport reaches the
+        // end, the real cursor can still reach every remaining code line.
+        self.preview_offset = self
+            .preview
+            .display_position(index, self.preview_split, self.pinned_preview_heading())
+            .unwrap_or(0)
+            .min(self.preview_rows.saturating_sub(self.preview_visible));
+    }
+
+    pub(super) fn preview_edge(&mut self, end: bool) {
+        self.preview.search.leave_match();
+        self.preview.cursor_byte = None;
+        let rows = self.preview.cursor_rows(self.preview_split);
+        self.preview_cursor = if end { rows.last() } else { rows.first() }.copied();
+        self.preview_offset = if end {
+            self.preview_rows.saturating_sub(self.preview_visible)
+        } else {
+            0
+        };
     }
 }
 
@@ -277,4 +470,56 @@ fn header_path(header: &str) -> Option<PathBuf> {
         .strip_prefix("a/")
         .or_else(|| decoded.strip_prefix("b/"))
         .map(PathBuf::from)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn containing_hunk_range_includes_header_but_never_another_hunk_or_file() {
+        let preview = Preview::git(
+            concat!(
+                "diff --git a/a.rs b/a.rs\n--- a/a.rs\n+++ b/a.rs\n",
+                "@@ -1,2 +1,2 @@\n-old_first\n+new_first\n context\n",
+                "@@ -20,2 +20,2 @@\n-old_second\n+new_second\n context\n",
+                "diff --git a/b.rs b/b.rs\n--- a/b.rs\n+++ b/b.rs\n",
+                "@@ -1 +1 @@\n-old_other\n+new_other\n",
+            ),
+            None,
+        );
+        let headers = preview
+            .rows
+            .iter()
+            .enumerate()
+            .filter(|(_, row)| row.text.starts_with("@@"))
+            .map(|(index, _)| index)
+            .collect::<Vec<_>>();
+        assert_eq!(headers.len(), 3);
+        for (index, row) in preview.rows.iter().enumerate() {
+            if row.marker.is_none() {
+                assert_eq!(preview.hunk_rows(index), None);
+            } else {
+                let range = preview.hunk_rows(index).unwrap();
+                assert!(range.contains(&index));
+                assert!(preview.rows[range.start].text.starts_with("@@"));
+                assert_eq!(preview.rows[range.start].path, row.path);
+                assert!(
+                    preview.rows[range.start + 1..range.end]
+                        .iter()
+                        .all(|part| part.marker.is_some() && part.path == row.path)
+                );
+                assert!(
+                    range.end == preview.rows.len() || preview.rows[range.end].marker.is_none()
+                );
+            }
+        }
+        assert_eq!(
+            preview.hunk_rows(headers[0] + 1),
+            Some(headers[0]..headers[1])
+        );
+        assert_eq!(preview.hunk_rows(preview.rows.len()), None);
+        let source = Preview::source(Path::new("a.rs"), "plain code\n");
+        assert_eq!(source.hunk_rows(1), None);
+    }
 }

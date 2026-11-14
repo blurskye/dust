@@ -1,0 +1,4 @@
+[0KRunning with runner 18.5.0
+[0Ksection_start:1700000000:step_script[0K[32;1m$ cargo test[0;m
+test result: FAILED. 1 failed
+section_end:1700000300:step_script[0K[31;1mERROR: Job failed: exit code 101[0;m

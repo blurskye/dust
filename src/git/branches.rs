@@ -1,4 +1,5 @@
-//! Branch and worktree listing, creation and removal. Check refusal conditions before writes;
+//! Branch, worktree and submodule listing, plus worktree creation and removal.
+//! Check refusal conditions before writes;
 //! retain running mutations until their completion is handled.
 use std::path::Path;
 use std::path::PathBuf;
@@ -52,6 +53,10 @@ pub struct GitBranchEntry {
     pub name: String,
     pub remote: bool,
     pub upstream: Option<String>,
+    /// Commits the upstream does not have. Only the checked-out branch pays for it.
+    pub ahead: u32,
+    /// Commits the working branch does not have.
+    pub behind: u32,
     /// The worktree that has this branch checked out, in its own path terms.
     pub checked_out: Option<PathBuf>,
     pub head: bool,
@@ -68,10 +73,24 @@ pub struct GitWorktreeEntry {
     pub main: bool,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GitSubmoduleEntry {
+    pub name: String,
+    /// Relative to the repository workdir, not its Git directory.
+    pub path: PathBuf,
+    pub initialized: bool,
+    /// Uncommitted files, independently of a HEAD/index gitlink mismatch.
+    pub dirty: bool,
+    /// The checked-out submodule's actual HEAD, not the superproject's HEAD gitlink.
+    pub head: Option<String>,
+    /// The expected gitlink in the superproject index.
+    pub index: Option<String>,
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct GitBranchList {
     pub request_id: GitBranchRequestId,
     pub branches: Vec<GitBranchEntry>,
     pub worktrees: Vec<GitWorktreeEntry>,
+    pub submodules: Result<Vec<GitSubmoduleEntry>, String>,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum GitBranchResult {
@@ -371,6 +390,12 @@ fn read_list(
     check_request(cancel, expires)?;
     let repository = open(&request.repository)?;
     let main = main_repository(&repository)?;
+    let (requested_dirty, submodules) = list_worktree_state(&repository, cancel, expires)?;
+    let main_dirty = if repository.is_worktree() {
+        list_worktree_state(&main, cancel, expires)?.0
+    } else {
+        requested_dirty
+    };
     let main_path = main
         .workdir()
         .and_then(|path| crate::files::canonicalize(path).ok());
@@ -382,7 +407,7 @@ fn read_list(
             .ok()
             .filter(|head| head.is_branch())
             .and_then(|head| head.shorthand().map(str::to_owned)),
-        dirty: has_changes(&main, cancel, expires)?,
+        dirty: main_dirty,
         operation: operation_name(main.state()),
         locked: false,
         main: true,
@@ -392,7 +417,11 @@ fn read_list(
         let opened = git2::Repository::open(&linked.path).ok();
         let (dirty, operation) = match &opened {
             Some(opened) => (
-                has_changes(opened, cancel, expires)?,
+                if opened.path() == repository.path() {
+                    requested_dirty
+                } else {
+                    list_worktree_state(opened, cancel, expires)?.0
+                },
                 operation_name(opened.state()),
             ),
             None => (false, None),
@@ -424,10 +453,32 @@ fn read_list(
                 .iter()
                 .find(|worktree| worktree.branch.as_deref() == Some(name.as_str()))
                 .map(|worktree| worktree.path.clone());
+            // Divergence belongs to the branch a person is standing on; reading it
+            // for every reference would turn one list into an unbounded walk.
+            let (ahead, behind) = if kind == git2::BranchType::Local && branch.is_head() {
+                branch
+                    .upstream()
+                    .ok()
+                    .and_then(|upstream| {
+                        let local = branch.get().target()?;
+                        let remote = upstream.get().target()?;
+                        repository.graph_ahead_behind(local, remote).ok()
+                    })
+                    .map_or((0, 0), |(ahead, behind)| {
+                        (
+                            u32::try_from(ahead).unwrap_or(u32::MAX),
+                            u32::try_from(behind).unwrap_or(u32::MAX),
+                        )
+                    })
+            } else {
+                (0, 0)
+            };
             branches.push(GitBranchEntry {
                 name,
                 remote: kind == git2::BranchType::Remote,
                 upstream,
+                ahead,
+                behind,
                 checked_out,
                 head: !branch.is_head().eq(&false) && branch.is_head(),
             });
@@ -438,13 +489,187 @@ fn read_list(
         request_id,
         branches,
         worktrees,
+        submodules,
     }))
+}
+
+/// Only relative, portable paths may reach libgit2's submodule lookup: lookup itself reads
+/// working-directory metadata, so checking the returned Submodule would already be too late.
+fn safe_submodule_relative_path(path: &Path) -> bool {
+    use std::path::Component;
+    let text = path.to_string_lossy();
+    if text.contains('\\') || text.starts_with('-') {
+        return false;
+    }
+    let mut normal = false;
+    for component in path.components() {
+        match component {
+            Component::Normal(name) => {
+                let name = name.to_string_lossy();
+                if name.contains(':') || name.eq_ignore_ascii_case(".git") {
+                    return false;
+                }
+                normal = true;
+            }
+            Component::CurDir => {}
+            _ => return false,
+        }
+    }
+    normal
+}
+
+/// Check the nearest existing ancestor as well, so an uninitialized path below an escaping
+/// symlink cannot pass merely because its final directory does not exist yet.
+fn contained_submodule_path(root: &Path, relative: &Path) -> bool {
+    let mut candidate = root.join(relative);
+    loop {
+        match crate::files::canonicalize(&candidate) {
+            Ok(resolved) => return resolved.starts_with(root),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                match std::fs::symlink_metadata(&candidate) {
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                    // In particular, do not accept dangling symlinks.
+                    _ => return false,
+                }
+                if !candidate.pop() || !candidate.starts_with(root) {
+                    return false;
+                }
+            }
+            Err(_) => return false,
+        }
+    }
+}
+
+/// The bool says whether Git's ordinary recursive status scan is safe to use. Use libgit2's
+/// config parser before find_submodule, rather than submodules(), which probes every path
+/// before returning the entries to its caller.
+fn read_submodules(
+    repository: &git2::Repository,
+    cancel: &AtomicBool,
+    expires: Instant,
+) -> Result<(Vec<GitSubmoduleEntry>, bool), GitBranchError> {
+    check_request(cancel, expires)?;
+    let root = repository.workdir().ok_or(GitBranchError::NotRepository)?;
+    let root = crate::files::canonicalize(root).map_err(backend)?;
+    let modules = root.join(".gitmodules");
+    match std::fs::symlink_metadata(&modules) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok((Vec::new(), true));
+        }
+        Err(error) => return Err(backend(error)),
+        Ok(_) => {}
+    }
+    if !contained_submodule_path(&root, Path::new(".gitmodules")) {
+        return Err(backend("unsafe .gitmodules path"));
+    }
+    let config = git2::Config::open(&modules).map_err(backend)?;
+    let mut entries = config.entries(Some("^submodule\\.")).map_err(backend)?;
+    let mut configured = std::collections::BTreeMap::new();
+    let mut safe_for_status = true;
+    while let Some(entry) = entries.next() {
+        check_request(cancel, expires)?;
+        let entry = entry.map_err(backend)?;
+        let (name, property) = entry
+            .name()
+            .and_then(|key| key.strip_prefix("submodule."))
+            .and_then(|key| key.rsplit_once('.'))
+            .ok_or_else(|| backend("invalid submodule name"))?;
+        if !safe_submodule_relative_path(Path::new(name)) {
+            safe_for_status = false;
+            continue;
+        }
+        let path = configured.entry(name.to_owned()).or_insert(None);
+        if property == "path" {
+            // ConfigEntry::value() panics for a valueless (boolean) config entry.
+            if !entry.has_value() {
+                return Err(backend("submodule path has no value"));
+            }
+            *path = Some(PathBuf::from(
+                entry
+                    .value()
+                    .ok_or_else(|| backend("invalid submodule path"))?,
+            ));
+        }
+    }
+    let gitdir = crate::files::canonicalize(repository.commondir()).map_err(backend)?;
+    let mut found = Vec::new();
+    for (name, path) in configured {
+        check_request(cancel, expires)?;
+        let path = path.ok_or_else(|| backend(format!("submodule `{name}` has no path")))?;
+        if !safe_submodule_relative_path(&path)
+            || !contained_submodule_path(&root, &path)
+            || !contained_submodule_path(&gitdir, &Path::new("modules").join(&name))
+            || !contained_submodule_path(&root, &path.join(".git"))
+        {
+            safe_for_status = false;
+            continue;
+        }
+        let submodule = repository.find_submodule(&name).map_err(backend)?;
+        let opened = match submodule.open() {
+            Ok(opened) => Some(opened),
+            Err(error) if error.code() == git2::ErrorCode::NotFound => None,
+            Err(error) => return Err(backend(error)),
+        };
+        let head = opened
+            .as_ref()
+            .and_then(|opened| opened.head().ok().and_then(|head| head.target()))
+            .map(|oid| oid.to_string());
+        // Reuse the existing deadline-killed status job instead of an uncancellable libgit2
+        // status scan. Nested submodules are inventoried when their parent is opened.
+        let dirty = match &opened {
+            Some(opened) => has_changes_with_options(opened, cancel, expires, true)?,
+            None => false,
+        };
+        found.push(GitSubmoduleEntry {
+            name,
+            path,
+            initialized: opened.is_some(),
+            dirty,
+            head,
+            index: submodule.index_id().map(|oid| oid.to_string()),
+        });
+    }
+    check_request(cancel, expires)?;
+    Ok((found, safe_for_status))
+}
+
+fn list_worktree_state(
+    repository: &git2::Repository,
+    cancel: &AtomicBool,
+    expires: Instant,
+) -> Result<(bool, Result<Vec<GitSubmoduleEntry>, String>), GitBranchError> {
+    let inventory = read_submodules(repository, cancel, expires);
+    // Cancellation/deadlines are request errors, never a partial submodule error.
+    check_request(cancel, expires)?;
+    let safe_for_status = inventory.as_ref().is_ok_and(|(_, safe)| *safe);
+    let submodules = inventory
+        .map(|(entries, _)| entries)
+        .map_err(|error| error.to_string());
+    // Malformed or unsafe configuration must neither erase the branch/worktree page nor
+    // send Git's recursive status scan through paths we have deliberately rejected.
+    let dirty = has_changes_with_options(repository, cancel, expires, !safe_for_status)?
+        || (!safe_for_status
+            && submodules.as_ref().is_ok_and(|entries| {
+                entries
+                    .iter()
+                    .any(|entry| entry.dirty || (entry.initialized && entry.head != entry.index))
+            }));
+    Ok((dirty, submodules))
 }
 
 fn has_changes(
     repository: &git2::Repository,
     cancel: &AtomicBool,
     expires: Instant,
+) -> Result<bool, GitBranchError> {
+    has_changes_with_options(repository, cancel, expires, false)
+}
+
+fn has_changes_with_options(
+    repository: &git2::Repository,
+    cancel: &AtomicBool,
+    expires: Instant,
+    ignore_submodules: bool,
 ) -> Result<bool, GitBranchError> {
     check_request(cancel, expires)?;
     let workdir = repository.workdir().ok_or(GitBranchError::NotRepository)?;
@@ -458,12 +683,12 @@ fn has_changes(
         maximum_path_bytes: 512,
         deadline: expires.saturating_duration_since(started),
     };
+    let mut args = vec!["status", "--porcelain", "--untracked-files=normal"];
+    if ignore_submodules {
+        args.push("--ignore-submodules=all");
+    }
     let (output, truncated) = crate::git::status::status_command(
-        workdir,
-        &["status", "--porcelain", "--untracked-files=normal"],
-        &policy,
-        started,
-        cancel,
+        workdir, &args, &policy, started, cancel,
     )
     .map_err(|error| match error {
         crate::git::status::GitStatusError::Deadline => GitBranchError::Deadline,

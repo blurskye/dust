@@ -101,7 +101,6 @@ pub(crate) use vfs::roots_current;
 
 mod root_identity;
 pub use root_identity::RootIdentity;
-#[cfg(windows)]
 pub(crate) use root_identity::file_identity;
 pub(crate) mod path_encoding;
 

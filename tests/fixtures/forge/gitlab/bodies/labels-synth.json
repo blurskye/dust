@@ -1,0 +1,28 @@
+[
+  {
+    "id": 77,
+    "name": "bug",
+    "color": "#d9534f",
+    "text_color": "#FFFFFF",
+    "description": "Something is broken",
+    "open_issues_count": 3,
+    "closed_issues_count": 9,
+    "open_merge_requests_count": 1,
+    "subscribed": false,
+    "priority": null,
+    "is_project_label": false
+  },
+  {
+    "id": 78,
+    "name": "scope::backend",
+    "color": "#428bca",
+    "text_color": "#FFFFFF",
+    "description": null,
+    "open_issues_count": 0,
+    "closed_issues_count": 2,
+    "open_merge_requests_count": 2,
+    "subscribed": false,
+    "priority": 1,
+    "is_project_label": true
+  }
+]

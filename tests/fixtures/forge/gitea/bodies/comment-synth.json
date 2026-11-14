@@ -1,0 +1,17 @@
+{
+  "id": 501,
+  "body": "Looks good to me.",
+  "user": {
+    "id": 1001,
+    "login": "maya",
+    "full_name": "Maya",
+    "email": "maya@example.invalid",
+    "avatar_url": "https://gitea.com/avatars/maya.png",
+    "html_url": "https://gitea.com/maya"
+  },
+  "created_at": "2026-11-14T05:10:56Z",
+  "updated_at": "2026-11-14T05:10:56Z",
+  "html_url": "https://gitea.com/orbit/orbit/pulls/13#issuecomment-501",
+  "issue_url": "https://gitea.com/orbit/orbit/issues/13",
+  "pull_request_url": "https://gitea.com/orbit/orbit/pulls/13"
+}

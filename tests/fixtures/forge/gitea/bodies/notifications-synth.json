@@ -1,0 +1,31 @@
+[
+  {
+    "id": 9001,
+    "unread": true,
+    "pinned": false,
+    "updated_at": "2026-11-14T05:06:56Z",
+    "subject": {
+      "title": "Keep drafts across reloads",
+      "type": "Pull",
+      "state": "open",
+      "url": "https://gitea.com/api/v1/repos/orbit/orbit/pulls/13",
+      "html_url": "https://gitea.com/orbit/orbit/pulls/13",
+      "latest_comment_url": "https://gitea.com/api/v1/repos/orbit/orbit/issues/comments/501",
+      "latest_comment_html_url": "https://gitea.com/orbit/orbit/pulls/13#issuecomment-501"
+    },
+    "repository": {
+      "id": 4242,
+      "full_name": "orbit/orbit",
+      "html_url": "https://gitea.com/orbit/orbit",
+      "owner": {
+        "id": 1000,
+        "login": "orbit",
+        "full_name": "Orbit",
+        "email": "orbit@example.invalid",
+        "avatar_url": "https://gitea.com/avatars/orbit.png",
+        "html_url": "https://gitea.com/orbit"
+      }
+    },
+    "url": "https://gitea.com/api/v1/notifications/threads/9001"
+  }
+]

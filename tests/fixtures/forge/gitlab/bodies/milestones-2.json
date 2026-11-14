@@ -1,0 +1,104 @@
+{
+  "data": {
+    "project": {
+      "milestones": {
+        "nodes": [
+          {
+            "id": "gid://gitlab/Milestone/5948912",
+            "iid": "121",
+            "title": "18.3",
+            "state": "active",
+            "dueDate": "2025-08-15",
+            "startDate": "2025-07-12",
+            "webPath": "/groups/orbit/-/milestones/121"
+          },
+          {
+            "id": "gid://gitlab/Milestone/5948913",
+            "iid": "122",
+            "title": "18.4",
+            "state": "active",
+            "dueDate": "2025-09-12",
+            "startDate": "2025-08-16",
+            "webPath": "/groups/orbit/-/milestones/122"
+          },
+          {
+            "id": "gid://gitlab/Milestone/5948915",
+            "iid": "123",
+            "title": "18.5",
+            "state": "active",
+            "dueDate": "2025-10-10",
+            "startDate": "2025-09-13",
+            "webPath": "/groups/orbit/-/milestones/123"
+          },
+          {
+            "id": "gid://gitlab/Milestone/5948917",
+            "iid": "124",
+            "title": "18.6",
+            "state": "active",
+            "dueDate": "2025-11-14",
+            "startDate": "2025-10-11",
+            "webPath": "/groups/orbit/-/milestones/124"
+          },
+          {
+            "id": "gid://gitlab/Milestone/6005754",
+            "iid": "133",
+            "title": "Git 2.52",
+            "state": "active",
+            "dueDate": "2025-11-17",
+            "startDate": "2025-08-18",
+            "webPath": "/groups/orbit/-/milestones/133"
+          },
+          {
+            "id": "gid://gitlab/Milestone/5948918",
+            "iid": "125",
+            "title": "18.7",
+            "state": "active",
+            "dueDate": "2025-12-12",
+            "startDate": "2025-11-15",
+            "webPath": "/groups/orbit/-/milestones/125"
+          },
+          {
+            "id": "gid://gitlab/Milestone/5948919",
+            "iid": "126",
+            "title": "18.8",
+            "state": "active",
+            "dueDate": "2026-01-09",
+            "startDate": "2025-12-13",
+            "webPath": "/groups/orbit/-/milestones/126"
+          },
+          {
+            "id": "gid://gitlab/Milestone/6110128",
+            "iid": "134",
+            "title": "Git 2.53",
+            "state": "active",
+            "dueDate": "2026-02-02",
+            "startDate": "2025-11-17",
+            "webPath": "/groups/orbit/-/milestones/134"
+          },
+          {
+            "id": "gid://gitlab/Milestone/5948920",
+            "iid": "127",
+            "title": "18.9",
+            "state": "active",
+            "dueDate": "2026-02-13",
+            "startDate": "2026-01-10",
+            "webPath": "/groups/orbit/-/milestones/127"
+          },
+          {
+            "id": "gid://gitlab/Milestone/5948921",
+            "iid": "128",
+            "title": "18.10",
+            "state": "active",
+            "dueDate": "2026-03-13",
+            "startDate": "2026-02-14",
+            "webPath": "/groups/orbit/-/milestones/128"
+          }
+        ],
+        "pageInfo": {
+          "hasNextPage": true,
+          "endCursor": "eyJkdWVfZGF0ZSI6IjIwMjYtMDMtMTMiLCJpZCI6IjU5NDg5MjEifQ"
+        }
+      }
+    }
+  }
+}

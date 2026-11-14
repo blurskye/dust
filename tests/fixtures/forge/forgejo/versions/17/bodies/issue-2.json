@@ -1,0 +1,40 @@
+[
+  {
+    "id": 106583,
+    "html_url": "https://code.forgejo.org/orbit/orbit/issues/1792#issuecomment-106583",
+    "pull_request_url": "",
+    "issue_url": "https://code.forgejo.org/orbit/orbit/issues/1792",
+    "user": {
+      "id": 3279,
+      "login": "alex6",
+      "login_name": "",
+      "source_id": 0,
+      "full_name": "",
+      "email": "alex6@example.invalid",
+      "avatar_url": "https://code.forgejo.org/avatars/alex6.png",
+      "html_url": "https://code.forgejo.org/alex6",
+      "language": "",
+      "is_admin": false,
+      "last_login": "0001-01-01T00:00:00Z",
+      "created": "2026-11-12T07:15:52Z",
+      "restricted": false,
+      "active": false,
+      "prohibit_login": false,
+      "location": "",
+      "pronouns": "",
+      "website": "",
+      "description": "",
+      "visibility": "public",
+      "followers_count": 0,
+      "following_count": 0,
+      "starred_repos_count": 0,
+      "username": "alex6"
+    },
+    "original_author": "",
+    "original_author_id": 0,
+    "body": "I believe my use case (which is different) would also benefit by implementing a more graceful shutdown/cancellation. I have written about it here: https://code.forgejo.org/orbit/forgejo-actions-feature-requests/issues/141",
+    "assets": [],
+    "created_at": "2026-11-12T07:31:20Z",
+    "updated_at": "2026-11-12T07:31:20Z"
+  }
+]

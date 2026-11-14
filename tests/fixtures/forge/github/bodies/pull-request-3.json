@@ -1,0 +1,26 @@
+[
+  {
+    "sha": "53438c25323252010a3b2d5436fc8a7769d39f94",
+    "filename": "cursed_renderer.go",
+    "status": "modified",
+    "additions": 8,
+    "deletions": 0,
+    "changes": 8,
+    "blob_url": "https://github.com/orbit/orbit/blob/1a755e34211d45b296e56c15db91b23b5c29983b/cursed_renderer.go",
+    "raw_url": "https://github.com/orbit/orbit/raw/1a755e34211d45b296e56c15db91b23b5c29983b/cursed_renderer.go",
+    "contents_url": "https://api.github.com/repos/orbit/orbit/contents/cursed_renderer.go?ref=1a755e34211d45b296e56c15db91b23b5c29983b",
+    "patch": "@@ -799,6 +799,14 @@ func (s *cursedRenderer) insertAbove(str string) error {\n \tvar sb strings.Builder\n \tw, h := s.cellbuf.Width(), s.cellbuf.Height()\n \t_, y := s.scr.Position()\n+\t// Before the first flush, the cell buffer still has the terminal height\n+\t// rather than the height of the current inline view.\n+\tif s.lastView == nil && !s.view.AltScreen {\n+\t\th = uv.NewStyledString(s.view.Content).Height()\n+\t\tif y < 0 {\n+\t\t\ty = 0\n+\t\t}\n+\t}\n \n \t// We need to scroll the screen up by the number of lines in the queue.\n \tsb.WriteByte('\\r')"
+  },
+  {
+    "sha": "aa4f77a71442d7dafb00c2da84e1620bcc0f5f42",
+    "filename": "cursed_renderer_test.go",
+    "status": "modified",
+    "additions": 19,
+    "deletions": 0,
+    "changes": 19,
+    "blob_url": "https://github.com/orbit/orbit/blob/1a755e34211d45b296e56c15db91b23b5c29983b/cursed_renderer_test.go",
+    "raw_url": "https://github.com/orbit/orbit/raw/1a755e34211d45b296e56c15db91b23b5c29983b/cursed_renderer_test.go",
+    "contents_url": "https://api.github.com/repos/orbit/orbit/contents/cursed_renderer_test.go?ref=1a755e34211d45b296e56c15db91b23b5c29983b",
+    "patch": "@@ -202,6 +202,24 @@ func TestCursedRenderer_updatesKittyKeyboardFlagsInPlace(t *testing.T) {\n \t}\n }\n \n+func TestCursedRenderer_insertAboveBeforeFirstFlush(t *testing.T) {\n+\tt.Parallel()\n+\n+\tvar output bytes.Buffer\n+\trenderer := newCursedRenderer(&output, []string{\"TERM=xterm-256color\"}, 80, 24)\n+\trenderer.render(NewView(\"footer\"))\n+\n+\tif err := renderer.insertAbove(\"startup\"); err != nil {\n+\t\tt.Fatal(err)\n+\t}\n+\n+\twant := \"\\r\\n\" + ansi.CursorUp(1) +\n+\t\tansi.InsertLine(1) + ansi.EraseLineRight + \"startup\" + \"\\r\\n\"\n+\tif got := output.String(); got != want {\n+\t\tt.Fatalf(\"unexpected insertAbove output:\\nwant: %q\\n got: %q\", want, got)\n+\t}\n+}\n+\n // Fixes: https://github.com/orbit/orbit/issues/1780\n func TestCursedRenderer_resizeStaleFrame(t *testing.T) {\n \tt.Parallel()\n@@ -313,6 +331,7 @@ func TestCursedRenderer_insertAboveLineBoundaries(t *testing.T) {\n \n \t\t\tvar out bytes.Buffer\n \t\t\tr := newCursedRenderer(&out, []string{\"TERM=xterm-256color\"}, width, 2)\n+\t\t\tr.render(NewView(\"view\\nview\"))\n \t\t\tr.scr.SetPosition(0, 0)\n \t\t\tif err := r.insertAbove(tt.line); err != nil {\n \t\t\t\tt.Fatal(err)"
+  }
+]

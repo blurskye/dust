@@ -7,3 +7,13 @@ pub fn hello(name: &str) -> String {
 pub fn shout(name: &str) -> String {
     hello(name).to_uppercase()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hello_greets_by_name() {
+        assert_eq!(hello("Dust"), "Hello, Dust!");
+    }
+}

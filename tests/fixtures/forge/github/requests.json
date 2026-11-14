@@ -1,0 +1,884 @@
+{
+  "schema": 1,
+  "provider": "github",
+  "host": "github.com",
+  "api_base": "https://api.github.com",
+  "server_version": null,
+  "recorded_at": "2026-11-14T05:20:02Z",
+  "repo": "orbit/orbit",
+  "redaction": {
+    "hashes": [
+      "031a2e695c0c8126555a81c50a2b0cffa124edb04f60c3d85507efca3a7c87e0",
+      "057ea15345b0c45edfb3f9f40a3549dc70ba5ef9d79eb0ad6d93d91c6e4578a4",
+      "09e75476f4dca1a07dae86ac26ea00a3c0c6d9e5af8c173692591d7f25044646",
+      "294ffbe98355a6d8d06e616377298f7890cf26fd81295fcc94f092d41d869c27",
+      "2c35d9c62b8af0352f431b21d66e2d9e3f84e450c8353dce3047f2417785b36b",
+      "3a6ed0b5a07be934ae059f6e9901af35be9bd438db000e23475d0bcf9e611a09",
+      "3e9900f5285f497bb4bfea2b6809b009deaaf753a34760df9c13e458d6390fa8",
+      "4c3f425a1f877cd1ef4054d1c6a206ca2768bbc249106f261b7569c0174b5ebd",
+      "5e17187349ae086885f7f8b5a95277d263b779814c931bca0830a5ee9b1039c6",
+      "5eacc8ffa82338c36196fdd7c5ce4f6a3dd7c72f072b1dd4825e59e67d17439a",
+      "61154159dcc6688f38f27eea164202c46608bcb9ac3c7ea411de52ff7f227882",
+      "655ccd1eab0f6d3f828d853dd0537a1b2268b0b316af991c2aae12fd8f4f02b8",
+      "765fb359ee57b062f5d371ed0bb6bb21f4e3d632577450169ada177efcc10fa6",
+      "7d9ab710c707102d30774f09824bbb33f35714c1a5b61961e3b707546fd276ce",
+      "83ae2342b45203acd051e745840380ad99b96433569f42c861352dd358b470b4",
+      "8962981d2d121eb7c920f8be6b90f883f195ae79df8ffa25fdb8349cc79580f1",
+      "9fd12e78ee56c1d798ed4504e2c12805cdc0a381a8bdf4ad5b0adcfbfae7fb88",
+      "ae3138e039985069f22a9de62a8c448ab43e936902261bd7d18bc40a4ba9841c",
+      "bfdb5f9dff2d9b34ebba0a553253bb1f999b2e066c4595d33e4bb157bc5d9249",
+      "c215429269a894fc93d4ef1632e96ae98a2ac515cf54e223f3d33abdce2bd5b8",
+      "c5cfda09f48e47f4bbf4b4bb7a1af1461883d3630bd071c237f70489ac61fa2e",
+      "cc8bc5106f3782ff15e6e06f8ae4c6fdd46e867f118a31f45a6abd691ea72f75",
+      "cd419364bf4b12d7c31e5402d6b0a68ee025487dd6348c76e4711a0a227bbf76",
+      "ce37f575118f88a308f750244f2b2660a6b4f8753c958e914ff6a703a6979f7a",
+      "cf87c4d10968741d8d173c9821189d09c9776b68ac8e6700b850cf8678a7c314",
+      "e05bdbfaffa05308c1a6a250283c35477057a3c8339ec954e552e08d27033060",
+      "e1304ec1b67a3facbb3d2d8f61c441ba1aa3766764263e1c6b85332d154c0903",
+      "e18d86417f970b1ab12ae5ad4afec61163845851c9e849fab8485d6ae7ae2290",
+      "e475489dda891ef9f1615bef63df9a19126e7e5383bf4928c5b694e123715db4",
+      "e815764ead74b173578e496f5afe598ed9147a1a4fc09fe6dc9bf5b5935a23a4",
+      "f671495d40d4572d227348a8f87c8f3649c00d41904a68de0e2d2a7267e56dda",
+      "f8a13100bb0e332c42fa0b084d1563c47431c12e8f550d8a32d942c595235e98",
+      "ffadd9571f18bbcd6781af0a60e30a2e3af67ba2507b3820a8e47692b2b56aa0"
+    ],
+    "logins": {
+      "bfdb5f9dff2d9b34ebba0a553253bb1f999b2e066c4595d33e4bb157bc5d9249": "maya",
+      "61154159dcc6688f38f27eea164202c46608bcb9ac3c7ea411de52ff7f227882": "alex",
+      "031a2e695c0c8126555a81c50a2b0cffa124edb04f60c3d85507efca3a7c87e0": "sam",
+      "f671495d40d4572d227348a8f87c8f3649c00d41904a68de0e2d2a7267e56dda": "leo",
+      "e815764ead74b173578e496f5afe598ed9147a1a4fc09fe6dc9bf5b5935a23a4": "nina",
+      "8962981d2d121eb7c920f8be6b90f883f195ae79df8ffa25fdb8349cc79580f1": "maya2",
+      "2c35d9c62b8af0352f431b21d66e2d9e3f84e450c8353dce3047f2417785b36b": "alex2",
+      "e475489dda891ef9f1615bef63df9a19126e7e5383bf4928c5b694e123715db4": "sam2",
+      "7d9ab710c707102d30774f09824bbb33f35714c1a5b61961e3b707546fd276ce": "leo2",
+      "3a6ed0b5a07be934ae059f6e9901af35be9bd438db000e23475d0bcf9e611a09": "nina2",
+      "ae3138e039985069f22a9de62a8c448ab43e936902261bd7d18bc40a4ba9841c": "maya3",
+      "c5cfda09f48e47f4bbf4b4bb7a1af1461883d3630bd071c237f70489ac61fa2e": "alex3",
+      "f8a13100bb0e332c42fa0b084d1563c47431c12e8f550d8a32d942c595235e98": "sam3",
+      "ce28948e6202d17a9115ef6c9e22cbe35cdf3eaca9e7f87e64dddbcce944b554": "leo3",
+      "09e75476f4dca1a07dae86ac26ea00a3c0c6d9e5af8c173692591d7f25044646": "nina3",
+      "5eacc8ffa82338c36196fdd7c5ce4f6a3dd7c72f072b1dd4825e59e67d17439a": "maya4",
+      "4c3f425a1f877cd1ef4054d1c6a206ca2768bbc249106f261b7569c0174b5ebd": "alex4",
+      "ffadd9571f18bbcd6781af0a60e30a2e3af67ba2507b3820a8e47692b2b56aa0": "sam4",
+      "3e9900f5285f497bb4bfea2b6809b009deaaf753a34760df9c13e458d6390fa8": "leo4",
+      "ce37f575118f88a308f750244f2b2660a6b4f8753c958e914ff6a703a6979f7a": "nina4",
+      "655ccd1eab0f6d3f828d853dd0537a1b2268b0b316af991c2aae12fd8f4f02b8": "maya5",
+      "9fd12e78ee56c1d798ed4504e2c12805cdc0a381a8bdf4ad5b0adcfbfae7fb88": "alex5",
+      "cd419364bf4b12d7c31e5402d6b0a68ee025487dd6348c76e4711a0a227bbf76": "sam5",
+      "e1304ec1b67a3facbb3d2d8f61c441ba1aa3766764263e1c6b85332d154c0903": "leo5",
+      "af58a496c65f18fb72ceb469e425f5015aaf78d9034e6efe4c34b15cc946560b": "nina5",
+      "1827547e1f1f01bd900909366e28b1cdea4235e94440371b7239c966391ed3b2": "maya6",
+      "c0b0109d9439de57fe3cf03abeccbc52f4c98170c732d3b69af5e6395ace574e": "alex6",
+      "49f5b0e488cfa66c69e6981896474e446daad70848f21cdd555e8c9d17ddae83": "sam6",
+      "78009e26357aa5211f73fcfd0db359a97ab38a1782effa3a8078b3c00a88cc36": "leo6",
+      "c215429269a894fc93d4ef1632e96ae98a2ac515cf54e223f3d33abdce2bd5b8": "nina6",
+      "83ae2342b45203acd051e745840380ad99b96433569f42c861352dd358b470b4": "maya7",
+      "e18d86417f970b1ab12ae5ad4afec61163845851c9e849fab8485d6ae7ae2290": "alex7",
+      "e05bdbfaffa05308c1a6a250283c35477057a3c8339ec954e552e08d27033060": "sam7",
+      "5e17187349ae086885f7f8b5a95277d263b779814c931bca0830a5ee9b1039c6": "leo7",
+      "cf87c4d10968741d8d173c9821189d09c9776b68ac8e6700b850cf8678a7c314": "nina7",
+      "cc8bc5106f3782ff15e6e06f8ae4c6fdd46e867f118a31f45a6abd691ea72f75": "maya8"
+    },
+    "date_shift_seconds": 933
+  },
+  "entries": [
+    {
+      "key": "GET /repos/orbit/orbit",
+      "read": "Repository",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8",
+        "etag": "\"550f5e16b983caec5a3000725a38c6bca7a49302d4a739b5011ab1e3ea974c74\"",
+        "last-modified": "Sat, 14 Nov 2026 04:55:29 GMT",
+        "x-ratelimit-limit": "5000",
+        "x-ratelimit-remaining": "4937",
+        "x-ratelimit-reset": "1794635243",
+        "x-ratelimit-used": "63",
+        "x-ratelimit-resource": "core"
+      },
+      "body": "repository.json",
+      "synthesized": false
+    },
+    {
+      "key": "GET /repos/orbit/orbit/labels",
+      "read": "Labels",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8",
+        "etag": "\"b4ae71c8863960c787554facb3fa19de696cc97f6bec58be998800ddccfc9ad2\"",
+        "x-ratelimit-limit": "5000",
+        "x-ratelimit-remaining": "4936",
+        "x-ratelimit-reset": "1794635243",
+        "x-ratelimit-used": "64",
+        "x-ratelimit-resource": "core"
+      },
+      "body": "labels.json",
+      "synthesized": false
+    },
+    {
+      "key": "GET /repos/orbit/orbit/milestones?state=all",
+      "read": "Milestones",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8",
+        "etag": "\"beec1826a80c586f107050f72ff938d019500341c840717ba3b71cd0e685136f\"",
+        "x-ratelimit-limit": "5000",
+        "x-ratelimit-remaining": "4935",
+        "x-ratelimit-reset": "1794635243",
+        "x-ratelimit-used": "65",
+        "x-ratelimit-resource": "core"
+      },
+      "body": "milestones.json",
+      "synthesized": false
+    },
+    {
+      "key": "GET /repos/orbit/orbit/collaborators",
+      "read": "Collaborators",
+      "method": "GET",
+      "status": 403,
+      "headers": {
+        "content-type": "application/json; charset=utf-8",
+        "x-ratelimit-limit": "5000",
+        "x-ratelimit-remaining": "4934",
+        "x-ratelimit-reset": "1794635243",
+        "x-ratelimit-used": "66",
+        "x-ratelimit-resource": "core"
+      },
+      "body": "collaborators.json",
+      "synthesized": false
+    },
+    {
+      "key": "GET /repos/orbit/orbit/pulls?page=1&state=open",
+      "read": "List",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8",
+        "etag": "\"8df2061b02d62f1fa2235a66d20b88e9a52fb01197e2de724e84b8b07f1486bf\"",
+        "link": "<https://api.github.com/repositories/233130089/pulls?state=open&page=2&per_page=10>; rel=\"next\", <https://api.github.com/repositories/233130089/pulls?state=open&page=14&per_page=10>; rel=\"last\"",
+        "x-ratelimit-limit": "5000",
+        "x-ratelimit-remaining": "4933",
+        "x-ratelimit-reset": "1794635243",
+        "x-ratelimit-used": "67",
+        "x-ratelimit-resource": "core"
+      },
+      "body": "list-pulls.json",
+      "synthesized": false,
+      "kind": "pulls"
+    },
+    {
+      "key": "GET /repos/orbit/orbit/pulls?page=2&state=open",
+      "read": "List",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8",
+        "etag": "\"709c7d909e2e501984a19038445f37458efc9493af910ea806f414803a1446c0\"",
+        "link": "<https://api.github.com/repositories/233130089/pulls?state=open&page=1&per_page=10>; rel=\"prev\", <https://api.github.com/repositories/233130089/pulls?state=open&page=3&per_page=10>; rel=\"next\", <https://api.github.com/repositories/233130089/pulls?state=open&page=14&per_page=10>; rel=\"last\", <https://api.github.com/repositories/233130089/pulls?state=open&page=1&per_page=10>; rel=\"first\"",
+        "x-ratelimit-limit": "5000",
+        "x-ratelimit-remaining": "4932",
+        "x-ratelimit-reset": "1794635243",
+        "x-ratelimit-used": "68",
+        "x-ratelimit-resource": "core"
+      },
+      "body": "list-pulls-2.json",
+      "synthesized": false,
+      "kind": "pulls"
+    },
+    {
+      "key": "GET /repos/orbit/orbit/issues?page=1&state=open",
+      "read": "List",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8",
+        "etag": "\"abca64005e95089fd4dfdbcb299971d650f7de7d8815c1494690fac08b149bcc\"",
+        "link": "<https://api.github.com/repositories/233130089/issues?state=open&page=2&per_page=10&after=Y3Vyc29yOnYyOpLPAAABoVlW27jPAAAAAWIpTqY%3D>; rel=\"next\"",
+        "x-ratelimit-limit": "5000",
+        "x-ratelimit-remaining": "4931",
+        "x-ratelimit-reset": "1794635243",
+        "x-ratelimit-used": "69",
+        "x-ratelimit-resource": "core"
+      },
+      "body": "list-issues.json",
+      "synthesized": false,
+      "kind": "issues"
+    },
+    {
+      "key": "GET /repos/orbit/orbit/issues?page=2&state=open",
+      "read": "List",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8",
+        "etag": "\"4de0a54c6860826d5d56369ad5894f9e0786960e5a9faa10b8a9c9b7e7290775\"",
+        "link": "<https://api.github.com/repositories/233130089/issues?state=open&page=3&per_page=10&after=Y3Vyc29yOnYyOpLPAAABoT_HfijPAAAAAV22KZE%3D>; rel=\"next\", <https://api.github.com/repositories/233130089/issues?state=open&page=1&per_page=10&before=Y3Vyc29yOnYyOpLPAAABoVSfGDjPAAAAAWE4M_Y%3D>; rel=\"prev\"",
+        "x-ratelimit-limit": "5000",
+        "x-ratelimit-remaining": "4930",
+        "x-ratelimit-reset": "1794635243",
+        "x-ratelimit-used": "70",
+        "x-ratelimit-resource": "core"
+      },
+      "body": "list-issues-2.json",
+      "synthesized": false,
+      "kind": "issues"
+    },
+    {
+      "key": "GET /repos/orbit/orbit/pulls/1766",
+      "read": "PullRequest",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8",
+        "etag": "\"efd97e7d802f04067f9c5f8744137e2a6ee066a450edc049dc7bd079dfd642c8\"",
+        "last-modified": "Thu, 12 Nov 2026 13:45:23 GMT",
+        "x-ratelimit-limit": "5000",
+        "x-ratelimit-remaining": "4924",
+        "x-ratelimit-reset": "1794635243",
+        "x-ratelimit-used": "76",
+        "x-ratelimit-resource": "core"
+      },
+      "body": "pull-request.json",
+      "synthesized": false
+    },
+    {
+      "key": "GET /repos/orbit/orbit/pulls/1766/commits",
+      "read": "PullRequest",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8",
+        "etag": "\"e66252debab1b16ed6cc8054630ff14469b1517b12fd40c56da3d59697bcd31e\"",
+        "last-modified": "Thu, 12 Nov 2026 13:45:23 GMT",
+        "x-ratelimit-limit": "5000",
+        "x-ratelimit-remaining": "4923",
+        "x-ratelimit-reset": "1794635243",
+        "x-ratelimit-used": "77",
+        "x-ratelimit-resource": "core"
+      },
+      "body": "pull-request-2.json",
+      "synthesized": false,
+      "part": "commits"
+    },
+    {
+      "key": "GET /repos/orbit/orbit/pulls/1766/files",
+      "read": "PullRequest",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8",
+        "etag": "\"7b4890fa0e194ca29f0b86b4884ccfadc843d3753cec537659da0ba159491b78\"",
+        "last-modified": "Thu, 12 Nov 2026 13:45:23 GMT",
+        "x-ratelimit-limit": "5000",
+        "x-ratelimit-remaining": "4922",
+        "x-ratelimit-reset": "1794635243",
+        "x-ratelimit-used": "78",
+        "x-ratelimit-resource": "core"
+      },
+      "body": "pull-request-3.json",
+      "synthesized": false,
+      "part": "files"
+    },
+    {
+      "key": "GET /repos/orbit/orbit/pulls/1766/reviews",
+      "read": "PullRequest",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8",
+        "etag": "\"91859f02fc98867b22cc2f11e4f99e280caef90084b78190d297ba6901f1de56\"",
+        "x-ratelimit-limit": "5000",
+        "x-ratelimit-remaining": "4921",
+        "x-ratelimit-reset": "1794635243",
+        "x-ratelimit-used": "79",
+        "x-ratelimit-resource": "core"
+      },
+      "body": "pull-request-4.json",
+      "synthesized": false,
+      "part": "reviews"
+    },
+    {
+      "key": "GET /repos/orbit/orbit/commits/1a755e34211d45b296e56c15db91b23b5c29983b/check-runs",
+      "read": "PullRequest",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8",
+        "etag": "\"32e4f86ce00f1a835319637415e665ab7a8c3793634b30af9f582d181791eb3c\"",
+        "x-ratelimit-limit": "5000",
+        "x-ratelimit-remaining": "4920",
+        "x-ratelimit-reset": "1794635243",
+        "x-ratelimit-used": "80",
+        "x-ratelimit-resource": "core"
+      },
+      "body": "pull-request-5.json",
+      "synthesized": false,
+      "part": "checks"
+    },
+    {
+      "key": "GET /repos/orbit/orbit/commits/1a755e34211d45b296e56c15db91b23b5c29983b/status",
+      "read": "PullRequest",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8",
+        "etag": "\"98160736b8091d83f907767a63fbdaf362a71a96d0e57909f42941b02cde2f31\"",
+        "x-ratelimit-limit": "5000",
+        "x-ratelimit-remaining": "4919",
+        "x-ratelimit-reset": "1794635243",
+        "x-ratelimit-used": "81",
+        "x-ratelimit-resource": "core"
+      },
+      "body": "pull-request-6.json",
+      "synthesized": false,
+      "part": "status"
+    },
+    {
+      "key": "GET /repos/orbit/orbit/pulls/1766/comments",
+      "read": "Threads",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8",
+        "etag": "\"864ce3e25204f89da3733c5114bca7fb5190129e38ea991bf8635cb9222aca31\"",
+        "x-ratelimit-limit": "5000",
+        "x-ratelimit-remaining": "4918",
+        "x-ratelimit-reset": "1794635243",
+        "x-ratelimit-used": "82",
+        "x-ratelimit-resource": "core"
+      },
+      "body": "threads.json",
+      "synthesized": false
+    },
+    {
+      "key": "GET /repos/orbit/orbit/issues/1766/timeline",
+      "read": "Timeline",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8",
+        "etag": "\"36c3f49c6615917bb4bf01a1ebcddf203905b60f074cfb6991a321988ebe3fa6\"",
+        "x-ratelimit-limit": "5000",
+        "x-ratelimit-remaining": "4917",
+        "x-ratelimit-reset": "1794635243",
+        "x-ratelimit-used": "83",
+        "x-ratelimit-resource": "core"
+      },
+      "body": "timeline.json",
+      "synthesized": false
+    },
+    {
+      "key": "GET /repos/orbit/orbit/issues/1766/comments",
+      "read": "Timeline",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8",
+        "etag": "\"c17484948294a85e671f1542bf06681eeed41e61c40cd60345781e4696eed928\"",
+        "x-ratelimit-limit": "5000",
+        "x-ratelimit-remaining": "4916",
+        "x-ratelimit-reset": "1794635243",
+        "x-ratelimit-used": "84",
+        "x-ratelimit-resource": "core"
+      },
+      "body": "timeline-2.json",
+      "synthesized": false,
+      "part": "comments"
+    },
+    {
+      "key": "GET /repos/orbit/orbit/pulls/1766",
+      "read": "Diff",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/vnd.github.diff; charset=utf-8",
+        "etag": "\"aab5bcccd77bc09045c0c74d7bc7ba893255c529bc76ca3e09b59bc88a003ce1\"",
+        "last-modified": "Thu, 12 Nov 2026 13:45:23 GMT",
+        "x-ratelimit-limit": "5000",
+        "x-ratelimit-remaining": "4915",
+        "x-ratelimit-reset": "1794635243",
+        "x-ratelimit-used": "85",
+        "x-ratelimit-resource": "core"
+      },
+      "body": "diff.diff",
+      "synthesized": false,
+      "accept": "application/vnd.github.diff"
+    },
+    {
+      "key": "GET /repos/orbit/orbit/commits/1a755e34211d45b296e56c15db91b23b5c29983b",
+      "read": "CommitDiff",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/vnd.github.diff; charset=utf-8",
+        "etag": "\"04827536951506a5b8287152d820819cf7ba62f72de5314ae89ef2aed178ec72\"",
+        "last-modified": "Thu, 12 Nov 2026 13:40:42 GMT",
+        "x-ratelimit-limit": "5000",
+        "x-ratelimit-remaining": "4914",
+        "x-ratelimit-reset": "1794635243",
+        "x-ratelimit-used": "86",
+        "x-ratelimit-resource": "core"
+      },
+      "body": "commit-diff.diff",
+      "synthesized": false,
+      "accept": "application/vnd.github.diff"
+    },
+    {
+      "key": "GET /repos/orbit/orbit/pulls?head=sam5%3Afix%2F1740-insert-above-before-first-flush&state=open",
+      "read": "PullRequestForBranch",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8",
+        "etag": "\"54686023623f480c309034d698d0a47beaedf95b2a603fea154af0d4bd4ff650\"",
+        "x-ratelimit-limit": "5000",
+        "x-ratelimit-remaining": "4913",
+        "x-ratelimit-reset": "1794635243",
+        "x-ratelimit-used": "87",
+        "x-ratelimit-resource": "core"
+      },
+      "body": "pull-request-for-branch.json",
+      "synthesized": false
+    },
+    {
+      "key": "GET /repos/orbit/orbit/issues/1883",
+      "read": "Issue",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8",
+        "etag": "\"ac38944e85ce2996f0b980cbb9880f3cf8f9cd44ad95d93bc5513d37670b4c2d\"",
+        "last-modified": "Thu, 05 Nov 2026 05:15:52 GMT",
+        "x-ratelimit-limit": "5000",
+        "x-ratelimit-remaining": "4912",
+        "x-ratelimit-reset": "1794635243",
+        "x-ratelimit-used": "88",
+        "x-ratelimit-resource": "core"
+      },
+      "body": "issue.json",
+      "synthesized": false
+    },
+    {
+      "key": "GET /repos/orbit/orbit/issues/1883/comments",
+      "read": "Issue",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8",
+        "etag": "\"54686023623f480c309034d698d0a47beaedf95b2a603fea154af0d4bd4ff650\"",
+        "x-ratelimit-limit": "5000",
+        "x-ratelimit-remaining": "4911",
+        "x-ratelimit-reset": "1794635243",
+        "x-ratelimit-used": "89",
+        "x-ratelimit-resource": "core"
+      },
+      "body": "issue-2.json",
+      "synthesized": false,
+      "part": "comments"
+    },
+    {
+      "key": "GET /repos/orbit/orbit/issues/1883/timeline",
+      "read": "Timeline",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8",
+        "etag": "\"7401defcff694932356f55bd82c878b95ff14459704b8828784f493dd4ba7893\"",
+        "x-ratelimit-limit": "5000",
+        "x-ratelimit-remaining": "4910",
+        "x-ratelimit-reset": "1794635243",
+        "x-ratelimit-used": "90",
+        "x-ratelimit-resource": "core"
+      },
+      "body": "timeline-3.json",
+      "synthesized": false,
+      "kind": "issue"
+    },
+    {
+      "key": "GET /repos/orbit/orbit/actions/workflows",
+      "read": "Workflows",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8",
+        "etag": "\"f4376bcaa8dc33ebee2dd8fae7ae54cf6d312d46edd63ebf65a3a46bed0f1da0\"",
+        "x-ratelimit-limit": "5000",
+        "x-ratelimit-remaining": "4909",
+        "x-ratelimit-reset": "1794635243",
+        "x-ratelimit-used": "91",
+        "x-ratelimit-resource": "core"
+      },
+      "body": "workflows.json",
+      "synthesized": false
+    },
+    {
+      "key": "GET /repos/orbit/orbit/contents/.github/workflows/build.yml?ref=main",
+      "read": "WorkflowSource",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8",
+        "etag": "\"b3fbbad04da582b0294f88f42c1b1e73b6e2eef3\"",
+        "last-modified": "Thu, 12 Nov 2026 13:45:21 GMT",
+        "x-ratelimit-limit": "5000",
+        "x-ratelimit-remaining": "4908",
+        "x-ratelimit-reset": "1794635243",
+        "x-ratelimit-used": "92",
+        "x-ratelimit-resource": "core"
+      },
+      "body": "workflow-source.json",
+      "synthesized": false
+    },
+    {
+      "key": "GET /repos/orbit/orbit/actions/runs?page=1",
+      "read": "Runs",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8",
+        "etag": "\"0852f4b7e9060f580041b75032a233750edee30052b11b852f247767bfab7db4\"",
+        "link": "<https://api.github.com/repositories/233130089/actions/runs?page=2&per_page=10>; rel=\"next\", <https://api.github.com/repositories/233130089/actions/runs?page=236&per_page=10>; rel=\"last\"",
+        "x-ratelimit-limit": "5000",
+        "x-ratelimit-remaining": "4907",
+        "x-ratelimit-reset": "1794635243",
+        "x-ratelimit-used": "93",
+        "x-ratelimit-resource": "core"
+      },
+      "body": "runs.json",
+      "synthesized": false
+    },
+    {
+      "key": "GET /repos/orbit/orbit/actions/runs?page=2",
+      "read": "Runs",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8",
+        "etag": "\"fc1d84861ff7e531b164728c846fc0bb162f01835e450d3328eca8352028c5b9\"",
+        "link": "<https://api.github.com/repositories/233130089/actions/runs?page=1&per_page=10>; rel=\"prev\", <https://api.github.com/repositories/233130089/actions/runs?page=3&per_page=10>; rel=\"next\", <https://api.github.com/repositories/233130089/actions/runs?page=236&per_page=10>; rel=\"last\", <https://api.github.com/repositories/233130089/actions/runs?page=1&per_page=10>; rel=\"first\"",
+        "x-ratelimit-limit": "5000",
+        "x-ratelimit-remaining": "4906",
+        "x-ratelimit-reset": "1794635243",
+        "x-ratelimit-used": "94",
+        "x-ratelimit-resource": "core"
+      },
+      "body": "runs-2.json",
+      "synthesized": false
+    },
+    {
+      "key": "GET /repos/orbit/orbit/actions/runs/43243312257",
+      "read": "Run",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8",
+        "etag": "\"94b1ad6758bce6efee6894cdfe5991a089f4b621f1d79d8444e102c5b4155ac9\"",
+        "x-ratelimit-limit": "5000",
+        "x-ratelimit-remaining": "4897",
+        "x-ratelimit-reset": "1794635243",
+        "x-ratelimit-used": "103",
+        "x-ratelimit-resource": "core"
+      },
+      "body": "run.json",
+      "synthesized": false
+    },
+    {
+      "key": "GET /repos/orbit/orbit/actions/runs/43243312257/jobs?filter=all",
+      "read": "Run",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8",
+        "etag": "\"d8f20e2be6dfb9ab7abcb4a9cc4d71717942a9bc674fd91f4a595e7b8e80342c\"",
+        "x-ratelimit-limit": "5000",
+        "x-ratelimit-remaining": "4896",
+        "x-ratelimit-reset": "1794635243",
+        "x-ratelimit-used": "104",
+        "x-ratelimit-resource": "core"
+      },
+      "body": "run-2.json",
+      "synthesized": false,
+      "part": "jobs"
+    },
+    {
+      "key": "GET /repos/orbit/orbit/actions/runs/43243312257/artifacts",
+      "read": "Artifacts",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8",
+        "etag": "\"a1fb0ce99003aa9baacb7cbb7c42e02a6bc1a32ba8848c7841e5f571dffeddcc\"",
+        "x-ratelimit-limit": "5000",
+        "x-ratelimit-remaining": "4895",
+        "x-ratelimit-reset": "1794635243",
+        "x-ratelimit-used": "105",
+        "x-ratelimit-resource": "core"
+      },
+      "body": "artifacts.json",
+      "synthesized": false
+    },
+    {
+      "key": "GET /repos/orbit/orbit/actions/jobs/131269259078",
+      "read": "Job",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8",
+        "etag": "\"4cee92563fcf2db3ea5bb90c75464af44165869fb8033c3398e530fd48902f89\"",
+        "x-ratelimit-limit": "5000",
+        "x-ratelimit-remaining": "4894",
+        "x-ratelimit-reset": "1794635243",
+        "x-ratelimit-used": "106",
+        "x-ratelimit-resource": "core"
+      },
+      "body": "job.json",
+      "synthesized": false
+    },
+    {
+      "key": "GET /repos/orbit/orbit/actions/jobs/131269259078/logs",
+      "read": "JobLog",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "text/plain",
+        "last-modified": "Thu, 12 Nov 2026 15:01:54 GMT",
+        "etag": "\"0x8DF40CDE3C6DC4F\""
+      },
+      "body": "job-log.log",
+      "synthesized": false,
+      "accept": "*/*",
+      "note": "followed a blob redirect without the token"
+    },
+    {
+      "key": "GET /user",
+      "read": "Viewer",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "body": "viewer-synth.json",
+      "synthesized": true,
+      "doc": "https://docs.github.com/en/rest/users/users#get-the-authenticated-user"
+    },
+    {
+      "key": "GET /notifications?all=false",
+      "read": "Notifications",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "body": "notifications-synth.json",
+      "synthesized": true,
+      "doc": "https://docs.github.com/en/rest/activity/notifications#list-notifications-for-the-authenticated-user"
+    },
+    {
+      "key": "POST /repos/orbit/orbit/issues/13/comments#54c8c686d137",
+      "read": "Comment",
+      "method": "POST",
+      "status": 201,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "body": "comment-synth.json",
+      "synthesized": true,
+      "doc": "https://docs.github.com/en/rest/issues/comments#create-an-issue-comment",
+      "request": {
+        "body": "Looks good to me."
+      }
+    },
+    {
+      "key": "PATCH /repos/orbit/orbit/issues/13#ace97ff00a6b",
+      "read": "SetLabels",
+      "method": "PATCH",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "body": "set-labels-synth.json",
+      "synthesized": true,
+      "doc": "https://docs.github.com/en/rest/issues/issues#update-an-issue",
+      "request": {
+        "labels": [
+          "bug"
+        ]
+      }
+    },
+    {
+      "key": "PATCH /repos/orbit/orbit/issues/13#f8022682813f",
+      "read": "SetState",
+      "method": "PATCH",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "body": "set-state-synth.json",
+      "synthesized": true,
+      "doc": "https://docs.github.com/en/rest/issues/issues#update-an-issue",
+      "request": {
+        "state": "closed"
+      }
+    },
+    {
+      "key": "POST /repos/orbit/orbit/pulls/13/reviews#4adeeeeb2fb5",
+      "read": "SubmitReview",
+      "method": "POST",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "body": "submit-review-synth.json",
+      "synthesized": true,
+      "doc": "https://docs.github.com/en/rest/pulls/reviews#create-a-review-for-a-pull-request",
+      "request": {
+        "event": "APPROVE",
+        "body": "Ship it",
+        "commit_id": "c92ad11000000000000000000000000000000000",
+        "comments": []
+      }
+    },
+    {
+      "key": "PUT /repos/orbit/orbit/pulls/13/merge#b2fe3115d5c4",
+      "read": "Merge",
+      "method": "PUT",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "body": "merge-synth.json",
+      "synthesized": true,
+      "doc": "https://docs.github.com/en/rest/pulls/pulls#merge-a-pull-request",
+      "request": {
+        "sha": "c92ad11000000000000000000000000000000000",
+        "merge_method": "squash"
+      }
+    },
+    {
+      "key": "PUT /repos/orbit/orbit/pulls/13/merge#c5c9f5e26a71",
+      "read": "Merge",
+      "method": "PUT",
+      "status": 409,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "body": "merge-synth-2.json",
+      "synthesized": true,
+      "doc": "https://docs.github.com/en/rest/pulls/pulls#merge-a-pull-request",
+      "request": {
+        "sha": "0000000000000000000000000000000000000000",
+        "merge_method": "squash"
+      }
+    },
+    {
+      "key": "POST /repos/orbit/orbit/pulls/13/comments#e24a9a5f70c5",
+      "read": "InlineComment",
+      "method": "POST",
+      "status": 201,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "body": "inline-comment-synth.json",
+      "synthesized": true,
+      "doc": "https://docs.github.com/en/rest/pulls/comments#create-a-review-comment-for-a-pull-request",
+      "request": {
+        "body": "nit: rename",
+        "commit_id": "c92ad11000000000000000000000000000000000",
+        "path": "src/lib.rs",
+        "line": 12,
+        "side": "RIGHT"
+      }
+    },
+    {
+      "key": "POST /graphql op=AddPullRequestReviewThreadReply",
+      "read": "Reply",
+      "method": "POST",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "body": "reply-synth.json",
+      "synthesized": true,
+      "doc": "https://docs.github.com/en/graphql/reference/mutations#addpullrequestreviewthreadreply",
+      "graphql": {
+        "operation": "AddPullRequestReviewThreadReply",
+        "variables": {
+          "thread": "PRRT_orbit1",
+          "body": "Done."
+        }
+      }
+    },
+    {
+      "key": "POST /repos/orbit/orbit/actions/runs/91/rerun#32d37a2fd89a",
+      "read": "Rerun",
+      "method": "POST",
+      "status": 201,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "body": "rerun-synth.json",
+      "synthesized": true,
+      "doc": "https://docs.github.com/en/rest/actions/workflow-runs#re-run-a-workflow",
+      "request": {
+        "enable_debug_logging": false
+      }
+    },
+    {
+      "key": "POST /repos/orbit/orbit/actions/runs/91/rerun-failed-jobs#32d37a2fd89a",
+      "read": "Rerun",
+      "method": "POST",
+      "status": 201,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "body": "rerun-synth-2.json",
+      "synthesized": true,
+      "doc": "https://docs.github.com/en/rest/actions/workflow-runs#re-run-failed-jobs-from-a-workflow-run",
+      "request": {
+        "enable_debug_logging": false
+      }
+    },
+    {
+      "key": "POST /repos/orbit/orbit/actions/runs/91/cancel",
+      "read": "CancelRun",
+      "method": "POST",
+      "status": 202,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "body": "cancel-run-synth.json",
+      "synthesized": true,
+      "doc": "https://docs.github.com/en/rest/actions/workflow-runs#cancel-a-workflow-run"
+    },
+    {
+      "key": "POST /repos/orbit/orbit/actions/workflows/31/dispatches#23ccdb21c43a",
+      "read": "Dispatch",
+      "method": "POST",
+      "status": 204,
+      "headers": {},
+      "body": null,
+      "synthesized": true,
+      "doc": "https://docs.github.com/en/rest/actions/workflows#create-a-workflow-dispatch-event",
+      "request": {
+        "ref": "main",
+        "inputs": {
+          "target": "staging"
+        }
+      }
+    },
+    {
+      "key": "PATCH /notifications/threads/9001",
+      "read": "MarkRead",
+      "method": "PATCH",
+      "status": 205,
+      "headers": {},
+      "body": null,
+      "synthesized": true,
+      "doc": "https://docs.github.com/en/rest/activity/notifications#mark-a-thread-as-read"
+    }
+  ]
+}

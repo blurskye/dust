@@ -19,6 +19,9 @@ const HIGHLIGHT_BYTE_LIMIT: usize = 64 * 1024;
 pub struct Styled {
     pub text: String,
     pub spans: Vec<(Range<usize>, Highlight)>,
+    /// Byte ranges of rendered code, tables and preformatted blocks. Logical
+    /// readers may wrap prose without reflowing these independently wide rows.
+    pub preformatted: Vec<Range<usize>>,
     pub ambiguous_width: AmbiguousWidth,
 }
 
@@ -67,7 +70,7 @@ impl Styled {
             wrap(
                 self,
                 &segments,
-                width,
+                Some(width),
                 if index == 0 { first } else { rest },
                 rest,
             );
@@ -76,7 +79,7 @@ impl Styled {
 
     /// Styled runs wrapped at words to `width` cells.
     pub fn runs(&mut self, runs: &[(String, Option<Highlight>)], width: usize) {
-        wrap(self, runs, width, ("", None), ("", None));
+        wrap(self, runs, Some(width), ("", None), ("", None));
     }
 }
 
@@ -87,16 +90,23 @@ type Segment = (String, Option<Highlight>);
 
 /// Append `source` rendered for a column `width` cells wide.
 pub fn render(out: &mut Styled, source: &str, width: usize) {
-    render_blocks(out, source, width, true);
+    render_blocks(out, source, Some(width.max(1)), true);
 }
 
 /// Like `render`, for a small popup: code blocks are not framed by rules.
 pub fn render_compact(out: &mut Styled, source: &str, width: usize) {
-    render_blocks(out, source, width, false);
+    render_blocks(out, source, Some(width.max(1)), false);
 }
 
-fn render_blocks(out: &mut Styled, source: &str, width: usize, framed: bool) {
-    let width = width.max(1);
+/// Unwrapped logical lines with the same Markdown semantics and styled byte ranges.
+/// Callers can reflow these without changing searchable text. Decorative rules and
+/// code fences are omitted; table rows use separators without alignment padding or
+/// borders, keeping output proportional to the input even for very wide tables.
+pub fn render_logical(out: &mut Styled, source: &str) {
+    render_blocks(out, source, None, false);
+}
+
+fn render_blocks(out: &mut Styled, source: &str, width: Option<usize>, framed: bool) {
     let lines = source.lines().collect::<Vec<_>>();
     let mut index = 0;
     while index < lines.len() {
@@ -104,7 +114,25 @@ fn render_blocks(out: &mut Styled, source: &str, width: usize, framed: bool) {
         let trimmed = line.trim_start();
         let indent = &line[..line.len() - trimmed.len()];
         index += 1;
-        if let Some((fence, info)) = fence_open(trimmed) {
+        if width.is_none()
+            && (line.starts_with("    ") || line.starts_with('\t'))
+            && list_item(trimmed, indent).is_none()
+        {
+            // Preserve literal diagrams and indented code before interpreting
+            // headings, quotes or fences. Nested list markers keep list semantics.
+            let mut body = vec![line];
+            while let Some(candidate) = lines
+                .get(index)
+                .copied()
+                .filter(|candidate| candidate.starts_with("    ") || candidate.starts_with('\t'))
+            {
+                body.push(candidate);
+                index += 1;
+            }
+            let start = out.text.len();
+            code_block(out, "", &body, None, false);
+            out.preformatted.push(start..out.text.len());
+        } else if let Some((fence, info)) = fence_open(trimmed) {
             let mut body = Vec::new();
             while let Some(candidate) = lines.get(index) {
                 index += 1;
@@ -113,7 +141,9 @@ fn render_blocks(out: &mut Styled, source: &str, width: usize, framed: bool) {
                 }
                 body.push(*candidate);
             }
+            let start = out.text.len();
             code_block(out, info, &body, width, framed);
+            out.preformatted.push(start..out.text.len());
         } else if trimmed.starts_with('|')
             && lines
                 .get(index)
@@ -129,7 +159,9 @@ fn render_blocks(out: &mut Styled, source: &str, width: usize, framed: bool) {
                 rows.push(row);
                 index += 1;
             }
+            let start = out.text.len();
             table(out, &rows, width);
+            out.preformatted.push(start..out.text.len());
         } else if let Some(title) = heading(trimmed) {
             wrap(
                 out,
@@ -139,7 +171,11 @@ fn render_blocks(out: &mut Styled, source: &str, width: usize, framed: bool) {
                 ("", None),
             );
         } else if is_rule(trimmed) {
-            out.rule(width);
+            if let Some(width) = width {
+                out.rule(width);
+            } else {
+                out.push("\n", None);
+            }
         } else if trimmed.starts_with('>') {
             let text = trimmed.trim_start_matches(['>', ' ']);
             let bar = ("▎ ", Some(Highlight::QUOTE));
@@ -272,9 +308,9 @@ fn list_item<'a>(line: &'a str, indent: &str) -> Option<(String, &'a str)> {
     Some((format!("{}{marker} ", "  ".repeat(depth)), text))
 }
 
-fn code_block(out: &mut Styled, info: &str, body: &[&str], width: usize, framed: bool) {
+fn code_block(out: &mut Styled, info: &str, body: &[&str], width: Option<usize>, framed: bool) {
     let name = info.split_whitespace().next().unwrap_or("");
-    if framed {
+    if let Some(width) = width.filter(|_| framed) {
         let label = if name.is_empty() {
             String::new()
         } else {
@@ -311,7 +347,7 @@ fn code_block(out: &mut Styled, info: &str, body: &[&str], width: usize, framed:
             continue;
         }
         let cells = out.width(grapheme);
-        if column > 0 && column + cells > width {
+        if column > 0 && width.is_some_and(|width| column + cells > width) {
             out.push("\n", None);
             column = 0;
         }
@@ -326,7 +362,7 @@ fn code_block(out: &mut Styled, info: &str, body: &[&str], width: usize, framed:
         column += cells;
     }
 
-    if framed {
+    if let Some(width) = width.filter(|_| framed) {
         out.rule(width);
     }
 }
@@ -353,7 +389,7 @@ fn table_cells(row: &str) -> Vec<&str> {
     cells
 }
 
-fn table(out: &mut Styled, rows: &[&str], width: usize) {
+fn table(out: &mut Styled, rows: &[&str], width: Option<usize>) {
     let cells = rows
         .iter()
         .enumerate()
@@ -373,8 +409,10 @@ fn table(out: &mut Styled, rows: &[&str], width: usize) {
         }
     }
     let separator = (" │ ", Some(Highlight::COMMENT));
-    if widths.iter().sum::<usize>() + out.width(separator.0) * columns.saturating_sub(1) > width {
-        // Too wide to line up: one wrapped line per row.
+    if width.is_none_or(|width| {
+        widths.iter().sum::<usize>() + out.width(separator.0) * columns.saturating_sub(1) > width
+    }) {
+        // Too wide to line up, or logical output: one natural line per row.
         for row in cells {
             let mut line = Vec::new();
             for (column, cell) in row.into_iter().enumerate() {
@@ -671,7 +709,15 @@ fn link(text: &str, label_end: usize) -> Option<(&str, usize)> {
 
 /// Lay `segments` out in lines of at most `width` cells, the first starting with `first`
 /// and the rest with `rest`. Words longer than a line are broken between characters.
-fn wrap(out: &mut Styled, segments: &[Segment], width: usize, first: Prefix, rest: Prefix) {
+fn wrap(out: &mut Styled, segments: &[Segment], width: Option<usize>, first: Prefix, rest: Prefix) {
+    let Some(width) = width else {
+        out.push(first.0, first.1);
+        for (text, role) in segments {
+            out.push(text, *role);
+        }
+        out.push("\n", None);
+        return;
+    };
     let mut words: Vec<Vec<(&str, Option<Highlight>)>> = vec![Vec::new()];
     for (text, role) in segments {
         for (index, part) in text.split(' ').enumerate() {
@@ -858,6 +904,54 @@ mod tests {
         assert_eq!(styled(&out, Highlight::ITALIC), ["italic"]);
         assert_eq!(styled(&out, Highlight::RAW), ["code"]);
         assert_eq!(styled(&out, Highlight::LINK), ["docs"]);
+    }
+
+    #[test]
+    fn logical_lines_share_semantics_without_wrapping_or_decorative_rules() {
+        let mut out = Styled::default();
+        render_logical(
+            &mut out,
+            "### Title\nSome **bold**, _italic_, `code` and [docs](https://hidden.test).\n> quote\n- [x] done\n\n---\n```rust\n\tlet value = \"**literal**\";\n```\n| Name | Value |\n|---|---|\n| **row** | `cell` |",
+        );
+        assert_eq!(
+            out.text,
+            "Title\nSome bold, italic, code and docs.\n▎ quote\n✓ done\n\n\n\tlet value = \"**literal**\";\nName │ Value\nrow │ cell\n"
+        );
+        for (role, text) in [
+            (Highlight::HEADING, "Title"),
+            (Highlight::STRONG, "bold"),
+            (Highlight::ITALIC, "italic"),
+            (Highlight::RAW, "code"),
+            (Highlight::LINK, "docs"),
+            (Highlight::QUOTE, "▎ quote"),
+            (Highlight::KEYWORD, "✓ "),
+        ] {
+            assert!(styled(&out, role).contains(&text), "{role:?}: {out:?}");
+        }
+        assert!(styled(&out, Highlight::named("@keyword.rust").unwrap()).contains(&"let"));
+    }
+
+    #[test]
+    fn logical_long_unicode_code_and_tables_are_lossless_and_input_bounded() {
+        let long = format!("{}e\u{301} 👩‍💻\tend", "界".repeat(20_000));
+        let source = format!(
+            "**{long}**\n```unknown\n{long}\n```\n---\n| {long} | b |\n|---|---|\n| c | d |"
+        );
+        let mut out = Styled::default();
+        render_logical(&mut out, &source);
+        assert_eq!(out.text, format!("{long}\n{long}\n\n{long} │ b\nc │ d\n"));
+        assert!(out.text.len() <= source.len());
+        for (range, _) in &out.spans {
+            assert!(out.text.get(range.clone()).is_some());
+        }
+    }
+
+    #[test]
+    fn compact_rendering_keeps_its_existing_wrap_and_code_behavior() {
+        let mut out = Styled::default();
+        render_compact(&mut out, "**aaa bbb**\n```text\n123456789\n```\n---", 7);
+        assert_eq!(out.text, "aaa bbb\n1234567\n89\n───────\n");
+        assert_eq!(styled(&out, Highlight::STRONG), ["aaa bbb"]);
     }
 
     #[test]

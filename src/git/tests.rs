@@ -1675,6 +1675,110 @@ fn line_range_stage_applies_only_the_selected_lines() {
 }
 
 #[test]
+fn line_range_unstage_preserves_other_staged_changes_and_worktree() {
+    let dir = tempdir().unwrap();
+    let repo = git2::Repository::init(dir.path()).unwrap();
+    commit(&repo, "lines.txt", "a\nb\nc\nd\ne\n");
+    let changed = "a\nB\nc\nNEW\nd\ne\n";
+    std::fs::write(dir.path().join("lines.txt"), changed).unwrap();
+    let mut index = repo.index().unwrap();
+    index.add_path(Path::new("lines.txt")).unwrap();
+    index.write().unwrap();
+    let root = crate::files::canonicalize(dir.path()).unwrap();
+    let policy = plan_policy(&root, "lines.txt", GitDiffLayer::Staged);
+    let mut plan = captured_plan(&root, policy.clone(), GitMutationKind::UnstageLines, 0);
+    plan.selected_lines = plan
+        .selected
+        .as_ref()
+        .unwrap()
+        .lines
+        .iter()
+        .enumerate()
+        .filter(|(_, line)| matches!(line.text.trim(), "b" | "B"))
+        .map(|(i, _)| i as u32)
+        .collect();
+    assert_eq!(plan.selected_lines.len(), 2);
+    let result = run_plan(plan).unwrap();
+    assert_eq!(result.kind, GitMutationKind::UnstageLines);
+    assert_eq!(index_text(&root, "lines.txt"), "a\nb\nc\nNEW\nd\ne\n");
+    assert_eq!(
+        std::fs::read_to_string(root.join("lines.txt")).unwrap(),
+        changed
+    );
+    let mut remaining = captured_plan(&root, policy, GitMutationKind::UnstageLines, 0);
+    remaining.selected_lines = remaining
+        .selected
+        .as_ref()
+        .unwrap()
+        .lines
+        .iter()
+        .enumerate()
+        .filter(|(_, line)| line.kind != GitDiffLineKind::Context)
+        .map(|(i, _)| i as u32)
+        .collect();
+    run_plan(remaining).unwrap();
+    assert_eq!(index_text(&root, "lines.txt"), "a\nb\nc\nd\ne\n");
+    assert_eq!(
+        std::fs::read_to_string(root.join("lines.txt")).unwrap(),
+        changed
+    );
+}
+
+#[test]
+fn line_unstage_handles_added_deleted_and_empty_files_without_writing_disk() {
+    for original in [None, Some("first\nsecond\n"), Some("")] {
+        let dir = tempdir().unwrap();
+        let repo = git2::Repository::init(dir.path()).unwrap();
+        commit(&repo, "seed.txt", "seed\n");
+        if let Some(original) = original {
+            commit(&repo, "lines.txt", original);
+        }
+        let path = dir.path().join("lines.txt");
+        let deleted = original.is_some_and(|text| !text.is_empty());
+        if deleted {
+            std::fs::remove_file(&path).unwrap();
+        } else {
+            std::fs::write(&path, "first\nsecond\n").unwrap();
+        }
+        let mut index = repo.index().unwrap();
+        if deleted {
+            index.remove_path(Path::new("lines.txt")).unwrap();
+        } else {
+            index.add_path(Path::new("lines.txt")).unwrap();
+        }
+        index.write().unwrap();
+        let root = crate::files::canonicalize(dir.path()).unwrap();
+        let policy = plan_policy(&root, "lines.txt", GitDiffLayer::Staged);
+        let mut plan = captured_plan(&root, policy.clone(), GitMutationKind::UnstageLines, 0);
+        plan.selected_lines = vec![
+            plan.selected
+                .as_ref()
+                .unwrap()
+                .lines
+                .iter()
+                .position(|line| line.text.starts_with("first"))
+                .unwrap() as u32,
+        ];
+        run_plan(plan).unwrap();
+        assert_eq!(
+            index_text(&root, "lines.txt"),
+            if deleted { "first\n" } else { "second\n" }
+        );
+        if original == Some("") {
+            let mut rest = captured_plan(&root, policy, GitMutationKind::UnstageLines, 0);
+            rest.selected_lines = vec![0];
+            run_plan(rest).unwrap();
+            assert_eq!(index_text(&root, "lines.txt"), "");
+        }
+        if deleted {
+            assert!(!path.exists());
+        } else {
+            assert_eq!(std::fs::read_to_string(path).unwrap(), "first\nsecond\n");
+        }
+    }
+}
+
+#[test]
 fn invalid_line_selections_are_rejected_without_writing_the_index() {
     let dir = tempdir().unwrap();
     let repo = git2::Repository::init(dir.path()).unwrap();
@@ -2879,9 +2983,13 @@ fn abort_returns_to_the_recorded_start_and_refuses_to_discard_work() {
     std::fs::create_dir_all(&root).unwrap();
     let (our_tip, _) = conflicted_fixture(&root);
 
-    // ABORT WITH AN UNCOMMITTED CHANGE is refused, and the change survives.
-    // h1.txt is untouched by the merge, so it is the user's own work.
+    // Git's normal abort can delete an unrelated newly staged file. Refuse it first.
     std::fs::write(root.join("mine.txt"), "my work\n").unwrap();
+    let repo = git2::Repository::open(&root).unwrap();
+    let mut index = repo.index().unwrap();
+    index.add_path(Path::new("mine.txt")).unwrap();
+    index.write().unwrap();
+    let before_index = git_index_fingerprint(&root).unwrap();
     let refusal = abort_operation(&root).expect_err("abort must not discard the user's work");
     match &refusal {
         GitRecoveryRefusal::WouldDiscard(paths) => {
@@ -2890,7 +2998,9 @@ fn abort_returns_to_the_recorded_start_and_refuses_to_discard_work() {
                 "the refusal names the path it would destroy: {paths}"
             );
             assert!(
-                refusal.to_string().contains("never throws work away"),
+                refusal
+                    .to_string()
+                    .contains("would discard unrelated changes: mine.txt"),
                 "and says why it refused: {refusal}"
             );
         }
@@ -2908,9 +3018,12 @@ fn abort_returns_to_the_recorded_start_and_refuses_to_discard_work() {
         "and the user's bytes are intact"
     );
     assert_eq!(repo.state(), git2::RepositoryState::Merge, "still paused");
+    assert_eq!(git_index_fingerprint(&root).unwrap(), before_index);
 
-    // Once the change is committed away, the abort succeeds and returns to the recorded start.
-    std::fs::remove_file(root.join("mine.txt")).unwrap();
+    // Unstage the unrelated file, without deleting it. Abort now keeps its working bytes.
+    let mut index = repo.index().unwrap();
+    index.remove_path(Path::new("mine.txt")).unwrap();
+    index.write().unwrap();
     let branch = repo.head().unwrap().name().unwrap().to_owned();
     let outcome = abort_operation(&root).expect("a clean abort returns to the recorded start");
     assert_eq!(outcome.operation, "merge");
@@ -2937,6 +3050,7 @@ fn abort_returns_to_the_recorded_start_and_refuses_to_discard_work() {
         "ours\n",
         "the working tree is back to the recorded content"
     );
+    assert_eq!(std::fs::read(root.join("mine.txt")).unwrap(), b"my work\n");
 }
 
 #[test]
@@ -3258,13 +3372,14 @@ fn the_bar_names_every_paused_operation_the_contract_lists() {
             bar.blockers
         );
         assert!(
-            bar.offers(GitOperationAction::Continue) == (expected == "merge"),
-            "only merge continuation is supported: {expected}"
+            bar.offers(GitOperationAction::Continue) == matches!(expected, "merge" | "rebase"),
+            "merge and rebase continuation are supported: {expected}"
         );
         assert!(
             bar.offers(GitOperationAction::Abort),
             "abort stays valid for {expected}"
         );
+        assert_eq!(bar.offers(GitOperationAction::Skip), expected == "rebase");
         assert!(
             !bar.offers(GitOperationAction::Resolve),
             "and resolving is NOT offered when no path is conflicted: {:?}",
@@ -4359,7 +4474,7 @@ fn abort_cherry_pick_of_a_root_commit_restores_the_start() {
 
 #[cfg(unix)]
 #[test]
-fn abort_protects_non_utf8_tracked_worktree_edits() {
+fn abort_preserves_non_utf8_tracked_worktree_edits() {
     use std::os::unix::ffi::OsStrExt;
     let dir = tempdir().unwrap();
     let native = Path::new(std::ffi::OsStr::from_bytes(b"mine\xff.txt"));
@@ -4373,19 +4488,17 @@ fn abort_protects_non_utf8_tracked_worktree_edits() {
             None
         }
     };
-    let before = git_index_fingerprint(dir.path()).unwrap();
-    assert!(matches!(
-        abort_operation(dir.path()),
-        Err(GitRecoveryRefusal::WouldDiscard(_))
-    ));
-    assert_eq!(git_index_fingerprint(dir.path()).unwrap(), before);
+    let repo = git2::Repository::open(dir.path()).unwrap();
+    let original = repo.index().unwrap().get_path(native, 0).unwrap();
+    let outcome = abort_operation(dir.path()).unwrap();
+    assert_eq!(outcome.restored_to, Some(ours));
+    let repo = git2::Repository::open(dir.path()).unwrap();
+    assert_eq!(repo.head().unwrap().target(), Some(ours));
+    assert_eq!(repo.state(), git2::RepositoryState::Clean);
+    let current = repo.index().unwrap().get_path(native, 0).unwrap();
     assert_eq!(
-        git2::Repository::open(dir.path())
-            .unwrap()
-            .head()
-            .unwrap()
-            .target(),
-        Some(ours)
+        (current.path, current.id, current.mode),
+        (original.path, original.id, original.mode)
     );
     assert_eq!(std::fs::read(dir.path().join(native)).ok(), expected);
 }
@@ -4396,15 +4509,25 @@ fn abort_preserves_unrelated_tracked_worktree_edits() {
     conflicted_fixture(dir.path());
     let path = dir.path().join("untouched.txt");
     std::fs::write(&path, "saved edits\n").unwrap();
-    assert!(matches!(
-        crate::git::conflict::abort_operation(dir.path()),
-        Err(crate::git::conflict::GitRecoveryRefusal::WouldDiscard(_))
-    ));
+    let repo = git2::Repository::open(dir.path()).unwrap();
+    let head = repo.head().unwrap().target();
+    let original = repo
+        .index()
+        .unwrap()
+        .get_path(Path::new("untouched.txt"), 0)
+        .unwrap();
+    let outcome = crate::git::conflict::abort_operation(dir.path()).unwrap();
+    assert_eq!(outcome.restored_to, head);
     assert_eq!(std::fs::read_to_string(path).unwrap(), "saved edits\n");
-    assert_eq!(
-        git2::Repository::open(dir.path()).unwrap().state(),
-        git2::RepositoryState::Merge
-    );
+    let repo = git2::Repository::open(dir.path()).unwrap();
+    assert_eq!(repo.state(), git2::RepositoryState::Clean);
+    assert_eq!(repo.head().unwrap().target(), head);
+    let current = repo
+        .index()
+        .unwrap()
+        .get_path(Path::new("untouched.txt"), 0)
+        .unwrap();
+    assert_eq!((current.id, current.mode), (original.id, original.mode));
 }
 
 #[test]

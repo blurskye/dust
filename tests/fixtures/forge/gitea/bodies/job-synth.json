@@ -1,0 +1,19 @@
+{
+  "id": 42,
+  "run_id": 91,
+  "name": "test",
+  "status": "completed",
+  "conclusion": "failure",
+  "head_branch": "main",
+  "head_sha": "c92ad11000000000000000000000000000000000",
+  "started_at": "2026-11-14T04:46:56Z",
+  "completed_at": "2026-11-14T04:50:56Z",
+  "runner_name": "runner-1",
+  "labels": [
+    "ubuntu-latest"
+  ],
+  "steps": [],
+  "html_url": "https://gitea.com/orbit/orbit/actions/runs/12/jobs/0",
+  "url": "https://gitea.com/api/v1/repos/orbit/orbit/actions/jobs/42",
+  "run_attempt": 1
+}

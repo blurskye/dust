@@ -1,0 +1,545 @@
+{
+  "data": {
+    "project": {
+      "mergeRequest": {
+        "iid": "564",
+        "diffRefs": {
+          "baseSha": "7f8e7610150dcbcd598ac73aa009d064113b3d05",
+          "headSha": "cd2d1286c97c1b78e3f6e6f607d9841136eb1ead",
+          "startSha": "7f8e7610150dcbcd598ac73aa009d064113b3d05"
+        },
+        "discussions": {
+          "nodes": [
+            {
+              "id": "gid://gitlab/Discussion/4b390670edc6ce417d4e6cd0f3e1d6eeb8f07e8f",
+              "resolved": false,
+              "resolvable": false,
+              "notes": {
+                "nodes": [
+                  {
+                    "id": "gid://gitlab/Note/4093396817",
+                    "body": "assigned to @maya",
+                    "system": true,
+                    "internal": false,
+                    "createdAt": "2026-10-26T18:50:26Z",
+                    "updatedAt": "2026-10-26T18:50:26Z",
+                    "author": {
+                      "username": "maya6",
+                      "name": "Maya6"
+                    },
+                    "position": null
+                  }
+                ]
+              }
+            },
+            {
+              "id": "gid://gitlab/Discussion/4a0f9568df07a3eae4e3a05f9babcab867ad6319",
+              "resolved": false,
+              "resolvable": false,
+              "notes": {
+                "nodes": [
+                  {
+                    "id": "gid://gitlab/Note/4093396902",
+                    "body": "<!-- triage-serverless ThankContribution -->\nThanks for your contribution to GitLab @maya! :tada:\n\nDid you know about our [community forks](https://gitlab.com/gitlab-community/meta)?\nWorking from there will make your contribution process easier. Please check it out!\n\n* Request a review, help or apply labels by [clicking here](https://alex6/manage-merge-request?projectId=6329679&mergeRequestIid=564) or come say hi on [Discord](https://discord.gg/gitlab).\n* We welcome AI-generated contributions and offer [complimentary access to Alex](https://gitlab.com/gitlab-community/meta#gitlab-duo)!\n\n*This message was [generated automatically](https://handbook.gitlab.com/handbook/engineering/infrastructure/engineering-productivity/triage-operations).\n[Improve it](https://gitlab.com/orbit/quality/triage-ops/-/blob/master/triage/processor/community/thank_contribution.rb)\nor [delete it](https://handbook.gitlab.com/handbook/engineering/infrastructure/engineering-productivity/triage-operations/#reactive-delete_bot_comment-command).*",
+                    "system": false,
+                    "internal": false,
+                    "createdAt": "2026-10-26T18:50:27Z",
+                    "updatedAt": "2026-10-26T18:50:27Z",
+                    "author": {
+                      "username": "maya6",
+                      "name": "Maya6"
+                    },
+                    "position": null
+                  }
+                ]
+              }
+            },
+            {
+              "id": "gid://gitlab/Discussion/5cf5d0a817b9e6f8daa91db550bd033f5b88db37",
+              "resolved": false,
+              "resolvable": false,
+              "notes": {
+                "nodes": [
+                  {
+                    "id": "gid://gitlab/Note/4093399605",
+                    "body": "mentioned in issue #603",
+                    "system": true,
+                    "internal": false,
+                    "createdAt": "2026-10-26T18:50:50Z",
+                    "updatedAt": "2026-10-26T18:50:50Z",
+                    "author": {
+                      "username": "maya",
+                      "name": "Maya"
+                    },
+                    "position": null
+                  }
+                ]
+              }
+            },
+            {
+              "id": "gid://gitlab/Discussion/42023bfa24f65198695c127be8263044a585e594",
+              "resolved": false,
+              "resolvable": true,
+              "notes": {
+                "nodes": [
+                  {
+                    "id": "gid://gitlab/DiscussionNote/4093488113",
+                    "body": "Hey @maya, thanks for requesting a review!\n\nPlease review all feedback from `@alex`: apply the suggestions you're confident about, and leave a note on any you are unsure or disagree with. Then, request a review from the suggested reviewer.\n\nHey  :wave:\n\n- Do you have capacity and domain expertise to review this? If not, find one or more [reviewers](https://orbit.gitlab.io/gitlab-roulette/) and assign to them.\n- If you've reviewed it, add the ~\"workflow::in dev\" label if these changes need more work before the next review.\n- Please ensure the group's Product Manager has validated the linked issue.\n\n<!--\n@maya6 ready @alex\n-->\n\n\n\n_Posted via [alex6](https://alex6)._",
+                    "system": false,
+                    "internal": false,
+                    "createdAt": "2026-10-26T19:02:30Z",
+                    "updatedAt": "2026-10-26T19:02:30Z",
+                    "author": {
+                      "username": "alex6",
+                      "name": "Alex6"
+                    },
+                    "position": null
+                  },
+                  {
+                    "id": "gid://gitlab/DiscussionNote/4093491042",
+                    "body": "`@alex`, this ~\"Community contribution\" is ready for review.\n\n- Do you have capacity and domain expertise to review this? If not, find one or more [reviewers](https://orbit.gitlab.io/gitlab-roulette/) and assign to them.\n- If you've reviewed it, add the ~\"workflow::in dev\" label if these changes need more work before the next review.\n- Please ensure the group's Product Manager has validated the linked issue.\n\n*This message was [generated automatically](https://handbook.gitlab.com/handbook/engineering/infrastructure/engineering-productivity/triage-operations).\n[Improve it](https://gitlab.com/orbit/quality/triage-ops/-/blob/master/triage/processor/community/command_mr_request_review.rb)\nor [delete it](https://handbook.gitlab.com/handbook/engineering/infrastructure/engineering-productivity/triage-operations/#reactive-delete_bot_comment-command).*",
+                    "system": false,
+                    "internal": false,
+                    "createdAt": "2026-10-26T19:03:01Z",
+                    "updatedAt": "2026-10-26T19:03:01Z",
+                    "author": {
+                      "username": "maya6",
+                      "name": "Maya6"
+                    },
+                    "position": null
+                  }
+                ]
+              }
+            },
+            {
+              "id": "gid://gitlab/Discussion/e4e9d115216967acdf4f7f5e9350b415cdd88aad",
+              "resolved": false,
+              "resolvable": false,
+              "notes": {
+                "nodes": [
+                  {
+                    "id": "gid://gitlab/Note/4093490800",
+                    "body": "requested review from @alex",
+                    "system": true,
+                    "internal": false,
+                    "createdAt": "2026-10-26T19:02:58Z",
+                    "updatedAt": "2026-10-26T19:02:58Z",
+                    "author": {
+                      "username": "maya6",
+                      "name": "Maya6"
+                    },
+                    "position": null
+                  }
+                ]
+              }
+            },
+            {
+              "id": "gid://gitlab/Discussion/9bcfbf8e11290cb85a7487d21d5352676060b268",
+              "resolved": false,
+              "resolvable": true,
+              "notes": {
+                "nodes": [
+                  {
+                    "id": "gid://gitlab/DiscussionNote/4093611799",
+                    "body": "This is a well-scoped CI maintenance change and the version bumps (kind, kubectl, docker, alpine, helm-unittest) and URL fixes (dl.k8s.io, docker:-cli, pinned DESIRED_VERSION for get-helm-3) all look correct and consistent with the stated rationale. I flagged one concern worth checking before merge: the new default image (`alpine/helm:${HELM_VERSION}`) replaces an old, pre-PEP668 Alpine base for jobs that still do a bare `pip install awscli` (namely `release beta`), which could start failing with an externally-managed-environment error depending on the Alpine version baked into that image — this job isn't exercised by this MR's own pipeline run since it only fires on `main`. I also noted, at low confidence, the general supply-chain tradeoff of depending on an unofficial `alpine/helm` image instead of a GitLab-maintained one. Everything else — the `entrypoint: [\"\"]` override, the parameterized `DOCKER_VERSION`/`KUBECTL_VERSION`/`KIND_VERSION`/`HELM_VERSION` variables, and the integration test's `kubectl`/`helm` install steps — checks out against the affected scripts and jobs.\n\n1 finding (1 major) across 1 file:\n\n**Major**\n- ci-image-regression: `.gitlab-ci.yml:74`",
+                    "system": false,
+                    "internal": false,
+                    "createdAt": "2026-10-26T19:20:01Z",
+                    "updatedAt": "2026-10-27T07:34:37Z",
+                    "author": {
+                      "username": "alex",
+                      "name": "Alex"
+                    },
+                    "position": null
+                  },
+                  {
+                    "id": "gid://gitlab/DiscussionNote/4096639632",
+                    "body": "On the `alpine/helm` image: `gitlab-build-images` has no Helm-only image newer than `gitlab-charts-build-base-helm-3.9`, and its tags are not version-shaped, so they cannot be kept current by an update bot. `alpine/helm` is the image published by the alpine-docker organisation and is what `charts/gitlab` style tooling and many Helm projects use; its tag follows the Helm version, which is what `HELM_VERSION` tracks. If maintainers prefer a GitLab-maintained image, I am happy to switch, the only requirement for the follow-up (#603) is a version-shaped tag.",
+                    "system": false,
+                    "internal": false,
+                    "createdAt": "2026-10-27T07:34:37Z",
+                    "updatedAt": "2026-10-27T07:34:37Z",
+                    "author": {
+                      "username": "maya",
+                      "name": "Maya"
+                    },
+                    "position": null
+                  }
+                ]
+              }
+            },
+            {
+              "id": "gid://gitlab/Discussion/49114c1a63ba2f9a6304dadd8e26b40aeca0e439",
+              "resolved": true,
+              "resolvable": true,
+              "notes": {
+                "nodes": [
+                  {
+                    "id": "gid://gitlab/DiffNote/4093611913",
+                    "body": "Switching the default image from the old gitlab-build-images Helm 3.7 image to `alpine/helm:${HELM_VERSION}` also changes the base Alpine version under `release beta`, which still runs `apk add --no-cache py-pip` followed by `pip install awscli` without overriding `image:`. Recent Alpine releases (3.19+) ship pip with PEP 668 enforced, so a bare `pip install` fails with an externally-managed-environment error unless `--break-system-packages` (or a venv) is used. The old build-base-helm-3.7 image predates that restriction, so this job may have worked by accident until now. Has this been verified against the actual Alpine version baked into `alpine/helm:3.22.1`, since `release beta` only runs on pushes to main and wouldn't be caught by this MR's own pipeline?",
+                    "system": false,
+                    "internal": false,
+                    "createdAt": "2026-10-26T19:20:02Z",
+                    "updatedAt": "2026-11-02T18:36:44Z",
+                    "author": {
+                      "username": "alex",
+                      "name": "Alex"
+                    },
+                    "position": {
+                      "positionType": "text",
+                      "newPath": ".gitlab-ci.yml",
+                      "newLine": 74,
+                      "oldPath": ".gitlab-ci.yml",
+                      "oldLine": null,
+                      "diffRefs": {
+                        "headSha": "cd2d1286c97c1b78e3f6e6f607d9841136eb1ead"
+                      }
+                    }
+                  },
+                  {
+                    "id": "gid://gitlab/DiffNote/4096639448",
+                    "body": "Good catch, confirmed. `alpine/helm:3.22.1` is based on Alpine 3.24.2, and in that image `apk add py-pip && pip install awscli` fails with `error: externally-managed-environment`.\n\nFixed in cd2d128 by installing the `aws-cli` package from the Alpine community repository instead of pip (`apk add --no-cache aws-cli`). Verified in the same image: `aws --version` reports `aws-cli/2.34.63`. The `aws s3 cp` / `aws s3 sync --acl public-read` invocations used by the job are unchanged between awscli v1 and v2. The `sed -r` substitutions of the job also work on this image.\n\n`release beta` still only runs on `main`, so the end-to-end run can only be confirmed after merge.",
+                    "system": false,
+                    "internal": false,
+                    "createdAt": "2026-10-27T07:34:34Z",
+                    "updatedAt": "2026-11-02T18:36:44Z",
+                    "author": {
+                      "username": "maya",
+                      "name": "Maya"
+                    },
+                    "position": {
+                      "positionType": "text",
+                      "newPath": ".gitlab-ci.yml",
+                      "newLine": 74,
+                      "oldPath": ".gitlab-ci.yml",
+                      "oldLine": null,
+                      "diffRefs": {
+                        "headSha": "cd2d1286c97c1b78e3f6e6f607d9841136eb1ead"
+                      }
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "id": "gid://gitlab/Discussion/29fc78a34f4a80e65195371eb623f9d6d5c01f36",
+              "resolved": false,
+              "resolvable": false,
+              "notes": {
+                "nodes": [
+                  {
+                    "id": "gid://gitlab/Note/4093611991",
+                    "body": "requested changes",
+                    "system": true,
+                    "internal": false,
+                    "createdAt": "2026-10-26T19:20:03Z",
+                    "updatedAt": "2026-10-26T19:20:03Z",
+                    "author": {
+                      "username": "alex",
+                      "name": "Alex"
+                    },
+                    "position": null
+                  }
+                ]
+              }
+            },
+            {
+              "id": "gid://gitlab/Discussion/f677b0efdc7d4e84eda75d8ffa6b1685fa2468be",
+              "resolved": false,
+              "resolvable": false,
+              "notes": {
+                "nodes": [
+                  {
+                    "id": "gid://gitlab/Note/4096637314",
+                    "body": "added 1 commit\n\n<ul><li>cd2d1286c97c1b78e3f6e6f607d9841136eb1ead - Install aws-cli from Alpine packages in release beta</li></ul>\n\n[Compare with previous version](/orbit/team/orbit/-/merge_requests/564/diffs?diff_id=2140969191&start_sha=aef20d9e895fcb8ff014b03a395612ee730d55ce)",
+                    "system": true,
+                    "internal": false,
+                    "createdAt": "2026-10-27T07:34:08Z",
+                    "updatedAt": "2026-10-27T07:34:08Z",
+                    "author": {
+                      "username": "maya",
+                      "name": "Maya"
+                    },
+                    "position": null
+                  }
+                ]
+              }
+            },
+            {
+              "id": "gid://gitlab/Discussion/abe0b072268053b1feb1968d337d7ba6fc437832",
+              "resolved": false,
+              "resolvable": false,
+              "notes": {
+                "nodes": [
+                  {
+                    "id": "gid://gitlab/Note/4096639878",
+                    "body": "changed the description",
+                    "system": true,
+                    "internal": false,
+                    "createdAt": "2026-10-27T07:34:40Z",
+                    "updatedAt": "2026-10-27T07:34:40Z",
+                    "author": {
+                      "username": "maya",
+                      "name": "Maya"
+                    },
+                    "position": null
+                  }
+                ]
+              }
+            },
+            {
+              "id": "gid://gitlab/Discussion/4ac442624225ec30294975ca3df14ae0be247576",
+              "resolved": false,
+              "resolvable": true,
+              "notes": {
+                "nodes": [
+                  {
+                    "id": "gid://gitlab/DiscussionNote/4096667444",
+                    "body": "Hey @maya, thanks for requesting a review!\n\nPlease review all feedback from `@alex`: apply the suggestions you're confident about, and leave a note on any you are unsure or disagree with. Then, request a review from the suggested reviewer.\n\nHey  :wave:\n\n- Do you have capacity and domain expertise to review this? If not, find one or more [reviewers](https://orbit.gitlab.io/gitlab-roulette/) and assign to them.\n- If you've reviewed it, add the ~\"workflow::in dev\" label if these changes need more work before the next review.\n- Please ensure the group's Product Manager has validated the linked issue.\n\n<!--\n@maya6 ready @alex\n-->\n\n\n\n_Posted via [alex6](https://alex6)._",
+                    "system": false,
+                    "internal": false,
+                    "createdAt": "2026-10-27T07:40:23Z",
+                    "updatedAt": "2026-10-27T07:40:23Z",
+                    "author": {
+                      "username": "alex6",
+                      "name": "Alex6"
+                    },
+                    "position": null
+                  },
+                  {
+                    "id": "gid://gitlab/DiscussionNote/4096669517",
+                    "body": "`@alex`, this ~\"Community contribution\" is ready for review.\n\n- Do you have capacity and domain expertise to review this? If not, find one or more [reviewers](https://orbit.gitlab.io/gitlab-roulette/) and assign to them.\n- If you've reviewed it, add the ~\"workflow::in dev\" label if these changes need more work before the next review.\n- Please ensure the group's Product Manager has validated the linked issue.\n\n*This message was [generated automatically](https://handbook.gitlab.com/handbook/engineering/infrastructure/engineering-productivity/triage-operations).\n[Improve it](https://gitlab.com/orbit/quality/triage-ops/-/blob/master/triage/processor/community/command_mr_request_review.rb)\nor [delete it](https://handbook.gitlab.com/handbook/engineering/infrastructure/engineering-productivity/triage-operations/#reactive-delete_bot_comment-command).*",
+                    "system": false,
+                    "internal": false,
+                    "createdAt": "2026-10-27T07:40:50Z",
+                    "updatedAt": "2026-10-27T07:40:50Z",
+                    "author": {
+                      "username": "maya6",
+                      "name": "Maya6"
+                    },
+                    "position": null
+                  }
+                ]
+              }
+            },
+            {
+              "id": "gid://gitlab/Discussion/41e69c2c814f31a3259ed1ec0b47cfe206d3b690",
+              "resolved": false,
+              "resolvable": false,
+              "notes": {
+                "nodes": [
+                  {
+                    "id": "gid://gitlab/Note/4096669294",
+                    "body": "requested review from @alex",
+                    "system": true,
+                    "internal": false,
+                    "createdAt": "2026-10-27T07:40:47Z",
+                    "updatedAt": "2026-10-27T07:40:47Z",
+                    "author": {
+                      "username": "maya6",
+                      "name": "Maya6"
+                    },
+                    "position": null
+                  }
+                ]
+              }
+            },
+            {
+              "id": "gid://gitlab/Discussion/d5bc51b44a6b5cb61393b55788b20ab8f901599f",
+              "resolved": false,
+              "resolvable": false,
+              "notes": {
+                "nodes": [
+                  {
+                    "id": "gid://gitlab/Note/4096685998",
+                    "body": "I finished my review and found nothing to comment on. Nice work! :tada:\n\nThis is a re-review focused on the one line added since my last pass: `release beta` now runs `apk add --no-cache aws-cli` instead of `apk add --no-cache py-pip` + `pip install awscli`.\n\n- Confirmed this directly fixes the PEP 668 externally-managed-environment failure I flagged previously, since the job runs under the new `alpine/helm` (Alpine 3.24) base image with no per-job image override.\n- The author verified in commit cd2d1286 that `aws --version` reports `aws-cli/2.34.63` in that image, and that the `aws s3 cp` / `aws s3 sync --acl public-read` calls used later in the job are unaffected by the v1→v2 awscli switch.\n- Checked the rest of the job's script (git config, sed substitutions, `helm package`, `helm repo index`) for any interaction with the aws-cli change; none found — these steps are unaffected.\n- No new correctness, security, or regression issues found in this change.\n\nBoth previous discussion threads are addressed: the PEP 668 / pip install issue is fixed, and the general alpine/helm-image supply-chain question was explained by the author with no code change needed.",
+                    "system": false,
+                    "internal": false,
+                    "createdAt": "2026-10-27T07:44:18Z",
+                    "updatedAt": "2026-10-27T07:44:18Z",
+                    "author": {
+                      "username": "alex",
+                      "name": "Alex"
+                    },
+                    "position": null
+                  }
+                ]
+              }
+            },
+            {
+              "id": "gid://gitlab/Discussion/1b5de702f26fe71d4e98e1efbecb082720706f59",
+              "resolved": false,
+              "resolvable": false,
+              "notes": {
+                "nodes": [
+                  {
+                    "id": "gid://gitlab/Note/4096686069",
+                    "body": "approved this merge request",
+                    "system": true,
+                    "internal": false,
+                    "createdAt": "2026-10-27T07:44:19Z",
+                    "updatedAt": "2026-10-27T07:44:19Z",
+                    "author": {
+                      "username": "alex",
+                      "name": "Alex"
+                    },
+                    "position": null
+                  }
+                ]
+              }
+            },
+            {
+              "id": "gid://gitlab/Discussion/86d9bf4a9e3a9ede221815559abedc0f5bcfc0b5",
+              "resolved": false,
+              "resolvable": true,
+              "notes": {
+                "nodes": [
+                  {
+                    "id": "gid://gitlab/DiscussionNote/4096782716",
+                    "body": "@maya6 ready @sam\n\nHi @sam, could you review this one? It bumps the CI tool versions (kind, kubectl, docker, alpine, helm-unittest, Helm image), see #602. The only review finding so far (`pip install awscli` failing on Alpine 3.24) is fixed in cd2d128 and the pipeline is green.",
+                    "system": false,
+                    "internal": false,
+                    "createdAt": "2026-10-27T08:01:35Z",
+                    "updatedAt": "2026-10-27T08:01:43Z",
+                    "author": {
+                      "username": "maya",
+                      "name": "Maya"
+                    },
+                    "position": null
+                  },
+                  {
+                    "id": "gid://gitlab/DiscussionNote/4096783471",
+                    "body": "@sam, this ~\"Community contribution\" is ready for review.\n\n- Do you have capacity and domain expertise to review this? If not, find one or more [reviewers](https://orbit.gitlab.io/gitlab-roulette/) and assign to them.\n- If you've reviewed it, add the ~\"workflow::in dev\" label if these changes need more work before the next review.\n- Please ensure the group's Product Manager has validated the linked issue.\n\n*This message was [generated automatically](https://handbook.gitlab.com/handbook/engineering/infrastructure/engineering-productivity/triage-operations).\n[Improve it](https://gitlab.com/orbit/quality/triage-ops/-/blob/master/triage/processor/community/command_mr_request_review.rb)\nor [delete it](https://handbook.gitlab.com/handbook/engineering/infrastructure/engineering-productivity/triage-operations/#reactive-delete_bot_comment-command).*",
+                    "system": false,
+                    "internal": false,
+                    "createdAt": "2026-10-27T08:01:43Z",
+                    "updatedAt": "2026-10-27T08:01:43Z",
+                    "author": {
+                      "username": "maya6",
+                      "name": "Maya6"
+                    },
+                    "position": null
+                  }
+                ]
+              }
+            },
+            {
+              "id": "gid://gitlab/Discussion/6f073e08265648abfffbcf0e2bd22f444423f1b9",
+              "resolved": false,
+              "resolvable": false,
+              "notes": {
+                "nodes": [
+                  {
+                    "id": "gid://gitlab/Note/4096783371",
+                    "body": "requested review from @sam",
+                    "system": true,
+                    "internal": false,
+                    "createdAt": "2026-10-27T08:01:42Z",
+                    "updatedAt": "2026-10-27T08:01:42Z",
+                    "author": {
+                      "username": "maya6",
+                      "name": "Maya6"
+                    },
+                    "position": null
+                  }
+                ]
+              }
+            },
+            {
+              "id": "gid://gitlab/Discussion/c1f148aa6d5b28fcdf558024ff92fca4b01b356f",
+              "resolved": false,
+              "resolvable": false,
+              "notes": {
+                "nodes": [
+                  {
+                    "id": "gid://gitlab/Note/4105603270",
+                    "body": "<!-- triage-ops plan-mr-review-nudge-ratchade info -->\n`sam` currently has 14 active review requests — response may be delayed.\n\n---\n_[Improve this message](https://gitlab.com/orbit/quality/triage-ops/-/blob/master/lib/mr_reviewer_response_helper.rb)_",
+                    "system": false,
+                    "internal": false,
+                    "createdAt": "2026-10-28T08:19:11Z",
+                    "updatedAt": "2026-10-28T08:19:11Z",
+                    "author": {
+                      "username": "maya6",
+                      "name": "Maya6"
+                    },
+                    "position": null
+                  }
+                ]
+              }
+            },
+            {
+              "id": "gid://gitlab/Discussion/33cf9d72221d3cc441c2a27e0921e46e8d7082c1",
+              "resolved": false,
+              "resolvable": false,
+              "notes": {
+                "nodes": [
+                  {
+                    "id": "gid://gitlab/Note/4136812245",
+                    "body": "We've attempted to automatically add labels to this merge request.\nFurther tweak labels using our [community merge request management UI](https://alex6/manage-merge-request?projectId=6329679&mergeRequestIid=564&action=label).\n\nTeam members, please indicate any mistakes by adding the `automation:ml wrong` label.\n\n<details><summary>View AI response JSON</summary>\n\n```json\n{\n  \"group\": {\n    \"existing\": \"group::application lifecycle\",\n    \"deduced\": \"group::operate\",\n    \"confidence\": 90\n  },\n  \"category\": {\n    \"existing\": null,\n    \"deduced\": \"Category:Cloud Native Installation\",\n    \"confidence\": 72\n  },\n  \"type\": {\n    \"existing\": \"type::maintenance\",\n    \"deduced\": \"type::maintenance\",\n    \"confidence\": 99\n  },\n  \"subtype\": {\n    \"existing\": null,\n    \"deduced\": \"maintenance::dependency\",\n    \"confidence\": 90\n  },\n  \"areas\": {\n    \"existing\": [],\n    \"deduced\": [\n      \"backend\"\n    ],\n    \"confidence\": 75\n  }\n}\n```\n</details>\n\n---\n\n[This message was generated automatically using AI](https://gitlab.com/gitlab-community/orbit/quality/triage-ops/-/blob/master/policies/stages/report/community-contribution-report.yml).",
+                    "system": false,
+                    "internal": false,
+                    "createdAt": "2026-11-02T00:08:53Z",
+                    "updatedAt": "2026-11-02T00:08:53Z",
+                    "author": {
+                      "username": "maya6",
+                      "name": "Maya6"
+                    },
+                    "position": null
+                  }
+                ]
+              }
+            },
+            {
+              "id": "gid://gitlab/Discussion/d5ca19c19c285a8dfe5e3b47b2a057a3034ba3a2",
+              "resolved": false,
+              "resolvable": false,
+              "notes": {
+                "nodes": [
+                  {
+                    "id": "gid://gitlab/Note/4146007378",
+                    "body": "mentioned in issue orbit/quality/triage-reports#33749",
+                    "system": true,
+                    "internal": false,
+                    "createdAt": "2026-11-03T00:06:05Z",
+                    "updatedAt": "2026-11-03T00:06:05Z",
+                    "author": {
+                      "username": "maya6",
+                      "name": "Maya6"
+                    },
+                    "position": null
+                  }
+                ]
+              }
+            },
+            {
+              "id": "gid://gitlab/Discussion/6db72e82014ea96cf76b9bcdb76f8eca99c952aa",
+              "resolved": false,
+              "resolvable": false,
+              "notes": {
+                "nodes": [
+                  {
+                    "id": "gid://gitlab/Note/4149153779",
+                    "body": "Hi @maya 👋 Thank you for your contribution! I can see you're already in good hands and your code review is underway. If you still need help, just @-mention me or add me as a reviewer and I'll pop in. 🚀",
+                    "system": false,
+                    "internal": false,
+                    "createdAt": "2026-11-03T10:33:21Z",
+                    "updatedAt": "2026-11-03T10:33:21Z",
+                    "author": {
+                      "username": "sam6",
+                      "name": "Sam6"
+                    },
+                    "position": null
+                  }
+                ]
+              }
+            }
+          ],
+          "pageInfo": {
+            "hasNextPage": true,
+            "endCursor": "MjA"
+          }
+        }
+      }
+    }
+  }
+}

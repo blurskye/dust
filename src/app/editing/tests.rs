@@ -1692,13 +1692,13 @@ fn tutor_moves_on_when_each_step_is_done() {
     assert!(title(&app).starts_with("Tutor 3/"), "{}", title(&app));
     // A step that checks text waits for the practice line to read right.
     app.process_effect(AppEffect::TutorBack);
-    for _ in 0..10 {
+    for _ in 0..13 {
         app.process_effect(AppEffect::TutorNext);
     }
     app.tutor_tick();
     wait_vfs(&mut app);
     app.tutor_tick();
-    assert!(title(&app).starts_with("Tutor 12/"), "{}", title(&app));
+    assert!(title(&app).starts_with("Tutor 15/"), "{}", title(&app));
     assert_eq!(cursor_line(&app), "Thhe cow jumpped over thee moon.");
     for key in ["l", "x", "f", "p", "x", "$", "6", "h", "x"] {
         press(&mut app, key);
@@ -1712,7 +1712,7 @@ fn tutor_moves_on_when_each_step_is_done() {
     );
     // The next step put the cursor on its own practice line.
     next_step(&mut app);
-    assert!(title(&app).starts_with("Tutor 13/"), "{}", title(&app));
+    assert!(title(&app).starts_with("Tutor 16/"), "{}", title(&app));
     assert_eq!(cursor_line(&app), "Dust is a editor");
     // The card says which line, and the gutter marks it.
     let card = app.ui.tutor.as_ref().unwrap();
@@ -1722,7 +1722,7 @@ fn tutor_moves_on_when_each_step_is_done() {
     // Going back to a step already done in the text stays there.
     app.process_effect(AppEffect::TutorBack);
     app.tutor_tick();
-    assert!(title(&app).starts_with("Tutor 12/"), "{}", title(&app));
+    assert!(title(&app).starts_with("Tutor 15/"), "{}", title(&app));
     app.process_effect(AppEffect::TutorNext);
     app.tutor_tick();
     // A file of the user's own pauses the tutor, whose card says how to get back; :Tutor goes
@@ -1746,7 +1746,7 @@ fn tutor_moves_on_when_each_step_is_done() {
     app.process_effect(AppEffect::Tutor);
     wait_vfs(&mut app);
     app.tutor_tick();
-    assert!(title(&app).starts_with("Tutor 13/"), "{}", title(&app));
+    assert!(title(&app).starts_with("Tutor 16/"), "{}", title(&app));
     assert_eq!(cursor_line(&app), "Dust is a editor");
     // Quitting moves back home and deletes the practice project.
     app.process_effect(AppEffect::TutorQuit);
@@ -1766,7 +1766,7 @@ fn tutor_moves_on_when_each_step_is_done() {
     assert!(app.ui.tutor.is_none());
     press(&mut app, "enter");
     wait_root(&mut app);
-    assert!(title(&app).starts_with("Tutor 13/"), "{}", title(&app));
+    assert!(title(&app).starts_with("Tutor 16/"), "{}", title(&app));
     assert_ne!(app.state.workspace_root, practice);
 }
 

@@ -1911,6 +1911,25 @@ fn cached_hunk_reset_never_targets_a_previous_buffer() {
 }
 
 #[test]
+fn editor_recovery_commands_refuse_untrusted_workspace() {
+    let (_dirs, mut app) = app();
+    assert_eq!(
+        app.workspace.trust(),
+        crate::workspace::WorkspaceTrust::Untrusted
+    );
+    for effect in [AppEffect::GitConflictContinue, AppEffect::GitConflictAbort] {
+        app.process_effect(effect);
+        assert!(app.ui.notification_error);
+        assert!(
+            app.ui
+                .notification
+                .as_deref()
+                .is_some_and(|message| message.contains("trusted workspace"))
+        );
+    }
+}
+
+#[test]
 fn conflict_navigation_works_in_unnamed_buffers() {
     let (_app_dirs, mut app) = app();
     let text = "intro\n<<<<<<< ours\nleft\n=======\nright\n>>>>>>> theirs\n";

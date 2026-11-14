@@ -1,0 +1,22 @@
+# F3 caching and freshness (FORGE.md §7.2/§7.3): the Issues tab paints from the disk cache at
+# once, then the background check merges what changed without moving the cursor.
+#   scripts/ui-scenarios/make-orbit-fixture.sh /tmp/orbit
+#   export DUSTY_FORGE_CACHE_DIR=/tmp/forge-cache DUSTY_GIT_BINARY=$PWD/target/release/dusty-git
+#   rm -rf $DUSTY_FORGE_CACHE_DIR
+#   FORGE_CACHED_PHASE=prime scripts/ui-shot scripts/ui-scenarios/forge-cached.keys \
+#     --binary scripts/ui-scenarios/forge-cached-launch --cwd /tmp/orbit --out target/ui-shots/forge-prime
+#   FORGE_CACHED_PHASE=cached scripts/ui-shot scripts/ui-scenarios/forge-cached.keys \
+#     --binary scripts/ui-scenarios/forge-cached-launch --cwd /tmp/orbit --out target/ui-shots/forge-cached
+# `cached`: rows on the first frame, chip "cached 1h ago · ⟳"; `merged`: #50/#49 inserted,
+# #48 renamed in place, #44 kept with a "closed" chip, the cursor still on #45.
+wait 1500
+# Git → Pull requests → Issues
+type >
+wait 100
+type >
+wait 250
+key j j
+wait 150
+shot cached
+wait 7000
+shot merged

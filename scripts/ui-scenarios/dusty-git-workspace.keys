@@ -1,0 +1,43 @@
+# Phase-1 acceptance (DESIGN.md §7.1). Run against the orbit fixture:
+#   scripts/ui-scenarios/make-orbit-fixture.sh /tmp/orbit
+#   scripts/ui-shot scripts/ui-scenarios/dusty-git-workspace.keys --binary dusty-git --cwd /tmp/orbit
+wait 1800
+# Cursor on orbit/queue.py (MM).
+key j j j
+wait 900
+shot workspace
+key 0
+wait 500
+shot reader
+key j j j j
+wait 300
+shot reader-line
+key escape
+key 4
+wait 400
+shot history
+key 3
+type ]
+wait 600
+shot remotes
+type [
+key 2
+key t
+wait 400
+shot tree
+key t
+key c
+wait 500
+shot commit-sheet
+type Bound retry delays below sixty seconds
+key tab
+type Cap the exponent first.
+wait 1200
+shot commit-typed
+key alt+s
+wait 300
+shot commit-options
+key escape
+type ?
+wait 500
+shot help

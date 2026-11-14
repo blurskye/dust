@@ -1,0 +1,19 @@
+{
+  "id": 802,
+  "user": {
+    "id": 1001,
+    "login": "maya",
+    "full_name": "Maya",
+    "email": "maya@example.invalid",
+    "avatar_url": "https://gitea.com/avatars/maya.png",
+    "html_url": "https://gitea.com/maya"
+  },
+  "body": "",
+  "state": "COMMENT",
+  "commit_id": "c92ad11000000000000000000000000000000000",
+  "stale": false,
+  "official": true,
+  "comments_count": 1,
+  "submitted_at": "2026-11-14T05:11:56Z",
+  "html_url": "https://gitea.com/orbit/orbit/pulls/13#issuecomment-801"
+}
