@@ -240,16 +240,30 @@ fn native_github_controls_forms_reviews_and_workflow_logs() {
     let mut screen =
         GitScreen::open(Path::new(&std::env::var("DUST_GITHUB_ROOT").unwrap())).unwrap();
     goto(&mut screen, 0, 1);
-    // One empty state, in the reader; the list keeps its count and a cursor (r15 ISS-03).
+    // One empty state, in the reader; the list keeps its count and a cursor.
     wait(&mut screen, "No issues match this view");
     wait_list_count(&mut screen, "open", 0);
     for (width, height) in [(100, 30), (180, 45)] {
         let frame = screen.frame(width, height);
-        frame.cursor.expect("empty list must keep a terminal cursor");
-        let text = (0..height).map(|y| frame.grid.row_text(y)).collect::<Vec<_>>().join("\n");
-        assert_eq!(text.matches("No issues match this view").count(), 1, "{text}");
-        assert!(text.contains("Showing 0") && !text.contains("Your repository is connected"), "{text}");
-        assert!(text.contains("n New issue") && text.contains("/ filter"), "{text}");
+        // No lone cursor in a blank list: the focused border shows where keys go.
+        assert!(frame.cursor.is_none(), "an empty list parks no cursor");
+        let text = (0..height)
+            .map(|y| frame.grid.row_text(y))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert_eq!(
+            text.matches("No issues match this view").count(),
+            1,
+            "{text}"
+        );
+        assert!(
+            text.contains("Showing 0") && !text.contains("Your repository is connected"),
+            "{text}"
+        );
+        assert!(
+            text.contains("n New issue") && text.contains("/ filter"),
+            "{text}"
+        );
     }
     let mut fixture: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&state_path).unwrap()).unwrap();
@@ -266,7 +280,10 @@ fn native_github_controls_forms_reviews_and_workflow_logs() {
             (width < 100 || header.contains("repository")) && header.contains("main"),
             "{header}"
         );
-        assert!(!header.contains("github.com") && !header.contains("? keys"), "{header}");
+        assert!(
+            !header.contains("github.com") && !header.contains("? keys"),
+            "{header}"
+        );
         let footer = frame.grid.row_text(height - 1);
         assert!(footer.contains("? keys"), "{footer}");
     }
@@ -287,7 +304,10 @@ fn native_github_controls_forms_reviews_and_workflow_logs() {
             .join("\n");
         // Header, tabs and the metadata rows, then the description: not a wall of controls.
         assert!(body <= 14, "description starts at row {body}:\n{text}");
-        assert!(text.contains("Labels") && text.contains("Development"), "{text}");
+        assert!(
+            text.contains("Labels") && text.contains("Development"),
+            "{text}"
+        );
         assert!(text.contains("/ filter"), "{text}");
         assert!(!text.contains("Edit title and description"));
     }
@@ -444,7 +464,10 @@ fn native_github_controls_forms_reviews_and_workflow_logs() {
             .unwrap();
         row[..row.find("fn after()").unwrap()].chars().count()
     };
-    let tree = (0..65).map(|y| wide.grid.row_text(y)).collect::<Vec<_>>().join("\n");
+    let tree = (0..65)
+        .map(|y| wide.grid.row_text(y))
+        .collect::<Vec<_>>()
+        .join("\n");
     assert!(drawn_reader_left(&wide) > 0, "{tree}");
     assert!(tree.contains("☑ example.rs"), "{tree}");
     key(&mut screen, KeyCode::Char(' '));
@@ -495,7 +518,7 @@ fn native_github_controls_forms_reviews_and_workflow_logs() {
     activate(&mut screen, "Resolve conversation");
     control(&mut screen, KeyCode::Enter);
     idle(&mut screen);
-    // A resolved thread folds to its header (§3.26).
+    // A resolved thread folds to its header.
     wait(&mut screen, "● Resolved");
     assert!(
         !view(&mut screen).contains("Merge pull request"),
@@ -510,7 +533,9 @@ fn native_github_controls_forms_reviews_and_workflow_logs() {
     let merge_box = view(&mut screen);
     assert!(!merge_box.contains("Pinned to") && !merge_box.contains("a newer push cancels"));
     activate(&mut screen, "Merge pull request");
-    assert!(view(&mut screen).contains("Merges aaaaaaa · new commits pushed before then cancel it"));
+    assert!(
+        view(&mut screen).contains("Merges aaaaaaa · new commits pushed before then cancel it")
+    );
     assert!(
         !calls()
             .iter()
@@ -557,7 +582,11 @@ fn native_github_controls_forms_reviews_and_workflow_logs() {
     wait(&mut screen, "test (windows)");
     let end = Instant::now() + Duration::from_secs(20);
     while view(&mut screen).contains("running") {
-        assert!(Instant::now() < end, "the run never finished:\n{}", view(&mut screen));
+        assert!(
+            Instant::now() < end,
+            "the run never finished:\n{}",
+            view(&mut screen)
+        );
         screen.poll();
         std::thread::sleep(Duration::from_millis(10));
     }
@@ -586,7 +615,10 @@ fn native_github_controls_forms_reviews_and_workflow_logs() {
         .map(|y| help.grid.row_text(y))
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(help_text.contains("Pan 8 columns") && help_text.contains("Refresh"), "{help_text}");
+    assert!(
+        help_text.contains("Pan 8 columns") && help_text.contains("Refresh"),
+        "{help_text}"
+    );
     key(&mut screen, KeyCode::Escape);
     key(&mut screen, KeyCode::Char('f'));
     wait(&mut screen, "Current runner version");
@@ -667,7 +699,7 @@ fn native_thread_replies_and_narrow_files_preserve_context_and_scoped_drafts() {
             .map(|y| frame.grid.row_text(y))
             .collect::<Vec<_>>()
             .join("\n");
-        // Every tab keeps its name at every width, never a bare icon (r11); below 110
+        // Every tab keeps its name at every width, never a bare icon; below 110
         // columns no reader shows counts (r12: one terminal width decides them, so Files
         // reads like the other tabs, with the list beside it or hidden).
         let files = "Files";
@@ -759,7 +791,10 @@ fn native_thread_replies_and_narrow_files_preserve_context_and_scoped_drafts() {
     assert!(view(&mut screen).contains("Unique draft A"));
     assert!(!view(&mut screen).contains("Unique draft B"));
     control(&mut screen, KeyCode::Enter);
-    wait(&mut screen, "GitHub rejected the thread reply · your draft is kept");
+    wait(
+        &mut screen,
+        "GitHub rejected the thread reply · your draft is kept",
+    );
     activate(&mut screen, "Reply / continue reply");
     assert!(
         view(&mut screen).contains("Unique draft A"),
@@ -851,9 +886,14 @@ fn github_closed_count_arrives_with_the_open_list() {
         std::thread::sleep(Duration::from_millis(10));
     }
     let list = compact_list(&mut screen);
-    assert!(list.contains("2 Open") && !list.contains("Old closed issue"), "{list}");
     assert!(
-        !calls().iter().any(|args| args.iter().any(|arg| arg == "closed")),
+        list.contains("2 Open") && !list.contains("Old closed issue"),
+        "{list}"
+    );
+    assert!(
+        !calls()
+            .iter()
+            .any(|args| args.iter().any(|arg| arg == "closed")),
         "{:?}",
         calls()
     );
@@ -917,8 +957,17 @@ fn github_triage_queries_refresh_and_selection_are_native_and_scoped() {
     wait(&mut screen, "First issue description.");
     let list = compact_list(&mut screen);
     // `label:bug` is the Bugs section; the footer carries the query.
-    assert!(view(&mut screen).lines().last().unwrap().contains("label:bug"));
-    assert!(list.contains("First issue") && !list.contains("Second issue"), "{list}");
+    assert!(
+        view(&mut screen)
+            .lines()
+            .last()
+            .unwrap()
+            .contains("label:bug")
+    );
+    assert!(
+        list.contains("First issue") && !list.contains("Second issue"),
+        "{list}"
+    );
     assert!(calls().iter().any(|args| {
         args.windows(2)
             .any(|pair| pair[0] == "--search" && pair[1] == "label:bug")
@@ -971,7 +1020,10 @@ fn github_triage_queries_refresh_and_selection_are_native_and_scoped() {
     }
     assert!(list.contains("Draft") && list.contains("Merged"), "{list}");
     // The search box names every state by naming none: `is:pr` alone.
-    assert!(list.contains("is:pr") && !list.contains("is:open") && list.contains("Showing 3"), "{list}");
+    assert!(
+        list.contains("is:pr") && !list.contains("is:open") && list.contains("Showing 3"),
+        "{list}"
+    );
     key(&mut screen, KeyCode::Char('/'));
     key(&mut screen, KeyCode::Tab);
     key(&mut screen, KeyCode::Up);
@@ -979,8 +1031,10 @@ fn github_triage_queries_refresh_and_selection_are_native_and_scoped() {
     wait(&mut screen, "Already merged");
     let list = compact_list(&mut screen);
     assert!(
-        list.contains("is:pr is:merged") && list.contains("Showing 1")
-            && !list.contains("#9 ") && !list.contains("#10 "),
+        list.contains("is:pr is:merged")
+            && list.contains("Showing 1")
+            && !list.contains("#9 ")
+            && !list.contains("#10 "),
         "{list}"
     );
     key(&mut screen, KeyCode::Char('v'));
@@ -1395,9 +1449,11 @@ fn github_pr_warm_description_keeps_tabs_find_and_metadata_separate() {
     let cursor = after;
     let loaded = view(&mut screen);
     assert!(loaded.contains("On merge"));
-    assert!(!loaded.contains("showing the list description") && !loaded.contains("Merge pull request"));
+    assert!(
+        !loaded.contains("showing the list description") && !loaded.contains("Merge pull request")
+    );
     release_read("pr-activity");
-    // The timeline joins the Conversation below the description (§3.26).
+    // The timeline joins the Conversation below the description.
     let end = Instant::now() + Duration::from_secs(30);
     while view(&mut screen).contains("Loading the conversation") {
         assert!(Instant::now() < end, "the timeline never arrived");
@@ -1536,10 +1592,7 @@ fn github_warm_list_empty_missing_and_failed_details_are_truthful_and_scoped() {
         if !body.is_empty() {
             assert_eq!(pending.contains(body), !missing);
         }
-        assert!(
-            !pending.contains("Development")
-                && !pending.contains("Add a comment")
-        );
+        assert!(!pending.contains("Development") && !pending.contains("Add a comment"));
         key(&mut screen, KeyCode::Char('e'));
         assert!(
             view(&mut screen).contains("Item is loading"),
@@ -1551,10 +1604,7 @@ fn github_warm_list_empty_missing_and_failed_details_are_truthful_and_scoped() {
             let failed = view(&mut screen);
             assert!(failed.contains(body) && failed.contains("Details unavailable"));
             assert!(failed.contains("Fixture refresh refused") && failed.contains("R retry"));
-            assert!(
-                !failed.contains("Development")
-                    && !failed.contains("Add a comment")
-            );
+            assert!(!failed.contains("Development") && !failed.contains("Add a comment"));
         } else {
             wait(&mut screen, "Development");
             wait(&mut screen, "Warm fixture settled");
@@ -1643,8 +1693,14 @@ fn github_commit_tab_requeues_pruned_source_and_preserves_it_on_refresh_error() 
     assert!(view(&mut screen).contains("fn after()"));
     wait(&mut screen, "is having problems");
     let cached = view(&mut screen);
-    let notice = cached.lines().find(|line| line.contains("is having problems")).unwrap();
-    assert!(notice.contains("· showing ") && notice.contains("· R retry"), "{notice}");
+    let notice = cached
+        .lines()
+        .find(|line| line.contains("is having problems"))
+        .unwrap();
+    assert!(
+        notice.contains("· showing ") && notice.contains("· R retry"),
+        "{notice}"
+    );
     assert_eq!(notice.matches("R retry").count(), 1, "{notice}");
     assert!(!cached.contains("· r retry"), "{cached}");
     assert!(
@@ -1695,7 +1751,10 @@ fn queued_github_write_survives_navigation_and_clears_only_its_own_draft() {
     paste(&mut screen, "Independent draft one");
     key(&mut screen, KeyCode::Escape);
     release_read("writing-source");
-    wait(&mut screen, "GitHub rejected the comment · your draft is kept");
+    wait(
+        &mut screen,
+        "GitHub rejected the comment · your draft is kept",
+    );
     wait(&mut screen, "Unique selected body 1.");
     let log = calls();
     let old = log
@@ -1999,7 +2058,10 @@ fn saved_github_views_round_trip_update_delete_and_restore_cached_identity() {
                 && text.contains("Search (GitHub query)")
                 && text.contains("State")
         );
-        assert!(text.contains("Save view") && text.contains("Cancel"), "{text}");
+        assert!(
+            text.contains("Save view") && text.contains("Cancel"),
+            "{text}"
+        );
     }
     key(&mut screen, KeyCode::Tab);
     paste(&mut screen, query);
@@ -2177,9 +2239,13 @@ fn saved_github_views_isolate_host_repository_page_and_refuse_unsafe_local_write
         wait(&mut screen, "scope fixture ready");
         // A similarly named view in another scope must not appear in this picker.
         key(&mut screen, KeyCode::Char('v'));
+        // Pasting its name picks nothing here: the picker only offers this scope's views.
         replace_field(&mut screen, "Saved: Shared name 🦀");
-        control(&mut screen, KeyCode::Enter);
-        assert!(view(&mut screen).contains("Choose a valid View"));
+        assert!(
+            !view(&mut screen).contains("Saved: Shared name"),
+            "{}",
+            view(&mut screen)
+        );
         key(&mut screen, KeyCode::Escape);
         key(&mut screen, KeyCode::Char('S'));
         paste(&mut screen, "Shared name 🦀");
@@ -2260,7 +2326,9 @@ fn saved_github_views_isolate_host_repository_page_and_refuse_unsafe_local_write
         .set_str("dusty-git.githubViews", "{malformed saved views}")
         .unwrap();
     control(&mut screen, KeyCode::Enter);
-    assert!(view(&mut screen).contains("Couldn't read saved views · your saved views are unchanged"));
+    assert!(
+        view(&mut screen).contains("Couldn't read saved views · your saved views are unchanged")
+    );
     assert_eq!(
         config.get_string("dusty-git.githubViews").unwrap(),
         "{malformed saved views}"
@@ -2268,7 +2336,10 @@ fn saved_github_views_isolate_host_repository_page_and_refuse_unsafe_local_write
     key(&mut screen, KeyCode::Escape);
     for code in ['v', 'S', 'D', '.', ','] {
         key(&mut screen, KeyCode::Char(code));
-        assert!(view(&mut screen).contains("Couldn't read saved views · your saved views are unchanged"));
+        assert!(
+            view(&mut screen)
+                .contains("Couldn't read saved views · your saved views are unchanged")
+        );
         assert_eq!(
             config.get_string("dusty-git.githubViews").unwrap(),
             "{malformed saved views}"
@@ -2277,7 +2348,10 @@ fn saved_github_views_isolate_host_repository_page_and_refuse_unsafe_local_write
     drop(screen);
     let mut screen = GitScreen::open(root).unwrap();
     goto(&mut screen, 0, 1);
-    wait(&mut screen, "Couldn't read saved views · your saved views are unchanged");
+    wait(
+        &mut screen,
+        "Couldn't read saved views · your saved views are unchanged",
+    );
     assert_read_only_github_calls();
 }
 
@@ -2315,7 +2389,12 @@ fn reader_left(width: u16, height: u16) -> u16 {
 /// The reader pane's left border as drawn: where the list's top-right corner meets the
 /// reader's top-left one (each page sizes its own list, r10 R9-01); 0 with no list beside it.
 fn drawn_reader_left(frame: &Frame) -> u16 {
-    let symbol = |x: u16| frame.grid.get(x, 1).map_or(String::new(), |cell| cell.symbol.to_string());
+    let symbol = |x: u16| {
+        frame
+            .grid
+            .get(x, 1)
+            .map_or(String::new(), |cell| cell.symbol.to_string())
+    };
     (1..frame.grid.width())
         .find(|&x| symbol(x - 1) == "╮" && symbol(x) == "╭")
         .unwrap_or(0)
@@ -2538,7 +2617,13 @@ fn github_markdown_prose_styles_visible_find_and_raw_drafts_preserve_local_git()
         .find(|cell| cell.symbol == "☑")
         .expect("done checklist box");
     assert!(
-        matches!(done.style, Style::Git { role: dust::ui::GitRole::Added, .. }),
+        matches!(
+            done.style,
+            Style::Git {
+                role: dust::ui::GitRole::Added,
+                ..
+            }
+        ),
         "{:?}",
         done.style
     );
@@ -2656,7 +2741,13 @@ fn github_markdown_reviews_and_threads_share_visible_find_but_patches_stay_liter
     // Files changed (H wraps from Conversation): a find never leaks across tabs, and
     // patches stay literal.
     key(&mut screen, KeyCode::Char('H'));
-    assert!(!screen.frame(100, 30).grid.row_text(29).contains("next match"));
+    assert!(
+        !screen
+            .frame(100, 30)
+            .grid
+            .row_text(29)
+            .contains("next match")
+    );
     wait(&mut screen, "**patch literal**");
     find_detail(&mut screen, "**patch literal**");
     for size in DETAIL_SIZES {
@@ -2670,12 +2761,21 @@ fn github_markdown_reviews_and_threads_share_visible_find_but_patches_stay_liter
 /// (`◔ 1 pending` never reads `1 pend`).
 fn assert_list_words_whole(screen: &mut GitScreen) {
     let wide = view(screen);
-    let words = wide.split_whitespace().collect::<std::collections::HashSet<_>>();
+    let words = wide
+        .split_whitespace()
+        .collect::<std::collections::HashSet<_>>();
     // The list pane's box at 100×30: from the left edge to its first `╮`, under the top bar
     // and above the footer.
     let frame = screen.frame(100, 30);
-    let symbol = |x: u16, y: u16| frame.grid.get(x, y).map_or(" ", |cell| cell.symbol.as_str());
-    let right = (0..100).find(|&x| symbol(x, 1) == "╮").expect("the list pane's box");
+    let symbol = |x: u16, y: u16| {
+        frame
+            .grid
+            .get(x, y)
+            .map_or(" ", |cell| cell.symbol.as_str())
+    };
+    let right = (0..100)
+        .find(|&x| symbol(x, 1) == "╮")
+        .expect("the list pane's box");
     let narrow = (1..29)
         .map(|y| (0..=right).map(|x| symbol(x, y)).collect::<String>())
         .collect::<Vec<_>>();
@@ -2745,7 +2845,7 @@ fn files_changed_e_opens_the_line_under_the_cursor_in_the_editor() {
     };
     let at = |line| ScreenOutcome::OpenFileAt(root.join("example.rs"), line);
     // An added line opens at its own line; a deleted one at the line that took its place;
-    // a context line at its new-side line (DESIGN §5.3).
+    // a context line at its new-side line.
     focus_control(&mut screen, "fn after()");
     assert_eq!(e(&mut screen), at(2));
     focus_control(&mut screen, "fn old()");
@@ -3026,11 +3126,16 @@ fn github_detail_find_files_refresh_tabs_items_and_narrow_chooser() {
         let (_, y, _) = detail_cursor(&frame);
         let row = frame.grid.row_text(y);
         let at = row.find("needle end").unwrap();
-        let start = row[..at].rfind('│').map_or(0, |border| border + '│'.len_utf8());
+        let start = row[..at]
+            .rfind('│')
+            .map_or(0, |border| border + '│'.len_utf8());
         row[start..at].to_owned()
     };
     let wrapped = code_before(&mut screen);
-    assert!(wrapped.contains('界') && !wrapped.chars().any(|c| c.is_ascii_digit()), "{wrapped:?}");
+    assert!(
+        wrapped.contains('界') && !wrapped.chars().any(|c| c.is_ascii_digit()),
+        "{wrapped:?}"
+    );
     key(&mut screen, KeyCode::Char('w'));
     detail_matched(&mut screen, (100, 30), "needle end", "3/3");
     let panned = code_before(&mut screen);
@@ -3157,10 +3262,19 @@ fn github_detail_find_actions_logs_and_attempt_identity_are_native_and_read_only
     let matched = |screen: &mut GitScreen, expected: &str, count: &str| {
         for (width, height) in [(64, 20), (100, 30), (190, 48)] {
             let frame = screen.frame(width, height);
-            let text = (0..height).map(|y| frame.grid.row_text(y)).collect::<Vec<_>>().join("\n");
+            let text = (0..height)
+                .map(|y| frame.grid.row_text(y))
+                .collect::<Vec<_>>()
+                .join("\n");
             let (_, y, _) = frame.cursor.expect("log cursor");
-            assert!(frame.grid.row_text(y).contains(expected), "{expected} at {width}×{height}:\n{text}");
-            assert!(text.contains(&format!("{count} matches")), "{count} at {width}×{height}:\n{text}");
+            assert!(
+                frame.grid.row_text(y).contains(expected),
+                "{expected} at {width}×{height}:\n{text}"
+            );
+            assert!(
+                text.contains(&format!("{count} matches")),
+                "{count} at {width}×{height}:\n{text}"
+            );
         }
     };
     key(&mut screen, KeyCode::Home);
@@ -3177,7 +3291,11 @@ fn github_detail_find_actions_logs_and_attempt_identity_are_native_and_read_only
     key(&mut screen, KeyCode::Char('w'));
     let frame = screen.frame(100, 30);
     let (_, y, _) = frame.cursor.unwrap();
-    assert!(frame.grid.row_text(y).contains('‹'), "{}", frame.grid.row_text(y));
+    assert!(
+        frame.grid.row_text(y).contains('‹'),
+        "{}",
+        frame.grid.row_text(y)
+    );
     key(&mut screen, KeyCode::Char('w'));
     key(&mut screen, KeyCode::Escape);
     typed(&mut screen, "💻");
@@ -3185,7 +3303,12 @@ fn github_detail_find_actions_logs_and_attempt_identity_are_native_and_read_only
     key(&mut screen, KeyCode::Escape);
     typed(&mut screen, "**log literal**");
     matched(&mut screen, "**log literal**", "1/1");
-    for query in ["UNKNOWN STEP", "2026-11-08T10:00", "Re-run jobs", "test (linux)"] {
+    for query in [
+        "UNKNOWN STEP",
+        "2026-11-08T10:00",
+        "Re-run jobs",
+        "test (linux)",
+    ] {
         key(&mut screen, KeyCode::Escape);
         typed(&mut screen, query);
         assert!(view(&mut screen).contains("no matches"), "{query}");
@@ -3193,7 +3316,10 @@ fn github_detail_find_actions_logs_and_attempt_identity_are_native_and_read_only
     assert_eq!(calls().len(), reads, "find reads nothing from the forge");
     // The step log is another projection: its find starts empty.
     key(&mut screen, KeyCode::Char('f'));
-    assert!(!view(&mut screen).contains("no matches"), "changing log projection clears find");
+    assert!(
+        !view(&mut screen).contains("no matches"),
+        "changing log projection clears find"
+    );
     key(&mut screen, KeyCode::Down);
     key(&mut screen, KeyCode::Enter);
     wait(&mut screen, "needle one needle two");
@@ -3205,7 +3331,10 @@ fn github_detail_find_actions_logs_and_attempt_identity_are_native_and_read_only
     key(&mut screen, KeyCode::Down);
     key(&mut screen, KeyCode::Enter);
     wait(&mut screen, "attempt 1 of 2");
-    assert!(!view(&mut screen).contains("/3 matches"), "attempt identity changes even with identical log text");
+    assert!(
+        !view(&mut screen).contains("/3 matches"),
+        "attempt identity changes even with identical log text"
+    );
     wait(&mut screen, "test (linux)");
     key(&mut screen, KeyCode::Down);
     key(&mut screen, KeyCode::Enter);
@@ -3263,9 +3392,9 @@ fn wait_list_count(screen: &mut GitScreen, state: &str, count: usize) {
         // The list footer counts what is loaded; a fresh view shows "Loading…" until then,
         // and an empty one says so.
         let list = compact_list(screen);
-        let shown = list.match_indices(&format!("Showing {count}")).any(|(at, found)| {
-            !list[at + found.len()..].starts_with(|c: char| c.is_ascii_digit())
-        });
+        let shown = list
+            .match_indices(&format!("Showing {count}"))
+            .any(|(at, found)| !list[at + found.len()..].starts_with(|c: char| c.is_ascii_digit()));
         let _ = state;
         if shown
             && !text.contains("Refreshing…")
@@ -3442,12 +3571,24 @@ fn github_load_more_depth_is_scoped_to_queries_states_saved_views_and_pages_and_
     choose_view(&mut screen, "Created by me");
     wait_list_count(&mut screen, "open", 155);
     key(&mut screen, KeyCode::Char('r'));
-    wait_limits(&mut screen, "issue", "author:@me", "open", &[100, 200, 200, 200]);
+    wait_limits(
+        &mut screen,
+        "issue",
+        "author:@me",
+        "open",
+        &[100, 200, 200, 200],
+    );
     wait_list_count(&mut screen, "open", 155);
     choose_view(&mut screen, "Saved: Closed assigned");
     wait_list_count(&mut screen, "closed", 165);
     // Choosing a view shows its cached depth at once and revalidates it in the background.
-    wait_limits(&mut screen, "issue", "author:@me", "closed", &[100, 200, 200]);
+    wait_limits(
+        &mut screen,
+        "issue",
+        "author:@me",
+        "closed",
+        &[100, 200, 200],
+    );
     choose_view(&mut screen, "All open");
     wait_list_count(&mut screen, "open", 200);
     wait_limits(&mut screen, "issue", "", "open", &[100, 200, 200, 200]);
@@ -3561,7 +3702,10 @@ fn github_load_more_ceiling_keeps_refresh_depth_and_invites_refining_the_filter(
     for (width, height) in DETAIL_SIZES {
         let frame = screen.frame(width, height);
         let status = frame.grid.row_text(height - 3);
-        assert!(status.contains("limit") && status.contains("/ refine"), "{status}");
+        assert!(
+            status.contains("limit") && status.contains("/ refine"),
+            "{status}"
+        );
         assert!(!status.contains("^N"));
     }
     for _ in 0..10 {
@@ -3629,10 +3773,7 @@ fn github_list_edges_and_pages_are_native_and_read_only() {
                         .collect::<String>()
                 })
                 .join("\n");
-            assert!(
-                names(&field, number),
-                "{width}x{height}: {field}"
-            );
+            assert!(names(&field, number), "{width}x{height}: {field}");
         }
     }
     assert_read_only_github_calls();
@@ -3645,7 +3786,11 @@ fn theme_luminance(colour: dust::config::ThemeColor) -> Option<f64> {
     };
     let linear = |channel: u8| {
         let value = f64::from(channel) / 255.0;
-        if value <= 0.04045 { value / 12.92 } else { ((value + 0.055) / 1.055).powf(2.4) }
+        if value <= 0.04045 {
+            value / 12.92
+        } else {
+            ((value + 0.055) / 1.055).powf(2.4)
+        }
     };
     Some(0.2126 * linear(red) + 0.7152 * linear(green) + 0.0722 * linear(blue))
 }
@@ -3660,20 +3805,48 @@ fn forge_screens_take_every_colour_from_the_theme() {
     // Dust's designed dark palette: no other theme may show any of it (it once coloured every
     // dark theme's forge screens, whatever the theme).
     const DESIGNED: [(u8, u8, u8); 16] = [
-        (0x15, 0x19, 0x23), (0x1b, 0x21, 0x30), (0x1f, 0x26, 0x36), (0xdc, 0xe4, 0xf2),
-        (0x9a, 0xa8, 0xc1), (0x6b, 0xda, 0xd5), (0x7a, 0xa2, 0xf7), (0xa6, 0xda, 0x95),
-        (0xf3, 0x8b, 0xa8), (0xee, 0xd4, 0x9f), (0xf5, 0xa9, 0x7f), (0xc6, 0xa0, 0xf6),
-        (0xf0, 0xc6, 0x74), (0xb8, 0xc0, 0xe0), (0xed, 0x87, 0x96), (0x3b, 0x45, 0x5c),
+        (0x15, 0x19, 0x23),
+        (0x1b, 0x21, 0x30),
+        (0x1f, 0x26, 0x36),
+        (0xdc, 0xe4, 0xf2),
+        (0x9a, 0xa8, 0xc1),
+        (0x6b, 0xda, 0xd5),
+        (0x7a, 0xa2, 0xf7),
+        (0xa6, 0xda, 0x95),
+        (0xf3, 0x8b, 0xa8),
+        (0xee, 0xd4, 0x9f),
+        (0xf5, 0xa9, 0x7f),
+        (0xc6, 0xa0, 0xf6),
+        (0xf0, 0xc6, 0x74),
+        (0xb8, 0xc0, 0xe0),
+        (0xed, 0x87, 0x96),
+        (0x3b, 0x45, 0x5c),
     ];
     let themes: [(&str, &str); 5] = [
-        ("catppuccin-latte", include_str!("../assets/themes/catppuccin-latte.toml")),
-        ("tokyo-night-day", include_str!("../assets/themes/tokyo-night-day.toml")),
-        ("rose-pine-dawn", include_str!("../assets/themes/rose-pine-dawn.toml")),
-        ("gruvbox-dark", include_str!("../assets/themes/gruvbox-dark.toml")),
+        (
+            "catppuccin-latte",
+            include_str!("../assets/themes/catppuccin-latte.toml"),
+        ),
+        (
+            "tokyo-night-day",
+            include_str!("../assets/themes/tokyo-night-day.toml"),
+        ),
+        (
+            "rose-pine-dawn",
+            include_str!("../assets/themes/rose-pine-dawn.toml"),
+        ),
+        (
+            "gruvbox-dark",
+            include_str!("../assets/themes/gruvbox-dark.toml"),
+        ),
         ("nord", include_str!("../assets/themes/nord.toml")),
     ];
     let state_path = std::env::var("DUST_GITHUB_FIXTURE").unwrap();
-    std::fs::write(&state_path, r#"{"calls":[],"comments":["Theme audit discussion."]}"#).unwrap();
+    std::fs::write(
+        &state_path,
+        r#"{"calls":[],"comments":["Theme audit discussion."]}"#,
+    )
+    .unwrap();
     let mut screen =
         GitScreen::open(Path::new(&std::env::var("DUST_GITHUB_ROOT").unwrap())).unwrap();
     // The issues list and reader (label chips, the composer), the close dialog over its dimmed
@@ -3684,7 +3857,11 @@ fn forge_screens_take_every_colour_from_the_theme() {
     let mut frames = vec![("issue", screen.frame(120, 36))];
     control(&mut screen, KeyCode::Char('l'));
     key(&mut screen, KeyCode::Char('x'));
-    assert!(view(&mut screen).contains("Close issue"), "{}", view(&mut screen));
+    assert!(
+        view(&mut screen).contains("Close issue"),
+        "{}",
+        view(&mut screen)
+    );
     frames.push(("close dialog", screen.frame(120, 36)));
     key(&mut screen, KeyCode::Escape);
     goto(&mut screen, 1, 2);
@@ -3700,16 +3877,35 @@ fn forge_screens_take_every_colour_from_the_theme() {
             for y in 0..frame.grid.height() {
                 for x in 0..frame.grid.width() {
                     let cell = frame.grid.get(x, y).unwrap();
-                    let Style::Git { role, surface, emphasis } = cell.style else { continue };
+                    let Style::Git {
+                        role,
+                        surface,
+                        emphasis,
+                    } = cell.style
+                    else {
+                        continue;
+                    };
                     let style = theme.git(role, surface, emphasis);
-                    let at = format!("{name} {screen_name} ({x}, {y}) {:?} {role:?} on {surface:?}", cell.symbol);
+                    let at = format!(
+                        "{name} {screen_name} ({x}, {y}) {:?} {role:?} on {surface:?}",
+                        cell.symbol
+                    );
                     for colour in [style.foreground, style.background] {
                         if let ThemeColor::Rgb(red, green, blue) = colour {
-                            assert!(!DESIGNED.contains(&(red, green, blue)), "Dust's dark palette in {at}");
+                            assert!(
+                                !DESIGNED.contains(&(red, green, blue)),
+                                "Dust's dark palette in {at}"
+                            );
                         }
                     }
                     // The screen's ground matches the theme's own: no dark pane on a pale theme.
-                    if matches!(surface, GitSurface::Canvas | GitSurface::Pane | GitSurface::TopBar | GitSurface::Sheet) {
+                    if matches!(
+                        surface,
+                        GitSurface::Canvas
+                            | GitSurface::Pane
+                            | GitSurface::TopBar
+                            | GitSurface::Sheet
+                    ) {
                         let ground = theme_luminance(style.background).unwrap();
                         assert_eq!(ground > 0.4, light, "ground {ground:.2} in {at}");
                     }
@@ -3725,7 +3921,11 @@ fn forge_screens_take_every_colour_from_the_theme() {
                         theme_luminance(style.background).unwrap(),
                     );
                     let ratio = (fore.max(back) + 0.05) / (fore.min(back) + 0.05);
-                    let minimum = if matches!(role, GitRole::Label(..)) { 4.5 } else { 3.0 };
+                    let minimum = if matches!(role, GitRole::Label(..)) {
+                        4.5
+                    } else {
+                        3.0
+                    };
                     assert!(ratio >= minimum, "contrast {ratio:.2} in {at}");
                 }
             }
@@ -3738,9 +3938,14 @@ fn enter_on_a_blocked_merge_box_moves_to_the_first_reason_without_a_message() {
     if fixture_child("enter_on_a_blocked_merge_box_moves_to_the_first_reason_without_a_message") {
         return;
     }
-    std::fs::write(std::env::var("DUST_GITHUB_FIXTURE").unwrap(), serde_json::json!({
-        "calls":[], "prs":[{"number":9,"reviewDecision":"REVIEW_REQUIRED"}]
-    }).to_string()).unwrap();
+    std::fs::write(
+        std::env::var("DUST_GITHUB_FIXTURE").unwrap(),
+        serde_json::json!({
+            "calls":[], "prs":[{"number":9,"reviewDecision":"REVIEW_REQUIRED"}]
+        })
+        .to_string(),
+    )
+    .unwrap();
     let mut screen =
         GitScreen::open(Path::new(&std::env::var("DUST_GITHUB_ROOT").unwrap())).unwrap();
     goto(&mut screen, 0, 2);
@@ -3755,8 +3960,15 @@ fn enter_on_a_blocked_merge_box_moves_to_the_first_reason_without_a_message() {
         .filter_map(|column| frame.grid.get(column, y))
         .map(|cell| cell.symbol.as_str())
         .collect::<String>();
-    assert!(text.contains("1."), "cursor did not move to the first reason: {text}");
-    assert!(!view(&mut screen).contains("Merging is blocked ·"), "{}", view(&mut screen));
+    assert!(
+        text.contains("1."),
+        "cursor did not move to the first reason: {text}"
+    );
+    assert!(
+        !view(&mut screen).contains("Merging is blocked ·"),
+        "{}",
+        view(&mut screen)
+    );
 }
 
 #[test]
@@ -3807,12 +4019,23 @@ fn j_reaches_the_merge_box_past_a_row_that_shares_the_sidebars_link() {
         seen.push(text.trim().to_owned());
         key(&mut screen, KeyCode::Char('j'));
     }
-    assert!(reached, "j never reached the merge box; stops: {seen:#?}\n{}", view(&mut screen));
+    assert!(
+        reached,
+        "j never reached the merge box; stops: {seen:#?}\n{}",
+        view(&mut screen)
+    );
     // The mention of #7 in the timeline was passed once, and Development's #7 once: j never
     // went back up the page.
-    let development = seen.iter().position(|stop| stop.contains("#7")).expect("Development links #7");
+    let development = seen
+        .iter()
+        .position(|stop| stop.contains("#7"))
+        .expect("Development links #7");
     assert!(
-        seen[development + 1..].iter().filter(|stop| stop.contains("#7")).count() <= 1,
+        seen[development + 1..]
+            .iter()
+            .filter(|stop| stop.contains("#7"))
+            .count()
+            <= 1,
         "j looped back to #7: {seen:#?}"
     );
     // G lands on the very last row: j there moves nothing.
@@ -3820,6 +4043,14 @@ fn j_reaches_the_merge_box_past_a_row_that_shares_the_sidebars_link() {
     let at_end = cursor_row(&mut screen);
     let before = view(&mut screen);
     key(&mut screen, KeyCode::Char('j'));
-    assert_eq!(cursor_row(&mut screen), at_end, "G stops short of the last row:\n{before}");
-    assert_eq!(view(&mut screen), before, "j after G still moved:\n{before}");
+    assert_eq!(
+        cursor_row(&mut screen),
+        at_end,
+        "G stops short of the last row:\n{before}"
+    );
+    assert_eq!(
+        view(&mut screen),
+        before,
+        "j after G still moved:\n{before}"
+    );
 }

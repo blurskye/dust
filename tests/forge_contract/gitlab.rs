@@ -1,4 +1,4 @@
-//! GitLab's contract scenarios (F5) against `server.py --world gitlab`
+//! GitLab's contract scenarios against `server.py --world gitlab`
 //! (`tests/fixtures/forge/world_gitlab.py`): project `orbit/team/orbit` in a nested group,
 //! merge requests !13 (failed pipeline, two diff threads, alex requested changes), !12 (merged),
 //! !11 (draft, running pipeline), !10 (approved); issues #14, #9 and closed #7; pipelines 91, 90
@@ -381,7 +381,7 @@ pub fn rows_and_terms(harness: &Harness) {
     assert_eq!(harness.rows(ItemKind::Issue, StateFilter::Closed, ""), [7]);
 }
 
-/// GitHub search syntax (§3.6) becomes GitLab arguments; the world filters on them.
+/// GitHub search syntax becomes GitLab arguments; the world filters on them.
 pub fn query_translation(harness: &Harness) {
     harness.update(|state| state["viewer"] = json!("alex"));
     let pulls = |state, query| harness.rows(ItemKind::PullRequest, state, query);
@@ -1711,7 +1711,7 @@ pub fn unsupported_writes_send_nothing(harness: &Harness) {
         capabilities.merge_methods,
         [MergeMethod::Merge, MergeMethod::Squash, MergeMethod::Rebase]
     );
-    // The workflow filter is the pipeline source (F6).
+    // The workflow filter is the pipeline source.
     assert!(capabilities.run_filters.workflow);
     let refused = [
         Write::SetProjects {
@@ -1945,11 +1945,14 @@ pub fn transports_agree() {
         assert_eq!(left, right);
     }
     assert_eq!(http_seen.len(), glab_seen.len());
-    assert_eq!(unordered_reads(http_requests), unordered_reads(glab_requests));
+    assert_eq!(
+        unordered_reads(http_requests),
+        unordered_reads(glab_requests)
+    );
 }
 
 /// The ledger with each run of consecutive GETs sorted: one read sends its independent parts at
-/// once (FORGE.md §7), so they arrive in any order; writes and the reads between them keep theirs.
+/// once, so they arrive in any order; writes and the reads between them keep theirs.
 fn unordered_reads(mut requests: Vec<String>) -> Vec<String> {
     let mut start = 0;
     while start < requests.len() {
@@ -2023,7 +2026,9 @@ pub fn conversation_timelines(harness: &Harness) {
     let bots = merge_request
         .iter()
         .filter_map(|event| match event {
-            TimelineEvent::Commented(comment) if comment.author.bot => Some(comment.author.login.as_str()),
+            TimelineEvent::Commented(comment) if comment.author.bot => {
+                Some(comment.author.login.as_str())
+            }
             _ => None,
         })
         .collect::<Vec<_>>();
@@ -2038,7 +2043,10 @@ pub fn conversation_timelines(harness: &Harness) {
         TimelineEvent::Commented(comment) if comment.body.contains("magic number")
     )));
     let stamps = merge_request.iter().map(when).collect::<Vec<_>>();
-    assert!(stamps.windows(2).all(|pair| pair[0] <= pair[1]), "{stamps:?}");
+    assert!(
+        stamps.windows(2).all(|pair| pair[0] <= pair[1]),
+        "{stamps:?}"
+    );
 
     let threads = some(
         harness.read(Read::Threads(15)).unwrap(),
@@ -2050,7 +2058,12 @@ pub fn conversation_timelines(harness: &Harness) {
     assert_eq!(
         threads
             .iter()
-            .map(|thread| (thread.path.as_deref(), thread.line, thread.resolved, thread.comments.len()))
+            .map(|thread| (
+                thread.path.as_deref(),
+                thread.line,
+                thread.resolved,
+                thread.comments.len()
+            ))
             .collect::<Vec<_>>(),
         [
             (Some("orbit/queue.py"), Some(14), Some(true), 3),
@@ -2073,10 +2086,20 @@ pub fn conversation_timelines(harness: &Harness) {
         event,
         TimelineEvent::CrossReferenced { link, .. } if link.number == 15 && link.kind == Some(ItemKind::PullRequest)
     )));
-    assert!(issue.iter().any(|event| matches!(event, TimelineEvent::Assigned { assignee, .. } if assignee == "maya")));
-    assert!(issue.iter().any(|event| matches!(event, TimelineEvent::Labeled { .. })));
+    assert!(issue.iter().any(
+        |event| matches!(event, TimelineEvent::Assigned { assignee, .. } if assignee == "maya")
+    ));
+    assert!(
+        issue
+            .iter()
+            .any(|event| matches!(event, TimelineEvent::Labeled { .. }))
+    );
     for read in ["merge_requests/15", "issues/16"] {
-        for path in ["notes", "resource_label_events", "resource_milestone_events"] {
+        for path in [
+            "notes",
+            "resource_label_events",
+            "resource_milestone_events",
+        ] {
             assert!(
                 harness
                     .requests()

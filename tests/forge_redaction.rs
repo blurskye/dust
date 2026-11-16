@@ -1,5 +1,5 @@
 #![cfg(unix)]
-//! Tokens never leave the credential (FORGE.md §2.1, §8, F2): not in argv, not in error text,
+//! Tokens never leave the credential: not in argv, not in error text,
 //! notices or the accounts popover, not in Debug output, not in `hosts.json`. `redact` knows
 //! every forge's token shapes and, verbatim, every token Dusty has read.
 
@@ -39,15 +39,39 @@ const GITEA_TOKEN: &str = "9f8e7d6c5b4a39281706f5e4d3c2b1a098765432";
 #[test]
 fn every_token_shape_is_redacted() {
     for (text, secret) in [
-        ("gh: token ghp_abcdefghijklmnopqrstuvwxyz012345 rejected", "ghp_abcdefghijklmnopqrstuvwxyz012345"),
-        ("github_pat_11ABCDEFG0123456789_abcdefghijklmnop", "github_pat_11ABCDEFG0123456789_abcdefghijklmnop"),
-        ("glab: glpat-abcdefghij0123456789 expired", "glpat-abcdefghij0123456789"),
+        (
+            "gh: token ghp_abcdefghijklmnopqrstuvwxyz012345 rejected",
+            "ghp_abcdefghijklmnopqrstuvwxyz012345",
+        ),
+        (
+            "github_pat_11ABCDEFG0123456789_abcdefghijklmnop",
+            "github_pat_11ABCDEFG0123456789_abcdefghijklmnop",
+        ),
+        (
+            "glab: glpat-abcdefghij0123456789 expired",
+            "glpat-abcdefghij0123456789",
+        ),
         ("PRIVATE-TOKEN: anything-at-all", "anything-at-all"),
-        ("Authorization: token 0123456789abcdef0123456789abcdef01234567", "0123456789abcdef0123456789abcdef01234567"),
-        ("https://x/?token=0123456789abcdef0123456789abcdef01234567", "0123456789abcdef0123456789abcdef01234567"),
-        ("    token: s3cr3t-config-value-0001", "s3cr3t-config-value-0001"),
-        ("{\"token\": \"s3cr3t-json-value-000002\"}", "s3cr3t-json-value-000002"),
-        ("fatal: https://maya:hunter2hunter2@git.example/o/r.git", "hunter2hunter2"),
+        (
+            "Authorization: token 0123456789abcdef0123456789abcdef01234567",
+            "0123456789abcdef0123456789abcdef01234567",
+        ),
+        (
+            "https://x/?token=0123456789abcdef0123456789abcdef01234567",
+            "0123456789abcdef0123456789abcdef01234567",
+        ),
+        (
+            "    token: s3cr3t-config-value-0001",
+            "s3cr3t-config-value-0001",
+        ),
+        (
+            "{\"token\": \"s3cr3t-json-value-000002\"}",
+            "s3cr3t-json-value-000002",
+        ),
+        (
+            "fatal: https://maya:hunter2hunter2@git.example/o/r.git",
+            "hunter2hunter2",
+        ),
     ] {
         let redacted = redact(text);
         assert!(!redacted.contains(secret), "{text:?} → {redacted:?}");
@@ -70,9 +94,15 @@ fn a_token_dusty_has_read_is_redacted_verbatim_whatever_its_shape() {
     for text in [format!("{credential:?}"), format!("{state:?}")] {
         assert!(!text.contains(GITEA_TOKEN), "{text}");
     }
-    let env = Env::from_pairs([("GITLAB_TOKEN", GLAB_TOKEN), ("DUSTY_FORGE_TOKEN", "ghp_dustyfixture0123456789abcdef")]);
+    let env = Env::from_pairs([
+        ("GITLAB_TOKEN", GLAB_TOKEN),
+        ("DUSTY_FORGE_TOKEN", "ghp_dustyfixture0123456789abcdef"),
+    ]);
     let text = format!("{env:?}");
-    assert!(text.contains("GITLAB_TOKEN") && !text.contains(GLAB_TOKEN) && !text.contains("ghp_dusty"), "{text}");
+    assert!(
+        text.contains("GITLAB_TOKEN") && !text.contains(GLAB_TOKEN) && !text.contains("ghp_dusty"),
+        "{text}"
+    );
 }
 
 struct World {
@@ -112,8 +142,18 @@ fn echoed_tokens_never_reach_error_text_or_host_states() {
         }
     }));
     for (kind, host, token, path) in [
-        (ProviderKind::GitLab, "gl.redact.test", GLAB_TOKEN, "projects/1"),
-        (ProviderKind::Forgejo, "fj.redact.test", GITEA_TOKEN, "repos/o/r"),
+        (
+            ProviderKind::GitLab,
+            "gl.redact.test",
+            GLAB_TOKEN,
+            "projects/1",
+        ),
+        (
+            ProviderKind::Forgejo,
+            "fj.redact.test",
+            GITEA_TOKEN,
+            "repos/o/r",
+        ),
     ] {
         let endpoints = world.endpoints(kind, host);
         let http = HttpTransport::new(
@@ -129,24 +169,34 @@ fn echoed_tokens_never_reach_error_text_or_host_states() {
             None,
             Arc::new(http),
         );
-        let response = ctx.send(&ApiRequest::get(path), &AtomicBool::new(false)).unwrap();
+        let response = ctx
+            .send(&ApiRequest::get(path), &AtomicBool::new(false))
+            .unwrap();
         let error = dust::forge::http::classify(&world.endpoints(kind, host), &response);
         let text = format!("{error} {error:?}");
         assert!(!text.contains(token), "{kind:?}: {text}");
         let account = host_state::account(&HostKey::new(host)).unwrap();
         let lines = format!("{:?}", account.lines());
         assert!(!lines.contains(token), "{lines}");
-        assert!(lines.contains("$DUSTY_FORGE_TOKEN") && lines.contains("rowan"), "{lines}");
+        assert!(
+            lines.contains("$DUSTY_FORGE_TOKEN") && lines.contains("rowan"),
+            "{lines}"
+        );
     }
     // Over HTTP the token travels in a header only, never in the URL.
     for request in world.requests() {
         let path = request["path"].as_str().unwrap_or_default();
-        assert!(!path.contains(GLAB_TOKEN) && !path.contains(GITEA_TOKEN), "{path}");
         assert!(
-            request["query"].as_object().is_none_or(|query| query.values().all(|value| {
-                let value = value.as_str().unwrap_or_default();
-                value != GLAB_TOKEN && value != GITEA_TOKEN
-            })),
+            !path.contains(GLAB_TOKEN) && !path.contains(GITEA_TOKEN),
+            "{path}"
+        );
+        assert!(
+            request["query"]
+                .as_object()
+                .is_none_or(|query| query.values().all(|value| {
+                    let value = value.as_str().unwrap_or_default();
+                    value != GLAB_TOKEN && value != GITEA_TOKEN
+                })),
             "{request}"
         );
     }
@@ -157,16 +207,39 @@ fn cli_passthrough_never_puts_a_token_in_argv() {
     let world = World::new(json!({}));
     let bin = world.directory.path().join("bin");
     let glab = world.server.install_glab(&bin);
-    let tea = world.server.install_tea(&bin, json!([{"name": "work", "url": "https://tea.redact.test", "default": true}]));
+    let tea = world.server.install_tea(
+        &bin,
+        json!([{"name": "work", "url": "https://tea.redact.test", "default": true}]),
+    );
     let request = ApiRequest::get("user").header("X-Test", "1");
     for (cli, args) in [
-        (Cli::Gh, cli::argv(Cli::Gh, &HostKey::new("gh.redact.test"), &request, None)),
-        (Cli::Glab, cli::argv(Cli::Glab, &HostKey::new("gl.redact.test"), &request, None)),
-        (Cli::Tea, cli::argv(Cli::Tea, &HostKey::new("tea.redact.test"), &request, Some("work"))),
+        (
+            Cli::Gh,
+            cli::argv(Cli::Gh, &HostKey::new("gh.redact.test"), &request, None),
+        ),
+        (
+            Cli::Glab,
+            cli::argv(Cli::Glab, &HostKey::new("gl.redact.test"), &request, None),
+        ),
+        (
+            Cli::Tea,
+            cli::argv(
+                Cli::Tea,
+                &HostKey::new("tea.redact.test"),
+                &request,
+                Some("work"),
+            ),
+        ),
     ] {
         let (argv, _, env) = args;
         let joined = format!("{argv:?} {env:?}");
-        for word in ["token", "PRIVATE-TOKEN", "Authorization", GLAB_TOKEN, GITEA_TOKEN] {
+        for word in [
+            "token",
+            "PRIVATE-TOKEN",
+            "Authorization",
+            GLAB_TOKEN,
+            GITEA_TOKEN,
+        ] {
             assert!(!joined.contains(word), "{cli:?}: {joined}");
         }
     }
@@ -175,14 +248,23 @@ fn cli_passthrough_never_puts_a_token_in_argv() {
         glab: Some(glab),
         tea: Some(tea),
         stores: Stores {
-            tea_config: Some(write(&world, "tea/config.yml", "logins:\n  - name: work\n    url: https://tea.redact.test\n    default: true\n")),
+            tea_config: Some(write(
+                &world,
+                "tea/config.yml",
+                "logins:\n  - name: work\n    url: https://tea.redact.test\n    default: true\n",
+            )),
             ..Stores::default()
         },
         ..ConnectOptions::default()
     };
-    for (kind, host) in [(ProviderKind::GitLab, "gl.redact.test"), (ProviderKind::Gitea, "tea.redact.test")] {
+    for (kind, host) in [
+        (ProviderKind::GitLab, "gl.redact.test"),
+        (ProviderKind::Gitea, "tea.redact.test"),
+    ] {
         let chosen = transport::passthrough(&world.endpoints(kind, host), &options).unwrap();
-        chosen.send(&HostKey::new(host), &request, &AtomicBool::new(false)).unwrap();
+        chosen
+            .send(&HostKey::new(host), &request, &AtomicBool::new(false))
+            .unwrap();
     }
     let argvs: Vec<String> = world
         .requests()
@@ -206,11 +288,15 @@ fn write(world: &World, name: &str, text: &str) -> std::path::PathBuf {
 #[test]
 fn hosts_json_never_holds_a_token_or_a_login() {
     let world = World::new(json!({"glab_auth": {"*": GLAB_TOKEN}}));
-    let glab = world.server.install_glab(&world.directory.path().join("bin"));
+    let glab = world
+        .server
+        .install_glab(&world.directory.path().join("bin"));
     let config = write(
         &world,
         "glab-cli/config.yml",
-        &format!("hosts:\n    claimed.redact.test:\n        token: {GLAB_TOKEN}\n        user: maya\n"),
+        &format!(
+            "hosts:\n    claimed.redact.test:\n        token: {GLAB_TOKEN}\n        user: maya\n"
+        ),
     );
     let hosts = world.directory.path().join("state/hosts.json");
     let inputs = DetectInputs {
@@ -228,12 +314,19 @@ fn hosts_json_never_holds_a_token_or_a_login() {
         probe: true,
     };
     for host in ["claimed.redact.test", "status.redact.test"] {
-        let found = detect::detect_with(&HostKey::new(host), &inputs, &AtomicBool::new(false)).unwrap();
+        let found =
+            detect::detect_with(&HostKey::new(host), &inputs, &AtomicBool::new(false)).unwrap();
         assert_eq!(found.kind, ProviderKind::GitLab, "{host}");
     }
     let text = std::fs::read_to_string(&hosts).unwrap();
-    assert!(text.contains("claimed.redact.test") && text.contains("status.redact.test"), "{text}");
+    assert!(
+        text.contains("claimed.redact.test") && text.contains("status.redact.test"),
+        "{text}"
+    );
     for secret in [GLAB_TOKEN, "maya", "rowan", "token"] {
-        assert!(!text.contains(secret), "hosts.json holds {secret:?}: {text}");
+        assert!(
+            !text.contains(secret),
+            "hosts.json holds {secret:?}: {text}"
+        );
     }
 }

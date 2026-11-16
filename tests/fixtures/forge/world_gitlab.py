@@ -1,4 +1,4 @@
-"""A stateful GitLab for the fake forge (`server.py --world gitlab`, FORGE.md §8.2, F5).
+"""A stateful GitLab for the fake forge (`server.py --world gitlab`).
 
 One project, `orbit/team/orbit` (a nested group, id 6329679), with merge requests, issues,
 discussions, approvals, pipelines and To-dos, answering the REST v4 and GraphQL calls the GitLab
@@ -440,7 +440,7 @@ def graphql(world, request, viewer):
 
 # --------------------------------------------------------------------------- F7: anonymous GraphQL
 
-# Public projects answer these over GraphQL without a sign-in, where REST is 401 (FORGE.md §2.5).
+# Public projects answer these over GraphQL without a sign-in, where REST is 401.
 ANONYMOUS_OPERATIONS = ("AnonymousLabels", "AnonymousMilestones", "AnonymousMembers", "AnonymousMergeRequestNotes",
                         "AnonymousIssueNotes", "AnonymousDiscussions", "AnonymousJob")
 

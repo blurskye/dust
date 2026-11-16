@@ -1,6 +1,6 @@
-//! What the UI asks a forge for (FORGE.md §3.4): `Read`s return a normalised `Payload`,
+//! What the UI asks a forge for: `Read`s return a normalised `Payload`,
 //! `Write`s return a `Receipt`. Both are provider-neutral; `provider/*.rs` maps them onto
-//! `ApiRequest`s. Also the one error type every layer reports (§3.5).
+//! `ApiRequest`s. Also the one error type every layer reports.
 
 use crate::forge::model::*;
 use crate::forge::pull_request::CreatePullRequest;
@@ -32,7 +32,7 @@ impl StateFilter {
     }
 }
 
-/// A list filter. `query` is GitHub search syntax (§3.6); F4/F5 translate it per provider.
+/// A list filter. `query` is GitHub search syntax; F4/F5 translate it per provider.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub struct Filter {
     pub state: StateFilter,
@@ -108,7 +108,7 @@ pub enum Read {
         filter: Filter,
         page: Page,
     },
-    /// Host-wide search (the inbox, DESIGN §3.36).
+    /// Host-wide search (the inbox).
     Search {
         kind: ItemKind,
         filter: Filter,
@@ -116,7 +116,7 @@ pub enum Read {
     },
     PullRequest(u64),
     /// Several pull requests at once (detail prefetch): one aliased GraphQL request per batch
-    /// on GitHub (§7.5), one read each elsewhere. Missing numbers are left out.
+    /// on GitHub, one read each elsewhere. Missing numbers are left out.
     PullRequests(Vec<u64>),
     Issue(u64),
     Fingerprint(u64),
@@ -164,7 +164,7 @@ impl Read {
         serde_json::to_string(self).unwrap_or_default()
     }
 
-    /// Freshness budget (§7.3) before the payload is known; `cache::ttl` refines it by
+    /// Freshness budget before the payload is known; `cache::ttl` refines it by
     /// lifecycle (closed lists and items, running runs, quiet items).
     pub fn ttl(&self) -> Duration {
         const MINUTE: u64 = 60;
@@ -344,7 +344,7 @@ pub enum Write {
         add: Vec<String>,
         remove: Vec<String>,
     },
-    /// GitHub Projects stay on `gh … edit --add-project` (§4.2 "kept where already used").
+    /// GitHub Projects stay on `gh … edit --add-project` (kept where already used).
     SetProjects {
         kind: ItemKind,
         number: u64,
@@ -375,7 +375,7 @@ pub enum Write {
         resolved: bool,
     },
     /// A review thread's suggested change committed to the pull request's head branch
-    /// (DESIGN.md §3.30a): lines `start..=end` of `path`, which read `original` when the
+    ///: lines `start..=end` of `path`, which read `original` when the
     /// suggestion was shown, become `replacement`. Refused when the head is no longer `head`
     /// or the lines changed.
     CommitSuggestion {
@@ -403,7 +403,7 @@ pub enum Write {
         title: Option<String>,
         message: Option<String>,
     },
-    /// Porcelain (§1.3): `gh pr checkout`.
+    /// Porcelain: `gh pr checkout`.
     Checkout {
         number: u64,
     },
@@ -456,7 +456,7 @@ pub enum Write {
 }
 
 impl Write {
-    /// The reads a confirmed write makes stale (§7.6).
+    /// The reads a confirmed write makes stale.
     pub fn invalidates(&self) -> Vec<Read> {
         let item = |kind: ItemKind, number: u64| match kind {
             ItemKind::Issue => Read::Issue(number),
@@ -513,7 +513,7 @@ impl Write {
         }
     }
 
-    /// Whether the UI may show the result before the forge confirms it (§7.6).
+    /// Whether the UI may show the result before the forge confirms it.
     pub fn optimistic(&self) -> bool {
         matches!(
             self,
@@ -572,7 +572,7 @@ pub struct Receipt {
     pub invalidates: Vec<Read>,
 }
 
-/// Every failure, from any transport or provider, as one of these (§3.5). Display is the fixed
+/// Every failure, from any transport or provider, as one of these. Display is the fixed
 /// UI copy; messages are redacted before they get here.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ForgeError {

@@ -443,7 +443,7 @@ name the CLI to use instead of the one on `PATH`. `DUSTY_FORGE_TRANSPORT=http` u
 only a token and `DUSTY_FORGE_TRANSPORT=cli` only the CLI. Tokens never appear in
 the screen, logs, notices or cache files.
 
-`a` on a list opens Accounts: the host, how Dusty reaches it and how to sign in.
+`@` on a list opens Accounts: the host, how Dusty reaches it and how to sign in.
 After you sign in, press `r` there to check again; Dusty forgets what it knew about
 your sign-ins and transports and tries again. A successful sign-in lookup is kept
 for five minutes otherwise.

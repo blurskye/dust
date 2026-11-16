@@ -5,7 +5,9 @@
 use crate::forge::model::Reaction;
 use serde_json::Value;
 
-const ORDER: [&str; 8] = ["+1", "-1", "laugh", "hooray", "confused", "heart", "rocket", "eyes"];
+const ORDER: [&str; 8] = [
+    "+1", "-1", "laugh", "hooray", "confused", "heart", "rocket", "eyes",
+];
 
 /// Gitea's (and Forgejo's) reaction list: one `{ "content": "+1", "user": … }` per person.
 pub(super) fn gitea(list: &Value) -> Vec<Reaction> {
@@ -31,7 +33,12 @@ pub(super) fn gitlab(list: &Value) -> Vec<Reaction> {
 }
 
 fn tally(list: &Value, word: impl Fn(&Value) -> Option<String>) -> Vec<Reaction> {
-    let words = list.as_array().into_iter().flatten().filter_map(word).collect::<Vec<_>>();
+    let words = list
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(word)
+        .collect::<Vec<_>>();
     ORDER
         .iter()
         .map(|content| Reaction {
@@ -48,7 +55,10 @@ mod tests {
     use serde_json::json;
 
     fn pairs(reactions: Vec<Reaction>) -> Vec<(String, u64)> {
-        reactions.into_iter().map(|reaction| (reaction.content, reaction.count)).collect()
+        reactions
+            .into_iter()
+            .map(|reaction| (reaction.content, reaction.count))
+            .collect()
     }
 
     #[test]

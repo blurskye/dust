@@ -1,4 +1,4 @@
-//! Rate limits as a state (FORGE.md §3.5, t3code): one entry per credential fingerprint.
+//! Rate limits as a state: one entry per credential fingerprint.
 //!
 //! Triggers are HTTP 429, a 403 whose quota is exhausted (`x-ratelimit-remaining: 0`) or whose
 //! text says `rate limit` / `abuse`, and GraphQL's `RATE_LIMITED` error. A trigger pauses every
@@ -161,7 +161,9 @@ impl Quota {
     /// Below `1/divisor` of the quota.
     pub fn in_reserve_of(&self, divisor: u64) -> bool {
         match (self.limit, self.remaining) {
-            (Some(limit), Some(remaining)) if limit > 0 => remaining.saturating_mul(divisor) < limit,
+            (Some(limit), Some(remaining)) if limit > 0 => {
+                remaining.saturating_mul(divisor) < limit
+            }
             _ => false,
         }
     }
@@ -290,7 +292,7 @@ impl RateLimiter {
         self.check_with(fingerprint, class, now, RESERVE_DIVISOR)
     }
 
-    /// `check` for an anonymous caller (FORGE.md §2.5): background work stops at half the
+    /// `check` for an anonymous caller: background work stops at half the
     /// quota, and once the forge has said none is left nothing is sent until its reset (the
     /// answer could only be a 403, and anonymous quotas are per address, shared with every
     /// other anonymous client there).
@@ -493,7 +495,12 @@ mod tests {
         // 40 of 60 is outside both reserves; 20 of 60 is inside the anonymous one only.
         assert!(
             limiter
-                .check_with(fingerprint, Class::Background, now, ANONYMOUS_RESERVE_DIVISOR)
+                .check_with(
+                    fingerprint,
+                    Class::Background,
+                    now,
+                    ANONYMOUS_RESERVE_DIVISOR
+                )
                 .is_ok()
         );
         let low = response(
@@ -509,12 +516,22 @@ mod tests {
         assert!(limiter.check(fingerprint, Class::Background, now).is_ok());
         assert!(
             limiter
-                .check_with(fingerprint, Class::Background, now, ANONYMOUS_RESERVE_DIVISOR)
+                .check_with(
+                    fingerprint,
+                    Class::Background,
+                    now,
+                    ANONYMOUS_RESERVE_DIVISOR
+                )
                 .is_err()
         );
         assert!(
             limiter
-                .check_with(fingerprint, Class::Interactive, now, ANONYMOUS_RESERVE_DIVISOR)
+                .check_with(
+                    fingerprint,
+                    Class::Interactive,
+                    now,
+                    ANONYMOUS_RESERVE_DIVISOR
+                )
                 .is_ok()
         );
         // Spent: an anonymous caller sends nothing until the reset; a credential is unaffected
@@ -537,7 +554,11 @@ mod tests {
         assert!(limiter.check(fingerprint, Class::Interactive, now).is_ok());
         assert!(
             limiter
-                .check_anonymous(fingerprint, Class::Interactive, now + Duration::from_secs(601))
+                .check_anonymous(
+                    fingerprint,
+                    Class::Interactive,
+                    now + Duration::from_secs(601)
+                )
                 .is_ok()
         );
     }

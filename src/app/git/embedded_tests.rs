@@ -19,7 +19,11 @@ fn key(app: &mut App, keys: &str) {
 }
 
 fn screen_text(app: &mut App) -> String {
-    let frame = app.git_screen.as_mut().expect("Dusty Git is open").frame(120, 36);
+    let frame = app
+        .git_screen
+        .as_mut()
+        .expect("Dusty Git is open")
+        .frame(120, 36);
     (0..36)
         .map(|y| frame.grid.row_text(y))
         .collect::<Vec<_>>()
@@ -79,7 +83,9 @@ fn composed(app: &mut App) -> crate::ui::Frame {
 }
 
 fn rows(frame: &crate::ui::Frame) -> Vec<String> {
-    (0..frame.grid.height()).map(|y| frame.grid.row_text(y)).collect()
+    (0..frame.grid.height())
+        .map(|y| frame.grid.row_text(y))
+        .collect()
 }
 
 /// Whether row `y` has a cell drawn in a live style: anything but the receded border colour.
@@ -87,14 +93,22 @@ fn live(frame: &crate::ui::Frame, y: u16) -> bool {
     (0..frame.grid.width()).any(|x| {
         frame.grid.get(x, y).is_some_and(|cell| {
             !cell.symbol.trim().is_empty()
-                && !matches!(cell.style, crate::ui::Style::Git { role: crate::ui::GitRole::Border, .. })
+                && !matches!(
+                    cell.style,
+                    crate::ui::Style::Git {
+                        role: crate::ui::GitRole::Border,
+                        ..
+                    }
+                )
         })
     })
 }
 
 fn repository(root: &Path) {
     let repo = git2::Repository::init(root).unwrap();
-    let original = (1..=60).map(|line| format!("line {line}\n")).collect::<String>();
+    let original = (1..=60)
+        .map(|line| format!("line {line}\n"))
+        .collect::<String>();
     fs::write(root.join("a.txt"), &original).unwrap();
     let mut index = repo.index().unwrap();
     index.add_path(Path::new("a.txt")).unwrap();
@@ -127,7 +141,10 @@ fn git_tab_e_opens_the_line_in_a_buffer_and_esc_returns_to_the_editor_where_it_w
     wait_screen(&mut app, "changed 30");
     let frame = composed(&mut app);
     let shown = rows(&frame);
-    assert!(shown.iter().any(|row| row.contains("changed 30")), "{shown:#?}");
+    assert!(
+        shown.iter().any(|row| row.contains("changed 30")),
+        "{shown:#?}"
+    );
     // The float leaves the editor around it, receded: the editor's status line (the last
     // row) keeps its text but not its colours, so Dusty Git's footer is the only live one.
     let bottom = frame.grid.height() - 1;
@@ -138,7 +155,10 @@ fn git_tab_e_opens_the_line_in_a_buffer_and_esc_returns_to_the_editor_where_it_w
     // the deleted line opens at the line that took its place (30).
     key(&mut app, "0 e");
     assert!(!app.git_screen_visible);
-    assert!(app.git_screen.is_some(), "Dusty Git waits behind the buffer");
+    assert!(
+        app.git_screen.is_some(),
+        "Dusty Git waits behind the buffer"
+    );
     wait_vfs(&mut app);
     assert_eq!(cursor(&app), (root.join("a.txt"), 26));
 
@@ -159,7 +179,9 @@ fn git_tab_e_opens_the_line_in_a_buffer_and_esc_returns_to_the_editor_where_it_w
     let frame = composed(&mut app);
     let shown = rows(&frame);
     assert!(
-        shown.iter().any(|row| row.contains("line 30") || row.contains("changed 30")),
+        shown
+            .iter()
+            .any(|row| row.contains("line 30") || row.contains("changed 30")),
         "{shown:#?}"
     );
     // Closed, the editor's status line is live again.

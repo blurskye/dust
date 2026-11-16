@@ -1,4 +1,4 @@
-//! F-PRCHECKS (DESIGN.md §3.29): a pull request's checks in GitHub's Checks-tab layout. The
+//! F-PRCHECKS: a pull request's checks in GitHub's Checks-tab layout. The
 //! job list on the left, grouped by workflow (failing first, a long run of skipped checks
 //! folded); the selected job's steps and log on the right, read by the run tree's own code
 //! (`runs/check_job.rs`). A narrow reader stacks the list above the job. Moving in the list
@@ -7,7 +7,8 @@
 use super::super::shell::glyphs::{Glyph, glyph};
 use super::lines::Line;
 use super::pr::{
-    check_parts, check_rank, checks_summary, ci_mark, distinct, shown_duration, skipped_key, split_event, state_word,
+    check_parts, check_rank, checks_summary, ci_mark, distinct, shown_duration, skipped_key,
+    split_event, state_word,
 };
 use super::prose::{Rich, blank, heading, muted, role, strong};
 use super::*;
@@ -37,7 +38,10 @@ fn step_key(job: u64, step: u64) -> String {
 /// GitLab links a merge request's job as `…/-/jobs/N`: no run, but the job's own id.
 fn gitlab_job(check: &CheckRow) -> Option<u64> {
     let (_, rest) = check.url.split_once("/-/jobs/")?;
-    rest.split(|c: char| !c.is_ascii_digit()).next()?.parse().ok()
+    rest.split(|c: char| !c.is_ascii_digit())
+        .next()?
+        .parse()
+        .ok()
 }
 
 /// A check's own name: no workflow before it, no event after it.
@@ -65,27 +69,47 @@ impl Group<'_> {
 
 /// The checks as the list shows them: grouped by workflow and event (every heading names
 /// both, so no row repeats them), the group with a failure first, failing before running,
-/// passing and skipped (§3.29: the first screen answers "what broke").
+/// passing and skipped (the first screen answers "what broke").
 fn groups(record: &DetailRecord) -> Vec<Group<'_>> {
     let mut groups: Vec<Group<'_>> = Vec::new();
     for check in &record.checks {
         let (workflow, own) = check_parts(check);
         let (own, event) = split_event(own);
-        match groups.iter_mut().find(|group| group.workflow == workflow && group.event == event) {
+        match groups
+            .iter_mut()
+            .find(|group| group.workflow == workflow && group.event == event)
+        {
             Some(group) => group.checks.push((check, own)),
-            None => groups.push(Group { workflow, event, checks: vec![(check, own)] }),
+            None => groups.push(Group {
+                workflow,
+                event,
+                checks: vec![(check, own)],
+            }),
         }
     }
     for group in &mut groups {
-        group.checks.sort_by_key(|(check, _)| check_rank(check.state));
+        group
+            .checks
+            .sort_by_key(|(check, _)| check_rank(check.state));
     }
-    groups.sort_by_key(|group| group.checks.iter().map(|(check, _)| check_rank(check.state)).min().unwrap_or(u8::MAX));
+    groups.sort_by_key(|group| {
+        group
+            .checks
+            .iter()
+            .map(|(check, _)| check_rank(check.state))
+            .min()
+            .unwrap_or(u8::MAX)
+    });
     groups
 }
 
 /// What the Checks tab and the merge box say when the head has no checks (one wording).
 pub(super) fn no_checks(record: &DetailRecord) -> String {
-    match record.commits.last().map(|commit| commit.sha.chars().take(7).collect::<String>()) {
+    match record
+        .commits
+        .last()
+        .map(|commit| commit.sha.chars().take(7).collect::<String>())
+    {
         Some(sha) if !sha.is_empty() => format!("No checks have run on {sha} yet"),
         _ => "No checks have run on this commit yet".to_owned(),
     }
@@ -93,7 +117,8 @@ pub(super) fn no_checks(record: &DetailRecord) -> String {
 
 impl Workspace {
     fn check_record(&self, id: u64) -> Option<DetailRecord> {
-        self.value(&Key::Item(2, id)).map(|value| self.checked(DetailRecord::from_value(value)))
+        self.value(&Key::Item(2, id))
+            .map(|value| self.checked(DetailRecord::from_value(value)))
     }
 
     /// The record with each check's state read from its job once the job is known: a
@@ -101,7 +126,10 @@ impl Workspace {
     /// (the banner, the merge gate and the tab never say "passed" over `✕ Run pytest`).
     pub(super) fn checked(&self, mut record: DetailRecord) -> DetailRecord {
         for index in 0..record.checks.len() {
-            if matches!(record.checks[index].state, CiState::Failed | CiState::Cancelled | CiState::Pending) {
+            if matches!(
+                record.checks[index].state,
+                CiState::Failed | CiState::Cancelled | CiState::Pending
+            ) {
                 continue;
             }
             let Some(job) = self.check_job(&record.checks[index]) else {
@@ -120,7 +148,12 @@ impl Workspace {
         self.checks_selected
             .get(&id)
             .and_then(|key| record.checks.iter().find(|check| identity(check) == *key))
-            .or_else(|| groups(record).first().and_then(|group| group.checks.first()).map(|(check, _)| *check))
+            .or_else(|| {
+                groups(record)
+                    .first()
+                    .and_then(|group| group.checks.first())
+                    .map(|(check, _)| *check)
+            })
     }
 
     /// The job behind a check: its run's job once the run is read (by id, else by name: a
@@ -128,15 +161,17 @@ impl Workspace {
     /// GitLab job by its own id.
     fn check_job(&self, check: &CheckRow) -> Option<Value> {
         let Some(run) = check.run else {
-            return gitlab_job(check).map(|id| runs::check_job::bare_job(id, own_name(check), check.state));
+            return gitlab_job(check)
+                .map(|id| runs::check_job::bare_job(id, own_name(check), check.state));
         };
         let jobs = array(self.value(&Key::Run(run, 0))?, "jobs");
         check
             .job
             .and_then(|id| jobs.iter().find(|job| number(job, "databaseId") == id))
             .or_else(|| {
-                jobs.iter()
-                    .find(|job| string(job, "name") == own_name(check) || string(job, "name") == check.name)
+                jobs.iter().find(|job| {
+                    string(job, "name") == own_name(check) || string(job, "name") == check.name
+                })
             })
             .cloned()
     }
@@ -160,7 +195,9 @@ impl Workspace {
         };
         let log = self.check_job(check).filter(|job| {
             let job_id = number(job, "databaseId");
-            self.job_wants_log(job, &|step: u64, default: bool| self.step_open(id, job_id, step, default))
+            self.job_wants_log(job, &|step: u64, default: bool| {
+                self.step_open(id, job_id, step, default)
+            })
         });
         (check.run, log.map(|job| number(&job, "databaseId")))
     }
@@ -169,7 +206,14 @@ impl Workspace {
     pub(super) fn check_reads(&mut self, refresh: bool) {
         let (run, log) = self.check_targets();
         if let Some(run) = run {
-            self.enqueue(Key::Run(run, 0), self.read(Read::Run { id: run.into(), attempt: None }), refresh);
+            self.enqueue(
+                Key::Run(run, 0),
+                self.read(Read::Run {
+                    id: run.into(),
+                    attempt: None,
+                }),
+                refresh,
+            );
         }
         if let Some(job) = log {
             self.enqueue(Key::Log(job), self.read(Read::JobLog(job.into())), refresh);
@@ -191,7 +235,11 @@ impl Workspace {
         if self.page != 2 || self.pr_tab != pr::CHECKS {
             return;
         }
-        let Some(Action::Check(id, key)) = self.detail_rows.get(self.detail_cursor).and_then(|row| row.action.clone()) else {
+        let Some(Action::Check(id, key)) = self
+            .detail_rows
+            .get(self.detail_cursor)
+            .and_then(|row| row.action.clone())
+        else {
             return;
         };
         let key = key.trim_end_matches(DETAILS).to_owned();
@@ -214,7 +262,9 @@ impl Workspace {
     /// page on the forge.
     pub(super) fn open_check(&mut self, id: u64, key: &str) -> Result<Option<Form>, String> {
         let key = key.trim_end_matches(DETAILS);
-        let record = self.check_record(id).ok_or("The pull request is still loading")?;
+        let record = self
+            .check_record(id)
+            .ok_or("The pull request is still loading")?;
         let check = record
             .checks
             .iter()
@@ -231,7 +281,14 @@ impl Workspace {
         self.cache.remove(&Key::Write);
         self.enqueue(
             Key::Write,
-            Op::Write(self.target(), Write::OpenInBrowser { kind: ItemKind::PullRequest, number: id, url: Some(url) }),
+            Op::Write(
+                self.target(),
+                Write::OpenInBrowser {
+                    kind: ItemKind::PullRequest,
+                    number: id,
+                    url: Some(url),
+                },
+            ),
             false,
         );
         self.notice_error = false;
@@ -248,16 +305,27 @@ impl Workspace {
         match &row.action {
             Some(Action::Check(id, key)) => {
                 let key = key.trim_end_matches(DETAILS);
-                let check = self.check_record(*id).and_then(|record| record.checks.into_iter().find(|check| identity(check) == key));
+                let check = self.check_record(*id).and_then(|record| {
+                    record
+                        .checks
+                        .into_iter()
+                        .find(|check| identity(check) == key)
+                });
                 match check {
-                    Some(check) if check.run.is_some() && self.terms().run_noun == "pipeline" => "open pipeline",
+                    Some(check) if check.run.is_some() && self.terms().run_noun == "pipeline" => {
+                        "open pipeline"
+                    }
                     Some(check) if check.run.is_some() => "open run",
                     Some(check) if !check.url.is_empty() => "open in browser",
                     _ => "",
                 }
             }
             Some(Action::Collapse(_, key)) if key.starts_with("\u{0}step\u{0}") => {
-                if row.text.starts_with(glyph(Glyph::FoldOpen, self.icons)) { "hide log" } else { "show log" }
+                if row.text.starts_with(glyph(Glyph::FoldOpen, self.icons)) {
+                    "hide log"
+                } else {
+                    "show log"
+                }
             }
             Some(Action::Collapse(..)) => "fold",
             _ => "",
@@ -280,16 +348,35 @@ pub(super) fn rows(
         // The frame stays: an empty list beside a calm note, in the merge box's words.
         let (mark, _, _) = ci_mark(CiState::Unknown, mode);
         if beside {
-            let mut row = Rich::new().plain("  ").push(format!("{mark} "), role(GitRole::Muted)).push("No checks yet", role(GitRole::Muted)).line();
+            let mut row = Rich::new()
+                .plain("  ")
+                .push(format!("{mark} "), role(GitRole::Muted))
+                .push("No checks yet", role(GitRole::Muted))
+                .line();
             row.outline = true;
             rows.push(row);
         }
-        rows.push(Rich::new().plain("  ").push(no_checks(record), role(GitRole::Muted)).line());
+        rows.push(
+            Rich::new()
+                .plain("  ")
+                .push(no_checks(record), role(GitRole::Muted))
+                .line(),
+        );
         return;
     }
     let chosen = workspace.chosen_check(id, record).map(identity);
     let start = rows.len();
-    list(workspace, id, record, rows, noun, chosen.as_deref(), beside, width, mode);
+    list(
+        workspace,
+        id,
+        record,
+        rows,
+        noun,
+        chosen.as_deref(),
+        beside,
+        width,
+        mode,
+    );
     if beside {
         for row in &mut rows[start..] {
             row.outline = true;
@@ -305,7 +392,11 @@ pub(super) fn rows(
     } else {
         width.saturating_sub(1)
     };
-    if let Some(check) = record.checks.iter().find(|check| Some(identity(check)) == chosen) {
+    if let Some(check) = record
+        .checks
+        .iter()
+        .find(|check| Some(identity(check)) == chosen)
+    {
         job(workspace, id, check, rows, pane, beside, mode);
     }
     // A row the cursor can rest on with no action of its own (a heading, the job's title,
@@ -313,9 +404,17 @@ pub(super) fn rows(
     // "Quality checks" line never reads as the list's heading of the same name.
     for row in &mut rows[start..] {
         if row.action.is_none() && row.source.is_none() {
-            row.source = Some(super::find::Source { text: std::sync::Arc::from(row.text.as_str()), offset: 0 });
+            row.source = Some(super::find::Source {
+                text: std::sync::Arc::from(row.text.as_str()),
+                offset: 0,
+            });
             // As `record_rows` would have left it without the anchor: muted text never pans.
-            if row.diff.is_none() && row.gutter.is_empty() && row.paint.is_empty() && row.band.is_none() && row.style == crate::ui::Style::Muted {
+            if row.diff.is_none()
+                && row.gutter.is_empty()
+                && row.paint.is_empty()
+                && row.band.is_none()
+                && row.style == crate::ui::Style::Muted
+            {
                 row.pan = false;
             }
         }
@@ -338,23 +437,51 @@ fn list(
     let counts = record.check_counts();
     let (mark, _, tone) = ci_mark(counts.state().unwrap_or(CiState::Unknown), mode);
     // One failing check is named where it is: `1 failing · Quality checks / Python tests`.
-    let failing = record.checks.iter().filter(|check| matches!(check.state, CiState::Failed | CiState::Cancelled)).collect::<Vec<_>>();
+    let failing = record
+        .checks
+        .iter()
+        .filter(|check| matches!(check.state, CiState::Failed | CiState::Cancelled))
+        .collect::<Vec<_>>();
     let summary = match failing.as_slice() {
         [check] => {
             let (workflow, own) = check_parts(check);
             let own = split_event(own).0;
-            if workflow.is_empty() { format!("1 failing · {own}") } else { format!("1 failing · {workflow} / {own}") }
+            if workflow.is_empty() {
+                format!("1 failing · {own}")
+            } else {
+                format!("1 failing · {workflow} / {own}")
+            }
         }
         _ => checks_summary(&counts, noun),
     };
-    rows.push(Rich::new().push(format!("{mark} "), role(tone)).push(summary, strong(tone)).line());
+    rows.push(
+        Rich::new()
+            .push(format!("{mark} "), role(tone))
+            .push(summary, strong(tone))
+            .line(),
+    );
     let groups = groups(record);
-    let grouped = groups.len() > 1 || groups.first().is_some_and(|group| !group.workflow.is_empty() || group.event.is_some());
+    let grouped = groups.len() > 1
+        || groups
+            .first()
+            .is_some_and(|group| !group.workflow.is_empty() || group.event.is_some());
     let indent = if grouped { 2 } else { 0 };
     // Beside the job a row is its mark and name; above it, its state and time too.
-    let room = if beside { super::paint::outline_most(width) } else { width.min(prose::MEASURE) };
-    let timed = !beside && record.checks.iter().any(|check| shown_duration(check).is_some());
-    let tail = if beside { 0 } else { 12 + if timed { 10 } else { 0 } };
+    let room = if beside {
+        super::paint::outline_most(width)
+    } else {
+        width.min(prose::MEASURE)
+    };
+    let timed = !beside
+        && record
+            .checks
+            .iter()
+            .any(|check| shown_duration(check).is_some());
+    let tail = if beside {
+        0
+    } else {
+        12 + if timed { 10 } else { 0 }
+    };
     let longest = groups
         .iter()
         .flat_map(|group| group.checks.iter().map(|(_, own)| own.width()))
@@ -372,11 +499,19 @@ fn list(
             for (check, _) in &group.checks {
                 counted.add(check.state);
             }
-            let note = if beside { String::new() } else { counted.summary() };
+            let note = if beside {
+                String::new()
+            } else {
+                counted.summary()
+            };
             rows.push(heading(&group.name(), &note));
         }
-        // A long run of skipped checks folds into one row (r12 gitea-01): Enter opens it.
-        let skipped = group.checks.iter().filter(|(check, _)| check.state == CiState::Skipped).count();
+        // A long run of skipped checks folds into one row: Enter opens it.
+        let skipped = group
+            .checks
+            .iter()
+            .filter(|(check, _)| check.state == CiState::Skipped)
+            .count();
         let key = skipped_key(group.workflow, group.event);
         let open = workspace.collapsed.contains(&(id, key.clone()));
         let fold = skipped > 3 && !open;
@@ -385,20 +520,35 @@ fn list(
             .iter()
             .filter(|(check, _)| !fold || check.state != CiState::Skipped)
             .collect::<Vec<_>>();
-        let names = distinct(&shown.iter().map(|(_, own)| *own).collect::<Vec<_>>(), name_width);
+        let names = distinct(
+            &shown.iter().map(|(_, own)| *own).collect::<Vec<_>>(),
+            name_width,
+        );
         for ((check, _), name) in shown.iter().zip(&names) {
             let (mark, _, tone) = ci_mark(check.state, mode);
             let selected = chosen == Some(identity(check).as_str());
             let mut row = Rich::new()
                 .plain(&" ".repeat(indent))
                 .push(format!("{mark} "), role(tone))
-                .push(name, if selected { strong(GitRole::Focus) } else { role(GitRole::Text) });
+                .push(
+                    name,
+                    if selected {
+                        strong(GitRole::Focus)
+                    } else {
+                        role(GitRole::Text)
+                    },
+                );
             if !beside {
-                row = row.to_column(name_width + indent + 4).push(state_word(&check.word), role(tone));
+                row = row
+                    .to_column(name_width + indent + 4)
+                    .push(state_word(&check.word), role(tone));
                 if timed {
-                    row = row
-                        .to_column(name_width + indent + 16)
-                        .push(shown_duration(check).map(records::duration).unwrap_or_default(), role(GitRole::Muted));
+                    row = row.to_column(name_width + indent + 16).push(
+                        shown_duration(check)
+                            .map(records::duration)
+                            .unwrap_or_default(),
+                        role(GitRole::Muted),
+                    );
                 }
             }
             let mut row = row.line();
@@ -410,12 +560,15 @@ fn list(
             let mut row = if open {
                 Rich::new()
                     .plain(&" ".repeat(indent))
-                    .push(format!("{} ", glyph(Glyph::FoldOpen, mode)), role(GitRole::Muted))
+                    .push(
+                        format!("{} ", glyph(Glyph::FoldOpen, mode)),
+                        role(GitRole::Muted),
+                    )
                     .push(format!("{skipped} skipped"), role(GitRole::Muted))
                     .line()
             } else {
                 // The folded row names what it holds, so the list hides nothing it counts
-                // (r11 GITEA-05): `▸ ⊘ linux, macos, windows +6`.
+                //: `▸ ⊘ linux, macos, windows +6`.
                 let names = group
                     .checks
                     .iter()
@@ -426,8 +579,16 @@ fn list(
                 let mut text = String::new();
                 for (at, name) in names.iter().enumerate() {
                     let rest = names.len() - at - 1;
-                    let next = if text.is_empty() { (*name).to_owned() } else { format!("{text}, {name}") };
-                    let more = if rest > 0 { format!(" +{rest}") } else { String::new() };
+                    let next = if text.is_empty() {
+                        (*name).to_owned()
+                    } else {
+                        format!("{text}, {name}")
+                    };
+                    let more = if rest > 0 {
+                        format!(" +{rest}")
+                    } else {
+                        String::new()
+                    };
                     if !text.is_empty() && format!("{next}{more}").width() > room {
                         text = format!("{text} +{}", names.len() - at);
                         break;
@@ -436,9 +597,15 @@ fn list(
                 }
                 Rich::new()
                     .plain(&" ".repeat(indent))
-                    .push(format!("{} ", glyph(Glyph::FoldClosed, mode)), role(GitRole::Muted))
+                    .push(
+                        format!("{} ", glyph(Glyph::FoldClosed, mode)),
+                        role(GitRole::Muted),
+                    )
                     .push(format!("{mark} "), role(tone))
-                    .push(super::super::shell::chrome::ellipsize(&text, room), role(GitRole::Muted))
+                    .push(
+                        super::super::shell::chrome::ellipsize(&text, room),
+                        role(GitRole::Muted),
+                    )
                     .line()
             };
             row.action = Some(Action::Collapse(id, key));
@@ -461,7 +628,15 @@ fn list(
 /// like its job never reads as one more check, r16 prs-08), then its steps and log, or, for
 /// a check with no run (a commit status, outside CI), where its details are.
 #[allow(clippy::too_many_arguments)]
-fn job(workspace: &Workspace, id: u64, check: &CheckRow, rows: &mut Vec<Line>, room: usize, beside: bool, mode: ExplorerIconMode) {
+fn job(
+    workspace: &Workspace,
+    id: u64,
+    check: &CheckRow,
+    rows: &mut Vec<Line>,
+    room: usize,
+    beside: bool,
+    mode: ExplorerIconMode,
+) {
     let (workflow, own) = check_parts(check);
     let (own, _) = split_event(own);
     let (mark, _, tone) = ci_mark(check.state, mode);
@@ -470,13 +645,17 @@ fn job(workspace: &Workspace, id: u64, check: &CheckRow, rows: &mut Vec<Line>, r
         let time = found
             .as_ref()
             .and_then(runs::check_job::job_time)
-            .or_else(|| shown_duration(check).map(|seconds| (records::duration(seconds), GitRole::Muted)));
+            .or_else(|| {
+                shown_duration(check).map(|seconds| (records::duration(seconds), GitRole::Muted))
+            });
         let mut title = Rich::new().push(format!("{mark} "), role(tone));
         if !workflow.is_empty() {
             title = title.push(format!("{workflow} / "), role(GitRole::Muted));
         }
         title = title.push(own, strong(GitRole::Text));
-        if let Some((time, time_role)) = time.filter(|(time, _)| time != "running" && time != "queued") {
+        if let Some((time, time_role)) =
+            time.filter(|(time, _)| time != "running" && time != "queued")
+        {
             title = title.sep().push(time, role(time_role));
         }
         title = title.sep().push(state_word(&check.word), role(tone));
@@ -488,7 +667,7 @@ fn job(workspace: &Workspace, id: u64, check: &CheckRow, rows: &mut Vec<Line>, r
     } else if found.is_some() {
         rows.push(
             Rich::new()
-                .push(own.to_owned(), strong(GitRole::Text))
+                .push(own, strong(GitRole::Text))
                 .sep()
                 .push("steps", role(GitRole::Muted))
                 .line(),
@@ -507,7 +686,7 @@ fn job(workspace: &Workspace, id: u64, check: &CheckRow, rows: &mut Vec<Line>, r
     }
     if let Some(run) = check.run {
         match workspace.cache.get(&Key::Run(run, 0)) {
-            // Calm, in the job's place: never the forge's status line (§3.46). A run the forge
+            // Calm, in the job's place: never the forge's status line. A run the forge
             // no longer has is GitHub's "logs … have expired"; a sign-in names the key.
             Some(Err(error)) => {
                 let words = workspace.explain(error);
@@ -522,19 +701,28 @@ fn job(workspace: &Workspace, id: u64, check: &CheckRow, rows: &mut Vec<Line>, r
                 "This job is not in the {}'s latest attempt",
                 workspace.terms().run_noun
             ))),
-            None => rows.push(muted(&format!("Loading the {}…", workspace.terms().run_noun))),
+            None => rows.push(muted(&format!(
+                "Loading the {}…",
+                workspace.terms().run_noun
+            ))),
         }
         return;
     }
     // A commit status or outside CI: the forge has no run to read.
-    rows.push(muted(&format!("No {} here · details are on the check's own page", workspace.terms().run_noun)));
+    rows.push(muted(&format!(
+        "No {} here · details are on the check's own page",
+        workspace.terms().run_noun
+    )));
     if check.url.is_empty() {
         rows.push(muted("The forge gave no link for it."));
         return;
     }
     rows.push(blank());
     let mut row = Rich::new()
-        .push(format!("View details {}", glyph(Glyph::Link, mode)), role(GitRole::Link))
+        .push(
+            format!("View details {}", glyph(Glyph::Link, mode)),
+            role(GitRole::Link),
+        )
         .line();
     row.action = Some(Action::Check(id, format!("{}{DETAILS}", identity(check))));
     rows.push(row);

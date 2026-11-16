@@ -1,4 +1,4 @@
-//! FORGE.md §7.2/§7.3/§7.5: stale-while-revalidate, merging without moving the reader,
+//! Stale-while-revalidate, merging without moving the reader,
 //! conditional requests and the warm worker (F3).
 #![cfg(unix)]
 use dust::editor::input::KeyCode;
@@ -10,8 +10,8 @@ mod forge_fake;
 mod forge_screen;
 #[path = "support/records.rs"]
 mod records;
-use records::lists;
 use forge_screen::*;
+use records::lists;
 
 fn issue(id: u64, title: &str) -> serde_json::Value {
     serde_json::json!({"number": id, "title": title, "body": format!("Unique selected body {id}.")})
@@ -32,7 +32,13 @@ fn list_rows(screen: &mut dust::git::screen::GitScreen) -> Vec<String> {
         .collect::<Vec<_>>();
     (0..lines.len())
         .filter(|&y| lines[y].contains("Navigation issue"))
-        .map(|y| format!("{} {}", lines[y], lines.get(y + 1).map_or("", String::as_str)))
+        .map(|y| {
+            format!(
+                "{} {}",
+                lines[y],
+                lines.get(y + 1).map_or("", String::as_str)
+            )
+        })
         .collect()
 }
 
@@ -49,7 +55,8 @@ fn the_cursor_survives_a_background_merge() {
     // Since the last session: two issues were opened, one renamed and one closed.
     update_state(|state| {
         // Held until the cursor is on #6: the merge lands under a moved cursor.
-        state["read_gates"] = serde_json::json!([{"prefix": ["issue", "list"], "name": "merge-list"}]);
+        state["read_gates"] =
+            serde_json::json!([{"prefix": ["issue", "list"], "name": "merge-list"}]);
         state["issues"] = serde_json::json!([
             issue(10, "Navigation issue 10"),
             issue(9, "Navigation issue 9"),
@@ -64,7 +71,9 @@ fn the_cursor_survives_a_background_merge() {
     let mut screen = open();
     goto(&mut screen, 0, 1);
     // The disk answers within a poll or a few: a busy machine can need more than one.
-    wait_for(&mut screen, "the cached issues", |frame| lists(frame, 2, "Navigation issue 2"));
+    wait_for(&mut screen, "the cached issues", |frame| {
+        lists(frame, 2, "Navigation issue 2")
+    });
     let cached = view(&mut screen);
     assert!(!cached.contains("Navigation issue 10"), "{cached}");
     assert!(cached.contains("updated 1h ago"), "{cached}");
@@ -72,7 +81,9 @@ fn the_cursor_survives_a_background_merge() {
     key(&mut screen, KeyCode::Char('j'));
     assert!(lists(&cursor_record(&mut screen), 6, "Navigation issue 6"));
     release("merge-list");
-    wait_for(&mut screen, "#10", |frame| lists(frame, 10, "Navigation issue 10"));
+    wait_for(&mut screen, "#10", |frame| {
+        lists(frame, 10, "Navigation issue 10")
+    });
     wait(&mut screen, "updated just now");
     assert!(
         lists(&cursor_record(&mut screen), 6, "Navigation issue 6"),
@@ -122,7 +133,9 @@ fn not_modified_changes_no_data() {
         serde_json::from_str(&std::fs::read_to_string(&repo).unwrap()).unwrap();
     let mut screen = open();
     goto(&mut screen, 0, 1);
-    wait_for(&mut screen, "the cached issues", |frame| lists(frame, 1, "Navigation issue 1"));
+    wait_for(&mut screen, "the cached issues", |frame| {
+        lists(frame, 1, "Navigation issue 1")
+    });
     let before = list_rows(&mut screen);
     assert!(!before.is_empty());
     wait_for(&mut screen, "a 304 for the repository", |_| {

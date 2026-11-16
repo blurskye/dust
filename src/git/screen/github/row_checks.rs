@@ -47,7 +47,10 @@ impl Workspace {
     fn row_checks_wanted(&self) -> bool {
         self.page == 2
             && !self.inbox.enabled
-            && matches!(self.forge_kind(), Some(ProviderKind::Gitea | ProviderKind::Forgejo))
+            && matches!(
+                self.forge_kind(),
+                Some(ProviderKind::Gitea | ProviderKind::Forgejo)
+            )
     }
 
     /// Take the warm worker's answers and ask for the visible rows still unknown or stale.
@@ -61,27 +64,49 @@ impl Workspace {
             .collect::<Vec<_>>();
         for key in answered {
             // From disk (a restart): shown, and asked again as if its budget ran out.
-            let verified = self.fresh.meta.remove(&key).is_some_and(|meta| meta.verified);
-            let seen = if verified { Instant::now() } else { Instant::now().checked_sub(TTL).unwrap_or_else(Instant::now) };
+            let verified = self
+                .fresh
+                .meta
+                .remove(&key)
+                .is_some_and(|meta| meta.verified);
+            let seen = if verified {
+                Instant::now()
+            } else {
+                Instant::now().checked_sub(TTL).unwrap_or_else(Instant::now)
+            };
             let Some(Ok(reply)) = self.cache.remove(&key) else {
                 continue;
             };
             let Key::RowChecks(numbers) = &key else {
                 continue;
             };
-            let Ok(Payload::Fingerprints(prints)) = serde_json::from_value::<Payload>(reply.value) else {
+            let Ok(Payload::Fingerprints(prints)) = serde_json::from_value::<Payload>(reply.value)
+            else {
                 continue;
             };
             for number in numbers {
-                let updated = self.fresh.rows.asked.get(number).map(|(updated, _)| updated.clone()).unwrap_or_default();
-                let state = prints.iter().find(|(each, _)| each == number).and_then(|(_, print)| print.rollup);
+                let updated = self
+                    .fresh
+                    .rows
+                    .asked
+                    .get(number)
+                    .map(|(updated, _)| updated.clone())
+                    .unwrap_or_default();
+                let state = prints
+                    .iter()
+                    .find(|(each, _)| each == number)
+                    .and_then(|(_, print)| print.rollup);
                 if self.fresh.rows.known.get(number).map(|(known, ..)| *known) != Some(state) {
                     changed = true;
                 }
-                self.fresh.rows.known.insert(*number, (state, updated, seen));
+                self.fresh
+                    .rows
+                    .known
+                    .insert(*number, (state, updated, seen));
             }
         }
-        if !self.row_checks_wanted() || self.fresh.warm_has(|key| matches!(key, Key::RowChecks(_))) {
+        if !self.row_checks_wanted() || self.fresh.warm_has(|key| matches!(key, Key::RowChecks(_)))
+        {
             return changed;
         }
         let updated = self
@@ -98,8 +123,14 @@ impl Workspace {
                     return false;
                 };
                 let fresh = |seen: &String, at: &Instant| seen == now && at.elapsed() < TTL;
-                let known = rows.known.get(number).is_some_and(|(_, seen, at)| fresh(seen, at));
-                let asked = rows.asked.get(number).is_some_and(|(seen, at)| fresh(seen, at));
+                let known = rows
+                    .known
+                    .get(number)
+                    .is_some_and(|(_, seen, at)| fresh(seen, at));
+                let asked = rows
+                    .asked
+                    .get(number)
+                    .is_some_and(|(seen, at)| fresh(seen, at));
                 !known && !asked
             })
             .collect::<Vec<_>>();
@@ -107,7 +138,10 @@ impl Workspace {
             return changed;
         }
         for number in &ask {
-            self.fresh.rows.asked.insert(*number, (updated[number].clone(), Instant::now()));
+            self.fresh
+                .rows
+                .asked
+                .insert(*number, (updated[number].clone(), Instant::now()));
         }
         let key = Key::RowChecks(ask.clone());
         let op = self.read(Read::Fingerprints(ask));
@@ -126,7 +160,8 @@ mod tests {
     #[test]
     fn a_known_state_marks_a_row_without_checks_only() {
         let mut rows = Rows::default();
-        rows.known.insert(7, (Some(CiState::Failed), String::new(), Instant::now()));
+        rows.known
+            .insert(7, (Some(CiState::Failed), String::new(), Instant::now()));
         let mut bare = ItemRecord::from_row(&json!({ "number": 7 }));
         rows.overlay(&mut bare);
         assert_eq!(bare.ci(), Some(CiState::Failed));

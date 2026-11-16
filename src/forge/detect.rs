@@ -1,4 +1,4 @@
-//! Which remote, which host, which forge (FORGE.md §2.2–2.3).
+//! Which remote, which host, which forge.
 //!
 //! Provider order, first answer wins: `[forge.hosts."H"].provider` in config.toml →
 //! `DUSTY_FORGE_PROVIDER` (for `DUSTY_FORGE_HOST`, or any host when that is unset) → well-known
@@ -6,7 +6,7 @@
 //! (a host gh, glab, fj or tea holds a credential for *is* that provider; t3code's rule that an
 //! unknown host is only claimed with a credential) → an unauthenticated version probe
 //! (`/api/v1/version` Gitea/Forgejo, `/api/v4/version` GitLab, `/api/v3/meta` GHES, 3 s each) →
-//! `Unknown forge at H` (DESIGN §3.45 X-PROVIDER).
+//! `Unknown forge at H`.
 //!
 //! Claims and probes are cached in `$XDG_STATE_HOME/dusty/forge/hosts.json`
 //! (`DUSTY_FORGE_STATE_DIR` overrides the directory) together with the capabilities observed
@@ -152,7 +152,7 @@ pub fn known_host(host: &HostKey) -> Option<ProviderKind> {
     }
 }
 
-/// `[forge.hosts."H"]` (FORGE.md §2.4); routing only, never tokens.
+/// `[forge.hosts."H"]`; routing only, never tokens.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct HostConfig {
     pub provider: Option<ProviderKind>,
@@ -257,7 +257,7 @@ pub struct Detected {
     pub source: DetectSource,
     /// The probes were refused because the instance requires a sign-in for every API call
     /// (Forgejo/Gitea `REQUIRE_SIGNIN_VIEW`, GHES private mode): `kind` is a guess from the
-    /// refusal, and anonymous reads cannot work (FORGE.md §2.5).
+    /// refusal, and anonymous reads cannot work.
     pub sign_in_required: bool,
 }
 
@@ -327,7 +327,7 @@ fn graphql_for(kind: ProviderKind, api_base: &str) -> Option<String> {
     }
 }
 
-/// API bases per provider (§2.2), then `api_base` from config, then `DUSTY_FORGE_API_BASE` /
+/// API bases per provider, then `api_base` from config, then `DUSTY_FORGE_API_BASE` /
 /// `DUSTY_FORGE_GRAPHQL_URL` (both with `{host}`).
 pub fn endpoints_for(
     kind: ProviderKind,
@@ -392,7 +392,7 @@ pub struct HostRecord {
     pub source: String,
     /// Seconds since the epoch.
     pub probed_at: u64,
-    /// Capability name → `yes` / `no` from a probe (`Cap::Probe`, FORGE.md §4.1).
+    /// Capability name → `yes` / `no` from a probe (`Cap::Probe`).
     #[serde(default)]
     pub capabilities_observed: BTreeMap<String, String>,
     /// The version probe was refused for want of a sign-in.
@@ -557,7 +557,7 @@ pub fn gitea_family(version: &str) -> ProviderKind {
 }
 
 /// Gitea's API errors carry the swagger URL; it proves the family even when anonymous reads
-/// are refused (`REQUIRE_SIGNIN_VIEW`). Forgejo's sign-in refusal (forgejo.example.org's
+/// are refused (`REQUIRE_SIGNIN_VIEW`). Forgejo's sign-in refusal (a private instance's
 /// 403) carries only its fixed message, which proves the family as well.
 fn gitea_error(body: &serde_json::Value) -> bool {
     body["message"].is_string()
@@ -576,7 +576,7 @@ fn sign_in_message(body: &serde_json::Value) -> bool {
     })
 }
 
-/// What the version probes found (§2.3).
+/// What the version probes found.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Probed {
     pub kind: ProviderKind,
@@ -585,7 +585,7 @@ pub struct Probed {
     pub sign_in_required: bool,
 }
 
-/// Probe a host's version endpoints (§2.3). Returns the provider and its version if known.
+/// Probe a host's version endpoints. Returns the provider and its version if known.
 pub fn probe(
     host: &HostKey,
     env: &Env,
@@ -955,7 +955,7 @@ mod tests {
     #[test]
     fn config_hosts_parse_provider_base_and_login() {
         let config = ForgeConfig::parse(
-            "[forge]\nremote = \"origin\"\n[forge.hosts.\"forgejo.example.org\"]\nprovider = \"forgejo\"\nlogin = \"blurskye\"\n[forge.hosts.\"git.corp.example:8443\"]\nprovider = \"gitlab\"\napi_base = \"https://git.corp.example:8443/gitlab/api/v4\"\n",
+            "[forge]\nremote = \"origin\"\n[forge.hosts.\"git.example.org\"]\nprovider = \"forgejo\"\nlogin = \"blurskye\"\n[forge.hosts.\"git.corp.example:8443\"]\nprovider = \"gitlab\"\napi_base = \"https://git.corp.example:8443/gitlab/api/v4\"\n",
         );
         assert_eq!(config.remote.as_deref(), Some("origin"));
         let corp = &config.hosts[&HostKey::new("git.corp.example:8443")];
@@ -976,7 +976,7 @@ mod tests {
         );
         assert_eq!(endpoints.web_base, "https://git.corp.example:8443");
         assert_eq!(
-            config.hosts[&HostKey::new("forgejo.example.org")]
+            config.hosts[&HostKey::new("git.example.org")]
                 .login
                 .as_deref(),
             Some("blurskye")

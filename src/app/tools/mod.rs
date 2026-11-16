@@ -973,7 +973,10 @@ mod tests {
         fs::create_dir(&two).unwrap();
         fs::write(two.join("available"), "").unwrap();
         let executable = root.path().join("rust-analyzer");
-        crate::testing::write_executable(&executable, "#!/bin/sh\nif [ -f available ]; then printf 'rust-analyzer project'; else exit 1; fi\n");
+        crate::testing::write_executable(
+            &executable,
+            "#!/bin/sh\nif [ -f available ]; then printf 'rust-analyzer project'; else exit 1; fi\n",
+        );
         let mut definition = crate::tools::bundled_tool_catalog()
             .into_iter()
             .find(|tool| tool.id == "rust-analyzer")
@@ -1008,7 +1011,10 @@ mod tests {
         use std::time::Instant;
         let root = tempfile::tempdir().unwrap();
         let executable = root.path().join("probe");
-        crate::testing::write_executable(&executable, "#!/bin/sh\nif [ \"$1\" = block ]; then\n  printf started > started\n  while [ ! -f release ]; do sleep 0.01; done\nfi\nprintf 'server 1.2.3'\n");
+        crate::testing::write_executable(
+            &executable,
+            "#!/bin/sh\nif [ \"$1\" = block ]; then\n  printf started > started\n  while [ ! -f release ]; do sleep 0.01; done\nfi\nprintf 'server 1.2.3'\n",
+        );
         let mut definition = crate::tools::bundled_tool_catalog()
             .into_iter()
             .find(|tool| tool.id == "gopls")
@@ -1064,7 +1070,10 @@ mod tests {
         fs::create_dir(&two).unwrap();
         fs::write(two.join("available"), "").unwrap();
         let executable = root.path().join("rust-analyzer");
-        crate::testing::write_executable(&executable, "#!/bin/sh\nif [ -f available ]; then printf 'rust-analyzer project'; else exit 1; fi\n");
+        crate::testing::write_executable(
+            &executable,
+            "#!/bin/sh\nif [ -f available ]; then printf 'rust-analyzer project'; else exit 1; fi\n",
+        );
         let mut tooling = Tools::new(Vec::new());
         for id in ["rust-analyzer", "gopls"] {
             let mut definition = crate::tools::bundled_tool_catalog()

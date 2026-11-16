@@ -92,7 +92,10 @@ fn wide(screen: &mut GitScreen) -> String {
 }
 fn selected(screen: &mut GitScreen) -> String {
     let frame = screen.frame(120, 40);
-    let (_, y, _) = frame.cursor.expect("native cursor");
+    // A pane still loading shows a note and no cursor: nothing is selected yet.
+    let Some((_, y, _)) = frame.cursor else {
+        return String::new();
+    };
     frame.grid.row_text(y).chars().take(36).collect()
 }
 fn choose_file(screen: &mut GitScreen, name: &str) {
@@ -350,7 +353,9 @@ fn narrow_sidebar_shows_five_branches_without_changing_pane_boundaries_on_focus(
         );
     }
     let mut screen = GitScreen::open(directory.path()).unwrap();
-    wait(&mut screen, |screen| view(screen).contains("visible-00") && screen.panes_sized());
+    wait(&mut screen, |screen| {
+        view(screen).contains("visible-00") && screen.panes_sized()
+    });
     let frame = screen.frame(100, 30);
     let headings = ["Changes", "Branches", "History", "Stashes"].map(|heading| {
         (0..30)
@@ -504,7 +509,9 @@ fn commit_and_commit_file_filters_keep_the_shared_changes_pane_read_only() {
     git(root, &["commit", "-m", "Later commit"]);
     let mut screen = GitScreen::open(root).unwrap();
     wait(&mut screen, |screen| view(screen).contains("Later commit"));
-    wait(&mut screen, |screen| view(screen).contains("Local 1") && screen.panes_sized());
+    wait(&mut screen, |screen| {
+        view(screen).contains("Local 1") && screen.panes_sized()
+    });
     key(&mut screen, KeyCode::Char('4'));
     let before = screen.frame(100, 30);
     let headings = ["Branches", "History", "Stashes"].map(|heading| {
@@ -602,7 +609,9 @@ fn exact_added_line_then_range_staging_preserves_the_rest_of_the_worktree() {
         git(root, &["show", ":file.txt"]),
         "alpha\nfirst added\nomega"
     );
-    wait(&mut screen, |screen| view(screen).contains("+ second added"));
+    wait(&mut screen, |screen| {
+        view(screen).contains("+ second added")
+    });
     code_cursor(&mut screen, "+ second added");
     ready_hunks(&mut screen);
     key(&mut screen, KeyCode::Char('V'));
@@ -996,14 +1005,9 @@ fn sidebar_tabs_use_real_worktrees_remote_refs_tags_and_reflog_events() {
     assert_eq!(git(root, &["diff", "--cached", "--name-only"]), "");
     let frame = screen.frame(190, 48);
     let historical_heading = "Commit files".to_owned();
-    for (name, y) in [
-        historical_heading.as_str(),
-        "Branches",
-        "Reflog",
-        "Stashes",
-    ]
-    .into_iter()
-    .zip(headings)
+    for (name, y) in [historical_heading.as_str(), "Branches", "Reflog", "Stashes"]
+        .into_iter()
+        .zip(headings)
     {
         assert!(
             frame
@@ -1314,7 +1318,7 @@ fn file_status_columns_and_filename_do_not_move_between_worktree_mixed_and_index
     write(root, "file.txt", "first edit\n");
     let mut screen = GitScreen::open(root).unwrap();
     wait(&mut screen, |screen| view(screen).contains("+ first edit"));
-    // Fixed Changes row anatomy (DESIGN.md §3.1): `▸` cursor, a mark column
+    // Fixed Changes row anatomy: `▸` cursor, a mark column
     // (`◐` when partly staged), the XY status letters, the file glyph, then the path.
     let assert_status = |screen: &mut GitScreen, marker: &str, code: &str| {
         let cursor = dust::ui::GitSurface::Cursor;
@@ -1487,14 +1491,23 @@ fn compact_help_exposes_submodule_remote_stash_and_diff_actions_at_every_support
         key(&mut screen, KeyCode::Char('['));
         key(&mut screen, KeyCode::Char('5'));
         let stashes = help(&mut screen, width, height);
-        assert_help(&stashes, width, height, &["Keys · Stashes", "New stash", "Apply"]);
+        assert_help(
+            &stashes,
+            width,
+            height,
+            &["Keys · Stashes", "New stash", "Apply"],
+        );
         key(&mut screen, KeyCode::Char('0'));
         let reader = help(&mut screen, width, height);
         assert_help(
             &reader,
             width,
             height,
-            &["Keys · Reader", "Stage · unstage hunk", "Start · finish a range"],
+            &[
+                "Keys · Reader",
+                "Stage · unstage hunk",
+                "Start · finish a range",
+            ],
         );
     }
 }

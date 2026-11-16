@@ -1,4 +1,4 @@
-//! FORGE.md §7.4: search shows cached hits while typing and streams the forge's results in
+//! Search shows cached hits while typing and streams the forge's results in
 //! below them (F3).
 #![cfg(unix)]
 use dust::editor::input::KeyCode;
@@ -10,9 +10,9 @@ mod forge_fake;
 mod forge_screen;
 #[path = "support/records.rs"]
 mod records;
+use forge_screen::*;
 use records::lists;
 use records::record_rows;
-use forge_screen::*;
 
 /// Lines of the list pane only (the form sits beside it).
 fn list(screen: &mut dust::git::screen::GitScreen) -> String {
@@ -46,11 +46,14 @@ fn cached_search_hits_appear_before_remote_results() {
     update_state(|state| {
         state["delay_ms"] = 1500.into();
         // Held until the local hits are checked: a paused test can't see remote rows early.
-        state["read_gates"] = serde_json::json!([{"prefix": ["issue", "list"], "name": "search-list"}]);
+        state["read_gates"] =
+            serde_json::json!([{"prefix": ["issue", "list"], "name": "search-list"}]);
     });
     let mut screen = open();
     goto(&mut screen, 0, 1);
-    wait_for(&mut screen, "the cached issues", |frame| lists(frame, 1, "Navigation issue 1"));
+    wait_for(&mut screen, "the cached issues", |frame| {
+        lists(frame, 1, "Navigation issue 1")
+    });
     key(&mut screen, KeyCode::Char('/'));
     let typed = Instant::now();
     paste(&mut screen, "issue 5");
@@ -64,7 +67,9 @@ fn cached_search_hits_appear_before_remote_results() {
     assert!(!local.contains("Remote only issue 42"), "{local}");
     release("search-list");
     // Remote results arrive below the divider, without repeating the local hit.
-    wait_for(&mut screen, "#42", |frame| lists(frame, 42, "Remote only issue 42"));
+    wait_for(&mut screen, "#42", |frame| {
+        lists(frame, 42, "Remote only issue 42")
+    });
     let merged = list(&mut screen);
     assert!(merged.contains("From github.com · 1 more"), "{merged}");
     assert_eq!(
@@ -72,7 +77,10 @@ fn cached_search_hits_appear_before_remote_results() {
         1,
         "{merged}"
     );
-    let divider = merged.lines().position(|line| line.contains("From github.com")).unwrap();
+    let divider = merged
+        .lines()
+        .position(|line| line.contains("From github.com"))
+        .unwrap();
     assert!(record_rows(&merged, 5, "Navigation issue 5")[0] < divider);
     assert!(record_rows(&merged, 42, "Remote only issue 42")[0] > divider);
     // A newer query supersedes the one in flight; nothing of the old one is reported.
@@ -91,6 +99,8 @@ fn cached_search_hits_appear_before_remote_results() {
     );
     // Closing the form brings the list back as it was.
     key(&mut screen, KeyCode::Escape);
-    wait_for(&mut screen, "#1", |frame| lists(frame, 1, "Navigation issue 1"));
+    wait_for(&mut screen, "#1", |frame| {
+        lists(frame, 1, "Navigation issue 1")
+    });
     assert!(!view(&mut screen).contains("From github.com"));
 }

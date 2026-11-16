@@ -153,11 +153,7 @@ fn same_file_refresh_keeps_visible_code_and_the_real_cursor_position() {
     control(&mut screen, KeyCode::Char('l'));
     key(&mut screen, KeyCode::End);
     let before = cursor(&mut screen);
-    std::fs::write(
-        root.join("z-marker.txt"),
-        "new file observed by refresh\n",
-    )
-    .unwrap();
+    std::fs::write(root.join("z-marker.txt"), "new file observed by refresh\n").unwrap();
     key(&mut screen, KeyCode::Char('r'));
     assert!(view(&mut screen).contains("changed_60"));
     assert_eq!(cursor(&mut screen), before);

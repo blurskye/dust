@@ -1,4 +1,4 @@
-//! GraphQL alias batching (FORGE.md §7.5, t3code): many per-item queries become one request
+//! GraphQL alias batching: many per-item queries become one request
 //! with an alias per item. Interactive batches take up to 50 aliases and wait up to 50 ms for
 //! company; background batches take 25 and wait 500 ms. Callers that overlap in time on the
 //! same group (forge, repository, document) join one batch; a full batch goes out at once.

@@ -257,12 +257,20 @@ fn issue_prose_measure_is_bounded_code_and_diagram_pan_and_tables_wrap() {
             .lines()
             // The cell between its column's borders, apart from a sidebar or the pane's border.
             .flat_map(|row| row.split('│').map(str::trim).collect::<Vec<_>>())
-            .filter(|cell| !cell.is_empty() && cell.chars().all(|c| c == 't' || "TABLE_END".contains(c)))
+            .filter(|cell| {
+                !cell.is_empty() && cell.chars().all(|c| c == 't' || "TABLE_END".contains(c))
+            })
             .collect::<Vec<_>>();
         assert!(cells.len() > 1, "the long cell wraps:\n{rows}");
-        assert_eq!(cells.concat(), format!("{}TABLE_END", "t".repeat(180)), "{rows}");
+        assert_eq!(
+            cells.concat(),
+            format!("{}TABLE_END", "t".repeat(180)),
+            "{rows}"
+        );
         assert!(
-            rows.lines().filter(|row| row.contains(" │ t")).all(|row| !row.contains('›')),
+            rows.lines()
+                .filter(|row| row.contains(" │ t"))
+                .all(|row| !row.contains('›')),
             "a wrapped table does not pan:\n{rows}"
         );
     }
@@ -496,9 +504,7 @@ fn refreshing_loaded_issue_keeps_real_body_and_readiness_after_a_failed_refresh(
             && pending.contains("The loaded body remains authoritative."),
         "{pending}"
     );
-    assert!(
-        pending.contains("Add a comment") && !pending.contains("showing the list description")
-    );
+    assert!(pending.contains("Add a comment") && !pending.contains("showing the list description"));
     key(&mut screen, KeyCode::Char('e'));
     assert!(
         view(&mut screen).contains("Edit title and description"),

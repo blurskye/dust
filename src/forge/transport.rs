@@ -1,4 +1,4 @@
-//! Request descriptors shared by both transports (FORGE.md §1.2): the provider layer builds
+//! Request descriptors shared by both transports: the provider layer builds
 //! `ApiRequest`s once and sends them either directly over HTTP or through the forge's CLI
 //! (`gh api --include`). Also host keys, in-flight bounds and transport selection.
 
@@ -365,9 +365,11 @@ impl Cli {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub enum TransportKind {
-    Http { credential_source: CredentialSource },
+    Http {
+        credential_source: CredentialSource,
+    },
     Cli(Cli),
-    /// Direct HTTP without a credential (§2.5 anonymous read path): reads of public
+    /// Direct HTTP without a credential (the anonymous read path): reads of public
     /// repositories only, every write refused before it is sent.
     Anonymous,
 }
@@ -431,7 +433,7 @@ pub enum TransportError {
         code: Option<i32>,
         stderr: String,
     },
-    /// Refused or answered as rate limited; `ratelimit.rs` holds the pause (§3.5).
+    /// Refused or answered as rate limited; `ratelimit.rs` holds the pause.
     RateLimited {
         until: Instant,
     },
@@ -466,9 +468,9 @@ impl From<TransportError> for ForgeError {
             TransportError::NeedsSignIn { host, hint } => {
                 ForgeError::NotAuthenticated { host, hint }
             }
-            TransportError::ReadOnly(what) => {
-                ForgeError::Failed(format!("{what} not sent: read-only run (DUSTY_FORGE_READONLY=1)"))
-            }
+            TransportError::ReadOnly(what) => ForgeError::Failed(format!(
+                "{what} not sent: read-only run (DUSTY_FORGE_READONLY=1)"
+            )),
         }
     }
 }
@@ -484,7 +486,7 @@ pub trait Transport: Send + Sync {
     fn graphql_batching(&self) -> bool;
 }
 
-/// Where a host's API lives. F1 derives it from the host (FORGE.md §2.2); F2's `detect.rs`
+/// Where a host's API lives. F1 derives it from the host; F2's `detect.rs`
 /// adds probes, config and `hosts.json`.
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize)]
 pub struct Endpoints {
@@ -524,13 +526,13 @@ impl Endpoints {
             web_base: format!("https://{name}"),
         };
         // `{host}` lets one loopback test server stand in for several hosts.
-        if let Some(base) = crate::forge::sandbox::var("DUSTY_FORGE_API_BASE")
-            .filter(|base| !base.is_empty())
+        if let Some(base) =
+            crate::forge::sandbox::var("DUSTY_FORGE_API_BASE").filter(|base| !base.is_empty())
         {
             endpoints.override_api_base(&base.replace("{host}", &name));
         }
-        if let Some(url) = crate::forge::sandbox::var("DUSTY_FORGE_GRAPHQL_URL")
-            .filter(|url| !url.is_empty())
+        if let Some(url) =
+            crate::forge::sandbox::var("DUSTY_FORGE_GRAPHQL_URL").filter(|url| !url.is_empty())
         {
             endpoints.graphql = Some(url.replace("{host}", &name));
         }
@@ -570,9 +572,9 @@ pub struct ConnectOptions {
     pub glab: Option<PathBuf>,
     pub tea: Option<PathBuf>,
     pub offline: bool,
-    /// Where glab, fj and tea keep their sign-ins (F2).
+    /// Where glab, fj and tea keep their sign-ins.
     pub stores: credential::Stores,
-    /// `[forge.hosts."H"] login`: the tea login passthrough uses for that host (F4).
+    /// `[forge.hosts."H"] login`: the tea login passthrough uses for that host.
     pub logins: std::collections::BTreeMap<HostKey, String>,
     /// `DUSTY_FORGE_ANONYMOUS=0`: no anonymous read path; a host without a credential or a
     /// signed-in CLI is a state (CLI missing, signed out) instead.
@@ -596,8 +598,10 @@ impl ConnectOptions {
             gh: Cli::Gh.executable(),
             glab: Cli::Glab.executable(),
             tea: Cli::Tea.executable(),
-            offline: crate::forge::sandbox::var("DUSTY_FORGE_OFFLINE").is_some_and(|value| value == "1"),
-            no_anonymous: crate::forge::sandbox::var("DUSTY_FORGE_ANONYMOUS").is_some_and(|value| value == "0"),
+            offline: crate::forge::sandbox::var("DUSTY_FORGE_OFFLINE")
+                .is_some_and(|value| value == "1"),
+            no_anonymous: crate::forge::sandbox::var("DUSTY_FORGE_ANONYMOUS")
+                .is_some_and(|value| value == "0"),
             stores: credential::Stores::from_env(&credential::Env::process()),
             logins: crate::forge::detect::ForgeConfig::load()
                 .hosts
@@ -608,7 +612,7 @@ impl ConnectOptions {
     }
 }
 
-/// A counting semaphore: the per-process in-flight bounds of §3.5.
+/// A counting semaphore: the per-process in-flight bounds.
 pub struct Bound {
     limit: usize,
     used: Mutex<usize>,
@@ -677,12 +681,28 @@ pub fn read_only() -> bool {
 /// `DUSTY_FORGE_READONLY_LOG=<path>`: one line per request of a read-only run, for counting
 /// against anonymous rate limits: host, transport, outcome, milliseconds and `describe()` (method and
 /// path only, never headers, tokens or bodies).
-fn read_only_log(kind: &TransportKind, host: &HostKey, request: &ApiRequest, outcome: &str, took: Duration) {
-    let Some(path) = crate::forge::sandbox::var("DUSTY_FORGE_READONLY_LOG").filter(|path| !path.is_empty()) else {
+fn read_only_log(
+    kind: &TransportKind,
+    host: &HostKey,
+    request: &ApiRequest,
+    outcome: &str,
+    took: Duration,
+) {
+    let Some(path) =
+        crate::forge::sandbox::var("DUSTY_FORGE_READONLY_LOG").filter(|path| !path.is_empty())
+    else {
         return;
     };
-    let line = format!("{host} {kind} {outcome} {}ms {}\n", took.as_millis(), request.describe());
-    if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+    let line = format!(
+        "{host} {kind} {outcome} {}ms {}\n",
+        took.as_millis(),
+        request.describe()
+    );
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+    {
         let _ = std::io::Write::write_all(&mut file, line.as_bytes());
     }
 }
@@ -690,7 +710,10 @@ fn read_only_log(kind: &TransportKind, host: &HostKey, request: &ApiRequest, out
 /// Counts one more request to `host` and says whether it is still under `cap`.
 fn read_only_admit(host: &HostKey, cap: Option<usize>) -> bool {
     static SENT: OnceLock<Mutex<HashMap<HostKey, usize>>> = OnceLock::new();
-    let mut sent = SENT.get_or_init(Default::default).lock().unwrap_or_else(|error| error.into_inner());
+    let mut sent = SENT
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
     let count = sent.entry(host.clone()).or_default();
     if cap.is_some_and(|cap| *count >= cap) {
         return false;
@@ -700,26 +723,55 @@ fn read_only_admit(host: &HostKey, cap: Option<usize>) -> bool {
 }
 
 /// Wraps whichever transport was chosen (direct, CLI or anonymous) and refuses every request
-/// but a GET before it reaches the network: no write, and no GraphQL either, since a POST
-/// body can hold a mutation.
+/// but a read before it reaches the network: a GET, or a GraphQL document that cannot be a
+/// write (`read_only_query`).
 pub struct ReadOnly(pub Arc<dyn Transport>);
+
+/// A GraphQL POST that can only read: a write must be declared with `mutation` (and a stream
+/// with `subscription`), so a document without either word anywhere, even inside a string,
+/// is a query. A false refusal is safe; nothing else gets through.
+fn read_only_query(request: &ApiRequest) -> bool {
+    let (Method::Post, Target::GraphQl, Some(Body::Json(body))) =
+        (&request.method, &request.target, &request.body)
+    else {
+        return false;
+    };
+    let only_query = body.as_object().is_some_and(|fields| {
+        fields
+            .keys()
+            .all(|key| matches!(key.as_str(), "query" | "variables" | "operationName"))
+    });
+    only_query
+        && body["query"].as_str().is_some_and(|document| {
+            !document.contains("mutation") && !document.contains("subscription")
+        })
+}
 
 impl Transport for ReadOnly {
     fn kind(&self) -> TransportKind {
         self.0.kind()
     }
 
-    fn send(&self, host: &HostKey, request: &ApiRequest, cancel: &AtomicBool) -> Result<ApiResponse, TransportError> {
-        if request.method != Method::Get {
+    fn send(
+        &self,
+        host: &HostKey,
+        request: &ApiRequest,
+        cancel: &AtomicBool,
+    ) -> Result<ApiResponse, TransportError> {
+        if request.method != Method::Get && !read_only_query(request) {
             read_only_log(&self.0.kind(), host, request, "refused", Duration::ZERO);
             return Err(TransportError::ReadOnly(request.describe()));
         }
         // `DUSTY_FORGE_READONLY_MAX=<n>`: at most n requests per host for the whole process,
         // so a runaway poll cannot hammer a real forge.
-        let cap = crate::forge::sandbox::var("DUSTY_FORGE_READONLY_MAX").and_then(|max| max.parse::<usize>().ok());
+        let cap = crate::forge::sandbox::var("DUSTY_FORGE_READONLY_MAX")
+            .and_then(|max| max.parse::<usize>().ok());
         if !read_only_admit(host, cap) {
             read_only_log(&self.0.kind(), host, request, "capped", Duration::ZERO);
-            return Err(TransportError::ReadOnly(format!("{} (request cap reached)", request.describe())));
+            return Err(TransportError::ReadOnly(format!(
+                "{} (request cap reached)",
+                request.describe()
+            )));
         }
         let started = Instant::now();
         let result = self.0.send(host, request, cancel);
@@ -756,9 +808,9 @@ pub fn forget_selections() {
         .clear();
 }
 
-/// The transport for a host (§1.2): direct HTTP when a credential exists and its live
+/// The transport for a host: direct HTTP when a credential exists and its live
 /// `GET /user` check passed; otherwise the CLI when it is installed (and, for tea, signed in);
-/// otherwise anonymous direct HTTP for reads (§2.5). With `no_anonymous` the last step is an
+/// otherwise anonymous direct HTTP for reads. With `no_anonymous` the last step is an
 /// error the UI shows as a state.
 pub fn for_host(
     endpoints: &Endpoints,
@@ -963,9 +1015,18 @@ mod tests {
             fn kind(&self) -> TransportKind {
                 TransportKind::Anonymous
             }
-            fn send(&self, _: &HostKey, _: &ApiRequest, _: &AtomicBool) -> Result<ApiResponse, TransportError> {
+            fn send(
+                &self,
+                _: &HostKey,
+                _: &ApiRequest,
+                _: &AtomicBool,
+            ) -> Result<ApiResponse, TransportError> {
                 self.0.fetch_add(1, Ordering::SeqCst);
-                Ok(ApiResponse { status: 200, headers: Vec::new(), body: b"{}".to_vec() })
+                Ok(ApiResponse {
+                    status: 200,
+                    headers: Vec::new(),
+                    body: b"{}".to_vec(),
+                })
             }
             fn graphql_batching(&self) -> bool {
                 true
@@ -980,8 +1041,16 @@ mod tests {
             ApiRequest::new(Method::Patch, "/notifications/threads/1"),
             ApiRequest::new(Method::Put, "/repos/o/r/pulls/1/merge"),
             ApiRequest::new(Method::Delete, "/repos/o/r/issues/comments/1"),
-            // A GraphQL query is a POST too, and its body could be a mutation.
-            ApiRequest::graphql("query Viewer { viewer { login } }", serde_json::json!({})),
+            // A GraphQL POST passes only when it cannot be a write.
+            ApiRequest::graphql(
+                "mutation Close { closeIssue(input: {}) { clientMutationId } }",
+                serde_json::json!({}),
+            ),
+            ApiRequest::graphql(
+                "{ closeIssue(input: {}) { x } } mutation M { y }",
+                serde_json::json!({}),
+            ),
+            ApiRequest::graphql("subscription S { events }", serde_json::json!({})),
         ];
         for request in &writes {
             let error = guard.send(&host, request, &cancel).unwrap_err();
@@ -989,10 +1058,28 @@ mod tests {
             let shown = ForgeError::from(error);
             assert!(format!("{shown:?}").contains("read-only run"), "{shown:?}");
         }
-        assert_eq!(inner.0.load(Ordering::SeqCst), 0, "a refused request reached the transport");
+        assert_eq!(
+            inner.0.load(Ordering::SeqCst),
+            0,
+            "a refused request reached the transport"
+        );
         assert!(!guard.graphql_batching());
-        guard.send(&host, &ApiRequest::get("/repos/o/r/pulls"), &cancel).unwrap();
+        guard
+            .send(&host, &ApiRequest::get("/repos/o/r/pulls"), &cancel)
+            .unwrap();
         assert_eq!(inner.0.load(Ordering::SeqCst), 1);
+        guard
+            .send(
+                &host,
+                &ApiRequest::graphql("query Viewer { viewer { login } }", serde_json::json!({})),
+                &cancel,
+            )
+            .unwrap();
+        assert_eq!(
+            inner.0.load(Ordering::SeqCst),
+            2,
+            "a GraphQL query is a read"
+        );
     }
 
     #[test]

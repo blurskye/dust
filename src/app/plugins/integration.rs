@@ -1998,9 +1998,7 @@ mod tests {
                 .unwrap();
             let deadline = Instant::now() + Duration::from_secs(30);
             let load = loop {
-                for update in
-                    owner.poll_packages(limits(), &Default::default(), false)
-                {
+                for update in owner.poll_packages(limits(), &Default::default(), false) {
                     match update {
                         ExtensionUpdate::Conflict(error) | ExtensionUpdate::Error(error) => {
                             panic!("package preparation failed: {error}")
@@ -2089,8 +2087,7 @@ mod tests {
                 .unwrap();
             let deadline = Instant::now() + Duration::from_secs(30);
             loop {
-                let updates =
-                    owner.poll_packages(limits(), &Default::default(), false);
+                let updates = owner.poll_packages(limits(), &Default::default(), false);
                 if updates.iter().any(|update| matches!(update, ExtensionUpdate::Failed { error, .. } if error.contains("belongs to package demo"))) {
                     break;
                 }
@@ -2114,9 +2111,7 @@ mod tests {
             owner.request_package(operation).unwrap();
             let deadline = Instant::now() + Duration::from_secs(30);
             while owner.pending_packages() != 0 {
-                for update in
-                    owner.poll_packages(limits(), &Default::default(), true)
-                {
+                for update in owner.poll_packages(limits(), &Default::default(), true) {
                     assert!(!matches!(
                         update,
                         ExtensionUpdate::Error(_) | ExtensionUpdate::Failed { .. }
@@ -2220,12 +2215,7 @@ mod tests {
         let activation = vec![(plugin, root.path().join("other.wasm"), lock)];
         assert!(
             owner
-                .load_activations(
-                    activation.clone(),
-                    &limits(),
-                    &Default::default(),
-                    true
-                )
+                .load_activations(activation.clone(), &limits(), &Default::default(), true)
                 .is_empty()
         );
         assert!(owner.load_id("other").is_none());
@@ -2247,12 +2237,7 @@ mod tests {
         owner.disable("other").unwrap();
         assert!(
             owner
-                .load_activations(
-                    activation.clone(),
-                    &limits(),
-                    &Default::default(),
-                    false
-                )
+                .load_activations(activation.clone(), &limits(), &Default::default(), false)
                 .is_empty()
         );
         assert!(owner.load_id("other").is_none());
@@ -2263,12 +2248,7 @@ mod tests {
         // A normal enabled activation still starts loading.
         owner.disabled_plugins.remove("other");
         if let Some(update) = owner
-            .load_activations(
-                activation,
-                &limits(),
-                &Default::default(),
-                false,
-            )
+            .load_activations(activation, &limits(), &Default::default(), false)
             .into_iter()
             .next()
         {

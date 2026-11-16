@@ -23,11 +23,26 @@ const HOST: &str = "github.com";
 pub(super) const REMOTE: &str = "forge";
 
 const FILES: [(&str, &str); 5] = [
-    ("server.py", include_str!("../../../../tests/fixtures/forge/server.py")),
-    ("world_conversation.py", include_str!("../../../../tests/fixtures/forge/world_conversation.py")),
-    ("world_gitlab.py", include_str!("../../../../tests/fixtures/forge/world_gitlab.py")),
-    ("world_gitea.py", include_str!("../../../../tests/fixtures/forge/world_gitea.py")),
-    ("world_actions.py", include_str!("../../../../tests/fixtures/forge/world_actions.py")),
+    (
+        "server.py",
+        include_str!("../../../../tests/fixtures/forge/server.py"),
+    ),
+    (
+        "world_conversation.py",
+        include_str!("../../../../tests/fixtures/forge/world_conversation.py"),
+    ),
+    (
+        "world_gitlab.py",
+        include_str!("../../../../tests/fixtures/forge/world_gitlab.py"),
+    ),
+    (
+        "world_gitea.py",
+        include_str!("../../../../tests/fixtures/forge/world_gitea.py"),
+    ),
+    (
+        "world_actions.py",
+        include_str!("../../../../tests/fixtures/forge/world_actions.py"),
+    ),
 ];
 
 /// Runs the server and exits when its stdin closes, so a server whose app died goes too.
@@ -142,12 +157,17 @@ impl Server {
                 Err(error) => missing = error.to_string(),
             }
         }
-        Err(format!("The practice forge needs Python 3 on PATH ({missing})"))
+        Err(format!(
+            "The practice forge needs Python 3 on PATH ({missing})"
+        ))
     }
 
     /// Waits for the port the server prints once it listens.
     fn ready(mut child: Child, dir: PathBuf, state: PathBuf) -> Result<Self, String> {
-        let stdout = child.stdout.take().ok_or("The practice forge has no output")?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or("The practice forge has no output")?;
         let (send, receive) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
             let mut line = String::new();
@@ -178,7 +198,10 @@ impl Server {
     pub(super) fn sandbox(&self, signed_in: bool) -> BTreeMap<String, String> {
         let url = format!("http://127.0.0.1:{}", self.port);
         let mut vars = BTreeMap::from([
-            ("DUSTY_FORGE_API_BASE".to_owned(), format!("{url}/{{host}}/api/v3")),
+            (
+                "DUSTY_FORGE_API_BASE".to_owned(),
+                format!("{url}/{{host}}/api/v3"),
+            ),
             ("DUSTY_FORGE_ORIGIN".to_owned(), format!("{url}/{{host}}")),
             (
                 "DUSTY_FORGE_STATE_DIR".to_owned(),
@@ -236,13 +259,22 @@ impl Drop for Server {
 }
 
 /// The pull requests whose head the practice forge's Git serves (`refs/pull/N/head`).
-const PULLS: [(u64, &str); 5] = [(13, "fix/backoff"), (14, "feat/14"), (16, "feat/16"), (17, "feat/17"), (18, "feat/18")];
+const PULLS: [(u64, &str); 5] = [
+    (13, "fix/backoff"),
+    (14, "feat/14"),
+    (16, "feat/16"),
+    (17, "feat/17"),
+    (18, "feat/18"),
+];
 
 /// The practice repository's forge remote. Git itself never reaches the host: the remote
 /// is reached over `ssh`, and the repository's `ssh` is a script that serves the lesson's own
 /// bare repository (`origin`), which holds each practice pull request's head; any HTTP
 /// request of this repository goes to a closed loopback port.
-pub(super) fn configure_repository(git: impl Fn(&[&str]) -> Result<String, String>, forge: &Forge) -> Result<(), String> {
+pub(super) fn configure_repository(
+    git: impl Fn(&[&str]) -> Result<String, String>,
+    forge: &Forge,
+) -> Result<(), String> {
     git(&["remote", "add", REMOTE, &forge.remote_url()])?;
     git(&["config", "http.proxy", "http://127.0.0.1:9"])?;
     git(&["config", "credential.helper", ""])?;
@@ -260,7 +292,11 @@ pub(super) fn configure_repository(git: impl Fn(&[&str]) -> Result<String, Strin
     )
     .map_err(text)?;
     let script = script.to_string_lossy().replace('\\', "/");
-    git(&["config", "core.sshCommand", &format!("sh {}", quote(&script))])?;
+    git(&[
+        "config",
+        "core.sshCommand",
+        &format!("sh {}", quote(&script)),
+    ])?;
     git(&["config", "ssh.variant", "simple"])?;
     if forge.world != World::Actions {
         let mut push = vec!["push".to_owned(), "-q".into(), "origin".into()];
@@ -272,7 +308,13 @@ pub(super) fn configure_repository(git: impl Fn(&[&str]) -> Result<String, Strin
     }
     if let Some(branch) = forge.branch {
         git(&["switch", "-q", "-c", branch])?;
-        git(&["commit", "-q", "--allow-empty", "-m", &format!("Practice change on {branch}")])?;
+        git(&[
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            &format!("Practice change on {branch}"),
+        ])?;
     }
     Ok(())
 }
@@ -281,7 +323,9 @@ pub(super) fn configure_repository(git: impl Fn(&[&str]) -> Result<String, Strin
 
 fn world(world: World) -> Value {
     match world {
-        World::Actions => json!({ "world": "actions", "actions_seed": "design", "actions_waiting": true, "viewer": "maya" }),
+        World::Actions => {
+            json!({ "world": "actions", "actions_seed": "design", "actions_waiting": true, "viewer": "maya" })
+        }
         World::Orbit => orbit(),
         World::Anonymous => {
             let mut world = orbit();
@@ -337,7 +381,14 @@ fn cleared(mut entry: Value) -> Value {
     entry
 }
 
-fn issue(number: u64, title: &str, author: &str, labels: &[&str], updated: u64, body: &str) -> Value {
+fn issue(
+    number: u64,
+    title: &str,
+    author: &str,
+    labels: &[&str],
+    updated: u64,
+    body: &str,
+) -> Value {
     cleared(json!({
         "number": number,
         "title": title,
@@ -363,7 +414,10 @@ fn check(name: &str, conclusion: Option<&str>, run: u64) -> Value {
 }
 
 fn passed() -> Value {
-    json!([check("Python tests", Some("SUCCESS"), 6), check("Lint", Some("SUCCESS"), 6)])
+    json!([
+        check("Python tests", Some("SUCCESS"), 6),
+        check("Lint", Some("SUCCESS"), 6)
+    ])
 }
 
 struct Pull<'a> {
@@ -452,15 +506,23 @@ index 3333333..4444444 100644
 +    assert retry_delay(40) == 60
 ";
 
-fn notification(id: &str, reason: &str, kind: &str, number: Option<u64>, title: &str, unread: bool, age: u64) -> Value {
+fn notification(
+    id: &str,
+    reason: &str,
+    kind: &str,
+    number: Option<u64>,
+    title: &str,
+    unread: bool,
+    age: u64,
+) -> Value {
     let path = match kind {
         "PullRequest" => Some("pulls"),
         "Issue" => Some("issues"),
         _ => None,
     };
-    let url = path
-        .zip(number)
-        .map(|(path, number)| format!("https://api.github.com/repos/orbit-dev/orbit/{path}/{number}"));
+    let url = path.zip(number).map(|(path, number)| {
+        format!("https://api.github.com/repos/orbit-dev/orbit/{path}/{number}")
+    });
     json!({
         "id": id,
         "unread": unread,
@@ -474,48 +536,116 @@ fn notification(id: &str, reason: &str, kind: &str, number: Option<u64>, title: 
 /// A small `orbit-dev/orbit`: the signed-in user is maya.
 fn orbit() -> Value {
     let issues = vec![
-        issue(20, "Support reduced-motion terminal themes", "maya", &["design", "accessibility"], 20,
-              "Some terminals render the spinner as flicker.\n\nOffer a **reduced motion** theme flag."),
-        issue(19, "Preserve scroll position in long logs", "alex", &["bug"], 18 * MINUTE,
-              "Scrolling a long job log jumps back to the top when new lines arrive."),
-        issue(18, "Add keyboard shortcuts to issue filters", "sam", &["enhancement"], HOUR,
-              "`[` and `]` should move between saved sections."),
-        issue(17, "Improve empty repository guidance", "nina", &["design"], 2 * HOUR, "Say what to do next."),
-        issue(7, "Reconnect loses queued progress", "nina", &["bug"], 2 * DAY,
-              "Progress counters reset after a reconnect."),
-        issue(1, "Queue stalls after a worker reconnects", "alex", &["bug", "priority: high"], 38 * MINUTE,
-              "When a worker reconnects, queued tasks can stay pending until another task arrives."),
+        issue(
+            20,
+            "Support reduced-motion terminal themes",
+            "maya",
+            &["design", "accessibility"],
+            20,
+            "Some terminals render the spinner as flicker.\n\nOffer a **reduced motion** theme flag.",
+        ),
+        issue(
+            19,
+            "Preserve scroll position in long logs",
+            "alex",
+            &["bug"],
+            18 * MINUTE,
+            "Scrolling a long job log jumps back to the top when new lines arrive.",
+        ),
+        issue(
+            18,
+            "Add keyboard shortcuts to issue filters",
+            "sam",
+            &["enhancement"],
+            HOUR,
+            "`[` and `]` should move between saved sections.",
+        ),
+        issue(
+            17,
+            "Improve empty repository guidance",
+            "nina",
+            &["design"],
+            2 * HOUR,
+            "Say what to do next.",
+        ),
+        issue(
+            7,
+            "Reconnect loses queued progress",
+            "nina",
+            &["bug"],
+            2 * DAY,
+            "Progress counters reset after a reconnect.",
+        ),
+        issue(
+            1,
+            "Queue stalls after a worker reconnects",
+            "alex",
+            &["bug", "priority: high"],
+            38 * MINUTE,
+            "When a worker reconnects, queued tasks can stay pending until another task arrives.",
+        ),
     ];
     let prs = vec![
         pull(
-            Pull { number: 13, title: "Clamp exponential backoff to sixty seconds", author: "maya",
-                   decision: "REVIEW_REQUIRED", checks: passed(), updated: 9 * MINUTE },
+            Pull {
+                number: 13,
+                title: "Clamp exponential backoff to sixty seconds",
+                author: "maya",
+                decision: "REVIEW_REQUIRED",
+                checks: passed(),
+                updated: 9 * MINUTE,
+            },
             json!({ "labels": [label("priority: high")], "headRefName": "fix/backoff",
                     "reviewRequests": ["alex", "sam"],
                     "body": "Cap retry delays at sixty seconds, even after a long outage.",
                     "closingIssuesReferences": [{ "number": 1, "title": "Queue stalls after a worker reconnects" }] }),
         ),
         pull(
-            Pull { number: 17, title: "Export completed task history as JSON", author: "leo",
-                   decision: "REVIEW_REQUIRED", checks: passed(), updated: 40 * MINUTE },
+            Pull {
+                number: 17,
+                title: "Export completed task history as JSON",
+                author: "leo",
+                decision: "REVIEW_REQUIRED",
+                checks: passed(),
+                updated: 40 * MINUTE,
+            },
             json!({ "reviewRequests": ["maya"] }),
         ),
         pull(
-            Pull { number: 14, title: "Introduce a quiet status indicator", author: "nina",
-                   decision: "APPROVED", checks: passed(), updated: 2 * HOUR },
+            Pull {
+                number: 14,
+                title: "Introduce a quiet status indicator",
+                author: "nina",
+                decision: "APPROVED",
+                checks: passed(),
+                updated: 2 * HOUR,
+            },
             json!({ "mergeStateStatus": "CLEAN",
                     "reviews": [{ "author": person("maya"), "state": "APPROVED", "body": "Looks good." }] }),
         ),
         pull(
-            Pull { number: 18, title: "Exercise the retry-limit regression check", author: "leo",
-                   decision: "REVIEW_REQUIRED",
-                   checks: json!([check("Python tests", Some("FAILURE"), 7), check("Lint", Some("SUCCESS"), 7)]),
-                   updated: DAY },
+            Pull {
+                number: 18,
+                title: "Exercise the retry-limit regression check",
+                author: "leo",
+                decision: "REVIEW_REQUIRED",
+                checks: json!([
+                    check("Python tests", Some("FAILURE"), 7),
+                    check("Lint", Some("SUCCESS"), 7)
+                ]),
+                updated: DAY,
+            },
             json!({ "reviewRequests": ["maya"] }),
         ),
         pull(
-            Pull { number: 16, title: "Batch terminal progress notifications", author: "sam",
-                   decision: "", checks: json!([check("Python tests", None, 8)]), updated: 2 * DAY },
+            Pull {
+                number: 16,
+                title: "Batch terminal progress notifications",
+                author: "sam",
+                decision: "",
+                checks: json!([check("Python tests", None, 8)]),
+                updated: 2 * DAY,
+            },
             json!({ "isDraft": true }),
         ),
     ];

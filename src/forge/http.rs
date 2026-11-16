@@ -1,10 +1,10 @@
-//! Direct REST/GraphQL over `reqwest` (FORGE.md §1.2): the hot path whenever a token could be
+//! Direct REST/GraphQL over `reqwest`: the hot path whenever a token could be
 //! read. Redirects are followed by hand (≤ 5) so the token is only ever sent to the API's own
 //! origin; a blob redirect (logs, artifacts) is fetched without it. Responses may be gzip
 //! encoded (decoded before the body cap applies). Every request first asks `ratelimit.rs`
 //! whether its credential is paused, and every response tells it the quota left.
 //!
-//! Without a credential (`HttpTransport::anonymous`, FORGE.md §2.5) the same client reads
+//! Without a credential (`HttpTransport::anonymous`) the same client reads
 //! public repositories: no auth header, every write and every GitHub GraphQL document refused
 //! before it is sent, background work held back once half the (small, per-address) quota is
 //! spent, and each response's quota recorded in the host state for the UI's chip.
@@ -88,7 +88,7 @@ impl HttpTransport {
         self.fingerprint
     }
 
-    /// The live credential check (§2.1): auth-status commands miss expired tokens. Records the
+    /// The live credential check: auth-status commands miss expired tokens. Records the
     /// account for the accounts popover.
     pub fn check_viewer(&self, cancel: &AtomicBool) -> Result<(), ForgeError> {
         let Some(credential) = &self.credential else {
@@ -332,7 +332,11 @@ impl Transport for HttpTransport {
 /// The scopes a 403 says the token lacks, joined `repo, workflow`: GitHub's
 /// `X-Accepted-OAuth-Scopes` minus `X-OAuth-Scopes`, GitLab's `insufficient_scope` (body or
 /// `WWW-Authenticate`), Gitea/Forgejo's `required=[…]` / `required scope(s): […]`.
-pub fn missing_scopes(response: &ApiResponse, body: &serde_json::Value, message: &str) -> Option<String> {
+pub fn missing_scopes(
+    response: &ApiResponse,
+    body: &serde_json::Value,
+    message: &str,
+) -> Option<String> {
     let split = |text: &str| -> Vec<String> {
         text.split([',', ' '])
             .map(|scope| scope.trim().trim_matches(['\'', '"']))
@@ -370,7 +374,9 @@ pub fn missing_scopes(response: &ApiResponse, body: &serde_json::Value, message:
 /// following scopes: ['read:project']`: the bracketed list after the word that names it.
 pub fn scopes_in(message: &str) -> Option<String> {
     let lower = message.to_ascii_lowercase();
-    let at = lower.find("required").or_else(|| lower.find("following scopes"))?;
+    let at = lower
+        .find("required")
+        .or_else(|| lower.find("following scopes"))?;
     let rest = &message[at..];
     let open = rest.find('[')?;
     let close = rest[open..].find(']')? + open;
@@ -382,7 +388,7 @@ pub fn scopes_in(message: &str) -> Option<String> {
     (!scopes.is_empty()).then(|| scopes.join(", "))
 }
 
-/// One error per response (§3.5); the copy shown to the user comes from `ForgeError`'s Display.
+/// One error per response; the copy shown to the user comes from `ForgeError`'s Display.
 pub fn classify(endpoints: &Endpoints, response: &ApiResponse) -> ForgeError {
     let body: serde_json::Value = serde_json::from_slice(&response.body).unwrap_or_default();
     let message = body["message"]
@@ -441,7 +447,10 @@ mod scope_tests {
     fn response(headers: &[(&str, &str)], body: &str) -> ApiResponse {
         ApiResponse {
             status: 403,
-            headers: headers.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
+            headers: headers
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
             body: body.as_bytes().to_vec(),
         }
     }
@@ -455,14 +464,26 @@ mod scope_tests {
     #[test]
     fn a_403_names_the_scopes_the_token_lacks() {
         let github = response(
-            &[("x-oauth-scopes", "read:org"), ("x-accepted-oauth-scopes", "repo, workflow")],
+            &[
+                ("x-oauth-scopes", "read:org"),
+                ("x-accepted-oauth-scopes", "repo, workflow"),
+            ],
             r#"{"message":"Resource not accessible by personal access token"}"#,
         );
         assert_eq!(scopes(&github).as_deref(), Some("repo, workflow"));
-        let held = response(&[("x-oauth-scopes", "repo"), ("x-accepted-oauth-scopes", "repo")], "{}");
+        let held = response(
+            &[
+                ("x-oauth-scopes", "repo"),
+                ("x-accepted-oauth-scopes", "repo"),
+            ],
+            "{}",
+        );
         assert_eq!(scopes(&held), None);
         let gitlab = response(
-            &[("www-authenticate", r#"Bearer realm="", error="insufficient_scope", scope="api""#)],
+            &[(
+                "www-authenticate",
+                r#"Bearer realm="", error="insufficient_scope", scope="api""#,
+            )],
             r#"{"error":"insufficient_scope","scope":"api read_api"}"#,
         );
         assert_eq!(scopes(&gitlab).as_deref(), Some("api, read_api"));
@@ -472,9 +493,13 @@ mod scope_tests {
         );
         assert_eq!(scopes(&gitea).as_deref(), Some("read:repository"));
         assert_eq!(
-            scopes_in("The 'title' field requires one of the following scopes: ['read:project']").as_deref(),
+            scopes_in("The 'title' field requires one of the following scopes: ['read:project']")
+                .as_deref(),
             Some("read:project")
         );
-        assert_eq!(scopes(&response(&[], r#"{"message":"Must have admin rights"}"#)), None);
+        assert_eq!(
+            scopes(&response(&[], r#"{"message":"Must have admin rights"}"#)),
+            None
+        );
     }
 }

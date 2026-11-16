@@ -1,5 +1,5 @@
 #![cfg(unix)]
-//! `dusty-git forge <verb>` (FORGE.md §5.3, F7): every verb against the fake forge of each
+//! `dusty-git forge <verb>`: every verb against the fake forge of each
 //! provider (GitHub, GitLab, Gitea, Forgejo), through detection and the shared on-disk cache
 //! exactly as other editors and scripts run it. Output is JSON only with `"schema": 1` in every
 //! top-level object, errors are JSON on stderr with a fixed exit code, and the token never shows.

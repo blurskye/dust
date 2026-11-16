@@ -1,4 +1,4 @@
-# F4 Gitea/Forgejo (FORGE.md §4.2): pull requests, a pull request with checks from commit
+# F4 Gitea/Forgejo: pull requests, a pull request with checks from commit
 # statuses, issues and Actions from the loopback fake Forgejo 17 (code.forgejo.org, orbit/orbit;
 # FORGE_GITEA_WORLD=gitea serves gitea.com instead).
 #   scripts/ui-scenarios/make-orbit-fixture.sh /tmp/orbit

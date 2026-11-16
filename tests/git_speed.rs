@@ -73,16 +73,27 @@ fn build(dir: &Path, shape: &Shape) {
 }
 
 fn key(screen: &mut GitScreen, code: KeyCode) {
-    screen.event(UiEvent::Key { key: KeyEvent::plain(code), kind: KeyInputKind::Press });
+    screen.event(UiEvent::Key {
+        key: KeyEvent::plain(code),
+        kind: KeyInputKind::Press,
+    });
 }
 
 fn view(screen: &mut GitScreen) -> String {
     let frame = screen.frame(WIDTH, HEIGHT);
-    (0..HEIGHT).map(|y| frame.grid.row_text(y)).collect::<Vec<_>>().join("\n")
+    (0..HEIGHT)
+        .map(|y| frame.grid.row_text(y))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// Poll and paint, as the terminal loop does, until `ready`; the time from `start`.
-fn until(screen: &mut GitScreen, start: Instant, what: &str, ready: impl Fn(&str) -> bool) -> Duration {
+fn until(
+    screen: &mut GitScreen,
+    start: Instant,
+    what: &str,
+    ready: impl Fn(&str) -> bool,
+) -> Duration {
     loop {
         screen.poll();
         let frame = view(screen);
@@ -133,7 +144,11 @@ impl Times {
     }
 
     fn get(&self, label: &str) -> Duration {
-        self.0.iter().find(|(name, _)| name == label).map(|(_, time)| *time).unwrap()
+        self.0
+            .iter()
+            .find(|(name, _)| name == label)
+            .map(|(_, time)| *time)
+            .unwrap()
     }
 }
 
@@ -148,9 +163,18 @@ fn walk(screen: &mut GitScreen, times: &mut Times, list: &str) {
     }
     handled.sort();
     painted.sort();
-    times.add(&format!("{list} j: key handled (max of 20)"), *handled.last().unwrap());
-    times.add(&format!("{list} j: key to paint (median of 20)"), painted[painted.len() / 2]);
-    times.add(&format!("{list} j: key to paint (max of 20)"), *painted.last().unwrap());
+    times.add(
+        &format!("{list} j: key handled (max of 20)"),
+        *handled.last().unwrap(),
+    );
+    times.add(
+        &format!("{list} j: key to paint (median of 20)"),
+        painted[painted.len() / 2],
+    );
+    times.add(
+        &format!("{list} j: key to paint (max of 20)"),
+        *painted.last().unwrap(),
+    );
 }
 
 fn audit(root: &Path, shape: &Shape) -> Times {
@@ -173,9 +197,12 @@ fn audit(root: &Path, shape: &Shape) -> Times {
         if history_at.is_none() && frame.contains(&newest) {
             history_at = Some(now);
         }
-        if branches_at.is_none() && frame.match_indices("Local ").any(|(at, found)| {
-            frame[at + found.len()..].starts_with(|digit: char| digit.is_ascii_digit() && digit != '0')
-        }) {
+        if branches_at.is_none()
+            && frame.match_indices("Local ").any(|(at, found)| {
+                frame[at + found.len()..]
+                    .starts_with(|digit: char| digit.is_ascii_digit() && digit != '0')
+            })
+        {
             branches_at = Some(now);
         }
         if frame.contains(&count) && history_at.is_some() {
@@ -185,8 +212,14 @@ fn audit(root: &Path, shape: &Shape) -> Times {
         std::thread::sleep(Duration::from_millis(1));
     };
     times.add("open: first frame", frame_at.unwrap());
-    times.add("open: History painted (first meaningful paint)", history_at.unwrap());
-    times.add("open: branches painted", branches_at.unwrap_or(Duration::MAX / 4));
+    times.add(
+        "open: History painted (first meaningful paint)",
+        history_at.unwrap(),
+    );
+    times.add(
+        "open: branches painted",
+        branches_at.unwrap_or(Duration::MAX / 4),
+    );
     times.add("open: first paint (changes and history)", both);
     times.add("open: settled", settled(&mut screen, start));
 
@@ -228,7 +261,10 @@ fn audit(root: &Path, shape: &Shape) -> Times {
             std::thread::sleep(Duration::from_millis(2));
         }
     };
-    times.add("History End: root commit painted", reached.unwrap_or(Duration::MAX / 4));
+    times.add(
+        "History End: root commit painted",
+        reached.unwrap_or(Duration::MAX / 4),
+    );
     key(&mut screen, KeyCode::Home);
     settled(&mut screen, Instant::now());
 
@@ -240,7 +276,10 @@ fn audit(root: &Path, shape: &Shape) -> Times {
     let wide = shape.wide.to_string();
     let start = Instant::now();
     let (handled, _) = stroke(&mut screen, KeyCode::Char('j'));
-    times.add(&format!("open the {wide}-file commit: key handled"), handled);
+    times.add(
+        &format!("open the {wide}-file commit: key handled"),
+        handled,
+    );
     times.add(
         &format!("open the {wide}-file commit: file list painted"),
         until(&mut screen, start, "the wide commit", |frame| {
@@ -249,18 +288,30 @@ fn audit(root: &Path, shape: &Shape) -> Times {
                 .any(|line| line.contains("Commit files") && line.contains(&format!(" {wide} ")))
         }),
     );
-    times.add(&format!("open the {wide}-file commit: settled"), settled(&mut screen, start));
+    times.add(
+        &format!("open the {wide}-file commit: settled"),
+        settled(&mut screen, start),
+    );
     // Enter moves into its files; `j` walks them (each loads that file's patch).
     let (_, paint) = stroke(&mut screen, KeyCode::Enter);
-    times.add(&format!("open the {wide}-file commit: Enter into its files"), paint);
+    times.add(
+        &format!("open the {wide}-file commit: Enter into its files"),
+        paint,
+    );
     settled(&mut screen, Instant::now());
     let mut painted = Vec::new();
     for _ in 0..20 {
         painted.push(stroke(&mut screen, KeyCode::Char('j')).1);
     }
     painted.sort();
-    times.add(&format!("{wide}-file commit j: key to paint (median of 20)"), painted[painted.len() / 2]);
-    times.add(&format!("{wide}-file commit j: key to paint (max of 20)"), *painted.last().unwrap());
+    times.add(
+        &format!("{wide}-file commit j: key to paint (median of 20)"),
+        painted[painted.len() / 2],
+    );
+    times.add(
+        &format!("{wide}-file commit j: key to paint (max of 20)"),
+        *painted.last().unwrap(),
+    );
 
     // A status refresh after touching one file, back in Changes (which shows the count):
     // Esc goes from the commit's files to History, then to Changes.
@@ -275,9 +326,14 @@ fn audit(root: &Path, shape: &Shape) -> Times {
     times.add("refresh after touching a file: key handled", handled);
     times.add(
         "refresh after touching a file: count painted",
-        until(&mut screen, start, "the refreshed count", |frame| frame.contains(&after)),
+        until(&mut screen, start, "the refreshed count", |frame| {
+            frame.contains(&after)
+        }),
     );
-    times.add("refresh after touching a file: settled", settled(&mut screen, start));
+    times.add(
+        "refresh after touching a file: settled",
+        settled(&mut screen, start),
+    );
     println!("GITSPEED-FRAME\n{}", view(&mut screen));
 
     // Reopened over the warm cache (`DUSTY_GIT_CACHE_DIR`, `src/git/screen/warm.rs`): the
@@ -330,6 +386,9 @@ fn a_big_repository_stays_fast() {
         ("refresh after touching a file: count painted", 3_000),
     ] {
         let time = times.get(label);
-        assert!(time < Duration::from_millis(bound), "{label}: {time:?} (bound {bound} ms)");
+        assert!(
+            time < Duration::from_millis(bound),
+            "{label}: {time:?} (bound {bound} ms)"
+        );
     }
 }

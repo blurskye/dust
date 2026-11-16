@@ -1,4 +1,4 @@
-//! Breakpoints → rectangles (DESIGN.md §2.5). Pane rectangles depend on the terminal
+//! Breakpoints → rectangles. Pane rectangles depend on the terminal
 //! size and on what the rail panes hold (counts that moving focus or a cursor cannot
 //! change), never on which pane has focus.
 
@@ -110,22 +110,34 @@ fn split(total: u16, percent: [u16; 4], minimum: [u16; 4]) -> [u16; 4] {
 pub(crate) const COLLAPSED: u16 = 3;
 
 /// `empty[i]` collapses rail pane `i` to [`COLLAPSED`] rows and gives its rows to the pane
-/// above. The percentage budgets of §2.5, for screens that only need the body and reader.
+/// above. The percentage budgets, for screens that only need the body and reader.
 pub(crate) fn layout(width: u16, height: u16, banner: bool, empty: [bool; 4]) -> Layout {
     sized(width, height, banner, empty, None)
 }
 
-/// The Git tab's rail sized by content (DESIGN.md §2.5): `rows[i]` is the interior rows
+/// The Git tab's rail sized by content: `rows[i]` is the interior rows
 /// pane `i` wants (Changes, Branches and Stashes; History's entry is ignored). Changes
 /// keeps at least its budget, Branches and Stashes shrink to their content, all three grow
 /// up to what History's budget leaves, and History takes every row left over. Inputs are
 /// counts (changed files, local branches, stashes), so focus, cursor and view moves (a
 /// commit's files, Reflog, sub-tabs) never move a rectangle.
-pub(crate) fn fitted(width: u16, height: u16, banner: bool, empty: [bool; 4], rows: [u16; 4]) -> Layout {
+pub(crate) fn fitted(
+    width: u16,
+    height: u16,
+    banner: bool,
+    empty: [bool; 4],
+    rows: [u16; 4],
+) -> Layout {
     sized(width, height, banner, empty, Some(rows))
 }
 
-fn sized(width: u16, height: u16, banner: bool, empty: [bool; 4], rows: Option<[u16; 4]>) -> Layout {
+fn sized(
+    width: u16,
+    height: u16,
+    banner: bool,
+    empty: [bool; 4],
+    rows: Option<[u16; 4]>,
+) -> Layout {
     let mode = mode(width, height);
     let top = Rect::new(0, 0, width, 1);
     let banner_rect = (banner && height > 3).then(|| Rect::new(0, 1, width, 1));
@@ -181,7 +193,14 @@ fn sized(width: u16, height: u16, banner: bool, empty: [bool; 4], rows: Option<[
 /// their minimum, and give the rest away. Changes grows past its budget for a long working
 /// tree. When the lists want more than there is, rows go one at a time to the pane furthest
 /// below its percentage share, so a long list never starves a short one.
-fn fit(total: u16, budget: [u16; 4], percent: [u16; 4], minimum: [u16; 4], empty: [bool; 4], rows: [u16; 4]) -> [u16; 4] {
+fn fit(
+    total: u16,
+    budget: [u16; 4],
+    percent: [u16; 4],
+    minimum: [u16; 4],
+    empty: [bool; 4],
+    rows: [u16; 4],
+) -> [u16; 4] {
     const LISTS: [usize; 3] = [0, 1, 3];
     let floor = |pane: usize| match pane {
         0 => budget[0],
@@ -263,7 +282,10 @@ mod tests {
         assert_eq!(empty.rail[3].h, COLLAPSED);
         let collapsed = layout(120, 36, false, [false, true, false, false]);
         assert_eq!(collapsed.rail[1].h, COLLAPSED);
-        assert_eq!(collapsed.rail[0].h, full.rail[0].h + full.rail[1].h - COLLAPSED);
+        assert_eq!(
+            collapsed.rail[0].h,
+            full.rail[0].h + full.rail[1].h - COLLAPSED
+        );
         assert_eq!(
             collapsed.rail.iter().map(|rect| rect.h).sum::<u16>(),
             full.body.h
@@ -271,17 +293,28 @@ mod tests {
     }
 
     fn fitted_heights(width: u16, height: u16, empty: [bool; 4], rows: [u16; 4]) -> [u16; 4] {
-        fitted(width, height, false, empty, rows).rail.map(|rect| rect.h)
+        fitted(width, height, false, empty, rows)
+            .rail
+            .map(|rect| rect.h)
     }
 
     #[test]
     fn short_lists_give_their_rows_to_history() {
         // The orbit fixture: 7 changes, a sub-tab row and 4 branches, 1 stash. Branches
         // sits tight and its spare rows go to History.
-        assert_eq!(fitted_heights(120, 36, [false; 4], [7, 5, 0, 1]), [12, 7, 12, 3]);
-        assert_eq!(fitted_heights(190, 48, [false; 4], [7, 5, 0, 1]), [16, 7, 20, 3]);
+        assert_eq!(
+            fitted_heights(120, 36, [false; 4], [7, 5, 0, 1]),
+            [12, 7, 12, 3]
+        );
+        assert_eq!(
+            fitted_heights(190, 48, [false; 4], [7, 5, 0, 1]),
+            [16, 7, 20, 3]
+        );
         // No stashes: title, `No stashes` and the bottom border.
-        assert_eq!(fitted_heights(120, 36, [false, false, false, true], [7, 5, 0, 0])[3], COLLAPSED);
+        assert_eq!(
+            fitted_heights(120, 36, [false, false, false, true], [7, 5, 0, 0])[3],
+            COLLAPSED
+        );
         // A clean tree keeps Changes' budget: it also lists a commit's files.
         assert_eq!(fitted_heights(190, 48, [false; 4], [0, 5, 0, 1])[0], 16);
         // Counts not known yet (0) keep every budget.
@@ -292,17 +325,25 @@ mod tests {
     #[test]
     fn long_lists_share_what_history_leaves_and_history_keeps_its_budget() {
         for (width, height) in [(100, 30), (120, 36), (190, 48)] {
-            let budget = layout(width, height, false, [false; 4]).rail.map(|rect| rect.h);
+            let budget = layout(width, height, false, [false; 4])
+                .rail
+                .map(|rect| rect.h);
             let sizes = fitted_heights(width, height, [false; 4], [60, 40, 0, 9]);
             assert_eq!(sizes[2], budget[2], "{width}x{height}: {sizes:?}");
             assert_eq!(sizes.iter().sum::<u16>(), budget.iter().sum::<u16>());
             // Both overflowing: they split the room by their percentages, as the budget does.
-            assert!(sizes[0].abs_diff(budget[0]) <= 1 && sizes[1].abs_diff(budget[1]) <= 1, "{width}x{height}: {sizes:?}");
+            assert!(
+                sizes[0].abs_diff(budget[0]) <= 1 && sizes[1].abs_diff(budget[1]) <= 1,
+                "{width}x{height}: {sizes:?}"
+            );
             assert!(sizes[3] >= 3);
             // One long list takes the other's slack.
             let lopsided = fitted_heights(width, height, [false; 4], [60, 2, 0, 1]);
             assert_eq!(lopsided[1], 4.max(if width >= 160 { 5 } else { 3 }));
-            assert!(lopsided[0] > budget[0] + 1, "{width}x{height}: {lopsided:?}");
+            assert!(
+                lopsided[0] > budget[0] + 1,
+                "{width}x{height}: {lopsided:?}"
+            );
         }
     }
 

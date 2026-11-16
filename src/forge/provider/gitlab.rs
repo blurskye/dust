@@ -1,5 +1,5 @@
 //! GitLab (gitlab.com and self-managed, nested groups included) over REST v4 and GraphQL
-//! (FORGE.md §4.2): one slim GraphQL document per list, REST for details, discussions, diffs,
+//!: one slim GraphQL document per list, REST for details, discussions, diffs,
 //! pipelines and every write except "request changes", which GitLab only offers in GraphQL.
 //! The project id is the URL-encoded full path (`orbit%2Fteam%2Forbit`), so a group of any depth
 //! works without a lookup. REST pages follow `x-next-page` (empty on the last page) and report
@@ -9,8 +9,6 @@ mod anonymous;
 
 use super::Conditional;
 use super::Fetched;
-use super::parallel;
-use super::reactions;
 use super::ForgeContext;
 use super::Plan;
 use super::Provider;
@@ -24,6 +22,8 @@ use super::common::optional_time;
 use super::common::path_segment;
 use super::common::text;
 use super::common::timestamp;
+use super::parallel;
+use super::reactions;
 use crate::forge::capability::Cap;
 use crate::forge::capability::Capabilities;
 use crate::forge::capability::GITLAB_TERMS;
@@ -302,7 +302,9 @@ fn rest_row(value: &Value, kind: ItemKind) -> ItemRow {
         review_tally: None,
         created: Some(timestamp(value, "created_at")).filter(|created| !created.is_empty()),
         // An issue counts the merge requests that mention it as closing it.
-        linked: value["merge_requests_count"].as_u64().filter(|_| kind == ItemKind::Issue),
+        linked: value["merge_requests_count"]
+            .as_u64()
+            .filter(|_| kind == ItemKind::Issue),
     }
 }
 
@@ -803,10 +805,7 @@ fn timeline_events(value: &Value) -> Vec<TimelineEvent> {
             Some(("issue", rest)) => (ItemKind::Issue, rest),
             _ => (ItemKind::Issue, ""),
         };
-        let number = reference
-            .trim_start_matches(['!', '#'])
-            .parse::<u64>()
-            .ok();
+        let number = reference.trim_start_matches(['!', '#']).parse::<u64>().ok();
         if let Some(number) = number.filter(|_| !reference.contains('/')) {
             return vec![TimelineEvent::CrossReferenced {
                 link: LinkRef {
@@ -910,7 +909,10 @@ fn pipeline_run(value: &Value) -> Run {
         attempts: 1,
         web_url: text(value, "web_url"),
         needs_approval: false,
-        actor: value["user"]["username"].as_str().unwrap_or_default().to_owned(),
+        actor: value["user"]["username"]
+            .as_str()
+            .unwrap_or_default()
+            .to_owned(),
     }
 }
 
@@ -975,7 +977,12 @@ fn schedule_workflow(value: &Value) -> Workflow {
         id: ItemId::new(format!("{SCHEDULE}{id}")),
         name: optional(value, "description").unwrap_or_else(|| format!("Schedule {id}")),
         path: ".gitlab-ci.yml".into(),
-        state: if value["active"].as_bool().unwrap_or(true) { "active" } else { "disabled_manually" }.into(),
+        state: if value["active"].as_bool().unwrap_or(true) {
+            "active"
+        } else {
+            "disabled_manually"
+        }
+        .into(),
         dispatchable: Some(false),
     }
 }
@@ -1134,7 +1141,7 @@ fn repo_payload(value: &Value) -> Repo {
 
 // ------------------------------------------------------------------------------ query translation
 
-/// GitHub search syntax (what the UI and saved views speak) as GitLab filters (§3.6).
+/// GitHub search syntax (what the UI and saved views speak) as GitLab filters.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Query {
     pub text: Vec<String>,
@@ -1512,7 +1519,11 @@ fn kind_entry(key: &(String, String, u64)) -> crate::forge::cache::CacheKey {
 }
 
 fn kind_name(kind: ItemKind) -> &'static str {
-    if kind == ItemKind::Issue { "issue" } else { "pull_request" }
+    if kind == ItemKind::Issue {
+        "issue"
+    } else {
+        "pull_request"
+    }
 }
 
 fn keep_in(cache: &crate::forge::cache::Cache, key: (String, String, u64)) {
@@ -1531,7 +1542,11 @@ fn restore_in(cache: &crate::forge::cache::Cache, key: (String, String, u64)) {
         return;
     }
     if let Some(envelope) = cache.get::<String>(&kind_entry(&key)) {
-        let kind = if envelope.data == "issue" { ItemKind::Issue } else { ItemKind::PullRequest };
+        let kind = if envelope.data == "issue" {
+            ItemKind::Issue
+        } else {
+            ItemKind::PullRequest
+        };
         lock(kinds()).insert(key, kind);
     }
 }
@@ -1553,7 +1568,7 @@ fn record(ctx: &ForgeContext, capability: &'static str, supported: bool) {
     crate::forge::detect::record_capability(ctx.host(), &ctx.endpoints, capability, supported);
 }
 
-/// `$XDG_STATE_HOME/dusty/forge/viewed/<host>/<project>/<iid>.json` (FORGE.md §4.2): GitLab
+/// `$XDG_STATE_HOME/dusty/forge/viewed/<host>/<project>/<iid>.json`: GitLab
 /// keeps viewed files in the browser only.
 fn viewed_path(ctx: &ForgeContext, number: u64) -> Option<PathBuf> {
     let hosts = crate::forge::detect::hosts_path(&crate::forge::credential::Env::process())?;
@@ -1883,7 +1898,10 @@ impl GitLab {
             Read::Threads(number) => vec![paged(&format!("merge_requests/{number}/discussions"))?],
             Read::Diff(number) => vec![paged(&format!("merge_requests/{number}/diffs"))?],
             Read::CommitDiff(sha) => {
-                vec![paged(&format!("repository/commits/{}/diff", path_segment(sha)))?]
+                vec![paged(&format!(
+                    "repository/commits/{}/diff",
+                    path_segment(sha)
+                ))?]
             }
             Read::Viewed(_) => Vec::new(),
             Read::Workflows => vec![
@@ -1910,16 +1928,23 @@ impl GitLab {
             }
             Read::Runs { filter, page }
                 if filter.workflow.as_ref().is_some_and(|workflow| {
-                    crate::forge::legacy::workflow_id(workflow).0.starts_with(SCHEDULE)
+                    crate::forge::legacy::workflow_id(workflow)
+                        .0
+                        .starts_with(SCHEDULE)
                 }) =>
             {
                 // A schedule's row lists the pipelines that schedule started.
-                let workflow = crate::forge::legacy::workflow_id(filter.workflow.as_ref().unwrap_or(&ItemId::new("")));
+                let workflow = crate::forge::legacy::workflow_id(
+                    filter.workflow.as_ref().unwrap_or(&ItemId::new("")),
+                );
                 let schedule = workflow.0.trim_start_matches(SCHEDULE);
                 vec![
-                    rest(&format!("pipeline_schedules/{}/pipelines", path_segment(schedule)))?
-                        .query("per_page", page.per_page.clamp(1, PAGE))
-                        .query("page", page.number.max(1)),
+                    rest(&format!(
+                        "pipeline_schedules/{}/pipelines",
+                        path_segment(schedule)
+                    ))?
+                    .query("per_page", page.per_page.clamp(1, PAGE))
+                    .query("page", page.number.max(1)),
                 ]
             }
             Read::Runs { filter, page } => {
@@ -1960,7 +1985,10 @@ impl GitLab {
             Read::ArtifactFile { artifact, path } => vec![
                 rest(&format!(
                     "jobs/{artifact}/artifacts/{}",
-                    path.split('/').map(path_segment).collect::<Vec<_>>().join("/")
+                    path.split('/')
+                        .map(path_segment)
+                        .collect::<Vec<_>>()
+                        .join("/")
                 ))?
                 .accept(Accept::Raw),
             ],
@@ -2191,7 +2219,7 @@ impl GitLab {
             Read::WorkflowSource { .. } => Payload::Text(ctx.ok(&requests[0], cancel)?.text()),
             Read::Runs { page, .. } => {
                 let mut request = requests.remove(0);
-                // §7.5 incremental refresh: only pipelines updated since the cached copy.
+                // Incremental refresh: only pipelines updated since the cached copy.
                 if let Some(since) = &cond.since {
                     request = request.query("updated_after", since.as_str());
                 }
@@ -2331,7 +2359,7 @@ impl GitLab {
                     other_total: None,
                 })
             }
-            // §3.7: read from the base ref locally, never through the API.
+            // Read from the base ref locally, never through the API.
             Read::PullRequestTemplate => Payload::Template(crate::forge::template::for_context(
                 &ctx.root,
                 ctx.endpoints.kind,
@@ -2436,17 +2464,26 @@ impl GitLab {
             <[ApiRequest; 7]>::try_from(requests)
                 .map_err(|_| ForgeError::Failed("merge request plan".into()))?;
         // The parts are independent of each other: one round trip for all of them.
-        let (value, approvals, reviewers, commits, diffs, closes, awards) = std::thread::scope(|scope| {
-            let approvals = scope.spawn(|| ctx.json(&approvals, cancel));
-            let reviewers = scope.spawn(|| Self::optional_list(ctx, &reviewers, cancel));
-            let commits = scope.spawn(|| Self::rest_pages(ctx, commits, cancel));
-            let diffs = scope.spawn(|| Self::rest_pages(ctx, diffs, cancel));
-            let awards = scope.spawn(|| Self::optional_list(ctx, &awards, cancel));
-            let closes = Self::optional_list(ctx, &closes, cancel);
-            let value = ctx.json(&detail, cancel);
-            use super::parallel::joined;
-            (value, joined(approvals), joined(reviewers), joined(commits), joined(diffs), closes, joined(awards))
-        });
+        let (value, approvals, reviewers, commits, diffs, closes, awards) =
+            std::thread::scope(|scope| {
+                let approvals = scope.spawn(|| ctx.json(&approvals, cancel));
+                let reviewers = scope.spawn(|| Self::optional_list(ctx, &reviewers, cancel));
+                let commits = scope.spawn(|| Self::rest_pages(ctx, commits, cancel));
+                let diffs = scope.spawn(|| Self::rest_pages(ctx, diffs, cancel));
+                let awards = scope.spawn(|| Self::optional_list(ctx, &awards, cancel));
+                let closes = Self::optional_list(ctx, &closes, cancel);
+                let value = ctx.json(&detail, cancel);
+                use super::parallel::joined;
+                (
+                    value,
+                    joined(approvals),
+                    joined(reviewers),
+                    joined(commits),
+                    joined(diffs),
+                    closes,
+                    joined(awards),
+                )
+            });
         let value = value?;
         let approvals = match approvals {
             Ok(value) => value,
@@ -2683,7 +2720,7 @@ impl GitLab {
         })
     }
 
-    /// `POST …/unapprove`: there is no `Write` for it yet, so the UI cannot reach it (F7).
+    /// `POST …/unapprove`: there is no `Write` for it yet, so the UI cannot reach it.
     pub fn unapprove(
         ctx: &ForgeContext,
         number: u64,
@@ -2841,7 +2878,7 @@ impl GitLab {
             }
             Write::CommitSuggestion { .. } => {
                 // `PUT suggestions/:id/apply` needs the note's suggestion id, which the
-                // discussions read does not keep (DESIGN.md §3.30a).
+                // discussions read does not keep.
                 return Err(Self::unsupported(
                     "commit_suggestion",
                     "Apply this suggestion on GitLab · o opens the merge request",
@@ -2982,7 +3019,10 @@ impl GitLab {
                     .eq_ignore_ascii_case(&request.base_repository)
                 {
                     let target = ctx.json(
-                        &ApiRequest::get(format!("projects/{}", path_segment(&request.base_repository))),
+                        &ApiRequest::get(format!(
+                            "projects/{}",
+                            path_segment(&request.base_repository)
+                        )),
                         cancel,
                     )?;
                     payload["target_project_id"] = target["id"].clone();
@@ -3244,7 +3284,7 @@ impl GitLab {
     }
 }
 
-/// GitLab's matrix (§4.2): request changes and draft notes are probed, viewed files are local;
+/// GitLab's matrix: request changes and draft notes are probed, viewed files are local;
 /// pipelines list, retry, cancel and run with variables, job artifacts are per job, and the
 /// workflows rail is the pipeline sources.
 pub fn capabilities(graphql_batching: bool) -> Capabilities {
@@ -3356,7 +3396,11 @@ mod tests {
     fn an_items_kind_outlives_a_restart_in_the_disk_cache() {
         let root = tempfile::tempdir().unwrap();
         let cache = crate::forge::cache::Cache::at(root.path());
-        let key = ("gitlab.example".to_string(), "group/kind-test".to_string(), 41);
+        let key = (
+            "gitlab.example".to_string(),
+            "group/kind-test".to_string(),
+            41,
+        );
         let recalled = |key: &(String, String, u64)| lock(kinds()).get(key).copied();
         lock(kinds()).insert(key.clone(), ItemKind::Issue);
         keep_in(&cache, key.clone());
@@ -3375,7 +3419,11 @@ mod tests {
         restore_in(&cache, key.clone());
         assert_eq!(recalled(&key), Some(ItemKind::Issue));
         // Nothing known anywhere: nothing restored (the read falls back as before).
-        let unknown = ("gitlab.example".to_string(), "group/kind-test".to_string(), 42);
+        let unknown = (
+            "gitlab.example".to_string(),
+            "group/kind-test".to_string(),
+            42,
+        );
         restore_in(&cache, unknown.clone());
         assert_eq!(recalled(&unknown), None);
     }

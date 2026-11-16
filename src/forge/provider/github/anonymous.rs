@@ -1,4 +1,4 @@
-//! GitHub without a credential (FORGE.md §2.5): REST only, since GitHub's GraphQL API refuses
+//! GitHub without a credential: REST only, since GitHub's GraphQL API refuses
 //! anonymous callers. Each REST answer is reshaped into the node the GraphQL documents return,
 //! so the mappers in `github.rs` (`row`, `pull_request`, `issue`, `thread`) stay the only
 //! place that knows the model.
@@ -34,9 +34,8 @@ pub(super) fn fetch(
         }
         // Viewed state lives in GraphQL only; anonymously nothing is marked.
         Read::Viewed(_) => Ok(Fetched::payload(Payload::Viewed(Vec::new()))),
-        Read::List { kind, filter, page } => {
-            list(ctx, *kind, filter, *page, cancel).map(|rows| Fetched::payload(Payload::Rows(rows)))
-        }
+        Read::List { kind, filter, page } => list(ctx, *kind, filter, *page, cancel)
+            .map(|rows| Fetched::payload(Payload::Rows(rows))),
         Read::Search { kind, filter, page } => search(ctx, None, *kind, filter, *page, cancel)
             .map(|rows| Fetched::payload(Payload::Rows(rows))),
         Read::Issue(number) => issue_detail(ctx, *number, cond, cancel),
@@ -308,7 +307,9 @@ fn contexts(ctx: &ForgeContext, sha: &str, cancel: &AtomicBool) -> Result<Vec<Va
 
 fn pull(ctx: &ForgeContext, number: u64, cancel: &AtomicBool) -> Result<Value, ForgeError> {
     match ctx.json(&rest(ctx, &format!("pulls/{number}"))?, cancel) {
-        Err(ForgeError::NotFound(_)) => Err(ForgeError::NotFound(format!("pull request #{number}"))),
+        Err(ForgeError::NotFound(_)) => {
+            Err(ForgeError::NotFound(format!("pull request #{number}")))
+        }
         result => result,
     }
 }
@@ -319,11 +320,17 @@ fn pull_detail(
     cancel: &AtomicBool,
 ) -> Result<PullRequest, ForgeError> {
     let value = pull(ctx, number, cancel)?;
-    let page = |tail: &str| rest(ctx, &format!("pulls/{number}/{tail}")).map(|r| r.query("per_page", PAGE));
+    let page = |tail: &str| {
+        rest(ctx, &format!("pulls/{number}/{tail}")).map(|r| r.query("per_page", PAGE))
+    };
     let files = link_pages(ctx, page("files")?, DETAIL_PAGES, cancel)?;
     let reviews = link_pages(ctx, page("reviews")?, 1, cancel)?;
     let commits = link_pages(ctx, page("commits")?, 1, cancel)?;
-    let contexts = contexts(ctx, value["head"]["sha"].as_str().unwrap_or_default(), cancel)?;
+    let contexts = contexts(
+        ctx,
+        value["head"]["sha"].as_str().unwrap_or_default(),
+        cancel,
+    )?;
     let files = files
         .iter()
         .map(|file| {
@@ -350,7 +357,11 @@ fn fingerprint_of(
     cancel: &AtomicBool,
 ) -> Result<Fingerprint, ForgeError> {
     let value = pull(ctx, number, cancel)?;
-    let contexts = contexts(ctx, value["head"]["sha"].as_str().unwrap_or_default(), cancel)?;
+    let contexts = contexts(
+        ctx,
+        value["head"]["sha"].as_str().unwrap_or_default(),
+        cancel,
+    )?;
     Ok(pull_request(&pull_node(&value, &[], &[], contexts), Vec::new()).fingerprint)
 }
 
@@ -370,10 +381,12 @@ fn issue_detail(
         return Ok(Fetched::NotModified);
     }
     if !response.success() {
-        return Err(match crate::forge::http::classify(&ctx.endpoints, &response) {
-            ForgeError::NotFound(_) => ForgeError::NotFound(format!("issue #{number}")),
-            error => error,
-        });
+        return Err(
+            match crate::forge::http::classify(&ctx.endpoints, &response) {
+                ForgeError::NotFound(_) => ForgeError::NotFound(format!("issue #{number}")),
+                error => error,
+            },
+        );
     }
     let value = response.json()?;
     // `issues/N` also answers for pull requests; GraphQL's `issue(number:)` does not.
@@ -624,7 +637,11 @@ mod tests {
         assert_eq!(pull.commits[0].headline, "Fix it");
         assert_eq!(pull.commits[0].body, "Because");
         assert_eq!(pull.checks.len(), 2);
-        let run = pull.checks.iter().find(|check| check.name == "test").unwrap();
+        let run = pull
+            .checks
+            .iter()
+            .find(|check| check.name == "test")
+            .unwrap();
         assert_eq!(
             run.run_link,
             Some(RunLink {

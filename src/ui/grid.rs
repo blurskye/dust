@@ -26,7 +26,7 @@ pub enum ExplorerSegmentRole {
     Diagnostic,
 }
 
-/// What a Dusty Git cell means (DESIGN.md §4.1). The theme turns a role into a colour;
+/// What a Dusty Git cell means. The theme turns a role into a colour;
 /// screens never name colours.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum GitRole {

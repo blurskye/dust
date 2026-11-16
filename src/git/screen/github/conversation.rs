@@ -1,5 +1,5 @@
 //! The Conversation tab of pull requests and the issue reader, laid out like GitHub's pages
-//! (DESIGN.md §3.26): one chronological timeline of cards on the left, the metadata sidebar on
+//!: one chronological timeline of cards on the left, the metadata sidebar on
 //! the right (a compact block above the timeline when the reader is narrow).
 //!
 //! Cards: the description, `maya added 2 commits` with its commits, one-line events on a thin
@@ -36,7 +36,11 @@ pub(super) fn sidebar_width(width: usize) -> usize {
 
 /// The timeline's width: beside the sidebar, or the whole reader.
 pub(super) fn timeline_width(width: usize) -> usize {
-    if width >= SIDEBAR_FROM { width - sidebar_width(width) - 3 } else { width }
+    if width >= SIDEBAR_FROM {
+        width - sidebar_width(width) - 3
+    } else {
+        width
+    }
 }
 
 /// A fold key inside this item's Conversation.
@@ -65,7 +69,9 @@ fn folded(workspace: &Workspace, number: u64, key: &str, by_default: bool) -> bo
 fn whole_tables(rows: &[Line], keep: usize) -> usize {
     let keep = keep.min(rows.len());
     let edge = |row: &Line, corner: char| {
-        row.text.trim_start_matches(|c: char| c.is_whitespace() || matches!(c, '│' | '▍' | '▎')).starts_with(corner)
+        row.text
+            .trim_start_matches(|c: char| c.is_whitespace() || matches!(c, '│' | '▍' | '▎'))
+            .starts_with(corner)
     };
     let kept = rows.get(..keep).unwrap_or_default();
     let Some(open) = kept.iter().rposition(|row| edge(row, '┌')) else {
@@ -82,17 +88,24 @@ fn whole_tables(rows: &[Line], keep: usize) -> usize {
     rows.iter()
         .skip(keep)
         .position(|row| edge(row, '└'))
-        .map_or(keep, |end| (keep + end + 1).min(rows.len().saturating_sub(1)).max(keep))
+        .map_or(keep, |end| {
+            (keep + end + 1).min(rows.len().saturating_sub(1)).max(keep)
+        })
 }
 
 /// The middle a long timeline folds: none at [`FOLD_OVER`] items or fewer, so the subtraction
 /// never runs short.
 fn fold_range(total: usize) -> Option<std::ops::Range<usize>> {
-    (total > FOLD_OVER && total >= 2 * FOLD_KEEP).then(|| FOLD_KEEP..total - FOLD_KEEP)
+    const { assert!(FOLD_OVER >= 2 * FOLD_KEEP, "a fold keeps both ends") };
+    (total > FOLD_OVER).then(|| FOLD_KEEP..total - FOLD_KEEP)
 }
 
 /// The timeline items a long conversation hides, while its fold is shut.
-fn hidden_items(workspace: &Workspace, number: u64, total: usize) -> Option<std::ops::Range<usize>> {
+fn hidden_items(
+    workspace: &Workspace,
+    number: u64,
+    total: usize,
+) -> Option<std::ops::Range<usize>> {
     fold_range(total).filter(|_| folded(workspace, number, &key("hidden", "timeline"), true))
 }
 
@@ -100,7 +113,7 @@ fn hidden_items(workspace: &Workspace, number: u64, total: usize) -> Option<std:
 fn hidden_row(number: u64, hidden: usize) -> Line {
     let mut row = Rich::new()
         .push("  ┆ ", role(GitRole::Border))
-        .push(&format!("{hidden} hidden items"), strong(GitRole::Text))
+        .push(format!("{hidden} hidden items"), strong(GitRole::Text))
         .sep()
         .push("Load more…", role(GitRole::Link))
         .line();
@@ -110,7 +123,11 @@ fn hidden_row(number: u64, hidden: usize) -> Line {
 }
 
 fn badge() -> Style {
-    Style::Git { role: GitRole::Muted, surface: GitSurface::Chip(GitChip::Muted), emphasis: Emphasis::None }
+    Style::Git {
+        role: GitRole::Muted,
+        surface: GitSurface::Chip(GitChip::Muted),
+        emphasis: Emphasis::None,
+    }
 }
 
 pub(super) fn is_bot(login: &str) -> bool {
@@ -155,7 +172,10 @@ fn card_header(
     mode: ExplorerIconMode,
 ) -> Rich {
     let mut rich = Rich::new()
-        .push(&format!(" {} ", glyph(Glyph::Person, mode)), role(GitRole::Muted))
+        .push(
+            format!(" {} ", glyph(Glyph::Person, mode)),
+            role(GitRole::Muted),
+        )
         .push(author, strong(GitRole::Author));
     for word in badges {
         rich = rich.plain(" ").chip(word, badge());
@@ -221,11 +241,19 @@ fn body(
                 let mark = if shut { "▸" } else { "▾" };
                 let mut row = Rich::new()
                     .plain(indent)
-                    .push(&format!("{mark} "), role(GitRole::Muted))
+                    .push(format!("{mark} "), role(GitRole::Muted))
                     // Muted and underlined like a link, as GitHub draws a summary.
                     .push(
-                        if summary.is_empty() { "Details" } else { summary.as_str() },
-                        Style::Git { role: GitRole::Muted, surface: GitSurface::Pane, emphasis: Emphasis::Underline },
+                        if summary.is_empty() {
+                            "Details"
+                        } else {
+                            summary.as_str()
+                        },
+                        Style::Git {
+                            role: GitRole::Muted,
+                            surface: GitSurface::Pane,
+                            emphasis: Emphasis::Underline,
+                        },
                     )
                     .line();
                 row.action = Some(Action::Collapse(number, fold));
@@ -238,7 +266,12 @@ fn body(
         }
     }
     if rows.len() == start {
-        rows.push(Rich::new().plain(indent).push("No description provided.", role(GitRole::Muted)).line());
+        rows.push(
+            Rich::new()
+                .plain(indent)
+                .push("No description provided.", role(GitRole::Muted))
+                .line(),
+        );
     }
     let shown = rows.len() - start;
     let long = key("long", owner);
@@ -251,13 +284,16 @@ fn body(
             rows.truncate(start + keep);
             let mut more = Rich::new()
                 .plain(indent)
-                .push(&format!("▸ {hidden} more lines"), role(GitRole::Link))
+                .push(format!("▸ {hidden} more lines"), role(GitRole::Link))
                 .line();
             more.action = Some(Action::Collapse(number, long));
             more.card = true;
             rows.push(more);
         } else {
-            let mut less = Rich::new().plain(indent).push("▾ show less", role(GitRole::Muted)).line();
+            let mut less = Rich::new()
+                .plain(indent)
+                .push("▾ show less", role(GitRole::Muted))
+                .line();
             less.action = Some(Action::Collapse(number, long));
             less.card = true;
             rows.push(less);
@@ -397,12 +433,28 @@ fn comment_card(
     now: i64,
     mode: ExplorerIconMode,
 ) {
-    let owner = if comment.id.is_empty() { format!("{}{}", comment.author, comment.created) } else { comment.id.clone() };
+    let owner = if comment.id.is_empty() {
+        format!("{}{}", comment.author, comment.created)
+    } else {
+        comment.id.clone()
+    };
     let fold = key("card", &owner);
     let shut = folded(workspace, number, &fold, false);
-    let when = if comment.pending { "sending…".to_owned() } else { fresh::relative(&comment.created, now) };
+    let when = if comment.pending {
+        "sending…".to_owned()
+    } else {
+        fresh::relative(&comment.created, now)
+    };
     let words = badges(&comment.author, item_author, &comment.association);
-    let mut header = card_header(&comment.author, &words, "commented", None, &when, comment.edited, mode);
+    let mut header = card_header(
+        &comment.author,
+        &words,
+        "commented",
+        None,
+        &when,
+        comment.edited,
+        mode,
+    );
     if shut {
         header = header.sep().push("folded", role(GitRole::Muted));
     }
@@ -410,7 +462,16 @@ fn comment_card(
     if shut {
         return;
     }
-    body(workspace, number, &owner, &comment.body, rows, width, "  ", &comment.url);
+    body(
+        workspace,
+        number,
+        &owner,
+        &comment.body,
+        rows,
+        width,
+        "  ",
+        &comment.url,
+    );
     if let Some(row) = reactions_row(&comment.reactions, "  ") {
         rows.push(row);
     }
@@ -418,15 +479,30 @@ fn comment_card(
 
 /// The last `HUNK_LINES` lines of a thread's hunk, banded like the Files diff.
 fn hunk_rows(hunk: &str, rows: &mut Vec<Line>, width: usize, indent: &str) {
-    let lines = hunk.lines().filter(|line| !line.starts_with("@@")).collect::<Vec<_>>();
+    let lines = hunk
+        .lines()
+        .filter(|line| !line.starts_with("@@"))
+        .collect::<Vec<_>>();
     let from = lines.len().saturating_sub(HUNK_LINES);
     for line in &lines[from..] {
         let added = line.starts_with('+');
         let removed = line.starts_with('-');
-        let text = super::super::shell::chrome::ellipsize(&line.replace('\t', "    "), width.saturating_sub(indent.width()).max(8));
+        let text = super::super::shell::chrome::ellipsize(
+            &line.replace('\t', "    "),
+            width.saturating_sub(indent.width()).max(8),
+        );
         let mut row = Rich::new()
             .plain(indent)
-            .push(&text, role(if added { GitRole::Added } else if removed { GitRole::Removed } else { GitRole::Text }))
+            .push(
+                &text,
+                role(if added {
+                    GitRole::Added
+                } else if removed {
+                    GitRole::Removed
+                } else {
+                    GitRole::Text
+                }),
+            )
             .line();
         row.band = Some(if added {
             GitSurface::AddedBand
@@ -471,7 +547,10 @@ fn thread_card(
     };
     let mut header = Rich::new()
         .plain("  ")
-        .push(&format!("{} ", if shut { "▸" } else { "▾" }), role(GitRole::Muted))
+        .push(
+            format!("{} ", if shut { "▸" } else { "▾" }),
+            role(GitRole::Muted),
+        )
         .push(&place, role(GitRole::Link))
         .plain("  ")
         .push(state, role(tone));
@@ -481,7 +560,10 @@ fn thread_card(
     let replies = thread.replies();
     if shut {
         let comments = replies + 1;
-        header = header.sep().push(&format!("{comments} comment{}", if comments == 1 { "" } else { "s" }), role(GitRole::Muted));
+        header = header.sep().push(
+            format!("{comments} comment{}", if comments == 1 { "" } else { "s" }),
+            role(GitRole::Muted),
+        );
     }
     let mut header = header.line();
     header.band = Some(GitSurface::Code);
@@ -490,7 +572,11 @@ fn thread_card(
     header.action = Some(Action::Collapse(number, fold));
     header.reply = Some(reply.clone());
     header.thread_header = true;
-    let web = thread.comments.first().map(|comment| comment.url.clone()).unwrap_or_default();
+    let web = thread
+        .comments
+        .first()
+        .map(|comment| comment.url.clone())
+        .unwrap_or_default();
     if !web.is_empty() {
         header.web = Some(web);
     }
@@ -519,17 +605,30 @@ fn thread_card(
             who = who.sep().push("edited", role(GitRole::Muted));
         }
         rows.push(who.line());
-        let owner = if comment.id.is_empty() { format!("{}{index}", thread.id) } else { comment.id.clone() };
+        let owner = if comment.id.is_empty() {
+            format!("{}{index}", thread.id)
+        } else {
+            comment.id.clone()
+        };
         let body_start = rows.len();
         match super::suggestion::split(&comment.body) {
-            // A suggested change reads as a diff against the lines the thread covers (§3.30a).
+            // A suggested change reads as a diff against the lines the thread covers.
             Some(parts) => {
                 let count = super::suggestion::span(thread.start_line, thread.line);
                 let original = super::suggestion::original(&thread.hunk, count);
                 for (part_index, part) in parts.into_iter().enumerate() {
                     match part {
                         super::suggestion::Part::Text(text) => {
-                            body(workspace, number, &format!("{owner}/{part_index}"), &text, rows, width, indent, &comment.url);
+                            body(
+                                workspace,
+                                number,
+                                &format!("{owner}/{part_index}"),
+                                &text,
+                                rows,
+                                width,
+                                indent,
+                                &comment.url,
+                            );
                         }
                         super::suggestion::Part::Suggestion(lines) => {
                             super::suggestion::rows(rows, &original, &lines, width, indent);
@@ -537,7 +636,16 @@ fn thread_card(
                     }
                 }
             }
-            None => body(workspace, number, &owner, &comment.body, rows, width, indent, &comment.url),
+            None => body(
+                workspace,
+                number,
+                &owner,
+                &comment.body,
+                rows,
+                width,
+                indent,
+                &comment.url,
+            ),
         }
         // Each logical line of the comment keeps its place across refreshes and reflow.
         let mut logical = 0;
@@ -552,7 +660,10 @@ fn thread_card(
         }
     }
     if thread.total > thread.comments.len() as u64 {
-        rows.push(muted(&format!("      {} more on the forge · o opens it", thread.total - thread.comments.len() as u64)));
+        rows.push(muted(&format!(
+            "      {} more on the forge · o opens it",
+            thread.total - thread.comments.len() as u64
+        )));
     }
     let draft = workspace
         .drafts
@@ -562,7 +673,10 @@ fn thread_card(
     let mut answer = Rich::new()
         .plain("    ")
         .push("› ", role(GitRole::Focus))
-        .push(if draft { "Continue draft" } else { "Reply" }, role(GitRole::Link))
+        .push(
+            if draft { "Continue draft" } else { "Reply" },
+            role(GitRole::Link),
+        )
         .line();
     answer.action = Some(reply.clone());
     answer.card = true;
@@ -571,7 +685,14 @@ fn thread_card(
         let mut toggle = Rich::new()
             .plain("    ")
             .push("› ", role(GitRole::Focus))
-            .push(if resolved { "Unresolve conversation" } else { "Resolve conversation" }, role(GitRole::Link))
+            .push(
+                if resolved {
+                    "Unresolve conversation"
+                } else {
+                    "Resolve conversation"
+                },
+                role(GitRole::Link),
+            )
             .line();
         toggle.action = Some(Action::Resolve(thread.id.clone(), !resolved));
         toggle.card = true;
@@ -604,6 +725,8 @@ fn review_words(state: ReviewState) -> (&'static str, GitRole) {
 }
 
 /// A timeline item with its time, for the one chronological stream.
+// Built per paint, a handful at a time: boxing the entry would cost more than its size.
+#[allow(clippy::large_enum_variant)]
 enum Item<'a> {
     Description,
     Commits(Vec<&'a records::CommitRow>),
@@ -614,7 +737,13 @@ enum Item<'a> {
 }
 
 fn commit_actor<'a>(commits: &[&'a records::CommitRow], fallback: &'a str) -> &'a str {
-    commits.first().map_or(fallback, |commit| if commit.author.is_empty() { fallback } else { commit.author.as_str() })
+    commits.first().map_or(fallback, |commit| {
+        if commit.author.is_empty() {
+            fallback
+        } else {
+            commit.author.as_str()
+        }
+    })
 }
 
 /// The pull request's timeline cards. The merge box follows (`pr.rs`).
@@ -633,7 +762,9 @@ pub(super) fn pull(
         .value(&Key::Threads(number))
         .map(records::threads)
         .unwrap_or_default();
-    sidebar(workspace, number, record, &entries, &threads, true, rows, width, mode);
+    sidebar(
+        workspace, number, record, &entries, &threads, true, rows, width, mode,
+    );
     let width = timeline_width(width);
     // Every review holds the threads its author opened up to its submission; the rest stand
     // on their own at their first comment's time.
@@ -653,7 +784,10 @@ pub(super) fn pull(
         let owner = reviews
             .iter()
             .enumerate()
-            .filter(|(_, review)| review.author == author && (created.is_empty() || review.submitted.as_str() >= created))
+            .filter(|(_, review)| {
+                review.author == author
+                    && (created.is_empty() || review.submitted.as_str() >= created)
+            })
             .min_by(|(_, a), (_, b)| a.submitted.cmp(&b.submitted))
             .map(|(at, _)| at);
         match owner {
@@ -673,7 +807,11 @@ pub(super) fn pull(
         items.push((commit.committed.clone(), Item::Commits(vec![commit])));
     }
     for thread in loose {
-        let at = thread.comments.first().map(|comment| comment.created.clone()).unwrap_or_default();
+        let at = thread
+            .comments
+            .first()
+            .map(|comment| comment.created.clone())
+            .unwrap_or_default();
         items.push((at, Item::Thread(thread)));
     }
     // A stable sort by time: undated items keep their place after the ones before them.
@@ -693,14 +831,13 @@ pub(super) fn pull(
     // Neighbouring commits are one `added N commits` card, and a forge's own `pushed N
     // commits` event beside them is that push again (Gitea, Forgejo): the card says it once.
     // Neighbouring events of one actor and kind are one line (`added bug, priority: high`).
-    let pushed = |entry: &TimelineEntry| {
-        matches!(entry, TimelineEntry::Event { verb, .. } if verb.starts_with("pushed ") && verb.contains(" commit"))
-    };
+    let pushed = |entry: &TimelineEntry| matches!(entry, TimelineEntry::Event { verb, .. } if verb.starts_with("pushed ") && verb.contains(" commit"));
     let mut merged: Vec<(String, Item)> = Vec::new();
     for (at, item) in items {
         match item {
             Item::Commits(mut commits) => {
-                if matches!(merged.last(), Some((_, Item::Events(events))) if events.len() == 1 && pushed(&events[0])) {
+                if matches!(merged.last(), Some((_, Item::Events(events))) if events.len() == 1 && pushed(&events[0]))
+                {
                     merged.pop();
                 }
                 if let Some((_, Item::Commits(previous))) = merged.last_mut() {
@@ -714,7 +851,9 @@ pub(super) fn pull(
                     continue;
                 }
                 if let Some((_, Item::Events(events))) = merged.last_mut()
-                    && events.last().is_some_and(|last| super::issue::joins(last, &entry, now))
+                    && events
+                        .last()
+                        .is_some_and(|last| super::issue::joins(last, &entry, now))
                 {
                     events.push(entry);
                     continue;
@@ -724,7 +863,11 @@ pub(super) fn pull(
             item => merged.push((at, item)),
         }
     }
-    let head = record.commits.last().map(|commit| commit.sha.as_str()).unwrap_or("");
+    let head = record
+        .commits
+        .last()
+        .map(|commit| commit.sha.as_str())
+        .unwrap_or("");
     let ci = record.check_counts().state();
     let mut review_index = 0;
     let hidden = hidden_items(workspace, number, merged.len());
@@ -741,7 +884,8 @@ pub(super) fn pull(
         // One-line events stack without a connector row between them.
         let stacked = index > 0
             && hidden.as_ref().is_none_or(|range| index != range.end)
-            && matches!(item, Item::Events(_)) && matches!(merged[index - 1].1, Item::Events(_));
+            && matches!(item, Item::Events(_))
+            && matches!(merged[index - 1].1, Item::Events(_));
         if index > 0 && !stacked {
             rows.push(rail());
         }
@@ -751,13 +895,30 @@ pub(super) fn pull(
                 let shut = folded(workspace, number, &fold, false);
                 let when = fresh::relative(&record.created, now);
                 let words = badges(&record.row.author, "", "");
-                let mut header = card_header(&record.row.author, &words, "commented", None, &when, false, mode);
+                let mut header = card_header(
+                    &record.row.author,
+                    &words,
+                    "commented",
+                    None,
+                    &when,
+                    false,
+                    mode,
+                );
                 if shut {
                     header = header.sep().push("folded", role(GitRole::Muted));
                 }
                 rows.push(header_line(header, Some((number, fold)), &record.row.url));
                 if !shut {
-                    body(workspace, number, "description", &record.body, rows, width, "  ", &record.row.url);
+                    body(
+                        workspace,
+                        number,
+                        "description",
+                        &record.body,
+                        rows,
+                        width,
+                        "  ",
+                        &record.row.url,
+                    );
                     // The description's reactions, as each comment's (GitHub, Gitea and GitLab).
                     if let Some(row) = reactions_row(&record.reactions, "  ") {
                         rows.push(row);
@@ -766,14 +927,20 @@ pub(super) fn pull(
             }
             Item::Commits(commits) => {
                 let actor = commit_actor(commits, &record.row.author);
-                let when = commits.last().map(|commit| fresh::relative(&commit.committed, now)).unwrap_or_default();
+                let when = commits
+                    .last()
+                    .map(|commit| fresh::relative(&commit.committed, now))
+                    .unwrap_or_default();
                 let count = commits.len();
                 let mut rich = Rich::new()
                     .push("  ●", role(GitRole::Ref))
                     .plain(" ")
                     .push(actor, strong(GitRole::Author))
                     .plain(" ")
-                    .push(&format!("added {count} commit{}", if count == 1 { "" } else { "s" }), role(GitRole::Muted));
+                    .push(
+                        format!("added {count} commit{}", if count == 1 { "" } else { "s" }),
+                        role(GitRole::Muted),
+                    );
                 if !when.is_empty() {
                     rich = rich.sep().push(&when, role(GitRole::Muted));
                 }
@@ -784,14 +951,27 @@ pub(super) fn pull(
                 // the check mark and the sha (9): cut only when that runs out, and the shas
                 // sit one blank after the longest subject, never at a fixed far column
                 // (R16 prs-09).
-                let longest = commits.iter().map(|commit| commit.headline.width()).max().unwrap_or(0);
+                let longest = commits
+                    .iter()
+                    .map(|commit| commit.headline.width())
+                    .max()
+                    .unwrap_or(0);
                 let headline_width = longest.min(width.saturating_sub(18)).max(12);
                 for commit in commits {
                     let short = commit.sha.chars().take(7).collect::<String>();
                     let mut rich = Rich::new()
                         .push("  │   ", role(GitRole::Border))
-                        .push(&format!("{} ", glyph(Glyph::ForgeCommit, mode)), role(GitRole::Ref))
-                        .push(&super::super::shell::chrome::ellipsize(&commit.headline, headline_width), role(GitRole::Text))
+                        .push(
+                            format!("{} ", glyph(Glyph::ForgeCommit, mode)),
+                            role(GitRole::Ref),
+                        )
+                        .push(
+                            super::super::shell::chrome::ellipsize(
+                                &commit.headline,
+                                headline_width,
+                            ),
+                            role(GitRole::Text),
+                        )
                         // One blank always before the status column, so a cut title never
                         // runs into it and every sha lines up.
                         .to_column(headline_width + 9);
@@ -799,7 +979,7 @@ pub(super) fn pull(
                         && let Some(state) = ci
                     {
                         let (mark, _, tone) = super::pr::ci_mark(state, mode);
-                        rich = rich.push(&format!("{mark} "), role(tone));
+                        rich = rich.push(format!("{mark} "), role(tone));
                     } else {
                         rich = rich.plain("  ");
                     }
@@ -812,7 +992,9 @@ pub(super) fn pull(
             }
             Item::Events(events) => {
                 let events = events.iter().collect::<Vec<_>>();
-                if let Some(event) = super::issue::events_row(workspace, &events, now, width.saturating_sub(2), mode) {
+                if let Some(event) =
+                    super::issue::events_row(workspace, &events, now, width.saturating_sub(2), mode)
+                {
                     for mut row in event {
                         indent(&mut row, "  ");
                         row.card = row.action.is_some();
@@ -821,7 +1003,9 @@ pub(super) fn pull(
                 }
             }
             Item::Entry(entry @ TimelineEntry::Event { .. }) => {
-                if let Some(event) = super::issue::event_row(workspace, entry, now, width.saturating_sub(2), mode) {
+                if let Some(event) =
+                    super::issue::event_row(workspace, entry, now, width.saturating_sub(2), mode)
+                {
                     for mut row in event {
                         indent(&mut row, "  ");
                         row.card = row.action.is_some();
@@ -830,7 +1014,16 @@ pub(super) fn pull(
                 }
             }
             Item::Entry(TimelineEntry::Comment(comment)) => {
-                comment_card(workspace, number, &record.row.author, comment, rows, width, now, mode);
+                comment_card(
+                    workspace,
+                    number,
+                    &record.row.author,
+                    comment,
+                    rows,
+                    width,
+                    now,
+                    mode,
+                );
             }
             Item::Entry(TimelineEntry::Review { review }) => {
                 let at = reviews
@@ -842,7 +1035,11 @@ pub(super) fn pull(
                 if let Some(at) = at {
                     review_index = at + 1;
                 }
-                let owner = if review.id.is_empty() { format!("{}{}", review.author, review.submitted) } else { review.id.clone() };
+                let owner = if review.id.is_empty() {
+                    format!("{}{}", review.author, review.submitted)
+                } else {
+                    review.id.clone()
+                };
                 let fold = key("card", &owner);
                 let shut = folded(workspace, number, &fold, false);
                 let (verb, tone) = review_words(review.state);
@@ -850,7 +1047,9 @@ pub(super) fn pull(
                 let when = fresh::relative(&review.submitted, now);
                 let words = badges(&review.author, &record.row.author, "");
                 let extra = match review.state {
-                    ReviewState::Approved | ReviewState::ChangesRequested => Some((format!("{mark} {verb}"), tone)),
+                    ReviewState::Approved | ReviewState::ChangesRequested => {
+                        Some((format!("{mark} {verb}"), tone))
+                    }
                     _ => None,
                 };
                 let action = if extra.is_some() { "" } else { verb };
@@ -865,9 +1064,21 @@ pub(super) fn pull(
                 );
                 let threads = at.map(|at| held[at].clone()).unwrap_or_default();
                 if shut {
-                    let open = threads.iter().filter(|thread| thread.resolved == Some(false)).count();
+                    let open = threads
+                        .iter()
+                        .filter(|thread| thread.resolved == Some(false))
+                        .count();
                     header = header.sep().push(
-                        &format!("folded · {} thread{}{}", threads.len(), if threads.len() == 1 { "" } else { "s" }, if open > 0 { format!(", {open} open") } else { String::new() }),
+                        format!(
+                            "folded · {} thread{}{}",
+                            threads.len(),
+                            if threads.len() == 1 { "" } else { "s" },
+                            if open > 0 {
+                                format!(", {open} open")
+                            } else {
+                                String::new()
+                            }
+                        ),
                         role(GitRole::Muted),
                     );
                 }
@@ -876,14 +1087,41 @@ pub(super) fn pull(
                     continue;
                 }
                 if !review.body.trim().is_empty() {
-                    body(workspace, number, &owner, &review.body, rows, width, "  ", "");
+                    body(
+                        workspace,
+                        number,
+                        &owner,
+                        &review.body,
+                        rows,
+                        width,
+                        "  ",
+                        "",
+                    );
                 }
                 for thread in threads {
-                    thread_card(workspace, number, &record.row.author, thread, rows, width, now, mode);
+                    thread_card(
+                        workspace,
+                        number,
+                        &record.row.author,
+                        thread,
+                        rows,
+                        width,
+                        now,
+                        mode,
+                    );
                 }
             }
             Item::Thread(thread) => {
-                thread_card(workspace, number, &record.row.author, thread, rows, width, now, mode);
+                thread_card(
+                    workspace,
+                    number,
+                    &record.row.author,
+                    thread,
+                    rows,
+                    width,
+                    now,
+                    mode,
+                );
             }
         }
     }
@@ -894,7 +1132,10 @@ pub(super) fn pull(
     rows.push(rail());
     // The comment box, as on GitHub and as the issue page ends (`C` from anywhere).
     let mut comment = Rich::new()
-        .push(&format!(" {} ", glyph(Glyph::Comment, mode)), role(GitRole::Muted))
+        .push(
+            format!(" {} ", glyph(Glyph::Comment, mode)),
+            role(GitRole::Muted),
+        )
         .push("Add a comment", strong(GitRole::Text))
         .line();
     comment.band = Some(GitSurface::FileBand);
@@ -921,20 +1162,47 @@ pub(super) fn issue(
     // The list's row lacks assignees, milestone and links: no sidebar claims "No one" until
     // the details are here.
     if loaded {
-        sidebar(workspace, number, record, &entries, &[], false, rows, width, mode);
+        sidebar(
+            workspace,
+            number,
+            record,
+            &entries,
+            &[],
+            false,
+            rows,
+            width,
+            mode,
+        );
     }
     let width = timeline_width(width);
     let fold = key("card", "description");
     let shut = folded(workspace, number, &fold, false);
     let when = fresh::relative(&record.created, now);
     let words = badges(&record.row.author, "", "");
-    let mut header = card_header(&record.row.author, &words, "commented", None, &when, false, mode);
+    let mut header = card_header(
+        &record.row.author,
+        &words,
+        "commented",
+        None,
+        &when,
+        false,
+        mode,
+    );
     if shut {
         header = header.sep().push("folded", role(GitRole::Muted));
     }
     rows.push(header_line(header, Some((number, fold)), &record.row.url));
     if !shut && show_body {
-        body(workspace, number, "description", &record.body, rows, width, "  ", &record.row.url);
+        body(
+            workspace,
+            number,
+            "description",
+            &record.body,
+            rows,
+            width,
+            "  ",
+            &record.row.url,
+        );
         // The description's reactions, as each comment's (GitHub, Gitea and GitLab).
         if let Some(row) = reactions_row(&record.reactions, "  ") {
             rows.push(row);
@@ -952,7 +1220,9 @@ pub(super) fn issue(
     let mut groups: Vec<Vec<&TimelineEntry>> = Vec::new();
     for entry in &entries {
         if let Some(group) = groups.last_mut()
-            && group.last().is_some_and(|last| super::issue::joins(last, entry, now))
+            && group
+                .last()
+                .is_some_and(|last| super::issue::joins(last, entry, now))
         {
             group.push(entry);
         } else {
@@ -979,10 +1249,21 @@ pub(super) fn issue(
         previous_event = event;
         match group[0] {
             TimelineEntry::Comment(comment) => {
-                comment_card(workspace, number, &record.row.author, comment, rows, width, now, mode);
+                comment_card(
+                    workspace,
+                    number,
+                    &record.row.author,
+                    comment,
+                    rows,
+                    width,
+                    now,
+                    mode,
+                );
             }
             TimelineEntry::Event { .. } => {
-                if let Some(event) = super::issue::events_row(workspace, &group, now, width.saturating_sub(2), mode) {
+                if let Some(event) =
+                    super::issue::events_row(workspace, &group, now, width.saturating_sub(2), mode)
+                {
                     for mut row in event {
                         indent(&mut row, "  ");
                         row.card = row.action.is_some();
@@ -1001,20 +1282,63 @@ pub(super) fn issue(
     // GitLab's `Close issue` is a plain button; GitHub's carries the closed-issue mark, which
     // on GitLab reads as a passed check (R16 gitlab-11).
     let marked = workspace.forge_kind() != Some(crate::forge::provider::ProviderKind::GitLab);
-    composer(number, record.row.lifecycle == Lifecycle::Open, marked, rows, width, mode);
+    let open = record.row.lifecycle == Lifecycle::Open;
+    if workspace.read_only() {
+        signed_out_composer(number, open, rows, mode);
+    } else {
+        composer(number, open, marked, rows, width, mode);
+    }
 }
 
-/// GitHub's comment box ending an issue (r15 ISS-05): a framed `Add a comment` box with its
+/// Signed out, the box and its button would only be cut off by the reason
+/// (`mark_refused`): one row each, as a pull request ends, with room for it.
+fn signed_out_composer(number: u64, open: bool, rows: &mut Vec<Line>, mode: ExplorerIconMode) {
+    let mut comment = Rich::new()
+        .push(
+            format!(" {} ", glyph(Glyph::Comment, mode)),
+            role(GitRole::Muted),
+        )
+        .push("Add a comment", strong(GitRole::Text))
+        .line();
+    comment.band = Some(GitSurface::FileBand);
+    comment.card = true;
+    comment.action = Some(Action::Comment(1, number));
+    rows.push(comment);
+    let (mark, words) = if open {
+        (glyph(Glyph::IssueClosed, mode), "Close issue")
+    } else {
+        (glyph(Glyph::Issue, mode), "Reopen issue")
+    };
+    let mut state = Rich::new()
+        .push(format!(" {mark} "), role(GitRole::Muted))
+        .push(words, strong(GitRole::Text))
+        .line();
+    state.card = true;
+    state.action = Some(Action::State(1, number, open));
+    rows.push(state);
+}
+
+/// GitHub's comment box ending an issue: a framed `Add a comment` box with its
 /// primary `Comment` button, then the bordered secondary `Close issue` (or `Reopen issue`)
 /// below its right edge. Each is one cursor stop.
-fn composer(number: u64, open: bool, marked: bool, rows: &mut Vec<Line>, width: usize, mode: ExplorerIconMode) {
+fn composer(
+    number: u64,
+    open: bool,
+    marked: bool,
+    rows: &mut Vec<Line>,
+    width: usize,
+    mode: ExplorerIconMode,
+) {
     let inner = width.saturating_sub(4).clamp(28, 96);
     let edge = role(GitRole::Border);
     let title = " Add a comment ";
     let top = Rich::new()
         .push("  ╭─", edge)
         .push(title, strong(GitRole::Text))
-        .push(&format!("{}╮", "─".repeat(inner.saturating_sub(title.width() + 1))), edge)
+        .push(
+            format!("{}╮", "─".repeat(inner.saturating_sub(title.width() + 1))),
+            edge,
+        )
         .line();
     rows.push(top);
     let button = " Comment ";
@@ -1024,7 +1348,14 @@ fn composer(number: u64, open: bool, marked: bool, rows: &mut Vec<Line>, width: 
         .push("  │ ", edge)
         .push(hint, role(GitRole::Muted))
         .plain(&" ".repeat(gap))
-        .push(button, Style::Git { role: GitRole::OnFocus, surface: GitSurface::ChipActive, emphasis: Emphasis::Bold })
+        .push(
+            button,
+            Style::Git {
+                role: GitRole::OnFocus,
+                surface: GitSurface::ChipActive,
+                emphasis: Emphasis::Bold,
+            },
+        )
         .push(" │", edge)
         .line();
     // One stop for the box, on its text row: the reader moves the cursor to the first row
@@ -1032,13 +1363,21 @@ fn composer(number: u64, open: bool, marked: bool, rows: &mut Vec<Line>, width: 
     middle.action = Some(Action::Comment(1, number));
     middle.card = true;
     rows.push(middle);
-    rows.push(Rich::new().push(&format!("  ╰{}╯", "─".repeat(inner)), edge).line());
+    rows.push(
+        Rich::new()
+            .push(format!("  ╰{}╯", "─".repeat(inner)), edge)
+            .line(),
+    );
     let (mark, words, tone) = if open {
         (glyph(Glyph::IssueClosed, mode), "Close issue", GitRole::Ref)
     } else {
         (glyph(Glyph::Issue, mode), "Reopen issue", GitRole::Added)
     };
-    let mark = if marked { format!("{mark} ") } else { String::new() };
+    let mark = if marked {
+        format!("{mark} ")
+    } else {
+        String::new()
+    };
     let label = format!("{mark}{words}");
     let lead = (inner + 2).saturating_sub(label.width() + 4) + 2;
     let mut close = Rich::new()
@@ -1084,7 +1423,10 @@ fn sidebar(
                 .iter()
                 .map(|(login, state)| {
                     let (mark, _, tone) = super::pr::review_mark(*state, mode);
-                    Rich::new().push(login, role(GitRole::Author)).plain(" ").push(mark, role(tone))
+                    Rich::new()
+                        .push(login, role(GitRole::Author))
+                        .plain(" ")
+                        .push(mark, role(tone))
                 })
                 .collect()
         };
@@ -1096,9 +1438,17 @@ fn sidebar(
         // GitHub's own copy for an empty field (R16 issues-10).
         vec![Rich::new().push("No one assigned", role(GitRole::Muted))]
     } else {
-        record.assignees.iter().map(|login| Rich::new().push(login, role(GitRole::Author))).collect()
+        record
+            .assignees
+            .iter()
+            .map(|login| Rich::new().push(login, role(GitRole::Author)))
+            .collect()
     };
-    sections.push(("Assignees", assignees, Some(Action::Metadata(page, number, "assignees"))));
+    sections.push((
+        "Assignees",
+        assignees,
+        Some(Action::Metadata(page, number, "assignees")),
+    ));
     let labels = if record.row.labels.is_empty() {
         vec![Rich::new().push("None yet", role(GitRole::Muted))]
     } else {
@@ -1106,36 +1456,74 @@ fn sidebar(
         let mut lines = vec![Rich::new()];
         for label in &record.row.labels {
             let chip = label.name.width() + 2;
-            if lines.last().is_some_and(|line| line.width() > 0 && line.width() + 1 + chip > side_width) {
+            if lines
+                .last()
+                .is_some_and(|line| line.width() > 0 && line.width() + 1 + chip > side_width)
+            {
                 lines.push(Rich::new());
             }
             let line = lines.pop().unwrap_or_default();
-            let line = if line.width() > 0 { line.plain(" ") } else { line };
+            let line = if line.width() > 0 {
+                line.plain(" ")
+            } else {
+                line
+            };
             lines.push(line.chip(&label.name, prose::label_style(label)));
         }
         lines
     };
-    sections.push(("Labels", labels, Some(Action::Metadata(page, number, "labels"))));
+    sections.push((
+        "Labels",
+        labels,
+        Some(Action::Metadata(page, number, "labels")),
+    ));
     // Every item keeps the Milestone row, `No milestone` when it has none, so the sidebar's
     // rows never move from one item to the next (R16 issues-10).
     let milestone = match &record.milestone {
-        Some(milestone) => {
-            Rich::new().push(&format!("{} ", glyph(Glyph::Milestone, mode)), role(GitRole::Tag)).push(milestone, role(GitRole::Text))
-        }
+        Some(milestone) => Rich::new()
+            .push(
+                format!("{} ", glyph(Glyph::Milestone, mode)),
+                role(GitRole::Tag),
+            )
+            .push(milestone, role(GitRole::Text)),
         None => Rich::new().push("No milestone", role(GitRole::Muted)),
     };
-    sections.push(("Milestone", vec![milestone], (!pull).then_some(Action::Metadata(1, number, "milestone"))));
+    sections.push((
+        "Milestone",
+        vec![milestone],
+        (!pull).then_some(Action::Metadata(1, number, "milestone")),
+    ));
     // Development: what this closes (pull requests) or what closes it (issues).
     let mut development = Vec::new();
     for link in &record.links {
-        let mark = glyph(if pull { Glyph::Issue } else { Glyph::PullRequest }, mode);
-        let text = format!("{mark} {}{} {}", workspace.sigil(!pull), link.number, link.title);
+        let mark = glyph(
+            if pull {
+                Glyph::Issue
+            } else {
+                Glyph::PullRequest
+            },
+            mode,
+        );
+        let text = format!(
+            "{mark} {}{} {}",
+            workspace.sigil(!pull),
+            link.number,
+            link.title
+        );
         let action = super::issue::link_action(workspace, link, if pull { 1 } else { 2 });
         if beside {
             // Beside the timeline a long title wraps under itself rather than ending in `…`.
-            let lines = crate::ui::render::wrap_plain_text(&text, side_width.saturating_sub(2).max(8), crate::config::AmbiguousWidth::Narrow);
+            let lines = crate::ui::render::wrap_plain_text(
+                &text,
+                side_width.saturating_sub(2).max(8),
+                crate::config::AmbiguousWidth::Narrow,
+            );
             for (index, line) in lines.iter().enumerate() {
-                let line = if index == 0 { line.clone() } else { format!("  {line}") };
+                let line = if index == 0 {
+                    line.clone()
+                } else {
+                    format!("  {line}")
+                };
                 development.push((Rich::new().push(&line, role(GitRole::Link)), action.clone()));
             }
         } else {
@@ -1143,12 +1531,23 @@ fn sidebar(
         }
     }
     if development.is_empty() {
-        let none = if pull { "No linked issues" } else { "No branches or pull requests" };
+        let none = if pull {
+            "No linked issues"
+        } else {
+            "No branches or pull requests"
+        };
         development.push((Rich::new().push(none, role(GitRole::Muted)), None));
     }
-    if !pull && matches!(workspace.forge_kind(), None | Some(crate::forge::provider::ProviderKind::GitHub)) {
+    if !pull
+        && matches!(
+            workspace.forge_kind(),
+            None | Some(crate::forge::provider::ProviderKind::GitHub)
+        )
+    {
         development.push((
-            Rich::new().push("› ", role(GitRole::Focus)).push("Create a branch", role(GitRole::Link)),
+            Rich::new()
+                .push("› ", role(GitRole::Focus))
+                .push("Create a branch", role(GitRole::Link)),
             Some(Action::Develop(number)),
         ));
     }
@@ -1166,7 +1565,7 @@ fn sidebar(
     }
     for thread in threads {
         for comment in &thread.comments {
-            if !comment.author.is_empty() && !people.iter().any(|known| *known == comment.author) {
+            if !comment.author.is_empty() && !people.contains(&comment.author) {
                 people.push(comment.author.clone());
             }
         }
@@ -1174,11 +1573,18 @@ fn sidebar(
     people.retain(|login| !login.is_empty());
     let mut participants = vec![Rich::new()];
     for login in &people {
-        if participants.last().is_some_and(|line| line.width() > 0 && line.width() + 2 + login.width() > side_width) {
+        if participants
+            .last()
+            .is_some_and(|line| line.width() > 0 && line.width() + 2 + login.width() > side_width)
+        {
             participants.push(Rich::new());
         }
         let line = participants.pop().unwrap_or_default();
-        let line = if line.width() > 0 { line.plain(", ") } else { line };
+        let line = if line.width() > 0 {
+            line.plain(", ")
+        } else {
+            line
+        };
         participants.push(line.push(login, role(GitRole::Author)));
     }
     if beside {
@@ -1194,7 +1600,11 @@ fn sidebar(
             }
         }
         rows.push(blank());
-        rows.push(Rich::new().push("Development", strong(GitRole::Muted)).line());
+        rows.push(
+            Rich::new()
+                .push("Development", strong(GitRole::Muted))
+                .line(),
+        );
         for (value, action) in development {
             let mut row = value.line();
             row.action = action;
@@ -1205,7 +1615,7 @@ fn sidebar(
             Rich::new()
                 .push("Participants", strong(GitRole::Muted))
                 .plain("  ")
-                .push(&people.len().to_string(), role(GitRole::Muted))
+                .push(people.len().to_string(), role(GitRole::Muted))
                 .line(),
         );
         for value in participants {
@@ -1236,7 +1646,8 @@ fn sidebar(
         row.action = action;
         rows.push(row);
     }
-    let mut rich = prose::field("Participants", column).push(&format!("{}  ", people.len()), role(GitRole::Muted));
+    let mut rich = prose::field("Participants", column)
+        .push(format!("{}  ", people.len()), role(GitRole::Muted));
     for (index, value) in participants.into_iter().enumerate() {
         if index > 0 {
             rich = rich.plain(", ");
@@ -1316,11 +1727,14 @@ pub(super) fn showing(workspace: &Workspace) -> bool {
 }
 
 impl Workspace {
-    /// The Conversation's own keys (§3.26, §5.7): `j`/`k` card to card, `Ctrl-d`/`Ctrl-u`
+    /// The Conversation's own keys: `j`/`k` card to card, `Ctrl-d`/`Ctrl-u`
     /// half a page, `g`/`G` the ends, `n`/`N` the unresolved threads, Enter folds, `C`
     /// answers the focused card, `o` opens it on the forge, `m` goes to the merge box.
     /// Space is the leader and means nothing else here.
-    pub(super) fn conversation_key(&mut self, key: &KeyEvent) -> Option<Result<Option<Form>, String>> {
+    pub(super) fn conversation_key(
+        &mut self,
+        key: &KeyEvent,
+    ) -> Option<Result<Option<Form>, String>> {
         if self.focus != 2 || !showing(self) || key.modifiers.alt {
             return None;
         }
@@ -1381,7 +1795,11 @@ impl Workspace {
                 self.detail_cursor = if key.code == KeyCode::Char('n') {
                     *open.iter().find(|&&at| at > cursor).unwrap_or(&open[0])
                 } else {
-                    *open.iter().rev().find(|&&at| at < cursor).unwrap_or(&open[open.len() - 1])
+                    *open
+                        .iter()
+                        .rev()
+                        .find(|&&at| at < cursor)
+                        .unwrap_or(&open[open.len() - 1])
                 };
                 self.reveal_top = true;
             }
@@ -1391,21 +1809,37 @@ impl Workspace {
                 };
                 self.detail_cursor = at;
             }
-            // The merge card's own keys (r15 PRS-10): on its Merge button or Method row Tab takes
+            // The merge card's own keys: on its Merge button or Method row Tab takes
             // the next method this forge allows; Enter on its text merges, as its footer says.
-            KeyCode::Tab if pull && !key.modifiers.shift && matches!(rows[cursor].action, Some(Action::Merge(..) | Action::MergeMethod(_))) => {
+            KeyCode::Tab
+                if pull
+                    && !key.modifiers.shift
+                    && matches!(
+                        rows[cursor].action,
+                        Some(Action::Merge(..) | Action::MergeMethod(_))
+                    ) =>
+            {
                 if self.merge_methods().len() < 2 {
                     return Some(Err("This forge offers one merge method".into()));
                 }
                 self.cycle_merge_method();
                 return Some(Ok(None));
             }
-            KeyCode::Enter if pull && in_merge_card(rows, cursor) && rows[cursor].action.is_none() => {
-                let Some(at) = rows.iter().position(|row| matches!(row.action, Some(Action::Merge(..)))) else {
+            KeyCode::Enter
+                if pull && in_merge_card(rows, cursor) && rows[cursor].action.is_none() =>
+            {
+                let Some(at) = rows
+                    .iter()
+                    .position(|row| matches!(row.action, Some(Action::Merge(..))))
+                else {
                     // pr.rs numbers reasons with "  1. ", then indents the merge card by two spaces.
-                    if let Some(at) = rows.iter().enumerate()
+                    if let Some(at) = rows
+                        .iter()
+                        .enumerate()
                         .skip_while(|(_, row)| !row.merge_box)
-                        .find(|(_, row)| row.text.starts_with("  1. ") || row.text.starts_with("    1. "))
+                        .find(|(_, row)| {
+                            row.text.starts_with("  1. ") || row.text.starts_with("    1. ")
+                        })
                         .map(|(at, _)| at)
                     {
                         self.detail_cursor = at;
@@ -1422,9 +1856,9 @@ impl Workspace {
                 if row.action.is_some() {
                     return None;
                 }
-                let header = rows[..cursor]
-                    .iter()
-                    .rposition(|row| stop(row) && matches!(row.action, Some(Action::Collapse(..))))?;
+                let header = rows[..cursor].iter().rposition(|row| {
+                    stop(row) && matches!(row.action, Some(Action::Collapse(..)))
+                })?;
                 let action = rows[header].action.clone()?;
                 self.detail_cursor = header;
                 return Some(self.activate(action));
@@ -1434,7 +1868,10 @@ impl Workspace {
                 if id == 0 {
                     return None;
                 }
-                let action = rows[cursor].reply.clone().unwrap_or(Action::Comment(self.page, id));
+                let action = rows[cursor]
+                    .reply
+                    .clone()
+                    .unwrap_or(Action::Comment(self.page, id));
                 return Some(self.activate(action));
             }
             KeyCode::Char('o') => {
@@ -1454,7 +1891,10 @@ mod tests {
     use super::*;
 
     fn plain_rows(texts: &[&str]) -> Vec<Line> {
-        texts.iter().map(|text| Rich::new().plain(text).line()).collect()
+        texts
+            .iter()
+            .map(|text| Rich::new().plain(text).line())
+            .collect()
     }
 
     /// The fold arithmetic never indexes or subtracts past its input (forge_speed's
@@ -1465,10 +1905,16 @@ mod tests {
         for total in [0, 1, FOLD_KEEP, 2 * FOLD_KEEP, FOLD_OVER] {
             assert_eq!(fold_range(total), None, "{total}");
         }
-        assert_eq!(fold_range(FOLD_OVER + 1), Some(FOLD_KEEP..FOLD_OVER + 1 - FOLD_KEEP));
+        assert_eq!(
+            fold_range(FOLD_OVER + 1),
+            Some(FOLD_KEEP..FOLD_OVER + 1 - FOLD_KEEP)
+        );
         for total in 0..200 {
             if let Some(range) = fold_range(total) {
-                assert!(total > FOLD_OVER && range.start <= range.end && range.end <= total, "{total}");
+                assert!(
+                    total > FOLD_OVER && range.start <= range.end && range.end <= total,
+                    "{total}"
+                );
             } else {
                 assert!(total <= FOLD_OVER, "{total}");
             }
@@ -1477,7 +1923,9 @@ mod tests {
         assert_eq!(whole_tables(&[], LONG_KEEP), 0);
         let short = plain_rows(&["one", "two"]);
         assert_eq!(whole_tables(&short, LONG_KEEP), 2);
-        let open: Vec<&str> = std::iter::once("┌───┬───┐").chain(std::iter::repeat_n("│ a │ b │", 30)).collect();
+        let open: Vec<&str> = std::iter::once("┌───┬───┐")
+            .chain(std::iter::repeat_n("│ a │ b │", 30))
+            .collect();
         let open = plain_rows(&open);
         assert_eq!(whole_tables(&open, LONG_KEEP), LONG_KEEP);
         assert_eq!(whole_tables(&open, 100), open.len());
@@ -1504,15 +1952,23 @@ mod tests {
 
     #[test]
     fn details_sections_split_out_with_their_summary() {
-        let parts = details("Intro\n<details>\n<summary>Walkthrough</summary>\n\n| a | b |\n</details>\nAfter");
+        let parts = details(
+            "Intro\n<details>\n<summary>Walkthrough</summary>\n\n| a | b |\n</details>\nAfter",
+        );
         assert_eq!(parts.len(), 3);
         assert!(matches!(&parts[0], Part::Text(text) if text.trim() == "Intro"));
-        assert!(matches!(&parts[1], Part::Details(summary, content) if summary == "Walkthrough" && content.contains("| a | b |")));
+        assert!(
+            matches!(&parts[1], Part::Details(summary, content) if summary == "Walkthrough" && content.contains("| a | b |"))
+        );
         assert!(matches!(&parts[2], Part::Text(text) if text.trim() == "After"));
         // Nested sections stay inside their parent.
-        let nested = details("<details><summary>A</summary><details><summary>B</summary>x</details></details>");
+        let nested = details(
+            "<details><summary>A</summary><details><summary>B</summary>x</details></details>",
+        );
         assert_eq!(nested.len(), 1);
-        assert!(matches!(&nested[0], Part::Details(summary, content) if summary == "A" && content.contains("<summary>B")));
+        assert!(
+            matches!(&nested[0], Part::Details(summary, content) if summary == "A" && content.contains("<summary>B"))
+        );
     }
 
     #[test]

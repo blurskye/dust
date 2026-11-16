@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""A fake `tea` for forge tests (FORGE.md §8.2, F2). Installed as `<dir>/tea` next to a
+"""A fake `tea` for forge tests. Installed as `<dir>/tea` next to a
 `fake_tea.json` sidecar (`{"server": "http://127.0.0.1:PORT", "logins": [...]}`) naming the fake
 forge server and the logins this tea knows (`{name, url, user, default}`; never a token). It
 never touches the network beyond that loopback server.

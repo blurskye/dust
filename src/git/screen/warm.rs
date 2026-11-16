@@ -45,9 +45,13 @@ fn folder() -> Option<PathBuf> {
 
 /// The entry's file: FNV-1a of the path, stable across builds.
 fn file(folder: &Path, root: &Path) -> PathBuf {
-    let hash = root.as_os_str().as_encoded_bytes().iter().fold(0xcbf2_9ce4_8422_2325u64, |hash, byte| {
-        (hash ^ u64::from(*byte)).wrapping_mul(0x0100_0000_01b3)
-    });
+    let hash = root
+        .as_os_str()
+        .as_encoded_bytes()
+        .iter()
+        .fold(0xcbf2_9ce4_8422_2325u64, |hash, byte| {
+            (hash ^ u64::from(*byte)).wrapping_mul(0x0100_0000_01b3)
+        });
     folder.join(format!("{hash:016x}.json"))
 }
 
@@ -61,13 +65,21 @@ struct Key {
 
 impl Key {
     fn of(repository: &git2::Repository, root: &Path) -> Self {
-        let head = repository.head().ok().and_then(|head| head.target()).map(|id| id.to_string());
+        let head = repository
+            .head()
+            .ok()
+            .and_then(|head| head.target())
+            .map(|id| id.to_string());
         let index = std::fs::metadata(repository.path().join("index"))
             .and_then(|metadata| metadata.modified())
             .ok()
             .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
             .and_then(|time| u64::try_from(time.as_nanos()).ok());
-        Self { root: root.to_owned(), head, index }
+        Self {
+            root: root.to_owned(),
+            head,
+            index,
+        }
     }
 }
 
@@ -87,7 +99,10 @@ pub(super) struct Warm {
 
 /// The first `HISTORY_LINES` lines of History's `git log`.
 pub(super) fn history_head(text: &str) -> String {
-    let end = text.match_indices('\n').nth(HISTORY_LINES - 1).map_or(text.len(), |(at, _)| at + 1);
+    let end = text
+        .match_indices('\n')
+        .nth(HISTORY_LINES - 1)
+        .map_or(text.len(), |(at, _)| at + 1);
     text[..end].to_owned()
 }
 
@@ -95,8 +110,12 @@ impl GitScreen {
     /// Paints `root`'s cached state, if any, before git answers.
     pub(super) fn load_warm(&mut self, repository: &git2::Repository) {
         let Some(folder) = folder() else { return };
-        let Ok(bytes) = std::fs::read(file(&folder, &self.root)) else { return };
-        let Ok(warm) = serde_json::from_slice::<Warm>(&bytes) else { return };
+        let Ok(bytes) = std::fs::read(file(&folder, &self.root)) else {
+            return;
+        };
+        let Ok(warm) = serde_json::from_slice::<Warm>(&bytes) else {
+            return;
+        };
         if warm.version != VERSION || warm.key.root != self.root {
             return;
         }
@@ -122,17 +141,34 @@ impl GitScreen {
     /// thread; again only when something changed.
     pub(super) fn save_warm(&mut self) {
         // History's head is HEAD's (`warm_history` is kept only then), whatever branch shows now.
-        if self.refreshing || self.history_loading || self.refs_loading || self.warm_history.is_empty() {
+        if self.refreshing
+            || self.history_loading
+            || self.refs_loading
+            || self.warm_history.is_empty()
+        {
             return;
         }
-        let Some(snapshot) = self.snapshot.as_ref().filter(|snapshot| snapshot.revision != REVISION) else {
+        let Some(snapshot) = self
+            .snapshot
+            .as_ref()
+            .filter(|snapshot| snapshot.revision != REVISION)
+        else {
             return;
         };
         let Some(folder) = folder() else { return };
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         use std::hash::{Hash, Hasher};
-        (snapshot.revision, snapshot.entries.len(), self.numstat.len(), self.warm_history.len()).hash(&mut hasher);
-        self.refs.as_ref().map(|refs| refs.request_id.0).hash(&mut hasher);
+        (
+            snapshot.revision,
+            snapshot.entries.len(),
+            self.numstat.len(),
+            self.warm_history.len(),
+        )
+            .hash(&mut hasher);
+        self.refs
+            .as_ref()
+            .map(|refs| refs.request_id.0)
+            .hash(&mut hasher);
         (&self.stashes, &self.tags, &self.remotes).hash(&mut hasher);
         let fingerprint = hasher.finish();
         if self.warm_saved == Some(fingerprint) {
@@ -142,30 +178,50 @@ impl GitScreen {
         let root = self.root.clone();
         let warm = Warm {
             version: VERSION,
-            key: Key { root: root.clone(), head: None, index: None },
+            key: Key {
+                root: root.clone(),
+                head: None,
+                index: None,
+            },
             snapshot: snapshot.clone(),
-            numstat: self.numstat.iter().map(|(path, stat)| (path.clone(), *stat)).collect(),
+            numstat: self
+                .numstat
+                .iter()
+                .map(|(path, stat)| (path.clone(), *stat))
+                .collect(),
             history: self.warm_history.clone(),
             refs: self.refs.clone(),
             stashes: self.stashes.clone(),
             tags: self.tags.clone(),
             remotes: self.remotes.clone(),
         };
-        let _ = std::thread::Builder::new().name("dust-git-warm".into()).spawn(move || {
-            let Ok(repository) = git2::Repository::open(&root) else { return };
-            let mut warm = warm;
-            // After git answered: a status may have refreshed the index's stat data.
-            warm.key = Key::of(&repository, &root);
-            let Ok(bytes) = serde_json::to_vec(&warm) else { return };
-            if std::fs::create_dir_all(&folder).is_err() {
-                return;
-            }
-            let target = file(&folder, &root);
-            let temporary = target.with_extension(format!("tmp.{}.{}", std::process::id(), WRITES.fetch_add(1, Ordering::Relaxed)));
-            if std::fs::write(&temporary, bytes).is_ok() && std::fs::rename(&temporary, &target).is_err() {
-                let _ = std::fs::remove_file(&temporary);
-            }
-        });
+        let _ = std::thread::Builder::new()
+            .name("dust-git-warm".into())
+            .spawn(move || {
+                let Ok(repository) = git2::Repository::open(&root) else {
+                    return;
+                };
+                let mut warm = warm;
+                // After git answered: a status may have refreshed the index's stat data.
+                warm.key = Key::of(&repository, &root);
+                let Ok(bytes) = serde_json::to_vec(&warm) else {
+                    return;
+                };
+                if std::fs::create_dir_all(&folder).is_err() {
+                    return;
+                }
+                let target = file(&folder, &root);
+                let temporary = target.with_extension(format!(
+                    "tmp.{}.{}",
+                    std::process::id(),
+                    WRITES.fetch_add(1, Ordering::Relaxed)
+                ));
+                if std::fs::write(&temporary, bytes).is_ok()
+                    && std::fs::rename(&temporary, &target).is_err()
+                {
+                    let _ = std::fs::remove_file(&temporary);
+                }
+            });
     }
 }
 

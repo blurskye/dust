@@ -1,4 +1,4 @@
-//! Pull, undo and redo, history rewriting and tag push (DESIGN.md §5.11). Each is a plan the
+//! Pull, undo and redo, history rewriting and tag push. Each is a plan the
 //! Git tab shows in a confirm sheet, then runs as one `git` command with the arguments and
 //! environment built here. Nothing in this module writes to the repository.
 use git2::{Oid, Repository, RepositoryState};
@@ -30,7 +30,10 @@ impl Run {
         let words = self
             .args
             .iter()
-            .filter(|arg| arg.to_str() != Some("-c") && !arg.to_string_lossy().starts_with("rebase.updateRefs"))
+            .filter(|arg| {
+                arg.to_str() != Some("-c")
+                    && !arg.to_string_lossy().starts_with("rebase.updateRefs")
+            })
             .map(|arg| {
                 let arg = arg.to_string_lossy();
                 if arg.len() == 40 && arg.bytes().all(|byte| byte.is_ascii_hexdigit()) {
@@ -62,7 +65,9 @@ fn settled(repository: &Repository) -> Result<(), String> {
         RepositoryState::Bisect => "bisect",
         _ => "rebase",
     };
-    Err(format!("A {name} is paused: continue or abort it first (C or X)"))
+    Err(format!(
+        "A {name} is paused: continue or abort it first (C or X)"
+    ))
 }
 
 pub fn short(id: Oid) -> String {
@@ -138,12 +143,18 @@ pub fn pull(root: &Path) -> Result<Pull, String> {
         .map_err(failed)?;
     let rebase = |key: &str| {
         config.get_string(key).ok().map(|value| {
-            !matches!(value.to_ascii_lowercase().as_str(), "false" | "no" | "off" | "0")
+            !matches!(
+                value.to_ascii_lowercase().as_str(),
+                "false" | "no" | "off" | "0"
+            )
         })
     };
     let mode = match rebase(&format!("branch.{branch}.rebase")).or_else(|| rebase("pull.rebase")) {
         Some(true) => PullMode::Rebase,
-        _ if config.get_string("pull.ff").is_ok_and(|value| value == "only") => {
+        _ if config
+            .get_string("pull.ff")
+            .is_ok_and(|value| value == "only") =>
+        {
             PullMode::FastForward
         }
         _ => PullMode::Merge,
@@ -262,9 +273,16 @@ pub fn undo(root: &Path, redo: bool) -> Result<Undo, String> {
                 from: from.to_owned(),
                 to: to.trim_end().to_owned(),
             })
-        } else if ["commit", "reset: moving to", "pull", "merge", "cherry-pick", "revert"]
-            .iter()
-            .any(|prefix| message.starts_with(prefix))
+        } else if [
+            "commit",
+            "reset: moving to",
+            "pull",
+            "merge",
+            "cherry-pick",
+            "revert",
+        ]
+        .iter()
+        .any(|prefix| message.starts_with(prefix))
         {
             Some(Move::Commit { from: old, to: new })
         } else {
@@ -302,7 +320,12 @@ pub fn undo(root: &Path, redo: bool) -> Result<Undo, String> {
         }
         counter -= 1;
     }
-    Err(if redo { "Nothing to redo" } else { "Nothing to undo" }.into())
+    Err(if redo {
+        "Nothing to redo"
+    } else {
+        "Nothing to undo"
+    }
+    .into())
 }
 
 // ---------------------------------------------------------------------------------------
@@ -398,8 +421,13 @@ pub fn rewrite(root: &Path, target: Oid, edit: Edit) -> Result<Rewrite, String> 
     let index = chain.len() - 1;
     let selected = &chain[index];
     let parent = selected.parent(0).ok();
-    if parent.as_ref().is_some_and(|parent| parent.parent_count() > 1) {
-        return Err("The commit below is a merge commit: rewriting across merges is not supported".into());
+    if parent
+        .as_ref()
+        .is_some_and(|parent| parent.parent_count() > 1)
+    {
+        return Err(
+            "The commit below is a merge commit: rewriting across merges is not supported".into(),
+        );
     }
     let reaches_parent = matches!(edit, Edit::Squash | Edit::Fixup | Edit::MoveDown);
     if reaches_parent && parent.is_none() {
@@ -412,9 +440,7 @@ pub fn rewrite(root: &Path, target: Oid, edit: Edit) -> Result<Rewrite, String> 
         let staged = repository
             .head()
             .and_then(|head| head.peel_to_tree())
-            .and_then(|tree| {
-                repository.diff_tree_to_index(Some(&tree), None, None)
-            })
+            .and_then(|tree| repository.diff_tree_to_index(Some(&tree), None, None))
             .map_err(failed)?;
         if staged.deltas().count() == 0 {
             return Err("Nothing staged · s stages the selected change".into());
@@ -469,16 +495,32 @@ pub fn rewrite(root: &Path, target: Oid, edit: Edit) -> Result<Rewrite, String> 
 
 impl Rewrite {
     fn rebase(&self, autosquash: bool) -> Run {
-        let mut args: Vec<OsString> = ["-c", "rebase.updateRefs=false", "rebase", "-i", "--autostash"]
-            .into_iter()
-            .map(Into::into)
-            .collect();
-        args.push(if autosquash { "--autosquash" } else { "--no-autosquash" }.into());
+        let mut args: Vec<OsString> = [
+            "-c",
+            "rebase.updateRefs=false",
+            "rebase",
+            "-i",
+            "--autostash",
+        ]
+        .into_iter()
+        .map(Into::into)
+        .collect();
+        args.push(
+            if autosquash {
+                "--autosquash"
+            } else {
+                "--no-autosquash"
+            }
+            .into(),
+        );
         args.push(match self.base {
             Some(base) => base.to_string().into(),
             None => "--root".into(),
         });
-        Run { args, env: Vec::new() }
+        Run {
+            args,
+            env: Vec::new(),
+        }
     }
 
     /// The commands, in order: a rebase whose todo Dusty Git writes through
@@ -539,7 +581,11 @@ impl Rewrite {
 pub fn default_remote(root: &Path) -> Result<String, String> {
     let repository = open(root)?;
     let remotes = repository.remotes().map_err(failed)?;
-    let remotes = remotes.iter().flatten().map(str::to_owned).collect::<Vec<_>>();
+    let remotes = remotes
+        .iter()
+        .flatten()
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
     if remotes.is_empty() {
         return Err("No remotes to push the tag to".into());
     }
@@ -589,7 +635,10 @@ mod tests {
             .current_dir(root)
             .args(args)
             .env("GIT_CONFIG_NOSYSTEM", "1")
-            .env("GIT_CONFIG_GLOBAL", if cfg!(windows) { "NUL" } else { "/dev/null" })
+            .env(
+                "GIT_CONFIG_GLOBAL",
+                if cfg!(windows) { "NUL" } else { "/dev/null" },
+            )
             .env_remove("GIT_DIR")
             .env_remove("GIT_WORK_TREE")
             .env_remove("GIT_INDEX_FILE")
@@ -603,11 +652,17 @@ mod tests {
             "git {args:?}: {}",
             String::from_utf8_lossy(&output.stderr)
         );
-        String::from_utf8_lossy(&output.stdout).trim_end().to_owned()
+        String::from_utf8_lossy(&output.stdout)
+            .trim_end()
+            .to_owned()
     }
 
     fn run(root: &Path, run: &Run) {
-        let args = run.args.iter().map(|arg| arg.to_str().unwrap()).collect::<Vec<_>>();
+        let args = run
+            .args
+            .iter()
+            .map(|arg| arg.to_str().unwrap())
+            .collect::<Vec<_>>();
         git_env(root, &args, &run.env);
     }
 
@@ -655,7 +710,10 @@ mod tests {
         assert_eq!(second.moved, Move::Commit { from: a, to: b });
         run(root, &second.run());
         assert_eq!(head(root), a);
-        assert!(undo(root, false).is_err(), "the first commit has nothing before it");
+        assert!(
+            undo(root, false).is_err(),
+            "the first commit has nothing before it"
+        );
         let again = undo(root, true).unwrap();
         assert_eq!(again.head(), (short(a), short(b)));
         run(root, &again.run());
@@ -677,7 +735,10 @@ mod tests {
         let undo_switch = undo(root, false).unwrap();
         assert_eq!(
             undo_switch.moved,
-            Move::Checkout { from: "main".into(), to: "topic".into() }
+            Move::Checkout {
+                from: "main".into(),
+                to: "topic".into()
+            }
         );
         run(root, &undo_switch.run());
         assert_eq!(git(root, &["branch", "--show-current"]), "main");
@@ -764,10 +825,16 @@ mod tests {
         assert!(pull(root).unwrap_err().contains("no upstream"));
         let remote = tempfile::tempdir().unwrap();
         git(remote.path(), &["init", "-q", "--bare", "-b", "main"]);
-        git(root, &["remote", "add", "origin", remote.path().to_str().unwrap()]);
+        git(
+            root,
+            &["remote", "add", "origin", remote.path().to_str().unwrap()],
+        );
         git(root, &["push", "-q", "-u", "origin", "main"]);
         let plan = pull(root).unwrap();
-        assert_eq!((plan.branch.as_str(), plan.upstream.as_str()), ("main", "origin/main"));
+        assert_eq!(
+            (plan.branch.as_str(), plan.upstream.as_str()),
+            ("main", "origin/main")
+        );
         assert_eq!(plan.mode, PullMode::Merge);
         git(root, &["config", "pull.ff", "only"]);
         assert_eq!(pull(root).unwrap().mode, PullMode::FastForward);

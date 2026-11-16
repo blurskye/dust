@@ -1,4 +1,4 @@
-//! Actions (DESIGN.md §3.37–§3.41): two panels, always. The run history on the left (section
+//! Actions: two panels, always. The run history on the left (section
 //! tabs over two-line rows: the human title, then workflow · PR or branch · event · actor ·
 //! age); the selected run on the right as one tree that follows the cursor: jobs, their steps
 //! and each step's log inline, failing work opened at its first error. Find, error jumps,
@@ -151,8 +151,8 @@ impl State {
             match self {
                 Self::Passed => Glyph::CheckPassed,
                 Self::Failed => Glyph::CheckFailed,
-                // Running and queued share the pending mark (DESIGN.md §4.3.1); the colour tells
-                // them apart, and `●` stays unread and a resolved thread (r16 notif-09).
+                // Running and queued share the pending mark; the colour tells
+                // them apart, and `●` stays unread and a resolved thread.
                 Self::Running | Self::Queued | Self::Waiting => Glyph::CheckPending,
                 Self::Cancelled | Self::Skipped => Glyph::CheckSkipped,
                 Self::Unknown => Glyph::CheckUnknown,
@@ -212,8 +212,16 @@ fn elapsed(stamp: &str) -> Option<String> {
 fn job_seconds(job: &Value) -> Option<i64> {
     seconds(string(job, "startedAt"), string(job, "completedAt")).or_else(|| {
         let steps = array(job, "steps");
-        let start = steps.iter().filter_map(|step| records::epoch(string(step, "startedAt"))).filter(|at| *at > 0).min()?;
-        let end = steps.iter().filter_map(|step| records::epoch(string(step, "completedAt"))).filter(|at| *at > 0).max()?;
+        let start = steps
+            .iter()
+            .filter_map(|step| records::epoch(string(step, "startedAt")))
+            .filter(|at| *at > 0)
+            .min()?;
+        let end = steps
+            .iter()
+            .filter_map(|step| records::epoch(string(step, "completedAt")))
+            .filter(|at| *at > 0)
+            .max()?;
         (end >= start && State::of(job).finished()).then_some(end - start)
     })
 }
@@ -249,7 +257,9 @@ fn capitalized(word: &str) -> String {
 /// Lines the runner prints that are only section markers (GitLab's `section_end`, GitHub's
 /// `##[endgroup]`) are dropped; a GitLab `section_start` keeps its heading text.
 fn gitlab_marker(text: &str) -> Option<(String, bool)> {
-    let at = text.find("section_start:").or_else(|| text.find("section_end:"))?;
+    let at = text
+        .find("section_start:")
+        .or_else(|| text.find("section_end:"))?;
     let start = text[at..].starts_with("section_start:");
     let mut rest = &text[at..];
     rest = rest.split_once(':').map_or("", |(_, rest)| rest);
@@ -379,8 +389,13 @@ fn log_lines(payloads: &[&str], fold: bool) -> Vec<LogLine> {
         }
         if let Some(command) = text.strip_prefix("##[group]Run ") {
             let command = command.trim();
-            let action = !command.contains(' ') && (command.contains('@') || command.starts_with("./.github/"));
-            out.push(LogLine::quiet(if action { format!("uses {command}") } else { format!("$ {command}") }));
+            let action = !command.contains(' ')
+                && (command.contains('@') || command.starts_with("./.github/"));
+            out.push(LogLine::quiet(if action {
+                format!("uses {command}")
+            } else {
+                format!("$ {command}")
+            }));
             preamble = true;
             continue;
         }
@@ -398,10 +413,12 @@ fn step_opens(job: State, step: State) -> bool {
 fn ruler(text: &str) -> bool {
     let text = text.trim();
     let mut chars = text.chars();
-    chars.next().is_some_and(|first| "=-─═━_~*#".contains(first) && text.chars().count() >= 8 && chars.all(|c| c == first))
+    chars.next().is_some_and(|first| {
+        "=-─═━_~*#".contains(first) && text.chars().count() >= 8 && chars.all(|c| c == first)
+    })
 }
 
-/// A line that reads best on one row, as the range of it to draw (r9 R9-07): a summary
+/// A line that reads best on one row, as the range of it to draw: a summary
 /// framed in rules (`==== 1 failed, 41 passed in 2.71s ====`) gives up rule characters, and a
 /// test line that ends in its status (`tests/test_retry.py::test_backoff PASSED [ 50%]`) gives
 /// up the start of its id, drawn as `…` before the rest. None when it fits or is neither.
@@ -425,7 +442,10 @@ fn one_row(text: &str, room: usize) -> Option<Range<usize>> {
             return None;
         }
         let start = line.char_indices().nth(from_lead).map(|(at, _)| at)?;
-        let end = line.char_indices().nth(total - from_trail).map_or(line.len(), |(at, _)| at);
+        let end = line
+            .char_indices()
+            .nth(total - from_trail)
+            .map_or(line.len(), |(at, _)| at);
         return Some(start..end);
     }
     let (id, rest) = line.split_once(' ')?;
@@ -433,7 +453,10 @@ fn one_row(text: &str, room: usize) -> Option<Range<usize>> {
     let status = words.next()?;
     let tail = words.collect::<Vec<_>>().join(" ");
     let progress = tail.is_empty() || (tail.starts_with('[') && tail.ends_with("%]"));
-    if !id.contains("::") || !progress || !["PASSED", "FAILED", "ERROR", "SKIPPED", "XFAIL", "XPASS"].contains(&status) {
+    if !id.contains("::")
+        || !progress
+        || !["PASSED", "FAILED", "ERROR", "SKIPPED", "XFAIL", "XPASS"].contains(&status)
+    {
         return None;
     }
     // One column for the `…`; at least a few characters of the id stay.
@@ -464,7 +487,11 @@ fn wrap_points(text: &str, room: usize) -> Vec<Range<usize>> {
 
 /// [`wrap_points`], but a hard break that would split one of `keep` (find matches) moves to
 /// the match's start, so a match reads whole on one row whatever the width.
-pub(super) fn wrap_points_keeping(text: &str, room: usize, keep: &[Range<usize>]) -> Vec<Range<usize>> {
+pub(super) fn wrap_points_keeping(
+    text: &str,
+    room: usize,
+    keep: &[Range<usize>],
+) -> Vec<Range<usize>> {
     let mut out = Vec::new();
     let mut start = 0;
     let mut used = 0;
@@ -548,7 +575,9 @@ fn link(text: &str) -> Option<(Range<usize>, String, u32)> {
         let path = &text[open + 6..path_end];
         let rest = &text[path_end + 1..];
         if let Some(after) = rest.strip_prefix(", line ") {
-            let digits = after.find(|c: char| !c.is_ascii_digit()).unwrap_or(after.len());
+            let digits = after
+                .find(|c: char| !c.is_ascii_digit())
+                .unwrap_or(after.len());
             if digits > 0 && path.contains('.') {
                 let line = after[..digits].parse().unwrap_or(1);
                 return Some((open + 6..path_end, path.to_owned(), line));
@@ -650,7 +679,9 @@ impl Row {
             .map(|(_, path, line)| (path.clone(), *line))
     }
     fn error(&self) -> bool {
-        self.log.as_ref().is_some_and(|(_, line)| line.tone == Tone::Error)
+        self.log
+            .as_ref()
+            .is_some_and(|(_, line)| line.tone == Tone::Error)
     }
 }
 
@@ -662,7 +693,9 @@ fn say_gone_logs_once(rows: &mut Vec<Row>) {
             return None;
         };
         let text = &row.left.first()?.0;
-        (job != 0 && row.log.is_none()).then(|| text.strip_suffix(" · R retry").map(str::to_owned)).flatten()
+        (job != 0 && row.log.is_none())
+            .then(|| text.strip_suffix(" · R retry").map(str::to_owned))
+            .flatten()
     };
     let failed = rows.iter().filter_map(reason).collect::<Vec<_>>();
     let Some(first) = failed.first().cloned() else {
@@ -677,14 +710,26 @@ fn say_gone_logs_once(rows: &mut Vec<Row>) {
         }
     }
     let mut lowered = first.chars();
-    let lowered = lowered.next().map(|c| c.to_lowercase().collect::<String>() + lowered.as_str()).unwrap_or_default();
+    let lowered = lowered
+        .next()
+        .map(|c| c.to_lowercase().collect::<String>() + lowered.as_str())
+        .unwrap_or_default();
     let text = format!("{} job logs: {lowered} · R retry", failed.len());
-    rows.insert(0, Row::new(Node::Note(0, u64::MAX), 0, vec![(text, st(GitRole::Removed, PANE))]));
+    rows.insert(
+        0,
+        Row::new(
+            Node::Note(0, u64::MAX),
+            0,
+            vec![(text, st(GitRole::Removed, PANE))],
+        ),
+    );
 }
 
 fn job_of(node: &Node) -> Option<u64> {
     match node {
-        Node::Job(job) | Node::Step(job, _) | Node::Line(job, _, _) | Node::Note(job, _) => Some(*job),
+        Node::Job(job) | Node::Step(job, _) | Node::Line(job, _, _) | Node::Note(job, _) => {
+            Some(*job)
+        }
         _ => None,
     }
 }
@@ -718,12 +763,13 @@ impl Workspace {
         match section {
             1 => State::of(run) == State::Failed,
             2 => !State::of(run).finished(),
-            3 => login.is_some_and(|login| string(&run["dusty"], "actor").eq_ignore_ascii_case(login)),
+            3 => login
+                .is_some_and(|login| string(&run["dusty"], "actor").eq_ignore_ascii_case(login)),
             _ => true,
         }
     }
 
-    /// The Actions tab's badge (r15 notif-actions-03): failing runs among the newest, and
+    /// The Actions tab's badge: failing runs among the newest, and
     /// whether any is running, as GitHub badges failing checks. Nothing until the runs are
     /// cached (this session or the disk's); nothing when all is quiet.
     pub(in crate::git::screen) fn actions_badge(&self) -> Option<(usize, bool)> {
@@ -731,7 +777,10 @@ impl Workspace {
             return None;
         }
         let runs = self.value(&Key::Runs(0))?.as_array()?;
-        let failing = runs.iter().filter(|run| State::of(run) == State::Failed).count();
+        let failing = runs
+            .iter()
+            .filter(|run| State::of(run) == State::Failed)
+            .count();
         let running = runs.iter().any(|run| !State::of(run).finished());
         (failing > 0 || running).then_some((failing, running))
     }
@@ -758,7 +807,10 @@ impl Workspace {
                 view.branch
                     .as_ref()
                     .is_none_or(|branch| string(run, "headBranch") == branch)
-                    && view.workflow.as_ref().is_none_or(|workflow| self.run_workflow(run) == *workflow)
+                    && view
+                        .workflow
+                        .as_ref()
+                        .is_none_or(|workflow| self.run_workflow(run) == *workflow)
                     && view
                         .event
                         .as_ref()
@@ -794,9 +846,17 @@ impl Workspace {
     fn section_tabs(&self) -> Vec<String> {
         let login = self.viewer_login();
         let runs = self.filtered_runs();
-        let count = |section| runs.iter().filter(|run| self.in_section(run, section, login.as_deref())).count();
+        let count = |section| {
+            runs.iter()
+                .filter(|run| self.in_section(run, section, login.as_deref()))
+                .count()
+        };
         let tab = |name: &str, count: usize| format!("{name} {count}");
-        let mut tabs = vec![tab("All", runs.len()), tab("Failing", count(1)), tab("Running", count(2))];
+        let mut tabs = vec![
+            tab("All", runs.len()),
+            tab("Failing", count(1)),
+            tab("Running", count(2)),
+        ];
         if login.is_some() {
             tabs.push(tab("Mine", count(3)));
         }
@@ -811,7 +871,8 @@ impl Workspace {
 
     /// The selected run as best known: its detail for the chosen attempt, else its row.
     fn run_value(&self, id: u64) -> Option<&Value> {
-        self.value(&Key::Run(id, self.attempt)).or_else(|| self.listed_run(id))
+        self.value(&Key::Run(id, self.attempt))
+            .or_else(|| self.listed_run(id))
     }
 
     fn listed_run(&self, id: u64) -> Option<&Value> {
@@ -840,7 +901,8 @@ impl Workspace {
                     name: string(step, "name").to_owned(),
                     state: State::of(step),
                     seconds: job_seconds(step),
-                    started: Some(string(step, "startedAt").to_owned()).filter(|stamp| !stamp.is_empty()),
+                    started: Some(string(step, "startedAt").to_owned())
+                        .filter(|stamp| !stamp.is_empty()),
                     value: Some(step.clone()),
                     section: None,
                 })
@@ -877,7 +939,9 @@ impl Workspace {
             .rev()
             .find(|index| {
                 let range = sections[*index].start.min(lines.len())..ends[*index].min(lines.len());
-                lines[range].iter().any(|line| LogLine::new(line).is_some_and(|line| line.tone == Tone::Error))
+                lines[range]
+                    .iter()
+                    .any(|line| LogLine::new(line).is_some_and(|line| line.tone == Tone::Error))
             })
             .unwrap_or(count.saturating_sub(1));
         sections
@@ -933,7 +997,10 @@ impl Workspace {
                 let done = state.finished() && string(job, "status") == "completed";
                 if !done && state != State::Running
                     || state == State::Skipped && array(job, "steps").is_empty()
-                    || !self.is_open(&Node::Job(id), matches!(state, State::Failed | State::Running))
+                    || !self.is_open(
+                        &Node::Job(id),
+                        matches!(state, State::Failed | State::Running),
+                    )
                 {
                     return false;
                 }
@@ -941,7 +1008,10 @@ impl Workspace {
                     || array(job, "steps").is_empty()
                     || self.steps(job).iter().any(|step| {
                         step.state != State::Skipped
-                            && self.is_open(&Node::Step(id, step.number), step_opens(state, step.state))
+                            && self.is_open(
+                                &Node::Step(id, step.number),
+                                step_opens(state, step.state),
+                            )
                     })
             })
             .map(|job| number(job, "databaseId"))
@@ -960,7 +1030,12 @@ impl Workspace {
                     .any(|job| number(job, "databaseId") == *id && State::of(job) == State::Running)
             })
             .collect::<BTreeSet<_>>();
-        let finished = self.actions.live.difference(&running).copied().collect::<Vec<_>>();
+        let finished = self
+            .actions
+            .live
+            .difference(&running)
+            .copied()
+            .collect::<Vec<_>>();
         self.actions.live = running.clone();
         running.into_iter().chain(finished).collect()
     }
@@ -997,7 +1072,9 @@ impl Workspace {
         let Node::Artifact(id) = node else {
             return false;
         };
-        self.artifacts().into_iter().any(|artifact| artifact_id(artifact) == *id && expired(artifact))
+        self.artifacts()
+            .into_iter()
+            .any(|artifact| artifact_id(artifact) == *id && expired(artifact))
     }
 
     /// The earlier attempts the attempts view lists, read for their outcome and time.
@@ -1005,7 +1082,10 @@ impl Workspace {
         if self.page != 3 || !self.actions.attempts {
             return Vec::new();
         }
-        (1..self.latest_attempt()).filter_map(|attempt| u32::try_from(attempt).ok()).filter(|attempt| *attempt != self.attempt).collect()
+        (1..self.latest_attempt())
+            .filter_map(|attempt| u32::try_from(attempt).ok())
+            .filter(|attempt| *attempt != self.attempt)
+            .collect()
     }
 
     /// The open artifact's file list.
@@ -1018,13 +1098,22 @@ impl Workspace {
         let open = self
             .artifacts()
             .into_iter()
-            .filter(|artifact| self.actions.opened.contains(&Node::Artifact(artifact_id(artifact))) && !expired(artifact))
+            .filter(|artifact| {
+                self.actions
+                    .opened
+                    .contains(&Node::Artifact(artifact_id(artifact)))
+                    && !expired(artifact)
+            })
             .map(artifact_id)
             .collect::<Vec<_>>();
-        open.iter().find(|id| self.cache.get(&Key::ArtifactFiles(**id)).is_none()).or(open.first()).copied()
+        open.iter()
+            .find(|id| !self.cache.contains_key(&Key::ArtifactFiles(**id)))
+            .or(open.first())
+            .copied()
     }
 
     /// A job's log rows: one step's slice, or the whole job.
+    #[allow(clippy::unnecessary_unwrap)] // `full` and the step are checked together
     fn log_body(&self, job: &Value, step: Option<&StepRow>, full: bool) -> Body {
         let id = number(job, "databaseId");
         let running = State::of(job) == State::Running;
@@ -1035,32 +1124,56 @@ impl Workspace {
             State::Skipped if full || step.is_none() => {
                 return Body::Message("Skipped · no commands ran".into(), GitRole::Muted);
             }
-            state if string(job, "startedAt").is_empty() && state != State::Failed && array(job, "steps").is_empty() => {
+            state
+                if string(job, "startedAt").is_empty()
+                    && state != State::Failed
+                    && array(job, "steps").is_empty() =>
+            {
                 return Body::Message("Never started · no log".into(), GitRole::Muted);
             }
             _ => {}
         }
-        if !full && let Some(step) = step && step.state == State::Skipped {
+        if !full
+            && let Some(step) = step
+            && step.state == State::Skipped
+        {
             return Body::Message("Skipped · no commands ran".into(), GitRole::Muted);
         }
         let raw = match self.cache.get(&Key::Log(id)) {
             Some(Ok(reply)) => reply.text.as_str(),
             // Not every forge serves a log before the job ends.
             Some(Err(_)) | None if running && !self.capabilities().job_log.allowed() => {
-                return Body::Message("Running · the log appears when the job finishes".into(), GitRole::Modified);
+                return Body::Message(
+                    "Running · the log appears when the job finishes".into(),
+                    GitRole::Modified,
+                );
             }
             Some(Err(_)) if running => {
-                return Body::Message("Running · the log appears when the job finishes".into(), GitRole::Modified);
+                return Body::Message(
+                    "Running · the log appears when the job finishes".into(),
+                    GitRole::Modified,
+                );
+            }
+            // A log the forge no longer has: GitHub's own words, calm, as in the Checks tab.
+            Some(Err(error)) if self.explain(error).headline.starts_with("Not found") => {
+                return Body::Message("This job's log has expired".into(), GitRole::Muted);
             }
             Some(Err(error)) => return Body::Message(calm(self, error), GitRole::Removed),
             None if !self.capabilities().job_log.allowed() => {
                 return Body::Message(
-                    self.capabilities().job_log.reason().unwrap_or("Logs are unavailable").into(),
+                    self.capabilities()
+                        .job_log
+                        .reason()
+                        .unwrap_or("Logs are unavailable")
+                        .into(),
                     GitRole::Muted,
                 );
             }
             None => return Body::Message("Loading log…".into(), GitRole::Muted),
         };
+        if raw == crate::forge::provider::gitea::NEVER_RAN {
+            return Body::Message(raw.to_owned(), GitRole::Muted);
+        }
         let payloads: Vec<&str> = if full || step.is_none() {
             raw.lines().map(|line| logs::unpack(line).1).collect()
         } else {
@@ -1072,18 +1185,27 @@ impl Workspace {
                     return Body::Message("Running · no output yet".into(), GitRole::Modified);
                 }
                 if lines.is_empty() {
-                    return Body::Message("No lines in this step · f shows the full job log".into(), GitRole::Muted);
+                    return Body::Message(
+                        "No lines in this step · f shows the full job log".into(),
+                        GitRole::Muted,
+                    );
                 }
                 lines
             } else {
-                let all = raw.lines().map(|line| logs::unpack(line).1).collect::<Vec<_>>();
+                let all = raw
+                    .lines()
+                    .map(|line| logs::unpack(line).1)
+                    .collect::<Vec<_>>();
                 let range = step.section.clone().unwrap_or(0..all.len());
                 let mut lines = all
                     .get(range.start.min(all.len())..range.end.min(all.len()))
                     .map(<[&str]>::to_vec)
                     .unwrap_or_default();
                 // GitLab's `section_start` heading is the step's name, already on its row.
-                if lines.first().is_some_and(|line| line.contains("section_start:")) {
+                if lines
+                    .first()
+                    .is_some_and(|line| line.contains("section_start:"))
+                {
                     lines.remove(0);
                 }
                 lines
@@ -1092,13 +1214,26 @@ impl Workspace {
         let lines = log_lines(&payloads, !full);
         if lines.is_empty() {
             return Body::Message(
-                if running { "Running · no output yet" } else { "The log is empty" }.into(),
-                if running { GitRole::Modified } else { GitRole::Muted },
+                if running {
+                    "Running · no output yet"
+                } else {
+                    "The log is empty"
+                }
+                .into(),
+                if running {
+                    GitRole::Modified
+                } else {
+                    GitRole::Muted
+                },
             );
         }
         // A running step shows the tail it is writing, as `tail -f` would.
         let following = running && !full && step.is_some_and(|step| step.state == State::Running);
-        let skip = if following { lines.len().saturating_sub(LIVE_TAIL) } else { 0 };
+        let skip = if following {
+            lines.len().saturating_sub(LIVE_TAIL)
+        } else {
+            0
+        };
         Body::Lines { lines, skip }
     }
 
@@ -1106,7 +1241,11 @@ impl Workspace {
         let id = number(job, "databaseId");
         let at = step.map_or(0, |step| step.number);
         match self.log_body(job, step, step.is_none()) {
-            Body::Message(text, role) => rows.push(Row::new(Node::Note(id, at), depth, vec![(text, st(role, PANE))])),
+            Body::Message(text, role) => rows.push(Row::new(
+                Node::Note(id, at),
+                depth,
+                vec![(text, st(role, PANE))],
+            )),
             Body::Lines { lines, skip } => {
                 for (index, line) in lines.into_iter().enumerate().skip(skip) {
                     let mut row = Row::new(Node::Line(id, at, index), depth, Vec::new());
@@ -1124,7 +1263,11 @@ impl Workspace {
             let id = number(job, "databaseId");
             let state = State::of(job);
             let nothing_ran = state == State::Skipped && array(job, "steps").is_empty();
-            let open = !nothing_ran && self.is_open(&Node::Job(id), matches!(state, State::Failed | State::Running));
+            let open = !nothing_ran
+                && self.is_open(
+                    &Node::Job(id),
+                    matches!(state, State::Failed | State::Running),
+                );
             let mut row = Row::new(
                 Node::Job(id),
                 0,
@@ -1132,7 +1275,18 @@ impl Workspace {
                     (format!("{} ", state.glyph(mode)), st(state.role(), PANE)),
                     (
                         string(job, "name").to_owned(),
-                        if state == State::Failed { bold(GitRole::Text, PANE) } else { st(if nothing_ran { GitRole::Muted } else { GitRole::Text }, PANE) },
+                        if state == State::Failed {
+                            bold(GitRole::Text, PANE)
+                        } else {
+                            st(
+                                if nothing_ran {
+                                    GitRole::Muted
+                                } else {
+                                    GitRole::Text
+                                },
+                                PANE,
+                            )
+                        },
                     ),
                 ],
             );
@@ -1152,7 +1306,9 @@ impl Workspace {
                     .map(|time| vec![(format!("running {time}"), st(GitRole::Modified, PANE))])
                     .unwrap_or_else(|| vec![("running".into(), st(GitRole::Modified, PANE))]),
                 State::Queued | State::Waiting => vec![("queued".into(), st(GitRole::Muted, PANE))],
-                _ => job_seconds(job).map(|time| vec![(duration(time), st(GitRole::Muted, PANE))]).unwrap_or_default(),
+                _ => job_seconds(job)
+                    .map(|time| vec![(duration(time), st(GitRole::Muted, PANE))])
+                    .unwrap_or_default(),
             };
             rows.push(row);
             if !open {
@@ -1175,7 +1331,10 @@ impl Workspace {
                     node,
                     1,
                     vec![
-                        (format!("{} ", step.state.glyph(mode)), st(step.state.role(), PANE)),
+                        (
+                            format!("{} ", step.state.glyph(mode)),
+                            st(step.state.role(), PANE),
+                        ),
                         (
                             step.name.clone(),
                             match step.state {
@@ -1192,9 +1351,15 @@ impl Workspace {
                     State::Skipped => vec![("–".into(), st(GitRole::Muted, PANE))],
                     State::Running => {
                         let time = step.started.as_deref().and_then(elapsed);
-                        vec![(time.map_or_else(|| "running".into(), |time| format!("running {time}")), st(GitRole::Modified, PANE))]
+                        vec![(
+                            time.map_or_else(|| "running".into(), |time| format!("running {time}")),
+                            st(GitRole::Modified, PANE),
+                        )]
                     }
-                    _ => step.seconds.map(|time| vec![(duration(time), st(GitRole::Muted, PANE))]).unwrap_or_default(),
+                    _ => step
+                        .seconds
+                        .map(|time| vec![(duration(time), st(GitRole::Muted, PANE))])
+                        .unwrap_or_default(),
                 };
                 rows.push(row);
                 if step_open {
@@ -1216,7 +1381,10 @@ impl Workspace {
         }
         let artifacts = self.artifacts();
         let state = self.cache.get(&Key::Artifacts(id));
-        if state.is_none() && !self.actions.opened.contains(&Node::Artifacts) && self.wanted_artifacts().is_none() {
+        if state.is_none()
+            && !self.actions.opened.contains(&Node::Artifacts)
+            && self.wanted_artifacts().is_none()
+        {
             return;
         }
         let count = matches!(state, Some(Ok(_))).then_some(artifacts.len());
@@ -1230,8 +1398,21 @@ impl Workspace {
             Node::Artifacts,
             0,
             vec![
-                (format!("{} ", glyph(Glyph::File, mode)), st(GitRole::Muted, PANE)),
-                (label, st(if count == Some(0) { GitRole::Muted } else { GitRole::Text }, PANE)),
+                (
+                    format!("{} ", glyph(Glyph::File, mode)),
+                    st(GitRole::Muted, PANE),
+                ),
+                (
+                    label,
+                    st(
+                        if count == Some(0) {
+                            GitRole::Muted
+                        } else {
+                            GitRole::Text
+                        },
+                        PANE,
+                    ),
+                ),
             ],
         );
         row.fold = (count != Some(0)).then_some(open);
@@ -1252,14 +1433,18 @@ impl Workspace {
                     let mut row = Row::new(
                         node,
                         1,
-                        vec![(string(artifact, "name").to_owned(), st(if gone { GitRole::Muted } else { GitRole::Text }, PANE))],
+                        vec![(
+                            string(artifact, "name").to_owned(),
+                            st(if gone { GitRole::Muted } else { GitRole::Text }, PANE),
+                        )],
                     );
                     row.fold = Some(open);
                     let (when, role) = expires(artifact);
                     let bytes = size(number(artifact, "size"));
                     // The forge's size is the archive's, not its files' (`zip 328 B`).
                     if !bytes.is_empty() {
-                        row.right.push((format!("zip {bytes} · "), st(GitRole::Muted, PANE)));
+                        row.right
+                            .push((format!("zip {bytes} · "), st(GitRole::Muted, PANE)));
                     }
                     row.right.push((when, st(role, PANE)));
                     rows.push(row);
@@ -1268,23 +1453,38 @@ impl Workspace {
                     }
                     let files_key = Key::ArtifactFiles(artifact_id);
                     // Under the archive, in its members' column.
-                    let member_note = |text: String, role| Row::new(Node::Note(0, 0), 2, vec![(text, st(role, PANE))]);
+                    let member_note = |text: String, role| {
+                        Row::new(Node::Note(0, 0), 2, vec![(text, st(role, PANE))])
+                    };
                     if gone {
-                        rows.push(member_note("Expired · the forge no longer keeps it".into(), GitRole::Removed));
+                        rows.push(member_note(
+                            "Expired · the forge no longer keeps it".into(),
+                            GitRole::Removed,
+                        ));
                         continue;
                     }
                     match self.cache.get(&files_key) {
-                        None => rows.push(member_note("Reading the archive…".into(), GitRole::Muted)),
-                        Some(Err(error)) => rows.push(member_note(calm(self, error), GitRole::Removed)),
+                        None => {
+                            rows.push(member_note("Reading the archive…".into(), GitRole::Muted))
+                        }
+                        Some(Err(error)) => {
+                            rows.push(member_note(calm(self, error), GitRole::Removed))
+                        }
                         Some(Ok(reply)) => {
-                            for (index, file) in array(&reply.value, "ArtifactFiles").iter().enumerate() {
+                            for (index, file) in
+                                array(&reply.value, "ArtifactFiles").iter().enumerate()
+                            {
                                 let mut row = Row::new(
                                     Node::File(artifact_id, index),
                                     2,
                                     // Body colour: a member opens nothing.
-                                    vec![(string(file, "path").to_owned(), st(GitRole::Text, PANE))],
+                                    vec![(
+                                        string(file, "path").to_owned(),
+                                        st(GitRole::Text, PANE),
+                                    )],
                                 );
-                                row.right = vec![(size(number(file, "size")), st(GitRole::Muted, PANE))];
+                                row.right =
+                                    vec![(size(number(file, "size")), st(GitRole::Muted, PANE))];
                                 rows.push(row);
                             }
                         }
@@ -1301,9 +1501,17 @@ impl Workspace {
             && let Some(at) = rows
                 .iter()
                 .position(Row::error)
-                .or_else(|| rows.iter().position(|row| matches!(row.node, Node::Step(..)) && row.state == Some(State::Failed)))
+                .or_else(|| {
+                    rows.iter().position(|row| {
+                        matches!(row.node, Node::Step(..)) && row.state == Some(State::Failed)
+                    })
+                })
                 .or_else(|| rows.iter().position(|row| row.state == Some(State::Failed)))
-                .or_else(|| rows.iter().position(|row| matches!(row.node, Node::Step(..)) && row.state == Some(State::Running)))
+                .or_else(|| {
+                    rows.iter().position(|row| {
+                        matches!(row.node, Node::Step(..)) && row.state == Some(State::Running)
+                    })
+                })
         {
             return at;
         }
@@ -1365,24 +1573,43 @@ impl Workspace {
         let workflow = self.named_workflow(run);
         let workflow = workflow.as_str();
         // GitLab's pipelines are named after their source (`Merge request`, `Push`).
-        let workflow = (!workflow.is_empty() && workflow != title && !workflow.eq_ignore_ascii_case(&word))
-            .then(|| workflow.to_owned());
+        let workflow =
+            (!workflow.is_empty() && workflow != title && !workflow.eq_ignore_ascii_case(&word))
+                .then(|| workflow.to_owned());
         // A title that already says the place or the event (GitLab's `topic-11 · push`) is
-        // not repeated under it (r16 gitlab-09).
-        let titled = |part: &str| title.split(" · ").any(|said| said.trim().eq_ignore_ascii_case(part));
+        // not repeated under it.
+        let titled = |part: &str| {
+            title
+                .split(" · ")
+                .any(|said| said.trim().eq_ignore_ascii_case(part))
+        };
         let pull = self.pull_ref(run);
         let place = pull
             .clone()
-            .or_else(|| Some(string(run, "headBranch").to_owned()).filter(|branch| !branch.is_empty() && !branch.starts_with("refs/")))
+            .or_else(|| {
+                Some(string(run, "headBranch").to_owned())
+                    .filter(|branch| !branch.is_empty() && !branch.starts_with("refs/"))
+            })
             .filter(|place| !titled(place));
-        let event = (pull.is_none() && !pull_event(event) && !word.is_empty() && !titled(&word) && !titled(event)).then_some(word);
-        let actor = Some(string(&run["dusty"], "actor").to_owned()).filter(|actor| !actor.is_empty());
+        let event = (pull.is_none()
+            && !pull_event(event)
+            && !word.is_empty()
+            && !titled(&word)
+            && !titled(event))
+        .then_some(word);
+        let actor =
+            Some(string(&run["dusty"], "actor").to_owned()).filter(|actor| !actor.is_empty());
         let created = string(run, "createdAt");
-        // Every row keeps its age slot, a running one too (r12 gitlab-04): the second line
+        // Every row keeps its age slot, a running one too: the second line
         // has one schema, and the first line's `running 2m` is how long, not when.
         let age = (!created.is_empty()).then(|| records::ago(created, records::now()));
         let join = |workflow: &Option<String>, event: &Option<String>, actor: &Option<String>| {
-            [workflow, &place, event, actor, &age].into_iter().flatten().cloned().collect::<Vec<_>>().join(" · ")
+            [workflow, &place, event, actor, &age]
+                .into_iter()
+                .flatten()
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(" · ")
         };
         let mut line = join(&workflow, &event, &actor);
         for (event, actor) in [(None, actor.clone()), (None, None)] {
@@ -1410,7 +1637,9 @@ impl Workspace {
     fn pull_ref(&self, run: &Value) -> Option<String> {
         run["dusty"]["prNumber"]
             .as_u64()
-            .filter(|_| pull_event(string(run, "event")) || run["dusty"]["prNumber"].as_u64().is_some())
+            .filter(|_| {
+                pull_event(string(run, "event")) || run["dusty"]["prNumber"].as_u64().is_some()
+            })
             .map(|pr| format!("{}{pr}", self.terms().pr_glyph))
     }
 
@@ -1431,7 +1660,9 @@ impl Workspace {
             return Some(seconds);
         }
         let id = number(run, "databaseId");
-        let detail = self.value(&Key::Run(id, self.attempt)).or_else(|| self.value(&Key::Run(id, 0)))?;
+        let detail = self
+            .value(&Key::Run(id, self.attempt))
+            .or_else(|| self.value(&Key::Run(id, 0)))?;
         let jobs = array(detail, "jobs");
         let start = jobs
             .iter()
@@ -1441,21 +1672,27 @@ impl Workspace {
             .iter()
             .filter_map(|job| records::epoch(string(job, "completedAt")))
             .max()?;
-        (end >= start && jobs.iter().all(|job| string(job, "status") == "completed")).then_some(end - start)
+        (end >= start && jobs.iter().all(|job| string(job, "status") == "completed"))
+            .then_some(end - start)
     }
 
     /// The right end of a run's row: its duration, or how long it has been running.
     fn run_time(&self, run: &Value) -> (String, GitRole) {
         match State::of(run) {
             State::Running => (
-                elapsed(string(run, "createdAt")).map_or_else(|| "running".into(), |time| format!("running {time}")),
+                elapsed(string(run, "createdAt"))
+                    .map_or_else(|| "running".into(), |time| format!("running {time}")),
                 GitRole::Modified,
             ),
             State::Queued => ("queued".into(), GitRole::Muted),
             State::Waiting => ("waiting".into(), GitRole::Modified),
             // A run that never started has no duration to show.
             State::Skipped => (String::new(), GitRole::Muted),
-            _ => self.run_seconds(run).map_or((String::new(), GitRole::Muted), |seconds| (duration(seconds), GitRole::Muted)),
+            _ => self
+                .run_seconds(run)
+                .map_or((String::new(), GitRole::Muted), |seconds| {
+                    (duration(seconds), GitRole::Muted)
+                }),
         }
     }
 
@@ -1525,7 +1762,7 @@ impl Workspace {
 
     fn choose_section(&mut self, section: usize) {
         self.actions.section = section;
-        // The run opens afresh at its first error, even when it was the one shown (§3.38).
+        // The run opens afresh at its first error, even when it was the one shown.
         self.actions.tree_for.clear();
         self.actions.pinned = false;
         self.run_selected = 0;
@@ -1540,7 +1777,10 @@ impl Workspace {
         if rows.is_empty() {
             return;
         }
-        let at = self.cursor_index(&rows).saturating_add_signed(delta).min(rows.len() - 1);
+        let at = self
+            .cursor_index(&rows)
+            .saturating_add_signed(delta)
+            .min(rows.len() - 1);
         self.actions.cursor = Some(rows[at].node.clone());
         self.actions.auto = false;
         self.actions.follow_match = false;
@@ -1566,7 +1806,11 @@ impl Workspace {
         let job = rows
             .get(at)
             .and_then(|row| job_of(&row.node))
-            .or_else(|| rows.iter().find(|row| row.state == Some(State::Failed)).and_then(|row| job_of(&row.node)))
+            .or_else(|| {
+                rows.iter()
+                    .find(|row| row.state == Some(State::Failed))
+                    .and_then(|row| job_of(&row.node))
+            })
             .ok_or("Select a job first")?;
         if !self.actions.full.remove(&job) {
             self.actions.full.insert(job);
@@ -1587,15 +1831,29 @@ impl Workspace {
     /// `n`/`N` without a find: the next or previous error line.
     fn jump_error(&mut self, forward: bool) -> Result<(), String> {
         let rows = self.tree(KEYS);
-        let errors = rows.iter().enumerate().filter(|(_, row)| row.error()).map(|(at, _)| at).collect::<Vec<_>>();
+        let errors = rows
+            .iter()
+            .enumerate()
+            .filter(|(_, row)| row.error())
+            .map(|(at, _)| at)
+            .collect::<Vec<_>>();
         if errors.is_empty() {
             return Err("No errors in the open logs".into());
         }
         let at = self.cursor_index(&rows);
         let next = if forward {
-            errors.iter().copied().find(|index| *index > at).unwrap_or(errors[0])
+            errors
+                .iter()
+                .copied()
+                .find(|index| *index > at)
+                .unwrap_or(errors[0])
         } else {
-            errors.iter().rev().copied().find(|index| *index < at).unwrap_or(errors[errors.len() - 1])
+            errors
+                .iter()
+                .rev()
+                .copied()
+                .find(|index| *index < at)
+                .unwrap_or(errors[errors.len() - 1])
         };
         self.actions.cursor = Some(rows[next].node.clone());
         self.actions.auto = false;
@@ -1606,7 +1864,11 @@ impl Workspace {
         // GitLab's "workflows" are its pipeline sources (`push`, `web`), which the Event group
         // already lists in plain words (`Push`, `Manual`): one group, not two (A2-06).
         let pipelines = self.terms().run_noun == "pipeline";
-        let mut rows = if pipelines { Vec::new() } else { vec![(0, None)] };
+        let mut rows = if pipelines {
+            Vec::new()
+        } else {
+            vec![(0, None)]
+        };
         rows.extend(
             self.workflows()
                 .iter()
@@ -1629,7 +1891,10 @@ impl Workspace {
         let mut events = Vec::<String>::new();
         for run in self.runs() {
             let branch = string(run, "headBranch");
-            if !branch.is_empty() && !branch.starts_with("refs/") && !branches.iter().any(|known| known == branch) {
+            if !branch.is_empty()
+                && !branch.starts_with("refs/")
+                && !branches.iter().any(|known| known == branch)
+            {
                 branches.push(branch.to_owned());
             }
             let event = self.event_kind(string(run, "event"));
@@ -1645,7 +1910,9 @@ impl Workspace {
 
     fn choose_rail(&mut self) {
         let rows = self.rail_rows();
-        let Some((section, value)) = rows.get(self.actions.rail.min(rows.len().saturating_sub(1))).cloned()
+        let Some((section, value)) = rows
+            .get(self.actions.rail.min(rows.len().saturating_sub(1)))
+            .cloned()
         else {
             return;
         };
@@ -1731,7 +1998,9 @@ impl Workspace {
     /// The workflow the runs list is narrowed to, by name; `None` on All.
     fn chosen_flow(&self) -> Option<String> {
         let rows = self.flow_rows();
-        rows.get(self.flow_cursor(&rows)).filter(|flow| **flow != Flow::All).map(|flow| self.flow_name(flow))
+        rows.get(self.flow_cursor(&rows))
+            .filter(|flow| **flow != Flow::All)
+            .map(|flow| self.flow_name(flow))
     }
 
     fn flow_cursor(&self, rows: &[Flow]) -> usize {
@@ -1779,7 +2048,11 @@ impl Workspace {
 
     /// `Workflows`; GitLab's are what starts a pipeline.
     fn flows_title(&self) -> &'static str {
-        if self.terms().run_noun == "pipeline" { "Sources" } else { "Workflows" }
+        if self.terms().run_noun == "pipeline" {
+            "Sources"
+        } else {
+            "Workflows"
+        }
     }
 
     fn flow_name(&self, flow: &Flow) -> String {
@@ -1817,12 +2090,16 @@ impl Workspace {
                     None => {
                         let name = string(workflow, "name");
                         self.all_runs().into_iter().find(|run| {
-                            number(run, "workflowDatabaseId") == id || self.run_workflow(run) == name
+                            number(run, "workflowDatabaseId") == id
+                                || self.run_workflow(run) == name
                         })
                     }
                 }
             }
-            Flow::Named(name) => self.all_runs().into_iter().find(|run| self.run_workflow(run) == *name),
+            Flow::Named(name) => self
+                .all_runs()
+                .into_iter()
+                .find(|run| self.run_workflow(run) == *name),
         };
         latest.map(State::of)
     }
@@ -1844,9 +2121,13 @@ impl Workspace {
                 let workflow = self.workflows().get(*index).copied()?;
                 let name = string(workflow, "name");
                 if string(workflow, "state").starts_with("disabled") {
-                    Some(format!("{name} is turned off · turn it on in the forge to run it"))
+                    Some(format!(
+                        "{name} is turned off · turn it on in the forge to run it"
+                    ))
                 } else if workflow["dispatchable"] == Value::Bool(false) {
-                    Some(format!("{name} can't be run manually · no workflow_dispatch trigger"))
+                    Some(format!(
+                        "{name} can't be run manually · no workflow_dispatch trigger"
+                    ))
                 } else {
                     None
                 }
@@ -1860,7 +2141,8 @@ impl Workspace {
     /// Whether Actions types into its own input (a find or filter row), or Notifications
     /// into its `/` filter: every key is the input's.
     pub(in crate::git::screen) fn actions_typing(&self) -> bool {
-        self.page == 3 && (self.actions.find.editing || self.actions.filter.editing) || self.notifications_typing()
+        self.page == 3 && (self.actions.find.editing || self.actions.filter.editing)
+            || self.notifications_typing()
     }
 
     /// `[`/`]` switch the run history's sections rather than the top tabs.
@@ -1916,7 +2198,11 @@ impl Workspace {
             .iter()
             .enumerate()
             .filter_map(|(index, row)| row.log.as_ref().map(|(_, line)| (index, line)))
-            .flat_map(|(index, line)| matches(&line.text, &query).into_iter().map(move |range| (index, range)))
+            .flat_map(|(index, line)| {
+                matches(&line.text, &query)
+                    .into_iter()
+                    .map(move |range| (index, range))
+            })
             .collect::<Vec<_>>();
         if found.is_empty() {
             self.actions.find_current = 0;
@@ -1924,7 +2210,10 @@ impl Workspace {
         }
         let cursor = self.cursor_index(&rows);
         let current = match step {
-            None => found.iter().position(|(row, _)| *row >= cursor).unwrap_or(0),
+            None => found
+                .iter()
+                .position(|(row, _)| *row >= cursor)
+                .unwrap_or(0),
             Some(forward) => {
                 let now = self.actions.find_current.min(found.len() - 1);
                 if forward {
@@ -1987,7 +2276,7 @@ impl Workspace {
         if self.actions.picker {
             return Some(self.picker_key(key));
         }
-        // Panels like the Git tab's: 1 Workflows, 2 runs, 3 the run (§3.37).
+        // Panels like the Git tab's: 1 Workflows, 2 runs, 3 the run.
         if plain && !self.actions.attempts {
             match key.code {
                 KeyCode::Char(c @ '1'..='3') => {
@@ -2035,7 +2324,10 @@ impl Workspace {
                 let Some(id) = id else {
                     return Some(Err(format!("Select a {} first", self.actions_noun())));
                 };
-                let url = self.run_value(id).map(|run| string(run, "url").to_owned()).unwrap_or_default();
+                let url = self
+                    .run_value(id)
+                    .map(|run| string(run, "url").to_owned())
+                    .unwrap_or_default();
                 if !url.starts_with("https://") && !url.starts_with("http://") {
                     return Some(Err(format!("This {} has no web page", self.actions_noun())));
                 }
@@ -2043,7 +2335,9 @@ impl Workspace {
             }
             if key.code == KeyCode::Char('R') {
                 if self.writing() {
-                    return Some(Err("Wait for the confirmed operation before refreshing".into()));
+                    return Some(Err(
+                        "Wait for the confirmed operation before refreshing".into()
+                    ));
                 }
                 self.ensure(true);
                 return Some(Ok(None));
@@ -2051,7 +2345,9 @@ impl Workspace {
             if matches!(key.code, KeyCode::Char('[' | ']')) {
                 let count = self.section_tabs().len();
                 let forward = key.code == KeyCode::Char(']');
-                let section = (self.actions.section.min(count - 1) + if forward { 1 } else { count - 1 }) % count;
+                let section = (self.actions.section.min(count - 1)
+                    + if forward { 1 } else { count - 1 })
+                    % count;
                 self.choose_section(section);
                 return Some(Ok(None));
             }
@@ -2149,7 +2445,11 @@ impl Workspace {
             }
             _ => 0,
         };
-        self.actions.rail = self.actions.rail.saturating_add_signed(delta).min(count.saturating_sub(1));
+        self.actions.rail = self
+            .actions
+            .rail
+            .saturating_add_signed(delta)
+            .min(count.saturating_sub(1));
         Ok(None)
     }
 
@@ -2194,7 +2494,9 @@ impl Workspace {
             KeyCode::Escape if self.notify.back => self.back_to_notifications(),
             KeyCode::Tab if key.modifiers.shift => self.focus_panel(0),
             KeyCode::Char('h') | KeyCode::Left => self.focus_panel(0),
-            KeyCode::Enter | KeyCode::Tab | KeyCode::Char('l') | KeyCode::Right => self.focus_panel(2),
+            KeyCode::Enter | KeyCode::Tab | KeyCode::Char('l') | KeyCode::Right => {
+                self.focus_panel(2)
+            }
             _ => {
                 if let Some(delta) = delta {
                     self.select_run(delta);
@@ -2204,7 +2506,11 @@ impl Workspace {
         Ok(None)
     }
 
-    fn run_key(&mut self, key: &KeyEvent, write_refusal: Option<&str>) -> Result<Option<Form>, String> {
+    fn run_key(
+        &mut self,
+        key: &KeyEvent,
+        write_refusal: Option<&str>,
+    ) -> Result<Option<Form>, String> {
         let rows = self.tree(KEYS);
         let at = self.cursor_index(&rows);
         if key.modifiers.control {
@@ -2240,9 +2546,15 @@ impl Workspace {
                 KeyCode::Escape | KeyCode::Char('a') => self.actions.attempts = false,
                 KeyCode::Enter | KeyCode::Char('l') => {
                     let latest = self.latest_attempt();
-                    let chosen = latest.saturating_sub(self.actions.attempt_cursor as u64).max(1);
+                    let chosen = latest
+                        .saturating_sub(self.actions.attempt_cursor as u64)
+                        .max(1);
                     self.actions.attempts = false;
-                    return self.activate(Action::Attempt(if chosen == latest { 0 } else { chosen as u32 }));
+                    return self.activate(Action::Attempt(if chosen == latest {
+                        0
+                    } else {
+                        chosen as u32
+                    }));
                 }
                 _ => {
                     if let Some(delta) = delta {
@@ -2264,7 +2576,7 @@ impl Workspace {
                 } else if self.actions.zoom {
                     self.actions.zoom = false;
                 } else if self.notify.back {
-                    // Opened from Notifications, Esc goes back there (§3.35.1 N11).
+                    // Opened from Notifications, Esc goes back there.
                     self.back_to_notifications();
                 } else if !self.go_back() {
                     // Opened from a pull request's check, Esc went back to it (R9-05).
@@ -2285,7 +2597,8 @@ impl Workspace {
                     return Err(format!("This {} has one attempt", self.actions_noun()));
                 }
                 self.actions.attempts = true;
-                self.actions.attempt_cursor = (self.latest_attempt() - self.effective_attempt().max(1)) as usize;
+                self.actions.attempt_cursor =
+                    (self.latest_attempt() - self.effective_attempt().max(1)) as usize;
                 // Each earlier attempt's outcome and time are read for its row.
                 self.ensure(false);
             }
@@ -2315,7 +2628,9 @@ impl Workspace {
                 }
             }
             KeyCode::Enter => match rows.get(at).map(|row| &row.node) {
-                Some(Node::Line(..)) if rows[at].link().is_some() => return self.open_source(&rows, at),
+                Some(Node::Line(..)) if rows[at].link().is_some() => {
+                    return self.open_source(&rows, at);
+                }
                 // A log line folds the step it belongs to, the way back up the tree (r12
                 // gitlab-08: the footer offers `Enter fold` on every row of the tree).
                 Some(Node::Line(..)) => {
@@ -2395,7 +2710,9 @@ impl Workspace {
     /// A finished write the Actions tab reports itself.
     pub(super) fn actions_written(&mut self, write: &Write, summary: &str) {
         match write {
-            Write::DownloadArtifact { name, directory, .. } => {
+            Write::DownloadArtifact {
+                name, directory, ..
+            } => {
                 let size = self
                     .artifacts()
                     .iter()
@@ -2405,7 +2722,9 @@ impl Workspace {
                 let shown = directory
                     .strip_prefix(&self.root)
                     .map(|path| format!("./{}", path.join(format!("{name}.zip")).display()))
-                    .unwrap_or_else(|_| directory.join(format!("{name}.zip")).display().to_string());
+                    .unwrap_or_else(|_| {
+                        directory.join(format!("{name}.zip")).display().to_string()
+                    });
                 let text = if size.is_empty() {
                     format!("Downloaded · {shown}")
                 } else {
@@ -2448,7 +2767,9 @@ impl Workspace {
         {
             if self.run_id != Some(id) || self.page != 3 {
                 self.actions.pending_rerun = None;
-            } else if self.cache.contains_key(&Key::Run(id, self.attempt)) || self.cache.contains_key(&Key::Run(id, 0)) {
+            } else if self.cache.contains_key(&Key::Run(id, self.attempt))
+                || self.cache.contains_key(&Key::Run(id, 0))
+            {
                 self.actions.pending_rerun = None;
                 match self.activate(Action::Rerun(id)) {
                     Ok(form) => self.ready_form = form,
@@ -2463,7 +2784,9 @@ impl Workspace {
         }
         if let Some(workflow) = self.actions.pending_dispatch
             && self.ready_form.is_none()
-            && self.cache.contains_key(&Key::Workflow(workflow, String::new()))
+            && self
+                .cache
+                .contains_key(&Key::Workflow(workflow, String::new()))
         {
             // The sheet opens with a ref alone when the definition could not be read.
             self.actions.pending_dispatch = None;
@@ -2519,7 +2842,11 @@ impl Workspace {
 
     /// Ctrl+s: writes the full job log to a file under the repository.
     pub(super) fn save_log(&mut self, job: u64, values: &[String]) -> Result<(), String> {
-        let path = values.first().map(|path| path.trim()).filter(|path| !path.is_empty()).ok_or("A file name is required")?;
+        let path = values
+            .first()
+            .map(|path| path.trim())
+            .filter(|path| !path.is_empty())
+            .ok_or("A file name is required")?;
         let raw = self.raw(&Key::Log(job)).ok_or("The log is not loaded")?;
         let text = raw
             .lines()
@@ -2528,9 +2855,19 @@ impl Workspace {
             .collect::<Vec<_>>();
         let target = self.root.join(path);
         if let Some(parent) = target.parent() {
-            std::fs::create_dir_all(parent).map_err(|error| format!("Couldn't create the folder{}", crate::git::screen::words::io_reason(&error)))?;
+            std::fs::create_dir_all(parent).map_err(|error| {
+                format!(
+                    "Couldn't create the folder{}",
+                    crate::git::screen::words::io_reason(&error)
+                )
+            })?;
         }
-        std::fs::write(&target, text.join("\n") + "\n").map_err(|error| format!("Couldn't save the log{}", crate::git::screen::words::io_reason(&error)))?;
+        std::fs::write(&target, text.join("\n") + "\n").map_err(|error| {
+            format!(
+                "Couldn't save the log{}",
+                crate::git::screen::words::io_reason(&error)
+            )
+        })?;
         self.notice = format!("Saved {} lines to {path}", text.len());
         self.notice_error = false;
         Ok(())
@@ -2546,7 +2883,13 @@ impl Workspace {
             .unwrap_or_else(|| format!("job-{job}"));
         let safe = name
             .chars()
-            .map(|c| if c.is_ascii_alphanumeric() || "-_.".contains(c) { c } else { '-' })
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || "-_.".contains(c) {
+                    c
+                } else {
+                    '-'
+                }
+            })
             .collect::<String>();
         format!("{}.log", safe.trim_matches('-'))
     }
@@ -2569,7 +2912,11 @@ impl Workspace {
     /// The workflow a row or header names beside the run: none on GitLab, whose "workflow" is
     /// the pipeline's source (`Run pipeline`, `Push`) and the event word says it (A2-05).
     fn named_workflow(&self, run: &Value) -> String {
-        if self.terms().run_noun == "pipeline" { String::new() } else { self.run_workflow(run) }
+        if self.terms().run_noun == "pipeline" {
+            String::new()
+        } else {
+            self.run_workflow(run)
+        }
     }
 
     /// A run's title as the list, header and sheets show it: a squash merge's `(#16)` goes
@@ -2582,7 +2929,10 @@ impl Workspace {
         if let Some(pull) = self.pull_ref(run) {
             let number = pull.trim_start_matches(|c: char| !c.is_ascii_digit());
             for suffix in [format!(" (#{number})"), format!(" ({pull})")] {
-                if let Some(kept) = title.strip_suffix(suffix.as_str()).filter(|kept| !kept.trim().is_empty()) {
+                if let Some(kept) = title
+                    .strip_suffix(suffix.as_str())
+                    .filter(|kept| !kept.trim().is_empty())
+                {
                     return kept.trim_end().to_owned();
                 }
             }
@@ -2615,7 +2965,9 @@ impl Workspace {
 
     /// The jobs of a run that failed, by name.
     fn failed_jobs(&self, id: u64) -> Vec<String> {
-        let detail = self.value(&Key::Run(id, self.attempt)).or_else(|| self.value(&Key::Run(id, 0)));
+        let detail = self
+            .value(&Key::Run(id, self.attempt))
+            .or_else(|| self.value(&Key::Run(id, 0)));
         detail
             .map(|run| array(run, "jobs"))
             .unwrap_or_default()
@@ -2625,45 +2977,78 @@ impl Workspace {
             .collect()
     }
 
-    /// What a run sheet's confirm does, the line under its title (§3.40): the consequence,
+    /// What a run sheet's confirm does, the line under its title: the consequence,
     /// read from what the sheet now holds (the rerun's chosen jobs, the dispatch's ref).
-    pub(in super::super) fn sheet_note(&self, action: &Action, fields: &[super::super::Field]) -> Option<String> {
-        let value = |index: usize| fields.get(index).map(|field| field.input.input.trim().to_owned()).unwrap_or_default();
+    pub(in super::super) fn sheet_note(
+        &self,
+        action: &Action,
+        fields: &[super::super::Field],
+    ) -> Option<String> {
+        let value = |index: usize| {
+            fields
+                .get(index)
+                .map(|field| field.input.input.trim().to_owned())
+                .unwrap_or_default()
+        };
         match action {
             Action::Cancel(_) => Some("Running jobs stop. Finished jobs keep their logs.".into()),
-            Action::Approve(_) => Some("Its jobs start on this repository's runners, with its secrets.".into()),
+            Action::Approve(_) => {
+                Some("Its jobs start on this repository's runners, with its secrets.".into())
+            }
             Action::Rerun(id) => {
                 let run = self.run_value(*id)?;
                 let sha: String = string(run, "headSha").chars().take(7).collect();
-                let commit = if sha.is_empty() { "the same commit".to_owned() } else { format!("the same commit ({sha})") };
+                let commit = if sha.is_empty() {
+                    "the same commit".to_owned()
+                } else {
+                    format!("the same commit ({sha})")
+                };
                 let (_, all) = self.run_jobs(*id);
                 let failed = self.failed_jobs(*id);
                 let first = value(0);
-                let mut note = if let Some(name) = first.strip_prefix("This job (").and_then(|rest| rest.strip_suffix(')')) {
+                let mut note = if let Some(name) = first
+                    .strip_prefix("This job (")
+                    .and_then(|rest| rest.strip_suffix(')'))
+                {
                     format!("Reruns {name} alone on {commit}; the other jobs keep their results.")
                 } else if value(0).starts_with("Failed") {
                     let names = failed.join(", ");
                     let plural = if failed.len() == 1 { "" } else { "s" };
-                    format!("Reruns {} failed job{plural} ({names}) on {commit}.", failed.len())
+                    format!(
+                        "Reruns {} failed job{plural} ({names}) on {commit}.",
+                        failed.len()
+                    )
                 } else if all > 0 {
-                    format!("Reruns all {all} job{} on {commit}.", if all == 1 { "" } else { "s" })
+                    format!(
+                        "Reruns all {all} job{} on {commit}.",
+                        if all == 1 { "" } else { "s" }
+                    )
                 } else {
                     format!("Reruns every job on {commit}.")
                 };
                 let caps = self.capabilities();
-                if !failed.is_empty() && !caps.rerun_failed.allowed() {
-                    if let Some(reason) = caps.rerun_failed.reason() {
-                        // The sheet is the how: only the reason (`Forgejo reruns whole runs only`).
-                        let reason = reason.split(" · ").next().unwrap_or(reason);
-                        note = format!("{note}\n{}.", reason.trim_end_matches('.'));
-                    }
+                if !failed.is_empty()
+                    && !caps.rerun_failed.allowed()
+                    && let Some(reason) = caps.rerun_failed.reason()
+                {
+                    // The sheet is the how: only the reason (`Forgejo reruns whole runs only`).
+                    let reason = reason.split(" · ").next().unwrap_or(reason);
+                    note = format!("{note}\n{}.", reason.trim_end_matches('.'));
                 }
                 Some(note)
             }
             Action::Dispatch(id) => {
-                let what = if self.terms().run_noun == "pipeline" { "a pipeline".to_owned() } else { self.dispatch_name(*id) };
+                let what = if self.terms().run_noun == "pipeline" {
+                    "a pipeline".to_owned()
+                } else {
+                    self.dispatch_name(*id)
+                };
                 let reference = value(0);
-                let on = if reference.is_empty() { String::new() } else { format!(" on {reference}") };
+                let on = if reference.is_empty() {
+                    String::new()
+                } else {
+                    format!(" on {reference}")
+                };
                 Some(if fields.len() > 1 {
                     format!("Starts {what}{on} with these inputs.")
                 } else {
@@ -2676,7 +3061,11 @@ impl Workspace {
 
     /// The workflow a dispatch sheet names: the listed one, else a run's (Forgejo lists none).
     pub(super) fn dispatch_name(&self, id: u64) -> String {
-        if let Some(workflow) = self.workflows().into_iter().find(|workflow| number(workflow, "id") == id) {
+        if let Some(workflow) = self
+            .workflows()
+            .into_iter()
+            .find(|workflow| number(workflow, "id") == id)
+        {
             return string(workflow, "name").to_owned();
         }
         self.runs()
@@ -2694,16 +3083,26 @@ impl Workspace {
         }
         let rows = self.tree(KEYS);
         let job = job_of(&rows.get(self.cursor_index(&rows))?.node)?;
-        let detail = self.value(&Key::Run(id, self.attempt)).or_else(|| self.value(&Key::Run(id, 0)))?;
-        let found = array(detail, "jobs").into_iter().find(|entry| number(entry, "databaseId") == job)?;
-        State::of(found).finished().then(|| (job, string(found, "name").to_owned()))
+        let detail = self
+            .value(&Key::Run(id, self.attempt))
+            .or_else(|| self.value(&Key::Run(id, 0)))?;
+        let found = array(detail, "jobs")
+            .iter()
+            .find(|entry| number(entry, "databaseId") == job)?;
+        State::of(found)
+            .finished()
+            .then(|| (job, string(found, "name").to_owned()))
     }
 
     pub(super) fn run_jobs(&self, id: u64) -> (usize, usize) {
-        let detail = self.value(&Key::Run(id, self.attempt)).or_else(|| self.value(&Key::Run(id, 0)));
+        let detail = self
+            .value(&Key::Run(id, self.attempt))
+            .or_else(|| self.value(&Key::Run(id, 0)));
         let jobs = detail.map(|run| array(run, "jobs")).unwrap_or_default();
         (
-            jobs.iter().filter(|job| State::of(job) == State::Failed).count(),
+            jobs.iter()
+                .filter(|job| State::of(job) == State::Failed)
+                .count(),
             jobs.len(),
         )
     }
@@ -2888,15 +3287,30 @@ fn paint_items(
         };
         let rows = item.height().min(inner.bottom() - y);
         if selected {
-            chrome::fill(grid, Rect::new(inner.x, y, inner.w, rows), st(GitRole::Text, surface));
+            chrome::fill(
+                grid,
+                Rect::new(inner.x, y, inner.w, rows),
+                st(GitRole::Text, surface),
+            );
             // The accent edge, as in every other list (r12 IN-07 / gitea-03): no chevron
             // stacked on the run's state mark.
             chrome::selection_edge(grid, inner.x, y..y + rows, focused, surface, mode);
             cursor_y = Some(y);
         }
         let right_width = chrome::spans_width(&item.right);
-        let end = inner.right().saturating_sub(1 + right_width + u16::from(right_width > 0));
-        chrome::put_spans(grid, inner.x + 1, y, &spans_on(&clip(item.left.clone(), end.saturating_sub(inner.x + 1)), surface), end.max(inner.x + 1));
+        let end = inner
+            .right()
+            .saturating_sub(1 + right_width + u16::from(right_width > 0));
+        chrome::put_spans(
+            grid,
+            inner.x + 1,
+            y,
+            &spans_on(
+                &clip(item.left.clone(), end.saturating_sub(inner.x + 1)),
+                surface,
+            ),
+            end.max(inner.x + 1),
+        );
         if right_width > 0 && inner.x + 2 + right_width < inner.right() {
             chrome::put_spans(
                 grid,
@@ -2910,7 +3324,13 @@ fn paint_items(
             && rows > 1
         {
             let room = inner.right().saturating_sub(inner.x + 2);
-            chrome::put_spans(grid, inner.x + 1, y + 1, &spans_on(&clip(more.clone(), room), surface), inner.right() - 1);
+            chrome::put_spans(
+                grid,
+                inner.x + 1,
+                y + 1,
+                &spans_on(&clip(more.clone(), room), surface),
+                inner.right() - 1,
+            );
         }
         y += rows;
     }
@@ -2943,7 +3363,11 @@ pub(in crate::git::screen) fn frame(app: &mut GitScreen, width: u16, height: u16
         cursor: None,
     };
     if layout::mode(width, height) == Mode::TooSmall {
-        let text = format!("Dusty Git needs {}×{}", layout::MIN_WIDTH, layout::MIN_HEIGHT);
+        let text = format!(
+            "Dusty Git needs {}×{}",
+            layout::MIN_WIDTH,
+            layout::MIN_HEIGHT
+        );
         frame.grid.put_text_clipped(
             width.saturating_sub(chrome::width(&text)) / 2,
             height / 2,
@@ -2953,19 +3377,34 @@ pub(in crate::git::screen) fn frame(app: &mut GitScreen, width: u16, height: u16
         );
         return frame;
     }
-    chrome::fill(&mut frame.grid, Rect::new(0, 0, width, height), st(GitRole::Text, GitSurface::Canvas));
+    chrome::fill(
+        &mut frame.grid,
+        Rect::new(0, 0, width, height),
+        st(GitRole::Text, GitSurface::Canvas),
+    );
     super::super::shell::top_bar(app, &mut frame.grid, width);
     app.github.sync_actions();
     let mode = app.icon_mode;
     let footer_rect = Rect::new(0, height - 1, width, 1);
     let body = Rect::new(0, 1, width, height - 2);
     if app.github.repo.is_empty() || !app.github.cache.contains_key(&Key::Repository) {
-        chrome::pane(&mut frame.grid, body, &[(app.github.terms().actions_tab.to_owned(), bold(GitRole::Text, PANE))], "", true);
+        chrome::pane(
+            &mut frame.grid,
+            body,
+            &[(
+                app.github.terms().actions_tab.to_owned(),
+                bold(GitRole::Text, PANE),
+            )],
+            "",
+            true,
+        );
         let (text, role) = match app.github.cache.get(&Key::Repository) {
             Some(Err(error)) => (calm(&app.github, error), GitRole::Removed),
             _ => ("Loading the repository…".to_owned(), GitRole::Muted),
         };
-        frame.grid.put_text_clipped(2, 2, &text, st(role, PANE), width - 2);
+        frame
+            .grid
+            .put_text_clipped(2, 2, &text, st(role, PANE), width - 2);
     } else {
         page(&mut frame, &mut app.github, body, mode);
     }
@@ -2980,7 +3419,7 @@ pub(in crate::git::screen) fn frame(app: &mut GitScreen, width: u16, height: u16
     frame
 }
 
-/// Workflows over their runs on the left, the run on the right (§3.37); below 90 columns
+/// Workflows over their runs on the left, the run on the right; below 90 columns
 /// the left column or the run; `z` gives the run the whole width, and `toggle_sidebar`
 /// (`Space e`) hides the left column until it is toggled back.
 fn page(frame: &mut Frame, ws: &mut Workspace, body: Rect, mode: ExplorerIconMode) {
@@ -3007,31 +3446,69 @@ fn page(frame: &mut Frame, ws: &mut Workspace, body: Rect, mode: ExplorerIconMod
         return;
     }
     // 40% from 120 columns (44–60, so run titles mostly fit; logs wrap in the run), else 40.
-    let list_w = if body.w >= 120 { (body.w * 40 / 100).clamp(44, 60) } else { 40.min(body.w / 2) };
+    let list_w = if body.w >= 120 {
+        (body.w * 40 / 100).clamp(44, 60)
+    } else {
+        40.min(body.w / 2)
+    };
     let right = ws.actions.right;
     paint_left(frame, ws, Rect::new(body.x, body.y, list_w, body.h), mode);
-    paint_run(frame, ws, Rect::new(body.x + list_w, body.y, body.w - list_w, body.h), right, mode);
+    paint_run(
+        frame,
+        ws,
+        Rect::new(body.x + list_w, body.y, body.w - list_w, body.h),
+        right,
+        mode,
+    );
 }
 
 /// The left column: Workflows on top (as tall as its rows, up to two fifths), the chosen
 /// workflow's runs below.
 fn paint_left(frame: &mut Frame, ws: &mut Workspace, rect: Rect, mode: ExplorerIconMode) {
     let rows = ws.flow_rows().len() as u16;
-    let top = (rows + 2).min(rect.h * 2 / 5).max(4).min(rect.h.saturating_sub(8)).max(3);
+    let top = (rows + 2)
+        .min(rect.h * 2 / 5)
+        .max(4)
+        .min(rect.h.saturating_sub(8))
+        .max(3);
     let panel = ws.panel();
-    paint_workflows(frame, ws, Rect::new(rect.x, rect.y, rect.w, top), panel == 0, mode);
-    paint_list(frame, ws, Rect::new(rect.x, rect.y + top, rect.w, rect.h - top), panel == 1, mode);
+    paint_workflows(
+        frame,
+        ws,
+        Rect::new(rect.x, rect.y, rect.w, top),
+        panel == 0,
+        mode,
+    );
+    paint_list(
+        frame,
+        ws,
+        Rect::new(rect.x, rect.y + top, rect.w, rect.h - top),
+        panel == 1,
+        mode,
+    );
 }
 
 /// `All workflows  42`, then each workflow with its latest run's state; one turned off is
 /// muted with `(off)`.
-fn paint_workflows(frame: &mut Frame, ws: &mut Workspace, rect: Rect, focused: bool, mode: ExplorerIconMode) {
+fn paint_workflows(
+    frame: &mut Frame,
+    ws: &mut Workspace,
+    rect: Rect,
+    focused: bool,
+    mode: ExplorerIconMode,
+) {
     let title = format!("{} {}", glyph(Glyph::Workflow, mode), ws.flows_title());
     let chip = match ws.cache.get(&Key::Workflows) {
         Some(Err(_)) => "R retry".to_owned(),
         _ => String::new(),
     };
-    chrome::pane(&mut frame.grid, rect, &[(title, bold(GitRole::Text, PANE))], &chip, focused);
+    chrome::pane(
+        &mut frame.grid,
+        rect,
+        &[(title, bold(GitRole::Text, PANE))],
+        &chip,
+        focused,
+    );
     let inner = rect.inner();
     if inner.h == 0 {
         return;
@@ -3046,23 +3523,47 @@ fn paint_workflows(frame: &mut Frame, ws: &mut Workspace, rect: Rect, focused: b
             if *flow == Flow::All {
                 let count = ws.all_runs().len();
                 return Item {
-                    left: vec![(blank.clone(), st(GitRole::Muted, PANE)), (name, bold(GitRole::Text, PANE))],
-                    right: if count == 0 { Vec::new() } else { vec![(count.to_string(), st(GitRole::Muted, PANE))] },
+                    left: vec![
+                        (blank.clone(), st(GitRole::Muted, PANE)),
+                        (name, bold(GitRole::Text, PANE)),
+                    ],
+                    right: if count == 0 {
+                        Vec::new()
+                    } else {
+                        vec![(count.to_string(), st(GitRole::Muted, PANE))]
+                    },
                     more: None,
                 };
             }
             let off = ws.flow_off(flow);
             let mark = match ws.flow_state(flow) {
                 Some(state) if !off => (format!("{} ", state.glyph(mode)), st(state.role(), PANE)),
-                _ if off => (format!("{} ", State::Skipped.glyph(mode)), st(GitRole::Muted, PANE)),
+                _ if off => (
+                    format!("{} ", State::Skipped.glyph(mode)),
+                    st(GitRole::Muted, PANE),
+                ),
                 // Never run: a dim ring keeps the column whole.
                 _ => (format!("◌{}", &blank[1..]), st(GitRole::Muted, PANE)),
             };
-            let mut left = vec![mark, (name, if off { st(GitRole::Muted, PANE) } else { st(GitRole::Text, PANE) })];
+            let mut left = vec![
+                mark,
+                (
+                    name,
+                    if off {
+                        st(GitRole::Muted, PANE)
+                    } else {
+                        st(GitRole::Text, PANE)
+                    },
+                ),
+            ];
             if off {
                 left.push((" (off)".into(), st(GitRole::Muted, PANE)));
             }
-            Item { left, right: Vec::new(), more: None }
+            Item {
+                left,
+                right: Vec::new(),
+                more: None,
+            }
         })
         .collect::<Vec<_>>();
     if let Some(row) = paint_items(&mut frame.grid, inner, &items, Some(cursor), focused, mode)
@@ -3073,7 +3574,13 @@ fn paint_workflows(frame: &mut Frame, ws: &mut Workspace, rect: Rect, focused: b
     }
 }
 
-fn paint_list(frame: &mut Frame, ws: &mut Workspace, rect: Rect, focused: bool, mode: ExplorerIconMode) {
+fn paint_list(
+    frame: &mut Frame,
+    ws: &mut Workspace,
+    rect: Rect,
+    focused: bool,
+    mode: ExplorerIconMode,
+) {
     let noun = ws.actions_noun();
     // `Runs · Quality checks` once a workflow is chosen; every one's are `Workflow runs`.
     let chosen = ws.chosen_flow();
@@ -3087,8 +3594,17 @@ fn paint_list(frame: &mut Frame, ws: &mut Workspace, rect: Rect, focused: bool, 
     let key = Key::Runs(ws.workflow_id());
     let room = rect.w.saturating_sub(chrome::width(&title) + 8);
     // One string at every width, or none (`updated just now`, never `now` when narrow).
-    let chip = ws.freshness_chip(&key, false).filter(|chip| chrome::width(chip) <= room).unwrap_or_default();
-    chrome::pane(&mut frame.grid, rect, &[(title, bold(GitRole::Text, PANE))], &chip, focused);
+    let chip = ws
+        .freshness_chip(&key, false)
+        .filter(|chip| chrome::width(chip) <= room)
+        .unwrap_or_default();
+    chrome::pane(
+        &mut frame.grid,
+        rect,
+        &[(title, bold(GitRole::Text, PANE))],
+        &chip,
+        focused,
+    );
     let inner = rect.inner();
     if inner.h < 3 {
         return;
@@ -3096,20 +3612,31 @@ fn paint_list(frame: &mut Frame, ws: &mut Workspace, rect: Rect, focused: bool, 
     let mut y = inner.y;
     let tabs = ws.section_tabs();
     let section = ws.actions.section.min(tabs.len() - 1);
-    // Only the state filters (r15 gitlab-01): `All` is the source selected above, said once
+    // Only the state filters: `All` is the source selected above, said once
     // with its count there. Section 0 (every run) is no chip; 1.. are `Failing`, `Running`,
     // `Mine`. Too wide, the counts go before the padding does, on every tab at once.
     let tabs = tabs[1..].to_vec();
     let active = section.checked_sub(1).unwrap_or(usize::MAX);
     let fitted = chrome::fit_tabs(&tabs, active.min(tabs.len() - 1), inner.w);
-    chrome::sub_tabs(&mut frame.grid, inner.x, y, inner.right(), &fitted, active, focused);
+    chrome::sub_tabs(
+        &mut frame.grid,
+        inner.x,
+        y,
+        inner.right(),
+        &fitted,
+        active,
+        focused,
+    );
     y += 1;
     let words = ws.filter_words();
     let filter = &ws.actions.filter;
     if filter.active() || !words.is_empty() {
         let mut spans: Vec<Span> = Vec::new();
         if filter.active() {
-            spans.push((format!("{} ", glyph(Glyph::Search, mode)), st(GitRole::Modified, PANE)));
+            spans.push((
+                format!("{} ", glyph(Glyph::Search, mode)),
+                st(GitRole::Modified, PANE),
+            ));
             spans.push((filter.query.clone(), bold(GitRole::Modified, PANE)));
             if filter.editing {
                 spans.push(("▏".into(), st(GitRole::Modified, PANE)));
@@ -3122,9 +3649,19 @@ fn paint_list(frame: &mut Frame, ws: &mut Workspace, rect: Rect, focused: bool, 
             spans.push((word.clone(), st(GitRole::Ref, PANE)));
         }
         spans.push(("  Esc clears".into(), st(GitRole::Muted, PANE)));
-        chrome::put_spans(&mut frame.grid, inner.x + 1, y, &clip(spans, inner.w.saturating_sub(2)), inner.right() - 1);
+        chrome::put_spans(
+            &mut frame.grid,
+            inner.x + 1,
+            y,
+            &clip(spans, inner.w.saturating_sub(2)),
+            inner.right() - 1,
+        );
         if filter.editing && focused {
-            frame.cursor = Some((inner.x + 3 + chrome::width(&filter.query), y, SetCursorStyle::SteadyBar));
+            frame.cursor = Some((
+                inner.x + 3 + chrome::width(&filter.query),
+                y,
+                SetCursorStyle::SteadyBar,
+            ));
         }
         y += 1;
     }
@@ -3150,15 +3687,21 @@ fn paint_list(frame: &mut Frame, ws: &mut Workspace, rect: Rect, focused: bool, 
                 _ => (format!("No {noun}s match these filters"), GitRole::Muted),
             },
         };
-        frame.grid.put_text_clipped(list.x + 1, list.y, &text, st(role, PANE), list.right() - 1);
+        frame
+            .grid
+            .put_text_clipped(list.x + 1, list.y, &text, st(role, PANE), list.right() - 1);
         if focused && frame.cursor.is_none() {
             frame.cursor = Some((list.x + 1, list.y, SetCursorStyle::SteadyBlock));
         }
     } else {
-        // One reserved, right-aligned time column for every row (r11 gitea-02): titles
+        // One reserved, right-aligned time column for every row: titles
         // clip at a single column whether a row has `57m 25s`, `waiting` or nothing.
         let times = runs.iter().map(|run| ws.run_time(run)).collect::<Vec<_>>();
-        let column = times.iter().map(|(time, _)| chrome::width(time)).max().unwrap_or(0);
+        let column = times
+            .iter()
+            .map(|(time, _)| chrome::width(time))
+            .max()
+            .unwrap_or(0);
         let items = runs
             .iter()
             .zip(times)
@@ -3177,7 +3720,11 @@ fn paint_list(frame: &mut Frame, ws: &mut Workspace, rect: Rect, focused: bool, 
                         (mark, st(state.role(), PANE)),
                         (title, bold(GitRole::Text, PANE)),
                     ],
-                    right: if column == 0 { Vec::new() } else { vec![(format!("{}{time}", " ".repeat(pad)), st(role, PANE))] },
+                    right: if column == 0 {
+                        Vec::new()
+                    } else {
+                        vec![(format!("{}{time}", " ".repeat(pad)), st(role, PANE))]
+                    },
                     more: Some(vec![(format!("  {meta}"), st(GitRole::Muted, PANE))]),
                 }
             })
@@ -3212,9 +3759,19 @@ fn paint_picker(frame: &mut Frame, ws: &Workspace, rect: Rect, mode: ExplorerIco
         }
     }
     // The footer says `Enter choose · Esc close`; the title does not repeat it cut (A2-04).
-    chrome::pane(&mut frame.grid, pane, &[("Filter by".to_owned(), bold(GitRole::Text, PANE))], "", true);
+    chrome::pane(
+        &mut frame.grid,
+        pane,
+        &[("Filter by".to_owned(), bold(GitRole::Text, PANE))],
+        "",
+        true,
+    );
     let labels = [
-        if ws.terms().run_noun == "pipeline" { "Source" } else { "Workflow" },
+        if ws.terms().run_noun == "pipeline" {
+            "Source"
+        } else {
+            "Workflow"
+        },
         "Branch",
         "Event",
     ];
@@ -3222,15 +3779,32 @@ fn paint_picker(frame: &mut Frame, ws: &Workspace, rect: Rect, mode: ExplorerIco
     let items = rows
         .iter()
         .map(|(section, value)| {
-            let label = if *section != last { labels[*section] } else { "" };
+            let label = if *section != last {
+                labels[*section]
+            } else {
+                ""
+            };
             last = *section;
             let text = value.clone().unwrap_or_else(|| "All".into());
             let chosen = ws.rail_chosen(*section, value);
             Item {
                 left: vec![
                     (format!("{label:<9}"), st(GitRole::Muted, PANE)),
-                    (if chosen { "● " } else { "  " }.into(), bold(GitRole::Focus, PANE)),
-                    (text, st(if *section == 1 && value.is_some() { GitRole::Ref } else { GitRole::Text }, PANE)),
+                    (
+                        if chosen { "● " } else { "  " }.into(),
+                        bold(GitRole::Focus, PANE),
+                    ),
+                    (
+                        text,
+                        st(
+                            if *section == 1 && value.is_some() {
+                                GitRole::Ref
+                            } else {
+                                GitRole::Text
+                            },
+                            PANE,
+                        ),
+                    ),
                 ],
                 right: Vec::new(),
                 more: None,
@@ -3245,8 +3819,17 @@ fn paint_picker(frame: &mut Frame, ws: &Workspace, rect: Rect, mode: ExplorerIco
 }
 
 /// The selected run: a two-line header, then one tree of jobs, steps and inline logs.
-fn paint_run(frame: &mut Frame, ws: &mut Workspace, rect: Rect, focused: bool, mode: ExplorerIconMode) {
-    let title = vec![(format!("{} {}", glyph(Glyph::Workflow, mode), ws.run_word()), bold(GitRole::Text, PANE))];
+fn paint_run(
+    frame: &mut Frame,
+    ws: &mut Workspace,
+    rect: Rect,
+    focused: bool,
+    mode: ExplorerIconMode,
+) {
+    let title = vec![(
+        format!("{} {}", glyph(Glyph::Workflow, mode), ws.run_word()),
+        bold(GitRole::Text, PANE),
+    )];
     // Opened from a pull request's check, the title says where Esc goes (R9-05).
     let chip = if ws.actions.zoom {
         "z restores the list".to_owned()
@@ -3261,7 +3844,10 @@ fn paint_run(frame: &mut Frame, ws: &mut Workspace, rect: Rect, focused: bool, m
     let x = inner.x + 1;
     let right = inner.right().saturating_sub(1);
     let mut y = inner.y;
-    let Some((id, run)) = ws.run_id.and_then(|id| ws.run_value(id).map(|run| (id, run.clone()))) else {
+    let Some((id, run)) = ws
+        .run_id
+        .and_then(|id| ws.run_value(id).map(|run| (id, run.clone())))
+    else {
         let (text, role) = match ws.cache.get(&Key::Runs(ws.workflow_id())) {
             None => match ws.blocked(&Key::Runs(ws.workflow_id())) {
                 Some((headline, hint)) => (format!("{headline} · {hint}"), GitRole::Muted),
@@ -3270,11 +3856,19 @@ fn paint_run(frame: &mut Frame, ws: &mut Workspace, rect: Rect, focused: bool, m
             Some(Err(error)) => (calm(ws, error), GitRole::Muted),
             // Why `d` would refuse stays on screen here, not only in a toast that fades.
             Some(Ok(_)) => match ws.dispatch_refusal() {
-                None => (format!("No {} to show · d starts one", ws.actions_noun()), GitRole::Muted),
-                Some(reason) => (format!("No {} to show · {reason}", ws.actions_noun()), GitRole::Muted),
+                None => (
+                    format!("No {} to show · d starts one", ws.actions_noun()),
+                    GitRole::Muted,
+                ),
+                Some(reason) => (
+                    format!("No {} to show · {reason}", ws.actions_noun()),
+                    GitRole::Muted,
+                ),
             },
         };
-        frame.grid.put_text_clipped(x, y, &text, st(role, PANE), right);
+        frame
+            .grid
+            .put_text_clipped(x, y, &text, st(role, PANE), right);
         return;
     };
     // Header: `✕ <title>`, then the run's facts in one dim line.
@@ -3285,7 +3879,10 @@ fn paint_run(frame: &mut Frame, ws: &mut Workspace, rect: Rect, focused: bool, m
         x,
         y,
         &clip(
-            vec![(format!("{} ", state.glyph(mode)), bold(state.role(), PANE)), (name, bold(GitRole::Text, PANE))],
+            vec![
+                (format!("{} ", state.glyph(mode)), bold(state.role(), PANE)),
+                (name, bold(GitRole::Text, PANE)),
+            ],
             right.saturating_sub(x),
         ),
         right,
@@ -3302,7 +3899,7 @@ fn paint_run(frame: &mut Frame, ws: &mut Workspace, rect: Rect, focused: bool, m
             facts.push(format!("attempt {attempt} of {latest}"));
         }
     }
-    // The list row's order (r11 gitea-04): the pull request or the branch, then the event.
+    // The list row's order: the pull request or the branch, then the event.
     let event = string(&run, "event");
     let pull = ws.pull_ref(&run);
     let pulled = pull.is_some();
@@ -3322,7 +3919,11 @@ fn paint_run(frame: &mut Frame, ws: &mut Workspace, rect: Rect, focused: bool, m
     let field = |key: &str| {
         Some(string(&run, key))
             .filter(|text| !text.is_empty())
-            .or_else(|| listed.map(|listed| string(listed, key)).filter(|text| !text.is_empty()))
+            .or_else(|| {
+                listed
+                    .map(|listed| string(listed, key))
+                    .filter(|text| !text.is_empty())
+            })
             .map(str::to_owned)
     };
     // A running run reads `running 2m` as its list row does, not `2m ago · running`; a
@@ -3330,7 +3931,10 @@ fn paint_run(frame: &mut Frame, ws: &mut Workspace, rect: Rect, focused: bool, m
     let created = field("createdAt");
     match state {
         State::Running => facts.push(
-            created.as_deref().and_then(elapsed).map_or_else(|| "running".into(), |time| format!("running {time}")),
+            created
+                .as_deref()
+                .and_then(elapsed)
+                .map_or_else(|| "running".into(), |time| format!("running {time}")),
         ),
         _ => {
             if state == State::Cancelled {
@@ -3363,8 +3967,12 @@ fn paint_run(frame: &mut Frame, ws: &mut Workspace, rect: Rect, focused: bool, m
         && !workflow.eq_ignore_ascii_case(&ws.event_word(event))
         && ws.chosen_flow().as_deref() != Some(workflow)
     {
-        // Labelled, so the last token is not a bare unexplained word (r11 gitea-04).
-        facts.push(if ws.terms().run_noun == "pipeline" { workflow.to_owned() } else { format!("workflow {workflow}") });
+        // Labelled, so the last token is not a bare unexplained word.
+        facts.push(if ws.terms().run_noun == "pipeline" {
+            workflow.to_owned()
+        } else {
+            format!("workflow {workflow}")
+        });
     }
     // Short of room whole facts go from the end (the workflow, then the actor…): never a
     // word cut in half or a dangling `·…`.
@@ -3372,23 +3980,56 @@ fn paint_run(frame: &mut Frame, ws: &mut Workspace, rect: Rect, focused: bool, m
     while facts.len() > 1 && usize::from(chrome::width(&facts.join(" · "))) > room {
         facts.pop();
     }
-    frame.grid.put_text_clipped(x, y, &chrome::ellipsize(&facts.join(" · "), room), st(GitRole::Muted, PANE), right);
+    frame.grid.put_text_clipped(
+        x,
+        y,
+        &chrome::ellipsize(&facts.join(" · "), room),
+        st(GitRole::Muted, PANE),
+        right,
+    );
     y += 1;
     // Notes: approval, cancellation, the last download, the find row.
     if run["dusty"]["needsApproval"].as_bool() == Some(true) {
-        chrome::put_spans(&mut frame.grid, x, y, &[
-            (format!("{} Waiting for approval · ", glyph(Glyph::CheckPending, mode)), st(GitRole::Modified, PANE)),
-            ("A".into(), bold(GitRole::Focus, PANE)),
-            (format!(" {}", ws.terms().approve_verb.to_lowercase()), st(GitRole::Muted, PANE)),
-        ], right);
+        chrome::put_spans(
+            &mut frame.grid,
+            x,
+            y,
+            &[
+                (
+                    format!(
+                        "{} Waiting for approval · ",
+                        glyph(Glyph::CheckPending, mode)
+                    ),
+                    st(GitRole::Modified, PANE),
+                ),
+                ("A".into(), bold(GitRole::Focus, PANE)),
+                (
+                    format!(" {}", ws.terms().approve_verb.to_lowercase()),
+                    st(GitRole::Muted, PANE),
+                ),
+            ],
+            right,
+        );
         y += 1;
     }
     if ws.actions.cancelling.contains(&id) && !state.finished() {
-        frame.grid.put_text_clipped(x, y, "Cancellation requested", bold(GitRole::Modified, PANE), right);
+        frame.grid.put_text_clipped(
+            x,
+            y,
+            "Cancellation requested",
+            bold(GitRole::Modified, PANE),
+            right,
+        );
         y += 1;
     }
     if let Some((_, receipt)) = ws.actions.receipt.as_ref().filter(|(run, _)| *run == id) {
-        chrome::receipt(&mut frame.grid, Rect::new(inner.x, y, inner.w, 1), chrome::ReceiptTone::Ok, receipt, mode);
+        chrome::receipt(
+            &mut frame.grid,
+            Rect::new(inner.x, y, inner.w, 1),
+            chrome::ReceiptTone::Ok,
+            receipt,
+            mode,
+        );
         y += 1;
     }
     let find_row = ws.actions.find.active().then_some(y);
@@ -3396,7 +4037,9 @@ fn paint_run(frame: &mut Frame, ws: &mut Workspace, rect: Rect, focused: bool, m
         y += 1;
     }
     for column in inner.x..inner.right() {
-        frame.grid.set_cell(column, y, "─", st(GitRole::Border, PANE));
+        frame
+            .grid
+            .set_cell(column, y, "─", st(GitRole::Border, PANE));
     }
     y += 1;
     let area = Rect::new(inner.x, y, inner.w, inner.bottom().saturating_sub(y));
@@ -3412,38 +4055,76 @@ fn paint_run(frame: &mut Frame, ws: &mut Workspace, rect: Rect, focused: bool, m
         None => Some(("Loading jobs…".to_owned(), GitRole::Muted)),
         Some(Ok(_)) => None,
     };
-    let rows = if message.is_some() { Vec::new() } else { ws.tree(mode) };
-    if let Some((text, role)) = message.or_else(|| rows.is_empty().then(|| (ws.no_jobs().to_owned(), GitRole::Muted))) {
-        frame.grid.put_text_clipped(x, area.y, &text, st(role, PANE), right);
+    let rows = if message.is_some() {
+        Vec::new()
+    } else {
+        ws.tree(mode)
+    };
+    if let Some((text, role)) = message.or_else(|| {
+        rows.is_empty()
+            .then(|| (ws.no_jobs().to_owned(), GitRole::Muted))
+    }) {
+        frame
+            .grid
+            .put_text_clipped(x, area.y, &text, st(role, PANE), right);
         // A run where nothing ran left nothing: it reads as a cancelled run does (A3-02).
-        let finished = ws.run_value(id).is_some_and(|run| State::of(run).finished());
-        if rows.is_empty() && finished && area.h > 1 && ws.capabilities().artifacts_list.reason().is_none() {
+        let finished = ws
+            .run_value(id)
+            .is_some_and(|run| State::of(run).finished());
+        if rows.is_empty()
+            && finished
+            && area.h > 1
+            && ws.capabilities().artifacts_list.reason().is_none()
+        {
             let line = format!("{} No artifacts", glyph(Glyph::File, mode));
-            frame.grid.put_text_clipped(x, area.y + 1, &line, st(GitRole::Muted, PANE), right);
+            frame
+                .grid
+                .put_text_clipped(x, area.y + 1, &line, st(GitRole::Muted, PANE), right);
         }
         return;
     }
     let found = paint_tree(frame, ws, area, &rows, focused, mode);
     if let Some(row) = find_row {
         let find = &ws.actions.find;
-        let text = format!("{} {}{}", glyph(Glyph::Search, mode), find.query, if find.editing { "▏" } else { "" });
-        frame.grid.put_text_clipped(x, row, &text, bold(GitRole::Modified, PANE), right);
+        let text = format!(
+            "{} {}{}",
+            glyph(Glyph::Search, mode),
+            find.query,
+            if find.editing { "▏" } else { "" }
+        );
+        frame
+            .grid
+            .put_text_clipped(x, row, &text, bold(GitRole::Modified, PANE), right);
         let count = if find.query.is_empty() {
             String::new()
         } else if found == 0 {
             "no matches".into()
         } else {
-            format!("{}/{found} matches", ws.actions.find_current.min(found - 1) + 1)
+            format!(
+                "{}/{found} matches",
+                ws.actions.find_current.min(found - 1) + 1
+            )
         };
         frame.grid.put_text_clipped(
             right.saturating_sub(chrome::width(&count)),
             row,
             &count,
-            st(if found == 0 && !find.query.is_empty() { GitRole::Removed } else { GitRole::Modified }, PANE),
+            st(
+                if found == 0 && !find.query.is_empty() {
+                    GitRole::Removed
+                } else {
+                    GitRole::Modified
+                },
+                PANE,
+            ),
             right,
         );
         if find.editing && focused {
-            frame.cursor = Some((x + 2 + chrome::width(&find.query), row, SetCursorStyle::SteadyBar));
+            frame.cursor = Some((
+                x + 2 + chrome::width(&find.query),
+                row,
+                SetCursorStyle::SteadyBar,
+            ));
         }
     }
 }
@@ -3451,7 +4132,13 @@ fn paint_run(frame: &mut Frame, ws: &mut Workspace, rect: Rect, focused: bool, m
 fn paint_attempts(frame: &mut Frame, ws: &Workspace, area: Rect, mode: ExplorerIconMode) {
     let latest = ws.latest_attempt();
     let id = ws.run_id.unwrap_or(0);
-    frame.grid.put_text_clipped(area.x + 1, area.y, "Attempts · Enter shows one · Esc closes", st(GitRole::Muted, PANE), area.right() - 1);
+    frame.grid.put_text_clipped(
+        area.x + 1,
+        area.y,
+        "Attempts · Enter shows one · Esc closes",
+        st(GitRole::Muted, PANE),
+        area.right() - 1,
+    );
     let items = (1..=latest)
         .rev()
         .map(|attempt| {
@@ -3464,24 +4151,46 @@ fn paint_attempts(frame: &mut Frame, ws: &Workspace, area: Rect, mode: ExplorerI
             let mut right = Vec::new();
             if let Some(run) = value {
                 let state = State::of(run);
-                left.insert(0, (format!("{} ", state.glyph(mode)), st(state.role(), PANE)));
+                left.insert(
+                    0,
+                    (format!("{} ", state.glyph(mode)), st(state.role(), PANE)),
+                );
                 if let Some(seconds) = ws.run_seconds(run) {
                     right.push((duration(seconds), st(GitRole::Muted, PANE)));
                 }
             } else {
                 left.insert(0, ("  ".into(), st(GitRole::Muted, PANE)));
             }
-            Item { left, right, more: None }
+            Item {
+                left,
+                right,
+                more: None,
+            }
         })
         .collect::<Vec<_>>();
     let rows = Rect::new(area.x, area.y + 1, area.w, area.h.saturating_sub(1));
-    if let Some(row) = paint_items(&mut frame.grid, rows, &items, Some(ws.actions.attempt_cursor), true, mode) {
+    if let Some(row) = paint_items(
+        &mut frame.grid,
+        rows,
+        &items,
+        Some(ws.actions.attempt_cursor),
+        true,
+        mode,
+    ) {
         frame.cursor = Some((rows.x, row, SetCursorStyle::SteadyBar));
     }
 }
 
 /// The tree with its cursor, scroll, pan and find marks; returns the find's match count.
-fn paint_tree(frame: &mut Frame, ws: &mut Workspace, area: Rect, rows: &[Row], focused: bool, mode: ExplorerIconMode) -> usize {
+#[allow(clippy::single_range_in_vec_init)] // a row that does not wrap is one range
+fn paint_tree(
+    frame: &mut Frame,
+    ws: &mut Workspace,
+    area: Rect,
+    rows: &[Row],
+    focused: bool,
+    mode: ExplorerIconMode,
+) -> usize {
     let cursor = ws.cursor_index(rows);
     let right = area.right().saturating_sub(1);
     let x0 = area.x + 1;
@@ -3494,10 +4203,17 @@ fn paint_tree(frame: &mut Frame, ws: &mut Workspace, area: Rect, rows: &[Row], f
     let indent = |depth: u16| x0 + depth * 2;
     let text_x = |row: &Row| indent(row.depth) + digits + 1;
     let room = |row: &Row| usize::from(right.saturating_sub(text_x(row)));
-    ws.detail_width = rows.iter().find(|row| row.log.is_some()).map_or(usize::from(area.w), room);
+    ws.detail_width = rows
+        .iter()
+        .find(|row| row.log.is_some())
+        .map_or(usize::from(area.w), room);
     let wrap = !ws.actions.nowrap;
     let whole = !ws.actions.find.active();
-    let finding = if whole { String::new() } else { ws.actions.find.query.clone() };
+    let finding = if whole {
+        String::new()
+    } else {
+        ws.actions.find.query.clone()
+    };
     let chunks = |row: &Row| -> Vec<Range<usize>> {
         let Some((_, line)) = &row.log else {
             return vec![0..0];
@@ -3519,9 +4235,15 @@ fn paint_tree(frame: &mut Frame, ws: &mut Workspace, area: Rect, rows: &[Row], f
     if ws.actions.auto {
         // The first error with its job and steps above it when they fit; else with its
         // step's header above it; else a third down.
-        let job = rows[..=cursor].iter().rposition(|row| matches!(row.node, Node::Job(_))).unwrap_or(0);
+        let job = rows[..=cursor]
+            .iter()
+            .rposition(|row| matches!(row.node, Node::Job(_)))
+            .unwrap_or(0);
         let job_top: usize = heights[..job].iter().sum();
-        let step = rows[..=cursor].iter().rposition(|row| matches!(row.node, Node::Step(..))).unwrap_or(job);
+        let step = rows[..=cursor]
+            .iter()
+            .rposition(|row| matches!(row.node, Node::Step(..)))
+            .unwrap_or(job);
         let step_top: usize = heights[..step].iter().sum();
         let fits = |from: usize| top + heights[cursor] <= from + height * 3 / 4;
         scroll = if fits(job_top) {
@@ -3538,7 +4260,9 @@ fn paint_tree(frame: &mut Frame, ws: &mut Workspace, area: Rect, rows: &[Row], f
         let mut span = heights[cursor];
         if rows[cursor].fold == Some(true) {
             for (row, rows_high) in rows[cursor + 1..].iter().zip(&heights[cursor + 1..]) {
-                if row.depth <= rows[cursor].depth || span + rows_high > (height / 2).max(heights[cursor]) {
+                if row.depth <= rows[cursor].depth
+                    || span + rows_high > (height / 2).max(heights[cursor])
+                {
                     break;
                 }
                 span += rows_high;
@@ -3546,7 +4270,11 @@ fn paint_tree(frame: &mut Frame, ws: &mut Workspace, area: Rect, rows: &[Row], f
         }
         // Artifacts are the tree's last node: in it, every archive comes into view when the
         // rest of the tree fits (A3-01).
-        if matches!(rows[cursor].node, Node::Artifacts | Node::Artifact(_) | Node::File(..)) && total - top <= height {
+        if matches!(
+            rows[cursor].node,
+            Node::Artifacts | Node::Artifact(_) | Node::File(..)
+        ) && total - top <= height
+        {
             span = span.max(total - top);
         }
         if top + span > scroll + height {
@@ -3562,9 +4290,14 @@ fn paint_tree(frame: &mut Frame, ws: &mut Workspace, area: Rect, rows: &[Row], f
         .iter()
         .enumerate()
         .filter_map(|(index, row)| row.log.as_ref().map(|(_, line)| (index, line)))
-        .flat_map(|(index, line)| matches(&line.text, &query).into_iter().map(move |range| (index, range)))
+        .flat_map(|(index, line)| {
+            matches(&line.text, &query)
+                .into_iter()
+                .map(move |range| (index, range))
+        })
         .collect::<Vec<_>>();
-    let current = (!found.is_empty()).then(|| found[ws.actions.find_current.min(found.len() - 1)].clone());
+    let current =
+        (!found.is_empty()).then(|| found[ws.actions.find_current.min(found.len() - 1)].clone());
     // The current match stays in view at this frame's width (the pan was set at another).
     if !wrap
         && ws.actions.follow_match
@@ -3583,7 +4316,11 @@ fn paint_tree(frame: &mut Frame, ws: &mut Workspace, area: Rect, rows: &[Row], f
     let cursor_part = current
         .as_ref()
         .filter(|(line, _)| wrap && *line == cursor)
-        .and_then(|(_, range)| chunks(&rows[cursor]).iter().position(|part| part.contains(&range.start)))
+        .and_then(|(_, range)| {
+            chunks(&rows[cursor])
+                .iter()
+                .position(|part| part.contains(&range.start))
+        })
         .unwrap_or(0);
     let mut visual = 0usize;
     for (index, row) in rows.iter().enumerate() {
@@ -3594,7 +4331,11 @@ fn paint_tree(frame: &mut Frame, ws: &mut Workspace, area: Rect, rows: &[Row], f
         }
         let selected = index == cursor;
         let surface = if selected {
-            if focused { GitSurface::Cursor } else { GitSurface::CursorInactive }
+            if focused {
+                GitSurface::Cursor
+            } else {
+                GitSurface::CursorInactive
+            }
         } else {
             PANE
         };
@@ -3609,7 +4350,11 @@ fn paint_tree(frame: &mut Frame, ws: &mut Workspace, area: Rect, rows: &[Row], f
                 break;
             }
             if selected {
-                chrome::fill(&mut frame.grid, Rect::new(area.x, y, area.w, 1), st(GitRole::Text, surface));
+                chrome::fill(
+                    &mut frame.grid,
+                    Rect::new(area.x, y, area.w, 1),
+                    st(GitRole::Text, surface),
+                );
                 if focused && part == cursor_part && !ws.actions.find.editing {
                     frame.cursor = Some((area.x, y, SetCursorStyle::SteadyBar));
                 }
@@ -3621,33 +4366,73 @@ fn paint_tree(frame: &mut Frame, ws: &mut Workspace, area: Rect, rows: &[Row], f
                     at = frame.grid.put_text_clipped(
                         at,
                         y,
-                        &format!("{} ", glyph(if open { Glyph::FoldOpen } else { Glyph::FoldClosed }, mode)),
+                        &format!(
+                            "{} ",
+                            glyph(
+                                if open {
+                                    Glyph::FoldOpen
+                                } else {
+                                    Glyph::FoldClosed
+                                },
+                                mode
+                            )
+                        ),
                         st(GitRole::Muted, surface),
                         right,
                     );
                 } else if !matches!(row.node, Node::Note(..) | Node::File(..) | Node::Artifacts) {
                     // `No artifacts` has no fold mark and sits in its column, at the run's
-                    // level, not under the last job (r9 R9-06).
+                    // level, not under the last job.
                     at += 2;
                 }
                 let right_w = chrome::spans_width(&row.right);
                 // A job's or step's time sits at most STEP_ROW columns in, by its name.
                 let right = right.min(area.x + check_job::STEP_ROW as u16);
                 let end = right.saturating_sub(right_w + u16::from(right_w > 0));
-                chrome::put_spans(&mut frame.grid, at, y, &spans_on(&clip(row.left.clone(), end.saturating_sub(at)), surface), end);
+                chrome::put_spans(
+                    &mut frame.grid,
+                    at,
+                    y,
+                    &spans_on(&clip(row.left.clone(), end.saturating_sub(at)), surface),
+                    end,
+                );
                 if right_w > 0 && at + right_w < right {
-                    chrome::put_spans(&mut frame.grid, right - right_w, y, &spans_on(&row.right, surface), right);
+                    chrome::put_spans(
+                        &mut frame.grid,
+                        right - right_w,
+                        y,
+                        &spans_on(&row.right, surface),
+                        right,
+                    );
                 }
                 continue;
             };
             let x_text = text_x(row);
             if part == 0 {
                 let label = format!("{number:>w$}", w = usize::from(digits));
-                frame.grid.put_text_clipped(indent(row.depth), y, &label, st(if selected { GitRole::Focus } else { GitRole::Muted }, surface), right);
+                frame.grid.put_text_clipped(
+                    indent(row.depth),
+                    y,
+                    &label,
+                    st(
+                        if selected {
+                            GitRole::Focus
+                        } else {
+                            GitRole::Muted
+                        },
+                        surface,
+                    ),
+                    right,
+                );
             }
-            let line_matches = found.iter().filter(|(at, _)| *at == index).map(|(_, range)| range.clone()).collect::<Vec<_>>();
+            let line_matches = found
+                .iter()
+                .filter(|(at, _)| *at == index)
+                .map(|(_, range)| range.clone())
+                .collect::<Vec<_>>();
             let style_at = |at: usize| -> Style {
-                if let Some((_, current_range)) = current.as_ref().filter(|(line, _)| *line == index)
+                if let Some((_, current_range)) =
+                    current.as_ref().filter(|(line, _)| *line == index)
                     && current_range.contains(&at)
                 {
                     return bold(GitRole::OnFocus, GitSurface::ChipActive);
@@ -3668,17 +4453,32 @@ fn paint_tree(frame: &mut Frame, ws: &mut Workspace, area: Rect, rows: &[Row], f
                     }
                     weight |= sgr.bold;
                 }
-                if line.link.as_ref().is_some_and(|(range, _, _)| range.contains(&at)) {
+                if line
+                    .link
+                    .as_ref()
+                    .is_some_and(|(range, _, _)| range.contains(&at))
+                {
                     role = GitRole::Link;
                 }
-                if weight { bold(role, surface) } else { st(role, surface) }
+                if weight {
+                    bold(role, surface)
+                } else {
+                    st(role, surface)
+                }
             };
             let mut column = 0usize;
             let mut x = x_text;
             let mut clipped = false;
             // A test line drawn from inside its id (R9-07) says so.
-            if part == 0 && range.start > 0 && !line.text[..range.start].chars().all(|c| "=-─═━_~*#".contains(c)) {
-                frame.grid.put_text_clipped(x, y, "…", st(GitRole::Muted, surface), right);
+            if part == 0
+                && range.start > 0
+                && !line.text[..range.start]
+                    .chars()
+                    .all(|c| "=-─═━_~*#".contains(c))
+            {
+                frame
+                    .grid
+                    .put_text_clipped(x, y, "…", st(GitRole::Muted, surface), right);
                 x += 1;
             }
             for (at, grapheme) in line.text[range.clone()].grapheme_indices(true) {
@@ -3693,17 +4493,29 @@ fn paint_tree(frame: &mut Frame, ws: &mut Workspace, area: Rect, rows: &[Row], f
                     break;
                 }
                 if w > 0 {
-                    frame.grid.put_text_clipped(x, y, grapheme, style_at(at), right);
+                    frame
+                        .grid
+                        .put_text_clipped(x, y, grapheme, style_at(at), right);
                 }
                 x += w as u16;
                 column += w;
             }
             if pan > 0 && line.text.width() > 0 {
-                frame.grid.set_cell(x_text - 1, y, glyph(Glyph::ClipLeft, mode), st(GitRole::Muted, surface));
+                frame.grid.set_cell(
+                    x_text - 1,
+                    y,
+                    glyph(Glyph::ClipLeft, mode),
+                    st(GitRole::Muted, surface),
+                );
             }
             // A ruler (`====`, `----`) is cut at the edge without a mark: nothing is lost.
             if clipped && !ruler(&line.text) {
-                frame.grid.set_cell(right - 1, y, glyph(Glyph::ClipRight, mode), st(GitRole::Muted, surface));
+                frame.grid.set_cell(
+                    right - 1,
+                    y,
+                    glyph(Glyph::ClipRight, mode),
+                    st(GitRole::Muted, surface),
+                );
             }
             if selected && part == cursor_part && focused && !ws.actions.find.editing {
                 frame.cursor = Some((x_text, y, SetCursorStyle::SteadyBar));
@@ -3726,7 +4538,13 @@ fn paint_tree(frame: &mut Frame, ws: &mut Workspace, area: Rect, rows: &[Row], f
     if below > 0 && area.w > 16 {
         let cue = format!(" {} {below} more ", glyph(Glyph::FoldOpen, mode));
         let cue_x = area.right().saturating_sub(chrome::width(&cue) + 1);
-        frame.grid.put_text_clipped(cue_x, area.bottom(), &cue, st(GitRole::Muted, PANE), area.right());
+        frame.grid.put_text_clipped(
+            cue_x,
+            area.bottom(),
+            &cue,
+            st(GitRole::Muted, PANE),
+            area.right(),
+        );
     }
     found.len()
 }
@@ -3740,7 +4558,9 @@ fn footer(app: &GitScreen, frame: &mut Frame, rect: Rect) {
         let multiline = form.fields.iter().any(|field| field.multiline);
         let verb = match &form.action {
             FormAction::Github(Action::Rerun(_)) => "re-run jobs",
-            FormAction::Github(Action::Cancel(_)) if ws.terms().run_noun == "pipeline" => "cancel pipeline",
+            FormAction::Github(Action::Cancel(_)) if ws.terms().run_noun == "pipeline" => {
+                "cancel pipeline"
+            }
             FormAction::Github(Action::Cancel(_)) => "cancel run",
             FormAction::Github(Action::Dispatch(_)) => "run workflow",
             FormAction::Github(Action::Approve(_)) => "approve",
@@ -3750,19 +4570,30 @@ fn footer(app: &GitScreen, frame: &mut Frame, rect: Rect) {
         };
         // The safe button (`Keep running`, `Cancel`) holds focus: Enter closes the sheet.
         let safe = form.selected == form.fields.len() + 1;
-        let keep = if matches!(&form.action, FormAction::Github(Action::Cancel(_))) { "keep running" } else { "close" };
+        let keep = if matches!(&form.action, FormAction::Github(Action::Cancel(_))) {
+            "keep running"
+        } else {
+            "close"
+        };
         // Esc says what it does: on the Cancel sheet it keeps the run, elsewhere it cancels
         // the sheet, as every other sheet's Esc does.
-        let esc = if matches!(&form.action, FormAction::Github(Action::Cancel(_))) { "keep running" } else { "cancel" };
+        let esc = if matches!(&form.action, FormAction::Github(Action::Cancel(_))) {
+            "keep running"
+        } else {
+            "cancel"
+        };
         let mut hints = if safe {
             vec![("Enter", keep), ("Tab", "switch"), ("Esc", esc)]
         } else {
-            vec![(if multiline { "Ctrl+Enter" } else { "Enter" }, verb), ("Esc", esc)]
+            vec![
+                (if multiline { "Ctrl+Enter" } else { "Enter" }, verb),
+                ("Esc", esc),
+            ]
         };
         if several {
             hints.extend([("Tab", "next field"), ("Shift+Tab", "previous")]);
         }
-        let message = (!app.notice.is_empty()).then(|| (app.notice.as_str(), true));
+        let message = (!app.notice.is_empty()).then_some((app.notice.as_str(), true));
         chrome::footer(&mut frame.grid, rect, &hints, "", message);
         return;
     }
@@ -3787,30 +4618,54 @@ fn footer(app: &GitScreen, frame: &mut Frame, rect: Rect) {
         .map(|(key, label)| (format!("{} {key}", keys.leader_name()), label))
         .collect::<Vec<_>>();
     let hints: Vec<(&str, &str)> = if view.find.editing || view.filter.editing {
-        vec![("Enter", if view.find.editing { "find" } else { "filter" }), ("Esc", "cancel")]
+        vec![
+            ("Enter", if view.find.editing { "find" } else { "filter" }),
+            ("Esc", "cancel"),
+        ]
     } else if view.picker {
         vec![("Enter", "choose"), ("j k", "move"), ("Esc", "close")]
     } else if ws.leader_pending() {
         // The leader waits for its chord: which keys finish it (no which-key sheet here).
-        let mut hints = chords.iter().map(|(key, label)| (key.as_str(), *label)).collect::<Vec<_>>();
+        let mut hints = chords
+            .iter()
+            .map(|(key, label)| (key.as_str(), *label))
+            .collect::<Vec<_>>();
         hints.push(("Esc", "cancel"));
         hints
     } else if !view.right && view.workflows {
-        let mut hints = vec![("j k", "choose"), ("Enter", "runs"), ("d", "dispatch"), ("Tab", "panels")];
+        let mut hints = vec![
+            ("j k", "choose"),
+            ("Enter", "runs"),
+            ("d", "dispatch"),
+            ("Tab", "panels"),
+        ];
         if !sidebar.is_empty() {
             hints.push((sidebar.as_str(), "sidebar"));
         }
         hints
     } else if !view.right {
-        // The run under the cursor still going: `x cancel`, not `r rerun` (r15 narrow pass).
-        let running = ws.run_id.and_then(|id| ws.run_value(id)).is_some_and(|run| !State::of(run).finished());
-        let rerun = if running { ("x", "cancel") } else { ("r", "re-run") };
-        let mut hints = vec![("Enter", "open"), ("[ ]", "sections"), ("/", "filter"), ("F", "narrow"), rerun];
+        // The run under the cursor still going: `x cancel`, not `r rerun`.
+        let running = ws
+            .run_id
+            .and_then(|id| ws.run_value(id))
+            .is_some_and(|run| !State::of(run).finished());
+        let rerun = if running {
+            ("x", "cancel")
+        } else {
+            ("r", "re-run")
+        };
+        let mut hints = vec![
+            ("Enter", "open"),
+            ("[ ]", "sections"),
+            ("/", "filter"),
+            ("F", "narrow"),
+            rerun,
+        ];
         // Opened from Notifications: the way back reads second, so a narrow row keeps it.
         if ws.notify.back {
             hints.insert(1, ("Esc", "back"));
         }
-        // The sidebar toggle ahead of `d` and `o`, so 120 columns keep it (r16 notif-actions-02).
+        // The sidebar toggle ahead of `d` and `o`, so 120 columns keep it.
         if !sidebar.is_empty() {
             hints.push((sidebar.as_str(), "sidebar"));
         }
@@ -3820,7 +4675,12 @@ fn footer(app: &GitScreen, frame: &mut Frame, rect: Rect) {
         vec![("Enter", "show attempt"), ("j k", "move"), ("Esc", "close")]
     } else if view.find.active() {
         if view.nowrap {
-            vec![("n N", "matches"), ("w", "wrap"), ("H L", "pan"), ("Esc", "clear")]
+            vec![
+                ("n N", "matches"),
+                ("w", "wrap"),
+                ("H L", "pan"),
+                ("Esc", "clear"),
+            ]
         } else {
             vec![("n N", "matches"), ("w", "no wrap"), ("Esc", "clear")]
         }
@@ -3829,51 +4689,71 @@ fn footer(app: &GitScreen, frame: &mut Frame, rect: Rect) {
         let at = ws.cursor_index(&rows);
         let row = rows.get(at);
         // (priority, key, label) in the order they read; the way back (`Esc list`) and the
-        // way out of the full log (`f steps`) are kept first when the row is short (§3.38).
+        // way out of the full log (`f steps`) are kept first when the row is short.
         let mut hints: Vec<(u8, &str, &str)> = Vec::new();
         match row {
             Some(row) if row.link().is_some() => hints.push((1, "Enter", "open file")),
             // An expired archive can be neither downloaded nor opened: no hint offers it.
             Some(row) if ws.expired_artifact(&row.node) => {}
-            Some(row) if matches!(row.node, Node::Artifact(_)) => hints.extend([(1, "Enter", "files"), (6, "s", "download")]),
+            Some(row) if matches!(row.node, Node::Artifact(_)) => {
+                hints.extend([(1, "Enter", "files"), (6, "s", "download")])
+            }
             Some(row) if row.fold == Some(true) => hints.push((1, "Enter", "fold")),
             Some(row) if row.fold == Some(false) => hints.push((1, "Enter", "unfold")),
-            // A log line folds its step (r12 gitlab-08).
+            // A log line folds its step.
             Some(row) if matches!(row.node, Node::Line(..)) => hints.push((1, "Enter", "fold")),
             _ => {}
         }
-        let full = row.and_then(|row| job_of(&row.node)).is_some_and(|job| view.full.contains(&job));
+        let full = row
+            .and_then(|row| job_of(&row.node))
+            .is_some_and(|job| view.full.contains(&job));
         // Opened from a pull request's check, Esc goes back to it (R9-05).
-        // Opened from Notifications, Esc goes back there (§3.35.1 N11).
+        // Opened from Notifications, Esc goes back there.
         back = if ws.notify.back {
             Some("back".into())
         } else {
-            ws.return_to.as_ref().map(|target| format!("back to {}", target.label))
+            ws.return_to
+                .as_ref()
+                .map(|target| format!("back to {}", target.label))
         };
         hints.extend([
             (2, "f", if full { "steps" } else { "full log" }),
             // Zoomed, the way back is as needed as `Esc list` (A2-02).
-            if view.zoom { (0, "z", "unzoom") } else { (7, "z", "zoom") },
+            if view.zoom {
+                (0, "z", "unzoom")
+            } else {
+                (7, "z", "zoom")
+            },
             (3, "n", "next error"),
         ]);
         // Offered where the forge is known to keep attempts, or this run has had several
         // (an unprobed Gitea may predate 1.27's attempts API).
-        if matches!(ws.capabilities().attempts, crate::forge::capability::Cap::Yes) || ws.latest_attempt() > 1 {
-            // Above `w`: attempts are the only way to a flaky step (r11 GL-11).
+        if matches!(
+            ws.capabilities().attempts,
+            crate::forge::capability::Cap::Yes
+        ) || ws.latest_attempt() > 1
+        {
+            // Above `w`: attempts are the only way to a flaky step.
             hints.push((6, "a", "attempts"));
         }
         // Re-run what the cursor is on: its job, else the failed jobs (the sheet offers all).
         // A run still going cannot be re-run (`r` says so); its key is `x cancel` (r15
         // narrow pass: the footer offered `r rerun` on #215 while it ran).
-        let running = ws.run_id.and_then(|id| ws.run_value(id)).is_some_and(|run| !State::of(run).finished());
+        let running = ws
+            .run_id
+            .and_then(|id| ws.run_value(id))
+            .is_some_and(|run| !State::of(run).finished());
         let rerun = match ws.run_id {
             _ if running => "cancel",
             Some(id) if ws.run_jobs(id).0 > 0 => "re-run failed",
-            Some(id) if ws.cursor_job(id).is_some() => "rerun job",
-            _ => "rerun",
+            Some(id) if ws.cursor_job(id).is_some() => "re-run job",
+            _ => "re-run",
         };
+        // Signed out, a run can only be read: the key still says why when pressed.
+        if !ws.read_only() {
+            hints.push((4, if running { "x" } else { "r" }, rerun));
+        }
         hints.extend([
-            (4, if running { "x" } else { "r" }, rerun),
             (5, "/", "find"),
             (8, "o", "browser"),
             (8, "w", if view.nowrap { "wrap" } else { "no wrap" }),
@@ -3890,14 +4770,29 @@ fn footer(app: &GitScreen, frame: &mut Frame, rect: Rect) {
     } else {
         view.filter.query.clone()
     };
+    // Signed out: Actions' writes leave the footer, as the other tabs' do (pressing one
+    // still says why).
+    let mut hints = hints;
+    if ws.read_only() {
+        hints
+            .retain(|hint| !matches!(*hint, ("x", "cancel") | ("r", "re-run") | ("d", "dispatch")));
+    }
     chrome::footer_with(&mut frame.grid, rect, &hints, &context, message, usize::MAX);
 }
 
 /// The hints `chrome::footer_with` will show whole (`? keys` after them), chosen by priority
-/// (0 first) until the width runs out, and kept in reading order (§3.38).
-fn fit_hints<'a>(hints: &[(u8, &'a str, &'a str)], width: u16, message: Option<(&str, bool)>) -> Vec<(&'a str, &'a str)> {
+/// (0 first) until the width runs out, and kept in reading order.
+fn fit_hints<'a>(
+    hints: &[(u8, &'a str, &'a str)],
+    width: u16,
+    message: Option<(&str, bool)>,
+) -> Vec<(&'a str, &'a str)> {
     let room = width.saturating_sub(1);
-    let context = message.filter(|(text, _)| !text.is_empty()).map_or(0, |(text, error)| chrome::width(text) + 2 + if error { 2 } else { 0 });
+    let context = message
+        .filter(|(text, _)| !text.is_empty())
+        .map_or(0, |(text, error)| {
+            chrome::width(text) + 2 + if error { 2 } else { 0 }
+        });
     let mut used = 6 + context;
     let mut order = (0..hints.len()).collect::<Vec<_>>();
     order.sort_by_key(|index| hints[*index].0);
@@ -3912,7 +4807,9 @@ fn fit_hints<'a>(hints: &[(u8, &'a str, &'a str)], width: u16, message: Option<(
         kept.push(index);
     }
     kept.sort_unstable();
-    kept.into_iter().map(|index| (hints[index].1, hints[index].2)).collect()
+    kept.into_iter()
+        .map(|index| (hints[index].1, hints[index].2))
+        .collect()
 }
 
 /// What the Git tutor's Actions lessons check (`src/git/screen/tutor`): read only.
@@ -3964,8 +4861,7 @@ impl Workspace {
     }
 }
 
-
-/// A run title cut to `room` cells at a seam (r11 GL-06): whole ` · ` parts go from the end
+/// A run title cut to `room` cells at a seam: whole ` · ` parts go from the end
 /// first, then the cut falls after a `/` or a space, so `refs/merge-requests/13/…` never
 /// keeps half a path segment or a dangling `·`.
 fn fit_title(title: &str, room: usize) -> String {
@@ -3997,12 +4893,19 @@ fn fit_title(title: &str, room: usize) -> String {
 /// a line 0, else why not. A runner's absolute path (`/home/runner/work/orbit/orbit/src/
 /// queue.py`) is matched by its longest tail that is a file here.
 fn source_target(root: &std::path::Path, path: &str, line: u32) -> String {
-    let parts = path.split('/').filter(|part| !part.is_empty()).collect::<Vec<_>>();
+    let parts = path
+        .split('/')
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>();
     for start in 0..parts.len() {
         let relative = parts[start..].join("/");
         let candidate = root.join(&relative);
         if candidate.is_file() {
-            return if line > 0 { format!("open-at:{line}:{relative}") } else { format!("open:{}", candidate.display()) };
+            return if line > 0 {
+                format!("open-at:{line}:{relative}")
+            } else {
+                format!("open:{}", candidate.display())
+            };
         }
     }
     format!("{path} is not in this repository")
@@ -4020,17 +4923,40 @@ mod tests {
         let gateway = calm(&ws, "Network error · 502 Bad Gateway");
         assert_eq!(gateway, "github.com is having problems · R retry");
         let limited = calm(&ws, "Rate limited · retry in 711s");
-        assert!(limited.starts_with("Rate limited by github.com · resets in "), "{limited}");
-        assert!(limited.ends_with(" · R retry once it resets") && !limited.contains("711s"), "{limited}");
+        assert!(
+            limited.starts_with("Rate limited by github.com · resets in "),
+            "{limited}"
+        );
+        assert!(
+            limited.ends_with(" · R retry once it resets") && !limited.contains("711s"),
+            "{limited}"
+        );
         let offline = calm(&ws, "Network error · error sending request");
-        assert_eq!(offline, "Can't reach github.com · you may be offline · R retry");
+        assert_eq!(
+            offline,
+            "Can't reach github.com · you may be offline · R retry"
+        );
         // Painted where the runs list would be: the words, never the raw status line.
         let text = |ws: &mut Workspace| {
-            let mut frame = Frame { grid: CellGrid::new(190, 40), cursor: None };
-            page(&mut frame, ws, Rect::new(0, 1, 190, 38), ExplorerIconMode::Unicode);
-            (0..40).map(|y| frame.grid.row_text(y)).collect::<Vec<_>>().join("\n")
+            let mut frame = Frame {
+                grid: CellGrid::new(190, 40),
+                cursor: None,
+            };
+            page(
+                &mut frame,
+                ws,
+                Rect::new(0, 1, 190, 38),
+                ExplorerIconMode::Unicode,
+            );
+            (0..40)
+                .map(|y| frame.grid.row_text(y))
+                .collect::<Vec<_>>()
+                .join("\n")
         };
-        for (error, words) in [("Network error · 502 Bad Gateway", "is having problems"), ("Rate limited · retry in 711s", "Rate limited by github.com")] {
+        for (error, words) in [
+            ("Network error · 502 Bad Gateway", "is having problems"),
+            ("Rate limited · retry in 711s", "Rate limited by github.com"),
+        ] {
             ws.cache.insert(Key::Runs(0), Err(error.into()));
             let shown = text(&mut ws);
             assert!(shown.contains(words), "{words} in:\n{shown}");
@@ -4039,7 +4965,10 @@ mod tests {
                 assert!(row.contains(&gateway), "{row}");
                 assert_eq!(row.matches("R retry").count(), 1, "{row}");
             }
-            assert!(!shown.contains("Bad Gateway") && !shown.contains("711s"), "{shown}");
+            assert!(
+                !shown.contains("Bad Gateway") && !shown.contains("711s"),
+                "{shown}"
+            );
         }
     }
 
@@ -4047,7 +4976,7 @@ mod tests {
     fn a_row_says_its_place_and_event_once() {
         let ws = workspace();
         // GitLab names a pipeline with no commit title after its ref and source: the
-        // second line keeps who and when, not `topic-11 · push` again (r16 gitlab-09).
+        // second line keeps who and when, not `topic-11 · push` again.
         let run = json!({
             "displayTitle": "topic-11 · push",
             "event": "push",
@@ -4056,7 +4985,10 @@ mod tests {
             "dusty": { "actor": "maya" },
         });
         let meta = ws.run_meta(&run, &ws.run_title(&run), 80);
-        assert!(meta.contains("maya") && !meta.contains("topic-11") && !meta.contains("push"), "{meta}");
+        assert!(
+            meta.contains("maya") && !meta.contains("topic-11") && !meta.contains("push"),
+            "{meta}"
+        );
         // A commit title leaves both on the second line.
         let titled = json!({
             "displayTitle": "Bound retries",
@@ -4066,7 +4998,10 @@ mod tests {
             "dusty": { "actor": "maya" },
         });
         let meta = ws.run_meta(&titled, &ws.run_title(&titled), 80);
-        assert!(meta.contains("topic-11") && meta.contains("push") && meta.contains("maya"), "{meta}");
+        assert!(
+            meta.contains("topic-11") && meta.contains("push") && meta.contains("maya"),
+            "{meta}"
+        );
     }
 
     #[test]
@@ -4075,17 +5010,31 @@ mod tests {
         std::fs::create_dir_all(root.path().join("src")).unwrap();
         std::fs::write(root.path().join("src/queue.py"), "pass\n").unwrap();
         // A test failure's `src/queue.py:42`, and the runner's absolute copy of it.
-        assert_eq!(source_target(root.path(), "src/queue.py", 42), "open-at:42:src/queue.py");
+        assert_eq!(
+            source_target(root.path(), "src/queue.py", 42),
+            "open-at:42:src/queue.py"
+        );
         assert_eq!(
             source_target(root.path(), "/home/runner/work/orbit/orbit/src/queue.py", 7),
             "open-at:7:src/queue.py"
         );
         let whole = source_target(root.path(), "src/queue.py", 0);
-        assert_eq!(whole, format!("open:{}", root.path().join("src/queue.py").display()));
-        assert_eq!(source_target(root.path(), "lib/gone.py", 3), "lib/gone.py is not in this repository");
+        assert_eq!(
+            whole,
+            format!("open:{}", root.path().join("src/queue.py").display())
+        );
+        assert_eq!(
+            source_target(root.path(), "lib/gone.py", 3),
+            "lib/gone.py is not in this repository"
+        );
         // From the log text itself, as Enter on the line reads it.
-        let (_, path, at) = link("FAILED tests/test_queue.py::test_backoff - src/queue.py:42: AssertionError").unwrap();
-        assert_eq!(source_target(root.path(), &path, at), "open-at:42:src/queue.py");
+        let (_, path, at) =
+            link("FAILED tests/test_queue.py::test_backoff - src/queue.py:42: AssertionError")
+                .unwrap();
+        assert_eq!(
+            source_target(root.path(), &path, at),
+            "open-at:42:src/queue.py"
+        );
     }
 
     #[test]
@@ -4094,9 +5043,21 @@ mod tests {
         assert_eq!(workspace.actions_badge(), Some((1, false)));
         let running = json!({"databaseId": 502, "status": "in_progress", "conclusion": null});
         let passed = json!({"databaseId": 503, "status": "completed", "conclusion": "success"});
-        workspace.cache.insert(Key::Runs(0), Ok(Reply { text: String::new(), value: json!([running, passed.clone()]) }));
+        workspace.cache.insert(
+            Key::Runs(0),
+            Ok(Reply {
+                text: String::new(),
+                value: json!([running, passed.clone()]),
+            }),
+        );
         assert_eq!(workspace.actions_badge(), Some((0, true)));
-        workspace.cache.insert(Key::Runs(0), Ok(Reply { text: String::new(), value: json!([passed]) }));
+        workspace.cache.insert(
+            Key::Runs(0),
+            Ok(Reply {
+                text: String::new(),
+                value: json!([passed]),
+            }),
+        );
         assert_eq!(workspace.actions_badge(), None, "all quiet: no badge");
     }
 
@@ -4134,10 +5095,30 @@ mod tests {
         let insert = |workspace: &mut Workspace, key: Key, value: Value, text: String| {
             workspace.cache.insert(key, Ok(Reply { text, value }));
         };
-        insert(&mut workspace, Key::Repository, json!({"nameWithOwner": "octo/orbit"}), String::new());
-        insert(&mut workspace, Key::Runs(0), json!([run(501, 2, "failure")]), String::new());
-        insert(&mut workspace, Key::Run(501, 0), run(501, 2, "failure"), String::new());
-        insert(&mut workspace, Key::Run(501, 1), run(501, 1, "failure"), String::new());
+        insert(
+            &mut workspace,
+            Key::Repository,
+            json!({"nameWithOwner": "octo/orbit"}),
+            String::new(),
+        );
+        insert(
+            &mut workspace,
+            Key::Runs(0),
+            json!([run(501, 2, "failure")]),
+            String::new(),
+        );
+        insert(
+            &mut workspace,
+            Key::Run(501, 0),
+            run(501, 2, "failure"),
+            String::new(),
+        );
+        insert(
+            &mut workspace,
+            Key::Run(501, 1),
+            run(501, 1, "failure"),
+            String::new(),
+        );
         // Both attempts print the same output: the tree belongs to the run and attempt.
         let log = "test\tUNKNOWN STEP\t2026-11-14T05:00:01.5Z setting up\n\
                    test\tUNKNOWN STEP\t2026-11-14T05:00:03.0Z running 3 tests\n\
@@ -4150,12 +5131,15 @@ mod tests {
     }
 
     /// A run sheet names the run as the header does, says what it does, and a destructive one
-    /// starts on its safe button; GitLab's say pipeline (§3.40).
+    /// starts on its safe button; GitLab's say pipeline.
     /// R9-05: a run opened from a pull request's check goes back to it on Esc, to the same
     /// tab and line; the title says so (`from #18 · Checks`). Going to the list forgets it.
     #[test]
     fn a_run_opened_from_a_check_goes_back_to_the_pull_request() {
-        let key = |code| KeyEvent { code, modifiers: Default::default() };
+        let key = |code| KeyEvent {
+            code,
+            modifiers: Default::default(),
+        };
         let mut workspace = workspace();
         workspace.page = 2;
         workspace.opened = Some((2, 18));
@@ -4163,8 +5147,17 @@ mod tests {
         workspace.detail_cursor = 4;
         workspace.activate(Action::Run(501)).unwrap();
         assert_eq!(workspace.page, 3);
-        assert_eq!(workspace.return_to.as_ref().map(|target| target.label.as_str()), Some("#18"));
-        assert_eq!(workspace.return_crumb().as_deref(), Some("from #18 · Checks"));
+        assert_eq!(
+            workspace
+                .return_to
+                .as_ref()
+                .map(|target| target.label.as_str()),
+            Some("#18")
+        );
+        assert_eq!(
+            workspace.return_crumb().as_deref(),
+            Some("from #18 · Checks")
+        );
         // Zoom is undone first; then Esc goes back.
         workspace.actions_key(&key(KeyCode::Char('z')), None);
         workspace.actions_key(&key(KeyCode::Escape), None);
@@ -4200,7 +5193,13 @@ mod tests {
             (8, "w", "no wrap"),
             (0, "Esc", "list"),
         ];
-        let keys = |width| fit_hints(&hints, width, None).into_iter().map(|(key, _)| key).collect::<Vec<_>>().join(" ");
+        let keys = |width| {
+            fit_hints(&hints, width, None)
+                .into_iter()
+                .map(|(key, _)| key)
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
         assert_eq!(keys(100), "Enter f z n a r / Esc");
         assert_eq!(keys(120), "Enter f z n a r / w Esc");
         assert_eq!(keys(60), "Enter f n Esc");
@@ -4223,8 +5222,16 @@ mod tests {
 
         assert_eq!(workspace.actions.pending_rerun, None);
         let rerun = workspace.ready_form.as_ref().expect("the jobs arrived");
-        let jobs = rerun.fields.iter().find(|field| field.label == "Jobs").unwrap();
-        assert!(jobs.choices.iter().any(|choice| choice == "Failed jobs only (1)"));
+        let jobs = rerun
+            .fields
+            .iter()
+            .find(|field| field.label == "Jobs")
+            .unwrap();
+        assert!(
+            jobs.choices
+                .iter()
+                .any(|choice| choice == "Failed jobs only (1)")
+        );
     }
 
     #[test]
@@ -4233,14 +5240,22 @@ mod tests {
         let rerun = workspace.activate(Action::Rerun(501)).unwrap().unwrap();
         assert_eq!(rerun.title, "Re-run #10 · Retry flaky uploads");
         assert_eq!(rerun.selected, 0);
-        let note = workspace.sheet_note(&Action::Rerun(501), &rerun.fields).unwrap();
-        assert_eq!(note, "Reruns 1 failed job (test) on the same commit (aaaaaaa).");
+        let note = workspace
+            .sheet_note(&Action::Rerun(501), &rerun.fields)
+            .unwrap();
+        assert_eq!(
+            note,
+            "Reruns 1 failed job (test) on the same commit (aaaaaaa)."
+        );
         let mut all = rerun.fields;
         all[0].input.input = all[0].choices[1].clone();
         let note = workspace.sheet_note(&Action::Rerun(501), &all).unwrap();
         assert_eq!(note, "Reruns all 2 jobs on the same commit (aaaaaaa).");
         // The download sheet shows the path it writes and leaves the repository to the top bar.
-        let download = workspace.activate(Action::Download(701, "coverage".into())).unwrap().unwrap();
+        let download = workspace
+            .activate(Action::Download(701, "coverage".into()))
+            .unwrap()
+            .unwrap();
         assert_eq!(download.title, "Download artifact · coverage");
         assert_eq!(download.fields[0].input.input, "./artifacts");
         // Still running: cancel opens on `Keep running`, so Enter cancels nothing.
@@ -4254,9 +5269,15 @@ mod tests {
         }
         let cancel = workspace.activate(Action::Cancel(501)).unwrap().unwrap();
         assert_eq!(cancel.title, "Cancel run #10 · Retry flaky uploads?");
-        assert_eq!(cancel.selected, cancel.fields.len() + 1, "focus starts on the safe button");
         assert_eq!(
-            workspace.sheet_note(&Action::Cancel(501), &cancel.fields).as_deref(),
+            cancel.selected,
+            cancel.fields.len() + 1,
+            "focus starts on the safe button"
+        );
+        assert_eq!(
+            workspace
+                .sheet_note(&Action::Cancel(501), &cancel.fields)
+                .as_deref(),
             Some("Running jobs stop. Finished jobs keep their logs.")
         );
         // GitLab names a pipeline, never its source (`Merge request`), in every sheet.
@@ -4264,7 +5285,10 @@ mod tests {
         let cancel = workspace.activate(Action::Cancel(501)).unwrap().unwrap();
         assert_eq!(cancel.title, "Cancel pipeline #10 · Retry flaky uploads?");
         assert_eq!(cancel.selected, 1);
-        let error = workspace.activate(Action::Rerun(501)).err().expect("a running pipeline refuses a rerun");
+        let error = workspace
+            .activate(Action::Rerun(501))
+            .err()
+            .expect("a running pipeline refuses a rerun");
         assert_eq!(error, "Pipeline #10 is still running · x cancels it");
         let dispatch = workspace.activate(Action::Dispatch(31)).unwrap().unwrap();
         assert_eq!(dispatch.title, "Run pipeline");
@@ -4277,7 +5301,12 @@ mod tests {
         }
         let rerun = workspace.activate(Action::Rerun(501)).unwrap().unwrap();
         assert_eq!(rerun.title, "Re-run pipeline #10 · Retry flaky uploads");
-        assert!(rerun.fields.iter().all(|field| field.label != "Debug logging"));
+        assert!(
+            rerun
+                .fields
+                .iter()
+                .all(|field| field.label != "Debug logging")
+        );
         // Nothing failed: one scope is no choice, and the note says what reruns (A3-04).
         for key in [Key::Run(501, 0), Key::Run(501, 1)] {
             if let Some(Ok(reply)) = workspace.cache.get_mut(&key) {
@@ -4291,8 +5320,21 @@ mod tests {
             reply.value[0]["conclusion"] = json!("success");
         }
         let rerun = workspace.activate(Action::Rerun(501)).unwrap().unwrap();
-        assert!(rerun.fields.iter().all(|field| field.label != "Jobs"), "{:?}", rerun.fields.iter().map(|field| &field.label).collect::<Vec<_>>());
-        assert_eq!(workspace.sheet_note(&Action::Rerun(501), &rerun.fields).as_deref(), Some("Reruns all 2 jobs on the same commit (aaaaaaa)."));
+        assert!(
+            rerun.fields.iter().all(|field| field.label != "Jobs"),
+            "{:?}",
+            rerun
+                .fields
+                .iter()
+                .map(|field| &field.label)
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            workspace
+                .sheet_note(&Action::Rerun(501), &rerun.fields)
+                .as_deref(),
+            Some("Reruns all 2 jobs on the same commit (aaaaaaa).")
+        );
     }
 
     #[test]
@@ -4325,26 +5367,53 @@ mod tests {
         workspace.save_log(602, &["test.log".into()]).unwrap();
         assert_eq!(workspace.notice, "Saved 3 lines to test.log");
         assert!(!workspace.notice_error);
-        assert!(std::fs::read_to_string(directory.path().join("test.log")).unwrap().contains("running 3 tests"));
+        assert!(
+            std::fs::read_to_string(directory.path().join("test.log"))
+                .unwrap()
+                .contains("running 3 tests")
+        );
     }
 
     #[test]
     fn logs_the_forge_lost_are_said_once_for_the_run() {
-        let note = |job, text: &str| Row::new(Node::Note(job, 0), 1, vec![(text.to_owned(), st(GitRole::Removed, PANE))]);
+        let note = |job, text: &str| {
+            Row::new(
+                Node::Note(job, 0),
+                1,
+                vec![(text.to_owned(), st(GitRole::Removed, PANE))],
+            )
+        };
         let gone = "Not on the forge any more · R retry";
         let mut rows = vec![note(1, gone), note(2, gone)];
         say_gone_logs_once(&mut rows);
-        let texts = rows.iter().map(|row| row.left[0].0.as_str()).collect::<Vec<_>>();
-        assert_eq!(texts, ["2 job logs: not on the forge any more · R retry", "No log", "No log"]);
+        let texts = rows
+            .iter()
+            .map(|row| row.left[0].0.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            texts,
+            [
+                "2 job logs: not on the forge any more · R retry",
+                "No log",
+                "No log"
+            ]
+        );
         // One job, or two reasons: each says its own.
-        let mut rows = vec![note(1, gone), note(2, "Couldn't read this from the forge · R retry")];
+        let mut rows = vec![
+            note(1, gone),
+            note(2, "Couldn't read this from the forge · R retry"),
+        ];
         say_gone_logs_once(&mut rows);
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0].left[0].0, gone);
     }
 
     fn nodes(workspace: &Workspace) -> Vec<Node> {
-        workspace.tree(KEYS).into_iter().map(|row| row.node).collect()
+        workspace
+            .tree(KEYS)
+            .into_iter()
+            .map(|row| row.node)
+            .collect()
     }
 
     #[test]
@@ -4353,11 +5422,18 @@ mod tests {
         let rows = workspace.tree(KEYS);
         let shown = nodes(&workspace);
         assert!(shown.contains(&Node::Step(602, 2)), "{shown:?}");
-        assert!(!shown.contains(&Node::Step(702, 1)), "a passing job stays closed: {shown:?}");
+        assert!(
+            !shown.contains(&Node::Step(702, 1)),
+            "a passing job stays closed: {shown:?}"
+        );
         assert_eq!(workspace.wanted_logs(), vec![602]);
         let at = workspace.cursor_index(&rows);
         let (_, line) = rows[at].log.as_ref().expect("the cursor is on a log line");
-        assert!(line.text.starts_with("error: retries_uploads"), "{}", line.text);
+        assert!(
+            line.text.starts_with("error: retries_uploads"),
+            "{}",
+            line.text
+        );
         assert_eq!(rows[at].link(), Some(("src/lib.rs".into(), 41)));
     }
 
@@ -4373,25 +5449,51 @@ mod tests {
         assert_eq!(workspace.effective_attempt(), 1);
         let shown = nodes(&workspace);
         assert!(shown.contains(&Node::Step(601, 2)), "{shown:?}");
-        assert!(!shown.contains(&Node::Step(701, 1)), "choices do not carry over: {shown:?}");
+        assert!(
+            !shown.contains(&Node::Step(701, 1)),
+            "choices do not carry over: {shown:?}"
+        );
         workspace.attempt = 0;
         workspace.cache.remove(&Key::Run(501, 0));
-        assert_eq!(workspace.effective_attempt(), 0, "a detail that has not arrived names no attempt");
+        assert_eq!(
+            workspace.effective_attempt(),
+            0,
+            "a detail that has not arrived names no attempt"
+        );
     }
 
     #[test]
     fn step_slices_follow_step_times_and_the_full_log_replaces_the_steps() {
         let mut workspace = workspace();
         let rows = workspace.tree(KEYS);
-        let lines = rows.iter().filter(|row| matches!(row.node, Node::Line(602, 2, _))).count();
+        let lines = rows
+            .iter()
+            .filter(|row| matches!(row.node, Node::Line(602, 2, _)))
+            .count();
         assert_eq!(lines, 2, "lines from 05:00:02 to 05:00:05");
-        assert!(!rows.iter().any(|row| row.node == Node::Note(602, 2)), "a slice by time is not remarked on");
+        assert!(
+            !rows.iter().any(|row| row.node == Node::Note(602, 2)),
+            "a slice by time is not remarked on"
+        );
         let at = workspace.cursor_index(&rows);
         workspace.toggle_full(&rows, at).unwrap();
         let rows = workspace.tree(KEYS);
-        assert!(!rows.iter().any(|row| matches!(row.node, Node::Step(602, _))));
-        assert_eq!(rows.iter().filter(|row| matches!(row.node, Node::Line(602, 0, _))).count(), 3);
-        assert_eq!(workspace.actions.cursor, Some(Node::Line(602, 0, 2)), "the cursor lands on the error");
+        assert!(
+            !rows
+                .iter()
+                .any(|row| matches!(row.node, Node::Step(602, _)))
+        );
+        assert_eq!(
+            rows.iter()
+                .filter(|row| matches!(row.node, Node::Line(602, 0, _)))
+                .count(),
+            3
+        );
+        assert_eq!(
+            workspace.actions.cursor,
+            Some(Node::Line(602, 0, 2)),
+            "the cursor lands on the error"
+        );
     }
 
     #[test]
@@ -4415,14 +5517,20 @@ mod tests {
         assert_eq!(matches("Error ERROR error", "Error").len(), 1);
         workspace.actions.find = Input::default();
         workspace.jump_error(true).unwrap();
-        assert!(matches!(workspace.actions.cursor, Some(Node::Line(602, 2, _))));
+        assert!(matches!(
+            workspace.actions.cursor,
+            Some(Node::Line(602, 2, _))
+        ));
     }
 
     #[test]
     fn toggling_closes_a_default_and_reopens_it() {
         let mut workspace = workspace();
         let rows = workspace.tree(KEYS);
-        let job = rows.iter().position(|row| row.node == Node::Job(602)).unwrap();
+        let job = rows
+            .iter()
+            .position(|row| row.node == Node::Job(602))
+            .unwrap();
         workspace.toggle(&rows, job);
         assert!(!nodes(&workspace).contains(&Node::Step(602, 2)));
         assert!(workspace.wanted_logs().is_empty());
@@ -4432,49 +5540,96 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::single_range_in_vec_init)] // one kept range is the case under test
     fn log_lines_wrap_at_word_edges_and_rulers_do_not_wrap() {
         let text = "test_backoff_doubles (test_backoff.BackoffTest.test_backoff_doubles) ... ok";
-        let parts = wrap_points(text, 66).into_iter().map(|range| &text[range]).collect::<Vec<_>>();
-        assert_eq!(parts, ["test_backoff_doubles (test_backoff.BackoffTest.test_backoff_", "doubles) ... ok"]);
+        let parts = wrap_points(text, 66)
+            .into_iter()
+            .map(|range| &text[range])
+            .collect::<Vec<_>>();
+        assert_eq!(
+            parts,
+            [
+                "test_backoff_doubles (test_backoff.BackoffTest.test_backoff_",
+                "doubles) ... ok"
+            ]
+        );
         let text = "test_retry_limit (test_regression.RegressionTest.test_retry_limit) ... FAIL";
-        let parts = wrap_points(text, 66).into_iter().map(|range| &text[range]).collect::<Vec<_>>();
-        assert_eq!(parts, ["test_retry_limit (test_regression.RegressionTest.test_retry_limit)", "... FAIL"]);
+        let parts = wrap_points(text, 66)
+            .into_iter()
+            .map(|range| &text[range])
+            .collect::<Vec<_>>();
+        assert_eq!(
+            parts,
+            [
+                "test_retry_limit (test_regression.RegressionTest.test_retry_limit)",
+                "... FAIL"
+            ]
+        );
         // Nowhere to break in the last 30%: a hard break.
         let long = format!("{}needle end", "x".repeat(28));
-        let parts = wrap_points_keeping(&long, 30, &[28..34]).into_iter().map(|range| &long[range]).collect::<Vec<_>>();
-        assert_eq!(parts, [&"x".repeat(28)[..], "needle end"], "a find match is not split");
-        let parts = wrap_points("aaaaaaaaaa bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", 30);
+        let parts = wrap_points_keeping(&long, 30, &[28..34])
+            .into_iter()
+            .map(|range| &long[range])
+            .collect::<Vec<_>>();
+        assert_eq!(
+            parts,
+            [&"x".repeat(28)[..], "needle end"],
+            "a find match is not split"
+        );
+        let parts = wrap_points(
+            "aaaaaaaaaa bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            30,
+        );
         assert_eq!(parts[0], 0..30);
         // R9-07: a status line keeps its status, a framed summary its words.
         let line = "tests/test_retry.py::test_backoff_caps_at_sixty PASSED";
         let range = one_row(line, 40).expect("one row");
         assert!(line[range.clone()].ends_with("caps_at_sixty PASSED") && line[range].width() < 40);
         assert_eq!(one_row(line, 80), None);
-        assert_eq!(one_row("Collected 42 items in tests/test_retry.py::x", 20), None);
+        assert_eq!(
+            one_row("Collected 42 items in tests/test_retry.py::x", 20),
+            None
+        );
         // The cut falls at a separator, not inside the file's name (R10-GLCR-11).
         let line = "tests/test_retry.py::test_retry_limit_stops_after_five FAILED";
         let range = one_row(line, 50).expect("one row");
         assert_eq!(&line[range], "test_retry_limit_stops_after_five FAILED");
         let range = one_row(line, 58).expect("one row");
-        assert_eq!(&line[range], "test_retry.py::test_retry_limit_stops_after_five FAILED");
+        assert_eq!(
+            &line[range],
+            "test_retry.py::test_retry_limit_stops_after_five FAILED"
+        );
         let rule = "=========== 1 failed, 41 passed in 2.71s ===========";
         let range = one_row(rule, 40).expect("one row");
         assert_eq!(&rule[range], "===== 1 failed, 41 passed in 2.71s =====");
-        assert!(ruler("======================================================================"));
+        assert!(ruler(
+            "======================================================================"
+        ));
         assert!(ruler("  ----------"));
         assert!(!ruler("--- a/file") && !ruler("== =="));
     }
 
     #[test]
     fn links_need_a_file_and_a_line() {
-        assert_eq!(link("at tests/test_regression.py:6").map(|found| found.1), Some("tests/test_regression.py".into()));
-        assert_eq!(link("File \"/home/runner/work/orbit/src/main.rs:12:5\"").map(|found| found.2), Some(12));
+        assert_eq!(
+            link("at tests/test_regression.py:6").map(|found| found.1),
+            Some("tests/test_regression.py".into())
+        );
+        assert_eq!(
+            link("File \"/home/runner/work/orbit/src/main.rs:12:5\"").map(|found| found.2),
+            Some(12)
+        );
         assert_eq!(
             link("  File \"/home/runner/work/orbit/checkout/tests/test_regression.py\", line 6, in test_retry_limit").map(|found| (found.1, found.2)),
             Some(("/home/runner/work/orbit/checkout/tests/test_regression.py".into(), 6))
         );
         assert!(link("12:30:45 started").is_none());
         assert!(link("version 2.330.0").is_none());
-        assert!(link("http://example.invalid:8080/x").is_none() || link("http://example.invalid:8080/x").is_some_and(|found| !found.1.starts_with("//")));
+        assert!(
+            link("http://example.invalid:8080/x").is_none()
+                || link("http://example.invalid:8080/x")
+                    .is_some_and(|found| !found.1.starts_with("//"))
+        );
     }
 }

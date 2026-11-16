@@ -12,7 +12,8 @@ const SIGNED: Token = Token::Signed;
 /// The practice forge answered a request (a read too) that passes `request`: its log entry
 /// (`method`, `path`, `operation`, `variables`, `body`).
 fn asked(p: &Probe, request: impl Fn(&Value) -> bool) -> bool {
-    p.forge.is_some_and(|forge| forge.requests().iter().any(request))
+    p.forge
+        .is_some_and(|forge| forge.requests().iter().any(request))
 }
 
 /// The practice forge answered the same GraphQL `operation` with the same variables twice:
@@ -22,7 +23,11 @@ fn read_twice(p: &Probe, operation: &str) -> bool {
         return false;
     };
     let mut seen = Vec::new();
-    for entry in forge.requests().iter().filter(|entry| entry["operation"] == operation) {
+    for entry in forge
+        .requests()
+        .iter()
+        .filter(|entry| entry["operation"] == operation)
+    {
         let variables = entry["variables"].to_string();
         if seen.contains(&variables) {
             return true;
@@ -38,14 +43,21 @@ fn reads(p: &Probe, path: &str) -> usize {
         forge
             .requests()
             .iter()
-            .filter(|entry| entry["method"] == "GET" && entry["path"].as_str().is_some_and(|at| at.ends_with(path)))
+            .filter(|entry| {
+                entry["method"] == "GET"
+                    && entry["path"].as_str().is_some_and(|at| at.ends_with(path))
+            })
             .count()
     })
 }
 
 /// The open sheet's title.
 fn sheet(p: &Probe) -> String {
-    p.screen.form.as_ref().map(|form| form.title.clone()).unwrap_or_default()
+    p.screen
+        .form
+        .as_ref()
+        .map(|form| form.title.clone())
+        .unwrap_or_default()
 }
 
 /// The screen's and the forge tabs' notices.
@@ -56,13 +68,19 @@ fn said(p: &Probe, text: &str) -> bool {
 /// A write to an item (`issues/19`, `pulls/17`) whose body sets `field`.
 fn patched(p: &Probe, field: &str) -> bool {
     p.wrote(|method, path, body| {
-        method == "PATCH" && (path.contains("/issues/") || path.contains("/pulls/")) && body.get(field).is_some()
+        method == "PATCH"
+            && (path.contains("/issues/") || path.contains("/pulls/"))
+            && body.get(field).is_some()
     })
 }
 
 /// A write that changes an item's labels, assignees or milestone.
 fn metadata(p: &Probe, name: &str) -> bool {
-    p.wrote(|_, path, body| path.ends_with(&format!("/{name}")) || path.contains(&format!("/{name}/")) || body.get(name).is_some())
+    p.wrote(|_, path, body| {
+        path.ends_with(&format!("/{name}"))
+            || path.contains(&format!("/{name}/"))
+            || body.get(name).is_some()
+    })
 }
 
 /// The practice forge has no web pages: `o` asks, then says so.
@@ -88,7 +106,7 @@ pub(super) static FORGE: &[Chapter] = &[
                 Forge::new(ORBIT, SIGNED, "prs"),
                 |p| p.view().section.as_deref() == Some("Review"),
             )
-            .teaching(&["Navigate · Sections (list) · tabs (reader)"]),
+            .teaching(&["Navigate · Sections · reader tabs"]),
             then(
                 "Filter",
                 "/ opens the filter: type retry in Search, then Ctrl+Enter.",
@@ -135,7 +153,7 @@ pub(super) static FORGE: &[Chapter] = &[
                     p.saw(0, open) && !open && p.view().section.is_some()
                 },
             )
-            .teaching(&["Filter · Saved views (list and reader)"]),
+            .teaching(&["Filter · Saved views"]),
             then(
                 "Inbox",
                 "i lists what waits for you in every repository; i again, this one.",
@@ -285,7 +303,7 @@ pub(super) static FORGE: &[Chapter] = &[
                 Forge::new(ORBIT, SIGNED, "prs").item(13),
                 |p| p.screen.notice.starts_with(EDITOR_NOTICE),
             )
-            .teaching(&["Files changed tab · Open the line in the editor (and in Commits)"]),
+            .teaching(&["Files changed tab · Open in the editor"]),
             then(
                 "Line comment",
                 "Enter on a diff line comments on it: write a line, Ctrl+Enter.",
@@ -323,7 +341,7 @@ pub(super) static FORGE: &[Chapter] = &[
                 Forge::new(ORBIT, SIGNED, "prs").item(13),
                 |p| p.repo.head().ok().and_then(|head| head.shorthand().map(str::to_owned)).is_some_and(|branch| branch != "practice"),
             )
-            .teaching(&["Pull request · Check out · reply in the reader"]),
+            .teaching(&["Pull request · Check out · reply"]),
             then(
                 "Worktree",
                 "w checks it out in a worktree of its own instead: Ctrl+Enter.",

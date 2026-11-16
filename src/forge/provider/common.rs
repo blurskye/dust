@@ -50,7 +50,11 @@ pub(super) fn optional_time(value: &Value, key: &str) -> Option<Timestamp> {
 /// GitHub's `sort:` orders a forge has no parameter for, applied to the rows it returned
 /// (`created-asc`, `comments-desc`, …). Unknown orders leave the forge's order.
 pub(super) fn sort_rows(rows: &mut [crate::forge::model::ItemRow], order: &str) {
-    let epoch = |stamp: Option<&Timestamp>| stamp.and_then(|stamp| crate::forge::records::epoch(stamp.as_str())).unwrap_or(0);
+    let epoch = |stamp: Option<&Timestamp>| {
+        stamp
+            .and_then(|stamp| crate::forge::records::epoch(stamp.as_str()))
+            .unwrap_or(0)
+    };
     match order {
         "created-desc" => rows.sort_by_key(|row| std::cmp::Reverse(epoch(row.created.as_ref()))),
         "created-asc" => rows.sort_by_key(|row| epoch(row.created.as_ref())),
@@ -110,7 +114,11 @@ pub(super) fn span(value: &Value, from: &str, to: &str) -> Option<std::time::Dur
 pub(super) fn run_actor(value: &Value) -> String {
     ["triggering_actor", "trigger_actor", "actor", "trigger_user"]
         .iter()
-        .find_map(|key| value[key]["login"].as_str().filter(|login| !login.is_empty()))
+        .find_map(|key| {
+            value[key]["login"]
+                .as_str()
+                .filter(|login| !login.is_empty())
+        })
         .unwrap_or_default()
         .to_owned()
 }

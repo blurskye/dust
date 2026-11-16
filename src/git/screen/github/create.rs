@@ -1,4 +1,4 @@
-//! Create pull request (DESIGN.md §3.31): the sheet starts from the branch's commits (one
+//! Create pull request: the sheet starts from the branch's commits (one
 //! commit gives its subject and body; several give the branch's name and a list of
 //! subjects), the base branch's template wins over the list, and the base branch is picked
 //! from the remote's branches. `o` on a branch in the Git tab opens it for that branch. When
@@ -81,20 +81,30 @@ fn commits(repository: &git2::Repository, base: git2::Oid, head: git2::Oid) -> V
 /// A branch name as a title: `feature/retry-backoff` reads `Retry backoff`, and a prefix
 /// that says what the change does stays as its verb (`fix/backoff` reads `Fix backoff`).
 pub(super) fn branch_title(branch: &str) -> String {
-    let mut segments = branch.split('/').filter(|segment| !segment.is_empty()).collect::<Vec<_>>();
+    let mut segments = branch
+        .split('/')
+        .filter(|segment| !segment.is_empty())
+        .collect::<Vec<_>>();
     let name = segments.pop().unwrap_or(branch);
     let words = name.replace(['-', '_'], " ");
-    let mut words = words.split_whitespace().map(str::to_owned).collect::<Vec<_>>();
-    let verb = segments.last().and_then(|prefix| match prefix.to_ascii_lowercase().as_str() {
-        "fix" | "bugfix" | "hotfix" => Some("fix"),
-        "refactor" => Some("refactor"),
-        "revert" => Some("revert"),
-        "test" | "tests" => Some("test"),
-        "docs" | "doc" => Some("document"),
-        _ => None,
-    });
+    let mut words = words
+        .split_whitespace()
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    let verb = segments
+        .last()
+        .and_then(|prefix| match prefix.to_ascii_lowercase().as_str() {
+            "fix" | "bugfix" | "hotfix" => Some("fix"),
+            "refactor" => Some("refactor"),
+            "revert" => Some("revert"),
+            "test" | "tests" => Some("test"),
+            "docs" | "doc" => Some("document"),
+            _ => None,
+        });
     if let Some(verb) = verb
-        && words.first().is_none_or(|first| !first.eq_ignore_ascii_case(verb))
+        && words
+            .first()
+            .is_none_or(|first| !first.eq_ignore_ascii_case(verb))
     {
         words.insert(0, verb.to_owned());
     }
@@ -122,8 +132,16 @@ pub(super) fn suggest(commits: &[Commit], branch: &str) -> (String, String) {
         [only] => (only.subject.clone(), only.body.clone()),
         many => {
             let title = branch_title(branch);
-            let title = if title.is_empty() { many[0].subject.clone() } else { title };
-            let body = many.iter().map(|commit| format!("- {}", commit.subject)).collect::<Vec<_>>().join("\n");
+            let title = if title.is_empty() {
+                many[0].subject.clone()
+            } else {
+                title
+            };
+            let body = many
+                .iter()
+                .map(|commit| format!("- {}", commit.subject))
+                .collect::<Vec<_>>()
+                .join("\n");
             (title, body)
         }
     }
@@ -231,7 +249,12 @@ impl Workspace {
 
     /// The commit a base branch stands on: the base repository's remote-tracking branch, else
     /// any remote's, else the local branch.
-    fn base_commit(&self, repository: &git2::Repository, base_repository: &str, base: &str) -> Option<git2::Oid> {
+    fn base_commit(
+        &self,
+        repository: &git2::Repository,
+        base_repository: &str,
+        base: &str,
+    ) -> Option<git2::Oid> {
         let remotes = self.pr_remotes();
         let mut names = remotes
             .iter()
@@ -256,7 +279,10 @@ impl Workspace {
         };
         let found_through = self.remote_host();
         let known = |host: &str| {
-            host.eq_ignore_ascii_case(&self.host) || found_through.as_deref().is_some_and(|found| host.eq_ignore_ascii_case(found))
+            host.eq_ignore_ascii_case(&self.host)
+                || found_through
+                    .as_deref()
+                    .is_some_and(|found| host.eq_ignore_ascii_case(found))
         };
         names
             .iter()
@@ -270,16 +296,24 @@ impl Workspace {
                     None => url.host_str()?.to_owned(),
                 };
                 let path = url.path().trim_matches('/');
-                (known(&host) && self.valid_pr_repository(path)).then(|| (name.to_owned(), path.to_owned()))
+                (known(&host) && self.valid_pr_repository(path))
+                    .then(|| (name.to_owned(), path.to_owned()))
             })
             .collect()
     }
 
     /// The head branch's commits that the base lacks; `None` when either branch is not
     /// here (without the base, the whole history would read as the branch's work).
-    pub(super) fn branch_commits(&self, base_repository: &str, base: &str, head: &str) -> Option<Vec<Commit>> {
+    pub(super) fn branch_commits(
+        &self,
+        base_repository: &str,
+        base: &str,
+        head: &str,
+    ) -> Option<Vec<Commit>> {
         let repository = git2::Repository::open(&self.root).ok()?;
-        let head = repository.refname_to_id(&format!("refs/heads/{head}")).ok()?;
+        let head = repository
+            .refname_to_id(&format!("refs/heads/{head}"))
+            .ok()?;
         let base = self.base_commit(&repository, base_repository, base)?;
         Some(commits(&repository, base, head))
     }
@@ -303,7 +337,11 @@ impl Workspace {
                 };
                 let name = match kind {
                     git2::BranchType::Remote => match name.split_once('/') {
-                        Some((remote, rest)) if remotes.iter().any(|known| known == remote) && rest != "HEAD" => rest,
+                        Some((remote, rest))
+                            if remotes.iter().any(|known| known == remote) && rest != "HEAD" =>
+                        {
+                            rest
+                        }
                         _ => continue,
                     },
                     git2::BranchType::Local => name,
@@ -320,7 +358,9 @@ impl Workspace {
 
     /// Fills a fresh Create sheet from the head branch's commits and offers base branches.
     pub(super) fn compose_pr(&mut self, form: &mut Form) {
-        let had_draft = self.drafts.contains_key(&self.draft_key(&Action::CreatePullRequest));
+        let had_draft = self
+            .drafts
+            .contains_key(&self.draft_key(&Action::CreatePullRequest));
         let wanted = self.compose.head.take();
         let fields = &mut form.fields;
         let mut fresh = !had_draft;
@@ -340,11 +380,16 @@ impl Workspace {
         if !fresh {
             return;
         }
-        let commits = self.branch_commits(&base_repository, &base, &head).unwrap_or_default();
+        let commits = self
+            .branch_commits(&base_repository, &base, &head)
+            .unwrap_or_default();
         let (title, body) = suggest(&commits, &head);
         set(fields, "Title", &title);
         // One commit's body or the list of subjects, then the base branch's template.
-        let template = super::pull_request::templates(&self.root, self.forge_kind()).into_iter().next().map(|(_, text)| text);
+        let template = super::pull_request::templates(&self.root, self.forge_kind())
+            .into_iter()
+            .next()
+            .map(|(_, text)| text);
         set(fields, "Description", &describe(&body, template));
         if let Some(picker) = fields.iter_mut().find(|field| field.label == "Template")
             && let Some(first) = picker.choices.first().cloned()
@@ -355,20 +400,36 @@ impl Workspace {
 
     /// `o` on a branch: its open pull request when the list knows one, else the Create sheet
     /// for it.
-    pub(in crate::git::screen) fn compose_from(&mut self, branch: String) -> Result<Option<Form>, String> {
+    pub(in crate::git::screen) fn compose_from(
+        &mut self,
+        branch: String,
+    ) -> Result<Option<Form>, String> {
         if branch.is_empty() {
             return Err("Select a branch first".into());
         }
         if self.repo.is_empty() {
-            self.compose = Compose { head: Some(branch), waiting: true, ..Compose::default() };
-            self.notice = format!("Loading the repository to open a {}…", self.terms().pr_singular);
+            self.compose = Compose {
+                head: Some(branch),
+                waiting: true,
+                ..Compose::default()
+            };
+            self.notice = format!(
+                "Loading the repository to open a {}…",
+                self.terms().pr_singular
+            );
             self.notice_error = false;
             return Ok(None);
         }
         let open = self
             .items()
             .into_iter()
-            .find(|row| string(row, "headRefName") == branch && !matches!(string(row, "state"), "CLOSED" | "MERGED" | "closed" | "merged"))
+            .find(|row| {
+                string(row, "headRefName") == branch
+                    && !matches!(
+                        string(row, "state"),
+                        "CLOSED" | "MERGED" | "closed" | "merged"
+                    )
+            })
             .map(|row| number(row, "number"))
             .filter(|number| *number > 0);
         if let Some(number) = open {
@@ -430,9 +491,14 @@ impl Workspace {
             .map(|repository| string(repository, "default_branch").to_owned())
             .filter(|branch| !branch.is_empty())
             .unwrap_or_else(|| "main".into());
-        let commits = self.branch_commits(&self.repo.clone(), &default, &head).unwrap_or_default();
+        let commits = self
+            .branch_commits(&self.repo.clone(), &default, &head)
+            .unwrap_or_default();
         let (title, body) = suggest(&commits, &head);
-        let template = super::pull_request::templates(&self.root, self.forge_kind()).into_iter().next().map(|(_, text)| text);
+        let template = super::pull_request::templates(&self.root, self.forge_kind())
+            .into_iter()
+            .next()
+            .map(|(_, text)| text);
         let body = describe(&body, template);
         let mut base = actions::field("Base branch", &default, true, false);
         base.choices = self.base_choices(&self.repo.clone(), &default);
@@ -466,34 +532,51 @@ impl Workspace {
         };
         let (base, head) = (base.trim(), head.trim());
         for branch in [base, head] {
-            if !git2::Reference::is_valid_name(&format!("refs/heads/{branch}")) || branch.starts_with('-') {
+            if !git2::Reference::is_valid_name(&format!("refs/heads/{branch}"))
+                || branch.starts_with('-')
+            {
                 return Err("Choose a valid branch name".into());
             }
         }
         if base == head {
             return Err("Head and base must be different branches".into());
         }
-        let owner = |repo: &str| repo.rsplit_once('/').map(|(owner, _)| owner.to_owned()).unwrap_or_default();
-        let fork = self.pr_remotes().into_iter().map(|(_, repo)| repo).find(|repo| {
-            !repo.eq_ignore_ascii_case(&self.repo) && self.head_remote_has(repo, head)
-        });
+        let owner = |repo: &str| {
+            repo.rsplit_once('/')
+                .map(|(owner, _)| owner.to_owned())
+                .unwrap_or_default()
+        };
+        let fork = self
+            .pr_remotes()
+            .into_iter()
+            .map(|(_, repo)| repo)
+            .find(|repo| {
+                !repo.eq_ignore_ascii_case(&self.repo) && self.head_remote_has(repo, head)
+            });
         let request = WebRequest {
             host: self.host.clone(),
             repo: self.repo.clone(),
-            head_owner: fork.map(|repo| owner(&repo)).filter(|owner| !owner.eq_ignore_ascii_case(&self.owner())),
+            head_owner: fork
+                .map(|repo| owner(&repo))
+                .filter(|owner| !owner.eq_ignore_ascii_case(&self.owner())),
             base: base.to_owned(),
             head: head.to_owned(),
             title: title.trim().to_owned(),
             body: body.clone(),
         };
         let url = web_url(self.pull_kind(), &request);
-        self.drafts.remove(&self.draft_key(&Action::CreatePullRequestWeb));
+        self.drafts
+            .remove(&self.draft_key(&Action::CreatePullRequestWeb));
         self.cache.remove(&Key::Write);
         self.enqueue(
             Key::Write,
             Op::Write(
                 self.target(),
-                Write::OpenInBrowser { kind: crate::forge::model::ItemKind::PullRequest, number: 0, url: Some(url) },
+                Write::OpenInBrowser {
+                    kind: crate::forge::model::ItemKind::PullRequest,
+                    number: 0,
+                    url: Some(url),
+                },
             ),
             false,
         );
@@ -503,7 +586,10 @@ impl Workspace {
     }
 
     fn owner(&self) -> String {
-        self.repo.rsplit_once('/').map(|(owner, _)| owner.to_owned()).unwrap_or_default()
+        self.repo
+            .rsplit_once('/')
+            .map(|(owner, _)| owner.to_owned())
+            .unwrap_or_default()
     }
 
     /// Whether `repo`'s remote has `branch` (a fork the head was pushed to).
@@ -514,21 +600,41 @@ impl Workspace {
         self.pr_remotes()
             .iter()
             .filter(|(_, known)| known.eq_ignore_ascii_case(repo))
-            .any(|(remote, _)| repository.refname_to_id(&format!("refs/remotes/{remote}/{branch}")).is_ok())
+            .any(|(remote, _)| {
+                repository
+                    .refname_to_id(&format!("refs/remotes/{remote}/{branch}"))
+                    .is_ok()
+            })
     }
 
     /// The line under the Create sheet's title: what goes where and how much; then, when the
     /// branch is not on the forge yet and will not be pushed, that it has to be.
     pub(super) fn create_note(&self, action: &Action, fields: &[Field]) -> Option<String> {
         let web = matches!(action, Action::CreatePullRequestWeb);
-        let base_repository = if web { self.repo.clone() } else { self.pr_value(fields, "Base repository") };
-        let (base, head) = (self.pr_value(fields, "Base branch"), self.pr_value(fields, "Head branch"));
+        let base_repository = if web {
+            self.repo.clone()
+        } else {
+            self.pr_value(fields, "Base repository")
+        };
+        let (base, head) = (
+            self.pr_value(fields, "Base branch"),
+            self.pr_value(fields, "Head branch"),
+        );
         if head.is_empty() || base.is_empty() {
             return None;
         }
-        let head_repository = if web { String::new() } else { self.pr_value(fields, "Head repository (fork)") };
+        let head_repository = if web {
+            String::new()
+        } else {
+            self.pr_value(fields, "Head repository (fork)")
+        };
         // Across a fork each side names its owner, as the forges write it: `maya:fix/backoff → orbit-dev:main`.
-        let owner = |repository: &str| repository.rsplit_once('/').map(|(owner, _)| owner.to_owned()).unwrap_or_default();
+        let owner = |repository: &str| {
+            repository
+                .rsplit_once('/')
+                .map(|(owner, _)| owner.to_owned())
+                .unwrap_or_default()
+        };
         let mut note = if !head_repository.is_empty() && head_repository != base_repository {
             // A fork under the same owner names whole repositories instead.
             let (from, to) = match (owner(&head_repository), owner(&base_repository)) {
@@ -539,7 +645,10 @@ impl Workspace {
         } else {
             format!("{head} → {base}")
         };
-        match self.branch_commits(&base_repository, &base, &head).map(|commits| commits.len()) {
+        match self
+            .branch_commits(&base_repository, &base, &head)
+            .map(|commits| commits.len())
+        {
             None => {}
             Some(0) => note.push_str(" · no new commits"),
             Some(1) => note.push_str(" · 1 commit"),
@@ -547,17 +656,28 @@ impl Workspace {
             Some(count) => note.push_str(&format!(" · {count} commits")),
         }
         if web {
-            let reason = self.refusal(&Action::CreatePullRequest).unwrap_or("Signed out");
+            let reason = self
+                .refusal(&Action::CreatePullRequest)
+                .unwrap_or("Signed out");
             let reason = reason.split(" · ").next().unwrap_or(reason);
-            note.push_str(&format!("\n{} · the forge's own form opens with these filled in.", reason.trim_end_matches('.')));
+            note.push_str(&format!(
+                "\n{} · the forge's own form opens with these filled in.",
+                reason.trim_end_matches('.')
+            ));
             return Some(note);
         }
         if self.pr_value(fields, "Publish branch") != PUSH {
             match self.published(&head_repository, &head) {
                 Published::Yes => {}
-                Published::Missing => note.push_str(&format!("\n{head} is not on {head_repository} yet")),
-                Published::Ahead(1) => note.push_str(&format!("\n1 commit is not on {head_repository} yet")),
-                Published::Ahead(count) => note.push_str(&format!("\n{count} commits are not on {head_repository} yet")),
+                Published::Missing => {
+                    note.push_str(&format!("\n{head} is not on {head_repository} yet"))
+                }
+                Published::Ahead(1) => {
+                    note.push_str(&format!("\n1 commit is not on {head_repository} yet"))
+                }
+                Published::Ahead(count) => note.push_str(&format!(
+                    "\n{count} commits are not on {head_repository} yet"
+                )),
             }
         }
         Some(note)
@@ -570,10 +690,18 @@ impl Workspace {
 
     fn pr_raw(&self, fields: &[Field], label: &str) -> String {
         use crate::git::screen::shell::sheet::{is_toggle, toggled};
-        if let Some(field) = fields.iter().find(|field| field.label == label && !is_toggle(field)) {
+        if let Some(field) = fields
+            .iter()
+            .find(|field| field.label == label && !is_toggle(field))
+        {
             return field.input.input.clone();
         }
-        let toggle = |wanted: &dyn Fn(&Field) -> bool| fields.iter().find(|field| is_toggle(field) && wanted(*field)).map(toggled);
+        let toggle = |wanted: &dyn Fn(&Field) -> bool| {
+            fields
+                .iter()
+                .find(|field| is_toggle(field) && wanted(field))
+                .map(toggled)
+        };
         match label {
             "Publish branch" => {
                 if let Some(on) = toggle(&|field| field.label.starts_with("Push ")) {
@@ -597,7 +725,10 @@ impl Workspace {
 
     /// Every value `review_pr` reads, in its order, from a sheet that shows only some.
     pub(in crate::git::screen) fn pr_values(&self, fields: &[Field]) -> Vec<String> {
-        let mut values = PR_FIELDS.iter().map(|label| self.pr_raw(fields, label)).collect::<Vec<_>>();
+        let mut values = PR_FIELDS
+            .iter()
+            .map(|label| self.pr_raw(fields, label))
+            .collect::<Vec<_>>();
         if let Some(template) = fields.iter().find(|field| field.label == "Template") {
             values.push(template.input.input.clone());
         }
@@ -617,7 +748,11 @@ impl Workspace {
             .pr_remotes()
             .into_iter()
             .filter(|(_, repo)| repo.eq_ignore_ascii_case(head_repository))
-            .find_map(|(remote, _)| repository.refname_to_id(&format!("refs/remotes/{remote}/{head}")).ok());
+            .find_map(|(remote, _)| {
+                repository
+                    .refname_to_id(&format!("refs/remotes/{remote}/{head}"))
+                    .ok()
+            });
         match remote {
             None => Published::Missing,
             Some(remote) => match repository.graph_ahead_behind(local, remote) {
@@ -627,7 +762,7 @@ impl Workspace {
         }
     }
 
-    /// Lays a filled Create sheet out for this branch (§3.31): Title, Description and the
+    /// Lays a filled Create sheet out for this branch: Title, Description and the
     /// base branch; the repositories only for a fork; a push toggle only when the branch
     /// is not on the forge, or is behind the local one; `☐ Open as draft` last.
     pub(super) fn compact_pr(&mut self, form: &mut Form) {
@@ -651,15 +786,22 @@ impl Workspace {
         for field in fields {
             let text = field.input.input.clone();
             match field.label.as_str() {
-                "Base repository" | "Head repository (fork)" if !fork => hidden.push((field.label, text)),
+                "Base repository" | "Head repository (fork)" if !fork => {
+                    hidden.push((field.label, text))
+                }
                 "Head branch" if !head.is_empty() => hidden.push((field.label, text)),
                 "Publish branch" => match published {
                     Published::Yes => hidden.push((field.label, PUSHED.into())),
                     Published::Ahead(count) => toggles.push(toggle(
-                        &format!("Push {count} commit{} first", if count == 1 { "" } else { "s" }),
+                        &format!(
+                            "Push {count} commit{} first",
+                            if count == 1 { "" } else { "s" }
+                        ),
                         text == PUSH,
                     )),
-                    Published::Missing => toggles.push(toggle(&format!("Push to {remote} first"), text == PUSH)),
+                    Published::Missing => {
+                        toggles.push(toggle(&format!("Push to {remote} first"), text == PUSH))
+                    }
                 },
                 "Draft" => toggles.push(toggle(OPEN_AS_DRAFT, text == "true")),
                 _ => shown.push(field),
@@ -676,7 +818,9 @@ impl Workspace {
 pub(super) fn submit_verb(action: &Action) -> Option<&'static str> {
     match action {
         Action::CreatePullRequest => Some("review"),
-        Action::CreatePullRequestWeb | Action::Browser(..) | Action::Web(..) => Some("open in browser"),
+        Action::CreatePullRequestWeb | Action::Browser(..) | Action::Web(..) => {
+            Some("open in browser")
+        }
         _ => None,
     }
 }
@@ -709,19 +853,28 @@ mod tests {
     use super::*;
 
     fn commit(subject: &str, body: &str) -> Commit {
-        Commit { subject: subject.into(), body: body.into() }
+        Commit {
+            subject: subject.into(),
+            body: body.into(),
+        }
     }
 
     #[test]
     fn one_commit_gives_its_subject_and_body() {
-        let (title, body) = suggest(&[commit("Retry with backoff", "Waits 2s, 4s, 8s.")], "feature/retry");
+        let (title, body) = suggest(
+            &[commit("Retry with backoff", "Waits 2s, 4s, 8s.")],
+            "feature/retry",
+        );
         assert_eq!(title, "Retry with backoff");
         assert_eq!(body, "Waits 2s, 4s, 8s.");
     }
 
     #[test]
     fn several_commits_give_the_branch_and_a_list() {
-        let (title, body) = suggest(&[commit("Add retry", ""), commit("Test retry", "")], "feature/retry-backoff");
+        let (title, body) = suggest(
+            &[commit("Add retry", ""), commit("Test retry", "")],
+            "feature/retry-backoff",
+        );
         assert_eq!(title, "Retry backoff");
         assert_eq!(body, "- Add retry\n- Test retry");
         assert_eq!(suggest(&[], "x"), (String::new(), String::new()));
@@ -738,7 +891,10 @@ mod tests {
 
     #[test]
     fn the_template_follows_what_the_commits_say() {
-        assert_eq!(describe("- Add retry", Some("## Why".into())), "- Add retry\n\n## Why");
+        assert_eq!(
+            describe("- Add retry", Some("## Why".into())),
+            "- Add retry\n\n## Why"
+        );
         assert_eq!(describe("", Some("## Why".into())), "## Why");
         assert_eq!(describe("Body", None), "Body");
     }
@@ -762,9 +918,19 @@ mod tests {
             web_url(ProviderKind::GitLab, &request),
             "https://example.test/team/app/-/merge_requests/new?merge_request%5Bsource_branch%5D=feature%2Fretry&merge_request%5Btarget_branch%5D=main&merge_request%5Btitle%5D=Retry%20%26%20backoff&merge_request%5Bdescription%5D=Line%20one%0Aline%20two"
         );
-        let fork = WebRequest { head_owner: Some("me".into()), ..request.clone() };
-        assert!(web_url(ProviderKind::Gitea, &fork).starts_with("https://example.test/team/app/compare/main...me:feature/retry?expand=1"));
-        let long = WebRequest { body: "x".repeat(WEB_BODY * 2), ..request };
+        let fork = WebRequest {
+            head_owner: Some("me".into()),
+            ..request.clone()
+        };
+        assert!(
+            web_url(ProviderKind::Gitea, &fork).starts_with(
+                "https://example.test/team/app/compare/main...me:feature/retry?expand=1"
+            )
+        );
+        let long = WebRequest {
+            body: "x".repeat(WEB_BODY * 2),
+            ..request
+        };
         assert!(web_url(ProviderKind::Forgejo, &long).len() < WEB_BODY + 400);
     }
 }

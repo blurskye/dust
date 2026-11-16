@@ -1,9 +1,9 @@
-//! Sheets (DESIGN.md §2.7, §3.4): forms, confirmations and the commit composer as
+//! Sheets: forms, confirmations and the commit composer as
 //! centred overlays with an accent border, labelled inputs and at most three buttons.
+use super::super::{Field, Form, FormAction, GitScreen};
 use super::chrome::{self, Span, bold, st};
 use super::glyphs::{Glyph, glyph};
 use super::layout::{Layout, Rect};
-use super::super::{Field, Form, FormAction, GitScreen};
 use crate::ui::{Frame, GitChip, GitRole, GitSurface};
 use crossterm::cursor::SetCursorStyle;
 use unicode_segmentation::UnicodeSegmentation;
@@ -19,9 +19,8 @@ pub(in crate::git::screen) fn paint(app: &GitScreen, frame: &mut Frame, lay: &La
         return true;
     };
     match &form.action {
-        FormAction::Operation { .. } | FormAction::Github(super::super::github::Action::Files(_)) => {
-            false
-        }
+        FormAction::Operation { .. }
+        | FormAction::Github(super::super::github::Action::Files(_)) => false,
         FormAction::Commit => {
             commit(app, frame, form, lay);
             true
@@ -64,7 +63,12 @@ fn frame_box(frame: &mut Frame, rect: Rect, title: &[Span], right: &str) -> Rect
 }
 
 fn frame_inner(rect: Rect) -> Rect {
-    Rect::new(rect.x + 2, rect.y + 1, rect.w.saturating_sub(4), rect.h.saturating_sub(2))
+    Rect::new(
+        rect.x + 2,
+        rect.y + 1,
+        rect.w.saturating_sub(4),
+        rect.h.saturating_sub(2),
+    )
 }
 
 fn title_spans(app: &GitScreen, glyph_kind: Glyph, title: &str) -> Vec<Span> {
@@ -116,12 +120,18 @@ fn wrap_note(note: &str, cells: usize) -> Vec<(String, bool)> {
 
 /// One labelled input. `rows` is the input height (1 for single-line fields).
 pub(in crate::git::screen) fn input(frame: &mut Frame, field: &Field, rect: Rect, focused: bool) {
-    let surface = if focused { GitSurface::CursorInactive } else { GitSurface::Canvas };
+    let surface = if focused {
+        GitSurface::CursorInactive
+    } else {
+        GitSurface::Canvas
+    };
     chrome::fill(&mut frame.grid, rect, st(GitRole::Text, surface));
-    // Only the focused field carries the accent edge (r15 ISS-06).
+    // Only the focused field carries the accent edge.
     if rect.x > 0 && focused {
         for y in rect.y..rect.bottom() {
-            frame.grid.set_cell(rect.x - 1, y, "▎", bold(GitRole::Focus, SURFACE));
+            frame
+                .grid
+                .set_cell(rect.x - 1, y, "▎", bold(GitRole::Focus, SURFACE));
         }
     }
     let text = &field.input.input;
@@ -172,7 +182,14 @@ pub(in crate::git::screen) fn input(frame: &mut Frame, field: &Field, rect: Rect
             rect.x + 1,
             y,
             shown,
-            st(if field.read_only { GitRole::Muted } else { GitRole::Text }, surface),
+            st(
+                if field.read_only {
+                    GitRole::Muted
+                } else {
+                    GitRole::Text
+                },
+                surface,
+            ),
             rect.right().saturating_sub(1),
         );
         // A modal text box's visual selection, clipped to this line.
@@ -181,7 +198,10 @@ pub(in crate::git::screen) fn input(frame: &mut Frame, field: &Field, rect: Rect
             let to = range.end.min(begin + line.len());
             let (from, to) = (from - begin, to.max(from) - begin);
             let mut selected = &line[from..to];
-            if selected.is_empty() && range.start <= begin + line.len() && range.end > begin + line.len() {
+            if selected.is_empty()
+                && range.start <= begin + line.len()
+                && range.end > begin + line.len()
+            {
                 selected = " ";
             }
             if !selected.is_empty() {
@@ -228,7 +248,9 @@ fn viewport(top: usize, cursor_line: usize, lines: usize, visible: usize) -> usi
 fn describe(frame: &mut Frame, choice: &str, x: u16, y: u16, right: u16) {
     if let Some(line) = described(choice) {
         let line = chrome::ellipsize(line, usize::from(right.saturating_sub(x)));
-        frame.grid.put_text_clipped(x, y, &line, st(GitRole::Muted, SURFACE), right);
+        frame
+            .grid
+            .put_text_clipped(x, y, &line, st(GitRole::Muted, SURFACE), right);
     }
 }
 
@@ -236,13 +258,34 @@ fn describe(frame: &mut Frame, choice: &str, x: u16, y: u16, right: u16) {
 /// option per row so none is clipped.
 fn radio(frame: &mut Frame, field: &Field, x: u16, y: u16, right: u16, focused: bool) {
     if stacked(field) {
-        let chosen = field.choices.iter().position(|choice| *choice == field.input.input).unwrap_or(0);
-        let first = chosen.saturating_sub(STACKED - 1).min(field.choices.len().saturating_sub(STACKED));
+        let chosen = field
+            .choices
+            .iter()
+            .position(|choice| *choice == field.input.input)
+            .unwrap_or(0);
+        let first = chosen
+            .saturating_sub(STACKED - 1)
+            .min(field.choices.len().saturating_sub(STACKED));
         // Descriptions line up in one column after the longest option.
-        let column = x + 5 + field.choices.iter().map(|choice| chrome::width(choice)).max().unwrap_or(0);
-        for (row, (index, choice)) in field.choices.iter().enumerate().skip(first).take(STACKED).enumerate() {
+        let column = x
+            + 5
+            + field
+                .choices
+                .iter()
+                .map(|choice| chrome::width(choice))
+                .max()
+                .unwrap_or(0);
+        for (row, (index, choice)) in field
+            .choices
+            .iter()
+            .enumerate()
+            .skip(first)
+            .take(STACKED)
+            .enumerate()
+        {
             let y = y + row as u16;
-            let more = (row == 0 && first > 0) || (row == STACKED - 1 && first + STACKED < field.choices.len());
+            let more = (row == 0 && first > 0)
+                || (row == STACKED - 1 && first + STACKED < field.choices.len());
             let label = chrome::ellipsize(choice, usize::from(right.saturating_sub(x + 6)));
             if index == chosen {
                 let style = if focused {
@@ -250,15 +293,29 @@ fn radio(frame: &mut Frame, field: &Field, x: u16, y: u16, right: u16, focused: 
                 } else {
                     bold(GitRole::Focus, GitSurface::Chip(GitChip::Focus))
                 };
-                let next = frame.grid.put_text_clipped(x, y, &format!(" ● {label} "), style, right);
+                let next = frame
+                    .grid
+                    .put_text_clipped(x, y, &format!(" ● {label} "), style, right);
                 if focused {
                     frame.cursor = Some((x + 1, y, SetCursorStyle::SteadyBlock));
                 }
                 describe(frame, choice, column.max(next + 1), y, right);
             } else {
-                let next = frame.grid.put_text_clipped(x, y, &format!(" ○ {label} "), st(GitRole::Text, SURFACE), right);
+                let next = frame.grid.put_text_clipped(
+                    x,
+                    y,
+                    &format!(" ○ {label} "),
+                    st(GitRole::Text, SURFACE),
+                    right,
+                );
                 if more {
-                    frame.grid.put_text_clipped(next + 1, y, "⋯", st(GitRole::Muted, SURFACE), right);
+                    frame.grid.put_text_clipped(
+                        next + 1,
+                        y,
+                        "⋯",
+                        st(GitRole::Muted, SURFACE),
+                        right,
+                    );
                 } else {
                     describe(frame, choice, column.max(next + 1), y, right);
                 }
@@ -293,7 +350,10 @@ fn radio(frame: &mut Frame, field: &Field, x: u16, y: u16, right: u16, focused: 
 fn buttons(frame: &mut Frame, form: &Form, x: u16, y: u16, right: u16, primary: &str, hints: &str) {
     let count = form.fields.len();
     // `Cancel` beside `Cancel run` would read as the same verb.
-    let secondary = if matches!(&form.action, FormAction::Github(super::super::github::Action::Cancel(_))) {
+    let secondary = if matches!(
+        &form.action,
+        FormAction::Github(super::super::github::Action::Cancel(_))
+    ) {
         "Keep running"
     } else {
         "Cancel"
@@ -305,7 +365,7 @@ fn buttons(frame: &mut Frame, form: &Form, x: u16, y: u16, right: u16, primary: 
 
 /// The one button pair every sheet and dialog draws (R16-issues-07): the primary a filled
 /// accent chip, the secondary a muted chip, the focused one filled and marked `›`. Each is
-/// bracketed so it reads as a button in plain text too (r15 ISS-08). Returns the column
+/// bracketed so it reads as a button in plain text too. Returns the column
 /// after the pair.
 pub(in crate::git::screen) fn button_pair(
     frame: &mut Frame,
@@ -325,10 +385,18 @@ pub(in crate::git::screen) fn button_pair(
         } else {
             st(GitRole::Text, GitSurface::Chip(GitChip::Muted))
         };
-        let edge = if chosen { bold(GitRole::Focus, SURFACE) } else { st(GitRole::Border, SURFACE) };
-        let start = frame.grid.put_text_clipped(at, y, if chosen { "›" } else { " " }, edge, right);
+        let edge = if chosen {
+            bold(GitRole::Focus, SURFACE)
+        } else {
+            st(GitRole::Border, SURFACE)
+        };
+        let start = frame
+            .grid
+            .put_text_clipped(at, y, if chosen { "›" } else { " " }, edge, right);
         let start = frame.grid.put_text_clipped(start, y, "[", edge, right);
-        let next = frame.grid.put_text_clipped(start, y, &format!(" {label} "), style, right);
+        let next = frame
+            .grid
+            .put_text_clipped(start, y, &format!(" {label} "), style, right);
         let next = frame.grid.put_text_clipped(next, y, "]", edge, right);
         if chosen {
             frame.cursor = Some((start + 1, y, SetCursorStyle::SteadyBlock));
@@ -339,7 +407,13 @@ pub(in crate::git::screen) fn button_pair(
 }
 
 /// `Enter confirm · Esc cancel` after a button pair, keys in the accent.
-pub(in crate::git::screen) fn button_hints(frame: &mut Frame, at: u16, y: u16, right: u16, hints: &str) {
+pub(in crate::git::screen) fn button_hints(
+    frame: &mut Frame,
+    at: u16,
+    y: u16,
+    right: u16,
+    hints: &str,
+) {
     // Whole hints only, never cut mid-word. The first part is the confirm key and stays;
     // middle parts go first, then the words (the buttons beside them already say them),
     // then the last key.
@@ -352,7 +426,10 @@ pub(in crate::git::screen) fn button_hints(frame: &mut Frame, at: u16, y: u16, r
         })
         .collect();
     let width = |parts: &[(&str, Option<&str>)]| {
-        parts.iter().map(|(key, what)| key.width() + what.map_or(0, |what| what.width() + 1)).sum::<usize>()
+        parts
+            .iter()
+            .map(|(key, what)| key.width() + what.map_or(0, |what| what.width() + 1))
+            .sum::<usize>()
             + parts.len().saturating_sub(1) * 3
     };
     while parts.len() > 2 && width(&parts) > room {
@@ -384,7 +461,7 @@ fn primary_label(app: &GitScreen, form: &Form) -> &'static str {
     use super::super::refs::Action as Ref;
     let pipeline = app.github.terms().run_noun == "pipeline";
     match &form.action {
-        // The button says the verb the footer says (§3.40).
+        // The button says the verb the footer says.
         FormAction::Github(Action::Cancel(_)) if pipeline => "Cancel pipeline",
         FormAction::Github(Action::Cancel(_)) => "Cancel run",
         FormAction::Github(Action::Rerun(_)) => "Re-run jobs",
@@ -393,7 +470,9 @@ fn primary_label(app: &GitScreen, form: &Form) -> &'static str {
         FormAction::Github(Action::Download(..)) => "Download",
         FormAction::Github(Action::SaveLog(_)) => "Save",
         FormAction::Github(Action::CreatePullRequest) => "Review →",
-        FormAction::Github(Action::CreatePullRequestWeb | Action::Browser(..) | Action::Web(..)) => "Open in browser",
+        FormAction::Github(
+            Action::CreatePullRequestWeb | Action::Browser(..) | Action::Web(..),
+        ) => "Open in browser",
         FormAction::Github(Action::InlineRange { .. }) => "Add review comment",
         FormAction::Github(Action::Draft(..)) => "Save",
         FormAction::Github(Action::ConfirmPullRequest(request)) if request.push.is_some() => {
@@ -401,7 +480,7 @@ fn primary_label(app: &GitScreen, form: &Form) -> &'static str {
         }
         FormAction::Github(Action::ConfirmPullRequest(_)) => "Create PR",
         FormAction::Github(Action::SaveView(..)) => "Save view",
-        // The verb the title asks about, not a bare `Confirm` (r11 ISS-07).
+        // The verb the title asks about, not a bare `Confirm`.
         FormAction::Github(Action::State(_, _, true)) => "Close",
         FormAction::Github(Action::State(_, _, false)) => "Reopen",
         FormAction::Rewrite(plan) => match plan.kind {
@@ -429,8 +508,16 @@ const STACKED: usize = 7;
 /// its line beside it, as GitHub's close menu does.
 fn stacked(field: &Field) -> bool {
     !field.custom_choices
-        && (field.choices.iter().map(|choice| usize::from(chrome::width(choice)) + 5).sum::<usize>() > 52
-            || field.choices.iter().any(|choice| described(choice).is_some()))
+        && (field
+            .choices
+            .iter()
+            .map(|choice| usize::from(chrome::width(choice)) + 5)
+            .sum::<usize>()
+            > 52
+            || field
+                .choices
+                .iter()
+                .any(|choice| described(choice).is_some()))
 }
 
 /// The one-line description GitHub's close menu gives each reason.
@@ -455,7 +542,10 @@ pub(in crate::git::screen) fn toggle(label: &str, on: bool) -> Field {
 }
 
 pub(in crate::git::screen) fn is_toggle(field: &Field) -> bool {
-    !field.custom_choices && field.choices.len() == 2 && field.choices[0] == ON && field.choices[1] == OFF
+    !field.custom_choices
+        && field.choices.len() == 2
+        && field.choices[0] == ON
+        && field.choices[1] == OFF
 }
 
 pub(in crate::git::screen) fn toggled(field: &Field) -> bool {
@@ -464,7 +554,10 @@ pub(in crate::git::screen) fn toggled(field: &Field) -> bool {
 
 /// Space, Up or Down flips a toggle; any other typing leaves it alone. True when the key
 /// was the toggle's.
-pub(in crate::git::screen) fn toggle_key(field: &mut Field, code: &crate::editor::input::KeyCode) -> bool {
+pub(in crate::git::screen) fn toggle_key(
+    field: &mut Field,
+    code: &crate::editor::input::KeyCode,
+) -> bool {
     use crate::editor::input::KeyCode;
     if !is_toggle(field) {
         return false;
@@ -497,15 +590,46 @@ fn heights(fields: &[Field]) -> Vec<u16> {
 }
 
 /// `☑ Push 2 commits first`: the box in the accent when checked, the row a chip when focused.
-fn checkbox(app: &GitScreen, frame: &mut Frame, field: &Field, x: u16, y: u16, right: u16, focused: bool) {
-    let mark = glyph(if toggled(field) { Glyph::Checked } else { Glyph::Unchecked }, app.icon_mode);
+fn checkbox(
+    app: &GitScreen,
+    frame: &mut Frame,
+    field: &Field,
+    x: u16,
+    y: u16,
+    right: u16,
+    focused: bool,
+) {
+    let mark = glyph(
+        if toggled(field) {
+            Glyph::Checked
+        } else {
+            Glyph::Unchecked
+        },
+        app.icon_mode,
+    );
     if focused {
-        frame.grid.put_text_clipped(x, y, &format!(" {mark} {} ", field.label), bold(GitRole::OnFocus, GitSurface::ChipActive), right);
+        frame.grid.put_text_clipped(
+            x,
+            y,
+            &format!(" {mark} {} ", field.label),
+            bold(GitRole::OnFocus, GitSurface::ChipActive),
+            right,
+        );
         frame.cursor = Some((x + 1, y, SetCursorStyle::SteadyBlock));
         return;
     }
     let spans: Vec<Span> = vec![
-        (format!(" {mark} "), st(if toggled(field) { GitRole::Focus } else { GitRole::Muted }, SURFACE)),
+        (
+            format!(" {mark} "),
+            st(
+                if toggled(field) {
+                    GitRole::Focus
+                } else {
+                    GitRole::Muted
+                },
+                SURFACE,
+            ),
+        ),
         (field.label.clone(), st(GitRole::Text, SURFACE)),
     ];
     chrome::put_spans(&mut frame.grid, x, y, &spans, right);
@@ -536,19 +660,28 @@ fn generic(app: &GitScreen, frame: &mut Frame, form: &Form, lay: &Layout) {
     };
     let w = (body.w * 6 / 10).clamp(56.min(body.w), 110.min(body.w));
     // A forge confirmation with only choices to make (`Close issue #19?`) is a short
-    // question: about 60 columns, not a 110-column bar across both panes (r11 ISS-08).
+    // question: about 60 columns, not a 110-column bar across both panes.
     // Closing an issue adds an optional comment; the dialog stays a short question.
-    let short = matches!(&form.action, FormAction::Github(super::super::github::Action::State(..)));
+    let short = matches!(
+        &form.action,
+        FormAction::Github(super::super::github::Action::State(..))
+    );
     let w = if short { w.min(72) } else { w };
     // The note wraps in the interior less its one-column pad (a rerun's second line says why
     // failed-only is unavailable), then a gap.
-    let note = note.map(|note| wrap_note(&note, usize::from(w.saturating_sub(6)))).unwrap_or_default();
-    let note_rows = if note.is_empty() { 0 } else { note.len() as u16 + 1 };
+    let note = note
+        .map(|note| wrap_note(&note, usize::from(w.saturating_sub(6))))
+        .unwrap_or_default();
+    let note_rows = if note.is_empty() {
+        0
+    } else {
+        note.len() as u16 + 1
+    };
     let content = content + note_rows;
     // Top padding, fields, an optional status row, the button row, borders.
     let wanted = content + 1 + u16::from(status.is_some()) + 1 + 2;
     let h = wanted.min(body.h.saturating_sub(2)).max(5);
-    // One placement rule at every width: centred on the screen (r11 ISS-04).
+    // One placement rule at every width: centred on the screen.
     let x = body.x + (body.w - w) / 2;
     let rect = Rect::new(x, body.y + body.h.saturating_sub(h) / 2, w, h);
     // The `Field 1/2` pager shows only when some field is out of view: a sheet whose
@@ -581,23 +714,52 @@ fn generic(app: &GitScreen, frame: &mut Frame, form: &Form, lay: &Layout) {
     let run_sheet = matches!(
         &form.action,
         FormAction::Github(
-            Action::Cancel(_) | Action::Rerun(_) | Action::Approve(_) | Action::Dispatch(_) | Action::Download(..) | Action::SaveLog(_)
+            Action::Cancel(_)
+                | Action::Rerun(_)
+                | Action::Approve(_)
+                | Action::Dispatch(_)
+                | Action::Download(..)
+                | Action::SaveLog(_)
         )
     );
     // The frame's corner, a space either side of the title, and the position label.
-    let glyph_cells = if run_sheet { 0 } else { usize::from(chrome::width(glyph(glyph_kind, app.icon_mode))) + 1 };
-    let position_cells = if position.is_empty() { 0 } else { usize::from(chrome::width(&position)) + 3 };
-    let title = cut_title(&form.title, usize::from(w.saturating_sub(6)).saturating_sub(glyph_cells + position_cells));
-    let spans = if run_sheet { vec![(title, bold(GitRole::Text, SURFACE))] } else { title_spans(app, glyph_kind, &title) };
+    let glyph_cells = if run_sheet {
+        0
+    } else {
+        usize::from(chrome::width(glyph(glyph_kind, app.icon_mode))) + 1
+    };
+    let position_cells = if position.is_empty() {
+        0
+    } else {
+        usize::from(chrome::width(&position)) + 3
+    };
+    let title = cut_title(
+        &form.title,
+        usize::from(w.saturating_sub(6)).saturating_sub(glyph_cells + position_cells),
+    );
+    let spans = if run_sheet {
+        vec![(title, bold(GitRole::Text, SURFACE))]
+    } else {
+        title_spans(app, glyph_kind, &title)
+    };
     let inner = frame_box(frame, rect, &spans, &position);
-    let fields_bottom = inner.bottom().saturating_sub(1 + u16::from(status.is_some()));
+    let fields_bottom = inner
+        .bottom()
+        .saturating_sub(1 + u16::from(status.is_some()));
 
     for (row, (line, first)) in note.iter().enumerate() {
         frame.grid.put_text_clipped(
             inner.x + 1,
             inner.y + 1 + row as u16,
             &chrome::ellipsize(line, usize::from(inner.w.saturating_sub(2))),
-            st(if *first { GitRole::Text } else { GitRole::Muted }, SURFACE),
+            st(
+                if *first {
+                    GitRole::Text
+                } else {
+                    GitRole::Muted
+                },
+                SURFACE,
+            ),
             inner.right(),
         );
     }
@@ -616,7 +778,10 @@ fn generic(app: &GitScreen, frame: &mut Frame, form: &Form, lay: &Layout) {
         }
     }
     // Scroll so the selected field is fully visible.
-    let selected_bottom = heights.iter().take((form.selected + 1).min(form.fields.len())).sum::<u16>();
+    let selected_bottom = heights
+        .iter()
+        .take((form.selected + 1).min(form.fields.len()))
+        .sum::<u16>();
     let scroll = selected_bottom.saturating_sub(room);
     let mut at = 0u16;
     for (index, field) in form.fields.iter().enumerate() {
@@ -678,7 +843,11 @@ fn generic(app: &GitScreen, frame: &mut Frame, form: &Form, lay: &Layout) {
             ));
         }
         chrome::put_spans(&mut frame.grid, inner.x + 1, y, &label, inner.right());
-        let rows = if field.multiline { heights[index].saturating_sub(2) } else { field_rows(field) - 1 };
+        let rows = if field.multiline {
+            heights[index].saturating_sub(2)
+        } else {
+            field_rows(field) - 1
+        };
         if !field.choices.is_empty() && !field.custom_choices {
             // A closed set reads as radio options: `● Completed  ○ Not planned`.
             radio(frame, field, inner.x + 1, y + 1, inner.right(), focused);
@@ -696,7 +865,14 @@ fn generic(app: &GitScreen, frame: &mut Frame, form: &Form, lay: &Layout) {
             inner.x + 1,
             inner.bottom() - 2,
             &chrome::ellipsize(&text, usize::from(inner.w.saturating_sub(1))),
-            st(if error { GitRole::Removed } else { GitRole::Modified }, SURFACE),
+            st(
+                if error {
+                    GitRole::Removed
+                } else {
+                    GitRole::Modified
+                },
+                SURFACE,
+            ),
             inner.right(),
         );
     }
@@ -745,14 +921,21 @@ fn status_line(app: &GitScreen, form: &Form) -> Option<(String, bool)> {
     if matches!(&form.action, FormAction::CheckoutDetached(_))
         && app.notice.contains("would be overwritten")
     {
-        return Some(("Git refused checkout: changes would be overwritten".into(), true));
+        return Some((
+            "Git refused checkout: changes would be overwritten".into(),
+            true,
+        ));
     }
     let line = app.notice.lines().next().unwrap_or_default();
     (!line.is_empty()).then(|| (line.to_owned(), super::looks_like_error(line)))
 }
 
 fn commit_rect(lay: &Layout) -> Rect {
-    let area = if lay.reader.w >= 60 { lay.reader } else { lay.body };
+    let area = if lay.reader.w >= 60 {
+        lay.reader
+    } else {
+        lay.body
+    };
     Rect::new(
         area.x + 1,
         area.y + 1,
@@ -762,7 +945,11 @@ fn commit_rect(lay: &Layout) -> Rect {
 }
 
 fn commit_left(inner: Rect) -> Rect {
-    let width = if inner.w >= 80 { (inner.w * 55 / 100).min(76) } else { inner.w };
+    let width = if inner.w >= 80 {
+        (inner.w * 55 / 100).min(76)
+    } else {
+        inner.w
+    };
     Rect::new(inner.x, inner.y, width, inner.h)
 }
 
@@ -783,7 +970,11 @@ fn commit(app: &GitScreen, frame: &mut Frame, form: &Form, lay: &Layout) {
     } else {
         format!("Commit to {branch}")
     };
-    let subject = form.fields.first().map(|field| field.input.input.as_str()).unwrap_or("");
+    let subject = form
+        .fields
+        .first()
+        .map(|field| field.input.input.as_str())
+        .unwrap_or("");
     let length = subject.width();
     let inner = frame_box(frame, rect, &title_spans(app, Glyph::Commit, &title), "");
     let split = inner.w >= 80;
@@ -887,18 +1078,36 @@ fn commit(app: &GitScreen, frame: &mut Frame, form: &Form, lay: &Layout) {
         };
         toggles.push((
             format!("{box_glyph} "),
-            if on { bold(GitRole::Focus, SURFACE) } else { st(GitRole::Muted, SURFACE) },
+            if on {
+                bold(GitRole::Focus, SURFACE)
+            } else {
+                st(GitRole::Muted, SURFACE)
+            },
         ));
         toggles.push((
             label.into(),
-            if on { bold(GitRole::Text, SURFACE) } else { st(GitRole::Text, SURFACE) },
+            if on {
+                bold(GitRole::Text, SURFACE)
+            } else {
+                st(GitRole::Text, SURFACE)
+            },
         ));
         toggles.push((
-            if with_keys { format!(" {key}   ") } else { "   ".into() },
+            if with_keys {
+                format!(" {key}   ")
+            } else {
+                "   ".into()
+            },
             st(GitRole::Muted, SURFACE),
         ));
     }
-    chrome::put_spans(&mut frame.grid, left.x + 1, inner.bottom() - 3, &toggles, left.right());
+    chrome::put_spans(
+        &mut frame.grid,
+        left.x + 1,
+        inner.bottom() - 3,
+        &toggles,
+        left.right(),
+    );
     // A refusal answering Ctrl+Enter sits between the toggles and the buttons.
     if let Some((line, _)) = status_line(app, form) {
         frame.grid.put_text_clipped(
@@ -978,7 +1187,11 @@ fn commit(app: &GitScreen, frame: &mut Frame, form: &Form, lay: &Layout) {
     let list_bottom = (right.y + 3 + 6).min(right.bottom().saturating_sub(2));
     let mut y = right.y + 3;
     for (index, entry) in staged.iter().enumerate() {
-        let counts = app.staged_numstat.get(&entry.relative_path).copied().flatten();
+        let counts = app
+            .staged_numstat
+            .get(&entry.relative_path)
+            .copied()
+            .flatten();
         if let Some((a, r)) = counts {
             added += a;
             removed += r;
@@ -1006,9 +1219,13 @@ fn commit(app: &GitScreen, frame: &mut Frame, form: &Form, lay: &Layout) {
             right.right(),
         );
         let (icon, group) = super::glyphs::file(&entry.relative_path, mode);
-        frame
-            .grid
-            .put_text_clipped(right.x + 2, y, icon, super::syntax(group, SURFACE), right.right());
+        frame.grid.put_text_clipped(
+            right.x + 2,
+            y,
+            icon,
+            super::syntax(group, SURFACE),
+            right.right(),
+        );
         let stats: Vec<Span> = match counts {
             Some((a, r)) => vec![
                 (format!("+{a}"), st(GitRole::Added, SURFACE)),
@@ -1021,15 +1238,25 @@ fn commit(app: &GitScreen, frame: &mut Frame, form: &Form, lay: &Layout) {
         chrome::put_spans(&mut frame.grid, stats_x, y, &stats, right.right());
         let path = entry.relative_path.display().to_string();
         let (dir, name) = super::fit_path(&path, usize::from(stats_x.saturating_sub(right.x + 5)));
-        let x = frame
-            .grid
-            .put_text_clipped(right.x + 4, y, &dir, st(GitRole::Muted, SURFACE), stats_x);
+        let x =
+            frame
+                .grid
+                .put_text_clipped(right.x + 4, y, &dir, st(GitRole::Muted, SURFACE), stats_x);
         frame
             .grid
             .put_text_clipped(x, y, &name, st(GitRole::Added, SURFACE), stats_x);
         y += 1;
     }
-    patch(app, frame, Rect::new(right.x, y + 1, right.w, right.bottom().saturating_sub(y + 3)));
+    patch(
+        app,
+        frame,
+        Rect::new(
+            right.x,
+            y + 1,
+            right.w,
+            right.bottom().saturating_sub(y + 3),
+        ),
+    );
     if staged.is_empty() {
         frame.grid.put_text_clipped(
             right.x,
@@ -1052,7 +1279,13 @@ fn commit(app: &GitScreen, frame: &mut Frame, form: &Form, lay: &Layout) {
         (" ".into(), st(GitRole::Muted, SURFACE)),
         (format!("−{removed}"), st(GitRole::Removed, SURFACE)),
     ];
-    chrome::put_spans(&mut frame.grid, right.x, right.bottom() - 1, &summary, right.right());
+    chrome::put_spans(
+        &mut frame.grid,
+        right.x,
+        right.bottom() - 1,
+        &summary,
+        right.right(),
+    );
 }
 
 /// The staged patch, compact: a file band per file, hunk bands, tinted +/− rows.
@@ -1062,7 +1295,9 @@ fn patch(app: &GitScreen, frame: &mut Frame, rect: Rect) {
     }
     let mode = app.icon_mode;
     for x in rect.x..rect.right() {
-        frame.grid.set_cell(x, rect.y, "─", st(GitRole::Border, SURFACE));
+        frame
+            .grid
+            .set_cell(x, rect.y, "─", st(GitRole::Border, SURFACE));
     }
     let mut y = rect.y + 1;
     for line in app.staged_patch.lines() {
@@ -1072,7 +1307,11 @@ fn patch(app: &GitScreen, frame: &mut Frame, rect: Rect) {
         let row = Rect::new(rect.x, y, rect.w, 1);
         if let Some(rest) = line.strip_prefix("diff --git a/") {
             let path = rest.split(" b/").next().unwrap_or(rest);
-            chrome::fill(&mut frame.grid, row, st(GitRole::Text, GitSurface::FileBand));
+            chrome::fill(
+                &mut frame.grid,
+                row,
+                st(GitRole::Text, GitSurface::FileBand),
+            );
             let (icon, group) = super::glyphs::file(std::path::Path::new(path), mode);
             let x = frame.grid.put_text_clipped(
                 rect.x + 1,
@@ -1089,7 +1328,11 @@ fn patch(app: &GitScreen, frame: &mut Frame, rect: Rect) {
                 rect.right(),
             );
         } else if line.starts_with("@@") {
-            chrome::fill(&mut frame.grid, row, st(GitRole::Text, GitSurface::HunkBand));
+            chrome::fill(
+                &mut frame.grid,
+                row,
+                st(GitRole::Text, GitSurface::HunkBand),
+            );
             let range = line.split("@@").nth(1).map_or(line, str::trim);
             frame.grid.put_text_clipped(
                 rect.x + 1,
@@ -1117,17 +1360,35 @@ fn patch(app: &GitScreen, frame: &mut Frame, rect: Rect) {
             // Code wraps, as the reader's diff does: a long line continues on the next rows
             // under its sign, never cut mid-token.
             let code = line.get(1..).unwrap_or_default().replace('\t', "    ");
-            let style = st(if role == GitRole::Muted { GitRole::Muted } else { GitRole::Text }, surface);
-            for (index, piece) in wrap_code(&code, usize::from(rect.w.saturating_sub(4)).max(1)).iter().enumerate() {
+            let style = st(
+                if role == GitRole::Muted {
+                    GitRole::Muted
+                } else {
+                    GitRole::Text
+                },
+                surface,
+            );
+            for (index, piece) in wrap_code(&code, usize::from(rect.w.saturating_sub(4)).max(1))
+                .iter()
+                .enumerate()
+            {
                 if y >= rect.bottom() {
                     break;
                 }
                 let row = Rect::new(rect.x, y, rect.w, 1);
                 chrome::fill(&mut frame.grid, row, st(GitRole::Text, surface));
                 if index == 0 {
-                    frame.grid.put_text_clipped(rect.x + 1, y, sign, bold(role, surface), rect.right());
+                    frame.grid.put_text_clipped(
+                        rect.x + 1,
+                        y,
+                        sign,
+                        bold(role, surface),
+                        rect.right(),
+                    );
                 }
-                frame.grid.put_text_clipped(rect.x + 3, y, piece, style, rect.right());
+                frame
+                    .grid
+                    .put_text_clipped(rect.x + 3, y, piece, style, rect.right());
                 y += 1;
             }
             continue;
@@ -1193,7 +1454,10 @@ mod tests {
 
     #[test]
     fn staged_patch_code_wraps_instead_of_clipping() {
-        assert_eq!(wrap_code("let modes = [\"NORMAL\"];", 10), ["let modes ", "= [\"NORMAL", "\"];"]);
+        assert_eq!(
+            wrap_code("let modes = [\"NORMAL\"];", 10),
+            ["let modes ", "= [\"NORMAL", "\"];"]
+        );
         assert_eq!(wrap_code("", 10), [""]);
         assert_eq!(wrap_code("中文中文", 4), ["中文", "中文"]);
     }
@@ -1210,8 +1474,15 @@ mod tests {
         let note = "Reruns 1 failed job (Python tests) on the same commit (425ac6a).\nForgejo reruns whole runs only.";
         let rows = wrap_note(note, 54);
         assert!(rows.iter().all(|(row, _)| row.width() <= 54), "{rows:?}");
-        assert!(rows.iter().any(|(row, first)| *first && row.ends_with("(425ac6a).")), "{rows:?}");
-        assert_eq!(rows.last().map(|(row, first)| (row.as_str(), *first)), Some(("Forgejo reruns whole runs only.", false)));
+        assert!(
+            rows.iter()
+                .any(|(row, first)| *first && row.ends_with("(425ac6a).")),
+            "{rows:?}"
+        );
+        assert_eq!(
+            rows.last().map(|(row, first)| (row.as_str(), *first)),
+            Some(("Forgejo reruns whole runs only.", false))
+        );
     }
 
     /// A text box scrolls only as far as the cursor needs, typing down or moving back up.

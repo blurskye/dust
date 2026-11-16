@@ -1,6 +1,6 @@
 [package]
 name = "dust"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 license = "GPL-3.0-or-later"
 description = "A terminal IDE with Vim keys, language servers, debugging, git and coding agents"

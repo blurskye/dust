@@ -1,11 +1,11 @@
 //! Configuration records and bundled policy.
 
 mod theme;
+#[allow(unused_imports)]
+pub use theme::GitPalette;
 pub use theme::HighlightDefinition;
 pub use theme::ThemeAttribute;
 pub use theme::ThemeColor;
-#[allow(unused_imports)]
-pub use theme::GitPalette;
 pub use theme::ThemeConfig;
 pub use theme::ThemeStyle;
 pub use theme::ThemeStyles;

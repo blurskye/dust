@@ -56,7 +56,10 @@ fn bindings() -> &'static BTreeMap<String, Keymap> {
             else {
                 continue;
             };
-            if entry.unmap || entry.disable || !(command.starts_with("input.") || builtin.contains(command)) {
+            if entry.unmap
+                || entry.disable
+                || !(command.starts_with("input.") || builtin.contains(command))
+            {
                 continue;
             }
             // Leader chords are the editor's own commands, never text editing.
@@ -67,7 +70,8 @@ fn bindings() -> &'static BTreeMap<String, Keymap> {
             else {
                 continue;
             };
-            let Ok(mut invocation) = CommandInvocation::new(command, InvocationSource::Keymap) else {
+            let Ok(mut invocation) = CommandInvocation::new(command, InvocationSource::Keymap)
+            else {
                 continue;
             };
             for (name, value) in &entry.arguments {
@@ -94,7 +98,9 @@ pub(super) fn keys_for(mode: &str, command: &str) -> Vec<String> {
             .keymaps
             .entries
             .into_iter()
-            .filter(|entry| entry.context.as_deref() == Some("editor") && !entry.unmap && !entry.disable)
+            .filter(|entry| {
+                entry.context.as_deref() == Some("editor") && !entry.unmap && !entry.disable
+            })
             .filter_map(|entry| Some((entry.mode, entry.keys?, entry.command?)))
             .collect()
     });
@@ -235,14 +241,13 @@ impl TextBox {
             owner,
             synced: text.to_owned(),
         };
-        if insert {
-            if let Ok(invocation) = CommandInvocation::new("mode.insert", InvocationSource::Keymap)
-            {
-                text_box.execute(
-                    invocation.with_argument("placement", CommandValue::String("before".into())),
-                    0,
-                );
-            }
+        if insert
+            && let Ok(invocation) = CommandInvocation::new("mode.insert", InvocationSource::Keymap)
+        {
+            text_box.execute(
+                invocation.with_argument("placement", CommandValue::String("before".into())),
+                0,
+            );
         }
         text_box
     }
@@ -319,10 +324,11 @@ impl TextBox {
             let input = match (context, character) {
                 (_, None) => GrammarInput::Cancel,
                 (PendingInputContext::Prefix, Some(_)) => {
-                    let resolution = bindings().get("prefix").map_or(
-                        MappingResolution::Missing,
-                        |prefix| self.sequence.feed_layers([prefix], key.clone()),
-                    );
+                    let resolution = bindings()
+                        .get("prefix")
+                        .map_or(MappingResolution::Missing, |prefix| {
+                            self.sequence.feed_layers([prefix], key.clone())
+                        });
                     match resolution {
                         MappingResolution::Ready(invocation) => {
                             self.dispatch(invocation);
@@ -348,9 +354,11 @@ impl TextBox {
             return;
         }
         let mode = mode_name(self.grammar.effective_mode(self.mode()));
-        let resolution = bindings().get(mode).map_or(MappingResolution::Missing, |keymap| {
-            self.sequence.feed_layers([keymap], key.clone())
-        });
+        let resolution = bindings()
+            .get(mode)
+            .map_or(MappingResolution::Missing, |keymap| {
+                self.sequence.feed_layers([keymap], key.clone())
+            });
         match resolution {
             MappingResolution::Ready(invocation) => self.dispatch(invocation),
             MappingResolution::ReadyAndReplay(invocation, rest) => {
@@ -445,7 +453,13 @@ mod tests {
     }
 
     fn open(text: &str, cursor: usize, insert: bool) -> TextBox {
-        TextBox::open(text, cursor, insert, RegisterStore::default(), (String::new(), 1, 0))
+        TextBox::open(
+            text,
+            cursor,
+            insert,
+            RegisterStore::default(),
+            (String::new(), 1, 0),
+        )
     }
 
     #[test]
@@ -482,7 +496,13 @@ mod tests {
         // The editor's linewise put after a last line without a newline ends with one.
         keys(&mut text_box, "p");
         assert_eq!(text_box.text().trim_end_matches('\n'), "two\none");
-        let mut next = TextBox::open("x", 0, false, text_box.registers().clone(), (String::new(), 1, 0));
+        let mut next = TextBox::open(
+            "x",
+            0,
+            false,
+            text_box.registers().clone(),
+            (String::new(), 1, 0),
+        );
         keys(&mut next, "p");
         assert_eq!(next.text().trim_end_matches('\n'), "x\none");
     }

@@ -629,9 +629,7 @@ mod tests {
         let server = RemoteServer::start(directory.path()).unwrap();
         let mut client = UnixStream::connect(server.path()).unwrap();
         // Long enough that only a server that keeps extending its deadline reaches it.
-        client
-            .set_read_timeout(Some(REQUEST_TIMEOUT * 10))
-            .unwrap();
+        client.set_read_timeout(Some(REQUEST_TIMEOUT * 10)).unwrap();
         let mut writer = client.try_clone().unwrap();
         let trickling = thread::spawn(move || {
             while writer.write_all(b"x").is_ok() {

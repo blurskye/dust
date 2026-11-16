@@ -11,13 +11,19 @@ const HEIGHT: u16 = 44;
 
 fn key(screen: &mut GitScreen, code: KeyCode) {
     screen.event(UiEvent::Key {
-        key: KeyEvent { code, modifiers: Modifiers::default() },
+        key: KeyEvent {
+            code,
+            modifiers: Modifiers::default(),
+        },
         kind: KeyInputKind::Press,
     });
 }
 fn view(screen: &mut GitScreen) -> String {
     let frame = screen.frame(WIDTH, HEIGHT);
-    (0..frame.grid.height()).map(|y| frame.grid.row_text(y)).collect::<Vec<_>>().join("\n")
+    (0..frame.grid.height())
+        .map(|y| frame.grid.row_text(y))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 /// Polls until `ready`, then a little longer, so late job errors would show too.
 fn settle(screen: &mut GitScreen, mut ready: impl FnMut(&mut GitScreen) -> bool) {
@@ -34,8 +40,16 @@ fn settle(screen: &mut GitScreen, mut ready: impl FnMut(&mut GitScreen) -> bool)
 }
 fn no_stderr(screen: &mut GitScreen, page: &str) {
     let shown = view(screen);
-    for raw in ["fatal:", "bad revision", "unknown revision", "ambiguous argument"] {
-        assert!(!shown.contains(raw), "{page} shows Git's stderr ({raw}):\n{shown}");
+    for raw in [
+        "fatal:",
+        "bad revision",
+        "unknown revision",
+        "ambiguous argument",
+    ] {
+        assert!(
+            !shown.contains(raw),
+            "{page} shows Git's stderr ({raw}):\n{shown}"
+        );
     }
 }
 
@@ -57,7 +71,9 @@ fn a_repository_with_no_commits_opens_every_tab_without_git_errors() {
 
     // History is empty and says how to start.
     key(s, KeyCode::Char('4'));
-    settle(s, |s| !s.busy() && view(s).contains("No commits yet · c to make the first commit"));
+    settle(s, |s| {
+        !s.busy() && view(s).contains("No commits yet · c to make the first commit")
+    });
     no_stderr(s, "History");
     key(s, KeyCode::Char('2'));
 

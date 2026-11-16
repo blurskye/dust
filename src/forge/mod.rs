@@ -1,6 +1,6 @@
-//! The forge layer (FORGE.md): providers for GitHub, GitLab, Gitea and Forgejo behind one
+//! The forge layer: providers for GitHub, GitLab, Gitea and Forgejo behind one
 //! `Read`/`Write` model, and `ForgeJobs`, the single cancellable worker the Git screen and the
-//! IDE send them through. The IDE's pull-request picker, review comments and checkout (§5.2)
+//! IDE send them through. The IDE's pull-request picker, review comments and checkout
 //! go through the provider layer like everything else; replies arrive on a channel.
 
 pub mod batch;
@@ -107,7 +107,7 @@ pub enum ForgeReply {
     Comments(Result<Vec<ReviewComment>, String>),
     CommentTarget(Result<ReviewCommentTarget, String>),
     Commented(Result<(), String>),
-    /// A provider-layer read (FORGE.md §3.2).
+    /// A provider-layer read.
     Fetched(
         request::Read,
         Result<provider::Fetched, request::ForgeError>,
@@ -147,11 +147,11 @@ impl Default for ForgeJobs {
     }
 }
 
-/// The IDE picker's page: one request on every provider (§5.2).
+/// The IDE picker's page: one request on every provider.
 const PICKER_PAGE: u32 = 100;
 
 impl ForgeJobs {
-    /// The low-priority worker that warms the cache (FORGE.md §7.2); the interactive worker
+    /// The low-priority worker that warms the cache; the interactive worker
     /// stays free for what the user is looking at.
     pub fn warm() -> Self {
         let mut jobs = Self::default();
@@ -850,7 +850,10 @@ mod tests {
                     .run(
                         root,
                         "/bin/sh",
-                        &["-c", "echo $$ > child.tmp && mv child.tmp child; exec sleep 30"],
+                        &[
+                            "-c",
+                            "echo $$ > child.tmp && mv child.tmp child; exec sleep 30",
+                        ],
                     )
                     .map(|_| Vec::new()),
             )

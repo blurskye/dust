@@ -111,7 +111,7 @@ impl Sgr {
 }
 
 /// The display text of a log line with the colours its SGR escapes asked for, as byte ranges
-/// of that text (§3.38: colours are rendered, never shown as `^[[36;1m`). Markers the runner
+/// of that text (colours are rendered, never shown as `^[[36;1m`). Markers the runner
 /// prints (`##[error]`, `##[command]`) read as in `display`.
 pub(super) fn styled(line: &str) -> (String, Vec<(std::ops::Range<usize>, Sgr)>) {
     let line = payload(line);
@@ -176,7 +176,11 @@ fn scan(line: &str, mut sgr: impl FnMut(&str, usize)) -> String {
                     let mut params = String::new();
                     for c in chars.by_ref() {
                         if ('@'..='~').contains(&c) {
-                            if c == 'm' && params.chars().all(|c| c.is_ascii_digit() || c == ';' || c == ':') {
+                            if c == 'm'
+                                && params
+                                    .chars()
+                                    .all(|c| c.is_ascii_digit() || c == ';' || c == ':')
+                            {
                                 sgr(&params, text.len());
                             }
                             break;
@@ -212,24 +216,60 @@ mod tests {
 
     #[test]
     fn sgr_colours_become_ranges_of_the_display_text() {
-        let raw = "2026-11-14T05:00:04.0000000Z test retries_uploads ... \x1b[31mFAILED\x1b[0m done";
+        let raw =
+            "2026-11-14T05:00:04.0000000Z test retries_uploads ... \x1b[31mFAILED\x1b[0m done";
         let (text, ranges) = styled(raw);
         assert_eq!(text, "test retries_uploads ... FAILED done");
         assert_eq!(text, display(raw));
-        assert_eq!(ranges, vec![(25..31, Sgr { color: Some(1), bold: false })]);
+        assert_eq!(
+            ranges,
+            vec![(
+                25..31,
+                Sgr {
+                    color: Some(1),
+                    bold: false
+                }
+            )]
+        );
         let (text, ranges) = styled("^[[36;1mcargo test^[[0m ok");
         assert_eq!(text, "cargo test ok");
-        assert_eq!(ranges, vec![(0..10, Sgr { color: Some(6), bold: true })]);
+        assert_eq!(
+            ranges,
+            vec![(
+                0..10,
+                Sgr {
+                    color: Some(6),
+                    bold: true
+                }
+            )]
+        );
         let (text, ranges) = styled("##[error]Process completed with exit code 101.");
         assert_eq!(text, "error: Process completed with exit code 101.");
         assert!(ranges.is_empty());
         let (text, ranges) = styled("\x1b[92mok\x1b[39m plain \x1b[38;5;3mwarn");
         assert_eq!(text, "ok plain warn");
-        assert_eq!(ranges[0], (0..2, Sgr { color: Some(10), bold: false }));
-        assert_eq!(ranges[1], (9..13, Sgr { color: Some(3), bold: false }));
+        assert_eq!(
+            ranges[0],
+            (
+                0..2,
+                Sgr {
+                    color: Some(10),
+                    bold: false
+                }
+            )
+        );
+        assert_eq!(
+            ranges[1],
+            (
+                9..13,
+                Sgr {
+                    color: Some(3),
+                    bold: false
+                }
+            )
+        );
         assert!(!styled("a\x1b[2Jb").0.contains('\x1b'));
     }
-
 
     #[test]
     fn public_command_caret_sgr_matches_raw_esc_normalization() {

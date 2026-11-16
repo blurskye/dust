@@ -1,4 +1,4 @@
-//! Pull, undo and redo, history rewriting and tag push on the Git tab (DESIGN.md §5.11):
+//! Pull, undo and redo, history rewriting and tag push on the Git tab:
 //! each opens a sheet that shows what will move and the command, then runs as a write job.
 use super::*;
 use crate::git::history::{self, Edit, PullMode, Run};
@@ -35,7 +35,9 @@ impl Op {
 
     /// The sheet's confirm button: the verb the title asks about.
     pub(super) fn verb(&self) -> &'static str {
-        self.button().trim_start_matches("[ ").trim_end_matches(" ]")
+        self.button()
+            .trim_start_matches("[ ")
+            .trim_end_matches(" ]")
     }
 
     /// The confirm button of the older painter, bracketed.
@@ -73,8 +75,11 @@ impl GitScreen {
         if self.page != 0 || key.modifiers.control || key.modifiers.alt {
             return false;
         }
-        let KeyCode::Char(code) = key.code else { return false };
-        let history = self.focus == 2 && self.last_list == 2 && self.history_view == 0 && !self.commit_open;
+        let KeyCode::Char(code) = key.code else {
+            return false;
+        };
+        let history =
+            self.focus == 2 && self.last_list == 2 && self.history_view == 0 && !self.commit_open;
         // A commit is in hand on History and in its open file list.
         let commit = history
             || matches!(self.focus, 0 | 4)
@@ -96,7 +101,9 @@ impl GitScreen {
             'K' if history => self.history_form(Edit::MoveUp),
             // HEAD keeps the native amend and reword sheets (`rewrite.rs`).
             'A' if history && !self.head_selected() => self.history_form(Edit::Amend),
-            'W' if history && !self.head_selected() => self.history_form(Edit::Reword(String::new())),
+            'W' if history && !self.head_selected() => {
+                self.history_form(Edit::Reword(String::new()))
+            }
             _ => return false,
         };
         self.report(result);
@@ -108,9 +115,11 @@ impl GitScreen {
         let id = if matches!(self.focus, 0 | 4) {
             self.commit.as_ref().map(|commit| commit.id.clone())
         } else {
-            self.selected_row().and_then(|row| row.value.to_str().map(str::to_owned))
+            self.selected_row()
+                .and_then(|row| row.value.to_str().map(str::to_owned))
         };
-        id.and_then(|id| git2::Oid::from_str(&id).ok()).ok_or_else(|| "Select a commit".into())
+        id.and_then(|id| git2::Oid::from_str(&id).ok())
+            .ok_or_else(|| "Select a commit".into())
     }
 
     /// `y`: a menu of what to copy: the SHA, the short SHA, the subject, the forge URL.
@@ -139,7 +148,12 @@ impl GitScreen {
             .collect::<Vec<_>>();
         let mut fields = vec![field];
         fields.extend(shown);
-        self.op_form(format!("Copy from {}", history::short(id)), Op::Copy(items), fields, 0);
+        self.op_form(
+            format!("Copy from {}", history::short(id)),
+            Op::Copy(items),
+            fields,
+            0,
+        );
         Ok(())
     }
 
@@ -175,14 +189,22 @@ impl GitScreen {
         self.allow_write()?;
         let plan = history::pull(&self.root)?;
         let mut mode = Field::new("Mode", plan.mode.label().into());
-        mode.choices = PullMode::ALL.iter().map(|mode| mode.label().to_owned()).collect();
+        mode.choices = PullMode::ALL
+            .iter()
+            .map(|mode| mode.label().to_owned())
+            .collect();
         let fields = vec![
             read_only("Branch", plan.branch.clone()),
             read_only("From", plan.upstream.clone()),
             mode,
         ];
         // Enter pulls in the configured mode; Tab reaches the mode, Up/Down changes it.
-        self.op_form(format!("Pull {} into {}?", plan.upstream, plan.branch), Op::Pull, fields, 3);
+        self.op_form(
+            format!("Pull {} into {}?", plan.upstream, plan.branch),
+            Op::Pull,
+            fields,
+            3,
+        );
         Ok(())
     }
 
@@ -195,7 +217,11 @@ impl GitScreen {
             read_only("HEAD", format!("{from} → {to}")),
             read_only("Runs", undo.run().display()),
         ];
-        let title = if redo { "Redo the undone action?" } else { "Undo the last action?" };
+        let title = if redo {
+            "Redo the undone action?"
+        } else {
+            "Undo the last action?"
+        };
         self.op_form(title.into(), Op::Undo(undo), fields, 3);
         Ok(())
     }
@@ -229,7 +255,11 @@ impl GitScreen {
         }
         let target = self
             .selected_row()
-            .and_then(|row| row.value.to_str().and_then(|id| git2::Oid::from_str(id).ok()))
+            .and_then(|row| {
+                row.value
+                    .to_str()
+                    .and_then(|id| git2::Oid::from_str(id).ok())
+            })
             .ok_or("Select a history commit")?;
         let plan = history::rewrite(&self.root, target, edit.clone())?;
         let mut fields = Vec::new();
@@ -257,16 +287,28 @@ impl GitScreen {
             fields.push(read_only("Source", "Index".into()));
         }
         let replays = plan.steps.len();
-        let onto = plan.base.map_or_else(|| "the root".to_owned(), history::short);
+        let onto = plan
+            .base
+            .map_or_else(|| "the root".to_owned(), history::short);
         fields.push(read_only(
             "Rebases",
-            format!("{replays} commit{} onto {onto}", if replays == 1 { "" } else { "s" }),
+            format!(
+                "{replays} commit{} onto {onto}",
+                if replays == 1 { "" } else { "s" }
+            ),
         ));
         let runs = plan.runs();
-        fields.push(read_only("Runs", runs.last().map(Run::display).unwrap_or_default()));
+        fields.push(read_only(
+            "Runs",
+            runs.last().map(Run::display).unwrap_or_default(),
+        ));
         let title = format!("{} · {}?", edit.title(), history::short(target));
         // A reword starts in its message; every other sheet on its confirm button.
-        let selected = if matches!(edit, Edit::Reword(_)) { 0 } else { fields.len() };
+        let selected = if matches!(edit, Edit::Reword(_)) {
+            0
+        } else {
+            fields.len()
+        };
         self.op_form(title, Op::Rewrite(Box::new(plan)), fields, selected);
         Ok(())
     }
@@ -283,7 +325,12 @@ impl GitScreen {
                 (
                     vec![history::pull_run(mode)],
                     NETWORK,
-                    format!("Pulled {} into {} ({})", plan.upstream, plan.branch, mode.label()),
+                    format!(
+                        "Pulled {} into {} ({})",
+                        plan.upstream,
+                        plan.branch,
+                        mode.label()
+                    ),
                 )
             }
             Op::Undo(undo) => {
@@ -293,7 +340,11 @@ impl GitScreen {
                 }
                 let (_, to) = undo.head();
                 let verb = if undo.redo { "Redid" } else { "Undid" };
-                (vec![undo.run()], LOCAL, format!("{verb} {} · HEAD at {to}", undo.entry))
+                (
+                    vec![undo.run()],
+                    LOCAL,
+                    format!("{verb} {} · HEAD at {to}", undo.entry),
+                )
             }
             Op::Rewrite(mut plan) => {
                 if let Edit::Reword(message) = &mut plan.edit {
@@ -326,12 +377,17 @@ impl GitScreen {
             }
             Op::PushTag(tag) => {
                 let remote = values.get(1).map_or("", |remote| remote.trim());
-                (vec![history::push_tag(remote, &tag)?], NETWORK, format!("Pushed tag {tag} to {remote}"))
+                (
+                    vec![history::push_tag(remote, &tag)?],
+                    NETWORK,
+                    format!("Pushed tag {tag} to {remote}"),
+                )
             }
         };
         let mut runs = runs.into_iter();
         let first = runs.next().ok_or("Nothing to run")?;
-        self.jobs.start_write_env(&self.root, first.args, &first.env, timeout)?;
+        self.jobs
+            .start_write_env(&self.root, first.args, &first.env, timeout)?;
         self.busy = true;
         self.notice = "Running Git…".into();
         self.running = Some(Running {
@@ -346,14 +402,19 @@ impl GitScreen {
     /// A write finished: start the sheet's next command, if it has one and this one
     /// succeeded. `true` while the sheet keeps running.
     pub(super) fn next_op_step(&mut self, result: &Result<String, String>) -> bool {
-        let Some(running) = self.running.as_mut() else { return false };
+        let Some(running) = self.running.as_mut() else {
+            return false;
+        };
         if result.is_err() || running.rest.is_empty() {
             return false;
         }
         let next = running.rest.remove(0);
         let timeout = running.timeout;
         running.progress = None;
-        match self.jobs.start_write_env(&self.root, next.args, &next.env, timeout) {
+        match self
+            .jobs
+            .start_write_env(&self.root, next.args, &next.env, timeout)
+        {
             Ok(()) => true,
             Err(error) => {
                 self.running = None;
@@ -374,10 +435,16 @@ impl GitScreen {
             Ok(_) => running.done,
             Err(error) => {
                 let state = git2::Repository::open(&self.root)
-                    .map_or(git2::RepositoryState::Clean, |repository| repository.state());
+                    .map_or(git2::RepositoryState::Clean, |repository| {
+                        repository.state()
+                    });
                 if state != git2::RepositoryState::Clean {
                     // Git has no skip for a merge (a pull that merges stops as one).
-                    let skip = if state == git2::RepositoryState::Merge { "" } else { "S skips, " };
+                    let skip = if state == git2::RepositoryState::Merge {
+                        ""
+                    } else {
+                        "S skips, "
+                    };
                     format!("Stopped on a conflict · resolve it, then C continues, {skip}X aborts")
                 } else {
                     error.replace(['\r', '\n'], " ")
@@ -388,7 +455,9 @@ impl GitScreen {
 
     /// While a sheet's command runs, the footer shows Git's last progress line.
     pub(super) fn op_progress(&mut self) -> bool {
-        let Some(running) = self.running.as_mut() else { return false };
+        let Some(running) = self.running.as_mut() else {
+            return false;
+        };
         let line = self.jobs.write_progress();
         if line.is_some() && line != running.progress {
             running.progress = line;
@@ -409,9 +478,12 @@ impl GitScreen {
 /// The web page of commit `id` on the forge behind the default remote: GitHub's and
 /// Gitea's `/commit/<sha>`, GitLab's `/-/commit/<sha>`.
 pub(super) fn commit_url(root: &Path, id: git2::Oid) -> Result<String, String> {
-    let remote = history::default_remote(root).map_err(|_| "No remote to open the commit on".to_owned())?;
+    let remote =
+        history::default_remote(root).map_err(|_| "No remote to open the commit on".to_owned())?;
     let repository = git2::Repository::open(root).map_err(|error| error.message().to_owned())?;
-    let remote = repository.find_remote(&remote).map_err(|error| error.message().to_owned())?;
+    let remote = repository
+        .find_remote(&remote)
+        .map_err(|error| error.message().to_owned())?;
     let base = remote
         .url()
         .and_then(crate::git::web_base)

@@ -1,4 +1,4 @@
-//! The pending review (DESIGN.md §3.28, §3.30): inline comments held for the next review of a
+//! The pending review: inline comments held for the next review of a
 //! pull request. They are kept under the forge state directory (never in the repository),
 //! per host, repository and pull request, so a restart keeps them until the review is sent
 //! or they are deleted. `V` in the Files reader marks the first line of a range; `c` on the
@@ -54,7 +54,9 @@ pub(super) fn directory(host: &str, repo: &str) -> Option<PathBuf> {
     if cfg!(test) && env.get("DUSTY_FORGE_STATE_DIR").is_none() {
         return None;
     }
-    let state = crate::forge::detect::hosts_path(&env)?.parent()?.to_path_buf();
+    let state = crate::forge::detect::hosts_path(&env)?
+        .parent()?
+        .to_path_buf();
     Some(state.join("drafts").join(segment(host)).join(segment(repo)))
 }
 
@@ -101,7 +103,11 @@ pub(super) fn decode(value: &Value) -> Vec<(InlineDraft, String)> {
                     path,
                     line,
                     start_line: draft["start_line"].as_u64(),
-                    side: if draft["side"].as_str() == Some("LEFT") { Side::Left } else { Side::Right },
+                    side: if draft["side"].as_str() == Some("LEFT") {
+                        Side::Left
+                    } else {
+                        Side::Right
+                    },
                     body,
                 },
                 draft["head"].as_str().unwrap_or_default().to_owned(),
@@ -111,7 +117,9 @@ pub(super) fn decode(value: &Value) -> Vec<(InlineDraft, String)> {
 }
 
 pub(super) fn load(host: &str, repo: &str) -> Drafts {
-    directory(host, repo).map(|directory| load_from(&directory)).unwrap_or_default()
+    directory(host, repo)
+        .map(|directory| load_from(&directory))
+        .unwrap_or_default()
 }
 
 fn load_from(directory: &std::path::Path) -> Drafts {
@@ -133,14 +141,23 @@ fn load_from(directory: &std::path::Path) -> Drafts {
         .collect()
 }
 
-fn save(host: &str, repo: &str, number: u64, drafts: &[(InlineDraft, String)]) -> Result<(), String> {
+fn save(
+    host: &str,
+    repo: &str,
+    number: u64,
+    drafts: &[(InlineDraft, String)],
+) -> Result<(), String> {
     match directory(host, repo) {
         Some(directory) => save_in(&directory, number, drafts),
         None => Ok(()),
     }
 }
 
-fn save_in(directory: &std::path::Path, number: u64, drafts: &[(InlineDraft, String)]) -> Result<(), String> {
+fn save_in(
+    directory: &std::path::Path,
+    number: u64,
+    drafts: &[(InlineDraft, String)],
+) -> Result<(), String> {
     let file = directory.join(format!("{number}.json"));
     if drafts.is_empty() {
         return match std::fs::remove_file(&file) {
@@ -149,10 +166,13 @@ fn save_in(directory: &std::path::Path, number: u64, drafts: &[(InlineDraft, Str
         };
     }
     std::fs::create_dir_all(directory).map_err(|error| error.to_string())?;
-    let mut temporary = tempfile::NamedTempFile::new_in(directory).map_err(|error| error.to_string())?;
+    let mut temporary =
+        tempfile::NamedTempFile::new_in(directory).map_err(|error| error.to_string())?;
     std::io::Write::write_all(&mut temporary, encode(drafts).to_string().as_bytes())
         .map_err(|error| error.to_string())?;
-    temporary.persist(&file).map_err(|error| error.error.to_string())?;
+    temporary
+        .persist(&file)
+        .map_err(|error| error.error.to_string())?;
     Ok(())
 }
 
@@ -165,7 +185,7 @@ pub(super) fn anchor_text(draft: &InlineDraft) -> String {
 }
 
 /// `1 pending comment`, `2 pending comments`: GitHub's words for the comments a review holds
-/// until it is submitted (§3.30a).
+/// until it is submitted.
 pub(super) fn pending(count: usize) -> String {
     plural(count, "pending comment")
 }
@@ -217,7 +237,10 @@ fn wrap(text: &str, width: usize) -> Vec<String> {
 impl Workspace {
     /// The drafts waiting for the review of `number`.
     pub(super) fn review_drafts(&self, number: u64) -> &[(InlineDraft, String)] {
-        self.inline_drafts.get(&number).map(Vec::as_slice).unwrap_or_default()
+        self.inline_drafts
+            .get(&number)
+            .map(Vec::as_slice)
+            .unwrap_or_default()
     }
 
     /// From `poll`: loads the drafts of the repository on screen and writes what changed.
@@ -262,8 +285,19 @@ impl Workspace {
             .copied()
             .collect::<BTreeSet<_>>();
         for number in numbers {
-            let now = self.inline_drafts.get(&number).map(Vec::as_slice).unwrap_or_default();
-            if self.review.saved.get(&number).map(Vec::as_slice).unwrap_or_default() == now {
+            let now = self
+                .inline_drafts
+                .get(&number)
+                .map(Vec::as_slice)
+                .unwrap_or_default();
+            if self
+                .review
+                .saved
+                .get(&number)
+                .map(Vec::as_slice)
+                .unwrap_or_default()
+                == now
+            {
                 continue;
             }
             if save(&host, &repo, number, now).is_err() {
@@ -280,13 +314,16 @@ impl Workspace {
         self.page == 2 && self.pr_tab == pr::FILES && self.focus == 2
     }
 
-    /// Files reader keys for pending comments: `V` marks a range, Esc drops it, `c` (or `C`,
-    /// §3.30a) on a pending comment edits it and on the range's last line comments on the range.
+    /// Files reader keys for pending comments: `V` marks a range, Esc drops it, `c` (or `C`)
+    /// on a pending comment edits it and on the range's last line comments on the range.
     pub(super) fn review_key(&mut self, key: &KeyEvent) -> Option<Result<Option<Form>, String>> {
         if !self.files_reader() || key.modifiers.control || key.modifiers.alt {
             return None;
         }
-        let row = self.detail_rows.get(self.detail_cursor).and_then(|row| row.action.clone());
+        let row = self
+            .detail_rows
+            .get(self.detail_cursor)
+            .and_then(|row| row.action.clone());
         match key.code {
             KeyCode::Escape if self.review.anchor.is_some() => {
                 self.review.anchor = None;
@@ -295,15 +332,28 @@ impl Workspace {
                 Some(Ok(None))
             }
             KeyCode::Char('V') => {
-                let Some(Action::Inline { number, path, line, side, .. }) = row else {
+                let Some(Action::Inline {
+                    number,
+                    path,
+                    line,
+                    side,
+                    ..
+                }) = row
+                else {
                     return Some(Err("Move to a line of the diff to start a range".into()));
                 };
-                let anchor = Anchor { number, path, line, side };
+                let anchor = Anchor {
+                    number,
+                    path,
+                    line,
+                    side,
+                };
                 if self.review.anchor.as_ref() == Some(&anchor) {
                     self.review.anchor = None;
                     self.notice.clear();
                 } else {
-                    self.notice = format!("Range from line {line} · j/k extend, C comments · Esc cancels");
+                    self.notice =
+                        format!("Range from line {line} · j/k extend, C comments · Esc cancels");
                     self.review.anchor = Some(anchor);
                 }
                 self.notice_error = false;
@@ -311,14 +361,28 @@ impl Workspace {
             }
             KeyCode::Char('c' | 'C') => match row {
                 Some(action @ Action::Draft(..)) => Some(self.activate(action)),
-                Some(Action::Inline { number, path, line, side, head }) if self.review.anchor.is_some() => {
+                Some(Action::Inline {
+                    number,
+                    path,
+                    line,
+                    side,
+                    head,
+                }) if self.review.anchor.is_some() => {
                     let anchor = self.review.anchor.clone()?;
                     if anchor.number != number || anchor.path != path || anchor.side != side {
-                        return Some(Err("A range stays in one file and on one side · Esc cancels it".into()));
+                        return Some(Err(
+                            "A range stays in one file and on one side · Esc cancels it".into(),
+                        ));
                     }
                     if anchor.line == line {
                         self.review.anchor = None;
-                        return Some(self.activate(Action::Inline { number, path, line, side, head }));
+                        return Some(self.activate(Action::Inline {
+                            number,
+                            path,
+                            line,
+                            side,
+                            head,
+                        }));
                     }
                     Some(self.activate(Action::InlineRange {
                         number,
@@ -331,9 +395,9 @@ impl Workspace {
                 }
                 // With a range open, `c` belongs to the range: a thread under the cursor is
                 // not where it ends, and replying there would leave the range dangling.
-                _ if self.review.anchor.is_some() => {
-                    Some(Err("Move to a line of the diff to end the range · Esc cancels it".into()))
-                }
+                _ if self.review.anchor.is_some() => Some(Err(
+                    "Move to a line of the diff to end the range · Esc cancels it".into(),
+                )),
                 _ => None,
             },
             _ => None,
@@ -343,15 +407,26 @@ impl Workspace {
     /// The sheet for a range comment or for editing a draft.
     pub(super) fn draft_form(&mut self, action: &Action) -> Result<Option<Form>, String> {
         match action {
-            Action::InlineRange { path, start, line, .. } => {
-                if let Some(reason) = self.capabilities().inline_comment.reason().filter(|_| self.read_only()) {
+            Action::InlineRange {
+                path, start, line, ..
+            } => {
+                if let Some(reason) = self
+                    .capabilities()
+                    .inline_comment
+                    .reason()
+                    .filter(|_| self.read_only())
+                {
                     return Err(reason.into());
                 }
                 if let Some(reason) = self.capabilities().batched_review.reason() {
                     return Err(format!("{reason} · comment on one line with c"));
                 }
                 let fields = vec![actions::field("Comment", "", true, true)];
-                Ok(Some(self.form(&format!("Comment on {path}:{start}–{line}"), action.clone(), fields)))
+                Ok(Some(self.form(
+                    &format!("Comment on {path}:{start}–{line}"),
+                    action.clone(),
+                    fields,
+                )))
             }
             Action::Draft(number, index) => {
                 let (draft, _) = self
@@ -365,16 +440,31 @@ impl Workspace {
                     actions::field("Comment", &draft.body, true, true),
                     actions::choice("Pending", "Keep", &["Keep", "Delete"]),
                 ];
-                Ok(Some(self.form(&format!("Pending comment on {}:{}", draft.path, draft_lines(&draft)), action.clone(), fields)))
+                Ok(Some(self.form(
+                    &format!("Pending comment on {}:{}", draft.path, draft_lines(&draft)),
+                    action.clone(),
+                    fields,
+                )))
             }
             _ => Ok(None),
         }
     }
 
     /// Saves a range comment or an edited draft; `None` for every other action.
-    pub(super) fn submit_draft(&mut self, action: &Action, values: &[String]) -> Option<Result<(), String>> {
+    pub(super) fn submit_draft(
+        &mut self,
+        action: &Action,
+        values: &[String],
+    ) -> Option<Result<(), String>> {
         let result = match action {
-            Action::InlineRange { number, path, start, line, side, head } => {
+            Action::InlineRange {
+                number,
+                path,
+                start,
+                line,
+                side,
+                head,
+            } => {
                 let body = values.first().map(|body| body.trim()).unwrap_or_default();
                 if body.is_empty() {
                     return Some(Err("Comment is required".into()));
@@ -384,20 +474,31 @@ impl Workspace {
                         path: path.clone(),
                         line: u64::from(*line),
                         start_line: Some(u64::from(*start)),
-                        side: if *side == "LEFT" { Side::Left } else { Side::Right },
+                        side: if *side == "LEFT" {
+                            Side::Left
+                        } else {
+                            Side::Right
+                        },
                         body: body.to_owned(),
                     },
                     head.clone(),
                 ));
                 self.review.anchor = None;
-                self.notice = format!("Added to your review · {}", pending(self.review_drafts(*number).len()));
+                self.notice = format!(
+                    "Added to your review · {}",
+                    pending(self.review_drafts(*number).len())
+                );
                 self.notice_transient = true;
                 Ok(())
             }
             Action::Draft(number, index) => {
                 let delete = values.get(1).map(String::as_str) == Some("Delete")
                     || values.first().is_none_or(|body| body.trim().is_empty());
-                let Some(drafts) = self.inline_drafts.get_mut(number).filter(|drafts| *index < drafts.len()) else {
+                let Some(drafts) = self
+                    .inline_drafts
+                    .get_mut(number)
+                    .filter(|drafts| *index < drafts.len())
+                else {
                     return Some(Err("That draft was already sent or deleted".into()));
                 };
                 if delete {
@@ -408,7 +509,9 @@ impl Workspace {
                 let left = drafts.len();
                 self.notice = match (delete, left) {
                     (true, 0) => "Pending comment deleted · no review pending".into(),
-                    (true, left) => format!("Pending comment deleted · {} · r review", pending(left)),
+                    (true, left) => {
+                        format!("Pending comment deleted · {} · r review", pending(left))
+                    }
                     (false, _) => "Pending comment updated".into(),
                 };
                 Ok(())
@@ -432,10 +535,13 @@ impl Workspace {
                     format!("Joins your pending review · {} already", pending(waiting))
                 })
             }
-            Action::Draft(..) => Some("Only you see pending comments until the review is submitted".into()),
+            Action::Draft(..) => {
+                Some("Only you see pending comments until the review is submitted".into())
+            }
             Action::Review(number) => {
                 let drafts = self.review_drafts(*number);
-                (!drafts.is_empty()).then(|| format!("Submits {} as one review", pending(drafts.len())))
+                (!drafts.is_empty())
+                    .then(|| format!("Submits {} as one review", pending(drafts.len())))
             }
             _ => None,
         }
@@ -452,16 +558,40 @@ pub(super) fn draft_lines(draft: &InlineDraft) -> String {
 
 /// `2 drafts` for the file heading; empty when there are none.
 pub(super) fn file_count(workspace: &Workspace, id: u64, path: &str) -> usize {
-    workspace.review_drafts(id).iter().filter(|(draft, _)| draft.path == path).count()
+    workspace
+        .review_drafts(id)
+        .iter()
+        .filter(|(draft, _)| draft.path == path)
+        .count()
 }
 
 /// The rows of the Files diff between the range's first line and the cursor, tinted.
-pub(super) fn mark_range(workspace: &Workspace, id: u64, path: &str, rows: &mut [Line], diff_start: usize) {
-    let Some(anchor) = workspace.review.anchor.as_ref().filter(|anchor| anchor.number == id && anchor.path == path) else {
+pub(super) fn mark_range(
+    workspace: &Workspace,
+    id: u64,
+    path: &str,
+    rows: &mut [Line],
+    diff_start: usize,
+) {
+    let Some(anchor) = workspace
+        .review
+        .anchor
+        .as_ref()
+        .filter(|anchor| anchor.number == id && anchor.path == path)
+    else {
         return;
     };
-    let cursor = match workspace.detail_rows.get(workspace.detail_cursor).and_then(|row| row.action.as_ref()) {
-        Some(Action::Inline { line, side, path: at, .. }) if *side == anchor.side && at == path => *line,
+    let cursor = match workspace
+        .detail_rows
+        .get(workspace.detail_cursor)
+        .and_then(|row| row.action.as_ref())
+    {
+        Some(Action::Inline {
+            line,
+            side,
+            path: at,
+            ..
+        }) if *side == anchor.side && at == path => *line,
         _ => anchor.line,
     };
     let (low, high) = (anchor.line.min(cursor), anchor.line.max(cursor));
@@ -477,62 +607,138 @@ pub(super) fn mark_range(workspace: &Workspace, id: u64, path: &str, rows: &mut 
             if row.gutter.is_empty() {
                 continue;
             }
-            row.gutter_style = Style::Git { role: GitRole::Focus, surface: GitSurface::CursorInactive, emphasis: Emphasis::Bold };
+            row.gutter_style = Style::Git {
+                role: GitRole::Focus,
+                surface: GitSurface::CursorInactive,
+                emphasis: Emphasis::Bold,
+            };
         }
     }
 }
 
 /// Draft cards under the lines they are about (after any review thread there); drafts whose
 /// line is not in this diff follow it.
-pub(super) fn place(workspace: &Workspace, id: u64, path: &str, rows: &mut Vec<Line>, diff_start: usize, width: usize, mode: ExplorerIconMode) {
-    let rail = Style::Git { role: GitRole::Modified, surface: GitSurface::Code, emphasis: Emphasis::None };
+pub(super) fn place(
+    workspace: &Workspace,
+    id: u64,
+    path: &str,
+    rows: &mut Vec<Line>,
+    diff_start: usize,
+    width: usize,
+    mode: ExplorerIconMode,
+) {
+    let rail = Style::Git {
+        role: GitRole::Modified,
+        surface: GitSurface::Code,
+        emphasis: Emphasis::None,
+    };
     let mut placed: Vec<(usize, usize, Vec<Line>)> = Vec::new();
     let mut trailing = Vec::new();
     for (index, (draft, _)) in workspace.review_drafts(id).iter().enumerate() {
         if draft.path != path {
             continue;
         }
-        let side = if draft.side == Side::Left { "LEFT" } else { "RIGHT" };
+        let side = if draft.side == Side::Left {
+            "LEFT"
+        } else {
+            "RIGHT"
+        };
         let mut card = Vec::new();
         let header = Rich::new()
-            .push(format!("{} ", glyph(Glyph::Comment, mode)), Style::Git { role: GitRole::Modified, surface: GitSurface::Code, emphasis: Emphasis::None })
+            .push(
+                format!("{} ", glyph(Glyph::Comment, mode)),
+                Style::Git {
+                    role: GitRole::Modified,
+                    surface: GitSurface::Code,
+                    emphasis: Emphasis::None,
+                },
+            )
             // GitHub's `Pending` label: the comment waits for the review to be submitted.
-            .chip("Pending", Style::Git { role: GitRole::Modified, surface: GitSurface::Chip(GitChip::Modified), emphasis: Emphasis::Bold })
-            .push(" ", Style::Git { role: GitRole::Muted, surface: GitSurface::Code, emphasis: Emphasis::None })
-            .push(anchor_text(draft), Style::Git { role: GitRole::Muted, surface: GitSurface::Code, emphasis: Emphasis::None })
+            .chip(
+                "Pending",
+                Style::Git {
+                    role: GitRole::Modified,
+                    surface: GitSurface::Chip(GitChip::Modified),
+                    emphasis: Emphasis::Bold,
+                },
+            )
+            .push(
+                " ",
+                Style::Git {
+                    role: GitRole::Muted,
+                    surface: GitSurface::Code,
+                    emphasis: Emphasis::None,
+                },
+            )
+            .push(
+                anchor_text(draft),
+                Style::Git {
+                    role: GitRole::Muted,
+                    surface: GitSurface::Code,
+                    emphasis: Emphasis::None,
+                },
+            )
             .line();
         card.push(header);
         let measure = width.saturating_sub(6).min(super::prose::MEASURE);
         let prose = |card: &mut Vec<Line>, text: &str| {
             for text in wrap(text, measure) {
-                card.push(Rich::new().push(text, Style::Git { role: GitRole::Text, surface: GitSurface::Code, emphasis: Emphasis::None }).line());
+                card.push(
+                    Rich::new()
+                        .push(
+                            text,
+                            Style::Git {
+                                role: GitRole::Text,
+                                surface: GitSurface::Code,
+                                emphasis: Emphasis::None,
+                            },
+                        )
+                        .line(),
+                );
             }
         };
         match super::suggestion::split(&draft.body) {
-            // A suggested change reads as a diff against the lines on screen (§3.30a).
+            // A suggested change reads as a diff against the lines on screen.
             Some(parts) => {
                 let start = draft.start_line.unwrap_or(draft.line);
                 let original = (start..=draft.line)
                     .filter_map(|line| {
-                        rows[diff_start..].iter().find_map(|row| match (&row.action, &row.source) {
-                            (Some(Action::Inline { line: at, side: s, .. }), Some(source)) if u64::from(*at) == line && *s == side => {
-                                Some(source.text.to_string())
-                            }
-                            _ => None,
-                        })
+                        rows[diff_start..]
+                            .iter()
+                            .find_map(|row| match (&row.action, &row.source) {
+                                (
+                                    Some(Action::Inline {
+                                        line: at, side: s, ..
+                                    }),
+                                    Some(source),
+                                ) if u64::from(*at) == line && *s == side => {
+                                    Some(source.text.to_string())
+                                }
+                                _ => None,
+                            })
                     })
                     .collect::<Vec<_>>();
                 for part in parts {
                     match part {
                         super::suggestion::Part::Text(text) => prose(&mut card, &text),
-                        super::suggestion::Part::Suggestion(lines) => super::suggestion::rows(&mut card, &original, &lines, width.saturating_sub(4), ""),
+                        super::suggestion::Part::Suggestion(lines) => super::suggestion::rows(
+                            &mut card,
+                            &original,
+                            &lines,
+                            width.saturating_sub(4),
+                            "",
+                        ),
                     }
                 }
             }
             None => prose(&mut card, &draft.body),
         }
         for row in &mut card {
-            row.band = Some(row.band.filter(|band| matches!(band, GitSurface::AddedBand | GitSurface::RemovedBand)).unwrap_or(GitSurface::Code));
+            row.band = Some(
+                row.band
+                    .filter(|band| matches!(band, GitSurface::AddedBand | GitSurface::RemovedBand))
+                    .unwrap_or(GitSurface::Code),
+            );
             row.gutter = "  ▍ ".into();
             row.gutter_style = rail;
             row.pan = false;
@@ -572,7 +778,9 @@ pub(super) fn review_row(workspace: &Workspace, id: u64) -> Line {
         .push("Review changes", role(GitRole::Link));
     let waiting = workspace.review_drafts(id).len();
     if waiting > 0 {
-        review = review.sep().push(format!("{waiting} pending"), strong(GitRole::Modified));
+        review = review
+            .sep()
+            .push(format!("{waiting} pending"), strong(GitRole::Modified));
     }
     let mut review = review.line();
     review.action = Some(Action::Review(id));
@@ -585,14 +793,23 @@ mod tests {
 
     fn draft(line: u64, start: Option<u64>, body: &str) -> (InlineDraft, String) {
         (
-            InlineDraft { path: "src/lib.rs".into(), line, start_line: start, side: Side::Right, body: body.into() },
+            InlineDraft {
+                path: "src/lib.rs".into(),
+                line,
+                start_line: start,
+                side: Side::Right,
+                body: body.into(),
+            },
             "a".repeat(40),
         )
     }
 
     #[test]
     fn drafts_round_trip_through_their_file_format() {
-        let drafts = vec![draft(14, None, "Name this"), draft(22, Some(18), "Split this block\nin two")];
+        let drafts = vec![
+            draft(14, None, "Name this"),
+            draft(22, Some(18), "Split this block\nin two"),
+        ];
         assert_eq!(decode(&encode(&drafts)), drafts);
         // An unknown schema reads as nothing rather than as wrong drafts.
         let mut other = encode(&drafts);
@@ -609,7 +826,10 @@ mod tests {
 
     #[test]
     fn draft_bodies_wrap_on_words() {
-        assert_eq!(wrap("one two three four", 9), vec!["one two", "three", "four"]);
+        assert_eq!(
+            wrap("one two three four", 9),
+            vec!["one two", "three", "four"]
+        );
         assert_eq!(wrap("first\n\nsecond", 20), vec!["first", "", "second"]);
         assert_eq!(wrap("abcdefghijkl", 8), vec!["abcdefgh", "ijkl"]);
     }
@@ -617,13 +837,19 @@ mod tests {
     #[test]
     fn drafts_are_saved_per_pull_request_and_survive_a_reload() {
         let state = tempfile::tempdir().unwrap();
-        let directory = state.path().join("drafts/github.com").join(segment("example/demo"));
+        let directory = state
+            .path()
+            .join("drafts/github.com")
+            .join(segment("example/demo"));
         let drafts = vec![draft(14, None, "Name this"), draft(22, Some(18), "Range")];
         save_in(&directory, 9, &drafts).unwrap();
         assert_eq!(load_from(&directory).get(&9), Some(&drafts));
         assert!(directory.ends_with("example%2Fdemo"));
         let file = directory.join("9.json");
-        assert!(file.is_file(), "drafts live under the state directory: {file:?}");
+        assert!(
+            file.is_file(),
+            "drafts live under the state directory: {file:?}"
+        );
         // Sending or deleting the last draft removes the file.
         save_in(&directory, 9, &[]).unwrap();
         assert!(!file.exists());

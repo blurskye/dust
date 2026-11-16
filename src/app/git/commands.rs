@@ -27,7 +27,11 @@ pub(in crate::app) fn register_commands(
         "Open a pull request, issue or run in Dusty Git by its link or #number",
         ContextRequirement::Workspace,
         ArgumentSchema::default().field("target", ArgumentType::String, true),
-        |invocation| Ok(AppEffect::GitScreenOpenLink(string_arg(invocation, "target")?.into())),
+        |invocation| {
+            Ok(AppEffect::GitScreenOpenLink(
+                string_arg(invocation, "target")?.into(),
+            ))
+        },
     )?;
     register(
         registry,
@@ -354,7 +358,8 @@ impl App {
                 } else {
                     match crate::git::screen::GitScreen::open(&self.state.workspace_root) {
                         Ok(mut screen) => {
-                            screen.set_icon_mode(self.configuration.settings().ui.explorer.icon_mode);
+                            screen
+                                .set_icon_mode(self.configuration.settings().ui.explorer.icon_mode);
                             screen.configure_input(self.configuration.settings());
                             self.git_screen = Some(screen);
                             self.git_screen_visible = true;
@@ -364,9 +369,7 @@ impl App {
                 }
             }
             AppEffect::GitScreenOpenLink(target) => {
-                if let Err(effect) = self.process_git_effect(AppEffect::GitScreenOpen) {
-                    return Err(effect);
-                }
+                self.process_git_effect(AppEffect::GitScreenOpen)?;
                 if let Some(screen) = &mut self.git_screen
                     && let Err(error) = screen.open_link(&target)
                 {

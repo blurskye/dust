@@ -1,4 +1,4 @@
-//! Porcelain per provider (FORGE.md §1.3, F7): checkout, a sibling worktree, linked branches,
+//! Porcelain per provider: checkout, a sibling worktree, linked branches,
 //! Projects and open-in-browser.
 //!
 //! Checkout uses the forge's CLI where it owns the job (`gh pr checkout`, `glab mr checkout`)
@@ -288,7 +288,7 @@ fn kind_word(kind: ItemKind) -> &'static str {
 }
 
 impl ForgeCommands<'_> {
-    /// §1.3 porcelain for every provider.
+    /// The same porcelain for every provider.
     pub(super) fn porcelain(
         &self,
         root: &Path,
@@ -470,7 +470,7 @@ impl ForgeCommands<'_> {
             }
             None => self.fetch_checkout(root, site, head, forced)?,
         };
-        // §3.7: gh-compatible base memory, after the checkout succeeded.
+        // Gh-compatible base memory, after the checkout succeeded.
         if !head.base_branch.is_empty() {
             crate::forge::template::set_merge_base(root, &branch, &head.base_branch);
         }

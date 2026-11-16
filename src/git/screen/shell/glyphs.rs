@@ -1,4 +1,4 @@
-//! Every glyph Dusty Git paints, in one table (DESIGN.md §4.3). ASCII fallbacks keep
+//! Every glyph Dusty Git paints, in one table. ASCII fallbacks keep
 //! the same cell count as the Unicode glyph wherever a column depends on it.
 use crate::config::ExplorerIconMode;
 
@@ -17,7 +17,7 @@ pub(crate) enum Glyph {
     PullRequest,
     Issue,
     Actions,
-    /// A workflow (the Actions panes' titles, §4.3); `Actions` stays the tab's status dot.
+    /// A workflow (the Actions panes' titles); `Actions` stays the tab's status dot.
     Workflow,
     Notification,
     Cursor,
@@ -35,7 +35,7 @@ pub(crate) enum Glyph {
     ClipLeft,
     ClipRight,
     Search,
-    // Forge (§4.3): lifecycle, checks, reviews and the reader's metadata icons.
+    // Forge: lifecycle, checks, reviews and the reader's metadata icons.
     PullMerged,
     /// The pull request reader's Merge tab when the row is too tight for its name.
     IssueClosed,
@@ -46,11 +46,11 @@ pub(crate) enum Glyph {
     CheckSkipped,
     CheckUnknown,
     ReviewRequested,
-    /// An approving review: not the CI pass mark, so the two never read alike (r11 GL-08).
+    /// An approving review: not the CI pass mark, so the two never read alike.
     Approved,
-    /// A review requesting changes: not the CI failure mark (DESIGN.md §4.3.1, r15 gitlab-08).
+    /// A review requesting changes: not the CI failure mark.
     ChangesRequested,
-    /// A commit on a forge screen (Commits' day heading): not an open issue's `○` (§4.3.1).
+    /// A commit on a forge screen (Commits' day heading): not an open issue's `○`.
     ForgeCommit,
     Comment,
     Person,
@@ -66,7 +66,7 @@ pub(crate) enum Glyph {
 /// shallow tick that reads as a square root (√), so check marks use the font's own icon.
 const CHECK: &str = "\u{f012c}";
 /// U+2714 in text presentation: U+2713 is a hairline in most monospace fonts and reads as
-/// `√` beside bold text (DESIGN.md §4.3 status glyphs).
+/// `√` beside bold text.
 const HEAVY_CHECK: &str = "\u{2714}";
 
 pub(crate) fn glyph(glyph: Glyph, mode: ExplorerIconMode) -> &'static str {
@@ -106,7 +106,7 @@ pub(crate) fn glyph(glyph: Glyph, mode: ExplorerIconMode) -> &'static str {
         (Issue, Ascii) => "o",
         (Issue, _) => "○",
         // GitHub's play-in-a-circle: a `●` here read as one more running dot beside the tab's
-        // own `●` running mark (r16 notif-actions-05).
+        // own `●` running mark.
         (Actions, NerdFont) => "\u{f144}",
         (Actions, Ascii) => "*",
         (Actions, _) => "●",
@@ -167,7 +167,7 @@ pub(crate) fn glyph(glyph: Glyph, mode: ExplorerIconMode) -> &'static str {
         (CheckPending, _) => "◷",
         (CheckSkipped, Ascii) => "-",
         (CheckSkipped, _) => "⊘",
-        // No checks reported: a dash, not a question mark in the icon column (r11).
+        // No checks reported: a dash, not a question mark in the icon column.
         (CheckUnknown, Ascii) => "-",
         (CheckUnknown, _) => "–",
         (ReviewRequested, Ascii) => "o",

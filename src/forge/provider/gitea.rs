@@ -1,4 +1,4 @@
-//! Gitea and Forgejo over `/api/v1` (FORGE.md §4.2, F4). One provider serves both: the
+//! Gitea and Forgejo over `/api/v1`. One provider serves both: the
 //! families share the issue/PR/review API and differ in Actions, which is gated on the server
 //! version (`GET version`, cached per API base). Gitea gates on `1.N` (its main branch reports
 //! `29.0.0+dev` and has everything); Forgejo gates on its own major, never on the `+gitea-1.22`
@@ -14,8 +14,6 @@ use super::ForgeContext;
 use super::Plan;
 use super::Provider;
 use super::ProviderKind;
-use super::parallel;
-use super::reactions;
 use super::common::count;
 use super::common::edited;
 use super::common::id_of;
@@ -25,6 +23,8 @@ use super::common::repos_path;
 use super::common::run_actor;
 use super::common::span;
 use super::common::text;
+use super::parallel;
+use super::reactions;
 use crate::forge::capability::Cap;
 use crate::forge::capability::Capabilities;
 use crate::forge::capability::GITEA_TERMS;
@@ -52,9 +52,11 @@ pub struct Gitea;
 
 /// Gitea's default `MAX_RESPONSE_ITEMS`; a server that caps lower is followed by `X-Total-Count`.
 const PAGE: u32 = 50;
+/// The log of a job Forgejo never ran: the screen shows it as a note, not as a log line.
+pub(crate) const NEVER_RAN: &str = "This job never ran · no log";
 /// Bounded fan-out for paginated detail reads.
 const MAX_PAGES: u32 = 30;
-/// The list's reading pane needs at most this much of a description (§7.5).
+/// The list's reading pane needs at most this much of a description.
 const PREVIEW_BYTES: usize = 2048;
 
 // ------------------------------------------------------------------------------ versions
@@ -314,7 +316,7 @@ pub fn server(ctx: &ForgeContext, cancel: &AtomicBool) -> Server {
     server
 }
 
-/// Gitea/Forgejo capabilities for a server version (§4.2 table).
+/// Gitea/Forgejo capabilities for a server version .
 pub fn capabilities(server: Server) -> Capabilities {
     let tasks = server.cap(&TASKS);
     let runs = match server.cap(&RUNS) {
@@ -1455,7 +1457,7 @@ fn repo_payload(value: &Value) -> Repo {
 
 // ------------------------------------------------------------------------------ queries
 
-/// GitHub search syntax (§3.6) as Gitea issue-list parameters. Qualifiers Gitea has no
+/// GitHub search syntax as Gitea issue-list parameters. Qualifiers Gitea has no
 /// parameter for become keywords (`q`).
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ListQuery {
@@ -1483,12 +1485,15 @@ pub fn client_keeps(terms: &[String], value: &Value, row: &ItemRow) -> bool {
         let verdict = match term.split_once(':') {
             Some(("no", "label")) => row.labels.is_empty(),
             Some(("no", "assignee")) => {
-                value["assignees"].as_array().is_none_or(Vec::is_empty) && value["assignee"].is_null()
+                value["assignees"].as_array().is_none_or(Vec::is_empty)
+                    && value["assignee"].is_null()
             }
             Some(("no", "milestone")) => value["milestone"].is_null(),
             Some(("label", name)) => {
                 let name = name.trim_matches('"');
-                row.labels.iter().any(|label| label.name.eq_ignore_ascii_case(name))
+                row.labels
+                    .iter()
+                    .any(|label| label.name.eq_ignore_ascii_case(name))
             }
             Some(("draft", value)) => row.draft == (value != "false"),
             Some(("is", "draft")) => row.draft,
@@ -1939,7 +1944,7 @@ impl Gitea {
         Ok(Some(response))
     }
 
-    /// Reads without a credential (FORGE.md §2.5): public repositories answer the REST reads
+    /// Reads without a credential: public repositories answer the REST reads
     /// anonymously, except the viewer, notifications, assignees and (on most instances)
     /// Actions logs. Those answer with what a sign-in would unlock instead of a host-wide
     /// "signed out".
@@ -1994,7 +1999,8 @@ impl Gitea {
     /// A status links its run by the run's index in the repository (`…/actions/runs/12`),
     /// while the API reads a run by its id: list the head commit's runs once and swap each
     /// index for that run's id. A server without the runs list keeps the index, which its
-    /// `actions/tasks` fallback reads runs by; a run not listed keeps it too.
+    /// `actions/tasks` fallback reads runs by; a run the list does not hold loses its link
+    /// (the check opens the forge's page instead).
     fn run_ids(ctx: &ForgeContext, sha: &str, checks: &mut [Check], cancel: &AtomicBool) {
         if sha.is_empty() || checks.iter().all(|check| check.run_link.is_none()) {
             return;
@@ -2011,12 +2017,25 @@ impl Gitea {
             return;
         };
         let runs = list_items(value, Some("workflow_runs"));
-        for link in checks.iter_mut().filter_map(|check| check.run_link.as_mut()) {
-            if let Some(run) = runs
+        for check in checks.iter_mut() {
+            let Some(link) = check.run_link.as_mut() else {
+                continue;
+            };
+            let found = runs
                 .iter()
-                .find(|run| run["run_number"].as_u64().is_some_and(|number| number.to_string() == link.run.0))
-            {
-                link.run = id_of(run, "id");
+                // Gitea's GitHub-shaped `run_number`, Forgejo's own `index_in_repo`.
+                .find(|run| {
+                    run["run_number"]
+                        .as_u64()
+                        .or_else(|| run["index_in_repo"].as_u64())
+                        .is_some_and(|number| number.to_string() == link.run.0)
+                })
+                .map(|run| id_of(run, "id"));
+            match found {
+                Some(id) => link.run = id,
+                // An index is no id: read as one it names another run, or none. The check
+                // keeps its link to the forge's own page.
+                None => check.run_link = None,
             }
         }
     }
@@ -2041,14 +2060,20 @@ impl Gitea {
                 };
                 match &closing.repo {
                     Some(other) => {
-                        link.web_url = Some(web(ctx, &format!("{other}/issues/{}", closing.number)));
+                        link.web_url =
+                            Some(web(ctx, &format!("{other}/issues/{}", closing.number)));
                     }
                     None => {
                         if !own_web.is_empty() {
-                            link.web_url = Some(format!("{}/issues/{}", own_web.trim_end_matches('/'), closing.number));
+                            link.web_url = Some(format!(
+                                "{}/issues/{}",
+                                own_web.trim_end_matches('/'),
+                                closing.number
+                            ));
                         }
                         if index < TITLED
-                            && let Ok(request) = Self::rest(ctx, &format!("issues/{}", closing.number))
+                            && let Ok(request) =
+                                Self::rest(ctx, &format!("issues/{}", closing.number))
                             && let Ok(issue) = ctx.json(&request, cancel)
                         {
                             // `Closes #4` naming a pull request closes nothing.
@@ -2090,10 +2115,19 @@ impl Gitea {
             });
             use super::parallel::joined;
             let linked = (joined(linked), joined(reactions));
-            (joined(files), joined(commits), joined(reviews), checks, linked)
+            (
+                joined(files),
+                joined(commits),
+                joined(reviews),
+                checks,
+                linked,
+            )
         });
         let (linked_issues, reactions) = linked_issues;
-        let files = files?.iter().map(|file| changed_file(file, &viewed)).collect::<Vec<_>>();
+        let files = files?
+            .iter()
+            .map(|file| changed_file(file, &viewed))
+            .collect::<Vec<_>>();
         let commits = commits?.iter().map(commit).collect::<Vec<_>>();
         let reviews = reviews?.iter().map(review).collect::<Vec<_>>();
         let checks = checks?;
@@ -2464,7 +2498,7 @@ impl Gitea {
                         .ok()
                         .is_some_and(|body| text(&body, "message").is_empty()) =>
             {
-                Ok(log("This job has no log · it never ran".into(), false))
+                Ok(log(NEVER_RAN.into(), false))
             }
             Ok(response) => Err(crate::forge::http::classify(&ctx.endpoints, &response)),
             Err(ForgeError::BadResponse(message)) if message.contains("exceeds") => Ok(log(
@@ -2486,7 +2520,11 @@ impl Gitea {
         cancel: &AtomicBool,
     ) -> Result<Vec<Workflow>, ForgeError> {
         let directories: &[&str] = if server.kind() == ProviderKind::Forgejo {
-            &[".forgejo/workflows", ".gitea/workflows", ".github/workflows"]
+            &[
+                ".forgejo/workflows",
+                ".gitea/workflows",
+                ".github/workflows",
+            ]
         } else {
             &[".gitea/workflows", ".github/workflows"]
         };
@@ -2670,7 +2708,8 @@ impl Gitea {
             Read::Issue(number) => {
                 let (value, reactions) = std::thread::scope(|scope| {
                     let reactions = scope.spawn(|| Self::reactions(ctx, *number, cancel));
-                    let value = rest(&format!("issues/{number}")).and_then(|request| ctx.json(&request, cancel));
+                    let value = rest(&format!("issues/{number}"))
+                        .and_then(|request| ctx.json(&request, cancel));
                     (value, parallel::joined(reactions))
                 });
                 let mut issue = issue(&value?);
@@ -2713,22 +2752,18 @@ impl Gitea {
                 let listed = match server.require(&WORKFLOWS) {
                     // Forgejo has no list.
                     Err(_) => None,
-                    Ok(known) => Self::probe(
-                        ctx,
-                        &rest("actions/workflows")?,
-                        known,
-                        "workflows",
-                        cancel,
-                    )?
-                    .map(|response| {
-                        Ok::<_, ForgeError>(
-                            list_items(response.json()?, Some("workflows"))
-                                .iter()
-                                .map(workflow)
-                                .collect::<Vec<_>>(),
-                        )
-                    })
-                    .transpose()?,
+                    Ok(known) => {
+                        Self::probe(ctx, &rest("actions/workflows")?, known, "workflows", cancel)?
+                            .map(|response| {
+                                Ok::<_, ForgeError>(
+                                    list_items(response.json()?, Some("workflows"))
+                                        .iter()
+                                        .map(workflow)
+                                        .collect::<Vec<_>>(),
+                                )
+                            })
+                            .transpose()?
+                    }
                 };
                 // Without the list, the workflow files are the Workflows panel (their on/off
                 // state is not in any API); with none, the runs name theirs.
@@ -2792,7 +2827,12 @@ impl Gitea {
             Read::Fingerprints(numbers) => {
                 // The list's check marks ask for every visible row: a few at once.
                 let fetched = parallel::map(numbers, |number| {
-                    Self::fetch(ctx, &Read::Fingerprint(*number), &Conditional::default(), cancel)
+                    Self::fetch(
+                        ctx,
+                        &Read::Fingerprint(*number),
+                        &Conditional::default(),
+                        cancel,
+                    )
                 });
                 let mut prints = Vec::new();
                 for (number, fetched) in numbers.iter().zip(fetched) {
@@ -2809,7 +2849,7 @@ impl Gitea {
             }
             Read::Notifications { filter, page } => {
                 let mut request = Self::notifications_request(filter, *page);
-                // §7.5 incremental refresh: only threads updated since the cached copy.
+                // Incremental refresh: only threads updated since the cached copy.
                 if let Some(since) = cond.since.as_ref().filter(|_| filter.since.is_none()) {
                     request = request.query("since", since.as_str());
                 }
@@ -2831,7 +2871,7 @@ impl Gitea {
                     other_total: None,
                 })
             }
-            // §3.7: read from the base ref locally, never through the API.
+            // Read from the base ref locally, never through the API.
             Read::PullRequestTemplate => Payload::Template(crate::forge::template::for_context(
                 &ctx.root,
                 ctx.endpoints.kind,
@@ -3194,7 +3234,9 @@ impl Gitea {
                 head.as_deref(),
                 drafts
                     .iter()
-                    .map(|draft| Self::inline(&draft.path, draft.line, draft.side, &draft.range_body()))
+                    .map(|draft| {
+                        Self::inline(&draft.path, draft.line, draft.side, &draft.range_body())
+                    })
                     .collect(),
             )?],
             Write::Merge {

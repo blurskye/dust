@@ -1,6 +1,5 @@
 #![cfg(unix)]
-//! The IDE's pull-request picker and inline review comments on the provider layer (FORGE.md
-//! §5.2, F7), for GitHub, GitLab, Gitea and Forgejo: `ForgeJobs::{list, comments,
+//! The IDE's pull-request picker and inline review comments on the provider layer, for GitHub, GitLab, Gitea and Forgejo: `ForgeJobs::{list, comments,
 //! comment_target, comment}` against the fake forge, through detection and `connect` exactly as
 //! the editor runs them. Each test re-runs itself in a child pointed at its own world.
 

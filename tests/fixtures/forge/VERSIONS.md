@@ -23,7 +23,7 @@ were dropped too, and nested repository objects keep only their identity fields 
 
 Hosts not recorded:
 
-- **forgejo.example.org**: skipped. Every anonymous API read, including `/api/v1/version`, answers
+- **a private Forgejo instance**: skipped. Every anonymous API read, including `/api/v1/version`, answers
   `403 {"message":"Only signed in user is allowed to call APIs."}` (re-checked 2026-11-14).
   Recording it needs a token; F0 used none.
 - **codeberg.org** (Forgejo 17.0.0-100): `/api/v1/version` answers, but
@@ -47,7 +47,7 @@ repo → `orbit/orbit` (`orbit/team/orbit` on GitLab), timestamps shifted so the
 `recorded_at − 9 min`. Bot accounts such as `codecov` keep their names. `requests.json` → `redaction.hashes` holds sha256 of every replaced identifier;
 `--check` fails if any of them reappears.
 
-## [p] resolutions (FORGE.md §4.2)
+## [p] resolutions
 
 "≥ N" means the endpoint first appears in that release's swagger; "anon" is what the recorded host
 answered without a token.
@@ -57,9 +57,9 @@ answered without a token.
 | Cell | Endpoint | Resolution | Evidence |
 |---|---|---|---|
 | Workflows rail | `GET actions/workflows` | **≥ 1.24** (as written) | swagger 1.24+; gitea.com 401 anon |
-| Runs list | `GET actions/runs` | **≥ 1.25** (FORGE says 1.24 — wrong) | absent from 1.24 swagger; gitea.com 401 anon |
-| Runs fallback | `GET actions/tasks` | **≥ 1.23** (FORGE says 1.22 — wrong) | swagger; gitea.com 200 anon |
-| Run → jobs | `GET actions/runs/{run}`, `/jobs` | **≥ 1.25** (FORGE says 1.24) | swagger; gitea.com 200 anon |
+| Runs list | `GET actions/runs` | **≥ 1.25** (earlier notes said 1.24 — wrong) | absent from 1.24 swagger; gitea.com 401 anon |
+| Runs fallback | `GET actions/tasks` | **≥ 1.23** (earlier notes said 1.22 — wrong) | swagger; gitea.com 200 anon |
+| Run → jobs | `GET actions/runs/{run}`, `/jobs` | **≥ 1.25** (earlier notes said 1.24) | swagger; gitea.com 200 anon |
 | Single job | `GET actions/jobs/{job}` | **≥ 1.25** | swagger; gitea.com 401 anon |
 | Job log | `GET actions/jobs/{job}/logs` | **≥ 1.24** (as written) | swagger; gitea.com 401 anon |
 | Rerun all / failed | `POST actions/runs/{run}/rerun`, `/rerun-failed-jobs` | **≥ 1.26** | swagger |
@@ -67,7 +67,7 @@ answered without a token.
 | Cancel | `POST actions/runs/{run}/cancel` | **No** in 1.20–1.27; only main (`29.0.0+dev`) | swagger |
 | Approve fork run | `POST actions/runs/{run}/approve` | **No** before 29 (main only) | swagger |
 | Attempts | `GET actions/runs/{run}/attempts/{n}` | **≥ 1.27** | swagger |
-| Dispatch | `POST actions/workflows/{id}/dispatches` | **≥ 1.24** (FORGE says 1.23 — wrong) | swagger |
+| Dispatch | `POST actions/workflows/{id}/dispatches` | **≥ 1.24** (earlier notes said 1.23 — wrong) | swagger |
 | Artifacts | `GET actions/runs/{run}/artifacts`, `actions/artifacts/{id}/zip` | **≥ 1.24** (as written) | swagger; gitea.com 200 anon |
 | PR for branch | `GET pulls/{base}/{head}` | **≥ 1.22**; base-repo heads only (fork heads 404) | swagger; recorded 404 + 200 |
 
@@ -77,16 +77,16 @@ answered without a token.
 |---|---|---|---|
 | Workflows rail | `GET actions/workflows` | **No** in 7–17 (hide the rail; group runs by `workflow_id`) | swagger; code.forgejo.org 404 |
 | Runs list | `GET actions/runs` | **≥ 12.0** | swagger 12.0 branch; 200 anon |
-| Runs fallback | `GET actions/tasks` | **≥ 8.0** (FORGE says 7.0 — wrong) | swagger; 200 anon |
+| Runs fallback | `GET actions/tasks` | **≥ 8.0** (earlier notes said 7.0 — wrong) | swagger; 200 anon |
 | Run | `GET actions/runs/{run}` | **≥ 12.0** | swagger; 200 anon |
 | Run → jobs | `GET actions/runs/{run}/jobs` | **≥ 16.0** (bare list) | swagger; 200 anon |
 | Single job | `GET actions/jobs/{job}` | **≥ 17.0** | swagger; 200 anon |
 | Job log | `GET actions/jobs/{job}/logs` | **≥ 16.0**; a job that never ran answers `500 {"message":""}` | swagger; recorded 500 + 200 |
-| Run log archive | `GET actions/runs/{run}/logs` | ≥ 16.0 (not used by FORGE.md) | swagger |
+| Run log archive | `GET actions/runs/{run}/logs` | ≥ 16.0 (not used) | swagger |
 | Rerun all | `POST actions/runs/{run}/rerun` | **≥ 17.0**; no `rerun-failed-jobs` | swagger |
 | Rerun one job | `POST actions/jobs/{job}/rerun` | **≥ 17.0** | swagger |
 | Cancel | `POST actions/runs/{run}/cancel` | **≥ 16.0** | swagger |
-| Dispatch | `POST actions/workflows/{file}/dispatches` | **≥ 8.0** (FORGE says 10.0 — earlier than written) | swagger |
+| Dispatch | `POST actions/workflows/{file}/dispatches` | **≥ 8.0** (earlier notes said 10.0 — earlier than written) | swagger |
 | Artifacts | `GET actions/runs/{run}/artifacts`, `actions/artifacts/{id}/zip` | **≥ 16.0** | swagger; 200 anon |
 | PR for branch | `GET pulls/{base}/{head}` | ≥ 7.0; fork heads 404 | swagger; recorded 404 |
 

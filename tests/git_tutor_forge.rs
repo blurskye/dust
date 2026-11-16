@@ -23,13 +23,20 @@ fn git(root: &Path, args: &[&str]) {
         .env("GIT_CONFIG_NOSYSTEM", "1")
         .output()
         .unwrap();
-    assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "git {args:?}: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
 }
 fn repo() -> tempfile::TempDir {
     let dir = tempfile::tempdir().unwrap();
     git(dir.path(), &["init", "-b", "main"]);
     git(dir.path(), &["config", "user.name", "Tutor Test"]);
-    git(dir.path(), &["config", "user.email", "test@example.invalid"]);
+    git(
+        dir.path(),
+        &["config", "user.email", "test@example.invalid"],
+    );
     git(dir.path(), &["config", "commit.gpgsign", "false"]);
     std::fs::write(dir.path().join("file.txt"), "my own work\n").unwrap();
     git(dir.path(), &["add", "."]);
@@ -83,7 +90,11 @@ fn wait(screen: &mut GitScreen, what: &str, mut ready: impl FnMut(&mut GitScreen
         if ready(screen) {
             return;
         }
-        assert!(Instant::now() < deadline, "timed out waiting for {what}:\n{}", view(screen));
+        assert!(
+            Instant::now() < deadline,
+            "timed out waiting for {what}:\n{}",
+            view(screen)
+        );
         std::thread::sleep(Duration::from_millis(10));
     }
 }
@@ -109,7 +120,11 @@ fn number(name: Option<&str>) -> usize {
     match name {
         None => total() + 1,
         Some(name) => {
-            outline().iter().position(|lesson| lesson == name).unwrap_or_else(|| panic!("no lesson {name}")) + 1
+            outline()
+                .iter()
+                .position(|lesson| lesson == name)
+                .unwrap_or_else(|| panic!("no lesson {name}"))
+                + 1
         }
     }
 }
@@ -148,7 +163,11 @@ fn until(screen: &mut GitScreen, next: &str, action: impl Fn(&mut GitScreen)) {
             }
             std::thread::sleep(Duration::from_millis(10));
         }
-        assert!(Instant::now() < deadline, "{next} never started:\n{}", view(screen));
+        assert!(
+            Instant::now() < deadline,
+            "{next} never started:\n{}",
+            view(screen)
+        );
     }
 }
 fn ctrl(screen: &mut GitScreen, letter: char) {
@@ -198,7 +217,11 @@ fn every_forge_lesson_advances_on_real_input_against_the_practice_forge() {
     lesson(s, "Pull requests · Open the tab");
     assert!(dust::forge::sandbox::active());
     assert!(banner(s).contains(&format!("1/{}", total())));
-    assert!(view(s).contains("Practice forge on this computer"), "{}", view(s));
+    assert!(
+        view(s).contains("Practice forge on this computer"),
+        "{}",
+        view(s)
+    );
     command(s, "tutor forge");
     assert!(view(s).contains("already running"), "{}", view(s));
 
@@ -209,7 +232,11 @@ fn every_forge_lesson_advances_on_real_input_against_the_practice_forge() {
     assert!(banner(s).contains("✓ Open the tab"), "{}", view(s));
     assert!(!view(s).contains("Open the tab done"), "{}", view(s));
     // The banner stays on the forge tabs, above their footer.
-    assert!(view(s).contains("] cycles the list's sections"), "{}", view(s));
+    assert!(
+        view(s).contains("] cycles the list's sections"),
+        "{}",
+        view(s)
+    );
     shows(s, "Clamp exponential backoff");
     until(s, "Pull requests · Filter", |s| char(s, ']'));
     char(s, '/');
@@ -357,7 +384,7 @@ fn every_forge_lesson_advances_on_real_input_against_the_practice_forge() {
     char(s, 'n');
     shows(s, "Create pull request");
     paste(s, "Add a quiet mode");
-    until(s, "Merge · Merge", |s| ctrl_enter(s));
+    until(s, "Merge · Merge", ctrl_enter);
 
     // Merge an approved pull request.
     shows(s, "Introduce a quiet status indicator");
@@ -477,7 +504,7 @@ fn every_forge_lesson_advances_on_real_input_against_the_practice_forge() {
     lesson(s, "Actions · Run workflow");
     char(s, 'd');
     shows(s, "Run ");
-    until(s, "Actions · Refresh", |s| ctrl_enter(s));
+    until(s, "Actions · Refresh", ctrl_enter);
     shows(s, "Exercise the retry-limit regression check");
     until(s, "Actions · Cancel", |s| char(s, 'R'));
     until(s, "Actions · Approve", |s| {
@@ -553,21 +580,37 @@ fn every_forge_lesson_advances_on_real_input_against_the_practice_forge() {
     shows(s, "Accounts");
     char(s, 'r');
     wait(s, "the finished tutor", |s| on_number(s, number(None)));
-    assert!(view(s).contains("You practiced every forge lesson"), "{}", view(s));
+    assert!(
+        view(s).contains("You practiced every forge lesson"),
+        "{}",
+        view(s)
+    );
 
     // `q` on a forge tab leaves the tutor, the practice forge and the sandbox.
     char(s, 'q');
     wait(s, "the user's workspace", |s| !s.in_tutor());
     assert!(!dust::forge::sandbox::active());
-    assert_eq!(s.root().canonicalize().unwrap(), dir.path().canonicalize().unwrap());
+    assert_eq!(
+        s.root().canonicalize().unwrap(),
+        dir.path().canonicalize().unwrap()
+    );
     shows(s, "Initial commit");
 
     // Jumping into a lesson builds its own start; quitting from it leaves the sandbox too.
-    command(s, &format!("tutor forge {}", number(Some("Actions · Zoom"))));
+    command(
+        s,
+        &format!("tutor forge {}", number(Some("Actions · Zoom"))),
+    );
     lesson(s, "Actions · Zoom");
     shows(s, "Exercise the retry-limit regression check");
     // `:tutor forge N` while it runs jumps, as `:tutor N` does.
-    command(s, &format!("tutor forge {}", number(Some("Sign in · Accounts · how to sign in [@]"))));
+    command(
+        s,
+        &format!(
+            "tutor forge {}",
+            number(Some("Sign in · Accounts · how to sign in [@]"))
+        ),
+    );
     lesson(s, "Sign in · Accounts · how to sign in [@]");
     // A jump finishes nothing.
     assert!(!banner(s).contains('✓'), "{}", view(s));

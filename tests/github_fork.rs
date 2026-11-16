@@ -154,9 +154,15 @@ fn fork_submission_reviews_exact_targets_and_recovers_after_push() {
         "{form}"
     );
     // A fork: both repositories show; the unpushed branch is pushed first unless unticked.
-    assert!(form.contains("Head repository") && form.contains("☑ Push to origin first"), "{form}");
+    assert!(
+        form.contains("Head repository") && form.contains("☑ Push to origin first"),
+        "{form}"
+    );
     // Each side of a fork names its owner.
-    assert!(form.contains("team/demo-fork:feature/fork → team/demo:trunk"), "{form}");
+    assert!(
+        form.contains("team/demo-fork:feature/fork → team/demo:trunk"),
+        "{form}"
+    );
     paste(&mut screen, "A fork contribution");
     key(&mut screen, KeyCode::Tab, false);
     paste(&mut screen, "Preserve this résumé.\nAnd this second line.");
@@ -165,7 +171,11 @@ fn fork_submission_reviews_exact_targets_and_recovers_after_push() {
         key(&mut screen, KeyCode::Tab, false);
     }
     key(&mut screen, KeyCode::Char(' '), false);
-    assert!(view(&mut screen).contains("☑ Open as draft"), "{}", view(&mut screen));
+    assert!(
+        view(&mut screen).contains("☑ Open as draft"),
+        "{}",
+        view(&mut screen)
+    );
     review(&mut screen);
     assert!(view(&mut screen).contains("github.com/team/demo : trunk"));
     assert!(view(&mut screen).contains("github.com/team/demo-fork : feature/fork"));
@@ -190,8 +200,14 @@ fn fork_submission_reviews_exact_targets_and_recovers_after_push() {
         assert!(frame.cursor.is_some());
     }
     key(&mut screen, KeyCode::Enter, true);
-    wait(&mut screen, "Branch pushed, but the pull request wasn't created · your draft is kept");
-    assert!(view(&mut screen).contains("Branch pushed, but the pull request wasn't created · your draft is kept"));
+    wait(
+        &mut screen,
+        "Branch pushed, but the pull request wasn't created · your draft is kept",
+    );
+    assert!(
+        view(&mut screen)
+            .contains("Branch pushed, but the pull request wasn't created · your draft is kept")
+    );
     assert_eq!(
         git(bare, &["rev-parse", "refs/heads/feature/fork"]),
         git(root, &["rev-parse", "HEAD"])
@@ -201,12 +217,20 @@ fn fork_submission_reviews_exact_targets_and_recovers_after_push() {
     assert!(view(&mut screen).contains("A fork contribution"));
     assert!(view(&mut screen).contains("And this second line."));
     // Already pushed: untick the push and only retry the PR submission.
-    assert!(view(&mut screen).contains("☑ Push to origin first"), "{}", view(&mut screen));
+    assert!(
+        view(&mut screen).contains("☑ Push to origin first"),
+        "{}",
+        view(&mut screen)
+    );
     for _ in 0..5 {
         key(&mut screen, KeyCode::Tab, false);
     }
     key(&mut screen, KeyCode::Char(' '), false);
-    assert!(view(&mut screen).contains("☐ Push to origin first"), "{}", view(&mut screen));
+    assert!(
+        view(&mut screen).contains("☐ Push to origin first"),
+        "{}",
+        view(&mut screen)
+    );
     review(&mut screen);
     key(&mut screen, KeyCode::Enter, true);
     wait(&mut screen, "https://github.com/team/demo/pull/9");

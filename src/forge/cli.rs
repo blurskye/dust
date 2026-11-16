@@ -1,4 +1,4 @@
-//! CLI passthrough (FORGE.md §1.2): the same `ApiRequest`s sent through `gh api --include`
+//! CLI passthrough: the same `ApiRequest`s sent through `gh api --include`
 //! (and, from F4/F5, `glab api` / `tea api`) when no token can be read. The CLI attaches its
 //! own credential, so Dusty never sees or passes a token here. Also the shared child-process
 //! runner, error classification and `redact`.
@@ -377,7 +377,7 @@ pub fn parse_version(text: &str) -> Option<(u32, u32, u32)> {
         })
 }
 
-/// The oldest CLI whose passthrough form §1.2 relies on.
+/// The oldest CLI whose passthrough form Dusty relies on.
 pub fn minimum_version(cli: Cli) -> ((u32, u32, u32), &'static str) {
     match cli {
         Cli::Gh => ((2, 40, 0), "2.40"),
@@ -510,7 +510,7 @@ pub fn run_process(
         )));
     }
     // Every forge child (passthrough, `gh auth token`, `glab auth status`, version checks)
-    // shares the ≤ 4 bound of §3.5.
+    // shares the ≤ 4 in-flight bound.
     let _permit = CLI_BOUND.acquire(cancel)?;
     let mut jobs =
         JobSupervisor::try_new(64).map_err(|error| TransportError::Spawn(error.to_string()))?;
@@ -634,7 +634,10 @@ mod tests {
             assert_eq!(mode & 0o077, 0, "only the user reads the body: {mode:o}");
         }
         let written = String::from_utf8(std::fs::read(file.path()).unwrap()).unwrap();
-        assert!(written.contains(r#""body":"long\ndescription""#), "{written}");
+        assert!(
+            written.contains(r#""body":"long\ndescription""#),
+            "{written}"
+        );
         let path = file.path().to_string_lossy().into_owned();
         for (cli, flag, value) in [
             (Cli::Gh, "--input", path.clone()),
@@ -645,13 +648,20 @@ mod tests {
             assert!(stdin.is_some());
             point_at_file(cli, &mut args, file.path());
             assert!(
-                args.windows(2).any(|pair| pair[0] == flag && pair[1] == value),
+                args.windows(2)
+                    .any(|pair| pair[0] == flag && pair[1] == value),
                 "{cli:?}: {args:?}"
             );
-            assert!(!args.iter().any(|arg| arg == "-" || arg == "@-"), "{args:?}");
+            assert!(
+                !args.iter().any(|arg| arg == "-" || arg == "@-"),
+                "{args:?}"
+            );
         }
         drop(file);
-        assert!(!std::path::Path::new(&path).exists(), "the file goes with the request");
+        assert!(
+            !std::path::Path::new(&path).exists(),
+            "the file goes with the request"
+        );
     }
 
     #[test]

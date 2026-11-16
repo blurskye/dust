@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Build the `orbit` fixture repository every Dusty Git mockup and screenshot uses
-# (target/dusty-git-design/DESIGN.md §0.1).
+#
 #
 #   scripts/ui-scenarios/make-orbit-fixture.sh DIR
 #
 # DIR is replaced. Commits use fixed authors and dates so hashes are reproducible
-# for a given Git version. The working tree ends with the seven changes of §0.1:
+# for a given Git version. The working tree ends with seven changes:
 # two fully staged, one partly staged (MM), three unstaged, one untracked.
 set -euo pipefail
 dir=${1:?usage: make-orbit-fixture.sh DIR}
@@ -153,11 +153,11 @@ git config branch.main.merge refs/heads/main
 git config branch.feat/search.remote origin
 git config branch.feat/search.merge refs/heads/feat/search
 
-# A stash on another branch name, as §0.1 lists.
+# A stash on another branch name.
 printf '\n    def reconnect(self):\n        self.close()\n' >> orbit/worker.py
 git stash push -q -m "WIP reconnect"
 
-# Working tree: the seven changes of §0.1.
+# Working tree: the seven changes.
 printf 'license = "MIT"\n' >> pyproject.toml
 python3 - <<'EOF'
 import pathlib

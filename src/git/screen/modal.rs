@@ -142,7 +142,10 @@ impl GitScreen {
                     .map_or(InputMode::Insert, |text_box| mode_of(text_box.mode())),
             );
         }
-        if self.filter_target().is_some_and(|target| self.list_filter(target).editing) {
+        if self
+            .filter_target()
+            .is_some_and(|target| self.list_filter(target).editing)
+        {
             return Some(
                 self.text_box
                     .as_ref()
@@ -235,7 +238,10 @@ impl GitScreen {
                 | KeyCode::Right
         );
         let kept = !typed || key.modifiers.alt || (control && key.code == KeyCode::Char('u'));
-        let Some(text_box) = self.text_box.as_ref().filter(|text_box| text_box.owner.0 == FILTER)
+        let Some(text_box) = self
+            .text_box
+            .as_ref()
+            .filter(|text_box| text_box.owner.0 == FILTER)
         else {
             return BoxKey::Pass;
         };
@@ -281,7 +287,11 @@ impl GitScreen {
         let target = self.filter_target()?;
         let filter = self.list_filter(target);
         filter.editing.then(|| {
-            ((FILTER.to_owned(), target, 0), filter.input.input.clone(), filter.input.cursor)
+            (
+                (FILTER.to_owned(), target, 0),
+                filter.input.input.clone(),
+                filter.input.cursor,
+            )
         })
     }
 
@@ -370,17 +380,21 @@ impl GitScreen {
     pub(super) fn git_chord(&mut self, key: KeyEvent) -> Option<KeyEvent> {
         if self.page != 0
             || self.form.is_some()
-            || self.filter_target().is_some_and(|target| self.list_filter(target).editing)
+            || self
+                .filter_target()
+                .is_some_and(|target| self.list_filter(target).editing)
         {
             return Some(key);
         }
         match self.github.chord_key(&key) {
             Step::Pass => match Key::of(&key) {
                 // A key the preset leaves alone goes on as it came, modifiers and all.
-                Some(plain) if self.github.key_table().preset == Preset::Lazygit => match self.lazygit_key(plain) {
-                    Some(event) if Key::of(&event) == Some(plain) => Some(key),
-                    other => other,
-                },
+                Some(plain) if self.github.key_table().preset == Preset::Lazygit => {
+                    match self.lazygit_key(plain) {
+                        Some(event) if Key::of(&event) == Some(plain) => Some(key),
+                        other => other,
+                    }
+                }
                 _ => Some(key),
             },
             Step::Wait | Step::Cancel => None,
@@ -435,7 +449,8 @@ impl GitScreen {
             Some(To::Key(Key::Char('v')))
                 if panel == Panel::Files
                     && key == Key::Enter
-                    && (self.changes_collapsed || self.selected_row().is_some_and(|row| row.directory)) =>
+                    && (self.changes_collapsed
+                        || self.selected_row().is_some_and(|row| row.directory)) =>
             {
                 Some(key.event())
             }
@@ -460,11 +475,24 @@ impl GitScreen {
     /// screen is not modal.
     fn mode_chip(&self) -> Option<(String, Style, Style, Option<&'static str>)> {
         let (label, style, edge_style) = match self.input_mode()? {
-            InputMode::Normal => (&self.mode_labels[0], Style::StatusAccent, Style::StatusEdgeNormal),
-            InputMode::Insert => (&self.mode_labels[1], Style::StatusInsert, Style::StatusEdgeInsert),
-            InputMode::Visual => (&self.mode_labels[2], Style::StatusVisual, Style::StatusEdgeVisual),
+            InputMode::Normal => (
+                &self.mode_labels[0],
+                Style::StatusAccent,
+                Style::StatusEdgeNormal,
+            ),
+            InputMode::Insert => (
+                &self.mode_labels[1],
+                Style::StatusInsert,
+                Style::StatusEdgeInsert,
+            ),
+            InputMode::Visual => (
+                &self.mode_labels[2],
+                Style::StatusVisual,
+                Style::StatusEdgeVisual,
+            ),
         };
-        let edge = (self.icon_mode == crate::config::ExplorerIconMode::NerdFont).then_some("\u{e0b0}");
+        let edge =
+            (self.icon_mode == crate::config::ExplorerIconMode::NerdFont).then_some("\u{e0b0}");
         Some((format!(" {label} "), style, edge_style, edge))
     }
 

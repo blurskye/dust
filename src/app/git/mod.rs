@@ -2259,12 +2259,12 @@ mod regression_tests {
 }
 
 mod conflict_markers;
+#[cfg(test)]
+mod embedded_tests;
 pub(in crate::app) mod pull_requests;
 mod review;
 #[cfg(test)]
 mod review_tests;
-#[cfg(test)]
-mod embedded_tests;
 
 pub(in crate::app) mod commands;
 
@@ -3639,7 +3639,9 @@ impl App {
                 self.notify_message(
                     match &outcome.stopped {
                         // The step was recorded and Git paused on the next one.
-                        Some(stop) => format!("{} continued · {}", outcome.operation, stop.summary()),
+                        Some(stop) => {
+                            format!("{} continued · {}", outcome.operation, stop.summary())
+                        }
                         None => format!(
                             "{} completed as {}",
                             outcome.operation,

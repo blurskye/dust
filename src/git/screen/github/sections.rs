@@ -1,4 +1,4 @@
-//! The sections row of a forge list (DESIGN.md §3.26/§3.33): built-in triage sections, then
+//! The sections row of a forge list: built-in triage sections, then
 //! the saved views of this repository, each with a count. `[`/`]` move between them.
 use super::views::SavedView;
 use super::*;
@@ -12,7 +12,14 @@ pub(super) struct Section {
 
 /// Bug and feature labels by convention: GitHub's defaults, Gitea/Forgejo's `Kind/*`, and
 /// GitLab's scoped `type::`/`kind::` labels. The first one the repository uses names a bucket.
-const BUG_LABELS: [&str; 6] = ["bug", "kind/bug", "type::bug", "kind::bug", "type/bug", "bugfix"];
+const BUG_LABELS: [&str; 6] = [
+    "bug",
+    "kind/bug",
+    "type::bug",
+    "kind::bug",
+    "type/bug",
+    "bugfix",
+];
 const FEATURE_LABELS: [&str; 10] = [
     "enhancement",
     "feature",
@@ -35,7 +42,10 @@ const PULLS: [(&str, &str); 4] = [
 impl Workspace {
     pub(super) fn sections(&self) -> Vec<Section> {
         let builtins: Vec<(String, String)> = if self.page == 2 {
-            PULLS.iter().map(|(name, query)| ((*name).into(), (*query).into())).collect()
+            PULLS
+                .iter()
+                .map(|(name, query)| ((*name).into(), (*query).into()))
+                .collect()
         } else {
             self.issue_buckets()
         };
@@ -67,7 +77,11 @@ impl Workspace {
         let mut buckets = vec![("All".to_owned(), String::new())];
         let used = self.list_rows_for("open", "").map(|rows| {
             rows.iter()
-                .flat_map(|row| array(row, "labels").iter().map(|label| string(label, "name").to_owned()))
+                .flat_map(|row| {
+                    array(row, "labels")
+                        .iter()
+                        .map(|label| string(label, "name").to_owned())
+                })
                 .collect::<std::collections::BTreeSet<_>>()
         });
         let pick = |candidates: &[&str]| -> Option<String> {
@@ -80,8 +94,15 @@ impl Workspace {
                 // Until the list arrives, the provider's convention stands in.
                 None => Some(
                     match self.forge_kind() {
-                        Some(crate::forge::provider::ProviderKind::Gitea | crate::forge::provider::ProviderKind::Forgejo) => {
-                            if candidates[0] == "bug" { "Kind/Bug" } else { "Kind/Feature" }
+                        Some(
+                            crate::forge::provider::ProviderKind::Gitea
+                            | crate::forge::provider::ProviderKind::Forgejo,
+                        ) => {
+                            if candidates[0] == "bug" {
+                                "Kind/Bug"
+                            } else {
+                                "Kind/Feature"
+                            }
                         }
                         _ => candidates[0],
                     }
@@ -95,7 +116,10 @@ impl Workspace {
         for (name, label) in [("Bugs", &bug), ("Features", &feature)] {
             if let Some(label) = label {
                 buckets.push((name.to_owned(), format!("label:{label}")));
-                other.push_str(&format!("{}-label:{label}", if other.is_empty() { "" } else { " " }));
+                other.push_str(&format!(
+                    "{}-label:{label}",
+                    if other.is_empty() { "" } else { " " }
+                ));
             }
         }
         if !other.is_empty() {
@@ -108,15 +132,20 @@ impl Workspace {
     pub(super) fn active_section(&self, sections: &[Section]) -> Option<usize> {
         let at = self.page.saturating_sub(1).min(1);
         if let Some(view) = &self.active_views[at]
-            && let Some(index) = sections
-                .iter()
-                .position(|section| section.saved.as_ref().is_some_and(|saved| saved.name == view.name))
+            && let Some(index) = sections.iter().position(|section| {
+                section
+                    .saved
+                    .as_ref()
+                    .is_some_and(|saved| saved.name == view.name)
+            })
         {
             return Some(index);
         }
         // A built-in section is its query; the Open/Closed toggle (`s`) keeps it selected,
         // as GitHub's filters keep through `is:open` and `is:closed`.
-        sections.iter().position(|section| section.saved.is_none() && section.query == self.queries[at])
+        sections
+            .iter()
+            .position(|section| section.saved.is_none() && section.query == self.queries[at])
     }
 
     /// The search box's query (GitHub's `is:pr is:open review-requested:@me`): the kind,
@@ -146,7 +175,10 @@ impl Workspace {
             return total.map(|total| total.to_string());
         };
         let count = rows.iter().filter(|row| row["dustyGone"].is_null()).count();
-        let more = self.list_limits.get(&key).is_some_and(|limit| rows.len() >= *limit);
+        let more = self
+            .list_limits
+            .get(&key)
+            .is_some_and(|limit| rows.len() >= *limit);
         // A whole list counts its own rows; a list cut at its limit takes the forge's total.
         Some(match total.filter(|total| more && *total > count as u64) {
             Some(total) => total.to_string(),
@@ -157,7 +189,9 @@ impl Workspace {
     /// Remember what the forge counted for a list read: its own total, and the other
     /// state's (open ↔ closed) where the forge counted it in the same request.
     pub(super) fn note_totals(&mut self, key: &Key, payload: &crate::forge::request::Payload) {
-        let (Key::List(page, state, query), crate::forge::request::Payload::Rows(rows)) = (key, payload) else {
+        let (Key::List(page, state, query), crate::forge::request::Payload::Rows(rows)) =
+            (key, payload)
+        else {
             return;
         };
         match rows.total {
@@ -184,7 +218,9 @@ impl Workspace {
             .iter()
             .map(|(_, qualifier)| *qualifier)
             .filter(|qualifier| {
-                self.queries[at].split_whitespace().any(|term| facet_of(term) == Some(*qualifier))
+                self.queries[at]
+                    .split_whitespace()
+                    .any(|term| facet_of(term) == Some(*qualifier))
             })
             .collect()
     }
@@ -222,7 +258,13 @@ impl Workspace {
                 labels.insert(string(label, "name").to_owned());
             }
         }
-        let quoted = |value: &str| if value.contains(' ') { format!("\"{value}\"") } else { value.to_owned() };
+        let quoted = |value: &str| {
+            if value.contains(' ') {
+                format!("\"{value}\"")
+            } else {
+                value.to_owned()
+            }
+        };
         let mut fields = Vec::new();
         for (name, qualifier) in super::paint::FACETS {
             let mut choices: Vec<String> = vec![ANY.into()];
@@ -247,7 +289,15 @@ impl Workspace {
             field.custom_choices = true;
             fields.push(field);
         }
-        self.form(if self.page == 2 { "Filter pull requests" } else { "Filter issues" }, Action::Facets, fields)
+        self.form(
+            if self.page == 2 {
+                "Filter pull requests"
+            } else {
+                "Filter issues"
+            },
+            Action::Facets,
+            fields,
+        )
     }
 
     /// The query with each menu's qualifier replaced by the sheet's answer.
@@ -270,14 +320,15 @@ impl Workspace {
                     None => format!("sort:{words}"),
                 },
                 (qualifier, NONE) => format!("no:{qualifier}"),
-                (qualifier, value) if value.contains(' ') && !value.starts_with('"') => format!("{qualifier}:\"{value}\""),
+                (qualifier, value) if value.contains(' ') && !value.starts_with('"') => {
+                    format!("{qualifier}:\"{value}\"")
+                }
                 (qualifier, value) => format!("{qualifier}:{value}"),
             });
         }
         let state = self.states[at].clone();
         self.apply_view(terms.join(" "), state, None)
     }
-
 
     fn section_key(&self, state: &str, query: &str) -> Key {
         if self.inbox.enabled {
@@ -288,7 +339,8 @@ impl Workspace {
     }
 
     fn list_rows_for(&self, state: &str, query: &str) -> Option<&Vec<Value>> {
-        self.value(&self.section_key(state, query)).and_then(Value::as_array)
+        self.value(&self.section_key(state, query))
+            .and_then(Value::as_array)
     }
 
     /// Lists of the sections whose count the shown list cannot give (`@me`, forge-only
@@ -345,7 +397,10 @@ impl Workspace {
         let all = self.list_rows_for(&section.state, "")?;
         Some(
             all.iter()
-                .filter(|row| row["dustyGone"].is_null() && fresh::matches(row, &section.query, &section.state))
+                .filter(|row| {
+                    row["dustyGone"].is_null()
+                        && fresh::matches(row, &section.query, &section.state)
+                })
                 .count(),
         )
     }
@@ -367,17 +422,31 @@ impl Workspace {
             .map(|section| Section {
                 name: section.name.clone(),
                 query: section.query.clone(),
-                state: if section.saved.is_none() { state.clone() } else { section.state.clone() },
+                state: if section.saved.is_none() {
+                    state.clone()
+                } else {
+                    section.state.clone()
+                },
                 saved: section.saved.clone(),
             })
             .collect::<Vec<_>>();
         let sections = sections.as_slice();
         let all_known = (self.inbox.enabled
-            || sections.iter().all(|section| self.locally_countable(&section.query)))
-            && sections.iter().all(|section| self.section_count(section).is_some());
+            || sections
+                .iter()
+                .all(|section| self.locally_countable(&section.query)))
+            && sections
+                .iter()
+                .all(|section| self.section_count(section).is_some());
         sections
             .iter()
-            .map(|section| if all_known { self.section_count(section) } else { None })
+            .map(|section| {
+                if all_known {
+                    self.section_count(section)
+                } else {
+                    None
+                }
+            })
             .collect()
     }
 
@@ -391,7 +460,7 @@ impl Workspace {
             .map(|rows| rows.iter().filter(|row| row["dustyGone"].is_null()).count())
     }
 
-    /// What this host's forge can do (FORGE.md §4.2); unavailable actions say why.
+    /// What this host's forge can do; unavailable actions say why.
     pub(super) fn capabilities(&self) -> crate::forge::capability::Capabilities {
         use crate::forge::provider::{ProviderKind, gitea, gitlab};
         let caps = match self.forge_kind() {
@@ -401,7 +470,7 @@ impl Workspace {
             }
             _ => crate::forge::capability::Capabilities::github(true),
         };
-        // Browsing without a credential: every write says how to lift it (FORGE.md §2.5).
+        // Browsing without a credential: every write says how to lift it.
         if self.read_only() {
             caps.read_only(self.forge_kind().unwrap_or(ProviderKind::GitHub))
         } else {
@@ -419,7 +488,8 @@ impl Workspace {
         if self.host.is_empty() {
             return None;
         }
-        crate::forge::host_state::account(&crate::forge::transport::HostKey::new(&self.host)).map(|account| account.state)
+        crate::forge::host_state::account(&crate::forge::transport::HostKey::new(&self.host))
+            .map(|account| account.state)
     }
 
     /// Read-only hosts keep their write rows visible, dimmed and saying why
@@ -429,6 +499,11 @@ impl Workspace {
             return;
         }
         for row in rows {
+            // Every diff line takes an inline comment: saying why on each would bury the code.
+            // The key still says it once, when pressed.
+            if matches!(row.action, Some(Action::Inline { .. })) {
+                continue;
+            }
             let Some(reason) = row.action.as_ref().and_then(|action| self.refusal(action)) else {
                 continue;
             };
@@ -441,11 +516,14 @@ impl Workspace {
             let start = row.text.len();
             row.text.push_str(&format!("  · {reason}"));
             let end = row.text.len();
-            row.paint.push((start..end, crate::ui::Style::Git {
-                role: crate::ui::GitRole::Modified,
-                surface: crate::ui::GitSurface::Pane,
-                emphasis: crate::ui::Emphasis::None,
-            }));
+            row.paint.push((
+                start..end,
+                crate::ui::Style::Git {
+                    role: crate::ui::GitRole::Modified,
+                    surface: crate::ui::GitSurface::Pane,
+                    emphasis: crate::ui::Emphasis::None,
+                },
+            ));
         }
     }
 
@@ -467,7 +545,7 @@ impl Workspace {
             Action::Merge(..) => reason(caps.merge_pinned_head),
             Action::Viewed(..) => reason(caps.viewed_files),
             Action::Edit(..) | Action::State(..) | Action::Metadata(..) => Some("Sign in to edit"),
-            Action::CreateIssue => Some("Sign in to open issues"),
+            Action::CreateIssue => Some("Sign in to create issues"),
             Action::CreatePullRequest | Action::ConfirmPullRequest(_) => reason(caps.draft_pr),
             Action::Dispatch(_) => reason(caps.dispatch),
             Action::Cancel(_) => reason(caps.cancel_run),
@@ -530,7 +608,10 @@ fn facet_value(query: &str, qualifier: &str) -> Option<String> {
         }
         if qualifier == "sort" {
             return Some(
-                SORTS.iter().find(|(_, order)| *order == value).map_or(value.to_owned(), |(words, _)| (*words).to_owned()),
+                SORTS
+                    .iter()
+                    .find(|(_, order)| *order == value)
+                    .map_or(value.to_owned(), |(words, _)| (*words).to_owned()),
             );
         }
         return Some(value.to_owned());

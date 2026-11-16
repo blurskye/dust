@@ -1,4 +1,4 @@
-//! Pull, undo and redo, history rewriting and tag push from the Git tab (DESIGN.md §5.11),
+//! Pull, undo and redo, history rewriting and tag push from the Git tab,
 //! on temporary repositories and local bare remotes only.
 use dust::config::{GitKeys, load_bundled_config};
 use dust::editor::input::{KeyCode, KeyEvent, Modifiers};
@@ -17,7 +17,11 @@ fn git(root: &Path, args: &[&str]) -> String {
         .env_remove("GIT_REFLOG_ACTION")
         .output()
         .unwrap();
-    assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "git {args:?}: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     String::from_utf8_lossy(&out.stdout).trim().into()
 }
 
@@ -50,7 +54,10 @@ fn repo(subjects: &[&str]) -> tempfile::TempDir {
 fn remote(root: &Path) -> tempfile::TempDir {
     let bare = tempfile::tempdir().unwrap();
     git(bare.path(), &["init", "-q", "--bare", "-b", "main"]);
-    git(root, &["remote", "add", "origin", bare.path().to_str().unwrap()]);
+    git(
+        root,
+        &["remote", "add", "origin", bare.path().to_str().unwrap()],
+    );
     git(root, &["push", "-q", "-u", "origin", "main"]);
     bare
 }
@@ -59,7 +66,10 @@ fn remote(root: &Path) -> tempfile::TempDir {
 fn push_from_elsewhere(bare: &Path, subject: &str) {
     let other = tempfile::tempdir().unwrap();
     let clone = other.path().join("clone");
-    git(other.path(), &["clone", "-q", bare.to_str().unwrap(), "clone"]);
+    git(
+        other.path(),
+        &["clone", "-q", bare.to_str().unwrap(), "clone"],
+    );
     configure(&clone);
     commit(&clone, subject);
     git(&clone, &["push", "-q", "origin", "main"]);
@@ -74,7 +84,10 @@ fn short(id: &str) -> &str {
 }
 
 fn press(screen: &mut GitScreen, code: KeyCode, modifiers: Modifiers) {
-    screen.event(UiEvent::Key { key: KeyEvent { code, modifiers }, kind: KeyInputKind::Press });
+    screen.event(UiEvent::Key {
+        key: KeyEvent { code, modifiers },
+        kind: KeyInputKind::Press,
+    });
 }
 
 fn key(screen: &mut GitScreen, code: KeyCode) {
@@ -82,12 +95,22 @@ fn key(screen: &mut GitScreen, code: KeyCode) {
 }
 
 fn ctrl(screen: &mut GitScreen, code: KeyCode) {
-    press(screen, code, Modifiers { control: true, ..Modifiers::default() });
+    press(
+        screen,
+        code,
+        Modifiers {
+            control: true,
+            ..Modifiers::default()
+        },
+    );
 }
 
 fn view(screen: &mut GitScreen) -> String {
     let frame = screen.frame(140, 40);
-    (0..40).map(|y| frame.grid.row_text(y)).collect::<Vec<_>>().join("\n")
+    (0..40)
+        .map(|y| frame.grid.row_text(y))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn wait(screen: &mut GitScreen, ready: impl Fn(&mut GitScreen) -> bool) {
@@ -97,7 +120,11 @@ fn wait(screen: &mut GitScreen, ready: impl Fn(&mut GitScreen) -> bool) {
         if ready(screen) {
             return;
         }
-        assert!(Instant::now() < deadline, "screen timed out:\n{}", view(screen));
+        assert!(
+            Instant::now() < deadline,
+            "screen timed out:\n{}",
+            view(screen)
+        );
         std::thread::sleep(Duration::from_millis(10));
     }
 }
@@ -148,7 +175,11 @@ fn p_pulls_with_the_configured_rebase_and_names_the_upstream() {
     let mut screen = open(root);
     key(&mut screen, KeyCode::Char('p'));
     let sheet = view(&mut screen);
-    for text in ["Pull origin/main into main?".to_owned(), "rebase".to_owned(), button("Pull")] {
+    for text in [
+        "Pull origin/main into main?".to_owned(),
+        "rebase".to_owned(),
+        button("Pull"),
+    ] {
         assert!(sheet.contains(&text), "{text}:\n{sheet}");
     }
     confirm(&mut screen);
@@ -164,7 +195,12 @@ fn p_pulls_with_the_configured_rebase_and_names_the_upstream() {
     shows(&mut screen, "Pull origin/main into main?");
     assert!(view(&mut screen).contains("merge"));
     confirm(&mut screen);
-    assert_eq!(git(root, &["rev-list", "--merges", "--count", "HEAD"]), "1", "{}", view(&mut screen));
+    assert_eq!(
+        git(root, &["rev-list", "--merges", "--count", "HEAD"]),
+        "1",
+        "{}",
+        view(&mut screen)
+    );
     shows(&mut screen, "(merge)");
 }
 
@@ -175,7 +211,10 @@ fn a_pull_that_conflicts_stops_in_the_operation_banner() {
     let bare = remote(root);
     let other = tempfile::tempdir().unwrap();
     let clone = other.path().join("clone");
-    git(other.path(), &["clone", "-q", bare.path().to_str().unwrap(), "clone"]);
+    git(
+        other.path(),
+        &["clone", "-q", bare.path().to_str().unwrap(), "clone"],
+    );
     configure(&clone);
     std::fs::write(clone.join("alpha.txt"), "theirs\n").unwrap();
     git(&clone, &["commit", "-q", "-am", "theirs"]);
@@ -239,7 +278,10 @@ fn z_undoes_and_shift_z_redoes_with_a_sheet_that_shows_the_move() {
     shows(&mut screen, &button("Undo"));
     confirm(&mut screen);
     assert_eq!(git(root, &["rev-parse", "HEAD"]), charlie);
-    assert_eq!(std::fs::read_to_string(root.join("charlie.txt")).unwrap(), "draft\n");
+    assert_eq!(
+        std::fs::read_to_string(root.join("charlie.txt")).unwrap(),
+        "draft\n"
+    );
 }
 
 #[test]
@@ -272,11 +314,17 @@ fn rewrite(key_code: KeyCode, title: &str) -> (tempfile::TempDir, GitScreen) {
 fn history_keys_squash_fixup_drop_and_move_the_selected_commit() {
     let (dir, mut screen) = rewrite(KeyCode::Char('s'), "Squash into the commit below");
     assert_eq!(subjects(dir.path()), "delta charlie alpha");
-    assert_eq!(git(dir.path(), &["log", "-1", "--format=%B", "HEAD~2"]), "alpha\n\nbravo");
+    assert_eq!(
+        git(dir.path(), &["log", "-1", "--format=%B", "HEAD~2"]),
+        "alpha\n\nbravo"
+    );
     shows(&mut screen, "Squashed");
     let (dir, _) = rewrite(KeyCode::Char('f'), "Fixup into the commit below");
     assert_eq!(subjects(dir.path()), "delta charlie alpha");
-    assert_eq!(git(dir.path(), &["log", "-1", "--format=%B", "HEAD~2"]), "alpha");
+    assert_eq!(
+        git(dir.path(), &["log", "-1", "--format=%B", "HEAD~2"]),
+        "alpha"
+    );
     assert_eq!(git(dir.path(), &["show", "HEAD~2:bravo.txt"]), "bravo");
     let (dir, _) = rewrite(KeyCode::Char('d'), "Drop");
     assert_eq!(subjects(dir.path()), "delta charlie alpha");
@@ -314,7 +362,12 @@ fn w_rewords_and_a_amends_a_commit_below_head() {
         key(&mut screen, KeyCode::Char(c));
     }
     confirm(&mut screen);
-    assert_eq!(subjects(root), "delta charlie Bravo, reworded alpha", "{}", view(&mut screen));
+    assert_eq!(
+        subjects(root),
+        "delta charlie Bravo, reworded alpha",
+        "{}",
+        view(&mut screen)
+    );
 
     std::fs::write(root.join("alpha.txt"), "amended\n").unwrap();
     git(root, &["add", "alpha.txt"]);
@@ -324,9 +377,17 @@ fn w_rewords_and_a_amends_a_commit_below_head() {
     key(&mut screen, KeyCode::Char('A'));
     shows(&mut screen, "Amend with the staged changes");
     confirm(&mut screen);
-    assert_eq!(subjects(root), "delta charlie Bravo, reworded alpha", "{}", view(&mut screen));
+    assert_eq!(
+        subjects(root),
+        "delta charlie Bravo, reworded alpha",
+        "{}",
+        view(&mut screen)
+    );
     assert_eq!(git(root, &["show", "HEAD~2:alpha.txt"]), "amended");
-    assert_eq!(std::fs::read_to_string(root.join("delta.txt")).unwrap(), "left unstaged\n");
+    assert_eq!(
+        std::fs::read_to_string(root.join("delta.txt")).unwrap(),
+        "left unstaged\n"
+    );
     assert_eq!(git(root, &["diff", "--cached", "--name-only"]), "");
 }
 
@@ -336,7 +397,10 @@ fn p_on_a_tag_pushes_only_that_tag() {
     let root = dir.path();
     let bare = tempfile::tempdir().unwrap();
     git(bare.path(), &["init", "-q", "--bare", "-b", "main"]);
-    git(root, &["remote", "add", "origin", bare.path().to_str().unwrap()]);
+    git(
+        root,
+        &["remote", "add", "origin", bare.path().to_str().unwrap()],
+    );
     git(root, &["tag", "v1.0"]);
     let mut screen = open(root);
     key(&mut screen, KeyCode::Char('3'));
@@ -347,7 +411,11 @@ fn p_on_a_tag_pushes_only_that_tag() {
     shows(&mut screen, "v1.0");
     key(&mut screen, KeyCode::Char('P'));
     let sheet = view(&mut screen);
-    for text in ["Push tag v1.0?".to_owned(), "origin".to_owned(), button("Push tag")] {
+    for text in [
+        "Push tag v1.0?".to_owned(),
+        "origin".to_owned(),
+        button("Push tag"),
+    ] {
         assert!(sheet.contains(&text), "{text}:\n{sheet}");
     }
     confirm(&mut screen);
@@ -368,7 +436,12 @@ fn the_footer_and_help_offer_the_new_keys() {
     }
     key(&mut screen, KeyCode::Char('?'));
     let help = view(&mut screen);
-    for text in ["Squash into the commit below", "Move down · up", "Pull (confirm)", "Undo · redo"] {
+    for text in [
+        "Squash into the commit below",
+        "Move down · up",
+        "Pull (confirm)",
+        "Undo · redo",
+    ] {
         assert!(help.contains(text), "{text}:\n{help}");
     }
 }
@@ -389,7 +462,12 @@ fn the_lazygit_preset_runs_the_new_operations_on_lazygits_keys() {
     ctrl(&mut screen, KeyCode::Char('j'));
     shows(&mut screen, "Move down");
     confirm(&mut screen);
-    assert_eq!(subjects(root), "charlie alpha bravo", "{}", view(&mut screen));
+    assert_eq!(
+        subjects(root),
+        "charlie alpha bravo",
+        "{}",
+        view(&mut screen)
+    );
     // `z` undoes the move, Ctrl-z redoes it.
     key(&mut screen, KeyCode::Char('z'));
     shows(&mut screen, &button("Undo"));
@@ -405,7 +483,7 @@ fn the_lazygit_preset_runs_the_new_operations_on_lazygits_keys() {
     shows(&mut screen, "main has no upstream");
 }
 
-// Round 15 of the Git tab's review (DESIGN.md §5.11).
+// Round 15 of the Git tab's review.
 
 #[test]
 fn a_browsed_branch_lists_its_log_once_in_the_reader_and_history_gives_way() {
@@ -437,7 +515,9 @@ fn a_browsed_branch_lists_its_log_once_in_the_reader_and_history_gives_way() {
     // The panes keep their rectangles: browsing folds nothing.
     let after = screen.frame(120, 36).grid;
     let corners = |grid: &dust::ui::CellGrid| {
-        (0..36).filter(|&y| grid.row_text(y).starts_with('╭')).collect::<Vec<_>>()
+        (0..36)
+            .filter(|&y| grid.row_text(y).starts_with('╭'))
+            .collect::<Vec<_>>()
     };
     assert_eq!(corners(&before), corners(&after));
     // History lists the log again when it takes focus.
@@ -473,7 +553,12 @@ fn the_commit_view_names_its_hash_once_in_the_header() {
     let frame = view(&mut screen);
     // The History row and the reader's header block; neither title repeats it.
     assert_eq!(frame.matches(short(&head)).count(), 2, "{frame}");
-    assert!(frame.lines().any(|line| line.contains("╭") && line.contains("bravo.txt")), "{frame}");
+    assert!(
+        frame
+            .lines()
+            .any(|line| line.contains("╭") && line.contains("bravo.txt")),
+        "{frame}"
+    );
 }
 
 #[test]
@@ -486,7 +571,10 @@ fn y_copies_a_commit_attribute_and_o_needs_a_forge_remote() {
     shows(&mut screen, "bravo");
     key(&mut screen, KeyCode::Char('o'));
     shows(&mut screen, "No remote to open the commit on");
-    git(root, &["remote", "add", "origin", "git@github.com:acme/widgets.git"]);
+    git(
+        root,
+        &["remote", "add", "origin", "git@github.com:acme/widgets.git"],
+    );
     key(&mut screen, KeyCode::Char('y'));
     let menu = view(&mut screen);
     for text in [
@@ -499,19 +587,31 @@ fn y_copies_a_commit_attribute_and_o_needs_a_forge_remote() {
     }
     let copied = |screen: &mut GitScreen| {
         screen.event(UiEvent::Key {
-            key: KeyEvent { code: KeyCode::Enter, modifiers: Modifiers::default() },
+            key: KeyEvent {
+                code: KeyCode::Enter,
+                modifiers: Modifiers::default(),
+            },
             kind: KeyInputKind::Press,
         })
     };
-    assert_eq!(copied(&mut screen), dust::git::screen::ScreenOutcome::Copy(head.clone()));
+    assert_eq!(
+        copied(&mut screen),
+        dust::git::screen::ScreenOutcome::Copy(head.clone())
+    );
     shows(&mut screen, "Copied the SHA");
     key(&mut screen, KeyCode::Char('y'));
     key(&mut screen, KeyCode::Char('j'));
-    assert_eq!(copied(&mut screen), dust::git::screen::ScreenOutcome::Copy(short(&head).to_owned()));
+    assert_eq!(
+        copied(&mut screen),
+        dust::git::screen::ScreenOutcome::Copy(short(&head).to_owned())
+    );
     key(&mut screen, KeyCode::Char('y'));
     key(&mut screen, KeyCode::Down);
     key(&mut screen, KeyCode::Down);
-    assert_eq!(copied(&mut screen), dust::git::screen::ScreenOutcome::Copy("bravo".into()));
+    assert_eq!(
+        copied(&mut screen),
+        dust::git::screen::ScreenOutcome::Copy("bravo".into())
+    );
 }
 
 #[test]
@@ -554,9 +654,19 @@ fn the_commit_box_shows_its_visual_selection_and_verbs_and_sheets_clear_the_pane
     key(&mut screen, KeyCode::Char(':'));
     let dimmed = screen.frame(140, 40);
     let sheet = view(&mut screen);
-    assert!(sheet.contains("Command") && sheet.contains("Branches"), "{sheet}");
-    assert_eq!(dimmed.grid.get(x, y).unwrap().symbol, plain.grid.get(x, y).unwrap().symbol);
-    assert_ne!(dimmed.grid.get(x, y).unwrap().style, plain.grid.get(x, y).unwrap().style, "{sheet}");
+    assert!(
+        sheet.contains("Command") && sheet.contains("Branches"),
+        "{sheet}"
+    );
+    assert_eq!(
+        dimmed.grid.get(x, y).unwrap().symbol,
+        plain.grid.get(x, y).unwrap().symbol
+    );
+    assert_ne!(
+        dimmed.grid.get(x, y).unwrap().style,
+        plain.grid.get(x, y).unwrap().style,
+        "{sheet}"
+    );
     let title = sheet.lines().find(|row| row.contains("Command")).unwrap();
     let before: Vec<char> = title[..title.find("Command").unwrap()].chars().collect();
     let edge = before.iter().rposition(|&c| c == '╭').unwrap();

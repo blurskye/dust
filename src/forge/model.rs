@@ -1,5 +1,5 @@
-//! The normalised forge model (FORGE.md §3.3). Every provider maps its responses into these
-//! types; the UI (through `legacy.rs` until DESIGN phase 4), the cache and `dusty-git forge`
+//! The normalised forge model. Every provider maps its responses into these
+//! types; the UI (through `legacy.rs` for now), the cache and `dusty-git forge`
 //! read only these. Ids are strings, numbers are `u64` (GitLab `iid`).
 
 use serde::Deserialize;
@@ -195,7 +195,7 @@ pub struct ItemRow {
     pub deletions: Option<u64>,
     pub changed_files: Option<u64>,
     pub draft: bool,
-    /// At most 2 KB of the description, enough for the list's reading pane (§7.5).
+    /// At most 2 KB of the description, enough for the list's reading pane.
     pub body_preview: Option<String>,
     /// A pull request's source branch, when the list query carries it (the IDE picker, F7).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -344,7 +344,7 @@ pub struct PullRequest {
     pub created: Timestamp,
     pub pinned_head: String,
     pub fingerprint: Fingerprint,
-    /// GitHub Projects the item belongs to (kept where already shown, §4.2).
+    /// GitHub Projects the item belongs to (kept where already shown).
     pub projects: Vec<String>,
     pub subscribed: Option<bool>,
     /// Reactions on the body itself, in GitHub's words (`+1`, `heart`…).
@@ -462,24 +462,70 @@ pub struct Actor {
 pub enum TimelineEvent {
     Commented(Comment),
     Reviewed(Review),
-    Labeled { label: String, by: Actor },
-    Unlabeled { label: String, by: Actor },
-    Assigned { assignee: String, by: Actor },
-    Unassigned { assignee: String, by: Actor },
-    Closed { by: Actor },
-    Reopened { by: Actor },
-    Merged { sha: String, by: Actor },
+    Labeled {
+        label: String,
+        by: Actor,
+    },
+    Unlabeled {
+        label: String,
+        by: Actor,
+    },
+    Assigned {
+        assignee: String,
+        by: Actor,
+    },
+    Unassigned {
+        assignee: String,
+        by: Actor,
+    },
+    Closed {
+        by: Actor,
+    },
+    Reopened {
+        by: Actor,
+    },
+    Merged {
+        sha: String,
+        by: Actor,
+    },
     Committed(CommitSummary),
-    ForcePushed { from: String, to: String, by: Actor },
-    CrossReferenced { link: LinkRef, by: Actor },
-    Renamed { from: String, to: String, by: Actor },
-    ReviewRequested { reviewer: String, by: Actor },
-    Milestoned { milestone: String, by: Actor },
-    Demilestoned { milestone: String, by: Actor },
-    Other { kind: String, by: Actor },
+    ForcePushed {
+        from: String,
+        to: String,
+        by: Actor,
+    },
+    CrossReferenced {
+        link: LinkRef,
+        by: Actor,
+    },
+    Renamed {
+        from: String,
+        to: String,
+        by: Actor,
+    },
+    ReviewRequested {
+        reviewer: String,
+        by: Actor,
+    },
+    Milestoned {
+        milestone: String,
+        by: Actor,
+    },
+    Demilestoned {
+        milestone: String,
+        by: Actor,
+    },
+    Other {
+        kind: String,
+        by: Actor,
+    },
     /// An event the page words from its details (`state_reason`, `lock_reason`,
     /// `deployment.environment`…): REST field paths, dotted when nested, to their text.
-    Detailed { kind: String, detail: std::collections::BTreeMap<String, String>, by: Actor },
+    Detailed {
+        kind: String,
+        detail: std::collections::BTreeMap<String, String>,
+        by: Actor,
+    },
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -694,7 +740,7 @@ pub struct Notification {
 }
 
 pub mod logs {
-    //! Job log sections and step slicing (F6). GitLab traces carry
+    //! Job log sections and step slicing. GitLab traces carry
     //! `section_start:<unix>:<name>[options]` / `section_end:<unix>:<name>` markers; GitHub and
     //! Gitea logs carry `##[group]Title` / `##[endgroup]` and an RFC 3339 timestamp per line;
     //! `gh run view --log` lines are `job<TAB>step<TAB>line`.

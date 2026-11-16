@@ -1,4 +1,4 @@
-//! Pull and merge request templates and the remembered base branch (FORGE.md §3.7, F7).
+//! Pull and merge request templates and the remembered base branch.
 //!
 //! Templates are read from the **base ref locally** (`git show <base>:<path>`), never from the
 //! API, so they cost no request and work offline. The base branch a head branch was opened or

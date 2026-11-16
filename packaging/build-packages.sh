@@ -2,11 +2,14 @@
 # Packages a static release binary for Linux into dist/: a tar archive, the bare
 # binary, deb, rpm and pacman packages (nfpm) and an AppImage (appimagetool).
 # The Flatpak is built from the same binary by .github/workflows/release.yml.
+# The archive and the packages also carry dusty-git, the standalone Git screen; the
+# AppImage and the Flatpak run the editor only (Dusty Git is Space g g inside it).
 #
-# usage: packaging/build-packages.sh VERSION BINARY
+# usage: packaging/build-packages.sh VERSION BINARY [DUSTY_GIT_BINARY]
 set -euo pipefail
 version=$1
 binary=$2
+dusty_git=${3:-$(dirname "$binary")/dusty-git}
 cd "$(dirname "$0")/.."
 dist=dist
 stage=target/package-stage
@@ -16,10 +19,12 @@ name=dust-$version-x86_64-linux
 
 # The licenses of Dust and of the themes and icons it bundles ship with the binary.
 install -m 0755 "$binary" "$stage/dust/dust"
+install -m 0755 "$dusty_git" "$stage/dust/dusty-git"
 cp -r LICENSE NOTICE LICENSES "$stage/dust/"
 tar --zstd --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner \
   -cf "$dist/$name.tar.zst" -C "$stage" dust
 install -m 0755 "$binary" "$dist/$name"
+install -m 0755 "$dusty_git" "$dist/dusty-git-$version-x86_64-linux"
 
 for packager in deb rpm archlinux; do
   VERSION=$version nfpm package --config packaging/nfpm.yaml \

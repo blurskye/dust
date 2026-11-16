@@ -1,7 +1,7 @@
-//! `dusty-git forge …` (FORGE.md §5.3): the forge layer for other editors and scripts, JSON
+//! `dusty-git forge …`: the forge layer for other editors and scripts, JSON
 //! only. Every top-level object carries `"schema": 1`; lists print one object per line (JSON
 //! Lines); errors go to stderr as `{"schema":1,"error":{"kind","message","hint"}}` with a fixed
-//! exit code. Reads share the TUI's on-disk cache (§7): a fresh entry answers without a
+//! exit code. Reads share the TUI's on-disk cache: a fresh entry answers without a
 //! request, a stale one is revalidated with its ETag.
 
 use super::ForgeCommands;

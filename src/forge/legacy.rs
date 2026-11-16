@@ -1,6 +1,6 @@
-//! `Payload` → the gh-CLI JSON shapes `src/git/screen/github/view.rs` reads (FORGE.md §5.1).
+//! `Payload` → the gh-CLI JSON shapes `src/git/screen/github/view.rs` reads.
 //! The field sets are exactly what the old `gh … --json` calls requested, so the view keeps
-//! working unchanged; DESIGN.md phase 4 moves the view onto the model and deletes this file.
+//! working unchanged; a later pass moves the view onto the model and deletes this file.
 
 use crate::forge::model::*;
 use crate::forge::request::Payload;
@@ -303,7 +303,11 @@ fn reaction_rollup(reactions: &[Reaction]) -> Value {
     }
     value.insert(
         "total_count".into(),
-        reactions.iter().map(|reaction| reaction.count).sum::<u64>().into(),
+        reactions
+            .iter()
+            .map(|reaction| reaction.count)
+            .sum::<u64>()
+            .into(),
     );
     Value::Object(value)
 }
@@ -558,7 +562,10 @@ fn check(check: &Check) -> Value {
 
 /// The id the API reads the check's run by, when its link names an Actions run.
 fn api_run(check: &Check) -> Value {
-    let linked = check.details_url.as_deref().is_some_and(|url| url.contains("/actions/runs/"));
+    let linked = check
+        .details_url
+        .as_deref()
+        .is_some_and(|url| url.contains("/actions/runs/"));
     check
         .run_link
         .as_ref()
@@ -749,7 +756,8 @@ fn timeline_event(timeline: &TimelineEvent) -> Value {
             value.insert("requested_reviewer".into(), json!({ "login": reviewer }));
             value
         }
-        TimelineEvent::Milestoned { milestone, by } | TimelineEvent::Demilestoned { milestone, by } => {
+        TimelineEvent::Milestoned { milestone, by }
+        | TimelineEvent::Demilestoned { milestone, by } => {
             let kind = if matches!(timeline, TimelineEvent::Milestoned { .. }) {
                 "milestoned"
             } else {
@@ -870,7 +878,7 @@ fn run_fields(run: &Run) -> serde_json::Map<String, Value> {
     value
 }
 
-/// What the Actions table and sheets (§3.37) need that gh's run fields never carried: the
+/// What the Actions table and sheets need that gh's run fields never carried: the
 /// duration, the pull request, approval, who started it and how many attempts there are. One
 /// key, as for items (`row_extension`), so the gh field-set parity stays exact.
 fn run_extension(run: &Run) -> Value {

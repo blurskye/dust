@@ -1,4 +1,4 @@
-//! Tokens (FORGE.md §2.1). Dusty never asks for one: it reads the forge CLI's sign-in or the
+//! Tokens. Dusty never asks for one: it reads the forge CLI's sign-in or the
 //! documented environment variables, first hit wins:
 //!
 //! | provider | env | CLI store | CLI command |
@@ -357,6 +357,24 @@ pub fn login_hint(kind: ProviderKind, host: &HostKey) -> String {
     }
 }
 
+/// The one sign-in to offer while a host is browsed anonymously: the CLI's login when it is
+/// installed, else its token variable (never `gh auth login` to someone without gh).
+pub fn anonymous_hint(kind: ProviderKind, host: &HostKey) -> String {
+    let cli = match kind {
+        ProviderKind::GitHub => crate::forge::transport::Cli::Gh,
+        ProviderKind::GitLab => crate::forge::transport::Cli::Glab,
+        ProviderKind::Gitea | ProviderKind::Forgejo => crate::forge::transport::Cli::Tea,
+    };
+    let installed =
+        crate::forge::sandbox::active() || cli.executable().is_some_and(|path| path.is_file());
+    let mut hints = sign_in_hints(kind, host);
+    if installed || hints.len() < 2 {
+        hints.swap_remove(0)
+    } else {
+        hints.pop().unwrap_or_default()
+    }
+}
+
 /// Every way to sign in to a host, the CLI's own login first: the copy for an instance that
 /// refuses anonymous API calls, and for the accounts popover.
 pub fn sign_in_hints(kind: ProviderKind, host: &HostKey) -> Vec<String> {
@@ -383,7 +401,11 @@ pub fn sign_in_hints(kind: ProviderKind, host: &HostKey) -> Vec<String> {
 pub fn sign_in_to(what: &str, kind: ProviderKind, host: &HostKey) -> ForgeError {
     ForgeError::Unsupported {
         capability: "sign_in",
-        reason: format!("Sign in to {what} · run {}", login_hint(kind, host)),
+        reason: {
+            let hint = anonymous_hint(kind, host);
+            let verb = if hint.contains('=') { "set" } else { "run" };
+            format!("Sign in to {what} · {verb} {hint}")
+        },
     }
 }
 
@@ -840,8 +862,7 @@ fn gitea(
     Ok(None)
 }
 
-/// Which provider a CLI's stored credential says an unknown host is (FORGE.md §2.3, t3code:
-/// "claim an unknown host only if a CLI has a credential for it"). Files first (cheap), then
+/// Which provider a CLI's stored credential says an unknown host is. Files first (cheap), then
 /// `gh auth token`; host-scoped env variables count as the CLI's own.
 pub fn claim(
     host: &HostKey,

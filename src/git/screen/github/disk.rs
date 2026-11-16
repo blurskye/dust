@@ -1,4 +1,4 @@
-//! Disk cache reads off the UI thread (FORGE.md §7.2): while `j`/`k` pass over rows, the
+//! Disk cache reads off the UI thread: while `j`/`k` pass over rows, the
 //! details they show are read from disk by a worker and painted when they land, so a slow disk
 //! (a cold page cache, a busy machine) never holds up a key.
 
@@ -25,7 +25,10 @@ pub(super) fn read(cache: &Cache, key: &Key, cache_key: &CacheKey) -> Found {
         return Found::Payload(envelope);
     }
     // A 404 for the repository, a list or the inbox means the scope is wrong: asked again.
-    if matches!(key, Key::Repository | Key::List(..) | Key::Inbox(..) | Key::RowChecks(_)) {
+    if matches!(
+        key,
+        Key::Repository | Key::List(..) | Key::Inbox(..) | Key::RowChecks(_)
+    ) {
         return Found::Nothing;
     }
     match cache.get::<String>(&cache_key.missing()) {
@@ -55,7 +58,14 @@ pub(super) struct Disk {
 
 impl Disk {
     /// Ask the worker for `key`'s entry; the answer comes back through `replies`.
-    pub(super) fn load(&mut self, cache: &Arc<Cache>, key: Key, what: Read, cache_key: CacheKey, epoch: u64) {
+    pub(super) fn load(
+        &mut self,
+        cache: &Arc<Cache>,
+        key: Key,
+        what: Read,
+        cache_key: CacheKey,
+        epoch: u64,
+    ) {
         if self.loading.contains(&key) {
             return;
         }
@@ -68,7 +78,12 @@ impl Disk {
                 .spawn(move || {
                     while let Ok((key, asked, cache_key, epoch)) = inbox.recv() {
                         let found = read(&cache, &key, &cache_key);
-                        let answer = Loaded { key, read: asked, epoch, found };
+                        let answer = Loaded {
+                            key,
+                            read: asked,
+                            epoch,
+                            found,
+                        };
                         if sender.send(answer).is_err() {
                             break;
                         }

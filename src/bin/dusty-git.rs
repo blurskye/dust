@@ -1,5 +1,5 @@
 //! Standalone host for the same Git screen the editor opens, and `dusty-git forge …`, the
-//! forge layer as JSON for other editors (FORGE.md §5.3). `dusty-git open <link>` starts on
+//! forge layer as JSON for other editors. `dusty-git open <link>` starts on
 //! the pull request, issue or run a web address or `#123` names.
 use clap::Parser;
 use dust::git::screen::{GitScreen, ScreenOutcome};
@@ -37,7 +37,10 @@ fn open_arguments(args: Vec<std::ffi::OsString>) -> Result<Vec<std::ffi::OsStrin
     if args.get(1).is_none_or(|arg| arg != "open") {
         return Ok(args);
     }
-    let Some(link) = args.get(2).filter(|arg| !arg.to_string_lossy().starts_with("--")) else {
+    let Some(link) = args
+        .get(2)
+        .filter(|arg| !arg.to_string_lossy().starts_with("--"))
+    else {
         return Err("usage: dusty-git open <url|#number> [PATH]".into());
     };
     let mut rewritten = vec![args[0].clone(), "--link".into(), link.clone()];
@@ -166,14 +169,26 @@ mod tests {
 
     #[test]
     fn open_becomes_the_link_flag() {
-        let args = |list: &[&str]| list.iter().map(std::ffi::OsString::from).collect::<Vec<_>>();
+        let args = |list: &[&str]| {
+            list.iter()
+                .map(std::ffi::OsString::from)
+                .collect::<Vec<_>>()
+        };
         assert_eq!(
             open_arguments(args(&["dusty-git", "open", "#12", "repo", "--clean"])).unwrap(),
             args(&["dusty-git", "--link", "#12", "repo", "--clean"])
         );
-        assert_eq!(open_arguments(args(&["dusty-git", "repo"])).unwrap(), args(&["dusty-git", "repo"]));
+        assert_eq!(
+            open_arguments(args(&["dusty-git", "repo"])).unwrap(),
+            args(&["dusty-git", "repo"])
+        );
         assert!(open_arguments(args(&["dusty-git", "open"])).is_err());
-        let cli = Cli::parse_from(args(&["dusty-git", "--link", "https://github.com/o/r/pull/3", "repo"]));
+        let cli = Cli::parse_from(args(&[
+            "dusty-git",
+            "--link",
+            "https://github.com/o/r/pull/3",
+            "repo",
+        ]));
         assert_eq!(cli.link.as_deref(), Some("https://github.com/o/r/pull/3"));
         assert_eq!(cli.path, std::path::PathBuf::from("repo"));
     }

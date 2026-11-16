@@ -1,5 +1,5 @@
 #![cfg(unix)]
-//! The forge tabs on their unhappy paths (DESIGN.md §3.46): no forge remote, signed out, a
+//! The forge tabs on their unhappy paths: no forge remote, signed out, a
 //! refused or under-scoped token, a rate limit, no network, a server error, and the empty
 //! states. Every screen says what happened in plain words with one next key, keeps what it
 //! already showed, and never shows a raw error, Debug text or a token. Each case re-runs itself
@@ -44,7 +44,9 @@ fn rerun_in_child(test: &str, world: &World, access: Access) {
         .env("DUSTY_STATES_FIXTURE", world.state_path());
     world.configure(&mut command);
     if access == Access::Anonymous {
-        command.env_remove("DUSTY_FORGE_TOKEN").env_remove("DUSTY_FORGE_ANONYMOUS");
+        command
+            .env_remove("DUSTY_FORGE_TOKEN")
+            .env_remove("DUSTY_FORGE_ANONYMOUS");
     }
     command.env("PATH", &bin);
     let output = command.output().unwrap();
@@ -61,7 +63,9 @@ fn rerun_in_child(test: &str, world: &World, access: Access) {
 
 fn child_repo() -> Option<PathBuf> {
     std::env::var_os(CHILD)?;
-    Some(PathBuf::from(std::env::var_os("DUSTY_STATES_REPO").unwrap()))
+    Some(PathBuf::from(
+        std::env::var_os("DUSTY_STATES_REPO").unwrap(),
+    ))
 }
 
 fn update(change: impl FnOnce(&mut Value)) {
@@ -144,9 +148,15 @@ fn assert_plain(label: &str, frame: &str) {
         return;
     }
     for raw in RAW {
-        assert!(!frame.contains(raw), "{label} shows raw text {raw:?}:\n{frame}");
+        assert!(
+            !frame.contains(raw),
+            "{label} shows raw text {raw:?}:\n{frame}"
+        );
     }
-    assert!(!frame.contains(FAKE_TOKEN), "{label} shows the token:\n{frame}");
+    assert!(
+        !frame.contains(FAKE_TOKEN),
+        "{label} shows the token:\n{frame}"
+    );
     assert!(!frame.contains("ghp_"), "{label} shows a token:\n{frame}");
 }
 
@@ -196,20 +206,29 @@ type Frames = Vec<(String, String, String)>;
 
 /// Some screen of the tour shows `text`, at either size.
 fn shows(frames: &Frames, text: &str) -> bool {
-    frames.iter().any(|(_, small, large)| small.contains(text) || large.contains(text))
+    frames
+        .iter()
+        .any(|(_, small, large)| small.contains(text) || large.contains(text))
 }
 
 fn assert_shows(frames: &Frames, text: &str) {
     assert!(
         shows(frames, text),
         "no screen shows {text:?}:\n{}",
-        frames.iter().map(|(label, small, _)| format!("== {label}\n{small}")).collect::<Vec<_>>().join("\n")
+        frames
+            .iter()
+            .map(|(label, small, _)| format!("== {label}\n{small}"))
+            .collect::<Vec<_>>()
+            .join("\n")
     );
 }
 
 fn assert_never(frames: &Frames, text: &str) {
     for (label, small, large) in frames {
-        assert!(!small.contains(text) && !large.contains(text), "{label} shows {text:?}:\n{small}");
+        assert!(
+            !small.contains(text) && !large.contains(text),
+            "{label} shows {text:?}:\n{small}"
+        );
     }
 }
 
@@ -240,7 +259,20 @@ fn committed(repo: &std::path::Path) -> &std::path::Path {
         .output()
         .unwrap();
     if !head.status.success() {
-        forge_world::git(repo, &["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "start"]);
+        forge_world::git(
+            repo,
+            &[
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@t",
+                "commit",
+                "-q",
+                "--allow-empty",
+                "-m",
+                "start",
+            ],
+        );
     }
     repo
 }
@@ -362,9 +394,18 @@ per_forge!(
         print("403-scope", forge, &frames);
         // The token is known: the screens name the scope it lacks and where to add it.
         let (scopes, fix) = match forge {
-            Forge::GitHub => ("needs the repo, workflow scopes", "gh auth refresh -s repo,workflow"),
-            Forge::GitLab => ("needs the api scope", "/-/user_settings/personal_access_tokens"),
-            Forge::Gitea | Forge::Forgejo => ("needs the read:repository scope", "/user/settings/applications"),
+            Forge::GitHub => (
+                "needs the repo, workflow scopes",
+                "gh auth refresh -s repo,workflow",
+            ),
+            Forge::GitLab => (
+                "needs the api scope",
+                "/-/user_settings/personal_access_tokens",
+            ),
+            Forge::Gitea | Forge::Forgejo => (
+                "needs the read:repository scope",
+                "/user/settings/applications",
+            ),
         };
         assert_shows(&frames, scopes);
         assert_shows(&frames, fix);
@@ -389,9 +430,15 @@ per_forge!(
         // `@` opens the accounts popover with this forge's own way in.
         key(&mut screen, KeyCode::Char('@'));
         let popover = text(&mut screen, 190, 48);
-        assert!(popover.contains("Accounts") && popover.contains(sign_in_words(forge)), "{popover}");
+        assert!(
+            popover.contains("Accounts") && popover.contains(sign_in_words(forge)),
+            "{popover}"
+        );
         key(&mut screen, KeyCode::Escape);
-        assert!(!text(&mut screen, 190, 48).contains("r re-check"), "Esc closes the popover");
+        assert!(
+            !text(&mut screen, 190, 48).contains("r re-check"),
+            "Esc closes the popover"
+        );
     }
 );
 
@@ -402,7 +449,11 @@ fn signed_out_github_empty_list_shows_sign_in_once() {
             Forge::GitHub,
             json!({ "fail": always(403, json!({ "message": "Only signed in user is allowed to call APIs." }), json!({})) }),
         );
-        rerun_in_child("signed_out_github_empty_list_shows_sign_in_once", &world, Access::Anonymous);
+        rerun_in_child(
+            "signed_out_github_empty_list_shows_sign_in_once",
+            &world,
+            Access::Anonymous,
+        );
         return;
     };
     let mut screen = GitScreen::open(committed(&repo)).unwrap();
@@ -411,24 +462,50 @@ fn signed_out_github_empty_list_shows_sign_in_once() {
     for (width, height, list_width) in [(120, 36, 48), (190, 48, 83)] {
         let frame = screen.frame(width, height);
         let list = (1..height - 1)
-            .map(|y| (0..list_width).map(|x| frame.grid.get(x, y).unwrap().symbol.as_str()).collect::<String>())
+            .map(|y| {
+                (0..list_width)
+                    .map(|x| frame.grid.get(x, y).unwrap().symbol.as_str())
+                    .collect::<String>()
+            })
             .collect::<Vec<_>>()
             .join("\n");
         // Said once, in the reader: the list beside it stays blank.
-        for text in ["Sign-in required", "Not signed in", "needs a sign-in", "@ sign in"] {
+        for text in [
+            "Sign-in required",
+            "Not signed in",
+            "needs a sign-in",
+            "@ sign in",
+        ] {
             assert!(!list.contains(text), "the list repeats {text:?}:\n{list}");
         }
         let reader = (1..height - 1)
-            .map(|y| (list_width..width).map(|x| frame.grid.get(x, y).unwrap().symbol.as_str()).collect::<String>())
+            .map(|y| {
+                (list_width..width)
+                    .map(|x| frame.grid.get(x, y).unwrap().symbol.as_str())
+                    .collect::<String>()
+            })
             .collect::<Vec<_>>()
             .join("\n");
-        assert!(reader.contains("gh auth login"), "the reader keeps the sign-in commands:\n{reader}");
-        assert_eq!(reader.matches("Not signed in").count(), 1, "the reader says it once:\n{reader}");
+        assert!(
+            reader.contains("gh auth login"),
+            "the reader keeps the sign-in commands:\n{reader}"
+        );
+        assert_eq!(
+            reader.matches("Not signed in").count(),
+            1,
+            "the reader says it once:\n{reader}"
+        );
         // The footer offers what can fix it, no keys that need a row.
         let footer = frame.grid.row_text(height - 1);
-        assert!(footer.contains("R retry") && footer.contains("@ sign in"), "{footer}");
+        assert!(
+            footer.contains("R retry") && footer.contains("@ sign in"),
+            "{footer}"
+        );
         for text in ["Enter open", "C comment", "x close", "l labels"] {
-            assert!(!footer.contains(text), "{text:?} with nothing to act on:\n{footer}");
+            assert!(
+                !footer.contains(text),
+                "{text:?} with nothing to act on:\n{footer}"
+            );
         }
     }
 }
@@ -489,9 +566,7 @@ per_forge!(
         let mut screen = GitScreen::open(committed(&repo)).unwrap();
         screen.open_target("prs", None);
         settle(&mut screen);
-        update(|state| {
-            state["fail"] = always(502, json!({ "message": "Bad Gateway" }), json!({}))
-        });
+        update(|state| state["fail"] = always(502, json!({ "message": "Bad Gateway" }), json!({})));
         let frames = tour(&mut screen, forge);
         print("5xx", forge, &frames);
         // A server error mid-session: the forge's fault in words, what was read stays.
@@ -516,7 +591,10 @@ per_forge!(
         let mut screen = GitScreen::open(committed(&repo)).unwrap();
         let frames = tour(&mut screen, forge);
         print("no-remote", forge, &frames);
-        assert_shows(&frames, "No GitHub, GitLab, Gitea or Forgejo remote in this repository");
+        assert_shows(
+            &frames,
+            "No GitHub, GitLab, Gitea or Forgejo remote in this repository",
+        );
         assert_shows(&frames, "git remote add origin");
         assert_never(&frames, "Loading…");
     }
@@ -529,7 +607,12 @@ per_forge!(
         let world = World::new(forge);
         forge_world::git(
             &world.repo,
-            &["remote", "set-url", "origin", "https://git.unknown.invalid/team/app.git"],
+            &[
+                "remote",
+                "set-url",
+                "origin",
+                "https://git.unknown.invalid/team/app.git",
+            ],
         );
         world
     },
@@ -588,11 +671,23 @@ fn reopen_and_refresh(repo: &std::path::Path) -> GitScreen {
 
 /// `#13`, or GitLab's `!13`.
 fn pull_ref(forge: Forge) -> String {
-    format!("{}{}", if matches!(forge, Forge::GitLab) { "!" } else { "#" }, forge.pull())
+    format!(
+        "{}{}",
+        if matches!(forge, Forge::GitLab) {
+            "!"
+        } else {
+            "#"
+        },
+        forge.pull()
+    )
 }
 
 fn pull_noun(forge: Forge) -> &'static str {
-    if forge == Forge::GitLab { "merge requests" } else { "pull requests" }
+    if forge == Forge::GitLab {
+        "merge requests"
+    } else {
+        "pull requests"
+    }
 }
 
 per_forge!(
@@ -632,7 +727,10 @@ per_forge!(
         screen.open_target("actions", None);
         frames.push(shot(&mut screen, "actions-empty"));
         print("empty", forge, &frames);
-        assert_shows(&frames, &format!("No {} match this filter", pull_noun(forge)));
+        assert_shows(
+            &frames,
+            &format!("No {} match this filter", pull_noun(forge)),
+        );
         assert_shows(&frames, "Clear the filter");
         assert_shows(&frames, "Inbox zero");
         assert_never(&frames, "Loading…");
@@ -670,8 +768,13 @@ fn long_content_never_pins_the_ui() {
         let log: String = (0..10_000)
             .map(|line| format!("test (linux)\tUNKNOWN STEP\t2026-11-08T10:00:00.200Z line {line} of the build\n"))
             .collect();
-        let comments: Vec<String> = (0..200).map(|index| format!("Comment number {index}")).collect();
-        let world = World::with_state(forge, json!({ "diff": diff, "log": log, "comments": comments }));
+        let comments: Vec<String> = (0..200)
+            .map(|index| format!("Comment number {index}"))
+            .collect();
+        let world = World::with_state(
+            forge,
+            json!({ "diff": diff, "log": log, "comments": comments }),
+        );
         rerun_in_child("long_content_never_pins_the_ui", &world, Access::Token);
         return;
     };
@@ -688,7 +791,11 @@ fn long_content_never_pins_the_ui() {
     let started = Instant::now();
     key(&mut screen, KeyCode::Char('G'));
     text(&mut screen, 190, 48);
-    assert!(started.elapsed() < Duration::from_secs(1), "G took {:?}", started.elapsed());
+    assert!(
+        started.elapsed() < Duration::from_secs(1),
+        "G took {:?}",
+        started.elapsed()
+    );
     // A 200-comment thread folds its middle the way GitHub does.
     screen.open_target("prs", Some(forge.pull()));
     settle(&mut screen);
@@ -699,7 +806,10 @@ fn long_content_never_pins_the_ui() {
     for _ in 0..80 {
         let frame = text(&mut screen, 190, 48);
         last.clone_from(&frame);
-        assert!(!frame.contains("Comment number 100\n") && !frame.contains("Comment number 100 "), "the fold should hide the middle:\n{frame}");
+        assert!(
+            !frame.contains("Comment number 100\n") && !frame.contains("Comment number 100 "),
+            "the fold should hide the middle:\n{frame}"
+        );
         if frame.contains("hidden items") {
             seen = frame;
             break;
@@ -709,5 +819,8 @@ fn long_content_never_pins_the_ui() {
     if std::env::var_os("DUSTY_STATES_PRINT").is_some() {
         println!("===== long fold\n{seen}");
     }
-    assert!(seen.contains("hidden items · Load more…"), "no fold in a 200-comment thread:\n{last}");
+    assert!(
+        seen.contains("hidden items · Load more…"),
+        "no fold in a 200-comment thread:\n{last}"
+    );
 }

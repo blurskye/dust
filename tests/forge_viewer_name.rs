@@ -31,7 +31,10 @@ fn key(screen: &mut GitScreen, code: KeyCode) {
 
 fn view(screen: &mut GitScreen) -> String {
     let frame = screen.frame(190, 48);
-    (0..48).map(|y| frame.grid.row_text(y)).collect::<Vec<_>>().join("\n")
+    (0..48)
+        .map(|y| frame.grid.row_text(y))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// The frame once nothing loads and it stays unchanged for `QUIET`.
@@ -60,7 +63,13 @@ fn no_forge_screen_shows_a_placeholder_viewer() {
             let world = World::new(forge);
             let mut command = Command::new(std::env::current_exe().unwrap());
             command
-                .args(["no_forge_screen_shows_a_placeholder_viewer", "--exact", "--nocapture", "--test-threads", "1"])
+                .args([
+                    "no_forge_screen_shows_a_placeholder_viewer",
+                    "--exact",
+                    "--nocapture",
+                    "--test-threads",
+                    "1",
+                ])
                 .env(CHILD, forge.name())
                 .env("DUSTY_VIEWER_REPO", &world.repo);
             world.configure(&mut command);
@@ -96,11 +105,23 @@ fn no_forge_screen_shows_a_placeholder_viewer() {
     // The review sheet names who submits it.
     key(&mut screen, KeyCode::Char('r'));
     let sheet = settle(&mut screen, "the review sheet");
-    let viewer = if matches!(forge, Forge::Gitea | Forge::Forgejo) { "maya" } else { "rowan" };
-    assert!(sheet.contains(&format!("Review by {viewer}")), "{}:\n{sheet}", forge.name());
+    let viewer = if matches!(forge, Forge::Gitea | Forge::Forgejo) {
+        "maya"
+    } else {
+        "rowan"
+    };
+    assert!(
+        sheet.contains(&format!("Review by {viewer}")),
+        "{}:\n{sheet}",
+        forge.name()
+    );
     seen.push(sheet);
     key(&mut screen, KeyCode::Escape);
     for frame in seen {
-        assert!(!frame.contains("tester"), "{} shows a placeholder viewer:\n{frame}", forge.name());
+        assert!(
+            !frame.contains("tester"),
+            "{} shows a placeholder viewer:\n{frame}",
+            forge.name()
+        );
     }
 }

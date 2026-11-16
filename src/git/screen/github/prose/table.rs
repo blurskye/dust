@@ -1,4 +1,4 @@
-//! Markdown tables on the reader, boxed in exactly as the editor draws them (DESIGN.md §3.34):
+//! Markdown tables on the reader, boxed in exactly as the editor draws them:
 //! the `[editor.markdown]` border glyphs, closing bottom and optional row lines, each cell a
 //! space inside its borders, and the editor's own column narrowing and cell wrapping
 //! (`ui::render::markdown`). A table wider than the reader wraps each cell inside its column;
@@ -42,7 +42,11 @@ pub(super) fn generation() -> u64 {
 }
 
 fn settings() -> MarkdownConfig {
-    SETTINGS.read().ok().and_then(|settings| settings.clone()).unwrap_or_default()
+    SETTINGS
+        .read()
+        .ok()
+        .and_then(|settings| settings.clone())
+        .unwrap_or_default()
 }
 
 /// A cleaned body split into prose and the tables in it.
@@ -70,7 +74,10 @@ pub(super) fn split(text: &str) -> Vec<Block<'_>> {
             prose.push(line);
             continue;
         }
-        if let Some(marker) = ["```", "~~~"].into_iter().find(|marker| trimmed.starts_with(marker)) {
+        if let Some(marker) = ["```", "~~~"]
+            .into_iter()
+            .find(|marker| trimmed.starts_with(marker))
+        {
             fence = Some(marker);
             prose.push(line);
             continue;
@@ -88,7 +95,10 @@ pub(super) fn split(text: &str) -> Vec<Block<'_>> {
             }
             let mut table = vec![line, lines[index]];
             index += 1;
-            while let Some(row) = lines.get(index).filter(|row| row.trim_start().starts_with('|')) {
+            while let Some(row) = lines
+                .get(index)
+                .filter(|row| row.trim_start().starts_with('|'))
+            {
                 table.push(row);
                 index += 1;
             }
@@ -118,7 +128,10 @@ impl Cell {
             let start = cell.text.len();
             cell.text.push_str(&text);
             if let Some(highlight) = highlight {
-                cell.paint.push((start..cell.text.len(), highlight_style(highlight, GitSurface::Pane)));
+                cell.paint.push((
+                    start..cell.text.len(),
+                    highlight_style(highlight, GitSurface::Pane),
+                ));
             }
         }
         cell
@@ -137,7 +150,11 @@ impl Cell {
     }
 
     fn natural(&self) -> usize {
-        self.pieces().into_iter().map(|piece| self.text[piece].trim().width()).max().unwrap_or(0)
+        self.pieces()
+            .into_iter()
+            .map(|piece| self.text[piece].trim().width())
+            .max()
+            .unwrap_or(0)
     }
 
     fn longest_word(&self) -> usize {
@@ -159,7 +176,11 @@ impl Cell {
             let graphemes = text
                 .grapheme_indices(true)
                 .map(|(at, grapheme)| {
-                    let width = if grapheme == "\t" { 1 } else { grapheme.width() };
+                    let width = if grapheme == "\t" {
+                        1
+                    } else {
+                        grapheme.width()
+                    };
                     (ByteOffset(start + at), width, grapheme.trim().is_empty())
                 })
                 .collect::<Vec<_>>();
@@ -169,7 +190,9 @@ impl Cell {
             }
             let end_of = |at: ByteOffset| {
                 let index = graphemes.partition_point(|(offset, _, _)| *offset <= at);
-                graphemes.get(index).map_or(start + text.len(), |(next, _, _)| next.0)
+                graphemes
+                    .get(index)
+                    .map_or(start + text.len(), |(next, _, _)| next.0)
             };
             let (places, widths) = editor::wrap_cell(&graphemes, width.max(1));
             let mut wrapped: Vec<Option<Range<usize>>> = vec![None; widths.len()];
@@ -179,7 +202,11 @@ impl Cell {
                 range.start = range.start.min(at.0);
                 range.end = range.end.max(end);
             }
-            rows.extend(wrapped.into_iter().map(|range| range.unwrap_or(start..start)));
+            rows.extend(
+                wrapped
+                    .into_iter()
+                    .map(|range| range.unwrap_or(start..start)),
+            );
         }
         rows
     }
@@ -239,36 +266,67 @@ impl Frame {
 
     /// Cells taken by borders and padding around `columns` columns.
     fn overhead(&self, columns: usize) -> usize {
-        columns * 2 + self.borders[0] + self.borders[2] + columns.saturating_sub(1) * self.borders[1]
+        columns * 2
+            + self.borders[0]
+            + self.borders[2]
+            + columns.saturating_sub(1) * self.borders[1]
     }
 
     /// A border row from the pieces at `parts` (top `0..3`, under the header `3..6`, bottom
     /// `6..9`), the row under the header marking each column's alignment.
-    fn border(&self, widths: &[usize], alignments: &[Alignment], parts: [usize; 3], aligned: bool, indent: &str) -> Line {
-        let text = editor::table_border(&self.config.glyphs, AMBIGUOUS, widths, self.borders, alignments, parts, aligned);
+    fn border(
+        &self,
+        widths: &[usize],
+        alignments: &[Alignment],
+        parts: [usize; 3],
+        aligned: bool,
+        indent: &str,
+    ) -> Line {
+        let text = editor::table_border(
+            &self.config.glyphs,
+            AMBIGUOUS,
+            widths,
+            self.borders,
+            alignments,
+            parts,
+            aligned,
+        );
         finish(Rich::new().push(&text, role(GitRole::Border)), indent)
     }
 
     /// The `│` at `border` (0 left, 1 between, 2 right), padded to the border's width.
     fn pipe(&self, border: usize) -> String {
         let pipe = editor::table_part(&self.config.glyphs, 9);
-        format!("{pipe}{}", " ".repeat(self.borders[border].saturating_sub(pipe.width())))
+        format!(
+            "{pipe}{}",
+            " ".repeat(self.borders[border].saturating_sub(pipe.width()))
+        )
     }
 }
 
 /// `lines` (header, delimiter, body rows) as reader rows `width` cells wide.
 pub(super) fn render(rows: &mut Vec<Line>, lines: &[&str], width: usize, indent: &str) {
     let cells = crate::ui::markdown::table_cells;
-    let header = cells(lines[0]).into_iter().map(|cell| Cell::new(cell, true)).collect::<Vec<_>>();
+    let header = cells(lines[0])
+        .into_iter()
+        .map(|cell| Cell::new(cell, true))
+        .collect::<Vec<_>>();
     let columns = header.len().max(1);
     let alignments = (0..columns)
-        .map(|column| cells(lines[1]).get(column).map_or(Alignment::Default, |cell| editor::table_alignment(cell)))
+        .map(|column| {
+            cells(lines[1])
+                .get(column)
+                .map_or(Alignment::Default, |cell| editor::table_alignment(cell))
+        })
         .collect::<Vec<_>>();
     // A body row has the header's columns: missing cells are empty, extra ones dropped.
     let body = lines[2..]
         .iter()
         .map(|line| {
-            let mut row = cells(line).into_iter().map(|cell| Cell::new(cell, false)).collect::<Vec<_>>();
+            let mut row = cells(line)
+                .into_iter()
+                .map(|cell| Cell::new(cell, false))
+                .collect::<Vec<_>>();
             row.resize_with(columns, Cell::default);
             row
         })
@@ -279,12 +337,21 @@ pub(super) fn render(rows: &mut Vec<Line>, lines: &[&str], width: usize, indent:
     let frame = Frame::new();
     let overhead = frame.overhead(columns);
     let mut widths = (0..columns)
-        .map(|column| all().map(|row| row[column].natural()).max().unwrap_or(0).max(1))
+        .map(|column| {
+            all()
+                .map(|row| row[column].natural())
+                .max()
+                .unwrap_or(0)
+                .max(1)
+        })
         .collect::<Vec<_>>();
     if widths.iter().sum::<usize>() + overhead > width {
         let floors = (0..columns)
             .map(|column| {
-                let word = all().map(|row| row[column].longest_word()).max().unwrap_or(0);
+                let word = all()
+                    .map(|row| row[column].longest_word())
+                    .max()
+                    .unwrap_or(0);
                 widths[column].min(word.clamp(FLOOR.0, FLOOR.1))
             })
             .sum::<usize>();
@@ -298,7 +365,11 @@ pub(super) fn render(rows: &mut Vec<Line>, lines: &[&str], width: usize, indent:
     let last = body.len();
     rows.push(frame.border(&widths, &alignments, [0, 1, 2], false, indent));
     for (index, row) in all().enumerate() {
-        let wrapped = row.iter().zip(&widths).map(|(cell, width)| cell.rows(*width)).collect::<Vec<_>>();
+        let wrapped = row
+            .iter()
+            .zip(&widths)
+            .map(|(cell, width)| cell.rows(*width))
+            .collect::<Vec<_>>();
         let height = wrapped.iter().map(Vec::len).max().unwrap_or(1).max(1);
         for line in 0..height {
             let mut rich = Rich::new().push(frame.pipe(0), border).plain(" ");
@@ -333,7 +404,14 @@ pub(super) fn render(rows: &mut Vec<Line>, lines: &[&str], width: usize, indent:
 }
 
 /// Each body row as `Header: value` lines in a box of its own, records apart by a blank row.
-fn stacked(rows: &mut Vec<Line>, header: &[Cell], body: &[Vec<Cell>], width: usize, indent: &str, frame: &Frame) {
+fn stacked(
+    rows: &mut Vec<Line>,
+    header: &[Cell],
+    body: &[Vec<Cell>],
+    width: usize,
+    indent: &str,
+    frame: &Frame,
+) {
     let overhead = frame.overhead(1);
     // Too narrow even for a box: the records without one.
     let boxed = width > overhead;
@@ -344,7 +422,11 @@ fn stacked(rows: &mut Vec<Line>, header: &[Cell], body: &[Vec<Cell>], width: usi
             let mut lines = Vec::new();
             for (column, cell) in record.iter().enumerate() {
                 let name = header[column].text.replace(CELL_BREAK, " ");
-                let name = if name.trim().is_empty() { format!("Column {}", column + 1) } else { name };
+                let name = if name.trim().is_empty() {
+                    format!("Column {}", column + 1)
+                } else {
+                    name
+                };
                 let label = format!("{name}: ");
                 // A long header puts its value on the next rows.
                 let beside = label.width() <= inner / 2;
@@ -363,7 +445,13 @@ fn stacked(rows: &mut Vec<Line>, header: &[Cell], body: &[Vec<Cell>], width: usi
             lines
         })
         .collect::<Vec<_>>();
-    let content = records.iter().flatten().map(Rich::width).max().unwrap_or(1).clamp(1, inner.max(1));
+    let content = records
+        .iter()
+        .flatten()
+        .map(Rich::width)
+        .max()
+        .unwrap_or(1)
+        .clamp(1, inner.max(1));
     let border = role(GitRole::Border);
     for (index, record) in records.into_iter().enumerate() {
         if index > 0 {
@@ -381,7 +469,9 @@ fn stacked(rows: &mut Vec<Line>, header: &[Cell], body: &[Vec<Cell>], width: usi
             }
             let pad = content.saturating_sub(line.width());
             let mut rich = Rich::new().push(frame.pipe(0), border).plain(" ");
-            rich = append(rich, line).plain(&" ".repeat(pad + 1)).push(frame.pipe(2), border);
+            rich = append(rich, line)
+                .plain(&" ".repeat(pad + 1))
+                .push(frame.pipe(2), border);
             rows.push(finish(rich, indent));
         }
         if boxed {
@@ -394,7 +484,11 @@ fn stacked(rows: &mut Vec<Line>, header: &[Cell], body: &[Vec<Cell>], width: usi
 fn append(mut rich: Rich, more: Rich) -> Rich {
     let at = rich.text.len();
     rich.text.push_str(&more.text);
-    rich.paint.extend(more.paint.into_iter().map(|(range, style)| (range.start + at..range.end + at, style)));
+    rich.paint.extend(
+        more.paint
+            .into_iter()
+            .map(|(range, style)| (range.start + at..range.end + at, style)),
+    );
     rich
 }
 
@@ -406,7 +500,9 @@ mod tests {
     const RESULTS: &str = "Intro\n\n| Suite | Passed | Failed | Duration |\n|:------|-------:|:------:|---------:|\n| unit | 41 | 0 | 2.7s |\n| reconnect-storm | 3 | 0 | 41.0s |\n\nAfter";
 
     fn texts(rows: &[Line]) -> Vec<String> {
-        rows.iter().map(|row| format!("{}{}", row.gutter, row.text)).collect()
+        rows.iter()
+            .map(|row| format!("{}{}", row.gutter, row.text))
+            .collect()
     }
 
     /// Where the column borders fall on a row.
@@ -419,8 +515,14 @@ mod tests {
 
     /// The table's rows: from its top-left corner to its bottom-right one.
     fn boxed(text: &[String]) -> &[String] {
-        let top = text.iter().position(|row| row.trim_start().starts_with('┌')).unwrap();
-        let bottom = text.iter().rposition(|row| row.trim_end().ends_with('┘')).unwrap();
+        let top = text
+            .iter()
+            .position(|row| row.trim_start().starts_with('┌'))
+            .unwrap();
+        let bottom = text
+            .iter()
+            .rposition(|row| row.trim_end().ends_with('┘'))
+            .unwrap();
         &text[top..=bottom]
     }
 
@@ -432,7 +534,11 @@ mod tests {
         let (left, right) = (bars(&table[0])[0], *bars(&table[0]).last().unwrap());
         for row in table {
             let bars = bars(row);
-            assert_eq!((bars[0], *bars.last().unwrap()), (left, right), "both outer sides on every row: {table:#?}");
+            assert_eq!(
+                (bars[0], *bars.last().unwrap()),
+                (left, right),
+                "both outer sides on every row: {table:#?}"
+            );
             assert_eq!(row.width(), right + 1, "{table:#?}");
         }
     }
@@ -462,9 +568,23 @@ mod tests {
         // The header is bold; the borders are in the border colour.
         let header = text.iter().position(|row| row.contains("Suite")).unwrap();
         let bold = super::super::strong(GitRole::Text);
-        assert!(rows[header].paint.iter().any(|(range, style)| *style == bold && &rows[header].text[range.clone()] == "Suite"));
-        assert!(rows[header + 1].paint.iter().all(|(_, style)| *style == role(GitRole::Border)));
-        assert!(rows[header].paint.iter().any(|(_, style)| *style == role(GitRole::Border)));
+        assert!(
+            rows[header].paint.iter().any(
+                |(range, style)| *style == bold && &rows[header].text[range.clone()] == "Suite"
+            )
+        );
+        assert!(
+            rows[header + 1]
+                .paint
+                .iter()
+                .all(|(_, style)| *style == role(GitRole::Border))
+        );
+        assert!(
+            rows[header]
+                .paint
+                .iter()
+                .any(|(_, style)| *style == role(GitRole::Border))
+        );
         // Prose around the table reads as before.
         assert_eq!(text[0], "Intro");
         assert_eq!(text.last().map(String::as_str), Some("After"));
@@ -472,24 +592,52 @@ mod tests {
 
     #[test]
     fn the_editor_table_settings_draw_the_forge_table() {
-        let mut config = MarkdownConfig::default();
-        config.table_bottom = false;
-        config.table_row_lines = true;
-        config.glyphs.table = ["╭", "┬", "╮", "├", "┼", "┤", "╰", "┴", "╯", "┃", "─"].map(String::from).into();
-        let frame = Frame { borders: editor::table_borders(&config.glyphs, AMBIGUOUS), config };
+        let mut config = MarkdownConfig {
+            table_bottom: false,
+            table_row_lines: true,
+            ..MarkdownConfig::default()
+        };
+        config.glyphs.table = ["╭", "┬", "╮", "├", "┼", "┤", "╰", "┴", "╯", "┃", "─"]
+            .map(String::from)
+            .into();
+        let frame = Frame {
+            borders: editor::table_borders(&config.glyphs, AMBIGUOUS),
+            config,
+        };
         assert_eq!(frame.pipe(0), "┃");
-        let line = frame.border(&[3, 2], &[Alignment::Left, Alignment::Right], [3, 4, 5], true, "");
+        let line = frame.border(
+            &[3, 2],
+            &[Alignment::Left, Alignment::Right],
+            [3, 4, 5],
+            true,
+            "",
+        );
         assert_eq!(line.text, "├━────┼───━┤");
-        assert_eq!(frame.border(&[3, 2], &[Alignment::Default; 2], [0, 1, 2], false, "").text, "╭─────┬────╮");
+        assert_eq!(
+            frame
+                .border(&[3, 2], &[Alignment::Default; 2], [0, 1, 2], false, "")
+                .text,
+            "╭─────┬────╮"
+        );
     }
 
     #[test]
     fn inline_marks_in_cells_lose_their_markup() {
         let mut rows = Vec::new();
-        markdown(&mut rows, "| File | Change |\n|---|---|\n| `orbit/queue.py` | **Bound** the [exponent](https://x) |", 80, "");
+        markdown(
+            &mut rows,
+            "| File | Change |\n|---|---|\n| `orbit/queue.py` | **Bound** the [exponent](https://x) |",
+            80,
+            "",
+        );
         let text = texts(&rows);
         assert_eq!(text[3], "│ orbit/queue.py │ Bound the exponent │");
-        assert!(rows[3].paint.iter().any(|(range, _)| &rows[3].text[range.clone()] == "orbit/queue.py"));
+        assert!(
+            rows[3]
+                .paint
+                .iter()
+                .any(|(range, _)| &rows[3].text[range.clone()] == "orbit/queue.py")
+        );
     }
 
     #[test]
@@ -507,10 +655,20 @@ mod tests {
             assert_eq!(bars(row), columns, "every row keeps the column: {text:#?}");
         }
         // The long cell continues on rows of its own, under its column, inside the box.
-        let first = table.iter().position(|row| row.contains("orbit/queue.py")).unwrap();
+        let first = table
+            .iter()
+            .position(|row| row.contains("orbit/queue.py"))
+            .unwrap();
         assert!(table[first + 1].trim_start().starts_with('│'), "{text:#?}");
-        let joined = table.iter().map(|row| row.split('│').nth(2).unwrap_or("").trim()).collect::<Vec<_>>().join(" ");
-        assert!(joined.contains("clamp the delay to 60 seconds so long outages stay cheap."), "{joined}");
+        let joined = table
+            .iter()
+            .map(|row| row.split('│').nth(2).unwrap_or("").trim())
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(
+            joined.contains("clamp the delay to 60 seconds so long outages stay cheap."),
+            "{joined}"
+        );
     }
 
     #[test]
@@ -520,7 +678,11 @@ mod tests {
         markdown(&mut rows, table, 30, "");
         let text = texts(&rows);
         let line = |text: &str| format!("│ {text:<21} │");
-        assert_eq!(&text[1..4], [line("Suite: unit"), line("Passed: 41"), line("Failed: 0")], "{text:#?}");
+        assert_eq!(
+            &text[1..4],
+            [line("Suite: unit"), line("Passed: 41"), line("Failed: 0")],
+            "{text:#?}"
+        );
         assert!(text.contains(&line("Runner: ubuntu-latest")), "{text:#?}");
         let gap = text.iter().position(String::is_empty).unwrap();
         assert_closed(&text[..gap]);
@@ -532,9 +694,28 @@ mod tests {
     #[test]
     fn breaks_ragged_rows_and_code_fences() {
         let mut rows = Vec::new();
-        markdown(&mut rows, "| a | b |\n|---|---|\n| one<br>two | x |\n| only |\n\n```\n| not | a table |\n|---|---|\n```", 80, "");
+        markdown(
+            &mut rows,
+            "| a | b |\n|---|---|\n| one<br>two | x |\n| only |\n\n```\n| not | a table |\n|---|---|\n```",
+            80,
+            "",
+        );
         let text = texts(&rows);
-        assert_eq!(&text[1..6], ["│ a    │ b │", "├──────┼───┤", "│ one  │ x │", "│ two  │   │", "│ only │   │"], "{text:#?}");
-        assert!(text.iter().any(|row| row.trim_start() == "| not | a table |"), "fenced code stays literal: {text:#?}");
+        assert_eq!(
+            &text[1..6],
+            [
+                "│ a    │ b │",
+                "├──────┼───┤",
+                "│ one  │ x │",
+                "│ two  │   │",
+                "│ only │   │"
+            ],
+            "{text:#?}"
+        );
+        assert!(
+            text.iter()
+                .any(|row| row.trim_start() == "| not | a table |"),
+            "fenced code stays literal: {text:#?}"
+        );
     }
 }

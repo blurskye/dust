@@ -1,4 +1,4 @@
-# Phase-1 acceptance (DESIGN.md §7.1). Run against the orbit fixture:
+# Phase-1 acceptance. Run against the orbit fixture:
 #   scripts/ui-scenarios/make-orbit-fixture.sh /tmp/orbit
 #   scripts/ui-shot scripts/ui-scenarios/dusty-git-workspace.keys --binary dusty-git --cwd /tmp/orbit
 until Changes

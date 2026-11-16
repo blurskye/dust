@@ -1,4 +1,4 @@
-//! Typed records the forge tabs paint (DESIGN.md §7.4): one row of a pull request or issue
+//! Typed records the forge tabs paint: one row of a pull request or issue
 //! list, the reader's item detail, checks, review threads and timeline entries.
 //!
 //! The Workspace cache keeps the gh-shaped JSON `forge::legacy` produces, because the
@@ -352,7 +352,9 @@ impl ItemRecord {
             body: text(value, "body").to_owned(),
             tally: extension["reviews"].is_object().then(|| ReviewTally {
                 approved: extension["reviews"]["approved"].as_u64().unwrap_or(0),
-                changes_requested: extension["reviews"]["changesRequested"].as_u64().unwrap_or(0),
+                changes_requested: extension["reviews"]["changesRequested"]
+                    .as_u64()
+                    .unwrap_or(0),
                 pending: extension["reviews"]["pending"].as_u64().unwrap_or(0),
             }),
             created: extension["created"]
@@ -362,8 +364,16 @@ impl ItemRecord {
                 .to_owned(),
             linked: extension["linked"]
                 .as_u64()
-                .or_else(|| value["closedByPullRequestsReferences"].as_array().map(|links| links.len() as u64))
-                .or_else(|| value["closingIssuesReferences"].as_array().map(|links| links.len() as u64))
+                .or_else(|| {
+                    value["closedByPullRequestsReferences"]
+                        .as_array()
+                        .map(|links| links.len() as u64)
+                })
+                .or_else(|| {
+                    value["closingIssuesReferences"]
+                        .as_array()
+                        .map(|links| links.len() as u64)
+                })
                 .unwrap_or(0),
         }
     }
@@ -375,7 +385,9 @@ impl ItemRecord {
     /// The row's review fact: its state, and the words when the counts say more than the
     /// state's own word. `tally` is the list's, else one counted from the opened item.
     pub fn review_fact(&self, tally: Option<ReviewTally>) -> Option<(ReviewState, Option<String>)> {
-        let decision = self.review.filter(|review| *review != ReviewState::NotRequested);
+        let decision = self
+            .review
+            .filter(|review| *review != ReviewState::NotRequested);
         let Some(tally) = self.tally.or(tally) else {
             return decision.map(|state| (state, None));
         };
@@ -393,8 +405,16 @@ impl ItemRecord {
         if tally.approved == 0 {
             return decision.map(|state| (state, None));
         }
-        let approvals = format!("{} approval{}", tally.approved, if tally.approved == 1 { "" } else { "s" });
-        let words = if tally.pending == 0 { approvals } else { format!("{approvals} · {} pending", tally.pending) };
+        let approvals = format!(
+            "{} approval{}",
+            tally.approved,
+            if tally.approved == 1 { "" } else { "s" }
+        );
+        let words = if tally.pending == 0 {
+            approvals
+        } else {
+            format!("{approvals} · {} pending", tally.pending)
+        };
         Some((ReviewState::Approved, Some(words)))
     }
 }
@@ -485,7 +505,11 @@ impl CheckRow {
             state: ci_state(word),
             word: word.to_ascii_lowercase().replace('_', " "),
             duration,
-            run: check["dustyRun"].as_u64().or_else(|| id_after("/runs/")),
+            // An Actions run only: an app's check (CodeQL) links GitHub's own check page,
+            // `…/runs/<check id>`, which is no run.
+            run: check["dustyRun"]
+                .as_u64()
+                .or_else(|| id_after("/actions/runs/")),
             job: id_after("/job/"),
             url,
         }
@@ -740,7 +764,9 @@ pub struct CommentRecord {
 /// GitHub's REST reaction rollup (`{"+1": 2, "heart": 1, "total_count": 3}`) or GraphQL
 /// `reactionGroups`, as `(content, count)` pairs with a count.
 pub fn reactions(value: &Value) -> Vec<(String, u64)> {
-    const KINDS: [&str; 8] = ["+1", "-1", "laugh", "hooray", "confused", "heart", "rocket", "eyes"];
+    const KINDS: [&str; 8] = [
+        "+1", "-1", "laugh", "hooray", "confused", "heart", "rocket", "eyes",
+    ];
     if let Some(groups) = value["reactionGroups"].as_array() {
         return groups
             .iter()
@@ -751,7 +777,9 @@ pub fn reactions(value: &Value) -> Vec<(String, u64)> {
                     "thumbs_down" => "-1".to_owned(),
                     _ => content,
                 };
-                let count = group["users"]["totalCount"].as_u64().or_else(|| group["count"].as_u64())?;
+                let count = group["users"]["totalCount"]
+                    .as_u64()
+                    .or_else(|| group["count"].as_u64())?;
                 (count > 0).then_some((content, count))
             })
             .collect();
@@ -759,7 +787,12 @@ pub fn reactions(value: &Value) -> Vec<(String, u64)> {
     let rollup = &value["reactions"];
     KINDS
         .iter()
-        .filter_map(|kind| rollup[*kind].as_u64().filter(|n| *n > 0).map(|n| ((*kind).to_owned(), n)))
+        .filter_map(|kind| {
+            rollup[*kind]
+                .as_u64()
+                .filter(|n| *n > 0)
+                .map(|n| ((*kind).to_owned(), n))
+        })
         .collect()
 }
 
@@ -771,9 +804,16 @@ fn comment_extras(value: &Value) -> (String, bool) {
         .or_else(|| value["authorAssociation"].as_str())
         .unwrap_or("")
         .to_owned();
-    let created = value["created_at"].as_str().or_else(|| value["createdAt"].as_str()).unwrap_or("");
-    let edited = value["lastEditedAt"].as_str().is_some_and(|at| !at.is_empty())
-        || value["updated_at"].as_str().is_some_and(|at| !at.is_empty() && !created.is_empty() && at > created);
+    let created = value["created_at"]
+        .as_str()
+        .or_else(|| value["createdAt"].as_str())
+        .unwrap_or("");
+    let edited = value["lastEditedAt"]
+        .as_str()
+        .is_some_and(|at| !at.is_empty())
+        || value["updated_at"]
+            .as_str()
+            .is_some_and(|at| !at.is_empty() && !created.is_empty() && at > created);
     (association, edited)
 }
 
@@ -878,7 +918,7 @@ pub fn timeline(value: &Value) -> Vec<TimelineEntry> {
                         object = Some(text(&event["assignee"], "login").to_owned());
                         "unassigned".into()
                     }
-                    // GitHub's wording (DESIGN.md §3.26): "closed this as not planned", "closed
+                    // GitHub's wording: "closed this as not planned", "closed
                     // this in 1a2b3c4" when a commit closed it.
                     "closed" => {
                         let sha = text(event, "commit_id");
@@ -911,7 +951,11 @@ pub fn timeline(value: &Value) -> Vec<TimelineEntry> {
                         let after = text(event, "after").chars().take(7).collect::<String>();
                         // "force-pushed the fix/backoff branch from 1a2b3c4 to 5d6e7f8"; GitHub's
                         // REST timeline names only the new head (`commit_id`).
-                        object = Some(if before.is_empty() { format!("to {after}") } else { format!("from {before} to {after}") });
+                        object = Some(if before.is_empty() {
+                            format!("to {after}")
+                        } else {
+                            format!("from {before} to {after}")
+                        });
                         "force-pushed".into()
                     }
                     "cross-referenced" => {
@@ -940,7 +984,14 @@ pub fn timeline(value: &Value) -> Vec<TimelineEntry> {
                     "review_requested" | "review_request_removed" => {
                         let reviewer = &event["requested_reviewer"];
                         let team = text(&event["requested_team"], "name");
-                        object = Some(if reviewer.is_object() { text(reviewer, "login") } else { team }.to_owned());
+                        object = Some(
+                            if reviewer.is_object() {
+                                text(reviewer, "login")
+                            } else {
+                                team
+                            }
+                            .to_owned(),
+                        );
                         (if kind == "review_requested" {
                             "requested review from"
                         } else {
@@ -954,13 +1005,19 @@ pub fn timeline(value: &Value) -> Vec<TimelineEntry> {
                     // "locked as off-topic and limited conversation to collaborators".
                     "locked" | "lock" => match text(event, "lock_reason") {
                         "" => "locked and limited conversation to collaborators".into(),
-                        reason => format!("locked as {} and limited conversation to collaborators", reason.replace('_', " ")),
+                        reason => format!(
+                            "locked as {} and limited conversation to collaborators",
+                            reason.replace('_', " ")
+                        ),
                     },
                     "unlocked" | "unlock" => "unlocked this conversation".into(),
                     "pinned" | "pin" => "pinned this issue".into(),
                     "unpinned" | "unpin" => "unpinned this issue".into(),
                     "base_ref_changed" | "change target branch" => {
-                        let (from, to) = (text(event, "previous_ref_name"), text(event, "current_ref_name"));
+                        let (from, to) = (
+                            text(event, "previous_ref_name"),
+                            text(event, "current_ref_name"),
+                        );
                         if !from.is_empty() && !to.is_empty() {
                             object = Some(format!("from {from} to {to}"));
                         }
@@ -968,7 +1025,11 @@ pub fn timeline(value: &Value) -> Vec<TimelineEntry> {
                     }
                     "deployed" => {
                         let environment = text(&event["deployment"], "environment");
-                        if environment.is_empty() { "deployed this".into() } else { format!("deployed to {environment}") }
+                        if environment.is_empty() {
+                            "deployed this".into()
+                        } else {
+                            format!("deployed to {environment}")
+                        }
                     }
                     "marked_as_duplicate" => "marked this as a duplicate".into(),
                     "unmarked_as_duplicate" => "marked this as not a duplicate".into(),
@@ -978,7 +1039,9 @@ pub fn timeline(value: &Value) -> Vec<TimelineEntry> {
                     "auto_merge_disabled" => "disabled auto-merge".into(),
                     "comment_deleted" => "deleted a comment".into(),
                     "added_to_project" | "added_to_project_v2" => "added this to a project".into(),
-                    "removed_from_project" | "removed_from_project_v2" => "removed this from a project".into(),
+                    "removed_from_project" | "removed_from_project_v2" => {
+                        "removed this from a project".into()
+                    }
                     "moved_columns_in_project" => {
                         let column = text(&event["project_card"], "column_name");
                         object = (!column.is_empty()).then(|| column.to_owned());
@@ -999,7 +1062,12 @@ pub fn timeline(value: &Value) -> Vec<TimelineEntry> {
                     "milestoned" | "demilestoned" => {
                         let title = text(&event["milestone"], "title");
                         object = (!title.is_empty()).then(|| format!("{title} milestone"));
-                        (if kind == "milestoned" { "added this to the" } else { "removed this from the" }).into()
+                        (if kind == "milestoned" {
+                            "added this to the"
+                        } else {
+                            "removed this from the"
+                        })
+                        .into()
                     }
                     // The page words these with their target (issue::events_row).
                     "connected" => "linked".into(),
@@ -1182,41 +1250,75 @@ mod tests {
     #[test]
     fn a_row_counts_approvals_against_open_requests_like_review_decision() {
         let row = |decision: &str, reviews: Value| {
-            ItemRecord::from_row(&json!({"number": 13, "reviewDecision": decision, "dusty": {"reviews": reviews}}))
+            ItemRecord::from_row(
+                &json!({"number": 13, "reviewDecision": decision, "dusty": {"reviews": reviews}}),
+            )
         };
-        let fact = |record: ItemRecord| record.review_fact(None).map(|(state, words)| (state, words.unwrap_or_default()));
+        let fact = |record: ItemRecord| {
+            record
+                .review_fact(None)
+                .map(|(state, words)| (state, words.unwrap_or_default()))
+        };
         // alex approved, sam is still asked: not "Review requested".
         assert_eq!(
-            fact(row("REVIEW_REQUIRED", json!({"approved": 1, "changesRequested": 0, "pending": 1}))),
+            fact(row(
+                "REVIEW_REQUIRED",
+                json!({"approved": 1, "changesRequested": 0, "pending": 1})
+            )),
             Some((ReviewState::Approved, "1 approval · 1 pending".into()))
         );
         assert_eq!(
-            fact(row("REVIEW_REQUIRED", json!({"approved": 2, "changesRequested": 0, "pending": 0}))),
+            fact(row(
+                "REVIEW_REQUIRED",
+                json!({"approved": 2, "changesRequested": 0, "pending": 0})
+            )),
             Some((ReviewState::Approved, "2 approvals".into()))
         );
         // A change request outweighs approvals; nothing yet stays the decision's word.
         assert_eq!(
-            fact(row("REVIEW_REQUIRED", json!({"approved": 1, "changesRequested": 1, "pending": 0}))),
+            fact(row(
+                "REVIEW_REQUIRED",
+                json!({"approved": 1, "changesRequested": 1, "pending": 0})
+            )),
             Some((ReviewState::ChangesRequested, String::new()))
         );
         // No review required and none asked: no fact, as before.
-        assert_eq!(fact(row("", json!({"approved": 1, "changesRequested": 0, "pending": 0}))), None);
         assert_eq!(
-            fact(row("REVIEW_REQUIRED", json!({"approved": 0, "changesRequested": 0, "pending": 2}))),
+            fact(row(
+                "",
+                json!({"approved": 1, "changesRequested": 0, "pending": 0})
+            )),
+            None
+        );
+        assert_eq!(
+            fact(row(
+                "REVIEW_REQUIRED",
+                json!({"approved": 0, "changesRequested": 0, "pending": 2})
+            )),
             Some((ReviewState::Requested, String::new()))
         );
         assert_eq!(
-            fact(row("APPROVED", json!({"approved": 1, "changesRequested": 0, "pending": 0}))),
+            fact(row(
+                "APPROVED",
+                json!({"approved": 1, "changesRequested": 0, "pending": 0})
+            )),
             Some((ReviewState::Approved, String::new()))
         );
         // A forge whose list knows only the requests (Gitea) counts from the opened item.
-        let gitea = ItemRecord::from_row(&json!({"number": 1412, "dusty": {"reviewRequested": true}}));
-        let opened = tally_of(&[("alex".into(), ReviewState::Approved), ("sam".into(), ReviewState::Requested)]);
+        let gitea =
+            ItemRecord::from_row(&json!({"number": 1412, "dusty": {"reviewRequested": true}}));
+        let opened = tally_of(&[
+            ("alex".into(), ReviewState::Approved),
+            ("sam".into(), ReviewState::Requested),
+        ]);
         assert_eq!(
             gitea.review_fact(Some(opened)),
             Some((ReviewState::Approved, Some("1 approval · 1 pending".into())))
         );
-        assert_eq!(gitea.review_fact(None), Some((ReviewState::Requested, None)));
+        assert_eq!(
+            gitea.review_fact(None),
+            Some((ReviewState::Requested, None))
+        );
     }
 
     #[test]
@@ -1317,6 +1419,16 @@ mod tests {
     }
 
     #[test]
+    fn a_check_names_a_run_only_from_an_actions_link() {
+        let actions = json!({"name": "Python tests", "detailsUrl": "https://github.com/o/r/actions/runs/91/job/42"});
+        let app =
+            json!({"name": "CodeQL", "detailsUrl": "https://github.com/o/r/runs/133093884570"});
+        let actions = CheckRow::from(&actions, &[]);
+        assert_eq!((actions.run, actions.job), (Some(91), Some(42)));
+        assert_eq!(CheckRow::from(&app, &[]).run, None);
+    }
+
+    #[test]
     fn timelines_split_conversation_from_events_and_drop_empty_reviews() {
         let value = json!([[
             {"event": "labeled", "actor": {"login": "alice"}, "label": {"name": "bug", "color": "d73a4a"},
@@ -1343,62 +1455,188 @@ mod tests {
         assert!(matches!(&entries[3], TimelineEntry::Comment(comment) if comment.pending));
     }
 
-    /// GitHub's timeline phrasing, event by event (DESIGN.md §3.26).
+    /// GitHub's timeline phrasing, event by event.
     #[test]
     fn timeline_events_read_in_githubs_words() {
         let event = |kind: &str, extra: Value| {
-            let mut value = json!({"event": kind, "actor": {"login": "maya"}, "created_at": "2026-11-08"});
+            let mut value =
+                json!({"event": kind, "actor": {"login": "maya"}, "created_at": "2026-11-08"});
             for (key, field) in extra.as_object().cloned().unwrap_or_default() {
                 value[key] = field;
             }
             value
         };
         let cases = [
-            (event("renamed", json!({"rename": {"from": "Clamp backoff", "to": "Clamp exponential backoff"}})),
-             "changed the title", Some("Clamp backoff → Clamp exponential backoff")),
-            (event("base_ref_changed", json!({"previous_ref_name": "main", "current_ref_name": "release"})),
-             "changed the base branch", Some("from main to release")),
-            (event("ready_for_review", json!({})), "marked this pull request as ready for review", None),
-            (event("convert_to_draft", json!({})), "marked this pull request as draft", None),
-            (event("locked", json!({"lock_reason": "off-topic"})),
-             "locked as off-topic and limited conversation to collaborators", None),
-            (event("locked", json!({"lock_reason": "too heated"})),
-             "locked as too heated and limited conversation to collaborators", None),
-            (event("locked", json!({})), "locked and limited conversation to collaborators", None),
-            (event("unlocked", json!({})), "unlocked this conversation", None),
+            (
+                event(
+                    "renamed",
+                    json!({"rename": {"from": "Clamp backoff", "to": "Clamp exponential backoff"}}),
+                ),
+                "changed the title",
+                Some("Clamp backoff → Clamp exponential backoff"),
+            ),
+            (
+                event(
+                    "base_ref_changed",
+                    json!({"previous_ref_name": "main", "current_ref_name": "release"}),
+                ),
+                "changed the base branch",
+                Some("from main to release"),
+            ),
+            (
+                event("ready_for_review", json!({})),
+                "marked this pull request as ready for review",
+                None,
+            ),
+            (
+                event("convert_to_draft", json!({})),
+                "marked this pull request as draft",
+                None,
+            ),
+            (
+                event("locked", json!({"lock_reason": "off-topic"})),
+                "locked as off-topic and limited conversation to collaborators",
+                None,
+            ),
+            (
+                event("locked", json!({"lock_reason": "too heated"})),
+                "locked as too heated and limited conversation to collaborators",
+                None,
+            ),
+            (
+                event("locked", json!({})),
+                "locked and limited conversation to collaborators",
+                None,
+            ),
+            (
+                event("unlocked", json!({})),
+                "unlocked this conversation",
+                None,
+            ),
             (event("pinned", json!({})), "pinned this issue", None),
             (event("unpinned", json!({})), "unpinned this issue", None),
-            (event("deployed", json!({"deployment": {"environment": "production"}})), "deployed to production", None),
-            (event("closed", json!({"state_reason": "not_planned"})), "closed this as not planned", None),
-            (event("closed", json!({"state_reason": "completed"})), "closed this as completed", None),
-            (event("closed", json!({"commit_id": "5d6e7f8a9b"})), "closed this in", Some("5d6e7f8")),
+            (
+                event(
+                    "deployed",
+                    json!({"deployment": {"environment": "production"}}),
+                ),
+                "deployed to production",
+                None,
+            ),
+            (
+                event("closed", json!({"state_reason": "not_planned"})),
+                "closed this as not planned",
+                None,
+            ),
+            (
+                event("closed", json!({"state_reason": "completed"})),
+                "closed this as completed",
+                None,
+            ),
+            (
+                event("closed", json!({"commit_id": "5d6e7f8a9b"})),
+                "closed this in",
+                Some("5d6e7f8"),
+            ),
             (event("closed", json!({})), "closed this", None),
             (event("reopened", json!({})), "reopened this", None),
-            (event("merged", json!({"commit_id": "1a2b3c4d5e"})), "merged commit", Some("1a2b3c4")),
-            (event("head_ref_force_pushed", json!({"before": "1a2b3c4d", "after": "5d6e7f8a"})),
-             "force-pushed", Some("from 1a2b3c4 to 5d6e7f8")),
-            (event("review_requested", json!({"requested_reviewer": {"login": "alex"}})), "requested review from", Some("alex")),
-            (event("review_request_removed", json!({"requested_reviewer": {"login": "alex"}})),
-             "removed the request for review from", Some("alex")),
-            (event("milestoned", json!({"milestone": {"title": "v1.4"}})), "added this to the", Some("v1.4 milestone")),
-            (event("demilestoned", json!({"milestone": {"title": "v1.4"}})), "removed this from the", Some("v1.4 milestone")),
-            (event("marked_as_duplicate", json!({})), "marked this as a duplicate", None),
-            (event("unmarked_as_duplicate", json!({})), "marked this as not a duplicate", None),
-            (event("auto_merge_enabled", json!({})), "enabled auto-merge", None),
-            (event("auto_merge_disabled", json!({})), "disabled auto-merge", None),
-            (event("moved_columns_in_project", json!({"project_card": {"column_name": "Done"}})), "moved this to", Some("Done")),
-            (event("lock", json!({})), "locked and limited conversation to collaborators", None),
+            (
+                event("merged", json!({"commit_id": "1a2b3c4d5e"})),
+                "merged commit",
+                Some("1a2b3c4"),
+            ),
+            (
+                event(
+                    "head_ref_force_pushed",
+                    json!({"before": "1a2b3c4d", "after": "5d6e7f8a"}),
+                ),
+                "force-pushed",
+                Some("from 1a2b3c4 to 5d6e7f8"),
+            ),
+            (
+                event(
+                    "review_requested",
+                    json!({"requested_reviewer": {"login": "alex"}}),
+                ),
+                "requested review from",
+                Some("alex"),
+            ),
+            (
+                event(
+                    "review_request_removed",
+                    json!({"requested_reviewer": {"login": "alex"}}),
+                ),
+                "removed the request for review from",
+                Some("alex"),
+            ),
+            (
+                event("milestoned", json!({"milestone": {"title": "v1.4"}})),
+                "added this to the",
+                Some("v1.4 milestone"),
+            ),
+            (
+                event("demilestoned", json!({"milestone": {"title": "v1.4"}})),
+                "removed this from the",
+                Some("v1.4 milestone"),
+            ),
+            (
+                event("marked_as_duplicate", json!({})),
+                "marked this as a duplicate",
+                None,
+            ),
+            (
+                event("unmarked_as_duplicate", json!({})),
+                "marked this as not a duplicate",
+                None,
+            ),
+            (
+                event("auto_merge_enabled", json!({})),
+                "enabled auto-merge",
+                None,
+            ),
+            (
+                event("auto_merge_disabled", json!({})),
+                "disabled auto-merge",
+                None,
+            ),
+            (
+                event(
+                    "moved_columns_in_project",
+                    json!({"project_card": {"column_name": "Done"}}),
+                ),
+                "moved this to",
+                Some("Done"),
+            ),
+            (
+                event("lock", json!({})),
+                "locked and limited conversation to collaborators",
+                None,
+            ),
         ];
         for (value, verb, object) in cases {
             let entries = timeline(&json!([[value.clone()]]));
-            let [TimelineEntry::Event { verb: read, object: read_object, .. }] = entries.as_slice() else {
+            let [
+                TimelineEntry::Event {
+                    verb: read,
+                    object: read_object,
+                    ..
+                },
+            ] = entries.as_slice()
+            else {
                 panic!("{value}: {entries:?}");
             };
-            assert_eq!((read.as_str(), read_object.as_deref()), (verb, object), "{value}");
+            assert_eq!(
+                (read.as_str(), read_object.as_deref()),
+                (verb, object),
+                "{value}"
+            );
         }
         // REST lists these; GitHub's page never shows them.
         for kind in ["mentioned", "subscribed", "unsubscribed"] {
-            assert!(timeline(&json!([[event(kind, json!({}))]])).is_empty(), "{kind}");
+            assert!(
+                timeline(&json!([[event(kind, json!({}))]])).is_empty(),
+                "{kind}"
+            );
         }
     }
 

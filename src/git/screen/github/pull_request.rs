@@ -11,7 +11,9 @@ impl Workspace {
             return valid_repository(name);
         }
         name.rsplit_once('/').is_some_and(|(groups, project)| {
-            groups.split('/').all(|group| valid_repository(&format!("{group}/{project}")))
+            groups
+                .split('/')
+                .all(|group| valid_repository(&format!("{group}/{project}")))
         })
     }
 
@@ -109,7 +111,7 @@ impl Workspace {
         head_branch.custom_choices = true;
         self.pending_pr = false;
         self.notice.clear();
-        // §3.31: the description starts from the base branch's pull request template; when
+        // The description starts from the base branch's pull request template; when
         // the repository keeps several, a Template picker swaps between them.
         let templates = templates(&self.root, self.forge_kind());
         let description = templates
@@ -117,8 +119,15 @@ impl Workspace {
             .map(|(_, text)| text.clone())
             .unwrap_or_default();
         let picker = (templates.len() > 1).then(|| {
-            let names = templates.iter().map(|(path, _)| path.clone()).collect::<Vec<_>>();
-            let mut field = actions::choice("Template", &names[0], &names.iter().map(String::as_str).collect::<Vec<_>>());
+            let names = templates
+                .iter()
+                .map(|(path, _)| path.clone())
+                .collect::<Vec<_>>();
+            let mut field = actions::choice(
+                "Template",
+                &names[0],
+                &names.iter().map(String::as_str).collect::<Vec<_>>(),
+            );
             field.custom_choices = false;
             field
         });
@@ -155,7 +164,7 @@ impl Workspace {
             .chain(picker)
             .collect(),
         );
-        // §3.31: the branch's commits fill a fresh sheet; the base branch is picked.
+        // The branch's commits fill a fresh sheet; the base branch is picked.
         self.compose_pr(&mut form);
         self.compact_pr(&mut form);
         Ok(Some(form))
@@ -167,7 +176,11 @@ impl Workspace {
     ) -> Result<Form, String> {
         self.save_draft(&Action::CreatePullRequest, values.clone());
         // The Template picker (last, when shown) only seeded the description.
-        let values = if values.len() == 9 { values[..8].to_vec() } else { values };
+        let values = if values.len() == 9 {
+            values[..8].to_vec()
+        } else {
+            values
+        };
         let [
             title,
             body,
@@ -291,7 +304,9 @@ pub(super) fn templates(
 ) -> Vec<(String, String)> {
     use crate::forge::template;
     let kind = kind.unwrap_or(crate::forge::provider::ProviderKind::GitHub);
-    let remote = crate::forge::detect::choose_remote(root).ok().map(|remote| remote.remote);
+    let remote = crate::forge::detect::choose_remote(root)
+        .ok()
+        .map(|remote| remote.remote);
     let base = template::base_ref(root, remote.as_deref());
     let Ok(repository) = git2::Repository::open(root) else {
         return Vec::new();
@@ -318,22 +333,36 @@ pub(in crate::git::screen) fn template_chosen(workspace: &Workspace, form: &mut 
     if !matches!(form.action, FormAction::Github(Action::CreatePullRequest)) {
         return;
     }
-    let Some(chosen) = form.fields.iter().find(|field| field.label == "Template").map(|field| field.input.input.clone()) else {
+    let Some(chosen) = form
+        .fields
+        .iter()
+        .find(|field| field.label == "Template")
+        .map(|field| field.input.input.clone())
+    else {
         return;
     };
     let templates = templates(root, kind);
     let Some((_, text)) = templates.iter().find(|(path, _)| *path == chosen) else {
         return;
     };
-    if let Some(description) = form.fields.iter_mut().find(|field| field.label == "Description") {
+    if let Some(description) = form
+        .fields
+        .iter_mut()
+        .find(|field| field.label == "Description")
+    {
         let current = description.input.input.trim_end().to_owned();
-        if current.trim().is_empty() || templates.iter().any(|(_, template)| template.trim() == current.trim()) {
+        if current.trim().is_empty()
+            || templates
+                .iter()
+                .any(|(_, template)| template.trim() == current.trim())
+        {
             description.input.input = text.clone();
             description.input.cursor = 0;
-        } else if let Some(kept) = templates
-            .iter()
-            .find_map(|(_, template)| current.strip_suffix(template.trim_end()).filter(|_| !template.trim().is_empty()))
-        {
+        } else if let Some(kept) = templates.iter().find_map(|(_, template)| {
+            current
+                .strip_suffix(template.trim_end())
+                .filter(|_| !template.trim().is_empty())
+        }) {
             // The commits' text above an untouched template stays; only the template swaps.
             description.input.input = format!("{}{text}", kept);
             description.input.cursor = 0;

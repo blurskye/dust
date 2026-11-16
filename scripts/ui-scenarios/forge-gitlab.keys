@@ -1,4 +1,4 @@
-# F5 GitLab (FORGE.md §4.2/§4.3): merge requests, a merge request with discussions and
+# F5 GitLab: merge requests, a merge request with discussions and
 # approvals, issues and pipelines from the loopback fake GitLab (nested group orbit/team/orbit),
 # in GitLab's words: "Merge requests", "!13", "Pipelines".
 #   scripts/ui-scenarios/make-orbit-fixture.sh /tmp/orbit

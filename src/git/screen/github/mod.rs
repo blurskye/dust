@@ -9,13 +9,14 @@ mod disk;
 mod drafts;
 mod files;
 mod find;
+mod forms;
 mod fresh;
 mod inbox;
-mod forms;
 mod issue;
 pub(super) mod keymap;
 mod keys;
 mod lanes;
+mod lines;
 mod logs;
 pub(super) mod notifications;
 pub(super) mod open;
@@ -25,12 +26,11 @@ mod prose;
 mod pull_request;
 mod review_row;
 mod row_checks;
+mod runs;
 mod sections;
 mod states;
 mod suggestion;
-mod lines;
 pub(super) mod tutor;
-mod runs;
 mod views;
 mod workflow;
 use super::{Field, Form, FormAction};
@@ -136,7 +136,7 @@ fn shape(key: &Key) -> Shape {
 }
 const LIST_BATCH: usize = 100;
 const LIST_CEILING: usize = 1000;
-/// The pull request a deep link left from (r10 R9-05): Enter on a check opens its run in
+/// The pull request a deep link left from: Enter on a check opens its run in
 /// Actions, and Esc there comes back to the same pull request, tab and line.
 pub(super) struct ReturnTarget {
     pub page: usize,
@@ -171,9 +171,9 @@ pub(super) struct Workspace {
     page: usize,
     selected: [usize; 2],
     opened: Option<(usize, u64)>,
-    /// Where Esc goes from a run opened off a pull request's check (r10 R9-05).
+    /// Where Esc goes from a run opened off a pull request's check.
     pub(super) return_to: Option<ReturnTarget>,
-    /// While a filter is typed, the first match: the reader follows it (§7.4).
+    /// While a filter is typed, the first match: the reader follows it.
     live_pick: Option<u64>,
     detail_scroll: usize,
     horizontal: usize,
@@ -196,16 +196,16 @@ pub(super) struct Workspace {
     reveal_top: bool,
     reveal_merge: bool,
     /// A reader just opened reads: no row is highlighted until a movement key or a
-    /// control key asks for the cursor (DESIGN.md §3.27).
+    /// control key asks for the cursor.
     reading: bool,
     detail_rows: Vec<lines::Line>,
     detail_find: find::DetailFind,
     reading_position: lines::ReadingPosition,
     detail_width: usize,
     pr_tab: usize,
-    /// Issues reader tab: Overview, Discussion, Activity (§3.33).
+    /// Issues reader tab: Overview, Discussion, Activity.
     issue_tab: usize,
-    /// §3.29: the Files diff pans long lines sideways instead of wrapping them (`w`, for
+    /// The Files diff pans long lines sideways instead of wrapping them (`w`, for
     /// this session).
     diff_nowrap: bool,
     /// `toggle_sidebar` (`keymap.rs`): the left column is hidden on the forge screens.
@@ -251,7 +251,7 @@ pub(super) struct Workspace {
     fresh: fresh::Fresh,
     accounts: accounts::Accounts,
     notify: notifications::Inbox,
-    /// Inline comments held for the next review of each pull request (§3.28, §3.30): sent
+    /// Inline comments held for the next review of each pull request: sent
     /// with it, as one batch, when the forge batches reviews.
     inline_drafts: BTreeMap<u64, Vec<(crate::forge::request::InlineDraft, String)>>,
     /// Where those drafts are saved, and a range's first line (`drafts.rs`).
@@ -434,7 +434,7 @@ impl Workspace {
         true
     }
 
-    /// What this workspace's forge calls things (FORGE.md §4.3): the kind the worker detected
+    /// What this workspace's forge calls things: the kind the worker detected
     /// for the host, else a well-known host's, else GitHub's words.
     /// No forge read is queued or in flight: what tests wait on instead of a fixed pause.
     pub(crate) fn quiet(&self) -> bool {
@@ -456,7 +456,7 @@ impl Workspace {
 
     /// A requested review in this forge's words, (long, short): GitLab shows a reviewer
     /// as awaiting review; GitHub and Gitea/Forgejo request one.
-    /// One word for a pending review request on every forge (r7 N-13): the state is the
+    /// One word for a pending review request on every forge: the state is the
     /// same thing whether GitLab calls the person a reviewer or GitHub a requested one.
     pub(super) fn requested_words(&self) -> (&'static str, &'static str) {
         ("Review requested", "Requested")
@@ -476,7 +476,9 @@ impl Workspace {
 
     /// The forge's display name (`GitHub`, `GitLab`, `Gitea`, `Forgejo`) for words in forms.
     pub(super) fn forge_name(&self) -> &'static str {
-        self.forge_kind().unwrap_or(crate::forge::provider::ProviderKind::GitHub).name()
+        self.forge_kind()
+            .unwrap_or(crate::forge::provider::ProviderKind::GitHub)
+            .name()
     }
 
     fn change_repository(&mut self, repo: String, host: String) {
@@ -547,8 +549,7 @@ impl Workspace {
         }
     }
     fn pending(&self, key: &Key) -> bool {
-        self.active.contains(key)
-            || self.queue.iter().any(|request| &request.key == key)
+        self.active.contains(key) || self.queue.iter().any(|request| &request.key == key)
     }
     fn target(&self) -> ForgeTarget {
         ForgeTarget::repository(&self.host, &self.repo)
@@ -557,7 +558,7 @@ impl Workspace {
         Op::Read(self.target(), read)
     }
     fn enqueue(&mut self, key: Key, op: Op, refresh: bool) {
-        // §7.2: a memory miss is filled from disk and painted at once; stale entries are
+        // A memory miss is filled from disk and painted at once; stale entries are
         // revalidated in the background while they stay on screen. The disk is read by a
         // worker: a key or a poll waits for it at most `DISK_BUDGET` in all, and a read that
         // takes longer (or one for a row the cursor is passing over) paints when it lands.
@@ -598,7 +599,8 @@ impl Workspace {
             && let Op::Read(target, read) = &op
             && (self.active.contains(&key) || self.fresh.warm_pending(&key))
         {
-            self.again.insert(key.clone(), (target.clone(), read.clone()));
+            self.again
+                .insert(key.clone(), (target.clone(), read.clone()));
         }
         self.enqueue_refresh(key, op);
     }
@@ -661,12 +663,15 @@ impl Workspace {
     }
     fn loading_more(&self) -> bool {
         let key = self.list_key();
-        self.active.requests().chain(self.queue.iter()).any(|request| {
-            request.key == key
-                && request
-                    .list_limit()
-                    .is_some_and(|limit| limit > self.list_limit())
-        })
+        self.active
+            .requests()
+            .chain(self.queue.iter())
+            .any(|request| {
+                request.key == key
+                    && request
+                        .list_limit()
+                        .is_some_and(|limit| limit > self.list_limit())
+            })
     }
     fn list_read(&self, limit: usize) -> Op {
         let at = self.page - 1;
@@ -685,7 +690,10 @@ impl Workspace {
         };
         let page = Page::first(limit.min(LIST_CEILING) as u32);
         if self.inbox.enabled {
-            return Op::Read(ForgeTarget::host(&self.host), Read::Search { kind, filter, page });
+            return Op::Read(
+                ForgeTarget::host(&self.host),
+                Read::Search { kind, filter, page },
+            );
         }
         self.read(Read::List { kind, filter, page })
     }
@@ -783,7 +791,7 @@ impl Workspace {
                     .map(|file| string(file, "viewerViewedState") == "VIEWED")
             })
             // Gitea, Forgejo and GitLab keep viewed files on this computer and list only the
-            // viewed ones: a file not listed is not viewed yet (r15 gitea-03).
+            // viewed ones: a file not listed is not viewed yet.
             .or_else(|| (!self.read_only()).then_some(false))
     }
     fn review_threads(&self, id: u64) -> Vec<&Value> {
@@ -826,7 +834,7 @@ impl Workspace {
     fn wanted(&self, key: &Key) -> bool {
         match key {
             Key::Write | Key::WorktreeWrite(_) | Key::Repository | Key::PullRequestDefaults => true,
-            // The unread badge is read behind every forge page (r9 R8-01).
+            // The unread badge is read behind every forge page.
             Key::Notifications => self.page != 0,
             Key::List(..) | Key::Inbox(..) => {
                 matches!(self.page, 1 | 2)
@@ -837,8 +845,7 @@ impl Workspace {
             Key::Item(page, id) => *page == self.page && *id == self.number(),
             Key::Timeline(id) => {
                 *id == self.number()
-                    && (self.page == 1
-                        || self.page == 2 && matches!(self.pr_tab, 0 | 4))
+                    && (self.page == 1 || self.page == 2 && matches!(self.pr_tab, 0 | 4))
             }
             Key::Threads(id) => {
                 self.page == 2 && *id == self.number() && matches!(self.pr_tab, 0 | 3 | 4 | 5)
@@ -850,8 +857,10 @@ impl Workspace {
                 self.page == 2 && self.pr_tab == 1 && self.selected_commit.as_ref() == Some(sha)
             }
             Key::Workflows => self.page == 3,
-            // Notifications reads the newest runs for its check-suite rows (§3.35.1 N10).
-            Key::Runs(id) => self.page == 3 && *id == self.workflow_id() || *id == 0 && self.notify_wants_runs(),
+            // Notifications reads the newest runs for its check-suite rows.
+            Key::Runs(id) => {
+                self.page == 3 && *id == self.workflow_id() || *id == 0 && self.notify_wants_runs()
+            }
             Key::Run(id, attempt) => {
                 self.page == 3
                     && Some(*id) == self.run_id
@@ -886,7 +895,7 @@ impl Workspace {
             }
         }
         queue.retain(|request| self.wanted(&request.key));
-        // A detail read for a row the cursor has left is abandoned (§7.5): its lane takes the
+        // A detail read for a row the cursor has left is abandoned: its lane takes the
         // next read as soon as its worker stops instead of after a stale answer.
         let abandoned = self
             .active
@@ -914,7 +923,7 @@ impl Workspace {
         }
         // Stable ordering keeps writes safe and lets the visible body/source win
         // over list refreshes, activity, threads and viewed-state annotations.
-        // A read somebody waits for goes ahead of every cached entry's check (§7.5).
+        // A read somebody waits for goes ahead of every cached entry's check.
         queue.make_contiguous().sort_by_key(|request| {
             let rank = match request.key {
                 Key::Write | Key::WorktreeWrite(_) | Key::Repository => 0,
@@ -933,7 +942,7 @@ impl Workspace {
     }
     fn ensure(&mut self, refresh: bool) {
         // While `j`/`k` move through the list the reader paints what the cache holds; the
-        // forge is asked once the cursor dwells on a row (§7.5).
+        // forge is asked once the cursor dwells on a row.
         self.fresh.holding = !refresh && self.cursor_moving();
         self.ensure_reads(refresh);
         self.fresh.holding = false;
@@ -952,7 +961,11 @@ impl Workspace {
         } else {
             self.target()
         };
-        self.enqueue(Key::Repository, Op::Read(target, Read::Repository), refresh && !cached);
+        self.enqueue(
+            Key::Repository,
+            Op::Read(target, Read::Repository),
+            refresh && !cached,
+        );
         if self.repo.is_empty() || !self.cache.contains_key(&Key::Repository) {
             return;
         }
@@ -962,7 +975,7 @@ impl Workspace {
             notifications::PAGE => self.notification_reads(refresh),
             1 | 2 => {
                 self.enqueue(self.list_key(), self.list_read(self.list_limit()), refresh);
-                // Every inbox section tab shows a count (§3.26): the ones the shown list
+                // Every inbox section tab shows a count: the ones the shown list
                 // cannot answer locally (`@me`) are read behind it. In a repository the
                 // budget is one list read per visit, so a section's count comes from its
                 // own cache once it has been opened (and from the open list otherwise).
@@ -1010,7 +1023,7 @@ impl Workspace {
                 self.enqueue(Key::Workflows, self.read(Read::Workflows), refresh);
                 let workflow = self.workflow_id();
                 // A workflow's definition is read when `d` asks for it, not each time the
-                // Workflows panel passes over it (§3.37).
+                // Workflows panel passes over it.
                 if let Some(source) = self.pending_dispatch() {
                     self.enqueue(
                         Key::Workflow(source, String::new()),
@@ -1025,7 +1038,10 @@ impl Workspace {
                 if let Some(id) = self.run_id {
                     self.enqueue(Key::Run(id, self.attempt), self.run_read(id), refresh);
                     for attempt in self.wanted_attempts() {
-                        let read = self.read(Read::Run { id: id.into(), attempt: Some(attempt) });
+                        let read = self.read(Read::Run {
+                            id: id.into(),
+                            attempt: Some(attempt),
+                        });
                         self.enqueue(Key::Run(id, attempt), read, refresh);
                     }
                     for job in self.wanted_logs() {
@@ -1074,7 +1090,10 @@ impl Workspace {
             std::env::var("DUSTY_FORGE_ACTIONS_POLL_SECS")
                 .ok()
                 .and_then(|seconds| seconds.parse().ok())
-                .map_or(std::time::Duration::from_secs(8), std::time::Duration::from_secs)
+                .map_or(
+                    std::time::Duration::from_secs(8),
+                    std::time::Duration::from_secs,
+                )
         });
         if self.page == 3
             && self.refreshed_at.elapsed() >= every
@@ -1131,7 +1150,7 @@ impl Workspace {
         }
         changed
     }
-    /// Start what the queue holds on the free lanes, in its order (§7.5).
+    /// Start what the queue holds on the free lanes, in its order.
     ///
     /// - A write runs alone: it waits for every lane to empty, and nothing behind it starts
     ///   until it is answered, so writes never overlap each other or a read of what they change.
@@ -1168,12 +1187,20 @@ impl Workspace {
                 (Key::Timeline(_), 2) => Some(ItemKind::PullRequest),
                 _ => None,
             };
-            if let Err((request, error)) =
-                self.active
-                    .start(self.root.clone(), request, conditional, scope, background, kind)
-            {
+            if let Err((request, error)) = self.active.start(
+                self.root.clone(),
+                request,
+                conditional,
+                scope,
+                background,
+                kind,
+            ) {
                 if self.cache.get(&request.key).is_some_and(Result::is_ok) {
-                    let age = self.fresh.meta.get(&request.key).and_then(|meta| meta.fetched.elapsed().ok());
+                    let age = self
+                        .fresh
+                        .meta
+                        .get(&request.key)
+                        .and_then(|meta| meta.fetched.elapsed().ok());
                     self.notice = self.stale_notice(&error, age);
                 } else {
                     self.notice = self.explain(&error).line();
@@ -1206,7 +1233,8 @@ impl Workspace {
                         "Opened in browser".into()
                     } else if let Some(receipt) = self.notification_written(write) {
                         receipt
-                    } else if matches!(write, Write::DownloadArtifact { .. } | Write::CancelRun(_)) {
+                    } else if matches!(write, Write::DownloadArtifact { .. } | Write::CancelRun(_))
+                    {
                         // Nothing was saved on the forge: the run header says it (the
                         // receipt, `Cancellation requested`).
                         String::new()
@@ -1214,10 +1242,18 @@ impl Workspace {
                         && !drafts.is_empty()
                     {
                         self.inline_drafts.remove(number);
-                        format!("Review sent with {} inline comment{}", drafts.len(), if drafts.len() == 1 { "" } else { "s" })
+                        format!(
+                            "Review sent with {} inline comment{}",
+                            drafts.len(),
+                            if drafts.len() == 1 { "" } else { "s" }
+                        )
                     } else {
                         let kind = self.forge_kind();
-                        format!("Saved on {}", kind.unwrap_or(crate::forge::provider::ProviderKind::GitHub).name())
+                        format!(
+                            "Saved on {}",
+                            kind.unwrap_or(crate::forge::provider::ProviderKind::GitHub)
+                                .name()
+                        )
                     };
                 }
                 if let Some(key) = self.writing_draft.take() {
@@ -1226,7 +1262,10 @@ impl Workspace {
                 self.queue.retain(|request| {
                     matches!(
                         request.key,
-                        Key::Write | Key::WorktreeWrite(_) | Key::Repository | Key::PullRequestDefaults
+                        Key::Write
+                            | Key::WorktreeWrite(_)
+                            | Key::Repository
+                            | Key::PullRequestDefaults
                     )
                 });
                 if let Some(next) = self.then_write.take() {
@@ -1334,7 +1373,11 @@ impl Workspace {
             action
         };
         Form {
-            title: if context.is_empty() { title.to_owned() } else { format!("{title} · {context}") },
+            title: if context.is_empty() {
+                title.to_owned()
+            } else {
+                format!("{title} · {context}")
+            },
             action: FormAction::Github(action),
             fields,
             selected: 0,
@@ -1356,7 +1399,8 @@ impl Workspace {
         }
         // In a run's drilldown (or typing a find) `a` is attempts, not accounts.
         let actions_first = !self.accounts.open
-            && (self.actions_typing() || self.page == 3 && (self.actions_drilled() || self.leader_pending));
+            && (self.actions_typing()
+                || self.page == 3 && (self.actions_drilled() || self.leader_pending));
         if !actions_first && let Some(handled) = self.accounts_key(key) {
             return handled;
         }
@@ -1400,7 +1444,11 @@ impl Workspace {
                 }
                 // Nothing is selected, so there is nothing to activate yet.
                 KeyCode::Enter => return Ok(None),
-                KeyCode::Tab | KeyCode::Home | KeyCode::End | KeyCode::PageUp | KeyCode::PageDown => {
+                KeyCode::Tab
+                | KeyCode::Home
+                | KeyCode::End
+                | KeyCode::PageUp
+                | KeyCode::PageDown => {
                     self.reading = false;
                 }
                 _ => {}
@@ -1460,8 +1508,10 @@ impl Workspace {
             }
             match key.code {
                 KeyCode::Char('q') => return Err("close".into()),
-                // A reader opened from Notifications goes back there (§3.35.1 N8).
-                KeyCode::Escape if self.focus == 2 && self.notify.back => self.back_to_notifications(),
+                // A reader opened from Notifications goes back there.
+                KeyCode::Escape if self.focus == 2 && self.notify.back => {
+                    self.back_to_notifications()
+                }
                 KeyCode::Escape if self.focus == 2 => {
                     self.focus = self.last_list;
                     self.return_inbox_list();
@@ -1585,9 +1635,15 @@ impl Workspace {
                         _ => -1,
                     };
                     if self.focus == 2 {
-                        // A wrapped diff line is one stop (§3.29): `j` steps past its rows.
-                        let from = if delta > 0 { files::line_end(&self.detail_rows, self.detail_cursor) } else { self.detail_cursor };
-                        let to = from.saturating_add_signed(delta).min(self.detail_rows.len().saturating_sub(1));
+                        // A wrapped diff line is one stop: `j` steps past its rows.
+                        let from = if delta > 0 {
+                            files::line_end(&self.detail_rows, self.detail_cursor)
+                        } else {
+                            self.detail_cursor
+                        };
+                        let to = from
+                            .saturating_add_signed(delta)
+                            .min(self.detail_rows.len().saturating_sub(1));
                         self.detail_cursor = files::line_start(&self.detail_rows, to);
                     } else if self.page < 3 {
                         self.opened = None;
@@ -1781,7 +1837,10 @@ mod list_tests {
                 (0, 0, 0)
             );
             // Files reveals its file; Checks its selected job (F-PRCHECKS).
-            assert_eq!(keyboard.reveal_file, expected == pr::FILES || expected == pr::CHECKS);
+            assert_eq!(
+                keyboard.reveal_file,
+                expected == pr::FILES || expected == pr::CHECKS
+            );
             assert_eq!(keyboard.drafts, action.drafts);
             assert_eq!(keyboard.opened, Some((2, 3)));
             assert_eq!(

@@ -1,11 +1,11 @@
 #![cfg(unix)]
-//! The Gitea/Forgejo provider contract (FORGE.md §8.3, F4): one scenario suite, run for Gitea
+//! The Gitea/Forgejo provider contract: one scenario suite, run for Gitea
 //! (gitea.com, main) and Forgejo 17 (code.forgejo.org) over direct HTTP (`Authorization: token`)
 //! and `tea api --include` passthrough (`tests/fixtures/forge/fake_tea.py`), against
 //! `server.py --world gitea|forgejo`, which answers from the recorded fixtures. Test names are
 //! `<family>_<transport>::<scenario>`; `<family>_transports_agree` checks that both transports
 //! decode to the same domain values from the same logical requests. The IDE picker test proves
-//! Codeberg pull requests list through the provider (FORGE.md §5.2).
+//! Codeberg pull requests list through the provider.
 
 #[path = "support/forge_fake.rs"]
 mod forge_fake;
@@ -372,13 +372,29 @@ pub fn rows_and_terms(harness: &Harness) {
         },
         page: Page::first(20),
     };
-    let issues = expect!(harness.read(closed(ItemKind::Issue)).unwrap(), Payload::Rows);
+    let issues = expect!(
+        harness.read(closed(ItemKind::Issue)).unwrap(),
+        Payload::Rows
+    );
     assert_eq!(issues.items.len(), 3);
     assert_eq!(issues.total, Some(3));
-    assert!(issues.items.iter().all(|row| row.lifecycle == Lifecycle::Closed));
-    let pulls = expect!(harness.read(closed(ItemKind::PullRequest)).unwrap(), Payload::Rows);
+    assert!(
+        issues
+            .items
+            .iter()
+            .all(|row| row.lifecycle == Lifecycle::Closed)
+    );
+    let pulls = expect!(
+        harness.read(closed(ItemKind::PullRequest)).unwrap(),
+        Payload::Rows
+    );
     assert_eq!(pulls.items.len(), 2, "{:?}", pulls.items);
-    assert!(pulls.items.iter().all(|row| row.lifecycle == Lifecycle::Closed));
+    assert!(
+        pulls
+            .items
+            .iter()
+            .all(|row| row.lifecycle == Lifecycle::Closed)
+    );
     harness.assert_transport();
 }
 
@@ -706,18 +722,34 @@ pub fn actions(harness: &Harness) {
         Family::Forgejo => {
             harness.clear_requests();
             // No workflow list on Forgejo: never asked for. The workflow directories are
-            // listed instead (§3.37's Workflows panel), Forgejo's own first; the recording
+            // listed instead (the Workflows panel), Forgejo's own first; the recording
             // has none of them, so the list is empty and the runs name the workflows.
             let workflows = expect!(harness.read(Read::Workflows).unwrap(), Payload::Workflows);
             assert!(workflows.is_empty());
             let paths = harness.paths();
-            assert!(!paths.iter().any(|path| path.contains("actions/workflows")), "{paths:?}");
+            assert!(
+                !paths.iter().any(|path| path.contains("actions/workflows")),
+                "{paths:?}"
+            );
             let listed = paths
                 .iter()
                 .filter(|path| path.contains("/contents/"))
-                .map(|path| path.rsplit("/contents/").next().unwrap_or_default().to_owned())
+                .map(|path| {
+                    path.rsplit("/contents/")
+                        .next()
+                        .unwrap_or_default()
+                        .to_owned()
+                })
                 .collect::<Vec<_>>();
-            assert_eq!(listed, [".forgejo/workflows", ".gitea/workflows", ".github/workflows"], "{paths:?}");
+            assert_eq!(
+                listed,
+                [
+                    ".forgejo/workflows",
+                    ".gitea/workflows",
+                    ".github/workflows"
+                ],
+                "{paths:?}"
+            );
             let run = &runs.items[0];
             assert_eq!(run.id, ItemId::new("200481"));
             assert_eq!(run.number, 24108);

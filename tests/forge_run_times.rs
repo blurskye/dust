@@ -51,7 +51,11 @@ print(json.dumps(world))
         .arg(&fixtures)
         .output()
         .unwrap();
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     serde_json::from_slice(&output.stdout).unwrap()
 }
 
@@ -60,7 +64,8 @@ fn rerun_in(test: &str, world: &str, remote: &str, probe: Option<(&str, &str)>) 
     let state = directory.path().join("state.json");
     let mut seed = serde_json::json!({ "actions_seed": "design", "viewer": "maya", "actions": designed_world() });
     if let Some((host, version)) = probe {
-        seed["probes"] = serde_json::json!({ host: { "api/v1/version": { "body": { "version": version } } } });
+        seed["probes"] =
+            serde_json::json!({ host: { "api/v1/version": { "body": { "version": version } } } });
     }
     std::fs::write(&state, seed.to_string()).unwrap();
     let server = ForgeServer::start(&state, world);
@@ -112,7 +117,10 @@ fn key(screen: &mut GitScreen, code: KeyCode) {
 
 fn text(screen: &mut GitScreen) -> String {
     let frame = screen.frame(190, 48);
-    (0..48).map(|y| frame.grid.row_text(y)).collect::<Vec<_>>().join("\n")
+    (0..48)
+        .map(|y| frame.grid.row_text(y))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// The Actions tab lists run 812 as `running 3m`.
@@ -132,8 +140,14 @@ fn reads_running_from_the_start(repo: &Path) {
         assert!(Instant::now() < end, "no running run:\n{frame}");
         std::thread::sleep(Duration::from_millis(10));
     };
-    assert!(frame.contains("running 3m"), "the re-run counts from its start:\n{frame}");
-    assert!(!frame.contains("running 48h"), "not from its creation:\n{frame}");
+    assert!(
+        frame.contains("running 3m"),
+        "the re-run counts from its start:\n{frame}"
+    );
+    assert!(
+        !frame.contains("running 48h"),
+        "not from its creation:\n{frame}"
+    );
 }
 
 #[test]

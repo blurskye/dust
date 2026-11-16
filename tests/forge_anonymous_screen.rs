@@ -1,5 +1,5 @@
 #![cfg(unix)]
-//! The forge tabs signed out (FORGE.md anonymous reads, DESIGN.md §3.45): a public host shows
+//! The forge tabs signed out: a public host shows
 //! the `Anonymous · read-only · N/60 requests left` chip over the list, the footer drops its
 //! write keys, a write key says why instead of opening a form, and an instance that hides even
 //! reads gets a full-pane sign-in state with its commands, not an error dump. Each case re-runs
@@ -49,7 +49,9 @@ fn rerun_in_child(test: &str, world: &World) {
 
 fn child_repo() -> Option<PathBuf> {
     std::env::var_os(CHILD)?;
-    Some(PathBuf::from(std::env::var_os("DUSTY_ANONYMOUS_REPO").unwrap()))
+    Some(PathBuf::from(
+        std::env::var_os("DUSTY_ANONYMOUS_REPO").unwrap(),
+    ))
 }
 
 fn world(forge: Forge, anonymous: Value) -> World {
@@ -106,19 +108,58 @@ fn a_public_host_reads_signed_out_and_says_why_writes_are_refused() {
             && frame.contains("Showing")
             && !frame.contains("Loading")
     });
-    assert!(frame.contains("requests left"), "the chip counts the quota:\n{frame}");
-    assert!(frame.contains("@ sign in"), "the chip gives the sign-in key:\n{frame}");
+    assert!(
+        frame.contains("requests left"),
+        "the chip counts the quota:\n{frame}"
+    );
+    assert!(
+        frame.contains("@ sign in"),
+        "the chip gives the sign-in key:\n{frame}"
+    );
     let footer_text = footer(&frame);
     for write in ["review", "comment"] {
-        assert!(!footer_text.contains(write), "a write key stayed in the footer: {footer_text}");
+        assert!(
+            !footer_text.contains(write),
+            "a write key stayed in the footer: {footer_text}"
+        );
     }
     // A write key is not ignored: it says why, and how to sign in.
     key(&mut screen, KeyCode::Char('C'));
-    let frame = wait_for(&mut screen, "the refusal", |frame| frame.contains("Sign in to comment"));
-    assert!(!frame.contains("Leave a comment"), "no form opens:\n{frame}");
+    let frame = wait_for(&mut screen, "the refusal", |frame| {
+        frame.contains("Sign in to comment")
+    });
+    assert!(
+        !frame.contains("Leave a comment"),
+        "no form opens:\n{frame}"
+    );
     assert!(
         frame.contains("gitea.com/user/settings/applications"),
         "the refusal names Gitea's token page:\n{frame}"
+    );
+}
+
+#[test]
+fn a_signed_out_issue_ends_in_rows_that_say_why_in_full() {
+    let Some(repo) = child_repo() else {
+        rerun_in_child(
+            "a_signed_out_issue_ends_in_rows_that_say_why_in_full",
+            &world(Forge::GitHub, json!({ "limit": 60, "style": "github" })),
+        );
+        return;
+    };
+    let mut screen = GitScreen::open(&repo).unwrap();
+    screen.open_target("issues", Some(Forge::GitHub.issue()));
+    // The comment box and its button would cut the reason off; signed out they are one row each.
+    let frame = wait_for(&mut screen, "the issue's last rows", |frame| {
+        frame.contains("Add a comment  · Sign in to comment") && !frame.contains("Loading")
+    });
+    assert!(
+        frame.contains("Close issue  · Sign in to edit"),
+        "the close row says why:\n{frame}"
+    );
+    assert!(
+        !frame.contains("Leave a comment"),
+        "no comment box when signed out:\n{frame}"
     );
 }
 
@@ -133,9 +174,21 @@ fn an_instance_that_hides_reads_shows_its_sign_in_commands() {
     };
     let mut screen = GitScreen::open(&repo).unwrap();
     screen.open_target("prs", None);
-    let frame = wait_for(&mut screen, "the sign-in state", |frame| frame.contains("requires sign-in") && frame.contains("$ "));
+    let frame = wait_for(&mut screen, "the sign-in state", |frame| {
+        frame.contains("requires sign-in") && frame.contains("$ ")
+    });
     assert!(frame.contains("tea login add"), "{frame}");
-    assert!(!frame.contains("Sign-in required"), "said once, in the reader:\n{frame}");
-    assert_eq!(frame.matches("requires sign-in").count(), 1, "said once:\n{frame}");
-    assert!(!frame.contains("Couldn't load this view"), "no error dump:\n{frame}");
+    assert!(
+        !frame.contains("Sign-in required"),
+        "said once, in the reader:\n{frame}"
+    );
+    assert_eq!(
+        frame.matches("requires sign-in").count(),
+        1,
+        "said once:\n{frame}"
+    );
+    assert!(
+        !frame.contains("Couldn't load this view"),
+        "no error dump:\n{frame}"
+    );
 }

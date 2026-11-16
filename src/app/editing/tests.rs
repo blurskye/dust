@@ -1878,24 +1878,51 @@ fn gv_reselects_the_last_visual_selection_with_its_kind() {
         (view.mode, selection.anchor.get(), selection.head.get())
     };
     press_keys(&mut app, &["v", "e", "escape", "j"]);
-    assert_eq!(app.state.views[view].mode, crate::editor::EditorMode::Normal);
+    assert_eq!(
+        app.state.views[view].mode,
+        crate::editor::EditorMode::Normal
+    );
     press_keys(&mut app, &["g", "v"]);
-    assert_eq!(selected(&app), (crate::editor::EditorMode::VisualChar, 0, 4));
+    assert_eq!(
+        selected(&app),
+        (crate::editor::EditorMode::VisualChar, 0, 4)
+    );
     // In Visual mode `gv` swaps the current selection with the previous one.
     press_keys(&mut app, &["escape", "w", "v", "e"]);
-    assert_eq!(selected(&app), (crate::editor::EditorMode::VisualChar, 6, 9));
+    assert_eq!(
+        selected(&app),
+        (crate::editor::EditorMode::VisualChar, 6, 9)
+    );
     press_keys(&mut app, &["g", "v"]);
-    assert_eq!(selected(&app), (crate::editor::EditorMode::VisualChar, 0, 4));
+    assert_eq!(
+        selected(&app),
+        (crate::editor::EditorMode::VisualChar, 0, 4)
+    );
     press_keys(&mut app, &["g", "v"]);
-    assert_eq!(selected(&app), (crate::editor::EditorMode::VisualChar, 6, 9));
+    assert_eq!(
+        selected(&app),
+        (crate::editor::EditorMode::VisualChar, 6, 9)
+    );
     // A Visual yank leaves the cursor at the start; `gv` still gets the whole selection.
-    press_keys(&mut app, &["escape", "g", "g", "v", "e", "y", "j", "g", "v"]);
-    assert_eq!(selected(&app), (crate::editor::EditorMode::VisualChar, 0, 4));
+    press_keys(
+        &mut app,
+        &["escape", "g", "g", "v", "e", "y", "j", "g", "v"],
+    );
+    assert_eq!(
+        selected(&app),
+        (crate::editor::EditorMode::VisualChar, 0, 4)
+    );
     // Line and block selections come back as lines and blocks.
-    press_keys(&mut app, &["escape", "g", "g", "V", "j", "escape", "g", "g"]);
+    press_keys(
+        &mut app,
+        &["escape", "g", "g", "V", "j", "escape", "g", "g"],
+    );
     press_keys(&mut app, &["g", "v"]);
     assert_eq!(selected(&app).0, crate::editor::EditorMode::VisualLine);
-    press_keys(&mut app, &["escape", "g", "g", "ctrl-v", "j", "l", "escape", "g", "g"]);
+    press_keys(
+        &mut app,
+        &["escape", "g", "g", "ctrl-v", "j", "l", "escape", "g", "g"],
+    );
     press_keys(&mut app, &["g", "v"]);
     assert_eq!(selected(&app).0, crate::editor::EditorMode::VisualBlock);
     // After `V >`, `gv` brings the indented lines back.
@@ -1914,7 +1941,11 @@ fn tag_text_objects_change_delete_yank_and_select_elements() {
         .open_text(TextBuffer::from_text(source), None)
         .unwrap();
     let at = |app: &mut App, needle: &str| {
-        let position = app.state.buffers[buffer].text.to_string().find(needle).unwrap();
+        let position = app.state.buffers[buffer]
+            .text
+            .to_string()
+            .find(needle)
+            .unwrap();
         app.state.views[view].cursor = ByteOffset(position);
     };
     at(&mut app, "hi");
@@ -1935,7 +1966,10 @@ fn tag_text_objects_change_delete_yank_and_select_elements() {
     at(&mut app, "you");
     press_keys(&mut app, &["y", "2", "i", "t"]);
     assert_eq!(
-        app.state.registers.get('"').map(|value| value.text.as_str()),
+        app.state
+            .registers
+            .get('"')
+            .map(|value| value.text.as_str()),
         Some("hi <b>you</b>")
     );
     at(&mut app, "<br>");
@@ -1945,7 +1979,10 @@ fn tag_text_objects_change_delete_yank_and_select_elements() {
         &app.state.buffers[buffer].text,
         selection.head,
     );
-    assert_eq!(&source[selection.anchor.get()..end.get()], source.trim_end());
+    assert_eq!(
+        &source[selection.anchor.get()..end.get()],
+        source.trim_end()
+    );
     press_keys(&mut app, &["escape"]);
     assert_eq!(app.state.buffers[buffer].text.to_string(), source);
 
@@ -1981,7 +2018,11 @@ fn tag_text_objects_change_delete_yank_and_select_elements() {
         );
         app.state.views[view].cursor = ByteOffset(source.find(needle).unwrap());
         press_keys(&mut app, &keys);
-        assert_eq!(app.state.buffers[buffer].text.to_string(), expected, "{name}");
+        assert_eq!(
+            app.state.buffers[buffer].text.to_string(),
+            expected,
+            "{name}"
+        );
     }
 }
 

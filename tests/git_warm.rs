@@ -33,18 +33,28 @@ fn git(root: &Path, arguments: &[&str]) {
 
 fn view(screen: &mut GitScreen) -> String {
     let frame = screen.frame(190, 48);
-    (0..48).map(|y| frame.grid.row_text(y)).collect::<Vec<_>>().join("\n")
+    (0..48)
+        .map(|y| frame.grid.row_text(y))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// Polls and paints until `ready`; the frame and the time from `start`.
-fn until(screen: &mut GitScreen, start: Instant, ready: impl Fn(&str) -> bool) -> (String, Duration) {
+fn until(
+    screen: &mut GitScreen,
+    start: Instant,
+    ready: impl Fn(&str) -> bool,
+) -> (String, Duration) {
     loop {
         screen.poll();
         let frame = view(screen);
         if ready(&frame) {
             return (frame, start.elapsed());
         }
-        assert!(start.elapsed() < Duration::from_secs(60), "never painted:\n{frame}");
+        assert!(
+            start.elapsed() < Duration::from_secs(60),
+            "never painted:\n{frame}"
+        );
         std::thread::sleep(Duration::from_millis(1));
     }
 }
@@ -52,7 +62,14 @@ fn until(screen: &mut GitScreen, start: Instant, ready: impl Fn(&str) -> bool) -
 /// A `git` first on PATH that sleeps before any command with one of `words` among its
 /// arguments, then runs the real one.
 fn slow_git(directory: &Path, name: &str, words: &str) -> PathBuf {
-    let real = String::from_utf8(Command::new("sh").args(["-c", "command -v git"]).output().unwrap().stdout).unwrap();
+    let real = String::from_utf8(
+        Command::new("sh")
+            .args(["-c", "command -v git"])
+            .output()
+            .unwrap()
+            .stdout,
+    )
+    .unwrap();
     let bin = directory.join(name);
     std::fs::create_dir_all(&bin).unwrap();
     let shim = bin.join("git");
@@ -73,18 +90,33 @@ fn slow_git(directory: &Path, name: &str, words: &str) -> PathBuf {
 fn child(mode: &str, repo: &Path, cache: &Path, path: Option<&Path>) {
     let mut command = Command::new(std::env::current_exe().unwrap());
     command
-        .args(["warm_child", "--exact", "--nocapture", "--test-threads", "1"])
+        .args([
+            "warm_child",
+            "--exact",
+            "--nocapture",
+            "--test-threads",
+            "1",
+        ])
         .env(CHILD, format!("{mode}:{}", repo.display()))
         .env("DUSTY_GIT_CACHE_DIR", cache)
         .env("GIT_CONFIG_NOSYSTEM", "1");
     if let Some(path) = path {
         let inherited = std::env::var_os("PATH").unwrap_or_default();
-        command.env("PATH", std::env::join_paths(std::iter::once(path.to_owned()).chain(std::env::split_paths(&inherited))).unwrap());
+        command.env(
+            "PATH",
+            std::env::join_paths(
+                std::iter::once(path.to_owned()).chain(std::env::split_paths(&inherited)),
+            )
+            .unwrap(),
+        );
     }
     let output = command.output().unwrap();
     let stdout = String::from_utf8_lossy(&output.stdout);
     // libtest writes `test warm_child ... ` before the child's own output.
-    for line in stdout.lines().filter_map(|line| line.find("GITWARM").map(|at| &line[at..])) {
+    for line in stdout
+        .lines()
+        .filter_map(|line| line.find("GITWARM").map(|at| &line[at..]))
+    {
         println!("{line}");
     }
     assert!(
@@ -113,7 +145,12 @@ fn a_reopened_git_tab_paints_from_its_cache_without_waiting_for_git() {
     let cache = directory.path().join("cache");
     // 1. Cold: History paints while the status reads sleep.
     let slow_status = slow_git(directory.path(), "slow-status", STATUS_READS);
-    child("cold", &repo, &directory.path().join("cold-cache"), Some(&slow_status));
+    child(
+        "cold",
+        &repo,
+        &directory.path().join("cold-cache"),
+        Some(&slow_status),
+    );
     // 2. A first session fills the cache.
     child("prime", &repo, &cache, None);
     let slow = slow_git(directory.path(), "slow-all", &format!("{STATUS_READS}|log"));
@@ -129,7 +166,9 @@ fn a_reopened_git_tab_paints_from_its_cache_without_waiting_for_git() {
 /// The children of the test above (`DUSTY_GIT_WARM_CHILD=mode:repo`); passes alone.
 #[test]
 fn warm_child() {
-    let Some(value) = std::env::var_os(CHILD) else { return };
+    let Some(value) = std::env::var_os(CHILD) else {
+        return;
+    };
     let value = value.to_string_lossy().into_owned();
     let (mode, repo) = value.split_once(':').unwrap();
     let repo = Path::new(repo);
@@ -141,34 +180,71 @@ fn warm_child() {
         "cold" => {
             let (frame, time) = until(&mut screen, start, |frame| frame.contains("Warm tip"));
             println!("GITWARM\tcold History paint\t{}", time.as_micros());
-            assert!(time < SLOW / 5, "History waited for the status ({time:?}):\n{frame}");
-            assert!(!frame.contains(&count), "the status has not answered yet:\n{frame}");
-            assert!(frame.contains("Loading…"), "Changes reads as loading:\n{frame}");
+            assert!(
+                time < SLOW / 5,
+                "History waited for the status ({time:?}):\n{frame}"
+            );
+            assert!(
+                !frame.contains(&count),
+                "the status has not answered yet:\n{frame}"
+            );
+            assert!(
+                frame.contains("Loading…"),
+                "Changes reads as loading:\n{frame}"
+            );
             // Then the status fills Changes.
             let (_, time) = until(&mut screen, start, |frame| frame.contains(&count));
             println!("GITWARM\tcold Changes paint\t{}", time.as_micros());
-            assert!(time >= SLOW, "the shim did not hold the status back ({time:?})");
+            assert!(
+                time >= SLOW,
+                "the shim did not hold the status back ({time:?})"
+            );
         }
         "prime" => {
-            until(&mut screen, start, |frame| frame.contains(&count) && frame.contains("Warm tip"));
-            // The cache is written on a thread once status, History and branches are in.
-            let written = || std::fs::read_dir(&cache).is_ok_and(|mut entries| {
-                entries.any(|entry| entry.is_ok_and(|entry| entry.path().extension().is_some_and(|e| e == "json")))
+            until(&mut screen, start, |frame| {
+                frame.contains(&count) && frame.contains("Warm tip")
             });
+            // The cache is written on a thread once status, History and branches are in.
+            let written = || {
+                std::fs::read_dir(&cache).is_ok_and(|mut entries| {
+                    entries.any(|entry| {
+                        entry.is_ok_and(|entry| {
+                            entry.path().extension().is_some_and(|e| e == "json")
+                        })
+                    })
+                })
+            };
             until(&mut screen, start, |_| written());
         }
         "warm" => {
-            let (frame, time) = until(&mut screen, start, |frame| frame.contains(&count) && frame.contains("Warm tip"));
+            let (frame, time) = until(&mut screen, start, |frame| {
+                frame.contains(&count) && frame.contains("Warm tip")
+            });
             println!("GITWARM\twarm first paint\t{}", time.as_micros());
-            assert!(time < SLOW / 5, "the warm paint waited for git ({time:?}):\n{frame}");
-            assert!(frame.contains("updating…"), "a cached status says it is updating:\n{frame}");
+            assert!(
+                time < SLOW / 5,
+                "the warm paint waited for git ({time:?}):\n{frame}"
+            );
+            assert!(
+                frame.contains("updating…"),
+                "a cached status says it is updating:\n{frame}"
+            );
         }
         "moved" => {
             let (frame, time) = until(&mut screen, start, |frame| frame.contains("Warm tip"));
             println!("GITWARM\tmoved first paint\t{}", time.as_micros());
-            assert!(time < SLOW / 5, "History waited for git ({time:?}):\n{frame}");
-            assert!(!frame.contains(&count), "another HEAD's changes are never listed:\n{frame}");
-            assert!(frame.contains("Loading…"), "Changes reads as loading:\n{frame}");
+            assert!(
+                time < SLOW / 5,
+                "History waited for git ({time:?}):\n{frame}"
+            );
+            assert!(
+                !frame.contains(&count),
+                "another HEAD's changes are never listed:\n{frame}"
+            );
+            assert!(
+                frame.contains("Loading…"),
+                "Changes reads as loading:\n{frame}"
+            );
         }
         _ => unreachable!("{mode}"),
     }

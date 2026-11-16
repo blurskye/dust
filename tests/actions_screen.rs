@@ -1,5 +1,5 @@
 #![cfg(unix)]
-//! The Actions tab (DESIGN.md §3.37–§3.41) against the fake forge's Actions world
+//! The Actions tab against the fake forge's Actions world
 //! (`server.py --world actions`, octo/orbit on github.com over direct HTTP): the run history
 //! beside the selected run's tree (jobs, steps, inline logs opened at the first error), its
 //! identity across attempts, the full log's find counts and pan, artifacts with a download, and
@@ -34,7 +34,7 @@ fn rerun_in_child(test: &str) {
     rerun_in(test, "actions", "{}", "https://github.com/octo/orbit.git");
 }
 
-/// The four provider shapes, each against DESIGN.md §3.37's designed world.
+/// The four provider shapes, each against the designed Actions world.
 #[derive(Clone, Copy, Debug)]
 enum Shape {
     GitHub,
@@ -57,7 +57,9 @@ impl Shape {
         let probe = |host: &str, version: &str| serde_json::json!({ host: { "api/v1/version": { "body": { "version": version } } } });
         match self {
             Shape::Gitea => state["probes"] = probe("gitea.com", "29.0.0+dev-160-g55186ca39b"),
-            Shape::Forgejo => state["probes"] = probe("code.forgejo.org", "17.0.0-26-363f3dc30b+gitea-1.22.0"),
+            Shape::Forgejo => {
+                state["probes"] = probe("code.forgejo.org", "17.0.0-26-363f3dc30b+gitea-1.22.0")
+            }
             Shape::GitHub | Shape::GitLab => {}
         }
         state
@@ -73,7 +75,12 @@ impl Shape {
 }
 
 fn rerun_in_shape(test: &str, shape: Shape) {
-    rerun_in(test, shape.world(), &shape.state().to_string(), shape.remote());
+    rerun_in(
+        test,
+        shape.world(),
+        &shape.state().to_string(),
+        shape.remote(),
+    );
 }
 
 fn rerun_in(test: &str, world: &str, seed: &str, remote: &str) {
@@ -129,7 +136,9 @@ fn requests() -> Vec<Value> {
 fn requested(method: &str, fragment: &str) -> bool {
     requests().iter().any(|request| {
         request["method"].as_str() == Some(method)
-            && request["path"].as_str().is_some_and(|path| path.contains(fragment))
+            && request["path"]
+                .as_str()
+                .is_some_and(|path| path.contains(fragment))
     })
 }
 
@@ -171,7 +180,12 @@ fn text(screen: &mut GitScreen, width: u16, height: u16) -> String {
         .join("\n")
 }
 
-fn wait_for(screen: &mut GitScreen, size: (u16, u16), what: &str, done: impl Fn(&str) -> bool) -> String {
+fn wait_for(
+    screen: &mut GitScreen,
+    size: (u16, u16),
+    what: &str,
+    done: impl Fn(&str) -> bool,
+) -> String {
     let end = Instant::now() + Duration::from_secs(30);
     loop {
         screen.poll();
@@ -223,10 +237,24 @@ fn run_history_beside_the_run_tree_keeps_identity_across_attempts() {
     // The state filters only, each counted; `All` is said once, by the workflows pane.
     let wide = wait(&mut screen, "Failing 1");
     assert!(!wide.contains(" All 3 │"), "{wide}");
-    for needle in ["Workflow runs", "All workflows", "Running ", "Retry flaky uploads", "CI · #9 · ", "Fix typo", "Release v1.4"] {
+    for needle in [
+        "Workflow runs",
+        "All workflows",
+        "Running ",
+        "Retry flaky uploads",
+        "CI · #9 · ",
+        "Fix typo",
+        "Release v1.4",
+    ] {
         assert!(wide.contains(needle), "{needle}:\n{wide}");
     }
-    for raw in ["failure", "success", "in_progress", "Select a workflow", "view rows"] {
+    for raw in [
+        "failure",
+        "success",
+        "in_progress",
+        "Select a workflow",
+        "view rows",
+    ] {
         assert!(!wide.contains(raw), "{raw}:\n{wide}");
     }
     // Moving down the history shows each run beside it, without Enter: the failed run opens
@@ -235,17 +263,35 @@ fn run_history_beside_the_run_tree_keeps_identity_across_attempts() {
     key(&mut screen, KeyCode::Down);
     assert!(cursor_row(&mut screen, 190, 48).contains("Retry flaky uploads"));
     let run = wait(&mut screen, "exit code 101");
-    for needle in ["✕ Retry flaky uploads", "Run #10 · attempt 2 of 2 · #9 · retry-uploads", "Run cargo test", "$ cargo test", "test retries_uploads ... FAILED"] {
+    for needle in [
+        "✕ Retry flaky uploads",
+        "Run #10 · attempt 2 of 2 · #9 · retry-uploads",
+        "Run cargo test",
+        "$ cargo test",
+        "test retries_uploads ... FAILED",
+    ] {
         assert!(run.contains(needle), "{needle}:\n{run}");
     }
-    assert!(!run.contains("[31m") && !run.contains("##[error]"), "SGR and markers are rendered:\n{run}");
+    assert!(
+        !run.contains("[31m") && !run.contains("##[error]"),
+        "SGR and markers are rendered:\n{run}"
+    );
     // A passing job stays closed: its steps are not listed.
-    assert!(run.contains("build") && !run.contains("Run cargo build --release"), "{run}");
+    assert!(
+        run.contains("build") && !run.contains("Run cargo build --release"),
+        "{run}"
+    );
     // At 100×30 both panels stay; below 90 columns the list and the run take turns.
     let compact = text(&mut screen, 100, 30);
-    assert!(compact.contains("Retry flaky uploads") && compact.contains("Run cargo test"), "{compact}");
+    assert!(
+        compact.contains("Retry flaky uploads") && compact.contains("Run cargo test"),
+        "{compact}"
+    );
     let narrow = text(&mut screen, 80, 24);
-    assert!(narrow.contains("Workflow runs") && !narrow.contains("Run cargo test"), "{narrow}");
+    assert!(
+        narrow.contains("Workflow runs") && !narrow.contains("Run cargo test"),
+        "{narrow}"
+    );
     // Enter focuses the run: the cursor rests on the first error.
     key(&mut screen, KeyCode::Enter);
     assert!(cursor_row(&mut screen, 190, 48).contains("test retries_uploads"));
@@ -313,13 +359,19 @@ fn full_log_find_counts_pan_and_wrap() {
     let before = cursor_row(&mut screen, 100, 30);
     key(&mut screen, KeyCode::Char('L'));
     let panned = cursor_row(&mut screen, 100, 30);
-    assert!(panned.contains('‹') && panned != before, "{before}\n{panned}");
+    assert!(
+        panned.contains('‹') && panned != before,
+        "{before}\n{panned}"
+    );
     key(&mut screen, KeyCode::Char('H'));
     assert_eq!(cursor_row(&mut screen, 100, 30), before);
     // `w` again wraps, keeping every character on screen at the narrowest size.
     key(&mut screen, KeyCode::Char('w'));
     let wrapped = text(&mut screen, 64, 20);
-    assert!(!wrapped.contains('›') || !wrapped.contains('‹'), "{wrapped}");
+    assert!(
+        !wrapped.contains('›') || !wrapped.contains('‹'),
+        "{wrapped}"
+    );
     // `z` gives the run the whole width; Esc returns.
     key(&mut screen, KeyCode::Char('z'));
     assert!(!text(&mut screen, 190, 48).contains("Workflow runs"));
@@ -330,7 +382,10 @@ fn full_log_find_counts_pan_and_wrap() {
     wait(&mut screen, "Save job log");
     control(&mut screen, KeyCode::Enter);
     let saved = std::fs::read_to_string(repo.join("test.log")).unwrap();
-    assert!(saved.contains("running 3 tests") && !saved.contains('\u{1b}'), "{saved}");
+    assert!(
+        saved.contains("running 3 tests") && !saved.contains('\u{1b}'),
+        "{saved}"
+    );
 }
 
 #[test]
@@ -397,7 +452,15 @@ fn approve_and_cancel_sheets_check_the_run_first() {
     let end = Instant::now() + Duration::from_secs(30);
     while !requested("POST", "actions/runs/502/approve") {
         screen.poll();
-        assert!(Instant::now() < end, "{}\n{:?}", text(&mut screen, 190, 48), requests().iter().map(|r| format!("{} {}", r["method"], r["path"])).collect::<Vec<_>>());
+        assert!(
+            Instant::now() < end,
+            "{}\n{:?}",
+            text(&mut screen, 190, 48),
+            requests()
+                .iter()
+                .map(|r| format!("{} {}", r["method"], r["path"]))
+                .collect::<Vec<_>>()
+        );
         std::thread::sleep(Duration::from_millis(10));
     }
     wait(&mut screen, "Saved on GitHub");
@@ -407,7 +470,12 @@ fn approve_and_cancel_sheets_check_the_run_first() {
     // The sheet names the run as its header does, says what cancelling does, and starts on
     // `Keep running`: a stray Enter closes it and cancels nothing.
     let sheet = wait(&mut screen, "Cancel run #12 · Release v1.4?");
-    for needle in ["Running jobs stop. Finished jobs keep their logs.", " Cancel run ", " Keep running ", "Enter keep running"] {
+    for needle in [
+        "Running jobs stop. Finished jobs keep their logs.",
+        " Cancel run ",
+        " Keep running ",
+        "Enter keep running",
+    ] {
         assert!(sheet.contains(needle), "{needle}:\n{sheet}");
     }
     key(&mut screen, KeyCode::Enter);
@@ -419,7 +487,15 @@ fn approve_and_cancel_sheets_check_the_run_first() {
     let end = Instant::now() + Duration::from_secs(30);
     while !requested("POST", "actions/runs/503/cancel") {
         screen.poll();
-        assert!(Instant::now() < end, "{}\n{:?}", text(&mut screen, 190, 48), requests().iter().map(|r| format!("{} {}", r["method"], r["path"])).collect::<Vec<_>>());
+        assert!(
+            Instant::now() < end,
+            "{}\n{:?}",
+            text(&mut screen, 190, 48),
+            requests()
+                .iter()
+                .map(|r| format!("{} {}", r["method"], r["path"]))
+                .collect::<Vec<_>>()
+        );
         std::thread::sleep(Duration::from_millis(10));
     }
 }
@@ -438,7 +514,10 @@ fn a_check_opens_its_run_and_esc_goes_back_to_the_pull_request() {
     // The row under the terminal cursor, if a pane has one.
     let marked = |screen: &mut GitScreen| {
         let frame = screen.frame(190, 48);
-        frame.cursor.map(|(_, y, _)| frame.grid.row_text(y)).unwrap_or_default()
+        frame
+            .cursor
+            .map(|(_, y, _)| frame.grid.row_text(y))
+            .unwrap_or_default()
     };
     // Pull request #9 (the one with checks; the oldest of four), its reader, then Conversation →
     // Commits → Checks.
@@ -449,7 +528,11 @@ fn a_check_opens_its_run_and_esc_goes_back_to_the_pull_request() {
         key(&mut screen, KeyCode::Char('j'));
     }
     let row = marked(&mut screen);
-    assert!(row.contains("Retry flaky uploads"), "{row:?}\n{}", text(&mut screen, 190, 48));
+    assert!(
+        row.contains("Retry flaky uploads"),
+        "{row:?}\n{}",
+        text(&mut screen, 190, 48)
+    );
     key(&mut screen, KeyCode::Enter);
     key(&mut screen, KeyCode::Char(']'));
     key(&mut screen, KeyCode::Char(']'));
@@ -465,12 +548,21 @@ fn a_check_opens_its_run_and_esc_goes_back_to_the_pull_request() {
     // once its log is in, so it reads the same when Esc brings the pull request back.
     wait(&mut screen, "test retries_uploads ... FAILED");
     let line = marked(&mut screen);
-    assert!(text(&mut screen, 190, 48).contains("Enter open run"), "{line:?}\n{}", text(&mut screen, 190, 48));
+    assert!(
+        text(&mut screen, 190, 48).contains("Enter open run"),
+        "{line:?}\n{}",
+        text(&mut screen, 190, 48)
+    );
     key(&mut screen, KeyCode::Enter);
     let run = wait(&mut screen, "Esc back to #9");
     assert!(run.contains("from #9 · Checks"), "{run}");
     key(&mut screen, KeyCode::Escape);
-    let back = wait_for(&mut screen, (190, 48), "the pull request's checks", |frame| !frame.contains("back to #9"));
+    let back = wait_for(
+        &mut screen,
+        (190, 48),
+        "the pull request's checks",
+        |frame| !frame.contains("back to #9"),
+    );
     assert!(back.contains("Retry flaky uploads"), "{back}");
     // The same check line under the reader's cursor once the reader has settled.
     let reader = |row: &str| row.split("││").nth(1).unwrap_or_default().to_owned();
@@ -479,7 +571,12 @@ fn a_check_opens_its_run_and_esc_goes_back_to_the_pull_request() {
         screen.poll();
         std::thread::sleep(Duration::from_millis(10));
     }
-    assert_eq!(reader(&marked(&mut screen)), reader(&line), "the same check line:\n{line:?}\n{}", text(&mut screen, 190, 48));
+    assert_eq!(
+        reader(&marked(&mut screen)),
+        reader(&line),
+        "the same check line:\n{line:?}\n{}",
+        text(&mut screen, 190, 48)
+    );
 }
 
 /// The designed world's Actions tab, its newest run listed.
@@ -515,7 +612,12 @@ fn expected(shape: Shape) -> Expected {
         Shape::GitHub | Shape::Gitea => Expected {
             title: "Workflows",
             all: "All workflows",
-            rows: &["Quality checks", "Preview deployment", "Publish package", "Nightly build"],
+            rows: &[
+                "Quality checks",
+                "Preview deployment",
+                "Publish package",
+                "Nightly build",
+            ],
             first: "Quality checks",
             glyph: &['✕'],
             chosen: "Runs · Quality checks",
@@ -542,7 +644,13 @@ fn expected(shape: Shape) -> Expected {
         Shape::GitLab => Expected {
             title: "Sources",
             all: "All pipelines",
-            rows: &["Merge request", "Push", "Run pipeline", "Weekly dependency audit", "Nightly build"],
+            rows: &[
+                "Merge request",
+                "Push",
+                "Run pipeline",
+                "Weekly dependency audit",
+                "Nightly build",
+            ],
             first: "Push",
             glyph: &['✓', '✔'],
             chosen: "Pipelines · Push",
@@ -554,7 +662,7 @@ fn expected(shape: Shape) -> Expected {
     }
 }
 
-/// DESIGN.md §3.37: Workflows over the chosen workflow's runs, the run on the right; 1 2 3
+/// Workflows over the chosen workflow's runs, the run on the right; 1 2 3
 /// and Tab move between them; `d` dispatches the chosen workflow or says why not; `Space e`
 /// hides the left column and the next session remembers it.
 fn workflows_panel_filters_runs_and_panels_take_turns(shape: Shape) {
@@ -569,25 +677,57 @@ fn workflows_panel_filters_runs_and_panels_take_turns(shape: Shape) {
         assert!(wide.contains(off), "{off}:\n{wide}");
     }
     // A workflow's row carries its newest run's state.
-    let first = wide.lines().find(|line| line.contains(&format!(" {}", want.first))).unwrap_or_default();
+    let first = wide
+        .lines()
+        .find(|line| line.contains(&format!(" {}", want.first)))
+        .unwrap_or_default();
     assert!(first.contains(want.glyph), "{first}\n{wide}");
     // 1 focuses Workflows; choosing a row filters the runs below at once.
     key(&mut screen, KeyCode::Char('1'));
-    assert!(cursor_row(&mut screen, 190, 48).contains(want.all), "{}", text(&mut screen, 190, 48));
+    assert!(
+        cursor_row(&mut screen, 190, 48).contains(want.all),
+        "{}",
+        text(&mut screen, 190, 48)
+    );
     for _ in 0..6 {
         if cursor_row(&mut screen, 190, 48).contains(want.first) {
             break;
         }
         key(&mut screen, KeyCode::Char('j'));
     }
-    let chosen = wait_for(&mut screen, (190, 48), "the chosen workflow's runs", |frame| {
-        frame.contains(want.chosen) && frame.contains(want.shows) && !frame.contains("Document the quickstart")
-    });
-    assert!(!chosen.contains("Add a queue summary") || !matches!(shape, Shape::GitLab), "{chosen}");
+    let chosen = wait_for(
+        &mut screen,
+        (190, 48),
+        "the chosen workflow's runs",
+        |frame| {
+            frame.contains(want.chosen)
+                && frame.contains(want.shows)
+                && !frame.contains("Document the quickstart")
+        },
+    );
+    assert!(
+        !chosen.contains("Add a queue summary") || !matches!(shape, Shape::GitLab),
+        "{chosen}"
+    );
     for path in want.read {
-        assert!(requested("GET", path), "{path}: {:?}", requests().iter().map(|r| r["path"].clone()).collect::<Vec<_>>());
+        assert!(
+            requested("GET", path),
+            "{path}: {:?}",
+            requests()
+                .iter()
+                .map(|r| r["path"].clone())
+                .collect::<Vec<_>>()
+        );
     }
-    assert!(!requested("GET", want.unread), "{}: {:?}", want.unread, requests().iter().map(|r| r["path"].clone()).collect::<Vec<_>>());
+    assert!(
+        !requested("GET", want.unread),
+        "{}: {:?}",
+        want.unread,
+        requests()
+            .iter()
+            .map(|r| r["path"].clone())
+            .collect::<Vec<_>>()
+    );
     // `d` on a workflow that is turned off says so, and on All asks for a workflow (GitLab
     // runs its one pipeline from any row).
     if let Some(off) = want.off {
@@ -599,9 +739,16 @@ fn workflows_panel_filters_runs_and_panels_take_turns(shape: Shape) {
             key(&mut screen, KeyCode::Escape);
         } else {
             // The reason also stays in the empty run pane, not only in a toast that fades.
-            wait_for(&mut screen, (190, 48), "the reason in the run pane", |frame| {
-                frame.lines().any(|line| line.contains(" to show · ") && line.contains("is turned off"))
-            });
+            wait_for(
+                &mut screen,
+                (190, 48),
+                "the reason in the run pane",
+                |frame| {
+                    frame
+                        .lines()
+                        .any(|line| line.contains(" to show · ") && line.contains("is turned off"))
+                },
+            );
         }
     }
     key(&mut screen, KeyCode::Home);
@@ -632,17 +779,29 @@ fn workflows_panel_filters_runs_and_panels_take_turns(shape: Shape) {
     // (The run's own footer offers `Space e sidebar` too; the pending leader adds `Esc cancel`.)
     key(&mut screen, KeyCode::Char(' '));
     let leader = text(&mut screen, 190, 48);
-    assert!(leader.contains("Space e sidebar") && leader.contains("Esc cancel"), "{leader}");
+    assert!(
+        leader.contains("Space e sidebar") && leader.contains("Esc cancel"),
+        "{leader}"
+    );
     // The footer lane says each chord whole, with no lone `Space …` at its edge; no which-key
     // box over the panes repeats it.
-    assert!(!leader.contains("Space …") && !leader.contains("Keys:"), "{leader}");
+    assert!(
+        !leader.contains("Space …") && !leader.contains("Keys:"),
+        "{leader}"
+    );
     key(&mut screen, KeyCode::Char('q'));
     let cancelled = text(&mut screen, 190, 48);
-    assert!(!cancelled.contains("Esc cancel") && cancelled.contains(want.all), "{cancelled}");
+    assert!(
+        !cancelled.contains("Esc cancel") && cancelled.contains(want.all),
+        "{cancelled}"
+    );
     key(&mut screen, KeyCode::Char(' '));
     key(&mut screen, KeyCode::Char('e'));
     let hidden = text(&mut screen, 190, 48);
-    assert!(!hidden.contains(want.all) && hidden.contains("Document the quickstart"), "{hidden}");
+    assert!(
+        !hidden.contains(want.all) && hidden.contains("Document the quickstart"),
+        "{hidden}"
+    );
     // The next session opens with it hidden too.
     drop(screen);
     let mut again = open_designed(&repo);
@@ -653,10 +812,16 @@ fn workflows_panel_filters_runs_and_panels_take_turns(shape: Shape) {
     assert!(text(&mut again, 190, 48).contains(want.all));
     // Below 90 columns the left column stacks Workflows over the runs; the run takes turns.
     let narrow = text(&mut again, 80, 24);
-    assert!(narrow.contains(want.title) && narrow.contains(want.all) && narrow.contains("Document the"), "{narrow}");
+    assert!(
+        narrow.contains(want.title) && narrow.contains(want.all) && narrow.contains("Document the"),
+        "{narrow}"
+    );
     // At 100 columns both columns stay.
     let compact = text(&mut again, 100, 30);
-    assert!(compact.contains(want.all) && compact.contains("Document the"), "{compact}");
+    assert!(
+        compact.contains(want.all) && compact.contains("Document the"),
+        "{compact}"
+    );
 }
 
 #[test]

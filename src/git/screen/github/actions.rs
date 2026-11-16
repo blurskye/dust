@@ -2,7 +2,7 @@ use super::*;
 use crate::forge::model::{MergeMethod, Side};
 use crate::forge::request::{RerunScope, Verdict};
 
-/// The `Send` choices of a line comment, in GitHub's words (§3.30a).
+/// The `Send` choices of a line comment, in GitHub's words.
 const SINGLE_COMMENT: &str = "Add single comment";
 const START_REVIEW: &str = "Start a review";
 const REVIEW_COMMENT: &str = "Add review comment";
@@ -60,7 +60,7 @@ pub(in crate::git::screen) enum Action {
     },
     Resolve(String, bool),
     /// A review thread's suggested change (pull request, thread id), committed to the head
-    /// branch after its sheet (§3.30a).
+    /// branch after its sheet.
     CommitSuggestion(u64, String),
     Files(u64),
     Viewed(u64, String),
@@ -201,8 +201,7 @@ impl Workspace {
     ) -> Result<&Value, String> {
         if self.repo != repo || self.host != host || self.page != 2 || self.number() != number {
             return Err(
-                "This conversation changed · reopen it to reply · your draft is kept"
-                    .into(),
+                "This conversation changed · reopen it to reply · your draft is kept".into(),
             );
         }
         self.review_threads(number)
@@ -243,15 +242,16 @@ impl Workspace {
         }
         self.check_inbox_action(&action)?;
         if let Some(reason) = self.refusal(&action) {
-            // The sign-in key and this forge's own way in (§3.46): `gh`, `glab`, or the token
+            // The sign-in key and this forge's own way in: `gh`, `glab`, or the token
             // settings page on Gitea and Forgejo.
             let hint = super::states::sign_in_hint(self.forge_kind(), &self.host);
             return Err(format!("{reason} · {hint}"));
         }
         if self.repo.is_empty() {
-            return Err(
-                format!("The repository is not loaded; sign in ({}) and refresh", super::issue::sign_in(self.forge_kind()).0),
-            );
+            return Err(format!(
+                "The repository is not loaded; sign in ({}) and refresh",
+                super::issue::sign_in(self.forge_kind()).0
+            ));
         }
         if action != Action::CreatePullRequest {
             self.pending_pr = false;
@@ -269,7 +269,11 @@ impl Workspace {
                 // Names what opens, as Close does (`Open pull request #13 in your browser?`).
                 title_owned = match page {
                     1 => format!("Open issue {}{id} in your browser?", self.sigil(false)),
-                    2 => format!("Open {} {}{id} in your browser?", self.terms().pr_singular, self.sigil(true)),
+                    2 => format!(
+                        "Open {} {}{id} in your browser?",
+                        self.terms().pr_singular,
+                        self.sigil(true)
+                    ),
                     _ => "Open this item in your browser?".to_owned(),
                 };
                 title = &title_owned;
@@ -342,7 +346,8 @@ impl Workspace {
                 self.focus = 2;
                 // The Conversation reads from its top; Commits, Files and Checks (lists of
                 // things to open) start with the cursor on their rows.
-                self.reading = self.page == 1 || !matches!(*tab, pr::COMMITS | pr::FILES | pr::CHECKS);
+                self.reading =
+                    self.page == 1 || !matches!(*tab, pr::COMMITS | pr::FILES | pr::CHECKS);
                 if self.page == 1 {
                     self.issue_tab = *tab;
                 } else {
@@ -414,7 +419,11 @@ impl Workspace {
                 }
                 let name = self.log_file_name(*job);
                 title_owned = format!("Save job log · {name}");
-                let mut form = self.form(&title_owned, action.clone(), vec![field("File", &name, true, false)]);
+                let mut form = self.form(
+                    &title_owned,
+                    action.clone(),
+                    vec![field("File", &name, true, false)],
+                );
                 form.title = title_owned;
                 return Ok(Some(form));
             }
@@ -424,8 +433,12 @@ impl Workspace {
                     return Err(reason.into());
                 }
                 title_owned = format!("Download artifact · {name}");
-                // The path the download writes, as the receipt names it (§3.41).
-                let mut form = self.form(&title_owned, action.clone(), vec![field("Destination folder", "./artifacts", true, false)]);
+                // The path the download writes, as the receipt names it.
+                let mut form = self.form(
+                    &title_owned,
+                    action.clone(),
+                    vec![field("Destination folder", "./artifacts", true, false)],
+                );
                 // The top bar names the repository; a sheet does not name it again (A3-08).
                 form.title = title_owned;
                 return Ok(Some(form));
@@ -447,9 +460,18 @@ impl Workspace {
                 let index = self.page.saturating_sub(1).min(1);
                 // The cursor lands after a space, so typing adds a term to the section's query.
                 let query = &self.queries[index];
-                let query = if query.is_empty() { String::new() } else { format!("{query} ") };
+                let query = if query.is_empty() {
+                    String::new()
+                } else {
+                    format!("{query} ")
+                };
                 fields = vec![
-                    field(&format!("Search ({} query)", self.forge_name()), &query, false, false),
+                    field(
+                        &format!("Search ({} query)", self.forge_name()),
+                        &query,
+                        false,
+                        false,
+                    ),
                     choice(
                         "State",
                         &self.states[index],
@@ -475,7 +497,10 @@ impl Workspace {
                 return Err("Open the PR form to review its source and destination".into());
             }
             Action::Develop(id) => {
-                title_owned = format!("Create linked branch on {} (current checkout stays unchanged)", self.forge_name());
+                title_owned = format!(
+                    "Create linked branch on {} (current checkout stays unchanged)",
+                    self.forge_name()
+                );
                 title = &title_owned;
                 let base = self
                     .value(&Key::Repository)
@@ -509,8 +534,11 @@ impl Workspace {
                 } else {
                     self.terms().pr_singular.to_owned()
                 };
-                // The item's own title beside its number (r15 ISS-07).
-                let name = self.value(&Key::Item(*page, *number)).map(|value| string(value, "title").to_owned()).unwrap_or_default();
+                // The item's own title beside its number.
+                let name = self
+                    .value(&Key::Item(*page, *number))
+                    .map(|value| string(value, "title").to_owned())
+                    .unwrap_or_default();
                 let verb = if *closed { "Close" } else { "Reopen" };
                 title_owned = if name.is_empty() {
                     format!("{verb} {noun} {}{number}?", self.sigil(*page == 2))
@@ -518,8 +546,8 @@ impl Workspace {
                     format!("{verb} {noun} {}{number} · {name}", self.sigil(*page == 2))
                 };
                 title = &title_owned;
-                // §3.34: closing an issue says why; a forge without the reason says so. An
-                // optional closing comment follows, posted before the issue closes (r15 ISS-07).
+                // Closing an issue says why; a forge without the reason says so. An
+                // optional closing comment follows, posted before the issue closes.
                 fields = if *closed && *page == 1 {
                     let mut fields = Vec::new();
                     if self.capabilities().issue_not_planned.allowed() {
@@ -562,7 +590,7 @@ impl Workspace {
                 fields = vec![field(name, &current, false, false)];
             }
             Action::Review(id) => {
-                // §3.30: the verdicts this forge offers; the summary follows.
+                // The verdicts this forge offers; the summary follows.
                 let caps = self.capabilities();
                 let mut verdicts = vec!["Comment"];
                 if caps.review_approve.allowed() {
@@ -571,7 +599,11 @@ impl Workspace {
                 if caps.review_request_changes.allowed() {
                     verdicts.push("Request changes");
                 }
-                title_owned = format!("Review {}{id} {}", self.sigil(true), self.item_title(2, *id));
+                title_owned = format!(
+                    "Review {}{id} {}",
+                    self.sigil(true),
+                    self.item_title(2, *id)
+                );
                 title = &title_owned;
                 fields = vec![
                     choice("Decision", "Comment", &verdicts),
@@ -579,7 +611,7 @@ impl Workspace {
                 ];
             }
             Action::Merge(id, _) => {
-                // §3.32: the methods this forge offers, then what happens to the branch.
+                // The methods this forge offers, then what happens to the branch.
                 let caps = self.capabilities();
                 let methods = self.merge_methods();
                 // The merge box's `Method` row chose it; the sheet still lets it change.
@@ -595,7 +627,12 @@ impl Workspace {
                         &["Keep it", "Delete it after the merge"],
                     ));
                 }
-                fields.push(field("Commit title", &format!("{name} ({}{id})", self.sigil(true)), false, false));
+                fields.push(field(
+                    "Commit title",
+                    &format!("{name} ({}{id})", self.sigil(true)),
+                    false,
+                    false,
+                ));
             }
             Action::Checkout(_) => {
                 title = "Check out pull request in this repository?";
@@ -605,20 +642,29 @@ impl Workspace {
                 title = "Check out pull request in a separate worktree?";
                 fields = vec![];
             }
-            Action::Inline { number, path, line, .. } => {
-                // §3.28, §3.30a: where the forge batches reviews, a comment can start a review
+            Action::Inline {
+                number, path, line, ..
+            } => {
+                // Where the forge batches reviews, a comment can start a review
                 // (held as pending) instead of notifying at once, in GitHub's words; once a
                 // review is pending, the next comment joins it unless changed.
                 let mut fields = vec![field("Comment", "", true, true)];
                 if self.capabilities().batched_review.allowed() {
-                    let waiting = self.inline_drafts.get(number).is_some_and(|drafts| !drafts.is_empty());
+                    let waiting = self
+                        .inline_drafts
+                        .get(number)
+                        .is_some_and(|drafts| !drafts.is_empty());
                     fields.push(if waiting {
                         choice("Send", REVIEW_COMMENT, &[REVIEW_COMMENT, SINGLE_COMMENT])
                     } else {
                         choice("Send", SINGLE_COMMENT, &[SINGLE_COMMENT, START_REVIEW])
                     });
                 }
-                return Ok(Some(self.form(&format!("Comment on {path}:{line}"), action, fields)));
+                return Ok(Some(self.form(
+                    &format!("Comment on {path}:{line}"),
+                    action,
+                    fields,
+                )));
             }
             Action::Reply {
                 number,
@@ -683,15 +729,26 @@ impl Workspace {
                         return Ok(None);
                     }
                 };
-                if definition.as_ref().is_some_and(|definition| !definition.dispatch) {
+                if definition
+                    .as_ref()
+                    .is_some_and(|definition| !definition.dispatch)
+                {
                     return Err("Can't run manually · no workflow_dispatch trigger".into());
                 }
                 let refs = self.dispatch_refs();
-                let mut reference = field("Branch or tag", refs.first().map_or("", String::as_str), true, false);
+                let mut reference = field(
+                    "Branch or tag",
+                    refs.first().map_or("", String::as_str),
+                    true,
+                    false,
+                );
                 reference.custom_choices = true;
                 reference.choices = refs;
                 let mut inputs = vec![reference];
-                for input in definition.map(|definition| definition.inputs).unwrap_or_default() {
+                for input in definition
+                    .map(|definition| definition.inputs)
+                    .unwrap_or_default()
+                {
                     let mut f = field(&input.name, &input.default, input.required, false);
                     f.choices = input.choices;
                     inputs.push(f);
@@ -720,16 +777,25 @@ impl Workspace {
             }
             Action::Rerun(id) => {
                 let caps = self.capabilities();
-                if let Some(reason) = caps.rerun_all.reason().filter(|_| !caps.rerun_failed.allowed()) {
+                if let Some(reason) = caps
+                    .rerun_all
+                    .reason()
+                    .filter(|_| !caps.rerun_failed.allowed())
+                {
                     return Err(reason.into());
                 }
                 let (object, number, run) = self.sheet_run(*id).ok_or("The run is loading")?;
                 if !self.run_finished(run) {
-                    return Err(format!("{} #{number} is still running · x cancels it", self.run_word()));
+                    return Err(format!(
+                        "{} #{number} is still running · x cancels it",
+                        self.run_word()
+                    ));
                 }
                 // Its jobs decide the choices: the sheet opens when they arrive (`poll_actions`).
                 // A read that failed opens it with all jobs, rather than never.
-                if !self.cache.contains_key(&Key::Run(*id, self.attempt)) && !self.cache.contains_key(&Key::Run(*id, 0)) {
+                if !self.cache.contains_key(&Key::Run(*id, self.attempt))
+                    && !self.cache.contains_key(&Key::Run(*id, 0))
+                {
                     self.actions.pending_rerun = Some(*id);
                     return Ok(None);
                 }
@@ -747,14 +813,26 @@ impl Workspace {
                     scopes.push(format!("This job ({name})"));
                 }
                 if caps.rerun_all.allowed() {
-                    scopes.push(if all > 0 { format!("All jobs ({all})") } else { "All jobs".into() });
+                    scopes.push(if all > 0 {
+                        format!("All jobs ({all})")
+                    } else {
+                        "All jobs".into()
+                    });
                 }
                 if scopes.is_empty() {
                     // Jobs that never loaded are not "nothing failed".
-                    if self.value(&Key::Run(*id, self.attempt)).or_else(|| self.value(&Key::Run(*id, 0))).is_none() {
+                    if self
+                        .value(&Key::Run(*id, self.attempt))
+                        .or_else(|| self.value(&Key::Run(*id, 0)))
+                        .is_none()
+                    {
                         return Err("Couldn't load this run's jobs · R to retry".into());
                     }
-                    return Err(caps.rerun_failed.reason().unwrap_or("Nothing failed to rerun").into());
+                    return Err(caps
+                        .rerun_failed
+                        .reason()
+                        .unwrap_or("Nothing failed to rerun")
+                        .into());
                 }
                 let scope_refs = scopes.iter().map(String::as_str).collect::<Vec<_>>();
                 // A choice of one asks nothing: the note says what reruns (A3-04).
@@ -765,12 +843,15 @@ impl Workspace {
                     jobs.required = false;
                     fields_now.push(jobs);
                 }
-                if self.forge_kind().is_none_or(|kind| kind == crate::forge::provider::ProviderKind::GitHub) {
+                if self
+                    .forge_kind()
+                    .is_none_or(|kind| kind == crate::forge::provider::ProviderKind::GitHub)
+                {
                     let mut debug = choice("Debug logging", "Off", &["Off", "On"]);
                     debug.required = false;
                     fields_now.push(debug);
                 }
-                // `Re-run #10 · …`, not `Re-run run #10` (r16 notif-actions-10); a pipeline
+                // `Re-run #10 · …`, not `Re-run run #10`; a pipeline
                 // keeps its noun.
                 title_owned = format!("Re-run {}", object.strip_prefix("run ").unwrap_or(&object));
                 return Ok(Some(self.form(&title_owned, action.clone(), fields_now)));
@@ -781,11 +862,20 @@ impl Workspace {
                     return Err(reason.into());
                 }
                 let (object, number, run) = self.sheet_run(*id).ok_or("The run is loading")?;
-                if run["dusty"]["needsApproval"].as_bool() != Some(true) && string(run, "conclusion") != "action_required" {
-                    return Err(format!("{} #{number} is not waiting for approval", self.run_word()));
+                if run["dusty"]["needsApproval"].as_bool() != Some(true)
+                    && string(run, "conclusion") != "action_required"
+                {
+                    return Err(format!(
+                        "{} #{number} is not waiting for approval",
+                        self.run_word()
+                    ));
                 }
                 // A fork's code with the repository's secrets: focus starts on Cancel.
-                let mut form = self.form(&format!("{} {object}?", self.terms().approve_verb), action.clone(), vec![]);
+                let mut form = self.form(
+                    &format!("{} {object}?", self.terms().approve_verb),
+                    action.clone(),
+                    vec![],
+                );
                 form.selected = 1;
                 return Ok(Some(form));
             }
@@ -878,7 +968,10 @@ impl Workspace {
                     ForgeTarget::repository(&request.host, &request.base_repository),
                     Write::CreatePullRequest((**request).clone()),
                 );
-                self.queue.push_back(Request { key: Key::Write, op });
+                self.queue.push_back(Request {
+                    key: Key::Write,
+                    op,
+                });
                 self.notice = if request.push.is_some() {
                     "Pushing the reviewed branch, then creating the PR…"
                 } else {
@@ -908,11 +1001,17 @@ impl Workspace {
                 number: *id,
                 open: !*closed,
                 // Closing an issue: `[Reason,] Comment`; the reason is the first of two.
-                reason: match values.first().filter(|_| *page != 1 || values.len() == 2).map(String::as_str) {
+                reason: match values
+                    .first()
+                    .filter(|_| *page != 1 || values.len() == 2)
+                    .map(String::as_str)
+                {
                     Some("Not planned") if *closed => {
                         Some(crate::forge::model::ClosedReason::NotPlanned)
                     }
-                    Some("Completed") if *closed => Some(crate::forge::model::ClosedReason::Completed),
+                    Some("Completed") if *closed => {
+                        Some(crate::forge::model::ClosedReason::Completed)
+                    }
                     _ => None,
                 },
             },
@@ -988,16 +1087,24 @@ impl Workspace {
             }
             Action::Review(id) => {
                 // Drafts make a review on their own; otherwise a comment needs a summary.
-                if values[0] != "Approve" && values[1].trim().is_empty() && self.review_drafts(*id).is_empty() {
+                if values[0] != "Approve"
+                    && values[1].trim().is_empty()
+                    && self.review_drafts(*id).is_empty()
+                {
                     return Err("A comment or request for changes needs a summary".into());
                 }
-                let login = crate::forge::host_state::account(&crate::forge::transport::HostKey::new(&self.host))
-                    .and_then(|account| account.login);
+                let login = crate::forge::host_state::account(
+                    &crate::forge::transport::HostKey::new(&self.host),
+                )
+                .and_then(|account| account.login);
                 let author = self
                     .value(&Key::Item(2, *id))
                     .and_then(|value| value["author"]["login"].as_str());
                 if values[0] == "Approve" && login.is_some() && login.as_deref() == author {
-                    return Err("Approve is unavailable on your own pull request; leave a comment instead".into());
+                    return Err(
+                        "Approve is unavailable on your own pull request; leave a comment instead"
+                            .into(),
+                    );
                 }
                 Write::SubmitReview {
                     number: *id,
@@ -1012,7 +1119,11 @@ impl Workspace {
                         .get(id)
                         .map(|drafts| drafts.iter().map(|(draft, _)| draft.clone()).collect())
                         .unwrap_or_default(),
-                    head: self.inline_drafts.get(id).and_then(|drafts| drafts.first()).map(|(_, head)| head.clone()),
+                    head: self
+                        .inline_drafts
+                        .get(id)
+                        .and_then(|drafts| drafts.first())
+                        .map(|(_, head)| head.clone()),
                 }
             }
             Action::Merge(id, head) => {
@@ -1024,7 +1135,9 @@ impl Workspace {
                     "Rebase" => MergeMethod::Rebase,
                     _ => MergeMethod::Squash,
                 };
-                let delete_branch = values.iter().any(|value| value == "Delete it after the merge");
+                let delete_branch = values
+                    .iter()
+                    .any(|value| value == "Delete it after the merge");
                 let title = values
                     .last()
                     .filter(|_| values.len() > 1 && method != MergeMethod::Rebase)
@@ -1055,7 +1168,11 @@ impl Workspace {
                 side,
                 head,
             } => {
-                let side = if *side == "LEFT" { Side::Left } else { Side::Right };
+                let side = if *side == "LEFT" {
+                    Side::Left
+                } else {
+                    Side::Right
+                };
                 if values.get(1).is_some_and(|send| send != SINGLE_COMMENT) {
                     let body = values[0].trim();
                     if body.is_empty() {
@@ -1075,7 +1192,8 @@ impl Workspace {
                     let count = drafts.len();
                     self.drafts.remove(&self.draft_key(&action));
                     self.notice_error = false;
-                    self.notice = format!("Added to your review · {}", super::drafts::pending(count));
+                    self.notice =
+                        format!("Added to your review · {}", super::drafts::pending(count));
                     self.notice_transient = true;
                     return Ok(());
                 }
@@ -1131,7 +1249,9 @@ impl Workspace {
                 thread: id.as_str().into(),
                 resolved: *resolved,
             },
-            Action::CommitSuggestion(number, thread) => self.suggestion_write(*number, thread, &values)?,
+            Action::CommitSuggestion(number, thread) => {
+                self.suggestion_write(*number, thread, &values)?
+            }
             Action::Dispatch(id) => {
                 let inputs = match self.raw(&Key::Workflow(*id, String::new())) {
                     Some(yaml) => workflow::Definition::parse(yaml)?.inputs,
@@ -1152,13 +1272,19 @@ impl Workspace {
             }
             Action::Cancel(id) => Write::CancelRun((*id).into()),
             Action::Rerun(_)
-                if values.first().is_some_and(|value| value.starts_with("This job")) && self.actions.rerun_job.is_some() =>
+                if values
+                    .first()
+                    .is_some_and(|value| value.starts_with("This job"))
+                    && self.actions.rerun_job.is_some() =>
             {
                 Write::RerunJob(self.actions.rerun_job.unwrap_or_default().into())
             }
             Action::Rerun(id) => Write::Rerun {
                 run: (*id).into(),
-                scope: if values.first().is_some_and(|value| value.starts_with("Failed")) {
+                scope: if values
+                    .first()
+                    .is_some_and(|value| value.starts_with("Failed"))
+                {
                     RerunScope::Failed
                 } else {
                     RerunScope::All
@@ -1199,14 +1325,21 @@ impl Workspace {
         };
         // A closing comment is posted first; the state change follows once it is saved.
         let closing = match &action {
-            Action::State(1, id, true) => values.last().filter(|comment| !comment.trim().is_empty()).map(|comment| (*id, comment.clone())),
+            Action::State(1, id, true) => values
+                .last()
+                .filter(|comment| !comment.trim().is_empty())
+                .map(|comment| (*id, comment.clone())),
             _ => None,
         };
         self.then_write = None;
         let write = match closing {
             Some((number, body)) => {
                 self.then_write = Some(write);
-                Write::Comment { kind: kind(1), number, body }
+                Write::Comment {
+                    kind: kind(1),
+                    number,
+                    body,
+                }
             }
             None => write,
         };

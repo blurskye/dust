@@ -1,4 +1,4 @@
-# F3 caching and freshness (FORGE.md §7.2/§7.3): the Issues tab paints from the disk cache at
+# F3 caching and freshness: the Issues tab paints from the disk cache at
 # once, then the background check merges what changed without moving the cursor.
 #   scripts/ui-scenarios/make-orbit-fixture.sh /tmp/orbit
 #   export DUSTY_FORGE_CACHE_DIR=/tmp/forge-cache DUSTY_GIT_BINARY=$PWD/target/release/dusty-git

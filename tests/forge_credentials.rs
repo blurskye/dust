@@ -1,5 +1,5 @@
 #![cfg(unix)]
-//! Credentials for every CLI (FORGE.md §2.1, F2): Dusty's own variable, then each forge's
+//! Credentials for every CLI: Dusty's own variable, then each forge's
 //! variables (host-scoped where the CLI scopes them), then the CLIs' stores — glab's
 //! `config.yml` and `glab auth status --show-token`, fj's `keys.json`, tea's `config.yml` (read
 //! with the strict YAML subset) — then the CLI passthrough. A token is validated with a live
@@ -82,8 +82,13 @@ impl World {
     }
 
     fn env(&self, pairs: &[(&str, &str)]) -> Env {
-        let mut all: Vec<(String, String)> = vec![("DUSTY_FORGE_ORIGIN".into(), self.server.origin())];
-        all.extend(pairs.iter().map(|(key, value)| (key.to_string(), value.to_string())));
+        let mut all: Vec<(String, String)> =
+            vec![("DUSTY_FORGE_ORIGIN".into(), self.server.origin())];
+        all.extend(
+            pairs
+                .iter()
+                .map(|(key, value)| (key.to_string(), value.to_string())),
+        );
         Env::from_pairs(all)
     }
 
@@ -106,7 +111,10 @@ impl World {
     }
 
     fn requests(&self) -> Vec<Value> {
-        self.state()["requests"].as_array().cloned().unwrap_or_default()
+        self.state()["requests"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
     }
 }
 
@@ -140,16 +148,31 @@ fn github_precedence_is_dusty_then_gh_variables_then_gh() {
         ("GH_ENTERPRISE_TOKEN", "ghp_enterprisefixture0123456789a"),
     ];
     let state = lookup(&dotcom, &options, &world.env(&all));
-    assert_eq!(source(&state), Some(CredentialSource::Env("DUSTY_FORGE_TOKEN")));
+    assert_eq!(
+        source(&state),
+        Some(CredentialSource::Env("DUSTY_FORGE_TOKEN"))
+    );
     // Scoped to another host, Dusty's variable steps aside.
-    let scoped = [all[0], all[1], all[2], ("DUSTY_FORGE_HOST", "elsewhere.test")];
-    assert_eq!(source(&lookup(&dotcom, &options, &world.env(&scoped))), Some(CredentialSource::Env("GH_TOKEN")));
+    let scoped = [
+        all[0],
+        all[1],
+        all[2],
+        ("DUSTY_FORGE_HOST", "elsewhere.test"),
+    ];
+    assert_eq!(
+        source(&lookup(&dotcom, &options, &world.env(&scoped))),
+        Some(CredentialSource::Env("GH_TOKEN"))
+    );
     assert_eq!(
         source(&lookup(&ghes, &options, &world.env(&scoped))),
         Some(CredentialSource::Env("GH_ENTERPRISE_TOKEN")),
         "GHES hosts read the enterprise variables, never GH_TOKEN"
     );
-    let state = lookup(&ghes, &options, &world.env(&[("GH_TOKEN", "ghp_ghtokenfixture0123456789abcd")]));
+    let state = lookup(
+        &ghes,
+        &options,
+        &world.env(&[("GH_TOKEN", "ghp_ghtokenfixture0123456789abcd")]),
+    );
     assert_eq!(source(&state), Some(CredentialSource::GhAuthToken));
     assert_eq!(token(&state).as_deref(), Some(FAKE_TOKEN));
 }
@@ -172,8 +195,14 @@ fn gitlab_reads_its_variable_then_glab_config_then_glab_status() {
     assert_eq!(source(&state), Some(CredentialSource::GlabConfig));
     assert_eq!(token(&state).as_deref(), Some(GLAB_TOKEN));
     // GITLAB_TOKEN wins, but only for GITLAB_HOST when that is set.
-    let env = world.env(&[("GITLAB_TOKEN", "glpat-envfixture0123456789abcd"), ("GITLAB_HOST", "https://gl.cred.test")]);
-    assert_eq!(source(&lookup(&gl, &options, &env)), Some(CredentialSource::Env("GITLAB_TOKEN")));
+    let env = world.env(&[
+        ("GITLAB_TOKEN", "glpat-envfixture0123456789abcd"),
+        ("GITLAB_HOST", "https://gl.cred.test"),
+    ]);
+    assert_eq!(
+        source(&lookup(&gl, &options, &env)),
+        Some(CredentialSource::Env("GITLAB_TOKEN"))
+    );
     let other = world.endpoints(ProviderKind::GitLab, "other.cred.test");
     assert!(matches!(
         lookup(&other, &options, &env),
@@ -181,14 +210,19 @@ fn gitlab_reads_its_variable_then_glab_config_then_glab_status() {
     ));
     // The config entry also answers for its api_host.
     let api = world.endpoints(ProviderKind::GitLab, "gl-api.cred.test");
-    assert_eq!(source(&lookup(&api, &options, &world.env(&[]))), Some(CredentialSource::GlabConfig));
+    assert_eq!(
+        source(&lookup(&api, &options, &world.env(&[]))),
+        Some(CredentialSource::GlabConfig)
+    );
     // No config entry: `glab auth status --show-token`.
     let status = world.endpoints(ProviderKind::GitLab, "status.cred.test");
     let state = lookup(&status, &options, &world.env(&[]));
     assert_eq!(source(&state), Some(CredentialSource::GlabAuthStatus));
     assert_eq!(token(&state).as_deref(), Some(GLAB_TOKEN));
     match &state {
-        CredentialState::Present(credential) => assert_eq!(credential.user.as_deref(), Some("rowan")),
+        CredentialState::Present(credential) => {
+            assert_eq!(credential.user.as_deref(), Some("rowan"))
+        }
         other => panic!("{other:?}"),
     }
 }
@@ -215,25 +249,51 @@ fn gitea_and_forgejo_read_variables_fj_keys_and_tea_config() {
     let state = lookup(&fj_host, &options, &world.env(&[]));
     assert_eq!(source(&state), Some(CredentialSource::FjKeys));
     match &state {
-        CredentialState::Present(credential) => assert_eq!(credential.user.as_deref(), Some("maya")),
+        CredentialState::Present(credential) => {
+            assert_eq!(credential.user.as_deref(), Some("maya"))
+        }
         other => panic!("{other:?}"),
     }
     // tea: the default login of several for the same host.
     let tea_host = world.endpoints(ProviderKind::Gitea, "tea.cred.test");
     let state = lookup(&tea_host, &options, &world.env(&[]));
-    assert_eq!(source(&state), Some(CredentialSource::TeaConfig("work".into())));
+    assert_eq!(
+        source(&state),
+        Some(CredentialSource::TeaConfig("work".into()))
+    );
     assert_eq!(token(&state).as_deref(), Some(GITEA_TOKEN));
-    assert_eq!(CredentialSource::TeaConfig("work".into()).to_string(), "tea login \"work\"");
+    assert_eq!(
+        CredentialSource::TeaConfig("work".into()).to_string(),
+        "tea login \"work\""
+    );
     // GITEA_SERVER_TOKEN needs GITEA_SERVER_URL naming the host.
     let unscoped = world.env(&[("GITEA_SERVER_TOKEN", OTHER_TOKEN)]);
-    assert_eq!(source(&lookup(&tea_host, &options, &unscoped)), Some(CredentialSource::TeaConfig("work".into())));
-    let scoped = world.env(&[("GITEA_SERVER_TOKEN", OTHER_TOKEN), ("GITEA_SERVER_URL", "https://tea.cred.test/")]);
-    assert_eq!(source(&lookup(&tea_host, &options, &scoped)), Some(CredentialSource::Env("GITEA_SERVER_TOKEN")));
+    assert_eq!(
+        source(&lookup(&tea_host, &options, &unscoped)),
+        Some(CredentialSource::TeaConfig("work".into()))
+    );
+    let scoped = world.env(&[
+        ("GITEA_SERVER_TOKEN", OTHER_TOKEN),
+        ("GITEA_SERVER_URL", "https://tea.cred.test/"),
+    ]);
+    assert_eq!(
+        source(&lookup(&tea_host, &options, &scoped)),
+        Some(CredentialSource::Env("GITEA_SERVER_TOKEN"))
+    );
     // FORGEJO_TOKEN applies to any Gitea-family host unless a URL scopes it.
     let forgejo = world.env(&[("FORGEJO_TOKEN", OTHER_TOKEN)]);
-    assert_eq!(source(&lookup(&fj_host, &options, &forgejo)), Some(CredentialSource::Env("FORGEJO_TOKEN")));
-    let elsewhere = world.env(&[("FORGEJO_TOKEN", OTHER_TOKEN), ("FORGEJO_URL", "https://elsewhere.test")]);
-    assert_eq!(source(&lookup(&fj_host, &options, &elsewhere)), Some(CredentialSource::FjKeys));
+    assert_eq!(
+        source(&lookup(&fj_host, &options, &forgejo)),
+        Some(CredentialSource::Env("FORGEJO_TOKEN"))
+    );
+    let elsewhere = world.env(&[
+        ("FORGEJO_TOKEN", OTHER_TOKEN),
+        ("FORGEJO_URL", "https://elsewhere.test"),
+    ]);
+    assert_eq!(
+        source(&lookup(&fj_host, &options, &elsewhere)),
+        Some(CredentialSource::FjKeys)
+    );
     // Nothing anywhere: the hint names tea.
     let none = world.endpoints(ProviderKind::Forgejo, "none.cred.test");
     assert!(matches!(
@@ -246,11 +306,34 @@ fn gitea_and_forgejo_read_variables_fj_keys_and_tea_config() {
 fn surprising_yaml_skips_the_store_instead_of_guessing() {
     let world = World::new(json!({}));
     for (name, text) in [
-        ("anchor", format!("logins:\n  - &a\n    name: work\n    url: https://tea.cred.test\n    token: {GITEA_TOKEN}\n")),
-        ("tab", format!("logins:\n\t- name: work\n\t  url: https://tea.cred.test\n\t  token: {GITEA_TOKEN}\n")),
-        ("block", format!("logins:\n  - name: work\n    url: https://tea.cred.test\n    token: |\n      {GITEA_TOKEN}\n")),
-        ("duplicate", format!("logins:\n  - name: work\n    name: other\n    url: https://tea.cred.test\n    token: {GITEA_TOKEN}\n")),
-        ("flow", format!("logins: [{{name: work, url: https://tea.cred.test, token: {GITEA_TOKEN}}}]\n")),
+        (
+            "anchor",
+            format!(
+                "logins:\n  - &a\n    name: work\n    url: https://tea.cred.test\n    token: {GITEA_TOKEN}\n"
+            ),
+        ),
+        (
+            "tab",
+            format!(
+                "logins:\n\t- name: work\n\t  url: https://tea.cred.test\n\t  token: {GITEA_TOKEN}\n"
+            ),
+        ),
+        (
+            "block",
+            format!(
+                "logins:\n  - name: work\n    url: https://tea.cred.test\n    token: |\n      {GITEA_TOKEN}\n"
+            ),
+        ),
+        (
+            "duplicate",
+            format!(
+                "logins:\n  - name: work\n    name: other\n    url: https://tea.cred.test\n    token: {GITEA_TOKEN}\n"
+            ),
+        ),
+        (
+            "flow",
+            format!("logins: [{{name: work, url: https://tea.cred.test, token: {GITEA_TOKEN}}}]\n"),
+        ),
     ] {
         let tea = world.file(&format!("{name}/config.yml"), &text);
         let options = world.options(Stores {
@@ -259,7 +342,10 @@ fn surprising_yaml_skips_the_store_instead_of_guessing() {
         });
         let endpoints = world.endpoints(ProviderKind::Gitea, "tea.cred.test");
         assert!(
-            matches!(lookup(&endpoints, &options, &world.env(&[])), CredentialState::Missing { .. }),
+            matches!(
+                lookup(&endpoints, &options, &world.env(&[])),
+                CredentialState::Missing { .. }
+            ),
             "{name}"
         );
         assert!(credential::tea_logins(&tea).is_empty(), "{name}");
@@ -290,7 +376,10 @@ fn a_token_is_validated_live_before_use_and_a_rejected_one_falls_back() {
         .into_iter()
         .find(|request| request["host"] == "live.cred.test")
         .unwrap();
-    assert_eq!((user_check["path"].as_str(), user_check["auth"].as_str()), (Some("user"), Some("valid")));
+    assert_eq!(
+        (user_check["path"].as_str(), user_check["auth"].as_str()),
+        (Some("user"), Some("valid"))
+    );
     let account = host_state::account(&HostKey::new("live.cred.test")).unwrap();
     assert_eq!(account.login.as_deref(), Some("maya"));
     assert!(matches!(account.state, HostState::Ready { .. }));
@@ -300,18 +389,28 @@ fn a_token_is_validated_live_before_use_and_a_rejected_one_falls_back() {
     let chosen = transport::for_host(&stale, &options, &AtomicBool::new(false)).unwrap();
     assert_eq!(chosen.kind(), TransportKind::Cli(Cli::Glab));
     let response = chosen
-        .send(&HostKey::new("stale.cred.test"), &ApiRequest::get("user"), &AtomicBool::new(false))
+        .send(
+            &HostKey::new("stale.cred.test"),
+            &ApiRequest::get("user"),
+            &AtomicBool::new(false),
+        )
         .unwrap();
     assert_eq!(response.status, 200);
     let last = world.requests().pop().unwrap();
-    assert_eq!((last["transport"].as_str(), last["path"].as_str()), (Some("glab"), Some("user")));
+    assert_eq!(
+        (last["transport"].as_str(), last["path"].as_str()),
+        (Some("glab"), Some("user"))
+    );
 }
 
 #[test]
 fn tea_passthrough_uses_the_login_and_missing_or_old_clis_are_states() {
     let world = World::new(json!({}));
     // A login without a token: tea itself is signed in (keyring, OAuth), Dusty is not.
-    let tea_config = world.file("tea/config.yml", "logins:\n  - name: work\n    url: https://tea.cred.test\n    default: true\n");
+    let tea_config = world.file(
+        "tea/config.yml",
+        "logins:\n  - name: work\n    url: https://tea.cred.test\n    default: true\n",
+    );
     let options = world.options(Stores {
         tea_config: Some(tea_config),
         ..Stores::default()
@@ -320,17 +419,26 @@ fn tea_passthrough_uses_the_login_and_missing_or_old_clis_are_states() {
     let chosen = transport::for_host(&endpoints, &options, &AtomicBool::new(false)).unwrap();
     assert_eq!(chosen.kind(), TransportKind::Cli(Cli::Tea));
     let response = chosen
-        .send(&HostKey::new("tea.cred.test"), &ApiRequest::get("user"), &AtomicBool::new(false))
+        .send(
+            &HostKey::new("tea.cred.test"),
+            &ApiRequest::get("user"),
+            &AtomicBool::new(false),
+        )
         .unwrap();
     assert_eq!(response.status, 200);
     let last = world.requests().pop().unwrap();
     assert_eq!(last["transport"], "tea");
     let argv: Vec<String> = serde_json::from_value(last["gh_argv"].clone()).unwrap();
-    assert!(argv.windows(2).any(|pair| pair == ["--login", "work"]), "{argv:?}");
+    assert!(
+        argv.windows(2).any(|pair| pair == ["--login", "work"]),
+        "{argv:?}"
+    );
 
     // No tea login for the host: signed out, with tea's command.
     let unknown = world.endpoints(ProviderKind::Gitea, "nologin.cred.test");
-    let error = transport::for_host(&unknown, &options, &AtomicBool::new(false)).err().unwrap();
+    let error = transport::for_host(&unknown, &options, &AtomicBool::new(false))
+        .err()
+        .unwrap();
     assert_eq!(
         error,
         ForgeError::NotAuthenticated {
@@ -351,13 +459,22 @@ fn tea_passthrough_uses_the_login_and_missing_or_old_clis_are_states() {
     // A glab older than 1.40.
     let old = world.directory.path().join("old/glab");
     std::fs::create_dir_all(old.parent().unwrap()).unwrap();
-    forge_fake::write_executable(&old, format!("#!/bin/sh\nFAKE_GLAB_VERSION=1.20.0 exec {} \"$@\"\n", world.glab.display()).as_bytes());
+    forge_fake::write_executable(
+        &old,
+        format!(
+            "#!/bin/sh\nFAKE_GLAB_VERSION=1.20.0 exec {} \"$@\"\n",
+            world.glab.display()
+        )
+        .as_bytes(),
+    );
     let outdated = ConnectOptions {
         glab: Some(old),
         ..world.options(Stores::default())
     };
     let old_host = world.endpoints(ProviderKind::GitLab, "oldglab.cred.test");
-    let error = transport::for_host(&old_host, &outdated, &AtomicBool::new(false)).err().unwrap();
+    let error = transport::for_host(&old_host, &outdated, &AtomicBool::new(false))
+        .err()
+        .unwrap();
     assert!(
         matches!(&error, ForgeError::CliTooOld { cli: Cli::Glab, found, needed } if found == "1.20.0" && *needed == "1.40"),
         "{error:?}"
@@ -374,13 +491,29 @@ fn forced_http_without_a_credential_names_the_right_login_command() {
         ..world.options(Stores::default())
     };
     for (kind, host, hint) in [
-        (ProviderKind::GitHub, "ghe.forced.test", "gh auth login --hostname ghe.forced.test"),
-        (ProviderKind::GitLab, "gl.forced.test", "glab auth login --hostname gl.forced.test"),
-        (ProviderKind::Gitea, "tea.forced.test", "tea login add --url https://tea.forced.test"),
+        (
+            ProviderKind::GitHub,
+            "ghe.forced.test",
+            "gh auth login --hostname ghe.forced.test",
+        ),
+        (
+            ProviderKind::GitLab,
+            "gl.forced.test",
+            "glab auth login --hostname gl.forced.test",
+        ),
+        (
+            ProviderKind::Gitea,
+            "tea.forced.test",
+            "tea login add --url https://tea.forced.test",
+        ),
     ] {
-        let error = transport::for_host(&world.endpoints(kind, host), &forced, &AtomicBool::new(false))
-            .err()
-            .unwrap();
+        let error = transport::for_host(
+            &world.endpoints(kind, host),
+            &forced,
+            &AtomicBool::new(false),
+        )
+        .err()
+        .unwrap();
         assert_eq!(
             error,
             ForgeError::NotAuthenticated {
@@ -399,20 +532,46 @@ fn resolutions_are_cached_five_minutes_misses_ten_seconds_crashes_never() {
     let endpoints = world.endpoints(ProviderKind::GitHub, "cache.cred.test");
     let cache = CredentialCache::new();
     let start = Instant::now();
-    let present = credential::lookup(&endpoints, &options, &world.env(&[]), &AtomicBool::new(false));
+    let present = credential::lookup(
+        &endpoints,
+        &options,
+        &world.env(&[]),
+        &AtomicBool::new(false),
+    );
     assert!(matches!(present, CredentialState::Present(_)));
     cache.put(&endpoints, &options, &present, start);
-    assert!(cache.get(&endpoints, &options, start + Duration::from_secs(299)).is_some());
-    assert!(cache.get(&endpoints, &options, start + Duration::from_secs(301)).is_none());
+    assert!(
+        cache
+            .get(&endpoints, &options, start + Duration::from_secs(299))
+            .is_some()
+    );
+    assert!(
+        cache
+            .get(&endpoints, &options, start + Duration::from_secs(301))
+            .is_none()
+    );
     let missing = CredentialState::Missing {
         tried: vec![],
         hint: String::new(),
     };
     cache.put(&endpoints, &options, &missing, start);
-    assert!(cache.get(&endpoints, &options, start + Duration::from_secs(9)).is_some());
-    assert!(cache.get(&endpoints, &options, start + Duration::from_secs(11)).is_none());
+    assert!(
+        cache
+            .get(&endpoints, &options, start + Duration::from_secs(9))
+            .is_some()
+    );
+    assert!(
+        cache
+            .get(&endpoints, &options, start + Duration::from_secs(11))
+            .is_none()
+    );
     let crashes = CredentialCache::new();
-    crashes.put(&endpoints, &options, &CredentialState::Crashed("boom".into()), start);
+    crashes.put(
+        &endpoints,
+        &options,
+        &CredentialState::Crashed("boom".into()),
+        start,
+    );
     assert!(crashes.get(&endpoints, &options, start).is_none());
     assert_eq!(credential::PRESENT_TTL, Duration::from_secs(300));
     assert_eq!(credential::MISSING_TTL, Duration::from_secs(10));

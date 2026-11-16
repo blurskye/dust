@@ -284,10 +284,14 @@ impl GitScreen {
         let unstage = snapshot.layer == GitDiffLayer::Staged;
         match self.stage_intent {
             Some(true) if unstage => {
-                return Err("This diff is staged · u unstages a hunk, ] shows the working tree".into());
+                return Err(
+                    "This diff is staged · u unstages a hunk, ] shows the working tree".into(),
+                );
             }
             Some(false) if !unstage => {
-                return Err("This diff is not staged · ] shows the staged diff, where u unstages".into());
+                return Err(
+                    "This diff is not staged · ] shows the staged diff, where u unstages".into(),
+                );
             }
             _ => {}
         }
@@ -431,7 +435,7 @@ struct DiscardTarget {
     disk: DiskIdentity,
 }
 
-/// A confirmed Changes-pane discard (DESIGN.md §5.2 `d`): the worktree side of each row is
+/// A confirmed Changes-pane discard (`d`): the worktree side of each row is
 /// restored from the index, and untracked files are deleted. The index is never touched.
 #[derive(Clone, Debug)]
 pub(super) struct FileDiscard {
@@ -451,7 +455,13 @@ fn disk_identity(path: &Path) -> Result<DiskIdentity, String> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             return Ok(DiskIdentity::Missing);
         }
-        Err(error) => return Err(format!("Couldn't read {}{}", path.display(), super::words::io_reason(&error))),
+        Err(error) => {
+            return Err(format!(
+                "Couldn't read {}{}",
+                path.display(),
+                super::words::io_reason(&error)
+            ));
+        }
     };
     let kind = metadata.file_type();
     Ok(if kind.is_symlink() {
@@ -477,11 +487,7 @@ fn disk_identity(path: &Path) -> Result<DiskIdentity, String> {
 }
 
 /// The identity of one path, refusing what a file discard must never touch.
-fn discard_target(
-    root: &Path,
-    index: &git2::Index,
-    path: &Path,
-) -> Result<DiscardTarget, String> {
+fn discard_target(root: &Path, index: &git2::Index, path: &Path) -> Result<DiscardTarget, String> {
     if !path
         .components()
         .all(|component| matches!(component, std::path::Component::Normal(_)))
@@ -524,7 +530,9 @@ fn discard_target(
 /// untracked ones. Nothing is written unless every path still matches the sheet.
 fn apply_file_discard(root: &Path, plan: &FileDiscard) -> Result<(), String> {
     let repository = git2::Repository::open(root).map_err(|error| error.message().to_owned())?;
-    let mut index = repository.index().map_err(|error| error.message().to_owned())?;
+    let mut index = repository
+        .index()
+        .map_err(|error| error.message().to_owned())?;
     for target in &plan.targets {
         let now = discard_target(root, &index, &target.path)?;
         if &now != target {
@@ -550,11 +558,21 @@ fn apply_file_discard(root: &Path, plan: &FileDiscard) -> Result<(), String> {
         }
         repository
             .checkout_index(Some(&mut index), Some(&mut checkout))
-            .map_err(|error| format!("Couldn't discard changes{}", super::words::git_reason(error.message())))?;
+            .map_err(|error| {
+                format!(
+                    "Couldn't discard changes{}",
+                    super::words::git_reason(error.message())
+                )
+            })?;
     }
     for target in plan.targets.iter().filter(|target| target.index.is_none()) {
-        std::fs::remove_file(root.join(&target.path))
-            .map_err(|error| format!("Couldn't delete {}{}", target.path.display(), super::words::io_reason(&error)))?;
+        std::fs::remove_file(root.join(&target.path)).map_err(|error| {
+            format!(
+                "Couldn't delete {}{}",
+                target.path.display(),
+                super::words::io_reason(&error)
+            )
+        })?;
     }
     Ok(())
 }
@@ -629,7 +647,11 @@ impl GitScreen {
             // An unstaged rename's source is still in the index: restore it too, so the
             // row's whole worktree change is undone. A staged rename's source is not.
             let mut label = format!("{} · {}", path.display(), code.trim());
-            if let Some(original) = entry.original_path.as_ref().filter(|original| *original != path) {
+            if let Some(original) = entry
+                .original_path
+                .as_ref()
+                .filter(|original| *original != path)
+            {
                 if index.get_path(original, 0).is_some() {
                     targets.push(discard_target(&self.root, &index, original)?);
                 }
@@ -647,8 +669,10 @@ impl GitScreen {
                     "{} has only staged changes; nothing in the worktree to discard (u unstages)",
                     path.display()
                 ),
-                _ => "The marked files have only staged changes; nothing in the worktree to discard"
-                    .into(),
+                _ => {
+                    "The marked files have only staged changes; nothing in the worktree to discard"
+                        .into()
+                }
             });
         }
         let files = restored.len() + deleted.len();
@@ -674,18 +698,12 @@ impl GitScreen {
             fields.push(("Scope", "Worktree only; the index keeps its copy.".into()));
         }
         if !deleted.is_empty() {
-            fields.push((
-                "Untracked",
-                "Deleted from disk; Git keeps no copy.".into(),
-            ));
+            fields.push(("Untracked", "Deleted from disk; Git keeps no copy.".into()));
         }
         if !kept.is_empty() {
             fields.push((
                 "Kept",
-                format!(
-                    "{} staged-only file(s) have nothing to discard",
-                    kept.len()
-                ),
+                format!("{} staged-only file(s) have nothing to discard", kept.len()),
             ));
         }
         let fields = fields

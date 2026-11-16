@@ -62,7 +62,10 @@ impl Workspace {
         TutorView {
             page: self.page,
             reader: self.focus == 2,
-            opened: self.opened.filter(|(page, _)| *page == self.page).map(|(_, number)| number),
+            opened: self
+                .opened
+                .filter(|(page, _)| *page == self.page)
+                .map(|(_, number)| number),
             section,
             query: self.queries[at].clone(),
             pr_tab: ["Conversation", "Commits", "Checks", "Files changed"]
@@ -81,11 +84,23 @@ impl Workspace {
             runs: self.tutor_runs(),
             link: self.focus == 2
                 && !self.reading
-                && self.detail_rows.get(self.detail_cursor).is_some_and(|row| row.action.is_some()),
-            find: if self.detail_find.search.active() { self.detail_find.search.query.clone() } else { String::new() },
+                && self
+                    .detail_rows
+                    .get(self.detail_cursor)
+                    .is_some_and(|row| row.action.is_some()),
+            find: if self.detail_find.search.active() {
+                self.detail_find.search.query.clone()
+            } else {
+                String::new()
+            },
             list_hidden: self.sidebar_hidden(),
             state: self.states[at].clone(),
-            views: self.scoped_views().unwrap_or_default().into_iter().map(|view| view.name).collect(),
+            views: self
+                .scoped_views()
+                .unwrap_or_default()
+                .into_iter()
+                .map(|view| view.name)
+                .collect(),
             inbox: self.inbox.enabled,
             unwrapped: self.diff_nowrap,
             file: (self.page == 2)

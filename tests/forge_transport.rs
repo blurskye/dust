@@ -1,5 +1,5 @@
 #![cfg(unix)]
-//! The GitHub contract on both transports (FORGE.md §8.2, F1): direct HTTP against the fake
+//! The GitHub contract on both transports: direct HTTP against the fake
 //! forge server, and `gh api` passthrough through a fake `gh` that forwards to the same server.
 //! Both must produce the same domain values and the same logical requests; neither may leak the
 //! token into argv, logs or error text.
@@ -495,7 +495,7 @@ fn errors_classify_the_same_on_both_transports() {
             ForgeError::Failed("Fixture refresh refused".into()),
             "{via:?}"
         );
-        // Last: a rate limit pauses this credential (F2, FORGE.md §3.5), so later reads would
+        // Last: a rate limit pauses this credential, so later reads would
         // be refused locally.
         assert!(
             matches!(
@@ -704,7 +704,7 @@ fn a_signed_out_host_without_gh_is_a_state_not_a_crash() {
     .err()
     .unwrap();
     assert_eq!(error, ForgeError::CliMissing(Cli::Gh));
-    // By default the same host is browsed anonymously instead (FORGE.md §2.5).
+    // By default the same host is browsed anonymously instead.
     let anonymous = transport::for_host(
         &world.endpoints("ghe.anonymous.test"),
         &ConnectOptions::default(),

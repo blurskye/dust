@@ -32,7 +32,10 @@ fn key(screen: &mut GitScreen, code: KeyCode) {
 
 fn view(screen: &mut GitScreen, width: u16, height: u16) -> String {
     let frame = screen.frame(width, height);
-    (0..height).map(|y| frame.grid.row_text(y)).collect::<Vec<_>>().join("\n")
+    (0..height)
+        .map(|y| frame.grid.row_text(y))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// The frame at this size once nothing loads and it stays unchanged for `QUIET`.
@@ -49,7 +52,10 @@ fn settle(screen: &mut GitScreen, width: u16, height: u16) -> String {
         } else if since.elapsed() >= QUIET {
             return last;
         }
-        assert!(start.elapsed() < DEADLINE, "Checks never settled at {width}x{height}:\n{last}");
+        assert!(
+            start.elapsed() < DEADLINE,
+            "Checks never settled at {width}x{height}:\n{last}"
+        );
         std::thread::sleep(Duration::from_millis(5));
     }
 }
@@ -73,7 +79,13 @@ fn in_parent(test: &str) -> bool {
         let asked = world
             .api_requests()
             .iter()
-            .map(|request| format!("{} {}", request["method"].as_str().unwrap_or(""), request["path"].as_str().unwrap_or("")))
+            .map(|request| {
+                format!(
+                    "{} {}",
+                    request["method"].as_str().unwrap_or(""),
+                    request["path"].as_str().unwrap_or("")
+                )
+            })
             .collect::<Vec<_>>()
             .join("\n");
         assert!(
@@ -90,7 +102,10 @@ fn in_parent(test: &str) -> bool {
 fn child() -> (Forge, PathBuf) {
     let name = std::env::var(CHILD).unwrap();
     let forge = ALL.into_iter().find(|forge| forge.name() == name).unwrap();
-    (forge, PathBuf::from(std::env::var_os("DUSTY_GITEA_CHECKS_REPO").unwrap()))
+    (
+        forge,
+        PathBuf::from(std::env::var_os("DUSTY_GITEA_CHECKS_REPO").unwrap()),
+    )
 }
 
 #[test]
@@ -110,7 +125,10 @@ fn gitea_checks_show_the_jobs_steps_at_every_width() {
             settle(&mut screen, width, height);
         }
         let checks = settle(&mut screen, width, height);
-        assert!(checks.contains("lint"), "{name} {width}x{height} is not on Checks:\n{checks}");
+        assert!(
+            checks.contains("lint"),
+            "{name} {width}x{height} is not on Checks:\n{checks}"
+        );
         assert!(
             !checks.contains("unavailable"),
             "{name} {width}x{height} says the steps are unavailable:\n{checks}"
@@ -145,7 +163,10 @@ fn gitea_pull_request_rows_show_their_checks() {
         if list.contains('✔') {
             return;
         }
-        assert!(start.elapsed() < DEADLINE, "the passing row never got its check mark:\n{frame}");
+        assert!(
+            start.elapsed() < DEADLINE,
+            "the passing row never got its check mark:\n{frame}"
+        );
         std::thread::sleep(Duration::from_millis(10));
     }
 }

@@ -1,4 +1,4 @@
-//! Caching and freshness in the GitHub workspace (FORGE.md §7): paint from the disk cache at
+//! Caching and freshness in the GitHub workspace: paint from the disk cache at
 //! once, revalidate in the background, merge without moving the reader, warm what the user is
 //! likely to open next on a low-priority worker, search locally while the remote search runs,
 //! and show writes before the forge confirms them.
@@ -7,11 +7,11 @@
 //! workspace behaves exactly as before: memory only, explicit refreshes, no warm worker.
 use super::*;
 use crate::forge::ForgeJobs;
-use crate::forge::records;
 use crate::forge::cache::{self, Cache, CacheKey};
 use crate::forge::merge;
 use crate::forge::model::Fingerprint;
 use crate::forge::provider::{Conditional, Fetched};
+use crate::forge::records;
 use crate::forge::request::Payload;
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -156,7 +156,9 @@ impl Fresh {
 
     /// Whether the warm worker holds (queued or running) a read whose key matches.
     pub(super) fn warm_has(&self, matches: impl Fn(&Key) -> bool) -> bool {
-        self.warm_active.as_ref().is_some_and(|(request, _)| matches(&request.key))
+        self.warm_active
+            .as_ref()
+            .is_some_and(|(request, _)| matches(&request.key))
             || self.warm_queue.iter().any(|request| matches(&request.key))
     }
 
@@ -334,7 +336,9 @@ impl Workspace {
         let Some((read, cache_key, cache)) = self.disk_entry(key, op) else {
             return Some(self.cache.contains_key(key));
         };
-        self.fresh.disk.load(&cache, key.clone(), read, cache_key, self.scope_epoch);
+        self.fresh
+            .disk
+            .load(&cache, key.clone(), read, cache_key, self.scope_epoch);
         None
     }
 
@@ -347,12 +351,19 @@ impl Workspace {
             return Some(self.cache.contains_key(key));
         };
         let epoch = self.scope_epoch;
-        self.fresh.disk.load(&cache, key.clone(), read.clone(), cache_key.clone(), epoch);
-        let until = *self.fresh.disk_until.get_or_insert_with(|| Instant::now() + DISK_BUDGET);
+        self.fresh
+            .disk
+            .load(&cache, key.clone(), read.clone(), cache_key.clone(), epoch);
+        let until = *self
+            .fresh
+            .disk_until
+            .get_or_insert_with(|| Instant::now() + DISK_BUDGET);
         let loaded = self.fresh.disk.wait(key, until)?;
         if loaded.epoch != epoch {
             // An answer for the scope before: ask again for this one.
-            self.fresh.disk.load(&cache, key.clone(), read, cache_key, epoch);
+            self.fresh
+                .disk
+                .load(&cache, key.clone(), read, cache_key, epoch);
             return None;
         }
         Some(self.apply_disk(&loaded.key, &loaded.read, loaded.found))
@@ -477,7 +488,7 @@ impl Workspace {
             return false;
         };
         // The last check failed (offline, rate limited, a server error): retry with backoff, a
-        // quarter of how old the shown data is, from 10 s up to 5 min (§3.46).
+        // quarter of how old the shown data is, from 10 s up to 5 min.
         if meta.offline {
             let wait = (meta.age() / 4).clamp(CONFIRM_AFTER, Duration::from_secs(300));
             return meta.checked.is_none_or(|checked| checked.elapsed() >= wait);
@@ -496,7 +507,7 @@ impl Workspace {
             return;
         }
         self.fresh.drop_warm(&key);
-        // An opened pull request is checked by its fingerprint first (§7.5).
+        // An opened pull request is checked by its fingerprint first.
         let op = match (&key, op) {
             (Key::Item(2, number), Op::Read(target, Read::PullRequest(_)))
                 if self
@@ -666,7 +677,7 @@ impl Workspace {
                 } else if !matches!(request.key, Key::List(..) | Key::Inbox(..))
                     || matches!(self.page, 1 | 2) && request.key == self.list_key()
                 {
-                    // In words, with how old what stays on screen is (§3.46).
+                    // In words, with how old what stays on screen is.
                     let age = self.fresh.meta.get(&request.key).map(Meta::age);
                     self.notice = self.stale_notice(&error, age);
                     self.notice_error = true;
@@ -723,7 +734,7 @@ impl Workspace {
         self.ensure(false);
     }
 
-    /// §7.2 merge rules for a background list refresh.
+    /// The merge rules for a background list refresh.
     fn merge_list(&mut self, key: &Key, reply: Reply) -> Reply {
         let old = self
             .value(key)
@@ -779,7 +790,7 @@ impl Workspace {
         }
     }
 
-    /// The only freshness UI (§7.3): `updated 3m ago · ⟳`.
+    /// The only freshness UI: `updated 3m ago · ⟳`.
     pub(super) fn freshness_chip(&self, key: &Key, compact: bool) -> Option<String> {
         if !self.fresh.enabled() || !self.cache.get(key).is_some_and(Result::is_ok) {
             return None;
@@ -787,15 +798,13 @@ impl Workspace {
         let meta = self.fresh.meta.get(key)?;
         let busy = self.pending(key) || self.fresh.warm_pending(key);
         let age = ago(meta.age());
-        // One string at every width (r11): a border too narrow for it drops the label whole
+        // One string at every width: a border too narrow for it drops the label whole
         // rather than shortening `updated just now` to `now`.
         if compact {
             return None;
         }
         Some(if meta.offline {
             format!("updated {age} · {}", self.stale_word())
-        } else if !meta.verified {
-            format!("updated {age}{}", if busy { " · ⟳" } else { "" })
         } else {
             format!("updated {age}{}", if busy { " · ⟳" } else { "" })
         })
@@ -885,7 +894,7 @@ impl Workspace {
         if self.fresh.warmed.as_ref() != Some(&scope) {
             self.fresh.warmed = Some(scope.clone());
             self.fresh.warm_queue.clear();
-            // §7.2 startup: everything a first keypress can show.
+            // Startup: everything a first keypress can show.
             let mut warm = vec![
                 (
                     Key::List(1, "open".into(), String::new()),
@@ -935,7 +944,7 @@ impl Workspace {
         }
         // After the warm-up is queued (a new scope clears the queue): the list's check marks.
         changed |= self.poll_row_checks();
-        // Prefetch the neighbours of a resting cursor (§7.5).
+        // Prefetch the neighbours of a resting cursor.
         if matches!(self.page, 1 | 2) && !self.inbox.enabled && self.opened.is_none() {
             let at = self.page - 1;
             let selected = self.selected[at];
@@ -952,7 +961,10 @@ impl Workspace {
                     .collect::<Vec<_>>();
                 for id in neighbours {
                     let key = Key::Item(self.page, id);
-                    if self.fresh.prefetched.contains(&key) || self.pending(&key) || self.disk_loading(&key) {
+                    if self.fresh.prefetched.contains(&key)
+                        || self.pending(&key)
+                        || self.disk_loading(&key)
+                    {
                         continue;
                     }
                     let op = self.read(if self.page == 1 {
@@ -967,7 +979,11 @@ impl Workspace {
                     };
                     self.fresh.prefetched.insert(key.clone());
                     changed |= cached;
-                    if !self.cache.contains_key(&key) || self.needs_check(&key) {
+                    // Signed out, one item is six REST reads of a 60-an-hour quota: neighbours
+                    // come from disk only, and the forge is asked when one is opened.
+                    if !self.read_only()
+                        && (!self.cache.contains_key(&key) || self.needs_check(&key))
+                    {
                         self.fresh.warm_queue.push_back(Request { key, op });
                     }
                 }
@@ -1152,7 +1168,7 @@ impl Workspace {
         rows.into_values().rev().collect()
     }
 
-    /// Local hits for the live query, then the remote results below a divider (§7.4).
+    /// Local hits for the live query, then the remote results below a divider.
     pub(super) fn live_rows(&mut self) -> Option<LiveRows> {
         let live = self.fresh.live.as_ref()?;
         if live.page != self.page {
@@ -1211,7 +1227,7 @@ impl Workspace {
         })
     }
 
-    /// Show a write before the forge confirms it (§7.7); `settle` keeps or undoes it.
+    /// Show a write before the forge confirms it; `settle` keeps or undoes it.
     pub(super) fn optimistic(&mut self, write: &Write) {
         self.fresh.undo.clear();
         if !self.fresh.enabled() {
@@ -1301,7 +1317,9 @@ impl Workspace {
             let Some(Ok(reply)) = self.cache.get_mut(&key) else {
                 continue;
             };
-            self.fresh.undo.push((key.clone(), Some(reply.value.clone())));
+            self.fresh
+                .undo
+                .push((key.clone(), Some(reply.value.clone())));
             edit(&mut reply.value);
             reply.text = reply.value.to_string();
             // A read of it already on its way answers for the time before the write: dropped,

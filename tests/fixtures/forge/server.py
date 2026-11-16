@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fake GitHub REST v3 + GraphQL server for forge tests (FORGE.md §8.2, F1). Never touches the network.
+"""Fake GitHub REST v3 + GraphQL server for forge tests. Never touches the network.
 
     server.py --state PATH [--world legacy|inbox|recorded|gitlab|gitea|forgejo|actions] [--fixtures DIR]
 
@@ -757,7 +757,7 @@ class Legacy:
                               dict({"id": f"{thread['id']}_COMMENT_{index}", "createdAt": "2026-11-08T10:00:00Z",
                                     "commit": {"oid": "a" * 40}}, **comment)
                               for index, comment in enumerate(thread["comments"]["nodes"])]}})
-            # A multi-line thread's first line (GitHub's `startLine`, DESIGN.md §3.30a).
+            # A multi-line thread's first line (GitHub's `startLine`).
             if thread.get("startLine"):
                 nodes[-1]["startLine"] = thread["startLine"]
         # Two pages exercise the provider's connection paging, including an empty last page.
@@ -798,7 +798,7 @@ class Legacy:
             return self.rest_read(repo, tail)
         return self.rest_write(repo, tail)
 
-    # ---- F7: the REST reads an anonymous client makes instead of GraphQL (FORGE.md §2.5)
+    # ---- F7: the REST reads an anonymous client makes instead of GraphQL
 
     def rest_item(self, entry, kind, repo, listed=False):
         host = self.state.get("host", self.host)
@@ -928,7 +928,7 @@ class Legacy:
             number = match.group(1)
             return 200, state.get("diffs", {}).get(number, state.get("diff", DEFAULT_DIFF))
         if match:
-            # The head a suggestion is committed to (DESIGN.md §3.30a).
+            # The head a suggestion is committed to.
             return 200, self.rest_item(self.find("pr", int(match.group(1))), "pr", repo)
         if tail == "pulls":
             return 200, []
@@ -1419,7 +1419,7 @@ def world_for(state, request):
     return Inbox(state, request) if world == "inbox" else Legacy(state, request)
 
 
-# F7 (FORGE.md §2.5): anonymous reads. With `state["anonymous"] = {limit, remaining, reset, style,
+# F7: anonymous reads. With `state["anonymous"] = {limit, remaining, reset, style,
 # sign_in_required, refuse}`, a direct-HTTP request without a credential is answered like a public
 # forge answers it: writes, GitHub GraphQL, GitLab mutations and the reads each forge keeps behind a
 # sign-in are 401 (403 on GitHub), a Gitea/Forgejo instance with `sign_in_required` refuses every
@@ -1638,7 +1638,7 @@ class Handler(BaseHTTPRequestHandler):
                             status, body, headers = reply.status, reply.body, reply.headers
                     save_state(state)
             if request.method == "GET" and status == 200 and not request.graphql:
-                # Conditional requests (FORGE.md §7.5): a strong ETag over the body, 304 on match.
+                # Conditional requests: a strong ETag over the body, 304 on match.
                 if isinstance(body, (dict, list)):
                     encoded = json.dumps(body).encode()
                 elif isinstance(body, str):

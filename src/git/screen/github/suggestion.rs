@@ -1,4 +1,4 @@
-//! GitHub's suggested changes (DESIGN.md §3.30a): a ```` ```suggestion ```` block in a review
+//! GitHub's suggested changes: a ```` ```suggestion ```` block in a review
 //! comment reads as the lines it replaces (`−`) and the lines it suggests (`+`), not as code.
 
 use super::lines::Line;
@@ -19,7 +19,10 @@ pub(super) enum Part {
 /// The fence that opens a suggestion: three or more backticks or tildes, then `suggestion`.
 fn opens(line: &str) -> Option<(char, usize)> {
     let trimmed = line.trim();
-    let mark = trimmed.chars().next().filter(|mark| *mark == '`' || *mark == '~')?;
+    let mark = trimmed
+        .chars()
+        .next()
+        .filter(|mark| *mark == '`' || *mark == '~')?;
     let run = trimmed.chars().take_while(|ch| *ch == mark).count();
     (run >= 3 && trimmed[run..].trim() == "suggestion").then_some((mark, run))
 }
@@ -67,7 +70,10 @@ pub(super) fn split(body: &str) -> Option<Vec<Part>> {
     if !text.trim().is_empty() {
         parts.push(Part::Text(text));
     }
-    parts.iter().any(|part| matches!(part, Part::Suggestion(_))).then_some(parts)
+    parts
+        .iter()
+        .any(|part| matches!(part, Part::Suggestion(_)))
+        .then_some(parts)
 }
 
 /// The suggested lines of the first suggestion in `body`.
@@ -97,26 +103,55 @@ pub(super) fn span(start: Option<u64>, line: Option<u64>) -> usize {
 }
 
 /// `Suggested change`, then the replaced lines and the suggested ones, as a diff.
-pub(super) fn rows(rows: &mut Vec<Line>, original: &[String], suggested: &[String], width: usize, indent: &str) {
-    let mut heading = Rich::new().plain(indent).push("Suggested change", strong(GitRole::Text));
+pub(super) fn rows(
+    rows: &mut Vec<Line>,
+    original: &[String],
+    suggested: &[String],
+    width: usize,
+    indent: &str,
+) {
+    let mut heading = Rich::new()
+        .plain(indent)
+        .push("Suggested change", strong(GitRole::Text));
     if original.is_empty() {
-        heading = heading.sep().push("the lines it replaces are not in this diff", role(GitRole::Muted));
+        heading = heading.sep().push(
+            "the lines it replaces are not in this diff",
+            role(GitRole::Muted),
+        );
     }
     let mut heading = heading.line();
     heading.band = Some(GitSurface::Code);
     rows.push(heading);
     let room = width.saturating_sub(indent.width() + 2).max(8);
-    let sides = original.iter().map(|line| ('−', line)).chain(suggested.iter().map(|line| ('+', line)));
+    let sides = original
+        .iter()
+        .map(|line| ('−', line))
+        .chain(suggested.iter().map(|line| ('+', line)));
     for (sign, line) in sides {
         let added = sign == '+';
         let text = super::super::shell::chrome::ellipsize(&line.replace('\t', "    "), room);
-        let tone = if added { GitRole::Added } else { GitRole::Removed };
-        let mut row = Rich::new().plain(indent).push(format!("{sign} "), role(tone)).push(text, role(tone)).line();
-        row.band = Some(if added { GitSurface::AddedBand } else { GitSurface::RemovedBand });
+        let tone = if added {
+            GitRole::Added
+        } else {
+            GitRole::Removed
+        };
+        let mut row = Rich::new()
+            .plain(indent)
+            .push(format!("{sign} "), role(tone))
+            .push(text, role(tone))
+            .line();
+        row.band = Some(if added {
+            GitSurface::AddedBand
+        } else {
+            GitSurface::RemovedBand
+        });
         rows.push(row);
     }
     if suggested.is_empty() {
-        let mut row = Rich::new().plain(indent).push("Deletes these lines", role(GitRole::Muted)).line();
+        let mut row = Rich::new()
+            .plain(indent)
+            .push("Deletes these lines", role(GitRole::Muted))
+            .line();
         row.band = Some(GitSurface::Code);
         rows.push(row);
     }
@@ -136,9 +171,16 @@ pub(super) struct Found {
 /// or the thread is outdated (its line is gone from the diff).
 pub(super) fn found(thread: &Value) -> Option<Found> {
     let comments = thread["comments"]["nodes"].as_array()?;
-    let (comment, replacement) = comments.iter().find_map(|comment| Some((comment, first(comment["body"].as_str()?)?)))?;
-    let end = thread["line"].as_u64().or_else(|| comment["line"].as_u64())?;
-    let start = thread["startLine"].as_u64().filter(|start| *start <= end).unwrap_or(end);
+    let (comment, replacement) = comments
+        .iter()
+        .find_map(|comment| Some((comment, first(comment["body"].as_str()?)?)))?;
+    let end = thread["line"]
+        .as_u64()
+        .or_else(|| comment["line"].as_u64())?;
+    let start = thread["startLine"]
+        .as_u64()
+        .filter(|start| *start <= end)
+        .unwrap_or(end);
     let path = thread["path"]
         .as_str()
         .filter(|path| !path.is_empty())
@@ -150,13 +192,21 @@ pub(super) fn found(thread: &Value) -> Option<Found> {
         path,
         start,
         end,
-        original: if original.len() == count { original } else { Vec::new() },
+        original: if original.len() == count {
+            original
+        } else {
+            Vec::new()
+        },
         replacement,
     })
 }
 
 fn lines_text(start: u64, end: u64) -> String {
-    if start == end { start.to_string() } else { format!("{start}–{end}") }
+    if start == end {
+        start.to_string()
+    } else {
+        format!("{start}–{end}")
+    }
 }
 
 /// The default commit message, GitHub's.
@@ -175,13 +225,17 @@ impl Workspace {
     /// still in the diff, on GitHub, signed in.
     pub(super) fn offers_commit(&self, number: u64, thread: &str) -> bool {
         use crate::forge::provider::ProviderKind;
-        !matches!(self.forge_kind(), Some(ProviderKind::GitLab | ProviderKind::Gitea | ProviderKind::Forgejo))
-            && !self.read_only()
+        !matches!(
+            self.forge_kind(),
+            Some(ProviderKind::GitLab | ProviderKind::Gitea | ProviderKind::Forgejo)
+        ) && !self.read_only()
             && self
                 .review_threads(number)
                 .into_iter()
                 .find(|candidate| candidate["id"].as_str() == Some(thread))
-                .is_some_and(|thread| thread["isResolved"].as_bool() == Some(false) && found(thread).is_some())
+                .is_some_and(|thread| {
+                    thread["isResolved"].as_bool() == Some(false) && found(thread).is_some()
+                })
     }
 
     /// The sheet for `Commit suggestion`: the commit message, GitHub's default filled in.
@@ -190,8 +244,17 @@ impl Workspace {
             return Ok(None);
         };
         let found = self.suggestion(*number, thread)?;
-        let fields = vec![super::actions::field("Commit message", MESSAGE, true, false)];
-        let title = format!("Commit suggestion to {}:{}", found.path, lines_text(found.start, found.end));
+        let fields = vec![super::actions::field(
+            "Commit message",
+            MESSAGE,
+            true,
+            false,
+        )];
+        let title = format!(
+            "Commit suggestion to {}:{}",
+            found.path,
+            lines_text(found.start, found.end)
+        );
         Ok(Some(self.form(&title, action.clone(), fields)))
     }
 
@@ -201,25 +264,48 @@ impl Workspace {
             return None;
         };
         let found = self.suggestion(*number, thread).ok()?;
-        let branch = self.item().map(|item| string(item, "headRefName").to_owned()).unwrap_or_default();
+        let branch = self
+            .item()
+            .map(|item| string(item, "headRefName").to_owned())
+            .unwrap_or_default();
         let replaced = (found.end - found.start + 1) as usize;
         let words = |count: usize| format!("{count} line{}", if count == 1 { "" } else { "s" });
         let change = if found.replacement.is_empty() {
             format!("deletes {}", words(replaced))
         } else {
-            format!("replaces {} with {}", words(replaced), words(found.replacement.len()))
+            format!(
+                "replaces {} with {}",
+                words(replaced),
+                words(found.replacement.len())
+            )
         };
-        Some(if branch.is_empty() { format!("Commits to the head branch · {change}") } else { format!("Commits to {branch} · {change}") })
+        Some(if branch.is_empty() {
+            format!("Commits to the head branch · {change}")
+        } else {
+            format!("Commits to {branch} · {change}")
+        })
     }
 
     /// The write for a confirmed `Commit suggestion`, pinned to the head it was read at.
-    pub(super) fn suggestion_write(&self, number: u64, thread: &str, values: &[String]) -> Result<Write, String> {
+    pub(super) fn suggestion_write(
+        &self,
+        number: u64,
+        thread: &str,
+        values: &[String],
+    ) -> Result<Write, String> {
         let found = self.suggestion(number, thread)?;
-        let head = self.value(&Key::Item(2, number)).map(|item| string(item, "headRefOid").to_owned()).unwrap_or_default();
+        let head = self
+            .value(&Key::Item(2, number))
+            .map(|item| string(item, "headRefOid").to_owned())
+            .unwrap_or_default();
         if head.is_empty() {
             return Err("Refresh the pull request before committing a suggestion".into());
         }
-        let message = values.first().map(|message| message.trim()).filter(|message| !message.is_empty()).unwrap_or(MESSAGE);
+        let message = values
+            .first()
+            .map(|message| message.trim())
+            .filter(|message| !message.is_empty())
+            .unwrap_or(MESSAGE);
         Ok(Write::CommitSuggestion {
             number,
             path: found.path,
@@ -256,7 +342,10 @@ mod tests {
     fn the_replaced_lines_are_the_end_of_the_hunks_new_side() {
         let hunk = "@@ -1,3 +1,4 @@\n keep\n-old\n+one\n+two\n\\ No newline at end of file";
         assert_eq!(original(hunk, 2), vec!["one".to_owned(), "two".to_owned()]);
-        assert_eq!(original(hunk, 9), vec!["keep".to_owned(), "one".to_owned(), "two".to_owned()]);
+        assert_eq!(
+            original(hunk, 9),
+            vec!["keep".to_owned(), "one".to_owned(), "two".to_owned()]
+        );
         assert_eq!(span(Some(2), Some(4)), 3);
         assert_eq!(span(None, Some(4)), 1);
     }

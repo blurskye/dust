@@ -1,4 +1,4 @@
-//! GitHub (github.com, `*.ghe.com`, GHES) over REST v3 and GraphQL (FORGE.md §4.2): a slim
+//! GitHub (github.com, `*.ghe.com`, GHES) over REST v3 and GraphQL: a slim
 //! GraphQL search for lists, one GraphQL document per detail, REST for timelines, diffs,
 //! Actions and every write except the thread/viewed/subscription mutations GitHub only offers
 //! in GraphQL. Without a credential `anonymous.rs` answers the GraphQL reads over REST.
@@ -49,7 +49,9 @@ fn list_document(kind: ItemKind, counted: bool) -> String {
     let (name, fields) = match kind {
         ItemKind::Issue => (
             "IssueList",
-            format!("... on Issue {{ {ROW_FIELDS} stateReason closedByPullRequestsReferences {{ totalCount }} }}"),
+            format!(
+                "... on Issue {{ {ROW_FIELDS} stateReason closedByPullRequestsReferences {{ totalCount }} }}"
+            ),
         ),
         ItemKind::PullRequest => (
             "PullRequestList",
@@ -57,7 +59,10 @@ fn list_document(kind: ItemKind, counted: bool) -> String {
         ),
     };
     let (other_variable, other) = if counted {
-        (", $other: String!", " other: search(type: ISSUE, query: $other, first: 1) { issueCount }")
+        (
+            ", $other: String!",
+            " other: search(type: ISSUE, query: $other, first: 1) { issueCount }",
+        )
     } else {
         ("", "")
     };
@@ -345,8 +350,9 @@ fn row(node: &Value, kind: ItemKind) -> ItemRow {
         draft: node["isDraft"].as_bool().unwrap_or(false),
         body_preview: node["body"].as_str().map(str::to_owned),
         head_branch: optional(node, "headRefName"),
-        review_tally: (kind == ItemKind::PullRequest && node.get("latestOpinionatedReviews").is_some())
-            .then(|| review_tally(node)),
+        review_tally: (kind == ItemKind::PullRequest
+            && node.get("latestOpinionatedReviews").is_some())
+        .then(|| review_tally(node)),
         created: Some(timestamp(node, "createdAt")).filter(|created| !created.is_empty()),
         linked: node["closedByPullRequestsReferences"]["totalCount"]
             .as_u64()
@@ -749,7 +755,10 @@ fn detail(event: &Value) -> std::collections::BTreeMap<String, String> {
         .iter()
         .filter_map(|path| {
             let value = path.split('.').fold(event, |value, key| &value[key]);
-            value.as_str().filter(|text| !text.is_empty()).map(|text| ((*path).to_owned(), text.to_owned()))
+            value
+                .as_str()
+                .filter(|text| !text.is_empty())
+                .map(|text| ((*path).to_owned(), text.to_owned()))
         })
         .collect()
 }
@@ -840,7 +849,7 @@ fn run_identity(value: &Value) -> RunIdentity {
 }
 
 /// `query Name(...) { repository(...) { pullRequest(number: $number) { BODY } } }` as one
-/// query with an alias `p<N>` per number (§7.5 batching).
+/// query with an alias `p<N>` per number (batched).
 pub fn alias_document(document: &str, numbers: &[u64]) -> Option<String> {
     let head = "pullRequest(number: $number) {";
     let start = document.find(head)? + head.len();
@@ -1237,9 +1246,13 @@ impl GitHub {
                     "after": Value::Null,
                 });
                 if let Some(other) = &other {
-                    variables["other"] = Self::search_query(ctx.repo.as_ref(), *kind, other, "created-desc").into();
+                    variables["other"] =
+                        Self::search_query(ctx.repo.as_ref(), *kind, other, "created-desc").into();
                 }
-                vec![ApiRequest::graphql(&list_document(*kind, other.is_some()), variables)]
+                vec![ApiRequest::graphql(
+                    &list_document(*kind, other.is_some()),
+                    variables,
+                )]
             }
             Read::Search { kind, filter, page } => vec![ApiRequest::graphql(
                 &list_document(*kind, false),
@@ -1352,7 +1365,7 @@ impl GitHub {
         })
     }
 
-    /// Per-number answers of an aliased batch (§7.5); one number sends the plain document.
+    /// Per-number answers of an aliased batch; one number sends the plain document.
     fn batched(
         ctx: &ForgeContext,
         document: &'static str,
@@ -1464,7 +1477,9 @@ impl GitHub {
         if found.branch != expected.branch {
             changed.push("branch");
         }
-        if !expected.head_owner.is_empty() && !found.head_owner.eq_ignore_ascii_case(&expected.head_owner) {
+        if !expected.head_owner.is_empty()
+            && !found.head_owner.eq_ignore_ascii_case(&expected.head_owner)
+        {
             changed.push("fork owner");
         }
         if !changed.is_empty() {
@@ -1500,14 +1515,14 @@ impl GitHub {
         for request in &mut requests {
             request.class = class;
         }
-        // §7.5 incremental refresh: only notifications updated since the cached copy.
+        // Incremental refresh: only notifications updated since the cached copy.
         if let (Read::Notifications { filter, .. }, Some(since)) = (read, &cond.since)
             && filter.since.is_none()
             && let Some(request) = requests.first_mut()
         {
             request.query.push(("since".into(), since.as_str().into()));
         }
-        // Single REST reads revalidate with ETags (§7.5); a 304 costs no rate limit.
+        // Single REST reads revalidate with ETags; a 304 costs no rate limit.
         if let ([request], Some(etag)) = (requests.as_mut_slice(), &cond.etag)
             && matches!(request.target, Target::Rest(_))
             && request.method == Method::Get
@@ -1551,8 +1566,9 @@ impl GitHub {
             Read::List { kind, filter, page } => Payload::Rows(Self::rows(
                 ctx,
                 Self::search_query(ctx.repo.as_ref(), *kind, filter, "created-desc"),
-                other_state(filter)
-                    .map(|other| Self::search_query(ctx.repo.as_ref(), *kind, &other, "created-desc")),
+                other_state(filter).map(|other| {
+                    Self::search_query(ctx.repo.as_ref(), *kind, &other, "created-desc")
+                }),
                 *kind,
                 *page,
                 cancel,
@@ -1795,7 +1811,7 @@ impl GitHub {
                     other_total: None,
                 })
             }
-            // §3.7: read from the base ref locally, never through the API.
+            // Read from the base ref locally, never through the API.
             Read::PullRequestTemplate => Payload::Template(crate::forge::template::for_context(
                 &ctx.root,
                 ctx.endpoints.kind,
@@ -1830,8 +1846,7 @@ impl GitHub {
         ctx.json(&request, cancel)
     }
 
-    /// A suggested change committed the way GitHub's "Commit suggestion" does (DESIGN.md
-    /// §3.30a), through the contents API: the head branch's file is read, the suggested lines
+    /// A suggested change committed the way GitHub's "Commit suggestion" does, through the contents API: the head branch's file is read, the suggested lines
     /// replace the ones the suggestion was made on (checked first), and the file is written back
     /// on that branch, pinned to the blob that was read.
     fn commit_suggestion(
@@ -1842,11 +1857,15 @@ impl GitHub {
         message: &str,
         cancel: &AtomicBool,
     ) -> Result<(), ForgeError> {
-        let pull = ctx.json(&ApiRequest::get(repos_path(ctx, &format!("pulls/{number}"))?), cancel)?;
+        let pull = ctx.json(
+            &ApiRequest::get(repos_path(ctx, &format!("pulls/{number}"))?),
+            cancel,
+        )?;
         let sha = text(&pull["head"], "sha");
         if !head.is_empty() && sha != head {
             return Err(ForgeError::Conflict(
-                "The pull request has new commits · refresh before committing this suggestion".into(),
+                "The pull request has new commits · refresh before committing this suggestion"
+                    .into(),
             ));
         }
         let branch = text(&pull["head"], "ref");
@@ -1859,9 +1878,17 @@ impl GitHub {
         };
         let contents = format!(
             "repos/{repo}/contents/{}",
-            suggestion.path.split('/').map(path_segment).collect::<Vec<_>>().join("/")
+            suggestion
+                .path
+                .split('/')
+                .map(path_segment)
+                .collect::<Vec<_>>()
+                .join("/")
         );
-        let file = ctx.json(&ApiRequest::get(contents.clone()).query("ref", &branch), cancel)?;
+        let file = ctx.json(
+            &ApiRequest::get(contents.clone()).query("ref", &branch),
+            cancel,
+        )?;
         let decoded = base64_decode(&text(&file, "content"))
             .and_then(|bytes| String::from_utf8(bytes).ok())
             .ok_or_else(|| ForgeError::Failed(format!("{} is not a text file", suggestion.path)))?;
@@ -2380,11 +2407,9 @@ impl Provider for GitHub {
                     Some(title) => Value::from(Self::milestone_number(ctx, title, cancel)?),
                     None => Value::Null,
                 };
-                let request = ApiRequest::new(
-                    Method::Patch,
-                    repos_path(ctx, &format!("issues/{number}"))?,
-                )
-                .json(json!({ "milestone": value }));
+                let request =
+                    ApiRequest::new(Method::Patch, repos_path(ctx, &format!("issues/{number}"))?)
+                        .json(json!({ "milestone": value }));
                 Self::send_write(ctx, request, cancel)?;
                 return Ok(saved("Saved"));
             }
@@ -2428,19 +2453,34 @@ impl Suggestion<'_> {
             return None;
         }
         let (start, end) = (start as usize - 1, end as usize);
-        let bare = |line: &str| line.trim_end_matches('\n').trim_end_matches('\r').to_owned();
-        if !self.original.is_empty() && lines[start..end].iter().map(|line| bare(line)).ne(self.original.iter().cloned()) {
+        let bare = |line: &str| {
+            line.trim_end_matches('\n')
+                .trim_end_matches('\r')
+                .to_owned()
+        };
+        if !self.original.is_empty()
+            && lines[start..end]
+                .iter()
+                .map(|line| bare(line))
+                .ne(self.original.iter().cloned())
+        {
             return None;
         }
         let ending = |line: &str| line[bare(line).len()..].to_owned();
         // The last line of the file keeps having (or not having) its newline; the others end
         // as the file's lines there do.
         let last = ending(lines[end - 1]);
-        let between = Some(ending(lines[start])).filter(|ending| !ending.is_empty()).unwrap_or_else(|| "\n".into());
+        let between = Some(ending(lines[start]))
+            .filter(|ending| !ending.is_empty())
+            .unwrap_or_else(|| "\n".into());
         let mut changed = lines[..start].concat();
         for (index, line) in self.replacement.iter().enumerate() {
             changed.push_str(line);
-            changed.push_str(if index + 1 == self.replacement.len() { &last } else { &between });
+            changed.push_str(if index + 1 == self.replacement.len() {
+                &last
+            } else {
+                &between
+            });
         }
         changed.push_str(&lines[end..].concat());
         Some(changed)
@@ -2456,7 +2496,11 @@ fn base64_encode(bytes: &[u8]) -> String {
             | (u32::from(*chunk.get(1).unwrap_or(&0)) << 8)
             | u32::from(*chunk.get(2).unwrap_or(&0));
         for (index, shift) in [18, 12, 6, 0].into_iter().enumerate() {
-            out.push(if index <= chunk.len() { BASE64[(n >> shift) as usize & 63] as char } else { '=' });
+            out.push(if index <= chunk.len() {
+                BASE64[(n >> shift) as usize & 63] as char
+            } else {
+                '='
+            });
         }
     }
     out
@@ -2466,7 +2510,10 @@ fn base64_encode(bytes: &[u8]) -> String {
 fn base64_decode(text: &str) -> Option<Vec<u8>> {
     let mut out = Vec::with_capacity(text.len() * 3 / 4);
     let (mut buffer, mut bits) = (0u32, 0u32);
-    for byte in text.bytes().filter(|byte| !byte.is_ascii_whitespace() && *byte != b'=') {
+    for byte in text
+        .bytes()
+        .filter(|byte| !byte.is_ascii_whitespace() && *byte != b'=')
+    {
         let value = BASE64.iter().position(|known| *known == byte)? as u32;
         buffer = (buffer << 6) | value;
         bits += 6;
@@ -2502,8 +2549,14 @@ mod tests {
             original: &original,
             replacement: &replacement,
         };
-        assert_eq!(suggestion.apply("a\nb\nc\nd\n").as_deref(), Some("a\nB\nC\nD\nd\n"));
-        assert_eq!(suggestion.apply("a\r\nb\r\nc").as_deref(), Some("a\r\nB\r\nC\r\nD"));
+        assert_eq!(
+            suggestion.apply("a\nb\nc\nd\n").as_deref(),
+            Some("a\nB\nC\nD\nd\n")
+        );
+        assert_eq!(
+            suggestion.apply("a\r\nb\r\nc").as_deref(),
+            Some("a\r\nB\r\nC\r\nD")
+        );
         // The lines moved on since the suggestion: nothing is committed.
         assert_eq!(suggestion.apply("a\nb\nX\nd\n"), None);
         assert_eq!(suggestion.apply("a\nb\n"), None);
@@ -2519,7 +2572,11 @@ mod tests {
     fn base64_round_trips_with_the_contents_apis_line_breaks() {
         for text in ["", "a", "ab", "abc", "retry_delay(attempt) → 60\n"] {
             let encoded = base64_encode(text.as_bytes());
-            assert_eq!(base64_decode(&encoded).as_deref(), Some(text.as_bytes()), "{encoded}");
+            assert_eq!(
+                base64_decode(&encoded).as_deref(),
+                Some(text.as_bytes()),
+                "{encoded}"
+            );
         }
         assert_eq!(base64_encode(b"Man"), "TWFu");
         assert_eq!(base64_encode(b"Ma"), "TWE=");

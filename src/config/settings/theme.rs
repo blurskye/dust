@@ -283,7 +283,7 @@ pub struct ThemeConfig {
     /// `"@lsp.type.property" = { link = "@property" }`.
     #[serde(default, deserialize_with = "deserialize_highlights")]
     pub highlights: BTreeMap<String, HighlightDefinition>,
-    /// Dusty Git's semantic role colours (DESIGN.md §4.1).
+    /// Dusty Git's semantic role colours.
     #[serde(default)]
     pub git: GitPalette,
     #[serde(skip)]
@@ -686,7 +686,7 @@ impl ThemeConfig {
     }
 }
 
-/// Optional overrides for Dusty Git's semantic roles (DESIGN.md §4.1), under `[git]` in a
+/// Optional overrides for Dusty Git's semantic roles, under `[git]` in a
 /// theme file. Anything left out comes from the theme's own styles, or for a dark theme the
 /// Dusty Git defaults.
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
@@ -740,7 +740,9 @@ struct GitColours {
 
 impl ThemeConfig {
     fn git_colours(&self) -> &GitColours {
-        self.git_resolved.0.get_or_init(|| self.resolve_git_colours())
+        self.git_resolved
+            .0
+            .get_or_init(|| self.resolve_git_colours())
     }
 
     fn resolve_git_colours(&self) -> GitColours {
@@ -784,7 +786,11 @@ impl ThemeConfig {
             hex(0xee, 0xd4, 0x9f),
             styles.git_sign_changed.foreground,
         );
-        let focus = pick(palette.focus, hex(0x6b, 0xda, 0xd5), styles.accent.foreground);
+        let focus = pick(
+            palette.focus,
+            hex(0x6b, 0xda, 0xd5),
+            styles.accent.foreground,
+        );
         let reference = pick(palette.reference, hex(0xc6, 0xa0, 0xf6), keyword);
         GitColours {
             canvas,
@@ -795,18 +801,34 @@ impl ThemeConfig {
                 hex(0xdc, 0xe4, 0xf2),
                 styles.default.foreground,
             ),
-            muted: pick(palette.muted, hex(0x9a, 0xa8, 0xc1), styles.muted.foreground),
+            muted: pick(
+                palette.muted,
+                hex(0x9a, 0xa8, 0xc1),
+                styles.muted.foreground,
+            ),
             focus,
             link: pick(palette.link, hex(0x7a, 0xa2, 0xf7), function),
             added,
             removed,
             modified,
-            untracked: pick(palette.untracked, hex(0xf5, 0xa9, 0x7f), styles.warning.foreground),
+            untracked: pick(
+                palette.untracked,
+                hex(0xf5, 0xa9, 0x7f),
+                styles.warning.foreground,
+            ),
             reference,
             tag: pick(palette.tag, hex(0xee, 0xd4, 0x9f), number),
             hash: pick(palette.hash, hex(0xf0, 0xc6, 0x74), number),
-            author: pick(palette.author, hex(0xb8, 0xc0, 0xe0), styles.default.foreground),
-            conflict: pick(palette.conflict, hex(0xed, 0x87, 0x96), styles.error.foreground),
+            author: pick(
+                palette.author,
+                hex(0xb8, 0xc0, 0xe0),
+                styles.default.foreground,
+            ),
+            conflict: pick(
+                palette.conflict,
+                hex(0xed, 0x87, 0x96),
+                styles.error.foreground,
+            ),
             border: pick(
                 palette.border,
                 hex(0x3b, 0x45, 0x5c),
@@ -843,9 +865,11 @@ impl ThemeConfig {
             GitRole::Border => colours.border,
             GitRole::OnFocus => colours.pane,
             GitRole::Lane(index) => colours.lanes[usize::from(index) % colours.lanes.len()],
-            GitRole::Label(red, green, blue) => {
-                readable(ThemeColor::Rgb(red, green, blue), colours.text, colours.pane)
-            }
+            GitRole::Label(red, green, blue) => readable(
+                ThemeColor::Rgb(red, green, blue),
+                colours.text,
+                colours.pane,
+            ),
         }
     }
 
@@ -898,7 +922,8 @@ impl ThemeConfig {
         if surface == GitSurface::ChipActive {
             // Text on the filled focus chip: the pane colour, or the text colour where the
             // theme's accent is too pale for it.
-            foreground = if contrast(colours.pane, background) >= contrast(colours.text, background) {
+            foreground = if contrast(colours.pane, background) >= contrast(colours.text, background)
+            {
                 colours.pane
             } else {
                 colours.text
@@ -907,13 +932,23 @@ impl ThemeConfig {
         match role {
             // A forge label's own colour, made readable on the chip it is drawn on.
             GitRole::Label(red, green, blue) => {
-                foreground = legible(readable(ThemeColor::Rgb(red, green, blue), colours.text, background), background, 4.5);
+                foreground = legible(
+                    readable(ThemeColor::Rgb(red, green, blue), colours.text, background),
+                    background,
+                    4.5,
+                );
             }
             // Lines and graph lanes are not text.
             GitRole::Border | GitRole::Lane(_) => {}
             // Any other text keeps at least 3:1 on its surface in every theme (a pale
             // theme's tinted chip or band never washes its words out).
-            _ => foreground = legible(mix_until(foreground, colours.text, background, 3.0), background, 3.0),
+            _ => {
+                foreground = legible(
+                    mix_until(foreground, colours.text, background, 3.0),
+                    background,
+                    3.0,
+                )
+            }
         }
         let attributes = match emphasis {
             Emphasis::None => Vec::new(),
@@ -988,7 +1023,11 @@ fn readable(colour: ThemeColor, text: ThemeColor, background: ThemeColor) -> The
         return colour;
     };
     let contrast = |value: f64| {
-        let (light, dark) = if value > under { (value, under) } else { (under, value) };
+        let (light, dark) = if value > under {
+            (value, under)
+        } else {
+            (under, value)
+        };
         (light + 0.05) / (dark + 0.05)
     };
     for percent in (0..=100).step_by(10) {
@@ -1008,12 +1047,21 @@ fn contrast(left: ThemeColor, right: ThemeColor) -> f64 {
     let (Some(left), Some(right)) = (luminance(left), luminance(right)) else {
         return 21.0;
     };
-    let (light, dark) = if left > right { (left, right) } else { (right, left) };
+    let (light, dark) = if left > right {
+        (left, right)
+    } else {
+        (right, left)
+    };
     (light + 0.05) / (dark + 0.05)
 }
 
 /// `colour` mixed towards `text` until it has `minimum` contrast on `background`.
-fn mix_until(colour: ThemeColor, text: ThemeColor, background: ThemeColor, minimum: f64) -> ThemeColor {
+fn mix_until(
+    colour: ThemeColor,
+    text: ThemeColor,
+    background: ThemeColor,
+    minimum: f64,
+) -> ThemeColor {
     if contrast(colour, background) >= minimum {
         return colour;
     }
@@ -1031,7 +1079,11 @@ fn legible(colour: ThemeColor, background: ThemeColor, minimum: f64) -> ThemeCol
         return colour;
     }
     let (black, white) = (ThemeColor::Rgb(0, 0, 0), ThemeColor::Rgb(255, 255, 255));
-    if contrast(black, background) >= contrast(white, background) { black } else { white }
+    if contrast(black, background) >= contrast(white, background) {
+        black
+    } else {
+        white
+    }
 }
 
 // sRGB relative luminance, as defined by WCAG's contrast calculation.

@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 /// Git jobs in flight across the process; the forge's cache-warming worker waits while this
-/// is non-zero so it never competes with the user's Git work (FORGE.md §7.2).
+/// is non-zero so it never competes with the user's Git work.
 static RUNNING: AtomicUsize = AtomicUsize::new(0);
 
 pub(super) fn running() -> usize {
@@ -127,7 +127,10 @@ impl Jobs {
 
     /// The last line a running write printed on stderr (Git's progress), if any.
     pub fn write_progress(&self) -> Option<String> {
-        let pending = self.pending.values().find(|pending| pending.request == Request::Write)?;
+        let pending = self
+            .pending
+            .values()
+            .find(|pending| pending.request == Request::Write)?;
         let text = String::from_utf8_lossy(&pending.stderr);
         text.split(['\r', '\n'])
             .map(str::trim)
@@ -302,7 +305,11 @@ impl Jobs {
 /// How much of a request's output is kept. History may be read whole (`End` on a 50,000-commit
 /// log is about 6 MiB); everything else is a preview-sized read.
 fn output_limit(request: Request) -> usize {
-    if request == Request::History { 64 << 20 } else { 2 << 20 }
+    if request == Request::History {
+        64 << 20
+    } else {
+        2 << 20
+    }
 }
 
 #[cfg(test)]

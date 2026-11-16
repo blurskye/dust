@@ -86,7 +86,9 @@ fn wait(screen: &mut GitScreen, mut ready: impl FnMut(&mut GitScreen) -> bool) {
 }
 fn open(root: &Path, source: &str) -> GitScreen {
     let mut screen = GitScreen::open(root).unwrap();
-    wait(&mut screen, |screen| view(screen).contains(source) && screen.panes_sized());
+    wait(&mut screen, |screen| {
+        view(screen).contains(source) && screen.panes_sized()
+    });
     control(&mut screen, KeyCode::Char('l'));
     screen
 }
@@ -157,10 +159,9 @@ fn borders(frame: &Frame) -> Vec<(u16, u16, String, bool)> {
     // Source frames focus the reader: its border carries the accent.
     let reader = reader_x(frame.grid.width(), frame.grid.height());
     assert!(
-        result.iter().any(|(x, y, symbol, focused)| *x == reader
-            && *y == 1
-            && symbol == "╭"
-            && *focused),
+        result
+            .iter()
+            .any(|(x, y, symbol, focused)| *x == reader && *y == 1 && symbol == "╭" && *focused),
         "focused reader border"
     );
     result

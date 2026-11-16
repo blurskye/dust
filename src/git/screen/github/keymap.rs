@@ -37,7 +37,11 @@ pub(in crate::git::screen) enum Preset {
 
 impl Preset {
     pub(in crate::git::screen) fn from_name(name: &str) -> Self {
-        if name.eq_ignore_ascii_case("lazygit") { Self::Lazygit } else { Self::Dusty }
+        if name.eq_ignore_ascii_case("lazygit") {
+            Self::Lazygit
+        } else {
+            Self::Dusty
+        }
     }
 }
 
@@ -115,14 +119,20 @@ impl Keys {
     }
 
     pub(in crate::git::screen) fn chord(self, named: Named) -> Option<Chord> {
-        self.entries().find(|(entry, _)| *entry == named).map(|(_, chord)| chord)
+        self.entries()
+            .find(|(entry, _)| *entry == named)
+            .map(|(_, chord)| chord)
     }
 
     /// As the footer shows it: `Space e`, `, e`.
     pub(in crate::git::screen) fn keys(self, named: Named) -> Option<String> {
         let chord = self.chord(named)?;
         let key = name(chord.key);
-        Some(if chord.leader { format!("{} {key}", name(self.leader())) } else { key })
+        Some(if chord.leader {
+            format!("{} {key}", name(self.leader()))
+        } else {
+            key
+        })
     }
 
     /// The chords the pending leader can finish, for the footer: `(e, sidebar)`.
@@ -340,11 +350,13 @@ const ENTER: To = To::Key(Key::Enter);
 
 /// lazygit's global keys that differ from Dusty Git's. A panel's own row for the same key
 /// wins, as in lazygit (`R` renames a branch and rewords a commit).
-pub(in crate::git::screen) const LAZYGIT_GLOBAL: &[Binding] =
-    &[(c('R'), to('r'), "refresh"), (Key::Ctrl('z'), to('Z'), "redo")];
+pub(in crate::git::screen) const LAZYGIT_GLOBAL: &[Binding] = &[
+    (c('R'), to('r'), "refresh"),
+    (Key::Ctrl('z'), to('Z'), "redo"),
+];
 
 /// lazygit's keys per panel (lazygit's `docs/keybindings/Keybindings_en.md`), for the
-/// actions Dusty Git has. A key not listed keeps Dusty Git's meaning (DESIGN.md §5.10).
+/// actions Dusty Git has. A key not listed keeps Dusty Git's meaning.
 pub(in crate::git::screen) fn lazygit_panel(panel: Panel) -> &'static [Binding] {
     match panel {
         Panel::Files => FILES,
@@ -386,7 +398,11 @@ const COMMITS: &[Binding] = &[
     (Key::Ctrl('k'), to('K'), "move commit up one"),
 ];
 const REFLOG: &[Binding] = &[(c(' '), to('o'), "checkout")];
-const STASH: &[Binding] = &[(c(' '), to('a'), "apply"), (c('g'), to('p'), "pop"), (c('p'), To::Pull, "pull")];
+const STASH: &[Binding] = &[
+    (c(' '), to('a'), "apply"),
+    (c('g'), to('p'), "pop"),
+    (c('p'), To::Pull, "pull"),
+];
 const STAGING: &[Binding] = &[
     (c(' '), to('a'), "stage"),
     (c('v'), to('V'), "range select"),
@@ -489,9 +505,14 @@ impl Keys {
     /// reaches it. `None` when the preset leaves the action out of that panel.
     pub(in crate::git::screen) fn shown(self, panel: Panel, key: Key) -> Option<Key> {
         let bindings = self.bindings(panel);
-        let alias = |pressed: &Key| lazygit_aliases(panel).iter().any(|(other, ..)| other == pressed);
-        if let Some((pressed, ..)) =
-            bindings.iter().find(|(pressed, to, _)| *to == To::Key(key) && !alias(pressed))
+        let alias = |pressed: &Key| {
+            lazygit_aliases(panel)
+                .iter()
+                .any(|(other, ..)| other == pressed)
+        };
+        if let Some((pressed, ..)) = bindings
+            .iter()
+            .find(|(pressed, to, _)| *to == To::Key(key) && !alias(pressed))
         {
             return Some(*pressed);
         }
@@ -529,10 +550,10 @@ impl Keys {
 
     /// A list of `(keys, label)` hints in the keys in force, without the ones the preset
     /// leaves out.
-    pub(in crate::git::screen) fn show_all<'a, L: Copy>(
+    pub(in crate::git::screen) fn show_all<L: Copy>(
         self,
         panel: Panel,
-        hints: &[(&'a str, L)],
+        hints: &[(&str, L)],
     ) -> Vec<(String, L)> {
         hints
             .iter()
@@ -570,7 +591,10 @@ mod tests {
         assert_eq!(workspace.chord_key(&key(KeyCode::Char('e'))), Step::Pass);
         assert_eq!(workspace.chord_key(&key(KeyCode::Char(' '))), Step::Wait);
         assert!(workspace.leader_pending());
-        assert_eq!(workspace.chord_key(&key(KeyCode::Char('e'))), Step::Run(Named::ToggleSidebar));
+        assert_eq!(
+            workspace.chord_key(&key(KeyCode::Char('e'))),
+            Step::Run(Named::ToggleSidebar)
+        );
         assert!(!workspace.leader_pending());
         assert_eq!(workspace.chord_key(&key(KeyCode::Char(' '))), Step::Wait);
         assert_eq!(workspace.chord_key(&key(KeyCode::Char('j'))), Step::Cancel);
@@ -592,9 +616,15 @@ mod tests {
         assert_eq!(lazy.keys(Named::Toggle).as_deref(), Some("Space"));
         let mut workspace = Workspace::new(std::env::temp_dir().join("dusty-keymap-no-repo"));
         workspace.set_keys(lazy);
-        assert_eq!(workspace.chord_key(&key(KeyCode::Char(' '))), Step::Run(Named::Toggle));
+        assert_eq!(
+            workspace.chord_key(&key(KeyCode::Char(' '))),
+            Step::Run(Named::Toggle)
+        );
         assert_eq!(workspace.chord_key(&key(KeyCode::Char(','))), Step::Wait);
-        assert_eq!(workspace.chord_key(&key(KeyCode::Char('e'))), Step::Run(Named::ToggleSidebar));
+        assert_eq!(
+            workspace.chord_key(&key(KeyCode::Char('e'))),
+            Step::Run(Named::ToggleSidebar)
+        );
     }
 
     fn lazygit() -> Keys {
@@ -641,7 +671,11 @@ mod tests {
             (Commits, Key::Ctrl('z'), To::Key(k('Z'))),
         ];
         for (panel, pressed, action) in expected {
-            assert_eq!(keys.translate(*panel, *pressed), Some(*action), "{panel:?} {pressed:?}");
+            assert_eq!(
+                keys.translate(*panel, *pressed),
+                Some(*action),
+                "{panel:?} {pressed:?}"
+            );
         }
         // Keys lazygit shares with Dusty Git, or that it has no word for, stay Dusty Git's.
         for (panel, pressed) in [
@@ -673,7 +707,11 @@ mod tests {
             (Remotes, 'f'),
             (Tags, 'd'),
         ] {
-            assert_eq!(keys.translate(panel, k(pressed)), None, "{panel:?} {pressed}");
+            assert_eq!(
+                keys.translate(panel, k(pressed)),
+                None,
+                "{panel:?} {pressed}"
+            );
         }
         // The default keys translate nothing.
         let dusty = Keys::default();
@@ -692,7 +730,9 @@ mod tests {
             let bindings = keys.bindings(panel);
             for (at, (pressed, ..)) in bindings.iter().enumerate() {
                 assert!(
-                    !bindings[at + 1..].iter().any(|(other, ..)| other == pressed),
+                    !bindings[at + 1..]
+                        .iter()
+                        .any(|(other, ..)| other == pressed),
                     "{panel:?} binds {pressed:?} twice"
                 );
             }
@@ -714,7 +754,11 @@ mod tests {
                     }
                     Some(shown) => {
                         let runs = keys.translate(panel, shown).unwrap_or(To::Key(shown));
-                        assert_eq!(runs, To::Key(key), "{panel:?}: {shown:?} should run {key:?}");
+                        assert_eq!(
+                            runs,
+                            To::Key(key),
+                            "{panel:?}: {shown:?} should run {key:?}"
+                        );
                     }
                     None => assert!(
                         shadowed.contains(&(key, None)),
@@ -758,9 +802,18 @@ mod tests {
         assert_eq!(keys.show(Panel::Commits, "J K").as_deref(), Some("C-j C-k"));
         assert_eq!(keys.show(Panel::Files, "z Z").as_deref(), Some("z C-z"));
         assert_eq!(keys.show(Panel::Stash, "p").as_deref(), Some("g"));
-        assert_eq!(keys.extras(Panel::Stash), vec![("p".to_owned(), "Pull (confirm)")]);
-        assert_eq!(keys.show(Panel::Files, "C-h/j/k/l").as_deref(), Some("C-h/j/k/l"));
-        assert_eq!(keys.extras(Panel::Files), vec![("s".to_owned(), "Stash all changes")]);
+        assert_eq!(
+            keys.extras(Panel::Stash),
+            vec![("p".to_owned(), "Pull (confirm)")]
+        );
+        assert_eq!(
+            keys.show(Panel::Files, "C-h/j/k/l").as_deref(),
+            Some("C-h/j/k/l")
+        );
+        assert_eq!(
+            keys.extras(Panel::Files),
+            vec![("s".to_owned(), "Stash all changes")]
+        );
         let dusty = Keys::default();
         assert_eq!(dusty.show(Panel::Files, "s u -").as_deref(), Some("s u -"));
         assert!(dusty.extras(Panel::Files).is_empty());

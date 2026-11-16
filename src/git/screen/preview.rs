@@ -326,7 +326,7 @@ impl Preview {
         Some((hunk, cursor.checked_sub(header + 1)?))
     }
 
-    /// Where `e` opens the editor (DESIGN.md §5.3): the file of the row at `cursor` and its
+    /// Where `e` opens the editor: the file of the row at `cursor` and its
     /// line in the working copy, 1-based. A deleted line opens at the line that took its place,
     /// a heading at the first line below it.
     pub fn location(&self, cursor: usize) -> Option<(PathBuf, u32)> {
@@ -338,8 +338,19 @@ impl Preview {
         let same = |row: &&PreviewRow| row.path.as_ref() == Some(&path);
         let line = row
             .new
-            .or_else(|| self.rows[cursor..].iter().filter(same).find_map(|row| row.new))
-            .or_else(|| self.rows[..cursor].iter().rev().filter(same).find_map(|row| row.new))
+            .or_else(|| {
+                self.rows[cursor..]
+                    .iter()
+                    .filter(same)
+                    .find_map(|row| row.new)
+            })
+            .or_else(|| {
+                self.rows[..cursor]
+                    .iter()
+                    .rev()
+                    .filter(same)
+                    .find_map(|row| row.new)
+            })
             .unwrap_or(1);
         Some((path, line))
     }
@@ -547,8 +558,14 @@ mod tests {
             "diff --git a/a.rs b/a.rs\n--- a/a.rs\n+++ b/a.rs\n@@ -4,3 +4,3 @@\n keep\n-old\n+new\n tail\n",
             None,
         );
-        let at = |text: &str| preview.rows.iter().position(|row| row.text.ends_with(text)).unwrap();
-        let line = |index: usize| preview.location(index).map(|(path, line)| (path, line));
+        let at = |text: &str| {
+            preview
+                .rows
+                .iter()
+                .position(|row| row.text.ends_with(text))
+                .unwrap()
+        };
+        let line = |index: usize| preview.location(index);
         let a = PathBuf::from("a.rs");
         assert_eq!(line(at("keep")), Some((a.clone(), 4)));
         assert_eq!(line(at("old")), Some((a.clone(), 5)));

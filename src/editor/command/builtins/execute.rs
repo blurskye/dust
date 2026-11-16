@@ -348,9 +348,9 @@ pub(super) fn execute_builtin<E>(
         }
         "mode.visual_reselect" => {
             transaction.undo_policy = UndoPolicy::Ignore;
-            let last = buffer.last_visual.ok_or_else(|| {
-                CommandError::Unavailable("no previous Visual selection".into())
-            })?;
+            let last = buffer
+                .last_visual
+                .ok_or_else(|| CommandError::Unavailable("no previous Visual selection".into()))?;
             let anchor = clamp_offset(&buffer.text, last.anchor);
             let head = clamp_offset(&buffer.text, last.head);
             let mode = match last.kind {

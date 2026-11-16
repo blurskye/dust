@@ -1,4 +1,4 @@
-//! The screen's forge lanes (FORGE.md §7.5): a few workers so a slow read on one tab never
+//! The screen's forge lanes: a few workers so a slow read on one tab never
 //! holds up another tab's read. Writes stay one at a time and alone: a write starts only when
 //! every lane is idle, and no read starts while one runs. Identical reads are joined below
 //! (`forge::inflight`) and by key here (`Workspace::pending`).
@@ -69,7 +69,10 @@ impl Lanes {
     }
 
     pub fn requests(&self) -> impl Iterator<Item = &Request> {
-        self.running.iter().flatten().map(|running| &running.request)
+        self.running
+            .iter()
+            .flatten()
+            .map(|running| &running.request)
     }
 
     pub fn contains(&self, key: &Key) -> bool {
@@ -91,6 +94,7 @@ impl Lanes {
     }
 
     /// Start `request` on a free lane; a `background` read's requests yield to the others'.
+    #[allow(clippy::result_large_err)] // the refused request goes back to its queue whole
     pub fn start(
         &mut self,
         root: PathBuf,
@@ -100,7 +104,8 @@ impl Lanes {
         background: bool,
         kind: Option<crate::forge::model::ItemKind>,
     ) -> Result<(), (Request, String)> {
-        let Some(lane) = (0..self.count()).find(|&lane| self.running[lane].is_none() && !self.jobs[lane].busy())
+        let Some(lane) =
+            (0..self.count()).find(|&lane| self.running[lane].is_none() && !self.jobs[lane].busy())
         else {
             return Err((request, "a forge request is already running".into()));
         };
@@ -121,7 +126,9 @@ impl Lanes {
                 background,
                 kind,
             ),
-            Op::Write(target, write) => self.jobs[lane].write(root, id, target.clone(), write.clone()),
+            Op::Write(target, write) => {
+                self.jobs[lane].write(root, id, target.clone(), write.clone())
+            }
         };
         match started {
             Ok(()) => {
@@ -234,7 +241,11 @@ mod tests {
     }
 
     fn running(workspace: &Workspace) -> Vec<Key> {
-        workspace.active.requests().map(|request| request.key.clone()).collect()
+        workspace
+            .active
+            .requests()
+            .map(|request| request.key.clone())
+            .collect()
     }
 
     #[test]
@@ -289,7 +300,10 @@ mod tests {
             workspace.active.finish(&started[0]);
             order.push(started[0].clone());
         }
-        assert_eq!(order, vec![Key::Item(1, 7), Key::Timeline(7), Key::Repository]);
+        assert_eq!(
+            order,
+            vec![Key::Item(1, 7), Key::Timeline(7), Key::Repository]
+        );
     }
 
     #[test]
@@ -309,7 +323,11 @@ mod tests {
         workspace.reconcile_reads();
         assert!(running(&workspace).is_empty());
         assert_eq!(
-            workspace.queue.iter().map(|request| request.key.clone()).collect::<Vec<_>>(),
+            workspace
+                .queue
+                .iter()
+                .map(|request| request.key.clone())
+                .collect::<Vec<_>>(),
             vec![Key::Item(1, 8)]
         );
         workspace.start_reads();
@@ -329,17 +347,31 @@ mod tests {
         assert_eq!(running(&workspace), vec![Key::Item(2, 1)]);
         workspace.active.finish(&Key::Item(2, 1));
         workspace.start_reads();
-        assert_eq!(running(&workspace), vec![Key::Write], "the first write, alone");
+        assert_eq!(
+            running(&workspace),
+            vec![Key::Write],
+            "the first write, alone"
+        );
         assert_eq!(workspace.queue.len(), 2);
         workspace.start_reads();
-        assert_eq!(running(&workspace).len(), 1, "the second write waits for the first");
+        assert_eq!(
+            running(&workspace).len(),
+            1,
+            "the second write waits for the first"
+        );
         let first = workspace.active.finish(&Key::Write).unwrap();
-        assert!(matches!(first.op, Op::Write(_, Write::Comment { number: 1, .. })));
+        assert!(matches!(
+            first.op,
+            Op::Write(_, Write::Comment { number: 1, .. })
+        ));
         workspace.start_reads();
         assert_eq!(running(&workspace), vec![Key::Write]);
         assert!(workspace.active.writing());
         let second = workspace.active.finish(&Key::Write).unwrap();
-        assert!(matches!(second.op, Op::Write(_, Write::Comment { number: 2, .. })));
+        assert!(matches!(
+            second.op,
+            Op::Write(_, Write::Comment { number: 2, .. })
+        ));
         workspace.start_reads();
         assert_eq!(running(&workspace), vec![Key::Item(2, 2)]);
     }

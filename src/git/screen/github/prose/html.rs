@@ -89,23 +89,41 @@ mod tests {
 
     #[test]
     fn allowed_tags_read_as_text_and_others_keep_their_text() {
-        assert_eq!(inline("one<br>two<br/>three<BR />four"), "one\ntwo\nthree\nfour");
+        assert_eq!(
+            inline("one<br>two<br/>three<BR />four"),
+            "one\ntwo\nthree\nfour"
+        );
         assert_eq!(inline("H<sub>2</sub>O and x<sup>2</sup>"), "H2O and x2");
         assert_eq!(
             inline(r#"<img src="https://x/y.png" alt="Build status"> and <img src=x.png>"#),
             "[image: Build status] and [image]"
         );
         assert_eq!(inline("<img alt='logo' src='a.png'/>"), "[image: logo]");
-        assert_eq!(inline(r#"<a href="https://x">the docs</a>, <span class="x">kept</span>"#), "the docs, kept");
+        assert_eq!(
+            inline(r#"<a href="https://x">the docs</a>, <span class="x">kept</span>"#),
+            "the docs, kept"
+        );
         assert_eq!(inline("<kbd>Ctrl</kbd>+<kbd>C</kbd>"), "Ctrl+C");
     }
 
     #[test]
     fn code_autolinks_and_comparisons_stay() {
-        assert_eq!(inline("`Vec<String>` and ``a <b> `c` ``"), "`Vec<String>` and ``a <b> `c` ``");
-        assert_eq!(inline("    let x: Vec<u8> = vec![];"), "    let x: Vec<u8> = vec![];");
-        assert_eq!(inline("see <https://orbit.example> if a < b"), "see <https://orbit.example> if a < b");
-        assert_eq!(inline("an unmatched ` backtick <b>bold</b>"), "an unmatched ` backtick bold");
+        assert_eq!(
+            inline("`Vec<String>` and ``a <b> `c` ``"),
+            "`Vec<String>` and ``a <b> `c` ``"
+        );
+        assert_eq!(
+            inline("    let x: Vec<u8> = vec![];"),
+            "    let x: Vec<u8> = vec![];"
+        );
+        assert_eq!(
+            inline("see <https://orbit.example> if a < b"),
+            "see <https://orbit.example> if a < b"
+        );
+        assert_eq!(
+            inline("an unmatched ` backtick <b>bold</b>"),
+            "an unmatched ` backtick bold"
+        );
     }
 
     #[test]

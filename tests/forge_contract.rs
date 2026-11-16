@@ -1,5 +1,5 @@
 #![cfg(unix)]
-//! The provider contract (FORGE.md §8.3): one scenario suite per provider, generated for each
+//! The provider contract: one scenario suite per provider, generated for each
 //! transport by `contract!`, against the stateful fake forge. Test names are
 //! `<provider>_<transport>::<scenario>`; `<provider>_transports_agree` checks that direct HTTP and
 //! CLI passthrough produce the same domain values and the same logical requests.

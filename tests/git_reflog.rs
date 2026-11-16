@@ -128,7 +128,10 @@ fn wait(screen: &mut GitScreen, mut ready: impl FnMut(&mut GitScreen) -> bool) {
 }
 fn selected(screen: &mut GitScreen) -> String {
     let frame = screen.frame(190, 48);
-    let (x, y, _) = frame.cursor.expect("native list cursor");
+    // A pane still loading shows a note and no cursor: nothing is selected yet.
+    let Some((x, y, _)) = frame.cursor else {
+        return String::new();
+    };
     assert!(x < 52, "expected sidebar focus, got cursor {x},{y}");
     frame.grid.row_text(y).chars().take(52).collect()
 }
@@ -679,10 +682,7 @@ fn reflog_keys_help_history_files_and_native_cursor_preserve_64_100_190_pane_geo
         assert_eq!(screen.frame(width, height).cursor, before.cursor);
         assert_eq!(key(&mut screen, KeyCode::Enter), ScreenOutcome::Continue);
         let historical = view_at(&mut screen, width, height);
-        assert!(
-            historical.contains("Commit files"),
-            "{historical}"
-        );
+        assert!(historical.contains("Commit files"), "{historical}");
         if stacked {
             assert_eq!(pane_tops(&mut screen, width, height), positions);
         }

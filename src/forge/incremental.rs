@@ -1,4 +1,4 @@
-//! Incremental refreshes (FORGE.md §7.5): a list the provider can filter by "updated since"
+//! Incremental refreshes: a list the provider can filter by "updated since"
 //! (GitHub notifications `since`, GitLab pipelines `updated_after`, Gitea notifications and
 //! issues `since`) is refreshed by asking only for what changed after the cached copy was
 //! fetched, then merging that into the cached copy. Every tenth refresh of the same list is a

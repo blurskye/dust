@@ -1,5 +1,5 @@
 #![cfg(unix)]
-//! Forge discovery (FORGE.md §2.3, F2): config → `DUSTY_FORGE_PROVIDER` → known hosts →
+//! Forge discovery: config → `DUSTY_FORGE_PROVIDER` → known hosts →
 //! `hosts.json` → CLI credential stores → unauthenticated version probes → "Unknown forge".
 //! An unknown host is only claimed when a CLI holds a credential for it; probe results are kept
 //! in `hosts.json` for 7 days and that file never holds a token. Everything runs against the
@@ -82,8 +82,12 @@ impl World {
     }
 
     fn inputs(&self, config: &str, env: &[(&str, &str)], stores: Stores) -> DetectInputs {
-        let mut pairs: Vec<(String, String)> = vec![("DUSTY_FORGE_ORIGIN".into(), self.server.origin())];
-        pairs.extend(env.iter().map(|(key, value)| (key.to_string(), value.to_string())));
+        let mut pairs: Vec<(String, String)> =
+            vec![("DUSTY_FORGE_ORIGIN".into(), self.server.origin())];
+        pairs.extend(
+            env.iter()
+                .map(|(key, value)| (key.to_string(), value.to_string())),
+        );
         DetectInputs {
             config: ForgeConfig::parse(config),
             env: Env::from_pairs(pairs),
@@ -122,27 +126,61 @@ fn config_beats_env_beats_known_hosts() {
     let config = "[forge.hosts.\"git.corp.example:8443\"]\nprovider = \"gitlab\"\napi_base = \"https://git.corp.example:8443/gitlab/api/v4\"\n[forge.hosts.\"gitlab.com\"]\nprovider = \"github\"\n";
     let inputs = world.inputs(config, &[], Stores::default());
     let corp = world.detect("git.corp.example:8443", &inputs).unwrap();
-    assert_eq!((corp.kind, &corp.source), (ProviderKind::GitLab, &DetectSource::Config));
-    assert_eq!(corp.endpoints.api_base, "https://git.corp.example:8443/gitlab/api/v4");
-    assert_eq!(corp.endpoints.graphql.as_deref(), Some("https://git.corp.example:8443/gitlab/api/graphql"));
+    assert_eq!(
+        (corp.kind, &corp.source),
+        (ProviderKind::GitLab, &DetectSource::Config)
+    );
+    assert_eq!(
+        corp.endpoints.api_base,
+        "https://git.corp.example:8443/gitlab/api/v4"
+    );
+    assert_eq!(
+        corp.endpoints.graphql.as_deref(),
+        Some("https://git.corp.example:8443/gitlab/api/graphql")
+    );
     assert_eq!(corp.endpoints.web_base, "https://git.corp.example:8443");
     assert_eq!(corp.cli, Some(Cli::Glab));
     // Config overrides even a well-known host.
-    assert_eq!(world.detect("gitlab.com", &inputs).unwrap().kind, ProviderKind::GitHub);
+    assert_eq!(
+        world.detect("gitlab.com", &inputs).unwrap().kind,
+        ProviderKind::GitHub
+    );
 
     // DUSTY_FORGE_PROVIDER: any host when DUSTY_FORGE_HOST is unset, else only that one.
-    let env = world.inputs("", &[("DUSTY_FORGE_PROVIDER", "forgejo")], Stores::default());
-    let any = world.detect("code.internal.test", &env).unwrap();
-    assert_eq!((any.kind, &any.source), (ProviderKind::Forgejo, &DetectSource::Env));
-    assert_eq!(any.endpoints.graphql, None);
-    assert!(any.endpoints.api_base.ends_with("/code.internal.test/api/v1"), "{}", any.endpoints.api_base);
-    let scoped = world.inputs(
+    let env = world.inputs(
         "",
-        &[("DUSTY_FORGE_PROVIDER", "gitea"), ("DUSTY_FORGE_HOST", "gitea.internal.test")],
+        &[("DUSTY_FORGE_PROVIDER", "forgejo")],
         Stores::default(),
     );
-    assert_eq!(world.detect("gitea.internal.test", &scoped).unwrap().kind, ProviderKind::Gitea);
-    assert_eq!(world.detect("github.com", &scoped).unwrap().source, DetectSource::KnownHost);
+    let any = world.detect("code.internal.test", &env).unwrap();
+    assert_eq!(
+        (any.kind, &any.source),
+        (ProviderKind::Forgejo, &DetectSource::Env)
+    );
+    assert_eq!(any.endpoints.graphql, None);
+    assert!(
+        any.endpoints
+            .api_base
+            .ends_with("/code.internal.test/api/v1"),
+        "{}",
+        any.endpoints.api_base
+    );
+    let scoped = world.inputs(
+        "",
+        &[
+            ("DUSTY_FORGE_PROVIDER", "gitea"),
+            ("DUSTY_FORGE_HOST", "gitea.internal.test"),
+        ],
+        Stores::default(),
+    );
+    assert_eq!(
+        world.detect("gitea.internal.test", &scoped).unwrap().kind,
+        ProviderKind::Gitea
+    );
+    assert_eq!(
+        world.detect("github.com", &scoped).unwrap().source,
+        DetectSource::KnownHost
+    );
 
     // Well-known hosts need no probe and no credential.
     let plain = world.inputs("", &[], Stores::default());
@@ -155,10 +193,21 @@ fn config_beats_env_beats_known_hosts() {
         ("gitea.com", ProviderKind::Gitea),
     ] {
         let found = world.detect(host, &plain).unwrap();
-        assert_eq!((found.kind, &found.source), (kind, &DetectSource::KnownHost), "{host}");
+        assert_eq!(
+            (found.kind, &found.source),
+            (kind, &DetectSource::KnownHost),
+            "{host}"
+        );
     }
-    assert_eq!(world.probes(), 0, "no probe for configured, env or known hosts");
-    assert!(!world.hosts_file().exists(), "nothing to cache for them either");
+    assert_eq!(
+        world.probes(),
+        0,
+        "no probe for configured, env or known hosts"
+    );
+    assert!(
+        !world.hosts_file().exists(),
+        "nothing to cache for them either"
+    );
 }
 
 #[test]
@@ -185,8 +234,16 @@ fn an_unknown_host_is_claimed_only_through_a_cli_credential() {
 
     let gitlab = world.detect("gitlab.corp.test", &inputs).unwrap();
     assert_eq!(gitlab.kind, ProviderKind::GitLab);
-    assert_eq!(gitlab.source, DetectSource::Credential(CredentialSource::GlabConfig.to_string()));
-    assert!(gitlab.endpoints.api_base.ends_with("/gitlab.corp.test/api/v4"));
+    assert_eq!(
+        gitlab.source,
+        DetectSource::Credential(CredentialSource::GlabConfig.to_string())
+    );
+    assert!(
+        gitlab
+            .endpoints
+            .api_base
+            .ends_with("/gitlab.corp.test/api/v4")
+    );
 
     let forgejo = world.detect("fj.corp.test", &inputs).unwrap();
     assert_eq!(forgejo.kind, ProviderKind::Forgejo);
@@ -196,10 +253,19 @@ fn an_unknown_host_is_claimed_only_through_a_cli_credential() {
     let gitea = world.detect("tea.corp.test", &inputs).unwrap();
     assert_eq!(gitea.kind, ProviderKind::Gitea);
     assert_eq!(gitea.login.as_deref(), Some("work"));
-    assert_eq!(gitea.source, DetectSource::Credential("tea login \"work\"".into()));
+    assert_eq!(
+        gitea.source,
+        DetectSource::Credential("tea login \"work\"".into())
+    );
 
     let ghes = world.detect("ghe.corp.test", &inputs).unwrap();
-    assert_eq!((ghes.kind, &ghes.source), (ProviderKind::GitHub, &DetectSource::Credential("gh token".into())));
+    assert_eq!(
+        (ghes.kind, &ghes.source),
+        (
+            ProviderKind::GitHub,
+            &DetectSource::Credential("gh token".into())
+        )
+    );
 
     // No CLI holds anything for this host and it answers no probe: not GitHub by default.
     let error = world.detect("nobody.corp.test", &inputs).unwrap_err();
@@ -221,7 +287,11 @@ fn an_unknown_host_is_claimed_only_through_a_cli_credential() {
         .iter()
         .filter_map(|request| request["path"].as_str().map(str::to_owned))
         .collect();
-    assert!(!probed.is_empty(), "the unknown host was probed: {}", world.state()["requests"]);
+    assert!(
+        !probed.is_empty(),
+        "the unknown host was probed: {}",
+        world.state()["requests"]
+    );
     assert!(
         world
             .requests_for("nobody.corp.test")
@@ -234,11 +304,16 @@ fn an_unknown_host_is_claimed_only_through_a_cli_credential() {
 
 #[test]
 fn glab_auth_status_claims_a_host_without_a_config_file() {
-    let world = World::new(json!({"gh_auth": {"*": "missing"}, "glab_auth": {"gl.status.test": GLAB_TOKEN}}));
+    let world = World::new(
+        json!({"gh_auth": {"*": "missing"}, "glab_auth": {"gl.status.test": GLAB_TOKEN}}),
+    );
     let inputs = world.inputs("", &[], Stores::default());
     let found = world.detect("gl.status.test", &inputs).unwrap();
     assert_eq!(found.kind, ProviderKind::GitLab);
-    assert_eq!(found.source, DetectSource::Credential("glab auth status".into()));
+    assert_eq!(
+        found.source,
+        DetectSource::Credential("glab auth status".into())
+    );
 }
 
 #[test]
@@ -262,7 +337,11 @@ fn version_probes_tell_the_forges_apart() {
     }));
     let inputs = world.inputs("", &[], Stores::default());
     for (host, kind, version) in [
-        ("forgejo.test", ProviderKind::Forgejo, Some("11.0.1+gitea-1.22.0")),
+        (
+            "forgejo.test",
+            ProviderKind::Forgejo,
+            Some("11.0.1+gitea-1.22.0"),
+        ),
         ("gitea.test", ProviderKind::Gitea, Some("1.22.6")),
         ("private-forgejo.test", ProviderKind::Forgejo, None),
         ("private-gitea.test", ProviderKind::Gitea, None),
@@ -294,13 +373,23 @@ fn hosts_json_caches_probes_for_seven_days_without_secrets() {
         "gh_auth": {"*": "missing"},
         "probes": {"cached.test": {"api/v1/version": {"body": {"version": "10.0.0+gitea-1.22.0"}}}}
     }));
-    let inputs = world.inputs("", &[("FORGEJO_TOKEN", TEA_TOKEN), ("GH_TOKEN", FAKE_TOKEN)], Stores::default());
+    let inputs = world.inputs(
+        "",
+        &[("FORGEJO_TOKEN", TEA_TOKEN), ("GH_TOKEN", FAKE_TOKEN)],
+        Stores::default(),
+    );
     let first = world.detect("cached.test", &inputs).unwrap();
     assert_eq!(first.source, DetectSource::Probe);
     let probes = world.probes();
     let second = world.detect("cached.test", &inputs).unwrap();
-    assert_eq!((second.kind, &second.source), (ProviderKind::Forgejo, &DetectSource::Cache));
-    assert_eq!(second.server_version.as_deref(), Some("10.0.0+gitea-1.22.0"));
+    assert_eq!(
+        (second.kind, &second.source),
+        (ProviderKind::Forgejo, &DetectSource::Cache)
+    );
+    assert_eq!(
+        second.server_version.as_deref(),
+        Some("10.0.0+gitea-1.22.0")
+    );
     assert_eq!(world.probes(), probes, "the cache answered without probing");
 
     let text = std::fs::read_to_string(world.hosts_file()).unwrap();
@@ -308,7 +397,12 @@ fn hosts_json_caches_probes_for_seven_days_without_secrets() {
     assert_eq!(file["schema"], 1);
     let record = &file["hosts"]["cached.test"];
     assert_eq!(record["kind"], "forgejo");
-    assert!(record["api_base"].as_str().unwrap().ends_with("/cached.test/api/v1"));
+    assert!(
+        record["api_base"]
+            .as_str()
+            .unwrap()
+            .ends_with("/cached.test/api/v1")
+    );
     assert_eq!(record["web_base"], "https://cached.test");
     assert_eq!(record["server_version"], "10.0.0+gitea-1.22.0");
     assert!(record["probed_at"].as_u64().unwrap() > 0);
@@ -320,10 +414,15 @@ fn hosts_json_caches_probes_for_seven_days_without_secrets() {
     // Older than 7 days: probed again.
     let mut stale = HostsFile::load(&world.hosts_file());
     let eight_days = 8 * 24 * 60 * 60;
-    let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs();
+    let now = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
     let record = stale.hosts.get_mut("cached.test").unwrap();
     record.probed_at = now - eight_days;
-    record.capabilities_observed.insert("actions".into(), "no".into());
+    record
+        .capabilities_observed
+        .insert("actions".into(), "no".into());
     stale.save(&world.hosts_file()).unwrap();
     assert!(stale.fresh(&HostKey::new("cached.test"), now).is_none());
     let again = world.detect("cached.test", &inputs).unwrap();
@@ -353,7 +452,10 @@ fn offline_detection_never_probes() {
     inputs.probe = false;
     assert!(matches!(
         world.detect("offline.test", &inputs),
-        Err(ForgeError::Unsupported { capability: "provider", .. })
+        Err(ForgeError::Unsupported {
+            capability: "provider",
+            ..
+        })
     ));
     assert_eq!(world.probes(), 0);
 }
@@ -362,13 +464,25 @@ fn offline_detection_never_probes() {
 fn remotes_pick_the_forge_host() {
     let directory = tempfile::tempdir().unwrap();
     let repository = git2::Repository::init(directory.path()).unwrap();
-    repository.remote("origin", "git@gitlab.com:group/sub/orbit.git").unwrap();
-    repository.remote("fork", "https://codeberg.org/maya/orbit.git").unwrap();
+    repository
+        .remote("origin", "git@gitlab.com:group/sub/orbit.git")
+        .unwrap();
+    repository
+        .remote("fork", "https://codeberg.org/maya/orbit.git")
+        .unwrap();
     let chosen = detect::choose_remote_with(directory.path(), None).unwrap();
-    assert_eq!((chosen.host.to_string(), chosen.repo.full()), ("gitlab.com".into(), "group/sub/orbit".into()));
+    assert_eq!(
+        (chosen.host.to_string(), chosen.repo.full()),
+        ("gitlab.com".into(), "group/sub/orbit".into())
+    );
     let preferred = detect::choose_remote_with(directory.path(), Some("fork")).unwrap();
     assert_eq!(preferred.host.to_string(), "codeberg.org");
-    assert_eq!(ForgeConfig::parse("[forge]\nremote = \"fork\"\n").remote.as_deref(), Some("fork"));
+    assert_eq!(
+        ForgeConfig::parse("[forge]\nremote = \"fork\"\n")
+            .remote
+            .as_deref(),
+        Some("fork")
+    );
 }
 
 /// F5: a nested GitLab group keeps every segment over SSH, `ssh://` with a Git port (dropped:
@@ -380,19 +494,51 @@ fn nested_gitlab_groups_survive_every_remote_form() {
     use dust::forge::provider::ForgeContext;
     use dust::forge::request::Read;
     for (remote, host) in [
-        ("git@gitlab.example.com:group/sub/project.git", "gitlab.example.com"),
-        ("ssh://git@gitlab.example.com:2222/group/sub/project.git", "gitlab.example.com"),
-        ("https://gitlab.example.com:8443/group/sub/project.git", "gitlab.example.com:8443"),
-        ("https://gitlab.example.com/group/sub/project", "gitlab.example.com"),
+        (
+            "git@gitlab.example.com:group/sub/project.git",
+            "gitlab.example.com",
+        ),
+        (
+            "ssh://git@gitlab.example.com:2222/group/sub/project.git",
+            "gitlab.example.com",
+        ),
+        (
+            "https://gitlab.example.com:8443/group/sub/project.git",
+            "gitlab.example.com:8443",
+        ),
+        (
+            "https://gitlab.example.com/group/sub/project",
+            "gitlab.example.com",
+        ),
     ] {
-        let (parsed_host, repo) = detect::parse_remote(remote).unwrap_or_else(|| panic!("{remote}"));
+        let (parsed_host, repo) =
+            detect::parse_remote(remote).unwrap_or_else(|| panic!("{remote}"));
         assert_eq!(parsed_host.to_string(), host, "{remote}");
-        assert_eq!((repo.owner.as_str(), repo.name.as_str()), ("group/sub", "project"), "{remote}");
-        let endpoints = detect::endpoints_for(ProviderKind::GitLab, &parsed_host, None, &Env::from_pairs::<&str, &str>([]));
+        assert_eq!(
+            (repo.owner.as_str(), repo.name.as_str()),
+            ("group/sub", "project"),
+            "{remote}"
+        );
+        let endpoints = detect::endpoints_for(
+            ProviderKind::GitLab,
+            &parsed_host,
+            None,
+            &Env::from_pairs::<&str, &str>([]),
+        );
         assert_eq!(endpoints.api_base, format!("https://{host}/api/v4"));
-        assert_eq!(endpoints.graphql.as_deref(), Some(format!("https://{host}/api/graphql").as_str()));
+        assert_eq!(
+            endpoints.graphql.as_deref(),
+            Some(format!("https://{host}/api/graphql").as_str())
+        );
         let ctx = ForgeContext::offline(endpoints, Some(repo));
-        let plan = provider::build(ProviderKind::GitLab).unwrap().plan(&ctx, &Read::PullRequest(7), &Conditional::default());
-        assert_eq!(plan.requests[0].path_and_query(), "projects/group%2Fsub%2Fproject/merge_requests/7");
+        let plan = provider::build(ProviderKind::GitLab).unwrap().plan(
+            &ctx,
+            &Read::PullRequest(7),
+            &Conditional::default(),
+        );
+        assert_eq!(
+            plan.requests[0].path_and_query(),
+            "projects/group%2Fsub%2Fproject/merge_requests/7"
+        );
     }
 }

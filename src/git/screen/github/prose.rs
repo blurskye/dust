@@ -1,4 +1,4 @@
-//! Forge reader rows (DESIGN.md §3.26/§3.33/§3.34): Markdown bodies, metadata tables, card
+//! Forge reader rows: Markdown bodies, metadata tables, card
 //! headers and links as `lines::Line`s that carry their own Git styles. The painter in
 //! `paint.rs` draws them on the reader surface.
 use super::find;
@@ -70,7 +70,7 @@ impl Rich {
         self.push(" · ", role(GitRole::Muted))
     }
     pub(super) fn chip(self, text: &str, style: Style) -> Self {
-        self.push(&format!(" {text} "), style)
+        self.push(format!(" {text} "), style)
     }
     /// `+13 −2`; a zero side is no fact and is left out (`+13`, r11), and so is `+0 −0`.
     pub(super) fn diffstat(mut self, additions: u64, deletions: u64) -> Self {
@@ -89,6 +89,7 @@ impl Rich {
         self.text.width()
     }
     /// Pads with spaces to `column` cells (a table's value column).
+    #[allow(clippy::wrong_self_convention)] // a builder step, like `with_*`
     pub(super) fn to_column(mut self, column: usize) -> Self {
         let width = self.text.width();
         if width < column {
@@ -113,7 +114,9 @@ pub(super) fn muted(text: &str) -> Line {
     Rich::new().push(text, role(GitRole::Muted)).line()
 }
 pub(super) fn rule(width: usize) -> Line {
-    Rich::new().push(&"─".repeat(width.max(1)), role(GitRole::Border)).line()
+    Rich::new()
+        .push("─".repeat(width.max(1)), role(GitRole::Border))
+        .line()
 }
 /// A section heading inside a reader tab: `Latest activity`.
 pub(super) fn heading(text: &str, note: &str) -> Line {
@@ -125,7 +128,9 @@ pub(super) fn heading(text: &str, note: &str) -> Line {
 }
 /// A metadata row: muted label in a fixed column, then the value pieces.
 pub(super) fn field(label: &str, column: usize) -> Rich {
-    Rich::new().push(label, role(GitRole::Muted)).to_column(column)
+    Rich::new()
+        .push(label, role(GitRole::Muted))
+        .to_column(column)
 }
 
 /// The fence language of each fenced block, by its first body line.
@@ -141,10 +146,15 @@ fn fences(source: &str) -> Vec<(String, String)> {
         } else {
             continue;
         };
-        let info = trimmed.trim_start_matches(fence.chars().next().unwrap()).trim();
+        let info = trimmed
+            .trim_start_matches(fence.chars().next().unwrap())
+            .trim();
         let first = lines.next().unwrap_or_default();
         if !first.trim_start().starts_with(fence) {
-            found.push((info.split_whitespace().next().unwrap_or("").to_owned(), first.to_owned()));
+            found.push((
+                info.split_whitespace().next().unwrap_or("").to_owned(),
+                first.to_owned(),
+            ));
             for rest in lines.by_ref() {
                 if rest.trim_start().starts_with(fence) {
                     break;
@@ -156,7 +166,7 @@ fn fences(source: &str) -> Vec<(String, String)> {
 }
 
 /// A title as one line of text: code spans lose their backticks, and a draft drops the
-/// `Draft:`/`WIP:` prefix its Draft chip already says (§3.26: one draft marker).
+/// `Draft:`/`WIP:` prefix its Draft chip already says (one draft marker).
 pub(super) fn title(raw: &str, draft: bool) -> String {
     let mut text = raw.trim();
     if draft {
@@ -172,8 +182,11 @@ pub(super) fn title(raw: &str, draft: bool) -> String {
             }
         }
     }
-    // Runs of spaces, tabs or newlines in a title read as one space (r9 R8-14): `bug:  Runner`.
-    text.replace('`', "").split_whitespace().collect::<Vec<_>>().join(" ")
+    // Runs of spaces, tabs or newlines in a title read as one space: `bug:  Runner`.
+    text.replace('`', "")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// Labels as chips, without one that repeats the Draft chip (`wip`, `draft`).
@@ -198,16 +211,20 @@ pub(super) fn chips(labels: &[LabelChip], draft: bool) -> Vec<LabelChip> {
 /// indented code keep every byte.
 pub(super) fn clean(text: &str) -> String {
     use std::sync::LazyLock;
-    static COMMENT: LazyLock<regex::Regex> = LazyLock::new(|| regex::Regex::new(r"(?s)<!--.*?-->").unwrap());
+    static COMMENT: LazyLock<regex::Regex> =
+        LazyLock::new(|| regex::Regex::new(r"(?s)<!--.*?-->").unwrap());
     static DETAILS: LazyLock<regex::Regex> = LazyLock::new(|| {
-        regex::Regex::new(r"(?is)<details[^>]*>\s*(?:<summary[^>]*>(.*?)</summary>)?.*?</details>").unwrap()
+        regex::Regex::new(r"(?is)<details[^>]*>\s*(?:<summary[^>]*>(.*?)</summary>)?.*?</details>")
+            .unwrap()
     });
     // Split into fenced code and the rest; only the rest is cleaned.
     let mut parts: Vec<(bool, String)> = Vec::new();
     let mut fence: Option<String> = None;
     for line in text.lines() {
         let trimmed = line.trim_start();
-        let marker = ["```", "~~~"].into_iter().find(|marker| trimmed.starts_with(marker));
+        let marker = ["```", "~~~"]
+            .into_iter()
+            .find(|marker| trimmed.starts_with(marker));
         let code = match (&fence, marker) {
             (None, Some(marker)) => {
                 fence = Some(marker.to_owned());
@@ -240,7 +257,10 @@ pub(super) fn clean(text: &str) -> String {
         let part = COMMENT.replace_all(&part, "");
         let part = DETAILS.replace_all(&part, |captures: &regex::Captures| {
             let summary = captures.get(1).map_or("Details", |m| m.as_str()).trim();
-            format!("\n▸ {} · collapsed\n", html::inline(summary).replace('\n', " "))
+            format!(
+                "\n▸ {} · collapsed\n",
+                html::inline(summary).replace('\n', " ")
+            )
         });
         out.push_str(&reflow(&html::inline(&part)));
     }
@@ -254,7 +274,9 @@ fn reflow(text: &str) -> String {
         let line = line.trim();
         line.len() >= 60
             && !line.contains(' ')
-            && line.chars().all(|c| c.is_ascii_alphanumeric() || "+/=_-".contains(c))
+            && line
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || "+/=_-".contains(c))
             && line.chars().any(|c| c.is_ascii_digit())
     };
     let block = |line: &str| {
@@ -263,7 +285,9 @@ fn reflow(text: &str) -> String {
             || line.starts_with('\t')
             || trimmed.starts_with(['#', '>', '|', '-', '*', '+', '▸', '=', '<'])
             || trimmed.split_once(['.', ')']).is_some_and(|(number, _)| {
-                !number.is_empty() && number.len() <= 3 && number.chars().all(|c| c.is_ascii_digit())
+                !number.is_empty()
+                    && number.len() <= 3
+                    && number.chars().all(|c| c.is_ascii_digit())
             })
     };
     let mut out: Vec<String> = Vec::new();
@@ -344,6 +368,7 @@ pub(super) fn markdown(rows: &mut Vec<Line>, text: &str, width: usize, indent: &
 
 thread_local! {
     /// Laid-out bodies by (hash of text, width, indent and table settings; text length).
+    #[allow(clippy::type_complexity)]
     static RENDERED: std::cell::RefCell<std::collections::HashMap<(u64, usize), std::rc::Rc<Vec<Line>>>> =
         std::cell::RefCell::new(std::collections::HashMap::new());
 }
@@ -393,7 +418,12 @@ fn blocks(rows: &mut Vec<Line>, text: &str, width: usize, indent: &str) {
             styled.spans[first..]
                 .iter()
                 .take_while(|(range, _)| range.start < to)
-                .map(|(range, role)| (range.start.max(from) - from..range.end.min(to) - from, *role))
+                .map(|(range, role)| {
+                    (
+                        range.start.max(from) - from..range.end.min(to) - from,
+                        *role,
+                    )
+                })
                 .collect::<Vec<_>>()
         };
         let source = Arc::<str>::from(*logical);
@@ -412,7 +442,7 @@ fn blocks(rows: &mut Vec<Line>, text: &str, width: usize, indent: &str) {
                 // The fence's row, drawn as the editor draws it: the language's icon and
                 // name at its left on the code surface (` ```sh ` reads `<sh icon> sh`), an
                 // empty code row when the fence names none. A line wider than the reader
-                // pans with h and l (r9 R8-13) and shows `›` at its clipped edge.
+                // pans with h and l and shows `›` at its clipped edge.
                 let language = language.unwrap_or_default();
                 let mut top = Line::text("", Style::Default);
                 if !language.is_empty() {
@@ -421,7 +451,10 @@ fn blocks(rows: &mut Vec<Line>, text: &str, width: usize, indent: &str) {
                     if let Some((glyph, color)) = icon {
                         text.push_str(glyph);
                         text.push(' ');
-                        top.spans.push((0..glyph.len(), crate::ui::render::markdown::icon_group(color)));
+                        top.spans.push((
+                            0..glyph.len(),
+                            crate::ui::render::markdown::icon_group(color),
+                        ));
                     }
                     let name = text.len()..text.len() + language.len();
                     text.push_str(&language);
@@ -507,7 +540,12 @@ fn blocks(rows: &mut Vec<Line>, text: &str, width: usize, indent: &str) {
                 (fragment.clone(), lead + offset)
             };
             let row_start = start + base;
-            let row_end = row_start + if fragment_index == 0 { lead + fragment.len() } else { fragment.len() };
+            let row_end = row_start
+                + if fragment_index == 0 {
+                    lead + fragment.len()
+                } else {
+                    fragment.len()
+                };
             let mut row = Line::text(&text, Style::Default);
             row.pan = false;
             row.spans = spans_at(row_start, row_end);
@@ -553,8 +591,8 @@ fn blocks(rows: &mut Vec<Line>, text: &str, width: usize, indent: &str) {
     }
 }
 
-/// Word wrap that also breaks a long URL or path (r9 N-21): before its last `/`, `?`, `&` or
-/// `#` in reach; a part longer than the row before its last `-` in reach (r10 N-21), and at
+/// Word wrap that also breaks a long URL or path: before its last `/`, `?`, `&` or
+/// `#` in reach; a part longer than the row before its last `-` in reach, and at
 /// the edge only when it has none. Plain prose may break after a
 /// `-` that joins two words. The fragments are contiguous byte ranges of `text`, as the
 /// reader's find offsets need.
@@ -564,7 +602,8 @@ fn wrap_words(text: &str, width: usize) -> Vec<String> {
     let mut rows = Vec::new();
     let mut start = 0;
     while start < text.len() {
-        let (mut used, mut end, mut space, mut slash, mut hyphen, mut dash) = (0, start, None, None, None, None);
+        let (mut used, mut end, mut space, mut slash, mut hyphen, mut dash) =
+            (0, start, None, None, None, None);
         let mut previous = "";
         for (offset, grapheme) in text[start..].grapheme_indices(true) {
             let cells = grapheme.width();
@@ -572,7 +611,11 @@ fn wrap_words(text: &str, width: usize) -> Vec<String> {
                 break;
             }
             let at = start + offset;
-            if at > start && matches!(grapheme, "/" | "?" | "&" | "#") && previous != "/" && previous != ":" {
+            if at > start
+                && matches!(grapheme, "/" | "?" | "&" | "#")
+                && previous != "/"
+                && previous != ":"
+            {
                 slash = Some(at);
             }
             used += cells;
@@ -594,7 +637,7 @@ fn wrap_words(text: &str, width: usize) -> Vec<String> {
             // then the last separator inside that token, then a hyphen between the words
             // of plain prose, then the hard edge.
             let token = |from: usize| text[from..].split(' ').next().unwrap_or_default().width();
-            // A URL or path breaks at `/ ? & #` (r9 N-21). A part longer than the row breaks
+            // A URL or path breaks at `/ ? & #`. A part longer than the row breaks
             // before its last hyphen that fits, so the hyphen opens the next row and cannot
             // read as one the wrap added (r10 N-21: `…-are-general` / `ly-available/` cut a
             // word in two); only a part with no hyphen is cut at the edge.
@@ -607,7 +650,11 @@ fn wrap_words(text: &str, width: usize) -> Vec<String> {
             let dash = dash.filter(|at| path(*at));
             let soft = slash.or(dash).or(hyphen);
             match (space, slash.or(dash), hyphen) {
-                (Some(space), ..) if soft.is_none_or(|soft| soft < space) || token(space) <= width => space,
+                (Some(space), ..)
+                    if soft.is_none_or(|soft| soft < space) || token(space) <= width =>
+                {
+                    space
+                }
                 (_, Some(slash), _) => slash,
                 (_, None, Some(hyphen)) => hyphen,
                 (Some(space), None, None) => space,
@@ -670,7 +717,8 @@ mod tests {
     #[test]
     fn remembered_bodies_match_a_fresh_layout() {
         let body = "# Title\n\nSome **bold** prose that wraps at narrow widths.\n\n| a | b |\n|---|---|\n| 1 | 2 |\n";
-        let (mut first, mut again, mut fresh, mut narrow) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+        let (mut first, mut again, mut fresh, mut narrow) =
+            (Vec::new(), Vec::new(), Vec::new(), Vec::new());
         markdown(&mut first, body, 60, "  ");
         markdown(&mut again, body, 60, "  ");
         laid_out(&mut fresh, body, 60, "  ");
@@ -681,7 +729,9 @@ mod tests {
     }
 
     fn texts(rows: &[Line]) -> Vec<String> {
-        rows.iter().map(|row| format!("{}{}", row.gutter, row.text)).collect()
+        rows.iter()
+            .map(|row| format!("{}{}", row.gutter, row.text))
+            .collect()
     }
 
     #[test]
@@ -702,7 +752,10 @@ mod tests {
         );
         assert!(text.iter().any(|row| row.ends_with("☐ Resume")), "{text:?}");
         assert!(text.iter().any(|row| row.ends_with("☑ Done")), "{text:?}");
-        let code = rows.iter().position(|row| row.text == "$ orbit worker").unwrap();
+        let code = rows
+            .iter()
+            .position(|row| row.text == "$ orbit worker")
+            .unwrap();
         assert_eq!(rows[code].band, Some(GitSurface::ProseCode));
         // The fence's row names the language at its left with the editor's icon for it, on
         // the code surface like the rows under it; it is not a code line.
@@ -711,7 +764,10 @@ mod tests {
         assert_eq!(rows[code - 1].band, Some(GitSurface::ProseCode));
         assert!(rows[code - 1].source.is_none());
         assert_eq!(rows[code + 1].band, Some(GitSurface::ProseCode));
-        assert!(rows.iter().all(|row| row.source.is_some() || row.band.is_some() || row.text.is_empty() || row.text.ends_with(" sh")));
+        assert!(rows.iter().all(|row| row.source.is_some()
+            || row.band.is_some()
+            || row.text.is_empty()
+            || row.text.ends_with(" sh")));
         // r9 R8-13: a line wider than the reader pans rather than wraps. No hint sits in the
         // body copy (R16 gitea-05): a fence without a language opens with an empty code row.
         let line = "could not fetch remote 'origin': fatal: Unable to create '/data/.git/index.lock': File exists";
@@ -719,8 +775,15 @@ mod tests {
         markdown(&mut rows, &format!("```\n{line}\n```\n"), 60, "");
         let code = rows.iter().position(|row| row.text == line).unwrap();
         assert!(rows[code].pan, "{:?}", texts(&rows));
-        assert_eq!((rows[code - 1].text.as_str(), rows[code - 1].band), ("", Some(GitSurface::ProseCode)));
-        assert!(!texts(&rows).iter().any(|row| row.contains("scroll")), "{:?}", texts(&rows));
+        assert_eq!(
+            (rows[code - 1].text.as_str(), rows[code - 1].band),
+            ("", Some(GitSurface::ProseCode))
+        );
+        assert!(
+            !texts(&rows).iter().any(|row| row.contains("scroll")),
+            "{:?}",
+            texts(&rows)
+        );
     }
 
     #[test]
@@ -728,29 +791,65 @@ mod tests {
         let body = "A reusable workflow (workflow_call) triggered by a pull\nrequest can write cache\nentries.\n\n<!--start release-notes-->\n<!--URL:x-->\n- PR: <!--number 1784 -->fix: set socket<!--d-->\n<!--end-->\n<details><summary>Logs</summary>\n\nlong\n</details>\nZml4OiBzZXQgY29udGFpbmVyIGRhZW1vbiBzb2NrZXQgdG8gIi0iIGlmIHRoZSBkZWZhdWx0IHNvY2tldA==\n```\nkeep\nthis <!-- -->\n```\n- one\n- two items that were wrapped at a column in the source\n  continued\n\nshort line\nkept apart";
         let cleaned = clean(body);
         assert!(cleaned.starts_with("A reusable workflow (workflow_call) triggered by a pull request can write cache entries.\n"), "{cleaned}");
-        assert!(!cleaned.contains("<!--start") && !cleaned.contains("Zml4"), "{cleaned}");
+        assert!(
+            !cleaned.contains("<!--start") && !cleaned.contains("Zml4"),
+            "{cleaned}"
+        );
         assert!(cleaned.contains("- PR: fix: set socket"), "{cleaned}");
-        assert!(cleaned.contains("▸ Logs · collapsed") && !cleaned.contains("long"), "{cleaned}");
-        assert!(cleaned.contains("keep\nthis <!-- -->"), "fenced code is literal: {cleaned}");
-        assert!(cleaned.contains("- one\n- two items that were wrapped at a column in the source continued"), "{cleaned}");
+        assert!(
+            cleaned.contains("▸ Logs · collapsed") && !cleaned.contains("long"),
+            "{cleaned}"
+        );
+        assert!(
+            cleaned.contains("keep\nthis <!-- -->"),
+            "fenced code is literal: {cleaned}"
+        );
+        assert!(
+            cleaned.contains(
+                "- one\n- two items that were wrapped at a column in the source continued"
+            ),
+            "{cleaned}"
+        );
         assert!(cleaned.contains("short line\nkept apart"), "{cleaned}");
     }
 
     #[test]
     fn titles_lose_code_marks_and_a_reported_draft_prefix() {
-        assert_eq!(title("fix `TestRunner_Mixed` flake", false), "fix TestRunner_Mixed flake");
-        assert_eq!(title("Draft: Split nested group settings", true), "Split nested group settings");
+        assert_eq!(
+            title("fix `TestRunner_Mixed` flake", false),
+            "fix TestRunner_Mixed flake"
+        );
+        assert_eq!(
+            title("Draft: Split nested group settings", true),
+            "Split nested group settings"
+        );
         assert_eq!(title("WIP: feat(jobparser): x", true), "feat(jobparser): x");
-        assert_eq!(title("WIP: kept when not a draft", false), "WIP: kept when not a draft");
-        assert_eq!(title("bug:  Runner accepts\tsuccessful \n run", false), "bug: Runner accepts successful run");
-        let labels = [LabelChip { name: "wip".into(), rgb: None }, LabelChip { name: "bug".into(), rgb: None }];
+        assert_eq!(
+            title("WIP: kept when not a draft", false),
+            "WIP: kept when not a draft"
+        );
+        assert_eq!(
+            title("bug:  Runner accepts\tsuccessful \n run", false),
+            "bug: Runner accepts successful run"
+        );
+        let labels = [
+            LabelChip {
+                name: "wip".into(),
+                rgb: None,
+            },
+            LabelChip {
+                name: "bug".into(),
+                rgb: None,
+            },
+        ];
         assert_eq!(chips(&labels, true).len(), 1);
         assert_eq!(chips(&labels, false).len(), 2);
     }
 
     #[test]
     fn long_urls_break_at_their_separators() {
-        let text = "See https://gitea.com/orbit/orbit/src/branch/main/.gitea/workflow-lockfiles for it";
+        let text =
+            "See https://gitea.com/orbit/orbit/src/branch/main/.gitea/workflow-lockfiles for it";
         let rows = super::wrap_words(text, 40);
         assert_eq!(rows.concat(), text);
         assert!(rows.iter().all(|row| row.width() <= 40), "{rows:?}");
@@ -761,36 +860,67 @@ mod tests {
             assert!(next == '/' || last == ' ', "{rows:?}");
         }
         // r9 N-21: a URL breaks before a `/ ? & #` when the part after it fits; a part longer
-        // than the row breaks before one of its hyphens (r10 N-21), never inside a word.
+        // than the row breaks before one of its hyphens, never inside a word.
         let url = "https://github.blog/changelog/2026-10-28-github-actions-workflow-lockfiles-are-generally-available/";
         for width in [40, 56, 57, 66, 68, 90] {
             let rows = super::wrap_words(url, width);
             assert_eq!(rows.concat(), url);
-            assert!(rows.iter().all(|row| row.width() <= width), "{width}: {rows:?}");
+            assert!(
+                rows.iter().all(|row| row.width() <= width),
+                "{width}: {rows:?}"
+            );
             for pair in rows.windows(2) {
-                assert!(pair[1].starts_with('/') || pair[1].starts_with('-'), "{width}: {rows:?}");
-                assert!(!pair[0].ends_with("https:") && !pair[0].ends_with("https:/"), "{width}: {rows:?}");
+                assert!(
+                    pair[1].starts_with('/') || pair[1].starts_with('-'),
+                    "{width}: {rows:?}"
+                );
+                assert!(
+                    !pair[0].ends_with("https:") && !pair[0].ends_with("https:/"),
+                    "{width}: {rows:?}"
+                );
             }
         }
         assert_eq!(
             super::wrap_words(url, 68),
-            ["https://github.blog/changelog", "/2026-10-28-github-actions-workflow-lockfiles-are-generally", "-available/"]
+            [
+                "https://github.blog/changelog",
+                "/2026-10-28-github-actions-workflow-lockfiles-are-generally",
+                "-available/"
+            ]
         );
         assert_eq!(
             super::wrap_words(url, 57),
-            ["https://github.blog/changelog", "/2026-10-28-github-actions-workflow-lockfiles-are", "-generally-available/"]
+            [
+                "https://github.blog/changelog",
+                "/2026-10-28-github-actions-workflow-lockfiles-are",
+                "-generally-available/"
+            ]
         );
         // A part with no hyphen still meets the edge.
-        assert_eq!(super::wrap_words("https://x.dev/abcdefghijklmnop", 10), ["https://x.", "dev", "/abcdefghi", "jklmnop"]);
+        assert_eq!(
+            super::wrap_words("https://x.dev/abcdefghijklmnop", 10),
+            ["https://x.", "dev", "/abcdefghi", "jklmnop"]
+        );
         // Plain prose still breaks after a hyphen between words.
-        assert_eq!(super::wrap_words("a well-known-thing", 9), ["a well-", "known-", "thing"]);
-        assert_eq!(super::wrap_words("short words wrap as before", 11), ["short ", "words wrap ", "as before"]);
+        assert_eq!(
+            super::wrap_words("a well-known-thing", 9),
+            ["a well-", "known-", "thing"]
+        );
+        assert_eq!(
+            super::wrap_words("short words wrap as before", 11),
+            ["short ", "words wrap ", "as before"]
+        );
     }
 
     #[test]
     fn wrapped_list_items_hang_under_their_text() {
         let mut rows = Vec::new();
-        markdown(&mut rows, "- one two three four five six seven eight nine ten", 20, "");
+        markdown(
+            &mut rows,
+            "- one two three four five six seven eight nine ten",
+            20,
+            "",
+        );
         assert!(rows.len() > 1);
         assert!(rows[1].gutter.chars().all(|c| c == ' ') && !rows[1].gutter.is_empty());
     }

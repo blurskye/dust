@@ -1,4 +1,4 @@
-//! FORGE.md §7.1/§7.2: the on-disk forge cache and painting from it (F3).
+//! The on-disk forge cache and painting from it (F3).
 #![cfg(unix)]
 use dust::forge::cache::{Cache, CacheKey, Caps, Envelope};
 use dust::forge::request::{Payload, Read};
@@ -11,8 +11,8 @@ mod forge_fake;
 mod forge_screen;
 #[path = "support/records.rs"]
 mod records;
-use records::lists;
 use forge_screen::*;
+use records::lists;
 
 fn key(read: &Read) -> CacheKey {
     CacheKey::for_read("github.com", Some("example/demo"), read)
@@ -191,7 +191,8 @@ fn first_paint_comes_from_disk_while_the_forge_is_slow() {
     // from disk: no timing decides it.
     age_cache(3600);
     update_state(|state| {
-        state["read_gates"] = serde_json::json!([{"prefix": ["issue", "list"], "name": "slow-list"}]);
+        state["read_gates"] =
+            serde_json::json!([{"prefix": ["issue", "list"], "name": "slow-list"}]);
     });
     let started = Instant::now();
     let mut screen = open();
@@ -213,7 +214,9 @@ fn first_paint_comes_from_disk_while_the_forge_is_slow() {
         !frame.contains("updated just now"),
         "the held list check cannot have finished:\n{frame}"
     );
-    println!("measured: first paint from cache {first_paint:?} (screen open {opened:?}, list held)");
+    println!(
+        "measured: first paint from cache {first_paint:?} (screen open {opened:?}, list held)"
+    );
     // The background check finishes later and changes nothing visible.
     let before = view(&mut screen)
         .lines()
@@ -273,6 +276,8 @@ fn a_corrupt_cache_is_ignored_by_the_screen() {
     }
     let mut screen = open();
     goto(&mut screen, 0, 1);
-    wait_for(&mut screen, "#8", |frame| lists(frame, 8, "Navigation issue 8"));
+    wait_for(&mut screen, "#8", |frame| {
+        lists(frame, 8, "Navigation issue 8")
+    });
     wait(&mut screen, "Corrupt fixture ready");
 }

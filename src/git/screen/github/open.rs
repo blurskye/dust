@@ -58,7 +58,12 @@ pub(in crate::git::screen) fn parse(text: &str) -> Result<Link, String> {
         return Err("Give a link or a number (#123)".into());
     }
     let short = |kind: Kind, digits: &str, repo: Option<String>| -> Result<Link, String> {
-        Ok(Link { kind, number: number(digits)?, host: None, repo })
+        Ok(Link {
+            kind,
+            number: number(digits)?,
+            host: None,
+            repo,
+        })
     };
     if let Some(digits) = text.strip_prefix('#') {
         return short(Kind::Either, digits, None);
@@ -73,12 +78,18 @@ pub(in crate::git::screen) fn parse(text: &str) -> Result<Link, String> {
         // `owner/repo#12` (GitLab `group/project!12`).
         if let Some(at) = text.rfind(['#', '!']) {
             let (repo, rest) = text.split_at(at);
-            let kind = if rest.starts_with('!') { Kind::Pull } else { Kind::Either };
+            let kind = if rest.starts_with('!') {
+                Kind::Pull
+            } else {
+                Kind::Either
+            };
             if repo.contains('/') && !repo.starts_with('/') && !repo.ends_with('/') {
                 return short(kind, &rest[1..], Some(repo.to_owned()));
             }
         }
-        return Err(format!("`{text}` is not a link, #number or owner/repo#number"));
+        return Err(format!(
+            "`{text}` is not a link, #number or owner/repo#number"
+        ));
     }
     let url = reqwest::Url::parse(text).map_err(|_| format!("`{text}` is not a web address"))?;
     if !matches!(url.scheme(), "https" | "http") {
@@ -89,9 +100,17 @@ pub(in crate::git::screen) fn parse(text: &str) -> Result<Link, String> {
         host = format!("{host}:{port}");
     }
     let host = host.strip_prefix("www.").map(str::to_owned).unwrap_or(host);
-    let segments = url.path_segments().map(|parts| parts.filter(|part| !part.is_empty()).collect::<Vec<_>>()).unwrap_or_default();
+    let segments = url
+        .path_segments()
+        .map(|parts| parts.filter(|part| !part.is_empty()).collect::<Vec<_>>())
+        .unwrap_or_default();
     let item = |kind: Kind, repo: &[&str], digits: &str| -> Result<Link, String> {
-        Ok(Link { kind, number: number(digits)?, host: Some(host.clone()), repo: Some(repo.join("/")) })
+        Ok(Link {
+            kind,
+            number: number(digits)?,
+            host: Some(host.clone()),
+            repo: Some(repo.join("/")),
+        })
     };
     // GitLab: `group/sub/project/-/merge_requests/12`, `/-/issues/12`, `/-/pipelines/34`.
     if let Some(dash) = segments.iter().position(|part| *part == "-")
@@ -120,7 +139,9 @@ impl Workspace {
     /// The host of the remote the forge was found through. The forge may name itself on
     /// another host in its web addresses (`self.host`); links and remotes on either are ours.
     pub(super) fn remote_host(&self) -> Option<String> {
-        crate::forge::detect::choose_remote(&self.root).ok().map(|remote| remote.host.to_string())
+        crate::forge::detect::choose_remote(&self.root)
+            .ok()
+            .map(|remote| remote.host.to_string())
     }
 
     /// Opens `link` now, or once the repository resolves.
@@ -151,9 +172,14 @@ impl Workspace {
         let gitlab = self.forge_kind() == Some(ProviderKind::GitLab);
         if let Some(host) = &link.host
             && !host.eq_ignore_ascii_case(&self.host)
-            && self.remote_host().is_none_or(|remote| !host.eq_ignore_ascii_case(&remote))
+            && self
+                .remote_host()
+                .is_none_or(|remote| !host.eq_ignore_ascii_case(&remote))
         {
-            self.link_error(format!("That link is on {host}; this repository is on {}", self.host));
+            self.link_error(format!(
+                "That link is on {host}; this repository is on {}",
+                self.host
+            ));
             return true;
         }
         let kind = match link.kind {
@@ -166,12 +192,24 @@ impl Workspace {
             Kind::Run => 3,
             _ => 2,
         };
-        if let Some(repo) = link.repo.as_ref().filter(|repo| !repo.eq_ignore_ascii_case(&self.repo)) {
+        if let Some(repo) = link
+            .repo
+            .as_ref()
+            .filter(|repo| !repo.eq_ignore_ascii_case(&self.repo))
+        {
             if kind == Kind::Run {
-                self.link_error(format!("That {} belongs to {repo}; open Dusty Git there", self.terms().run_noun));
+                self.link_error(format!(
+                    "That {} belongs to {repo}; open Dusty Git there",
+                    self.terms().run_noun
+                ));
                 return true;
             }
-            let target = inbox::Target { host: self.host.clone(), repo: repo.clone(), page, number: link.number };
+            let target = inbox::Target {
+                host: self.host.clone(),
+                repo: repo.clone(),
+                page,
+                number: link.number,
+            };
             if let Err(error) = self.activate(Action::OpenRemote(target)) {
                 self.link_error(error);
             }
@@ -218,7 +256,11 @@ impl Workspace {
             return false;
         }
         self.link.select = None;
-        let Some(row) = self.items().iter().position(|item| item["number"].as_u64() == Some(number)) else {
+        let Some(row) = self
+            .items()
+            .iter()
+            .position(|item| item["number"].as_u64() == Some(number))
+        else {
             return false;
         };
         let changed = self.selected[page - 1] != row;
@@ -266,11 +308,16 @@ impl Workspace {
     }
 
     /// `activate`'s first look: the sheets that live in `create.rs` and `drafts.rs`.
-    pub(super) fn activate_feature(&mut self, action: &Action) -> Option<Result<Option<Form>, String>> {
+    pub(super) fn activate_feature(
+        &mut self,
+        action: &Action,
+    ) -> Option<Result<Option<Form>, String>> {
         match action {
             // Signed out: the forge's own form, prefilled, instead of a refusal.
             Action::CreatePullRequest
-                if !self.repo.is_empty() && !self.inbox.enabled && self.refusal(action).is_some() =>
+                if !self.repo.is_empty()
+                    && !self.inbox.enabled
+                    && self.refusal(action).is_some() =>
             {
                 Some(self.web_pr_form())
             }
@@ -288,7 +335,11 @@ impl Workspace {
     }
 
     /// `submit`'s first look, after a scoped action is unwrapped.
-    pub(super) fn submit_feature(&mut self, action: &Action, values: &[String]) -> Option<Result<(), String>> {
+    pub(super) fn submit_feature(
+        &mut self,
+        action: &Action,
+        values: &[String],
+    ) -> Option<Result<(), String>> {
         match action {
             Action::CreatePullRequestWeb => Some(self.submit_web_pr(values)),
             _ => self.submit_draft(action, values),
@@ -296,9 +347,15 @@ impl Workspace {
     }
 
     /// The line under a feature sheet's title.
-    pub(in crate::git::screen) fn feature_note(&self, action: &Action, fields: &[Field]) -> Option<String> {
+    pub(in crate::git::screen) fn feature_note(
+        &self,
+        action: &Action,
+        fields: &[Field],
+    ) -> Option<String> {
         match action {
-            Action::CreatePullRequest | Action::CreatePullRequestWeb => self.create_note(action, fields),
+            Action::CreatePullRequest | Action::CreatePullRequestWeb => {
+                self.create_note(action, fields)
+            }
             Action::CommitSuggestion(..) => self.suggestion_note(action),
             _ => self.draft_note(action),
         }
@@ -329,7 +386,12 @@ mod tests {
     use super::*;
 
     fn link(kind: Kind, number: u64, host: Option<&str>, repo: Option<&str>) -> Link {
-        Link { kind, number, host: host.map(str::to_owned), repo: repo.map(str::to_owned) }
+        Link {
+            kind,
+            number,
+            host: host.map(str::to_owned),
+            repo: repo.map(str::to_owned),
+        }
     }
 
     #[test]
@@ -337,8 +399,14 @@ mod tests {
         assert_eq!(parse("#12").unwrap(), link(Kind::Either, 12, None, None));
         assert_eq!(parse(" 12 ").unwrap(), link(Kind::Either, 12, None, None));
         assert_eq!(parse("!12").unwrap(), link(Kind::Pull, 12, None, None));
-        assert_eq!(parse("team/app#4").unwrap(), link(Kind::Either, 4, None, Some("team/app")));
-        assert_eq!(parse("group/sub/app!4").unwrap(), link(Kind::Pull, 4, None, Some("group/sub/app")));
+        assert_eq!(
+            parse("team/app#4").unwrap(),
+            link(Kind::Either, 4, None, Some("team/app"))
+        );
+        assert_eq!(
+            parse("group/sub/app!4").unwrap(),
+            link(Kind::Pull, 4, None, Some("group/sub/app"))
+        );
         assert!(parse("#0").is_err());
         assert!(parse("#x").is_err());
         assert!(parse("").is_err());
@@ -361,15 +429,30 @@ mod tests {
         );
         assert_eq!(
             parse("https://gitlab.ci.test/orbit/team/orbit/-/merge_requests/13/diffs").unwrap(),
-            link(Kind::Pull, 13, Some("gitlab.ci.test"), Some("orbit/team/orbit"))
+            link(
+                Kind::Pull,
+                13,
+                Some("gitlab.ci.test"),
+                Some("orbit/team/orbit")
+            )
         );
         assert_eq!(
             parse("https://gitlab.ci.test/orbit/team/orbit/-/issues/14").unwrap(),
-            link(Kind::Issue, 14, Some("gitlab.ci.test"), Some("orbit/team/orbit"))
+            link(
+                Kind::Issue,
+                14,
+                Some("gitlab.ci.test"),
+                Some("orbit/team/orbit")
+            )
         );
         assert_eq!(
             parse("https://gitlab.ci.test/orbit/team/orbit/-/pipelines/5").unwrap(),
-            link(Kind::Run, 5, Some("gitlab.ci.test"), Some("orbit/team/orbit"))
+            link(
+                Kind::Run,
+                5,
+                Some("gitlab.ci.test"),
+                Some("orbit/team/orbit")
+            )
         );
         assert_eq!(
             parse("https://gitea.com/orbit/orbit/pulls/1402").unwrap(),
@@ -377,7 +460,12 @@ mod tests {
         );
         assert_eq!(
             parse("https://code.forgejo.org/orbit/orbit/actions/runs/200481/jobs/0").unwrap(),
-            link(Kind::Run, 200481, Some("code.forgejo.org"), Some("orbit/orbit"))
+            link(
+                Kind::Run,
+                200481,
+                Some("code.forgejo.org"),
+                Some("orbit/orbit")
+            )
         );
         assert_eq!(
             parse("http://localhost:3000/me/app/issues/2").unwrap(),

@@ -1,4 +1,4 @@
-//! Conditional GETs for every REST read (FORGE.md §7.5, t3code's per-host-and-path ETags).
+//! Conditional GETs for every REST read.
 //! `ForgeContext::send` asks here before a GET goes out: when an earlier answer to the same
 //! request carried an `ETag`, `If-None-Match` is attached, and a `304` is turned back into that
 //! earlier answer. GitHub does not count a 304 against the rate limit, and the forge sends no

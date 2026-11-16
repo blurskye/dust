@@ -1,5 +1,5 @@
 #![cfg(unix)]
-//! CI everywhere (FORGE.md F6) and the F3 speed items, against the fake forge: every scenario
+//! CI everywhere and the F3 speed items, against the fake forge: every scenario
 //! runs for GitHub (`server.py --world actions`, `world_actions.py`), GitLab (`--world gitlab`),
 //! Gitea and Forgejo (`--world gitea|forgejo`, recorded), each over direct HTTP and over the
 //! forge's CLI (`gh`, `glab`, `tea` passthrough). Test names are `<forge>_<transport>::<scenario>`.
@@ -516,7 +516,7 @@ pub fn runs_jobs_steps_logs(harness: &Harness) {
                     .all(|blob| blob["authorization"] == "absent"),
                 "{blobs}"
             );
-            // CI, Release and the turned-off Nightly, with its state (§3.37).
+            // CI, Release and the turned-off Nightly, with its state.
             let workflows = expect!(harness.read(Read::Workflows), Payload::Workflows);
             assert_eq!(workflows.len(), 3);
             assert_eq!(workflows[2].state, "disabled_manually");
@@ -1184,7 +1184,7 @@ pub fn check_dedupe_and_rollup(harness: &Harness) {
     assert_eq!(quiet.row.ci, None);
 }
 
-// ---------------------------------------------------------------------------- speed (§7.5)
+// ---------------------------------------------------------------------------- speed
 
 /// The worker's refresh path (worker.rs `fetch`): prepare against the cache, read, merge.
 fn refresh(harness: &Harness, cache: &Cache, read: &Read) -> (Payload, Option<String>) {

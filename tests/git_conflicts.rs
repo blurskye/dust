@@ -1,4 +1,4 @@
-//! Conflict resolution from the Git tab (DESIGN.md §5.12): merge, rebase, cherry-pick and
+//! Conflict resolution from the Git tab: merge, rebase, cherry-pick and
 //! pull stop in one place, label each hunk's sides, pick per hunk, count what is left and
 //! name the operation on continue, skip and abort. Temporary repositories and local bare
 //! remotes only.
@@ -26,14 +26,21 @@ fn output(root: &Path, args: &[&str]) -> std::process::Output {
 
 fn git(root: &Path, args: &[&str]) -> String {
     let out = output(root, args);
-    assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "git {args:?}: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     String::from_utf8_lossy(&out.stdout).trim().into()
 }
 
 /// A Git step expected to stop on a conflict.
 fn attempt(root: &Path, args: &[&str]) {
     let out = output(root, args);
-    assert!(!out.status.success(), "git {args:?} was expected to stop on a conflict");
+    assert!(
+        !out.status.success(),
+        "git {args:?} was expected to stop on a conflict"
+    );
 }
 
 fn configure(root: &Path) {
@@ -48,10 +55,10 @@ fn configure(root: &Path) {
 fn story(edits: &[(usize, &str)]) -> String {
     (1..=15)
         .map(|number| {
-            edits
-                .iter()
-                .find(|(line, _)| *line == number)
-                .map_or_else(|| format!("line {number}\n"), |(_, text)| format!("{text}\n"))
+            edits.iter().find(|(line, _)| *line == number).map_or_else(
+                || format!("line {number}\n"),
+                |(_, text)| format!("{text}\n"),
+            )
         })
         .collect()
 }
@@ -81,7 +88,10 @@ fn unmerged(root: &Path) -> String {
 }
 
 fn press(screen: &mut GitScreen, code: KeyCode, modifiers: Modifiers) -> ScreenOutcome {
-    screen.event(UiEvent::Key { key: KeyEvent { code, modifiers }, kind: KeyInputKind::Press })
+    screen.event(UiEvent::Key {
+        key: KeyEvent { code, modifiers },
+        kind: KeyInputKind::Press,
+    })
 }
 
 fn key(screen: &mut GitScreen, code: KeyCode) {
@@ -89,18 +99,32 @@ fn key(screen: &mut GitScreen, code: KeyCode) {
 }
 
 fn ctrl(screen: &mut GitScreen, code: KeyCode) {
-    press(screen, code, Modifiers { control: true, ..Modifiers::default() });
+    press(
+        screen,
+        code,
+        Modifiers {
+            control: true,
+            ..Modifiers::default()
+        },
+    );
 }
 
 fn view(screen: &mut GitScreen) -> String {
     let frame = screen.frame(140, 40);
-    (0..40).map(|y| frame.grid.row_text(y)).collect::<Vec<_>>().join("\n")
+    (0..40)
+        .map(|y| frame.grid.row_text(y))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// The operation banner (row 1); empty when no operation is paused.
 fn banner(screen: &mut GitScreen) -> String {
     let banner = screen.frame(140, 40).grid.row_text(1);
-    if banner.contains('⟳') { banner } else { String::new() }
+    if banner.contains('⟳') {
+        banner
+    } else {
+        String::new()
+    }
 }
 
 fn wait(screen: &mut GitScreen, ready: impl Fn(&mut GitScreen) -> bool) {
@@ -110,7 +134,11 @@ fn wait(screen: &mut GitScreen, ready: impl Fn(&mut GitScreen) -> bool) {
         if ready(screen) {
             return;
         }
-        assert!(Instant::now() < deadline, "screen timed out:\n{}", view(screen));
+        assert!(
+            Instant::now() < deadline,
+            "screen timed out:\n{}",
+            view(screen)
+        );
         std::thread::sleep(Duration::from_millis(10));
     }
 }
@@ -166,9 +194,17 @@ fn three_way() -> tempfile::TempDir {
     let root = dir.path();
     git(root, &["config", "merge.conflictStyle", "diff3"]);
     git(root, &["switch", "-q", "-c", "feature"]);
-    commit_story(root, &[(3, "feature 3"), (9, "feature 9"), (15, "feature 15")], "Feature story");
+    commit_story(
+        root,
+        &[(3, "feature 3"), (9, "feature 9"), (15, "feature 15")],
+        "Feature story",
+    );
     git(root, &["switch", "-q", "main"]);
-    commit_story(root, &[(3, "main 3"), (9, "main 9"), (15, "main 15")], "Main story");
+    commit_story(
+        root,
+        &[(3, "main 3"), (9, "main 9"), (15, "main 15")],
+        "Main story",
+    );
     attempt(root, &["merge", "--no-edit", "feature"]);
     dir
 }
@@ -190,24 +226,53 @@ fn a_merge_labels_each_side_and_picks_ours_theirs_or_both_per_hunk() {
     // The banner: what is merged into what, the hunks left, and only the keys Git has.
     let top = banner(&mut screen);
     assert!(top.contains("Merge · feature into main"), "{top}");
-    assert!(top.contains("merge: 0 of 3 conflict hunks resolved"), "{top}");
-    assert!(top.contains("X abort merge") && !top.contains("skip"), "{top}");
-    assert!(view(&mut screen).contains("o ours"), "the footer offers the picks");
+    assert!(
+        top.contains("merge: 0 of 3 conflict hunks resolved"),
+        "{top}"
+    );
+    assert!(
+        top.contains("X abort merge") && !top.contains("skip"),
+        "{top}"
+    );
+    assert!(
+        view(&mut screen).contains("o ours"),
+        "the footer offers the picks"
+    );
 
     // The cursor starts on the first conflict: o keeps ours there.
-    pick(&mut screen, KeyCode::Char('o'), "merge: 1 of 3 conflict hunks resolved");
-    assert!(on_disk(root).starts_with("line 1\nline 2\nmain 3\nline 4\n"), "{}", on_disk(root));
+    pick(
+        &mut screen,
+        KeyCode::Char('o'),
+        "merge: 1 of 3 conflict hunks resolved",
+    );
+    assert!(
+        on_disk(root).starts_with("line 1\nline 2\nmain 3\nline 4\n"),
+        "{}",
+        on_disk(root)
+    );
     assert!(view(&mut screen).contains("2 conflicts left in story.txt"));
-    pick(&mut screen, KeyCode::Char('t'), "merge: 2 of 3 conflict hunks resolved");
-    assert!(on_disk(root).contains("line 8\nfeature 9\nline 10\n"), "{}", on_disk(root));
-    assert!(!unmerged(root).is_empty(), "the file stays conflicted until its last pick");
+    pick(
+        &mut screen,
+        KeyCode::Char('t'),
+        "merge: 2 of 3 conflict hunks resolved",
+    );
+    assert!(
+        on_disk(root).contains("line 8\nfeature 9\nline 10\n"),
+        "{}",
+        on_disk(root)
+    );
+    assert!(
+        !unmerged(root).is_empty(),
+        "the file stays conflicted until its last pick"
+    );
     settle(&mut screen);
     key(&mut screen, KeyCode::Char('b'));
     shows(&mut screen, "every conflict is resolved");
     settle(&mut screen);
     assert_eq!(
         on_disk(root),
-        story(&[(3, "main 3"), (9, "feature 9"), (15, "main 15")]).replace("main 15\n", "main 15\nfeature 15\n")
+        story(&[(3, "main 3"), (9, "feature 9"), (15, "main 15")])
+            .replace("main 15\n", "main 15\nfeature 15\n")
     );
     // The last pick staged the file.
     assert!(unmerged(root).is_empty());
@@ -219,7 +284,11 @@ fn a_merge_labels_each_side_and_picks_ours_theirs_or_both_per_hunk() {
     wait(&mut screen, |s| banner(s).contains("C continue merge"));
     key(&mut screen, KeyCode::Char('C'));
     shows(&mut screen, "Continue resolved merge?");
-    assert!(view(&mut screen).contains(&button("Continue merge")), "{}", view(&mut screen));
+    assert!(
+        view(&mut screen).contains(&button("Continue merge")),
+        "{}",
+        view(&mut screen)
+    );
     confirm(&mut screen);
     wait(&mut screen, |s| banner(s).is_empty());
     assert_eq!(git(root, &["rev-list", "--merges", "--count", "HEAD"]), "1");
@@ -242,8 +311,16 @@ fn e_opens_a_conflicted_file_at_its_first_conflict() {
     // The help sheet lists the conflict keys.
     key(&mut screen, KeyCode::Char('?'));
     let frame = screen.frame(190, 60);
-    let help = (0..60).map(|y| frame.grid.row_text(y)).collect::<Vec<_>>().join("\n");
-    for row in ["Take both", "Take the side under the cursor", "Edit at the conflict", "Continue · skip · abort menu"] {
+    let help = (0..60)
+        .map(|y| frame.grid.row_text(y))
+        .collect::<Vec<_>>()
+        .join("\n");
+    for row in [
+        "Take both",
+        "Take the side under the cursor",
+        "Edit at the conflict",
+        "Continue · skip · abort menu",
+    ] {
         assert!(help.contains(row), "{row}:\n{help}");
     }
 }
@@ -254,7 +331,11 @@ fn rebasing() -> (tempfile::TempDir, String) {
     let root = dir.path();
     git(root, &["switch", "-q", "-c", "feature"]);
     let shout = commit_story(root, &[(3, "FEATURE 3")], "Shout the greeting");
-    commit_story(root, &[(3, "FEATURE 3"), (15, "feature 15")], "Wave goodbye");
+    commit_story(
+        root,
+        &[(3, "FEATURE 3"), (15, "feature 15")],
+        "Wave goodbye",
+    );
     git(root, &["switch", "-q", "main"]);
     commit_story(root, &[(3, "main 3"), (15, "main 15")], "Main story");
     git(root, &["switch", "-q", "feature"]);
@@ -272,7 +353,12 @@ fn a_rebase_names_the_upstream_ours_and_the_replayed_commit_theirs() {
     let theirs = format!(">>>>>>> theirs · {} Shout the greeting", &shout[..7]);
     assert!(shown.contains(&theirs), "{theirs}:\n{shown}");
     let top = banner(&mut screen);
-    for text in ["Rebase · rebase · feature onto main", "commit 1 of 2", "rebase: 0 of 1 conflict hunk resolved", "S skip commit"] {
+    for text in [
+        "Rebase · rebase · feature onto main",
+        "commit 1 of 2",
+        "rebase: 0 of 1 conflict hunk resolved",
+        "S skip commit",
+    ] {
         assert!(top.contains(text), "{text}: {top}");
     }
 
@@ -284,7 +370,11 @@ fn a_rebase_names_the_upstream_ours_and_the_replayed_commit_theirs() {
     key(&mut screen, KeyCode::Enter);
     shows(&mut screen, "Took theirs");
     settle(&mut screen);
-    assert!(on_disk(root).contains("line 2\nFEATURE 3\nline 4\n"), "{}", on_disk(root));
+    assert!(
+        on_disk(root).contains("line 2\nFEATURE 3\nline 4\n"),
+        "{}",
+        on_disk(root)
+    );
     assert!(unmerged(root).is_empty());
 
     wait(&mut screen, |s| banner(s).contains("C continue rebase"));
@@ -300,7 +390,10 @@ fn a_rebase_names_the_upstream_ours_and_the_replayed_commit_theirs() {
     confirm(&mut screen);
     wait(&mut screen, |s| banner(s).is_empty());
     let subjects = git(root, &["log", "--format=%s"]);
-    assert!(subjects.contains("Shout the greeting") && !subjects.contains("Wave goodbye"), "{subjects}");
+    assert!(
+        subjects.contains("Shout the greeting") && !subjects.contains("Wave goodbye"),
+        "{subjects}"
+    );
 }
 
 /// `main` cherry-picks `topic`'s commit; both change line 3.
@@ -322,10 +415,19 @@ fn a_cherry_pick_keeps_both_sides_and_continues_skips_or_aborts_by_name() {
     let mut screen = reader(root, None);
     let line = format!("{} Greet from topic", &picked[..7]);
     let shown = view(&mut screen);
-    assert!(shown.contains(&format!(">>>>>>> theirs · {line}")), "{shown}");
+    assert!(
+        shown.contains(&format!(">>>>>>> theirs · {line}")),
+        "{shown}"
+    );
     let top = banner(&mut screen);
-    assert!(top.contains(&format!("Cherry-pick · {line} onto main")), "{top}");
-    assert!(top.contains("S skip commit") && top.contains("X abort cherry-pick"), "{top}");
+    assert!(
+        top.contains(&format!("Cherry-pick · {line} onto main")),
+        "{top}"
+    );
+    assert!(
+        top.contains("S skip commit") && top.contains("X abort cherry-pick"),
+        "{top}"
+    );
 
     key(&mut screen, KeyCode::Char('X'));
     shows(&mut screen, "Abort cherry-pick?");
@@ -336,9 +438,19 @@ fn a_cherry_pick_keeps_both_sides_and_continues_skips_or_aborts_by_name() {
     assert!(view(&mut screen).contains(&button("Skip commit")));
     key(&mut screen, KeyCode::Escape);
 
-    pick(&mut screen, KeyCode::Char('b'), "every conflict is resolved");
-    assert!(on_disk(root).contains("line 2\nmain 3\ntopic 3\nline 4\n"), "{}", on_disk(root));
-    wait(&mut screen, |s| banner(s).contains("C continue cherry-pick"));
+    pick(
+        &mut screen,
+        KeyCode::Char('b'),
+        "every conflict is resolved",
+    );
+    assert!(
+        on_disk(root).contains("line 2\nmain 3\ntopic 3\nline 4\n"),
+        "{}",
+        on_disk(root)
+    );
+    wait(&mut screen, |s| {
+        banner(s).contains("C continue cherry-pick")
+    });
     key(&mut screen, KeyCode::Char('C'));
     shows(&mut screen, "Continue resolved cherry-pick?");
     assert!(view(&mut screen).contains(&button("Continue cherry-pick")));
@@ -366,11 +478,17 @@ fn pulled() -> (tempfile::TempDir, tempfile::TempDir) {
     let root = dir.path();
     let bare = tempfile::tempdir().unwrap();
     git(bare.path(), &["init", "-q", "--bare", "-b", "main"]);
-    git(root, &["remote", "add", "origin", bare.path().to_str().unwrap()]);
+    git(
+        root,
+        &["remote", "add", "origin", bare.path().to_str().unwrap()],
+    );
     git(root, &["push", "-q", "-u", "origin", "main"]);
     let other = tempfile::tempdir().unwrap();
     let clone = other.path().join("clone");
-    git(other.path(), &["clone", "-q", bare.path().to_str().unwrap(), "clone"]);
+    git(
+        other.path(),
+        &["clone", "-q", bare.path().to_str().unwrap(), "clone"],
+    );
     configure(&clone);
     commit_story(&clone, &[(3, "origin 3")], "Origin story");
     git(&clone, &["push", "-q", "origin", "main"]);
@@ -389,7 +507,10 @@ fn a_pull_that_merges_stops_with_named_sides_and_a_menu_continues_it() {
     shows(&mut screen, &button("Pull"));
     confirm(&mut screen);
     shows(&mut screen, "Stopped on a conflict");
-    assert!(!view(&mut screen).contains("S skips"), "a merge has no skip");
+    assert!(
+        !view(&mut screen).contains("S skips"),
+        "a merge has no skip"
+    );
     let top = banner(&mut screen);
     assert!(top.contains("Pull · origin/main into main"), "{top}");
     key(&mut screen, KeyCode::Char('2'));
@@ -397,7 +518,11 @@ fn a_pull_that_merges_stops_with_named_sides_and_a_menu_continues_it() {
     assert!(view(&mut screen).contains("<<<<<<< ours · main"));
     settle(&mut screen);
     key(&mut screen, KeyCode::Char('0'));
-    pick(&mut screen, KeyCode::Char('o'), "every conflict is resolved");
+    pick(
+        &mut screen,
+        KeyCode::Char('o'),
+        "every conflict is resolved",
+    );
     assert_eq!(on_disk(root), story(&[(3, "main 3")]));
 
     // M opens the operation's options; skip is not one for a merge.
@@ -405,7 +530,10 @@ fn a_pull_that_merges_stops_with_named_sides_and_a_menu_continues_it() {
     key(&mut screen, KeyCode::Char('M'));
     shows(&mut screen, "Pull options");
     let menu = view(&mut screen);
-    assert!(menu.contains("Continue merge") && menu.contains("Abort merge"), "{menu}");
+    assert!(
+        menu.contains("Continue merge") && menu.contains("Abort merge"),
+        "{menu}"
+    );
     assert!(!menu.contains("Skip commit"), "{menu}");
     key(&mut screen, KeyCode::Enter);
     shows(&mut screen, "Continue resolved merge?");
@@ -424,14 +552,29 @@ fn the_lazygit_preset_picks_with_space_and_b_and_opens_the_menu_with_m() {
     settle(&mut screen);
     key(&mut screen, KeyCode::Char(' '));
     shows(&mut screen, "merge: 1 of 3 conflict hunks resolved");
-    assert!(on_disk(root).contains("line 2\nmain 3\nline 4\n"), "{}", on_disk(root));
-    pick(&mut screen, KeyCode::Char('b'), "merge: 2 of 3 conflict hunks resolved");
-    assert!(on_disk(root).contains("line 8\nmain 9\nfeature 9\nline 10\n"), "{}", on_disk(root));
+    assert!(
+        on_disk(root).contains("line 2\nmain 3\nline 4\n"),
+        "{}",
+        on_disk(root)
+    );
+    pick(
+        &mut screen,
+        KeyCode::Char('b'),
+        "merge: 2 of 3 conflict hunks resolved",
+    );
+    assert!(
+        on_disk(root).contains("line 8\nmain 9\nfeature 9\nline 10\n"),
+        "{}",
+        on_disk(root)
+    );
     settle(&mut screen);
     key(&mut screen, KeyCode::Char('m'));
     shows(&mut screen, "Merge options");
     let menu = view(&mut screen);
-    assert!(menu.contains("Continue merge") && menu.contains("Abort merge"), "{menu}");
+    assert!(
+        menu.contains("Continue merge") && menu.contains("Abort merge"),
+        "{menu}"
+    );
 }
 
 // The tutor's Conflicts chapter (`src/git/screen/tutor/conflicts.rs`), walked through on
@@ -539,40 +682,61 @@ fn the_tutor_conflicts_chapter_advances_on_real_picks() {
 
 /// The cells from `from` to `to` (exclusive) on row `y`, one symbol each.
 fn cells(frame: &dust::ui::Frame, y: u16, from: u16, to: u16) -> String {
-    (from..to).filter_map(|x| frame.grid.get(x, y)).map(|cell| cell.symbol.to_string()).collect()
+    (from..to)
+        .filter_map(|x| frame.grid.get(x, y))
+        .map(|cell| cell.symbol.to_string())
+        .collect()
 }
 
 /// The box of the overlay titled `title`: its left, top, right and bottom edges.
 fn overlay(frame: &dust::ui::Frame, title: &str) -> Option<(u16, u16, u16, u16)> {
     let (width, height) = (frame.grid.width(), frame.grid.height());
-    let symbol = |x: u16, y: u16| frame.grid.get(x, y).map_or(String::new(), |cell| cell.symbol.to_string());
+    let symbol = |x: u16, y: u16| {
+        frame
+            .grid
+            .get(x, y)
+            .map_or(String::new(), |cell| cell.symbol.to_string())
+    };
     for top in 1..height {
         // Right to left: a sidebar box can start on the same row, left of the sheet.
         for left in (0..width).rev() {
-            if !["╭", "┌"].contains(&symbol(left, top).as_str()) || !cells(frame, top, left, (left + 40).min(width)).contains(title) {
+            if !["╭", "┌"].contains(&symbol(left, top).as_str())
+                || !cells(frame, top, left, (left + 40).min(width)).contains(title)
+            {
                 continue;
             }
-            let right = (left + 1..width).find(|&x| ["╮", "┐"].contains(&symbol(x, top).as_str()))?;
-            let bottom = (top + 1..height).find(|&y| ["╰", "└"].contains(&symbol(left, y).as_str()))?;
+            let right =
+                (left + 1..width).find(|&x| ["╮", "┐"].contains(&symbol(x, top).as_str()))?;
+            let bottom =
+                (top + 1..height).find(|&y| ["╰", "└"].contains(&symbol(left, y).as_str()))?;
             return Some((left, top, right, bottom));
         }
     }
     None
 }
 
-const BOX: &[&str] = &["│", "─", "╭", "╮", "╰", "╯", "┌", "┐", "└", "┘", "┬", "┴", "├", "┤", "┼", "━", "┃"];
+const BOX: &[&str] = &[
+    "│", "─", "╭", "╮", "╰", "╯", "┌", "┐", "└", "┘", "┬", "┴", "├", "┤", "┼", "━", "┃",
+];
 
 /// R16 #1: an overlay's box is opaque (no glyph of the panes behind it shows inside) and
 /// the panes recede to the border colour around it, their text kept, never blanked.
 fn occludes(screen: &mut GitScreen, plain: &dust::ui::Frame, width: u16, height: u16, title: &str) {
     use dust::ui::{GitRole, GitSurface, Style};
     let frame = screen.frame(width, height);
-    let shown = (0..height).map(|y| frame.grid.row_text(y)).collect::<Vec<_>>().join("\n");
-    let (left, top, right, bottom) = overlay(&frame, title).unwrap_or_else(|| panic!("no `{title}` overlay:\n{shown}"));
+    let shown = (0..height)
+        .map(|y| frame.grid.row_text(y))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let (left, top, right, bottom) =
+        overlay(&frame, title).unwrap_or_else(|| panic!("no `{title}` overlay:\n{shown}"));
     for y in top + 1..bottom {
         for x in left + 1..right {
             let symbol = frame.grid.get(x, y).unwrap().symbol.to_string();
-            assert!(!BOX.contains(&symbol.as_str()), "`{symbol}` at ({x},{y}) inside `{title}` at {width}x{height}:\n{shown}");
+            assert!(
+                !BOX.contains(&symbol.as_str()),
+                "`{symbol}` at ({x},{y}) inside `{title}` at {width}x{height}:\n{shown}"
+            );
         }
     }
     let mut dimmed = 0;
@@ -584,16 +748,29 @@ fn occludes(screen: &mut GitScreen, plain: &dust::ui::Frame, width: u16, height:
                 continue;
             }
             let after = frame.grid.get(x, y).unwrap();
-            assert_eq!(after.symbol, before.symbol, "the pane at ({x},{y}) is blanked at {width}x{height}:\n{shown}");
+            assert_eq!(
+                after.symbol, before.symbol,
+                "the pane at ({x},{y}) is blanked at {width}x{height}:\n{shown}"
+            );
             assert!(
-                matches!(after.style, Style::Git { role: GitRole::Border, surface: GitSurface::Canvas, .. }),
+                matches!(
+                    after.style,
+                    Style::Git {
+                        role: GitRole::Border,
+                        surface: GitSurface::Canvas,
+                        ..
+                    }
+                ),
                 "the pane at ({x},{y}) is not dimmed at {width}x{height}: {:?}\n{shown}",
                 after.style
             );
             dimmed += 1;
         }
     }
-    assert!(dimmed > 0, "no pane border behind `{title}` at {width}x{height}:\n{shown}");
+    assert!(
+        dimmed > 0,
+        "no pane border behind `{title}` at {width}x{height}:\n{shown}"
+    );
 }
 
 #[test]

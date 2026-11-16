@@ -1,5 +1,5 @@
 #![cfg(unix)]
-//! Field-set parity for the legacy adapter (FORGE.md §5.1, F1): every `legacy::encode` shape
+//! Field-set parity for the legacy adapter: every `legacy::encode` shape
 //! carries exactly the fields the old `gh … --json` calls requested, and for the same fixture
 //! world its JSON has the same structure as what the old gh-CLI fixture
 //! (`tests/fixtures/github_cli.py`) printed for that command, so `view.rs` reads it unchanged.

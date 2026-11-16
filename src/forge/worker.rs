@@ -1,4 +1,4 @@
-//! `ForgeJobs::request` / `ForgeJobs::write` (FORGE.md §3.2): provider-layer work on the same
+//! `ForgeJobs::request` / `ForgeJobs::write`: provider-layer work on the same
 //! single, cancellable forge worker. Host, transport and credential are resolved on the worker
 //! so the UI thread never runs a CLI or opens a socket.
 
@@ -75,7 +75,7 @@ impl ForgeTarget {
     }
 }
 
-/// Provider, endpoints and transport for a target (§1.2 selection, §2.3 detection).
+/// Provider, endpoints and transport for a target.
 pub fn connect(
     root: &Path,
     target: &ForgeTarget,
@@ -117,7 +117,7 @@ pub fn connect_to(
 /// longer, so revalidation sweeps and warm-ups spend less of it.
 pub const ANONYMOUS_TTL_FACTOR: u32 = 4;
 
-/// The §7.3 budget for a payload on this context.
+/// The budget for a payload on this context.
 fn budget(ctx: &ForgeContext, read: &Read, value: &Payload) -> std::time::Duration {
     let ttl = cache::ttl(read, Some(value));
     if ctx.anonymous() {
@@ -131,9 +131,9 @@ fn failed(error: String) -> ForgeError {
     ForgeError::Failed(redact(&error))
 }
 
-/// One conditional read written through to the disk cache (§7.1): a list this provider can
+/// One conditional read written through to the disk cache: a list this provider can
 /// read incrementally asks only for what changed since the cached copy and merges into it; a
-/// payload is stored with its §7.3 budget, a 304 or unchanged fingerprint renews the entry.
+/// payload is stored with its freshness budget, a 304 or unchanged fingerprint renews the entry.
 pub fn fetch_through(
     provider: &dyn Provider,
     ctx: &ForgeContext,
@@ -152,17 +152,17 @@ pub fn fetch_through(
     // GitLab numbers issues and merge requests apart and `Read::Timeline` names only the
     // number: after a restart the kind comes from the disk, not a guess.
     let gitlab = provider.kind() == crate::forge::provider::ProviderKind::GitLab;
-    if gitlab
-        && let (Read::Timeline(number), Some(cache)) = (read, &cache)
-    {
+    if gitlab && let (Read::Timeline(number), Some(cache)) = (read, &cache) {
         crate::forge::provider::gitlab::restore_kind(ctx, cache, *number);
     }
     let started = cache::now_ms();
     let result = crate::forge::inflight::read(provider, ctx, read, &conditional, cancel);
     if gitlab
         && result.is_ok()
-        && let (Read::Issue(number) | Read::PullRequest(number) | Read::Fingerprint(number), Some(cache)) =
-            (read, &cache)
+        && let (
+            Read::Issue(number) | Read::PullRequest(number) | Read::Fingerprint(number),
+            Some(cache),
+        ) = (read, &cache)
     {
         crate::forge::provider::gitlab::keep_kind(ctx, cache, *number);
     }
@@ -208,7 +208,7 @@ pub fn fetch_through(
         }
     }
     // A durable "not found" (an expired log, a deleted run, an endpoint this forge lacks) is
-    // remembered too, so a restart paints it from the cache like any answer (§7.2).
+    // remembered too, so a restart paints it from the cache like any answer.
     if let (Err(error @ ForgeError::NotFound(_)), Some(cache)) = (&result, &cache) {
         cache.store_since(
             &key.missing(),
@@ -233,7 +233,7 @@ pub enum Served {
     Network,
 }
 
-/// The cached entry for `read` when it is still fresh (§7.3), without connecting.
+/// The cached entry for `read` when it is still fresh, without connecting.
 pub fn cached_fresh(host: &HostKey, repo: Option<&RepoRef>, read: &Read) -> Option<Payload> {
     let cache = cache::Cache::shared()?;
     let envelope = cache.get::<Payload>(&cache::CacheKey::new(host, repo, read))?;
@@ -280,9 +280,9 @@ pub fn cached_read(
     }
 }
 
-/// Run one write against its provider and drop what it made stale from the cache (§7.7).
+/// Run one write against its provider and drop what it made stale from the cache.
 /// Porcelain acts locally; a PR creation pushes first when asked and remembers its base
-/// (`branch.<head>.gh-merge-base`, §3.7).
+/// (`branch.<head>.gh-merge-base`).
 pub(crate) fn write_through(
     commands: &ForgeCommands<'_>,
     root: &Path,
@@ -337,7 +337,7 @@ pub fn local_write(kind: provider::ProviderKind, write: &Write) -> bool {
         )
 }
 
-/// What a confirmed write changed is revalidated by the next reader (§7.7).
+/// What a confirmed write changed is revalidated by the next reader.
 pub(crate) fn invalidate(ctx: &ForgeContext, reads: &[Read]) {
     if let Some(cache) = cache::Cache::shared() {
         for read in reads {
@@ -358,7 +358,7 @@ impl ForgeJobs {
         self.fetch(root, request_id, target, read, Conditional::default())
     }
 
-    /// Run one conditional `Read` and write the answer through to the disk cache (§7.1).
+    /// Run one conditional `Read` and write the answer through to the disk cache.
     pub fn fetch(
         &mut self,
         root: PathBuf,
@@ -368,7 +368,15 @@ impl ForgeJobs {
         conditional: Conditional,
     ) -> Result<(), String> {
         let background = self.warming();
-        self.fetch_as(root, request_id, target, read, conditional, background, None)
+        self.fetch_as(
+            root,
+            request_id,
+            target,
+            read,
+            conditional,
+            background,
+            None,
+        )
     }
 
     /// `fetch`, as background work when nobody waits for the answer (a cached entry being

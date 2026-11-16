@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""A fake `glab` for forge tests (FORGE.md §8.2, F2). Installed as `<dir>/glab` next to a
+"""A fake `glab` for forge tests. Installed as `<dir>/glab` next to a
 `fake_glab.json` sidecar (`{"server": "http://127.0.0.1:PORT"}`) naming the fake forge server
 (tests/fixtures/forge/server.py). It never touches the network beyond that loopback server.
 

@@ -1,5 +1,5 @@
 #![cfg(unix)]
-//! How fast the forge tabs paint against a slow forge (FORGE.md §7): the fake forge answers
+//! How fast the forge tabs paint against a slow forge: the fake forge answers
 //! every request after `delay_ms`, and the screen is driven headless, as a terminal would.
 //!
 //! - `speed_audit` (ignored; `--ignored --nocapture`) prints, for each forge, the time to a
@@ -45,7 +45,14 @@ fn rerun_in_child_with(test: &str, world: &World, forge: Forge, env: &[(&str, &s
     let mut command = Command::new(std::env::current_exe().unwrap());
     command.envs(env.iter().copied());
     command
-        .args([test, "--exact", "--nocapture", "--test-threads", "1", "--include-ignored"])
+        .args([
+            test,
+            "--exact",
+            "--nocapture",
+            "--test-threads",
+            "1",
+            "--include-ignored",
+        ])
         .env(CHILD, forge.name())
         .env("DUSTY_SPEED_REPO", &world.repo)
         .env("DUSTY_SPEED_STATE", world.state_path());
@@ -65,7 +72,10 @@ fn rerun_in_child_with(test: &str, world: &World, forge: Forge, env: &[(&str, &s
 fn child() -> Option<(Forge, PathBuf)> {
     let name = std::env::var(CHILD).ok()?;
     let forge = ALL.into_iter().find(|forge| forge.name() == name).unwrap();
-    Some((forge, PathBuf::from(std::env::var_os("DUSTY_SPEED_REPO").unwrap())))
+    Some((
+        forge,
+        PathBuf::from(std::env::var_os("DUSTY_SPEED_REPO").unwrap()),
+    ))
 }
 
 fn set_delay(millis: u64) {
@@ -82,7 +92,10 @@ fn key(screen: &mut GitScreen, code: KeyCode) {
 
 fn view(screen: &mut GitScreen) -> String {
     let frame = screen.frame(190, 48);
-    (0..48).map(|y| frame.grid.row_text(y)).collect::<Vec<_>>().join("\n")
+    (0..48)
+        .map(|y| frame.grid.row_text(y))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// The frame without what changes on its own: ages (`updated 3s ago`) and the busy mark.
@@ -113,7 +126,12 @@ fn has_row(frame: &str) -> bool {
 
 /// Polls as a terminal would until `ready` holds and the screen then stays unchanged for
 /// `QUIET`: the time from `start` to the last change, which is when the paint settled.
-fn settled(screen: &mut GitScreen, start: Instant, what: &str, ready: impl Fn(&str) -> bool) -> Duration {
+fn settled(
+    screen: &mut GitScreen,
+    start: Instant,
+    what: &str,
+    ready: impl Fn(&str) -> bool,
+) -> Duration {
     let mut last = steady(&view(screen));
     let mut changed = start.elapsed();
     let mut quiet_since: Option<Instant> = None;
@@ -140,7 +158,12 @@ fn settled(screen: &mut GitScreen, start: Instant, what: &str, ready: impl Fn(&s
 }
 
 /// The first poll whose frame satisfies `ready`, from `start`.
-fn first(screen: &mut GitScreen, start: Instant, what: &str, ready: impl Fn(&str) -> bool) -> Duration {
+fn first(
+    screen: &mut GitScreen,
+    start: Instant,
+    what: &str,
+    ready: impl Fn(&str) -> bool,
+) -> Duration {
     loop {
         screen.poll();
         let frame = view(screen);
@@ -153,7 +176,11 @@ fn first(screen: &mut GitScreen, start: Instant, what: &str, ready: impl Fn(&str
 }
 
 fn report(forge: Forge, phase: &str, label: &str, time: Duration) {
-    println!("SPEED\t{}\t{phase}\t{label}\t{}", forge.name(), time.as_millis());
+    println!(
+        "SPEED\t{}\t{phase}\t{label}\t{}",
+        forge.name(),
+        time.as_millis()
+    );
 }
 
 /// The first meaningful paint (`ready`, nothing loading) and the settled one, both from `start`.
@@ -165,8 +192,18 @@ fn measure(
     start: Instant,
     ready: impl Fn(&str) -> bool,
 ) {
-    report(forge, phase, &format!("{label}: first paint"), first(screen, start, label, &ready));
-    report(forge, phase, &format!("{label}: settled"), settled(screen, start, label, &ready));
+    report(
+        forge,
+        phase,
+        &format!("{label}: first paint"),
+        first(screen, start, label, &ready),
+    );
+    report(
+        forge,
+        phase,
+        &format!("{label}: settled"),
+        settled(screen, start, label, &ready),
+    );
 }
 
 /// One session through every tab: cold when the cache is empty, warm when a session filled it.
@@ -184,33 +221,77 @@ fn session(forge: Forge, repo: &Path, phase: &str) {
         let start = Instant::now();
         key(&mut screen, KeyCode::Char('j'));
         let input = start.elapsed();
-        moves.push(settled(&mut screen, start, "the next row's details", has_row));
+        moves.push(settled(
+            &mut screen,
+            start,
+            "the next row's details",
+            has_row,
+        ));
         report(forge, phase, "j: key handled", input);
     }
     moves.sort();
-    report(forge, phase, "j: details settled (median of 4)", moves[moves.len() / 2]);
-    for (page, label) in [("issues", "Issues"), ("actions", "Actions"), ("notifications", "Notifications")] {
+    report(
+        forge,
+        phase,
+        "j: details settled (median of 4)",
+        moves[moves.len() / 2],
+    );
+    for (page, label) in [
+        ("issues", "Issues"),
+        ("actions", "Actions"),
+        ("notifications", "Notifications"),
+    ] {
         let start = Instant::now();
         screen.open_target(page, None);
-        measure(&mut screen, forge, phase, &format!("tab {label}"), start, |_| true);
+        measure(
+            &mut screen,
+            forge,
+            phase,
+            &format!("tab {label}"),
+            start,
+            |_| true,
+        );
     }
     let start = Instant::now();
     screen.open_target("prs", None);
-    measure(&mut screen, forge, phase, "tab Pull requests", start, has_row);
+    measure(
+        &mut screen,
+        forge,
+        phase,
+        "tab Pull requests",
+        start,
+        has_row,
+    );
     // An opened pull request and each of its tabs.
     let number = format!("{sigil}{}", forge.pull());
     let start = Instant::now();
     screen.open_target("prs", Some(forge.pull()));
-    measure(&mut screen, forge, phase, "PR Conversation", start, |frame| frame.contains(&number));
+    measure(
+        &mut screen,
+        forge,
+        phase,
+        "PR Conversation",
+        start,
+        |frame| frame.contains(&number),
+    );
     for tab in ["Commits", "Checks", "Files changed"] {
         let start = Instant::now();
         key(&mut screen, KeyCode::Char('L'));
-        measure(&mut screen, forge, phase, &format!("PR {tab}"), start, |frame| frame.contains(&number));
+        measure(
+            &mut screen,
+            forge,
+            phase,
+            &format!("PR {tab}"),
+            start,
+            |frame| frame.contains(&number),
+        );
     }
     let number = format!("#{}", forge.issue());
     let start = Instant::now();
     screen.open_target("issues", Some(forge.issue()));
-    measure(&mut screen, forge, phase, "issue", start, |frame| frame.contains(&number));
+    measure(&mut screen, forge, phase, "issue", start, |frame| {
+        frame.contains(&number)
+    });
 }
 
 #[test]
@@ -225,7 +306,10 @@ fn speed_audit() {
     }
     // `DUSTY_SPEED_FORGES=Gitea,Forgejo` measures only those.
     let only = std::env::var("DUSTY_SPEED_FORGES").unwrap_or_default();
-    for forge in ALL.into_iter().filter(|forge| only.is_empty() || only.split(',').any(|name| name == forge.name())) {
+    for forge in ALL
+        .into_iter()
+        .filter(|forge| only.is_empty() || only.split(',').any(|name| name == forge.name()))
+    {
         let world = World::new(forge);
         let output = rerun_in_child("speed_audit", &world, forge);
         for line in output.lines().filter(|line| line.starts_with("SPEED\t")) {
@@ -246,9 +330,19 @@ fn cached_paint_does_not_wait_on_the_network() {
     // A first session fills the disk cache: both lists and the rows they open on.
     let mut screen = GitScreen::open(&repo).unwrap();
     screen.open_target("issues", None);
-    settled(&mut screen, Instant::now(), "the first session's issues", has_row);
+    settled(
+        &mut screen,
+        Instant::now(),
+        "the first session's issues",
+        has_row,
+    );
     screen.open_target("prs", None);
-    settled(&mut screen, Instant::now(), "the first session's list", has_row);
+    settled(
+        &mut screen,
+        Instant::now(),
+        "the first session's list",
+        has_row,
+    );
     let cached = view(&mut screen);
     drop(screen);
     // The forge now takes far longer than a frame to answer anything.
@@ -259,22 +353,35 @@ fn cached_paint_does_not_wait_on_the_network() {
     // Measured across polls: the disk may answer on the second, the forge not for 5 s.
     let painted = first(&mut screen, start, "the cached list", has_row);
     let frame = view(&mut screen);
-    assert!(painted < Duration::from_millis(1500), "the first frame took {painted:?}:\n{frame}");
+    assert!(
+        painted < Duration::from_millis(1500),
+        "the first frame took {painted:?}:\n{frame}"
+    );
     // The reader beside the list shows the cached row's details too.
-    let title = cached.lines().find(|line| line.contains("Pull request") || line.contains("Merge request"));
+    let title = cached
+        .lines()
+        .find(|line| line.contains("Pull request") || line.contains("Merge request"));
     assert!(title.is_some(), "{cached}");
     // Keys are handled at once while the refresh is in flight.
     let start = Instant::now();
     key(&mut screen, KeyCode::Char('j'));
     screen.poll();
     view(&mut screen);
-    assert!(start.elapsed() < Duration::from_millis(500), "`j` waited {:?}", start.elapsed());
+    assert!(
+        start.elapsed() < Duration::from_millis(500),
+        "`j` waited {:?}",
+        start.elapsed()
+    );
     // Another tab paints from the cache too, behind the list refresh still in flight.
     let start = Instant::now();
     screen.open_target("issues", None);
     screen.poll();
     let issues = view(&mut screen);
-    assert!(start.elapsed() < Duration::from_millis(500), "the Issues tab waited {:?}", start.elapsed());
+    assert!(
+        start.elapsed() < Duration::from_millis(500),
+        "the Issues tab waited {:?}",
+        start.elapsed()
+    );
     assert!(
         has_row(&issues) && !loading(&issues),
         "the Issues tab paints from the cache:\n{issues}"
@@ -295,10 +402,15 @@ fn warm_tabs_paint_from_the_cache() {
         return;
     };
     let number = format!("#{}", forge.pull());
+    #[allow(clippy::type_complexity)]
     let steps: [(&str, &dyn Fn(&mut GitScreen)); 5] = [
-        ("Notifications", &|screen| screen.open_target("notifications", None)),
+        ("Notifications", &|screen| {
+            screen.open_target("notifications", None)
+        }),
         ("Actions", &|screen| screen.open_target("actions", None)),
-        ("PR", &|screen| screen.open_target("prs", Some(forge.pull()))),
+        ("PR", &|screen| {
+            screen.open_target("prs", Some(forge.pull()))
+        }),
         ("PR Commits", &|screen| key(screen, KeyCode::Char('L'))),
         ("PR Checks", &|screen| key(screen, KeyCode::Char('L'))),
     ];
@@ -306,10 +418,17 @@ fn warm_tabs_paint_from_the_cache() {
     // A first session fills the disk cache.
     let mut screen = GitScreen::open(&repo).unwrap();
     screen.open_target("prs", None);
-    settled(&mut screen, Instant::now(), "the first session's list", has_row);
+    settled(
+        &mut screen,
+        Instant::now(),
+        "the first session's list",
+        has_row,
+    );
     for (label, step) in &steps {
         step(&mut screen);
-        settled(&mut screen, Instant::now(), label, |frame| ready(label, frame));
+        settled(&mut screen, Instant::now(), label, |frame| {
+            ready(label, frame)
+        });
     }
     drop(screen);
     set_delay(5000);
@@ -349,7 +468,9 @@ fn a_slow_read_on_one_tab_does_not_delay_another_tabs_paint() {
     let mut screen = GitScreen::open(&repo).unwrap();
     screen.open_target("prs", None);
     settled(&mut screen, Instant::now(), "the pull requests", has_row);
-    forge_fake::update(&state, |state| state["slow_paths"] = json!({"/actions/": 2000}));
+    forge_fake::update(&state, |state| {
+        state["slow_paths"] = json!({"/actions/": 2000})
+    });
     let opened = Instant::now();
     screen.open_target("actions", None);
     // The Actions reads are on their way (and will take 2 s).
@@ -359,7 +480,12 @@ fn a_slow_read_on_one_tab_does_not_delay_another_tabs_paint() {
     }
     let start = Instant::now();
     screen.open_target("issues", None);
-    let painted = first(&mut screen, start, "the Issues tab behind a slow Actions read", has_row);
+    let painted = first(
+        &mut screen,
+        start,
+        "the Issues tab behind a slow Actions read",
+        has_row,
+    );
     let frame = view(&mut screen);
     assert!(
         painted < Duration::from_millis(1200),
@@ -381,7 +507,9 @@ fn a_restored_gitlab_issue_reads_an_issues_timeline() {
         let number = format!("#{}", forge.issue());
         let mut screen = GitScreen::open(&repo).unwrap();
         screen.open_target("issues", Some(forge.issue()));
-        settled(&mut screen, Instant::now(), "the issue", |frame| frame.contains(&number));
+        settled(&mut screen, Instant::now(), "the issue", |frame| {
+            frame.contains(&number)
+        });
         return;
     }
     let forge = Forge::GitLab;
@@ -418,11 +546,15 @@ fn a_restored_gitlab_issue_reads_an_issues_timeline() {
     let after = paths()[before..].to_vec();
     let issue = forge.issue();
     assert!(
-        after.iter().any(|path| path.contains(&format!("/issues/{issue}/notes"))),
+        after
+            .iter()
+            .any(|path| path.contains(&format!("/issues/{issue}/notes"))),
         "the issue's timeline was read: {after:?}"
     );
     assert!(
-        !after.iter().any(|path| path.contains(&format!("/merge_requests/{issue}"))),
+        !after
+            .iter()
+            .any(|path| path.contains(&format!("/merge_requests/{issue}"))),
         "no merge request was guessed: {after:?}"
     );
 }
@@ -462,6 +594,11 @@ fn keys_never_wait_on_a_slow_disk_cache() {
         rerun_in_child(test, &world, forge);
         // A restart over the filled cache, the forge slow too so nothing races the disk.
         forge_fake::update(&world.state_path(), |state| state["delay_ms"] = json!(2000));
-        rerun_in_child_with(test, &world, forge, &[("DUSTY_FORGE_CACHE_READ_DELAY_MS", "250")]);
+        rerun_in_child_with(
+            test,
+            &world,
+            forge,
+            &[("DUSTY_FORGE_CACHE_READ_DELAY_MS", "250")],
+        );
     }
 }

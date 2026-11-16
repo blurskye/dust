@@ -1,5 +1,5 @@
 #![cfg(unix)]
-//! Live, read-only smoke of `dusty-git forge` against real forges (FORGE.md §8.5, F7).
+//! Live, read-only smoke of `dusty-git forge` against real forges.
 //!
 //! Ignored unless asked for twice: `DUSTY_FORGE_LIVE=1 cargo test --test forge_live -- --ignored
 //! --nocapture`. Nothing here writes to a forge: only `detect`, lists, one pull request's detail,
@@ -12,16 +12,16 @@
 //!   25 of the address's 60 requests an hour;
 //! - gitlab.com `DUSTY_LIVE_GITLAB_REPO` (default `gitlab-org/gitlab-runner`);
 //! - codeberg.org `DUSTY_LIVE_CODEBERG_REPO` (default `forgejo/forgejo`);
-//! - forgejo.example.org `DUSTY_LIVE_FORGEJO_REPO` (default `blurskye/dust-editor`), which
-//!   refuses every anonymous API call: without a credential (`DUSTY_FORGE_TOKEN` with
-//!   `DUSTY_FORGE_HOST=forgejo.example.org`, or a `tea` login with `DUSTY_LIVE_LOGINS=1`) it must
-//!   report `SignInRequired`, with the ways to sign in.
+//! - a private Forgejo instance, `DUSTY_LIVE_FORGEJO_HOST` with `DUSTY_LIVE_FORGEJO_REPO` (skipped
+//!   unless both are set), which refuses every anonymous API call: without a credential
+//!   (`DUSTY_FORGE_TOKEN` with `DUSTY_FORGE_HOST` set to that host, or a `tea` login with
+//!   `DUSTY_LIVE_LOGINS=1`) it must report `SignInRequired`, with the ways to sign in.
 //!
 //! `DUSTY_GIT_BIN` runs a `dusty-git` built elsewhere (another machine) with this machine's
 //! logins.
 //!
 //! Only GitHub uses the developer's own login (gh) unless `DUSTY_LIVE_LOGINS=1`; the other hosts
-//! are read anonymously (FORGE.md §2.5): read-only, every write capability `No("Sign in to …")`,
+//! are read anonymously: read-only, every write capability `No("Sign in to …")`,
 //! and the reads that need a sign-in (job logs on GitHub and GitLab, notifications) answer
 //! "Sign in to …" without a request, which the tour reports as expected.
 //! Tokens never reach argv or output: every output is checked against `gh auth token`.
@@ -258,7 +258,7 @@ impl Live {
                 "       exit {} {} · {}",
                 detect.code, error["kind"], error["message"]
             );
-            // Without a credential the host is read anonymously (FORGE.md §2.5), so a failed
+            // Without a credential the host is read anonymously, so a failed
             // detection is a failure, not a skip.
             failed.push("detect".into());
         }
@@ -464,25 +464,35 @@ fn github_com_anonymous() {
 
 #[test]
 #[ignore = "reads real forges; DUSTY_FORGE_LIVE=1"]
-fn forgejo_blurskye_dev() {
+fn forgejo_private_instance() {
     if !live() {
         return;
     }
+    let (Ok(host), Ok(private_repo)) = (
+        std::env::var("DUSTY_LIVE_FORGEJO_HOST"),
+        std::env::var("DUSTY_LIVE_FORGEJO_REPO"),
+    ) else {
+        println!(
+            "== private Forgejo skipped (set DUSTY_LIVE_FORGEJO_HOST and DUSTY_LIVE_FORGEJO_REPO)"
+        );
+        return;
+    };
+    let host: &'static str = Box::leak(host.into_boxed_str());
     let logins = std::env::var("DUSTY_LIVE_LOGINS").as_deref() == Ok("1");
-    let token = std::env::var("DUSTY_FORGE_HOST").as_deref() == Ok("forgejo.example.org");
+    let token = std::env::var("DUSTY_FORGE_HOST").as_deref() == Ok(host);
     let live = Live::new(Host {
-        host: "forgejo.example.org",
-        repo: repo("DUSTY_LIVE_FORGEJO_REPO", "blurskye/dust-editor"),
+        host,
+        repo: private_repo,
         logins,
     });
     if logins || token {
         let failed = live.smoke();
-        assert!(failed.is_empty(), "forgejo.example.org: {failed:?}");
+        assert!(failed.is_empty(), "{host}: {failed:?}");
         return;
     }
     // No credential: the instance refuses anonymous API calls, which is a state with the ways
     // to sign in, not an unknown forge.
-    println!("== forgejo.example.org (no credential)");
+    println!("== {host} (no credential)");
     for args in [&["detect"][..], &["prs"]] {
         let outcome = live.forge(args);
         let error = outcome.error();
@@ -499,7 +509,11 @@ fn forgejo_blurskye_dev() {
             error["hint"],
         );
         assert_eq!(outcome.code, 4, "{args:?}: {}", outcome.stderr);
-        assert_eq!(error["kind"], "SignInRequired", "{args:?}: {}", outcome.stderr);
+        assert_eq!(
+            error["kind"], "SignInRequired",
+            "{args:?}: {}",
+            outcome.stderr
+        );
         let hint = error["hint"].as_str().unwrap_or_default();
         assert!(hint.contains("tea login add"), "{hint}");
         assert!(hint.contains("FORGEJO_TOKEN"), "{hint}");

@@ -1040,7 +1040,10 @@ mod tests {
         let bin = root.join("prettier/bin");
         fs::create_dir_all(&bin).unwrap();
         let executable = bin.join("prettier");
-        crate::testing::write_executable(&executable, "#!/bin/sh\nprintf '%s\\n' \"$@\"\nprintf '%s' \"$PATH\"\n",);
+        crate::testing::write_executable(
+            &executable,
+            "#!/bin/sh\nprintf '%s\\n' \"$@\"\nprintf '%s' \"$PATH\"\n",
+        );
         fs::write(bin.join("node"), "runtime").unwrap();
         let path = directory
             .path()

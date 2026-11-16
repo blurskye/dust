@@ -357,7 +357,7 @@ THREAD_B_NOTES = [
                   "`retry_delay(-1)` returns 1 by accident today."),
 ]
 # `state["conversation"]["suggestion"]`: an open multi-line suggestion on THREAD_A's lines 13–14
-# (GitHub only, DESIGN.md §3.30a).
+# (GitHub only).
 SUGGESTION_NOTES = [
     ("sam", 200, "Name the bound where it is used:\n\n```suggestion\n"
                  "    # Bound the exponent so the delay never passes a minute.\n"

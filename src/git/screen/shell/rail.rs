@@ -1,13 +1,12 @@
-//! Rail panes (DESIGN.md §3.1): Changes, Branches, History and Stashes.
+//! Rail panes: Changes, Branches, History and Stashes.
+use super::super::GitScreen;
 use super::chrome::{self, Span, bold, st};
 use super::glyphs::{Glyph, glyph, lane};
 use super::layout::Rect;
 use super::{fit_path, surface_for, syntax};
 use crate::git::GitFileStatus;
-use super::super::GitScreen;
 use crate::ui::{Emphasis, Frame, GitChip, GitRole, GitSurface, Style};
 use crossterm::cursor::SetCursorStyle;
-
 
 pub(super) fn paint(app: &mut GitScreen, frame: &mut Frame, pane: usize, rect: Rect) {
     if rect.w < 8 || rect.h < 2 {
@@ -17,9 +16,10 @@ pub(super) fn paint(app: &mut GitScreen, frame: &mut Frame, pane: usize, rect: R
         commit_files(app, frame, rect);
         return;
     }
-    let operation_modal = app.form.as_ref().is_some_and(|form| {
-        matches!(&form.action, super::super::FormAction::Operation { .. })
-    });
+    let operation_modal = app
+        .form
+        .as_ref()
+        .is_some_and(|form| matches!(&form.action, super::super::FormAction::Operation { .. }));
     let focused = app.focus == pane && !operation_modal;
     let mode = app.icon_mode;
     let rows = app.rows(pane);
@@ -83,7 +83,10 @@ pub(super) fn paint(app: &mut GitScreen, frame: &mut Frame, pane: usize, rect: R
         }
     }
     if filtering {
-        count = format!("/{query} · {}", rows.iter().filter(|row| !row.directory).count());
+        count = format!(
+            "/{query} · {}",
+            rows.iter().filter(|row| !row.directory).count()
+        );
     }
     let title_spans: Vec<Span> = vec![
         (
@@ -93,7 +96,7 @@ pub(super) fn paint(app: &mut GitScreen, frame: &mut Frame, pane: usize, rect: R
         (title, bold(GitRole::Text, GitSurface::Pane)),
     ];
     chrome::pane(&mut frame.grid, rect, &title_spans, &count, focused);
-    // An empty pane collapses to title, one body row and its bottom border (§2.5): its
+    // An empty pane collapses to title, one body row and its bottom border: its
     // `No stashes` is body text below, never written on a border.
     if rect.h <= 2 {
         return;
@@ -164,7 +167,7 @@ pub(super) fn paint(app: &mut GitScreen, frame: &mut Frame, pane: usize, rect: R
             Some((
                 fit_tabs(
                     &[
-                        // Counts on every tab or on none (r16 git-tab-11).
+                        // Counts on every tab or on none.
                         vec![
                             format!("Local {locals}"),
                             format!("Remotes {remotes}"),
@@ -230,7 +233,12 @@ pub(super) fn paint(app: &mut GitScreen, frame: &mut Frame, pane: usize, rect: R
         } else if pane == 2 && app.history_view == 1 {
             "No reflog entries"
         } else {
-            ["Working tree clean", "No references", "No commits yet", "No stashes"][pane]
+            [
+                "Working tree clean",
+                "No references",
+                "No commits yet",
+                "No stashes",
+            ][pane]
         };
         frame.grid.put_text_clipped(
             list.x + 2,
@@ -239,9 +247,8 @@ pub(super) fn paint(app: &mut GitScreen, frame: &mut Frame, pane: usize, rect: R
             st(GitRole::Muted, GitSurface::Pane),
             list.right(),
         );
-        if focused {
-            frame.cursor = Some((list.x + 2, list.y, SetCursorStyle::SteadyBlock));
-        }
+        // No cursor on the note: the focused border already says where keys go, and a lone
+        // block on "Working tree clean" reads as a glitch (as on the forge tabs' empty lists).
         return;
     }
     let graph_width = if pane == 2 && app.history_view == 0 {
@@ -260,7 +267,11 @@ pub(super) fn paint(app: &mut GitScreen, frame: &mut Frame, pane: usize, rect: R
         let y = list.y + (index - offset) as u16;
         let is_cursor = index == selected;
         let surface = surface_for(is_cursor, focused);
-        chrome::fill(&mut frame.grid, Rect::new(list.x, y, list.w, 1), st(GitRole::Text, surface));
+        chrome::fill(
+            &mut frame.grid,
+            Rect::new(list.x, y, list.w, 1),
+            st(GitRole::Text, surface),
+        );
         if is_cursor && focused {
             frame.grid.set_cell(
                 list.x,
@@ -281,9 +292,13 @@ pub(super) fn paint(app: &mut GitScreen, frame: &mut Frame, pane: usize, rect: R
                     (glyph(Glyph::Remote, mode), GitRole::RemoteRef)
                 };
                 let x = list.x + 2 + row.indent as u16;
-                let x = frame
-                    .grid
-                    .put_text_clipped(x, y, &format!("{mark} "), st(role, surface), list.right());
+                let x = frame.grid.put_text_clipped(
+                    x,
+                    y,
+                    &format!("{mark} "),
+                    st(role, surface),
+                    list.right(),
+                );
                 let label = row.label.trim_start();
                 // A remote row reads `origin · 3 branches`; its URL lives in the reader.
                 if app.subview == 2
@@ -307,7 +322,10 @@ pub(super) fn paint(app: &mut GitScreen, frame: &mut Frame, pane: usize, rect: R
                     frame.grid.put_text_clipped(
                         x,
                         y,
-                        &format!(" · {branches} branch{}", if branches == 1 { "" } else { "es" }),
+                        &format!(
+                            " · {branches} branch{}",
+                            if branches == 1 { "" } else { "es" }
+                        ),
                         st(GitRole::Muted, surface),
                         list.right(),
                     );
@@ -370,7 +388,11 @@ fn change_row(
     let grid = &mut frame.grid;
     let y = rect.y;
     let right = rect.right();
-    let indent = if app.changes_flat() { 0 } else { row.indent as u16 };
+    let indent = if app.changes_flat() {
+        0
+    } else {
+        row.indent as u16
+    };
     if row.directory {
         let label = row.label.trim_start();
         let (fold, name) = label.split_at(label.find(' ').unwrap_or(0));
@@ -378,11 +400,14 @@ fn change_row(
         let x = grid.put_text_clipped(
             x.saturating_sub(2),
             y,
-            &format!("{} ", if fold.contains('▸') {
-                glyph(Glyph::FoldClosed, mode)
-            } else {
-                glyph(Glyph::FoldOpen, mode)
-            }),
+            &format!(
+                "{} ",
+                if fold.contains('▸') {
+                    glyph(Glyph::FoldClosed, mode)
+                } else {
+                    glyph(Glyph::FoldOpen, mode)
+                }
+            ),
             st(GitRole::Muted, surface),
             right,
         );
@@ -393,21 +418,24 @@ fn change_row(
                 .iter()
                 .any(|path| path.starts_with(&row.value));
         // Aggregated `+n −m` and the staged marker of everything below this directory.
-        let below = app
-            .snapshot
-            .as_ref()
-            .map_or(&[][..], |snapshot| super::super::memo::below(&snapshot.entries, &row.value));
+        let below = app.snapshot.as_ref().map_or(&[][..], |snapshot| {
+            super::super::memo::below(&snapshot.entries, &row.value)
+        });
         let staged = below.iter().filter(|entry| entry.sources.staged).count();
         if marked {
-            grid.set_cell(rect.x + 1, y, glyph(Glyph::Mark, mode), bold(GitRole::Focus, surface));
+            grid.set_cell(
+                rect.x + 1,
+                y,
+                glyph(Glyph::Mark, mode),
+                bold(GitRole::Focus, surface),
+            );
         } else if staged > 0 {
-            let (mark, role) = if staged == below.len()
-                && below.iter().all(|entry| !entry.sources.unstaged)
-            {
-                (glyph(Glyph::Mark, mode), GitRole::Added)
-            } else {
-                (glyph(Glyph::Partial, mode), GitRole::Modified)
-            };
+            let (mark, role) =
+                if staged == below.len() && below.iter().all(|entry| !entry.sources.unstaged) {
+                    (glyph(Glyph::Mark, mode), GitRole::Added)
+                } else {
+                    (glyph(Glyph::Partial, mode), GitRole::Modified)
+                };
             grid.set_cell(rect.x + 1, y, mark, st(role, surface));
         }
         let (added, removed) = below
@@ -451,13 +479,25 @@ fn change_row(
     let untracked = entry.is_some_and(|entry| entry.status == GitFileStatus::Untracked);
     let staged = entry.is_some_and(|entry| entry.sources.staged);
     let unstaged = entry.is_some_and(|entry| entry.sources.unstaged)
-        || module.is_some_and(|module| module.dirty || module.initialized && module.head != module.index);
+        || module.is_some_and(|module| {
+            module.dirty || module.initialized && module.head != module.index
+        });
     // Column 1: the multi-mark wins over the partly-staged marker.
     let marked = app.file_selection_context() && app.file_selection.marked.contains(&row.value);
     if marked {
-        grid.set_cell(rect.x + 1, y, glyph(Glyph::Mark, mode), bold(GitRole::Focus, surface));
+        grid.set_cell(
+            rect.x + 1,
+            y,
+            glyph(Glyph::Mark, mode),
+            bold(GitRole::Focus, surface),
+        );
     } else if staged && unstaged && !conflicted {
-        grid.set_cell(rect.x + 1, y, glyph(Glyph::Partial, mode), st(GitRole::Modified, surface));
+        grid.set_cell(
+            rect.x + 1,
+            y,
+            glyph(Glyph::Partial, mode),
+            st(GitRole::Modified, surface),
+        );
     }
     // Columns 2–3: X (index) and Y (worktree), exactly `git status --short`.
     let mut letters = code.chars();
@@ -475,8 +515,18 @@ fn change_row(
         };
         st(role, surface)
     };
-    grid.set_cell(rect.x + 2, y, &x_letter.to_string(), paint_letter(x_letter, true));
-    grid.set_cell(rect.x + 3, y, &y_letter.to_string(), paint_letter(y_letter, false));
+    grid.set_cell(
+        rect.x + 2,
+        y,
+        &x_letter.to_string(),
+        paint_letter(x_letter, true),
+    );
+    grid.set_cell(
+        rect.x + 3,
+        y,
+        &y_letter.to_string(),
+        paint_letter(y_letter, false),
+    );
     // Columns 5–6: the file-type glyph.
     let (icon, icon_group) = super::glyphs::file(&row.value, mode);
     let icon_x = rect.x + 5 + indent;
@@ -484,7 +534,9 @@ fn change_row(
         grid.put_text_clipped(icon_x, y, icon, syntax(icon_group, surface), right);
     }
     // Right 9: `+n −m`.
-    let counts = (rect.w >= 30).then(|| app.numstat.get(&row.value)).flatten();
+    let counts = (rect.w >= 30)
+        .then(|| app.numstat.get(&row.value))
+        .flatten();
     let mut path_right = right;
     if let Some(counts) = counts {
         let spans: Vec<Span> = match counts {
@@ -512,7 +564,11 @@ fn change_row(
     } else {
         GitRole::Text
     };
-    let emphasis = if conflicted { Emphasis::Bold } else { Emphasis::None };
+    let emphasis = if conflicted {
+        Emphasis::Bold
+    } else {
+        Emphasis::None
+    };
     let path_x = rect.x + 7 + indent;
     let label = if app.changes_flat() {
         row.value.display().to_string()
@@ -556,28 +612,55 @@ fn branch_row(
     });
     let head = entry.is_some_and(|branch| branch.head) || name == app.branch;
     if head {
-        grid.set_cell(rect.x + 2, y, glyph(Glyph::CommitHead, mode), bold(GitRole::Added, surface));
+        grid.set_cell(
+            rect.x + 2,
+            y,
+            glyph(Glyph::CommitHead, mode),
+            bold(GitRole::Added, surface),
+        );
     }
-    grid.set_cell(rect.x + 4, y, glyph(Glyph::Branch, mode), st(GitRole::Ref, surface));
+    grid.set_cell(
+        rect.x + 4,
+        y,
+        glyph(Glyph::Branch, mode),
+        st(GitRole::Ref, surface),
+    );
     let mut tail: Vec<Span> = Vec::new();
     if let Some(branch) = entry {
         if branch.upstream.is_some() && (branch.ahead > 0 || branch.behind > 0 || head) {
             let quiet = branch.ahead == 0 && branch.behind == 0;
             tail.push((
                 format!("{}{}", glyph(Glyph::Ahead, mode), branch.ahead),
-                st(if quiet || branch.ahead == 0 { GitRole::Muted } else { GitRole::Added }, surface),
+                st(
+                    if quiet || branch.ahead == 0 {
+                        GitRole::Muted
+                    } else {
+                        GitRole::Added
+                    },
+                    surface,
+                ),
             ));
             tail.push((" ".into(), st(GitRole::Text, surface)));
             tail.push((
                 format!("{}{}", glyph(Glyph::Behind, mode), branch.behind),
-                st(if quiet || branch.behind == 0 { GitRole::Muted } else { GitRole::Removed }, surface),
+                st(
+                    if quiet || branch.behind == 0 {
+                        GitRole::Muted
+                    } else {
+                        GitRole::Removed
+                    },
+                    surface,
+                ),
             ));
         } else if branch.upstream.is_none() {
             tail.push(("local".into(), st(GitRole::Muted, surface)));
         }
         if branch.checked_out.is_some() && !head {
             tail.push((" ".into(), st(GitRole::Text, surface)));
-            tail.push((" wt ".into(), st(GitRole::Modified, GitSurface::Chip(GitChip::Modified))));
+            tail.push((
+                " wt ".into(),
+                st(GitRole::Modified, GitSurface::Chip(GitChip::Modified)),
+            ));
         }
     }
     let tail_width = chrome::spans_width(&tail);
@@ -620,12 +703,18 @@ fn history_row(
     let merge = info.is_some_and(|info| info.parents.len() > 1);
     let mut x = rect.x + 2;
     if let Some(graph) = app.history_graph.get(index) {
-        for (cell_index, cell) in graph.cells.iter().enumerate().take(usize::from(graph_width)) {
+        for (cell_index, cell) in graph
+            .cells
+            .iter()
+            .enumerate()
+            .take(usize::from(graph_width))
+        {
             let at = x + cell_index as u16;
             let Some((symbol, colour)) = *cell else {
                 continue;
             };
-            let clipped = cell_index + 1 == usize::from(graph_width) && graph.cells.len() > usize::from(graph_width);
+            let clipped = cell_index + 1 == usize::from(graph_width)
+                && graph.cells.len() > usize::from(graph_width);
             let text = if clipped {
                 lane('…', mode)
             } else if symbol == super::graph::NODE {
@@ -642,7 +731,11 @@ fn history_row(
             } else {
                 lane(symbol, mode)
             };
-            let role = if clipped { GitRole::Muted } else { GitRole::Lane(colour % 5) };
+            let role = if clipped {
+                GitRole::Muted
+            } else {
+                GitRole::Lane(colour % 5)
+            };
             let style = if symbol == super::graph::NODE && head {
                 bold(GitRole::Focus, surface)
             } else {
@@ -652,7 +745,13 @@ fn history_row(
         }
         x += graph_width + 1;
     }
-    x = grid.put_text_clipped(x, y, &id[..id.len().min(7)], st(GitRole::Hash, surface), right);
+    x = grid.put_text_clipped(
+        x,
+        y,
+        &id[..id.len().min(7)],
+        st(GitRole::Hash, surface),
+        right,
+    );
     x += 1;
     // Ref chips, decided before the age column: a branch tip matters more than a date.
     let chips = info.map_or_else(Vec::new, |info| {
@@ -692,7 +791,10 @@ fn history_row(
             .take(2)
             .collect::<String>()
             .to_uppercase();
-        let tail = format!("{initials} {}", chrome::when(&info.date, crate::forge::records::now()));
+        let tail = format!(
+            "{initials} {}",
+            chrome::when(&info.date, crate::forge::records::now())
+        );
         let at = right.saturating_sub(chrome::width(&tail) + 1);
         if at > x + 14 {
             grid.put_text_clipped(at, y, &tail, st(GitRole::Muted, surface), right);
@@ -737,7 +839,9 @@ fn stash_row(
     let reference = parts.next().unwrap_or_default();
     let (branch, message) = match (parts.next(), parts.next()) {
         (Some(on), Some(message)) => (
-            on.trim_start_matches("WIP on ").trim_start_matches("On ").to_owned(),
+            on.trim_start_matches("WIP on ")
+                .trim_start_matches("On ")
+                .to_owned(),
             message.to_owned(),
         ),
         (Some(message), None) => (String::new(), message.to_owned()),
@@ -762,7 +866,11 @@ fn stash_row(
     } else {
         branch
     };
-    let branch_width = if branch.is_empty() { 0 } else { chrome::width(&branch).min(14) + 1 };
+    let branch_width = if branch.is_empty() {
+        0
+    } else {
+        chrome::width(&branch).min(14) + 1
+    };
     let message_right = right.saturating_sub(branch_width + 1);
     grid.put_text_clipped(
         x,
@@ -808,7 +916,12 @@ fn commit_files(app: &GitScreen, frame: &mut Frame, rect: Rect) {
         // The hash lives once, in the reader's commit header (R15-06).
         ("Commit files".into(), bold(GitRole::Text, GitSurface::Pane)),
         (
-            if filtering && !commit.filter.active() { " /" } else { "" }.into(),
+            if filtering && !commit.filter.active() {
+                " /"
+            } else {
+                ""
+            }
+            .into(),
             st(GitRole::Focus, GitSurface::Pane),
         ),
     ];
@@ -844,9 +957,18 @@ fn commit_files(app: &GitScreen, frame: &mut Frame, rect: Rect) {
         let is_cursor = index == commit.cursor;
         let surface = surface_for(is_cursor, focused);
         let right = list.right();
-        chrome::fill(&mut frame.grid, Rect::new(list.x, y, list.w, 1), st(GitRole::Text, surface));
+        chrome::fill(
+            &mut frame.grid,
+            Rect::new(list.x, y, list.w, 1),
+            st(GitRole::Text, surface),
+        );
         if is_cursor && focused {
-            frame.grid.set_cell(list.x, y, glyph(Glyph::Cursor, mode), bold(GitRole::Focus, surface));
+            frame.grid.set_cell(
+                list.x,
+                y,
+                glyph(Glyph::Cursor, mode),
+                bold(GitRole::Focus, surface),
+            );
             frame.cursor = Some((list.x, y, SetCursorStyle::SteadyBar));
         }
         let indent = row.indent as u16;
@@ -894,7 +1016,9 @@ fn commit_files(app: &GitScreen, frame: &mut Frame, rect: Rect) {
         }
         let (icon, group) = super::glyphs::file(&row.value, mode);
         let x = list.x + 2 + indent;
-        frame.grid.put_text_clipped(x, y, icon, syntax(group, surface), path_right);
+        frame
+            .grid
+            .put_text_clipped(x, y, icon, syntax(group, surface), path_right);
         let name = row
             .value
             .file_name()
@@ -913,7 +1037,12 @@ fn commit_files(app: &GitScreen, frame: &mut Frame, rect: Rect) {
         );
     }
     if rows.len() > visible {
-        let label = format!(" {}–{}/{} ", offset + 1, (offset + visible).min(rows.len()), rows.len());
+        let label = format!(
+            " {}–{}/{} ",
+            offset + 1,
+            (offset + visible).min(rows.len()),
+            rows.len()
+        );
         let at = rect.right().saturating_sub(chrome::width(&label) + 2);
         frame.grid.put_text_clipped(
             at,
@@ -928,7 +1057,8 @@ fn commit_files(app: &GitScreen, frame: &mut Frame, rect: Rect) {
 /// The first label set whose ` a │ b │ c ` strip fits `room` cells, else the last.
 fn fit_tabs(variants: &[Vec<String>], room: u16) -> Vec<String> {
     let strip = |tabs: &Vec<String>| {
-        tabs.iter().map(|tab| chrome::width(tab) + 2).sum::<u16>() + tabs.len().saturating_sub(1) as u16
+        tabs.iter().map(|tab| chrome::width(tab) + 2).sum::<u16>()
+            + tabs.len().saturating_sub(1) as u16
     };
     variants
         .iter()

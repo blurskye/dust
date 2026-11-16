@@ -1,4 +1,4 @@
-//! Conflict resolution on the Git tab (DESIGN.md §5.12). Merge, pull, rebase, cherry-pick
+//! Conflict resolution on the Git tab. Merge, pull, rebase, cherry-pick
 //! and revert all stop in the same place: the operation banner names what is being applied
 //! onto what and how many conflict hunks are left; the reader labels each hunk's sides
 //! (`<<<<<<< ours · main`, `>>>>>>> theirs · feature`, and the base when diff3 or zdiff3
@@ -43,7 +43,10 @@ impl Hunk {
         let ours_end = self.base.unwrap_or(self.middle);
         if line > self.start && line < ours_end {
             Some(Pick::Ours)
-        } else if self.base.is_some_and(|base| line > base && line < self.middle) {
+        } else if self
+            .base
+            .is_some_and(|base| line > base && line < self.middle)
+        {
             Some(Pick::Base)
         } else if line > self.middle && line < self.end {
             Some(Pick::Theirs)
@@ -121,9 +124,9 @@ pub(super) fn resolve(text: &str, hunk: &Hunk, pick: Pick) -> Result<String, Str
         Pick::Theirs => theirs.to_vec(),
         Pick::Both => ours.iter().chain(theirs).copied().collect(),
         Pick::Base => {
-            let base = hunk.base.ok_or(
-                "Base version not shown · git config merge.conflictStyle zdiff3 adds it",
-            )?;
+            let base = hunk
+                .base
+                .ok_or("Base version not shown · git config merge.conflictStyle zdiff3 adds it")?;
             lines[base + 1..hunk.middle].to_vec()
         }
     };
@@ -193,7 +196,11 @@ fn name_at(repository: &git2::Repository, id: git2::Oid, skip: &str) -> Option<S
             .references_glob(&format!("{prefix}*"))
             .ok()?
             .flatten()
-            .filter(|reference| reference.peel_to_commit().is_ok_and(|commit| commit.id() == id))
+            .filter(|reference| {
+                reference
+                    .peel_to_commit()
+                    .is_ok_and(|commit| commit.id() == id)
+            })
             .filter_map(|reference| reference.name().map(|name| name[prefix.len()..].to_owned()))
             .filter(|name| name != skip && !name.ends_with("/HEAD"))
             .collect::<Vec<_>>();
@@ -214,7 +221,13 @@ fn recorded(path: &Path) -> Option<git2::Oid> {
 impl Context {
     /// `head` is the screen's validated head label (`rebase · main`, `rebase · detached
     /// HEAD`); a rebase never names its branch from unchecked metadata.
-    fn read(root: &Path, operation: &str, branch: &str, head: &str, replay: Option<&PausedReplay>) -> Self {
+    fn read(
+        root: &Path,
+        operation: &str,
+        branch: &str,
+        head: &str,
+        replay: Option<&PausedReplay>,
+    ) -> Self {
         let mut context = Self {
             kind: operation.to_owned(),
             ..Self::default()
@@ -236,7 +249,11 @@ impl Context {
             "merge" => {
                 let first = std::fs::read_to_string(git.join("MERGE_MSG")).unwrap_or_default();
                 // `git pull` records `Merge branch 'main' of <remote>`.
-                if first.lines().next().is_some_and(|line| line.contains("' of ")) {
+                if first
+                    .lines()
+                    .next()
+                    .is_some_and(|line| line.contains("' of "))
+                {
                     context.kind = "pull".into();
                 }
                 let incoming = recorded(&git.join("MERGE_HEAD"));
@@ -266,7 +283,8 @@ impl Context {
                     .and_then(|directory| recorded(&directory.join("onto")))
                     .map(|onto| name_at(&repository, onto, rebased).unwrap_or_else(|| short(onto)));
                 // Theirs is the commit being replayed, only when its metadata checks out.
-                context.theirs = replay.map(|replay| format!("{} {}", short(replay.id), replay.subject));
+                context.theirs =
+                    replay.map(|replay| format!("{} {}", short(replay.id), replay.subject));
                 context.base = replay.map(|replay| format!("parent of {}", short(replay.id)));
                 // `rebase · feature onto main`: the head label as the top bar says it.
                 context.what = (!head.is_empty()).then(|| match &context.ours {
@@ -276,15 +294,27 @@ impl Context {
                 context.step = crate::git::conflict::rebase_progress(&repository);
             }
             "cherry-pick" | "revert" => {
-                let head = if operation == "revert" { "REVERT_HEAD" } else { "CHERRY_PICK_HEAD" };
+                let head = if operation == "revert" {
+                    "REVERT_HEAD"
+                } else {
+                    "CHERRY_PICK_HEAD"
+                };
                 let incoming = repository.refname_to_id(head).ok();
                 context.ours = Some(here.clone());
                 context.theirs = incoming.map(|id| {
                     let line = commit_line(&repository, id);
-                    if operation == "revert" { format!("revert of {line}") } else { line }
+                    if operation == "revert" {
+                        format!("revert of {line}")
+                    } else {
+                        line
+                    }
                 });
                 context.base = incoming.map(|id| {
-                    if operation == "revert" { short(id) } else { format!("parent of {}", short(id)) }
+                    if operation == "revert" {
+                        short(id)
+                    } else {
+                        format!("parent of {}", short(id))
+                    }
                 });
                 context.what = incoming.map(|id| {
                     let verb = if operation == "revert" { "on" } else { "onto" };
@@ -318,7 +348,11 @@ impl Context {
             self.kind,
             total - self.left(),
             if total == 1 { "" } else { "s" },
-            if files > 1 { format!(" in {files} files") } else { String::new() }
+            if files > 1 {
+                format!(" in {files} files")
+            } else {
+                String::new()
+            }
         ))
     }
 
@@ -352,7 +386,9 @@ fn files(repository: &git2::Repository, root: &Path) -> Vec<FileConflicts> {
         else {
             continue;
         };
-        let found = read_text(&root.join(&path)).map(|text| hunks(&text)).unwrap_or_default();
+        let found = read_text(&root.join(&path))
+            .map(|text| hunks(&text))
+            .unwrap_or_default();
         let merged = match (&conflict.ancestor, &conflict.our, &conflict.their) {
             (Some(base), Some(ours), Some(theirs)) => repository
                 .merge_file_from_index(base, ours, theirs, None)
@@ -379,17 +415,42 @@ fn files(repository: &git2::Repository, root: &Path) -> Vec<FileConflicts> {
 
 /// Labels each conflict's marker rows in a conflicted file's source preview and marks its
 /// sides for the reader's bands; returns the row of the first conflict, for the cursor.
-pub(super) fn decorate(preview: &mut Preview, text: &str, context: Option<&Context>) -> Option<usize> {
+pub(super) fn decorate(
+    preview: &mut Preview,
+    text: &str,
+    context: Option<&Context>,
+) -> Option<usize> {
     let found = hunks(text);
     let lines = text.lines().collect::<Vec<_>>();
     let side = |pick: fn(&Context) -> Option<&String>| context.and_then(pick);
     for hunk in &found {
-        label(preview, &lines, hunk.start, '<', "ours", side(|c| c.ours.as_ref()));
+        label(
+            preview,
+            &lines,
+            hunk.start,
+            '<',
+            "ours",
+            side(|c| c.ours.as_ref()),
+        );
         if let Some(base) = hunk.base {
-            label(preview, &lines, base, '|', "base", side(|c| c.base.as_ref()));
+            label(
+                preview,
+                &lines,
+                base,
+                '|',
+                "base",
+                side(|c| c.base.as_ref()),
+            );
         }
         label(preview, &lines, hunk.middle, '=', "", None);
-        label(preview, &lines, hunk.end, '>', "theirs", side(|c| c.theirs.as_ref()));
+        label(
+            preview,
+            &lines,
+            hunk.end,
+            '>',
+            "theirs",
+            side(|c| c.theirs.as_ref()),
+        );
         for line in hunk.start + 1..hunk.end {
             if let Some(pick) = hunk.side(line)
                 && let Some(row) = preview.rows.get_mut(line + 1)
@@ -407,11 +468,22 @@ pub(super) fn decorate(preview: &mut Preview, text: &str, context: Option<&Conte
 
 /// One marker row's text: the marker, the side, and the repository's name for it, or Git's
 /// own label (`HEAD`, `a1b2c3d (Shout)`) when the repository names no side.
-fn label(preview: &mut Preview, lines: &[&str], line: usize, sign: char, side: &str, name: Option<&String>) {
+fn label(
+    preview: &mut Preview,
+    lines: &[&str],
+    line: usize,
+    sign: char,
+    side: &str,
+    name: Option<&String>,
+) {
     let Some(row) = preview.rows.get_mut(line + 1) else {
         return;
     };
-    let own = lines[line].trim_end_matches('\r').get(MARKER..).unwrap_or_default().trim();
+    let own = lines[line]
+        .trim_end_matches('\r')
+        .get(MARKER..)
+        .unwrap_or_default()
+        .trim();
     let name = name.map_or(own, String::as_str);
     let marker = sign.to_string().repeat(MARKER);
     row.text = if side.is_empty() {
@@ -447,9 +519,13 @@ fn menu_choices(operation: &str) -> Vec<String> {
 }
 
 pub(super) fn menu_action(choice: &str) -> Option<GitOperationAction> {
-    [GitOperationAction::Continue, GitOperationAction::Skip, GitOperationAction::Abort]
-        .into_iter()
-        .find(|action| choice.starts_with(&action_label(*action, "")[..4]))
+    [
+        GitOperationAction::Continue,
+        GitOperationAction::Skip,
+        GitOperationAction::Abort,
+    ]
+    .into_iter()
+    .find(|action| choice.starts_with(&action_label(*action, "")[..4]))
 }
 
 /// An Operation help row's key in the keys in force: lazygit takes the side under the
@@ -497,7 +573,9 @@ impl GitScreen {
             .as_ref()?
             .entries
             .iter()
-            .any(|entry| entry.relative_path == row.value && entry.status == GitFileStatus::Conflicted)
+            .any(|entry| {
+                entry.relative_path == row.value && entry.status == GitFileStatus::Conflicted
+            })
             .then_some(row.value)
     }
 
@@ -514,9 +592,19 @@ impl GitScreen {
         let lazygit = self.github.key_table().preset == Preset::Lazygit;
         if self.conflict_reader() {
             let take = if lazygit { "Space" } else { "Enter" };
-            return Some(vec![("o", "ours"), ("t", "theirs"), ("b", "both"), (take, "this side"), ("e", "edit")]);
+            return Some(vec![
+                ("o", "ours"),
+                ("t", "theirs"),
+                ("b", "both"),
+                (take, "this side"),
+                ("e", "edit"),
+            ]);
         }
-        if self.focus == 0 && !lazygit && self.file_selection.marked.is_empty() && self.conflicted_row().is_some() {
+        if self.focus == 0
+            && !lazygit
+            && self.file_selection.marked.is_empty()
+            && self.conflicted_row().is_some()
+        {
             return Some(vec![
                 ("0", "pick hunks"),
                 ("o t", "whole file"),
@@ -584,7 +672,10 @@ impl GitScreen {
     }
 
     fn operation_menu(&mut self) -> Result<(), String> {
-        let bar = self.operation_bar.clone().ok_or("No Git operation is paused")?;
+        let bar = self
+            .operation_bar
+            .clone()
+            .ok_or("No Git operation is paused")?;
         let choices = menu_choices(&bar.operation);
         let mut field = Field::new("Action (Up/Down selects)", choices[0].clone());
         field.choices = choices;
@@ -626,7 +717,12 @@ impl GitScreen {
             .copied()
             .ok_or("Move the cursor into a conflict, then o t or b picks a side")?;
         // The reader must still show this text: an edit since it loaded moves the conflicts.
-        let markers = [Some(hunk.start), hunk.base, Some(hunk.middle), Some(hunk.end)];
+        let markers = [
+            Some(hunk.start),
+            hunk.base,
+            Some(hunk.middle),
+            Some(hunk.end),
+        ];
         let shown = markers.into_iter().flatten().all(|index| {
             self.preview.rows.get(index + 1).is_some_and(|row| {
                 row.new == Some(index as u32 + 1) && row.marker == Some(MARKER_ROW)
@@ -634,7 +730,9 @@ impl GitScreen {
         });
         if !shown {
             self.load_preview();
-            return Err(format!("{name} changed since it was shown; check the conflict and pick again"));
+            return Err(format!(
+                "{name} changed since it was shown; check the conflict and pick again"
+            ));
         }
         let pick = match pick {
             Some(pick) => pick,
@@ -646,7 +744,8 @@ impl GitScreen {
         #[cfg(unix)]
         let executable = {
             use std::os::unix::fs::PermissionsExt;
-            std::fs::metadata(&path).is_ok_and(|metadata| metadata.permissions().mode() & 0o111 != 0)
+            std::fs::metadata(&path)
+                .is_ok_and(|metadata| metadata.permissions().mode() & 0o111 != 0)
         };
         #[cfg(not(unix))]
         let executable = false;
@@ -654,7 +753,9 @@ impl GitScreen {
             .map_err(|error| {
                 let reason = match &error {
                     crate::files::VfsError::Io { source, .. }
-                    | crate::files::VfsError::RootIo { source, .. } => super::words::io_reason(source),
+                    | crate::files::VfsError::RootIo { source, .. } => {
+                        super::words::io_reason(source)
+                    }
                     _ => String::new(),
                 };
                 format!("Couldn't save {name}{reason}")
@@ -669,12 +770,18 @@ impl GitScreen {
         } else {
             match crate::git::conflict::stage_resolved(&self.root, &relative) {
                 Ok(()) => format!("Took {} · {name} is resolved and staged", pick.word()),
-                Err(_) => format!("Used {} · {name} is resolved but couldn't be staged", pick.word()),
+                Err(_) => format!(
+                    "Used {} · {name} is resolved but couldn't be staged",
+                    pick.word()
+                ),
             }
         };
         self.refresh_conflicts();
         if left == 0
-            && self.conflict.as_ref().is_some_and(|context| context.files.iter().all(|file| file.path == relative))
+            && self
+                .conflict
+                .as_ref()
+                .is_some_and(|context| context.files.iter().all(|file| file.path == relative))
             && let Some(bar) = &self.operation_bar
         {
             self.notice = format!(
@@ -691,15 +798,33 @@ impl GitScreen {
 mod tests {
     use super::*;
 
-    const DIFF3: &str = "one\n<<<<<<< HEAD\nmain\n||||||| base\nbase\n=======\nfeature\n>>>>>>> feature\nend\n";
+    const DIFF3: &str =
+        "one\n<<<<<<< HEAD\nmain\n||||||| base\nbase\n=======\nfeature\n>>>>>>> feature\nend\n";
 
     #[test]
     fn hunks_find_each_conflict_with_its_optional_base() {
-        let text = format!("{DIFF3}<<<<<<< HEAD\r\nx\r\n=======\r\ny\r\n>>>>>>> a1b2c3d (Shout)\r\n");
+        let text =
+            format!("{DIFF3}<<<<<<< HEAD\r\nx\r\n=======\r\ny\r\n>>>>>>> a1b2c3d (Shout)\r\n");
         let found = hunks(&text);
         assert_eq!(found.len(), 2);
-        assert_eq!(found[0], Hunk { start: 1, base: Some(3), middle: 5, end: 7 });
-        assert_eq!(found[1], Hunk { start: 9, base: None, middle: 11, end: 13 });
+        assert_eq!(
+            found[0],
+            Hunk {
+                start: 1,
+                base: Some(3),
+                middle: 5,
+                end: 7
+            }
+        );
+        assert_eq!(
+            found[1],
+            Hunk {
+                start: 9,
+                base: None,
+                middle: 11,
+                end: 13
+            }
+        );
         assert_eq!(found[0].side(2), Some(Pick::Ours));
         assert_eq!(found[0].side(4), Some(Pick::Base));
         assert_eq!(found[0].side(6), Some(Pick::Theirs));
@@ -712,10 +837,22 @@ mod tests {
     #[test]
     fn resolve_keeps_the_picked_side_and_every_other_byte() {
         let hunk = hunks(DIFF3)[0];
-        assert_eq!(resolve(DIFF3, &hunk, Pick::Ours).unwrap(), "one\nmain\nend\n");
-        assert_eq!(resolve(DIFF3, &hunk, Pick::Theirs).unwrap(), "one\nfeature\nend\n");
-        assert_eq!(resolve(DIFF3, &hunk, Pick::Both).unwrap(), "one\nmain\nfeature\nend\n");
-        assert_eq!(resolve(DIFF3, &hunk, Pick::Base).unwrap(), "one\nbase\nend\n");
+        assert_eq!(
+            resolve(DIFF3, &hunk, Pick::Ours).unwrap(),
+            "one\nmain\nend\n"
+        );
+        assert_eq!(
+            resolve(DIFF3, &hunk, Pick::Theirs).unwrap(),
+            "one\nfeature\nend\n"
+        );
+        assert_eq!(
+            resolve(DIFF3, &hunk, Pick::Both).unwrap(),
+            "one\nmain\nfeature\nend\n"
+        );
+        assert_eq!(
+            resolve(DIFF3, &hunk, Pick::Base).unwrap(),
+            "one\nbase\nend\n"
+        );
         let crlf = "<<<<<<< HEAD\r\na\r\n=======\r\nb\r\n>>>>>>> x\r\ntail";
         let hunk = hunks(crlf)[0];
         assert_eq!(resolve(crlf, &hunk, Pick::Theirs).unwrap(), "b\r\ntail");
@@ -751,9 +888,18 @@ mod tests {
     #[test]
     fn menu_choices_name_the_operation_and_skip_only_a_replay() {
         assert_eq!(menu_choices("merge"), ["Continue merge", "Abort merge"]);
-        assert_eq!(menu_choices("rebase"), ["Continue rebase", "Skip commit", "Abort rebase"]);
+        assert_eq!(
+            menu_choices("rebase"),
+            ["Continue rebase", "Skip commit", "Abort rebase"]
+        );
         assert_eq!(menu_action("Skip commit"), Some(GitOperationAction::Skip));
-        assert_eq!(menu_action("Abort cherry-pick"), Some(GitOperationAction::Abort));
-        assert_eq!(menu_action("Continue merge"), Some(GitOperationAction::Continue));
+        assert_eq!(
+            menu_action("Abort cherry-pick"),
+            Some(GitOperationAction::Abort)
+        );
+        assert_eq!(
+            menu_action("Continue merge"),
+            Some(GitOperationAction::Continue)
+        );
     }
 }

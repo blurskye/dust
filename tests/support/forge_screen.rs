@@ -1,4 +1,4 @@
-//! A GitHub screen against the fake forge with the disk cache on (FORGE.md §7, F3). Each test
+//! A GitHub screen against the fake forge with the disk cache on. Each test
 //! re-runs itself as a child with `DUSTY_FORGE_CACHE_DIR` pointing at a private directory, so
 //! sessions in one test share a cache and tests never share one. Include after `forge_fake`:
 //! `#[path = "support/forge_screen.rs"] mod forge_screen;`.

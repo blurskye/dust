@@ -26,7 +26,10 @@ pub fn closing_references(body: &str, repo: &str) -> Vec<Closing> {
     let mut found: Vec<Closing> = Vec::new();
     for line in prose_lines(body) {
         for capture in KEYWORD.captures_iter(&line) {
-            let Some(number) = capture.get(2).and_then(|number| number.as_str().parse::<u64>().ok()) else {
+            let Some(number) = capture
+                .get(2)
+                .and_then(|number| number.as_str().parse::<u64>().ok())
+            else {
                 continue;
             };
             if number == 0 {
@@ -54,7 +57,9 @@ fn prose_lines(body: &str) -> Vec<String> {
         let marker = trimmed.chars().next().filter(|c| *c == '`' || *c == '~');
         let run = marker.map_or(0, |c| trimmed.chars().take_while(|each| *each == c).count());
         match (fence, marker) {
-            (Some((open, length)), Some(c)) if c == open && run >= length && trimmed[run..].trim().is_empty() => {
+            (Some((open, length)), Some(c))
+                if c == open && run >= length && trimmed[run..].trim().is_empty() =>
+            {
                 fence = None;
                 continue;
             }
@@ -108,14 +113,20 @@ mod tests {
     fn every_keyword_form_in_any_case_closes() {
         let body = "Closes #1\nfixes #2, RESOLVED #3\nclose #4; Fix: #5 and resolve #6\n\
                     closed #7 · Fixed #8 · Resolves #9";
-        let found: Vec<u64> = numbers(body).into_iter().map(|(_, number)| number).collect();
+        let found: Vec<u64> = numbers(body)
+            .into_iter()
+            .map(|(_, number)| number)
+            .collect();
         assert_eq!(found, vec![1, 2, 3, 4, 5, 6, 7, 8, 9]);
     }
 
     #[test]
     fn other_repositories_keep_their_name_and_this_one_reads_as_plain() {
         let body = "Fixes octo/widgets#12 and closes orbit/orbit#13. Closes #13 again.";
-        assert_eq!(numbers(body), vec![(Some("octo/widgets".to_owned()), 12), (None, 13)]);
+        assert_eq!(
+            numbers(body),
+            vec![(Some("octo/widgets".to_owned()), 12), (None, 13)]
+        );
     }
 
     #[test]

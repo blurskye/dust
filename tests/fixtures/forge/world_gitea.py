@@ -1,4 +1,4 @@
-"""Gitea and Forgejo for the fake forge (`server.py --world gitea|forgejo`, FORGE.md §8.2, F4).
+"""Gitea and Forgejo for the fake forge (`server.py --world gitea|forgejo`).
 
 Answers `/api/v1` from the recorded fixtures: `gitea/` (gitea.com, main) for `gitea`,
 `forgejo/versions/17/` (code.forgejo.org) for `forgejo`; `state["gitea_fixtures"]` names

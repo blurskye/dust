@@ -416,7 +416,8 @@ mod tests {
     fn stale_same_number_reply_and_repository_round_trip_do_not_replace_current_source() {
         let mut workspace = workspace(PathBuf::new());
         let first_epoch = workspace.scope_epoch;
-        let scope: super::super::lanes::Scope = ("github.com".into(), "alpha/one".into(), first_epoch);
+        let scope: super::super::lanes::Scope =
+            ("github.com".into(), "alpha/one".into(), first_epoch);
         workspace.selected[1] = 1;
         workspace.ensure(false);
         assert!(!workspace.accept_scope(&Key::Item(2, 7), &scope));
@@ -660,7 +661,11 @@ mod tests {
         let Op::Read(target, _) = workspace.list_read(200) else {
             panic!("inbox list is a read")
         };
-        assert_eq!(target, ForgeTarget::host("github.com"), "search is host-wide");
+        assert_eq!(
+            target,
+            ForgeTarget::host("github.com"),
+            "search is host-wide"
+        );
         let mut invalid = json!([row("alpha/one", 2)]);
         invalid[0]["url"] = "https://elsewhere.test/alpha/one/pull/7".into();
         assert!(validate_rows(&mut invalid, "github.com", 2, "open").is_err());

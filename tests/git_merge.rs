@@ -389,8 +389,14 @@ fn assert_conflict_row_and_reader(frame: &Frame, width: u16, height: u16) {
     assert!(row.contains("UU") && row.contains("conflict.txt"), "{row}");
     let border = frame.grid.row_text(2);
     if width >= 100 {
-        let reader = border.chars().skip(usize::from(width / 4)).collect::<String>();
-        assert!(reader.contains("conflict.txt"), "{width}x{height}: {border}");
+        let reader = border
+            .chars()
+            .skip(usize::from(width / 4))
+            .collect::<String>();
+        assert!(
+            reader.contains("conflict.txt"),
+            "{width}x{height}: {border}"
+        );
     } else {
         assert!(border.contains("Changes"), "{width}x{height}: {border}");
     }
@@ -655,7 +661,10 @@ fn confirmed_rebase_rewrites_only_current_branch_and_preserves_selected_and_othe
         );
         let (x, y, _) = frame.cursor.unwrap();
         let row = frame.grid.row_text(y);
-        assert!(x < width && y < height - 1 && row.contains(" Rebase ") && row.contains(" Cancel "), "{row}");
+        assert!(
+            x < width && y < height - 1 && row.contains(" Rebase ") && row.contains(" Cancel "),
+            "{row}"
+        );
     }
     key(&mut screen, KeyCode::Escape);
     assert_eq!(fixture.files(), expected);
@@ -865,7 +874,10 @@ fn rebase_continue_and_skip_that_stop_on_the_next_conflict_close_the_sheet_with_
         std::fs::write(fixture.root.join(path), "topic bytes\n").unwrap();
     }
     git(&fixture.root, &["add", "."]);
-    git(&fixture.root, &["commit", "-m", "Topic adds second and third"]);
+    git(
+        &fixture.root,
+        &["commit", "-m", "Topic adds second and third"],
+    );
     git(&fixture.root, &["checkout", "main"]);
     for (path, subject) in [
         ("second.txt", "Second main commit"),
@@ -887,7 +899,10 @@ fn rebase_continue_and_skip_that_stop_on_the_next_conflict_close_the_sheet_with_
     submit(&mut screen);
     finished(&mut screen);
     let shown = view(&mut screen);
-    assert!(!shown.contains("Continue resolved rebase?"), "the sheet closes: {shown}");
+    assert!(
+        !shown.contains("Continue resolved rebase?"),
+        "the sheet closes: {shown}"
+    );
     assert!(!shown.contains("operation changed"), "{shown}");
     assert!(!shown.contains("failed"), "{shown}");
     let (row, surface) = receipt(
@@ -895,7 +910,11 @@ fn rebase_continue_and_skip_that_stop_on_the_next_conflict_close_the_sheet_with_
         "Rebase continued · stopped on conflict in second.txt (2/3)",
     );
     assert!(row.contains('⚠') && !row.contains('✕'), "{row}");
-    assert_eq!(surface, Some(GitSurface::Warning), "a neutral receipt, not an error: {row}");
+    assert_eq!(
+        surface,
+        Some(GitSurface::Warning),
+        "a neutral receipt, not an error: {row}"
+    );
     assert!(fixture.root.join(".git/rebase-merge").exists());
     assert!(git(&fixture.root, &["ls-files", "--unmerged"]).contains("second.txt"));
     assert_eq!(
@@ -904,7 +923,10 @@ fn rebase_continue_and_skip_that_stop_on_the_next_conflict_close_the_sheet_with_
     );
     // The bar was refreshed: continue is refused again until second.txt is resolved.
     let banner = operation_summary_at(&mut screen, 190, 48);
-    assert!(banner.contains("S skip") && !banner.contains("C continue"), "{banner}");
+    assert!(
+        banner.contains("S skip") && !banner.contains("C continue"),
+        "{banner}"
+    );
     key(&mut screen, KeyCode::Char('C'));
     assert!(view(&mut screen).contains("Resolve and stage"));
 
@@ -914,7 +936,10 @@ fn rebase_continue_and_skip_that_stop_on_the_next_conflict_close_the_sheet_with_
     submit(&mut screen);
     finished(&mut screen);
     let shown = view(&mut screen);
-    assert!(!shown.contains("Skip current rebase commit?"), "the sheet closes: {shown}");
+    assert!(
+        !shown.contains("Skip current rebase commit?"),
+        "the sheet closes: {shown}"
+    );
     let (row, surface) = receipt(
         &mut screen,
         "Rebase commit skipped · stopped on conflict in third.txt (3/3)",
@@ -1249,7 +1274,11 @@ fn git_jobs_preserve_private_user_configuration_for_rebase_and_commit() {
     key(&mut screen, KeyCode::Char('2'));
     wait(&mut screen, |screen| view(screen).contains("working.txt"));
     key(&mut screen, KeyCode::Char('c'));
-    assert!(view(&mut screen).contains("Commit to main"), "{}", view(&mut screen));
+    assert!(
+        view(&mut screen).contains("Commit to main"),
+        "{}",
+        view(&mut screen)
+    );
     screen.event(UiEvent::Paste("User configured commit".into()));
     submit(&mut screen);
     finished(&mut screen);
@@ -1269,7 +1298,11 @@ fn git_jobs_preserve_private_user_configuration_for_rebase_and_commit() {
 fn persistent_head(screen: &mut GitScreen, width: u16, height: u16) -> String {
     let frame = screen.frame(width, height);
     let banner = frame.grid.row_text(1);
-    let banner = if banner.contains('⟳') { banner } else { String::new() };
+    let banner = if banner.contains('⟳') {
+        banner
+    } else {
+        String::new()
+    };
     format!("{}\n{banner}", frame.grid.row_text(0))
 }
 
@@ -1473,7 +1506,11 @@ fn open_conflict_overview(fixture: &Fixture) -> GitScreen {
 fn operation_summary_at(screen: &mut GitScreen, width: u16, height: u16) -> String {
     let _ = height;
     let banner = screen.frame(width, height).grid.row_text(1);
-    if banner.contains('⟳') { banner } else { String::new() }
+    if banner.contains('⟳') {
+        banner
+    } else {
+        String::new()
+    }
 }
 
 #[derive(Debug, PartialEq)]

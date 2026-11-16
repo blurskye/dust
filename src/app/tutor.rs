@@ -426,7 +426,10 @@ fn practice_tasks(language: Language) -> Vec<(&'static str, crate::config::TaskC
         Some(TaskConfig {
             kind,
             executable: crate::process::discover_executable(program)?,
-            arguments: arguments.iter().map(|argument| (*argument).to_owned()).collect(),
+            arguments: arguments
+                .iter()
+                .map(|argument| (*argument).to_owned())
+                .collect(),
             cwd: None,
             environment: std::collections::BTreeMap::new(),
             dependencies: Vec::new(),
@@ -448,7 +451,10 @@ fn practice_tasks(language: Language) -> Vec<(&'static str, crate::config::TaskC
         duration_group: None,
     };
     [
-        ("status", task(TaskKind::Task, "git", &["status", "--short"], None)),
+        (
+            "status",
+            task(TaskKind::Task, "git", &["status", "--short"], None),
+        ),
         (
             "todo",
             task(TaskKind::Linter, "git", &["grep", "-n", "TODO"], Some(todo)),
@@ -856,16 +862,20 @@ impl App {
         self.tutor.seen.push(format!(
             "{}{}",
             invocation.id.as_str(),
-            if self.tutor.errors == errors { "" } else { " (error)" }
+            if self.tutor.errors == errors {
+                ""
+            } else {
+                " (error)"
+            }
         ));
         let Some(step) = self.tutor.step() else {
             return;
         };
         if self.tutor.errors == errors
             && step
-            .done
-            .iter()
-            .any(|pattern| invocation_matches(pattern, invocation))
+                .done
+                .iter()
+                .any(|pattern| invocation_matches(pattern, invocation))
         {
             self.tutor.observed = true;
         }
@@ -1104,7 +1114,9 @@ impl App {
         match step.setup.as_deref() {
             Some("conflict") => {
                 if let Err(error) = start_practice_conflict(&root) {
-                    self.show_error(format!("could not stop a practice merge on a conflict: {error}"));
+                    self.show_error(format!(
+                        "could not stop a practice merge on a conflict: {error}"
+                    ));
                 }
                 self.start_git_status_refresh_silent();
             }
@@ -1171,7 +1183,11 @@ impl App {
 
     /// Put the practice tasks in the configuration while the tutor runs.
     fn add_practice_tasks(&mut self) {
-        let Some(language) = self.tutor.practice.as_ref().map(|practice| practice.language)
+        let Some(language) = self
+            .tutor
+            .practice
+            .as_ref()
+            .map(|practice| practice.language)
         else {
             return;
         };
@@ -1195,7 +1211,11 @@ impl App {
 
     /// A debug adapter for the practice language is installed.
     fn tutor_debugger_ready(&self) -> bool {
-        let Some(language) = self.tutor.practice.as_ref().map(|practice| practice.language)
+        let Some(language) = self
+            .tutor
+            .practice
+            .as_ref()
+            .map(|practice| practice.language)
         else {
             return false;
         };
@@ -2042,7 +2062,7 @@ mod tests {
                 step.done.is_empty()
                     || step
                         .done
-                    .iter()
+                        .iter()
                         .any(|pattern| pattern.split_whitespace().next() == Some(command.as_str())),
                 "{sequence} runs {command}, but step {:?} waits for {:?}",
                 step.press,
@@ -2213,9 +2233,15 @@ mod tests {
             }
             let keys = step.keys.clone();
             let read_only = step.done.is_empty()
-                && [&step.line, &step.gone, &step.twice, &step.indented, &step.commented]
-                    .iter()
-                    .all(|check| check.is_none())
+                && [
+                    &step.line,
+                    &step.gone,
+                    &step.twice,
+                    &step.indented,
+                    &step.commented,
+                ]
+                .iter()
+                .all(|check| check.is_none())
                 && step.cursor.is_none()
                 && step.staged.is_none()
                 && step.clean.is_none();
@@ -2250,7 +2276,10 @@ mod tests {
                 if index + 1 == count && app.tutor.practice.is_some() {
                     let notice = format!("{:?}", app.notices.history().collect::<Vec<_>>());
                     assert!(notice.contains(":TutorQuit"), "{what}: {notice}");
-                    for key in key_script(":TutorQuit<enter>", &leader).into_iter().flatten() {
+                    for key in key_script(":TutorQuit<enter>", &leader)
+                        .into_iter()
+                        .flatten()
+                    {
                         app.handle_event(crate::ui::UiEvent::Key {
                             key,
                             kind: crate::ui::KeyInputKind::Press,
@@ -2296,9 +2325,17 @@ mod tests {
                 app.tutor_go(index + 1, true);
             }
         }
-        assert!(failures.is_empty(), "{} steps failed:\n{}", failures.len(), failures.join("\n"));
+        assert!(
+            failures.is_empty(),
+            "{} steps failed:\n{}",
+            failures.len(),
+            failures.join("\n")
+        );
         // The last step's :TutorNext finishes the tutor and leaves the practice project.
-        assert!(app.tutor.practice.is_none(), "{language:?}: the tutor never finished");
+        assert!(
+            app.tutor.practice.is_none(),
+            "{language:?}: the tutor never finished"
+        );
         println!("{language:?}: skipped steps without their tools: {skipped:?}");
     }
 
@@ -2339,7 +2376,10 @@ mod tests {
         assert_eq!(names.len(), chapters.len());
         let title = app.ui.tutor.as_ref().unwrap().title.clone();
         assert!(title.starts_with("Tutor 1/"), "{title}");
-        assert!(title.contains(&format!("1/{} Welcome", chapters.len())), "{title}");
+        assert!(
+            title.contains(&format!("1/{} Welcome", chapters.len())),
+            "{title}"
+        );
         let (_, third) = &chapters[2];
         app.tutor.completed.insert(third.start);
         app.process_effect(AppEffect::TutorChapters);
@@ -2354,7 +2394,10 @@ mod tests {
         assert!(title.contains(&format!("2/{}", third.len())), "{title}");
         // The progress keeps what was done.
         let saved = std::fs::read_to_string(&app.tutor.progress).unwrap();
-        assert!(saved.ends_with(&format!(" rust {}", third.start)), "{saved}");
+        assert!(
+            saved.ends_with(&format!(" rust {}", third.start)),
+            "{saved}"
+        );
         assert!(app.tutor.saved_completed().contains(&third.start));
     }
 
@@ -2375,7 +2418,11 @@ mod tests {
         assert!(app.tutor.steps[index].needs.is_some() || index < step);
         app.tutor_go(step, false);
         let card = app.ui.tutor.as_ref().unwrap();
-        assert!(card.away && card.place.contains("rust-analyzer"), "{}", card.place);
+        assert!(
+            card.away && card.place.contains("rust-analyzer"),
+            "{}",
+            card.place
+        );
         // The command alone doesn't do a step that can't work here.
         app.tutor.observed = true;
         app.tutor_tick();

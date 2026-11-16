@@ -1,4 +1,4 @@
-//! What Dusty knows about each forge host it talked to (FORGE.md §2.5, DESIGN §3.45 X-OFFLINE /
+//! What Dusty knows about each forge host it talked to (
 //! X-PROVIDER): signed in and how, browsed anonymously (read-only, with the quota left),
 //! signed out, an instance that requires sign-in, CLI missing or too old, rate limited,
 //! unreachable, unknown provider. The forge worker records observations here; the forge tabs
@@ -206,7 +206,7 @@ impl HostState {
         }
     }
 
-    /// The one-row list-header notice (§2.5), or `None` when the list needs none. `cached` is
+    /// The one-row list-header notice, or `None` when the list needs none. `cached` is
     /// the age of what the list is still showing. The forge screens word the states they act
     /// on themselves (`git::screen::github::states`); the keys here are theirs: `@` signs in
     /// (`a` is assignees and attempts there) and `R` retries.
@@ -253,10 +253,7 @@ impl HostState {
                 Tone::Error,
             ),
             HostState::CliTooOld { cli, found, need } => (
-                format!(
-                    "{} {found} is too old · {need} or newer needed",
-                    cli.name()
-                ),
+                format!("{} {found} is too old · {need} or newer needed", cli.name()),
                 Tone::Warning,
             ),
             HostState::RateLimited { until } => {
@@ -275,10 +272,9 @@ impl HostState {
                 text.push_str(" · R retry");
                 (text, Tone::Error)
             }
-            HostState::UnknownProvider => (
-                format!("Unknown site {host} · @ accounts"),
-                Tone::Warning,
-            ),
+            HostState::UnknownProvider => {
+                (format!("Unknown site {host} · @ accounts"), Tone::Warning)
+            }
             HostState::Unknown(reason) => (
                 format!("⚠ {reason} · Git operations remain available"),
                 Tone::Warning,
@@ -355,10 +351,7 @@ impl Account {
                 ));
             }
             HostState::SignInRequired { hints, .. } => {
-                lines.push((
-                    format!("○ {host} · {}", self.state.label()),
-                    Tone::Warning,
-                ));
+                lines.push((format!("○ {host} · {}", self.state.label()), Tone::Warning));
                 for hint in hints {
                     lines.push((
                         format!("  {}", crate::forge::cli::redact(hint)),
@@ -478,7 +471,7 @@ fn anonymous_state(endpoints: &Endpoints) -> HostState {
         remaining: quota.remaining,
         limit: quota.limit,
         reset: None,
-        hint: crate::forge::credential::login_hint(endpoints.kind, &endpoints.host),
+        hint: crate::forge::credential::anonymous_hint(endpoints.kind, &endpoints.host),
     }
 }
 
@@ -712,14 +705,23 @@ mod tests {
         let account = Account::new(
             HostKey::new("offline.test"),
             None,
-            HostState::Unreachable { error: "Network error · 502 Bad Gateway".into() },
+            HostState::Unreachable {
+                error: "Network error · 502 Bad Gateway".into(),
+            },
         );
-        assert_eq!(account.lines()[1], ("  Can't reach offline.test · r retry".into(), Tone::Muted));
+        assert_eq!(
+            account.lines()[1],
+            ("  Can't reach offline.test · r retry".into(), Tone::Muted)
+        );
     }
 
     #[test]
     fn unknown_account_explains_site_configuration_on_two_lines() {
-        let account = Account::new(HostKey::new("unknown.test"), None, HostState::UnknownProvider);
+        let account = Account::new(
+            HostKey::new("unknown.test"),
+            None,
+            HostState::UnknownProvider,
+        );
         assert_eq!(account.lines(), vec![
             ("○ unknown.test · Unknown site".into(), Tone::Warning),
             ("Tell Dusty Git what kind of site this is, in config.toml:".into(), Tone::Muted),

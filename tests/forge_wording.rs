@@ -1,5 +1,5 @@
 #![cfg(unix)]
-//! The forge tabs speak each forge's language (DESIGN.md §4.3): GitLab, Gitea and Forgejo
+//! The forge tabs speak each forge's language: GitLab, Gitea and Forgejo
 //! screens never show GitHub-only words in their chrome. Each provider's world is opened by
 //! deep link (`GitScreen::open_target`, as `dusty-git --page … --open …` does), every reader
 //! tab of a pull (merge) request and an issue is rendered at a wide and a narrow size, and the
@@ -38,7 +38,9 @@ fn rerun_in_child(test: &str, world: &World) {
 
 fn child_repo() -> Option<PathBuf> {
     std::env::var_os(CHILD)?;
-    Some(PathBuf::from(std::env::var_os("DUSTY_WORDING_REPO").unwrap()))
+    Some(PathBuf::from(
+        std::env::var_os("DUSTY_WORDING_REPO").unwrap(),
+    ))
 }
 
 fn key(screen: &mut GitScreen, code: KeyCode) {
@@ -103,7 +105,9 @@ fn foreign(forge: Forge) -> Vec<&'static str> {
             "│ CI",
             "CI │",
         ]),
-        Forge::Gitea | Forge::Forgejo => words.extend(["Merge request", "merge request", "Pipelines"]),
+        Forge::Gitea | Forge::Forgejo => {
+            words.extend(["Merge request", "merge request", "Pipelines"])
+        }
         Forge::GitHub => {}
     }
     words
@@ -120,11 +124,15 @@ fn wording(forge: Forge, test: &str) {
     let pull = format!("{sigil}{}", forge.pull());
     let pages = if forge == Forge::GitLab { "mrs" } else { "prs" };
     screen.open_target(pages, Some(forge.pull()));
-    wait_for(&mut screen, &pull, |frame| frame.contains(&pull) && !frame.contains("Loading details"));
+    wait_for(&mut screen, &pull, |frame| {
+        frame.contains(&pull) && !frame.contains("Loading details")
+    });
     let mut shots = every_tab(&mut screen, 5);
     let issue = format!("#{}", forge.issue());
     screen.open_target("issues", Some(forge.issue()));
-    wait_for(&mut screen, &issue, |frame| frame.contains(&issue) && !frame.contains("Loading details"));
+    wait_for(&mut screen, &issue, |frame| {
+        frame.contains(&issue) && !frame.contains("Loading details")
+    });
     shots.extend(every_tab(&mut screen, 3));
     let mut found = Vec::new();
     for shot in &shots {

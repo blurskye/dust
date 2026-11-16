@@ -1,5 +1,5 @@
 #![cfg(unix)]
-//! Anonymous reads (FORGE.md §2.5): with no token and no forge CLI, public repositories on
+//! Anonymous reads: with no token and no forge CLI, public repositories on
 //! GitHub, GitLab, Gitea and Forgejo are browsed read-only over direct HTTP. Writes answer
 //! "not signed in" without a request, GitHub never sees a GraphQL request (its GraphQL API has
 //! no anonymous access), the small quota is spent carefully (304s are free, background work
@@ -15,13 +15,13 @@ use dust::forge::capability::Cap;
 use dust::forge::host_state;
 use dust::forge::host_state::HostState;
 use dust::forge::http::HttpTransport;
+use dust::forge::model::ItemKind;
 use dust::forge::provider;
 use dust::forge::provider::Conditional;
 use dust::forge::provider::ForgeContext;
 use dust::forge::provider::ProviderKind;
 use dust::forge::provider::RepoRef;
 use dust::forge::request::ForgeError;
-use dust::forge::model::ItemKind;
 use dust::forge::request::Payload;
 use dust::forge::request::Read;
 use dust::forge::request::Write;
@@ -141,6 +141,18 @@ fn login_hint(forge: Forge) -> String {
     }
 }
 
+/// The popover's sign-in with no CLI on PATH: the token variable, never a CLI it can't run.
+fn token_hint(forge: Forge) -> String {
+    match forge {
+        Forge::GitHub if forge.host() == "github.com" => "GH_TOKEN=<token>".into(),
+        Forge::GitHub => "GH_ENTERPRISE_TOKEN=<token>".into(),
+        Forge::GitLab => "GITLAB_TOKEN=<token>".into(),
+        Forge::Gitea | Forge::Forgejo => {
+            format!("FORGEJO_TOKEN=<token> FORGEJO_URL=https://{}", forge.host())
+        }
+    }
+}
+
 /// Every request that reached the API carried no credential, and none was a write.
 fn assert_anonymous_reads_only(world: &World) {
     for request in world.api_requests() {
@@ -178,9 +190,19 @@ fn lists_and_details_load_without_a_credential_on_every_provider() {
             assert_eq!(detected["sign_in_required"], false);
             assert!(detected["viewer"].is_null(), "{}", run.stdout);
             let caps = &detected["capabilities"];
-            assert_eq!(caps["writes"], json!({ "No": "Sign in to make changes" }), "{caps}");
-            assert_eq!(caps["inline_comment"], json!({ "No": "Sign in to comment" }));
-            assert_eq!(caps["notifications"], json!({ "No": "Sign in to see notifications" }));
+            assert_eq!(
+                caps["writes"],
+                json!({ "No": "Sign in to make changes" }),
+                "{caps}"
+            );
+            assert_eq!(
+                caps["inline_comment"],
+                json!({ "No": "Sign in to comment" })
+            );
+            assert_eq!(
+                caps["notifications"],
+                json!({ "No": "Sign in to see notifications" })
+            );
             assert_eq!(caps["merge_methods"], json!([]));
             let state = &detected["state"];
             assert_eq!(state["label"], "Anonymous · read-only", "{state}");
@@ -190,7 +212,11 @@ fn lists_and_details_load_without_a_credential_on_every_provider() {
             assert!(chip.starts_with("Anonymous · read-only · "), "{chip}");
             assert!(chip.ends_with("/60 requests left"), "{chip}");
             assert_eq!(state["anonymous"]["limit"], 60, "{state}");
-            assert_eq!(state["anonymous"]["hint"], login_hint(forge_kind), "{state}");
+            assert_eq!(
+                state["anonymous"]["hint"],
+                token_hint(forge_kind),
+                "{state}"
+            );
         });
         attempt(&mut failures, label("prs"), || {
             let run = forge(world, &["prs"]);
@@ -211,7 +237,12 @@ fn lists_and_details_load_without_a_credential_on_every_provider() {
             let run = forge(world, &["pr", &pull]);
             ok(&run);
             let object = run.object();
-            assert_eq!(object["data"]["row"]["number"], forge_kind.pull(), "{}", run.stdout);
+            assert_eq!(
+                object["data"]["row"]["number"],
+                forge_kind.pull(),
+                "{}",
+                run.stdout
+            );
         });
         attempt(&mut failures, label("issue"), || {
             let run = forge(world, &["issue", &issue]);
@@ -238,7 +269,10 @@ fn lists_and_details_load_without_a_credential_on_every_provider() {
             ok(&run);
             let object = run.object();
             assert!(
-                object["data"].as_str().unwrap_or_default().contains("diff --git"),
+                object["data"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .contains("diff --git"),
                 "{}",
                 run.stdout
             );
@@ -264,7 +298,11 @@ fn lists_and_details_load_without_a_credential_on_every_provider() {
                     "{error}"
                 );
                 assert!(
-                    error["hint"].as_str().unwrap_or_default().contains(&login_hint(forge_kind)),
+                    // No CLI on PATH: the sign-in it names is the token variable.
+                    error["hint"]
+                        .as_str()
+                        .unwrap_or_default()
+                        .contains(&token_hint(forge_kind)),
                     "{error}"
                 );
                 assert_eq!(world.api_requests().len(), before, "a log read was sent");
@@ -272,8 +310,12 @@ fn lists_and_details_load_without_a_credential_on_every_provider() {
         }
         attempt(&mut failures, label("anonymous only"), || {
             assert_anonymous_reads_only(world);
-            assert_eq!(world.state()["anonymous_refused"].as_u64().unwrap_or(0), 0, "{}",
-                world.state()["requests"]);
+            assert_eq!(
+                world.state()["anonymous_refused"].as_u64().unwrap_or(0),
+                0,
+                "{}",
+                world.state()["requests"]
+            );
         });
         if forge_kind == Forge::GitHub {
             attempt(&mut failures, label("no GraphQL"), || {
@@ -282,7 +324,10 @@ fn lists_and_details_load_without_a_credential_on_every_provider() {
                     .into_iter()
                     .filter(|request| request["path"] == "graphql")
                     .collect::<Vec<_>>();
-                assert!(graphql.is_empty(), "GitHub GraphQL sent anonymously: {graphql:?}");
+                assert!(
+                    graphql.is_empty(),
+                    "GitHub GraphQL sent anonymously: {graphql:?}"
+                );
             });
         }
     }
@@ -314,7 +359,9 @@ fn writes_are_refused_without_a_request() {
             let writes = world
                 .requests()
                 .into_iter()
-                .filter(|request| !matches!(request["method"].as_str(), Some("GET" | "HEAD") | None))
+                .filter(|request| {
+                    !matches!(request["method"].as_str(), Some("GET" | "HEAD") | None)
+                })
                 .collect::<Vec<_>>();
             assert!(writes.is_empty(), "a write was sent: {writes:?}");
             assert_eq!(world.state()["anonymous_refused"].as_u64().unwrap_or(0), 0);
@@ -370,7 +417,9 @@ fn github_writes_and_sign_in_reads_send_nothing_in_process() {
         Read::Viewer,
         Read::JobLog(dust::forge::model::ItemId::new("42")),
     ] {
-        let error = github.read(&ctx, &read, &Conditional::default(), &cancel).unwrap_err();
+        let error = github
+            .read(&ctx, &read, &Conditional::default(), &cancel)
+            .unwrap_err();
         assert!(
             error.to_string().starts_with("Sign in to "),
             "{read:?}: {error}"
@@ -379,8 +428,15 @@ fn github_writes_and_sign_in_reads_send_nothing_in_process() {
     let caps = github.capabilities(&ctx);
     assert_eq!(caps.writes, Cap::No("Sign in to make changes"));
     assert_eq!(caps.job_log, Cap::No("Sign in to read logs"));
-    assert_eq!(caps.graphql_batching, Cap::No("GitHub GraphQL needs a sign-in"));
-    assert!(world.api_requests().is_empty(), "{:?}", world.api_requests());
+    assert_eq!(
+        caps.graphql_batching,
+        Cap::No("GitHub GraphQL needs a sign-in")
+    );
+    assert!(
+        world.api_requests().is_empty(),
+        "{:?}",
+        world.api_requests()
+    );
 }
 
 /// The quota is respected: once the forge says it is spent nothing more is sent, a 304 costs
@@ -411,7 +467,11 @@ fn the_rate_budget_is_respected() {
     ok(&again);
     assert_eq!(again.object()["source"], "revalidated", "{}", again.stdout);
     let state = world.state();
-    assert_eq!(state["anonymous"]["charged"].as_u64().unwrap(), charged, "{state}");
+    assert_eq!(
+        state["anonymous"]["charged"].as_u64().unwrap(),
+        charged,
+        "{state}"
+    );
     assert!(state["not_modified"].as_u64().unwrap_or(0) >= 1);
 
     // In process: background work stops at half the anonymous quota.
@@ -420,13 +480,15 @@ fn the_rate_budget_is_respected() {
     let (_, ctx) = github_context(&world, host);
     let github = provider::build(ProviderKind::GitHub).unwrap();
     let cancel = AtomicBool::new(false);
-    let read = |ctx: &ForgeContext, read: Read| {
-        github.read(ctx, &read, &Conditional::default(), &cancel)
-    };
+    let read =
+        |ctx: &ForgeContext, read: Read| github.read(ctx, &read, &Conditional::default(), &cancel);
     read(&ctx, Read::Issue(7)).unwrap();
     // 29 of 60 left, and the host's chip says so.
     let account = host_state::account(&HostKey::new(host)).unwrap();
-    let HostState::Anonymous { remaining, limit, .. } = &account.state else {
+    let HostState::Anonymous {
+        remaining, limit, ..
+    } = &account.state
+    else {
         panic!("{:?}", account.state);
     };
     assert_eq!((*remaining, *limit), (Some(29), Some(60)));
@@ -469,21 +531,38 @@ fn a_sign_in_required_instance_is_a_state_not_an_unknown_forge() {
     let detected = run.object();
     assert_eq!(detected["provider"], "Forgejo", "{}", run.stdout);
     assert_eq!(detected["sign_in_required"], true);
-    assert_eq!(detected["error"]["kind"], "SignInRequired", "{}", run.stdout);
+    assert_eq!(
+        detected["error"]["kind"], "SignInRequired",
+        "{}",
+        run.stdout
+    );
     let state = &detected["state"];
     assert_eq!(state["label"], "Instance requires sign-in", "{state}");
     assert_eq!(state["ready"], false);
     assert_eq!(state["sign_in_required"]["provider"], "Forgejo");
     let hints = state["sign_in_required"]["hints"].to_string();
-    for hint in ["tea login add --url https://code.forgejo.org", "fj -H code.forgejo.org auth login", "FORGEJO_TOKEN="] {
+    for hint in [
+        "tea login add --url https://code.forgejo.org",
+        "fj -H code.forgejo.org auth login",
+        "FORGEJO_TOKEN=",
+    ] {
         assert!(hints.contains(hint), "{hint}: {hints}");
     }
     let list = forge(&world, &["prs"]);
     assert_eq!(list.code, 4, "{}", list.describe());
     let error = list.error();
     assert_eq!(error["kind"], "SignInRequired", "{error}");
-    assert!(error["message"].as_str().unwrap().contains("requires sign-in"), "{error}");
-    assert!(error["hint"].as_str().unwrap().contains("tea login add"), "{error}");
+    assert!(
+        error["message"]
+            .as_str()
+            .unwrap()
+            .contains("requires sign-in"),
+        "{error}"
+    );
+    assert!(
+        error["hint"].as_str().unwrap().contains("tea login add"),
+        "{error}"
+    );
     assert!(
         world.api_requests().is_empty(),
         "detection already knew: {:?}",
@@ -494,6 +573,16 @@ fn a_sign_in_required_instance_is_a_state_not_an_unknown_forge() {
     let world = anonymous_world(Forge::Gitea, json!({ "sign_in_required": true }));
     let list = forge(&world, &["prs"]);
     assert_eq!(list.code, 4, "{}", list.describe());
-    assert_eq!(list.error()["kind"], "SignInRequired", "{}", list.describe());
-    assert!(list.error()["hint"].as_str().unwrap().contains("FORGEJO_TOKEN="));
+    assert_eq!(
+        list.error()["kind"],
+        "SignInRequired",
+        "{}",
+        list.describe()
+    );
+    assert!(
+        list.error()["hint"]
+            .as_str()
+            .unwrap()
+            .contains("FORGEJO_TOKEN=")
+    );
 }

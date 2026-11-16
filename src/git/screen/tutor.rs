@@ -28,8 +28,7 @@ use forge_lessons::FORGE;
 const NAME: &str = "Dusty Git Tutor";
 const EMAIL: &str = "tutor@example.invalid";
 const GREET: &str = "src/greet.rs";
-const USAGE: &str =
-    "Tutor: tutor git [N] · tutor forge [N] · tutor next · tutor prev · tutor reset · tutor N · tutor quit";
+const USAGE: &str = "Tutor: tutor git [N] · tutor forge [N] · tutor next · tutor prev · tutor reset · tutor N · tutor quit";
 const NOT_RUNNING: &str = "The Git tutor is not running; :tutor git starts it";
 
 type Setup = Result<Option<Oid>, String>;
@@ -848,7 +847,7 @@ static GIT: &[Chapter] = &[
                     let mode = p.screen.input_mode();
                     p.saw(0, mode == Some(InputMode::Visual)) && mode == Some(InputMode::Normal)
                 },
-            ).teaching(&["Vim · VISUAL · select, in a text box only"]),
+            ).teaching(&["Vim · VISUAL · select"]),
             vim(
                 "Insert and Normal",
                 "c opens the box in INSERT. Esc: NORMAL; i types again; Ctrl+Enter commits.",
@@ -861,15 +860,15 @@ static GIT: &[Chapter] = &[
                     again && p.moved()
                 },
             ).teaching(&[
-                "Vim · INSERT · in a text box (opens in it)",
-                "Vim · NORMAL · in a text box; again, or q, closes it",
+                "Vim · INSERT · type",
+                "Vim · NORMAL · again closes",
             ]),
             vim(
                 "Vim keys",
                 "? opens the keys; its Vim group lists the modes and the leader. Esc closes it.",
                 plain,
                 |p| p.saw(0, p.screen.help) && !p.screen.help,
-            ).teaching(&["Vim · Leader · which-key; Esc cancels"]),
+            ).teaching(&["Vim · Leader · which-key"]),
         ],
     },
 ];
@@ -1032,7 +1031,14 @@ fn panes(f: &Fixture) -> Setup {
     f.git(&["branch", "feature"])?;
     f.git(&["tag", "v0.1"])?;
     f.write("notes.md", "A stashed note\n")?;
-    f.git(&["stash", "push", "--quiet", "--include-untracked", "-m", "Practice stash"])?;
+    f.git(&[
+        "stash",
+        "push",
+        "--quiet",
+        "--include-untracked",
+        "-m",
+        "Practice stash",
+    ])?;
     f.write(GREET, &greeting("Hello, Dusty Git!"))?;
     Ok(None)
 }
@@ -1041,7 +1047,10 @@ fn tree(f: &Fixture) -> Setup {
     f.write("src/app/view.rs", "pub fn view() {}\n")?;
     f.write("docs/guide.md", "# Guide\n")?;
     f.commit("Add the app")?;
-    f.write("src/app/main.rs", "fn main() {\n    println!(\"practice\");\n}\n")?;
+    f.write(
+        "src/app/main.rs",
+        "fn main() {\n    println!(\"practice\");\n}\n",
+    )?;
     f.write("src/app/view.rs", "pub fn view() -> u8 {\n    1\n}\n")?;
     f.write("docs/guide.md", "# Guide\n\nTry the tree view.\n")?;
     f.write(GREET, &greeting("Hello, tree!"))?;
@@ -1085,7 +1094,10 @@ fn list(f: &Fixture, added: &[&str]) -> Setup {
 fn echoes(f: &Fixture) -> Setup {
     f.write("echo.txt", "start\n")?;
     f.commit("Add an echo")?;
-    f.write("echo.txt", "start\nhello one\nmiddle\nhello two\nhello three\n")?;
+    f.write(
+        "echo.txt",
+        "start\nhello one\nmiddle\nhello two\nhello three\n",
+    )?;
     Ok(None)
 }
 /// HEAD has a body the History row does not show.
@@ -1242,14 +1254,28 @@ fn dirty(f: &Fixture) -> Setup {
 }
 fn stashed(f: &Fixture) -> Setup {
     dirty(f)?;
-    f.git(&["stash", "push", "--quiet", "--include-untracked", "-m", "Practice stash"])?;
+    f.git(&[
+        "stash",
+        "push",
+        "--quiet",
+        "--include-untracked",
+        "-m",
+        "Practice stash",
+    ])?;
     Ok(None)
 }
 fn two_stashes(f: &Fixture) -> Setup {
     f.write(GREET, &greeting("Hello, first stash"))?;
     f.git(&["stash", "push", "--quiet", "-m", "Greeting tweak"])?;
     f.write("idea.md", "An idea\n")?;
-    f.git(&["stash", "push", "--quiet", "--include-untracked", "-m", "Idea"])?;
+    f.git(&[
+        "stash",
+        "push",
+        "--quiet",
+        "--include-untracked",
+        "-m",
+        "Idea",
+    ])?;
     Ok(None)
 }
 fn review(f: &Fixture) -> Setup {
@@ -1259,13 +1285,31 @@ fn review(f: &Fixture) -> Setup {
 /// A committed `lib` submodule cloned from `library/` beside the practice repository.
 fn library(f: &Fixture) -> Result<(), String> {
     let library = f.dir.join("library");
-    run(&f.dir, &f.hooks, &["init", "--quiet", "-b", "main", "library"], true)?;
+    run(
+        &f.dir,
+        &f.hooks,
+        &["init", "--quiet", "-b", "main", "library"],
+        true,
+    )?;
     std::fs::write(library.join("lib.txt"), "Library v1\n").map_err(text)?;
     run(&library, &f.hooks, &["add", "-A"], true)?;
-    run(&library, &f.hooks, &["commit", "--quiet", "-m", "Library v1"], true)?;
+    run(
+        &library,
+        &f.hooks,
+        &["commit", "--quiet", "-m", "Library v1"],
+        true,
+    )?;
     // File transport only for this local, disposable clone.
     let source = library.to_string_lossy().into_owned();
-    f.git(&["-c", "protocol.file.allow=always", "submodule", "--quiet", "add", &source, "lib"])?;
+    f.git(&[
+        "-c",
+        "protocol.file.allow=always",
+        "submodule",
+        "--quiet",
+        "add",
+        &source,
+        "lib",
+    ])?;
     f.commit("Add the lib submodule")?;
     Ok(())
 }
@@ -1279,7 +1323,12 @@ fn submodule_moved(f: &Fixture) -> Setup {
     library(f)?;
     let lib = f.root.join("lib");
     std::fs::write(lib.join("lib.txt"), "Library v2\n").map_err(text)?;
-    run(&lib, &f.hooks, &["commit", "--quiet", "-am", "Library v2"], true)?;
+    run(
+        &lib,
+        &f.hooks,
+        &["commit", "--quiet", "-am", "Library v2"],
+        true,
+    )?;
     Ok(None)
 }
 fn tagged(f: &Fixture) -> Setup {
@@ -1313,7 +1362,13 @@ fn oops(f: &Fixture) -> Setup {
 fn undone(f: &Fixture) -> Setup {
     let base = f.head()?;
     oops(f)?;
-    f.git(&["update-ref", "-m", &format!("{}: updating HEAD", crate::git::history::UNDO_ACTION), "HEAD", &base.to_string()])?;
+    f.git(&[
+        "update-ref",
+        "-m",
+        &format!("{}: updating HEAD", crate::git::history::UNDO_ACTION),
+        "HEAD",
+        &base.to_string(),
+    ])?;
     f.git(&["reset", "--quiet", "--hard", "HEAD"])?;
     Ok(Some(base))
 }
@@ -1322,9 +1377,15 @@ fn release(f: &Fixture) -> Setup {
     Ok(None)
 }
 fn farewell_typo(f: &Fixture) -> Setup {
-    f.write("src/farewell.rs", "pub fn farewell() -> &'static str {\n    \"Goodby\"\n}\n")?;
+    f.write(
+        "src/farewell.rs",
+        "pub fn farewell() -> &'static str {\n    \"Goodby\"\n}\n",
+    )?;
     f.commit("Add farewell")?;
-    f.write("src/farewell.rs", "pub fn farewell() -> &'static str {\n    \"Goodbye\"\n}\n")?;
+    f.write(
+        "src/farewell.rs",
+        "pub fn farewell() -> &'static str {\n    \"Goodbye\"\n}\n",
+    )?;
     f.commit("Fix farewell typo")?;
     Ok(None)
 }
@@ -1436,7 +1497,12 @@ impl Probe<'_> {
             && self.head().and_then(parent) == self.start.and_then(parent)
     }
     fn same_tree(&self) -> bool {
-        let tree = |id: Oid| self.repo.find_commit(id).ok().map(|commit| commit.tree_id());
+        let tree = |id: Oid| {
+            self.repo
+                .find_commit(id)
+                .ok()
+                .map(|commit| commit.tree_id())
+        };
         self.head().and_then(tree) == self.start.and_then(tree)
     }
     fn branch(&self, name: &str) -> Option<Oid> {
@@ -1513,10 +1579,16 @@ impl Probe<'_> {
             .collect()
     }
     fn staged(&self) -> Vec<String> {
-        self.changes(true).into_iter().map(|(path, _)| path).collect()
+        self.changes(true)
+            .into_iter()
+            .map(|(path, _)| path)
+            .collect()
     }
     fn unstaged(&self) -> Vec<String> {
-        self.changes(false).into_iter().map(|(path, _)| path).collect()
+        self.changes(false)
+            .into_iter()
+            .map(|(path, _)| path)
+            .collect()
     }
     fn lines(&self, staged: bool, path: &str) -> usize {
         self.changes(staged)
@@ -1613,10 +1685,17 @@ pub(super) fn with_banner(inner: Frame, banner: Banner, width: u16, height: u16)
             if cell.continuation {
                 continue;
             }
-            let wide = inner.grid.get(x + 1, y).is_some_and(|next| next.continuation);
-            frame
+            let wide = inner
                 .grid
-                .set_cell_with_width(x, to, &cell.symbol, cell.style, if wide { 2 } else { 1 });
+                .get(x + 1, y)
+                .is_some_and(|next| next.continuation);
+            frame.grid.set_cell_with_width(
+                x,
+                to,
+                &cell.symbol,
+                cell.style,
+                if wide { 2 } else { 1 },
+            );
         }
     }
     let style = |role, emphasis| Style::Git {
@@ -1628,9 +1707,13 @@ pub(super) fn with_banner(inner: Frame, banner: Banner, width: u16, height: u16)
         frame.grid.fill_row(y, style(GitRole::Text, Emphasis::None));
     }
     let right = width.saturating_sub(1);
-    frame
-        .grid
-        .put_text_clipped(1, footer, &banner.title, style(GitRole::Focus, Emphasis::Bold), right);
+    frame.grid.put_text_clipped(
+        1,
+        footer,
+        &banner.title,
+        style(GitRole::Focus, Emphasis::Bold),
+        right,
+    );
     if let Some(completed) = &banner.completed {
         completed_mark(&mut frame.grid, footer, completed, &banner.title, width);
     }
@@ -1641,9 +1724,13 @@ pub(super) fn with_banner(inner: Frame, banner: Banner, width: u16, height: u16)
         style(GitRole::Text, Emphasis::None),
         right,
     );
-    frame
-        .grid
-        .put_text_clipped(1, footer + 2, banner.hint, style(GitRole::Muted, Emphasis::None), right);
+    frame.grid.put_text_clipped(
+        1,
+        footer + 2,
+        banner.hint,
+        style(GitRole::Muted, Emphasis::None),
+        right,
+    );
     frame.cursor = inner
         .cursor
         .map(|(x, y, shape)| (x, if y >= footer { y + BANNER_ROWS } else { y }, shape));
@@ -1682,7 +1769,9 @@ pub(super) fn keyed(text: &str, keys: github::keymap::Keys) -> String {
             Some((panel, key))
         });
         match panel {
-            Some((panel, key)) => out.push_str(&keys.show(panel, key).unwrap_or_else(|| key.to_owned())),
+            Some((panel, key)) => {
+                out.push_str(&keys.show(panel, key).unwrap_or_else(|| key.to_owned()))
+            }
             None => out.push_str(&rest[open..=close]),
         }
         rest = &rest[close + 1..];
@@ -1733,7 +1822,9 @@ impl Session {
             None if self.track == Track::Forge => {
                 "You practiced every forge lesson. q returns to your workspace."
             }
-            None => "You practiced every Git lesson. q returns to your workspace; :tutor forge goes on.",
+            None => {
+                "You practiced every Git lesson. q returns to your workspace; :tutor forge goes on."
+            }
             Some(_) if self.failed => {
                 "Practice setup failed (see the notice). :tutor reset retries; :tutor next skips."
             }
@@ -1793,7 +1884,10 @@ impl GitScreen {
         self.form = None;
         let words = command.split_whitespace().collect::<Vec<_>>();
         // A running session counts the lessons it started with; a new one, this screen's.
-        let vim = self.tutor.as_ref().map_or(self.modal, |session| session.vim);
+        let vim = self
+            .tutor
+            .as_ref()
+            .map_or(self.modal, |session| session.vim);
         let number = |track: Track, word: &str| {
             word.parse::<usize>()
                 .ok()
@@ -1805,8 +1899,12 @@ impl GitScreen {
             ["tutor"] | ["tutor", "git"] => return self.start_tutor(Track::Git, 0),
             ["tutor", "forge"] => return self.start_tutor(Track::Forge, 0),
             ["tutor", name @ ("git" | "forge"), lesson] => {
-                let track = if *name == "git" { Track::Git } else { Track::Forge };
-                let index = number(track, *lesson).ok_or(USAGE)?;
+                let track = if *name == "git" {
+                    Track::Git
+                } else {
+                    Track::Forge
+                };
+                let index = number(track, lesson).ok_or(USAGE)?;
                 // The running tutor's own track jumps to the lesson, as `:tutor N` does.
                 if running != Some(track) {
                     return self.start_tutor(track, index);
@@ -1815,7 +1913,7 @@ impl GitScreen {
             }
             ["tutor", "quit"] => return self.stop_tutor(),
             ["tutor", word] if running.is_none() => {
-                return match number(Track::Git, *word) {
+                return match number(Track::Git, word) {
                     Some(index) => self.start_tutor(Track::Git, index),
                     None => Err(NOT_RUNNING.into()),
                 };
@@ -1952,7 +2050,10 @@ impl GitScreen {
         let Some(mut session) = self.tutor.take() else {
             return false;
         };
-        let lesson = session.track.lesson(session.lesson, session.vim).filter(|_| !session.failed);
+        let lesson = session
+            .track
+            .lesson(session.lesson, session.vim)
+            .filter(|_| !session.failed);
         let done = match (lesson, Repository::open(&self.root)) {
             (Some((_, lesson)), Ok(repo)) => (lesson.done)(&mut Probe {
                 screen: self,
@@ -2117,27 +2218,40 @@ mod coverage {
                 add(&screen, context);
             }
         }
-        out.extend(
-            NOTIFICATIONS
-                .iter()
-                .map(|(key, item)| ("Notifications".to_owned(), (*key).to_owned(), (*item).to_owned())),
-        );
-        out.extend(
-            SIGNED_OUT
-                .iter()
-                .map(|(key, item)| ("Signed out".to_owned(), (*key).to_owned(), (*item).to_owned())),
-        );
+        out.extend(NOTIFICATIONS.iter().map(|(key, item)| {
+            (
+                "Notifications".to_owned(),
+                (*key).to_owned(),
+                (*item).to_owned(),
+            )
+        }));
+        out.extend(SIGNED_OUT.iter().map(|(key, item)| {
+            (
+                "Signed out".to_owned(),
+                (*key).to_owned(),
+                (*item).to_owned(),
+            )
+        }));
         out
     }
 
     /// The lesson that teaches `item`: `Git 12 · Staging · Stage all`.
     fn lesson_for(item: &str) -> Option<String> {
         [Track::Git, Track::Forge].into_iter().find_map(|track| {
-            track.lessons(true).enumerate().find_map(|(index, (chapter, lesson))| {
-                lesson.teaches.contains(&item).then(|| {
-                    format!("{} {} · {} · {}", track.name(), index + 1, chapter.name, lesson.title)
+            track
+                .lessons(true)
+                .enumerate()
+                .find_map(|(index, (chapter, lesson))| {
+                    lesson.teaches.contains(&item).then(|| {
+                        format!(
+                            "{} {} · {} · {}",
+                            track.name(),
+                            index + 1,
+                            chapter.name,
+                            lesson.title
+                        )
+                    })
                 })
-            })
         })
     }
 
@@ -2166,7 +2280,11 @@ mod coverage {
             } else if let Some(lesson) = lesson_for(item) {
                 lesson
             } else {
-                missing.push(format!("{item}  [{}]  ({})", keys.join(" / "), contexts.join(", ")));
+                missing.push(format!(
+                    "{item}  [{}]  ({})",
+                    keys.join(" / "),
+                    contexts.join(", ")
+                ));
                 "**missing**".to_owned()
             };
             text.push_str(&format!(
@@ -2182,7 +2300,7 @@ mod coverage {
     fn every_action_on_every_keys_sheet_has_a_lesson() {
         let rows = sheets();
         let (text, missing) = table(&rows);
-        // `DUSTY_TUTOR_COVERAGE=path` writes the table (DESIGN.md §7 keeps a copy).
+        // `DUSTY_TUTOR_COVERAGE=path` writes the table.
         if let Ok(path) = std::env::var("DUSTY_TUTOR_COVERAGE") {
             std::fs::write(path, &text).unwrap();
         }
@@ -2203,6 +2321,9 @@ mod coverage {
             .flat_map(|(_, lesson)| lesson.teaches.iter())
             .filter(|item| !rows.iter().any(|(_, _, known)| known == *item))
             .collect::<Vec<_>>();
-        assert!(stale.is_empty(), "lessons teach items no keys sheet lists: {stale:?}");
+        assert!(
+            stale.is_empty(),
+            "lessons teach items no keys sheet lists: {stale:?}"
+        );
     }
 }

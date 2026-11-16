@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Launch Dusty Git against the loopback fake forge with the orbit world of DESIGN.md §0.1
+"""Launch Dusty Git against the loopback fake forge with the orbit world
 (forge-issues.keys, forge-prs.keys): ten issues and eight pull requests with label colours,
 reviews, checks, files and timelines whose times are relative to now, so the screenshots
 read "2h ago" like the mockups.
@@ -265,7 +265,7 @@ def stamp(seconds):
 
 
 # The run behind #18's checks (run 7 in their links), so Enter on a failing check opens
-# this run in Actions with the failing step unfolded (r9 N-16).
+# this run in Actions with the failing step unfolded.
 RUN = {"databaseId": 7, "number": 214, "displayTitle": "Exercise the retry-limit regression check", "actor": "leo",
        "workflowName": "Quality checks", "workflowDatabaseId": 3, "headBranch": "feat/18",
        # #18's head commit (`pr()` names it), so the rerun sheet names a real-looking commit.
@@ -279,7 +279,7 @@ RUN = {"databaseId": 7, "number": 214, "displayTitle": "Exercise the retry-limit
                  "startedAt": stamp(0), "completedAt": stamp(2),
                  "steps": [step(1, "Set up job", "success", 0, 1), step(2, "Run ruff", "success", 1, 1)]}]}
 # The run behind every other PR's passing checks (run 6 in their links), on #13's head, so
-# the merge box, the list glyph and the Checks tab agree before and after it is read (r15).
+# the merge box, the list glyph and the Checks tab agree before and after it is read.
 RUN_PASSED = {"databaseId": 6, "number": 213, "displayTitle": "Clamp exponential backoff to sixty seconds", "actor": "maya",
               "workflowName": "Quality checks", "workflowDatabaseId": 3, "headBranch": "fix/backoff",
               "headSha": "bf028a1" + "0" * 33, "event": "pull_request", "attempt": 1, "status": "completed",
@@ -295,7 +295,7 @@ RUN_RUNNING = {"databaseId": 8, "number": 215, "displayTitle": "Batch terminal p
                "conclusion": "", "path": ".github/workflows/quality.yml", "createdAt": ago(minutes=4),
                "jobs": [{"databaseId": 80, "name": "Python tests", "status": "in_progress", "conclusion": "",
                          # Started with the run, 4 minutes ago: the job's `running 4m` agrees
-                         # with the run's (r15 narrow pass), not a day-old stamp.
+                         # with the run's, not a day-old stamp.
                          "startedAt": ago(minutes=4),
                          "steps": [{"name": "Set up job", "number": 1, "status": "completed",
                                     "conclusion": "success", "startedAt": ago(minutes=4),
@@ -327,7 +327,7 @@ world = {
     "diff": DIFF,
     "commit_diffs": dict({entry["commits"][0]["oid"]: DIFF for entry in PRS},
                          **{"a7c91d2" + "0" * 33: QUEUE_DIFF, "bf028a1" + "0" * 33: TEST_DIFF}),
-    # §3.35: the signed-in user's inbox (GitHub `notifications` threads).
+    # The signed-in user's inbox (GitHub `notifications` threads).
     "notifications": [
         notification("8101", "review_requested", "PullRequest", 13,
                      "Clamp exponential backoff to sixty seconds", minutes=2),

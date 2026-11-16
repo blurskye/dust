@@ -22,7 +22,6 @@ use crate::git::hunks::GitHunk;
 
 use crate::git::hunks::GitHunkError;
 
-
 use crate::git::hunks::GitHunkId;
 
 use crate::git::hunks::GitHunkPolicy;
@@ -492,8 +491,7 @@ pub(super) fn reset_hunk(
     if !before_worktree.matches_capture(r.expected_worktree, r.selected.new_mode == 0) {
         return Err(GitMutationError::StaleWorktree);
     }
-    let snapshot =
-        read_hunks_for_mutation(&r.policy, cancel).map_err(mutation_hunk_error)?;
+    let snapshot = read_hunks_for_mutation(&r.policy, cancel).map_err(mutation_hunk_error)?;
     let current = snapshot
         .hunks
         .iter()
@@ -559,8 +557,8 @@ pub(super) fn reset_hunk(
     if after != before || worktree_state(&file)? == before_worktree {
         return Err(GitMutationError::Postcondition);
     }
-    let remaining = read_hunks_for_mutation(&r.policy, cancel)
-        .map_err(|_| GitMutationError::Postcondition)?;
+    let remaining =
+        read_hunks_for_mutation(&r.policy, cancel).map_err(|_| GitMutationError::Postcondition)?;
     // Part of a hunk can leave a hunk with the same header, and so the same id.
     if r.selected_lines.is_empty() && remaining.hunks.iter().any(|h| h.id == r.hunk_id) {
         return Err(GitMutationError::Postcondition);
@@ -595,8 +593,7 @@ pub(super) fn stage_hunk(
     if !worktree.matches_capture(r.expected_worktree, r.selected.new_mode == 0) {
         return Err(GitMutationError::StaleWorktree);
     }
-    let snapshot =
-        read_hunks_for_mutation(&r.policy, cancel).map_err(mutation_hunk_error)?;
+    let snapshot = read_hunks_for_mutation(&r.policy, cancel).map_err(mutation_hunk_error)?;
     let current = snapshot
         .hunks
         .iter()
@@ -1073,8 +1070,7 @@ fn captured_hunk_patch(
     selection: Option<&[u32]>,
     cancel: &AtomicBool,
 ) -> Result<Vec<u8>, GitMutationError> {
-    let snapshot =
-        read_hunks_for_mutation(&p.policy, cancel).map_err(mutation_hunk_error)?;
+    let snapshot = read_hunks_for_mutation(&p.policy, cancel).map_err(mutation_hunk_error)?;
     let hunk_id = p.hunk_id.ok_or(GitMutationError::MissingSelection)?;
     let selected = p
         .selected

@@ -1,4 +1,4 @@
-//! DESIGN.md §5.7: the keys of the Pull requests and Issues tabs. Anything not handled here
+//! The keys of the Pull requests and Issues tabs. Anything not handled here
 //! falls through to `Workspace::event`'s shared list/reader keys.
 use super::*;
 
@@ -14,14 +14,19 @@ impl Workspace {
         }
     }
 
-    /// The file and new-side line `e` opens (DESIGN.md §5.3): a diff line's own; a deleted
+    /// The file and new-side line `e` opens: a diff line's own; a deleted
     /// line's replacement (the next new-side line of its file, else the one before); a review
     /// thread's line above it; a file or hunk heading's first line below.
     fn editor_location(&self) -> Option<(String, u32)> {
         let rows = &self.detail_rows;
         let at = self.detail_cursor.min(rows.len().checked_sub(1)?);
         let right = |row: &super::lines::Line| match &row.action {
-            Some(Action::Inline { path, line, side: "RIGHT", .. }) => Some((path.clone(), *line)),
+            Some(Action::Inline {
+                path,
+                line,
+                side: "RIGHT",
+                ..
+            }) => Some((path.clone(), *line)),
             _ => None,
         };
         if let Some(found) = right(&rows[at]) {
@@ -32,16 +37,25 @@ impl Workspace {
                 .iter()
                 .filter_map(right)
                 .find(|(file, _)| file == path)
-                .or_else(|| rows[..at].iter().rev().filter_map(right).find(|(file, _)| file == path))
+                .or_else(|| {
+                    rows[..at]
+                        .iter()
+                        .rev()
+                        .filter_map(right)
+                        .find(|(file, _)| file == path)
+                })
                 .or_else(|| Some((path.clone(), 1))),
             Some(Action::SelectFile(_, path)) => Some((path.clone(), 1)),
             _ if rows[at].reply.is_some() => rows[..at].iter().rev().find_map(right),
-            _ => rows[at..].iter().take_while(|row| !row.outline).find_map(right),
+            _ => rows[at..]
+                .iter()
+                .take_while(|row| !row.outline)
+                .find_map(right),
         }
     }
 
     fn reader_tab(&mut self, forward: bool) -> Result<Option<Form>, String> {
-        // An issue is one Conversation page (§3.33): no tabs to step through.
+        // An issue is one Conversation page: no tabs to step through.
         if self.page == 1 {
             let _ = forward;
             return Ok(None);
@@ -90,7 +104,9 @@ impl Workspace {
             }
             KeyCode::Char('R') => {
                 if self.writing() {
-                    return Some(Err("Wait for the confirmed operation before refreshing".into()));
+                    return Some(Err(
+                        "Wait for the confirmed operation before refreshing".into()
+                    ));
                 }
                 self.notice.clear();
                 self.notice_error = false;
@@ -124,7 +140,9 @@ impl Workspace {
                 self.reading = false;
                 result
             }),
-            KeyCode::Char('r') if pull => self.selected_number().and_then(|id| self.activate(Action::Review(id))),
+            KeyCode::Char('r') if pull => self
+                .selected_number()
+                .and_then(|id| self.activate(Action::Review(id))),
             // Long lines wrap by default; `w` pans them sideways instead, and back. The
             // cursor keeps its source line (the reading position follows its bytes).
             KeyCode::Char('w') if files => {
@@ -132,12 +150,22 @@ impl Workspace {
                 self.horizontal = 0;
                 Ok(None)
             }
-            KeyCode::Char('w') if pull => self.selected_number().and_then(|id| self.activate(Action::Worktree(id))),
-            KeyCode::Char('d') if pull => self.selected_number().and_then(|_| self.activate(Action::PrTab(pr::FILES))),
+            KeyCode::Char('w') if pull => self
+                .selected_number()
+                .and_then(|id| self.activate(Action::Worktree(id))),
+            KeyCode::Char('d') if pull => self
+                .selected_number()
+                .and_then(|_| self.activate(Action::PrTab(pr::FILES))),
             // On a check `o` opens what Enter opens (its run, else its page on the forge);
             // elsewhere it opens the pull request in the browser.
             KeyCode::Char('o')
-                if pull && reader && self.pr_tab == pr::CHECKS && matches!(row.and_then(|row| row.action.as_ref()), Some(Action::Check(..))) =>
+                if pull
+                    && reader
+                    && self.pr_tab == pr::CHECKS
+                    && matches!(
+                        row.and_then(|row| row.action.as_ref()),
+                        Some(Action::Check(..))
+                    ) =>
             {
                 let action = row.and_then(|row| row.action.clone()).expect("a check row");
                 self.activate(action)
@@ -159,33 +187,41 @@ impl Workspace {
                     self.activate(Action::Viewed(id, path))
                 }
             }
-            // `e` opens the line under the cursor in the editor (DESIGN.md §5.3): the
+            // `e` opens the line under the cursor in the editor: the
             // checkout's copy of the file, at the new side's line. In Commits it does so on a
             // commit's diff; on the commit list `e` edits the description, as elsewhere.
-            KeyCode::Char('e') if pull && reader && matches!(self.pr_tab, pr::FILES | pr::COMMITS) => {
+            KeyCode::Char('e')
+                if pull && reader && matches!(self.pr_tab, pr::FILES | pr::COMMITS) =>
+            {
                 match self.editor_location() {
                     Some(_) if self.foreign_inbox_item() => {
                         Err("Remote inbox item: open its local repository to edit its files".into())
                     }
                     Some((path, line)) => Err(format!("open-at:{line}:{path}")),
-                    None if self.pr_tab == pr::FILES => Err("No changed line under the cursor".into()),
+                    None if self.pr_tab == pr::FILES => {
+                        Err("No changed line under the cursor".into())
+                    }
                     None => return None,
                 }
             }
             KeyCode::Char('c') if pull => {
                 // In the reader `c` answers the thread or line under the cursor; elsewhere
-                // it checks the branch out (§5.7).
+                // it checks the branch out.
                 let answer = row
                     .filter(|_| reader)
                     .and_then(|row| {
-                        row.reply
-                            .as_ref()
-                            .or_else(|| row.action.as_ref().filter(|action| matches!(action, Action::Inline { .. })))
+                        row.reply.as_ref().or_else(|| {
+                            row.action
+                                .as_ref()
+                                .filter(|action| matches!(action, Action::Inline { .. }))
+                        })
                     })
                     .cloned();
                 match answer {
                     Some(action) => self.activate(action),
-                    None => self.selected_number().and_then(|id| self.activate(Action::Checkout(id))),
+                    None => self
+                        .selected_number()
+                        .and_then(|id| self.activate(Action::Checkout(id))),
                 }
             }
             _ => return None,

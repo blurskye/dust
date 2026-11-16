@@ -1,4 +1,4 @@
-# DESIGN.md §3.33/§3.34 (screens 34, 35, 47): the Issues list and reader on the orbit world.
+# The Issues list and reader on the orbit world.
 #   scripts/ui-scenarios/make-orbit-fixture.sh /tmp/orbit
 #   DUSTY_GIT_BINARY=$PWD/target/debug/dusty-git scripts/ui-shot scripts/ui-scenarios/forge-issues.keys \
 #     --binary scripts/ui-scenarios/forge-orbit-launch --cwd /tmp/orbit --out target/ui-shots/forge-issues \

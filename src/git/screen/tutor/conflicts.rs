@@ -1,5 +1,5 @@
 //! The Conflicts chapter: one lesson per operation that stops on a conflict (merge, rebase,
-//! cherry-pick, pull) and one on picking per hunk (DESIGN.md §5.12). Each starts on a
+//! cherry-pick, pull) and one on picking per hunk. Each starts on a
 //! practice repository already stopped, and ends only when the repository shows the
 //! conflict resolved and the operation finished.
 use super::*;
@@ -79,11 +79,18 @@ pub(super) const CHAPTER: Chapter = Chapter {
             rebase_stopped,
             |p| {
                 let subjects = p.subjects();
-                subjects.iter().any(|subject| subject == "Polish greet and farewell")
-                    && subjects.iter().any(|subject| subject == "Shout the greeting")
+                subjects
+                    .iter()
+                    .any(|subject| subject == "Polish greet and farewell")
+                    && subjects
+                        .iter()
+                        .any(|subject| subject == "Shout the greeting")
             },
         )
-        .teaching(&["Operation · Take the side under the cursor", "Operation · Continue"]),
+        .teaching(&[
+            "Operation · Take the side under the cursor",
+            "Operation · Continue",
+        ]),
         fresh(
             "Cherry-pick conflict",
             "2, greet.rs, 0: t takes the picked commit's side; C, Enter finishes the pick.",
@@ -97,14 +104,20 @@ pub(super) const CHAPTER: Chapter = Chapter {
             pulling,
             merged,
         )
-        .teaching(&["Operation · Take ours · theirs", "Operation · Continue · skip · abort menu"]),
+        .teaching(&[
+            "Operation · Take ours · theirs",
+            "Operation · Continue · skip · abort menu",
+        ]),
         fresh(
             "Pick per hunk",
             "2, notes.txt, 0: o on one conflict, t on the other. e edits there instead.",
             two_conflicts,
             picked_per_hunk,
         )
-        .teaching(&["Operation · Take ours · theirs", "Operation · Edit at the conflict"]),
+        .teaching(&[
+            "Operation · Take ours · theirs",
+            "Operation · Edit at the conflict",
+        ]),
     ],
 };
 
@@ -144,7 +157,9 @@ mod tests {
                     // The merge brings in what the remote has.
                     assert_eq!(
                         repository.refname_to_id("MERGE_HEAD").unwrap(),
-                        repository.refname_to_id("refs/remotes/origin/practice").unwrap()
+                        repository
+                            .refname_to_id("refs/remotes/origin/practice")
+                            .unwrap()
                     );
                 }
                 "Pick per hunk" => {
@@ -158,7 +173,11 @@ mod tests {
                 }
                 other => panic!("no starting check for {other}"),
             }
-            assert!(!lesson.teaches.is_empty(), "{} teaches nothing", lesson.title);
+            assert!(
+                !lesson.teaches.is_empty(),
+                "{} teaches nothing",
+                lesson.title
+            );
             for item in lesson.teaches {
                 assert!(item.starts_with("Operation · "), "{item}");
             }

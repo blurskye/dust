@@ -130,7 +130,7 @@ fn project_header_is_compact_and_branch_badges_are_separate() {
             1,
             "help must appear once in the footer at {width} columns"
         );
-        // The top bar names the checked-out head (DESIGN §2.1) but never a forge host.
+        // The top bar names the checked-out head but never a forge host.
         assert!(
             !header.contains("Dusty Git")
                 && header.contains("⎇ main")
@@ -176,7 +176,9 @@ fn changes_and_commit_files_share_a_single_collapsible_sidebar_tree() {
     std::fs::write(dir.path().join("src/nested/alpha.rs"), "fn alpha() {}\n").unwrap();
     std::fs::write(dir.path().join("src/nested/beta.rs"), "fn beta() {}\n").unwrap();
     let mut screen = GitScreen::open(dir.path()).unwrap();
-    wait(&mut screen, |s| view(s).contains("alpha.rs") && view(s).contains("beta.rs"));
+    wait(&mut screen, |s| {
+        view(s).contains("alpha.rs") && view(s).contains("beta.rs")
+    });
     // Changes is flat by default; `t` shows it as a foldable tree.
     key(&mut screen, KeyCode::Char('t'));
     wait(&mut screen, |s| view(s).contains("nested/"));
@@ -187,7 +189,14 @@ fn changes_and_commit_files_share_a_single_collapsible_sidebar_tree() {
         let frame = screen.frame(120, 40);
         let right = rail_right(&frame) as usize;
         (0..40)
-            .map(|y| frame.grid.row_text(y).chars().take(right + 1).collect::<String>())
+            .map(|y| {
+                frame
+                    .grid
+                    .row_text(y)
+                    .chars()
+                    .take(right + 1)
+                    .collect::<String>()
+            })
             .collect::<Vec<_>>()
             .join("\n")
     };
@@ -287,7 +296,12 @@ fn change_code(screen: &mut GitScreen, name: &str) -> Option<String> {
     let frame = screen.frame(120, 40);
     let rail = rail_right(&frame) as usize;
     (2..39).find_map(|y| {
-        let row = frame.grid.row_text(y).chars().take(rail).collect::<String>();
+        let row = frame
+            .grid
+            .row_text(y)
+            .chars()
+            .take(rail)
+            .collect::<String>();
         row.contains(name).then(|| {
             format!(
                 "{}{}",
@@ -409,7 +423,10 @@ fn compact_help_and_long_names_preserve_selection() {
     assert!(before.grid.row_text(y).contains('…'));
     // The compact footer keeps the focused pane's main actions and the help key.
     let footer = before.grid.row_text(23);
-    assert!(footer.contains("stage") && footer.contains("commit"), "{footer}");
+    assert!(
+        footer.contains("stage") && footer.contains("commit"),
+        "{footer}"
+    );
     // Checked at the end: `? keys` must survive a long path in the footer context.
     let help_hint = footer.contains("? keys");
     key(&mut screen, KeyCode::Char('?'));
@@ -463,7 +480,9 @@ fn preview_focus_updates_index_diff_when_toggling_layers() {
     wait(&mut screen, |s| view(s).contains("+ working version"));
     // `F` browses every file; the rail retitles itself and the reader shows source.
     key(&mut screen, KeyCode::Char('F'));
-    wait(&mut screen, |s| view(s).contains("± Files") && view(s).contains("working version"));
+    wait(&mut screen, |s| {
+        view(s).contains("± Files") && view(s).contains("working version")
+    });
     key(&mut screen, KeyCode::Char('i'));
     wait(&mut screen, |s| {
         view(s).contains("+ index version") && !view(s).contains("+ working version")
@@ -621,7 +640,10 @@ fn commit_scrolls_immediately_pins_identity_and_exposes_the_full_message() {
         let footer = overview.lines().nth(usize::from(height - 1)).unwrap();
         assert!(footer.contains("Enter files"), "{overview}");
         // The long subject is clipped in the overview; `m` shows the whole message.
-        assert!(overview.contains("A deliberately long commit subject"), "{overview}");
+        assert!(
+            overview.contains("A deliberately long commit subject"),
+            "{overview}"
+        );
         assert!(!overview.contains("careful preservation of all user drafts"));
         key(&mut screen, KeyCode::Enter);
         let files = screen.frame(width, height);
@@ -682,7 +704,12 @@ fn commit_scrolls_immediately_pins_identity_and_exposes_the_full_message() {
         let identity = paged
             .lines()
             .skip(2)
-            .find(|line| line.chars().skip(rail + 1).collect::<String>().contains("scroll.rs"))
+            .find(|line| {
+                line.chars()
+                    .skip(rail + 1)
+                    .collect::<String>()
+                    .contains("scroll.rs")
+            })
             .unwrap_or_else(|| panic!("{paged}"))
             .to_owned();
         key(&mut screen, KeyCode::Char('l'));
@@ -788,7 +815,10 @@ fn floating_is_default_and_fullscreen_is_a_persisted_setting() {
         assert!(
             matches!(
                 background.grid.get(1, y).unwrap().style,
-                Style::Git { role: dust::ui::GitRole::Border, .. }
+                Style::Git {
+                    role: dust::ui::GitRole::Border,
+                    ..
+                }
             ),
             "row {y}: {:?}",
             background.grid.get(1, y).unwrap().style
@@ -1033,14 +1063,21 @@ fn commit_box_insert_hints_are_clear_without_duplicate_text() {
     key(&mut screen, KeyCode::Char('s'));
     wait(&mut screen, |s| !s.busy());
     key(&mut screen, KeyCode::Char('c'));
-    assert_eq!(screen.input_mode(), Some(dust::git::screen::InputMode::Insert));
+    assert_eq!(
+        screen.input_mode(),
+        Some(dust::git::screen::InputMode::Insert)
+    );
     let frame = screen.frame(120, 40);
-    let shown = (0..40).map(|y| frame.grid.row_text(y)).collect::<Vec<_>>().join("\n");
+    let shown = (0..40)
+        .map(|y| frame.grid.row_text(y))
+        .collect::<Vec<_>>()
+        .join("\n");
     assert!(shown.contains("Commit to main"), "{shown}");
     assert!(
         (0..39).any(|y| {
             let row = frame.grid.row_text(y);
-            row.contains("Ctrl+Enter commit · Tab next · Esc normal") && row.trim_end().ends_with('│')
+            row.contains("Ctrl+Enter commit · Tab next · Esc normal")
+                && row.trim_end().ends_with('│')
         }),
         "{shown}"
     );
@@ -1055,7 +1092,10 @@ fn commit_box_insert_hints_are_clear_without_duplicate_text() {
             row.contains("Ctrl+Enter commit · Esc normal") && row.trim_end().ends_with('│')
         }),
         "{}",
-        (0..30).map(|y| narrow.grid.row_text(y)).collect::<Vec<_>>().join("\n")
+        (0..30)
+            .map(|y| narrow.grid.row_text(y))
+            .collect::<Vec<_>>()
+            .join("\n")
     );
     let footer = narrow.grid.row_text(29);
     assert!(!footer.contains("C-Enter"), "{footer}");
@@ -1076,7 +1116,9 @@ fn stages_unstages_and_commits_through_real_screen_input() {
             let footer = frame.grid.row_text(height - 1);
             let words = footer.split_whitespace().collect::<Vec<_>>();
             assert!(
-                words.windows(2).any(|words| words == [if verb == "stage" { "s" } else { "u" }, verb]),
+                words
+                    .windows(2)
+                    .any(|words| words == [if verb == "stage" { "s" } else { "u" }, verb]),
                 "{width}×{height}: {footer}"
             );
         }
@@ -1278,7 +1320,10 @@ fn branch_preview_is_selected_branch_not_current_head() {
         .map(|y| pinned.grid.row_text(y))
         .find(|row| row.contains("History · feature"))
         .unwrap_or_else(|| {
-            let shown = (0..48).map(|y| pinned.grid.row_text(y)).collect::<Vec<_>>().join("\n");
+            let shown = (0..48)
+                .map(|y| pinned.grid.row_text(y))
+                .collect::<Vec<_>>()
+                .join("\n");
             panic!("history heading names its pinned reference:\n{shown}")
         });
     assert!(history_heading.starts_with('╭'), "{history_heading}");
@@ -1319,11 +1364,18 @@ fn file_tree_and_real_cursor_do_not_shift_row_text() {
         let frame = screen.frame(120, 40);
         let right = rail_right(&frame) as usize;
         (0..40)
-            .map(|y| frame.grid.row_text(y).chars().take(right + 1).collect::<String>())
+            .map(|y| {
+                frame
+                    .grid
+                    .row_text(y)
+                    .chars()
+                    .take(right + 1)
+                    .collect::<String>()
+            })
             .collect::<Vec<_>>()
             .join("\n")
     };
-    // The reader may list a selected directory's descendants (DESIGN §3.1), so only
+    // The reader may list a selected directory's descendants, so only
     // the rail must hide the folded file.
     assert!(!rail.contains("new.rs"), "{folded}");
     key(&mut screen, KeyCode::Char('l'));
@@ -1440,9 +1492,7 @@ fn short_current_ref_header_has_no_old_title_suffix_and_resize_keeps_native_curs
     );
     let source = std::fs::read(dir.path().join("file.txt")).unwrap();
     let mut screen = GitScreen::open(dir.path()).unwrap();
-    wait(&mut screen, |screen| {
-        view(screen).contains("Initial comm")
-    });
+    wait(&mut screen, |screen| view(screen).contains("Initial comm"));
     key(&mut screen, KeyCode::Char('3'));
     // The reader's border title names the selected branch and nothing else.
     let reader_title = |frame: &dust::ui::Frame| {
@@ -1477,7 +1527,11 @@ fn short_current_ref_header_has_no_old_title_suffix_and_resize_keeps_native_curs
         }
         let (x, y, _) = frame.cursor.expect("native branch-list cursor");
         assert_eq!(x, 1);
-        assert!(frame.grid.row_text(y).contains("● ⎇ a"), "{}", frame.grid.row_text(y));
+        assert!(
+            frame.grid.row_text(y).contains("● ⎇ a"),
+            "{}",
+            frame.grid.row_text(y)
+        );
     }
     assert_eq!(screen.frame(190, 48).cursor, native);
     assert_eq!(std::fs::read(dir.path().join(".git/HEAD")).unwrap(), head);
@@ -1498,10 +1552,12 @@ fn token_column(frame: &dust::ui::Frame, y: u16, token: &str) -> Option<u16> {
     let width = frame.grid.width();
     let chars = token.chars().map(String::from).collect::<Vec<_>>();
     (0..width.saturating_sub(chars.len() as u16)).find(|&x| {
-        chars
-            .iter()
-            .enumerate()
-            .all(|(at, want)| frame.grid.get(x + at as u16, y).is_some_and(|cell| cell.symbol == *want))
+        chars.iter().enumerate().all(|(at, want)| {
+            frame
+                .grid
+                .get(x + at as u16, y)
+                .is_some_and(|cell| cell.symbol == *want)
+        })
     })
 }
 
@@ -1524,8 +1580,15 @@ fn diff_code_starts_in_one_column_on_every_row_kind() {
                     .unwrap_or_else(|| panic!("{label} {width}x{height}: no {token}"))
             });
             for (token, (x, y)) in ["ctxa", "olda", "newa", "ctxb"].iter().zip(at) {
-                assert_eq!(x, at[0].0, "{label} {width}x{height}: {token} starts at {x}");
-                assert_eq!(frame.grid.get(x - 4, y).unwrap().symbol, "│", "{label} {width}x{height}: {token}");
+                assert_eq!(
+                    x, at[0].0,
+                    "{label} {width}x{height}: {token} starts at {x}"
+                );
+                assert_eq!(
+                    frame.grid.get(x - 4, y).unwrap().symbol,
+                    "│",
+                    "{label} {width}x{height}: {token}"
+                );
                 let sign = frame.grid.get(x - 2, y).unwrap().symbol.clone();
                 let expected = match *token {
                     "olda" => "−",
@@ -1542,7 +1605,9 @@ fn diff_code_starts_in_one_column_on_every_row_kind() {
     git(dir.path(), &["commit", "-am", "Align change"]);
     let mut screen = GitScreen::open(dir.path()).unwrap();
     key(&mut screen, KeyCode::Char('4'));
-    wait(&mut screen, |s| view(s).contains("newa") && view(s).contains("Align change"));
+    wait(&mut screen, |s| {
+        view(s).contains("newa") && view(s).contains("Align change")
+    });
     check(&mut screen, "commit");
 }
 
@@ -1561,21 +1626,35 @@ fn keys_sheet_keeps_two_columns_and_its_width_as_the_terminal_grows() {
         let top = (0..height)
             .find(|&y| frame.grid.row_text(y).contains("Keys · Changes"))
             .unwrap_or_else(|| panic!("{width}x{height}: no sheet"));
-        let left = (0..width).find(|&x| frame.grid.get(x, top).unwrap().symbol == "╭").unwrap();
-        let right = (0..width).rev().find(|&x| frame.grid.get(x, top).unwrap().symbol == "╮").unwrap();
+        let left = (0..width)
+            .find(|&x| frame.grid.get(x, top).unwrap().symbol == "╭")
+            .unwrap();
+        let right = (0..width)
+            .rev()
+            .find(|&x| frame.grid.get(x, top).unwrap().symbol == "╮")
+            .unwrap();
         let sheet = right - left + 1;
         assert!(sheet <= 112, "{width}x{height}: {sheet} wide");
-        assert!(left.abs_diff(width - 1 - right) <= 1, "{width}x{height}: not centred ({left}, {right})");
+        assert!(
+            left.abs_diff(width - 1 - right) <= 1,
+            "{width}x{height}: not centred ({left}, {right})"
+        );
         widths.push(sheet);
         // Two `key  label` cells on one row: Navigate's `Tab` beside `C-h/j/k/l`.
-        let rows = (top..height).map(|y| frame.grid.row_text(y)).collect::<Vec<_>>();
+        let rows = (top..height)
+            .map(|y| frame.grid.row_text(y))
+            .collect::<Vec<_>>();
         assert!(
-            rows.iter().any(|row| row.contains("Next pane") && row.contains("Move focus")),
+            rows.iter()
+                .any(|row| row.contains("Next pane") && row.contains("Move focus")),
             "{width}x{height}:\n{}",
             rows.join("\n")
         );
     }
-    assert!(widths.windows(2).all(|pair| pair[0] == pair[1]), "{widths:?}");
+    assert!(
+        widths.windows(2).all(|pair| pair[0] == pair[1]),
+        "{widths:?}"
+    );
 }
 
 /// R16 git-tab-11: every Branches sub-tab carries its count, and an empty Stashes pane says
@@ -1588,13 +1667,24 @@ fn branch_tabs_all_count_and_an_empty_pane_speaks_inside_its_frame() {
     wait(&mut screen, |s| view(s).contains("side"));
     for (width, height) in [(100, 30), (120, 36), (190, 48)] {
         let frame = screen.frame(width, height);
-        let rows = (0..height).map(|y| frame.grid.row_text(y)).collect::<Vec<_>>();
-        assert!(rows.iter().any(|row| row.contains("Local 2 │ Remotes 0 │ Tags 0")), "{}", rows.join("\n"));
+        let rows = (0..height)
+            .map(|y| frame.grid.row_text(y))
+            .collect::<Vec<_>>();
+        assert!(
+            rows.iter()
+                .any(|row| row.contains("Local 2 │ Remotes 0 │ Tags 0")),
+            "{}",
+            rows.join("\n")
+        );
         let empty = rows
             .iter()
             .position(|row| row.contains("No stashes"))
             .unwrap_or_else(|| panic!("{width}x{height}:\n{}", rows.join("\n")));
-        assert!(rows[empty].starts_with('│'), "{width}x{height}: {}", rows[empty]);
+        assert!(
+            rows[empty].starts_with('│'),
+            "{width}x{height}: {}",
+            rows[empty]
+        );
         assert!(rows[empty - 1].starts_with('╭') && rows[empty - 1].contains("Stashes"));
         assert!(rows[empty - 1].contains(" 0 "), "{}", rows[empty - 1]);
         assert!(rows[empty + 1].starts_with('╰') && !rows[empty + 1].contains("No stashes"));

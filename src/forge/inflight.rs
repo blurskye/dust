@@ -1,4 +1,4 @@
-//! In-flight coalescing (FORGE.md §7.5): identical reads that overlap share one fetch. The
+//! In-flight coalescing: identical reads that overlap share one fetch. The
 //! interactive worker and the warm worker both read through here, so a prefetch the warm
 //! worker already started is joined by the screen that opens the same item instead of being
 //! sent twice. Identity is the forge (API base), the repository, the `Read` and its

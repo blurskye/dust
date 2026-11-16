@@ -204,7 +204,10 @@ fn count(screen: &mut GitScreen, expected: usize) {
                     "{width}×{height}: {footer}"
                 );
                 if width >= 190 {
-                    assert!(footer.contains("stage marked"), "{width}×{height}: {footer}");
+                    assert!(
+                        footer.contains("stage marked"),
+                        "{width}×{height}: {footer}"
+                    );
                 }
             }
         }
@@ -831,4 +834,3 @@ fn home_end_and_pages_extend_and_shrink_file_ranges_without_writing() {
         assert!(view(&mut screen).contains("No stashes"));
     }
 }
-

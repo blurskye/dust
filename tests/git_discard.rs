@@ -567,9 +567,7 @@ fn authorization_changes_keep_discard_dialog_and_other_form_input() {
     screen.write_refusal = Some("Host denies commit".into());
     control(&mut screen, KeyCode::Enter);
     let shown = view(&mut screen);
-    assert!(
-        shown.contains("Commit to main") && shown.contains("Preserve this commit draft")
-    );
+    assert!(shown.contains("Commit to main") && shown.contains("Preserve this commit draft"));
     assert!(!screen.busy());
     assert_eq!(index_bytes(root), index);
     // The refusal must be visible while the sheet keeps the draft.
@@ -586,7 +584,7 @@ fn staged_historical_all_file_and_non_code_discard_refuse_without_writes() {
     let index = index_bytes(root);
     let others = disk(root, &OTHERS);
     control(&mut screen, KeyCode::Char('h'));
-    // In Changes, `d` asks to discard the selected file (DESIGN.md §5.2); Esc keeps it.
+    // In Changes, `d` asks to discard the selected file; Esc keeps it.
     key(&mut screen, KeyCode::Char('d'));
     assert!(
         view(&mut screen).contains(FILE_DIALOG),
@@ -753,7 +751,11 @@ fn native_discard_cursor_geometry_and_help_are_usable_at_all_three_sizes() {
                         .contains(heading)
             })
         });
-        assert_eq!(headings.iter().all(Option::is_some), left > 0, "{width}×{height}");
+        assert_eq!(
+            headings.iter().all(Option::is_some),
+            left > 0,
+            "{width}×{height}"
+        );
         key(&mut screen, KeyCode::Char('/'));
         screen.event(UiEvent::Paste("first_work".into()));
         key(&mut screen, KeyCode::Enter);
@@ -853,7 +855,10 @@ fn changes_d_confirms_then_discards_a_tracked_file_and_deletes_an_untracked_one(
         ] {
             assert!(shown.contains(label), "{width}×{height}: {shown}");
         }
-        assert!(!shown.contains("Deleted from disk"), "{width}×{height}: {shown}");
+        assert!(
+            !shown.contains("Deleted from disk"),
+            "{width}×{height}: {shown}"
+        );
         // The native cursor rests on the primary Discard button.
         let (x, y, _) = frame.cursor.expect("confirmation button cursor");
         let row = frame.grid.row_text(y);
@@ -878,7 +883,11 @@ fn changes_d_confirms_then_discards_a_tracked_file_and_deletes_an_untracked_one(
         std::fs::read_to_string(root.join("other.rs")).unwrap(),
         "fn other_base() {}\n"
     );
-    assert_eq!(git(root, &["ls-files", "--stage"]), index, "the index keeps its copy");
+    assert_eq!(
+        git(root, &["ls-files", "--stage"]),
+        index,
+        "the index keeps its copy"
+    );
     assert_eq!(
         std::fs::read_to_string(root.join("change.rs")).unwrap(),
         working
@@ -978,7 +987,10 @@ fn changes_marked_set_and_rename_discard_with_one_confirmation() {
     for label in ["moved.rs · RM", "untracked.txt · untracked"] {
         assert!(shown.contains(label), "{shown}");
     }
-    confirm_files(&mut screen, "Discarded changes in 2 files · 1 untracked deleted");
+    confirm_files(
+        &mut screen,
+        "Discarded changes in 2 files · 1 untracked deleted",
+    );
     assert_eq!(
         std::fs::read_to_string(root.join("moved.rs")).unwrap(),
         "fn other_base() {}\n"
@@ -1006,7 +1018,10 @@ fn changes_discard_rechecks_host_authorization_and_refuses_changed_files() {
     for reason in ["Host denies discard", "Host changed to read-only"] {
         screen.write_refusal = Some(reason.into());
         let shown = refused(&mut screen, 'd');
-        assert!(shown.contains(reason) && !shown.contains("Discard changes in"), "{shown}");
+        assert!(
+            shown.contains(reason) && !shown.contains("Discard changes in"),
+            "{shown}"
+        );
     }
     // Refused at confirmation: the sheet stays, shows why, and nothing is written.
     screen.write_refusal = None;
@@ -1030,10 +1045,7 @@ fn changes_discard_rechecks_host_authorization_and_refuses_changed_files() {
     write(root, "other.rs", "fn external_edit() {}\n");
     key(&mut screen, KeyCode::Enter);
     let shown = view(&mut screen);
-    assert!(
-        shown.contains("changed since this sheet opened"),
-        "{shown}"
-    );
+    assert!(shown.contains("changed since this sheet opened"), "{shown}");
     assert_eq!(
         std::fs::read_to_string(root.join("other.rs")).unwrap(),
         "fn external_edit() {}\n"
@@ -1050,7 +1062,11 @@ fn changes_discard_rechecks_host_authorization_and_refuses_changed_files() {
     key(&mut screen, KeyCode::Char('d'));
     std::fs::remove_file(root.join("untracked.txt")).unwrap();
     std::fs::create_dir(root.join("untracked.txt")).unwrap();
-    write(root, "untracked.txt/inside.txt", "new descendant must survive\n");
+    write(
+        root,
+        "untracked.txt/inside.txt",
+        "new descendant must survive\n",
+    );
     key(&mut screen, KeyCode::Enter);
     let shown = view(&mut screen);
     assert!(shown.contains("is now a directory"), "{shown}");

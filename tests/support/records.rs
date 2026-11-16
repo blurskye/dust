@@ -22,7 +22,8 @@ pub fn record_rows(frame: &str, number: u64, title: &str) -> Vec<usize> {
         .filter(|&y| {
             let line = lines[y];
             line.contains(&one_row)
-                || (line.contains(title) && lines.get(y + 1).is_some_and(|below| names(below, number)))
+                || (line.contains(title)
+                    && lines.get(y + 1).is_some_and(|below| names(below, number)))
         })
         .collect()
 }

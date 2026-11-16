@@ -213,7 +213,11 @@ const BUILTINS: [(&str, &str); 5] = [
 impl Workspace {
     /// A built-in view's name in this forge's words.
     fn builtin_name(&self, name: &'static str) -> &'static str {
-        if name == "Review requested" { self.requested_words().0 } else { name }
+        if name == "Review requested" {
+            self.requested_words().0
+        } else {
+            name
+        }
     }
     pub(super) fn view_scope(&self) -> Result<Scope, String> {
         Scope::new(
@@ -231,10 +235,7 @@ impl Workspace {
     }
     fn check_view_scope(&self, scope: &Scope) -> Result<(), String> {
         if &self.view_scope()? != scope {
-            return Err(
-                "This view changed · reopen the form · your draft is kept"
-                    .into(),
-            );
+            return Err("This view changed · reopen the form · your draft is kept".into());
         }
         Ok(())
     }
@@ -254,7 +255,10 @@ impl Workspace {
         BUILTINS[..if self.page == 2 { 5 } else { 4 }]
             .iter()
             .find(|(_, query)| self.states[at] == "open" && *query == self.queries[at])
-            .map_or_else(|| "Custom".into(), |(name, _)| self.builtin_name(name).into())
+            .map_or_else(
+                || "Custom".into(),
+                |(name, _)| self.builtin_name(name).into(),
+            )
     }
     pub(super) fn views_form(&self) -> Result<Form, String> {
         let saved = self.scoped_views()?;
@@ -300,7 +304,12 @@ impl Workspace {
             Action::SaveView(self.view_scope()?, current.clone()),
             vec![
                 actions::field("View name", current.as_deref().unwrap_or(""), true, false),
-                actions::field(&format!("Search ({} query)", self.forge_name()), &self.queries[at], false, false),
+                actions::field(
+                    &format!("Search ({} query)", self.forge_name()),
+                    &self.queries[at],
+                    false,
+                    false,
+                ),
                 actions::choice(
                     "State",
                     &self.states[at],
@@ -663,7 +672,11 @@ mod tests {
         // A value which libgit2 cannot decode is not equivalent to a missing key.
         let unreadable = b"[dusty-git]\n\tgithubViews = \"\xff\"\n";
         std::fs::write(repo.commondir().join("config"), unreadable).unwrap();
-        assert!(load(owner.path()).unwrap_err().contains("Couldn't read saved views · your saved views are unchanged"));
+        assert!(
+            load(owner.path())
+                .unwrap_err()
+                .contains("Couldn't read saved views · your saved views are unchanged")
+        );
         assert!(store(owner.path(), &scope, &view.name, Some(view.clone())).is_err());
         assert_eq!(
             std::fs::read(repo.commondir().join("config")).unwrap(),
@@ -684,7 +697,11 @@ mod tests {
         let view =
             SavedView::new(&scope, "With spaces 日本語", "label:\"help wanted\"", "all").unwrap();
         let text = serde_json::to_string(&vec![view.clone(), view]).unwrap();
-        assert!(parse(&text).unwrap_err().contains("Couldn't read saved views · your saved views are unchanged"));
+        assert!(
+            parse(&text)
+                .unwrap_err()
+                .contains("Couldn't read saved views · your saved views are unchanged")
+        );
         for text in ["null", "{}", "[] broken", "[{\"name\":\"incomplete\"}]"] {
             assert!(parse(text).is_err());
         }

@@ -458,10 +458,14 @@ fn upstream_uses_actual_choices_and_the_selected_branch_even_with_a_slash_remote
         view(&mut screen)
     );
     assert!(view(&mut screen).contains("origin/topic/sibling"));
+    // A name that is no remote-tracking branch picks nothing: the choice keeps a real one.
     replace(&mut screen, "invented/main");
-    submit(&mut screen);
     assert!(!screen.busy());
-    assert!(view(&mut screen).contains("Choose a valid Upstream with Up/Down"));
+    assert!(
+        !view(&mut screen).contains("invented/main"),
+        "{}",
+        view(&mut screen)
+    );
     // Use the actual choice control, not a production-only test seam.
     let desired = "team/origin/topic/selected";
     let mut found = false;
@@ -469,7 +473,7 @@ fn upstream_uses_actual_choices_and_the_selected_branch_even_with_a_slash_remote
         key(&mut screen, KeyCode::Down);
         let frame = screen.frame(190, 48);
         let (x, y, _) = frame.cursor.unwrap();
-        // The upstream is a picker (DESIGN 5.x `u`): the native cursor sits on the chosen
+        // The upstream is a picker (`u`): the native cursor sits on the chosen
         // option's mark, so the choice is the text after the cursor. The sidebar can
         // contain a colliding branch name on this same screen row, before the sheet.
         let chosen = frame
@@ -478,7 +482,13 @@ fn upstream_uses_actual_choices_and_the_selected_branch_even_with_a_slash_remote
             .chars()
             .skip(usize::from(x))
             .collect::<String>();
-        let chosen = chosen.trim_start_matches(['●', ' ']).split("  ").next().unwrap_or("").trim().to_owned();
+        let chosen = chosen
+            .trim_start_matches(['●', ' '])
+            .split("  ")
+            .next()
+            .unwrap_or("")
+            .trim()
+            .to_owned();
         assert!(
             chosen != "team/origin/HEAD",
             "symbolic remote HEAD is not a branch choice"
@@ -706,11 +716,7 @@ fn preview_at(screen: &mut GitScreen, width: u16, height: u16) -> Vec<String> {
         .collect()
 }
 /// Narrow layouts paint only the focused surface: show the reader for one read.
-fn with_reader<T>(
-    screen: &mut GitScreen,
-    width: u16,
-    read: impl FnOnce(&mut GitScreen) -> T,
-) -> T {
+fn with_reader<T>(screen: &mut GitScreen, width: u16, read: impl FnOnce(&mut GitScreen) -> T) -> T {
     if width >= 100 {
         return read(screen);
     }
@@ -781,7 +787,7 @@ fn selected_commit_decorations_use_the_existing_metadata_row_and_keep_current_di
     fixture.dirty();
     let id = git(&fixture.root, &["rev-parse", "HEAD"]);
     let author = git(&fixture.root, &["show", "-s", "--format=%an", "HEAD"]);
-    // The reader dates a commit by age (DESIGN.md §2.5a): the fixture's is seconds old.
+    // The reader dates a commit by age: the fixture's is seconds old.
     let date = " · now · ";
     let files = git(&fixture.root, &["ls-tree", "--name-only", "HEAD"])
         .lines()
@@ -964,18 +970,16 @@ fn branch_log_attributes_each_commit_without_reflow_or_repository_changes() {
             .any(|line| line.contains("Generated Recovery QA · Nov 12"))
     });
     for (width, height) in [(190, 48), (100, 30), (64, 20)] {
-        let rows = with_reader(&mut screen, width, |screen| preview_at(screen, width, height));
+        let rows = with_reader(&mut screen, width, |screen| {
+            preview_at(screen, width, height)
+        });
         for (id, subject, metadata) in [
             (
                 &tip,
                 "New literal subject (HEAD -> fake)",
                 "Generated Recovery QA · Nov 12",
             ),
-            (
-                &older,
-                "Older literal subject 中文",
-                "Older Author · Jun 8",
-            ),
+            (&older, "Older literal subject 中文", "Older Author · Jun 8"),
         ] {
             let row = rows
                 .iter()
@@ -1099,4 +1103,3 @@ fn ref_context_keeps_subject_visible_with_long_names_and_unshared_or_detached_ti
     assert_eq!(refs(&fixture.root), refs_before);
     assert_eq!(state(&fixture.root), detached_before);
 }
-

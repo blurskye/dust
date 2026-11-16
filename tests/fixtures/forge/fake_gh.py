@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""A fake `gh` for forge tests (FORGE.md §8.2, F1). Installed as `<dir>/gh` next to a
+"""A fake `gh` for forge tests. Installed as `<dir>/gh` next to a
 `fake_gh.json` sidecar (`{"server": "http://127.0.0.1:PORT"}`) naming the fake forge server
 (tests/fixtures/forge/server.py). It never touches the network beyond that loopback server.
 

@@ -1,4 +1,4 @@
-//! The on-disk forge cache (FORGE.md §7.1), shared by the IDE, the standalone `dusty-git` and
+//! The on-disk forge cache, shared by the IDE, the standalone `dusty-git` and
 //! `dusty-git forge`. One JSON `Envelope` per entry under
 //! `<root>/<host>/<owner-path>/<repo>/<kind>/<sha256(key)[..16]>.json`; host-wide entries
 //! (inbox searches, notifications, viewer) under `<root>/<host>/_host/`. Each directory keeps an
@@ -60,7 +60,7 @@ pub fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
-/// The cache-file family of a read (§7.1).
+/// The cache-file family of a read.
 pub fn kind(read: &Read) -> &'static str {
     match read {
         Read::Repository | Read::RepositoryNamed(_) => "repo",
@@ -137,7 +137,7 @@ fn number_at(text: &str, range: std::ops::Range<usize>) -> Option<i64> {
     text.get(range)?.parse().ok()
 }
 
-/// The §7.3 freshness budget once the payload is known: closed things live long, running
+/// The freshness budget once the payload is known: closed things live long, running
 /// things short, and an item nobody touched for a day is polled every 15 minutes.
 pub fn ttl(read: &Read, payload: Option<&Payload>) -> Duration {
     let base = read.ttl();
@@ -289,7 +289,7 @@ impl CacheKey {
         }
     }
 
-    /// Where a read the forge answered "not found" is remembered (§7.1): a restart shows the
+    /// Where a read the forge answered "not found" is remembered: a restart shows the
     /// answer at once instead of `Loading…` until the forge says it again.
     pub fn missing(&self) -> Self {
         Self {
@@ -638,7 +638,7 @@ impl Cache {
         })
     }
 
-    /// A confirmed write made this entry stale (§7.7): the next reader revalidates.
+    /// A confirmed write made this entry stale: the next reader revalidates.
     pub fn invalidate(&self, key: &CacheKey) -> bool {
         self.rewrite(key, |envelope| envelope.ttl = 0)
     }
@@ -665,7 +665,7 @@ impl Cache {
     }
 
     /// Every readable entry of one kind in a repository (or host-wide) directory: the corpus
-    /// for local search (§7.4).
+    /// for local search.
     pub fn scan<T: DeserializeOwned>(
         &self,
         host: &str,
@@ -759,7 +759,12 @@ impl Cache {
         self.with_index_waiting(directory, 25, change)
     }
 
-    fn with_index_waiting(&self, directory: &Path, wait_ms: u64, change: impl FnOnce(&mut Index)) -> bool {
+    fn with_index_waiting(
+        &self,
+        directory: &Path,
+        wait_ms: u64,
+        change: impl FnOnce(&mut Index),
+    ) -> bool {
         let Some(_lock) = IndexLock::try_acquire(directory, wait_ms) else {
             return false;
         };

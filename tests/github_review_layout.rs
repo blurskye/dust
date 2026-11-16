@@ -126,7 +126,10 @@ fn cursor_to(screen: &mut GitScreen, needle: &str) {
         }
         key(screen, KeyCode::Char('j'));
     }
-    panic!("no reader row shows {needle}:\n{}", text(&screen.frame(190, 48)));
+    panic!(
+        "no reader row shows {needle}:\n{}",
+        text(&screen.frame(190, 48))
+    );
 }
 fn child(name: &str) -> bool {
     if std::env::var_os("DUST_REVIEW_LAYOUT_CHILD").is_some() {
@@ -217,13 +220,19 @@ fn actions_reader_keeps_selected_job_identity_payload_and_confirmation() {
     key(&mut screen, KeyCode::Enter);
     // The run opens on both failed jobs and their failed steps.
     wait_until(&mut screen, |shown| {
-        shown.contains("go_modules update") && shown.contains("First job") && shown.contains("Dependabot")
+        shown.contains("go_modules update")
+            && shown.contains("First job")
+            && shown.contains("Dependabot")
     });
     for (width, height) in [(64, 20), (100, 30), (190, 48)] {
         let frame = screen.frame(width, height);
         for row in 1..5 {
             assert!(
-                !frame.grid.row_text(row).to_ascii_lowercase().contains("attempt"),
+                !frame
+                    .grid
+                    .row_text(row)
+                    .to_ascii_lowercase()
+                    .contains("attempt"),
                 "a sole attempt is not named:\n{}",
                 text(&frame)
             );
@@ -231,22 +240,40 @@ fn actions_reader_keeps_selected_job_identity_payload_and_confirmation() {
     }
     wait(&mut screen, "P00 payload");
     let shown = view(&mut screen);
-    assert!(shown.contains("Run first") && shown.contains("Run Dependabot"), "{shown}");
+    assert!(
+        shown.contains("Run first") && shown.contains("Run Dependabot"),
+        "{shown}"
+    );
     // Closing the first job leaves the second job's failed step and log.
     key(&mut screen, KeyCode::Home);
     key(&mut screen, KeyCode::Enter);
     // The second job's log is read after the first one's.
-    wait_until(&mut screen, |shown| shown.contains("P00 payload") && !shown.contains("Run first"));
+    wait_until(&mut screen, |shown| {
+        shown.contains("P00 payload") && !shown.contains("Run first")
+    });
     for (width, height) in [(64, 20), (100, 30), (190, 48)] {
         let frame = screen.frame(width, height);
         let shown = text(&frame);
-        assert!(shown.contains("Dependabot") && shown.contains("Run Dependabot") && !shown.contains("Run first"), "{shown}");
+        assert!(
+            shown.contains("Dependabot")
+                && shown.contains("Run Dependabot")
+                && !shown.contains("Run first"),
+            "{shown}"
+        );
         // A step's lines found by their time are shown without remark.
         assert!(!shown.contains("Approximate"), "{shown}");
-        let payloads = (0..height).filter(|row| frame.grid.row_text(*row).contains("payload")).count();
-        assert!(payloads >= usize::from(height) - 12, "only {payloads} payload rows:\n{shown}");
+        let payloads = (0..height)
+            .filter(|row| frame.grid.row_text(*row).contains("payload"))
+            .count();
+        assert!(
+            payloads >= usize::from(height) - 12,
+            "only {payloads} payload rows:\n{shown}"
+        );
         // Long lines wrap inside the pane, never into the border.
-        assert!(shown.contains('›') || shown.contains("RIGHTEDGE"), "{shown}");
+        assert!(
+            shown.contains('›') || shown.contains("RIGHTEDGE"),
+            "{shown}"
+        );
     }
     // Find in the step log counts the one emoji match.
     key(&mut screen, KeyCode::Char('/'));
@@ -256,7 +283,11 @@ fn actions_reader_keeps_selected_job_identity_payload_and_confirmation() {
         let frame = screen.frame(width, height);
         assert!(text(&frame).contains("1/1 matches"), "{}", text(&frame));
         let (_, y, _) = frame.cursor.unwrap();
-        assert!(frame.grid.row_text(y).contains("unicode"), "{}", text(&frame));
+        assert!(
+            frame.grid.row_text(y).contains("unicode"),
+            "{}",
+            text(&frame)
+        );
     }
     key(&mut screen, KeyCode::Escape);
     // A refused write opens nothing and sends nothing.
@@ -271,7 +302,12 @@ fn actions_reader_keeps_selected_job_identity_payload_and_confirmation() {
     screen.write_refusal = None;
     key(&mut screen, KeyCode::Char('r'));
     let sheet = view(&mut screen);
-    assert!(sheet.contains("Failed jobs only (2)") && sheet.contains("Debug logging"), "{sheet}");
+    assert!(
+        sheet.contains("Failed jobs only (2)") && sheet.contains("Debug logging"),
+        "{sheet}"
+    );
+    // A stray key on the Jobs choice picks nothing and keeps the failed jobs chosen.
+    key(&mut screen, KeyCode::Char('z'));
     assert!(
         !calls()
             .iter()
@@ -313,7 +349,10 @@ fn the_merge_box_says_failing_from_the_moment_the_pull_request_opens() {
         .find(|pane| pane.contains("Merge verdict sentinel"))
         .unwrap_or_default()
         .to_owned();
-    assert!(row.contains('✕') && !row.contains('✔'), "the list glyph says failing: {row}");
+    assert!(
+        row.contains('✕') && !row.contains('✔'),
+        "the list glyph says failing: {row}"
+    );
     control(&mut screen, KeyCode::Char('l'));
     wait(&mut screen, "approved these changes");
     // The merge box first (the timeline's end): no run read yet, and it already says failed.
@@ -322,14 +361,21 @@ fn the_merge_box_says_failing_from_the_moment_the_pull_request_opens() {
     let whole = |screen: &mut GitScreen| text(&screen.frame(190, 160));
     let deadline = Instant::now() + Duration::from_secs(30);
     // The merge box names the failing check among what blocks it (`1. test (linux) failed`).
-    let failing = |shown: &str| shown.contains("test (linux) failed") && !shown.contains("Checks passed");
+    let failing =
+        |shown: &str| shown.contains("test (linux) failed") && !shown.contains("Checks passed");
     while !failing(&whole(&mut screen)) {
         screen.poll();
-        assert!(Instant::now() < deadline, "no failing verdict:\n{}", whole(&mut screen));
+        assert!(
+            Instant::now() < deadline,
+            "no failing verdict:\n{}",
+            whole(&mut screen)
+        );
         std::thread::sleep(Duration::from_millis(10));
     }
     assert!(
-        !calls().iter().any(|args| args.starts_with(&["run".into(), "view".into()])),
+        !calls()
+            .iter()
+            .any(|args| args.starts_with(&["run".into(), "view".into()])),
         "the verdict needs no run read: {:?}",
         calls()
     );
@@ -351,7 +397,10 @@ fn the_merge_box_says_failing_from_the_moment_the_pull_request_opens() {
         if failing(&shown) {
             break;
         }
-        assert!(Instant::now() < deadline, "the verdict changed after the run read:\n{shown}");
+        assert!(
+            Instant::now() < deadline,
+            "the verdict changed after the run read:\n{shown}"
+        );
         std::thread::sleep(Duration::from_millis(10));
     }
 }
@@ -407,7 +456,12 @@ fn narrow_review_keeps_thread_drafts_and_neutral_resolve_target_on_refresh() {
     control(&mut screen, KeyCode::Char('l'));
     let restored = screen.frame(64, 20);
     let (x, y, _) = restored.cursor.unwrap();
-    assert_eq!(restored.grid.get(x, y).unwrap().symbol, "f", "{}", text(&restored));
+    assert_eq!(
+        restored.grid.get(x, y).unwrap().symbol,
+        "f",
+        "{}",
+        text(&restored)
+    );
     // `c` on a thread answers it; drafts are scoped to their own thread.
     cursor_to(&mut screen, "Unresolved · alice");
     key(&mut screen, KeyCode::Char('c'));

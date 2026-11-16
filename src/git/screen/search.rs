@@ -228,5 +228,4 @@ impl GitScreen {
             self.preview_column = end.saturating_add(1).saturating_sub(available).min(start);
         }
     }
-
 }

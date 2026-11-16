@@ -1,4 +1,4 @@
-//! GitLab without a credential (FORGE.md §2.5). Public projects answer most REST reads
+//! GitLab without a credential. Public projects answer most REST reads
 //! anonymously, but labels, milestones, members, notes, discussions and single jobs are 401;
 //! GitLab's GraphQL API serves the same data for public projects, so those reads go there and
 //! are reshaped into the REST JSON the mappers in `gitlab.rs` read. Job logs, to-dos, the
@@ -62,17 +62,18 @@ pub(super) fn fetch(
         {
             Err(ctx.sign_in_to("filter by @me"))
         }
-        Read::Labels => connection(ctx, LABELS_DOCUMENT, json!({}), &["labels"], cancel)
-            .map(|nodes| {
+        Read::Labels => {
+            connection(ctx, LABELS_DOCUMENT, json!({}), &["labels"], cancel).map(|nodes| {
                 Payload::Labels(labels(&Value::Array(
                     nodes
                         .iter()
                         .map(|label| json!({ "title": label["title"], "color": label["color"] }))
                         .collect(),
                 )))
-            }),
-        Read::Milestones => connection(ctx, MILESTONES_DOCUMENT, json!({}), &["milestones"], cancel)
-            .map(|nodes| {
+            })
+        }
+        Read::Milestones => {
+            connection(ctx, MILESTONES_DOCUMENT, json!({}), &["milestones"], cancel).map(|nodes| {
                 Payload::Milestones(
                     nodes
                         .iter()
@@ -87,27 +88,31 @@ pub(super) fn fetch(
                         })
                         .collect(),
                 )
-            }),
-        Read::Collaborators => {
-            connection(ctx, MEMBERS_DOCUMENT, json!({}), &["projectMembers"], cancel).map(
-                |nodes| {
-                    Payload::Users(
-                        nodes
-                            .iter()
-                            .map(|node| &node["user"])
-                            .filter(|member| member.is_object())
-                            .map(|member| {
-                                user(&json!({
-                                    "id": gid(&member["id"]),
-                                    "username": member["username"],
-                                    "name": member["name"],
-                                }))
-                            })
-                            .collect(),
-                    )
-                },
-            )
+            })
         }
+        Read::Collaborators => connection(
+            ctx,
+            MEMBERS_DOCUMENT,
+            json!({}),
+            &["projectMembers"],
+            cancel,
+        )
+        .map(|nodes| {
+            Payload::Users(
+                nodes
+                    .iter()
+                    .map(|node| &node["user"])
+                    .filter(|member| member.is_object())
+                    .map(|member| {
+                        user(&json!({
+                            "id": gid(&member["id"]),
+                            "username": member["username"],
+                            "name": member["name"],
+                        }))
+                    })
+                    .collect(),
+            )
+        }),
         Read::Timeline(number) => {
             let kind = recall(ctx, *number);
             let field = match kind {
@@ -228,7 +233,10 @@ fn connection(
             at = &at[*key];
         }
         if at.is_null() {
-            return Err(ForgeError::NotFound(format!("{} in {full}", path.join("."))));
+            return Err(ForgeError::NotFound(format!(
+                "{} in {full}",
+                path.join(".")
+            )));
         }
         all.extend(nodes(at).iter().cloned());
         match at["pageInfo"]["endCursor"].as_str() {

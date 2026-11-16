@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Launch Dusty Git against the loopback fake Forgejo or Gitea (forge-gitea.keys, FORGE.md F4).
+"""Launch Dusty Git against the loopback fake Forgejo or Gitea (forge-gitea.keys).
 
 FORGE_GITEA_WORLD picks `forgejo` (default: code.forgejo.org, Forgejo 17) or `gitea` (gitea.com,
 Gitea main). The disposable repository (the orbit fixture) gets a `forge-<world>` remote for

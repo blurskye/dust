@@ -1,4 +1,4 @@
-//! Stale-while-revalidate list merging (FORGE.md §7.2): fresh rows replace cached ones without
+//! Stale-while-revalidate list merging: fresh rows replace cached ones without
 //! moving the reader. The cursor stays on the same item by id, rows that appear are inserted
 //! where the server puts them while the viewport keeps its top row, changed rows update in
 //! place (reported so the view can flash them once), and rows that vanished are kept where

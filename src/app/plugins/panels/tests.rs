@@ -654,13 +654,9 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
     std::fs::write(&path, &component).expect("component fixture");
     let checksum = format!("{:x}", Sha256::digest(&component));
     let manifest = fixture_manifest(checksum);
-    let mut outcome = crate::plugins::load_component(
-        store.path(),
-        &path,
-        manifest.clone(),
-        &activation_limits(),
-    )
-    .expect("production component load");
+    let mut outcome =
+        crate::plugins::load_component(store.path(), &path, manifest.clone(), &activation_limits())
+            .expect("production component load");
     assert_eq!(
         outcome.loaded.activated_commands,
         vec![
@@ -1099,13 +1095,9 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
     assert_eq!(virtual_snapshot.revision, 2);
     assert!(virtual_snapshot.text.starts_with("## Héllo"));
 
-    let mut trapped_outcome = crate::plugins::load_component(
-        store.path(),
-        &path,
-        manifest.clone(),
-        &activation_limits(),
-    )
-    .expect("trap runtime");
+    let mut trapped_outcome =
+        crate::plugins::load_component(store.path(), &path, manifest.clone(), &activation_limits())
+            .expect("trap runtime");
     let trapped = crate::plugins::execute_component(
         crate::plugins::PluginExecutionRequest {
             call: Default::default(),
@@ -1168,13 +1160,9 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
     assert!(state.provider_chunks.is_empty());
     assert!(state.virtual_document_proposals.is_empty());
 
-    let mut deadline_outcome = crate::plugins::load_component(
-        store.path(),
-        &path,
-        manifest.clone(),
-        &activation_limits(),
-    )
-    .expect("deadline runtime");
+    let mut deadline_outcome =
+        crate::plugins::load_component(store.path(), &path, manifest.clone(), &activation_limits())
+            .expect("deadline runtime");
     // Only activation gets the long budget: `spin` must still meet the default deadline.
     deadline_outcome.runtime.limits.epoch_deadline_ticks =
         crate::plugins::PluginLimits::default().epoch_deadline_ticks;

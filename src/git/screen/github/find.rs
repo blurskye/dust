@@ -128,9 +128,13 @@ impl DetailFind {
         let position = if count == 0 {
             "no matches".into()
         } else {
-            format!("{}/{count}", position.map_or_else(|| "-".into(), |n| n.to_string()))
+            format!(
+                "{}/{count}",
+                position.map_or_else(|| "-".into(), |n| n.to_string())
+            )
         };
-        let query = super::super::render::ellipsize(&self.search.query, usize::from(width / 5).max(6));
+        let query =
+            super::super::render::ellipsize(&self.search.query, usize::from(width / 5).max(6));
         format!("/{query}/ · {position}")
     }
 }
@@ -147,7 +151,11 @@ impl Workspace {
             Content::Item(
                 self.list_key(),
                 self.number(),
-                if self.page == 2 { self.pr_tab } else { self.issue_tab },
+                if self.page == 2 {
+                    self.pr_tab
+                } else {
+                    self.issue_tab
+                },
                 file,
                 if self.pr_tab == 1 {
                     self.selected_commit.clone()

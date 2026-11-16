@@ -74,12 +74,17 @@ fn read_lines(world: &World, args: &[&str]) -> Vec<Value> {
     let output = command.output().unwrap();
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(!stdout.contains(FAKE_TOKEN) && !stderr.contains(FAKE_TOKEN), "the token leaked");
+    assert!(
+        !stdout.contains(FAKE_TOKEN) && !stderr.contains(FAKE_TOKEN),
+        "the token leaked"
+    );
     assert!(output.status.success(), "{args:?}: {stdout}\n{stderr}");
     stdout
         .lines()
         .filter(|line| !line.trim().is_empty())
-        .map(|line| serde_json::from_str(line).unwrap_or_else(|error| panic!("{args:?}: {error}: {line}")))
+        .map(|line| {
+            serde_json::from_str(line).unwrap_or_else(|error| panic!("{args:?}: {error}: {line}"))
+        })
         .collect()
 }
 
@@ -112,7 +117,9 @@ fn has(events: &[(String, Value)], kind: &str) -> bool {
 }
 
 fn bot_comment(comments: &[&Value]) -> bool {
-    comments.iter().any(|comment| comment["author"]["bot"] == true)
+    comments
+        .iter()
+        .any(|comment| comment["author"]["bot"] == true)
 }
 
 /// The reactions on an item's own body, as `(content, count)`.
@@ -121,7 +128,12 @@ fn body_reactions(detail: &Value) -> Vec<(String, u64)> {
         .as_array()
         .into_iter()
         .flatten()
-        .map(|each| (each["content"].as_str().unwrap_or_default().to_owned(), each["count"].as_u64().unwrap_or(0)))
+        .map(|each| {
+            (
+                each["content"].as_str().unwrap_or_default().to_owned(),
+                each["count"].as_u64().unwrap_or(0),
+            )
+        })
         .collect()
 }
 
@@ -138,14 +150,27 @@ fn check_pull(world: &World, forge: Forge, pull: u64, issue: u64) {
         );
     }
     let body = detail["body"].as_str().unwrap_or_default();
-    for part in ["## Summary", "- Bound the exponent", "```python", "https://orbit.example/docs/retries"] {
+    for part in [
+        "## Summary",
+        "- Bound the exponent",
+        "```python",
+        "https://orbit.example/docs/retries",
+    ] {
         assert!(body.contains(part), "description lacks {part:?}: {body}");
     }
     assert!(body.contains(&format!("Closes #{issue}")), "{body}");
     let labels = detail["row"]["labels"].as_array().map_or(0, Vec::len);
     assert_eq!(labels, 2, "labels: {}", detail["row"]["labels"]);
-    assert_eq!(detail["assignees"][0]["login"], "maya", "{}", detail["assignees"]);
-    assert_eq!(detail["milestone"]["title"], "v1.4", "{}", detail["milestone"]);
+    assert_eq!(
+        detail["assignees"][0]["login"], "maya",
+        "{}",
+        detail["assignees"]
+    );
+    assert_eq!(
+        detail["milestone"]["title"], "v1.4",
+        "{}",
+        detail["milestone"]
+    );
     assert_eq!(
         detail["commits"].as_array().map_or(0, Vec::len),
         3,
@@ -154,11 +179,13 @@ fn check_pull(world: &World, forge: Forge, pull: u64, issue: u64) {
     );
     // What it closes: the forge's own list, else (Gitea, Forgejo) the description's
     // `Closes #N`, with the issue's title.
-    let linked = detail["linked_issues"].as_array().cloned().unwrap_or_default();
+    let linked = detail["linked_issues"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
     assert!(
-        linked
-            .iter()
-            .any(|link| link["number"] == issue && link["title"] == "Queue stalls after a worker reconnects"),
+        linked.iter().any(|link| link["number"] == issue
+            && link["title"] == "Queue stalls after a worker reconnects"),
         "linked issues: {}",
         detail["linked_issues"]
     );
@@ -181,7 +208,10 @@ fn check_pull(world: &World, forge: Forge, pull: u64, issue: u64) {
         "bot comments carry a walkthrough and a table: {timeline}"
     );
     assert!(
-        said.iter().filter(|comment| comment["author"]["bot"] == true).count() >= 2,
+        said.iter()
+            .filter(|comment| comment["author"]["bot"] == true)
+            .count()
+            >= 2,
         "two bots: {timeline}"
     );
     let people = said
@@ -189,7 +219,10 @@ fn check_pull(world: &World, forge: Forge, pull: u64, issue: u64) {
         .filter(|comment| comment["author"]["bot"] == false)
         .map(|comment| comment["author"]["login"].as_str().unwrap_or_default())
         .collect::<std::collections::BTreeSet<_>>();
-    assert!(people.len() >= 4, "comments from several people: {people:?}");
+    assert!(
+        people.len() >= 4,
+        "comments from several people: {people:?}"
+    );
     assert!(
         said.iter()
             .any(|comment| comment["body"].as_str().unwrap_or_default().lines().count() >= 40),
@@ -201,14 +234,22 @@ fn check_pull(world: &World, forge: Forge, pull: u64, issue: u64) {
     );
     if forge == Forge::GitHub {
         assert!(
-            said.iter().any(|comment| comment["association"] == "CONTRIBUTOR"),
+            said.iter()
+                .any(|comment| comment["association"] == "CONTRIBUTOR"),
             "author association: {timeline}"
         );
         let reacted = said
             .iter()
-            .filter(|comment| comment["reactions"].as_array().is_some_and(|all| !all.is_empty()))
+            .filter(|comment| {
+                comment["reactions"]
+                    .as_array()
+                    .is_some_and(|all| !all.is_empty())
+            })
             .count();
-        assert!(reacted >= 2, "reactions on a couple of comments: {timeline}");
+        assert!(
+            reacted >= 2,
+            "reactions on a couple of comments: {timeline}"
+        );
     }
     for kind in ["Labeled", "Assigned", "Milestoned", "ReviewRequested"] {
         assert!(has(&events, kind), "no {kind}: {timeline}");
@@ -217,7 +258,12 @@ fn check_pull(world: &World, forge: Forge, pull: u64, issue: u64) {
         .iter()
         .enumerate()
         .filter(|(_, (kind, _))| kind == "Reviewed")
-        .map(|(index, (_, review))| (index, review["state"].as_str().unwrap_or_default().to_owned()))
+        .map(|(index, (_, review))| {
+            (
+                index,
+                review["state"].as_str().unwrap_or_default().to_owned(),
+            )
+        })
         .collect::<Vec<_>>();
     let changes = verdicts
         .iter()
@@ -229,12 +275,19 @@ fn check_pull(world: &World, forge: Forge, pull: u64, issue: u64) {
         .rfind(|(_, state)| state == "Approved")
         .unwrap_or_else(|| panic!("no approval: {timeline}"))
         .0;
-    assert!(changes < approved, "approved after the change request: {verdicts:?}");
+    assert!(
+        changes < approved,
+        "approved after the change request: {verdicts:?}"
+    );
     assert!(
         events[changes..approved].iter().any(|(kind, fields)| {
             kind == "Committed"
                 || kind == "ForcePushed"
-                || (kind == "Other" && fields["kind"].as_str().unwrap_or_default().contains("pushed"))
+                || (kind == "Other"
+                    && fields["kind"]
+                        .as_str()
+                        .unwrap_or_default()
+                        .contains("pushed"))
         }),
         "a push between the change request and the approval: {timeline}"
     );
@@ -244,14 +297,20 @@ fn check_pull(world: &World, forge: Forge, pull: u64, issue: u64) {
     }
 
     let threads = read(world, &["threads", &number]);
-    let threads = threads.as_array().unwrap_or_else(|| panic!("threads: {threads}"));
+    let threads = threads
+        .as_array()
+        .unwrap_or_else(|| panic!("threads: {threads}"));
     let resolved = threads
         .iter()
         .find(|thread| thread["resolved"] == true)
         .unwrap_or_else(|| panic!("no resolved thread: {threads:?}"));
     assert_eq!(resolved["path"], "orbit/queue.py");
     assert_eq!(resolved["line"], 14);
-    assert_eq!(resolved["comments"].as_array().map_or(0, Vec::len), 3, "{resolved}");
+    assert_eq!(
+        resolved["comments"].as_array().map_or(0, Vec::len),
+        3,
+        "{resolved}"
+    );
     let open = threads
         .iter()
         .find(|thread| thread["resolved"] == false)
@@ -277,18 +336,34 @@ fn check_ci(world: &World, forge: Forge, detail: &Value) {
                 .iter()
                 .find(|check| check["name"] == "ci / test (pull_request)")
                 .unwrap_or_else(|| panic!("checks: {checks:?}"));
-            let run = test["run_link"]["run"].as_str().unwrap_or_else(|| panic!("run link: {test}"));
+            let run = test["run_link"]["run"]
+                .as_str()
+                .unwrap_or_else(|| panic!("run link: {test}"));
             // The status links run index 6; the API reads that run by its id.
-            assert!(test["details_url"].as_str().unwrap_or_default().contains("/actions/runs/6/"), "{test}");
+            assert!(
+                test["details_url"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .contains("/actions/runs/6/"),
+                "{test}"
+            );
             assert_eq!(run, "4407", "the run's index resolves to its id: {test}");
             let run = read(world, &["run", run]);
             let job = run["jobs"]
                 .as_array()
                 .and_then(|jobs| jobs.iter().find(|job| job["name"] == "test"))
                 .unwrap_or_else(|| panic!("run jobs: {run}"));
-            let id = job["id"].as_str().unwrap_or_else(|| panic!("job id: {job}"));
+            let id = job["id"]
+                .as_str()
+                .unwrap_or_else(|| panic!("job id: {job}"));
             let log = read(world, &["log", id]);
-            assert!(log["text"].as_str().unwrap_or_default().contains("44 passed"), "log: {log}");
+            assert!(
+                log["text"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .contains("44 passed"),
+                "log: {log}"
+            );
         }
         Forge::GitLab => {
             assert_eq!(checks.len(), 3, "three jobs: {checks:?}");
@@ -296,7 +371,10 @@ fn check_ci(world: &World, forge: Forge, detail: &Value) {
                 .iter()
                 .find(|check| check["state"] == "Failed")
                 .unwrap_or_else(|| panic!("a failed job: {checks:?}"));
-            let url = failed["details_url"].as_str().or_else(|| failed["url"].as_str()).unwrap_or_default();
+            let url = failed["details_url"]
+                .as_str()
+                .or_else(|| failed["url"].as_str())
+                .unwrap_or_default();
             let job = url.rsplit('/').next().unwrap_or_default();
             let log = read(world, &["log", job]);
             let text = log["text"].as_str().unwrap_or_default();
@@ -321,7 +399,11 @@ fn check_ci(world: &World, forge: Forge, detail: &Value) {
 fn check_issue(world: &World, forge: Forge, pull: u64, issue: u64) {
     let number = issue.to_string();
     let detail = read(world, &["issue", &number]);
-    assert_eq!(detail["row"]["labels"].as_array().map_or(0, Vec::len), 2, "{detail}");
+    assert_eq!(
+        detail["row"]["labels"].as_array().map_or(0, Vec::len),
+        2,
+        "{detail}"
+    );
     if forge != Forge::GitHub {
         assert_eq!(
             body_reactions(&detail),
@@ -332,7 +414,10 @@ fn check_issue(world: &World, forge: Forge, pull: u64, issue: u64) {
     }
     assert_eq!(detail["assignees"][0]["login"], "maya", "{detail}");
     assert!(
-        detail["body"].as_str().unwrap_or_default().contains("### Steps to reproduce"),
+        detail["body"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("### Steps to reproduce"),
         "{detail}"
     );
     if forge == Forge::GitLab {
@@ -349,7 +434,9 @@ fn check_issue(world: &World, forge: Forge, pull: u64, issue: u64) {
         assert!(has(&events, kind), "no {kind}: {timeline}");
     }
     assert!(
-        events.iter().any(|(kind, fields)| kind == "CrossReferenced" && fields["link"]["number"] == pull),
+        events
+            .iter()
+            .any(|(kind, fields)| kind == "CrossReferenced" && fields["link"]["number"] == pull),
         "the pull request's cross-reference: {timeline}"
     );
 }

@@ -1,4 +1,4 @@
-# F2 host states in the forge tabs (FORGE.md §2.5; DESIGN §3.45 X-OFFLINE / X-PROVIDER).
+# F2 host states in the forge tabs.
 # One run per state against the loopback fake forge; each writes `notice` (the list's notice
 # row) and `accounts` (the `a` popover):
 #   scripts/ui-scenarios/make-orbit-fixture.sh /tmp/orbit

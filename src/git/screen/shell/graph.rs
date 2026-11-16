@@ -1,4 +1,4 @@
-//! Commit graph lanes (DESIGN.md §4.5): the lane assignment `git log --graph` and
+//! Commit graph lanes: the lane assignment `git log --graph` and
 //! lazygit use, one row per commit, two cells per lane.
 
 /// One painted cell: a lane glyph and the lane colour index it belongs to.
@@ -83,11 +83,7 @@ pub(crate) fn rows<S: AsRef<str>>(commits: &[(S, Vec<S>)]) -> Vec<GraphRow> {
             let (target, lane_colour, glyph) = match existing {
                 Some(target) => {
                     let lane_colour = lanes[target].as_ref().map_or(0, |(_, colour)| *colour);
-                    (
-                        target,
-                        lane_colour,
-                        if target > column { '┤' } else { '├' },
-                    )
+                    (target, lane_colour, if target > column { '┤' } else { '├' })
                 }
                 None => {
                     let lane_colour = next_colour();
@@ -100,11 +96,7 @@ pub(crate) fn rows<S: AsRef<str>>(commits: &[(S, Vec<S>)]) -> Vec<GraphRow> {
                         lanes.push(None);
                     }
                     lanes[target] = Some((parent.to_owned(), lane_colour));
-                    (
-                        target,
-                        lane_colour,
-                        if target > column { '╮' } else { '╭' },
-                    )
+                    (target, lane_colour, if target > column { '╮' } else { '╭' })
                 }
             };
             if cells.len() < (target + 1) * 2 {
@@ -127,8 +119,8 @@ pub(crate) fn rows<S: AsRef<str>>(commits: &[(S, Vec<S>)]) -> Vec<GraphRow> {
 /// Horizontal run between two lanes, crossing any lane that passes between them.
 fn connect(cells: &mut [Option<Cell>], from: usize, to: usize, colour: u8) {
     let (low, high) = (from.min(to), from.max(to));
-    for cell in low * 2 + 1..high * 2 {
-        cells[cell] = match cells[cell] {
+    for cell in &mut cells[low * 2 + 1..high * 2] {
+        *cell = match *cell {
             Some(('│', passing)) => Some(('┼', passing)),
             None => Some(('─', colour)),
             other => other,
@@ -150,9 +142,10 @@ mod tests {
 
     #[test]
     fn linear_history_stays_in_one_lane() {
-        assert_eq!(graph(&[("c", &["b"]), ("b", &["a"]), ("a", &[])]), [
-            "*", "*", "*"
-        ]);
+        assert_eq!(
+            graph(&[("c", &["b"]), ("b", &["a"]), ("a", &[])]),
+            ["*", "*", "*"]
+        );
     }
 
     #[test]

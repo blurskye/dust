@@ -407,7 +407,9 @@ fn tag(
     around: bool,
     count: usize,
 ) -> Option<ByteRange> {
-    if objects.iter().any(|object| object.kind == SyntaxObjectKind::Tag)
+    if objects
+        .iter()
+        .any(|object| object.kind == SyntaxObjectKind::Tag)
         && let Some(range) = syntax(objects, SyntaxObjectKind::Tag, cursor, around, count)
     {
         return Some(range);

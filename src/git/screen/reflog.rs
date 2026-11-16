@@ -129,7 +129,12 @@ impl GitScreen {
         }
         let parent =
             crate::files::canonicalize(path.parent().ok_or("Choose a worktree parent directory")?)
-                .map_err(|error| format!("Couldn't open the worktree's parent folder{}", super::words::io_reason(&error)))?;
+                .map_err(|error| {
+                    format!(
+                        "Couldn't open the worktree's parent folder{}",
+                        super::words::io_reason(&error)
+                    )
+                })?;
         if !parent.is_dir() {
             return Err("Choose an existing worktree parent directory".into());
         }

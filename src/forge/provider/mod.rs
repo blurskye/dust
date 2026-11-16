@@ -1,14 +1,14 @@
-//! The provider layer (FORGE.md §3.2): one `Provider` per forge kind maps `Read`/`Write` onto
+//! The provider layer: one `Provider` per forge kind maps `Read`/`Write` onto
 //! `ApiRequest`s and responses onto the normalised model. Providers never pick a transport;
 //! `ForgeContext::send` does, and owns the per-Read deadline and the 401 fallback.
 
 mod closing;
 mod common;
-mod parallel;
-mod reactions;
 pub mod gitea;
 pub mod github;
 pub mod gitlab;
+mod parallel;
+mod reactions;
 
 use crate::forge::capability::Capabilities;
 use crate::forge::capability::Terms;
@@ -128,7 +128,7 @@ impl ForgeContext {
         self.background.load(std::sync::atomic::Ordering::Acquire)
     }
 
-    /// No credential: public reads only (FORGE.md §2.5).
+    /// No credential: public reads only.
     pub fn anonymous(&self) -> bool {
         self.transport_kind().anonymous()
     }
@@ -182,7 +182,7 @@ impl ForgeContext {
         self.transport().kind()
     }
 
-    /// Start a Read's overall deadline (§3.5); every request it fans out to shares it.
+    /// Start a Read's overall deadline; every request it fans out to shares it.
     pub fn start_deadline(&self, budget: Duration) {
         *self
             .deadline
@@ -198,13 +198,13 @@ impl ForgeContext {
     }
 
     /// Send one request. A 401 over direct HTTP evicts the credential and retries once
-    /// through the CLI (§1.2); the CLI attaches its own sign-in.
+    /// through the CLI; the CLI attaches its own sign-in.
     pub fn send(
         &self,
         request: &ApiRequest,
         cancel: &AtomicBool,
     ) -> Result<ApiResponse, ForgeError> {
-        // Every REST GET revalidates what this process already holds (§7.5).
+        // Every REST GET revalidates what this process already holds.
         let conditional = crate::forge::etag::key(&self.endpoints.api_base, request);
         let prepared;
         let request = match &conditional {
@@ -216,7 +216,7 @@ impl ForgeContext {
             }
             None => request,
         };
-        // Host states for the notices and the accounts popover (FORGE.md §2.5).
+        // Host states for the notices and the accounts popover.
         let result = self.send_once(request, cancel);
         let result = match (result, &conditional) {
             (Ok(response), Some(key)) => Ok(crate::forge::etag::settle(key, response)),
@@ -277,8 +277,8 @@ impl ForgeContext {
         {
             return result;
         }
-        // A token the forge refused: retry through the CLI's own sign-in (§1.2). A CLI that
-        // turns out to be signed out (`gh` installed, never logged in) goes anonymous (§2.5).
+        // A token the forge refused: retry through the CLI's own sign-in. A CLI that
+        // turns out to be signed out (`gh` installed, never logged in) goes anonymous.
         let next = match kind {
             TransportKind::Http { .. } => {
                 transport::evict(&self.endpoints, &self.options);
@@ -313,7 +313,7 @@ impl ForgeContext {
         }
     }
 
-    /// Send and require a 2xx, classifying anything else (§3.5).
+    /// Send and require a 2xx, classifying anything else.
     pub fn ok(&self, request: &ApiRequest, cancel: &AtomicBool) -> Result<ApiResponse, ForgeError> {
         let response = self.send(request, cancel)?;
         if response.success() {
@@ -410,7 +410,7 @@ pub trait Provider: Send + Sync {
         write: &Write,
         cancel: &AtomicBool,
     ) -> Result<Receipt, ForgeError>;
-    /// Whether `read` honours `Conditional::since` by answering only what changed (§7.5);
+    /// Whether `read` honours `Conditional::since` by answering only what changed;
     /// `incremental::merge` folds such an answer into the cached copy.
     fn incremental(&self, _ctx: &ForgeContext, _read: &Read) -> bool {
         false
@@ -454,7 +454,7 @@ pub fn download(request: ApiRequest) -> ApiRequest {
     request
 }
 
-/// Archives above this are opened in the browser instead (F6). The process supervisor caps
+/// Archives above this are opened in the browser instead. The process supervisor caps
 /// a CLI's output at 256 MiB, and the passthrough adds up to 256 KiB of headers.
 pub const ARTIFACT_CAP: usize = 255 * 1024 * 1024;
 
@@ -476,7 +476,7 @@ pub fn build(kind: ProviderKind) -> Result<Arc<dyn Provider>, ForgeError> {
     }
 }
 
-/// The overall budget for one Read: 30 s, longer for diffs and logs (§3.5).
+/// The overall budget for one Read: 30 s, longer for diffs and logs.
 pub fn read_budget(read: &Read) -> Duration {
     match read {
         Read::Diff(_) | Read::CommitDiff(_) => transport::DIFF_TIMEOUT,
@@ -488,7 +488,7 @@ pub fn read_budget(read: &Read) -> Duration {
 }
 
 /// Every `ApiRequest` each Read would send first, without sending anything. `forge-record
-/// --plan` consumes this (§8.1) through the env-gated `describe_plans` test.
+/// --plan` consumes this through the env-gated `describe_plans` test.
 pub fn describe(kind: ProviderKind, host: &HostKey, repo: &RepoRef) -> Vec<(Read, Plan)> {
     let endpoints = match kind {
         ProviderKind::GitHub => Endpoints::github(host),

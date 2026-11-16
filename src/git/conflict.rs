@@ -710,7 +710,10 @@ pub fn skip_operation(repository: &Path) -> Result<GitRecoveryOutcome, GitRecove
     let (start, current) = if operation == "rebase" {
         rebase_info(&repo)?
     } else {
-        (pick_start(&repo).ok_or(GitRecoveryRefusal::NoRecordedStart)?, None)
+        (
+            pick_start(&repo).ok_or(GitRecoveryRefusal::NoRecordedStart)?,
+            None,
+        )
     };
     let touched = operation_touched_paths(&repo, start, &operation, current)?;
     let risky = risky_changes(&repo, &touched, false)?;
@@ -725,9 +728,9 @@ pub fn skip_operation(repository: &Path) -> Result<GitRecoveryOutcome, GitRecove
 /// Stage one resolved path with Git itself (`git add`), as `s` would.
 pub(super) fn stage_resolved(repository: &Path, path: &Path) -> Result<(), GitRecoveryRefusal> {
     let repo = git2::Repository::open(repository).map_err(|_| GitRecoveryRefusal::NotRepository)?;
-    let path = path
-        .to_str()
-        .ok_or_else(|| GitRecoveryRefusal::Backend("the path is not UTF-8; stage it with s".into()))?;
+    let path = path.to_str().ok_or_else(|| {
+        GitRecoveryRefusal::Backend("the path is not UTF-8; stage it with s".into())
+    })?;
     run_operation_git(&repo, &["--literal-pathspecs", "add", "--", path])
 }
 

@@ -444,10 +444,14 @@ impl GitScreen {
                 }
             }
             // `e` in the commit reader: the line in the editor, as in the worktree reader.
-            KeyCode::Char('e') if self.focus == 4 && !key.modifiers.control && !key.modifiers.alt => {
+            KeyCode::Char('e')
+                if self.focus == 4 && !key.modifiers.control && !key.modifiers.alt =>
+            {
                 self.outcome = self.open_line();
             }
-            KeyCode::Char('c') if !key.modifiers.control && !key.modifiers.alt => self.commit_form(),
+            KeyCode::Char('c') if !key.modifiers.control && !key.modifiers.alt => {
+                self.commit_form()
+            }
             KeyCode::Char('|') => {
                 self.split_diff = !self.split_diff;
                 self.preview_offset = 0;
@@ -609,8 +613,8 @@ mod tests {
 
 #[cfg(test)]
 mod ref_log_tests {
-    use super::*;
     use super::tests::now;
+    use super::*;
 
     #[test]
     fn ref_log_rejects_bad_optional_metadata_without_losing_literal_subjects() {
@@ -659,10 +663,7 @@ mod ref_log_tests {
                 preview.rows[2 * i].text,
                 format!("{}  Subject {i} 中文", &entry.id.to_string()[..7])
             );
-            assert_eq!(
-                preview.rows[2 * i + 1].text,
-                format!("Author {i} · Nov 12")
-            );
+            assert_eq!(preview.rows[2 * i + 1].text, format!("Author {i} · Nov 12"));
             assert_eq!(preview.rows[2 * i + 1].style, Style::Muted);
         }
         assert!(preview.same_content(&RefLogEntry::preview_at(&entries, now())));

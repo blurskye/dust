@@ -32,7 +32,10 @@ fn repo() -> tempfile::TempDir {
     let dir = tempfile::tempdir().unwrap();
     git(dir.path(), &["init", "-b", "main"]);
     git(dir.path(), &["config", "user.name", "Tutor Test"]);
-    git(dir.path(), &["config", "user.email", "test@example.invalid"]);
+    git(
+        dir.path(),
+        &["config", "user.email", "test@example.invalid"],
+    );
     git(dir.path(), &["config", "commit.gpgsign", "false"]);
     std::fs::write(dir.path().join("file.txt"), "old\n").unwrap();
     git(dir.path(), &["add", "."]);
@@ -121,7 +124,11 @@ fn until(
         if started(screen) {
             return;
         }
-        assert!(Instant::now() < deadline, "never started:\n{}", view(screen));
+        assert!(
+            Instant::now() < deadline,
+            "never started:\n{}",
+            view(screen)
+        );
         for _ in 0..5 {
             screen.poll();
             std::thread::sleep(Duration::from_millis(10));
@@ -132,7 +139,9 @@ fn idle(screen: &mut GitScreen) {
     wait(screen, |screen| !screen.busy());
 }
 fn ready(screen: &mut GitScreen, needle: &str) {
-    wait(screen, |screen| !screen.busy() && view(screen).contains(needle));
+    wait(screen, |screen| {
+        !screen.busy() && view(screen).contains(needle)
+    });
 }
 fn banner(screen: &mut GitScreen) -> String {
     let frame = screen.frame(WIDTH, HEIGHT);
@@ -171,7 +180,11 @@ fn lesson(screen: &mut GitScreen, number: usize) {
 fn at(screen: &mut GitScreen, name: &str) {
     let number = number(name);
     lesson(screen, number);
-    assert!(banner(screen).contains(name), "lesson {number} is not {name}: {}", banner(screen));
+    assert!(
+        banner(screen).contains(name),
+        "lesson {number} is not {name}: {}",
+        banner(screen)
+    );
 }
 fn finished(screen: &mut GitScreen) {
     lesson(screen, lessons() + 1);
@@ -259,13 +272,19 @@ fn every_git_lesson_advances_on_real_input_and_quit_restores_the_workspace() {
     at(s, "Panes · Focus panes");
     let base = practice_base(s);
     assert!(!base.starts_with(dir.path()) && !dir.path().starts_with(&base));
-    assert!(banner(s).contains(&format!("Git tutor · 1/{} · Panes · Focus panes", lessons())));
+    assert!(banner(s).contains(&format!(
+        "Git tutor · 1/{} · Panes · Focus panes",
+        lessons()
+    )));
     assert!(view(s).contains(":tutor next skips"));
 
     // Basics: panes, the rail, the keys sheet.
     ready(s, "greet.rs");
     keys(s, "345");
-    assert!(banner(s).contains("Panes · Focus panes"), "advanced before returning to Changes");
+    assert!(
+        banner(s).contains("Panes · Focus panes"),
+        "advanced before returning to Changes"
+    );
     char(s, '2');
     at(s, "Panes · Reader and Tab");
     ready(s, "greet.rs");
@@ -363,18 +382,33 @@ fn every_git_lesson_advances_on_real_input_and_quit_restores_the_workspace() {
     select(s, '2', "greet.rs");
     reader(s);
     seek(s, "debug: remove me");
-    until(s, |s| char(s, 'd'), |s| view(s).contains("Discard unstaged change?"));
+    until(
+        s,
+        |s| char(s, 'd'),
+        |s| view(s).contains("Discard unstaged change?"),
+    );
     key(s, KeyCode::Escape);
     idle(s);
-    assert!(banner(s).contains("Discard · Discard a hunk"), "Esc must cancel the discard");
-    until(s, |s| char(s, 'd'), |s| view(s).contains("Discard unstaged change?"));
+    assert!(
+        banner(s).contains("Discard · Discard a hunk"),
+        "Esc must cancel the discard"
+    );
+    until(
+        s,
+        |s| char(s, 'd'),
+        |s| view(s).contains("Discard unstaged change?"),
+    );
     key(s, KeyCode::Enter);
     at(s, "Discard · Discard a line");
     ready(s, "gamma");
     select(s, '2', "list.txt");
     reader(s);
     seek(s, "gamma");
-    until(s, |s| char(s, 'D'), |s| view(s).contains("Discard unstaged change?"));
+    until(
+        s,
+        |s| char(s, 'D'),
+        |s| view(s).contains("Discard unstaged change?"),
+    );
     key(s, KeyCode::Enter);
     at(s, "Discard · Discard files");
     ready(s, "c.txt");
@@ -382,7 +416,11 @@ fn every_git_lesson_advances_on_real_input_and_quit_restores_the_workspace() {
     char(s, 'x');
     key(s, KeyCode::Down);
     char(s, 'x');
-    until(s, |s| char(s, 'D'), |s| view(s).contains("Discard changes in 2 files?"));
+    until(
+        s,
+        |s| char(s, 'D'),
+        |s| view(s).contains("Discard changes in 2 files?"),
+    );
     key(s, KeyCode::Enter);
 
     // Commits.
@@ -405,7 +443,10 @@ fn every_git_lesson_advances_on_real_input_and_quit_restores_the_workspace() {
     paste(s, "Commit past the hook");
     ctrl(s, KeyCode::Enter);
     idle(s);
-    assert!(banner(s).contains("Commit · Skip hooks"), "the practice hook must block a plain commit");
+    assert!(
+        banner(s).contains("Commit · Skip hooks"),
+        "the practice hook must block a plain commit"
+    );
     char(s, 'c');
     paste(s, "Commit past the hook");
     alt(s, 'n');
@@ -427,8 +468,16 @@ fn every_git_lesson_advances_on_real_input_and_quit_restores_the_workspace() {
     select(s, '4', "Add the app");
     key(s, KeyCode::Enter);
     ready(s, "◇ docs/guide.md");
-    until(s, |s| char(s, 'J'), |s| view(s).contains("◇ src/app/main.rs"));
-    until(s, |s| key(s, KeyCode::Tab), |s| cursor(s).is_some_and(|(x, _)| x > RAIL));
+    until(
+        s,
+        |s| char(s, 'J'),
+        |s| view(s).contains("◇ src/app/main.rs"),
+    );
+    until(
+        s,
+        |s| key(s, KeyCode::Tab),
+        |s| cursor(s).is_some_and(|(x, _)| x > RAIL),
+    );
     idle(s);
     key(s, KeyCode::Escape);
     at(s, "History · Open a commit's line");
@@ -436,8 +485,19 @@ fn every_git_lesson_advances_on_real_input_and_quit_restores_the_workspace() {
     select(s, '4', "Add the app");
     key(s, KeyCode::Enter);
     ready(s, "◇ docs/guide.md");
-    until(s, |s| key(s, KeyCode::Tab), |s| cursor(s).is_some_and(|(x, _)| x > RAIL));
-    until(s, |s| { char(s, 'j'); char(s, 'e') }, |s| banner(s).contains("History · Full message"));
+    until(
+        s,
+        |s| key(s, KeyCode::Tab),
+        |s| cursor(s).is_some_and(|(x, _)| x > RAIL),
+    );
+    until(
+        s,
+        |s| {
+            char(s, 'j');
+            char(s, 'e')
+        },
+        |s| banner(s).contains("History · Full message"),
+    );
     at(s, "History · Full message");
     ready(s, "Explain the design");
     select(s, '4', "Explain the");
@@ -520,7 +580,11 @@ fn every_git_lesson_advances_on_real_input_and_quit_restores_the_workspace() {
     ctrl(s, KeyCode::Enter);
     at(s, "Branches · Upstream");
     select(s, '3', "feature");
-    until(s, |s| char(s, 'u'), |s| view(s).contains("Set selected branch upstream"));
+    until(
+        s,
+        |s| char(s, 'u'),
+        |s| view(s).contains("Set selected branch upstream"),
+    );
     ctrl(s, KeyCode::Enter);
     at(s, "Branches · Delete");
     select(s, '3', "done-topic");
@@ -590,11 +654,19 @@ fn every_git_lesson_advances_on_real_input_and_quit_restores_the_workspace() {
     // Rewrite history.
     at(s, "Rewrite history · Squash");
     select(s, '4', "Fix farewell");
-    until(s, |s| char(s, 's'), |s| view(s).contains("Squash into the commit below"));
+    until(
+        s,
+        |s| char(s, 's'),
+        |s| view(s).contains("Squash into the commit below"),
+    );
     key(s, KeyCode::Enter);
     at(s, "Rewrite history · Fixup");
     select(s, '4', "Fix farewell");
-    until(s, |s| char(s, 'f'), |s| view(s).contains("Fixup into the commit below"));
+    until(
+        s,
+        |s| char(s, 'f'),
+        |s| view(s).contains("Fixup into the commit below"),
+    );
     key(s, KeyCode::Enter);
     at(s, "Rewrite history · Drop");
     select(s, '4', "Add debug");
@@ -606,9 +678,15 @@ fn every_git_lesson_advances_on_real_input_and_quit_restores_the_workspace() {
     key(s, KeyCode::Enter);
     at(s, "Rewrite history · Edit");
     select(s, '4', "Second step");
-    until(s, |s| char(s, 'e'), |s| view(s).contains("Edit (stop the rebase here)"));
+    until(
+        s,
+        |s| char(s, 'e'),
+        |s| view(s).contains("Edit (stop the rebase here)"),
+    );
     key(s, KeyCode::Enter);
-    wait(s, |s| s.root().join(".git/rebase-merge").is_dir() && !s.busy());
+    wait(s, |s| {
+        s.root().join(".git/rebase-merge").is_dir() && !s.busy()
+    });
     idle(s);
     char(s, 'C');
     key(s, KeyCode::Enter);
@@ -620,16 +698,28 @@ fn every_git_lesson_advances_on_real_input_and_quit_restores_the_workspace() {
     ctrl(s, KeyCode::Enter);
     at(s, "Rewrite history · Amend an older commit");
     select(s, '4', "Add farewell");
-    until(s, |s| char(s, 'A'), |s| view(s).contains("Amend with the staged changes"));
+    until(
+        s,
+        |s| char(s, 'A'),
+        |s| view(s).contains("Amend with the staged changes"),
+    );
     key(s, KeyCode::Enter);
 
     // Undo and redo: each sheet shows the move, Enter confirms it.
     at(s, "Undo · Undo");
-    until(s, |s| char(s, 'z'), |s| view(s).contains("Undo the last action?"));
+    until(
+        s,
+        |s| char(s, 'z'),
+        |s| view(s).contains("Undo the last action?"),
+    );
     assert!(view(s).contains("Commit too early"), "{}", view(s));
     key(s, KeyCode::Enter);
     at(s, "Undo · Redo");
-    until(s, |s| char(s, 'Z'), |s| view(s).contains("Redo the undone action?"));
+    until(
+        s,
+        |s| char(s, 'Z'),
+        |s| view(s).contains("Redo the undone action?"),
+    );
     key(s, KeyCode::Enter);
 
     // Reflog: rescue, browse, detach, a worktree.
@@ -658,11 +748,19 @@ fn every_git_lesson_advances_on_real_input_and_quit_restores_the_workspace() {
                 key(s, KeyCode::Escape);
             }
             1 => {
-                until(s, |s| char(s, 'o'), |s| view(s).contains("Check out commit with detached HEAD?"));
+                until(
+                    s,
+                    |s| char(s, 'o'),
+                    |s| view(s).contains("Check out commit with detached HEAD?"),
+                );
                 key(s, KeyCode::Enter);
             }
             _ => {
-                until(s, |s| char(s, 'w'), |s| view(s).contains("Create detached worktree at commit"));
+                until(
+                    s,
+                    |s| char(s, 'w'),
+                    |s| view(s).contains("Create detached worktree at commit"),
+                );
                 ctrl(s, KeyCode::Enter);
             }
         }
@@ -679,10 +777,18 @@ fn every_git_lesson_advances_on_real_input_and_quit_restores_the_workspace() {
     at(s, "Remotes and tags · Track");
     keys(s, "3]");
     select(s, '3', "topic");
-    until(s, |s| key(s, KeyCode::Enter), |s| view(s).contains("Create a local branch tracking"));
+    until(
+        s,
+        |s| key(s, KeyCode::Enter),
+        |s| view(s).contains("Create a local branch tracking"),
+    );
     key(s, KeyCode::Enter);
     at(s, "Remotes and tags · Pull");
-    until(s, |s| char(s, 'p'), |s| view(s).contains("Pull origin/practice into practice?"));
+    until(
+        s,
+        |s| char(s, 'p'),
+        |s| view(s).contains("Pull origin/practice into practice?"),
+    );
     key(s, KeyCode::Enter);
     at(s, "Remotes and tags · Push");
     ready(s, "Ready to share");
@@ -741,9 +847,21 @@ fn the_tracks_teach_in_order() {
             .position(|lesson| lesson.starts_with(&format!("{name} · ")))
             .unwrap_or_else(|| panic!("no chapter {name}: {git:?}"))
     };
-    let order = ["Panes", "Staging", "Commit", "Branches", "Rewrite history", "Remotes and tags"];
+    let order = [
+        "Panes",
+        "Staging",
+        "Commit",
+        "Branches",
+        "Rewrite history",
+        "Remotes and tags",
+    ];
     for pair in order.windows(2) {
-        assert!(chapter(pair[0]) < chapter(pair[1]), "{} before {}", pair[0], pair[1]);
+        assert!(
+            chapter(pair[0]) < chapter(pair[1]),
+            "{} before {}",
+            pair[0],
+            pair[1]
+        );
     }
     let forge = GitScreen::tutor_outline(true, false);
     let chapter = |name: &str| {
@@ -752,9 +870,20 @@ fn the_tracks_teach_in_order() {
             .position(|lesson| lesson.starts_with(&format!("{name} · ")))
             .unwrap_or_else(|| panic!("no chapter {name}: {forge:?}"))
     };
-    let order = ["Pull requests", "Pull request", "Issues", "Actions", "Notifications"];
+    let order = [
+        "Pull requests",
+        "Pull request",
+        "Issues",
+        "Actions",
+        "Notifications",
+    ];
     for pair in order.windows(2) {
-        assert!(chapter(pair[0]) < chapter(pair[1]), "{} before {}", pair[0], pair[1]);
+        assert!(
+            chapter(pair[0]) < chapter(pair[1]),
+            "{} before {}",
+            pair[0],
+            pair[1]
+        );
     }
 }
 
@@ -771,7 +900,10 @@ fn tutor_commands_skip_go_back_jump_and_reset_with_fresh_fixtures() {
     let split = number("Changes · Split diff");
     command(s, &format!("tutor git {split}"));
     at(s, "Changes · Split diff");
-    assert!(banner(s).contains(&format!("Git tutor · {split}/{} · Changes · Split diff", lessons())));
+    assert!(banner(s).contains(&format!(
+        "Git tutor · {split}/{} · Changes · Split diff",
+        lessons()
+    )));
     let base = practice_base(s);
     let seventh = s.root().to_owned();
     command(s, "tutor next");
@@ -839,7 +971,11 @@ fn the_vim_lessons_teach_the_modes_and_appear_only_when_vim_is_on() {
     let mut plain = GitScreen::open(dir.path()).unwrap();
     idle(&mut plain);
     command(&mut plain, &format!("tutor git {first}"));
-    assert!(view(&mut plain).contains("tutor git [N]"), "{}", view(&mut plain));
+    assert!(
+        view(&mut plain).contains("tutor git [N]"),
+        "{}",
+        view(&mut plain)
+    );
 
     let mut screen = GitScreen::open(dir.path()).unwrap();
     screen.configure_input(&dust::config::load_bundled_config().config);
@@ -848,7 +984,9 @@ fn the_vim_lessons_teach_the_modes_and_appear_only_when_vim_is_on() {
     command(s, &format!("tutor git {first}"));
     at(s, first);
     assert!(
-        banner(s).contains(&format!("Git tutor · {first}/{total} · Vim mode · Mode chip")),
+        banner(s).contains(&format!(
+            "Git tutor · {first}/{total} · Vim mode · Mode chip"
+        )),
         "{}",
         banner(s)
     );
@@ -859,13 +997,20 @@ fn the_vim_lessons_teach_the_modes_and_appear_only_when_vim_is_on() {
     seek(s, "gamma");
     char(s, 'V');
     assert_eq!(s.input_mode(), Some(dust::git::screen::InputMode::Visual));
-    assert!(banner(s).contains("Vim mode · Mode chip"), "advanced before Esc");
+    assert!(
+        banner(s).contains("Vim mode · Mode chip"),
+        "advanced before Esc"
+    );
     key(s, KeyCode::Escape);
     at(s, first + 1);
 
     // The commit box: INSERT, Esc to NORMAL, i to type again, Ctrl+Enter commits.
     ready(s, "greet.rs");
-    until(s, |s| char(s, 'c'), |s| s.input_mode() == Some(dust::git::screen::InputMode::Insert));
+    until(
+        s,
+        |s| char(s, 'c'),
+        |s| s.input_mode() == Some(dust::git::screen::InputMode::Insert),
+    );
     keys(s, "Learn the modes");
     key(s, KeyCode::Escape);
     assert_eq!(s.input_mode(), Some(dust::git::screen::InputMode::Normal));
@@ -896,14 +1041,23 @@ fn the_lessons_spell_the_keys_of_the_preset_in_force() {
     let s = &mut screen;
     idle(s);
     for (name, expected) in [
-        ("Staging · Stage a file", "press Space to stage the whole file"),
-        ("Branches · Checkout", "select feature, Space, then Enter again"),
+        (
+            "Staging · Stage a file",
+            "press Space to stage the whole file",
+        ),
+        (
+            "Branches · Checkout",
+            "select feature, Space, then Enter again",
+        ),
         ("Merge · Merge", "select topic, M, then Enter merges it"),
         ("Rebase · Rebase", "select main, r, then Enter replays"),
         ("Stash · Pop", "select the stash, g, then Enter"),
         ("Undo · Redo", "C-z shows the undone commit"),
         ("Rewrite history · Move", "C-j moves it below"),
-        ("Rewrite history · Reword an older commit", "'Add greting'; r, fix the typo"),
+        (
+            "Rewrite history · Reword an older commit",
+            "'Add greting'; r, fix the typo",
+        ),
     ] {
         let number = number(name);
         command(s, &format!("tutor git {number}"));
@@ -921,6 +1075,10 @@ fn the_lessons_spell_the_keys_of_the_preset_in_force() {
     let merge = number("Merge · Merge");
     command(&mut plain, &format!("tutor git {merge}"));
     wait(&mut plain, |s| banner(s).contains(&format!("· {merge}/")));
-    assert!(view(&mut plain).contains("select topic, m, then Enter merges it"), "{}", view(&mut plain));
+    assert!(
+        view(&mut plain).contains("select topic, m, then Enter merges it"),
+        "{}",
+        view(&mut plain)
+    );
     command(&mut plain, "tutor quit");
 }

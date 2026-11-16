@@ -680,7 +680,11 @@ fn render_changed_file_picker(
     );
     super::shell::sheet::button_hints(frame, after, row, x + w - 2, "Ctrl+Enter open · Esc cancel");
     if form.selected == 0 {
-        frame.cursor = Some((x + 4, y + 1 + (selected - first) as u16, SetCursorStyle::SteadyBlock));
+        frame.cursor = Some((
+            x + 4,
+            y + 1 + (selected - first) as u16,
+            SetCursorStyle::SteadyBlock,
+        ));
     }
     true
 }
@@ -1043,10 +1047,8 @@ mod tests {
                         for col in 0..width {
                             if !(x..x + w).contains(&col) || !(y..y + h).contains(&row) {
                                 let cell = frame.grid.get(col, row).unwrap();
-                                let margin = col + 1 >= x
-                                    && col <= x + w
-                                    && row + 1 >= y
-                                    && row <= y + h;
+                                let margin =
+                                    col + 1 >= x && col <= x + w && row + 1 >= y && row <= y + h;
                                 if row == 0 || row + 1 == height {
                                     assert_eq!(cell.symbol, ".");
                                     assert_eq!(cell.style, Style::Warning);
@@ -1176,5 +1178,4 @@ mod tests {
             }
         }
     }
-
 }

@@ -1,4 +1,4 @@
-//! What a forge can do and what it calls things (FORGE.md §4). A `Cap::No(reason)` action stays
+//! What a forge can do and what it calls things. A `Cap::No(reason)` action stays
 //! visible but muted; pressing it shows the reason instead of sending a request.
 
 use crate::forge::model::MergeMethod;
@@ -9,7 +9,7 @@ use serde::Serialize;
 pub enum Cap {
     Yes,
     No(&'static str),
-    /// Acts as `Yes` until a 404 flips it to `No` for that host and version (F2).
+    /// Acts as `Yes` until a 404 flips it to `No` for that host and version.
     Probe,
 }
 
@@ -95,7 +95,7 @@ pub struct Capabilities {
 }
 
 impl Capabilities {
-    /// GitHub.com and GHES (§4.2): everything the UI offers today.
+    /// GitHub.com and GHES: everything the UI offers today.
     pub fn github(graphql_batching: bool) -> Self {
         Self {
             pull_requests: Cap::Yes,
@@ -157,7 +157,7 @@ impl Capabilities {
         }
     }
 
-    /// The same forge browsed without a credential (FORGE.md §2.5): reads stay, every write
+    /// The same forge browsed without a credential: reads stay, every write
     /// becomes `Cap::No("Sign in to …")` and no merge method is offered. Reads that need a
     /// sign-in on this provider (notifications; GitHub job logs, viewed files, artifact
     /// downloads, GraphQL) are `No` as well.
@@ -183,8 +183,8 @@ impl Capabilities {
         self.merge_pinned_head = MERGE;
         self.delete_branch_on_merge = MERGE;
         self.auto_merge = MERGE;
-        self.draft_pr = Cap::No("Sign in to open pull requests");
-        self.create_pr_cross_fork = Cap::No("Sign in to open pull requests");
+        self.draft_pr = Cap::No("Sign in to create pull requests");
+        self.create_pr_cross_fork = Cap::No("Sign in to create pull requests");
         self.update_branch = EDIT;
         self.issue_not_planned = match self.issue_not_planned {
             Cap::No(reason) => Cap::No(reason),
@@ -220,7 +220,7 @@ impl Capabilities {
     }
 }
 
-/// What the forge calls things (§4.3); the UI never hard-codes "pull request".
+/// What the forge calls things; the UI never hard-codes "pull request".
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct Terms {
     pub pr_singular: &'static str,

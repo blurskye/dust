@@ -176,7 +176,10 @@ impl GitScreen {
         } else {
             reference
         };
-        for (label, value) in [("Selected branch or tag", reference), ("Effect", effect.into())] {
+        for (label, value) in [
+            ("Selected branch or tag", reference),
+            ("Effect", effect.into()),
+        ] {
             let mut field = Field::new(label, value);
             field.required = false;
             field.read_only = true;

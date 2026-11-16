@@ -46,13 +46,22 @@ fn same<T>(kept: &Option<Arc<T>>, now: &Option<Arc<T>>) -> bool {
 
 /// Memoised rows for a commit's files (`Commit::rows`), and where each path is in them.
 #[derive(Default)]
-pub(super) struct CommitMemo(RefCell<Option<(u64, Rows)>>, std::cell::OnceCell<HashMap<PathBuf, usize>>);
+pub(super) struct CommitMemo(
+    RefCell<Option<(u64, Rows)>>,
+    std::cell::OnceCell<HashMap<PathBuf, usize>>,
+);
 
 impl CommitMemo {
     /// Where `path` is in a commit's `files` (which never change).
     pub(super) fn position(&self, files: &[commit::ChangedFile], path: &Path) -> Option<usize> {
         self.1
-            .get_or_init(|| files.iter().enumerate().map(|(index, file)| (file.path.clone(), index)).collect())
+            .get_or_init(|| {
+                files
+                    .iter()
+                    .enumerate()
+                    .map(|(index, file)| (file.path.clone(), index))
+                    .collect()
+            })
             .get(path)
             .copied()
     }
@@ -115,7 +124,9 @@ impl GitScreen {
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         self.filters[0].input.input.hash(&mut hasher);
         (self.changes_collapsed, self.changes_tree, self.all_files).hash(&mut hasher);
-        self.all_files.then(|| Arc::as_ptr(&self.files) as usize).hash(&mut hasher);
+        self.all_files
+            .then_some(Arc::as_ptr(&self.files) as usize)
+            .hash(&mut hasher);
         self.collapsed.hash(&mut hasher);
         hasher.finish()
     }
@@ -142,7 +153,14 @@ impl GitScreen {
         std::thread::spawn(move || {
             let mut filter = filter::ListFilter::default();
             filter.input.input = query;
-            let rows = changes_rows(&entries, files.as_deref(), tree, folded, &filter, &collapsed);
+            let rows = changes_rows(
+                &entries,
+                files.as_deref(),
+                tree,
+                folded,
+                &filter,
+                &collapsed,
+            );
             (entries, rows)
         })
     }
@@ -190,7 +208,10 @@ pub(super) fn changes_rows(
                 (true, true) => '◐',
                 _ => ' ',
             };
-            (entry.relative_path.clone(), format!("{marker} {:<2}", entry.change_code().trim()))
+            (
+                entry.relative_path.clone(),
+                format!("{marker} {:<2}", entry.change_code().trim()),
+            )
         })
         .collect::<std::collections::BTreeMap<_, _>>();
     if let Some(files) = files {

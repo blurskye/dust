@@ -28,7 +28,10 @@ pub fn parse_unified_patch(text: &str, provenance: impl Into<String>) -> DiffPre
             match parse_hunk_header(rest) {
                 Some(((old_start, old_count), (new_start, new_count))) => {
                     let mut builder = HunkBuilder::new(raw.to_owned(), old_start, new_start);
-                    builder.limits = (old_start.saturating_add(old_count), new_start.saturating_add(new_count));
+                    builder.limits = (
+                        old_start.saturating_add(old_count),
+                        new_start.saturating_add(new_count),
+                    );
                     current = Some(builder);
                 }
                 // A malformed header cannot be numbered, so it ends the run rather than

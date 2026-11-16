@@ -11,12 +11,23 @@ use crate::ui::{GitRole, GitSurface};
 
 impl Workspace {
     /// The row's review fact as spans, or None when it has none ("Not requested" is none).
-    pub(super) fn review_spans(&self, record: &ItemRecord, mode: ExplorerIconMode, surface: GitSurface) -> Option<Vec<Span>> {
+    pub(super) fn review_spans(
+        &self,
+        record: &ItemRecord,
+        mode: ExplorerIconMode,
+        surface: GitSurface,
+    ) -> Option<Vec<Span>> {
         // An opened pull request of this repository (a cross-repository row may share its number).
         let opened = record
             .tally
             .is_none()
-            .then(|| record.repo.is_none().then(|| self.value(&Key::Item(2, record.number))).flatten())
+            .then(|| {
+                record
+                    .repo
+                    .is_none()
+                    .then(|| self.value(&Key::Item(2, record.number)))
+                    .flatten()
+            })
             .flatten()
             .map(|value| records::tally_of(&DetailRecord::from_value(value).reviewers()));
         let (state, words) = record.review_fact(opened)?;
@@ -31,7 +42,11 @@ impl Workspace {
                 None => vec![(format!("{mark} {words}"), st(role, surface))],
             },
             None => {
-                let word = if state == ReviewState::Requested { self.requested_words().0 } else { word };
+                let word = if state == ReviewState::Requested {
+                    self.requested_words().0
+                } else {
+                    word
+                };
                 vec![(format!("{mark} {word}"), st(role, surface))]
             }
         })

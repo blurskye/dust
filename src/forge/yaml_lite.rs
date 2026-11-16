@@ -1,5 +1,5 @@
 //! A strict reader for the small YAML files forge CLIs keep their sign-ins in (glab's
-//! `config.yml`, tea's `config.yml`), FORGE.md §2.1. It understands block mappings, block
+//! `config.yml`, tea's `config.yml`). It understands block mappings, block
 //! sequences, plain and quoted scalars, empty `[]`/`{}` and comments — the shapes those tools
 //! write — and refuses everything else (anchors, aliases, tags, block scalars, flow collections,
 //! tabs, multi-line scalars, duplicate keys). A refusal means "skip this store": the caller falls

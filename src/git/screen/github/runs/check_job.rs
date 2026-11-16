@@ -21,7 +21,11 @@ pub(in crate::git::screen::github) fn bare_job(id: u64, name: &str, state: CiSta
         CiState::ActionRequired => ("waiting", ""),
         CiState::Unknown => ("completed", ""),
     };
-    let started = if matches!(state, CiState::Skipped | CiState::ActionRequired) { "" } else { "started" };
+    let started = if matches!(state, CiState::Skipped | CiState::ActionRequired) {
+        ""
+    } else {
+        "started"
+    };
     serde_json::json!({
         "databaseId": id,
         "name": name,
@@ -35,7 +39,8 @@ pub(in crate::git::screen::github) fn bare_job(id: u64, name: &str, state: CiSta
 pub(in crate::git::screen::github) fn job_time(job: &Value) -> Option<(String, GitRole)> {
     match State::of(job) {
         State::Running => Some((
-            elapsed(string(job, "startedAt")).map_or_else(|| "running".into(), |time| format!("running {time}")),
+            elapsed(string(job, "startedAt"))
+                .map_or_else(|| "running".into(), |time| format!("running {time}")),
             GitRole::Modified,
         )),
         State::Queued | State::Waiting => Some(("queued".into(), GitRole::Muted)),
@@ -69,27 +74,37 @@ impl Workspace {
     /// whose job reads `✕ Run pytest` is failing whatever the check's summary says.
     pub(in crate::git::screen::github) fn job_failed(&self, job: &Value) -> bool {
         let state = State::of(job);
-        state == State::Failed || state.finished() && self.steps(job).iter().any(|step| step.state == State::Failed)
+        state == State::Failed
+            || state.finished()
+                && self
+                    .steps(job)
+                    .iter()
+                    .any(|step| step.state == State::Failed)
     }
 
     /// Whether a job's pane needs its log: a step there shows it, or the job lists no steps
     /// of its own (they come from the log). The run tree's own reading (`wanted_logs`).
     /// `open(step, default)` is whether a step shows its log; `default` is the tree's
     /// (a failing step of a finished job, the running step).
-    pub(in crate::git::screen::github) fn job_wants_log(&self, job: &Value, open: &dyn Fn(u64, bool) -> bool) -> bool {
+    pub(in crate::git::screen::github) fn job_wants_log(
+        &self,
+        job: &Value,
+        open: &dyn Fn(u64, bool) -> bool,
+    ) -> bool {
         if !self.capabilities().job_log.allowed() {
             return false;
         }
         let state = State::of(job);
         let done = state.finished() && string(job, "status") == "completed";
-        if !done && state != State::Running || state == State::Skipped && array(job, "steps").is_empty() {
+        if !done && state != State::Running
+            || state == State::Skipped && array(job, "steps").is_empty()
+        {
             return false;
         }
         array(job, "steps").is_empty()
-            || self
-                .steps(job)
-                .iter()
-                .any(|step| step.state != State::Skipped && open(step.number, step_opens(state, step.state)))
+            || self.steps(job).iter().any(|step| {
+                step.state != State::Skipped && open(step.number, step_opens(state, step.state))
+            })
     }
 
     /// A job's steps, each open one with its slice of the log under it, in `room` cells; a
@@ -115,7 +130,17 @@ impl Workspace {
             let fold = if skipped {
                 "  ".to_owned()
             } else {
-                format!("{} ", glyph(if shown { Glyph::FoldOpen } else { Glyph::FoldClosed }, mode))
+                format!(
+                    "{} ",
+                    glyph(
+                        if shown {
+                            Glyph::FoldOpen
+                        } else {
+                            Glyph::FoldClosed
+                        },
+                        mode
+                    )
+                )
             };
             let name = match step.state {
                 State::Failed => prose::strong(GitRole::Text),
@@ -126,14 +151,23 @@ impl Workspace {
                 State::Skipped => vec![("–".to_owned(), prose::role(GitRole::Muted))],
                 State::Running => {
                     let time = step.started.as_deref().and_then(elapsed);
-                    vec![(time.map_or_else(|| "running".into(), |time| format!("running {time}")), prose::role(GitRole::Modified))]
+                    vec![(
+                        time.map_or_else(|| "running".into(), |time| format!("running {time}")),
+                        prose::role(GitRole::Modified),
+                    )]
                 }
-                _ => step.seconds.map(|time| vec![(duration(time), prose::role(GitRole::Muted))]).unwrap_or_default(),
+                _ => step
+                    .seconds
+                    .map(|time| vec![(duration(time), prose::role(GitRole::Muted))])
+                    .unwrap_or_default(),
             };
             let line = spread(
                 vec![
                     (fold, prose::role(GitRole::Muted)),
-                    (format!("{} ", step.state.glyph(mode)), prose::role(step.state.role())),
+                    (
+                        format!("{} ", step.state.glyph(mode)),
+                        prose::role(step.state.role()),
+                    ),
                     (step.name.clone(), name),
                 ],
                 right,
@@ -149,18 +183,41 @@ impl Workspace {
 
     /// A job's log (or one step's slice of it) as numbered rows wrapped to `room` cells, as
     /// the run tree draws it; what stands in for a log (loading, skipped, an error) is a row.
-    fn log_rows(&self, rows: &mut Vec<(Option<u64>, Line)>, job: &Value, step: Option<&StepRow>, depth: usize, room: usize) {
+    #[allow(clippy::single_range_in_vec_init)] // a row that does not wrap is one range
+    fn log_rows(
+        &self,
+        rows: &mut Vec<(Option<u64>, Line)>,
+        job: &Value,
+        step: Option<&StepRow>,
+        depth: usize,
+        room: usize,
+    ) {
         let indent = " ".repeat(depth);
         // A log that would not load is a calm note in the log's place; the steps above stay.
         if State::of(job) != State::Running
-            && matches!(self.cache.get(&Key::Log(number(job, "databaseId"))), Some(Err(_)))
+            && matches!(
+                self.cache.get(&Key::Log(number(job, "databaseId"))),
+                Some(Err(_))
+            )
         {
-            rows.push((None, Rich::new().plain(&indent).push("Log unavailable · R retry", prose::role(GitRole::Muted)).line()));
+            rows.push((
+                None,
+                Rich::new()
+                    .plain(&indent)
+                    .push("Log unavailable · R retry", prose::role(GitRole::Muted))
+                    .line(),
+            ));
             return;
         }
         let (lines, skip) = match self.log_body(job, step, step.is_none()) {
             Body::Message(text, tone) => {
-                rows.push((None, Rich::new().plain(&indent).push(text, prose::role(tone)).line()));
+                rows.push((
+                    None,
+                    Rich::new()
+                        .plain(&indent)
+                        .push(text, prose::role(tone))
+                        .line(),
+                ));
                 return;
             }
             Body::Lines { lines, skip } => (lines, skip),
@@ -186,10 +243,18 @@ impl Workspace {
                     }
                     weight |= sgr.bold;
                 }
-                if line.link.as_ref().is_some_and(|(range, _, _)| range.contains(&at)) {
+                if line
+                    .link
+                    .as_ref()
+                    .is_some_and(|(range, _, _)| range.contains(&at))
+                {
                     tone = GitRole::Link;
                 }
-                if weight { prose::strong(tone) } else { prose::role(tone) }
+                if weight {
+                    prose::strong(tone)
+                } else {
+                    prose::role(tone)
+                }
             };
             let parts = if ruler(&line.text) {
                 // A ruler is cut at the edge: nothing is lost.
@@ -218,7 +283,9 @@ impl Workspace {
                 for (at, grapheme) in line.text[range.clone()].grapheme_indices(true) {
                     let style = base(range.start + at);
                     let span = offset + at..offset + at + grapheme.len();
-                    let joins = paint.last().is_some_and(|(last, same)| *same == style && last.end == span.start);
+                    let joins = paint
+                        .last()
+                        .is_some_and(|(last, same)| *same == style && last.end == span.start);
                     if !joins {
                         paint.push((span, style));
                     } else if let Some((last, _)) = paint.last_mut() {
@@ -228,7 +295,10 @@ impl Workspace {
                 let mut row = Line::text(text, Style::Default);
                 row.paint = paint;
                 row.pan = false;
-                row.source = Some(find::Source { text: logical.clone(), offset: if elided { 0 } else { range.start } });
+                row.source = Some(find::Source {
+                    text: logical.clone(),
+                    offset: if elided { 0 } else { range.start },
+                });
                 // A dim rail of numbers, blank beside a wrapped line's continuation.
                 row.gutter = if part == 0 {
                     format!("{indent}{:>digits$} ", index + 1)

@@ -1,10 +1,10 @@
-"""GitHub Actions for the fake forge (`server.py --world actions`, FORGE.md §8.2, F6).
+"""GitHub Actions for the fake forge (`server.py --world actions`).
 
 One repository, `octo/orbit`, with workflows, runs (one on its second attempt, one fork run
 waiting for approval, one in progress), jobs with and without `steps[]`, timestamped logs with
 `##[group]` markers, artifacts, notifications and a few pull requests whose check rollups hold
 duplicate `(workflow, name)` contexts. Shapes follow GitHub's REST v3 and the GraphQL documents
-the GitHub provider sends; the aliased `*Batch` documents (§7.5) are answered alias by alias.
+the GitHub provider sends; the aliased `*Batch` documents are answered alias by alias.
 Logs and artifact archives are `302`s to `/_blob/` on another origin (`localhost` for
 `127.0.0.1`), like GitHub's blob storage. Writes change the world, so a test can read its own
 write back. `state["actions"]` holds the world once seeded; a test may seed it itself.
@@ -118,7 +118,7 @@ def run(run_id, number, workflow, title, branch, sha, event, status, conclusion,
 WORKFLOWS = [
     {"id": 31, "name": "CI", "path": ".github/workflows/ci.yml", "state": "active", "dispatch": True},
     {"id": 32, "name": "Release", "path": ".github/workflows/release.yml", "state": "active", "dispatch": False},
-    # Turned off on the forge: listed muted, `(off)`, and `d` refuses it (§3.37).
+    # Turned off on the forge: listed muted, `(off)`, and `d` refuses it.
     {"id": 33, "name": "Nightly", "path": ".github/workflows/nightly.yml", "state": "disabled_manually",
      "dispatch": True},
 ]
@@ -493,7 +493,7 @@ def graphql(world, request):
 
 # --------------------------------------------------------------------------- the designed world
 #
-# `state["actions_seed"] = "design"` swaps the runs for the world DESIGN.md §3.37 draws: two
+# `state["actions_seed"] = "design"` swaps the runs for the designed world: two
 # workflows (Quality checks, Preview deployment), ten runs over four days relative to now (one
 # failing, one running, three by maya), jobs with steps and logs whose lines fall inside their
 # steps' times, and two artifacts. The same world renders for GitHub (here), GitLab
@@ -503,7 +503,7 @@ DESIGN_FLOWS = [
     {"id": 41, "name": "Quality checks", "path": ".github/workflows/quality.yml", "state": "active", "dispatch": True},
     {"id": 42, "name": "Preview deployment", "path": ".github/workflows/preview.yml", "state": "active",
      "dispatch": True},
-    # §3.37's Workflows panel: one that has never run, one turned off.
+    # The Workflows panel: one that has never run, one turned off.
     {"id": 43, "name": "Publish package", "path": ".github/workflows/publish.yml", "state": "active",
      "dispatch": True},
     {"id": 44, "name": "Nightly build", "path": ".github/workflows/nightly.yml", "state": "disabled_manually",
@@ -686,7 +686,7 @@ def preview_jobs(run, t0, outcome):
 
 
 def seed_design():
-    """The ten runs of DESIGN.md §3.37 (newest first)."""
+    """The ten designed runs (newest first)."""
     now = time.time()
     quality, preview = DESIGN_FLOWS[:2]
     rows = [

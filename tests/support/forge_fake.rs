@@ -1,4 +1,4 @@
-//! The fake forge for integration tests (FORGE.md §8.2, F1): `tests/fixtures/forge/server.py`
+//! The fake forge for integration tests: `tests/fixtures/forge/server.py`
 //! serves REST v3 + GraphQL on loopback, and `tests/fixtures/forge/fake_gh.py` installed as `gh`
 //! forwards `gh api` passthrough to it. Include with
 //! `#[path = "support/forge_fake.rs"] mod forge_fake;`.

@@ -1,4 +1,4 @@
-//! F-PRFILES (DESIGN.md §3.28, §3.29): GitHub's "Files changed". The changed-file tree, each
+//! F-PRFILES: GitHub's "Files changed". The changed-file tree, each
 //! file with its Viewed box and the review threads on it, sits beside the selected file's
 //! unified diff, threads under the lines they discuss. Long lines wrap by default (`w` pans
 //! them sideways instead): a continuation row has a blank gutter, sits under the code and
@@ -6,8 +6,8 @@
 //! together, so `j`/`k` (and a `V` range) move by source line at every width, as GitHub's do.
 use super::super::preview::{Preview, PreviewRow};
 use super::super::shell::glyphs::{Glyph, glyph};
-use super::prose::{Rich, muted, role, strong};
 use super::lines::Line;
+use super::prose::{Rich, muted, role, strong};
 use super::*;
 use crate::config::ExplorerIconMode;
 use crate::forge::records::DetailRecord;
@@ -68,7 +68,10 @@ pub(super) fn diff_counted(workspace: &Workspace, id: u64, record: &DetailRecord
         }
     }
     // The totals too, when the diff holds every file the forge counted.
-    let changed = record.row.changed_files.map_or(record.files.len(), |n| n as usize);
+    let changed = record
+        .row
+        .changed_files
+        .map_or(record.files.len(), |n| n as usize);
     if stats.len() >= changed.max(record.files.len()) {
         record.row.additions = Some(stats.values().map(|stat| stat.0).sum());
         record.row.deletions = Some(stats.values().map(|stat| stat.1).sum());
@@ -98,25 +101,46 @@ pub(super) fn rows(
     let wide = outline_beside(workspace, width);
     let selected = workspace.selected_file(id, item).to_owned();
     if wide {
-        outline(workspace, id, record, &selected, rows, super::paint::outline_room(width), mode);
+        outline(
+            workspace,
+            id,
+            record,
+            &selected,
+            rows,
+            super::paint::outline_room(width),
+            mode,
+        );
     }
-    let Some((index, file)) = record.files.iter().enumerate().find(|(_, file)| file.path == selected) else {
+    let Some((index, file)) = record
+        .files
+        .iter()
+        .enumerate()
+        .find(|(_, file)| file.path == selected)
+    else {
         rows.push(muted("No changed files"));
         return;
     };
     // The file heading: pinned above the diff, Enter picks another file.
     let viewed = workspace.file_viewed(id, &selected);
     let mut heading = Rich::new()
-        .push(format!("{} ", glyph(Glyph::File, mode)), role(GitRole::Focus))
+        .push(
+            format!("{} ", glyph(Glyph::File, mode)),
+            role(GitRole::Focus),
+        )
         .push(selected.clone(), strong(GitRole::Text))
         .push("  ", role(GitRole::Text))
         .diffstat(file.additions, file.deletions)
         .sep()
-        .push(format!("file {} of {}", index + 1, record.files.len()), role(GitRole::Muted));
-    // Pending comments on this file (§3.28, §3.30a): counted only when there are some.
+        .push(
+            format!("file {} of {}", index + 1, record.files.len()),
+            role(GitRole::Muted),
+        );
+    // Pending comments on this file: counted only when there are some.
     let waiting = super::drafts::file_count(workspace, id, &selected);
     if waiting > 0 {
-        heading = heading.sep().push(format!("{waiting} pending"), role(GitRole::Modified));
+        heading = heading
+            .sep()
+            .push(format!("{waiting} pending"), role(GitRole::Modified));
     }
     let mut heading = heading.line();
     heading.action = Some(Action::Files(id));
@@ -127,14 +151,20 @@ pub(super) fn rows(
             // GitHub's Viewed checkbox, the same box the file tree shows.
             let mut row = if viewed {
                 Rich::new()
-                    .push(format!("{} ", glyph(Glyph::Checked, mode)), role(GitRole::Added))
+                    .push(
+                        format!("{} ", glyph(Glyph::Checked, mode)),
+                        role(GitRole::Added),
+                    )
                     .push("Viewed", role(GitRole::Added))
                     .sep()
                     .push("v unmark", role(GitRole::Muted))
                     .line()
             } else {
                 Rich::new()
-                    .push(format!("{} ", glyph(Glyph::Unchecked, mode)), role(GitRole::Muted))
+                    .push(
+                        format!("{} ", glyph(Glyph::Unchecked, mode)),
+                        role(GitRole::Muted),
+                    )
                     .push("Mark viewed", role(GitRole::Link))
                     .sep()
                     .push("v", role(GitRole::Muted))
@@ -156,7 +186,11 @@ pub(super) fn rows(
     let diff_start = rows.len();
     let wrap = (!workspace.diff_nowrap).then(|| diff_width(workspace, width));
     let search = &workspace.detail_find.search;
-    let finding = if search.active() { search.query.as_str() } else { "" };
+    let finding = if search.active() {
+        search.query.as_str()
+    } else {
+        ""
+    };
     unified(&preview, path, id, &head, rows, wrap, finding);
     let conversation = if wide {
         width.saturating_sub(((width + 5) / 3).clamp(24, 42))
@@ -164,10 +198,24 @@ pub(super) fn rows(
         width
     };
     let mut threads = Vec::new();
-    lines::threads(workspace, id, &mut threads, conversation.saturating_sub(6), Some(&selected));
+    lines::threads(
+        workspace,
+        id,
+        &mut threads,
+        conversation.saturating_sub(6),
+        Some(&selected),
+    );
     place_threads(workspace, id, Some(&selected), rows, diff_start, threads);
     super::drafts::mark_range(workspace, id, &selected, rows, diff_start);
-    super::drafts::place(workspace, id, &selected, rows, diff_start, conversation, mode);
+    super::drafts::place(
+        workspace,
+        id,
+        &selected,
+        rows,
+        diff_start,
+        conversation,
+        mode,
+    );
     rows.push(super::prose::blank());
     rows.push(super::drafts::review_row(workspace, id));
 }
@@ -177,9 +225,18 @@ fn thread_count(workspace: &Workspace, id: u64, path: &str) -> (usize, bool) {
     let threads = workspace
         .review_threads(id)
         .into_iter()
-        .filter(|thread| array(&thread["comments"], "nodes").iter().any(|comment| string(comment, "path") == path))
+        .filter(|thread| {
+            array(&thread["comments"], "nodes")
+                .iter()
+                .any(|comment| string(comment, "path") == path)
+        })
         .collect::<Vec<_>>();
-    (threads.len(), threads.iter().any(|thread| thread["isResolved"].as_bool() != Some(true)))
+    (
+        threads.len(),
+        threads
+            .iter()
+            .any(|thread| thread["isResolved"].as_bool() != Some(true)),
+    )
 }
 
 /// The tree of changed files: folders collapse; files carry their Viewed box, their review
@@ -201,10 +258,14 @@ fn outline(
         .map(|(_, path)| PathBuf::from(path))
         .collect();
     let tree = super::super::tree::rows(
-        record.files.iter().map(|file| (PathBuf::from(&file.path), String::new())).collect(),
+        record
+            .files
+            .iter()
+            .map(|file| (PathBuf::from(&file.path), String::new()))
+            .collect(),
         &collapsed,
     );
-    // No `Files  2` heading: the tab above counts them (r12 prs-10).
+    // No `Files  2` heading: the tab above counts them.
     for entry in tree {
         let path = entry.value.to_string_lossy().into_owned();
         let file = record.files.iter().find(|file| file.path == path);
@@ -213,26 +274,47 @@ fn outline(
         let (indent, label) = entry.label.split_at(entry.indent.min(entry.label.len()));
         let indent = " ".repeat(indent.len() / 2);
         if entry.directory {
-            let label = super::super::shell::chrome::ellipsize(label, room.saturating_sub(indent.len()));
+            let label =
+                super::super::shell::chrome::ellipsize(label, room.saturating_sub(indent.len()));
             row = row.plain(&indent).push(label, role(GitRole::Muted));
         } else {
             // `☐ queue.py ❝ 2  +13 −2`: the Viewed box first, where the eye runs down the
             // tree (none while the forge has not said, or cannot), then the review threads
             // on the file (the open ones in their colour).
-            let name_role = if path == selected { GitRole::Focus } else { GitRole::Text };
+            let name_role = if path == selected {
+                GitRole::Focus
+            } else {
+                GitRole::Text
+            };
             row = row.plain(&indent);
             match workspace.file_viewed(id, &path) {
-                Some(true) => row = row.push(format!("{} ", glyph(Glyph::Checked, mode)), role(GitRole::Added)),
-                Some(false) => row = row.push(format!("{} ", glyph(Glyph::Unchecked, mode)), role(GitRole::Muted)),
+                Some(true) => {
+                    row = row.push(
+                        format!("{} ", glyph(Glyph::Checked, mode)),
+                        role(GitRole::Added),
+                    )
+                }
+                Some(false) => {
+                    row = row.push(
+                        format!("{} ", glyph(Glyph::Unchecked, mode)),
+                        role(GitRole::Muted),
+                    )
+                }
                 None => {}
             }
             let (threads, open) = thread_count(workspace, id, &path);
-            let mut threads = (threads > 0).then(|| (format!(" {} {threads}", glyph(Glyph::Comment, mode)), open));
-            let mut stat = file.map(|file| Rich::new().plain("  ").diffstat(file.additions, file.deletions));
+            let mut threads = (threads > 0)
+                .then(|| (format!(" {} {threads}", glyph(Glyph::Comment, mode)), open));
+            let mut stat = file.map(|file| {
+                Rich::new()
+                    .plain("  ")
+                    .diffstat(file.additions, file.deletions)
+            });
             // What does not fit goes whole, never as `+…`: the thread count first, then ±,
             // and only then is the name cut (it keeps at least a few cells).
             let extra = |threads: &Option<(String, bool)>, stat: &Option<Rich>| {
-                threads.as_ref().map_or(0, |(text, _)| text.width()) + stat.as_ref().map_or(0, Rich::width)
+                threads.as_ref().map_or(0, |(text, _)| text.width())
+                    + stat.as_ref().map_or(0, Rich::width)
             };
             let room_left = room.saturating_sub(row.width());
             if label.width() + extra(&threads, &stat) > room_left {
@@ -243,9 +325,20 @@ fn outline(
             }
             let name_room = room_left.saturating_sub(extra(&threads, &stat));
             let name = super::super::shell::chrome::ellipsize(label, name_room.max(4));
-            row = row.push(name, if path == selected { strong(name_role) } else { role(name_role) });
+            row = row.push(
+                name,
+                if path == selected {
+                    strong(name_role)
+                } else {
+                    role(name_role)
+                },
+            );
             if let Some((text, open)) = threads {
-                let tone = if open { GitRole::Modified } else { GitRole::Muted };
+                let tone = if open {
+                    GitRole::Modified
+                } else {
+                    GitRole::Muted
+                };
                 row = row.push(text, role(tone));
             }
             if let (Some(_), Some(file)) = (stat, file) {
@@ -269,7 +362,11 @@ fn inline(id: u64, path: &Path, source: &PreviewRow, head: &str) -> Option<Actio
         number: id,
         path: path.to_string_lossy().into_owned(),
         line,
-        side: if source.new.is_some() { "RIGHT" } else { "LEFT" },
+        side: if source.new.is_some() {
+            "RIGHT"
+        } else {
+            "LEFT"
+        },
         head: head.to_owned(),
     })
 }
@@ -280,7 +377,7 @@ fn hunk_row(text: &str) -> Line {
         Some((at, _)) => (&text[..at + 2], text[at + 2..].trim()),
         None => (text, ""),
     };
-    let mut row = Rich::new().push(range.to_owned(), role(GitRole::Muted));
+    let mut row = Rich::new().push(range, role(GitRole::Muted));
     if !scope.is_empty() {
         row = row.push(format!("  {scope}"), role(GitRole::Focus));
     }
@@ -295,7 +392,15 @@ fn hunk_row(text: &str) -> Line {
 /// diff band, its syntax spans and its inline-comment action, and find reads the parts as
 /// one line. Without it a row is the whole line and pans sideways.
 /// `finding`: the open find's query, whose matches a wrapped line never splits.
-fn unified(preview: &Preview, path: &Path, id: u64, head: &str, rows: &mut Vec<Line>, wrap: Option<usize>, finding: &str) {
+fn unified(
+    preview: &Preview,
+    path: &Path,
+    id: u64,
+    head: &str,
+    rows: &mut Vec<Line>,
+    wrap: Option<usize>,
+    finding: &str,
+) {
     let number_width = preview.number_width();
     for source in preview
         .rows
@@ -332,13 +437,26 @@ fn unified(preview: &Preview, path: &Path, id: u64, head: &str, rows: &mut Vec<L
                 // While a find is open a match reads whole on one row, as in a run's log:
                 // a break inside one moves to the match's start.
                 let keep = super::runs::matches(&source.text, finding);
-                if keep.iter().any(|kept| parts.iter().any(|part| kept.start < part.start && part.start < kept.end)) {
+                if keep.iter().any(|kept| {
+                    parts
+                        .iter()
+                        .any(|part| kept.start < part.start && part.start < kept.end)
+                }) {
                     parts = super::runs::wrap_points_keeping(&source.text, room - hang, &keep);
                 }
                 parts
                     .into_iter()
                     .enumerate()
-                    .map(|(part, range)| (range, if part == 0 { gutter.clone() } else { " ".repeat(gutter.width() + hang) }))
+                    .map(|(part, range)| {
+                        (
+                            range,
+                            if part == 0 {
+                                gutter.clone()
+                            } else {
+                                " ".repeat(gutter.width() + hang)
+                            },
+                        )
+                    })
                     .collect::<Vec<_>>()
             }
             _ => vec![(0..source.text.len(), gutter)],
@@ -347,14 +465,23 @@ fn unified(preview: &Preview, path: &Path, id: u64, head: &str, rows: &mut Vec<L
         for (range, gutter) in parts {
             let mut row = Line::text(&source.text[range.clone()], source.style);
             if source.old.is_some() || source.new.is_some() {
-                row.source = Some(find::Source { text: logical.clone(), offset: range.start });
+                row.source = Some(find::Source {
+                    text: logical.clone(),
+                    offset: range.start,
+                });
             }
             row.diff = diff;
             row.spans = source
                 .spans
                 .iter()
                 .filter(|(span, _)| span.start < range.end && span.end > range.start)
-                .map(|(span, highlight)| (span.start.max(range.start) - range.start..span.end.min(range.end) - range.start, *highlight))
+                .map(|(span, highlight)| {
+                    (
+                        span.start.max(range.start) - range.start
+                            ..span.end.min(range.end) - range.start,
+                        *highlight,
+                    )
+                })
                 .collect();
             row.gutter = gutter;
             row.action = action.clone();
@@ -396,13 +523,20 @@ pub(super) fn line_end(rows: &[Line], mut index: usize) -> usize {
 /// A grapheme's cells at `column` of its row: a tab runs to the next stop of four, as
 /// `paint` draws it.
 fn cells(grapheme: &str, column: usize) -> usize {
-    if grapheme == "\t" { 4 - column % 4 } else { grapheme.width() }
+    if grapheme == "\t" {
+        4 - column % 4
+    } else {
+        grapheme.width()
+    }
 }
 
 /// The cells of a line's leading whitespace: its continuation rows hang under its code.
 fn indentation(text: &str) -> usize {
     let mut column = 0;
-    for grapheme in text.graphemes(true).take_while(|g| g.chars().all(char::is_whitespace)) {
+    for grapheme in text
+        .graphemes(true)
+        .take_while(|g| g.chars().all(char::is_whitespace))
+    {
         column += cells(grapheme, column);
     }
     column
@@ -454,7 +588,14 @@ fn breaks(text: &str, first: usize, rest: usize) -> Vec<std::ops::Range<usize>> 
 
 /// Review threads sit under the line they discuss, as cards with a rail coloured by state
 /// (GitHub's inline conversations). Threads whose line is not in the diff follow it.
-fn place_threads(workspace: &Workspace, id: u64, selected: Option<&str>, rows: &mut Vec<Line>, diff_start: usize, threads: Vec<Line>) {
+fn place_threads(
+    workspace: &Workspace,
+    id: u64,
+    selected: Option<&str>,
+    rows: &mut Vec<Line>,
+    diff_start: usize,
+    threads: Vec<Line>,
+) {
     let anchors = workspace
         .review_threads(id)
         .into_iter()
@@ -467,8 +608,15 @@ fn place_threads(workspace: &Workspace, id: u64, selected: Option<&str>, rows: &
         })
         .map(|thread| {
             let first = array(&thread["comments"], "nodes").first();
-            let line = first.and_then(|first| first["line"].as_u64().or_else(|| first["originalLine"].as_u64()));
-            (line.map(|line| line as u32), thread["isResolved"].as_bool() == Some(true))
+            let line = first.and_then(|first| {
+                first["line"]
+                    .as_u64()
+                    .or_else(|| first["originalLine"].as_u64())
+            });
+            (
+                line.map(|line| line as u32),
+                thread["isResolved"].as_bool() == Some(true),
+            )
         })
         .collect::<Vec<_>>();
     // Split the rendered threads into one card per thread; a loading or error row stays loose.
@@ -490,11 +638,18 @@ fn place_threads(workspace: &Workspace, id: u64, selected: Option<&str>, rows: &
         // The blank after a thread stays a plain separator (it keeps the thread's identity
         // for j/k); only the card itself is banded.
         let mut tail = Vec::new();
-        while card.last().is_some_and(|row| row.text.is_empty() && row.action.is_none() && row.reply.is_none()) {
+        while card
+            .last()
+            .is_some_and(|row| row.text.is_empty() && row.action.is_none() && row.reply.is_none())
+        {
             tail.extend(card.pop());
         }
         let rail = Style::Git {
-            role: if resolved { GitRole::Muted } else { GitRole::Modified },
+            role: if resolved {
+                GitRole::Muted
+            } else {
+                GitRole::Modified
+            },
             surface: GitSurface::Code,
             emphasis: crate::ui::Emphasis::None,
         };
@@ -512,8 +667,12 @@ fn place_threads(workspace: &Workspace, id: u64, selected: Option<&str>, rows: &
                 .map(|at| diff_start + at + 1)
         });
         for row in &mut card {
-            // A suggested change keeps its own − and + bands (§3.30a).
-            row.band = Some(row.band.filter(|band| matches!(band, GitSurface::AddedBand | GitSurface::RemovedBand)).unwrap_or(GitSurface::Code));
+            // A suggested change keeps its own − and + bands.
+            row.band = Some(
+                row.band
+                    .filter(|band| matches!(band, GitSurface::AddedBand | GitSurface::RemovedBand))
+                    .unwrap_or(GitSurface::Code),
+            );
             row.gutter = "  ▍ ".into();
             row.gutter_style = rail;
             row.pan = false;
@@ -547,21 +706,57 @@ fn place_threads(workspace: &Workspace, id: u64, selected: Option<&str>, rows: &
 
 /// `◔ Unresolved · alex · line 14`: the state in its colour, the author bold.
 fn style_header(header: &mut Line, resolved: bool) {
-    let mut parts = header.text.match_indices(" · ").map(|(at, _)| at).collect::<Vec<_>>();
+    let mut parts = header
+        .text
+        .match_indices(" · ")
+        .map(|(at, _)| at)
+        .collect::<Vec<_>>();
     parts.push(header.text.len());
     let state_end = parts[0];
-    let tone = if resolved { GitRole::Added } else { GitRole::Modified };
-    header.paint.push((0..state_end, Style::Git { role: tone, surface: GitSurface::Code, emphasis: crate::ui::Emphasis::None }));
+    let tone = if resolved {
+        GitRole::Added
+    } else {
+        GitRole::Modified
+    };
+    header.paint.push((
+        0..state_end,
+        Style::Git {
+            role: tone,
+            surface: GitSurface::Code,
+            emphasis: crate::ui::Emphasis::None,
+        },
+    ));
     if parts.len() > 1 {
         let author = state_end + 3..parts[1];
-        header.paint.push((author, Style::Git { role: GitRole::Author, surface: GitSurface::Code, emphasis: crate::ui::Emphasis::Bold }));
+        header.paint.push((
+            author,
+            Style::Git {
+                role: GitRole::Author,
+                surface: GitSurface::Code,
+                emphasis: crate::ui::Emphasis::Bold,
+            },
+        ));
     }
     if parts.len() > 2 && !header.text[parts[1] + 3..parts[2]].starts_with("line ") {
         // Activity names the file: `orbit/queue.py:14` reads as a link.
         let file = parts[1] + 3..parts[2];
-        header.paint.push((file, Style::Git { role: GitRole::Link, surface: GitSurface::Code, emphasis: crate::ui::Emphasis::None }));
+        header.paint.push((
+            file,
+            Style::Git {
+                role: GitRole::Link,
+                surface: GitSurface::Code,
+                emphasis: crate::ui::Emphasis::None,
+            },
+        ));
     }
-    header.paint.push((0..header.text.len(), Style::Git { role: GitRole::Muted, surface: GitSurface::Code, emphasis: crate::ui::Emphasis::None }));
+    header.paint.push((
+        0..header.text.len(),
+        Style::Git {
+            role: GitRole::Muted,
+            surface: GitSurface::Code,
+            emphasis: crate::ui::Emphasis::None,
+        },
+    ));
     // `paint` is searched from the end; keep the specific ranges last.
     header.paint.rotate_right(1);
 }
@@ -581,7 +776,11 @@ mod tests {
         assert_eq!(joined(text, &parts), text);
         assert_eq!(&text[parts[0].clone()], "let total = ");
         for part in &parts[1..] {
-            assert!(text[part.clone()].width() <= 12, "{:?}", &text[part.clone()]);
+            assert!(
+                text[part.clone()].width() <= 12,
+                "{:?}",
+                &text[part.clone()]
+            );
         }
         // CJK breaks between characters; a word after them moves whole.
         let wide = format!("{}needle end", "界".repeat(7));
@@ -606,9 +805,15 @@ mod tests {
         unified(&preview, path, 9, "abc", &mut wrapped, Some(40), "");
         let mut panned = Vec::new();
         unified(&preview, path, 9, "abc", &mut panned, None, "");
-        assert_eq!(panned.iter().filter(|row| row.diff == Some(true)).count(), 1);
+        assert_eq!(
+            panned.iter().filter(|row| row.diff == Some(true)).count(),
+            1
+        );
         assert!(wrapped.len() > panned.len());
-        let line = wrapped.iter().filter(|row| row.diff == Some(true)).collect::<Vec<_>>();
+        let line = wrapped
+            .iter()
+            .filter(|row| row.diff == Some(true))
+            .collect::<Vec<_>>();
         assert!(line.len() > 1);
         let gutter = line[0].gutter.clone();
         assert!(gutter.contains('2') && gutter.contains('+'), "{gutter:?}");
@@ -616,7 +821,14 @@ mod tests {
         for (part, row) in line.iter().enumerate() {
             // One source line: the same comment target, band and logical find source.
             assert_eq!(row.action, line[0].action);
-            assert!(matches!(&row.action, Some(Action::Inline { line: 2, side: "RIGHT", .. })));
+            assert!(matches!(
+                &row.action,
+                Some(Action::Inline {
+                    line: 2,
+                    side: "RIGHT",
+                    ..
+                })
+            ));
             assert!(!row.pan);
             let source = row.source.as_ref().unwrap();
             assert_eq!(&*source.text, long.as_str());
@@ -626,18 +838,36 @@ mod tests {
                 // No line number: a blank gutter, hung under the line's own indentation.
                 assert_eq!(row.gutter, " ".repeat(gutter.width() + 4));
             }
-            assert!(row.gutter.width() + row.text.width() <= 40, "{:?}", row.text);
+            assert!(
+                row.gutter.width() + row.text.width() <= 40,
+                "{:?}",
+                row.text
+            );
             for (span, _) in &row.spans {
                 assert!(span.end <= row.text.len());
             }
         }
         assert_eq!(text, long);
-        assert!(panned.iter().filter(|row| row.diff == Some(true)).all(|row| row.pan && row.text == long));
+        assert!(
+            panned
+                .iter()
+                .filter(|row| row.diff == Some(true))
+                .all(|row| row.pan && row.text == long)
+        );
         // The wrapped line is one cursor stop: its first row starts it, the rest continue it.
-        let first = wrapped.iter().position(|row| row.diff == Some(true)).unwrap();
+        let first = wrapped
+            .iter()
+            .position(|row| row.diff == Some(true))
+            .unwrap();
         let last = first + line.len() - 1;
-        assert!(!continues(&wrapped, first) && (first + 1..=last).all(|index| continues(&wrapped, index)));
-        assert_eq!((line_start(&wrapped, last), line_end(&wrapped, first)), (first, last));
+        assert!(
+            !continues(&wrapped, first)
+                && (first + 1..=last).all(|index| continues(&wrapped, index))
+        );
+        assert_eq!(
+            (line_start(&wrapped, last), line_end(&wrapped, first)),
+            (first, last)
+        );
         // The lines around it are stops of their own.
         assert_eq!(line_end(&wrapped, first - 1), first - 1);
         assert!(!continues(&wrapped, first - 1) && !continues(&wrapped, last + 1));
