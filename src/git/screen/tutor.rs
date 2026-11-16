@@ -956,7 +956,7 @@ struct Fixture {
 impl Fixture {
     fn new(dir: &Path) -> Result<Self, String> {
         std::fs::create_dir_all(dir).map_err(text)?;
-        let dir = dir.canonicalize().map_err(text)?;
+        let dir = crate::files::canonicalize(dir).map_err(text)?;
         let fixture = Self {
             root: dir.join("practice"),
             remote: dir.join("remote.git"),
@@ -1857,11 +1857,9 @@ impl Session {
         })
     }
     pub fn check_destination(&self, path: &Path) -> Result<(), String> {
-        let parent = path
-            .parent()
-            .ok_or("Choose a practice worktree path")?
-            .canonicalize()
-            .map_err(|error| error.to_string())?;
+        let parent =
+            crate::files::canonicalize(path.parent().ok_or("Choose a practice worktree path")?)
+                .map_err(|error| error.to_string())?;
         if parent.starts_with(&self.base) && path.file_name().is_some() {
             Ok(())
         } else {
@@ -1952,7 +1950,7 @@ impl GitScreen {
             .prefix("dusty-git-tutor-")
             .tempdir()
             .map_err(text)?;
-        let base = directory.path().canonicalize().map_err(text)?;
+        let base = crate::files::canonicalize(directory.path()).map_err(text)?;
         // From here on a forge lesson may have entered the sandbox; the guard leaves it
         // whether or not the first lesson builds.
         let guard = forge::Sandbox(track == Track::Forge);
@@ -2043,10 +2041,10 @@ impl GitScreen {
         }
     }
     /// Checks the current lesson against the real state; moves on when it is done.
+    /// What the learner did is recorded on every input, busy or not: a key pressed while a
+    /// read is in flight still counts. The lesson only ends once the screen is idle.
     pub(super) fn advance_tutor(&mut self) -> bool {
-        if self.busy() {
-            return false;
-        }
+        let busy = self.busy();
         let Some(mut session) = self.tutor.take() else {
             return false;
         };
@@ -2065,7 +2063,7 @@ impl GitScreen {
                 forge: session.fixture.server.as_ref(),
             }),
             _ => false,
-        };
+        } && !busy;
         let next = session.lesson + 1;
         self.tutor = Some(session);
         if let Some((_, lesson)) = lesson.filter(|_| done) {
@@ -2087,8 +2085,7 @@ impl GitScreen {
     }
     pub(super) fn tutor_worktree(&mut self, path: &Path) -> Result<(), String> {
         let session = self.tutor.as_ref().ok_or(NOT_RUNNING)?;
-        if !path
-            .canonicalize()
+        if !crate::files::canonicalize(path)
             .map_err(|error| error.to_string())?
             .starts_with(&session.base)
         {

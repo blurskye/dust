@@ -529,9 +529,10 @@ fn detached_worktree_uses_selected_commit_and_source_identity_without_touching_d
         refs_before,
         "no persistent or moved branch from detached recovery"
     );
+    // Git lists worktrees with `/` on Windows too.
     assert!(
         git(&fixture.root, &["worktree", "list", "--porcelain"])
-            .contains(destination.to_str().unwrap())
+            .contains(&destination.to_str().unwrap().replace('\\', "/"))
     );
     assert_eq!(screen.root(), fixture.root.as_path());
 }

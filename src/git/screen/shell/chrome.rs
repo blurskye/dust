@@ -744,6 +744,13 @@ fn footer_ranked(
             } else {
                 ("", GitRole::Modified)
             };
+            // Git's multi-line errors read as one line, never as raw line breaks.
+            let text = text
+                .lines()
+                .map(str::trim)
+                .filter(|line| !line.is_empty())
+                .collect::<Vec<_>>()
+                .join(" · ");
             (format!("{mark}{text}"), role)
         });
     if let Some((text, role)) = &notice
@@ -1191,5 +1198,25 @@ mod tests {
         assert_eq!(super::when("not a date", now), "not a date");
         // A clock ahead of ours is a date, never a negative age.
         assert_eq!(super::when("2026-11-17T09:00:00Z", now), "Nov 17");
+    }
+
+    #[test]
+    fn a_multi_line_git_error_reads_as_one_footer_line() {
+        let mut grid = CellGrid::new(120, 1);
+        footer_ranked(
+            &mut grid,
+            Rect::new(0, 0, 120, 1),
+            &[],
+            "",
+            Some(("error: cannot lock ref\r\n\r\n  hint: retry\n", true)),
+            usize::MAX,
+            true,
+        );
+        let row = grid.row_text(0);
+        assert!(
+            row.contains("✕ error: cannot lock ref · hint: retry"),
+            "{row}"
+        );
+        assert!(!row.contains('\u{fffd}'), "{row}");
     }
 }

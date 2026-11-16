@@ -780,6 +780,8 @@ fn a_sheet_hides_the_panes_under_it_and_dims_the_rest() {
     wait(&mut screen, |s| banner(s).contains('⟳'));
     settle(&mut screen);
     for (width, height) in [(120, 36), (190, 48)] {
+        // Each sheet is compared with the frame just before it opened: a preview that lands
+        // late (a loaded machine) changes the panes, never what a sheet does to them.
         let plain = screen.frame(width, height);
         // The `:` prompt (a generic sheet) and the abort confirmation (the operation dialog).
         key(&mut screen, KeyCode::Char(':'));
@@ -787,6 +789,7 @@ fn a_sheet_hides_the_panes_under_it_and_dims_the_rest() {
         occludes(&mut screen, &plain, width, height, "Command");
         key(&mut screen, KeyCode::Escape);
         settle(&mut screen);
+        let plain = screen.frame(width, height);
         key(&mut screen, KeyCode::Char('X'));
         shows(&mut screen, "Abort merge?");
         occludes(&mut screen, &plain, width, height, "Abort merge?");

@@ -293,7 +293,7 @@ fn execute(plan: Plan, message: String) -> Result<Outcome, String> {
         .prefix("dust-rewrite-")
         .tempdir_in(repo.path())
         .map_err(error)?;
-    let common = repo.commondir().canonicalize().map_err(error)?;
+    let common = crate::files::canonicalize(repo.commondir()).map_err(error)?;
     fs::write(
         private.path().join("commondir"),
         common

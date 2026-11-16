@@ -57,10 +57,26 @@ impl DetailFind {
             })
             .collect();
         let same_identity = self.identity.as_ref() == Some(&identity);
-        if !same_identity || !source.starts_with(&self.source) {
+        if !same_identity {
             self.search = SourceSearch::default();
             self.cursor = None;
             self.prompt = false;
+        } else if !source.starts_with(&self.source) {
+            // A refresh of the same page: an open find box stays open, and a query runs
+            // again on the fresh text instead of vanishing under the learner.
+            let query = std::mem::take(&mut self.search.query);
+            self.search = if query.is_empty() {
+                SourceSearch::default()
+            } else {
+                SourceSearch::in_lines(
+                    source
+                        .iter()
+                        .enumerate()
+                        .map(|(row, text)| (row, text.as_ref())),
+                    query,
+                )
+            };
+            self.cursor = None;
         } else if source.len() > self.source.len() {
             // Newly loaded discussion must not move a match or dismiss a query.
             self.search.append_lines(
@@ -466,7 +482,7 @@ mod tests {
     }
 
     #[test]
-    fn replaced_source_invalidates_matches_cursor_and_an_open_prompt_before_stepping() {
+    fn replaced_source_keeps_an_open_prompt_and_finds_in_the_fresh_text() {
         let mut workspace = workspace();
         workspace.detail_find.prompt = true;
         workspace
@@ -475,16 +491,15 @@ mod tests {
             .unwrap()
             .as_mut()
             .unwrap()
-            .value["body"] = json!("Entirely unrelated content");
+            .value["body"] = json!("Entirely unrelated content, then a needle");
         workspace.prepare_detail_find();
-        assert!(!workspace.detail_find.search.active());
         assert!(workspace.detail_find.cursor.is_none());
-        assert!(!workspace.detail_find.prompt_active());
-        assert!(workspace.find_detail("needle".into()).is_err());
         assert!(
-            !workspace.detail_find.search.active(),
-            "stale prompt cannot apply to replacement text"
+            workspace.detail_find.prompt_active(),
+            "a refresh never closes the box the learner is typing in"
         );
+        workspace.find_detail("needle".into()).unwrap();
+        assert_eq!(workspace.detail_find.search.matches.len(), 1);
         assert!(workspace.queue.is_empty());
     }
 

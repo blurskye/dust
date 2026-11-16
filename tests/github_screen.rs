@@ -1278,10 +1278,8 @@ fn github_find_prompt_keeps_keyboard_input_when_metadata_and_discussion_arrive()
 }
 
 #[test]
-fn github_find_replaced_source_retains_input_and_refuses_submit_without_shortcut_leaks() {
-    if fixture_child(
-        "github_find_replaced_source_retains_input_and_refuses_submit_without_shortcut_leaks",
-    ) {
+fn github_find_replaced_source_keeps_the_query_and_finds_in_the_fresh_text() {
+    if fixture_child("github_find_replaced_source_keeps_the_query_and_finds_in_the_fresh_text") {
         return;
     }
     let state_path = std::env::var("DUST_GITHUB_FIXTURE").unwrap();
@@ -1314,17 +1312,16 @@ fn github_find_replaced_source_retains_input_and_refuses_submit_without_shortcut
     release_read("replaced-source");
     wait(&mut screen, "A replacement paragraph is now visible.");
     assert_find_query_input(&mut screen, "retained query");
+    // Edit and comment shortcuts stay inside the box; the query then runs on the fresh text.
     control(&mut screen, KeyCode::Char('e'));
     control(&mut screen, KeyCode::Char('u'));
-    for character in "never edit or comment".chars() {
+    for character in "replacement".chars() {
         key(&mut screen, KeyCode::Char(character));
     }
+    assert_find_query_input(&mut screen, "replacement");
     control(&mut screen, KeyCode::Enter);
-    assert!(view(&mut screen).contains("detail changed while finding"));
-    assert_find_query_input(&mut screen, "never edit or comment");
-    assert!(!screen.busy(), "a rejected find must not start a write");
-    key(&mut screen, KeyCode::Escape);
-    find_detail(&mut screen, "replacement");
+    assert!(!view(&mut screen).contains("detail changed while finding"));
+    assert!(!screen.busy(), "a find must not start a write");
     for size in DETAIL_SIZES {
         issue_detail_matched(&mut screen, size, "replacement", "1/1");
     }

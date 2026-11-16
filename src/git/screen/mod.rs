@@ -482,10 +482,10 @@ pub struct GitScreen {
 impl GitScreen {
     pub fn open(path: &Path) -> Result<Self, String> {
         let repo = git2::Repository::discover(path).map_err(|e| e.message().to_owned())?;
-        let root = repo
-            .workdir()
-            .ok_or("Bare repositories do not have a working tree")?
-            .to_path_buf();
+        let root = native_path(
+            repo.workdir()
+                .ok_or("Bare repositories do not have a working tree")?,
+        );
         let project = git2::Repository::open(repo.commondir())
             .ok()
             .and_then(|main| {
@@ -3348,6 +3348,22 @@ impl GitScreen {
 
 /// The option of a closed choice that typed or pasted letters name: the one they spell out
 /// (ignoring ASCII case), else the first they begin.
+/// libgit2 writes Windows paths with `/`; the screen joins and shows native ones, so a
+/// default like the review worktree's reads `D:\work\review`, not `D:/work\review`.
+fn native_path(path: &Path) -> PathBuf {
+    #[cfg(windows)]
+    {
+        path.to_str().map_or_else(
+            || path.to_path_buf(),
+            |text| PathBuf::from(text.replace('/', "\\")),
+        )
+    }
+    #[cfg(not(windows))]
+    {
+        path.to_path_buf()
+    }
+}
+
 fn pick_choice<'a>(choices: &'a [String], typed: &str) -> Option<&'a String> {
     if typed.is_empty() {
         return None;

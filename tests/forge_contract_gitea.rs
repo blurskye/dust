@@ -1022,8 +1022,12 @@ fn transports_agree(family: Family) {
     // transports send the same requests in whatever order the threads finish.
     let (http, mut http_requests) = run(Via::Http);
     let (tea, mut tea_requests) = run(Via::Tea);
-    http_requests.sort();
-    tea_requests.sort();
+    // The version probe is asked once per address and process; a test server that reuses
+    // an earlier test's port finds its answer already cached, whichever transport it runs.
+    for requests in [&mut http_requests, &mut tea_requests] {
+        requests.retain(|request| request != "GET version?");
+        requests.sort();
+    }
     assert_eq!(
         http, tea,
         "both transports decode to the same domain values"

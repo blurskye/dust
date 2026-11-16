@@ -5,3 +5,9 @@ fail-fast = false
 slow-timeout = { period = "60s", terminate-after = 3 }
 # Hosted runners have few cores and many tests spawn processes.
 test-threads = 4
+
+# The tutor tests walk every lesson against real Git; Windows starts processes several
+# times slower than Linux or macOS.
+[[profile.ci.overrides]]
+filter = 'test(/tutor/)'
+slow-timeout = { period = "60s", terminate-after = 10 }

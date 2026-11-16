@@ -5358,9 +5358,15 @@ mod tests {
         let mut workspace = workspace();
         let directory = tempfile::tempdir().unwrap();
         workspace.root = directory.path().to_owned();
-        assert_eq!(
-            workspace.save_log(602, &[".".into()]),
-            Err("Couldn't save the log".into())
+        // Writing over a folder: Linux and macOS give an error the notice doesn't name,
+        // Windows "access denied".
+        let error = workspace.save_log(602, &[".".into()]).err();
+        assert!(
+            matches!(
+                error.as_deref(),
+                Some("Couldn't save the log" | "Couldn't save the log · permission denied")
+            ),
+            "{error:?}"
         );
         workspace.notice = "Couldn't save the log".into();
         workspace.notice_error = true;

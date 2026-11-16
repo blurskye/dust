@@ -385,7 +385,11 @@ fn review_comments(threads: &[model::ReviewThread], root: &Path) -> Vec<ReviewCo
                     Side::Right => position.and_then(|position| position.line).or(thread.line),
                 };
                 ReviewComment {
-                    path: root.join(path),
+                    // Forges write `/`; each part is joined so Windows gets `\` throughout.
+                    path: path
+                        .split('/')
+                        .filter(|part| !part.is_empty())
+                        .fold(root.to_path_buf(), |path, part| path.join(part)),
                     line: line.filter(|line| *line > 0),
                     author: comment.author.login.clone(),
                     body: comment.body.clone(),
@@ -1091,17 +1095,32 @@ mod tests {
             comments
                 .iter()
                 .map(|comment| (
-                    comment.path.to_string_lossy().into_owned(),
+                    comment.path.clone(),
                     comment.line,
                     comment.body.as_str(),
                     comment.author.as_str()
                 ))
                 .collect::<Vec<_>>(),
             [
-                ("/r/src/a.rs".to_owned(), Some(3), "nit", "ana"),
-                ("/r/src/a.rs".to_owned(), Some(4), "reply", "ana"),
-                ("/r/src/a.rs".to_owned(), None, "old side", "ana"),
-                ("/r/gone.rs".to_owned(), None, "outdated", "ana"),
+                (
+                    Path::new("/r").join("src").join("a.rs"),
+                    Some(3),
+                    "nit",
+                    "ana"
+                ),
+                (
+                    Path::new("/r").join("src").join("a.rs"),
+                    Some(4),
+                    "reply",
+                    "ana"
+                ),
+                (
+                    Path::new("/r").join("src").join("a.rs"),
+                    None,
+                    "old side",
+                    "ana"
+                ),
+                (Path::new("/r").join("gone.rs"), None, "outdated", "ana"),
             ]
         );
     }
