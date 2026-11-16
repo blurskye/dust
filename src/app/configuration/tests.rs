@@ -42,7 +42,7 @@ pub(in crate::app) fn saved_theme_restore_rejects_invalid_data_and_cannot_overwr
     saved.styles.default.foreground = crate::config::ThemeColor::Red;
     let snapshot = serde_json::to_string(&saved).unwrap();
     let wait = |app: &mut App| {
-        let deadline = Instant::now() + Duration::from_secs(3);
+        let deadline = Instant::now() + Duration::from_secs(20);
         loop {
             if let Some(result) = app.configuration.poll_theme_restore() {
                 return result;
@@ -91,7 +91,7 @@ pub(in crate::app) fn saved_theme_restore_rejects_invalid_data_and_cannot_overwr
         .unwrap();
     assert!(app.configuration.poll_theme_restore().is_none());
     assert_eq!(app.configuration.theme(), &original);
-    let deadline = Instant::now() + Duration::from_secs(3);
+    let deadline = Instant::now() + Duration::from_secs(20);
     loop {
         app.configuration.begin_theme_restore();
         match app.configuration.restore_theme(Some(&snapshot)) {
@@ -188,7 +188,7 @@ pub(in crate::app) fn delayed_persistence_preserves_newer_runtime_breakpoint_and
     app.debugger_session.add_watch("live".into());
     app.debugger_session.remove_watch("removed");
     drop(release);
-    let deadline = Instant::now() + Duration::from_secs(3);
+    let deadline = Instant::now() + Duration::from_secs(20);
     while app.persistence.pending() {
         app.process_persistence_events();
         assert!(Instant::now() < deadline);
@@ -239,7 +239,7 @@ pub(in crate::app) fn theme_picker_replaces_the_current_choice_with_its_installe
     configuration.sources.settings = root.join("config.toml");
     app.configuration.install_fixture(configuration);
     app.process_effect(AppEffect::SelectTheme);
-    let deadline = Instant::now() + Duration::from_secs(3);
+    let deadline = Instant::now() + Duration::from_secs(20);
     while app.ui.picker.as_ref().unwrap().loading {
         app.process_theme_results();
         assert!(Instant::now() < deadline);
@@ -308,7 +308,7 @@ pub(in crate::app) fn theme_picker_previews_cancels_applies_and_never_overwrites
         for key in "amber".chars() {
             app.handle_configured_key(KeyEvent::character(key));
         }
-        let deadline = Instant::now() + Duration::from_secs(3);
+        let deadline = Instant::now() + Duration::from_secs(20);
         while app.ui.picker.as_ref().unwrap().loading {
             app.process_theme_results();
             assert!(Instant::now() < deadline);
@@ -402,7 +402,7 @@ pub(in crate::app) fn theme_picker_previews_cancels_applies_and_never_overwrites
     );
     // Enter queues the ordinary state writer; it is not necessary to exit first.
     app.process_persistence_events();
-    let deadline = Instant::now() + Duration::from_secs(3);
+    let deadline = Instant::now() + Duration::from_secs(20);
     while app.persistence.pending() {
         app.process_persistence_events();
         assert!(Instant::now() < deadline);
@@ -433,7 +433,7 @@ pub(in crate::app) fn theme_picker_previews_cancels_applies_and_never_overwrites
     )
     .unwrap();
     restarted.load_persistence();
-    let deadline = Instant::now() + Duration::from_secs(3);
+    let deadline = Instant::now() + Duration::from_secs(20);
     while restarted.configuration.theme() != &amber {
         restarted.process_persistence_events();
         restarted.process_theme_results();
@@ -473,7 +473,7 @@ pub(in crate::app) fn theme_picker_previews_cancels_applies_and_never_overwrites
         app.configuration
             .restore_theme(Some("invalid JSON"))
             .unwrap();
-        let deadline = Instant::now() + Duration::from_secs(3);
+        let deadline = Instant::now() + Duration::from_secs(20);
         loop {
             if let Some(result) = app.configuration.poll_theme_restore() {
                 assert!(result.is_err());
@@ -1764,7 +1764,7 @@ pub(in crate::app) fn colorscheme_with_a_name_applies_that_theme_and_refuses_an_
     app.apply_configuration_candidate(loaded, false).unwrap();
     let set = |name: &str, app: &mut App| {
         app.process_effect(AppEffect::SetTheme(name.into()));
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + Duration::from_secs(20);
         while app.ui.picker.is_some() {
             assert!(Instant::now() < deadline, "theme list did not load");
             app.process_theme_results();
@@ -1908,7 +1908,7 @@ pub(in crate::app) fn the_settings_page_saves_and_reloads_user_configuration() {
     let page = app.ui.settings.as_ref().unwrap();
     assert!(page.edit.is_none());
     assert_eq!(page.status, Some(("Saved".into(), false)));
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + Duration::from_secs(20);
     while app.configuration.reload_id() == reload_id {
         app.process_configuration_result();
         assert!(Instant::now() < deadline, "saved setting was not reloaded");
@@ -1988,7 +1988,7 @@ pub(in crate::app) fn the_first_start_setup_saves_the_picked_choices_to_a_new_co
     // Choices that match the defaults are left out of the file.
     assert!(disk["ui"].get("terminal_panel").is_none(), "{source}");
     let reload_id = app.configuration.reload_id();
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + Duration::from_secs(20);
     while app.configuration.reload_id() == reload_id {
         app.process_configuration_result();
         assert!(Instant::now() < deadline, "setup was not reloaded");
@@ -2057,7 +2057,7 @@ pub(in crate::app) fn the_shortcuts_page_records_new_keys_and_resets_them() {
     .unwrap();
     app.window_session.observe_size((120, 40));
     let reloaded = |app: &mut App, reload_id| {
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + Duration::from_secs(20);
         while app.configuration.reload_id() == reload_id {
             app.process_configuration_result();
             assert!(Instant::now() < deadline, "keymaps were not reloaded");

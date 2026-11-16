@@ -98,7 +98,7 @@ fn foreign(forge: Forge) -> Vec<&'static str> {
         Forge::GitLab => words.extend([
             "Pull request",
             "pull request",
-            "Review requested",
+            // "Review requested" is shared vocabulary since r7: one word per review state.
             "Checks",
             "│ CI",
             "CI │",

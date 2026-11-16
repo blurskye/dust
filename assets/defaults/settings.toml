@@ -98,6 +98,7 @@ settings = [
   { key = "ui.git.placement", title = "Window", about = "float opens Dusty Git centered over the editor; fullscreen fills the terminal.", choices = ["float", "fullscreen"] },
   { key = "ui.git.width_percent", title = "Floating Width (%)", about = "Share of terminal width used by the floating Git workspace (50–100)." },
   { key = "ui.git.height_percent", title = "Floating Height (%)", about = "Share of terminal height used by the floating Git workspace (50–100)." },
+  { key = "ui.git.keys", title = "Keys", about = "dusty: s stages, u unstages, - toggles, the editor's leader starts chords. lazygit: Space stages and toggles, , is the leader.", choices = ["dusty", "lazygit"] },
 ]
 
 [[section]]

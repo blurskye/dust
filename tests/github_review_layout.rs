@@ -1,7 +1,7 @@
 #![cfg(unix)]
 use dust::editor::input::{KeyCode, KeyEvent, Modifiers};
 use dust::git::screen::GitScreen;
-use dust::ui::{Frame, KeyInputKind, Style, UiEvent};
+use dust::ui::{Frame, KeyInputKind, UiEvent};
 use serde_json::{Value, json};
 use std::path::Path;
 use std::process::Command;
@@ -43,12 +43,16 @@ fn state() -> Value {
     )
     .unwrap()
 }
+fn fixture() -> std::path::PathBuf {
+    std::env::var("DUST_GITHUB_FIXTURE").unwrap().into()
+}
+/// Under the server's lock: a plain write can be overwritten by the server saving its
+/// request log (D9).
 fn save(value: &Value) {
-    std::fs::write(
-        std::env::var("DUST_GITHUB_FIXTURE").unwrap(),
-        value.to_string(),
-    )
-    .unwrap();
+    forge_fake::write_state(&fixture(), value);
+}
+fn update(change: impl FnOnce(&mut Value)) {
+    forge_fake::update(&fixture(), change);
 }
 /// The fake forge server's request log in the gh-CLI form the legacy fixture logged.
 fn calls() -> Vec<Vec<String>> {
@@ -63,6 +67,7 @@ fn idle(screen: &mut GitScreen) {
         std::thread::sleep(Duration::from_millis(10));
     }
 }
+#[track_caller]
 fn wait_until(screen: &mut GitScreen, predicate: impl Fn(&str) -> bool) {
     let deadline = Instant::now() + Duration::from_secs(30);
     loop {
@@ -79,6 +84,7 @@ fn wait_until(screen: &mut GitScreen, predicate: impl Fn(&str) -> bool) {
         std::thread::sleep(Duration::from_millis(10));
     }
 }
+#[track_caller]
 fn wait(screen: &mut GitScreen, needle: &str) {
     wait_until(screen, |shown| shown.contains(needle));
 }
@@ -209,38 +215,37 @@ fn actions_reader_keeps_selected_job_identity_payload_and_confirmation() {
     }
     wait(&mut screen, "go_modules update");
     key(&mut screen, KeyCode::Enter);
-    // The drilldown opens on the first failed job and its failed step.
+    // The run opens on both failed jobs and their failed steps.
     wait_until(&mut screen, |shown| {
         shown.contains("go_modules update") && shown.contains("First job") && shown.contains("Dependabot")
     });
     for (width, height) in [(64, 20), (100, 30), (190, 48)] {
         let frame = screen.frame(width, height);
-        assert!(
-            !frame.grid.row_text(1).to_ascii_lowercase().contains("attempt"),
-            "a sole attempt is not named:\n{}",
-            text(&frame)
-        );
+        for row in 1..5 {
+            assert!(
+                !frame.grid.row_text(row).to_ascii_lowercase().contains("attempt"),
+                "a sole attempt is not named:\n{}",
+                text(&frame)
+            );
+        }
     }
-    key(&mut screen, KeyCode::Enter);
-    key(&mut screen, KeyCode::Enter);
     wait(&mut screen, "P00 payload");
-    assert!(view(&mut screen).contains("Run first"));
-    // Back to the jobs, the next job, its failed step and log.
-    key(&mut screen, KeyCode::Escape);
-    key(&mut screen, KeyCode::Escape);
-    key(&mut screen, KeyCode::Down);
+    let shown = view(&mut screen);
+    assert!(shown.contains("Run first") && shown.contains("Run Dependabot"), "{shown}");
+    // Closing the first job leaves the second job's failed step and log.
+    key(&mut screen, KeyCode::Home);
     key(&mut screen, KeyCode::Enter);
-    key(&mut screen, KeyCode::Enter);
-    wait(&mut screen, "Run Dependabot");
-    wait(&mut screen, "P00 payload");
+    // The second job's log is read after the first one's.
+    wait_until(&mut screen, |shown| shown.contains("P00 payload") && !shown.contains("Run first"));
     for (width, height) in [(64, 20), (100, 30), (190, 48)] {
         let frame = screen.frame(width, height);
         let shown = text(&frame);
-        assert!(frame.grid.row_text(1).contains("Dependabot") && frame.grid.row_text(1).contains("Run Dependabot"), "{shown}");
-        assert!(shown.contains("Approximate step slice"), "{shown}");
+        assert!(shown.contains("Dependabot") && shown.contains("Run Dependabot") && !shown.contains("Run first"), "{shown}");
+        // A step's lines found by their time are shown without remark.
+        assert!(!shown.contains("Approximate"), "{shown}");
         let payloads = (0..height).filter(|row| frame.grid.row_text(*row).contains("payload")).count();
-        assert!(payloads >= usize::from(height) - 9, "only {payloads} payload rows:\n{shown}");
-        // Long lines clip at the pane's edge with a mark, never into the border.
+        assert!(payloads >= usize::from(height) - 12, "only {payloads} payload rows:\n{shown}");
+        // Long lines wrap inside the pane, never into the border.
         assert!(shown.contains('›') || shown.contains("RIGHTEDGE"), "{shown}");
     }
     // Find in the step log counts the one emoji match.
@@ -283,6 +288,75 @@ fn actions_reader_keeps_selected_job_identity_payload_and_confirmation() {
 }
 
 #[test]
+fn the_merge_box_says_failing_from_the_moment_the_pull_request_opens() {
+    if child("the_merge_box_says_failing_from_the_moment_the_pull_request_opens") {
+        return;
+    }
+    // One fact in three places (r15 prs-01): the list glyph, the merge box and the Checks
+    // tab all say `test (linux)` failed, before and after the Checks tab reads its run.
+    let run = json!({"databaseId":91,"displayTitle":"Validate native workspace","workflowName":"Native CI",
+    "workflowDatabaseId":31,"headBranch":"feature/native","headSha":"a".repeat(40),"event":"pull_request",
+    "attempt":1,"status":"completed","conclusion":"failure","jobs":[
+        {"databaseId":42,"name":"test (linux)","status":"completed","conclusion":"failure",
+         "steps":[{"number":1,"name":"Check","status":"completed","conclusion":"failure"}]}]});
+    save(&json!({"calls":[],"comments":[],"run_views":2,"run":run,
+        "prs":[{"number":9,"title":"Merge verdict sentinel","statusCheckRollup":[{"name":"test (linux)",
+            "conclusion":"FAILURE","detailsUrl":"https://github.com/example/demo/actions/runs/91/job/42"}]}]}));
+    let mut screen = screen();
+    key(&mut screen, KeyCode::Char('>'));
+    wait(&mut screen, "Merge verdict sentinel");
+    let list = view(&mut screen);
+    // The list pane's row (left of `││`), not the reader's `#9 Merge verdict sentinel` title.
+    let row = list
+        .lines()
+        .filter_map(|row| row.split("││").next())
+        .find(|pane| pane.contains("Merge verdict sentinel"))
+        .unwrap_or_default()
+        .to_owned();
+    assert!(row.contains('✕') && !row.contains('✔'), "the list glyph says failing: {row}");
+    control(&mut screen, KeyCode::Char('l'));
+    wait(&mut screen, "approved these changes");
+    // The merge box first (the timeline's end): no run read yet, and it already says failed.
+    // A frame tall enough for the whole Conversation, so the verdict is read without moving
+    // the cursor (this test is about the words, not the reader's navigation).
+    let whole = |screen: &mut GitScreen| text(&screen.frame(190, 160));
+    let deadline = Instant::now() + Duration::from_secs(30);
+    // The merge box names the failing check among what blocks it (`1. test (linux) failed`).
+    let failing = |shown: &str| shown.contains("test (linux) failed") && !shown.contains("Checks passed");
+    while !failing(&whole(&mut screen)) {
+        screen.poll();
+        assert!(Instant::now() < deadline, "no failing verdict:\n{}", whole(&mut screen));
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(
+        !calls().iter().any(|args| args.starts_with(&["run".into(), "view".into()])),
+        "the verdict needs no run read: {:?}",
+        calls()
+    );
+    let overview = whole(&mut screen);
+    assert!(!overview.contains("Checks passed"), "{overview}");
+    // The Checks tab reads the run and agrees; back on Conversation nothing changed.
+    for _ in 0..2 {
+        key(&mut screen, KeyCode::Char('L'));
+    }
+    wait(&mut screen, "Check");
+    for _ in 0..2 {
+        key(&mut screen, KeyCode::Char('H'));
+    }
+    wait(&mut screen, "approved these changes");
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        screen.poll();
+        let shown = whole(&mut screen);
+        if failing(&shown) {
+            break;
+        }
+        assert!(Instant::now() < deadline, "the verdict changed after the run read:\n{shown}");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+#[test]
 fn narrow_review_keeps_thread_drafts_and_neutral_resolve_target_on_refresh() {
     if child("narrow_review_keeps_thread_drafts_and_neutral_resolve_target_on_refresh") {
         return;
@@ -305,10 +379,10 @@ fn narrow_review_keeps_thread_drafts_and_neutral_resolve_target_on_refresh() {
     key(&mut screen, KeyCode::Char('>'));
     wait(&mut screen, "Review layout sentinel");
     control(&mut screen, KeyCode::Char('l'));
-    // busy() covers writes, not asynchronous forge read completion. The overview names
-    // each reviewer with their own verdict.
+    // busy() covers writes, not asynchronous forge read completion. The Conversation names
+    // each reviewer's verdict on their review card and in the sidebar.
     wait_until(&mut screen, |shown| {
-        shown.contains("decision ✔ Approved") && shown.contains("Latest activity")
+        shown.contains("approved these changes") && shown.contains("On merge")
     });
     let overview = view(&mut screen);
     assert!(overview.contains("Reviewers"), "{overview}");
@@ -357,9 +431,7 @@ fn narrow_review_keeps_thread_drafts_and_neutral_resolve_target_on_refresh() {
     key(&mut screen, KeyCode::Escape);
     idle(&mut screen);
     // A refresh that resolves A keeps the cursor on A and never arms the opposite write.
-    let mut fixture = state();
-    fixture["thread_resolved"] = json!({"THREAD_A":true});
-    save(&fixture);
+    update(|fixture| fixture["thread_resolved"] = json!({"THREAD_A":true}));
     key(&mut screen, KeyCode::Char('R'));
     wait(&mut screen, "● Resolved · alice");
     let frame = screen.frame(64, 20);
@@ -371,7 +443,7 @@ fn narrow_review_keeps_thread_drafts_and_neutral_resolve_target_on_refresh() {
     );
     key(&mut screen, KeyCode::Enter);
     assert!(
-        !view(&mut screen).contains("Reopen review thread?"),
+        !view(&mut screen).contains("Unresolve conversation?"),
         "refresh armed an opposite mutation"
     );
     // Nothing opened, so the reader keeps focus (Esc here would go back to the list).
@@ -387,19 +459,19 @@ fn narrow_review_keeps_thread_drafts_and_neutral_resolve_target_on_refresh() {
     assert!(view(&mut screen).contains("Unique draft A"));
     key(&mut screen, KeyCode::Escape);
     idle(&mut screen);
-    let mut fixture = state();
-    fixture["review_threads"]["example/demo#9"]
-        .as_array_mut()
-        .unwrap()
-        .remove(0);
-    save(&fixture);
+    update(|fixture| {
+        fixture["review_threads"]["example/demo#9"]
+            .as_array_mut()
+            .unwrap()
+            .remove(0);
+    });
     key(&mut screen, KeyCode::Char('R'));
     // Alice is also the PR author in the list; only thread headers establish removal.
     wait_until(&mut screen, |shown| {
-        shown.contains("○ Unresolved · bob · line 1") && !shown.contains("· alice · line 1")
+        shown.contains("◔ Unresolved · bob · line 1") && !shown.contains("· alice · line 1")
     });
     key(&mut screen, KeyCode::Enter);
-    assert!(!view(&mut screen).contains("Resolve review thread?"));
+    assert!(!view(&mut screen).contains("Resolve conversation?"));
     assert!(
         !calls()
             .iter()

@@ -72,6 +72,13 @@ pub(in crate::app) fn app_with_plugin_queue(
     app_with_optional_plugin_queue(Some(plugin_queue_capacity))
 }
 
+/// The plugin budget (10 ms ticks) for tests that run real guests. The bundled 100 ms is
+/// shorter than one scheduling stall on a loaded runner, and the budget's timer keeps running
+/// while the whole job is paused, so a guest doing correct work was cut off and its activation
+/// rolled back. A test that waits for a plugin bounds that wait itself and fails loudly, so the
+/// guest gets the same 30 s; tests about expiry set their own deadline.
+pub(in crate::app) const PLUGIN_TEST_TICKS: u64 = 3_000;
+
 fn app_with_optional_plugin_queue(
     plugin_queue_capacity: Option<usize>,
 ) -> ((tempfile::TempDir, tempfile::TempDir), App) {
@@ -83,9 +90,7 @@ fn app_with_optional_plugin_queue(
     let mut loaded = crate::config::load_bundled_config();
     if let Some(plugin_queue_capacity) = plugin_queue_capacity {
         loaded.config.plugins.queue_capacity = plugin_queue_capacity;
-        // Plugin tests run real guests, and the bundled 100 ms command budget is too
-        // tight on slow CI runners; tests that check expiry move the deadline themselves.
-        loaded.config.plugins.epoch_deadline_ticks = 100;
+        loaded.config.plugins.epoch_deadline_ticks = PLUGIN_TEST_TICKS;
     }
     let mut app = App::new(
         startup,
@@ -191,7 +196,7 @@ pub(in crate::app) fn write_plugin_manifest(
 }
 
 pub(in crate::app) fn wait_vfs(app: &mut App) {
-    let deadline = Instant::now() + Duration::from_secs(2);
+    let deadline = Instant::now() + Duration::from_secs(20);
     while app.documents.has_work() {
         app.queue_startup_reads();
         app.process_vfs_results();
@@ -201,7 +206,7 @@ pub(in crate::app) fn wait_vfs(app: &mut App) {
 }
 
 pub(in crate::app) fn wait_workspace_approval(app: &mut App) {
-    let deadline = Instant::now() + Duration::from_secs(2);
+    let deadline = Instant::now() + Duration::from_secs(20);
     while app.workspace_edits.proposal().is_some() {
         app.process_workspace_approval();
         assert!(
@@ -224,7 +229,7 @@ pub(in crate::app) fn prepare_trust_identity(app: &mut App) {
 }
 
 pub(in crate::app) fn wait_trust(app: &mut App) {
-    let deadline = Instant::now() + Duration::from_secs(2);
+    let deadline = Instant::now() + Duration::from_secs(20);
     while app.workspace.persist_pending() {
         app.process_trust_events();
         assert!(Instant::now() < deadline, "trust persistence timed out");

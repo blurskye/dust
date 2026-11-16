@@ -135,7 +135,7 @@ impl HostState {
                 capability: "provider" | "transport",
                 reason,
             } => {
-                if reason.starts_with("Unknown forge") {
+                if reason.starts_with("Unknown site ") {
                     HostState::UnknownProvider
                 } else {
                     HostState::Unknown(reason.clone())
@@ -201,17 +201,19 @@ impl HostState {
             HostState::CliTooOld { .. } => "CLI too old",
             HostState::RateLimited { .. } => "Rate limited",
             HostState::Unreachable { .. } => "Offline",
-            HostState::UnknownProvider => "Unknown forge",
+            HostState::UnknownProvider => "Unknown site",
             HostState::Unknown(_) => "Unavailable",
         }
     }
 
     /// The one-row list-header notice (§2.5), or `None` when the list needs none. `cached` is
-    /// the age of what the list is still showing.
+    /// the age of what the list is still showing. The forge screens word the states they act
+    /// on themselves (`git::screen::github::states`); the keys here are theirs: `@` signs in
+    /// (`a` is assignees and attempts there) and `R` retries.
     pub fn notice(&self, host: &str, cached: Option<Duration>) -> Option<(String, Tone)> {
         let cached_part = |text: &mut String| {
             if let Some(cached) = cached {
-                text.push_str(&format!(" · cached {} ago", age(cached)));
+                text.push_str(&format!(" · updated {} ago", age(cached)));
             }
         };
         Some(match self {
@@ -234,13 +236,13 @@ impl HostState {
             HostState::SignInRequired { .. } => {
                 let mut text = format!("✕ {host} requires sign-in");
                 cached_part(&mut text);
-                text.push_str(" · a accounts");
+                text.push_str(" · @ sign in");
                 (text, Tone::Error)
             }
             HostState::SignedOut { .. } => {
                 let mut text = format!("✕ Sign in required for {host}");
                 cached_part(&mut text);
-                text.push_str(" · a accounts");
+                text.push_str(" · @ sign in");
                 (text, Tone::Error)
             }
             HostState::CliMissing { cli, .. } => (
@@ -252,7 +254,7 @@ impl HostState {
             ),
             HostState::CliTooOld { cli, found, need } => (
                 format!(
-                    "⚠ {} {found} found · {need} needed for passthrough",
+                    "{} {found} is too old · {need} or newer needed",
                     cli.name()
                 ),
                 Tone::Warning,
@@ -263,18 +265,18 @@ impl HostState {
                     .max(Duration::from_secs(1));
                 let mut text = format!("⚠ Rate limited by {host} · resumes in {}", age(left));
                 if cached.is_some() {
-                    text.push_str(" · showing cached");
+                    text.push_str(" · showing earlier results");
                 }
                 (text, Tone::Warning)
             }
             HostState::Unreachable { .. } => {
                 let mut text = format!("✕ Could not reach {host}");
                 cached_part(&mut text);
-                text.push_str(" · r retry");
+                text.push_str(" · R retry");
                 (text, Tone::Error)
             }
             HostState::UnknownProvider => (
-                format!("⚠ Unknown forge at {host} · set [forge.hosts.\"{host}\"].provider"),
+                format!("Unknown site {host} · @ accounts"),
                 Tone::Warning,
             ),
             HostState::Unknown(reason) => (
@@ -373,15 +375,23 @@ impl Account {
                         Some(format!("update {} to {need} or newer", cli.name()))
                     }
                     HostState::RateLimited { until } => Some(format!(
-                        "background polling paused · resumes in {}",
+                        "Background updates paused · back in {}",
                         age(until
                             .saturating_duration_since(Instant::now())
                             .max(Duration::from_secs(1)))
                     )),
-                    HostState::Unreachable { error } => Some(error.clone()),
-                    HostState::UnknownProvider => Some(format!(
-                        "set [forge.hosts.\"{host}\"].provider in config.toml"
-                    )),
+                    HostState::Unreachable { .. } => Some(format!("Can't reach {host} · r retry")),
+                    HostState::UnknownProvider => {
+                        lines.push((
+                            "Tell Dusty Git what kind of site this is, in config.toml:".into(),
+                            Tone::Muted,
+                        ));
+                        lines.push((
+                            format!("[forge.hosts.\"{host}\"] provider = \"github\"   # or gitlab, gitea, forgejo"),
+                            Tone::Muted,
+                        ));
+                        None
+                    }
                     HostState::Unknown(reason) => Some(reason.clone()),
                     HostState::Ready { .. }
                     | HostState::Anonymous { .. }
@@ -590,6 +600,14 @@ pub fn latest() -> Option<Account> {
         .cloned()
 }
 
+/// Drop a host from the accounts list (the tutor's practice forge, once left).
+pub fn forget(host: &HostKey) {
+    registry()
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .remove(host);
+}
+
 /// `r` in the accounts popover: forget credentials, transport choices, detection and pauses so
 /// the next request discovers everything again.
 pub fn recheck() {
@@ -614,7 +632,7 @@ mod tests {
                 .notice("gitlab.com", Some(Duration::from_secs(12 * 60)))
                 .unwrap()
                 .0,
-            "✕ Sign in required for gitlab.com · cached 12m ago · a accounts"
+            "✕ Sign in required for gitlab.com · updated 12m ago · @ sign in"
         );
         assert_eq!(
             HostState::CliMissing {
@@ -631,14 +649,14 @@ mod tests {
                 .notice("codeberg.org", Some(Duration::from_secs(120)))
                 .unwrap()
                 .0,
-            "✕ Could not reach codeberg.org · cached 2m ago · r retry"
+            "✕ Could not reach codeberg.org · updated 2m ago · R retry"
         );
         assert_eq!(
             HostState::UnknownProvider
                 .notice("git.example", None)
                 .unwrap()
                 .0,
-            "⚠ Unknown forge at git.example · set [forge.hosts.\"git.example\"].provider"
+            "Unknown site git.example · @ accounts"
         );
         let limited = HostState::RateLimited {
             until: Instant::now() + Duration::from_secs(42),
@@ -650,7 +668,7 @@ mod tests {
             limited.starts_with("⚠ Rate limited by github.com · resumes in 4"),
             "{limited}"
         );
-        assert!(limited.ends_with("· showing cached"));
+        assert!(limited.ends_with("· showing earlier results"));
         assert!(
             HostState::Ready {
                 transport: TransportKind::Cli(Cli::Gh),
@@ -672,7 +690,7 @@ mod tests {
                 Some(ProviderKind::GitLab),
                 &ForgeError::Unsupported {
                     capability: "provider",
-                    reason: "Unknown forge at h · set".into()
+                    reason: "Unknown site h · @ accounts".into()
                 }
             ),
             Some(HostState::UnknownProvider)
@@ -687,6 +705,26 @@ mod tests {
             ),
             Some(HostState::SignedOut { cli: Cli::Glab, .. })
         ));
+    }
+
+    #[test]
+    fn unreachable_account_uses_a_fixed_retry_instruction() {
+        let account = Account::new(
+            HostKey::new("offline.test"),
+            None,
+            HostState::Unreachable { error: "Network error · 502 Bad Gateway".into() },
+        );
+        assert_eq!(account.lines()[1], ("  Can't reach offline.test · r retry".into(), Tone::Muted));
+    }
+
+    #[test]
+    fn unknown_account_explains_site_configuration_on_two_lines() {
+        let account = Account::new(HostKey::new("unknown.test"), None, HostState::UnknownProvider);
+        assert_eq!(account.lines(), vec![
+            ("○ unknown.test · Unknown site".into(), Tone::Warning),
+            ("Tell Dusty Git what kind of site this is, in config.toml:".into(), Tone::Muted),
+            ("[forge.hosts.\"unknown.test\"] provider = \"github\"   # or gitlab, gitea, forgejo".into(), Tone::Muted),
+        ]);
     }
 
     #[test]

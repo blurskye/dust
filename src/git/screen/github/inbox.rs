@@ -125,7 +125,7 @@ impl Workspace {
     }
     pub(super) fn toggle_inbox(&mut self) -> Result<(), String> {
         if self.writing() {
-            return Err("Wait for the confirmed operation before changing inbox scope".into());
+            return Err("Wait for the current action to finish".into());
         }
         if self.repo.is_empty() || self.host.is_empty() {
             return Err("Load a GitHub repository before opening i inbox".into());
@@ -175,7 +175,6 @@ impl Workspace {
         self.reading_position = lines::ReadingPosition::default();
         self.selected_files.clear();
         self.collapsed.clear();
-        self.expanded_details.clear();
         self.reveal_file = self.page == 2 && self.pr_tab == 3;
         self.pending_pr = false;
         self.ready_form = None;
@@ -238,31 +237,17 @@ impl Workspace {
             number(item, "number")
         )
     }
-    pub(super) fn accept_active_scope(&self, key: &Key) -> bool {
+    /// Whether a reply started under `scope` still belongs on screen.
+    pub(super) fn accept_scope(&self, key: &Key, scope: &super::lanes::Scope) -> bool {
         match key {
             Key::Write | Key::WorktreeWrite(_) => true,
             Key::Inbox(host, ..) => host == &self.host,
-            _ => self.active_scope.as_ref().is_none_or(|scope| {
-                scope == &(self.host.clone(), self.repo.clone(), self.scope_epoch)
-            }),
+            _ => scope == &(self.host.clone(), self.repo.clone(), self.scope_epoch),
         }
     }
-    /// Host-wide search, newest update first; the query is passed through as search syntax,
-    /// so a saved search can keep its negative qualifiers.
-    pub(super) fn inbox_read(&self, limit: usize) -> Read {
-        let at = self.page - 1;
-        Read::Search {
-            kind: if self.page == 1 {
-                ItemKind::Issue
-            } else {
-                ItemKind::PullRequest
-            },
-            filter: Filter {
-                state: StateFilter::parse(&self.states[at]),
-                query: self.queries[at].clone(),
-            },
-            page: Page::first(limit.min(LIST_CEILING) as u32),
-        }
+    /// A remote inbox item of another repository: this checkout does not hold its files.
+    pub(super) fn foreign_inbox_item(&self) -> bool {
+        self.inbox.enabled && !self.repo.eq_ignore_ascii_case(&self.inbox.home)
     }
     pub(super) fn check_inbox_action(&self, action: &Action) -> Result<(), String> {
         if self.inbox.enabled {
@@ -273,7 +258,7 @@ impl Workspace {
                     | Action::Develop(_)
                     | Action::Run(_)
             ) {
-                return Err("Use i repository mode for creation, development and workflows".into());
+                return Err("Press i to go back to this repository first".into());
             }
             if matches!(action, Action::Checkout(_) | Action::Worktree(_))
                 && !self.repo.eq_ignore_ascii_case(&self.inbox.home)
@@ -285,11 +270,11 @@ impl Workspace {
             }
             let target = match action {
                 Action::Browser(page, id)
+                | Action::Web(page, id, _)
                 | Action::Edit(page, id)
                 | Action::Comment(page, id)
                 | Action::State(page, id, _)
-                | Action::Metadata(page, id, _)
-                | Action::Subscription(page, id) => Some((*page, *id)),
+                | Action::Metadata(page, id, _) => Some((*page, *id)),
                 Action::Review(id)
                 | Action::Merge(id, _)
                 | Action::Checkout(id)
@@ -431,14 +416,14 @@ mod tests {
     fn stale_same_number_reply_and_repository_round_trip_do_not_replace_current_source() {
         let mut workspace = workspace(PathBuf::new());
         let first_epoch = workspace.scope_epoch;
-        workspace.active_scope = Some(("github.com".into(), "alpha/one".into(), first_epoch));
+        let scope: super::super::lanes::Scope = ("github.com".into(), "alpha/one".into(), first_epoch);
         workspace.selected[1] = 1;
         workspace.ensure(false);
-        assert!(!workspace.accept_active_scope(&Key::Item(2, 7)));
+        assert!(!workspace.accept_scope(&Key::Item(2, 7), &scope));
         workspace.selected[1] = 0;
         workspace.ensure(false);
         assert!(
-            !workspace.accept_active_scope(&Key::Item(2, 7)),
+            !workspace.accept_scope(&Key::Item(2, 7), &scope),
             "A → B → A is a new detail generation"
         );
         workspace.cache.insert(
@@ -448,12 +433,11 @@ mod tests {
                 text: String::new(),
             }),
         );
-        workspace.active = Some(Request::placeholder(Key::Item(2, 7)));
         workspace.queue.clear();
         workspace.page = 0; // Consume only the injected reply; never launch a CLI in this state test.
-        workspace.jobs.reply_for_test(
-            PathBuf::new(),
-            workspace.next,
+        workspace.active.answer_for_test(
+            Request::placeholder(Key::Item(2, 7)),
+            scope,
             ForgeReply::Fetched(
                 Read::PullRequest(7),
                 Ok(crate::forge::provider::Fetched::payload(
@@ -466,7 +450,7 @@ mod tests {
             string(workspace.value(&Key::Item(2, 7)).unwrap(), "body"),
             "current alpha"
         );
-        assert!(workspace.active.is_none());
+        assert!(workspace.active.idle());
     }
 
     #[test]
@@ -587,7 +571,7 @@ mod tests {
         assert!(validate_rows(&mut wrong_state, "github.com", 2, "merged").is_err());
         let mut workspace = workspace(PathBuf::new());
         workspace.states[1] = "merged".into();
-        let Read::Search { filter, .. } = workspace.inbox_read(100) else {
+        let Op::Read(_, Read::Search { filter, .. }) = workspace.list_read(100) else {
             panic!("inbox reads search")
         };
         assert_eq!(filter.state, StateFilter::Merged);
@@ -624,7 +608,6 @@ mod tests {
             value: json!({"number":7,"title":"remote seven","state":"OPEN","body":"remote body","files":[]}),
             text: String::new(),
         }));
-        screen.github.expanded_details.insert((2, 7));
         let rows = lines::detail_lines(&screen.github, 100);
         assert!(
             !rows
@@ -651,7 +634,7 @@ mod tests {
             );
             assert!(screen.form.is_none());
             assert!(!screen.github.writing());
-            assert!(screen.github.queue.is_empty() && screen.github.active.is_none());
+            assert!(screen.github.queue.is_empty() && screen.github.active.idle());
             assert_eq!(screen.root(), root.as_path());
             assert_eq!(repo.head().unwrap().target(), Some(head));
             assert_eq!(std::fs::read(repo.path().join("HEAD")).unwrap(), head_file);
@@ -670,7 +653,7 @@ mod tests {
     #[test]
     fn bounded_search_uses_only_supported_fields_and_rejects_wrong_host_or_identity() {
         let workspace = workspace(PathBuf::new());
-        let Read::Search { kind, page, .. } = workspace.inbox_read(200) else {
+        let Op::Read(_, Read::Search { kind, page, .. }) = workspace.list_read(200) else {
             panic!("inbox reads search")
         };
         assert_eq!((kind, page.per_page), (ItemKind::PullRequest, 200));

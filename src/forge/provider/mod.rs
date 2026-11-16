@@ -2,6 +2,10 @@
 //! `ApiRequest`s and responses onto the normalised model. Providers never pick a transport;
 //! `ForgeContext::send` does, and owns the per-Read deadline and the 401 fallback.
 
+mod closing;
+mod common;
+mod parallel;
+mod reactions;
 pub mod gitea;
 pub mod github;
 pub mod gitlab;
@@ -87,8 +91,9 @@ pub struct ForgeContext {
     transport: Mutex<Arc<dyn Transport>>,
     deadline: Mutex<Option<Instant>>,
     fell_back: AtomicBool,
-    /// Work nobody is waiting for (the warm worker); while anonymous its requests are sent as
-    /// `Class::Background` so they stop once half the small quota is spent.
+    /// Work nobody is waiting for (the warm worker, a cached entry's check): its requests are
+    /// sent as `Class::Background`, so they take few of the in-flight slots and stop once the
+    /// quota's reserve is reached (half the small quota while anonymous).
     background: AtomicBool,
 }
 
@@ -253,7 +258,7 @@ impl ForgeContext {
             request.timeout = request.timeout.min(remaining);
         }
         let transport = self.transport();
-        if self.background() && transport.kind().anonymous() {
+        if self.background() {
             request.class = transport::Class::Background;
         }
         let result = transport
@@ -289,7 +294,7 @@ impl ForgeContext {
             .transport
             .lock()
             .unwrap_or_else(|error| error.into_inner()) = next.clone();
-        if self.background() && next.kind().anonymous() {
+        if self.background() {
             request.class = transport::Class::Background;
         }
         next.send(self.host(), &request, cancel)

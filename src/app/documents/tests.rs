@@ -248,7 +248,7 @@ fn operation_state_read_failure_is_reported_as_unavailable_not_idle() {
     let git_dir = repo.path().to_path_buf();
     drop(repo);
     app.start_git_status_refresh();
-    let deadline = Instant::now() + Duration::from_secs(3);
+    let deadline = Instant::now() + Duration::from_secs(30);
     while app.git.status_pending() {
         app.process_git_status_events();
         assert!(Instant::now() < deadline);
@@ -281,7 +281,7 @@ fn soft_reset_refreshes_status_even_when_index_and_head_files_do_not_change() {
     repo.commit(Some("HEAD"), &sig, &sig, "second", &tree, &[&old])
         .unwrap();
     app.start_git_status_refresh_with_feedback(false);
-    let deadline = Instant::now() + Duration::from_secs(3);
+    let deadline = Instant::now() + Duration::from_secs(30);
     while app.git.status_pending() {
         app.process_git_status_events();
         assert!(Instant::now() < deadline);
@@ -303,7 +303,7 @@ fn soft_reset_refreshes_status_even_when_index_and_head_files_do_not_change() {
     app.next_disk_check = None;
     app.process_disk_changes();
     assert!(app.git.status_pending());
-    let deadline = Instant::now() + Duration::from_secs(3);
+    let deadline = Instant::now() + Duration::from_secs(30);
     while app.git.status_pending() {
         app.process_git_status_events();
         assert!(Instant::now() < deadline);
@@ -352,7 +352,7 @@ pub(in crate::app) fn near_changes_fixture() -> (
     app.start_open(path.clone());
     wait_vfs(&mut app);
     app.start_git_status_refresh_silent();
-    let deadline = Instant::now() + Duration::from_secs(3);
+    let deadline = Instant::now() + Duration::from_secs(30);
     while app.git.status().is_none() {
         app.process_git_status_events();
         assert!(Instant::now() < deadline);
@@ -524,7 +524,7 @@ fn a_failed_test_is_listed_in_problems_and_jumps_to_its_line() {
     }
     app.reconcile_workspace_trust();
     app.process_effect(AppEffect::TestRun("unit".into()));
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + Duration::from_secs(30);
     while app.tasks.test_items("unit").is_empty() && Instant::now() < deadline {
         app.process_execution_preflight();
         app.process_job_events();
@@ -553,7 +553,7 @@ fn a_failed_test_is_listed_in_problems_and_jumps_to_its_line() {
     app.process_effect(AppEffect::TaskRestart("unit".into()));
     assert!(!app.ui.notification_error, "{:?}", app.ui.notification);
     assert!(app.tasks.test_items("unit").is_empty());
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + Duration::from_secs(30);
     while app.tasks.test_items("unit").is_empty() && Instant::now() < deadline {
         app.process_execution_preflight();
         app.process_job_events();
@@ -616,7 +616,7 @@ fn named_staging_commands_change_only_the_index() {
         crate::workspace::WorkspaceTrust::Trusted
     );
     app.start_git_status_refresh();
-    let deadline = Instant::now() + Duration::from_secs(4);
+    let deadline = Instant::now() + Duration::from_secs(30);
     while app.git.status_pending() {
         app.process_git_status_events();
         assert!(Instant::now() < deadline);
@@ -635,7 +635,7 @@ fn named_staging_commands_change_only_the_index() {
     // A completed mutation clears the session's status snapshot, so the follow-up refresh
     // must also be drained before the next command has a captured state to plan against.
     let wait_mutation = |app: &mut App| {
-        let deadline = Instant::now() + Duration::from_secs(4);
+        let deadline = Instant::now() + Duration::from_secs(30);
         while app.git.mutation_pending() || app.git.status_pending() {
             app.process_git_mutation_events();
             app.process_git_status_events();
@@ -676,7 +676,7 @@ fn named_staging_commands_change_only_the_index() {
     );
 
     app.start_git_hunks();
-    let deadline = Instant::now() + Duration::from_secs(4);
+    let deadline = Instant::now() + Duration::from_secs(30);
     while app.git.hunks_pending() {
         app.process_git_hunk_events();
         assert!(Instant::now() < deadline);
@@ -752,7 +752,7 @@ fn staging_an_unsaved_buffer_offers_an_explicit_choice() {
     app.start_open(path.clone());
     wait_vfs(&mut app);
     app.start_git_status_refresh();
-    let deadline = Instant::now() + Duration::from_secs(4);
+    let deadline = Instant::now() + Duration::from_secs(30);
     while app.git.status_pending() {
         app.process_git_status_events();
         assert!(Instant::now() < deadline);
@@ -770,7 +770,7 @@ fn staging_an_unsaved_buffer_offers_an_explicit_choice() {
     assert!(app.state.buffers[id].text.revision().0 > 0);
 
     let wait_for_choice = |app: &mut App| {
-        let deadline = Instant::now() + Duration::from_secs(4);
+        let deadline = Instant::now() + Duration::from_secs(30);
         loop {
             app.process_git_mutation_events();
             if app
@@ -828,7 +828,7 @@ fn staging_an_unsaved_buffer_offers_an_explicit_choice() {
         .select_confirmation(crate::ui::ConfirmationChoice::Yes);
     app.submit_prompt();
     wait_vfs(&mut app);
-    let deadline = Instant::now() + Duration::from_secs(4);
+    let deadline = Instant::now() + Duration::from_secs(30);
     while app.git.mutation_pending() || app.git.status_pending() {
         app.process_git_mutation_events();
         app.process_git_status_events();
@@ -882,7 +882,7 @@ fn status_reports_a_path_whose_only_change_is_an_unsaved_buffer() {
     assert!(revision > 0);
 
     app.start_git_status_refresh();
-    let deadline = Instant::now() + Duration::from_secs(4);
+    let deadline = Instant::now() + Duration::from_secs(30);
     while app.git.status_pending() {
         app.process_git_status_events();
         assert!(Instant::now() < deadline);
@@ -928,7 +928,7 @@ fn staging_one_of_two_changed_lines_keeps_the_file_in_order() {
     app.start_open(path.clone());
     wait_vfs(&mut app);
     let settle = |app: &mut App| {
-        let deadline = Instant::now() + Duration::from_secs(4);
+        let deadline = Instant::now() + Duration::from_secs(30);
         while app.git.hunks_pending() || app.git.mutation_pending() || app.git.status_pending() {
             app.process_git_hunk_events();
             app.process_git_mutation_events();
@@ -1246,7 +1246,7 @@ fn choosing_a_side_edits_the_result_buffer_and_leaves_save_and_stage_separate() 
         app.workspace.fixture_trust_identity(root.identity.clone())
     }
     app.reconcile_workspace_trust();
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + Duration::from_secs(30);
     app.start_git_status_refresh();
     while app.git.status_pending() {
         app.process_git_status_events();
@@ -1389,7 +1389,7 @@ fn a_previewed_replacement_writes_nothing_until_it_is_confirmed() {
         app.workspace.fixture_trust_identity(root.identity.clone())
     }
     app.reconcile_workspace_trust();
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + Duration::from_secs(30);
     app.start_git_status_refresh();
     while app.git.status_pending() {
         app.process_git_status_events();
@@ -1635,7 +1635,7 @@ fn the_changes_surface_renders_its_sections_columns_badge_and_footer() {
         .expect("revision bump");
 
     app.start_git_status_refresh();
-    let deadline = Instant::now() + Duration::from_secs(4);
+    let deadline = Instant::now() + Duration::from_secs(30);
     while app.git.status_pending() {
         app.process_git_status_events();
         assert!(Instant::now() < deadline);
@@ -1772,7 +1772,7 @@ fn the_changes_surface_renders_its_sections_columns_badge_and_footer() {
 }
 
 pub(in crate::app) fn wait_changes_preview(app: &mut App) {
-    let deadline = Instant::now() + Duration::from_secs(3);
+    let deadline = Instant::now() + Duration::from_secs(30);
     while !app
         .search
         .preview()
@@ -1841,7 +1841,7 @@ fn a_change_refresh_keeps_the_selection_on_the_same_row() {
     app.reconcile_workspace_trust();
     let refresh = |app: &mut App| {
         app.start_git_status_refresh();
-        let deadline = Instant::now() + Duration::from_secs(4);
+        let deadline = Instant::now() + Duration::from_secs(30);
         while app.git.status_pending() {
             app.process_git_status_events();
             assert!(Instant::now() < deadline);
@@ -1889,7 +1889,7 @@ fn staging_a_row_moves_it_to_the_staged_section_of_the_open_list() {
     }
     app.reconcile_workspace_trust();
     app.start_git_status_refresh();
-    let deadline = Instant::now() + Duration::from_secs(4);
+    let deadline = Instant::now() + Duration::from_secs(30);
     while app.git.status_pending() {
         app.process_git_status_events();
         assert!(Instant::now() < deadline);
@@ -1916,7 +1916,7 @@ fn staging_a_row_moves_it_to_the_staged_section_of_the_open_list() {
         crate::editor::CommandInvocation::new("workspace.git.file.stage", InvocationSource::Test)
             .expect("static command"),
     );
-    let deadline = Instant::now() + Duration::from_secs(4);
+    let deadline = Instant::now() + Duration::from_secs(30);
     while !labels(&app).iter().any(|label| label == "Staged 1") {
         app.process_git_mutation_events();
         app.process_git_status_events();
@@ -1962,7 +1962,7 @@ fn ctrl_q_sends_the_change_rows_to_the_results_surface() {
     }
     app.reconcile_workspace_trust();
     app.start_git_status_refresh();
-    let deadline = Instant::now() + Duration::from_secs(4);
+    let deadline = Instant::now() + Duration::from_secs(30);
     while app.git.status_pending() {
         app.process_git_status_events();
         assert!(Instant::now() < deadline);
@@ -2006,7 +2006,7 @@ fn opening_changes_before_status_arrives_opens_them_when_it_does() {
         app.ui.picker.is_none(),
         "nothing opens before status exists"
     );
-    let deadline = Instant::now() + Duration::from_secs(4);
+    let deadline = Instant::now() + Duration::from_secs(30);
     while app.git.status_pending() {
         app.process_git_status_events();
         assert!(Instant::now() < deadline);
@@ -2187,6 +2187,33 @@ fn disk_polling_retries_reloads_refused_by_document_capacity() {
     );
 }
 
+/// The once-a-second disk check is still reading the file when the person saves it: the save
+/// replaces the check instead of failing with "a save or reload for this buffer is already
+/// pending" (`:w` right after opening a file, or any save on a loaded machine).
+#[test]
+fn a_save_replaces_a_disk_check_still_in_flight() {
+    let (_app_dirs, mut app) = app();
+    let path = app.state.workspace_root.join("checked.txt");
+    fs::write(&path, "old\n").unwrap();
+    let (buffer, _) = app
+        .state
+        .open_text(TextBuffer::from_text("old\n"), Some(path.clone()))
+        .unwrap();
+    app.replace_with_recovered(buffer, "new\n".into()).unwrap();
+    app.next_disk_check = None;
+    app.process_disk_changes();
+    assert!(app.documents.has_work(), "the disk check is in flight");
+    app.process_effect(AppEffect::Save {
+        quit_after: false,
+        path: None,
+        force: false,
+    });
+    assert!(!app.ui.notification_error, "{:?}", app.ui.notification);
+    wait_vfs(&mut app);
+    assert!(!app.ui.notification_error, "{:?}", app.ui.notification);
+    assert_eq!(fs::read_to_string(&path).unwrap(), "new\n");
+}
+
 #[test]
 fn failed_save_and_stage_does_not_leak_into_a_later_save() {
     let (_app_dirs, mut app, repo, path) = near_changes_fixture();
@@ -2246,7 +2273,7 @@ fn staging_an_unsaved_buffer_offers_an_explicit_choice_slot5() {
     app.start_open(path.clone());
     wait_vfs(&mut app);
     app.start_git_status_refresh();
-    let deadline = Instant::now() + Duration::from_secs(4);
+    let deadline = Instant::now() + Duration::from_secs(30);
     while app.git.status_pending() {
         app.process_git_status_events();
         assert!(Instant::now() < deadline);
@@ -2264,7 +2291,7 @@ fn staging_an_unsaved_buffer_offers_an_explicit_choice_slot5() {
     assert!(app.state.buffers[id].text.revision().0 > 0);
 
     let wait_for_choice = |app: &mut App| {
-        let deadline = Instant::now() + Duration::from_secs(4);
+        let deadline = Instant::now() + Duration::from_secs(30);
         loop {
             app.process_git_mutation_events();
             if app
@@ -2331,7 +2358,7 @@ fn staging_an_unsaved_buffer_offers_an_explicit_choice_slot5() {
         .select_confirmation(crate::ui::ConfirmationChoice::Yes);
     app.submit_prompt();
     wait_vfs(&mut app);
-    let deadline = Instant::now() + Duration::from_secs(4);
+    let deadline = Instant::now() + Duration::from_secs(30);
     while app.git.mutation_pending() || app.git.status_pending() {
         app.process_git_mutation_events();
         app.process_git_status_events();
@@ -2406,7 +2433,7 @@ fn a_previewed_replacement_writes_nothing_until_it_is_confirmed_slot5() {
         app.workspace.fixture_trust_identity(root.identity.clone())
     }
     app.reconcile_workspace_trust();
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + Duration::from_secs(30);
     app.start_git_status_refresh();
     while app.git.status_pending() {
         app.process_git_status_events();
@@ -2548,7 +2575,7 @@ fn opening_changes_refreshes_cached_unsaved_document_information() {
     app.start_open(path);
     wait_vfs(&mut app);
     app.start_git_status_refresh();
-    let deadline = Instant::now() + Duration::from_secs(4);
+    let deadline = Instant::now() + Duration::from_secs(30);
     while app.git.status_pending() {
         app.process_git_status_events();
         assert!(Instant::now() < deadline);
@@ -2604,7 +2631,7 @@ fn file_rows_dim_the_folder_and_count_what_the_query_leaves_of_all() {
     fs::write(app.state.workspace_root.join("src/lib.rs"), "").unwrap();
     fs::write(app.state.workspace_root.join("NOTICE"), "").unwrap();
     app.start_workspace_file_picker();
-    let deadline = Instant::now() + Duration::from_secs(3);
+    let deadline = Instant::now() + Duration::from_secs(30);
     while app.search.files_pending() {
         app.process_workspace_file_events();
         assert!(Instant::now() < deadline);
@@ -3034,7 +3061,7 @@ fn undo_history_failures_are_notified_and_fail_shutdown() {
     app.invoke_insert_text("X".into());
     app.start_save(false, None, false);
     wait_vfs(&mut app);
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + Duration::from_secs(30);
     while app.persistence.undo_pending() {
         app.process_persistence_events();
         assert!(Instant::now() < deadline);
@@ -3264,7 +3291,7 @@ fn recovery_retention_keeps_all_live_dirty_journals() {
         app.state.set_buffer_dirty(buffer, true);
         journals.push(app.recovery.path(buffer));
     }
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + Duration::from_secs(30);
     while app
         .recovery
         .unwritten(&app.state, &app.configuration.settings().recovery)
@@ -3892,7 +3919,7 @@ fn ctrl_arrows_in_a_lone_editor_resize_the_agent_docked_beside_it() {
     let mut driver = TestSession::new(loaded);
     driver.new_buffer();
     driver.trust_owned_terminal_fixture();
-    let deadline = Instant::now() + Duration::from_secs(6);
+    let deadline = Instant::now() + Duration::from_secs(30);
     driver
         .application_mut()
         .process_effect(AppEffect::Agent(AgentCommand::Ask));

@@ -12,6 +12,9 @@ struct Kinds {
     bodies: Vec<String>,
     comments: Vec<String>,
     comment_markers: Vec<(String, String)>,
+    tags: Vec<String>,
+    tag_openers: Vec<String>,
+    tag_closers: Vec<String>,
 }
 
 static KINDS: LazyLock<Kinds> = LazyLock::new(|| {
@@ -53,6 +56,11 @@ pub(super) fn collect(tree: &tree_sitter::Tree, source: &str, limit: usize) -> V
             arguments(node, &mut objects, remaining);
         } else if node.is_named() && KINDS.comments.iter().any(|name| name == kind) {
             objects.push(comment(node, source));
+        } else if node.is_named()
+            && KINDS.tags.iter().any(|name| name == kind)
+            && let Some(object) = tag(node)
+        {
+            objects.push(object);
         }
         if objects.len() >= limit {
             break;
@@ -115,6 +123,25 @@ fn comment(node: tree_sitter::Node<'_>, source: &str) -> SyntaxObject {
         inner: (start + leading, start + leading + content.trim().len()),
         parent: None,
     }
+}
+
+/// An element whose first child is its opening tag. The inner range runs from that tag's
+/// end to the closing tag, or to the element's end when the grammar left the closing tag
+/// implied (HTML's `<li>`); a self-closing element has no inner text and is not an object.
+fn tag(node: tree_sitter::Node<'_>) -> Option<SyntaxObject> {
+    let opening = node
+        .child(0)
+        .filter(|child| KINDS.tag_openers.iter().any(|kind| kind == child.kind()))?;
+    let closing = node
+        .child(node.child_count().checked_sub(1)?)
+        .filter(|child| KINDS.tag_closers.iter().any(|kind| kind == child.kind()));
+    let end = closing.map_or(node.end_byte(), |closing| closing.start_byte());
+    Some(SyntaxObject {
+        kind: SyntaxObjectKind::Tag,
+        outer: (node.start_byte(), node.end_byte()),
+        inner: (opening.end_byte(), end.max(opening.end_byte())),
+        parent: None,
+    })
 }
 
 /// The outer range is the whole node; the inner range is its body without the braces, the
@@ -413,6 +440,53 @@ mod tests {
             tree.root_node().to_sexp()
         );
         collect(&tree, source, 100)
+    }
+    #[test]
+    fn html_xml_and_jsx_elements_are_tag_objects() {
+        for (source, language, at, inner, outer) in [
+            (
+                "<div><p>hi <b>there</b></p></div>",
+                tree_sitter_html::LANGUAGE.into(),
+                "hi",
+                "hi <b>there</b>",
+                "<p>hi <b>there</b></p>",
+            ),
+            (
+                "<a><b x=\"1\">text</b></a>",
+                tree_sitter_xml::LANGUAGE_XML.into(),
+                "text",
+                "text",
+                "<b x=\"1\">text</b>",
+            ),
+            (
+                "const v = <div><span>{n}</span></div>;",
+                tree_sitter_typescript::LANGUAGE_TSX.into(),
+                "{n}",
+                "{n}",
+                "<span>{n}</span>",
+            ),
+        ] {
+            let found = parsed(source, language);
+            let cursor = source.find(at).unwrap();
+            let object = found
+                .iter()
+                .filter(|o| {
+                    o.kind == SyntaxObjectKind::Tag && o.outer.0 <= cursor && cursor < o.outer.1
+                })
+                .min_by_key(|o| o.outer.1 - o.outer.0)
+                .unwrap_or_else(|| panic!("no tag in {source}"));
+            assert_eq!(&source[object.inner.0..object.inner.1], inner, "{source}");
+            assert_eq!(&source[object.outer.0..object.outer.1], outer, "{source}");
+        }
+        // A self-closing element has no inside, so it is not a tag object.
+        let found = parsed("<a><b/></a>", tree_sitter_xml::LANGUAGE_XML.into());
+        assert_eq!(
+            found
+                .iter()
+                .filter(|o| o.kind == SyntaxObjectKind::Tag)
+                .count(),
+            1
+        );
     }
     #[test]
     fn ruby_methods_and_parameters_have_objects() {

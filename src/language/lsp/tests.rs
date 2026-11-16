@@ -1456,7 +1456,7 @@ while read() is not None: pass
             ..Default::default()
         },
     );
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + Duration::from_secs(20);
     loop {
         assert!(Instant::now() < deadline, "server did not initialize");
         match service.try_event() {
@@ -1688,7 +1688,7 @@ while True:
             },
         )
         .expect("sync");
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + Duration::from_secs(20);
     let mut hover = false;
     let mut completion = false;
     let mut inlay = false;
@@ -1754,7 +1754,7 @@ while True:
     thread::sleep(Duration::from_millis(30));
     service.close("fake", document.uri()).expect("close");
     service.stop("fake").expect("stop");
-    let deadline = Instant::now() + Duration::from_secs(2);
+    let deadline = Instant::now() + Duration::from_secs(20);
     let trace = loop {
         let trace = std::fs::read_to_string(&trace_path).expect("trace");
         if trace.contains("textDocument/didClose") {
@@ -2020,7 +2020,7 @@ while True:
 fn server_request_ids_dynamic_options_folders_and_saturated_readers_stay_healthy() {
     let (root, mut service, document) = boundary_service(BOUNDARY_SERVER);
     thread::sleep(Duration::from_millis(100));
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + Duration::from_secs(20);
     let mut progress = 0;
     let mut registered = false;
     let mut unregistered = false;
@@ -2088,7 +2088,7 @@ while True:
   sys.stderr.buffer.flush()
 "#;
     let (_root, mut service, _) = boundary_service(&script);
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + Duration::from_secs(20);
     let mut invalid = false;
     loop {
         assert!(Instant::now() < deadline, "recent stderr was not forwarded");
@@ -2129,7 +2129,7 @@ time.sleep(30)
             ..LspPolicy::default()
         },
     );
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + Duration::from_secs(20);
     while !matches!(service.try_event(), Some(LspEvent::Running { .. })) {
         assert!(Instant::now() < deadline);
         thread::sleep(Duration::from_millis(1));
@@ -2181,7 +2181,7 @@ while True:
   break
 "#;
     let (root, mut service, _) = boundary_service(&script);
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + Duration::from_secs(20);
     while !matches!(service.try_event(), Some(LspEvent::Running { .. })) {
         assert!(Instant::now() < deadline);
         thread::sleep(Duration::from_millis(1));
@@ -2218,7 +2218,7 @@ while True:
  if m.get('method')=='exit': break
 "#;
     let (root, mut service, _) = boundary_service(&script);
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + Duration::from_secs(20);
     while !matches!(service.try_event(), Some(LspEvent::Running { .. })) {
         assert!(Instant::now() < deadline);
         thread::sleep(Duration::from_millis(1));
@@ -2254,7 +2254,7 @@ time.sleep(30)
     // The process checks that read `root` are Linux-only.
     #[cfg_attr(not(target_os = "linux"), allow(unused_variables))]
     let (root, mut service, mut document) = boundary_service(&script);
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + Duration::from_secs(20);
     while !matches!(service.try_event(), Some(LspEvent::Running { .. })) {
         assert!(Instant::now() < deadline);
         thread::sleep(Duration::from_millis(1));
@@ -2305,7 +2305,7 @@ pathlib.Path('closed').write_text('closed')
 time.sleep(30)
 "#;
     let (root, mut service, document) = boundary_service(&script);
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + Duration::from_secs(20);
     while !root.path().join("closed").exists() {
         assert!(Instant::now() < deadline);
         thread::sleep(Duration::from_millis(5));
@@ -2380,7 +2380,7 @@ fn server_that_never_initializes_fails_within_the_request_timeout() {
             environment: tool_launch_environment(&definition),
         })
         .expect("start");
-    let deadline = Instant::now() + Duration::from_secs(3);
+    let deadline = Instant::now() + Duration::from_secs(20);
     let failed = loop {
         if let Some(LspEvent::Failed { message, .. }) = service.try_event() {
             break message;

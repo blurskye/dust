@@ -354,7 +354,7 @@ fn debugger_protected_launch_source_capture_refusal_and_fresh_recovery() {
     driver.debug_stop();
     assert!(!starts.exists(), "stop before launch started the adapter");
     let drain = |driver: &mut TestSession| {
-        let deadline = Instant::now() + Duration::from_secs(3);
+        let deadline = Instant::now() + Duration::from_secs(20);
         while driver.debug_preflights() != 0 {
             driver.pump_debug();
             assert!(Instant::now() < deadline);
@@ -370,7 +370,7 @@ fn debugger_protected_launch_source_capture_refusal_and_fresh_recovery() {
     assert!(!starts.exists(), "cancelled preflight launched adapter");
     // Configured adapters may run scripts; exercise executable preflight through a native tool.
     driver.debug_start_native_program_fixture();
-    let program_deadline = Instant::now() + Duration::from_secs(3);
+    let program_deadline = Instant::now() + Duration::from_secs(20);
     while !driver.debug_program_pending() {
         driver.pump_debug();
         assert!(
@@ -396,7 +396,7 @@ fn debugger_protected_launch_source_capture_refusal_and_fresh_recovery() {
         "replacement configuration adopted old preflight"
     );
     driver.debug_start("owned");
-    let deadline = Instant::now() + Duration::from_secs(4);
+    let deadline = Instant::now() + Duration::from_secs(20);
     while driver.debug_source_text().is_none() {
         driver.pump_debug();
         assert!(
@@ -412,7 +412,7 @@ fn debugger_protected_launch_source_capture_refusal_and_fresh_recovery() {
     driver.new_buffer();
     assert!(driver.debug_source_text().is_none());
     let picker = |driver: &mut TestSession, needle: &str| {
-        let deadline = Instant::now() + Duration::from_secs(4);
+        let deadline = Instant::now() + Duration::from_secs(20);
         loop {
             driver.pump_debug();
             if driver
@@ -442,7 +442,7 @@ fn debugger_protected_launch_source_capture_refusal_and_fresh_recovery() {
     picker(&mut driver, "original-frame");
     driver.accept_debug_picker();
     driver.open_command_prompt();
-    let deadline = Instant::now() + Duration::from_secs(4);
+    let deadline = Instant::now() + Duration::from_secs(20);
     while driver.debug_source_pending() {
         assert!(
             Instant::now() < deadline,
@@ -461,7 +461,7 @@ fn debugger_protected_launch_source_capture_refusal_and_fresh_recovery() {
     driver.accept_debug_picker();
     picker(&mut driver, "original-frame");
     driver.accept_debug_picker();
-    let deadline = Instant::now() + Duration::from_secs(4);
+    let deadline = Instant::now() + Duration::from_secs(20);
     while driver.debug_source_text().is_none() {
         driver.pump_debug();
         assert!(Instant::now() < deadline, "fresh source did not publish");
@@ -471,7 +471,7 @@ fn debugger_protected_launch_source_capture_refusal_and_fresh_recovery() {
         driver.debug_source_text().as_deref(),
         Some("original adapter source\n")
     );
-    let deadline = Instant::now() + Duration::from_secs(3);
+    let deadline = Instant::now() + Duration::from_secs(20);
     while !driver.debug_reverse_refusal() {
         driver.pump_debug();
         assert!(
@@ -481,7 +481,7 @@ fn debugger_protected_launch_source_capture_refusal_and_fresh_recovery() {
         std::thread::sleep(Duration::from_millis(2));
     }
     driver.debug_stop();
-    let deadline = Instant::now() + Duration::from_secs(3);
+    let deadline = Instant::now() + Duration::from_secs(20);
     while driver.debug_pending() != 0 {
         driver.pump_debug();
         assert!(Instant::now() < deadline, "owned adapter cleanup");

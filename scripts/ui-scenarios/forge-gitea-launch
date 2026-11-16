@@ -2,7 +2,7 @@
 """Launch Dusty Git against the loopback fake Forgejo or Gitea (forge-gitea.keys, FORGE.md F4).
 
 FORGE_GITEA_WORLD picks `forgejo` (default: code.forgejo.org, Forgejo 17) or `gitea` (gitea.com,
-Gitea main). The disposable repository (the orbit fixture) gets a `forge` remote for
+Gitea main). The disposable repository (the orbit fixture) gets a `forge-<world>` remote for
 `orbit/orbit` on that host; `DUSTY_FORGE_REMOTE` picks it. The fake server runs
 `--world forgejo|gitea` (tests/fixtures/forge/world_gitea.py), answering from the recorded
 fixtures. The token is the fake's (`FORGEJO_TOKEN`, direct HTTP); PATH holds only a fake `tea`
@@ -16,6 +16,23 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
+
+
+def own_remote(name, url):
+    """Point remote `name` at `url` without disturbing any other launch: each world has its own
+    remote (forge-forgejo, forge-gitea, …), so concurrent shots in the one orbit checkout never
+    rewrite the remote another run is reading. A busy config lock is waited out."""
+    for _ in range(50):
+        current = subprocess.run(["git", "remote", "get-url", name], capture_output=True, text=True)
+        if current.returncode == 0 and current.stdout.strip() == url:
+            return
+        verb = "set-url" if current.returncode == 0 else "add"
+        if subprocess.run(["git", "remote", verb, name, url], stderr=subprocess.DEVNULL).returncode == 0:
+            return
+        time.sleep(0.1)
+    sys.exit(f"could not point remote {name} at {url}")
+
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 FIXTURES = ROOT / "tests/fixtures/forge"
@@ -33,7 +50,11 @@ host, version = HOSTS[WORLD]
 work = pathlib.Path(tempfile.mkdtemp(prefix="forge-gitea-"))
 state_path = work / "state.json"
 probe = {"body": {"version": version}}
-state_path.write_text(json.dumps({"probes": {host: {"api/v1/version": probe}}}))
+state = {"probes": {host: {"api/v1/version": probe}}}
+if os.environ.get("FORGE_CONVERSATION"):
+    # world_conversation.py's pull request and issue on top of the recordings.
+    state["conversation"] = True
+state_path.write_text(json.dumps(state))
 server = subprocess.Popen([sys.executable, str(FIXTURES / "server.py"), "--state", str(state_path),
                            "--world", WORLD], stdout=subprocess.PIPE, stdin=subprocess.DEVNULL)
 port = int(server.stdout.readline().strip())
@@ -60,10 +81,9 @@ env.update(
     XDG_DATA_HOME=str(home / "share"),
     DUSTY_FORGE_ORIGIN=f"{url}/{{host}}",
     DUSTY_FORGE_STATE_DIR=str(work / "forge-state"),
-    DUSTY_FORGE_REMOTE="forge",
+    DUSTY_FORGE_REMOTE=f"forge-{WORLD}",
 )
-subprocess.run(["git", "remote", "remove", "forge"], stderr=subprocess.DEVNULL)
-subprocess.run(["git", "remote", "add", "forge", f"https://{host}/orbit/orbit.git"], check=True)
+own_remote(f"forge-{WORLD}", f"https://{host}/orbit/orbit.git")
 try:
     code = subprocess.call([BINARY, *sys.argv[1:]], env=env)
 finally:

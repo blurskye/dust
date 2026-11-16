@@ -947,8 +947,7 @@ mod tests {
         let cwd = env::current_dir().unwrap();
         let root = tempfile::tempdir_in(&cwd).unwrap();
         let path = root.path().join("clangd");
-        fs::write(&path, "#!/bin/sh\n").unwrap();
-        fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).unwrap();
+        crate::testing::write_executable(&path, "#!/bin/sh\n");
         let relative = path.strip_prefix(&cwd).unwrap();
         assert!(!relative.is_absolute());
         assert_eq!(discover_executable(relative.to_str().unwrap()), Some(path));
@@ -990,7 +989,7 @@ mod tests {
     fn executable_discovery_matches_effective_execution_permissions() {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("tool");
-        fs::write(&path, "#!/bin/sh\nexit 0\n").unwrap();
+        crate::testing::write_executable(&path, "#!/bin/sh\nexit 0\n");
         for mode in [0o641, 0o600, 0o700] {
             fs::set_permissions(&path, fs::Permissions::from_mode(mode)).unwrap();
             let can_execute = std::process::Command::new(&path).status().is_ok();
@@ -1041,12 +1040,7 @@ mod tests {
         let bin = root.join("prettier/bin");
         fs::create_dir_all(&bin).unwrap();
         let executable = bin.join("prettier");
-        fs::write(
-            &executable,
-            "#!/bin/sh\nprintf '%s\\n' \"$@\"\nprintf '%s' \"$PATH\"\n",
-        )
-        .unwrap();
-        fs::set_permissions(&executable, fs::Permissions::from_mode(0o700)).unwrap();
+        crate::testing::write_executable(&executable, "#!/bin/sh\nprintf '%s\\n' \"$@\"\nprintf '%s' \"$PATH\"\n",);
         fs::write(bin.join("node"), "runtime").unwrap();
         let path = directory
             .path()

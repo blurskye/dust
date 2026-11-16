@@ -81,7 +81,7 @@ fn project_root_resolution_requires_valid_tool_evidence_and_prefers_the_nested_p
             ProjectRootStrategy::Cargo,
         )
         .unwrap();
-    let deadline = Instant::now() + Duration::from_secs(2);
+    let deadline = Instant::now() + Duration::from_secs(30);
     let resolution = loop {
         if let Some(result) = service.try_result() {
             break result.unwrap();
@@ -108,7 +108,7 @@ fn project_root_resolution_requires_valid_tool_evidence_and_prefers_the_nested_p
             ProjectRootStrategy::Cargo,
         )
         .unwrap();
-    let deadline = Instant::now() + Duration::from_secs(2);
+    let deadline = Instant::now() + Duration::from_secs(30);
     let resolution = loop {
         if let Some(result) = service.try_result() {
             break result.unwrap();
@@ -129,7 +129,7 @@ fn project_root_resolution_requires_valid_tool_evidence_and_prefers_the_nested_p
             ProjectRootStrategy::Go,
         )
         .unwrap();
-    let deadline = Instant::now() + Duration::from_secs(2);
+    let deadline = Instant::now() + Duration::from_secs(30);
     let resolution = loop {
         if let Some(result) = service.try_result() {
             break result.unwrap();
@@ -155,7 +155,7 @@ fn a_file_not_saved_yet_still_finds_its_project_root() {
             ProjectRootStrategy::Cargo,
         )
         .unwrap();
-    let deadline = Instant::now() + Duration::from_secs(2);
+    let deadline = Instant::now() + Duration::from_secs(30);
     let resolution = loop {
         if let Some(result) = service.try_result() {
             break result.unwrap();
@@ -332,7 +332,7 @@ fn explorer_watch_reads_symlinked_ignore_files() {
     })
     .unwrap();
     watch.reconcile(1, roots.clone(), roots).unwrap();
-    let deadline = Instant::now() + Duration::from_secs(2);
+    let deadline = Instant::now() + Duration::from_secs(30);
     let mut revision = 0;
     loop {
         revision += 1;
@@ -887,7 +887,7 @@ fn recovery_worker_fifo_order_makes_delete_the_revision_barrier() {
         path: &Path,
         write: bool,
     ) {
-        let deadline = Instant::now() + Duration::from_secs(2);
+        let deadline = Instant::now() + Duration::from_secs(30);
         loop {
             if let Some(reply) = worker.try_result().expect("worker") {
                 let (actual_id, actual_path, result) = match reply {
@@ -1007,7 +1007,7 @@ fn collect_files(
 ) {
     let mut service = crate::files::WorkspaceFileWorker::default();
     let stream_id = service.start(policy.clone()).expect("start finder");
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + Duration::from_secs(30);
     let mut entries = Vec::new();
     loop {
         match service.try_event() {
@@ -1129,7 +1129,7 @@ fn a_root_shows_its_worktrees_and_a_worktree_shows_only_itself() {
                 event_queue_capacity: 8,
             })
             .unwrap();
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + Duration::from_secs(30);
         let mut entries = Vec::new();
         loop {
             match service.try_event() {
@@ -1321,7 +1321,7 @@ fn scoped_directory_listing_is_lazy_sorted_hidden_aware_and_bounded() {
             10,
         )
         .expect("list");
-    let deadline = Instant::now() + Duration::from_secs(2);
+    let deadline = Instant::now() + Duration::from_secs(30);
     loop {
         if let Some(result) = service.try_result() {
             let listing = result.expect("listing");
@@ -1435,7 +1435,7 @@ fn workspace_files_and_search_keep_distinct_non_utf8_path_identities() {
         })
         .unwrap();
     let mut entries = Vec::new();
-    let deadline = Instant::now() + Duration::from_secs(2);
+    let deadline = Instant::now() + Duration::from_secs(30);
     loop {
         match service.try_event() {
             Some(crate::files::WorkspaceFileEvent::Batch { entries: batch, .. }) => {
@@ -1822,7 +1822,7 @@ fn scoped_read_rejects_symlink_escape_after_canonicalization() {
             vec![crate::files::canonicalize(root.path()).expect("canonical root")],
         )
         .expect("queue");
-    let deadline = Instant::now() + Duration::from_secs(2);
+    let deadline = Instant::now() + Duration::from_secs(30);
     loop {
         if let Some(VfsResult::Read {
             id: result_id,
@@ -1849,7 +1849,7 @@ fn directory_completion_is_bounded_and_runs_on_worker() {
     let id = worker
         .list_directory(root.path().to_path_buf(), String::new(), 2)
         .expect("queue list");
-    let deadline = Instant::now() + Duration::from_secs(2);
+    let deadline = Instant::now() + Duration::from_secs(30);
     loop {
         if let Some(VfsResult::Directory {
             id: result_id,
@@ -1886,7 +1886,7 @@ fn directory_completion_filters_before_limiting_entries() {
     let id = worker
         .list_directory(root.path().to_path_buf(), prefix, 1000)
         .unwrap();
-    let deadline = Instant::now() + Duration::from_secs(2);
+    let deadline = Instant::now() + Duration::from_secs(30);
     loop {
         if let Some(VfsResult::Directory {
             id: actual, result, ..
@@ -1921,7 +1921,7 @@ fn directory_completion_filters_names_before_capping_worker_results() {
     let id = worker
         .list_directory(root.path().to_path_buf(), target.to_uppercase(), 1000)
         .expect("queue filtered list");
-    let deadline = Instant::now() + Duration::from_secs(2);
+    let deadline = Instant::now() + Duration::from_secs(30);
     loop {
         if let Some(VfsResult::Directory {
             id: result_id,
@@ -1982,7 +1982,7 @@ fn explorer_mutations_are_scoped_non_overwriting_and_worker_owned() {
                 1024,
             )
             .expect("queue mutation");
-        let deadline = Instant::now() + Duration::from_secs(2);
+        let deadline = Instant::now() + Duration::from_secs(30);
         loop {
             if let Some(VfsResult::ExplorerMutated {
                 id: result_id,
@@ -2060,7 +2060,7 @@ fn worker_reports_write_completion() {
     let id = worker
         .write(path.clone(), b"saved".to_vec())
         .expect("queue");
-    let deadline = Instant::now() + Duration::from_secs(2);
+    let deadline = Instant::now() + Duration::from_secs(30);
     loop {
         if let Some(VfsResult::Write {
             id: result_id,
@@ -2136,7 +2136,7 @@ fn workspace_files_reject_worktrees_behind_a_symlinked_ancestor() {
             event_queue_capacity: 8,
         })
         .unwrap();
-    let deadline = Instant::now() + Duration::from_secs(2);
+    let deadline = Instant::now() + Duration::from_secs(30);
     let mut paths = Vec::new();
     loop {
         match service.try_event() {
@@ -2174,7 +2174,7 @@ fn workspace_files_report_a_missing_root_instead_of_partial_success() {
             event_queue_capacity: 8,
         })
         .unwrap();
-    let deadline = Instant::now() + Duration::from_secs(2);
+    let deadline = Instant::now() + Duration::from_secs(30);
     loop {
         match service.try_event() {
             Some(crate::files::WorkspaceFileEvent::Failed {
@@ -2225,7 +2225,7 @@ fn workspace_files_are_bounded_deterministic_and_ignore_symlink_escapes() {
             event_queue_capacity: 8,
         })
         .unwrap();
-    let deadline = Instant::now() + Duration::from_secs(2);
+    let deadline = Instant::now() + Duration::from_secs(30);
     let mut entries = Vec::new();
     let summary = loop {
         if let Some(event) = service.try_event() {

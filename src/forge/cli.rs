@@ -56,7 +56,21 @@ impl Transport for CliTransport {
         limiter
             .check(fingerprint, request.class, Instant::now())
             .map_err(|until| TransportError::RateLimited { until })?;
-        let (args, stdin, extra) = argv(self.cli, host, request, self.login.as_deref());
+        let (mut args, mut stdin, extra) = argv(self.cli, host, request, self.login.as_deref());
+        // Authored text travels in a private file the child reads, removed when it exits.
+        let _body = match stdin.take() {
+            Some(bytes) if request.body_file => {
+                let file = body_file(&bytes).map_err(|error| {
+                    TransportError::Spawn(format!("cannot write the request body: {error}"))
+                })?;
+                point_at_file(self.cli, &mut args, file.path());
+                Some(file)
+            }
+            other => {
+                stdin = other;
+                None
+            }
+        };
         let mut env = child_env();
         env.extend(extra.into_iter().map(|(key, value)| (key, value.into())));
         let spec = ProcessSpec {
@@ -163,6 +177,32 @@ pub fn argv(cli: Cli, host: &HostKey, request: &ApiRequest, login: Option<&str>)
         body.bytes()
     });
     (args, stdin, env)
+}
+
+/// A temporary file holding `bytes`, readable by this user only (tempfile creates 0600).
+pub fn body_file(bytes: &[u8]) -> std::io::Result<tempfile::NamedTempFile> {
+    let mut file = tempfile::Builder::new()
+        .prefix("dusty-forge-body-")
+        .suffix(".json")
+        .tempfile()?;
+    std::io::Write::write_all(&mut file, bytes)?;
+    std::io::Write::flush(&mut file)?;
+    Ok(file)
+}
+
+/// Rewrite the stdin form of `argv` (`--input -`, tea's `-d @-`) to read `path` instead.
+pub fn point_at_file(cli: Cli, args: &mut [String], path: &std::path::Path) {
+    let path = path.to_string_lossy().into_owned();
+    let (flag, stdin, file) = match cli {
+        Cli::Tea => ("-d", "@-", format!("@{path}")),
+        _ => ("--input", "-", path),
+    };
+    if let Some(at) = args
+        .windows(2)
+        .position(|pair| pair[0] == flag && pair[1] == stdin)
+    {
+        args[at + 1] = file;
+    }
 }
 
 /// The `--include` form: a status line, headers, a blank line, then the body.
@@ -579,6 +619,39 @@ mod tests {
         );
         assert!(tea.iter().any(|arg| arg == "--include"));
         assert!(tea.windows(2).any(|pair| pair == ["-d", "@-"]));
+    }
+
+    #[test]
+    fn authored_bodies_travel_in_a_private_file_over_every_cli() {
+        let request = ApiRequest::new(Method::Post, "repos/o/r/pulls")
+            .json(serde_json::json!({"title": "t", "body": "long\ndescription"}))
+            .body_file();
+        let file = body_file(&request.body.as_ref().unwrap().bytes()).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(file.path()).unwrap().permissions().mode();
+            assert_eq!(mode & 0o077, 0, "only the user reads the body: {mode:o}");
+        }
+        let written = String::from_utf8(std::fs::read(file.path()).unwrap()).unwrap();
+        assert!(written.contains(r#""body":"long\ndescription""#), "{written}");
+        let path = file.path().to_string_lossy().into_owned();
+        for (cli, flag, value) in [
+            (Cli::Gh, "--input", path.clone()),
+            (Cli::Glab, "--input", path.clone()),
+            (Cli::Tea, "-d", format!("@{path}")),
+        ] {
+            let (mut args, stdin, _) = argv(cli, &HostKey::new("h.test"), &request, None);
+            assert!(stdin.is_some());
+            point_at_file(cli, &mut args, file.path());
+            assert!(
+                args.windows(2).any(|pair| pair[0] == flag && pair[1] == value),
+                "{cli:?}: {args:?}"
+            );
+            assert!(!args.iter().any(|arg| arg == "-" || arg == "@-"), "{args:?}");
+        }
+        drop(file);
+        assert!(!std::path::Path::new(&path).exists(), "the file goes with the request");
     }
 
     #[test]

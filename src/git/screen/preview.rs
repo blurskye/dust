@@ -326,6 +326,24 @@ impl Preview {
         Some((hunk, cursor.checked_sub(header + 1)?))
     }
 
+    /// Where `e` opens the editor (DESIGN.md §5.3): the file of the row at `cursor` and its
+    /// line in the working copy, 1-based. A deleted line opens at the line that took its place,
+    /// a heading at the first line below it.
+    pub fn location(&self, cursor: usize) -> Option<(PathBuf, u32)> {
+        let row = self.rows.get(cursor)?;
+        let path = row
+            .path
+            .clone()
+            .or_else(|| self.rows[cursor..].iter().find_map(|row| row.path.clone()))?;
+        let same = |row: &&PreviewRow| row.path.as_ref() == Some(&path);
+        let line = row
+            .new
+            .or_else(|| self.rows[cursor..].iter().filter(same).find_map(|row| row.new))
+            .or_else(|| self.rows[..cursor].iter().rev().filter(same).find_map(|row| row.new))
+            .unwrap_or(1);
+        Some((path, line))
+    }
+
     pub fn cursor_rows(&self, split: bool) -> Vec<usize> {
         let mut rows = if split {
             self.split
@@ -521,5 +539,24 @@ mod tests {
         assert_eq!(preview.hunk_rows(preview.rows.len()), None);
         let source = Preview::source(Path::new("a.rs"), "plain code\n");
         assert_eq!(source.hunk_rows(1), None);
+    }
+
+    #[test]
+    fn e_opens_the_new_line_and_a_deleted_line_at_the_one_that_took_its_place() {
+        let preview = Preview::git(
+            "diff --git a/a.rs b/a.rs\n--- a/a.rs\n+++ b/a.rs\n@@ -4,3 +4,3 @@\n keep\n-old\n+new\n tail\n",
+            None,
+        );
+        let at = |text: &str| preview.rows.iter().position(|row| row.text.ends_with(text)).unwrap();
+        let line = |index: usize| preview.location(index).map(|(path, line)| (path, line));
+        let a = PathBuf::from("a.rs");
+        assert_eq!(line(at("keep")), Some((a.clone(), 4)));
+        assert_eq!(line(at("old")), Some((a.clone(), 5)));
+        assert_eq!(line(at("new")), Some((a.clone(), 5)));
+        assert_eq!(line(at("tail")), Some((a.clone(), 6)));
+        // The file heading opens at the first line below it.
+        assert_eq!(line(0), Some((a, 4)));
+        let source = Preview::source(Path::new("b.rs"), "one\ntwo\n");
+        assert_eq!(source.location(2), Some((PathBuf::from("b.rs"), 2)));
     }
 }

@@ -225,10 +225,9 @@ impl Harness {
         forge_fake::state(&self.state_path())
     }
 
+    /// Under the fixture's state lock, so a change never races the server's own save.
     fn update(&self, change: impl FnOnce(&mut Value)) {
-        let mut state = self.state();
-        change(&mut state);
-        std::fs::write(self.state_path(), state.to_string()).unwrap();
+        forge_fake::update(&self.state_path(), change);
     }
 
     fn requests(&self) -> Vec<Value> {
@@ -517,8 +516,10 @@ pub fn runs_jobs_steps_logs(harness: &Harness) {
                     .all(|blob| blob["authorization"] == "absent"),
                 "{blobs}"
             );
+            // CI, Release and the turned-off Nightly, with its state (§3.37).
             let workflows = expect!(harness.read(Read::Workflows), Payload::Workflows);
-            assert_eq!(workflows.len(), 2);
+            assert_eq!(workflows.len(), 3);
+            assert_eq!(workflows[2].state, "disabled_manually");
         }
         Forge::GitLab => {
             let all = expect!(harness.read(runs(RunFilter::default())), Payload::Runs);
@@ -527,26 +528,28 @@ pub fn runs_jobs_steps_logs(harness: &Harness) {
                     .iter()
                     .map(|run| run.id.0.as_str())
                     .collect::<Vec<_>>(),
-                ["91", "90", "89"]
+                // Newest update first: the running pipeline started minutes ago.
+                ["89", "91", "90"]
             );
             // A merge request pipeline shows the merge request's source branch.
-            assert_eq!(all.items[0].branch, "retry-uploads");
-            assert_eq!(all.items[0].pr_number, Some(13));
+            assert_eq!(all.items[1].branch, "retry-uploads");
+            assert_eq!(all.items[1].pr_number, Some(13));
             let workflows = expect!(harness.read(Read::Workflows), Payload::Workflows);
             assert_eq!(
                 workflows
                     .iter()
                     .map(|workflow| workflow.id.0.as_str())
                     .collect::<Vec<_>>(),
-                ["merge_request_event", "push"]
+                // Sources in the order the newest pipelines name them.
+                ["push", "merge_request_event"]
             );
             // The workflow filter is a pipeline source; the status filter is translated.
             assert_eq!(
                 run_ids(harness.read(runs(RunFilter {
-                    workflow: Some(workflows[1].id.clone()),
+                    workflow: Some(workflows[0].id.clone()),
                     ..RunFilter::default()
                 }))),
-                ["90", "89"]
+                ["89", "90"]
             );
             assert_eq!(
                 run_ids(harness.read(runs(RunFilter {
@@ -1278,14 +1281,14 @@ pub fn since_merges_without_full_reload(harness: &Harness) {
                     .map(|run| (run.id.0.as_str(), run.status))
                     .collect::<Vec<_>>(),
                 [
+                    ("89", RunStatus::InProgress),
                     ("91", RunStatus::Completed),
-                    ("90", RunStatus::InProgress),
-                    ("89", RunStatus::InProgress)
+                    ("90", RunStatus::InProgress)
                 ]
             );
             assert_eq!(merged.total, Some(3));
             // A merge request pipeline keeps the branch it resolved on the full refresh.
-            assert_eq!(merged.items[0].branch, "retry-uploads");
+            assert_eq!(merged.items[1].branch, "retry-uploads");
             let _ = base;
         }
         Forge::Gitea | Forge::Forgejo => {
@@ -1371,12 +1374,17 @@ impl Harness {
 }
 
 /// Identical reads that overlap share one request.
+///
+/// The forge holds the runs list until three readers are waiting on the first one's fetch,
+/// so they overlap by construction: no response delay to outlast, and a count of this one
+/// flight's followers, not the process-wide `joined`, which the other forges' copies of this
+/// test (running at the same time) also move.
 pub fn concurrent_reads_coalesce(harness: &Harness) {
     harness.warm();
-    // The world answers after 400 ms, so the readers overlap.
-    harness.update(|state| state["delay_ms"] = json!(400));
+    harness.update(|state| {
+        state["read_gates"] = json!([{"path": harness.runs_tail(), "name": "coalesce"}]);
+    });
     let read = runs(RunFilter::default());
-    let joined = dust::forge::inflight::joined();
     let results = std::thread::scope(|scope| {
         let threads = (0..4)
             .map(|_| {
@@ -1394,6 +1402,17 @@ pub fn concurrent_reads_coalesce(harness: &Harness) {
                 })
             })
             .collect::<Vec<_>>();
+        let ctx = harness.ctx();
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while dust::forge::inflight::followers(&ctx, &read, &Conditional::default()) < 3 {
+            assert!(Instant::now() < deadline, "the readers never overlapped");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        std::fs::write(
+            format!("{}.coalesce", harness.state_path().display()),
+            "release",
+        )
+        .unwrap();
         threads
             .into_iter()
             .map(|thread| thread.join().unwrap())
@@ -1406,7 +1425,6 @@ pub fn concurrent_reads_coalesce(harness: &Harness) {
         "{:?}",
         harness.paths()
     );
-    assert_eq!(dust::forge::inflight::joined() - joined, 3);
 }
 
 /// A second read of an unchanged list is a `304` the transport turns back into the answer.

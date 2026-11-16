@@ -136,7 +136,7 @@ fn echoed_tokens_never_reach_error_text_or_host_states() {
         let account = host_state::account(&HostKey::new(host)).unwrap();
         let lines = format!("{:?}", account.lines());
         assert!(!lines.contains(token), "{lines}");
-        assert!(lines.contains("$DUSTY_FORGE_TOKEN") && lines.contains("tester"), "{lines}");
+        assert!(lines.contains("$DUSTY_FORGE_TOKEN") && lines.contains("rowan"), "{lines}");
     }
     // Over HTTP the token travels in a header only, never in the URL.
     for request in world.requests() {
@@ -233,7 +233,7 @@ fn hosts_json_never_holds_a_token_or_a_login() {
     }
     let text = std::fs::read_to_string(&hosts).unwrap();
     assert!(text.contains("claimed.redact.test") && text.contains("status.redact.test"), "{text}");
-    for secret in [GLAB_TOKEN, "maya", "tester", "token"] {
+    for secret in [GLAB_TOKEN, "maya", "rowan", "token"] {
         assert!(!text.contains(secret), "hosts.json holds {secret:?}: {text}");
     }
 }

@@ -410,7 +410,7 @@ pub(super) fn dock_terminal_panel(
     Frame { grid, cursor }
 }
 
-pub(super) fn render_key_hints(
+pub(crate) fn render_key_hints(
     frame: &mut Frame,
     hints: &KeyHintUiState,
     bounds: WindowRect,

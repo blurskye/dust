@@ -9,6 +9,9 @@ use std::time::{Duration, Instant};
 mod forge_fake;
 #[path = "support/forge_screen.rs"]
 mod forge_screen;
+#[path = "support/records.rs"]
+mod records;
+use records::lists;
 use forge_screen::*;
 
 fn key(read: &Read) -> CacheKey {
@@ -183,9 +186,13 @@ fn first_paint_comes_from_disk_while_the_forge_is_slow() {
         entries(&cache_dir()).len() >= 3,
         "the first session wrote the repository, the list and the item"
     );
-    // The last session was an hour ago, so everything shown is also checked again.
+    // The last session was an hour ago, so everything shown is also checked again. The forge
+    // holds that check of the list until released, so whatever the list shows meanwhile came
+    // from disk: no timing decides it.
     age_cache(3600);
-    update_state(|state| state["delay_ms"] = 2000.into());
+    update_state(|state| {
+        state["read_gates"] = serde_json::json!([{"prefix": ["issue", "list"], "name": "slow-list"}]);
+    });
     let started = Instant::now();
     let mut screen = open();
     let opened = started.elapsed();
@@ -193,51 +200,44 @@ fn first_paint_comes_from_disk_while_the_forge_is_slow() {
     let _ = view(&mut screen);
     let at = Instant::now();
     goto(&mut screen, 0, 1);
-    let keys = at.elapsed();
-    let mut first_paint = None;
-    for _ in 0..200 {
-        screen.poll();
-        let polled = at.elapsed();
-        let frame = view(&mut screen);
-        println!(
-            "measured: keys {keys:?}, poll done {polled:?}, frame done {:?}",
-            at.elapsed()
-        );
-        if frame.contains("#8 Navigation issue 8") && frame.contains("#1 Navigation issue 1") {
-            first_paint = Some(at.elapsed());
-            assert!(
-                frame.contains("cached") || frame.contains("updated"),
-                "{frame}"
-            );
-            break;
-        }
-    }
-    let first_paint = first_paint.expect("cached rows are painted without the forge");
-    println!(
-        "measured: first paint from cache {first_paint:?} (screen open {opened:?}, forge delay 2 s)"
+    wait_for(&mut screen, "cached rows", |frame| {
+        lists(frame, 8, "Navigation issue 8") && lists(frame, 1, "Navigation issue 1")
+    });
+    let first_paint = at.elapsed();
+    let frame = view(&mut screen);
+    assert!(
+        frame.contains("cached") || frame.contains("updated"),
+        "{frame}"
     );
-    assert!(first_paint < Duration::from_millis(50), "{first_paint:?}");
+    assert!(
+        !frame.contains("updated just now"),
+        "the held list check cannot have finished:\n{frame}"
+    );
+    println!("measured: first paint from cache {first_paint:?} (screen open {opened:?}, list held)");
     // The background check finishes later and changes nothing visible.
     let before = view(&mut screen)
         .lines()
         .filter(|line| {
-            // A record's title row: `│   ○ #3 …`, or `│ ▸ ○ #3 …` under the cursor.
+            // A record's title row: `│   ○ Navigation issue 3 …`, or `│▎  ○ …` under the cursor.
             line.strip_prefix('│')
-                .map(|rest| rest.trim_start_matches([' ', '▸']))
-                .is_some_and(|rest| rest.starts_with("○ #"))
+                .map(|rest| rest.trim_start_matches([' ', '▸', '▎']))
+                .is_some_and(|rest| rest.starts_with("○ Navigation issue"))
         })
-        .map(str::to_owned)
+        // The list's half: the reader beside it fills in from its own reads meanwhile.
+        .map(|line| line.split("││").next().unwrap_or(line).to_owned())
         .collect::<Vec<_>>();
+    release("slow-list");
     wait(&mut screen, "updated just now");
     let after = view(&mut screen)
         .lines()
         .filter(|line| {
-            // A record's title row: `│   ○ #3 …`, or `│ ▸ ○ #3 …` under the cursor.
+            // A record's title row: `│   ○ Navigation issue 3 …`, or `│▎  ○ …` under the cursor.
             line.strip_prefix('│')
-                .map(|rest| rest.trim_start_matches([' ', '▸']))
-                .is_some_and(|rest| rest.starts_with("○ #"))
+                .map(|rest| rest.trim_start_matches([' ', '▸', '▎']))
+                .is_some_and(|rest| rest.starts_with("○ Navigation issue"))
         })
-        .map(str::to_owned)
+        // The list's half: the reader beside it fills in from its own reads meanwhile.
+        .map(|line| line.split("││").next().unwrap_or(line).to_owned())
         .collect::<Vec<_>>();
     // Every cached record's title row: the seven navigation issues, the cursor's included.
     assert_eq!(before.len(), 7, "{before:#?}");
@@ -273,6 +273,6 @@ fn a_corrupt_cache_is_ignored_by_the_screen() {
     }
     let mut screen = open();
     goto(&mut screen, 0, 1);
-    wait(&mut screen, "#8 Navigation issue 8");
+    wait_for(&mut screen, "#8", |frame| lists(frame, 8, "Navigation issue 8"));
     wait(&mut screen, "Corrupt fixture ready");
 }

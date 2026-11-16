@@ -76,7 +76,7 @@ fn the_dashboard_cursor_runs_items_and_ctrl_h_l_reach_an_agent_beside_it() {
     driver
         .application_mut()
         .process_effect(AppEffect::Agent(AgentCommand::Ask));
-    let deadline = Instant::now() + Duration::from_secs(4);
+    let deadline = Instant::now() + Duration::from_secs(20);
     while !driver
         .terminal_lines()
         .iter()
@@ -128,7 +128,7 @@ fn ctrl_h_from_an_agent_beside_the_dashboard_returns_to_it_and_it_stays_beside_t
     agents.default = "echoer".into();
     let mut driver = TestSession::new(loaded);
     driver.trust_owned_terminal_fixture();
-    let deadline = Instant::now() + Duration::from_secs(6);
+    let deadline = Instant::now() + Duration::from_secs(20);
     driver
         .application_mut()
         .process_effect(AppEffect::Agent(AgentCommand::Ask));

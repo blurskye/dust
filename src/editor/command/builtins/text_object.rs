@@ -45,6 +45,7 @@ pub(super) fn text_object(
         "class" => syntax(objects, SyntaxObjectKind::Class, cursor, around, count),
         "argument" => syntax(objects, SyntaxObjectKind::Argument, cursor, around, count),
         "comment" => syntax(objects, SyntaxObjectKind::Comment, cursor, around, count),
+        "tag" => tag(text, objects, cursor, around, count),
         _ => return Ok(None),
     };
     if count > 1 && matches!(kind, "word" | "big_word" | "paragraph") {
@@ -395,4 +396,111 @@ fn quote(
     ByteRange::new(ByteOffset(start + from), ByteOffset(start + to))
         .map(Some)
         .map_err(failed)
+}
+
+/// A tag pair (`it`/`at`): from the buffer's parse where its grammar has elements (HTML,
+/// XML, JSX), else the nearest enclosing `<name …>…</name>` pair in the text.
+fn tag(
+    text: &TextBuffer,
+    objects: &[SyntaxObject],
+    cursor: ByteOffset,
+    around: bool,
+    count: usize,
+) -> Option<ByteRange> {
+    if objects.iter().any(|object| object.kind == SyntaxObjectKind::Tag)
+        && let Some(range) = syntax(objects, SyntaxObjectKind::Tag, cursor, around, count)
+    {
+        return Some(range);
+    }
+    let source = text.to_string();
+    let at = cursor.get();
+    let pairs = tag_pairs(&source);
+    let mut enclosing = pairs
+        .iter()
+        .filter(|pair| pair.0 <= at && at < pair.3)
+        .collect::<Vec<_>>();
+    enclosing.sort_by_key(|pair| pair.3 - pair.0);
+    let pair = if enclosing.is_empty() {
+        pairs
+            .iter()
+            .filter(|pair| pair.0 > at)
+            .min_by_key(|pair| pair.0)
+    } else {
+        enclosing.get(count.max(1) - 1).copied()
+    }?;
+    let (start, end) = if around {
+        (pair.0, pair.3)
+    } else {
+        (pair.1, pair.2)
+    };
+    ByteRange::new(ByteOffset(start), ByteOffset(end)).ok()
+}
+
+/// Each matched tag pair as (opening start, opening end, closing start, closing end).
+/// Comments, `<!…>` and `<?…>` are skipped, self-closing tags never pair, and an opening
+/// tag with no closing one (`<br>`, a generic `Vec<u8>`) is dropped when an outer tag closes.
+fn tag_pairs(source: &str) -> Vec<(usize, usize, usize, usize)> {
+    let mut stack: Vec<(&str, usize, usize)> = Vec::new();
+    let mut pairs = Vec::new();
+    let mut index = 0;
+    while let Some(found) = source[index..].find('<') {
+        let start = index + found;
+        let rest = &source[start..];
+        if rest.starts_with("<!--") {
+            index = rest.find("-->").map_or(source.len(), |end| start + end + 3);
+            continue;
+        }
+        if rest.starts_with("<!") || rest.starts_with("<?") {
+            index = rest.find('>').map_or(source.len(), |end| start + end + 1);
+            continue;
+        }
+        let closing = rest.starts_with("</");
+        let name_start = start + if closing { 2 } else { 1 };
+        let name_end = source[name_start..]
+            .find(|character: char| {
+                !(character.is_alphanumeric() || matches!(character, '-' | '_' | ':' | '.'))
+            })
+            .map_or(source.len(), |offset| name_start + offset);
+        let name = &source[name_start..name_end];
+        // A name starts with a letter; an empty one is a JSX fragment, `<>` or `</>`.
+        let named = name.chars().next().is_some_and(char::is_alphabetic);
+        if !named && !(name.is_empty() && source[name_end..].starts_with('>')) {
+            index = start + 1;
+            continue;
+        }
+        let Some(end) = tag_end(source, name_end) else {
+            index = start + 1;
+            continue;
+        };
+        if closing {
+            if let Some(depth) = stack.iter().rposition(|(open, _, _)| *open == name) {
+                let (_, open_start, open_end) = stack[depth];
+                stack.truncate(depth);
+                pairs.push((open_start, open_end, start, end));
+            }
+        } else if !source[..end].ends_with("/>") {
+            stack.push((name, start, end));
+        }
+        index = end;
+    }
+    pairs
+}
+
+/// The byte after a tag's `>`, past quoted attribute values and JSX `{…}` expressions.
+fn tag_end(source: &str, from: usize) -> Option<usize> {
+    let mut quote = None;
+    let mut braces = 0_usize;
+    for (offset, character) in source[from..].char_indices() {
+        match (quote, character) {
+            (Some(mark), _) if character == mark => quote = None,
+            (Some(_), _) => {}
+            (None, '"' | '\'') if braces == 0 => quote = Some(character),
+            (None, '{') => braces += 1,
+            (None, '}') => braces = braces.saturating_sub(1),
+            (None, '>') if braces == 0 => return Some(from + offset + 1),
+            (None, '<') if braces == 0 => return None,
+            _ => {}
+        }
+    }
+    None
 }

@@ -78,7 +78,9 @@ def api(argv):
         if word == "-H" and index + 1 < len(argv):
             key, _, value = argv[index + 1].partition(":")
             headers[key.strip()] = value.strip()
-    body = sys.stdin.buffer.read() if flag(argv, "--input") == "-" else None
+    source = flag(argv, "--input")
+    # `--input -` reads stdin; `--input FILE` a file (authored text, like `--body-file`).
+    body = sys.stdin.buffer.read() if source == "-" else (open(source, "rb").read() if source else None)
     quoted = urllib.parse.quote(host, safe=":")
     if endpoint == "graphql":
         url = f"{SERVER}/{quoted}/api/graphql"
@@ -115,7 +117,7 @@ def main():
         reply = post_json("/_fake/auth", {"argv": argv, "host": host})
         finish(reply["code"], reply["stdout"], reply["stderr"])
     if argv[:2] == ["auth", "status"]:
-        finish(0, "", "github.com\n  Logged in to github.com account tester (keyring)\n")
+        finish(0, "", "github.com\n  Logged in to github.com account rowan (keyring)\n")
     if argv[:1] == ["api"]:
         api(argv)
     reply = post_json("/_fake/porcelain", {"argv": argv, "host": host_of(argv)})

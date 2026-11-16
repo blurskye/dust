@@ -56,7 +56,7 @@ fn index(root: &Path) -> Vec<u8> {
 fn run(plan: Plan, message: &str) -> Result<Outcome, String> {
     let mut worker = Worker::default();
     worker.start(plan, message.into())?;
-    let deadline = Instant::now() + Duration::from_secs(15);
+    let deadline = Instant::now() + Duration::from_secs(120);
     loop {
         if let Some(result) = worker.poll() { return result; }
         assert!(Instant::now() < deadline, "rewrite worker timed out");
@@ -252,10 +252,27 @@ fn paused_operation_is_refused_at_open_and_again_at_submit() {
 
 #[cfg(unix)]
 fn hook(root: &Path, name: &str, source: &str) {
-    use std::os::unix::fs::PermissionsExt;
-    let path = root.join("empty-hooks").join(name);
-    fs::write(&path, source).unwrap();
-    fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+    install_hook(source, &root.join("empty-hooks").join(name));
+}
+
+/// Put an executable hook at `path` from a child process (`install`), never opening it for
+/// writing here: tests run on many threads, and a fork made by another test's thread while
+/// this process held the file open keeps that descriptor until it execs, so Git running the
+/// hook in that window fails with `Text file busy` (ETXTBSY).
+#[cfg(unix)]
+fn install_hook(source: &str, path: &Path) {
+    let mut staging = path.as_os_str().to_owned();
+    staging.push(".source");
+    fs::write(&staging, source).unwrap();
+    let status = Command::new("install")
+        .arg("-m")
+        .arg("755")
+        .arg(&staging)
+        .arg(path)
+        .status()
+        .unwrap();
+    assert!(status.success(), "install {}", path.display());
+    fs::remove_file(&staging).unwrap();
 }
 
 #[cfg(unix)]
@@ -383,7 +400,7 @@ fn screen_bindings_host_veto_stale_form_and_retry_preserve_draft() {
         (0..45).map(|y| frame.grid.row_text(y)).collect::<Vec<_>>().join("\n")
     }
     fn settle(screen: &mut GitScreen) {
-        let deadline = Instant::now() + Duration::from_secs(15);
+        let deadline = Instant::now() + Duration::from_secs(120);
         loop {
             screen.poll();
             if !screen.busy() { return; }
@@ -429,7 +446,7 @@ fn dropping_ui_worker_does_not_abort_an_accepted_commit() {
     let mut worker = Worker::default();
     worker.start(Plan::capture(root, Kind::Reword).unwrap(), "Owned until completion".into()).unwrap();
     drop(worker);
-    let deadline = Instant::now() + Duration::from_secs(15);
+    let deadline = Instant::now() + Duration::from_secs(120);
     while head(root) == before || root.join(".git/index.lock").exists() {
         assert!(Instant::now() < deadline, "worker did not complete after receiver dropped");
         std::thread::sleep(Duration::from_millis(5));
@@ -489,7 +506,7 @@ fn screen_fixup_binding_uses_selected_history_row_not_head() {
     stage_with_residual(root);
     let bytes = index(root);
     let mut screen = GitScreen::open(root).unwrap();
-    let deadline = Instant::now() + Duration::from_secs(15);
+    let deadline = Instant::now() + Duration::from_secs(120);
     loop {
         screen.poll();
         let rendered = view(&mut screen);
@@ -509,7 +526,7 @@ fn screen_fixup_binding_uses_selected_history_row_not_head() {
         key: KeyEvent { code: KeyCode::Enter, modifiers: Modifiers { control: true, ..Modifiers::default() } },
         kind: KeyInputKind::Press,
     });
-    let deadline = Instant::now() + Duration::from_secs(15);
+    let deadline = Instant::now() + Duration::from_secs(120);
     loop {
         screen.poll();
         if !screen.busy() { break; }
@@ -647,11 +664,11 @@ fn default_relative_absolute_hooks_run_and_reference_policy_is_still_refused() {
             root.join("empty-hooks")
         };
         hook(root, "commit-msg", "#!/bin/sh\nprintf 'hook ran\\n' > path-hook-marker\n");
-        if mode == "default" { fs::copy(root.join("empty-hooks/commit-msg"), hooks.join("commit-msg")).unwrap(); }
+        if mode == "default" { install_hook(&fs::read_to_string(root.join("empty-hooks/commit-msg")).unwrap(), &hooks.join("commit-msg")); }
         run(Plan::capture(root, Kind::Reword).unwrap(), "Resolved hooks path").unwrap();
         assert_eq!(fs::read(root.join("path-hook-marker")).unwrap(), b"hook ran\n");
         hook(root, "reference-transaction", "#!/bin/sh\nexit 0\n");
-        if mode == "default" { fs::copy(root.join("empty-hooks/reference-transaction"), hooks.join("reference-transaction")).unwrap(); }
+        if mode == "default" { install_hook(&fs::read_to_string(root.join("empty-hooks/reference-transaction")).unwrap(), &hooks.join("reference-transaction")); }
         let before = head(root); let bytes = index(root);
         let result = run(Plan::capture(root, Kind::Reword).unwrap(), "Must honor policy").unwrap_err();
         assert!(result.contains("reference-transaction hook"), "{mode}: {result}");

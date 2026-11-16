@@ -57,6 +57,7 @@ pub fn register_builtin_commands<E: 'static>(
         ("mode.visual_char", "Enter character Visual mode"),
         ("mode.visual_line", "Enter line Visual mode"),
         ("mode.visual_block", "Enter block Visual mode"),
+        ("mode.visual_reselect", "Reselect the last Visual selection"),
         ("edit.delete_char", "Delete character"),
         (
             "edit.delete_backward",

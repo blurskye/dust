@@ -12,14 +12,13 @@ pub(crate) enum Glyph {
     Commit,
     CommitMerge,
     Stash,
-    Worktree,
-    Submodule,
     ChangesPane,
     HistoryPane,
-    Diff,
     PullRequest,
     Issue,
     Actions,
+    /// A workflow (the Actions panes' titles, §4.3); `Actions` stays the tab's status dot.
+    Workflow,
     Notification,
     Cursor,
     Mark,
@@ -28,7 +27,6 @@ pub(crate) enum Glyph {
     FoldOpen,
     Ahead,
     Behind,
-    Conflict,
     Running,
     RangeEdge,
     ReceiptOk,
@@ -39,6 +37,7 @@ pub(crate) enum Glyph {
     Search,
     // Forge (§4.3): lifecycle, checks, reviews and the reader's metadata icons.
     PullMerged,
+    /// The pull request reader's Merge tab when the row is too tight for its name.
     IssueClosed,
     NotPlanned,
     CheckPassed,
@@ -47,17 +46,20 @@ pub(crate) enum Glyph {
     CheckSkipped,
     CheckUnknown,
     ReviewRequested,
+    /// An approving review: not the CI pass mark, so the two never read alike (r11 GL-08).
+    Approved,
+    /// A review requesting changes: not the CI failure mark (DESIGN.md §4.3.1, r15 gitlab-08).
+    ChangesRequested,
+    /// A commit on a forge screen (Commits' day heading): not an open issue's `○` (§4.3.1).
+    ForgeCommit,
     Comment,
     Person,
-    Label,
     Milestone,
-    Viewed,
     Link,
     Dot,
     Unchecked,
     Checked,
     File,
-    Folder,
 }
 
 /// The Nerd Font check (nf-md-check). Nerd fonts built on Fira Code draw U+2713 as a
@@ -92,28 +94,25 @@ pub(crate) fn glyph(glyph: Glyph, mode: ExplorerIconMode) -> &'static str {
         (Stash, NerdFont) => "󰆓",
         (Stash, Unicode) => "≡",
         (Stash, Ascii) => "=",
-        (Worktree, NerdFont) => "󰙅",
-        (Worktree, Unicode) => "⌂",
-        (Worktree, Ascii) => "w",
-        (Submodule, NerdFont) => "󰍲",
-        (Submodule, Unicode) => "⊞",
-        (Submodule, Ascii) => "s",
         (ChangesPane, NerdFont) => "󰊢",
         (ChangesPane, Unicode) => "±",
         (ChangesPane, Ascii) => "+",
         (HistoryPane, NerdFont) => "󰜘",
         (HistoryPane, Unicode) => "⌁",
         (HistoryPane, Ascii) => "~",
-        (Diff, NerdFont) => "󰈙",
-        (Diff, Unicode) => "≠",
-        (Diff, Ascii) => "d",
         (PullRequest, NerdFont) => "",
         (PullRequest, Unicode) => "⎇",
         (PullRequest, Ascii) => "P",
         (Issue, Ascii) => "o",
         (Issue, _) => "○",
+        // GitHub's play-in-a-circle: a `●` here read as one more running dot beside the tab's
+        // own `●` running mark (r16 notif-actions-05).
+        (Actions, NerdFont) => "\u{f144}",
         (Actions, Ascii) => "*",
         (Actions, _) => "●",
+        (Workflow, NerdFont) => "󰑮",
+        (Workflow, Unicode) => "▷",
+        (Workflow, Ascii) => "*",
         (Notification, NerdFont) => "󰂚",
         (Notification, Unicode) => "●",
         (Notification, Ascii) => "!",
@@ -132,8 +131,6 @@ pub(crate) fn glyph(glyph: Glyph, mode: ExplorerIconMode) -> &'static str {
         (Ahead, _) => "↑",
         (Behind, Ascii) => "v",
         (Behind, _) => "↓",
-        (Conflict, Ascii) => "!",
-        (Conflict, _) => "⇄",
         (Running, Ascii) => "~",
         (Running, _) => "⟳",
         (RangeEdge, Ascii) => "|",
@@ -170,24 +167,27 @@ pub(crate) fn glyph(glyph: Glyph, mode: ExplorerIconMode) -> &'static str {
         (CheckPending, _) => "◷",
         (CheckSkipped, Ascii) => "-",
         (CheckSkipped, _) => "⊘",
-        (CheckUnknown, _) => "?",
+        // No checks reported: a dash, not a question mark in the icon column (r11).
+        (CheckUnknown, Ascii) => "-",
+        (CheckUnknown, _) => "–",
         (ReviewRequested, Ascii) => "o",
         (ReviewRequested, _) => "◌",
+        (Approved, Ascii) => "v",
+        (Approved, NerdFont) => "\u{f0513}",
+        (Approved, _) => "✓",
+        (ChangesRequested, Ascii) => "~",
+        (ChangesRequested, _) => "✎",
+        (ForgeCommit, Ascii) => "c",
+        (ForgeCommit, _) => "◦",
         (Comment, NerdFont) => "󰆈",
         (Comment, Unicode) => "❝",
         (Comment, Ascii) => "\"",
         (Person, NerdFont) => "󰀄",
         (Person, Unicode) => "☺",
         (Person, Ascii) => "@",
-        (Label, NerdFont) => "󰓹",
-        (Label, Unicode) => "◆",
-        (Label, Ascii) => "#",
-        (Milestone, NerdFont) => "󰐃",
+        (Milestone, NerdFont) => "",
         (Milestone, Unicode) => "◈",
         (Milestone, Ascii) => "m",
-        (Viewed, NerdFont) => "󰈈",
-        (Viewed, Unicode) => "◉",
-        (Viewed, Ascii) => "v",
         (Link, Ascii) => ">",
         (Link, _) => "↗",
         (Dot, Ascii) => "*",
@@ -199,9 +199,6 @@ pub(crate) fn glyph(glyph: Glyph, mode: ExplorerIconMode) -> &'static str {
         (File, NerdFont) => "󰈙",
         (File, Unicode) => "◇",
         (File, Ascii) => "-",
-        (Folder, NerdFont) => "󰉋",
-        (Folder, Unicode) => "▸",
-        (Folder, Ascii) => "+",
     }
 }
 
@@ -230,6 +227,9 @@ pub(crate) fn lane(symbol: char, mode: ExplorerIconMode) -> &'static str {
 }
 
 /// A file-type glyph and the highlight group that colours it.
+/// Nerd Font `nf-md-file`: the file glyph for paths the icon table does not know.
+pub(crate) const GENERIC_FILE: &str = "\u{f0214}";
+
 pub(crate) fn file(
     path: &std::path::Path,
     mode: ExplorerIconMode,
@@ -250,9 +250,29 @@ pub(crate) fn file(
         _ => Highlight::TYPE,
     };
     let glyph = match mode {
-        ExplorerIconMode::NerdFont => icon.map_or("", |icon| icon.glyph),
+        // A path with no mapping (`notes`, `data.xyz`) gets a plain file glyph, so the icon
+        // column is never an empty slot in a list where every sibling has one.
+        ExplorerIconMode::NerdFont => icon.map_or(GENERIC_FILE, |icon| icon.glyph),
         ExplorerIconMode::Unicode => "◇",
         ExplorerIconMode::Ascii => "-",
     };
     (glyph, role)
+}
+
+#[cfg(test)]
+mod file_tests {
+    use super::*;
+
+    #[test]
+    fn every_file_gets_a_glyph_and_toml_has_its_own() {
+        let nerd = ExplorerIconMode::NerdFont;
+        let toml = file(std::path::Path::new("pyproject.toml"), nerd).0;
+        assert!(!toml.is_empty() && toml != GENERIC_FILE, "{toml:?}");
+        assert_eq!(toml, file(std::path::Path::new("Cargo.toml"), nerd).0);
+        for path in ["notes", "data.unknownext", "dir/.envrc", "Makefile.am"] {
+            let glyph = file(std::path::Path::new(path), nerd).0;
+            assert!(!glyph.trim().is_empty(), "{path}: {glyph:?}");
+        }
+        assert_eq!(file(std::path::Path::new("notes"), nerd).0, GENERIC_FILE);
+    }
 }

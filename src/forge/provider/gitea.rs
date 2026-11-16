@@ -14,6 +14,17 @@ use super::ForgeContext;
 use super::Plan;
 use super::Provider;
 use super::ProviderKind;
+use super::parallel;
+use super::reactions;
+use super::common::count;
+use super::common::edited;
+use super::common::id_of;
+use super::common::is_bot;
+use super::common::path_segment;
+use super::common::repos_path;
+use super::common::run_actor;
+use super::common::span;
+use super::common::text;
 use crate::forge::capability::Cap;
 use crate::forge::capability::Capabilities;
 use crate::forge::capability::GITEA_TERMS;
@@ -354,7 +365,8 @@ pub fn capabilities(server: Server) -> Capabilities {
         reviewers: Cap::Yes,
         projects: Cap::No(PROJECTS_REASON),
         subscribe: Cap::Yes,
-        linked_issues: Cap::No("Pull requests do not list the issues they close here"),
+        // Read from the description's closing keywords (`closing.rs`).
+        linked_issues: Cap::Yes,
         runs_list: runs,
         run_jobs,
         job_steps: steps,
@@ -384,27 +396,12 @@ pub fn capabilities(server: Server) -> Capabilities {
 
 // ------------------------------------------------------------------------------ mapping
 
-fn text(value: &Value, key: &str) -> String {
-    value[key].as_str().unwrap_or_default().to_owned()
-}
-
+/// Gitea sends an unset time as `0001-01-01T00:00:00Z`.
 fn optional(value: &Value, key: &str) -> Option<String> {
     value[key]
         .as_str()
         .filter(|text| !text.is_empty() && !text.starts_with("0001-01-01"))
         .map(str::to_owned)
-}
-
-fn count(value: &Value, key: &str) -> u64 {
-    value[key].as_u64().unwrap_or_default()
-}
-
-fn id_of(value: &Value, key: &str) -> ItemId {
-    match &value[key] {
-        Value::String(text) => ItemId::new(text),
-        Value::Number(number) => ItemId::new(number),
-        _ => ItemId::default(),
-    }
 }
 
 fn user(value: &Value) -> User {
@@ -413,6 +410,7 @@ fn user(value: &Value) -> User {
         login: login.unwrap_or_default(),
         id: value["id"].as_u64().map(ItemId::new),
         name: optional(value, "full_name"),
+        bot: is_bot(value),
     }
 }
 
@@ -598,6 +596,9 @@ pub fn row(value: &Value) -> ItemRow {
         draft: kind == ItemKind::PullRequest && draft(value),
         body_preview: value["body"].as_str().map(preview),
         head_branch: optional(&value["head"], "ref").map(|reference| head_branch(value, reference)),
+        review_tally: None,
+        created: Some(timestamp(value, "created_at")).filter(|created| !created.is_empty()),
+        linked: None,
     }
 }
 
@@ -841,6 +842,7 @@ fn issue(value: &Value) -> Issue {
         closed_reason: None,
         projects: Vec::new(),
         subscribed: None,
+        reactions: Vec::new(),
     }
 }
 
@@ -876,6 +878,8 @@ pub fn threads(comments: &[Value]) -> Vec<ReviewThread> {
                 original_line: (side == Side::Left).then_some(line),
                 commit: commit.clone(),
             }),
+            // A review comment's `updated_at` also moves when the diff under it does.
+            ..Comment::default()
         };
         let resolved = value["resolver"].is_object();
         let same = |thread: &ReviewThread| {
@@ -903,6 +907,8 @@ pub fn threads(comments: &[Value]) -> Vec<ReviewThread> {
                 commit,
                 comments: vec![comment],
                 total_comments: None,
+                diff_hunk: optional(value, "diff_hunk"),
+                start_line: None,
             }),
         }
     }
@@ -955,6 +961,9 @@ fn timeline_event(event: &Value, reviews: &HashMap<u64, Review>) -> Option<Timel
             system: false,
             pending: false,
             position: None,
+            association: None,
+            edited: edited(event, "created_at", "updated_at"),
+            reactions: Vec::new(),
         }),
         // Inline review comments belong to threads.
         "code" => return None,
@@ -996,6 +1005,18 @@ fn timeline_event(event: &Value, reviews: &HashMap<u64, Review>) -> Option<Timel
         },
         "close" => TimelineEvent::Closed { by },
         "reopen" => TimelineEvent::Reopened { by },
+        // `milestone` set, `old_milestone` cleared (both on a change).
+        "milestone" => match (
+            optional(&event["milestone"], "title"),
+            optional(&event["old_milestone"], "title"),
+        ) {
+            (Some(milestone), _) => TimelineEvent::Milestoned { milestone, by },
+            (None, Some(milestone)) => TimelineEvent::Demilestoned { milestone, by },
+            (None, None) => TimelineEvent::Other {
+                kind: "milestone".into(),
+                by,
+            },
+        },
         "merge_pull" => TimelineEvent::Merged {
             sha: optional(event, "ref_commit_sha").unwrap_or_default(),
             by,
@@ -1113,8 +1134,9 @@ pub fn run(value: &Value) -> Run {
             },
             sha: text(value, "commit_sha"),
             event: optional(value, "trigger_event").unwrap_or_else(|| text(value, "event")),
-            created: optional_time(value, "created")
-                .or_else(|| optional_time(value, "started"))
+            // When it started (a re-run starts long after it was created).
+            created: optional_time(value, "started")
+                .or_else(|| optional_time(value, "created"))
                 .unwrap_or_default(),
             duration: value["duration"]
                 .as_u64()
@@ -1125,6 +1147,7 @@ pub fn run(value: &Value) -> Run {
             web_url: text(value, "html_url"),
             pr_number,
             needs_approval: value["need_approval"].as_bool() == Some(true),
+            actor: run_actor(value),
         };
     }
     let conclusion = optional(value, "conclusion");
@@ -1142,15 +1165,20 @@ pub fn run(value: &Value) -> Run {
         branch: text(value, "head_branch"),
         sha: text(value, "head_sha"),
         event: text(value, "event"),
-        created: optional_time(value, "created_at")
+        // When it started (a re-run starts long after it was created).
+        created: optional_time(value, "run_started_at")
             .or_else(|| optional_time(value, "started_at"))
+            .or_else(|| optional_time(value, "created_at"))
             .unwrap_or_default(),
-        duration: None,
+        duration: (value["status"] == "completed")
+            .then(|| span(value, "started_at", "completed_at"))
+            .flatten(),
         attempt,
         attempts: attempt,
         web_url: text(value, "html_url"),
         pr_number: value["pull_requests"][0]["number"].as_u64(),
         needs_approval: value["conclusion"] == "action_required",
+        actor: run_actor(value),
     }
 }
 
@@ -1285,6 +1313,7 @@ pub fn task_runs(tasks: &[Value]) -> Vec<(Run, Vec<Job>)> {
                     web_url: text(task, "url"),
                     pr_number: None,
                     needs_approval: false,
+                    actor: String::new(),
                 },
                 vec![job],
             )),
@@ -1437,6 +1466,36 @@ pub struct ListQuery {
     pub state: Option<StateFilter>,
     /// `@me` in a repository list: the caller substitutes the viewer's login.
     pub needs_viewer: bool,
+    /// Qualifiers Gitea has no parameter for (`no:label`, `-label:bug`, `no:assignee`,
+    /// `no:milestone`, `draft:true`), applied to each row the list returns.
+    pub client: Vec<String>,
+    /// `sort:` (Gitea's lists have no order parameter): the returned rows are sorted.
+    pub sort: Option<String>,
+}
+
+/// Whether a row passes the qualifiers Gitea could not take (`ListQuery::client`).
+pub fn client_keeps(terms: &[String], value: &Value, row: &ItemRow) -> bool {
+    terms.iter().all(|term| {
+        let (negated, term) = match term.strip_prefix('-') {
+            Some(rest) => (true, rest),
+            None => (false, term.as_str()),
+        };
+        let verdict = match term.split_once(':') {
+            Some(("no", "label")) => row.labels.is_empty(),
+            Some(("no", "assignee")) => {
+                value["assignees"].as_array().is_none_or(Vec::is_empty) && value["assignee"].is_null()
+            }
+            Some(("no", "milestone")) => value["milestone"].is_null(),
+            Some(("label", name)) => {
+                let name = name.trim_matches('"');
+                row.labels.iter().any(|label| label.name.eq_ignore_ascii_case(name))
+            }
+            Some(("draft", value)) => row.draft == (value != "false"),
+            Some(("is", "draft")) => row.draft,
+            _ => true,
+        };
+        verdict != negated
+    })
 }
 
 pub fn translate(filter: &Filter, host_wide: bool) -> ListQuery {
@@ -1455,9 +1514,12 @@ pub fn translate(filter: &Filter, host_wide: bool) -> ListQuery {
                 "open" => query.state = Some(StateFilter::Open),
                 "closed" => query.state = Some(StateFilter::Closed),
                 "merged" => query.state = Some(StateFilter::Merged),
+                "draft" => query.client.push(term.to_owned()),
                 _ => {}
             },
-            ("sort", _) | ("draft", _) | ("archived", _) => {}
+            ("sort", _) => query.sort = Some(value.to_owned()),
+            ("archived", _) => {}
+            ("draft", _) | ("no", _) | ("-label", _) => query.client.push(term.to_owned()),
             ("label", _) => labels.push(value.to_owned()),
             ("milestone", false) => param("milestones", value),
             ("author", true) if me => param("created", "true"),
@@ -1526,19 +1588,6 @@ fn list_items(value: Value, key: Option<&str>) -> Vec<Value> {
     }
 }
 
-/// One path segment (label and workflow names may hold spaces or slashes).
-fn path_segment(text: &str) -> String {
-    let mut escaped = String::new();
-    for byte in text.bytes() {
-        if byte.is_ascii_alphanumeric() || b"-_.~".contains(&byte) {
-            escaped.push(byte as char);
-        } else {
-            escaped.push_str(&format!("%{byte:02X}"));
-        }
-    }
-    escaped
-}
-
 // ------------------------------------------------------------------------------ viewed files
 
 /// `<state dir>/viewed/<host>/<owner>/<repo>/<n>.json` (next to `hosts.json`).
@@ -1593,17 +1642,8 @@ fn save_viewed(
 // ------------------------------------------------------------------------------ provider
 
 impl Gitea {
-    fn repo_path(ctx: &ForgeContext, tail: &str) -> Result<String, ForgeError> {
-        let repo = ctx.repo()?;
-        Ok(if tail.is_empty() {
-            format!("repos/{}/{}", repo.owner, repo.name)
-        } else {
-            format!("repos/{}/{}/{tail}", repo.owner, repo.name)
-        })
-    }
-
     fn rest(ctx: &ForgeContext, tail: &str) -> Result<ApiRequest, ForgeError> {
-        Self::repo_path(ctx, tail).map(ApiRequest::get)
+        repos_path(ctx, tail).map(ApiRequest::get)
     }
 
     fn cancelled(cancel: &AtomicBool) -> Result<(), ForgeError> {
@@ -1651,7 +1691,7 @@ impl Gitea {
         request: ApiRequest,
         page: Page,
         filtered: bool,
-        keep: impl Fn(&ItemRow) -> bool,
+        keep: impl Fn(&Value, &ItemRow) -> bool,
         cancel: &AtomicBool,
     ) -> Result<PageOf<ItemRow>, ForgeError> {
         let per_page = page.per_page.max(1) as usize;
@@ -1673,7 +1713,10 @@ impl Gitea {
             let batch = list_items(response.json()?, None);
             let size = batch.len();
             seen += size as u64;
-            rows.extend(batch.iter().map(row).filter(|row| keep(row)));
+            rows.extend(batch.iter().filter_map(|value| {
+                let row = row(value);
+                keep(value, &row).then_some(row)
+            }));
             more = size > 0
                 && match total {
                     Some(total) => (skip as u64 - offset as u64) + seen < total,
@@ -1691,6 +1734,7 @@ impl Gitea {
                 per_page: page.per_page,
             }),
             total: if filtered { None } else { total },
+            other_total: None,
         })
     }
 
@@ -1947,6 +1991,82 @@ impl Gitea {
             .collect())
     }
 
+    /// A status links its run by the run's index in the repository (`…/actions/runs/12`),
+    /// while the API reads a run by its id: list the head commit's runs once and swap each
+    /// index for that run's id. A server without the runs list keeps the index, which its
+    /// `actions/tasks` fallback reads runs by; a run not listed keeps it too.
+    fn run_ids(ctx: &ForgeContext, sha: &str, checks: &mut [Check], cancel: &AtomicBool) {
+        if sha.is_empty() || checks.iter().all(|check| check.run_link.is_none()) {
+            return;
+        }
+        if server(ctx, cancel).require(&RUNS).is_err() {
+            return;
+        }
+        let Ok(request) = Self::rest(ctx, "actions/runs") else {
+            return;
+        };
+        // Gitea filters by `head_sha`; a server that ignores it still lists the newest runs.
+        let request = request.query("head_sha", sha).query("limit", PAGE);
+        let Ok(value) = ctx.json(&request, cancel) else {
+            return;
+        };
+        let runs = list_items(value, Some("workflow_runs"));
+        for link in checks.iter_mut().filter_map(|check| check.run_link.as_mut()) {
+            if let Some(run) = runs
+                .iter()
+                .find(|run| run["run_number"].as_u64().is_some_and(|number| number.to_string() == link.run.0))
+            {
+                link.run = id_of(run, "id");
+            }
+        }
+    }
+
+    /// The issues the description closes (`Closes #12`): neither forge lists them for a pull
+    /// request. This repository's are read for their titles (the first few; one that cannot
+    /// be read keeps its number), another repository's keep their name.
+    fn closing_issues(ctx: &ForgeContext, pull: &Value, cancel: &AtomicBool) -> Vec<LinkRef> {
+        const TITLED: usize = 5;
+        let repo = text(&pull["base"]["repo"], "full_name");
+        let own_web = text(&pull["base"]["repo"], "html_url");
+        super::closing::closing_references(&text(pull, "body"), &repo)
+            .into_iter()
+            .enumerate()
+            .filter_map(|(index, closing)| {
+                let mut link = LinkRef {
+                    number: closing.number,
+                    title: String::new(),
+                    web_url: None,
+                    repo: closing.repo.clone(),
+                    kind: Some(ItemKind::Issue),
+                };
+                match &closing.repo {
+                    Some(other) => {
+                        link.web_url = Some(web(ctx, &format!("{other}/issues/{}", closing.number)));
+                    }
+                    None => {
+                        if !own_web.is_empty() {
+                            link.web_url = Some(format!("{}/issues/{}", own_web.trim_end_matches('/'), closing.number));
+                        }
+                        if index < TITLED
+                            && let Ok(request) = Self::rest(ctx, &format!("issues/{}", closing.number))
+                            && let Ok(issue) = ctx.json(&request, cancel)
+                        {
+                            // `Closes #4` naming a pull request closes nothing.
+                            if issue["pull_request"].is_object() {
+                                return None;
+                            }
+                            link.title = text(&issue, "title");
+                            if let Some(url) = optional(&issue, "html_url") {
+                                link.web_url = Some(url);
+                            }
+                        }
+                    }
+                }
+                Some(link)
+            })
+            .collect()
+    }
+
     fn pull_request(
         ctx: &ForgeContext,
         number: u64,
@@ -1954,35 +2074,29 @@ impl Gitea {
     ) -> Result<PullRequest, ForgeError> {
         let pull = ctx.json(&Self::rest(ctx, &format!("pulls/{number}"))?, cancel)?;
         let viewed = load_viewed(ctx, number);
-        let files = Self::all_pages(
-            ctx,
-            Self::rest(ctx, &format!("pulls/{number}/files"))?,
-            None,
-            cancel,
-        )?
-        .iter()
-        .map(|file| changed_file(file, &viewed))
-        .collect::<Vec<_>>();
-        let commits = Self::all_pages(
-            ctx,
-            Self::rest(ctx, &format!("pulls/{number}/commits"))?,
-            None,
-            cancel,
-        )?
-        .iter()
-        .map(commit)
-        .collect::<Vec<_>>();
-        let reviews = Self::all_pages(
-            ctx,
-            Self::rest(ctx, &format!("pulls/{number}/reviews"))?,
-            None,
-            cancel,
-        )?
-        .iter()
-        .map(review)
-        .collect::<Vec<_>>();
         let head = ref_info(&pull["head"]);
-        let checks = Self::statuses(ctx, &head.sha, cancel)?;
+        let [files, commits, reviews] = ["files", "commits", "reviews"]
+            .map(|part| Self::rest(ctx, &format!("pulls/{number}/{part}")));
+        let (files, commits, reviews) = (files?, commits?, reviews?);
+        // Everything else hangs off the pull itself: one more round trip, not five.
+        let (files, commits, reviews, checks, linked_issues) = std::thread::scope(|scope| {
+            let pages = |request| scope.spawn(move || Self::all_pages(ctx, request, None, cancel));
+            let (files, commits, reviews) = (pages(files), pages(commits), pages(reviews));
+            let linked = scope.spawn(|| Self::closing_issues(ctx, &pull, cancel));
+            let reactions = scope.spawn(|| Self::reactions(ctx, number, cancel));
+            let checks = Self::statuses(ctx, &head.sha, cancel).map(|mut checks| {
+                Self::run_ids(ctx, &head.sha, &mut checks, cancel);
+                checks
+            });
+            use super::parallel::joined;
+            let linked = (joined(linked), joined(reactions));
+            (joined(files), joined(commits), joined(reviews), checks, linked)
+        });
+        let (linked_issues, reactions) = linked_issues;
+        let files = files?.iter().map(|file| changed_file(file, &viewed)).collect::<Vec<_>>();
+        let commits = commits?.iter().map(commit).collect::<Vec<_>>();
+        let reviews = reviews?.iter().map(review).collect::<Vec<_>>();
+        let checks = checks?;
         let reviewers = reviewer_slots(&pull, &reviews);
         let rollup = checks::rollup(&checks);
         let mut item = row(&pull);
@@ -2003,13 +2117,23 @@ impl Gitea {
             commits,
             assignees: users(&pull["assignees"]),
             milestone: milestone(&pull["milestone"]),
-            linked_issues: Vec::new(),
+            linked_issues,
             created: timestamp(&pull, "created_at"),
             fingerprint: fingerprint(&pull, rollup),
             projects: Vec::new(),
             subscribed: None,
+            reactions,
             row: item,
         })
+    }
+
+    /// The reactions on an issue's or pull request's body (one request; none where the
+    /// instance refuses or predates them).
+    fn reactions(ctx: &ForgeContext, number: u64, cancel: &AtomicBool) -> Vec<Reaction> {
+        Self::rest(ctx, &format!("issues/{number}/reactions"))
+            .and_then(|request| ctx.json(&request.query("limit", "50"), cancel))
+            .map(|list| reactions::gitea(&list))
+            .unwrap_or_default()
     }
 
     fn review_threads(
@@ -2023,23 +2147,28 @@ impl Gitea {
             None,
             cancel,
         )?;
-        let mut comments = Vec::new();
-        for review in &reviews {
-            if review["comments_count"].as_u64() == Some(0) {
-                continue;
-            }
+        let commented = reviews
+            .iter()
+            .filter(|review| review["comments_count"].as_u64() != Some(0))
+            .map(|review| text_or_number(review, "id"))
+            .collect::<Vec<_>>();
+        // Each review's comments are their own request; a few go out at once.
+        let pages = parallel::map(&commented, |id| -> Result<Vec<Value>, ForgeError> {
             Self::cancelled(cancel)?;
-            let id = text_or_number(review, "id");
             let request = Self::rest(ctx, &format!("pulls/{number}/reviews/{id}/comments"))?;
             let response = ctx.send(&request, cancel)?;
             // A review deleted since the list was read: its comments went with it.
             if response.status == 404 {
-                continue;
+                return Ok(Vec::new());
             }
             if !response.success() {
                 return Err(crate::forge::http::classify(&ctx.endpoints, &response));
             }
-            comments.extend(list_items(response.json()?, None));
+            Ok(list_items(response.json()?, None))
+        });
+        let mut comments = Vec::new();
+        for page in pages {
+            comments.extend(page?);
         }
         Ok(threads(&comments))
     }
@@ -2210,6 +2339,7 @@ impl Gitea {
                     next: next(total, size),
                     items,
                     total: if filtered { None } else { total },
+                    other_total: None,
                 });
             }
         }
@@ -2224,6 +2354,7 @@ impl Gitea {
                 .collect(),
             next: next(total, size),
             total: None,
+            other_total: None,
         })
     }
 
@@ -2347,6 +2478,42 @@ impl Gitea {
         }
     }
 
+    /// The workflow files of the first workflow directory the repository has, in the order
+    /// the server reads them (`.forgejo/` only on Forgejo); one request per directory tried.
+    fn workflow_files(
+        ctx: &ForgeContext,
+        server: Server,
+        cancel: &AtomicBool,
+    ) -> Result<Vec<Workflow>, ForgeError> {
+        let directories: &[&str] = if server.kind() == ProviderKind::Forgejo {
+            &[".forgejo/workflows", ".gitea/workflows", ".github/workflows"]
+        } else {
+            &[".gitea/workflows", ".github/workflows"]
+        };
+        for directory in directories {
+            Self::cancelled(cancel)?;
+            let response = ctx.send(&Self::rest(ctx, &format!("contents/{directory}"))?, cancel)?;
+            if !response.success() {
+                // Absent (404) or hidden from this account: the next directory, then none.
+                continue;
+            }
+            let files = response
+                .json()?
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter(|entry| text(entry, "type") == "file")
+                .map(|entry| text(entry, "path"))
+                .filter(|path| path.ends_with(".yml") || path.ends_with(".yaml"))
+                .map(|path| workflow_from_path(&path))
+                .collect::<Vec<_>>();
+            if !files.is_empty() {
+                return Ok(files);
+            }
+        }
+        Ok(Vec::new())
+    }
+
     fn workflow_source(
         ctx: &ForgeContext,
         id: &ItemId,
@@ -2448,36 +2615,48 @@ impl Gitea {
                     None
                 };
                 let (request, state) = Self::list_request(ctx, *kind, filter, viewer.as_deref())?;
-                let filtered = matches!(state, StateFilter::Merged | StateFilter::Closed)
-                    && *kind == ItemKind::PullRequest;
-                Payload::Rows(Self::window(
+                let query = translate(filter, false);
+                let filtered = (matches!(state, StateFilter::Merged | StateFilter::Closed)
+                    && *kind == ItemKind::PullRequest)
+                    || !query.client.is_empty();
+                let mut rows = Self::window(
                     ctx,
                     request,
                     *page,
                     filtered,
-                    |row| state_keeps(state, row),
+                    |value, row| state_keeps(state, row) && client_keeps(&query.client, value, row),
                     cancel,
-                )?)
+                )?;
+                if let Some(order) = &query.sort {
+                    super::common::sort_rows(&mut rows.items, order);
+                }
+                Payload::Rows(rows)
             }
             Read::Search { kind, filter, page } => {
                 let (request, state, query) = Self::search_request(*kind, filter);
                 let filtered = query.repo.is_some()
+                    || !query.client.is_empty()
                     || (matches!(state, StateFilter::Merged | StateFilter::Closed)
                         && *kind == ItemKind::PullRequest);
-                Payload::Rows(Self::window(
+                let mut rows = Self::window(
                     ctx,
                     request,
                     *page,
                     filtered,
-                    |row| {
+                    |value, row| {
                         state_keeps(state, row)
+                            && client_keeps(&query.client, value, row)
                             && query
                                 .repo
                                 .as_ref()
                                 .is_none_or(|repo| row.repo.as_deref() == Some(repo))
                     },
                     cancel,
-                )?)
+                )?;
+                if let Some(order) = &query.sort {
+                    super::common::sort_rows(&mut rows.items, order);
+                }
+                Payload::Rows(rows)
             }
             Read::PullRequest(number) => {
                 let pull = Self::pull_request(ctx, *number, cancel)?;
@@ -2488,9 +2667,16 @@ impl Gitea {
                     fingerprint,
                 });
             }
-            Read::Issue(number) => Payload::Issue(Box::new(issue(
-                &ctx.json(&rest(&format!("issues/{number}"))?, cancel)?,
-            ))),
+            Read::Issue(number) => {
+                let (value, reactions) = std::thread::scope(|scope| {
+                    let reactions = scope.spawn(|| Self::reactions(ctx, *number, cancel));
+                    let value = rest(&format!("issues/{number}")).and_then(|request| ctx.json(&request, cancel));
+                    (value, parallel::joined(reactions))
+                });
+                let mut issue = issue(&value?);
+                issue.reactions = reactions;
+                Payload::Issue(Box::new(issue))
+            }
             Read::Fingerprint(number) => {
                 let pull = ctx.json(&rest(&format!("pulls/{number}"))?, cancel)?;
                 let checks = Self::statuses(ctx, &text(&pull["head"], "sha"), cancel)?;
@@ -2524,27 +2710,32 @@ impl Gitea {
             }
             Read::Workflows => {
                 let server = server(ctx, cancel);
-                match server.require(&WORKFLOWS) {
-                    // Forgejo has no list: the rail hides and runs show their workflow file.
-                    Err(_) => Payload::Workflows(Vec::new()),
-                    Ok(known) => {
-                        match Self::probe(
-                            ctx,
-                            &rest("actions/workflows")?,
-                            known,
-                            "workflows",
-                            cancel,
-                        )? {
-                            Some(response) => Payload::Workflows(
-                                list_items(response.json()?, Some("workflows"))
-                                    .iter()
-                                    .map(workflow)
-                                    .collect(),
-                            ),
-                            None => Payload::Workflows(Vec::new()),
-                        }
-                    }
-                }
+                let listed = match server.require(&WORKFLOWS) {
+                    // Forgejo has no list.
+                    Err(_) => None,
+                    Ok(known) => Self::probe(
+                        ctx,
+                        &rest("actions/workflows")?,
+                        known,
+                        "workflows",
+                        cancel,
+                    )?
+                    .map(|response| {
+                        Ok::<_, ForgeError>(
+                            list_items(response.json()?, Some("workflows"))
+                                .iter()
+                                .map(workflow)
+                                .collect::<Vec<_>>(),
+                        )
+                    })
+                    .transpose()?,
+                };
+                // Without the list, the workflow files are the Workflows panel (their on/off
+                // state is not in any API); with none, the runs name theirs.
+                Payload::Workflows(match listed {
+                    Some(workflows) => workflows,
+                    None => Self::workflow_files(ctx, server, cancel)?,
+                })
             }
             Read::WorkflowSource { id, reference } => Payload::Text(Self::workflow_source(
                 ctx,
@@ -2599,14 +2790,13 @@ impl Gitea {
                 Payload::PullRequests(pulls)
             }
             Read::Fingerprints(numbers) => {
+                // The list's check marks ask for every visible row: a few at once.
+                let fetched = parallel::map(numbers, |number| {
+                    Self::fetch(ctx, &Read::Fingerprint(*number), &Conditional::default(), cancel)
+                });
                 let mut prints = Vec::new();
-                for number in numbers {
-                    match Self::fetch(
-                        ctx,
-                        &Read::Fingerprint(*number),
-                        &Conditional::default(),
-                        cancel,
-                    ) {
+                for (number, fetched) in numbers.iter().zip(fetched) {
+                    match fetched {
                         Ok(Fetched::Payload {
                             value: Payload::Fingerprint(print),
                             ..
@@ -2638,6 +2828,7 @@ impl Gitea {
                         per_page: page.per_page,
                     }),
                     total,
+                    other_total: None,
                 })
             }
             // §3.7: read from the base ref locally, never through the API.
@@ -2718,9 +2909,10 @@ impl Gitea {
         }
         Ok(ApiRequest::new(
             Method::Post,
-            Self::repo_path(ctx, &format!("pulls/{number}/reviews"))?,
+            repos_path(ctx, &format!("pulls/{number}/reviews"))?,
         )
-        .json(payload))
+        .json(payload)
+        .body_file())
     }
 
     fn unsupported(capability: &'static str, reason: &str) -> ForgeError {
@@ -2737,7 +2929,7 @@ impl Gitea {
         write: &Write,
         cancel: &AtomicBool,
     ) -> Result<Vec<ApiRequest>, ForgeError> {
-        let path = |tail: &str| Self::repo_path(ctx, tail);
+        let path = |tail: &str| repos_path(ctx, tail);
         let post = |tail: &str, body: Value| -> Result<ApiRequest, ForgeError> {
             Ok(ApiRequest::new(Method::Post, path(tail)?).json(body))
         };
@@ -2787,7 +2979,8 @@ impl Gitea {
                         "head": head,
                         "title": title,
                         "body": request.body,
-                    })),
+                    }))
+                    .body_file(),
                 ]
             }
             Write::Edit {
@@ -2977,6 +3170,12 @@ impl Gitea {
             Write::Resolve { .. } => {
                 return Err(Self::unsupported("resolve_thread", RESOLVE_REASON));
             }
+            Write::CommitSuggestion { .. } => {
+                return Err(Self::unsupported(
+                    "commit_suggestion",
+                    "This forge has no suggested changes to commit · o opens the pull request",
+                ));
+            }
             Write::SubmitReview {
                 number,
                 verdict,
@@ -2995,7 +3194,7 @@ impl Gitea {
                 head.as_deref(),
                 drafts
                     .iter()
-                    .map(|draft| Self::inline(&draft.path, draft.line, draft.side, &draft.body))
+                    .map(|draft| Self::inline(&draft.path, draft.line, draft.side, &draft.range_body()))
                     .collect(),
             )?],
             Write::Merge {
@@ -3467,6 +3666,7 @@ mod tests {
                 line: 3,
                 side: Side::Left,
                 body: "old".into(),
+                start_line: None,
             }],
             head: Some("c92ad11".into()),
         })

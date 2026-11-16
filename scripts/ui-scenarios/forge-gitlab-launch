@@ -23,7 +23,11 @@ FAKE_TOKEN = "ghp_fixture0123456789abcdefABCDEF0123"
 
 work = pathlib.Path(tempfile.mkdtemp(prefix="forge-gitlab-"))
 state_path = work / "state.json"
-state_path.write_text(json.dumps({"glab_auth": {"*": "token"}, "viewer": "tester"}))
+# FORGE_CONVERSATION=1: !15 and #16 carry the full conversation of world_conversation.py.
+state = {"glab_auth": {"*": "token"}, "viewer": "rowan"}
+if os.environ.get("FORGE_CONVERSATION"):
+    state["conversation"] = True
+state_path.write_text(json.dumps(state))
 server = subprocess.Popen([sys.executable, str(FIXTURES / "server.py"), "--state", str(state_path),
                            "--world", "gitlab"], stdout=subprocess.PIPE, stdin=subprocess.DEVNULL)
 port = int(server.stdout.readline().strip())

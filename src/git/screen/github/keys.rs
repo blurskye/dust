@@ -14,10 +14,37 @@ impl Workspace {
         }
     }
 
+    /// The file and new-side line `e` opens (DESIGN.md §5.3): a diff line's own; a deleted
+    /// line's replacement (the next new-side line of its file, else the one before); a review
+    /// thread's line above it; a file or hunk heading's first line below.
+    fn editor_location(&self) -> Option<(String, u32)> {
+        let rows = &self.detail_rows;
+        let at = self.detail_cursor.min(rows.len().checked_sub(1)?);
+        let right = |row: &super::lines::Line| match &row.action {
+            Some(Action::Inline { path, line, side: "RIGHT", .. }) => Some((path.clone(), *line)),
+            _ => None,
+        };
+        if let Some(found) = right(&rows[at]) {
+            return Some(found);
+        }
+        match &rows[at].action {
+            Some(Action::Inline { path, .. }) => rows[at..]
+                .iter()
+                .filter_map(right)
+                .find(|(file, _)| file == path)
+                .or_else(|| rows[..at].iter().rev().filter_map(right).find(|(file, _)| file == path))
+                .or_else(|| Some((path.clone(), 1))),
+            Some(Action::SelectFile(_, path)) => Some((path.clone(), 1)),
+            _ if rows[at].reply.is_some() => rows[..at].iter().rev().find_map(right),
+            _ => rows[at..].iter().take_while(|row| !row.outline).find_map(right),
+        }
+    }
+
     fn reader_tab(&mut self, forward: bool) -> Result<Option<Form>, String> {
+        // An issue is one Conversation page (§3.33): no tabs to step through.
         if self.page == 1 {
-            let tab = (self.issue_tab + if forward { 1 } else { issue::TABS.len() - 1 }) % issue::TABS.len();
-            return self.activate(Action::PrTab(tab));
+            let _ = forward;
+            return Ok(None);
         }
         let current = self.pr_tab.min(pr::CYCLE - 1);
         let tab = (current + if forward { 1 } else { pr::CYCLE - 1 }) % pr::CYCLE;
@@ -30,10 +57,14 @@ impl Workspace {
         key: &KeyEvent,
         write_refusal: Option<&str>,
     ) -> Option<Result<Option<Form>, String>> {
+        // Review drafts and line ranges in Files (`drafts.rs`).
+        if let Some(result) = self.review_key(key) {
+            return Some(result);
+        }
         let reader = self.focus == 2;
         let pull = self.page == 2;
-        // Files keys (`v` viewed, `u` split) belong to the Files reader; from the list `v`
-        // opens the saved views and `l` the labels as everywhere else.
+        // Files keys (`v` viewed, `w` wrap) belong to the Files reader; from the list `v`
+        // opens the saved views, `l` the labels and `w` a worktree as everywhere else.
         let files = pull && self.pr_tab == pr::FILES && reader;
         let row = self.detail_rows.get(self.detail_cursor);
         let result = match key.code {
@@ -86,10 +117,31 @@ impl Workspace {
             KeyCode::Char('m') if !pull => self
                 .selected_number()
                 .and_then(|id| self.activate(Action::Metadata(1, id, "milestone"))),
-            KeyCode::Char('m') => self.selected_number().and_then(|_| self.activate(Action::PrTab(pr::MERGE))),
+            // The merge box ends the Conversation; `m` goes there from anywhere.
+            KeyCode::Char('m') => self.selected_number().and_then(|_| {
+                let result = self.activate(Action::PrTab(pr::CONVERSATION));
+                self.reveal_merge = true;
+                self.reading = false;
+                result
+            }),
             KeyCode::Char('r') if pull => self.selected_number().and_then(|id| self.activate(Action::Review(id))),
+            // Long lines wrap by default; `w` pans them sideways instead, and back. The
+            // cursor keeps its source line (the reading position follows its bytes).
+            KeyCode::Char('w') if files => {
+                self.diff_nowrap = !self.diff_nowrap;
+                self.horizontal = 0;
+                Ok(None)
+            }
             KeyCode::Char('w') if pull => self.selected_number().and_then(|id| self.activate(Action::Worktree(id))),
             KeyCode::Char('d') if pull => self.selected_number().and_then(|_| self.activate(Action::PrTab(pr::FILES))),
+            // On a check `o` opens what Enter opens (its run, else its page on the forge);
+            // elsewhere it opens the pull request in the browser.
+            KeyCode::Char('o')
+                if pull && reader && self.pr_tab == pr::CHECKS && matches!(row.and_then(|row| row.action.as_ref()), Some(Action::Check(..))) =>
+            {
+                let action = row.and_then(|row| row.action.clone()).expect("a check row");
+                self.activate(action)
+            }
             KeyCode::Char('v') if files => {
                 let Ok(id) = self.selected_number() else {
                     return Some(Err("Select a pull request first".into()));
@@ -107,6 +159,19 @@ impl Workspace {
                     self.activate(Action::Viewed(id, path))
                 }
             }
+            // `e` opens the line under the cursor in the editor (DESIGN.md §5.3): the
+            // checkout's copy of the file, at the new side's line. In Commits it does so on a
+            // commit's diff; on the commit list `e` edits the description, as elsewhere.
+            KeyCode::Char('e') if pull && reader && matches!(self.pr_tab, pr::FILES | pr::COMMITS) => {
+                match self.editor_location() {
+                    Some(_) if self.foreign_inbox_item() => {
+                        Err("Remote inbox item: open its local repository to edit its files".into())
+                    }
+                    Some((path, line)) => Err(format!("open-at:{line}:{path}")),
+                    None if self.pr_tab == pr::FILES => Err("No changed line under the cursor".into()),
+                    None => return None,
+                }
+            }
             KeyCode::Char('c') if pull => {
                 // In the reader `c` answers the thread or line under the cursor; elsewhere
                 // it checks the branch out (§5.7).
@@ -122,15 +187,6 @@ impl Workspace {
                     Some(action) => self.activate(action),
                     None => self.selected_number().and_then(|id| self.activate(Action::Checkout(id))),
                 }
-            }
-            // The layout is a preference: too narrow a reader shows unified and says why in
-            // the file heading, and the footer keeps its keys (no error replaces it).
-            KeyCode::Char('u') if files => {
-                self.split_diff = !self.split_diff;
-                views::set_split_preference(&self.root, self.split_diff);
-                self.detail_rows.clear();
-                self.reveal_file = true;
-                Ok(None)
             }
             _ => return None,
         };

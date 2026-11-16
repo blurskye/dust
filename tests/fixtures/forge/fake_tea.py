@@ -75,7 +75,12 @@ def api(argv):
             key, _, value = argv[index + 1].partition(":")
             headers[key.strip()] = value.strip()
     data = flag(argv, "-d", "--data")
-    body = sys.stdin.buffer.read() if data == "@-" else (data.encode() if data else None)
+    if data == "@-":
+        body = sys.stdin.buffer.read()
+    elif data and data.startswith("@"):
+        body = open(data[1:], "rb").read()
+    else:
+        body = data.encode() if data else None
     if body is not None:
         headers.setdefault("Content-Type", "application/json")
     quoted = urllib.parse.quote(host, safe=":")

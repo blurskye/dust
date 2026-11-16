@@ -170,6 +170,9 @@ pub struct ForgeConfig {
 impl ForgeConfig {
     /// The `[forge]` table of the user's config.toml; anything unreadable is ignored.
     pub fn load() -> Self {
+        if crate::forge::sandbox::active() {
+            return Self::default();
+        }
         std::fs::read_to_string(crate::config::user_config_path())
             .map(|text| Self::parse(&text))
             .unwrap_or_default()
@@ -684,7 +687,7 @@ pub fn probe_host(host: &HostKey, env: &Env, cancel: &AtomicBool) -> Option<Prob
 pub fn unknown_provider(host: &HostKey) -> ForgeError {
     ForgeError::Unsupported {
         capability: "provider",
-        reason: format!("Unknown forge at {host} · set [forge.hosts.\"{host}\"].provider"),
+        reason: format!("Unknown site {host} · @ accounts"),
     }
 }
 
@@ -872,14 +875,6 @@ pub fn forget() {
         .lock()
         .unwrap_or_else(|error| error.into_inner())
         .clear();
-}
-
-/// F1's name for the provider of a host, kept for callers that only need the kind. Unknown
-/// hosts are no longer assumed to be GitHub: they must be detected.
-pub fn provider_for(host: &HostKey) -> ProviderKind {
-    detect(host, &ConnectOptions::from_env(), &AtomicBool::new(false))
-        .map(|detected| detected.kind)
-        .unwrap_or(ProviderKind::GitHub)
 }
 
 #[cfg(test)]

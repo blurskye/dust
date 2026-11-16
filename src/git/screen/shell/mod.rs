@@ -126,16 +126,16 @@ pub(super) fn top_bar(app: &GitScreen, grid: &mut CellGrid, width: u16) {
             .iter()
             .any(|branch| branch.head && branch.upstream.is_some())
     });
-    let tab = |glyph, role, label, short| Tab {
+    let tab = |glyph, role, label| Tab {
         glyph,
         role,
         label,
-        short,
         count: None,
+        badge: false,
+        marks: Vec::new(),
     };
     // GitLab says "Merge requests" and "Pipelines" (FORGE.md §4.3).
     let terms = app.github.terms();
-    let pr_short = if terms.pr_glyph == "!" { "MRs" } else { "PRs" };
     let active = GitScreen::TAB_PAGES
         .iter()
         .position(|&page| page == app.page)
@@ -150,28 +150,39 @@ pub(super) fn top_bar(app: &GitScreen, grid: &mut CellGrid, width: u16) {
             operation: app.operation_bar.is_some(),
             divergence: has_upstream.then(|| app.divergence()),
             tabs: vec![
-                tab(Glyph::Repo, GitRole::Focus, "Git", "Git"),
+                tab(Glyph::Repo, GitRole::Focus, "Git"),
                 Tab {
                     count: app.github.tab_count(2).map(|count| count.to_string()),
-                    ..tab(Glyph::PullRequest, GitRole::Ref, terms.pr_plural, pr_short)
+                    ..tab(Glyph::PullRequest, GitRole::Ref, terms.pr_plural)
                 },
                 Tab {
                     count: app.github.tab_count(1).map(|count| count.to_string()),
-                    ..tab(Glyph::Issue, GitRole::Added, "Issues", "Issues")
+                    ..tab(Glyph::Issue, GitRole::Added, "Issues")
                 },
-                tab(
-                    Glyph::Actions,
-                    GitRole::Modified,
-                    terms.actions_tab,
-                    // GitLab calls them pipelines at every width, as the reader's tabs do.
-                    if terms.actions_tab == "Pipelines" { "Pipes" } else { "CI" },
-                ),
+                // GitLab calls them pipelines at every width, as the reader's tabs do.
+                Tab {
+                    // Failing runs and a running mark, as GitHub badges checks (r15 notif-actions-03).
+                    marks: app
+                        .github
+                        .actions_badge()
+                        .map(|(failing, running)| {
+                            let failed = (failing > 0)
+                                .then(|| (format!("{} {failing}", glyphs::glyph(Glyph::CheckFailed, mode)), GitRole::Removed));
+                            // Running is CI's pending mark, not the unread `●` (DESIGN.md §4.3.1).
+                            let dot = running.then(|| (glyphs::glyph(Glyph::CheckPending, mode).to_owned(), GitRole::Modified));
+                            failed.into_iter().chain(dot).collect()
+                        })
+                        .unwrap_or_default(),
+                    ..tab(Glyph::Actions, GitRole::Modified, terms.actions_tab)
+                },
             ]
             .into_iter()
             .chain(app.github.notifications_available().then(|| Tab {
-                // Counted once the page has been read (§3.35): no request just to paint.
-                count: app.github.unread_notifications().map(|count| count.to_string()),
-                ..tab(Glyph::Notification, GitRole::Focus, terms.notifications_tab, "")
+                // The unread badge, on every screen (r9 R8-01): the inbox's first page is
+                // read behind each forge page's own data. No badge for nothing unread.
+                count: app.github.unread_notifications().filter(|count| *count > 0).map(|count| count.to_string()),
+                badge: true,
+                ..tab(Glyph::Notification, GitRole::Focus, terms.notifications_tab)
             }))
             .collect(),
             active,
@@ -227,11 +238,12 @@ pub(super) fn frame(app: &mut GitScreen, width: u16, height: u16) -> Frame {
     } else {
         0
     };
-    let mut lay = layout::layout(
+    let mut lay = layout::fitted(
         width,
         height - tutor_rows,
         app.operation_bar.is_some(),
         empty,
+        rail_rows(app),
     );
     lay.footer.y = height.saturating_sub(1);
     if let Some(rect) = lay.banner {
@@ -243,6 +255,9 @@ pub(super) fn frame(app: &mut GitScreen, width: u16, height: u16) -> Frame {
         } else {
             rail::paint(app, &mut frame, app.focus.min(3), lay.body);
         }
+    } else if app.rail_hidden && app.focus == 4 {
+        // `<leader> e` hid the rail: the reader takes the body until a list has focus.
+        reader::paint(app, &mut frame, lay.body);
     } else {
         for pane in 0..4 {
             rail::paint(app, &mut frame, pane, lay.rail[pane]);
@@ -259,10 +274,16 @@ pub(super) fn frame(app: &mut GitScreen, width: u16, height: u16) -> Frame {
             bold(GitRole::Focus, GitSurface::Sheet),
             width - 1,
         );
+        if let Some(completed) = tutor.completed() {
+            super::tutor::completed_mark(&mut frame.grid, rect.y, &completed, &tutor.title(), width);
+        }
         frame.grid.put_text_clipped(
             1,
             rect.y + 1,
-            &chrome::ellipsize(tutor.instruction(), usize::from(width - 2)),
+            &chrome::ellipsize(
+                &super::tutor::keyed(tutor.instruction(), app.github.key_table()),
+                usize::from(width - 2),
+            ),
             st(GitRole::Text, GitSurface::Sheet),
             width - 1,
         );
@@ -281,27 +302,77 @@ pub(super) fn frame(app: &mut GitScreen, width: u16, height: u16) -> Frame {
     frame
 }
 
+/// How long the rail may wait at its budgets for content counts (a cold open, with no
+/// warm cache): long enough for a usual status read, short enough not to be noticed.
+const RAIL_SETTLE: std::time::Duration = std::time::Duration::from_millis(250);
+
+/// The interior rows each rail pane's content wants (DESIGN.md §2.5): changed files, the
+/// sub-tab row plus local branches, and stashes. History takes what is left, so its own
+/// count is not an input; nor is an open commit's file count (Changes keeps its budget).
+/// Counted once, when status and refs first arrive, and kept for the session: focus,
+/// cursor, refreshes, new branches or files never move a rectangle. Until then every
+/// count is 0 (unknown) and the panes keep their budgets. Panes shown at their budgets
+/// for [`RAIL_SETTLE`] keep them: counts that come later would move what was read.
+fn rail_rows(app: &mut GitScreen) -> [u16; 4] {
+    if let Some(rows) = app.rail_rows {
+        return rows;
+    }
+    let settled = app.rail_unsized.is_some_and(|since| since.elapsed() >= RAIL_SETTLE);
+    if settled {
+        app.rail_rows = Some([0; 4]);
+        return [0; 4];
+    }
+    if app.snapshot.is_none() || app.refs.is_none() {
+        app.rail_unsized.get_or_insert_with(std::time::Instant::now);
+        return [0; 4];
+    }
+    let clamp = |rows: usize| u16::try_from(rows).unwrap_or(u16::MAX);
+    let tabs = app.refs.as_ref().is_some_and(|refs| {
+        refs.worktrees.len() > 1 || refs.submodules.as_ref().is_ok_and(|subs| !subs.is_empty())
+    });
+    let changes = app.snapshot.as_ref().map_or(0, |snapshot| snapshot.entries.len()) + usize::from(tabs);
+    let branches = app
+        .refs
+        .as_ref()
+        .map_or(0, |refs| refs.branches.iter().filter(|branch| !branch.remote).count());
+    let rows = [clamp(changes), clamp(1 + branches), 0, clamp(app.stashes.len())];
+    app.rail_rows = Some(rows);
+    rows
+}
+
 fn banner(app: &GitScreen, grid: &mut CellGrid, rect: Rect) {
     let Some(bar) = &app.operation_bar else {
         return;
     };
     let surface = GitSurface::Warning;
     let mode = app.icon_mode;
+    // What is applied onto what and how many conflict hunks are left (`conflicts.rs`);
+    // Git's own phase when the repository does not say.
+    let context = app.conflict.as_ref();
+    let title = context.map_or_else(|| capitalise(&bar.operation), |context| context.title());
     let mut spans = vec![(
-        format!(
-            "{} {}",
-            glyphs::glyph(Glyph::Running, mode),
-            capitalise(&bar.operation)
-        ),
+        format!("{} {title}", glyphs::glyph(Glyph::Running, mode)),
         bold(GitRole::Modified, surface),
     )];
+    let what = context.and_then(|context| context.what.clone());
+    if let Some(what) = &what {
+        spans.push((format!(" · {what}"), st(GitRole::Text, surface)));
+    }
+    if let Some((step, of)) = context.and_then(|context| context.step) {
+        spans.push((format!(" · commit {step} of {of}"), st(GitRole::Muted, surface)));
+    }
+    let phase = context
+        .and_then(|context| context.progress())
+        .unwrap_or_else(|| bar.phase.clone());
     if let Some(replay) = &app.paused_replay {
-        spans.push((
-            format!(" · {}", app.head_label()),
-            st(GitRole::Text, surface),
-        ));
+        if what.is_none() {
+            spans.push((
+                format!(" · {}", app.head_label()),
+                st(GitRole::Text, surface),
+            ));
+        }
         spans.push(("  │  ".into(), st(GitRole::Border, surface)));
-        spans.push((bar.phase.clone(), bold(GitRole::Text, surface)));
+        spans.push((phase, bold(GitRole::Text, surface)));
         spans.push(("  │  ".into(), st(GitRole::Border, surface)));
         spans.push(("Current ".into(), st(GitRole::Muted, surface)));
         spans.push((
@@ -311,16 +382,21 @@ fn banner(app: &GitScreen, grid: &mut CellGrid, rect: Rect) {
         spans.push((format!(" {}", replay.subject), st(GitRole::Text, surface)));
     } else {
         spans.push(("  │  ".into(), st(GitRole::Border, surface)));
-        spans.push((bar.phase.clone(), bold(GitRole::Text, surface)));
+        spans.push((phase, bold(GitRole::Text, surface)));
     }
+    // Each action names the operation it acts on, where the banner has room; skip only
+    // where Git has one.
+    let wide = rect.w >= 120;
+    let named = |verb: &str| if wide { format!("{verb} {}", bar.operation) } else { verb.to_owned() };
+    let (continue_label, abort_label) = (named("continue"), named("abort"));
     let mut actions = Vec::new();
     if bar.offers(crate::git::GitOperationAction::Continue) {
-        actions.push(("C", "continue"));
+        actions.push(("C", continue_label.as_str()));
     }
     if bar.offers(crate::git::GitOperationAction::Skip) {
-        actions.push(("S", "skip"));
+        actions.push(("S", if wide { "skip commit" } else { "skip" }));
     }
-    actions.push(("X", "abort"));
+    actions.push(("X", abort_label.as_str()));
     chrome::banner(grid, rect, &spans, &actions);
 }
 
@@ -339,6 +415,7 @@ fn footer(app: &GitScreen, frame: &mut Frame, rect: Rect) {
         if filter.editing {
             let surface = GitSurface::TopBar;
             chrome::fill(&mut frame.grid, rect, st(GitRole::Text, surface));
+            let rect = chrome::footer_rect(rect);
             let x = frame.grid.put_text_clipped(
                 rect.x + 1,
                 rect.y,
@@ -347,17 +424,43 @@ fn footer(app: &GitScreen, frame: &mut Frame, rect: Rect) {
                 rect.right(),
             );
             let input = &filter.input;
-            let available = usize::from(rect.right().saturating_sub(x + 30)).max(4);
-            let shown = chrome::ellipsize_start(&input.input[..input.cursor], available);
+            let typing = app.input_mode() == Some(super::modal::InputMode::Insert);
+            let help = if app.modal && typing {
+                "Enter keep · Esc normal · ↑↓ matches"
+            } else {
+                "Enter keep · Esc clear · ↑↓ matches"
+            };
+            // The query keeps clear of the keys at the right.
+            let reserved = chrome::width(help) + 2;
+            let available = usize::from(rect.right().saturating_sub(x + reserved)).max(4);
+            let before = &input.input[..input.cursor];
+            let shown = chrome::ellipsize_start(before, available);
             let cursor = frame.grid.put_text_clipped(x, rect.y, &shown, st(GitRole::Text, surface), rect.right());
             frame.grid.put_text_clipped(
                 cursor,
                 rect.y,
                 &input.input[input.cursor..],
                 st(GitRole::Text, surface),
-                rect.right().saturating_sub(28),
+                rect.right().saturating_sub(reserved),
             );
-            let help = "Enter keep · Esc clear · ↑↓ matches";
+            // A modal screen's query box: its Visual selection, and a block cursor out of
+            // Insert mode, as a form's box shows them.
+            let (highlight, block) = app.filter_box_marks();
+            if let Some(range) = highlight {
+                let cut = shown != before;
+                let visible = if cut { input.cursor - (shown.len() - '…'.len_utf8()) } else { 0 };
+                let (start, end) = (range.start.max(visible), range.end.min(input.input.len()));
+                if start < end {
+                    let at = x + u16::from(cut) + chrome::width(&input.input[visible..start]);
+                    frame.grid.put_text_clipped(
+                        at,
+                        rect.y,
+                        &input.input[start..end],
+                        crate::ui::Style::Selection,
+                        rect.right().saturating_sub(reserved),
+                    );
+                }
+            }
             frame.grid.put_text_clipped(
                 rect.right().saturating_sub(chrome::width(help) + 1),
                 rect.y,
@@ -365,39 +468,43 @@ fn footer(app: &GitScreen, frame: &mut Frame, rect: Rect) {
                 st(GitRole::Muted, surface),
                 rect.right(),
             );
-            frame.cursor = Some((cursor, rect.y, crossterm::cursor::SetCursorStyle::SteadyBar));
+            let shape = if block {
+                crossterm::cursor::SetCursorStyle::SteadyBlock
+            } else {
+                crossterm::cursor::SetCursorStyle::SteadyBar
+            };
+            frame.cursor = Some((cursor, rect.y, shape));
             return;
         }
     }
     let grid = &mut frame.grid;
     if app.form.is_some() {
-        let multiline = app
-            .form
-            .as_ref()
-            .is_some_and(|form| form.fields.iter().any(|field| field.multiline));
         let commit = app
             .form
             .as_ref()
             .is_some_and(|form| matches!(form.action, super::FormAction::Commit));
-        let hints: &[(&str, &str)] = if commit {
-            &[
-                ("C-Enter", "commit"),
-                ("Tab", "next field"),
-                ("M-s M-a M-n", "sign-off · amend · skip hooks"),
-                ("Esc", "back"),
-            ]
-        } else if multiline {
-            &[("C-Enter", "confirm"), ("Tab", "next field"), ("Esc", "cancel")]
-        } else {
-            &[("Enter", "confirm"), ("Tab", "next field"), ("Esc", "cancel")]
-        };
+        // A modal screen's box: Esc leaves Insert mode first, then closes the form.
+        let typing = app.input_mode() == Some(super::modal::InputMode::Insert);
+        let visual = app.input_mode() == Some(super::modal::InputMode::Visual);
+        // The sheet prints its own keys (Enter or Ctrl+Enter, Tab, Esc, and a Visual
+        // selection's verbs); this bar keeps the mode chip and what the sheet does not say,
+        // so no key is printed twice (r16 git-tab-03).
+        let mut hints: Vec<(&str, &str)> = Vec::new();
+        if commit && !visual && !sheet::commit_keys_beside_toggles(rect) {
+            // Only show the toggles' keys here when they do not fit beside the boxes.
+            hints.push(("M-s M-a M-n", "sign-off · amend · skip hooks"));
+        }
+        if typing && !commit {
+            // Other forms still need to explain how to leave Insert mode.
+            hints.push(("Esc", "normal mode"));
+        }
         // A refusal answering this form stays visible beside it.
         let message = (!app.busy && !app.notice.is_empty()).then(|| (app.notice.as_str(), true));
-        chrome::footer(grid, rect, hints, "", message);
+        chrome::footer(grid, rect, &hints, "", message);
         return;
     }
     let message = if app.busy {
-        Some(("Git operation running…", false))
+        Some((app.busy_line(), false))
     } else if !app.notice.is_empty() {
         Some((app.notice.as_str(), looks_like_error(&app.notice)))
     } else {
@@ -413,59 +520,94 @@ fn footer(app: &GitScreen, frame: &mut Frame, rect: Rect) {
         ]
     } else if app.focus == 4 && app.last_list == 0 && app.preview.patch {
         vec![
-            ("Space", if staged { "unstage hunk" } else { "stage hunk" }),
-            ("a", "line"),
+            if staged { ("u", "unstage hunk") } else { ("s", "stage hunk") },
+            // A verb on every hint (r16 git-tab-09).
+            ("a", if staged { "unstage line" } else { "stage line" }),
             ("V", "range"),
             ("d", "discard"),
-            ("s", "split"),
+            ("|", "split"),
+            ("e", "editor"),
         ]
     } else if app.focus == 4 && app.last_list == 2 {
+        // The commit reader: a commit's keys, not the worktree's (r16 git-tab-01).
         vec![
-            ("Enter", "files"),
             ("m", "message"),
+            ("y", "copy"),
+            ("o", "open on forge"),
+            ("e", "editor"),
             ("/", "find"),
-            ("s", "split"),
+            ("Esc", "back"),
+        ]
+    } else if app.commit_open {
+        // The commit's file list: nothing here stages, unstages or discards.
+        vec![
+            ("Enter", "read"),
+            ("m", "message"),
+            ("y", "copy"),
+            ("o", "open on forge"),
+            ("/", "filter"),
             ("Esc", "back"),
         ]
     } else if app.focus == 4 {
-        vec![("/", "find"), ("s", "split"), ("Esc", "back")]
+        // `e` opens the line under the cursor in the editor (DESIGN.md §5.3).
+        vec![("/", "find"), ("e", "editor"), ("|", "split"), ("Esc", "back")]
     } else if marked {
+        // `x` first: beside a long refusal the row ends at the first hint that does not
+        // fit, and marking is what is left to do then.
         vec![
-            ("Space", "stage marked"),
             ("x", "mark"),
+            ("s", "stage marked"),
+            ("u", "unstage"),
             ("V", "range"),
             ("Esc", "clear"),
         ]
     } else {
         match (app.focus, app.files_view, app.subview, app.history_view) {
             (0, 1, ..) => vec![("Enter", "open"), ("n", "new worktree"), ("d", "remove")],
-            (0, 2, ..) => vec![("Space", "pointer"), ("Enter", "open"), ("u", "update")],
+            (0, 2, ..) => vec![
+                ("s", "pointer"),
+                ("Enter", "open"),
+                ("u", "update"),
+                ("-", "toggle"),
+            ],
+            // Commit before lazygit's `a` (stage or unstage all): a narrow footer keeps the
+            // first ones. `/` is on `?`.
             (0, ..) => vec![
-                ("Space", if staged { "unstage" } else { "stage" }),
-                ("v", "lines"),
+                ("s", "stage"),
+                ("u", "unstage"),
                 ("c", "commit"),
+                ("a", "all"),
+                ("v", "lines"),
                 ("d", "discard"),
-                ("/", "find"),
             ],
             (1, _, 2, _) => vec![("Enter", "open"), ("f", "fetch"), ("/", "find")],
-            (1, _, 3, _) => vec![("Enter", "inspect"), ("d", "delete"), ("/", "find")],
+            (1, _, 3, _) => vec![("Enter", "inspect"), ("d", "delete"), ("P", "push"), ("/", "find")],
             (1, ..) => vec![
                 ("Enter", "checkout"),
                 ("n", "new"),
+                // `o` (the branch's pull request, or the sheet that opens one, §3.31) is in
+                // the help sheet: the footer holds five actions.
                 ("m", "merge"),
                 ("R", "rebase"),
                 ("d", "delete"),
             ],
-            (2, _, _, 1) => vec![("n", "rescue branch"), ("Space", "detach"), ("Enter", "files")],
+            (2, _, _, 1) => vec![("n", "rescue branch"), ("o", "detach"), ("Enter", "files")],
             (2, ..) => vec![
                 ("Enter", "files"),
-                ("A", "amend"),
                 ("W", "reword"),
-                ("F", "fixup"),
-                ("/", "find"),
+                ("s", "squash"),
+                ("d", "drop"),
+                ("J K", "move"),
             ],
             _ => vec![("a", "apply"), ("p", "pop"), ("d", "drop"), ("n", "save")],
         }
+    };
+    // The keys in force: the lazygit preset shows its own key for each action.
+    let shown = app.github.key_table().show_all(app.key_panel(), &hints);
+    // On a conflict the footer says its pick keys (`conflicts.rs`), already in force.
+    let hints: Vec<(&str, &str)> = match app.conflict_hints() {
+        Some(conflict) => conflict,
+        None => shown.iter().map(|(keys, label)| (keys.as_str(), *label)).collect(),
     };
     let search = &app.preview.search;
     let context = if app.focus == 4 && search.active() {

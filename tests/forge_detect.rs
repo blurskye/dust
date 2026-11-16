@@ -207,13 +207,13 @@ fn an_unknown_host_is_claimed_only_through_a_cli_credential() {
         error,
         ForgeError::Unsupported {
             capability: "provider",
-            reason: "Unknown forge at nobody.corp.test · set [forge.hosts.\"nobody.corp.test\"].provider".into(),
+            reason: "Unknown site nobody.corp.test · @ accounts".into(),
         }
     );
     assert!(
         error
             .to_string()
-            .ends_with("Unknown forge at nobody.corp.test · set [forge.hosts.\"nobody.corp.test\"].provider"),
+            .ends_with("Unknown site nobody.corp.test · @ accounts"),
         "{error}"
     );
     let probed: Vec<String> = world
@@ -313,7 +313,7 @@ fn hosts_json_caches_probes_for_seven_days_without_secrets() {
     assert_eq!(record["server_version"], "10.0.0+gitea-1.22.0");
     assert!(record["probed_at"].as_u64().unwrap() > 0);
     assert!(record["capabilities_observed"].is_object());
-    for secret in [TEA_TOKEN, FAKE_TOKEN, "tester"] {
+    for secret in [TEA_TOKEN, FAKE_TOKEN, "rowan"] {
         assert!(!text.contains(secret), "hosts.json holds {secret:?}");
     }
 

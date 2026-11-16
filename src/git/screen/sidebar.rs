@@ -209,7 +209,7 @@ impl GitScreen {
     }
 
     /// Child file dirtiness cannot be staged in the parent. Only a new checkout revision
-    /// remains actionable after its gitlink was staged, so the next Space must unstage it.
+    /// remains actionable after its gitlink was staged, so the next toggle (`-`) must unstage it.
     pub(super) fn submodule_pointer_matches_index(&self, path: &Path) -> bool {
         self.refs
             .as_ref()
@@ -229,7 +229,7 @@ impl GitScreen {
         };
         let entry = self.submodule_status(path);
         let index_state = if entry.is_some_and(|entry| entry.sources.staged) {
-            "staged pointer · Space unstages when checkout matches index"
+            "staged pointer · - unstages when checkout matches index"
         } else if self
             .snapshot
             .as_ref()
@@ -239,10 +239,10 @@ impl GitScreen {
         } else {
             "no staged pointer"
         };
-        self.preview = format!("{}\n\nParent index: {}\nCheckout pointer: {}\nCheckout: {}\nWorking files: {}\nExpected index commit: {}\nActual submodule HEAD: {}\n\nEnter opens this submodule as a Git workspace.\nSpace stages or unstages its commit pointer, not its working files.\nu initializes / updates to the expected commit after confirmation.",
+        self.preview = format!("{}\n\nParent index: {}\nCheckout pointer: {}\nCheckout: {}\nWorking files: {}\nExpected index commit: {}\nActual submodule HEAD: {}\n\nEnter opens this submodule as a Git workspace.\ns stages its commit pointer and - toggles it, not its working files.\nu initializes / updates to the expected commit after confirmation.",
             module.path.display(),
             index_state,
-            if !module.initialized { "not initialized" } else if module.head != module.index { "unstaged revision · Space stages this pointer" } else { "matches index" },
+            if !module.initialized { "not initialized" } else if module.head != module.index { "unstaged revision · s stages this pointer" } else { "matches index" },
             if module.initialized { "initialized" } else { "not initialized" },
             if module.dirty { "modified; open the submodule to review and commit them" } else { "clean" },
             module.index.as_deref().unwrap_or("none"),
@@ -289,6 +289,11 @@ impl GitScreen {
         let unstage = entry.is_some_and(|entry| {
             entry.sources.staged && (module.head == module.index || !entry.sources.unstaged)
         });
+        match self.stage_intent {
+            Some(true) if unstage => return Err("The pointer is staged · - unstages it".into()),
+            Some(false) if !unstage => return Err("No staged pointer to unstage".into()),
+            _ => {}
+        }
         if !unstage && !module.initialized {
             return Err("Initialize or open the submodule before staging its revision".into());
         }

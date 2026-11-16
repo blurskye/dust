@@ -11,8 +11,6 @@ use std::sync::mpsc;
 use std::sync::mpsc::Receiver;
 use std::sync::mpsc::TryRecvError;
 use std::thread;
-use std::time::Duration;
-use std::time::Instant;
 
 use thiserror::Error;
 
@@ -24,13 +22,12 @@ use crate::git::hunks::GitHunk;
 
 use crate::git::hunks::GitHunkError;
 
-use crate::git::hunks::GitHunkRequestId;
 
 use crate::git::hunks::GitHunkId;
 
 use crate::git::hunks::GitHunkPolicy;
 
-use crate::git::hunks::read_hunks_owned;
+use crate::git::hunks::read_hunks_for_mutation;
 
 use crate::git::hunks::validate_hunk_policy;
 
@@ -154,7 +151,6 @@ pub struct GitChangePlanRequest {
     /// Bounded, sorted unsaved editor content for this repository.
     pub unsaved_documents: Vec<GitUnsavedDocument>,
     pub maximum_patch_bytes: usize,
-    pub deadline: Duration,
 }
 #[derive(Clone, Debug)]
 pub struct GitStageHunkRequest {
@@ -166,7 +162,6 @@ pub struct GitStageHunkRequest {
     /// `None` captures a missing file and is only valid for a deletion hunk.
     pub expected_worktree: Option<[u8; 32]>,
     pub maximum_patch_bytes: usize,
-    pub deadline: Duration,
 }
 #[derive(Clone, Debug)]
 pub struct GitResetHunkRequest {
@@ -180,7 +175,6 @@ pub struct GitResetHunkRequest {
     /// `None` captures a missing file and is only valid for a deletion hunk.
     pub expected_worktree: Option<[u8; 32]>,
     pub maximum_patch_bytes: usize,
-    pub deadline: Duration,
 }
 #[derive(Clone, Debug)]
 pub enum GitMutationRequest {
@@ -244,8 +238,6 @@ pub enum GitMutationError {
     OutsideScope,
     #[error("Git mutation path type is unsupported")]
     UnsupportedPath,
-    #[error("Git mutation deadline exceeded")]
-    Deadline,
     #[error("Git mutation was cancelled")]
     Cancelled,
     #[error("Git mutation worker stopped")]
@@ -274,7 +266,6 @@ impl GitMutationWorker {
         match &request {
             GitMutationRequest::StageHunk(request) => validate_legacy_request(
                 request.maximum_patch_bytes,
-                request.deadline,
                 request.hunk_snapshot_revision,
                 request.policy.layer,
                 request.expected_index.is_some()
@@ -283,7 +274,6 @@ impl GitMutationWorker {
             )?,
             GitMutationRequest::ResetUnstagedHunk(request) => validate_legacy_request(
                 request.maximum_patch_bytes,
-                request.deadline,
                 request.hunk_snapshot_revision,
                 request.policy.layer,
                 request.expected_index.is_some()
@@ -376,7 +366,6 @@ pub fn worktree_hash(path: &Path) -> Result<([u8; 32], Vec<u8>), GitMutationErro
 pub(super) fn mutation_hunk_error(error: GitHunkError) -> GitMutationError {
     match error {
         GitHunkError::Cancelled => GitMutationError::Cancelled,
-        GitHunkError::Deadline => GitMutationError::Deadline,
         GitHunkError::OutsideScope => GitMutationError::OutsideScope,
         GitHunkError::BinaryUnsupported => GitMutationError::UnsupportedPath,
         GitHunkError::StaleRepository => GitMutationError::StaleRepository,
@@ -491,7 +480,6 @@ pub(super) fn reset_hunk(
     if cancel.load(Ordering::Acquire) {
         return Err(GitMutationError::Cancelled);
     }
-    let started = Instant::now();
     let (root, repo, repository) = exact_mutation_repository(&r.policy)?;
     let _index_write = IndexWrite::start(&repo)?;
     let repo_path = repository_relative_path(&root, &repository, &r.policy.file)?;
@@ -505,7 +493,7 @@ pub(super) fn reset_hunk(
         return Err(GitMutationError::StaleWorktree);
     }
     let snapshot =
-        read_hunks_owned(GitHunkRequestId(0), &r.policy, cancel).map_err(mutation_hunk_error)?;
+        read_hunks_for_mutation(&r.policy, cancel).map_err(mutation_hunk_error)?;
     let current = snapshot
         .hunks
         .iter()
@@ -557,9 +545,6 @@ pub(super) fn reset_hunk(
     if cancel.load(Ordering::Acquire) {
         return Err(GitMutationError::Cancelled);
     }
-    if started.elapsed() > r.deadline {
-        return Err(GitMutationError::Deadline);
-    }
     if git_index_fingerprint(&repository)? != before {
         return Err(GitMutationError::StaleIndex);
     }
@@ -574,7 +559,7 @@ pub(super) fn reset_hunk(
     if after != before || worktree_state(&file)? == before_worktree {
         return Err(GitMutationError::Postcondition);
     }
-    let remaining = read_hunks_owned(GitHunkRequestId(0), &r.policy, cancel)
+    let remaining = read_hunks_for_mutation(&r.policy, cancel)
         .map_err(|_| GitMutationError::Postcondition)?;
     // Part of a hunk can leave a hunk with the same header, and so the same id.
     if r.selected_lines.is_empty() && remaining.hunks.iter().any(|h| h.id == r.hunk_id) {
@@ -598,7 +583,6 @@ pub(super) fn stage_hunk(
     if cancel.load(Ordering::Acquire) {
         return Err(GitMutationError::Cancelled);
     }
-    let started = Instant::now();
     let (root, repo, repository) = exact_mutation_repository(&r.policy)?;
     let index_write = IndexWrite::start(&repo)?;
     let repo_path = repository_relative_path(&root, &repository, &r.policy.file)?;
@@ -612,7 +596,7 @@ pub(super) fn stage_hunk(
         return Err(GitMutationError::StaleWorktree);
     }
     let snapshot =
-        read_hunks_owned(GitHunkRequestId(0), &r.policy, cancel).map_err(mutation_hunk_error)?;
+        read_hunks_for_mutation(&r.policy, cancel).map_err(mutation_hunk_error)?;
     let current = snapshot
         .hunks
         .iter()
@@ -621,18 +605,12 @@ pub(super) fn stage_hunk(
     if current != &r.selected {
         return Err(GitMutationError::WrongHunk);
     }
-    if started.elapsed() > r.deadline {
-        return Err(GitMutationError::Deadline);
-    }
     let patch = whole_hunk_patch(checked_name(&repo_path)?, current);
     if patch.len() > r.maximum_patch_bytes {
         return Err(GitMutationError::Invalid);
     }
     if cancel.load(Ordering::Acquire) {
         return Err(GitMutationError::Cancelled);
-    }
-    if started.elapsed() > r.deadline {
-        return Err(GitMutationError::Deadline);
     }
     if git_index_fingerprint(&repository)? != before {
         return Err(GitMutationError::StaleIndex);
@@ -664,7 +642,6 @@ pub(super) fn stage_hunk(
 /// add HEAD and document capture without changing this behaviour.
 pub(super) fn validate_legacy_request(
     maximum_patch_bytes: usize,
-    deadline: Duration,
     snapshot_revision: u64,
     layer: GitDiffLayer,
     exact: bool,
@@ -672,8 +649,6 @@ pub(super) fn validate_legacy_request(
 ) -> Result<(), GitMutationError> {
     if maximum_patch_bytes == 0
         || maximum_patch_bytes > 1024 * 1024
-        || deadline.is_zero()
-        || deadline > Duration::from_secs(5)
         || snapshot_revision == 0
         || layer != GitDiffLayer::Unstaged
         || !exact
@@ -689,8 +664,6 @@ pub(super) fn validate_legacy_request(
 pub(super) fn validate_change_plan(plan: &GitChangePlanRequest) -> Result<(), GitMutationError> {
     if plan.maximum_patch_bytes == 0
         || plan.maximum_patch_bytes > 1024 * 1024
-        || plan.deadline.is_zero()
-        || plan.deadline > Duration::from_secs(5)
         || plan.expected_index.is_none()
         || validate_hunk_policy(&plan.policy).is_err()
         || crate::git::status::validate_unsaved_documents(
@@ -1101,7 +1074,7 @@ fn captured_hunk_patch(
     cancel: &AtomicBool,
 ) -> Result<Vec<u8>, GitMutationError> {
     let snapshot =
-        read_hunks_owned(GitHunkRequestId(0), &p.policy, cancel).map_err(mutation_hunk_error)?;
+        read_hunks_for_mutation(&p.policy, cancel).map_err(mutation_hunk_error)?;
     let hunk_id = p.hunk_id.ok_or(GitMutationError::MissingSelection)?;
     let selected = p
         .selected
@@ -1247,7 +1220,6 @@ pub(super) fn apply_change_plan(
     if cancel.load(Ordering::Acquire) {
         return Err(GitMutationError::Cancelled);
     }
-    let started = Instant::now();
     let (root, repo, workdir) = exact_mutation_repository(&p.policy)?;
     let index_write = IndexWrite::start(&repo)?;
     let repo_path = repository_relative_path(&root, &workdir, &p.policy.file)?;
@@ -1306,9 +1278,6 @@ pub(super) fn apply_change_plan(
 
     if cancel.load(Ordering::Acquire) {
         return Err(GitMutationError::Cancelled);
-    }
-    if started.elapsed() > p.deadline {
-        return Err(GitMutationError::Deadline);
     }
     // Re-check the captures immediately before the first write.
     if git_index_fingerprint(&workdir)? != before {

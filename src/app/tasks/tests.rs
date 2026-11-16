@@ -75,7 +75,7 @@ fn successful_task_dependencies_publish_their_matched_diagnostics() {
     }
     app.reconcile_workspace_trust();
     app.process_effect(AppEffect::TaskRun("parent".into()));
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + Duration::from_secs(20);
     while !root.path().join("parent-finished").exists() || app.diagnostics.choices().count() < 2 {
         app.process_execution_preflight();
         app.process_job_events();

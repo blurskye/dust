@@ -1745,6 +1745,25 @@ impl App {
 }
 
 impl App {
+    /// Open a file at a 1-based line: Dusty Git's `e` on a diff line.
+    pub(in crate::app) fn edit_path_at(&mut self, path: PathBuf, line: usize) {
+        self.record_jump();
+        let navigation = self
+            .window_session
+            .navigation_stamp(self.state.window_version(), self.state.active_view());
+        match self.documents.request_open_at_line(
+            path,
+            &self.state.workspace_root,
+            &self.state.window_version(),
+            self.workspace.version(),
+            navigation,
+            Some(line.saturating_sub(1)),
+        ) {
+            Ok(()) => self.notify_message(self.message("opening_file", &[]), false),
+            Err(e) => self.show_document_failure(e),
+        }
+    }
+
     pub(in crate::app) fn start_open(&mut self, path: PathBuf) {
         self.record_jump();
         match self.documents.request_open(
@@ -1970,26 +1989,52 @@ impl App {
 }
 
 impl App {
-    /// A commit or stage made outside Dust, such as in its terminal, moves the index or HEAD.
-    fn follow_outside_git_changes(&mut self) {
-        let Some(status) = self.git.status() else {
-            return;
-        };
-        let Ok(head) = crate::git::git_head_id(&status.repository) else {
-            return;
-        };
+    /// When the index and HEAD were last modified and what HEAD names, in the repository the
+    /// last status came from.
+    #[allow(clippy::type_complexity)]
+    fn read_git_stamp(
+        &mut self,
+    ) -> Option<(
+        [Option<std::time::SystemTime>; 2],
+        Option<crate::git::GitHeadId>,
+    )> {
+        if let Some(status) = self.git.status() {
+            self.git_stamp_dirs = Some((status.repository.clone(), status.git_dir.clone()));
+        }
+        let (repository, git_dir) = self.git_stamp_dirs.as_ref()?;
+        let head = crate::git::git_head_id(repository).ok()?;
         let metadata = ["index", "HEAD"].map(|name| {
-            std::fs::metadata(status.git_dir.join(name))
+            std::fs::metadata(git_dir.join(name))
                 .and_then(|file| file.modified())
                 .ok()
         });
-        let stamp = (metadata, head);
+        Some((metadata, head))
+    }
+
+    /// A commit or stage made outside Dust, such as in its terminal, moves the index or HEAD.
+    fn follow_outside_git_changes(&mut self) {
+        if self.git.status().is_none() {
+            return;
+        }
+        let Some(stamp) = self.read_git_stamp() else {
+            return;
+        };
         if self
             .git_stamp
             .replace(stamp)
             .is_some_and(|previous| previous != stamp)
         {
             self.start_git_status_refresh_with_feedback(false);
+        }
+    }
+
+    /// A status read that Dust starts sees the index and HEAD as they are now, so they are no
+    /// news to the next disk check. Otherwise Dust's own stage, unstage or commit looked like
+    /// an outside change up to a second later, and that refresh dropped the hunks just read
+    /// for the next action: a reset confirmed then said "Git hunk target changed".
+    pub(in crate::app) fn note_git_stamp(&mut self) {
+        if let Some(stamp) = self.read_git_stamp() {
+            self.git_stamp = Some(stamp);
         }
     }
 }

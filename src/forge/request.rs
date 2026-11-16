@@ -87,6 +87,11 @@ pub struct PageOf<T> {
     pub items: Vec<T>,
     pub next: Option<Page>,
     pub total: Option<u64>,
+    /// How many items the same list holds in the other state (open ↔ closed), where the
+    /// forge counts them in the same request (GitHub's `issueCount`); the `Closed` count
+    /// of the list header before that list is read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub other_total: Option<u64>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
@@ -237,6 +242,27 @@ pub struct InlineDraft {
     pub line: u64,
     pub side: Side,
     pub body: String,
+    /// The first line of a range comment (`line` is the last). GitHub anchors the range;
+    /// GitLab and Gitea anchor on `line` and the body names the range (`range_body`).
+    pub start_line: Option<u64>,
+}
+
+impl InlineDraft {
+    /// The range a comment covers, when it covers more than one line.
+    pub fn range(&self) -> Option<(u64, u64)> {
+        self.start_line
+            .filter(|start| *start < self.line)
+            .map(|start| (start, self.line))
+    }
+
+    /// The body for a forge that anchors comments on one line: a range comment says which
+    /// lines it is about first (`Lines 13–14:`), so the reviewer reads it in place.
+    pub fn range_body(&self) -> String {
+        match self.range() {
+            Some((start, end)) => format!("**Lines {start}–{end}:** {}", self.body),
+            None => self.body.clone(),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize)]
@@ -253,15 +279,6 @@ pub enum SubscriptionState {
 }
 
 impl SubscriptionState {
-    pub fn parse(text: &str) -> Option<Self> {
-        match text.trim().to_ascii_uppercase().as_str() {
-            "SUBSCRIBED" => Some(SubscriptionState::Subscribed),
-            "UNSUBSCRIBED" => Some(SubscriptionState::Unsubscribed),
-            "IGNORED" => Some(SubscriptionState::Ignored),
-            _ => None,
-        }
-    }
-
     pub fn as_github(self) -> &'static str {
         match self {
             SubscriptionState::Subscribed => "SUBSCRIBED",
@@ -356,6 +373,20 @@ pub enum Write {
     Resolve {
         thread: ItemId,
         resolved: bool,
+    },
+    /// A review thread's suggested change committed to the pull request's head branch
+    /// (DESIGN.md §3.30a): lines `start..=end` of `path`, which read `original` when the
+    /// suggestion was shown, become `replacement`. Refused when the head is no longer `head`
+    /// or the lines changed.
+    CommitSuggestion {
+        number: u64,
+        path: String,
+        start: u64,
+        end: u64,
+        original: Vec<String>,
+        replacement: Vec<String>,
+        head: String,
+        message: String,
     },
     SubmitReview {
         number: u64,
@@ -455,6 +486,12 @@ impl Write {
             Write::InlineComment { number, .. } | Write::Reply { number, .. } => {
                 vec![Read::Threads(*number)]
             }
+            Write::CommitSuggestion { number, .. } => vec![
+                Read::PullRequest(*number),
+                Read::Timeline(*number),
+                Read::Threads(*number),
+                Read::Diff(*number),
+            ],
             Write::SetViewed { number, .. } => vec![Read::Viewed(*number)],
             Write::Rerun { run, .. } | Write::CancelRun(run) | Write::ApproveRun { run, .. } => {
                 vec![

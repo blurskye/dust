@@ -9,10 +9,21 @@ mod anonymous;
 
 use super::Conditional;
 use super::Fetched;
+use super::parallel;
+use super::reactions;
 use super::ForgeContext;
 use super::Plan;
 use super::Provider;
 use super::ProviderKind;
+use super::common::edited;
+use super::common::id_of;
+use super::common::is_bot;
+use super::common::link_target;
+use super::common::optional;
+use super::common::optional_time;
+use super::common::path_segment;
+use super::common::text;
+use super::common::timestamp;
 use crate::forge::capability::Cap;
 use crate::forge::capability::Capabilities;
 use crate::forge::capability::GITLAB_TERMS;
@@ -25,7 +36,6 @@ use crate::forge::transport::Accept;
 use crate::forge::transport::ApiRequest;
 use crate::forge::transport::ApiResponse;
 use crate::forge::transport::Method;
-use crate::forge::transport::Target;
 use serde_json::Value;
 use serde_json::json;
 use std::collections::HashMap;
@@ -46,12 +56,12 @@ const MAX_PAGES: usize = 30;
 const REBASE_WAIT: Duration = Duration::from_secs(30);
 
 /// `project.mergeRequests` row fields: review, pipeline and ± slots in one round trip.
-const MR_ROW_FIELDS: &str = "iid id title description state draft webUrl updatedAt userNotesCount \
+const MR_ROW_FIELDS: &str = "iid id title description state draft webUrl createdAt updatedAt userNotesCount \
 mergeStatusEnum sourceBranch author { username name } labels(first: 20) { nodes { title color } } approved \
 approvedBy { nodes { username } } reviewers { nodes { username } } headPipeline { status } \
 diffStatsSummary { additions deletions fileCount }";
 
-const ISSUE_ROW_FIELDS: &str = "iid id title description state webUrl updatedAt userNotesCount \
+const ISSUE_ROW_FIELDS: &str = "iid id title description state webUrl createdAt updatedAt userNotesCount \
 author { username name } labels(first: 20) { nodes { title color } }";
 
 const REQUEST_CHANGES_DOCUMENT: &str = "mutation MergeRequestRequestChanges($projectPath: ID!, $iid: String!) { \
@@ -65,17 +75,6 @@ const REQUEST_CHANGES: &str = "review_request_changes";
 const DRAFT_NOTES: &str = "batched_review";
 
 // ------------------------------------------------------------------------------ JSON helpers
-
-fn text(value: &Value, key: &str) -> String {
-    value[key].as_str().unwrap_or_default().to_owned()
-}
-
-fn optional(value: &Value, key: &str) -> Option<String> {
-    value[key]
-        .as_str()
-        .filter(|text| !text.is_empty())
-        .map(str::to_owned)
-}
 
 /// GraphQL spells iids as strings, REST as numbers.
 fn count(value: &Value, key: &str) -> u64 {
@@ -94,14 +93,6 @@ fn nodes(value: &Value) -> &[Value] {
         .unwrap_or_default()
 }
 
-fn id_of(value: &Value, key: &str) -> ItemId {
-    match &value[key] {
-        Value::String(text) => ItemId::new(text),
-        Value::Number(number) => ItemId::new(number),
-        _ => ItemId::default(),
-    }
-}
-
 fn user(value: &Value) -> User {
     User {
         login: optional(value, "username")
@@ -109,6 +100,7 @@ fn user(value: &Value) -> User {
             .unwrap_or_default(),
         id: value["id"].as_u64().map(ItemId::new),
         name: optional(value, "name"),
+        bot: is_bot(value),
     }
 }
 
@@ -130,14 +122,6 @@ fn labels(value: &Value) -> Vec<Label> {
             },
         })
         .collect()
-}
-
-fn timestamp(value: &Value, key: &str) -> Timestamp {
-    Timestamp::new(text(value, key))
-}
-
-fn optional_time(value: &Value, key: &str) -> Option<Timestamp> {
-    optional(value, key).map(Timestamp::new)
 }
 
 fn milestone(value: &Value) -> Option<Milestone> {
@@ -239,19 +223,6 @@ fn reference_repo(value: &Value) -> Option<String> {
         .filter(|repo| !repo.is_empty())
 }
 
-/// One URL path segment: the project id of a nested group (`a%2Fb%2Fc`), a file path, a label.
-pub fn encode(text: &str) -> String {
-    let mut escaped = String::new();
-    for byte in text.bytes() {
-        if byte.is_ascii_alphanumeric() || b"-_.~".contains(&byte) {
-            escaped.push(byte as char);
-        } else {
-            escaped.push_str(&format!("%{byte:02X}"));
-        }
-    }
-    escaped
-}
-
 fn item_path(kind: ItemKind, number: u64) -> String {
     match kind {
         ItemKind::Issue => format!("issues/{number}"),
@@ -293,6 +264,9 @@ fn graphql_row(node: &Value, kind: ItemKind, repo: &str) -> ItemRow {
         draft: node["draft"].as_bool().unwrap_or(false),
         body_preview: node["description"].as_str().map(str::to_owned),
         head_branch: optional(node, "sourceBranch"),
+        review_tally: None,
+        created: Some(timestamp(node, "createdAt")).filter(|created| !created.is_empty()),
+        linked: None,
     }
 }
 
@@ -325,6 +299,10 @@ fn rest_row(value: &Value, kind: ItemKind) -> ItemRow {
             || value["work_in_progress"].as_bool().unwrap_or(false),
         body_preview: value["description"].as_str().map(str::to_owned),
         head_branch: optional(value, "source_branch"),
+        review_tally: None,
+        created: Some(timestamp(value, "created_at")).filter(|created| !created.is_empty()),
+        // An issue counts the merge requests that mention it as closing it.
+        linked: value["merge_requests_count"].as_u64().filter(|_| kind == ItemKind::Issue),
     }
 }
 
@@ -357,6 +335,7 @@ fn issue(value: &Value, closed_by: &[Value]) -> Issue {
         closed_reason: None,
         projects: Vec::new(),
         subscribed: value["subscribed"].as_bool(),
+        reactions: Vec::new(),
     }
 }
 
@@ -460,7 +439,7 @@ fn check(job: &Value, pipeline: &ItemId) -> Check {
         name: text(job, "name"),
         workflow: optional(job, "stage"),
         state,
-        raw_state: Some(ci_word_for(state).into()),
+        raw_state: Some(crate::forge::legacy::ci_word(state).into()),
         started: optional_time(job, "started_at"),
         duration: job["duration"].as_f64().map(Duration::from_secs_f64),
         completed: optional_time(job, "finished_at"),
@@ -471,10 +450,6 @@ fn check(job: &Value, pipeline: &ItemId) -> Check {
         }),
         required: job["allow_failure"].as_bool() != Some(true),
     }
-}
-
-fn ci_word_for(state: CiState) -> &'static str {
-    crate::forge::legacy::ci_word(state)
 }
 
 /// The parts of a merge request detail beyond `GET merge_requests/{iid}`.
@@ -646,6 +621,7 @@ fn pull_request(value: &Value, parts: DetailParts) -> PullRequest {
         fingerprint: fingerprint(value),
         projects: Vec::new(),
         subscribed: value["subscribed"].as_bool(),
+        reactions: Vec::new(),
         row,
     }
 }
@@ -687,6 +663,11 @@ fn note(value: &Value) -> Comment {
         system: value["system"].as_bool().unwrap_or(false),
         pending: false,
         position: note_position(value),
+        association: None,
+        // Resolving a discussion touches `updated_at` too; that is not an edit.
+        edited: edited(value, "created_at", "updated_at")
+            .filter(|at| Some(at.as_str()) != value["resolved_at"].as_str()),
+        reactions: Vec::new(),
     }
 }
 
@@ -725,18 +706,21 @@ fn thread(number: u64, discussion: &Value) -> Option<ReviewThread> {
         commit: anchor.commit,
         comments,
         total_comments: None,
+        // Discussions carry a position, not the diff lines around it.
+        diff_hunk: None,
+        start_line: None,
     })
 }
 
-/// Notes as the conversation: comments, approvals and GitLab's system notes ("added ~bug
-/// label", "mentioned in !5"). Diff notes live in the threads, not here.
-fn timeline_event(value: &Value) -> Option<TimelineEvent> {
+/// Notes as the conversation: comments, approvals and GitLab's system notes ("added 1 commit",
+/// "requested review from @alex", "mentioned in !5"). Diff notes live in the threads, not here.
+fn timeline_events(value: &Value) -> Vec<TimelineEvent> {
     if value["type"] == "DiffNote" {
-        return None;
+        return Vec::new();
     }
     let comment = note(value);
     if !comment.system {
-        return Some(TimelineEvent::Commented(comment));
+        return vec![TimelineEvent::Commented(comment)];
     }
     let by = Actor {
         actor: comment.author.clone(),
@@ -748,21 +732,147 @@ fn timeline_event(value: &Value) -> Option<TimelineEvent> {
         "requested changes" => Some(ReviewState::ChangesRequested),
         _ => None,
     };
-    Some(match state {
-        Some(state) => TimelineEvent::Reviewed(Review {
+    if let Some(state) = state {
+        return vec![TimelineEvent::Reviewed(Review {
             id: comment.id,
             author: comment.author,
             state,
             body: String::new(),
             submitted: comment.created,
-        }),
-        None if body == "closed" => TimelineEvent::Closed { by },
-        None if body == "reopened" => TimelineEvent::Reopened { by },
-        None => TimelineEvent::Other {
-            kind: body.chars().take(120).collect(),
-            by,
-        },
-    })
+        })];
+    }
+    let mentions = |rest: &str| -> Vec<String> {
+        rest.split_whitespace()
+            .filter_map(|word| word.strip_prefix('@'))
+            .map(|login| login.trim_end_matches([',', '.']).to_owned())
+            .filter(|login| !login.is_empty())
+            .collect()
+    };
+    if body == "closed" {
+        return vec![TimelineEvent::Closed { by }];
+    }
+    if body == "reopened" {
+        return vec![TimelineEvent::Reopened { by }];
+    }
+    if let Some(rest) = body.strip_prefix("requested review from ") {
+        return mentions(rest)
+            .into_iter()
+            .map(|reviewer| TimelineEvent::ReviewRequested {
+                reviewer,
+                by: by.clone(),
+            })
+            .collect();
+    }
+    if let Some(rest) = body.strip_prefix("assigned to ")
+        && !rest.contains("unassigned")
+    {
+        return mentions(rest)
+            .into_iter()
+            .map(|assignee| TimelineEvent::Assigned {
+                assignee,
+                by: by.clone(),
+            })
+            .collect();
+    }
+    // "added 2 commits" lists them as `<li>1b9cc6c3 - Bound retry exponent</li>`.
+    if body.starts_with("added ") && (body.ends_with(" commit") || body.ends_with(" commits")) {
+        let commits = comment
+            .body
+            .split("<li>")
+            .skip(1)
+            .filter_map(|item| {
+                let item = item.split("</li>").next()?;
+                let (sha, headline) = item.split_once(" - ")?;
+                Some(TimelineEvent::Committed(CommitSummary {
+                    sha: sha.trim().to_owned(),
+                    headline: headline.trim().to_owned(),
+                    body: headline.trim().to_owned(),
+                    committed: comment.created.clone(),
+                    author: Some(comment.author.clone()),
+                }))
+            })
+            .collect::<Vec<_>>();
+        if !commits.is_empty() {
+            return commits;
+        }
+    }
+    // "mentioned in merge request !13" / "mentioned in issue #14" (same project).
+    if let Some(rest) = body.strip_prefix("mentioned in ") {
+        let (kind, reference) = match rest.split_once(' ') {
+            Some(("merge", rest)) => (ItemKind::PullRequest, rest.trim_start_matches("request ")),
+            Some(("issue", rest)) => (ItemKind::Issue, rest),
+            _ => (ItemKind::Issue, ""),
+        };
+        let number = reference
+            .trim_start_matches(['!', '#'])
+            .parse::<u64>()
+            .ok();
+        if let Some(number) = number.filter(|_| !reference.contains('/')) {
+            return vec![TimelineEvent::CrossReferenced {
+                link: LinkRef {
+                    number,
+                    kind: Some(kind),
+                    ..LinkRef::default()
+                },
+                by,
+            }];
+        }
+    }
+    vec![TimelineEvent::Other {
+        kind: body.chars().take(120).collect(),
+        by,
+    }]
+}
+
+/// `resource_label_events` / `resource_milestone_events` entries: GitLab records label and
+/// milestone changes there, not as notes.
+fn resource_event(value: &Value) -> Option<TimelineEvent> {
+    let by = Actor {
+        actor: user(&value["user"]),
+        at: timestamp(value, "created_at"),
+    };
+    let add = value["action"] == "add";
+    if value["label"].is_object() {
+        let label = text(&value["label"], "name");
+        return Some(if add {
+            TimelineEvent::Labeled { label, by }
+        } else {
+            TimelineEvent::Unlabeled { label, by }
+        });
+    }
+    if value["milestone"].is_object() {
+        let milestone = text(&value["milestone"], "title");
+        return Some(if add {
+            TimelineEvent::Milestoned { milestone, by }
+        } else {
+            TimelineEvent::Demilestoned { milestone, by }
+        });
+    }
+    None
+}
+
+fn event_time(event: &TimelineEvent) -> Option<i64> {
+    let at = match event {
+        TimelineEvent::Commented(comment) => &comment.created,
+        TimelineEvent::Reviewed(review) => &review.submitted,
+        TimelineEvent::Committed(commit) => &commit.committed,
+        TimelineEvent::Labeled { by, .. }
+        | TimelineEvent::Unlabeled { by, .. }
+        | TimelineEvent::Assigned { by, .. }
+        | TimelineEvent::Unassigned { by, .. }
+        | TimelineEvent::Closed { by }
+        | TimelineEvent::Reopened { by }
+        | TimelineEvent::Merged { by, .. }
+        | TimelineEvent::ForcePushed { by, .. }
+        | TimelineEvent::CrossReferenced { by, .. }
+        | TimelineEvent::Renamed { by, .. }
+        | TimelineEvent::ReviewRequested { by, .. }
+        | TimelineEvent::Milestoned { by, .. }
+        | TimelineEvent::Demilestoned { by, .. }
+        | TimelineEvent::Other { by, .. }
+        | TimelineEvent::Detailed { by, .. } => &by.at,
+    };
+    crate::forge::records::epoch(at.as_str())
 }
 
 fn pipeline_run(value: &Value) -> Run {
@@ -791,12 +901,16 @@ fn pipeline_run(value: &Value) -> Run {
         branch: reference,
         sha: text(value, "sha"),
         event: text(value, "source"),
-        created: timestamp(value, "created_at"),
+        // A retried pipeline starts after it was created; a queued one has no start yet.
+        created: optional_time(value, "started_at")
+            .or_else(|| optional_time(value, "created_at"))
+            .unwrap_or_default(),
         duration: value["duration"].as_f64().map(Duration::from_secs_f64),
         attempt: 1,
         attempts: 1,
         web_url: text(value, "web_url"),
         needs_approval: false,
+        actor: value["user"]["username"].as_str().unwrap_or_default().to_owned(),
     }
 }
 
@@ -847,6 +961,22 @@ fn source_workflow(source: &str) -> Workflow {
         path: ".gitlab-ci.yml".into(),
         state: "active".into(),
         dispatchable: Some(source == "web"),
+    }
+}
+
+/// A schedule's workflow id: `schedule:<id>`, apart from the `schedule` source.
+const SCHEDULE: &str = "schedule:";
+
+/// A pipeline schedule as a row of the Workflows panel: its description, muted `(off)` when
+/// inactive.
+fn schedule_workflow(value: &Value) -> Workflow {
+    let id = id_of(value, "id").0;
+    Workflow {
+        id: ItemId::new(format!("{SCHEDULE}{id}")),
+        name: optional(value, "description").unwrap_or_else(|| format!("Schedule {id}")),
+        path: ".gitlab-ci.yml".into(),
+        state: if value["active"].as_bool().unwrap_or(true) { "active" } else { "disabled_manually" }.into(),
+        dispatchable: Some(false),
     }
 }
 
@@ -1020,6 +1150,10 @@ pub struct Query {
     pub sort: Option<&'static str>,
     pub repo: Option<String>,
     pub group: Option<String>,
+    /// `no:label`, `no:assignee`, `no:milestone`: GitLab's `None` wildcards.
+    pub no: Vec<String>,
+    /// A `sort:` GitLab has no order for (`comments-desc`): the returned rows are sorted.
+    pub client_sort: Option<String>,
 }
 
 fn words(query: &str) -> Vec<String> {
@@ -1075,6 +1209,9 @@ impl Query {
                 "repo" | "project" => parsed.repo = Some(value),
                 "org" | "group" | "user" => parsed.group = Some(value),
                 "sort" => {
+                    if value.starts_with("comments-") {
+                        parsed.client_sort = Some(value.clone());
+                    }
                     parsed.sort = Some(match value.as_str() {
                         "created-desc" => "CREATED_DESC",
                         "created-asc" => "CREATED_ASC",
@@ -1082,6 +1219,7 @@ impl Query {
                         _ => "UPDATED_DESC",
                     })
                 }
+                "no" => parsed.no.push(value.to_ascii_lowercase()),
                 // `mentions:` has no GitLab filter; the rest is text GitLab can search.
                 "mentions" => {}
                 _ => parsed.text.push(word),
@@ -1200,6 +1338,14 @@ pub fn list_document(
     if !query.not_labels.is_empty() {
         args.add("not", negated, json!({ labels: query.not_labels }));
     }
+    for wildcard in &query.no {
+        match wildcard.as_str() {
+            "label" if query.labels.is_empty() => args.add(labels, labels_type, json!(["None"])),
+            "assignee" => args.add("assigneeWildcardId", "AssigneeWildcardId", "NONE".into()),
+            "milestone" => args.add("milestoneWildcardId", "MilestoneWildcardId", "NONE".into()),
+            _ => {}
+        }
+    }
     let (operation, connection, fields) = if merge_requests {
         ("MergeRequestList", "mergeRequests", MR_ROW_FIELDS)
     } else {
@@ -1226,8 +1372,8 @@ pub fn search_request(kind: ItemKind, filter: &Filter, page: Page, me: Option<&s
         "issues"
     };
     let path = match (&query.repo, &query.group) {
-        (Some(repo), _) => format!("projects/{}/{collection}", encode(repo)),
-        (None, Some(group)) => format!("groups/{}/{collection}", encode(group)),
+        (Some(repo), _) => format!("projects/{}/{collection}", path_segment(repo)),
+        (None, Some(group)) => format!("groups/{}/{collection}", path_segment(group)),
         (None, None) => collection.to_owned(),
     };
     let mut request = ApiRequest::get(path).query("scope", "all");
@@ -1268,6 +1414,15 @@ pub fn search_request(kind: ItemKind, filter: &Filter, page: Page, me: Option<&s
     }
     if let Some(milestone) = &query.milestone {
         request = request.query("milestone", milestone);
+    }
+    // `no:label` and friends: the REST `None` wildcards.
+    for wildcard in &query.no {
+        request = match wildcard.as_str() {
+            "label" if query.labels.is_empty() => request.query("labels", "None"),
+            "assignee" => request.query("assignee_id", "None"),
+            "milestone" => request.query("milestone", "None"),
+            _ => request,
+        };
     }
     let (order, sort) = match query.sort {
         Some("CREATED_DESC") => ("created_at", "desc"),
@@ -1332,6 +1487,55 @@ fn recall(ctx: &ForgeContext, number: u64) -> ItemKind {
         .unwrap_or(ItemKind::PullRequest)
 }
 
+/// What the screen knows the item under `number` is (the tab it reads it from), for the
+/// timeline read that names only the number.
+pub fn note_kind(ctx: &ForgeContext, number: u64, kind: ItemKind) {
+    remember(ctx, number, kind);
+}
+
+/// After an item read: its kind kept in the disk cache (`item_kind`), so a timeline read
+/// after a restart follows the kind read last time instead of guessing.
+pub fn keep_kind(ctx: &ForgeContext, cache: &crate::forge::cache::Cache, number: u64) {
+    keep_in(cache, kind_key(ctx, number));
+}
+
+/// Before a timeline read: the kind kept on disk, when this process has not read the item.
+pub fn restore_kind(ctx: &ForgeContext, cache: &crate::forge::cache::Cache, number: u64) {
+    restore_in(cache, kind_key(ctx, number));
+}
+
+const KIND_TTL: Duration = Duration::from_secs(30 * 24 * 3600);
+
+fn kind_entry(key: &(String, String, u64)) -> crate::forge::cache::CacheKey {
+    let repo = Some(key.1.as_str()).filter(|repo| !repo.is_empty());
+    crate::forge::cache::CacheKey::named(&key.0, repo, "item_kind", &key.2.to_string())
+}
+
+fn kind_name(kind: ItemKind) -> &'static str {
+    if kind == ItemKind::Issue { "issue" } else { "pull_request" }
+}
+
+fn keep_in(cache: &crate::forge::cache::Cache, key: (String, String, u64)) {
+    let Some(kind) = lock(kinds()).get(&key).copied() else {
+        return;
+    };
+    let entry = kind_entry(&key);
+    let kept = cache.get::<String>(&entry).map(|envelope| envelope.data);
+    if kept.as_deref() != Some(kind_name(kind)) {
+        cache.store(&entry, kind_name(kind), KIND_TTL, None, None);
+    }
+}
+
+fn restore_in(cache: &crate::forge::cache::Cache, key: (String, String, u64)) {
+    if lock(kinds()).contains_key(&key) {
+        return;
+    }
+    if let Some(envelope) = cache.get::<String>(&kind_entry(&key)) {
+        let kind = if envelope.data == "issue" { ItemKind::Issue } else { ItemKind::PullRequest };
+        lock(kinds()).insert(key, kind);
+    }
+}
+
 fn observed(ctx: &ForgeContext, capability: &'static str) -> Option<bool> {
     if let Some(known) = lock(probes())
         .get(&(ctx.host().to_string(), capability))
@@ -1358,8 +1562,8 @@ fn viewed_path(ctx: &ForgeContext, number: u64) -> Option<PathBuf> {
         hosts
             .parent()?
             .join("viewed")
-            .join(encode(&ctx.host().to_string()))
-            .join(encode(&repo.full()))
+            .join(path_segment(&ctx.host().to_string()))
+            .join(path_segment(&repo.full()))
             .join(format!("{number}.json")),
     )
 }
@@ -1496,7 +1700,7 @@ const MOVED: &str = "the merge request moved since you reviewed it · reload to 
 
 impl GitLab {
     fn project(ctx: &ForgeContext, tail: &str) -> Result<String, ForgeError> {
-        let id = encode(&ctx.repo()?.full());
+        let id = path_segment(&ctx.repo()?.full());
         Ok(if tail.is_empty() {
             format!("projects/{id}")
         } else {
@@ -1540,7 +1744,7 @@ impl GitLab {
             request = match next_page(&response) {
                 Some(NextPage::Number(page)) => with_page(request, page),
                 Some(NextPage::Link(url)) => ApiRequest {
-                    target: Self::relative(ctx, &url),
+                    target: link_target(ctx, &url),
                     query: Vec::new(),
                     ..request
                 },
@@ -1548,13 +1752,6 @@ impl GitLab {
             };
         }
         Ok((all, counted))
-    }
-
-    fn relative(ctx: &ForgeContext, url: &str) -> Target {
-        match url.strip_prefix(&format!("{}/", ctx.endpoints.api_base)) {
-            Some(path) => Target::Rest(path.to_owned()),
-            None => Target::Absolute(url.to_owned()),
-        }
     }
 
     /// The signed-in username for `@me` filters.
@@ -1631,6 +1828,7 @@ impl GitLab {
                 per_page: page.per_page,
             }),
             total: counted,
+            other_total: None,
         })
     }
 
@@ -1641,7 +1839,7 @@ impl GitLab {
         Ok(match read {
             Read::Repository => vec![rest("")?],
             Read::RepositoryNamed(name) => {
-                vec![ApiRequest::get(format!("projects/{}", encode(name)))]
+                vec![ApiRequest::get(format!("projects/{}", path_segment(name)))]
             }
             Read::Viewer => vec![ApiRequest::get("user")],
             Read::Labels => vec![paged("labels")?],
@@ -1663,25 +1861,29 @@ impl GitLab {
                     paged(&format!("{mr}/commits"))?,
                     paged(&format!("{mr}/diffs"))?,
                     rest(&format!("{mr}/closes_issues"))?,
+                    paged(&format!("{mr}/award_emoji"))?,
                 ]
             }
             Read::Fingerprint(number) => vec![rest(&format!("merge_requests/{number}"))?],
             Read::Issue(number) => vec![
                 rest(&format!("issues/{number}"))?,
                 rest(&format!("issues/{number}/closed_by"))?,
+                paged(&format!("issues/{number}/award_emoji"))?,
             ],
-            Read::Timeline(number) => vec![
-                paged(&format!(
-                    "{}/notes",
-                    item_path(recall(ctx, *number), *number)
-                ))?
-                .query("sort", "asc")
-                .query("order_by", "created_at"),
-            ],
+            Read::Timeline(number) => {
+                let item = item_path(recall(ctx, *number), *number);
+                vec![
+                    paged(&format!("{item}/notes"))?
+                        .query("sort", "asc")
+                        .query("order_by", "created_at"),
+                    paged(&format!("{item}/resource_label_events"))?,
+                    paged(&format!("{item}/resource_milestone_events"))?,
+                ]
+            }
             Read::Threads(number) => vec![paged(&format!("merge_requests/{number}/discussions"))?],
             Read::Diff(number) => vec![paged(&format!("merge_requests/{number}/diffs"))?],
             Read::CommitDiff(sha) => {
-                vec![paged(&format!("repository/commits/{}/diff", encode(sha)))?]
+                vec![paged(&format!("repository/commits/{}/diff", path_segment(sha)))?]
             }
             Read::Viewed(_) => Vec::new(),
             Read::Workflows => vec![
@@ -1689,6 +1891,8 @@ impl GitLab {
                     .query("order_by", "updated_at")
                     .query("sort", "desc")
                     .query("per_page", PAGE),
+                // The project's schedules are rows of their own (Developer role; else none).
+                rest("pipeline_schedules")?.query("per_page", PAGE),
             ],
             Read::PullRequestForBranch(branch) => vec![
                 rest("merge_requests")?
@@ -1703,6 +1907,20 @@ impl GitLab {
                     request = request.query("ref", reference);
                 }
                 vec![request]
+            }
+            Read::Runs { filter, page }
+                if filter.workflow.as_ref().is_some_and(|workflow| {
+                    crate::forge::legacy::workflow_id(workflow).0.starts_with(SCHEDULE)
+                }) =>
+            {
+                // A schedule's row lists the pipelines that schedule started.
+                let workflow = crate::forge::legacy::workflow_id(filter.workflow.as_ref().unwrap_or(&ItemId::new("")));
+                let schedule = workflow.0.trim_start_matches(SCHEDULE);
+                vec![
+                    rest(&format!("pipeline_schedules/{}/pipelines", path_segment(schedule)))?
+                        .query("per_page", page.per_page.clamp(1, PAGE))
+                        .query("page", page.number.max(1)),
+                ]
             }
             Read::Runs { filter, page } => {
                 let mut request = rest("pipelines")?
@@ -1742,7 +1960,7 @@ impl GitLab {
             Read::ArtifactFile { artifact, path } => vec![
                 rest(&format!(
                     "jobs/{artifact}/artifacts/{}",
-                    path.split('/').map(encode).collect::<Vec<_>>().join("/")
+                    path.split('/').map(path_segment).collect::<Vec<_>>().join("/")
                 ))?
                 .accept(Accept::Raw),
             ],
@@ -1824,7 +2042,11 @@ impl GitLab {
                     .collect(),
             ),
             Read::List { kind, filter, page } => {
-                Payload::Rows(Self::rows(ctx, *kind, filter, *page, cancel)?)
+                let mut rows = Self::rows(ctx, *kind, filter, *page, cancel)?;
+                if let Some(order) = Query::parse(&filter.query).client_sort {
+                    super::common::sort_rows(&mut rows.items, &order);
+                }
+                Payload::Rows(rows)
             }
             Read::Search { kind, filter, page } => {
                 let me = if Query::parse(&filter.query).mentions_me() {
@@ -1848,6 +2070,7 @@ impl GitLab {
                         .flatten()
                         .map(|value| rest_row(value, *kind))
                         .collect(),
+                    other_total: None,
                 })
             }
             Read::PullRequest(number) => {
@@ -1870,17 +2093,35 @@ impl GitLab {
             }
             Read::Issue(number) => {
                 remember(ctx, *number, ItemKind::Issue);
-                let value = ctx.json(&requests[0], cancel)?;
-                let closed_by = Self::optional_list(ctx, &requests[1], cancel)?;
-                Payload::Issue(Box::new(issue(&value, &closed_by)))
+                // The issue, what closes it and its reactions: one round trip for all three.
+                let (value, closed_by, awards) = std::thread::scope(|scope| {
+                    let closed_by = scope.spawn(|| Self::optional_list(ctx, &requests[1], cancel));
+                    let awards = Self::optional_list(ctx, &requests[2], cancel);
+                    let value = ctx.json(&requests[0], cancel);
+                    (value, parallel::joined(closed_by), awards)
+                });
+                let mut issue = issue(&value?, &closed_by?);
+                issue.reactions = reactions::gitlab(&Value::Array(awards?));
+                Payload::Issue(Box::new(issue))
             }
-            Read::Timeline(_) => Payload::Timeline(
-                Self::rest_pages(ctx, requests.remove(0), cancel)?
+            Read::Timeline(_) => {
+                let mut events = Self::rest_pages(ctx, requests.remove(0), cancel)?
                     .0
                     .iter()
-                    .filter_map(timeline_event)
-                    .collect(),
-            ),
+                    .flat_map(timeline_events)
+                    .collect::<Vec<_>>();
+                // Label and milestone history (GitLab ≥ 11.2 / 13.1); older servers 404.
+                for request in requests {
+                    events.extend(
+                        Self::optional_pages(ctx, request, cancel)?
+                            .iter()
+                            .filter_map(resource_event),
+                    );
+                }
+                // Notes come oldest first; the resource events slot in by time (stable).
+                events.sort_by_key(|event| event_time(event).unwrap_or(i64::MAX));
+                Payload::Timeline(events)
+            }
             Read::Threads(number) => {
                 remember(ctx, *number, ItemKind::PullRequest);
                 Payload::Threads(
@@ -1936,12 +2177,16 @@ impl GitLab {
                         sources.push(source);
                     }
                 }
-                Payload::Workflows(
-                    sources
+                let mut workflows = sources
+                    .iter()
+                    .map(|source| source_workflow(source))
+                    .collect::<Vec<_>>();
+                workflows.extend(
+                    Self::optional_list(ctx, &requests[1], cancel)?
                         .iter()
-                        .map(|source| source_workflow(source))
-                        .collect(),
-                )
+                        .map(schedule_workflow),
+                );
+                Payload::Workflows(workflows)
             }
             Read::WorkflowSource { .. } => Payload::Text(ctx.ok(&requests[0], cancel)?.text()),
             Read::Runs { page, .. } => {
@@ -1966,6 +2211,7 @@ impl GitLab {
                     }),
                     total: total(&response),
                     items,
+                    other_total: None,
                 })
             }
             Read::Run { .. } => {
@@ -2082,6 +2328,7 @@ impl GitLab {
                         .flatten()
                         .map(todo)
                         .collect(),
+                    other_total: None,
                 })
             }
             // §3.7: read from the base ref locally, never through the API.
@@ -2140,6 +2387,25 @@ impl GitLab {
         Ok(())
     }
 
+    /// Every page of a secondary list, or none when the server lacks it (see `optional_list`).
+    fn optional_pages(
+        ctx: &ForgeContext,
+        request: ApiRequest,
+        cancel: &AtomicBool,
+    ) -> Result<Vec<Value>, ForgeError> {
+        match Self::rest_pages(ctx, request, cancel) {
+            Ok((items, _)) => Ok(items),
+            Err(ForgeError::NotAuthenticated { .. }) if ctx.anonymous() => Ok(Vec::new()),
+            Err(
+                error @ (ForgeError::Cancelled
+                | ForgeError::Timeout
+                | ForgeError::RateLimited { .. }
+                | ForgeError::NotAuthenticated { .. }),
+            ) => Err(error),
+            Err(_) => Ok(Vec::new()),
+        }
+    }
+
     fn optional_list(
         ctx: &ForgeContext,
         request: &ApiRequest,
@@ -2166,25 +2432,37 @@ impl GitLab {
         requests: Vec<ApiRequest>,
         cancel: &AtomicBool,
     ) -> Result<PullRequest, ForgeError> {
-        let [detail, approvals, reviewers, commits, diffs, closes] =
-            <[ApiRequest; 6]>::try_from(requests)
+        let [detail, approvals, reviewers, commits, diffs, closes, awards] =
+            <[ApiRequest; 7]>::try_from(requests)
                 .map_err(|_| ForgeError::Failed("merge request plan".into()))?;
-        let value = ctx.json(&detail, cancel)?;
-        let approvals = match ctx.json(&approvals, cancel) {
+        // The parts are independent of each other: one round trip for all of them.
+        let (value, approvals, reviewers, commits, diffs, closes, awards) = std::thread::scope(|scope| {
+            let approvals = scope.spawn(|| ctx.json(&approvals, cancel));
+            let reviewers = scope.spawn(|| Self::optional_list(ctx, &reviewers, cancel));
+            let commits = scope.spawn(|| Self::rest_pages(ctx, commits, cancel));
+            let diffs = scope.spawn(|| Self::rest_pages(ctx, diffs, cancel));
+            let awards = scope.spawn(|| Self::optional_list(ctx, &awards, cancel));
+            let closes = Self::optional_list(ctx, &closes, cancel);
+            let value = ctx.json(&detail, cancel);
+            use super::parallel::joined;
+            (value, joined(approvals), joined(reviewers), joined(commits), joined(diffs), closes, joined(awards))
+        });
+        let value = value?;
+        let approvals = match approvals {
             Ok(value) => value,
             Err(ForgeError::NotFound(_) | ForgeError::Forbidden(_)) => Value::Null,
             Err(error) => return Err(error),
         };
         let mut parts = DetailParts {
             approvals,
-            reviewers: Self::optional_list(ctx, &reviewers, cancel)?,
-            commits: Self::rest_pages(ctx, commits, cancel)?.0,
-            diffs: match Self::rest_pages(ctx, diffs, cancel) {
+            reviewers: reviewers?,
+            commits: commits?.0,
+            diffs: match diffs {
                 Ok((diffs, _)) => diffs,
                 Err(ForgeError::NotFound(_)) => Vec::new(),
                 Err(error) => return Err(error),
             },
-            closes: Self::optional_list(ctx, &closes, cancel)?,
+            closes: closes?,
             jobs: Vec::new(),
         };
         // A fork's pipeline runs in the source project, so its jobs are read there.
@@ -2204,7 +2482,9 @@ impl GitLab {
         if count(&value, "iid") != number {
             return Err(ForgeError::NotFound(format!("merge request !{number}")));
         }
-        Ok(pull_request(&value, parts))
+        let mut pull = pull_request(&value, parts);
+        pull.reactions = reactions::gitlab(&Value::Array(awards?));
+        Ok(pull)
     }
 
     // -------------------------------------------------------------------------- writes
@@ -2347,7 +2627,7 @@ impl GitLab {
                 if batched {
                     match post(
                         &format!("{mr}/draft_notes"),
-                        json!({ "note": draft.body, "position": position }),
+                        json!({ "note": draft.range_body(), "position": position }),
                     ) {
                         Ok(_) => continue,
                         // Draft notes are GitLab ≥ 15.9: post the rest one by one.
@@ -2360,7 +2640,7 @@ impl GitLab {
                 }
                 post(
                     &format!("{mr}/discussions"),
-                    json!({ "body": draft.body, "position": position }),
+                    json!({ "body": draft.range_body(), "position": position }),
                 )?;
             }
         }
@@ -2559,6 +2839,14 @@ impl GitLab {
                     json!({ "body": body }),
                 )?]
             }
+            Write::CommitSuggestion { .. } => {
+                // `PUT suggestions/:id/apply` needs the note's suggestion id, which the
+                // discussions read does not keep (DESIGN.md §3.30a).
+                return Err(Self::unsupported(
+                    "commit_suggestion",
+                    "Apply this suggestion on GitLab · o opens the merge request",
+                ));
+            }
             Write::Resolve { thread, resolved } => {
                 let (number, discussion) = thread.0.split_once('/').ok_or_else(|| {
                     ForgeError::Failed(format!("not a GitLab discussion: {}", thread.0))
@@ -2678,7 +2966,7 @@ impl GitLab {
                 })
             }
             Write::CreatePullRequest(request) => {
-                let source = encode(&request.head_repository);
+                let source = path_segment(&request.head_repository);
                 let mut payload = json!({
                     "source_branch": request.head_branch,
                     "target_branch": request.base_branch,
@@ -2694,14 +2982,15 @@ impl GitLab {
                     .eq_ignore_ascii_case(&request.base_repository)
                 {
                     let target = ctx.json(
-                        &ApiRequest::get(format!("projects/{}", encode(&request.base_repository))),
+                        &ApiRequest::get(format!("projects/{}", path_segment(&request.base_repository))),
                         cancel,
                     )?;
                     payload["target_project_id"] = target["id"].clone();
                 }
                 let created = ctx.json(
                     &ApiRequest::new(Method::Post, format!("projects/{source}/merge_requests"))
-                        .json(payload),
+                        .json(payload)
+                        .body_file(),
                     cancel,
                 )?;
                 Ok(Receipt {
@@ -3062,6 +3351,34 @@ impl Provider for GitLab {
 mod tests {
     use super::*;
     use crate::forge::credential::Env;
+
+    #[test]
+    fn an_items_kind_outlives_a_restart_in_the_disk_cache() {
+        let root = tempfile::tempdir().unwrap();
+        let cache = crate::forge::cache::Cache::at(root.path());
+        let key = ("gitlab.example".to_string(), "group/kind-test".to_string(), 41);
+        let recalled = |key: &(String, String, u64)| lock(kinds()).get(key).copied();
+        lock(kinds()).insert(key.clone(), ItemKind::Issue);
+        keep_in(&cache, key.clone());
+        // A restart: the process forgets, the disk does not.
+        lock(kinds()).remove(&key);
+        restore_in(&cache, key.clone());
+        assert_eq!(recalled(&key), Some(ItemKind::Issue));
+        // Read as a merge request since: that is what a later timeline follows.
+        lock(kinds()).insert(key.clone(), ItemKind::PullRequest);
+        keep_in(&cache, key.clone());
+        lock(kinds()).remove(&key);
+        restore_in(&cache, key.clone());
+        assert_eq!(recalled(&key), Some(ItemKind::PullRequest));
+        // What this process knows wins over the disk.
+        lock(kinds()).insert(key.clone(), ItemKind::Issue);
+        restore_in(&cache, key.clone());
+        assert_eq!(recalled(&key), Some(ItemKind::Issue));
+        // Nothing known anywhere: nothing restored (the read falls back as before).
+        let unknown = ("gitlab.example".to_string(), "group/kind-test".to_string(), 42);
+        restore_in(&cache, unknown.clone());
+        assert_eq!(recalled(&unknown), None);
+    }
     use crate::forge::transport::HostKey;
 
     fn ctx() -> ForgeContext {

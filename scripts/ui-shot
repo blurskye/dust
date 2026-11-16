@@ -9,6 +9,10 @@ A scenario is a text file with one step per line:
     key space e        press keys one after another (kitty key names: ctrl+h, escape, enter)
     type hello world   type literal text
     wait 300           sleep for milliseconds
+    until Issues 10    wait until the screen shows this text (default 20 s, then fail)
+    until 5000 Ready   the same with its own limit in milliseconds
+    gone Loading…      wait until the screen no longer shows this text
+    settle 15000 Load  wait up to 15 s for the text to go, never fail, print how long it took
     shot explorer      save OUT/<size>/explorer.png and explorer.txt (screen text)
     # comment
 
@@ -20,6 +24,7 @@ import argparse
 import json
 import os
 import pathlib
+import select
 import shutil
 import subprocess
 import sys
@@ -30,15 +35,47 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 FONT = "FiraCode Nerd Font"
 
 
-def free_display():
-    for number in range(90, 140):
-        if not pathlib.Path(f"/tmp/.X11-unix/X{number}").exists():
-            return number
-    sys.exit("no free X display number")
+def start_xvfb():
+    """Start Xvfb on a display it picks itself (`-displayfd`). Choosing a free number here and
+    then starting Xvfb on it raced between concurrent runs: two runs took the same number, one
+    Xvfb failed, and both terminals drew on the survivor, so one run's screenshots came out
+    black."""
+    read_end, write_end = os.pipe()
+    xvfb = subprocess.Popen(
+        ["Xvfb", "-displayfd", str(write_end), "-screen", "0", "3840x2160x24", "-nolisten", "tcp"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        pass_fds=(write_end,),
+    )
+    os.close(write_end)
+    number = b""
+    deadline = time.monotonic() + 15
+    while not number.endswith(b"\n") and time.monotonic() < deadline:
+        ready, _, _ = select.select([read_end], [], [], 0.1)
+        if ready:
+            chunk = os.read(read_end, 16)
+            if not chunk:
+                break
+            number += chunk
+    os.close(read_end)
+    if not number.strip().isdigit():
+        xvfb.kill()
+        sys.exit("Xvfb did not report a display number")
+    return xvfb, int(number)
 
 
 class StartupError(Exception):
     pass
+
+
+def colours(png):
+    result = subprocess.run(["identify", "-format", "%k", str(png)], capture_output=True, text=True)
+    return int(result.stdout.strip() or 0) if result.stdout.strip().isdigit() else 0
+
+
+def blank(png):
+    """A terminal screenshot has many colours and real weight; a black frame has neither."""
+    return png.stat().st_size < 5000 or colours(png) <= 2
 
 
 def wait_for(predicate, timeout, what):
@@ -53,14 +90,9 @@ def wait_for(predicate, timeout, what):
 class Terminal:
     def __init__(self, binary, cwd, columns, rows, workdir):
         self.workdir = workdir
-        self.display = free_display()
         self.socket = workdir / "kitty.sock"
         self.kitty = None
-        self.xvfb = subprocess.Popen(
-            ["Xvfb", f":{self.display}", "-screen", "0", "3840x2160x24", "-nolisten", "tcp"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
+        self.xvfb, self.display = start_xvfb()
         try:
             self.start(binary, cwd, columns, rows)
         except StartupError as error:
@@ -131,10 +163,19 @@ class Terminal:
         self.remote("send-text", "--", text)
 
     def shot(self, path):
-        subprocess.run(
-            ["import", "-display", f":{self.display}", "-window", str(self.window_id()), str(path.with_suffix(".png"))],
-            check=True,
-        )
+        png = path.with_suffix(".png")
+        # A blank capture (a window not yet drawn, or another display's) is retried, then
+        # fails the run loudly instead of leaving a black PNG beside a good text dump.
+        for attempt in range(4):
+            subprocess.run(
+                ["import", "-display", f":{self.display}", "-window", str(self.window_id()), str(png)],
+                check=True,
+            )
+            if not blank(png):
+                break
+            time.sleep(0.5)
+        else:
+            sys.exit(f"{png}: blank screenshot ({png.stat().st_size} bytes, {colours(png)} colours)")
         text = self.remote("get-text", "--extent", "screen", capture=True) or ""
         path.with_suffix(".txt").write_text(text)
 
@@ -150,6 +191,25 @@ class Terminal:
                 process.wait(5)
             except subprocess.TimeoutExpired:
                 process.kill()
+
+
+def wait_for_text(terminal, text, present, limit, where):
+    """A readiness signal instead of a guessed sleep: poll the screen text until `text` shows
+    (or, for `gone`, until it no longer does). A timeout or an exit fails the run with the
+    screen it was waiting on, so a slow forge read never turns into a wrong screenshot."""
+    deadline = time.monotonic() + limit / 1000
+    screen = ""
+    while time.monotonic() < deadline:
+        if not terminal.alive():
+            sys.exit(f"{where}: dust exited while waiting for '{text}'")
+        screen = terminal.remote("get-text", "--extent", "screen", capture=True) or ""
+        if (text in screen) == present:
+            # One more frame: the text can land a paint ahead of the rest of the screen.
+            time.sleep(0.15)
+            return
+        time.sleep(0.1)
+    verb = "show" if present else "drop"
+    sys.exit(f"{where}: the screen did not {verb} '{text}' within {limit} ms; it read:\n{screen}")
 
 
 def run(scenario, binary, cwd, size, out):
@@ -175,6 +235,26 @@ def run(scenario, binary, cwd, size, out):
                 terminal.type(rest)
             elif step == "wait":
                 time.sleep(int(rest) / 1000)
+            elif step in ("until", "gone"):
+                limit, _, text = rest.partition(" ")
+                if not (limit.isdigit() and text):
+                    limit, text = "20000", rest
+                wait_for_text(terminal, text, step == "until", int(limit), f"{scenario}:{number}")
+            elif step == "settle":
+                # Real forges: wait up to MS for TEXT to go, never fail, and say how long it
+                # took, so a slow read is measured instead of aborting the run.
+                limit, _, text = rest.partition(" ")
+                started = time.monotonic()
+                deadline = started + int(limit) / 1000
+                screen = ""
+                while time.monotonic() < deadline and terminal.alive():
+                    screen = terminal.remote("get-text", "--extent", "screen", capture=True) or ""
+                    if text not in screen:
+                        break
+                    time.sleep(0.1)
+                took = int((time.monotonic() - started) * 1000)
+                state = "still shown" if text in screen else "gone"
+                print(f"settle {scenario.name}:{number} '{text}' {state} after {took} ms", flush=True)
             elif step == "shot":
                 time.sleep(0.15)
                 path = out / rest

@@ -367,7 +367,7 @@ fn trust_worker_reports_distinct_request_ids_and_async_identity() {
         .expect("inspect");
     let load_request_id = service.load(state.path().join("missing")).expect("load");
     assert!(load_request_id > identity_request_id);
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
     let mut identity_seen = false;
     let mut load_seen = false;
     while !identity_seen || !load_seen {

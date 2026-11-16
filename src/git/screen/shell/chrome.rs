@@ -88,6 +88,25 @@ pub(crate) fn put_spans(grid: &mut CellGrid, mut x: u16, y: u16, spans: &[Span],
     x
 }
 
+/// The selection edge in a list's gutter, on each of the selected record's rows. Only the
+/// focused pane draws it (R15 focus): one bar on screen says where `j`/`k` go, and an
+/// unfocused pane's selection reads from its inactive band alone, as the Git rail does.
+pub(crate) fn selection_edge(
+    grid: &mut CellGrid,
+    x: u16,
+    rows: std::ops::Range<u16>,
+    focused: bool,
+    surface: GitSurface,
+    mode: ExplorerIconMode,
+) {
+    if !focused {
+        return;
+    }
+    for y in rows {
+        grid.set_cell(x, y, glyph(Glyph::Cursor, mode), bold(GitRole::Focus, surface));
+    }
+}
+
 /// A bordered pane with `glyph title` on the top border and a muted count at its right end.
 pub(crate) fn pane(
     grid: &mut CellGrid,
@@ -154,7 +173,7 @@ fn recolour(style: Style, role: GitRole) -> Style {
     }
 }
 
-/// `Local │ Remotes 3 │ Tags 2` on one interior row; the active tab is a filled chip.
+/// `Local 4 │ Remotes 3 │ Tags 2` on one interior row; the active tab is a filled chip.
 pub(crate) fn sub_tabs(
     grid: &mut CellGrid,
     x: u16,
@@ -166,9 +185,14 @@ pub(crate) fn sub_tabs(
 ) {
     let surface = GitSurface::Pane;
     let mut at = x;
+    // Every tab keeps one space either side of its `│` at every width (r9 R8-04): a row
+    // that is too wide loses its counts first (see [`fit_tabs`]), never its gutters.
     for (index, tab) in tabs.iter().enumerate() {
+        // Every tab needs both pads, the last one too, so the row never touches the border
+        // (r11 GL-01); a row fits or not whichever tab is active (r10 R9-01).
+        let pad = 2;
         // A tab that does not fit whole is replaced by `…`, never cut mid-word.
-        let need = width(tab) + 2 + u16::from(index > 0);
+        let need = width(tab) + pad + u16::from(index > 0);
         if at + need > right {
             if at + 2 <= right {
                 grid.put_text_clipped(at, y, " …", st(GitRole::Muted, surface), right);
@@ -187,56 +211,66 @@ pub(crate) fn sub_tabs(
         } else {
             st(GitRole::Muted, surface)
         };
-        at = grid.put_text_clipped(at, y, &format!(" {tab} "), style, right);
+        let text = format!(" {tab} ");
+        at = grid.put_text_clipped(at, y, &text, style, right);
     }
 }
 
-/// Tabs made to fit `room` columns: the longest names shorten first (`Features 2` →
-/// `Feat 2`), the active one last; when even that is too wide the tail folds into a counted
-/// `+2`, never a bare `…` (DESIGN.md §4.5).
+/// ` name ` per tab joined by `│`, as [`sub_tabs`] paints them, the last tab's trailing
+/// pad included so the row keeps a gutter before the border. The same whichever tab is
+/// active.
+fn padded_width(tabs: &[String]) -> u16 {
+    tabs.iter().map(|tab| width(tab) + 2).sum::<u16>() + tabs.len().saturating_sub(1) as u16
+}
+
+/// Whether `tabs` fit `room` whole: every name, count and gutter.
+pub(crate) fn tabs_fit(tabs: &[String], room: u16) -> bool {
+    padded_width(tabs) <= room
+}
+
+/// Tabs made to fit `room` columns (DESIGN.md §4.5). Names never change with width, and
+/// counts are on every tab or on none (r8 R7-03): every count goes at once, and only then does the tail behind the active tab fold
+/// into a counted `+2 more`, never a bare `…`.
 pub(crate) fn fit_tabs(tabs: &[String], active: usize, room: u16) -> Vec<String> {
     fit_tabs_reserving(tabs, active, room, 0)
 }
 
-/// The short name of every tab label that has one; the rest keep their names.
-const SHORT_TABS: [(&str, &str); 6] = [
-    ("Overview", "Info"),
-    ("Activity", "Log"),
-    ("Pipelines", "Pipes"),
-    ("Discussion", "Talk"),
-    ("Features", "Feat"),
-    ("Other", "Misc"),
-];
+/// `Commits 2` → `Commits`; a name without a trailing count is kept whole.
+fn without_count(tab: &str) -> String {
+    match tab.rsplit_once(' ') {
+        Some((name, count))
+            if !name.is_empty()
+                && !count.is_empty()
+                && count.chars().all(|c| c.is_ascii_digit() || c == '+' || c == '/') =>
+        {
+            name.to_owned()
+        }
+        _ => tab.to_owned(),
+    }
+}
 
-/// One rule at every width: full names when the row fits (with `reserve` columns kept for
-/// tabs that come and go, such as Merge), else every tab's short name, else the tail folded
-/// into `+N more`. A row never mixes long and short names.
+/// [`fit_tabs`] keeping `reserve` columns free for tabs that come and go.
 pub(crate) fn fit_tabs_reserving(tabs: &[String], active: usize, room: u16, reserve: u16) -> Vec<String> {
-    let total = |tabs: &[String]| tabs.iter().map(|tab| width(tab) + 3).sum::<u16>();
-    if total(tabs) + reserve <= room {
+    let total = padded_width;
+    let fits = |tabs: &[String]| total(tabs) + reserve <= room;
+    if fits(tabs) {
         return tabs.to_vec();
     }
-    let short = tabs
-        .iter()
-        .map(|tab| match SHORT_TABS.iter().find(|(long, _)| tab.starts_with(long)) {
-            Some((long, short)) => format!("{short}{}", &tab[long.len()..]),
-            None => tab.clone(),
-        })
-        .collect::<Vec<_>>();
-    if total(&short) <= room {
-        return short;
+    let quiet = tabs.iter().map(|tab| without_count(tab)).collect::<Vec<_>>();
+    if total(&quiet) <= room {
+        return quiet;
     }
     // Fold the tail behind the active tab into `+N more`.
-    let mut kept = short.len();
+    let mut kept = quiet.len();
     while kept > active + 1 && kept > 1 {
         kept -= 1;
-        let mut candidate = short[..kept].to_vec();
-        candidate.push(format!("+{} more", short.len() - kept));
+        let mut candidate = quiet[..kept].to_vec();
+        candidate.push(format!("+{} more", quiet.len() - kept));
         if total(&candidate) <= room {
             return candidate;
         }
     }
-    short
+    quiet
 }
 
 /// A chip: one space of padding each side on a tinted surface.
@@ -254,13 +288,72 @@ pub(crate) fn chip(grid: &mut CellGrid, x: u16, y: u16, right: u16, text: &str, 
     grid.put_text_clipped(x, y, &format!(" {text} "), st(role, GitSurface::Chip(hue)), right)
 }
 
+/// The backdrop of a sheet over `keep` (r9 R8-10). Behind a sheet the screen's body is
+/// cleared outright, pane borders and rules included, so no cut word, count chip or rule
+/// stub reads as part of the sheet at any size. Only the top bar (where you are) and the
+/// footer row (the screen's own hints, muted) stay.
+pub(crate) fn scrim(grid: &mut CellGrid, keep: Rect) {
+    let (width, height) = (grid.width(), grid.height());
+    for y in 0..height {
+        for x in 0..width {
+            let margin = x + 1 >= keep.x && x <= keep.right() && y + 1 >= keep.y && y <= keep.bottom();
+            if margin {
+                grid.set_cell(x, y, " ", st(GitRole::Text, GitSurface::Canvas));
+                continue;
+            }
+            // The top bar stays as it is: it says where you are.
+            if y == 0 {
+                continue;
+            }
+            let Some(cell) = grid.get(x, y) else { continue };
+            if cell.continuation {
+                continue;
+            }
+            if y + 1 == height {
+                // The footer's keys go flat so the sheet is the only thing that reads as live.
+                let symbol = cell.symbol.clone();
+                grid.set_cell(x, y, &symbol, st(GitRole::Muted, GitSurface::Canvas));
+            } else {
+                grid.set_cell(x, y, " ", st(GitRole::Text, GitSurface::Canvas));
+            }
+        }
+    }
+}
+
+/// The Git tab's backdrop for a centred sheet: `area` (the panes) recedes around `keep`,
+/// the way a close or reopen sheet dims the forge: text keeps its place in the border
+/// colour, and a one-cell margin around the sheet is cleared, so no panel word runs into
+/// its edge (`Ta╭─`). The top bar, an operation banner, the tutor and the footer outside
+/// `area` stay as they are.
+pub(crate) fn scrim_within(grid: &mut CellGrid, keep: Rect, area: Rect) {
+    for y in area.y..area.bottom() {
+        for x in area.x..area.right() {
+            let inside = x >= keep.x && x < keep.right() && y >= keep.y && y < keep.bottom();
+            if inside {
+                continue;
+            }
+            let margin = x + 1 >= keep.x && x <= keep.right() && y + 1 >= keep.y && y <= keep.bottom();
+            let Some(cell) = grid.get(x, y) else { continue };
+            if cell.continuation {
+                continue;
+            }
+            let symbol = if margin { " ".to_owned() } else { cell.symbol.clone() };
+            grid.set_cell(x, y, &symbol, st(GitRole::Border, GitSurface::Canvas));
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct Tab {
     pub glyph: Glyph,
     pub role: GitRole,
     pub label: &'static str,
-    pub short: &'static str,
     pub count: Option<String>,
+    /// The count is a badge (unread), not a total: it stays when the bar drops its counts.
+    pub badge: bool,
+    /// Status marks after the count, in their own colours, kept at every width like a badge:
+    /// the Actions tab's `✕ 2` failing runs and `●` while one runs.
+    pub marks: Vec<(String, GitRole)>,
 }
 
 pub(crate) struct TopBar<'a> {
@@ -275,18 +368,62 @@ pub(crate) struct TopBar<'a> {
     pub mode: ExplorerIconMode,
 }
 
-/// Row 0. Shrinks in the order of DESIGN.md §2.1 until it fits.
+/// How far row 0 has shrunk. Tab names never change with width, and counts are on every
+/// tab or on none (r8 R7-03): the wordmark goes first, then inactive icons, then the
+/// repository and branch shorten, then every count goes at once, and only as a last resort
+/// do inactive tabs fold to icon and count. The active tab keeps its name and chip, and its
+/// icon goes with the others'.
+#[derive(Clone, Copy)]
+struct Squeeze {
+    counts: bool,
+    wordmark: bool,
+    inactive_icons: bool,
+    repo: Option<usize>,
+    head: Option<usize>,
+    inactive_labels: bool,
+}
+
+const SQUEEZES: [Squeeze; 7] = {
+    const FULL: Squeeze = Squeeze {
+        counts: true,
+        wordmark: true,
+        inactive_icons: true,
+        repo: None,
+        head: None,
+        inactive_labels: true,
+    };
+    const PLAIN: Squeeze = Squeeze { wordmark: false, inactive_icons: false, ..FULL };
+    [
+        FULL,
+        Squeeze { wordmark: false, ..FULL },
+        PLAIN,
+        Squeeze { repo: Some(12), ..PLAIN },
+        Squeeze { repo: Some(12), head: Some(14), ..PLAIN },
+        Squeeze { repo: Some(12), head: Some(14), counts: false, ..PLAIN },
+        // Last resort: inactive tabs fold to icon and count.
+        Squeeze {
+            counts: true,
+            wordmark: false,
+            inactive_icons: true,
+            repo: Some(12),
+            head: Some(14),
+            inactive_labels: false,
+        },
+    ]
+};
+
+/// Row 0. Shrinks in the order of [`Squeeze`] until it fits.
 pub(crate) fn top_bar(grid: &mut CellGrid, width_cells: u16, bar: &TopBar<'_>) {
     let surface = GitSurface::TopBar;
     let base = st(GitRole::Text, surface);
     for x in 0..width_cells {
         grid.set_cell(x, 0, " ", base);
     }
-    for step in 0..=7 {
-        let left = left_cluster(bar, step);
-        let right = right_cluster(bar, step);
+    for (index, squeeze) in SQUEEZES.iter().enumerate() {
+        let left = left_cluster(bar, *squeeze);
+        let right = right_cluster(bar, *squeeze);
         let need = spans_width(&left) + spans_width(&right) + 3;
-        if need <= width_cells || step == 7 {
+        if need <= width_cells || index == SQUEEZES.len() - 1 {
             put_spans(grid, 1, 0, &left, width_cells);
             let at = width_cells.saturating_sub(spans_width(&right) + 1);
             put_spans(grid, at.max(spans_width(&left) + 2), 0, &right, width_cells);
@@ -299,26 +436,22 @@ fn separator() -> Span {
     (" │ ".into(), st(GitRole::Border, GitSurface::TopBar))
 }
 
-fn left_cluster(bar: &TopBar<'_>, step: u8) -> Vec<Span> {
+fn left_cluster(bar: &TopBar<'_>, squeeze: Squeeze) -> Vec<Span> {
     let surface = GitSurface::TopBar;
     let mut spans = Vec::new();
-    if step < 2 {
+    if squeeze.wordmark {
         spans.push(("DUSTY GIT".into(), bold(GitRole::Text, surface)));
         spans.push(separator());
     }
-    if step < 6 {
-        let repo = if step >= 5 {
-            ellipsize(bar.repo, 12)
-        } else {
-            bar.repo.to_owned()
-        };
-        spans.push((repo, st(GitRole::Text, surface)));
-        spans.push(separator());
-    }
-    let head = if step >= 6 {
-        ellipsize_start(bar.head, 14)
-    } else {
-        bar.head.to_owned()
+    let repo = match squeeze.repo {
+        Some(room) => ellipsize(bar.repo, room),
+        None => bar.repo.to_owned(),
+    };
+    spans.push((repo, st(GitRole::Text, surface)));
+    spans.push(separator());
+    let head = match squeeze.head {
+        Some(room) => ellipsize_start(bar.head, room),
+        None => bar.head.to_owned(),
     };
     spans.push((
         format!("{} ", glyph(Glyph::Branch, bar.mode)),
@@ -334,11 +467,7 @@ fn left_cluster(bar: &TopBar<'_>, step: u8) -> Vec<Span> {
             bold(GitRole::Modified, surface),
         ));
     }
-    if step < 6 {
-        spans.push(separator());
-    } else {
-        spans.push((" ".into(), st(GitRole::Text, surface)));
-    }
+    spans.push(separator());
     match bar.divergence {
         Some((ahead, behind)) => {
             let quiet = ahead == 0 && behind == 0;
@@ -361,46 +490,46 @@ fn left_cluster(bar: &TopBar<'_>, step: u8) -> Vec<Span> {
     spans
 }
 
-fn right_cluster(bar: &TopBar<'_>, step: u8) -> Vec<Span> {
+fn right_cluster(bar: &TopBar<'_>, squeeze: Squeeze) -> Vec<Span> {
     let surface = GitSurface::TopBar;
     let mut spans = Vec::new();
     for (index, tab) in bar.tabs.iter().enumerate() {
         if index > 0 {
-            spans.push(if step >= 7 {
-                (" ".into(), st(GitRole::Text, surface))
-            } else {
-                separator()
-            });
+            spans.push(separator());
         }
-        let label = if step >= 4 {
-            ""
-        } else if step >= 1 {
-            tab.short
-        } else {
-            tab.label
-        };
         let mark = glyph(tab.glyph, bar.mode);
-        let count = tab.count.as_deref().unwrap_or("");
+        let count = tab.count.as_deref().filter(|_| squeeze.counts || tab.badge).unwrap_or("");
         if index == bar.active {
-            let parts = [mark, label, count]
+            // One icon rule for every tab (r11 NOT-08, gitea-10): when the inactive icons go,
+            // the active tab's goes too; its chip is the cue.
+            let mark = if squeeze.inactive_icons || !squeeze.inactive_labels { mark } else { "" };
+            let parts = [mark, tab.label, count]
                 .into_iter()
+                .chain(tab.marks.iter().map(|(text, _)| text.as_str()))
                 .filter(|part| !part.is_empty())
                 .collect::<Vec<_>>();
             spans.push((
                 format!(" {} ", parts.join(" ")),
                 bold(GitRole::OnFocus, GitSurface::ChipActive),
             ));
-        } else {
-            spans.push((mark.into(), st(tab.role, surface)));
-            if !label.is_empty() {
-                spans.push((format!(" {label}"), st(GitRole::Muted, surface)));
-            }
-            if !count.is_empty() {
-                spans.push((
-                    format!("{}{count}", if step >= 7 { "" } else { " " }),
-                    st(GitRole::Muted, surface),
-                ));
-            }
+            continue;
+        }
+        let mut parts: Vec<Span> = Vec::new();
+        if squeeze.inactive_icons || !squeeze.inactive_labels {
+            parts.push((mark.into(), st(tab.role, surface)));
+        }
+        if squeeze.inactive_labels {
+            parts.push((tab.label.into(), st(GitRole::Muted, surface)));
+        }
+        if !count.is_empty() {
+            let role = if tab.badge { GitRole::Focus } else { GitRole::Muted };
+            parts.push((count.into(), st(role, surface)));
+        }
+        for (text, role) in &tab.marks {
+            parts.push((text.clone(), st(*role, surface)));
+        }
+        for (at, (text, style)) in parts.into_iter().enumerate() {
+            spans.push((if at == 0 { text } else { format!(" {text}") }, style));
         }
     }
     spans
@@ -423,6 +552,22 @@ pub(crate) fn banner(grid: &mut CellGrid, rect: Rect, spans: &[Span], actions: &
     put_spans(grid, right_at, rect.y, &right_spans, rect.right());
 }
 
+thread_local! {
+    /// Columns at the left of the footer row that the mode chip (`modal.rs`) will paint.
+    static FOOTER_INSET: std::cell::Cell<u16> = const { std::cell::Cell::new(0) };
+}
+
+/// Reserves `columns` at the left of every footer drawn until it is reset to 0.
+pub(crate) fn set_footer_inset(columns: u16) {
+    FOOTER_INSET.with(|inset| inset.set(columns));
+}
+
+/// `rect` less the columns the mode chip reserves.
+pub(crate) fn footer_rect(rect: Rect) -> Rect {
+    let inset = FOOTER_INSET.with(std::cell::Cell::get).min(rect.w.saturating_sub(1));
+    Rect::new(rect.x + inset, rect.y, rect.w - inset, rect.h)
+}
+
 /// The last row: at most five `key label` pairs, then `? keys`; context on the right.
 pub(crate) fn footer(
     grid: &mut CellGrid,
@@ -431,42 +576,104 @@ pub(crate) fn footer(
     context: &str,
     message: Option<(&str, bool)>,
 ) {
+    footer_with(grid, rect, hints, context, message, 6);
+}
+
+/// `footer` with up to `most` hints: a screen that ranks its own keys by priority (Actions'
+/// run pane, §3.38) fills the row until the width runs out.
+pub(crate) fn footer_with(
+    grid: &mut CellGrid,
+    rect: Rect,
+    hints: &[(&str, &str)],
+    context: &str,
+    message: Option<(&str, bool)>,
+    most: usize,
+) {
+    footer_ranked(grid, rect, hints, context, message, most, false);
+}
+
+/// `footer` whose context is decoration (a repository tag, a standing query): keys outrank
+/// it (r11 NOT-06), and it takes only what the hints leave.
+pub(crate) fn footer_keys_first(
+    grid: &mut CellGrid,
+    rect: Rect,
+    hints: &[(&str, &str)],
+    context: &str,
+    message: Option<(&str, bool)>,
+) {
+    footer_ranked(grid, rect, hints, context, message, 6, true);
+}
+
+/// [`footer_keys_first`] without the six-hint cap: the width alone decides how many show,
+/// in the order given (r15 narrow pass: Notifications' `/ filter` never showed at 190).
+pub(crate) fn footer_keys_first_fill(
+    grid: &mut CellGrid,
+    rect: Rect,
+    hints: &[(&str, &str)],
+    context: &str,
+    message: Option<(&str, bool)>,
+) {
+    footer_ranked(grid, rect, hints, context, message, usize::MAX, true);
+}
+
+fn footer_ranked(
+    grid: &mut CellGrid,
+    rect: Rect,
+    hints: &[(&str, &str)],
+    context: &str,
+    message: Option<(&str, bool)>,
+    most: usize,
+    keys_first: bool,
+) {
     let surface = GitSurface::TopBar;
     fill(grid, rect, st(GitRole::Text, surface));
+    // A modal screen's mode chip takes the left of the row: the hints lay out after it and
+    // drop by priority instead of running under it.
+    let rect = footer_rect(rect);
     // `? keys` always follows the hints that fit.
     let keys = |grid: &mut CellGrid, x: u16| {
         let x = grid.put_text_clipped(x, rect.y, "?", bold(GitRole::Focus, surface), rect.right());
         grid.put_text_clipped(x, rect.y, " keys", st(GitRole::Muted, surface), rect.right())
     };
-    if let Some((text, error)) = message.filter(|(text, _)| !text.is_empty()) {
-        let (mark, role) = if error {
-            ("✕ ", GitRole::Removed)
-        } else {
-            ("", GitRole::Modified)
-        };
-        // A notice takes the whole row until the next action clears it.
-        grid.put_text_clipped(
-            rect.x + 1,
-            rect.y,
-            &ellipsize(&format!("{mark}{text}"), usize::from(rect.w.saturating_sub(2))),
-            bold(role, surface),
-            rect.right(),
-        );
-        return;
+    // A notice sits on the right, where the context was, and the hints stay (r8 R7-05): a
+    // toast never takes away the keys. Only a notice too long to share the row takes it.
+    let notice = message.filter(|(text, _)| !text.is_empty()).map(|(text, error)| {
+        let (mark, role) = if error { ("✕ ", GitRole::Removed) } else { ("", GitRole::Modified) };
+        (format!("{mark}{text}"), role)
+    });
+    if let Some((text, role)) = &notice {
+        if width(text) + 6 + 4 > rect.w.saturating_sub(2) {
+            grid.put_text_clipped(
+                rect.x + 1,
+                rect.y,
+                &ellipsize(text, usize::from(rect.w.saturating_sub(2))),
+                bold(*role, surface),
+                rect.right(),
+            );
+            return;
+        }
     }
-    // The context (a path, a find position) keeps up to a third of the row; hints
-    // that do not fit are dropped, and `? keys` is never cut.
+    // The context (a path, a find position) keeps up to a third of the row; hints that do
+    // not fit are dropped, and `? keys` is never cut. A decorative context yields to the
+    // keys instead (`keys_first`); a notice always keeps its room.
     let keys_width = 6u16;
     let room = rect.w.saturating_sub(1);
-    let pairs = hints.iter().take(6).copied().collect::<Vec<_>>();
+    let pairs = hints.iter().take(most).copied().collect::<Vec<_>>();
     let size = |key: &str, label: &str| width(key) + width(label) + 1 + 3;
-    let wanted_context = if context.is_empty() { 0 } else { width(context).min(rect.w / 3) + 2 };
+    let wanted_context = match &notice {
+        Some((text, _)) => width(text) + 2,
+        None if context.is_empty() => 0,
+        None => width(context).min(rect.w / 3) + 2,
+    };
+    let reserved = if notice.is_some() || !keys_first { wanted_context } else { 0 };
     let mut used = keys_width;
     let mut shown = Vec::new();
     for (key, label) in &pairs {
         let next = size(*key, *label);
-        if used + next + wanted_context > room {
-            continue;
+        // Hints come in priority order: the first that does not fit ends the row, so a
+        // smaller, lesser key never shows where a more important one was dropped.
+        if used + next + reserved > room {
+            break;
         }
         used += next;
         shown.push((*key, *label));
@@ -478,6 +685,11 @@ pub(crate) fn footer(
         x = grid.put_text_clipped(x, rect.y, " · ", st(GitRole::Border, surface), rect.right());
     }
     x = keys(grid, x);
+    if let Some((text, role)) = &notice {
+        let at = rect.right().saturating_sub(width(text) + 1).max(x + 2);
+        grid.put_text_clipped(at, rect.y, text, bold(*role, surface), rect.right());
+        return;
+    }
     if !context.is_empty() {
         let free = rect.right().saturating_sub(x + 3);
         let cells = usize::from(free.min(wanted_context.saturating_sub(2)));
@@ -494,6 +706,10 @@ pub(crate) fn footer(
             }
             kept.reverse();
             if kept.is_empty() { String::new() } else { format!("… {}", kept.join(" ")) }
+        } else if keys_first && context.width() > cells {
+            // A decorative tag (`orbit-dev/orbit`) shows whole or not at all: `…orbit`
+            // reads as a word cut in half (r15 narrow pass).
+            String::new()
         } else {
             ellipsize_start(context, cells)
         };
@@ -547,40 +763,58 @@ pub(crate) fn receipt(
     );
 }
 
-/// A centred modal sheet with an accent border; returns its interior.
-pub(crate) fn sheet(grid: &mut CellGrid, body: Rect, title: &str, rows: u16) -> Rect {
-    let w = (body.w * 6 / 10).clamp(56.min(body.w), 110.min(body.w));
-    let h = (rows + 2).min(body.h.saturating_sub(2)).max(3);
-    let rect = Rect::new(
-        body.x + (body.w - w) / 2,
-        body.y + (body.h.saturating_sub(h)) / 2,
-        w,
-        h,
-    );
-    let surface = GitSurface::Sheet;
-    fill(grid, rect, st(GitRole::Text, surface));
-    let edge = st(GitRole::Focus, surface);
-    let (right, bottom) = (rect.right() - 1, rect.bottom() - 1);
-    for x in rect.x + 1..right {
-        grid.set_cell(x, rect.y, "─", edge);
-        grid.set_cell(x, bottom, "─", edge);
+/// One date grammar for the Git tab (DESIGN.md §2.5a): a commit from the last day reads as
+/// its age (`now`, `5m`, `2h`), an older one as `Nov 12`, and one from another year as
+/// `Nov 12, 2025`. `stamp` is a Git date: strict ISO (`%aI`, which has the hour) or a bare
+/// `2026-11-12` (`%as`, `--date=short`), which can only say `today`. `now` is Unix
+/// seconds. Anything else is shown as given; the full stamp is for copying, not lists.
+pub(crate) fn when(stamp: &str, now: i64) -> String {
+    const MONTHS: [&str; 12] = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
+    let stamp = stamp.trim();
+    let Some(at) = crate::forge::records::epoch(stamp) else {
+        return stamp.to_owned();
+    };
+    let timed = stamp.len() > 10;
+    let age = now - at;
+    if timed && (0..86_400).contains(&age) {
+        return if age < 60 {
+            "now".into()
+        } else if age < 3600 {
+            format!("{}m", age / 60)
+        } else {
+            format!("{}h", age / 3600)
+        };
     }
-    for y in rect.y + 1..bottom {
-        grid.set_cell(rect.x, y, "│", edge);
-        grid.set_cell(right, y, "│", edge);
+    // The date as the author's clock wrote it, as `git log` prints it.
+    let mut parts = stamp[..10].split('-');
+    let (Some(year), Some(month), Some(day)) = (
+        parts.next().and_then(|part| part.parse::<i64>().ok()),
+        parts.next().and_then(|part| part.parse::<usize>().ok()),
+        parts.next().and_then(|part| part.parse::<u8>().ok()),
+    ) else {
+        return stamp.to_owned();
+    };
+    // Today's civil date in UTC (Howard Hinnant's civil-from-days).
+    let days = now.div_euclid(86_400) + 719_468;
+    let era = days.div_euclid(146_097);
+    let doe = days - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let today_day = doy - (153 * mp + 2) / 5 + 1;
+    let today_month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let today_year = yoe + era * 400 + i64::from(today_month <= 2);
+    if !timed && (year, month as i64, i64::from(day)) == (today_year, today_month, today_day) {
+        return "today".into();
     }
-    grid.set_cell(rect.x, rect.y, "╭", edge);
-    grid.set_cell(right, rect.y, "╮", edge);
-    grid.set_cell(rect.x, bottom, "╰", edge);
-    grid.set_cell(right, bottom, "╯", edge);
-    grid.put_text_clipped(
-        rect.x + 2,
-        rect.y,
-        &format!(" {} ", ellipsize(title, usize::from(w.saturating_sub(6)))),
-        bold(GitRole::Focus, surface),
-        right,
-    );
-    Rect::new(rect.x + 2, rect.y + 1, w.saturating_sub(4), h.saturating_sub(2))
+    let name = MONTHS[month.clamp(1, 12) - 1];
+    if year == today_year {
+        format!("{name} {day}")
+    } else {
+        format!("{name} {day}, {year}")
+    }
 }
 
 #[cfg(test)]
@@ -589,12 +823,13 @@ mod tests {
 
     fn bar(width_cells: u16) -> String {
         let mut grid = CellGrid::new(width_cells, 1);
-        let tab = |glyph, role, label, short, count: Option<&str>| Tab {
+        let tab = |glyph, role, label, count: Option<&str>| Tab {
             glyph,
             role,
             label,
-            short,
             count: count.map(Into::into),
+            badge: false,
+            marks: Vec::new(),
         };
         top_bar(
             &mut grid,
@@ -606,10 +841,10 @@ mod tests {
                 operation: false,
                 divergence: Some((2, 0)),
                 tabs: vec![
-                    tab(Glyph::Repo, GitRole::Focus, "Git", "Git", None),
-                    tab(Glyph::PullRequest, GitRole::Ref, "Pull requests", "PRs", Some("8")),
-                    tab(Glyph::Issue, GitRole::Added, "Issues", "Issues", Some("10")),
-                    tab(Glyph::Actions, GitRole::Modified, "Actions", "CI", None),
+                    tab(Glyph::Repo, GitRole::Focus, "Git", None),
+                    tab(Glyph::PullRequest, GitRole::Ref, "Pull requests", Some("8")),
+                    tab(Glyph::Issue, GitRole::Added, "Issues", Some("10")),
+                    tab(Glyph::Actions, GitRole::Modified, "Actions", None),
                 ],
                 active: 0,
                 mode: ExplorerIconMode::Unicode,
@@ -634,5 +869,120 @@ mod tests {
         let narrow = bar(64);
         assert!(narrow.contains("↑2 ↓0") && narrow.contains("⎇ 8"), "{narrow}");
         assert!(!narrow.contains("Pull"), "{narrow}");
+    }
+
+    /// r8 R7-03: a count is on every tab or on none, whatever the width; icons go first.
+    #[test]
+    fn counts_are_on_every_tab_or_none() {
+        for width in 60..=200 {
+            let text = bar(width);
+            if text.contains("Pull requests") {
+                assert_eq!(text.contains("Pull requests 8"), text.contains("Issues 10"), "{width}: {text}");
+            }
+        }
+        let hundred = bar(100);
+        assert!(hundred.contains("Pull requests 8") && hundred.contains("Issues 10"), "{hundred}");
+    }
+
+    /// r9 R8-10: behind a sheet nothing of the screen's body survives, not a word, a pane
+    /// rule nor a tab separator; the top bar and the footer row do.
+    #[test]
+    fn scrim_leaves_no_fragment_of_the_screen_behind() {
+        for (w, h) in [(100u16, 30u16), (120, 36), (190, 48)] {
+            let mut grid = CellGrid::new(w, h);
+            let text = st(GitRole::Text, GitSurface::Pane);
+            for y in 1..h {
+                let row = match y {
+                    1 => format!("╭ Issues {}╮", "─".repeat(usize::from(w) - 11)),
+                    _ if y + 2 == h => format!("╰{}╯", "─".repeat(usize::from(w) - 2)),
+                    _ if y + 1 == h => "Enter open · ? keys".to_owned(),
+                    _ => format!("│ All 10 │ Bugs 4 │ Other 4 ago long logs {}│", "Merge ".repeat(usize::from(w) / 6 - 8)),
+                };
+                grid.put_text_clipped(0, y, &row, text, w);
+            }
+            let sheet = Rect::new(w / 4, 3, w / 2, h - 8);
+            scrim(&mut grid, sheet);
+            for y in 1..h - 1 {
+                for x in 0..w {
+                    let cell = grid.get(x, y).expect("cell");
+                    assert_eq!(cell.symbol, " ", "{w}x{h}: `{}` at ({x},{y}) survives behind the sheet", cell.symbol);
+                }
+            }
+            assert!(grid.row_text(h - 1).contains("Enter open"), "the footer stays");
+        }
+    }
+
+    /// Reader and section tabs: counts on all or none, and every `│` keeps its gutters.
+    #[test]
+    fn sub_tab_counts_are_on_every_tab_or_none() {
+        let tabs: Vec<String> =
+            ["Overview", "Commits 2", "Checks 3", "Files 2", "Activity 6", "Merge"].map(Into::into).into();
+        for room in 20..=90 {
+            let fitted = fit_tabs(&tabs, 0, room);
+            let counted = fitted.iter().filter(|tab| tab.ends_with(|c: char| c.is_ascii_digit())).count();
+            assert!(counted == 0 || counted == 4, "{room}: {fitted:?}");
+        }
+        let quiet = tabs.iter().map(|tab| without_count(tab)).collect::<Vec<_>>();
+        // The last tab keeps its trailing pad too (a gutter before the border), and
+        // whether counts fit never depends on which tab is active.
+        for active in 0..tabs.len() {
+            assert_eq!(fit_tabs(&tabs, active, 64), tabs, "padded, every count fits in 64");
+            assert_eq!(fit_tabs(&tabs, active, 63), quiet);
+        }
+        let mut grid = CellGrid::new(80, 1);
+        for room in [40u16, 54, 56, 62, 63, 64, 80] {
+            grid.put_text_clipped(0, 0, &" ".repeat(80), st(GitRole::Text, GitSurface::Pane), 80);
+            sub_tabs(&mut grid, 0, 0, room, &fit_tabs(&tabs, 2, room), 2, true);
+            let row = grid.row_text(0);
+            for (at, _) in row.match_indices('│') {
+                assert!(row[..at].ends_with(' ') && row[at + '│'.len_utf8()..].starts_with(' '), "{room}: {row}");
+            }
+        }
+    }
+
+    /// The footer keeps whole hints at every width, after a mode chip's inset too: a row that
+    /// runs out drops the lowest hints, never half a word (`en · [ ] sections`, R15).
+    #[test]
+    fn footer_hints_stay_whole_at_every_width() {
+        let hints = [("Enter", "open"), ("[ ]", "sections"), ("/", "filter"), ("F", "narrow"), ("r", "rerun"), ("d", "dispatch"), ("Space e", "sidebar")];
+        for inset in [0u16, 10] {
+            for columns in 20u16..=200 {
+                let mut grid = CellGrid::new(columns, 1);
+                set_footer_inset(inset);
+                footer_with(&mut grid, Rect::new(0, 0, columns, 1), &hints, "orbit-dev/orbit", None, usize::MAX);
+                set_footer_inset(0);
+                let row = grid.row_text(0);
+                let shown = row.chars().skip(usize::from(inset.min(columns - 1))).collect::<String>();
+                let shown = shown.trim();
+                let mut parts = shown.split(" · ").map(str::trim).filter(|part| !part.is_empty()).collect::<Vec<_>>();
+                // `? keys` ends the hints; a context may follow it.
+                let last = parts.pop().unwrap_or_default();
+                assert!(last.starts_with("? keys") || shown.is_empty(), "{inset}/{columns}: {row:?}");
+                for part in &parts {
+                    assert!(hints.iter().any(|(key, label)| *part == format!("{key} {label}")), "{inset}/{columns}: cut hint {part:?} in {row:?}");
+                }
+                // The first hint goes last: a narrow row still opens with the key that opens.
+                if !parts.is_empty() {
+                    assert_eq!(parts[0], "Enter open", "{inset}/{columns}: {row:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn one_date_grammar_for_the_git_tab() {
+        let now = crate::forge::records::epoch("2026-11-16T12:00:00Z").unwrap();
+        assert_eq!(super::when("2026-11-16T11:59:30Z", now), "now");
+        assert_eq!(super::when("2026-11-16T11:15:00Z", now), "45m");
+        assert_eq!(super::when("2026-11-16T10:00:00+00:00", now), "2h");
+        assert_eq!(super::when("2026-11-16T12:00:00+02:00", now), "2h");
+        assert_eq!(super::when("2026-11-15T09:00:00Z", now), "Nov 15");
+        assert_eq!(super::when("2026-11-12", now), "Nov 12");
+        assert_eq!(super::when("2026-11-16", now), "today");
+        assert_eq!(super::when("2025-06-08T12:00:00Z", now), "Jun 8, 2025");
+        assert_eq!(super::when("2025-06-08", now), "Jun 8, 2025");
+        assert_eq!(super::when("not a date", now), "not a date");
+        // A clock ahead of ours is a date, never a negative age.
+        assert_eq!(super::when("2026-11-17T09:00:00Z", now), "Nov 17");
     }
 }

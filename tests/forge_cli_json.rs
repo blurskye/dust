@@ -583,15 +583,12 @@ fn open_hands_the_provider_url_to_the_browser() {
         let world = World::new(forge_kind);
         let world = &world;
         attempt(&mut failures, forge_kind.name().into(), || {
-            use std::os::unix::fs::PermissionsExt;
             let log = world.directory.path().join("browser.log");
             let browser = world.directory.path().join("browser.sh");
-            std::fs::write(
+            forge_fake::write_executable(
                 &browser,
-                format!("#!/bin/sh\nprintf '%s\\n' \"$1\" >> '{}'\n", log.display()),
-            )
-            .unwrap();
-            std::fs::set_permissions(&browser, std::fs::Permissions::from_mode(0o755)).unwrap();
+                format!("#!/bin/sh\nprintf '%s\\n' \"$1\" >> '{}'\n", log.display()).as_bytes(),
+            );
             let before = world.requests().len();
             for args in [
                 vec!["open".to_owned(), forge_kind.pull().to_string()],

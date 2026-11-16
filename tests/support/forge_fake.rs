@@ -103,11 +103,9 @@ impl ForgeServer {
 
     /// The fake `gh` as `<bin>/gh`, finding this server through a sidecar file.
     pub fn install_gh(&self, bin: &Path) -> PathBuf {
-        use std::os::unix::fs::PermissionsExt;
         std::fs::create_dir_all(bin).unwrap();
         let gh = bin.join("gh");
-        std::fs::write(&gh, include_bytes!("../fixtures/forge/fake_gh.py")).unwrap();
-        std::fs::set_permissions(&gh, std::fs::Permissions::from_mode(0o755)).unwrap();
+        write_executable(&gh, include_bytes!("../fixtures/forge/fake_gh.py"));
         std::fs::write(
             bin.join("fake_gh.json"),
             serde_json::json!({ "server": self.url() }).to_string(),
@@ -147,11 +145,9 @@ impl ForgeServer {
     }
 
     fn install(&self, bin: &Path, name: &str, script: &[u8], mut sidecar: Value) -> PathBuf {
-        use std::os::unix::fs::PermissionsExt;
         std::fs::create_dir_all(bin).unwrap();
         let path = bin.join(name);
-        std::fs::write(&path, script).unwrap();
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        write_executable(&path, script);
         sidecar["server"] = Value::String(self.url());
         std::fs::write(bin.join(format!("fake_{name}.json")), sidecar.to_string()).unwrap();
         path
@@ -174,6 +170,58 @@ impl Drop for ForgeServer {
         let _ = self.child.kill();
         let _ = self.child.wait();
     }
+}
+
+/// Write a script the code under test will run, as an executable at `path`.
+///
+/// The file is written by a child process (`install`), never opened for writing here: tests
+/// run on many threads, and a fork made by another test's thread while this process held the
+/// file open keeps a copy of that descriptor until it execs, so running the script in that
+/// window fails with `Text file busy` (ETXTBSY).
+pub fn write_executable(path: &Path, contents: &[u8]) {
+    let mut staging = path.as_os_str().to_owned();
+    staging.push(".source");
+    let staging = PathBuf::from(staging);
+    std::fs::write(&staging, contents).unwrap();
+    let status = Command::new("install")
+        .arg("-m")
+        .arg("755")
+        .arg(&staging)
+        .arg(path)
+        .status()
+        .unwrap();
+    assert!(status.success(), "install {}", path.display());
+    std::fs::remove_file(&staging).unwrap();
+}
+
+/// Change the fake forge's world in place under the lock the server holds while it answers a
+/// request (`<state>.lock`), so neither side loses the other's change. The new world replaces
+/// the file whole (a rename), so the server never reads half of it.
+pub fn update(path: &Path, change: impl FnOnce(&mut Value)) {
+    let mut name = path.as_os_str().to_owned();
+    name.push(".lock");
+    let lock = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(PathBuf::from(name))
+        .unwrap();
+    lock.lock().unwrap();
+    let mut value = if path.exists() {
+        state(path)
+    } else {
+        Value::Object(Default::default())
+    };
+    change(&mut value);
+    let mut temporary = path.as_os_str().to_owned();
+    temporary.push(".test-tmp");
+    std::fs::write(&temporary, value.to_string()).unwrap();
+    std::fs::rename(&temporary, path).unwrap();
+    lock.unlock().unwrap();
+}
+
+/// Replace the fake forge's world (see [`update`]).
+pub fn write_state(path: &Path, world: &Value) {
+    update(path, |state| *state = world.clone());
 }
 
 pub fn state(path: &Path) -> Value {

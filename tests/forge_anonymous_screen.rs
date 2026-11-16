@@ -107,7 +107,7 @@ fn a_public_host_reads_signed_out_and_says_why_writes_are_refused() {
             && !frame.contains("Loading")
     });
     assert!(frame.contains("requests left"), "the chip counts the quota:\n{frame}");
-    assert!(frame.contains("sign in: tea"), "the chip says how to sign in:\n{frame}");
+    assert!(frame.contains("@ sign in"), "the chip gives the sign-in key:\n{frame}");
     let footer_text = footer(&frame);
     for write in ["review", "comment"] {
         assert!(!footer_text.contains(write), "a write key stayed in the footer: {footer_text}");
@@ -116,7 +116,10 @@ fn a_public_host_reads_signed_out_and_says_why_writes_are_refused() {
     key(&mut screen, KeyCode::Char('C'));
     let frame = wait_for(&mut screen, "the refusal", |frame| frame.contains("Sign in to comment"));
     assert!(!frame.contains("Leave a comment"), "no form opens:\n{frame}");
-    assert!(frame.contains("tea login add"), "the refusal names the sign-in:\n{frame}");
+    assert!(
+        frame.contains("gitea.com/user/settings/applications"),
+        "the refusal names Gitea's token page:\n{frame}"
+    );
 }
 
 #[test]
@@ -132,6 +135,7 @@ fn an_instance_that_hides_reads_shows_its_sign_in_commands() {
     screen.open_target("prs", None);
     let frame = wait_for(&mut screen, "the sign-in state", |frame| frame.contains("requires sign-in") && frame.contains("$ "));
     assert!(frame.contains("tea login add"), "{frame}");
-    assert!(frame.contains("Sign-in required"), "the list says it too:\n{frame}");
-    assert!(!frame.contains("This view is unavailable"), "no error dump:\n{frame}");
+    assert!(!frame.contains("Sign-in required"), "said once, in the reader:\n{frame}");
+    assert_eq!(frame.matches("requires sign-in").count(), 1, "said once:\n{frame}");
+    assert!(!frame.contains("Couldn't load this view"), "no error dump:\n{frame}");
 }

@@ -8,12 +8,18 @@
 #       --binary scripts/ui-scenarios/forge-unauth-launch --cwd /tmp/orbit \
 #       --out target/ui-shots/forge-unauth-$state
 #   done
-wait 1500
+until Changes
+wait 300
 # `>` steps the top tabs: Git → Pull requests → Issues → Actions.
 key > >
-wait 3500
+wait 300
+# Each state says itself in its own words (no shared phrase since the states pass), so wait
+# for the list and for every read to end.
+until Filters
+gone Loading
+wait 800
 shot notice
-key a
+type @
 wait 500
 shot accounts
 key escape

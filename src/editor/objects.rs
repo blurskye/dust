@@ -6,6 +6,8 @@ pub enum SyntaxObjectKind {
     Class,
     Argument,
     Comment,
+    /// An element with an opening and a closing tag (HTML, XML, JSX): `it` and `at`.
+    Tag,
     Node,
 }
 

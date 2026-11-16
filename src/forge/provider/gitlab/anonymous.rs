@@ -126,7 +126,7 @@ pub(super) fn fetch(
                     nodes
                         .iter()
                         .map(note)
-                        .filter_map(|note| timeline_event(&note))
+                        .flat_map(|note| timeline_events(&note))
                         .collect(),
                 )
             })
@@ -166,7 +166,7 @@ fn gid(value: &Value) -> Value {
         .unwrap_or(Value::Null)
 }
 
-/// A GraphQL note as the REST note `note()`, `thread()` and `timeline_event()` read.
+/// A GraphQL note as the REST note `note()`, `thread()` and `timeline_events()` read.
 fn note(node: &Value) -> Value {
     let position = &node["position"];
     let rest_position = position.is_object().then(|| {
@@ -295,6 +295,6 @@ mod tests {
         assert_eq!(thread.resolved, Some(false));
         assert_eq!(thread.comments[0].author.login, "maya");
         // Diff notes stay out of the conversation, like REST's.
-        assert!(timeline_event(&rest).is_none());
+        assert!(timeline_events(&rest).is_empty());
     }
 }

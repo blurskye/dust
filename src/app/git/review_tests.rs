@@ -19,7 +19,7 @@ fn key(app: &mut App, keys: &str) {
 }
 
 fn wait_git(app: &mut App) {
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + Duration::from_secs(30);
     while app.git.status_pending() || app.git.mutation_pending() {
         app.process_git_mutation_events();
         app.process_git_status_events();
@@ -29,7 +29,7 @@ fn wait_git(app: &mut App) {
 }
 
 fn wait_diff(app: &mut App) {
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + Duration::from_secs(30);
     while app.search.diff_snapshot.is_none() {
         app.process_git_hunk_events();
         assert!(

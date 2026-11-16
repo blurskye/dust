@@ -8,7 +8,9 @@ use unicode_segmentation::UnicodeSegmentation;
 /// (`diff --git`, `index`, `---`, `+++`, mode lines) and the `\ No newline at end of file`
 /// marker, which annotates the preceding line rather than being a line of its own. A blank
 /// line or an unrecognised header ends the current hunk and starts a new file's run, so a
-/// multi-file patch produces each file's hunks with its own collapsed counts.
+/// multi-file patch produces each file's hunks with its own collapsed counts; a blank line
+/// the hunk's header still counts on both sides is its blank context line, the leading space
+/// lost (as a forge's API or a trimmed paste leaves it), and is read as one.
 #[must_use]
 pub fn parse_unified_patch(text: &str, provenance: impl Into<String>) -> DiffPreview {
     let mut hunks: Vec<DiffHunk> = Vec::new();
@@ -24,8 +26,10 @@ pub fn parse_unified_patch(text: &str, provenance: impl Into<String>) -> DiffPre
                 previous_end = Some(end);
             }
             match parse_hunk_header(rest) {
-                Some((old_start, new_start)) => {
-                    current = Some(HunkBuilder::new(raw.to_owned(), old_start, new_start));
+                Some(((old_start, old_count), (new_start, new_count))) => {
+                    let mut builder = HunkBuilder::new(raw.to_owned(), old_start, new_start);
+                    builder.limits = (old_start.saturating_add(old_count), new_start.saturating_add(new_count));
+                    current = Some(builder);
                 }
                 // A malformed header cannot be numbered, so it ends the run rather than
                 // producing lines attributed to a hunk that does not exist.
@@ -41,6 +45,9 @@ pub fn parse_unified_patch(text: &str, provenance: impl Into<String>) -> DiffPre
             Some(b'+') => builder.push(DiffLineKind::Added, raw.get(1..).unwrap_or_default()),
             Some(b'-') => builder.push(DiffLineKind::Removed, raw.get(1..).unwrap_or_default()),
             Some(b' ') => builder.push(DiffLineKind::Context, raw.get(1..).unwrap_or_default()),
+            None if builder.old_next < builder.limits.0 && builder.new_next < builder.limits.1 => {
+                builder.push(DiffLineKind::Context, "");
+            }
             // A blank line or a file header ends this hunk and this file's run.
             _ => {
                 if let Some(builder) = current.take() {
@@ -62,14 +69,14 @@ pub fn parse_unified_patch(text: &str, provenance: impl Into<String>) -> DiffPre
     }
 }
 
-/// `@@ -31,6 +31,9 @@ section` → the old and new starting line numbers. A range with no
-/// comma covers exactly one line.
-fn parse_hunk_header(after_at: &str) -> Option<(u32, u32)> {
+/// `@@ -31,6 +31,9 @@ section` → the old and new ranges, each its starting line number and
+/// line count. A range with no comma covers exactly one line.
+fn parse_hunk_header(after_at: &str) -> Option<((u32, u32), (u32, u32))> {
     let (ranges, _) = after_at.split_once("@@")?;
     let mut parts = ranges.split_whitespace();
     let old = parts.next()?.strip_prefix('-')?;
     let new = parts.next()?.strip_prefix('+')?;
-    Some((parse_range(old)?.0, parse_range(new)?.0))
+    Some((parse_range(old)?, parse_range(new)?))
 }
 
 fn parse_range(text: &str) -> Option<(u32, u32)> {
@@ -84,6 +91,8 @@ struct HunkBuilder {
     old_start: u32,
     old_next: u32,
     new_next: u32,
+    /// Exclusive ends of the old and new ranges the header counts.
+    limits: (u32, u32),
     lines: Vec<DiffLine>,
 }
 
@@ -94,6 +103,7 @@ impl HunkBuilder {
             old_start,
             old_next: old_start,
             new_next: new_start,
+            limits: (old_start, new_start),
             lines: Vec::new(),
         }
     }
@@ -389,6 +399,18 @@ index 9792656..89d6f9e 100644
         assert_eq!(hunk.lines.len(), 2, "the newline marker is not a diff line");
         assert_eq!(hunk.lines[0].old_number, Some(5));
         assert_eq!(hunk.lines[1].new_number, Some(5));
+    }
+
+    #[test]
+    fn a_blank_line_the_header_still_counts_is_blank_context() {
+        // The leading space of a blank context line lost: the hunk reads on to its count.
+        let patch = "@@ -10,4 +10,5 @@ head\n a\n\n-b\n+c\n+d\n e\n\ndiff --git a/g b/g\n";
+        let hunk = &parse_unified_patch(patch, "p").hunks[0];
+        let kinds = hunk.lines.iter().map(|line| line.kind).collect::<Vec<_>>();
+        use DiffLineKind::{Added, Context, Removed};
+        assert_eq!(kinds, [Context, Context, Removed, Added, Added, Context]);
+        assert_eq!(hunk.lines[1].new_number, Some(11));
+        assert_eq!(hunk.lines[5].new_number, Some(14));
     }
 
     #[test]

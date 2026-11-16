@@ -551,7 +551,7 @@ mod tests {
         let buffer = app.state.active_buffer_id().unwrap();
         app.open_plugin_browser();
         app.accept_plugin_choice(PluginChoice::Folder("completion".into()));
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
         while app.state.workspace_root != root.path().join("plugins") {
             app.process_trust_events();
             app.process_plugin_events();

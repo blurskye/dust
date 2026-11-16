@@ -9,6 +9,7 @@ use std::ops::Range;
 pub(super) enum SourceScope {
     Thread(String, usize, usize),
 }
+#[derive(Clone)]
 pub(super) struct Line {
     pub(super) text: String,
     pub(super) source: Option<find::Source>,
@@ -32,6 +33,17 @@ pub(super) struct Line {
     pub(super) band: Option<crate::ui::GitSurface>,
     /// Backgrounds over byte ranges (the two sides of a split diff row).
     pub(super) bands: Vec<(Range<usize>, crate::ui::GitSurface)>,
+    /// The Conversation's metadata sidebar (Reviewers, Labels…): painted in a right column
+    /// beside the timeline when the reader is wide enough, else in place.
+    pub(super) side: bool,
+    /// The first row of a Conversation card: `j`/`k` step from card to card.
+    pub(super) card: bool,
+    /// The first row of an unresolved review thread: `n`/`N` step through them.
+    pub(super) unresolved: bool,
+    /// The card's own page on the forge, for `o`.
+    pub(super) web: Option<String>,
+    /// The merge box's header at the end of the Conversation, where `m` goes.
+    pub(super) merge_box: bool,
 }
 impl Line {
     pub(super) fn text(text: impl Into<String>, style: Style) -> Self {
@@ -55,6 +67,11 @@ impl Line {
             paint: Vec::new(),
             band: None,
             bands: Vec::new(),
+            side: false,
+            card: false,
+            unresolved: false,
+            web: None,
+            merge_box: false,
         }
     }
     pub(super) fn button(text: impl Into<String>, action: Action) -> Self {
@@ -71,7 +88,6 @@ impl Line {
                 | Action::Files(_)
                 | Action::Commit(_)
                 | Action::PrTab(_)
-                | Action::Details(..)
         );
         let mut line = Self::text(
             if expandable {
@@ -87,6 +103,7 @@ impl Line {
 }
 /// Logical source/byte anchors survive reflow in either direction without
 /// recapturing the wider fragment's start and drifting on each focus round trip.
+#[derive(Clone)]
 struct ReadingAnchor {
     scope: Option<SourceScope>,
     logical: usize,
@@ -126,6 +143,28 @@ impl ReadingAnchor {
         })
     }
 }
+/// Which occurrence of its action the row at `index` is: 0 for the first row carrying it.
+/// Two rows can share an action (the sidebar's Development link and the timeline's mention
+/// of the same issue), so an action alone does not say which row the cursor was on.
+pub(super) fn action_ordinal(rows: &[Line], index: usize) -> usize {
+    let Some(action) = rows.get(index).and_then(|row| row.action.as_ref()) else {
+        return 0;
+    };
+    rows[..index].iter().filter(|row| row.action.as_ref() == Some(action)).count()
+}
+
+/// The row carrying `action` that stands for the cursor's: the same occurrence of it, else
+/// the one nearest `near` (never simply the first, which would pull the cursor back up).
+pub(super) fn action_row(rows: &[Line], action: &Action, ordinal: usize, near: usize) -> Option<usize> {
+    let matches = rows
+        .iter()
+        .enumerate()
+        .filter(|(_, row)| row.action.as_ref() == Some(action))
+        .map(|(index, _)| index)
+        .collect::<Vec<_>>();
+    matches.get(ordinal).copied().or_else(|| matches.iter().copied().min_by_key(|index| index.abs_diff(near)))
+}
+
 // Neutral thread rows have no source/action anchor. Scope their identity to
 // the real Reply key, including the separator immediately after that thread.
 fn neutral_thread_row(rows: &[Line], index: usize) -> Option<(&Action, bool, &str)> {
@@ -153,7 +192,7 @@ fn neutral_thread_row(rows: &[Line], index: usize) -> Option<(&Action, bool, &st
     ))
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub(super) struct ReadingPosition {
     identity: Option<(String, String, Key, u64)>,
     cursor: Option<ReadingAnchor>,
@@ -178,6 +217,7 @@ impl ReadingPosition {
         if self.identity.as_ref() != Some(&identity) || old.is_empty() {
             *self = Self {
                 identity: Some(identity),
+                narrow_pr: self.narrow_pr,
                 ..Self::default()
             };
             return;
@@ -262,8 +302,13 @@ impl ReadingPosition {
             .action
             .as_ref()
             .and_then(|action| {
-                rows.iter()
-                    .position(|row| row.action.as_ref() == Some(action))
+                // A wrapped diff line's rows share its action: the source bytes say which
+                // part the cursor is on, through a resize or a wrap toggle too.
+                self.cursor
+                    .as_ref()
+                    .and_then(|anchor| anchor.locate(rows))
+                    .filter(|&index| rows[index].action.as_ref() == Some(action))
+                    .or_else(|| action_row(rows, action, action_ordinal(old, *cursor), *cursor))
             })
             .or_else(|| self.cursor.as_ref().and_then(|anchor| anchor.locate(rows)))
             .or_else(|| {
@@ -391,15 +436,33 @@ fn body(rows: &mut Vec<Line>, text: &str, width: usize) {
         logical_start += logical.len() + 1;
     }
 }
+/// A review comment's body; a ```` ```suggestion ```` block in it reads as the change it
+/// suggests (§3.30a), against the lines the thread covers at the end of its diff hunk.
+fn suggested_body(rows: &mut Vec<Line>, thread: &Value, comment: &Value, width: usize) {
+    use super::suggestion::{self, Part};
+    let text = string(comment, "body");
+    let Some(parts) = suggestion::split(text) else {
+        body(rows, text, width);
+        return;
+    };
+    let line = thread["line"].as_u64().or_else(|| comment["line"].as_u64());
+    let count = suggestion::span(thread["startLine"].as_u64(), line);
+    let original = suggestion::original(string(comment, "diffHunk"), count);
+    for part in parts {
+        match part {
+            Part::Text(text) => body(rows, &text, width),
+            Part::Suggestion(lines) => suggestion::rows(rows, &original, &lines, width, ""),
+        }
+    }
+}
 pub(super) fn error_or_loading(workspace: &Workspace, key: &Key, rows: &mut Vec<Line>) -> bool {
     match workspace.cache.get(key) {
         Some(Ok(_)) => false,
         Some(Err(error)) => {
-            rows.push(Line::text(error, Style::Error));
-            rows.push(Line::text(
-                "r refresh · authenticate with gh auth login if needed",
-                Style::Muted,
-            ));
+            // In words with one key (§3.46): never the forge's status line or a stock gh hint.
+            let words = workspace.explain(error);
+            rows.push(Line::text(&words.headline, Style::Error));
+            rows.push(Line::text(&words.hint, Style::Muted));
             true
         }
         None => {
@@ -461,7 +524,7 @@ pub(super) fn threads(workspace: &Workspace, id: u64, rows: &mut Vec<Line>, widt
         let resolved = thread["isResolved"].as_bool();
         let state = match resolved {
             Some(true) => "● Resolved",
-            Some(false) => "○ Unresolved",
+            Some(false) => "◔ Unresolved",
             None => "Conversation · state unknown",
         };
         let mut header = Line::text(state, Style::Muted);
@@ -513,7 +576,7 @@ pub(super) fn threads(workspace: &Workspace, id: u64, rows: &mut Vec<Line>, widt
                 rows.push(Line::text("Outdated · original line", Style::Muted));
             }
             let body_start = rows.len();
-            body(rows, string(comment, "body"), width);
+            suggested_body(rows, thread, comment, width);
             let mut logical = 0;
             for row in &mut rows[body_start..] {
                 if row.source.as_ref().is_some_and(|source| source.offset == 0) {
@@ -554,12 +617,17 @@ pub(super) fn threads(workspace: &Workspace, id: u64, rows: &mut Vec<Line>, widt
         if let Some(resolved) = resolved {
             let mut button = Line::button(
                 if resolved {
-                    "[ Reopen conversation ]"
+                    "[ Unresolve conversation ]"
                 } else {
                     "[ Resolve conversation ]"
                 },
                 Action::Resolve(thread_id.into(), !resolved),
             );
+            button.thread_action = true;
+            rows.push(button);
+        }
+        if workspace.offers_commit(id, thread_id) {
+            let mut button = Line::button("[ Commit suggestion ]", Action::CommitSuggestion(id, thread_id.into()));
             button.thread_action = true;
             rows.push(button);
         }
@@ -580,27 +648,6 @@ pub(super) fn detail_lines(workspace: &Workspace, width: usize) -> Vec<Line> {
     // Keep even whitespace-only logical sources canonical across disclosure.
     let (mut primary, quiet): (Vec<_>, Vec<_>) =
         rows.into_iter().partition(|row| !row.quiet_review);
-    let count = quiet
-        .iter()
-        .filter(|row| row.source.is_none() && !row.text.is_empty())
-        .count();
-    if count > 0
-        && let Some(row) = primary
-            .iter_mut()
-            .find(|row| matches!(row.action, Some(Action::Details(2, _))))
-    {
-        row.text = format!(
-            "{} Actions & metadata · {count} review events",
-            if workspace
-                .expanded_details
-                .contains(&(2, workspace.number()))
-            {
-                "▾"
-            } else {
-                "▸"
-            }
-        );
-    }
     primary.extend(quiet);
     primary
 }
@@ -781,7 +828,7 @@ mod tests {
         let mut rows = Vec::new();
         threads(&workspace, 7, &mut rows, 59, Some("example.rs"));
         assert!(rows.iter().any(|row| row.thread_header
-            && row.text == "○ Unresolved · alice · original line 42 · 1 of 4 replies loaded"));
+            && row.text == "◔ Unresolved · alice · original line 42 · 1 of 4 replies loaded"));
         assert_eq!(
             rows.iter()
                 .filter(|row| row.text == "Showing 2 of 5 comments · more on GitHub")
@@ -789,7 +836,7 @@ mod tests {
             1
         );
         assert_eq!(workspace.value(&Key::Threads(7)).unwrap(), &cached);
-        assert!(workspace.queue.is_empty() && workspace.active.is_none());
+        assert!(workspace.queue.is_empty() && workspace.active.idle());
     }
 
     #[test]
@@ -800,35 +847,35 @@ mod tests {
                 "example.rs",
                 json!(5),
                 Value::Null,
-                "○ Unresolved · alice · line 5 · 1 reply",
+                "◔ Unresolved · alice · line 5 · 1 reply",
             ),
             (
                 Some("example.rs"),
                 "example.rs",
                 Value::Null,
                 json!(42),
-                "○ Unresolved · alice · original line 42 · 1 reply",
+                "◔ Unresolved · alice · original line 42 · 1 reply",
             ),
             (
                 None,
                 "example.rs",
                 json!(5),
                 Value::Null,
-                "○ Unresolved · alice · example.rs:5 · 1 reply",
+                "◔ Unresolved · alice · example.rs:5 · 1 reply",
             ),
             (
                 Some("example.rs"),
                 "other.rs",
                 json!(5),
                 Value::Null,
-                "○ Unresolved · alice · other.rs:5 · 1 reply",
+                "◔ Unresolved · alice · other.rs:5 · 1 reply",
             ),
             (
                 Some("example.rs"),
                 "example.rs",
                 Value::Null,
                 Value::Null,
-                "○ Unresolved · alice · 1 reply",
+                "◔ Unresolved · alice · 1 reply",
             ),
         ] {
             let mut workspace = workspace(2);
@@ -879,14 +926,14 @@ mod tests {
             }
             assert_eq!(workspace.value(&Key::Threads(7)).unwrap(), &value);
             assert_eq!(workspace.drafts, drafts);
-            assert!(workspace.queue.is_empty() && workspace.active.is_none());
+            assert!(workspace.queue.is_empty() && workspace.active.idle());
         }
     }
 
     fn review_workspace() -> Workspace {
         let mut workspace = workspace(2);
-        // Review threads read in the Activity tab (and beside their lines in Files).
-        workspace.pr_tab = super::super::pr::ACTIVITY;
+        // Review threads read in the Conversation (and beside their lines in Files).
+        workspace.pr_tab = super::super::pr::CONVERSATION;
         let pages = json!([
             {"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[
                 {"id":"THREAD_A","isResolved":false,"comments":{"nodes":[
@@ -1148,7 +1195,7 @@ mod tests {
                 assert_eq!(app.github.drafts, drafts);
                 assert_eq!(app.github.value(&Key::Threads(7)).unwrap(), &threads);
                 assert_eq!(app.github.raw(&Key::Diff(7)).unwrap(), patch);
-                assert!(app.github.queue.is_empty() && app.github.active.is_none());
+                assert!(app.github.queue.is_empty() && app.github.active.idle());
                 assert!(!app.github.detail_find.search.active());
                 assert!(app.form.is_none());
             }
@@ -1342,15 +1389,23 @@ mod tests {
         assert!(updated[cursor].thread_header);
         assert_eq!(updated[cursor].reply.as_ref(), Some(&reply));
         assert!(
-            updated[cursor].action.is_none(),
+            !matches!(updated[cursor].action, Some(Action::Resolve(..))),
             "refresh must not arm Reopen or another Resolve"
         );
+        // A resolved thread folds (§3.26); opened, its reply still continues the draft.
+        let fold = updated[cursor].action.clone().filter(|action| matches!(action, Action::Collapse(..)));
+        if let Some(fold) = fold.clone() {
+            workspace.activate(fold).unwrap();
+        }
         assert!(
-            updated
+            detail_lines(&workspace, 70)
                 .iter()
                 .any(|row| row.action.as_ref() == Some(&reply)
                     && row.text.contains("Continue draft"))
         );
+        if let Some(fold) = fold {
+            workspace.activate(fold).unwrap();
+        }
         position.finish_scoped(&updated, cursor, 0, (0..updated.len()).collect());
         workspace
             .cache
@@ -1384,6 +1439,8 @@ mod tests {
                 .value[page]["data"]["repository"]["pullRequest"]["reviewThreads"]["nodes"][0]["comments"]
                 ["nodes"][0]["body"] = json!(text);
         }
+        // THREAD_B is resolved, so it starts folded (§3.26); open it.
+        workspace.collapsed.insert((7, super::super::conversation::thread_key("THREAD_B")));
         let narrow = detail_lines(&workspace, 20);
         let mut cursor = narrow
             .iter()
@@ -1496,7 +1553,13 @@ mod tests {
                     .unwrap();
                 let probe = app.frame(width, height);
                 let (x, _, _) = probe.cursor.unwrap();
-                let available = usize::from(width - x - 2);
+                // Beside the Conversation's sidebar (§3.26) the text ends before it.
+                let side = if app.github.detail_rows.iter().any(|row| row.side) {
+                    super::super::conversation::sidebar_width(app.github.detail_width) + 3
+                } else {
+                    0
+                };
+                let available = usize::from(width - x - 2) - side;
                 let length = if code {
                     available
                 } else {
@@ -1545,7 +1608,10 @@ mod tests {
                     app.github.notice = status.clone();
                     let shown = app.frame(width, height);
                     let row = shown.grid.row_text(footer);
-                    if status.len() < usize::from(width) - 2 {
+                    // A notice that shares the row keeps the hints on the left (r8 R7-05).
+                    if status.len() + 10 <= usize::from(width) - 2 {
+                        assert!(row.trim_end().ends_with(status.trim()) && row.contains("? keys"), "{row}");
+                    } else if status.len() < usize::from(width) - 2 {
                         assert_eq!(row.trim(), status.trim());
                     } else {
                         assert!(row.trim().starts_with("Important status") && row.trim().ends_with('…'), "{row}");
@@ -1558,16 +1624,18 @@ mod tests {
                 }
                 app.github.notice = "Workspace error has priority".into();
                 app.github.notice_error = true;
-                assert_eq!(
-                    app.frame(width, height).grid.row_text(footer).trim(),
-                    "✕ Workspace error has priority"
+                assert!(
+                    app.frame(width, height).grid.row_text(footer).trim_end().ends_with("✕ Workspace error has priority"),
+                    "{}",
+                    app.frame(width, height).grid.row_text(footer)
                 );
                 app.github.notice.clear();
                 app.github.notice_error = false;
                 app.notice = "Application error has priority".into();
-                assert_eq!(
-                    app.frame(width, height).grid.row_text(footer).trim(),
-                    "✕ Application error has priority"
+                assert!(
+                    app.frame(width, height).grid.row_text(footer).trim_end().ends_with("✕ Application error has priority"),
+                    "{}",
+                    app.frame(width, height).grid.row_text(footer)
                 );
                 app.notice.clear();
 
@@ -1576,14 +1644,14 @@ mod tests {
                     app.frame(width, height)
                         .grid
                         .row_text(footer)
-                        .contains("Sending to the forge")
+                        .contains("Sending…")
                 );
                 app.github.queue.pop_back();
                 let list_key = app.github.list_key();
                 app.github.queue.push_back(Request::placeholder(list_key));
                 if width >= 190 {
                     let row = app.frame(width, height).grid.row_text(footer);
-                    assert!(row.contains("cached results"), "{row}");
+                    assert!(row.contains("Refreshing…"), "{row}");
                 }
                 app.github.queue.pop_back();
 
@@ -1612,7 +1680,7 @@ mod tests {
                 );
                 assert_eq!(app.github.value(&Key::Item(page, 7)).unwrap(), &item);
                 assert_eq!(app.github.raw(&Key::Diff(7)).map(str::to_owned), patch);
-                assert!(app.github.queue.is_empty() && app.github.active.is_none());
+                assert!(app.github.queue.is_empty() && app.github.active.idle());
                 assert!(app.form.is_none());
                 app.github.detail_find = Default::default();
             }
@@ -1679,5 +1747,87 @@ mod tests {
             form.action,
             FormAction::Github(Action::Comment(2, 7))
         ));
+    }
+
+    #[test]
+    fn files_keep_every_changed_line_with_a_thread_after_its_line() {
+        // GH-*-03: a blank context line without its leading space, then the changes, and a
+        // thread on new line 4: the whole hunk renders and the thread follows line 4.
+        let mut workspace = files_workspace();
+        workspace.cache.insert(
+            Key::Diff(7),
+            Ok(Reply {
+                value: Value::Null,
+                text: "diff --git a/example.rs b/example.rs\n--- a/example.rs\n+++ b/example.rs\n@@ -1,4 +1,5 @@\n fn head() {}\n\n-fn before() {}\n+fn after() {}\n+fn extra() {}\n fn tail() {}\n".into(),
+            }),
+        );
+        let value = json!([{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[{
+            "id":"THREAD_LINE","isResolved":true,"comments":{"nodes":[
+                {"author":{"login":"alice"},"body":"Thread on the extra line","path":"example.rs","line":4}
+            ]}
+        }]}}}}}]);
+        workspace.cache.insert(Key::Threads(7), Ok(Reply { text: value.to_string(), value }));
+        for width in [61, 69, 120] {
+            let rows = super::super::paint::record_rows(&workspace, width, workspace.icons);
+            let at = |text: &str| rows.iter().position(|row| row.text.contains(text)).unwrap_or_else(|| panic!("{width}: no {text}"));
+            assert!(rows[at("fn before()")].diff == Some(false));
+            assert!(rows[at("fn after()")].diff == Some(true));
+            let extra = at("fn extra()");
+            assert!(rows[extra].diff == Some(true));
+            let thread = rows.iter().position(|row| row.thread_header).expect("thread");
+            assert!(thread > extra && thread < at("fn tail()"), "{width}: the thread sits after line 4");
+        }
+    }
+
+    #[test]
+    fn k_then_enter_beside_the_commit_list_opens_the_previous_commit() {
+        // The Commits tab at 120 columns: the newest commit opens beside the list with the
+        // cursor on its row; `k` moves to the commit before it and Enter opens that one.
+        use crate::ui::{KeyInputKind, UiEvent};
+
+        let root = tempfile::tempdir().unwrap();
+        git2::Repository::init(root.path()).unwrap();
+        let mut app = crate::git::screen::GitScreen::open(root.path()).unwrap();
+        let mut workspace = workspace(2);
+        workspace.root = root.path().to_path_buf();
+        let shas = ["a".repeat(40), "b".repeat(40), "c".repeat(40)];
+        workspace.cache.get_mut(&Key::Item(2, 7)).unwrap().as_mut().unwrap().value["commits"] = json!(shas
+            .iter()
+            .enumerate()
+            .map(|(index, sha)| json!({
+                "oid": sha, "messageHeadline": format!("Commit number {index}"),
+                "committedDate": "2026-11-08T10:00:00Z"
+            }))
+            .collect::<Vec<_>>());
+        for (index, sha) in shas.iter().enumerate() {
+            workspace.cache.insert(
+                Key::Commit(sha.clone()),
+                Ok(Reply {
+                    value: Value::Null,
+                    text: format!("diff --git a/f.rs b/f.rs\n--- a/f.rs\n+++ b/f.rs\n@@ -1 +1 @@\n-old {index}\n+new {index}\n"),
+                }),
+            );
+        }
+        workspace.focus = 2;
+        app.page = 2;
+        app.github = workspace;
+        app.github.activate(Action::PrTab(super::super::pr::COMMITS)).unwrap();
+        app.frame(120, 36);
+        app.frame(120, 36);
+        let open_row = |app: &crate::git::screen::GitScreen| {
+            let row = &app.github.detail_rows[app.github.detail_cursor];
+            (row.outline, row.action.clone())
+        };
+        assert_eq!(app.github.selected_commit.as_deref(), Some(shas[2].as_str()), "the newest opens");
+        assert_eq!(open_row(&app), (false, Some(Action::Commit(shas[2].clone()))));
+        for code in [KeyCode::Char('k'), KeyCode::Enter] {
+            app.event(UiEvent::Key { key: KeyEvent::plain(code), kind: KeyInputKind::Press });
+            app.frame(120, 36);
+        }
+        app.frame(120, 36);
+        assert_eq!(app.github.selected_commit.as_deref(), Some(shas[1].as_str()), "k then Enter opens the one before");
+        assert_eq!(open_row(&app), (false, Some(Action::Commit(shas[1].clone()))));
+        assert!(app.github.detail_rows.iter().any(|row| !row.outline && row.text.contains("Commit number 1")));
+        assert!(app.github.detail_rows.iter().any(|row| row.text.contains("new 1")));
     }
 }

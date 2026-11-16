@@ -633,13 +633,18 @@ fn run(
                 }
                 Ok(())
             })();
-            let _ = write_tx.send(result);
+            // portable-pty's writer sends a newline and EOF into the terminal when dropped,
+            // which the line discipline echoes back as output. The controller drops it only
+            // once the reader has finished, so that echo never reaches the output stream.
+            let _ = write_tx.send((result, writer));
         })
         .map_err(|e| fail(e.to_string()))?;
     let mut exit = None;
     let mut exit_delivered = false;
     let mut read_done = false;
     let mut write_done = false;
+    // The returned writer, kept until the reader is done (see the writer thread).
+    let mut _writer = None;
     let mut failure = None;
     let mut terminated = false;
     loop {
@@ -686,21 +691,26 @@ fn run(
             exit = Some(status.exit_code());
             writer_stop.store(true, Ordering::Release);
         }
-        for (rx, done) in [(&read_rx, &mut read_done), (&write_rx, &mut write_done)] {
-            if !*done {
-                match rx.try_recv() {
-                    Ok(result) => {
-                        *done = true;
-                        if let Err(e) = result {
-                            failure.get_or_insert(e);
-                        }
+        let write = (!write_done).then(|| {
+            write_rx.try_recv().map(|(result, writer)| {
+                _writer = Some(writer);
+                result
+            })
+        });
+        let read = (!read_done).then(|| read_rx.try_recv());
+        for (received, done) in [(read, &mut read_done), (write, &mut write_done)] {
+            match received {
+                Some(Ok(result)) => {
+                    *done = true;
+                    if let Err(e) = result {
+                        failure.get_or_insert(e);
                     }
-                    Err(mpsc::TryRecvError::Disconnected) => {
-                        *done = true;
-                        failure.get_or_insert("PTY I/O worker stopped without completion".into());
-                    }
-                    Err(mpsc::TryRecvError::Empty) => {}
                 }
+                Some(Err(mpsc::TryRecvError::Disconnected)) => {
+                    *done = true;
+                    failure.get_or_insert("PTY I/O worker stopped without completion".into());
+                }
+                Some(Err(mpsc::TryRecvError::Empty)) | None => {}
             }
         }
         if let Some(code) = exit {

@@ -191,11 +191,14 @@ struct App {
     reload_stamps:
         std::collections::HashMap<crate::editor::BufferId, (Option<std::time::SystemTime>, u64)>,
     pub(super) next_disk_check: Option<std::time::Instant>,
-    /// When the repository's index and HEAD last changed, as of the last disk check.
+    /// When the repository's index and HEAD last changed, as of the last disk check or the
+    /// last status read Dust started.
     pub(super) git_stamp: Option<(
         [Option<std::time::SystemTime>; 2],
         Option<crate::git::GitHeadId>,
     )>,
+    /// The repository and Git folder `git_stamp` comes from, kept while the status is re-read.
+    pub(super) git_stamp_dirs: Option<(std::path::PathBuf, std::path::PathBuf)>,
     /// What project replace is looking for, while it asks what to replace it with.
     replace_query: Option<String>,
     /// A `:s///c` asking about each match in turn.

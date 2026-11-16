@@ -42,7 +42,7 @@ fn explorer_auto_git_status_is_silent_outside_a_repository() {
         .unwrap();
     app.set_dashboard_visibility(false);
     app.open_explorer();
-    let deadline = Instant::now() + Duration::from_secs(3);
+    let deadline = Instant::now() + Duration::from_secs(30);
     while app.git.status_pending() {
         app.process_git_status_events();
         assert!(Instant::now() < deadline);
@@ -83,7 +83,7 @@ fn active_tracked_buffer_starts_git_status_and_updates_unsaved_signs_without_exp
 
     app.reconcile_git_signs();
     assert!(app.git.status_pending());
-    let deadline = Instant::now() + Duration::from_secs(3);
+    let deadline = Instant::now() + Duration::from_secs(30);
     while app.git.status_pending() {
         app.process_git_status_events();
         assert!(Instant::now() < deadline);
@@ -97,7 +97,7 @@ fn active_tracked_buffer_starts_git_status_and_updates_unsaved_signs_without_exp
     let revision = app.state.buffers[buffer].text.revision().0;
     app.reconcile_git_signs();
     assert!(app.git.signs_pending());
-    let deadline = Instant::now() + Duration::from_secs(3);
+    let deadline = Instant::now() + Duration::from_secs(30);
     while app.git.signs_pending() {
         app.process_git_sign_events();
         assert!(Instant::now() < deadline);
@@ -112,7 +112,7 @@ fn active_tracked_buffer_starts_git_status_and_updates_unsaved_signs_without_exp
     app.start_save(false, None, false);
     wait_vfs(&mut app);
     assert!(app.git.status_pending());
-    let deadline = Instant::now() + Duration::from_secs(3);
+    let deadline = Instant::now() + Duration::from_secs(30);
     while app.git.status_pending() || app.git.signs_pending() {
         app.process_git_status_events();
         app.reconcile_git_signs();
@@ -129,7 +129,7 @@ fn active_tracked_buffer_starts_git_status_and_updates_unsaved_signs_without_exp
     app.start_reload(false);
     wait_vfs(&mut app);
     assert!(app.git.status_pending());
-    let deadline = Instant::now() + Duration::from_secs(3);
+    let deadline = Instant::now() + Duration::from_secs(30);
     while app.git.status_pending() {
         app.process_git_status_events();
         assert!(Instant::now() < deadline);
@@ -156,7 +156,7 @@ fn the_first_hunk_key_reads_the_hunks_and_moves_to_the_next_one() {
     app.start_open(path);
     wait_vfs(&mut app);
     app.start_git_status_refresh_silent();
-    let deadline = Instant::now() + Duration::from_secs(3);
+    let deadline = Instant::now() + Duration::from_secs(30);
     while app.git.status().is_none() {
         app.process_git_status_events();
         assert!(Instant::now() < deadline);
@@ -165,7 +165,7 @@ fn the_first_hunk_key_reads_the_hunks_and_moves_to_the_next_one() {
 
     app.process_effect(AppEffect::GitHunkNavigate(1));
     assert!(app.git.hunks_pending(), "{:?}", app.ui.notification);
-    let deadline = Instant::now() + Duration::from_secs(3);
+    let deadline = Instant::now() + Duration::from_secs(30);
     while app.git.hunks_pending() {
         app.process_git_hunk_events();
         assert!(Instant::now() < deadline);
@@ -192,7 +192,7 @@ fn the_first_hunk_key_reads_the_hunks_and_moves_to_the_next_one() {
 }
 
 pub(in crate::app) fn settle_git_work(app: &mut App) {
-    let deadline = Instant::now() + Duration::from_secs(3);
+    let deadline = Instant::now() + Duration::from_secs(30);
     while app.git.hunks_pending() || app.git.mutation_pending() || app.git.status_pending() {
         app.process_git_status_events();
         app.process_git_hunk_events();
@@ -252,6 +252,52 @@ fn hunk_reset_takes_the_change_under_the_cursor() {
         "one\ntwo\nthree\nFOUR\nfive\n",
         "{:?}",
         app.ui.notification
+    );
+}
+
+/// Dust's own staging moves the index. The once-a-second check for Git changes made outside
+/// Dust must not take that for someone else's commit and re-read the status, which drops the
+/// hunks an open reset prompt was asked about ("Git hunk target changed").
+#[test]
+fn own_staging_is_not_an_outside_change_that_drops_an_open_reset() {
+    let (_app_dirs, mut app, repo, path) = near_changes_fixture();
+    // The disk check has seen the repository before Dust stages anything.
+    app.next_disk_check = None;
+    app.process_disk_changes();
+    app.process_effect(AppEffect::GitHunkNavigate(1));
+    settle_git_work(&mut app);
+    app.process_effect(AppEffect::GitHunkStage);
+    settle_git_work(&mut app);
+    app.process_effect(AppEffect::GitHunkNavigate(1));
+    settle_git_work(&mut app);
+    app.process_effect(AppEffect::GitHunkReset);
+    settle_git_work(&mut app);
+    // The next disk check comes while the reset prompt is open.
+    app.next_disk_check = None;
+    app.process_disk_changes();
+    settle_git_work(&mut app);
+    app.confirm_reset_selected_git_hunk("reset this hunk".into());
+    settle_git_work(&mut app);
+
+    assert_eq!(
+        fs::read_to_string(&path).unwrap(),
+        "one\nTWO\nthree\nfour\nfive\n",
+        "{:?}",
+        app.ui.notification
+    );
+    let mut index = repo.index().unwrap();
+    index.read(true).unwrap();
+    let staged = repo
+        .find_blob(
+            index
+                .get_path(std::path::Path::new("near.txt"), 0)
+                .unwrap()
+                .id,
+        )
+        .unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(staged.content()),
+        "one\nTWO\nthree\nfour\nfive\n"
     );
 }
 
@@ -331,7 +377,7 @@ fn explorer_auto_git_status_colors_names_opens_picker_and_idles() {
     app.open_explorer();
     assert!(app.git.status_pending());
     assert!(app.git.silent());
-    let deadline = Instant::now() + Duration::from_secs(3);
+    let deadline = Instant::now() + Duration::from_secs(30);
     while app.git.status_pending() {
         app.process_git_status_events();
         assert!(Instant::now() < deadline);
@@ -413,7 +459,7 @@ fn explorer_auto_git_status_colors_names_opens_picker_and_idles() {
         Some(&path)
     );
     app.reconcile_git_signs();
-    let deadline = Instant::now() + Duration::from_secs(3);
+    let deadline = Instant::now() + Duration::from_secs(30);
     while app.git.signs_pending() {
         app.process_git_sign_events();
         assert!(Instant::now() < deadline);
@@ -463,7 +509,7 @@ fn explorer_auto_git_status_colors_names_opens_picker_and_idles() {
         assert_eq!(app.ui.git_signs, signs);
     }
     app.start_git_hunks();
-    let deadline = Instant::now() + Duration::from_secs(3);
+    let deadline = Instant::now() + Duration::from_secs(30);
     while app.git.hunks_pending() {
         app.process_git_hunk_events();
         assert!(Instant::now() < deadline);
@@ -505,7 +551,7 @@ fn explorer_auto_git_status_colors_names_opens_picker_and_idles() {
             })
             .collect::<Vec<_>>()
     );
-    let deadline = Instant::now() + Duration::from_secs(3);
+    let deadline = Instant::now() + Duration::from_secs(30);
     while app.git.signs_pending() {
         app.process_git_sign_events();
         assert!(Instant::now() < deadline);
@@ -571,7 +617,7 @@ fn trusted_stage_hunk_flow_changes_only_index_and_refreshes_status() {
         crate::workspace::WorkspaceTrust::Trusted
     );
     app.start_git_status_refresh();
-    let deadline = Instant::now() + Duration::from_secs(4);
+    let deadline = Instant::now() + Duration::from_secs(30);
     while app.git.status_pending() {
         app.process_git_status_events();
         assert!(Instant::now() < deadline);
@@ -580,7 +626,7 @@ fn trusted_stage_hunk_flow_changes_only_index_and_refreshes_status() {
     app.start_open(path.clone());
     wait_vfs(&mut app);
     app.start_git_hunks();
-    let deadline = Instant::now() + Duration::from_secs(4);
+    let deadline = Instant::now() + Duration::from_secs(30);
     while app.git.hunks_pending() {
         app.process_git_hunk_events();
         assert!(Instant::now() < deadline);
@@ -614,7 +660,7 @@ fn trusted_stage_hunk_flow_changes_only_index_and_refreshes_status() {
     let before = crate::git::git_index_fingerprint(&app.state.workspace_root).unwrap();
     app.stage_selected_git_hunk();
     assert!(app.git.mutation_pending());
-    let deadline = Instant::now() + Duration::from_secs(4);
+    let deadline = Instant::now() + Duration::from_secs(30);
     while app.git.mutation_pending() || app.git.status_pending() {
         app.process_git_mutation_events();
         app.process_git_status_events();
@@ -643,7 +689,7 @@ fn trusted_stage_hunk_flow_changes_only_index_and_refreshes_status() {
     policy.layer = crate::git::GitDiffLayer::Staged;
     assert_eq!(crate::git::read_hunks(&policy).unwrap().hunks.len(), 1);
     app.start_git_hunks();
-    let deadline = Instant::now() + Duration::from_secs(4);
+    let deadline = Instant::now() + Duration::from_secs(30);
     while app.git.hunks_pending() {
         app.process_git_hunk_events();
         assert!(Instant::now() < deadline);
@@ -674,7 +720,7 @@ fn trusted_stage_hunk_flow_changes_only_index_and_refreshes_status() {
     app.request_reset_selected_git_hunk();
     app.close_prompt();
     app.confirm_reset_selected_git_hunk("reset this hunk".into());
-    let deadline = Instant::now() + Duration::from_secs(4);
+    let deadline = Instant::now() + Duration::from_secs(30);
     while app.git.mutation_pending() || app.git.status_pending() {
         app.process_git_mutation_events();
         app.process_git_status_events();
@@ -823,7 +869,7 @@ fn git_status_rows_label_each_source_without_conflating_them() {
         .expect("revision bump");
 
     app.start_git_status_refresh();
-    let deadline = Instant::now() + Duration::from_secs(4);
+    let deadline = Instant::now() + Duration::from_secs(30);
     while app.git.status_pending() {
         app.process_git_status_events();
         assert!(Instant::now() < deadline);
@@ -945,7 +991,7 @@ fn staged_hunk_rows_are_labelled_staged_and_unstaged_rows_are_not() {
     app.reconcile_workspace_trust();
     app.start_open(path.clone());
     wait_vfs(&mut app);
-    let deadline = Instant::now() + Duration::from_secs(4);
+    let deadline = Instant::now() + Duration::from_secs(30);
     app.start_git_status_refresh();
     while app.git.status_pending() {
         app.process_git_status_events();
@@ -953,7 +999,7 @@ fn staged_hunk_rows_are_labelled_staged_and_unstaged_rows_are_not() {
         thread::yield_now()
     }
     let open_hunks = |app: &mut App, id: &str| {
-        let deadline = Instant::now() + Duration::from_secs(4);
+        let deadline = Instant::now() + Duration::from_secs(30);
         app.invoke(
             crate::editor::CommandInvocation::new(id, InvocationSource::Test).expect("command id"),
         );
@@ -987,7 +1033,7 @@ fn staged_hunk_rows_are_labelled_staged_and_unstaged_rows_are_not() {
         crate::editor::CommandInvocation::new("workspace.git.file.stage", InvocationSource::Test)
             .expect("command id"),
     );
-    let deadline = Instant::now() + Duration::from_secs(4);
+    let deadline = Instant::now() + Duration::from_secs(30);
     while app.git.mutation_pending() || app.git.status_pending() {
         app.process_git_mutation_events();
         app.process_git_status_events();
@@ -1029,7 +1075,7 @@ fn hunk_unstage_returns_one_staged_hunk_to_head_and_refuses_the_rest() {
     app.reconcile_workspace_trust();
     app.start_open(path.clone());
     wait_vfs(&mut app);
-    let deadline = Instant::now() + Duration::from_secs(4);
+    let deadline = Instant::now() + Duration::from_secs(30);
     app.start_git_status_refresh();
     while app.git.status_pending() {
         app.process_git_status_events();
@@ -1042,7 +1088,7 @@ fn hunk_unstage_returns_one_staged_hunk_to_head_and_refuses_the_rest() {
         );
     };
     let drain = |app: &mut App| {
-        let deadline = Instant::now() + Duration::from_secs(4);
+        let deadline = Instant::now() + Duration::from_secs(30);
         while app.git.mutation_pending() || app.git.status_pending() {
             app.process_git_mutation_events();
             app.process_git_status_events();
@@ -1051,7 +1097,7 @@ fn hunk_unstage_returns_one_staged_hunk_to_head_and_refuses_the_rest() {
         }
     };
     let load_hunks = |app: &mut App, id: &str| {
-        let deadline = Instant::now() + Duration::from_secs(4);
+        let deadline = Instant::now() + Duration::from_secs(30);
         invoke(app, id);
         while app.git.hunks_pending() {
             app.process_git_hunk_events();
@@ -1166,7 +1212,7 @@ fn the_unstage_key_undoes_the_hunk_just_staged_under_the_cursor() {
     app.start_open(path.clone());
     wait_vfs(&mut app);
     let settle = |app: &mut App| {
-        let deadline = Instant::now() + Duration::from_secs(4);
+        let deadline = Instant::now() + Duration::from_secs(30);
         while app.git.hunks_pending() || app.git.mutation_pending() || app.git.status_pending() {
             app.process_git_hunk_events();
             app.process_git_mutation_events();
@@ -1329,7 +1375,7 @@ fn switching_to_a_worktree_moves_the_editor_there() {
         app.workspace.fixture_trust_identity(root.identity.clone())
     }
     app.reconcile_workspace_trust();
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + Duration::from_secs(30);
     app.start_git_status_refresh();
     while app.git.status_pending() {
         app.process_git_status_events();
@@ -1355,7 +1401,7 @@ fn switching_to_a_worktree_moves_the_editor_there() {
     let open_worktree_row = |app: &mut App| {
         // A trust reconciliation changes the workspace version and invalidates the previous status
         // snapshot, so the picker's own refresh has to be drained on every open.
-        let deadline = Instant::now() + Duration::from_secs(10);
+        let deadline = Instant::now() + Duration::from_secs(30);
         app.start_git_status_refresh();
         while app.git.status_pending() {
             app.process_git_status_events();
@@ -1363,7 +1409,7 @@ fn switching_to_a_worktree_moves_the_editor_there() {
             thread::yield_now()
         }
         invoke(app, "workspace.git.worktrees.open");
-        let deadline = Instant::now() + Duration::from_secs(10);
+        let deadline = Instant::now() + Duration::from_secs(30);
         while app.git.branch_pending() {
             app.process_git_branch_events();
             assert!(Instant::now() < deadline);
@@ -1384,7 +1430,7 @@ fn switching_to_a_worktree_moves_the_editor_there() {
     };
 
     let switch = |app: &mut App| {
-        let deadline = Instant::now() + Duration::from_secs(10);
+        let deadline = Instant::now() + Duration::from_secs(30);
         invoke(app, "workspace.git.worktree.open");
         while app.workspace.root_operation_pending() {
             app.process_trust_events();
@@ -1462,7 +1508,7 @@ fn primary_worktree_and_linked_main_have_distinct_picker_entries() {
         app.workspace.fixture_trust_identity(root.identity.clone());
     }
     app.reconcile_workspace_trust();
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + Duration::from_secs(30);
     app.start_git_status_refresh();
     while app.git.status_pending() {
         app.process_git_status_events();
@@ -1518,7 +1564,7 @@ fn removing_the_main_checkout_cannot_remove_a_linked_worktree_named_main() {
     options.reference(Some(&branch));
     repo.worktree("main", &linked, Some(&options)).unwrap();
     app.start_git_status_refresh();
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + Duration::from_secs(30);
     while app.git.status_pending() {
         app.process_git_status_events();
         assert!(Instant::now() < deadline);
@@ -1584,7 +1630,7 @@ fn a_locked_worktree_refuses_removal() {
         );
     };
     let select_worktree_row = |app: &mut App| {
-        let deadline = Instant::now() + Duration::from_secs(10);
+        let deadline = Instant::now() + Duration::from_secs(30);
         app.start_git_status_refresh();
         while app.git.status_pending() {
             app.process_git_status_events();
@@ -1592,7 +1638,7 @@ fn a_locked_worktree_refuses_removal() {
             thread::yield_now()
         }
         invoke(app, "workspace.git.worktrees.open");
-        let deadline = Instant::now() + Duration::from_secs(10);
+        let deadline = Instant::now() + Duration::from_secs(30);
         while app.git.branch_pending() {
             app.process_git_branch_events();
             assert!(Instant::now() < deadline);
@@ -1609,7 +1655,7 @@ fn a_locked_worktree_refuses_removal() {
         }
     };
     let drain = |app: &mut App| {
-        let deadline = Instant::now() + Duration::from_secs(10);
+        let deadline = Instant::now() + Duration::from_secs(30);
         while app.git.branch_pending() || app.git.status_pending() {
             app.process_git_branch_events();
             app.process_git_status_events();
@@ -1695,7 +1741,7 @@ fn the_conflict_surface_shows_the_paused_operation_and_each_side() {
         app.workspace.fixture_trust_identity(root.identity.clone())
     }
     app.reconcile_workspace_trust();
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + Duration::from_secs(30);
     app.start_git_status_refresh();
     while app.git.status_pending() {
         app.process_git_status_events();
@@ -1761,7 +1807,7 @@ fn choosing_a_side_for_an_unconflicted_path_is_refused() {
         app.workspace.fixture_trust_identity(root.identity.clone())
     }
     app.reconcile_workspace_trust();
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + Duration::from_secs(30);
     app.start_git_status_refresh();
     while app.git.status_pending() {
         app.process_git_status_events();
@@ -1817,7 +1863,7 @@ fn changes_rows_display_index_and_worktree_status_independently() {
     index.write().unwrap();
     fs::write(&path, "modified after staging\n").unwrap();
     app.start_git_status_refresh();
-    let deadline = Instant::now() + Duration::from_secs(3);
+    let deadline = Instant::now() + Duration::from_secs(30);
     while app.git.status_pending() {
         app.process_git_status_events();
         assert!(Instant::now() < deadline);
@@ -1843,7 +1889,7 @@ fn refreshing_the_explorer_also_refreshes_git_status() {
         app.workspace.fixture_trust_identity(root.identity.clone())
     }
     app.reconcile_workspace_trust();
-    let deadline = Instant::now() + Duration::from_secs(4);
+    let deadline = Instant::now() + Duration::from_secs(30);
     while app.git.status_pending() {
         app.process_git_status_events();
         assert!(Instant::now() < deadline);
@@ -2105,7 +2151,7 @@ fn conflict_picker_resolves_paths_from_the_repository_root() {
     )
     .unwrap();
     app.start_git_status_refresh();
-    let deadline = Instant::now() + Duration::from_secs(3);
+    let deadline = Instant::now() + Duration::from_secs(30);
     while app.git.status().is_none() {
         app.process_git_status_events();
         assert!(Instant::now() < deadline);

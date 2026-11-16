@@ -110,6 +110,40 @@ impl Jobs {
         args: Vec<OsString>,
         stdin: Option<Vec<u8>>,
     ) -> Result<(), String> {
+        self.start_full(root, request, args, stdin, &[], Duration::from_secs(30))
+    }
+
+    /// A write that adds variables to Git's environment (a rebase's todo, a reflog tag)
+    /// and may run for minutes (a pull or a push over the network).
+    pub fn start_write_env(
+        &mut self,
+        root: &Path,
+        args: Vec<OsString>,
+        env: &[(String, OsString)],
+        timeout: Duration,
+    ) -> Result<(), String> {
+        self.start_full(root, Request::Write, args, None, env, timeout)
+    }
+
+    /// The last line a running write printed on stderr (Git's progress), if any.
+    pub fn write_progress(&self) -> Option<String> {
+        let pending = self.pending.values().find(|pending| pending.request == Request::Write)?;
+        let text = String::from_utf8_lossy(&pending.stderr);
+        text.split(['\r', '\n'])
+            .map(str::trim)
+            .rfind(|line| !line.is_empty())
+            .map(str::to_owned)
+    }
+
+    fn start_full(
+        &mut self,
+        root: &Path,
+        request: Request,
+        args: Vec<OsString>,
+        stdin: Option<Vec<u8>>,
+        extra: &[(String, OsString)],
+        timeout: Duration,
+    ) -> Result<(), String> {
         if request == Request::Preview {
             self.cancel_preview();
         }
@@ -157,6 +191,9 @@ impl Jobs {
             // Even a content-clean diff can refresh stat data in the index.
             environment.insert("GIT_OPTIONAL_LOCKS".into(), "0".into());
         }
+        for (key, value) in extra {
+            environment.insert(key.clone(), value.clone());
+        }
         let id = self
             .supervisor
             .start(JobRequest {
@@ -169,8 +206,8 @@ impl Jobs {
                 root_revision: 0,
                 stdin,
                 policy: JobPolicy {
-                    maximum_output_bytes: 2 * 1024 * 1024,
-                    timeout: Duration::from_secs(30),
+                    maximum_output_bytes: output_limit(request),
+                    timeout,
                     ..JobPolicy::default()
                 },
             })
@@ -208,7 +245,7 @@ impl Jobs {
                         } else {
                             &mut pending.stderr
                         };
-                        let remaining = (2 * 1024 * 1024usize).saturating_sub(output.len());
+                        let remaining = output_limit(pending.request).saturating_sub(output.len());
                         output.extend(bytes.iter().take(remaining));
                     }
                 }
@@ -260,6 +297,12 @@ impl Jobs {
         self.count();
         replies
     }
+}
+
+/// How much of a request's output is kept. History may be read whole (`End` on a 50,000-commit
+/// log is about 6 MiB); everything else is a preview-sized read.
+fn output_limit(request: Request) -> usize {
+    if request == Request::History { 64 << 20 } else { 2 << 20 }
 }
 
 #[cfg(test)]
@@ -314,7 +357,7 @@ mod tests {
     }
 
     fn complete(jobs: &mut Jobs, request: Request) -> String {
-        let deadline = Instant::now() + Duration::from_secs(10);
+        let deadline = Instant::now() + Duration::from_secs(20);
         loop {
             let replies = jobs.poll();
             if !replies.is_empty() {

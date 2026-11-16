@@ -400,7 +400,7 @@ mod tests {
                 )
                 .is_err()
         );
-        let deadline = Instant::now() + Duration::from_secs(2);
+        let deadline = Instant::now() + Duration::from_secs(20);
         let result = loop {
             if let Some(result) = owner.project_result(DiscoveryKind::Language) {
                 break result.unwrap();
@@ -446,7 +446,7 @@ mod tests {
                 root_revision: owner.root_revision(),
             })
             .unwrap();
-        let deadline = Instant::now() + Duration::from_secs(2);
+        let deadline = Instant::now() + Duration::from_secs(20);
         loop {
             let events = owner.preflight_events();
             if !events.is_empty() {

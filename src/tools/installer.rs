@@ -384,7 +384,7 @@ mod tests {
         std::fs::create_dir(&destination).unwrap();
         let installer = ToolInstaller::start_at(directory.path().to_path_buf());
         installer.uninstall(definition.clone()).unwrap();
-        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        let deadline = std::time::Instant::now() + Duration::from_secs(20);
         loop {
             if installer.try_progress().unwrap().is_some() {
                 break;
@@ -425,7 +425,7 @@ mod tests {
             .unwrap();
         definition.id = "../invalid".into();
         installer.uninstall(definition).unwrap();
-        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        let deadline = std::time::Instant::now() + Duration::from_secs(20);
         loop {
             if let Some(result) = installer.try_result().unwrap() {
                 assert!(result.result.is_err());

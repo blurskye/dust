@@ -23,6 +23,14 @@ pub(in crate::app) fn register_commands(
     )?;
     register(
         registry,
+        "workspace.git.open.link",
+        "Open a pull request, issue or run in Dusty Git by its link or #number",
+        ContextRequirement::Workspace,
+        ArgumentSchema::default().field("target", ArgumentType::String, true),
+        |invocation| Ok(AppEffect::GitScreenOpenLink(string_arg(invocation, "target")?.into())),
+    )?;
+    register(
+        registry,
         "workspace.git.pr.list",
         "Pick a pull request and check it out in its own worktree",
         ContextRequirement::Workspace,
@@ -340,17 +348,29 @@ impl App {
                     && (screen.in_tutor() || screen.root() == self.state.workspace_root)
                 {
                     screen.set_icon_mode(self.configuration.settings().ui.explorer.icon_mode);
+                    screen.configure_input(self.configuration.settings());
                     screen.resume();
                     self.git_screen_visible = true;
                 } else {
                     match crate::git::screen::GitScreen::open(&self.state.workspace_root) {
                         Ok(mut screen) => {
                             screen.set_icon_mode(self.configuration.settings().ui.explorer.icon_mode);
+                            screen.configure_input(self.configuration.settings());
                             self.git_screen = Some(screen);
                             self.git_screen_visible = true;
                         }
                         Err(error) => self.show_error(error),
                     }
+                }
+            }
+            AppEffect::GitScreenOpenLink(target) => {
+                if let Err(effect) = self.process_git_effect(AppEffect::GitScreenOpen) {
+                    return Err(effect);
+                }
+                if let Some(screen) = &mut self.git_screen
+                    && let Err(error) = screen.open_link(&target)
+                {
+                    self.show_error(error);
                 }
             }
             AppEffect::GitReviewHunk(action) => {

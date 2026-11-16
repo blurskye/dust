@@ -146,6 +146,9 @@ def pr(number, title, author, decision, checks, add, delete, updated, **extra):
                         {"path": "tests/test_queue.py", "additions": 2 if add > 2 else 0, "deletions": 0}],
                  body=f"{title}.")
     entry.update(extra)
+    # The head is the branch's last commit, so merge's pinned SHA and Commits' Head agree.
+    if "headRefOid" not in extra:
+        entry["headRefOid"] = entry["commits"][-1]["oid"]
     return entry
 
 
@@ -154,9 +157,10 @@ PRS = [
        labels=labels("priority: high"), headRefName="fix/backoff", reviewRequests=["alex", "sam"],
        body=BACKOFF_BODY, commits=[
            {"oid": "a7c91d2" + "0" * 33, "messageHeadline": "Bound retry exponent", "messageBody": "",
-            "committedDate": ago(hours=2), "authors": [{"login": "maya"}]},
+            "committedDate": ago(hours=3), "authors": [{"login": "maya"}]},
            {"oid": "bf028a1" + "0" * 33, "messageHeadline": "Add backoff regression test", "messageBody": "",
-            "committedDate": ago(hours=3), "authors": [{"login": "maya"}]}],
+            "committedDate": ago(hours=2), "authors": [{"login": "maya"}]}],
+       createdAt=ago(hours=3, minutes=20),
        files=[{"path": "orbit/queue.py", "additions": 4, "deletions": 1},
               {"path": "tests/test_queue.py", "additions": 2, "deletions": 1}],
        closingIssuesReferences=[{"number": 1, "title": "Queue stalls after a worker reconnects"}]),
@@ -206,6 +210,10 @@ index 3333333..4444444 100644
 
 # Context lines that are blank in the source keep their one-space marker (editors strip it).
 DIFF = "\n".join(line or " " for line in DIFF.split("\n")[:-1]) + "\n"
+# Each commit shows its own part of the change, not the fake forge's placeholder commit diff:
+# #13 bounds the exponent in orbit/queue.py, then adds the regression test in
+# tests/test_queue.py; every other PR's one commit is its whole diff (`diff` below).
+QUEUE_DIFF, TEST_DIFF = ("diff --git" + part for part in DIFF.split("diff --git")[1:])
 
 # Every issue's own short history: the author labelled it when opening it.
 TIMELINES = {str(entry["number"]): [
@@ -227,7 +235,7 @@ TIMELINES["11"] = []
 def thread(ident, path, line, author, body, resolved=False):
     return {"id": ident, "isResolved": resolved, "comments": {"nodes": [
         {"author": person(author), "body": body, "path": path, "line": line, "originalLine": line,
-         "createdAt": ago(minutes=50), "commit": {"oid": "13" + "a" * 38}}]}}
+         "createdAt": ago(minutes=50), "commit": {"oid": "bf028a1" + "0" * 33}}]}}
 
 
 # Review threads: the fake forge keys them by `owner/name#number`; every PR gets its own.
@@ -245,8 +253,67 @@ def notification(ident, reason, kind, number, title, unread=True, **delta):
             "subject": {"title": title, "type": kind, "url": url, "latest_comment_url": None}}
 
 
+def step(number, name, conclusion, start, seconds):
+    began = NOW - datetime.timedelta(days=1, seconds=-start)
+    return {"name": name, "number": number, "status": "completed", "conclusion": conclusion,
+            "startedAt": began.isoformat().replace("+00:00", "Z"),
+            "completedAt": (began + datetime.timedelta(seconds=seconds)).isoformat().replace("+00:00", "Z")}
+
+
+def stamp(seconds):
+    return (NOW - datetime.timedelta(days=1, seconds=-seconds)).isoformat().replace("+00:00", "Z")
+
+
+# The run behind #18's checks (run 7 in their links), so Enter on a failing check opens
+# this run in Actions with the failing step unfolded (r9 N-16).
+RUN = {"databaseId": 7, "number": 214, "displayTitle": "Exercise the retry-limit regression check", "actor": "leo",
+       "workflowName": "Quality checks", "workflowDatabaseId": 3, "headBranch": "feat/18",
+       # #18's head commit (`pr()` names it), so the rerun sheet names a real-looking commit.
+       "headSha": "18c91d2" + "0" * 33, "event": "pull_request", "attempt": 1, "status": "completed",
+       "conclusion": "failure", "path": ".github/workflows/quality.yml", "createdAt": ago(days=1),
+       "jobs": [{"databaseId": 70, "name": "Python tests", "status": "completed", "conclusion": "failure",
+                 "startedAt": stamp(0), "completedAt": stamp(3),
+                 "steps": [step(1, "Set up job", "success", 0, 1), step(2, "Install dependencies", "success", 1, 1),
+                           step(3, "Run pytest", "failure", 2, 1)]},
+                {"databaseId": 71, "name": "Lint", "status": "completed", "conclusion": "success",
+                 "startedAt": stamp(0), "completedAt": stamp(2),
+                 "steps": [step(1, "Set up job", "success", 0, 1), step(2, "Run ruff", "success", 1, 1)]}]}
+# The run behind every other PR's passing checks (run 6 in their links), on #13's head, so
+# the merge box, the list glyph and the Checks tab agree before and after it is read (r15).
+RUN_PASSED = {"databaseId": 6, "number": 213, "displayTitle": "Clamp exponential backoff to sixty seconds", "actor": "maya",
+              "workflowName": "Quality checks", "workflowDatabaseId": 3, "headBranch": "fix/backoff",
+              "headSha": "bf028a1" + "0" * 33, "event": "pull_request", "attempt": 1, "status": "completed",
+              "conclusion": "success", "path": ".github/workflows/quality.yml", "createdAt": ago(minutes=9),
+              "jobs": [{"databaseId": 60 + index, "name": name, "status": "completed", "conclusion": "success",
+                        "startedAt": stamp(0), "completedAt": stamp(seconds),
+                        "steps": [step(1, "Set up job", "success", 0, 1), step(2, name, "success", 1, seconds - 1)]}
+                       for index, (name, seconds) in enumerate([("Python tests", 3), ("Lint", 2), ("Docs", 5)])]}
+# #16's check is still running (run 8).
+RUN_RUNNING = {"databaseId": 8, "number": 215, "displayTitle": "Batch terminal progress notifications", "actor": "sam",
+               "workflowName": "Quality checks", "workflowDatabaseId": 3, "headBranch": "feat/16",
+               "headSha": "16" + "a" * 38, "event": "pull_request", "attempt": 1, "status": "in_progress",
+               "conclusion": "", "path": ".github/workflows/quality.yml", "createdAt": ago(minutes=4),
+               "jobs": [{"databaseId": 80, "name": "Python tests", "status": "in_progress", "conclusion": "",
+                         # Started with the run, 4 minutes ago: the job's `running 4m` agrees
+                         # with the run's (r15 narrow pass), not a day-old stamp.
+                         "startedAt": ago(minutes=4),
+                         "steps": [{"name": "Set up job", "number": 1, "status": "completed",
+                                    "conclusion": "success", "startedAt": ago(minutes=4),
+                                    "completedAt": ago(minutes=4, seconds=-1)}]}]}
+RUN_LOG = "".join(f"Python tests\tRun pytest\t{stamp(2)} {line}\n" for line in [
+    "tests/test_retry.py::test_backoff_caps_at_sixty PASSED",
+    "tests/test_retry.py::test_retry_limit_stops_after_five FAILED",
+    "E   AssertionError: expected 5 attempts, saw 6",
+    "=========== 1 failed, 41 passed in 2.71s ===========",
+])
+
 world = {
     "repository": "orbit-dev/orbit",
+    "run": RUN,
+    "runs": [RUN_PASSED, RUN, RUN_RUNNING],
+    "workflows": [{"id": 3, "name": "Quality checks", "path": ".github/workflows/quality.yml", "state": "active"}],
+    "run_views": 2,
+    "logs": {"70": RUN_LOG},
     "comments": [],
     "posted_at": ago(seconds=5),
     "issues": ISSUES,
@@ -258,13 +325,15 @@ world = {
     "review_threads": THREADS,
     "diffs": {"13": DIFF},
     "diff": DIFF,
+    "commit_diffs": dict({entry["commits"][0]["oid"]: DIFF for entry in PRS},
+                         **{"a7c91d2" + "0" * 33: QUEUE_DIFF, "bf028a1" + "0" * 33: TEST_DIFF}),
     # §3.35: the signed-in user's inbox (GitHub `notifications` threads).
     "notifications": [
         notification("8101", "review_requested", "PullRequest", 13,
                      "Clamp exponential backoff to sixty seconds", minutes=2),
         notification("8102", "mention", "Issue", 7, "Reconnect loses queued progress", minutes=14),
         notification("8103", "ci_activity", "CheckSuite", None,
-                     "Quality checks failed for fix/ci-regression", minutes=26),
+                     "Quality checks workflow run failed for feat/18 branch", minutes=26),
         notification("8104", "comment", "PullRequest", 11,
                      "Recover queued tasks after worker reconnect", hours=2),
         notification("8105", "review_requested", "PullRequest", 18,
@@ -273,6 +342,10 @@ world = {
                      unread=False),
     ],
 }
+
+# FORGE_CONVERSATION=1: #13 and #1 carry the full conversation of world_conversation.py.
+if os.environ.get("FORGE_CONVERSATION"):
+    world["conversation"] = True
 
 work = pathlib.Path(tempfile.mkdtemp(prefix="forge-orbit-"))
 state_path = work / "state.json"

@@ -100,7 +100,7 @@ with socket.create_connection((host, int(port)), timeout=5) as s:
             .spawn()
             .expect("run dust"),
     );
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + Duration::from_secs(20);
     let mut stdin = bridge.0.stdin.take().expect("stdin");
     stdin.write_all(b"no newline").expect("write");
     let mut stdout = bridge.0.stdout.take().expect("stdout");

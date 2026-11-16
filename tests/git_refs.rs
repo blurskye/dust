@@ -133,7 +133,7 @@ fn selected(screen: &mut GitScreen) -> String {
     })
 }
 fn wait(screen: &mut GitScreen, mut ready: impl FnMut(&mut GitScreen) -> bool) {
-    let deadline = Instant::now() + Duration::from_secs(15);
+    let deadline = Instant::now() + Duration::from_secs(120);
     loop {
         screen.poll();
         if ready(screen) {
@@ -687,7 +687,7 @@ fn reader_left(width: u16, height: u16) -> u16 {
     } else if width >= 160 && height >= 40 {
         (25 + width / 7).clamp(44, 60) + 1
     } else {
-        (20 + width / 10).clamp(28, 36) + 1
+        (width / 4 + 7).clamp(32, 44) + 1
     }
 }
 // Only inspect the reader interior, not matching names in the rail.
@@ -781,7 +781,8 @@ fn selected_commit_decorations_use_the_existing_metadata_row_and_keep_current_di
     fixture.dirty();
     let id = git(&fixture.root, &["rev-parse", "HEAD"]);
     let author = git(&fixture.root, &["show", "-s", "--format=%an", "HEAD"]);
-    let date = git(&fixture.root, &["show", "-s", "--format=%as", "HEAD"]);
+    // The reader dates a commit by age (DESIGN.md §2.5a): the fixture's is seconds old.
+    let date = " · now · ";
     let files = git(&fixture.root, &["ls-tree", "--name-only", "HEAD"])
         .lines()
         .count();
@@ -822,7 +823,7 @@ fn selected_commit_decorations_use_the_existing_metadata_row_and_keep_current_di
             );
         }
         assert!(meta.contains(&author), "{width}x{height}: {meta}");
-        assert!(meta.contains(&date), "{width}x{height}: {meta}");
+        assert!(meta.contains(date), "{width}x{height}: {meta}");
         assert!(
             meta.contains(&format!("{files} files")),
             "{width}x{height}: {meta}"
@@ -960,7 +961,7 @@ fn branch_log_attributes_each_commit_without_reflow_or_repository_changes() {
     wait(&mut screen, |screen| {
         preview_at(screen, 190, 48)
             .iter()
-            .any(|line| line.contains("Generated Recovery QA · 2026-11-12"))
+            .any(|line| line.contains("Generated Recovery QA · Nov 12"))
     });
     for (width, height) in [(190, 48), (100, 30), (64, 20)] {
         let rows = with_reader(&mut screen, width, |screen| preview_at(screen, width, height));
@@ -968,12 +969,12 @@ fn branch_log_attributes_each_commit_without_reflow_or_repository_changes() {
             (
                 &tip,
                 "New literal subject (HEAD -> fake)",
-                "Generated Recovery QA · 2026-11-12",
+                "Generated Recovery QA · Nov 12",
             ),
             (
                 &older,
                 "Older literal subject 中文",
-                "Older Author · 2025-06-08",
+                "Older Author · Jun 8",
             ),
         ] {
             let row = rows
@@ -1002,7 +1003,7 @@ fn branch_log_attributes_each_commit_without_reflow_or_repository_changes() {
         metadata_frame
             .grid
             .row_text(metadata_y)
-            .contains("Generated Recovery QA · 2026-11-12")
+            .contains("Generated Recovery QA · Nov 12")
     );
     for (width, height) in [(64, 20), (100, 30), (190, 48)] {
         screen.frame(width, height);

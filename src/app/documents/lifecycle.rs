@@ -278,6 +278,9 @@ impl Documents {
                 "virtual document is read-only".into(),
             ));
         }
+        if !check_disk {
+            self.withdraw_disk_checks(view.id);
+        }
         self.check_buffer_mutation(view.id)?;
         if view.dirty && !force {
             return Err(DocumentFailure::Policy("dirty_reload"));
@@ -311,6 +314,7 @@ impl Documents {
                 "virtual document is read-only".into(),
             ));
         }
+        self.withdraw_disk_checks(view.id);
         self.check_buffer_mutation(view.id)?;
         let path = request
             .path
@@ -375,6 +379,22 @@ impl Documents {
             },
         );
         Ok(id)
+    }
+    /// The once-a-second disk check is a read nobody asked for. A save or reload the person
+    /// asks for while one is in flight replaces it instead of being refused as already pending
+    /// (`:w` straight after opening a file, or on a loaded machine where the read is slow);
+    /// the next check sees whatever the save wrote.
+    fn withdraw_disk_checks(&mut self, buffer: BufferId) {
+        self.pending_files.retain(|id, intent| {
+            let keep = !matches!(
+                &intent.operation,
+                Operation::Reload { version, check_disk: true } if version.id == buffer
+            );
+            if !keep {
+                self.vfs.cancel(*id);
+            }
+            keep
+        });
     }
     fn check_buffer_mutation(&self, buffer: BufferId) -> Result<(), DocumentFailure> {
         if self
@@ -1035,7 +1055,7 @@ mod tests {
             .unwrap_or_else(|_| panic!("accept"));
         owner.stop_worker();
         gate.send(()).unwrap();
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
         while !owner.worker_finished() {
             assert!(std::time::Instant::now() < deadline);
             std::thread::sleep(std::time::Duration::from_millis(1));

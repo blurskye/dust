@@ -2,31 +2,50 @@
 #   DUSTY_GIT_BINARY=$PWD/target/debug/dusty-git scripts/ui-shot scripts/ui-scenarios/forge-prs.keys \
 #     --binary scripts/ui-scenarios/forge-orbit-launch --cwd /tmp/orbit --out target/ui-shots/forge-prs \
 #     --size 190x48 --size 120x36 --size 100x30
-wait 1500
+until Changes
+wait 300
 type >
-wait 1200
-shot prs-inbox
-# #13 is the first row
-key enter
+wait 300
+until Showing
+gone Loading
+# The All section with its second row (#17) selected, so the reader differs from pr-overview
+key j
 wait 800
+shot prs-all
+# #13 is the first row
+key k
+wait 300
+key enter
+wait 300
+gone Loading
 shot pr-overview
 type ]
-wait 600
+wait 300
+gone Loading
 shot pr-commits
 type ]
-wait 500
+wait 300
+gone Loading
 shot pr-checks
 type ]
-wait 900
+wait 300
+gone Loading
 shot pr-files
-# u toggles split; narrow terminals refuse with a notice
-type u
+# Long lines wrap by default; w pans them sideways instead (the footer then offers w wrap)
+type w
 wait 500
-shot pr-files-split
-type u
+shot pr-files-nowrap
+type w
+wait 300
+# Space e hides the list: the Files reader and its file tree take the width; again brings it back
+key space e
+wait 500
+shot pr-files-full
+key space e
 wait 300
 type ]
-wait 600
+wait 300
+gone Loading
 shot pr-activity
 type m
 wait 500
@@ -38,9 +57,15 @@ key escape
 wait 200
 type 2
 wait 200
+# Sections cycle from All: `]` → Review, `]` → Mine
 type ]
-wait 500
-shot prs-section
+wait 300
+gone Loading
+shot prs-review
+type ]
+wait 300
+gone Loading
+shot prs-mine
 type ?
 wait 300
 shot prs-help

@@ -5,6 +5,16 @@ use crate::forge::pull_request::{
 };
 
 impl Workspace {
+    /// `OWNER/NAME`; GitLab projects may sit in nested groups (`group/sub/project`).
+    pub(super) fn valid_pr_repository(&self, name: &str) -> bool {
+        if self.forge_kind() != Some(crate::forge::provider::ProviderKind::GitLab) {
+            return valid_repository(name);
+        }
+        name.rsplit_once('/').is_some_and(|(groups, project)| {
+            groups.split('/').all(|group| valid_repository(&format!("{group}/{project}")))
+        })
+    }
+
     fn remotes(&self) -> Vec<(String, String)> {
         let Ok(repo) = git2::Repository::open(&self.root) else {
             return Vec::new();
@@ -71,7 +81,7 @@ impl Workspace {
             info
         };
         let base = string(base_info, "full_name");
-        if !valid_repository(base) {
+        if !self.valid_pr_repository(base) {
             return Err("GitHub returned an invalid repository".into());
         }
         let branch = crate::git::git_branch_name(&self.root)
@@ -117,7 +127,7 @@ impl Workspace {
         } else {
             "Create pull request"
         };
-        Ok(Some(self.form(
+        let mut form = self.form(
             title,
             Action::CreatePullRequest,
             [
@@ -132,17 +142,23 @@ impl Workspace {
                 ),
                 head_field,
                 head_branch,
+                // Shown as toggles when needed (create.rs `compact_pr`): a branch the forge
+                // lacks is pushed first unless unticked; a pull request opens ready.
                 actions::choice(
                     "Publish branch",
-                    "Already pushed",
+                    "Push local branch",
                     &["Already pushed", "Push local branch"],
                 ),
-                actions::choice("Draft", "true", &["true", "false"]),
+                actions::choice("Draft", "false", &["true", "false"]),
             ]
             .into_iter()
             .chain(picker)
             .collect(),
-        )))
+        );
+        // §3.31: the branch's commits fill a fresh sheet; the base branch is picked.
+        self.compose_pr(&mut form);
+        self.compact_pr(&mut form);
+        Ok(Some(form))
     }
 
     pub(in crate::git::screen) fn review_pr(
@@ -166,7 +182,7 @@ impl Workspace {
             return Err("Invalid PR form".into());
         };
         for repository in [base_repository, head_repository] {
-            if !valid_repository(repository) {
+            if !self.valid_pr_repository(repository) {
                 return Err("Repository must be OWNER/NAME on the displayed GitHub host".into());
             }
         }
@@ -252,7 +268,9 @@ impl Workspace {
     }
 
     pub(super) fn poll_pr_form(&mut self) {
-        if self.pending_pr && self.cache.contains_key(&Key::PullRequestDefaults) {
+        // Retried until the defaults are in memory: a disk miss that came back after the
+        // turn's budget never sent the forge read, so waiting for the entry alone stalls.
+        if self.pending_pr {
             self.pending_pr = false;
             match self.create_pr_form() {
                 Ok(form) => self.ready_form = form,
@@ -267,7 +285,7 @@ impl Workspace {
 }
 
 /// The base branch's pull request templates (path, text), the forge's default first.
-fn templates(
+pub(super) fn templates(
     root: &std::path::Path,
     kind: Option<crate::forge::provider::ProviderKind>,
 ) -> Vec<(String, String)> {
@@ -308,9 +326,16 @@ pub(in crate::git::screen) fn template_chosen(workspace: &Workspace, form: &mut 
         return;
     };
     if let Some(description) = form.fields.iter_mut().find(|field| field.label == "Description") {
-        let current = description.input.input.trim().to_owned();
-        if current.is_empty() || templates.iter().any(|(_, template)| template.trim() == current) {
+        let current = description.input.input.trim_end().to_owned();
+        if current.trim().is_empty() || templates.iter().any(|(_, template)| template.trim() == current.trim()) {
             description.input.input = text.clone();
+            description.input.cursor = 0;
+        } else if let Some(kept) = templates
+            .iter()
+            .find_map(|(_, template)| current.strip_suffix(template.trim_end()).filter(|_| !template.trim().is_empty()))
+        {
+            // The commits' text above an untouched template stays; only the template swaps.
+            description.input.input = format!("{}{text}", kept);
             description.input.cursor = 0;
         }
     }

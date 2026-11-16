@@ -123,6 +123,8 @@ enum PluginCommand {
 }
 
 fn main() -> ExitCode {
+    // The Git tab paints its last status, History and branches before git answers.
+    dust::git::screen::enable_warm_cache();
     #[cfg(unix)]
     {
         let mut arguments = std::env::args_os().skip(1);

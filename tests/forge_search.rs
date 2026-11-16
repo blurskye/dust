@@ -8,6 +8,10 @@ use std::time::{Duration, Instant};
 mod forge_fake;
 #[path = "support/forge_screen.rs"]
 mod forge_screen;
+#[path = "support/records.rs"]
+mod records;
+use records::lists;
+use records::record_rows;
 use forge_screen::*;
 
 /// Lines of the list pane only (the form sits beside it).
@@ -39,11 +43,14 @@ fn cached_search_hits_appear_before_remote_results() {
         wait(&mut screen, "Search fixture ready");
         settle(&mut screen, Duration::from_millis(400));
     }
-    update_state(|state| state["delay_ms"] = 1500.into());
+    update_state(|state| {
+        state["delay_ms"] = 1500.into();
+        // Held until the local hits are checked: a paused test can't see remote rows early.
+        state["read_gates"] = serde_json::json!([{"prefix": ["issue", "list"], "name": "search-list"}]);
+    });
     let mut screen = open();
     goto(&mut screen, 0, 1);
-    screen.poll();
-    assert!(list(&mut screen).contains("#1 Navigation issue 1"));
+    wait_for(&mut screen, "the cached issues", |frame| lists(frame, 1, "Navigation issue 1"));
     key(&mut screen, KeyCode::Char('/'));
     let typed = Instant::now();
     paste(&mut screen, "issue 5");
@@ -51,22 +58,23 @@ fn cached_search_hits_appear_before_remote_results() {
     let local = list(&mut screen);
     let shown = typed.elapsed();
     println!("measured: local search hits {shown:?} after typing");
-    assert!(local.contains("#5 Navigation issue 5"), "{local}");
-    assert!(!local.contains("#1 Navigation issue 1"), "{local}");
+    assert!(lists(&local, 5, "Navigation issue 5"), "{local}");
+    assert!(!lists(&local, 1, "Navigation issue 1"), "{local}");
     assert!(local.contains("From github.com · searching ⟳"), "{local}");
     assert!(!local.contains("Remote only issue 42"), "{local}");
+    release("search-list");
     // Remote results arrive below the divider, without repeating the local hit.
-    wait(&mut screen, "#42 Remote only issue 42");
+    wait_for(&mut screen, "#42", |frame| lists(frame, 42, "Remote only issue 42"));
     let merged = list(&mut screen);
     assert!(merged.contains("From github.com · 1 more"), "{merged}");
     assert_eq!(
-        merged.matches("#5 Navigation issue 5").count(),
+        record_rows(&merged, 5, "Navigation issue 5").len(),
         1,
         "{merged}"
     );
-    let divider = merged.find("From github.com").unwrap();
-    assert!(merged.find("#5 Navigation issue 5").unwrap() < divider);
-    assert!(merged.find("#42 Remote only issue 42").unwrap() > divider);
+    let divider = merged.lines().position(|line| line.contains("From github.com")).unwrap();
+    assert!(record_rows(&merged, 5, "Navigation issue 5")[0] < divider);
+    assert!(record_rows(&merged, 42, "Remote only issue 42")[0] > divider);
     // A newer query supersedes the one in flight; nothing of the old one is reported.
     paste(&mut screen, "x");
     let end = Instant::now() + Duration::from_millis(320);
@@ -83,6 +91,6 @@ fn cached_search_hits_appear_before_remote_results() {
     );
     // Closing the form brings the list back as it was.
     key(&mut screen, KeyCode::Escape);
-    wait(&mut screen, "#1 Navigation issue 1");
+    wait_for(&mut screen, "#1", |frame| lists(frame, 1, "Navigation issue 1"));
     assert!(!view(&mut screen).contains("From github.com"));
 }

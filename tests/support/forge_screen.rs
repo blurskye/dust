@@ -61,6 +61,13 @@ pub fn cursor_row(screen: &mut GitScreen) -> String {
     frame.grid.row_text(y)
 }
 
+/// The record under the list cursor: its title row and the `#N opened …` row beneath it.
+pub fn cursor_record(screen: &mut GitScreen) -> String {
+    let frame = screen.frame(190, 65);
+    let (_, y, _) = frame.cursor.expect("the list keeps a cursor");
+    format!("{}\n{}", frame.grid.row_text(y), frame.grid.row_text(y + 1))
+}
+
 pub fn wait(screen: &mut GitScreen, text: &str) {
     wait_for(screen, text, |frame| frame.contains(text));
 }
@@ -117,9 +124,7 @@ pub fn state() -> Value {
 
 /// Change the fake forge's world in place, keeping its request log.
 pub fn update_state(change: impl FnOnce(&mut Value)) {
-    let mut value = state();
-    change(&mut value);
-    std::fs::write(fixture(), serde_json::to_string(&value).unwrap()).unwrap();
+    forge_fake::update(&fixture(), change);
 }
 
 pub fn release(name: &str) {

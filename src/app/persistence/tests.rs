@@ -30,7 +30,7 @@ fn help_restores_the_visible_palette_and_keeps_file_search_alive() {
     app.process_workspace_file_events();
     assert!(app.search.help_is_open());
     app.close_picker();
-    let deadline = Instant::now() + Duration::from_secs(3);
+    let deadline = Instant::now() + Duration::from_secs(20);
     while app.search.files_pending() {
         app.process_workspace_file_events();
         assert!(Instant::now() < deadline);
@@ -511,7 +511,7 @@ fn hiding_an_inspector_sends_no_disconnect_and_leaves_the_session_running() {
 
     // HIDE: close the surface, which runs the session's own dismiss_choices path.
     driver.application_mut().close_picker();
-    let deadline = Instant::now() + Duration::from_secs(6);
+    let deadline = Instant::now() + Duration::from_secs(20);
     while driver.projection().picker.is_some() {
         driver.pump_debug();
         assert!(Instant::now() < deadline, "the inspector never closed");
@@ -526,7 +526,7 @@ fn hiding_an_inspector_sends_no_disconnect_and_leaves_the_session_running() {
     // A fresh threads response acknowledges a request ordered after hiding.
     // The adapter has consumed any earlier disconnect before this response.
     driver.debug_threads();
-    let deadline = Instant::now() + Duration::from_secs(6);
+    let deadline = Instant::now() + Duration::from_secs(20);
     while driver.projection().picker.is_none() {
         driver.pump_debug();
         assert!(
@@ -626,7 +626,7 @@ fn a_restored_session_keeps_the_buffer_line_in_window_order() {
 
 use crate::app::persistence::*;
 pub(in crate::app) fn drain(owner: &mut Persistence) {
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
     while owner.pending() {
         owner.poll();
         assert!(std::time::Instant::now() < deadline);

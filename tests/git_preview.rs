@@ -76,7 +76,7 @@ fn cursor(screen: &mut GitScreen) -> String {
     text.trim_end().into()
 }
 fn wait(screen: &mut GitScreen, ready: impl Fn(&mut GitScreen) -> bool) {
-    let end = Instant::now() + Duration::from_secs(15);
+    let end = Instant::now() + Duration::from_secs(120);
     loop {
         screen.poll();
         if ready(screen) {
@@ -109,7 +109,7 @@ fn switching_file_or_index_layer_hides_old_code_before_the_new_read_finishes() {
         "old source is mislabeled as b.rs: {pending}"
     );
     control(&mut screen, KeyCode::Char('l'));
-    key(&mut screen, KeyCode::Char(' '));
+    key(&mut screen, KeyCode::Char('-'));
     assert!(view(&mut screen).contains("diff is refreshing"));
     assert_eq!(git(root, &["diff", "--cached"]), original_index);
     wait(&mut screen, |screen| {

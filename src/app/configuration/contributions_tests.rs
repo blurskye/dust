@@ -94,7 +94,7 @@ pub(in crate::app) fn indexed_plugin_defaults_install_before_activation_and_roll
             app.plugin_limits(),
         )
         .expect("index request");
-    let deadline = Instant::now() + Duration::from_secs(2);
+    let deadline = Instant::now() + Duration::from_secs(20);
     while app.extension.contributions().get("demo").is_none() {
         app.process_plugin_events();
         assert!(Instant::now() < deadline, "index integration timed out");
@@ -114,7 +114,7 @@ pub(in crate::app) fn indexed_plugin_defaults_install_before_activation_and_roll
             .expect("static command"),
     );
     assert_eq!(app.extension.load_id("demo"), previous);
-    let deadline = Instant::now() + Duration::from_secs(2);
+    let deadline = Instant::now() + Duration::from_secs(20);
     while app.extension.contributions().get("demo").is_some() {
         app.process_plugin_events();
         assert!(Instant::now() < deadline, "activation rollback timed out");

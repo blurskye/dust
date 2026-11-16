@@ -130,8 +130,11 @@ impl Reply {
     }
 }
 
+/// How long a reply may wait on a reader that stopped reading.
+const REPLY_WRITE_TIMEOUT: Duration = Duration::from_secs(2);
+
 fn send_reply(mut stream: UnixStream, answer: Result<String, String>) -> io::Result<()> {
-    stream.set_write_timeout(Some(Duration::from_secs(2)))?;
+    stream.set_write_timeout(Some(REPLY_WRITE_TIMEOUT))?;
     let message = match answer {
         Ok(text) => json!({"text": text}),
         Err(error) => json!({"error": error}),
@@ -556,7 +559,7 @@ mod tests {
             None,
         )
         .unwrap();
-        let deadline = Instant::now() + Duration::from_secs(3);
+        let deadline = Instant::now() + Duration::from_secs(30);
         loop {
             if let Some(RemoteRequest::Open(open)) = server.try_request() {
                 assert_eq!(open.path, crate::files::absolute_test_path("/next.rs"));
@@ -625,8 +628,9 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let server = RemoteServer::start(directory.path()).unwrap();
         let mut client = UnixStream::connect(server.path()).unwrap();
+        // Long enough that only a server that keeps extending its deadline reaches it.
         client
-            .set_read_timeout(Some(Duration::from_secs(5)))
+            .set_read_timeout(Some(REQUEST_TIMEOUT * 10))
             .unwrap();
         let mut writer = client.try_clone().unwrap();
         let trickling = thread::spawn(move || {
@@ -636,8 +640,13 @@ mod tests {
         });
         let started = Instant::now();
         let mut byte = [0];
-        assert_eq!(client.read(&mut byte).unwrap(), 0);
-        assert!(started.elapsed() < REQUEST_TIMEOUT + Duration::from_secs(2));
+        // The server hangs up at its deadline. A byte that arrived after its last read makes
+        // the hang-up a reset instead of a clean end of stream; either way the trickle is cut.
+        match client.read(&mut byte) {
+            Ok(read) => assert_eq!(read, 0),
+            Err(error) => assert_eq!(error.kind(), io::ErrorKind::ConnectionReset),
+        }
+        assert!(started.elapsed() < REQUEST_TIMEOUT * 10);
         trickling.join().unwrap();
         assert!(server.try_request().is_none());
     }
@@ -652,7 +661,7 @@ mod tests {
             let _client = active.then(|| {
                 let mut stream = UnixStream::connect(&path).unwrap();
                 stream.write_all(b"unfinished").unwrap();
-                let deadline = std::time::Instant::now() + Duration::from_secs(3);
+                let deadline = std::time::Instant::now() + Duration::from_secs(20);
                 while server.reading.lock().unwrap().is_none() {
                     assert!(std::time::Instant::now() < deadline);
                     thread::sleep(Duration::from_millis(1));
@@ -684,7 +693,7 @@ mod tests {
         let server = RemoteServer::start(directory.path()).unwrap();
         let mut client = UnixStream::connect(server.path()).unwrap();
         writeln!(client, "agent\t{}", json!({"parent": 1, "prompt": "task"})).unwrap();
-        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        let deadline = std::time::Instant::now() + Duration::from_secs(30);
         let request = loop {
             if let Some(RemoteRequest::Agent(request)) = server.try_request() {
                 break request;
@@ -699,7 +708,9 @@ mod tests {
         }
         let started = std::time::Instant::now();
         drop(server);
-        assert!(started.elapsed() < Duration::from_secs(1));
+        // A writer that is not interrupted only gives up when its write timeout fires, so
+        // returning sooner than that is the proof, however slow the machine is.
+        assert!(started.elapsed() < REPLY_WRITE_TIMEOUT);
     }
 
     #[test]
@@ -717,8 +728,7 @@ mod tests {
         let dust = directory
             .path()
             .join("dust '\"$HOME`echo expanded`\\binary");
-        fs::write(&dust, "#!/bin/sh\nprintf '%s\\n' \"$@\"\n").unwrap();
-        fs::set_permissions(&dust, fs::Permissions::from_mode(0o700)).unwrap();
+        crate::testing::write_executable(&dust, "#!/bin/sh\nprintf '%s\\n' \"$@\"\n");
         lazygit_config(directory.path(), &dust).unwrap();
         let overlay = directory
             .path()
@@ -783,7 +793,7 @@ mod tests {
             .path()
             .join(std::ffi::OsString::from_vec(b"a\n\tb-\xff.rs".to_vec()));
         send(server.path(), std::slice::from_ref(&file), Some(9)).unwrap();
-        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        let deadline = std::time::Instant::now() + Duration::from_secs(20);
         loop {
             if let Some(RemoteRequest::Open(open)) = server.try_request() {
                 assert_eq!(

@@ -207,7 +207,7 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         let root = tempfile::tempdir().unwrap();
         let executable = root.path().join("tool");
-        std::fs::write(&executable, "#!/bin/sh\nexit 0\n").unwrap();
+        crate::testing::write_executable(&executable, "#!/bin/sh\nexit 0\n");
         for mode in [0o641, 0o600, 0o700] {
             std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(mode)).unwrap();
             let can_execute = std::process::Command::new(&executable).status().is_ok();

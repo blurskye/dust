@@ -99,6 +99,7 @@ fn rows<T: Clone>(base: &PageOf<T>, fresh: &PageOf<T>, id: impl Fn(&T) -> String
         items,
         next: base.next,
         total: base.total.map(|total| total + added),
+        other_total: None,
     }
 }
 
@@ -153,11 +154,13 @@ mod tests {
             items: vec![run(3, RunStatus::InProgress), run(2, RunStatus::Completed)],
             next: None,
             total: Some(2),
+            other_total: None,
         });
         let fresh = Fetched::payload(Payload::Runs(PageOf {
             items: vec![run(4, RunStatus::Queued), run(3, RunStatus::Completed)],
             next: None,
             total: Some(2),
+            other_total: None,
         }));
         let read = Read::Runs {
             filter: Default::default(),

@@ -326,22 +326,42 @@ fn inbox_explicit_merged_section_preserves_closed_vs_merged_list_truth() {
     key(&mut screen, KeyCode::Down); // open -> closed
     key(&mut screen, KeyCode::Down); // closed -> merged
     control(&mut screen, KeyCode::Enter);
-    wait(&mut screen, |text| text.contains("2 indexed") && state()["search_state"] == "merged");
+    // By the search itself, not the fake's last-search state: a section's count search may
+    // run after it on a loaded machine.
+    let searched = |flag: &'static str, value: Option<&'static str>| {
+        move || {
+            calls().iter().any(|args| {
+                args.first().is_some_and(|arg| arg == "search")
+                    && args.windows(2).any(|pair| pair[0] == flag && value.is_none_or(|value| pair[1] == value))
+                    && !args.iter().any(|arg| arg.contains("@me"))
+            })
+        }
+    };
+    let merged = searched("--merged", None);
+    let marked = |text: &str, word: &str| text.lines().any(|line| line.contains("#7 by alice") && line.contains(word));
+    wait(&mut screen, |text| text.contains("2 indexed") && marked(text, "Merged") && merged());
     let frame = screen.frame(190, 65);
-    // The record's state chip names the lifecycle (the glyph differs only in colour).
+    // The record's state chip names the lifecycle (the glyph differs only in colour); it
+    // ends the record's meta row, so every title clips at one column (r12).
     assert!((0..frame.grid.height()).any(|y| {
-        frame.grid.row_text(y).contains("alpha/one item 7") && frame.grid.row_text(y).contains("Merged")
+        frame.grid.row_text(y).contains("alpha/one item 7")
+            && (frame.grid.row_text(y).contains("Merged") || frame.grid.row_text(y + 1).contains("Merged"))
     }), "explicit merged search must mark the records merged");
     assert!(calls().iter().any(|args| args.first().is_some_and(|arg| arg == "search") && args.iter().any(|arg| arg == "--merged")));
     key(&mut screen, KeyCode::Char('/'));
     key(&mut screen, KeyCode::Tab);
     key(&mut screen, KeyCode::Up); // merged -> closed (not merged-only)
     control(&mut screen, KeyCode::Enter);
-    wait(&mut screen, |text| text.contains("2 indexed") && state()["search_state"] == "closed");
+    let closed = searched("--state", Some("closed"));
+    wait(&mut screen, |text| text.contains("2 indexed") && marked(text, "Closed") && closed());
     let frame = screen.frame(190, 65);
     assert!((0..frame.grid.height()).any(|y| {
         let row = frame.grid.row_text(y);
-        row.contains("alpha/one item 7") && row.contains("Closed") && !row.contains("Merged")
+        let meta = frame.grid.row_text(y + 1);
+        row.contains("alpha/one item 7")
+            && (row.contains("Closed") || meta.contains("Closed"))
+            && !row.contains("Merged")
+            && !meta.contains("Merged")
     }), "ordinary closed results must not all be relabeled merged");
     assert_local_source_unchanged();
 }
@@ -375,7 +395,7 @@ fn inbox_failed_confirmed_write_after_a_b_a_preserves_dirty_root_and_scoped_draf
     key(&mut screen, KeyCode::Char('k'));
     assert_eq!(DirtyRootSnapshot::capture(&screen), before);
     std::fs::write(format!("{}.alpha-write", state_path().display()), "release").unwrap();
-    wait(&mut screen, |text| text.contains("Fixture comment write refused") && text.contains("draft is preserved"));
+    wait(&mut screen, |text| text.contains("Fixture comment write refused · your draft is kept"));
     assert_eq!(state()["writes"], json!([]));
     assert_eq!(state()["write_attempts"][0], json!({
         "host":"github.com","repo":"alpha/one","kind":"pr","number":7,"body":"alpha failed draft must survive"

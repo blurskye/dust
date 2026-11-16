@@ -74,8 +74,11 @@ pub enum GitSurface {
     Chip(GitChip),
     ChipActive,
     Sheet,
-    /// Code blocks in rendered Markdown: one step darker than the pane.
+    /// Code in diffs and suggestions: one step darker than the pane.
     Code,
+    /// Code blocks and code spans in a forge reader's Markdown: the editor's own Markdown code
+    /// background (`Theme::markdown_code`), so fenced code reads as it does in the editor.
+    ProseCode,
     /// A forge label chip: the label's colour blended into the pane.
     Label(u8, u8, u8),
 }
@@ -100,6 +103,8 @@ pub enum Emphasis {
     Bold,
     Dim,
     Strike,
+    /// Underlined, as a link that does something on Enter (a folded `<details>` summary).
+    Underline,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]

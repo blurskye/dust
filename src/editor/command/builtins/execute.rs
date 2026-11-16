@@ -115,6 +115,16 @@ fn checked_range(
     Ok(range)
 }
 
+/// A remembered position on a character boundary inside the text, after edits the
+/// position did not follow (an undo, a reload).
+fn clamp_offset(text: &crate::editor::text::TextBuffer, position: ByteOffset) -> ByteOffset {
+    let mut position = ByteOffset(position.get().min(text.len_bytes()));
+    while position.get() > 0 && text.validate_offset(position).is_err() {
+        position = ByteOffset(position.get() - 1);
+    }
+    position
+}
+
 pub(super) fn execute_builtin<E>(
     state: &EditorState,
     invocation: &CommandInvocation,
@@ -291,6 +301,8 @@ pub(super) fn execute_builtin<E>(
             } else {
                 None
             };
+            // `gi` reopens Insert mode where it stopped, before Esc steps the cursor back.
+            let stopped = ByteOffset(view.cursor.get() + repeated.as_ref().map_or(0, String::len));
             if let Some(text) = repeated.filter(|text| !text.is_empty()) {
                 let last = text
                     .grapheme_indices(true)
@@ -327,6 +339,54 @@ pub(super) fn execute_builtin<E>(
                 view: view_id,
                 mode: EditorMode::Normal,
             });
+            if view.mode == EditorMode::Insert {
+                transaction.operations.push(EditorOperation::SetLastInsert {
+                    buffer: buffer_id,
+                    position: stopped,
+                });
+            }
+        }
+        "mode.visual_reselect" => {
+            transaction.undo_policy = UndoPolicy::Ignore;
+            let last = buffer.last_visual.ok_or_else(|| {
+                CommandError::Unavailable("no previous Visual selection".into())
+            })?;
+            let anchor = clamp_offset(&buffer.text, last.anchor);
+            let head = clamp_offset(&buffer.text, last.head);
+            let mode = match last.kind {
+                crate::editor::SelectionKind::Line => EditorMode::VisualLine,
+                crate::editor::SelectionKind::Block => EditorMode::VisualBlock,
+                crate::editor::SelectionKind::Character => EditorMode::VisualChar,
+            };
+            // In Visual mode the current and the previous selection swap, as in Vim.
+            let current = matches!(
+                view.mode,
+                EditorMode::VisualChar | EditorMode::VisualLine | EditorMode::VisualBlock
+            )
+            .then_some(view.selection)
+            .flatten();
+            transaction.operations.push(EditorOperation::SetMode {
+                view: view_id,
+                mode,
+            });
+            transaction.operations.push(EditorOperation::SetSelection {
+                view: view_id,
+                selection: Some(crate::editor::Selection {
+                    anchor,
+                    head,
+                    kind: last.kind,
+                }),
+            });
+            transaction.operations.push(EditorOperation::SetCursor {
+                view: view_id,
+                position: head,
+            });
+            if current.is_some() {
+                transaction.operations.push(EditorOperation::SetLastVisual {
+                    buffer: buffer_id,
+                    selection: current,
+                });
+            }
         }
         "mode.replace" => {
             transaction.undo_policy = UndoPolicy::Merge;
@@ -399,12 +459,23 @@ pub(super) fn execute_builtin<E>(
         "mode.insert" => {
             transaction.undo_policy = UndoPolicy::Merge;
             let placement = string_argument(invocation, "placement")?;
+            // `gi`: where Insert mode last stopped in this buffer, else at the cursor.
+            let (cursor, placement) = if placement == "last_insert" {
+                (
+                    buffer
+                        .last_insert
+                        .map_or(view.cursor, |position| clamp_offset(&buffer.text, position)),
+                    "before",
+                )
+            } else {
+                (view.cursor, placement)
+            };
             build_insert_transition(
                 &mut transaction,
                 &buffer.text,
                 view_id,
                 buffer_id,
-                view.cursor,
+                cursor,
                 placement,
             )?;
             if count > 1 {
@@ -1151,6 +1222,18 @@ pub(super) fn execute_builtin<E>(
                     EditorMode::Normal
                 },
             });
+            // A Visual yank moved the cursor to the start; `gv` gets the whole selection.
+            if operator == "yank"
+                && matches!(
+                    view.mode,
+                    EditorMode::VisualChar | EditorMode::VisualLine | EditorMode::VisualBlock
+                )
+            {
+                transaction.operations.push(EditorOperation::SetLastVisual {
+                    buffer: buffer_id,
+                    selection: view.selection,
+                });
+            }
         }
         "edit.surround" => {
             let action = string_argument(invocation, "action")?;

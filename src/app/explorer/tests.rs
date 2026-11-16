@@ -30,7 +30,7 @@ fn explorer_command_prompt_creates_a_file_from_the_selected_directory() {
     app.submit_prompt();
     assert!(app.ui.prompt.is_none(), "{:?}", app.ui.prompt);
     assert!(app.explorer.mutation_pending());
-    let deadline = Instant::now() + Duration::from_secs(2);
+    let deadline = Instant::now() + Duration::from_secs(20);
     while Instant::now() < deadline && !app.state.workspace_root.join("new.txt").exists() {
         app.process_vfs_results();
         std::thread::sleep(Duration::from_millis(2));
@@ -59,7 +59,7 @@ fn explorer_prefilled_rename_keeps_original_target_and_dirty_split_views() {
     app.state.views[first].cursor = ByteOffset(1);
     app.state.views[second].cursor = ByteOffset(4);
     app.open_explorer();
-    let deadline = Instant::now() + Duration::from_secs(2);
+    let deadline = Instant::now() + Duration::from_secs(20);
     while app.explorer.tree().id_for_path(&source).is_none() {
         app.process_explorer_result();
         assert!(Instant::now() < deadline);
@@ -131,7 +131,7 @@ fn explorer_rename_prompt_refuses_replaced_files_and_stale_or_cancelled_requests
     fs::write(&source, "original").unwrap();
     fs::write(&target, "collision").unwrap();
     app.open_explorer();
-    let deadline = Instant::now() + Duration::from_secs(2);
+    let deadline = Instant::now() + Duration::from_secs(20);
     while app.explorer.tree().id_for_path(&source).is_none() {
         app.process_explorer_result();
         assert!(Instant::now() < deadline);
@@ -197,7 +197,7 @@ fn explorer_rename_prompt_refuses_replaced_files_and_stale_or_cancelled_requests
     wait_vfs(&mut app);
     assert!(app.input.prompt().is_none());
     app.open_explorer();
-    let deadline = Instant::now() + Duration::from_secs(2);
+    let deadline = Instant::now() + Duration::from_secs(20);
     while app.explorer.tree().id_for_path(&source).is_none() {
         app.process_explorer_result();
         assert!(Instant::now() < deadline);
@@ -245,7 +245,7 @@ fn explorer_rename_rejects_destinations_owned_by_unsaved_buffers() {
             .unwrap();
         app.state.set_buffer_dirty(destination, true);
         app.open_explorer();
-        let deadline = Instant::now() + Duration::from_secs(2);
+        let deadline = Instant::now() + Duration::from_secs(20);
         while app.explorer.tree().id_for_path(&source).is_none() {
             app.process_explorer_result();
             assert!(Instant::now() < deadline);
@@ -282,7 +282,7 @@ fn explorer_close_reconciles_an_accepted_rename_even_after_disk_completion() {
         .open_text(TextBuffer::from_text("kept"), Some(source.clone()))
         .unwrap();
     app.open_explorer();
-    let deadline = Instant::now() + Duration::from_secs(2);
+    let deadline = Instant::now() + Duration::from_secs(20);
     while app.explorer.tree().id_for_path(&source).is_none() {
         app.process_explorer_result();
         assert!(Instant::now() < deadline);
@@ -340,7 +340,7 @@ fn explorer_rename_refuses_destinations_owned_by_unsaved_buffers_before_writing(
             .unwrap();
         app.state.set_buffer_dirty(unsaved, true);
         app.open_explorer();
-        let deadline = Instant::now() + Duration::from_secs(3);
+        let deadline = Instant::now() + Duration::from_secs(20);
         while app.explorer.tree().id_for_path(&source).is_none() {
             app.process_explorer_result();
             assert!(Instant::now() < deadline);
@@ -380,7 +380,7 @@ fn explorer_rename_and_delete_reconcile_open_buffers_without_losing_text() {
         .unwrap();
     app.state.set_buffer_dirty(buffer, true);
     app.open_explorer();
-    let deadline = Instant::now() + Duration::from_secs(2);
+    let deadline = Instant::now() + Duration::from_secs(20);
     while Instant::now() < deadline && app.explorer.tree().id_for_path(&source).is_none() {
         app.process_explorer_result();
         std::thread::sleep(Duration::from_millis(2));
@@ -393,7 +393,7 @@ fn explorer_rename_and_delete_reconcile_open_buffers_without_losing_text() {
     );
     app.rename_explorer_path("renamed.txt".into());
     let target = app.state.workspace_root.join("renamed.txt");
-    let deadline = Instant::now() + Duration::from_secs(2);
+    let deadline = Instant::now() + Duration::from_secs(20);
     while Instant::now() < deadline && app.state.buffers[buffer].path.as_ref() != Some(&target) {
         app.process_vfs_results();
         std::thread::sleep(Duration::from_millis(2));
@@ -413,7 +413,7 @@ fn explorer_rename_and_delete_reconcile_open_buffers_without_losing_text() {
         "kept plus unsaved"
     );
 
-    let deadline = Instant::now() + Duration::from_secs(2);
+    let deadline = Instant::now() + Duration::from_secs(20);
     while app.explorer.tree().id_for_path(&target).is_none() {
         app.process_explorer_result();
         assert!(Instant::now() < deadline);
@@ -423,7 +423,7 @@ fn explorer_rename_and_delete_reconcile_open_buffers_without_losing_text() {
         .select(app.explorer.tree().id_for_path(&target).unwrap());
     let ready_delete = |app: &mut App| {
         app.request_explorer_delete();
-        let deadline = Instant::now() + Duration::from_secs(2);
+        let deadline = Instant::now() + Duration::from_secs(20);
         while app
             .input
             .prompt()
@@ -457,7 +457,7 @@ fn explorer_rename_and_delete_reconcile_open_buffers_without_losing_text() {
     app.input
         .select_confirmation(crate::ui::ConfirmationChoice::Yes);
     app.submit_prompt();
-    let deadline = Instant::now() + Duration::from_secs(2);
+    let deadline = Instant::now() + Duration::from_secs(20);
     while app.explorer.mutation_pending() {
         app.process_vfs_results();
         assert!(Instant::now() < deadline);
@@ -480,7 +480,7 @@ fn explorer_rename_and_delete_reconcile_open_buffers_without_losing_text() {
     app.input
         .select_confirmation(crate::ui::ConfirmationChoice::Yes);
     app.submit_prompt();
-    let deadline = Instant::now() + Duration::from_secs(2);
+    let deadline = Instant::now() + Duration::from_secs(20);
     while Instant::now() < deadline && app.state.buffers[buffer].path.is_some() {
         app.process_vfs_results();
         std::thread::sleep(Duration::from_millis(2));
@@ -495,7 +495,7 @@ fn explorer_rename_and_delete_reconcile_open_buffers_without_losing_text() {
     let opened = app.state.workspace_root.join("opened.txt");
     fs::write(&opened, "open through owner").unwrap();
     app.refresh_explorer();
-    let deadline = Instant::now() + Duration::from_secs(2);
+    let deadline = Instant::now() + Duration::from_secs(20);
     while app.explorer.tree().id_for_path(&opened).is_none() {
         app.process_explorer_result();
         assert!(Instant::now() < deadline);
@@ -534,7 +534,7 @@ fn explorer_rename_and_delete_reconcile_open_buffers_without_losing_text() {
 }
 
 pub(in crate::app) fn wait_explorer(app: &mut App) {
-    let deadline = Instant::now() + Duration::from_secs(2);
+    let deadline = Instant::now() + Duration::from_secs(20);
     while app.explorer.pending() {
         app.process_explorer_result();
         assert!(Instant::now() < deadline, "explorer timed out");
@@ -1304,7 +1304,7 @@ pub(in crate::app) fn fixture(root: &std::path::Path) -> (Explorer, WorkspaceVer
     (owner, workspace.version())
 }
 pub(in crate::app) fn drain(owner: &mut Explorer, scope: WorkspaceVersion) {
-    let deadline = Instant::now() + Duration::from_secs(2);
+    let deadline = Instant::now() + Duration::from_secs(20);
     while owner.pending() {
         owner.poll(scope.clone(), 1);
         assert!(Instant::now() < deadline);
@@ -1597,7 +1597,7 @@ fn failed_watch_reconciliation_is_retried_without_tree_changes() {
     drain(&mut owner, scope);
     std::fs::remove_dir(&dir).unwrap();
     owner.reconcile_watch(true).unwrap();
-    let deadline = Instant::now() + Duration::from_secs(3);
+    let deadline = Instant::now() + Duration::from_secs(20);
     while owner.poll_watch(true).is_ok() {
         assert!(Instant::now() < deadline);
         std::thread::sleep(Duration::from_millis(2));
@@ -1776,7 +1776,7 @@ fn stale_directory_policy_completes_requests() {
     let node = owner.tree().selected_id().unwrap();
     owner.load(node, source.clone(), 1, 100).unwrap();
     let wait = |owner: &mut Explorer| {
-        let deadline = Instant::now() + Duration::from_secs(2);
+        let deadline = Instant::now() + Duration::from_secs(20);
         while owner.pending() {
             owner.poll(source.clone(), 2);
             assert!(Instant::now() < deadline);

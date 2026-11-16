@@ -138,6 +138,9 @@ pub fn browser_url(endpoints: &Endpoints, repo: &RepoRef, kind: ItemKind, number
 /// appended) or the OS opener. A launcher that exits at once must succeed; one still running
 /// after a moment is left to run and reaped in the background.
 pub fn open_url(url: &str) -> Result<(), String> {
+    if crate::forge::sandbox::active() {
+        return Err("The practice forge has no web pages; nothing opens in the browser".into());
+    }
     if !(url.starts_with("https://") || url.starts_with("http://")) {
         return Err(format!("not a web address: {url}"));
     }

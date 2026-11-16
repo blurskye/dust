@@ -6,6 +6,14 @@ per host, ≤ 2 pages per list, text bodies capped at 256 KiB). Every fixture pa
 
 ## Hosts
 
+Only `gitea/` and `forgejo/versions/17/` are kept: `server.py --world gitea|forgejo` answers from
+them. The `github/` and `gitlab/` recordings were dropped once the `legacy`, `inbox`, `actions` and
+`gitlab` worlds replaced them (no test loaded them); the rows below still say what was recorded, and
+`scripts/forge-record` makes them again. Recorded entries no test or `forge-gitea` scenario requested
+were dropped too, and nested repository objects keep only their identity fields (`id`, `owner`,
+`name`, `full_name`, `private`, `fork`, `parent`, `html_url`, `clone_url`, `ssh_url`,
+`default_branch`).
+
 | Dir | Host | Server version | Recorded at | Source repo → redacted | Auth |
 |---|---|---|---|---|---|
 | `github/` | github.com (`https://api.github.com`) | n/a (no version endpoint) | 2026-11-14T05:20:02Z | `charmbracelet/bubbletea` → `orbit/orbit` | gh token, held in memory, reads only |
@@ -131,6 +139,7 @@ recorded one `"auth": "none"`.
 | gitea, forgejo | Rerun, CancelRun | `POST actions/runs/91/rerun`, `/cancel` | `#/repository/rerunWorkflowRun` (Forgejo: `RerunWorkflowRun`), `#/repository/cancelWorkflowRun` |
 | gitea, forgejo | Dispatch | `POST actions/workflows/ci.yml/dispatches` | `#/repository/ActionsDispatchWorkflow` |
 | gitea, forgejo | MarkRead | `PATCH /notifications/threads/9001?to-status=read` | `#/notification/notifyReadThread` |
+| gitea, forgejo | List (closed) | `GET issues?state=closed&type=issues`, `GET pulls?state=closed`: three closed issues; two closed and one merged pull request, made from the first recorded open row (the list header's `Closed` side) | `#/issue/issueListIssues`, `#/repository/repoListPullRequests` |
 
 Gitea/Forgejo doc anchors are relative to `https://gitea.com/api/swagger` and
 `https://code.forgejo.org/api/swagger`.

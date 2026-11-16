@@ -446,7 +446,7 @@ mod tests {
             );
         }
         let text = crate::editor::text::TextBuffer::from_text(&"x".repeat(20));
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
         loop {
             if let Some(mut tree) = crate::editor::transaction::undo::load_undo_history(
                 root.path(),

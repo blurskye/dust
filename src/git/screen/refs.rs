@@ -91,7 +91,7 @@ impl GitScreen {
                     "Merge selected branch?",
                     Action::MergeBranch { target, current },
                     vec![field],
-                    "Merge the captured tip; stop on conflicts; no autostash",
+                    "Merge the selected commit · stops on conflicts · doesn't stash your changes",
                 )
             }
             (0, KeyCode::Char('R')) => {
@@ -109,7 +109,7 @@ impl GitScreen {
                     "Rebase current branch?",
                     Action::RebaseBranch { target, current },
                     vec![field],
-                    "Replay onto captured tip; rewrite history; no autostash",
+                    "Rebase onto the selected commit · rewrites history · doesn't stash your changes",
                 )
             }
             (0, KeyCode::Char('e')) => (
@@ -176,7 +176,7 @@ impl GitScreen {
         } else {
             reference
         };
-        for (label, value) in [("Selected local ref", reference), ("Effect", effect.into())] {
+        for (label, value) in [("Selected branch or tag", reference), ("Effect", effect.into())] {
             let mut field = Field::new(label, value);
             field.required = false;
             field.read_only = true;

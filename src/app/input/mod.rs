@@ -2167,10 +2167,29 @@ impl App {
                     self.git_screen_visible = false;
                     self.edit_path(path);
                 }
+                // `e` on a diff line: the buffer opens at that line, and Dusty Git waits
+                // behind it (the same command brings it back where it was).
+                crate::git::screen::ScreenOutcome::OpenFileAt(path, line) => {
+                    self.git_screen_visible = false;
+                    self.edit_path_at(path, line);
+                }
                 crate::git::screen::ScreenOutcome::OpenRepository(path) => {
                     self.git_screen = None;
                     self.git_screen_visible = false;
                     self.switch_workspace_root(path);
+                }
+                crate::git::screen::ScreenOutcome::Copy(text) => {
+                    // The unnamed register reaches the system clipboard as a yank does.
+                    let enabled = self.state.policy.registers_enabled;
+                    self.state.value.registers.set(
+                        '"',
+                        crate::editor::RegisterValue {
+                            text,
+                            shape: crate::editor::RegisterShape::Character,
+                        },
+                        enabled,
+                        false,
+                    );
                 }
             }
             if !resized {

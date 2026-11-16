@@ -278,37 +278,7 @@ fn pull_node(pull: &Value, reviews: &[Value], commits: &[Value], contexts: Vec<V
 // ------------------------------------------------------------------------------ requests
 
 fn rest(ctx: &ForgeContext, tail: &str) -> Result<ApiRequest, ForgeError> {
-    GitHub::repo_path(ctx, tail).map(ApiRequest::get)
-}
-
-/// Up to `limit` REST pages following `Link: rel="next"`.
-fn pages(
-    ctx: &ForgeContext,
-    first: ApiRequest,
-    limit: usize,
-    cancel: &AtomicBool,
-) -> Result<Vec<Value>, ForgeError> {
-    let mut request = first;
-    let mut all = Vec::new();
-    for _ in 0..limit {
-        if cancel.load(Ordering::Acquire) {
-            return Err(ForgeError::Cancelled);
-        }
-        let response = ctx.ok(&request, cancel)?;
-        match response.json()? {
-            Value::Array(items) => all.extend(items),
-            other => all.push(other),
-        }
-        let Some(next) = response.next_link() else {
-            break;
-        };
-        request = ApiRequest {
-            target: GitHub::relative(ctx, &next),
-            query: Vec::new(),
-            ..request
-        };
-    }
-    Ok(all)
+    repos_path(ctx, tail).map(ApiRequest::get)
 }
 
 /// The head commit's check runs and commit statuses, as rollup contexts.
@@ -350,9 +320,9 @@ fn pull_detail(
 ) -> Result<PullRequest, ForgeError> {
     let value = pull(ctx, number, cancel)?;
     let page = |tail: &str| rest(ctx, &format!("pulls/{number}/{tail}")).map(|r| r.query("per_page", PAGE));
-    let files = pages(ctx, page("files")?, DETAIL_PAGES, cancel)?;
-    let reviews = pages(ctx, page("reviews")?, 1, cancel)?;
-    let commits = pages(ctx, page("commits")?, 1, cancel)?;
+    let files = link_pages(ctx, page("files")?, DETAIL_PAGES, cancel)?;
+    let reviews = link_pages(ctx, page("reviews")?, 1, cancel)?;
+    let commits = link_pages(ctx, page("commits")?, 1, cancel)?;
     let contexts = contexts(ctx, value["head"]["sha"].as_str().unwrap_or_default(), cancel)?;
     let files = files
         .iter()
@@ -422,7 +392,7 @@ fn threads(
     number: u64,
     cancel: &AtomicBool,
 ) -> Result<Vec<ReviewThread>, ForgeError> {
-    let mut comments = pages(
+    let mut comments = link_pages(
         ctx,
         rest(ctx, &format!("pulls/{number}/comments"))?.query("per_page", PAGE),
         DETAIL_PAGES,
@@ -564,6 +534,7 @@ fn list(
         }),
         items,
         total: None,
+        other_total: None,
     })
 }
 
@@ -607,6 +578,7 @@ fn search(
             }),
         items,
         total,
+        other_total: None,
     })
 }
 

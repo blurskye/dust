@@ -3,12 +3,16 @@
 //! `paint.rs` draws them on the reader surface.
 use super::find;
 use super::lines::Line;
-use crate::config::{AmbiguousWidth, Highlight};
+use crate::config::Highlight;
 use crate::forge::records::LabelChip;
 use crate::ui::{Emphasis, GitRole, GitSurface, Style};
 use std::ops::Range;
 use std::sync::Arc;
 use unicode_width::UnicodeWidthStr;
+
+mod html;
+mod table;
+pub(in crate::git::screen) use table::configure as configure_tables;
 
 /// Bodies wrap at a comfortable measure, never wider than this.
 pub(super) const MEASURE: usize = 100;
@@ -68,12 +72,16 @@ impl Rich {
     pub(super) fn chip(self, text: &str, style: Style) -> Self {
         self.push(&format!(" {text} "), style)
     }
-    pub(super) fn labels(mut self, labels: &[LabelChip]) -> Self {
-        for (index, label) in labels.iter().enumerate() {
-            if index > 0 {
+    /// `+13 −2`; a zero side is no fact and is left out (`+13`, r11), and so is `+0 −0`.
+    pub(super) fn diffstat(mut self, additions: u64, deletions: u64) -> Self {
+        if additions > 0 {
+            self = self.push(format!("+{additions}"), role(GitRole::Added));
+        }
+        if deletions > 0 {
+            if additions > 0 {
                 self = self.plain(" ");
             }
-            self = self.chip(&label.name, label_style(label));
+            self = self.push(format!("−{deletions}"), role(GitRole::Removed));
         }
         self
     }
@@ -164,7 +172,8 @@ pub(super) fn title(raw: &str, draft: bool) -> String {
             }
         }
     }
-    text.replace('`', "")
+    // Runs of spaces, tabs or newlines in a title read as one space (r9 R8-14): `bug:  Runner`.
+    text.replace('`', "").split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 /// Labels as chips, without one that repeats the Draft chip (`wip`, `draft`).
@@ -183,8 +192,8 @@ pub(super) fn chips(labels: &[LabelChip], draft: bool) -> Vec<LabelChip> {
 }
 
 /// What a forge body carries that is not prose: HTML comments (release-note bots hide their
-/// state in them), `<details>` blocks (collapsed to their summary), base64 blobs and layout
-/// tags. Paragraph lines are reflowed: a single newline inside a paragraph is a space, as
+/// state in them), `<details>` blocks (collapsed to their summary), base64 blobs and inline
+/// HTML (`html::inline`: `<br>`, `<img alt>`, other tags keep their text). Paragraph lines are reflowed: a single newline inside a paragraph is a space, as
 /// GitHub's renderer and glamour treat it, so the pane width decides the wrap. Fenced and
 /// indented code keep every byte.
 pub(super) fn clean(text: &str) -> String {
@@ -193,11 +202,6 @@ pub(super) fn clean(text: &str) -> String {
     static DETAILS: LazyLock<regex::Regex> = LazyLock::new(|| {
         regex::Regex::new(r"(?is)<details[^>]*>\s*(?:<summary[^>]*>(.*?)</summary>)?.*?</details>").unwrap()
     });
-    static TAG: LazyLock<regex::Regex> = LazyLock::new(|| {
-        regex::Regex::new(r"(?i)</?(?:sub|sup|b|i|em|strong|p|div|span|kbd|picture|source|center|summary|details)(?:\s[^>]*)?/?>")
-            .unwrap()
-    });
-    static BREAK: LazyLock<regex::Regex> = LazyLock::new(|| regex::Regex::new(r"(?i)<br\s*/?>").unwrap());
     // Split into fenced code and the rest; only the rest is cleaned.
     let mut parts: Vec<(bool, String)> = Vec::new();
     let mut fence: Option<String> = None;
@@ -236,11 +240,9 @@ pub(super) fn clean(text: &str) -> String {
         let part = COMMENT.replace_all(&part, "");
         let part = DETAILS.replace_all(&part, |captures: &regex::Captures| {
             let summary = captures.get(1).map_or("Details", |m| m.as_str()).trim();
-            format!("\n▸ {} · collapsed\n", TAG.replace_all(summary, ""))
+            format!("\n▸ {} · collapsed\n", html::inline(summary).replace('\n', " "))
         });
-        let part = BREAK.replace_all(&part, "\n");
-        let part = TAG.replace_all(&part, "");
-        out.push_str(&reflow(&part));
+        out.push_str(&reflow(&html::inline(&part)));
     }
     out
 }
@@ -316,6 +318,37 @@ fn reflow(text: &str) -> String {
 /// quotes with a bar, links in the link colour and fenced code on the code surface with its
 /// language. Every row keeps a find source for its logical line.
 pub(super) fn markdown(rows: &mut Vec<Line>, text: &str, width: usize, indent: &str) {
+    // A body reads the same at the same width until the table settings change, and the
+    // reader is rebuilt every frame: each one is laid out once and copied after.
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    (text, width, indent, table::generation()).hash(&mut hasher);
+    let key = (hasher.finish(), text.len());
+    let remembered = RENDERED.with(|rendered| rendered.borrow().get(&key).cloned());
+    if let Some(remembered) = remembered {
+        rows.extend(remembered.iter().cloned());
+        return;
+    }
+    let start = rows.len();
+    laid_out(rows, text, width, indent);
+    let made = std::rc::Rc::new(rows[start..].to_vec());
+    RENDERED.with(|rendered| {
+        let mut rendered = rendered.borrow_mut();
+        // A bound, not an eviction policy: a long session starts over now and then.
+        if rendered.len() >= 512 {
+            rendered.clear();
+        }
+        rendered.insert(key, made);
+    });
+}
+
+thread_local! {
+    /// Laid-out bodies by (hash of text, width, indent and table settings; text length).
+    static RENDERED: std::cell::RefCell<std::collections::HashMap<(u64, usize), std::rc::Rc<Vec<Line>>>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
+fn laid_out(rows: &mut Vec<Line>, text: &str, width: usize, indent: &str) {
     let indent_width = indent.width();
     let width = width.saturating_sub(indent_width).clamp(10, MEASURE);
     if text.trim().is_empty() {
@@ -332,6 +365,16 @@ pub(super) fn markdown(rows: &mut Vec<Line>, text: &str, width: usize, indent: &
         rows.push(row);
         return;
     }
+    for block in table::split(text) {
+        match block {
+            table::Block::Text(text) => blocks(rows, &text, width, indent),
+            table::Block::Table(lines) => table::render(rows, &lines, width, indent),
+        }
+    }
+}
+
+/// Markdown without tables as reader rows, `width` cells wide after `indent`.
+fn blocks(rows: &mut Vec<Line>, text: &str, width: usize, indent: &str) {
     let mut styled = crate::ui::markdown::Styled::default();
     crate::ui::markdown::render_logical(&mut styled, text);
     let mut fences = fences(text).into_iter().peekable();
@@ -366,10 +409,27 @@ pub(super) fn markdown(rows: &mut Vec<Line>, text: &str, width: usize, indent: &
                 if language.is_some() {
                     fences.next();
                 }
-                let mut top = Rich::new()
-                    .push(&language.unwrap_or_default(), role(GitRole::Muted))
-                    .line();
-                top.band = Some(GitSurface::Code);
+                // The fence's row, drawn as the editor draws it: the language's icon and
+                // name at its left on the code surface (` ```sh ` reads `<sh icon> sh`), an
+                // empty code row when the fence names none. A line wider than the reader
+                // pans with h and l (r9 R8-13) and shows `›` at its clipped edge.
+                let language = language.unwrap_or_default();
+                let mut top = Line::text("", Style::Default);
+                if !language.is_empty() {
+                    let icon = crate::ui::render::markdown::fence_icon(&language);
+                    let mut text = String::new();
+                    if let Some((glyph, color)) = icon {
+                        text.push_str(glyph);
+                        text.push(' ');
+                        top.spans.push((0..glyph.len(), crate::ui::render::markdown::icon_group(color)));
+                    }
+                    let name = text.len()..text.len() + language.len();
+                    text.push_str(&language);
+                    top.text = text;
+                    top.spans.push((name, Highlight::COMMENT));
+                }
+                top.pan = false;
+                top.band = Some(GitSurface::ProseCode);
                 top.gutter = format!("{indent}  ");
                 rows.push(top);
             }
@@ -381,7 +441,7 @@ pub(super) fn markdown(rows: &mut Vec<Line>, text: &str, width: usize, indent: &
             });
             row.pan = true;
             if !table {
-                row.band = Some(GitSurface::Code);
+                row.band = Some(GitSurface::ProseCode);
                 row.gutter = format!("{indent}  ");
             } else {
                 row.gutter = indent.into();
@@ -395,7 +455,7 @@ pub(super) fn markdown(rows: &mut Vec<Line>, text: &str, width: usize, indent: &
             });
             if !table && !next_in_block {
                 let mut bottom = blank();
-                bottom.band = Some(GitSurface::Code);
+                bottom.band = Some(GitSurface::ProseCode);
                 bottom.gutter = format!("{indent}  ");
                 rows.push(bottom);
                 in_code = None;
@@ -427,7 +487,7 @@ pub(super) fn markdown(rows: &mut Vec<Line>, text: &str, width: usize, indent: &
         let fragments = if body_text.is_empty() {
             vec![String::new()]
         } else {
-            crate::ui::render::wrap_plain_text(body_text, room, AmbiguousWidth::Narrow)
+            wrap_words(body_text, room)
         };
         // A heading gets breathing room above it, except at the very top.
         if is_heading
@@ -493,6 +553,76 @@ pub(super) fn markdown(rows: &mut Vec<Line>, text: &str, width: usize, indent: &
     }
 }
 
+/// Word wrap that also breaks a long URL or path (r9 N-21): before its last `/`, `?`, `&` or
+/// `#` in reach; a part longer than the row before its last `-` in reach (r10 N-21), and at
+/// the edge only when it has none. Plain prose may break after a
+/// `-` that joins two words. The fragments are contiguous byte ranges of `text`, as the
+/// reader's find offsets need.
+fn wrap_words(text: &str, width: usize) -> Vec<String> {
+    use unicode_segmentation::UnicodeSegmentation;
+    let width = width.max(1);
+    let mut rows = Vec::new();
+    let mut start = 0;
+    while start < text.len() {
+        let (mut used, mut end, mut space, mut slash, mut hyphen, mut dash) = (0, start, None, None, None, None);
+        let mut previous = "";
+        for (offset, grapheme) in text[start..].grapheme_indices(true) {
+            let cells = grapheme.width();
+            if used + cells > width && end > start {
+                break;
+            }
+            let at = start + offset;
+            if at > start && matches!(grapheme, "/" | "?" | "&" | "#") && previous != "/" && previous != ":" {
+                slash = Some(at);
+            }
+            used += cells;
+            end = at + grapheme.len();
+            if grapheme == " " {
+                space = Some(end);
+            } else if grapheme == "-" && previous.chars().all(char::is_alphanumeric) {
+                hyphen = Some(end);
+                if at > start {
+                    dash = Some(at);
+                }
+            }
+            previous = grapheme;
+        }
+        let cut = if end == text.len() {
+            end
+        } else {
+            // A space wins unless the token after it cannot fit a row of its own anyway;
+            // then the last separator inside that token, then a hyphen between the words
+            // of plain prose, then the hard edge.
+            let token = |from: usize| text[from..].split(' ').next().unwrap_or_default().width();
+            // A URL or path breaks at `/ ? & #` (r9 N-21). A part longer than the row breaks
+            // before its last hyphen that fits, so the hyphen opens the next row and cannot
+            // read as one the wrap added (r10 N-21: `…-are-general` / `ly-available/` cut a
+            // word in two); only a part with no hyphen is cut at the edge.
+            let path = |at: usize| {
+                let from = text[..at].rfind(' ').map_or(0, |space| space + 1);
+                let to = text[at..].find(' ').map_or(text.len(), |space| at + space);
+                text[from..to].contains('/')
+            };
+            let hyphen = hyphen.filter(|at| !path(*at - 1));
+            let dash = dash.filter(|at| path(*at));
+            let soft = slash.or(dash).or(hyphen);
+            match (space, slash.or(dash), hyphen) {
+                (Some(space), ..) if soft.is_none_or(|soft| soft < space) || token(space) <= width => space,
+                (_, Some(slash), _) => slash,
+                (_, None, Some(hyphen)) => hyphen,
+                (Some(space), None, None) => space,
+                (None, None, None) => end,
+            }
+        };
+        rows.push(text[start..cut].to_owned());
+        start = cut;
+    }
+    if rows.is_empty() {
+        rows.push(String::new());
+    }
+    rows
+}
+
 /// The style a Markdown highlight takes on the reader.
 pub(super) fn highlight_style(highlight: Highlight, surface: GitSurface) -> Style {
     let git = |role, emphasis| Style::Git {
@@ -518,7 +648,7 @@ pub(super) fn highlight_style(highlight: Highlight, surface: GitSurface) -> Styl
         Style::Git {
             role: GitRole::Modified,
             surface: if matches!(surface, GitSurface::Pane) {
-                GitSurface::Code
+                GitSurface::ProseCode
             } else {
                 surface
             },
@@ -535,6 +665,20 @@ pub(super) fn highlight_style(highlight: Highlight, surface: GitSurface) -> Styl
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A remembered body reads exactly as a fresh one, at its own width only.
+    #[test]
+    fn remembered_bodies_match_a_fresh_layout() {
+        let body = "# Title\n\nSome **bold** prose that wraps at narrow widths.\n\n| a | b |\n|---|---|\n| 1 | 2 |\n";
+        let (mut first, mut again, mut fresh, mut narrow) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+        markdown(&mut first, body, 60, "  ");
+        markdown(&mut again, body, 60, "  ");
+        laid_out(&mut fresh, body, 60, "  ");
+        markdown(&mut narrow, body, 24, "  ");
+        assert_eq!(texts(&first), texts(&fresh));
+        assert_eq!(texts(&again), texts(&fresh));
+        assert_ne!(texts(&narrow), texts(&fresh));
+    }
 
     fn texts(rows: &[Line]) -> Vec<String> {
         rows.iter().map(|row| format!("{}{}", row.gutter, row.text)).collect()
@@ -559,10 +703,24 @@ mod tests {
         assert!(text.iter().any(|row| row.ends_with("☐ Resume")), "{text:?}");
         assert!(text.iter().any(|row| row.ends_with("☑ Done")), "{text:?}");
         let code = rows.iter().position(|row| row.text == "$ orbit worker").unwrap();
-        assert_eq!(rows[code].band, Some(GitSurface::Code));
-        assert_eq!(rows[code - 1].text, "sh");
-        assert_eq!(rows[code + 1].band, Some(GitSurface::Code));
-        assert!(rows.iter().all(|row| row.source.is_some() || row.band.is_some() || row.text.is_empty() || row.text == "sh"));
+        assert_eq!(rows[code].band, Some(GitSurface::ProseCode));
+        // The fence's row names the language at its left with the editor's icon for it, on
+        // the code surface like the rows under it; it is not a code line.
+        let (icon, _) = crate::ui::render::markdown::fence_icon("sh").unwrap();
+        assert_eq!(rows[code - 1].text, format!("{icon} sh"));
+        assert_eq!(rows[code - 1].band, Some(GitSurface::ProseCode));
+        assert!(rows[code - 1].source.is_none());
+        assert_eq!(rows[code + 1].band, Some(GitSurface::ProseCode));
+        assert!(rows.iter().all(|row| row.source.is_some() || row.band.is_some() || row.text.is_empty() || row.text.ends_with(" sh")));
+        // r9 R8-13: a line wider than the reader pans rather than wraps. No hint sits in the
+        // body copy (R16 gitea-05): a fence without a language opens with an empty code row.
+        let line = "could not fetch remote 'origin': fatal: Unable to create '/data/.git/index.lock': File exists";
+        let mut rows = Vec::new();
+        markdown(&mut rows, &format!("```\n{line}\n```\n"), 60, "");
+        let code = rows.iter().position(|row| row.text == line).unwrap();
+        assert!(rows[code].pan, "{:?}", texts(&rows));
+        assert_eq!((rows[code - 1].text.as_str(), rows[code - 1].band), ("", Some(GitSurface::ProseCode)));
+        assert!(!texts(&rows).iter().any(|row| row.contains("scroll")), "{:?}", texts(&rows));
     }
 
     #[test]
@@ -584,9 +742,49 @@ mod tests {
         assert_eq!(title("Draft: Split nested group settings", true), "Split nested group settings");
         assert_eq!(title("WIP: feat(jobparser): x", true), "feat(jobparser): x");
         assert_eq!(title("WIP: kept when not a draft", false), "WIP: kept when not a draft");
+        assert_eq!(title("bug:  Runner accepts\tsuccessful \n run", false), "bug: Runner accepts successful run");
         let labels = [LabelChip { name: "wip".into(), rgb: None }, LabelChip { name: "bug".into(), rgb: None }];
         assert_eq!(chips(&labels, true).len(), 1);
         assert_eq!(chips(&labels, false).len(), 2);
+    }
+
+    #[test]
+    fn long_urls_break_at_their_separators() {
+        let text = "See https://gitea.com/orbit/orbit/src/branch/main/.gitea/workflow-lockfiles for it";
+        let rows = super::wrap_words(text, 40);
+        assert_eq!(rows.concat(), text);
+        assert!(rows.iter().all(|row| row.width() <= 40), "{rows:?}");
+        // Every break inside the URL falls at a separator.
+        for pair in rows.windows(2) {
+            let next = pair[1].chars().next().unwrap_or(' ');
+            let last = pair[0].chars().last().unwrap_or(' ');
+            assert!(next == '/' || last == ' ', "{rows:?}");
+        }
+        // r9 N-21: a URL breaks before a `/ ? & #` when the part after it fits; a part longer
+        // than the row breaks before one of its hyphens (r10 N-21), never inside a word.
+        let url = "https://github.blog/changelog/2026-10-28-github-actions-workflow-lockfiles-are-generally-available/";
+        for width in [40, 56, 57, 66, 68, 90] {
+            let rows = super::wrap_words(url, width);
+            assert_eq!(rows.concat(), url);
+            assert!(rows.iter().all(|row| row.width() <= width), "{width}: {rows:?}");
+            for pair in rows.windows(2) {
+                assert!(pair[1].starts_with('/') || pair[1].starts_with('-'), "{width}: {rows:?}");
+                assert!(!pair[0].ends_with("https:") && !pair[0].ends_with("https:/"), "{width}: {rows:?}");
+            }
+        }
+        assert_eq!(
+            super::wrap_words(url, 68),
+            ["https://github.blog/changelog", "/2026-10-28-github-actions-workflow-lockfiles-are-generally", "-available/"]
+        );
+        assert_eq!(
+            super::wrap_words(url, 57),
+            ["https://github.blog/changelog", "/2026-10-28-github-actions-workflow-lockfiles-are", "-generally-available/"]
+        );
+        // A part with no hyphen still meets the edge.
+        assert_eq!(super::wrap_words("https://x.dev/abcdefghijklmnop", 10), ["https://x.", "dev", "/abcdefghi", "jklmnop"]);
+        // Plain prose still breaks after a hyphen between words.
+        assert_eq!(super::wrap_words("a well-known-thing", 9), ["a well-", "known-", "thing"]);
+        assert_eq!(super::wrap_words("short words wrap as before", 11), ["short ", "words wrap ", "as before"]);
     }
 
     #[test]

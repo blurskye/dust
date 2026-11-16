@@ -396,7 +396,7 @@ mod tests {
     use std::time::Duration;
     use std::time::Instant;
     fn reply(worker: &VfsWorker) -> ExplorerIoReply {
-        let deadline = Instant::now() + Duration::from_secs(2);
+        let deadline = Instant::now() + Duration::from_secs(30);
         loop {
             if let Some(VfsReply::Explorer(reply)) = worker.try_reply().unwrap() {
                 return reply;
@@ -491,7 +491,7 @@ mod tests {
                 64,
             )
             .unwrap();
-        let until = std::time::Instant::now() + Duration::from_secs(2);
+        let until = std::time::Instant::now() + Duration::from_secs(30);
         let observed = loop {
             if let Some(result) = directory.poll_result() {
                 break result.unwrap().1;

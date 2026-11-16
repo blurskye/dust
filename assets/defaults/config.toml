@@ -171,6 +171,10 @@ enabled = true
 placement = "float"
 width_percent = 85
 height_percent = 85
+# "dusty": s stages, u unstages, - toggles, and the leader (input.keymaps.leader) starts
+# chords such as <leader> e. "lazygit": lazygit's keys where Dusty Git has the action
+# (Space stages and checks out, R refreshes, M merges, s stashes), and , is the leader.
+keys = "dusty"
 
 [ui.terminal_panel]
 height = 16
@@ -1117,6 +1121,7 @@ workspace = "Project"
 "workspace.git.status.refresh" = "Refresh Git status"
 "workspace.git.status.open" = "Review changed files (Git status)"
 "workspace.git.open" = "Open Dusty Git"
+"workspace.git.open.link" = "Open Link in Dusty Git"
 "workspace.git.review.hunk" = "Act on a review hunk"
 "workspace.search.todo" = "Todo"
 "agent.ask" = "Ask Agent"
@@ -1265,6 +1270,7 @@ workspace = "Project"
 "mode.visual_char" = "Enter character Visual mode"
 "mode.visual_line" = "Enter line Visual mode"
 "mode.visual_block" = "Enter block Visual mode"
+"mode.visual_reselect" = "Reselect the last Visual selection"
 "multi.add_next" = "Add a cursor at the next match"
 "multi.add_below" = "Add a cursor below"
 "multi.add_above" = "Add a cursor above"

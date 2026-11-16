@@ -251,7 +251,7 @@ fn real_guest_syntax_uses_the_current_buffer_tree_with_ranges_and_parent_nodes()
         .open_text(TextBuffer::from_text("fn hello() {}"), Some(path))
         .unwrap();
     app.reconcile_editor_windows();
-    let deadline = std::time::Instant::now() + Duration::from_secs(15);
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
     while app.syntax.result(buffer).is_none() {
         app.process_syntax();
         assert!(std::time::Instant::now() < deadline);

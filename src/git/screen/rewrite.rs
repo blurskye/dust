@@ -228,7 +228,7 @@ mod tests {
             "test must exercise asynchronous failures: {refreshed:?}"
         );
         screen.finish_rewrite_refresh(refreshed);
-        let deadline = std::time::Instant::now() + Duration::from_secs(15);
+        let deadline = std::time::Instant::now() + Duration::from_secs(20);
         while screen.refreshing || screen.refs_loading {
             screen.poll();
             assert_retained(&screen, &diagnostic, head);

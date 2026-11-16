@@ -229,31 +229,4 @@ impl GitScreen {
         }
     }
 
-    pub(super) fn render_source_search(&self, frame: &mut Frame, width: u16, height: u16) {
-        if self.focus != 4 || !self.preview.search.active() || !self.notice.is_empty() {
-            return;
-        }
-        let search = &self.preview.search;
-        let query = render::ellipsize(&search.query, usize::from(width / 3));
-        let position = if search.matches.is_empty() {
-            "No source matches".into()
-        } else {
-            let current = search
-                .current
-                .filter(|_| search.selected(self.preview_cursor).is_some())
-                .map_or_else(|| "-".into(), |index| (index + 1).to_string());
-            format!("{current}/{}", search.matches.len())
-        };
-        frame.grid.put_text_clipped(
-            1,
-            height - 3,
-            &format!("Find /{query}/ · {position} · Esc clear · n/N"),
-            if search.matches.is_empty() {
-                crate::ui::Style::Warning
-            } else {
-                crate::ui::Style::GitControl
-            },
-            width - 1,
-        );
-    }
 }

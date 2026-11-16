@@ -45,6 +45,10 @@ Dust uses Vim-style Normal, Insert, Visual, and command-line modes.
 | Repeat search | `n` / `N` |
 | Find a character on the line | `f`/`F`/`t`/`T`, then `;` / `,` to repeat |
 | Change inside quotes, brackets, a word | `ci"`, `ci(`, `ciw` (also `a…` for around, `ip`/`ap` paragraph) |
+| Change inside an HTML, XML or JSX tag | `cit`, `dat`, `yit`, `vat` (a count reaches outer tags) |
+| Delete / change / yank to the end of the line | `D` / `C` / `Y` (`Y` is `y$`, as in Neovim) |
+| Insert where Insert mode last stopped | `gi` |
+| Reselect the last Visual selection | `gv` (in Visual mode it swaps with the current one) |
 | Toggle comment | `gcc` line, `gc` + motion, `gc` in Visual |
 | Add / delete / replace surrounding pair | `gsa` + motion + char, `gsd` + char, `gsr` + old + new |
 | Command palette | `F1` or `Space :` |
@@ -73,8 +77,12 @@ Use these objects after an operator (`d`, `c`, `y`) or in character Visual mode:
 | Class, struct or similar definition | `ac` | `ic` |
 | Argument or parameter | `aa` | `ia` |
 | Comment | `a/` | `i/` |
+| Tag pair (HTML, XML, JSX) | `at` | `it` |
 
-Inside a function/class selects its body; inside a comment omits its delimiters.
+Inside a function/class selects its body; inside a comment omits its delimiters;
+inside a tag is the text between its opening and closing tags. Tags come from the
+parse in HTML, XML, Vue, JSX and TSX buffers (so an implied `</li>` counts); in any
+other buffer they match the nearest enclosing `<name …>…</name>` pair in the text.
 `]f` / `[f` move to the next/previous function start, and `]c` / `[c` to class
 starts. Counts, Visual selection and operators also work with these motions.
 `Space c >` / `Space c <` swap the argument under the cursor with its next/previous
@@ -227,13 +235,15 @@ moves between panes; `j/k` selects rows. Source previews and working-tree, stage
 commit and stash diffs use Dust's syntax highlighting, with line numbers and
 separate addition/deletion markers. In the preview, `h/l` or Left/Right scroll
 horizontally while the line-number gutter stays fixed. Diffs use the full preview
-width by default, with tinted additions/deletions. `s` in the preview opts into
+width by default, with tinted additions/deletions. `|` in the preview opts into
 aligned before/after columns when there is enough room, or returns to unified view. The Changes tree
 expands/collapses with `l/h`. `H/L` cycles Branches, Worktrees, Remotes and Tags. Enter opens files in
 Dust, or `$VISUAL`/`$EDITOR` from the standalone tool. Worktree Enter opens that
 repository. Branch Enter confirms checkout. `v` switches Changes/All files,
-including highlighted source for clean tracked files. `Space` stages a file;
-`i` switches to the index where `Space` unstages. The Commits pane follows the
+including highlighted source for clean tracked files. `s` stages a file, `u`
+unstages it and `-` toggles; the same keys stage, unstage or toggle the hunk under
+the cursor in the diff and a marked set of files, and on Submodules `s` stages the
+pointer. In the reflog, `o` checks out the selected commit detached. The Commits pane follows the
 selected branch, worktree or tag. Commit previews show a compact summary and one
 file's diff, not a dump of every patch. Enter on a commit opens its changed-file
 navigator. Tab or Ctrl-h/l switches files/diff; `J/K` changes files from either
@@ -245,8 +255,79 @@ push. `n` creates a worktree from an existing or new branch, or saves a stash in
 `a/p/d` apply/pop/drop a stash with confirmation. `r` refreshes. Form fields use
 ordinary typing, arrows, Tab, Enter and Escape; Ctrl-Enter submits.
 
-`[` and `]` switch Git, Issues, Pull requests and Actions. GitHub pages use your
-existing `gh` authentication and show the target host/repository. `/` filters
+### Pull, undo and rewriting history
+
+Each of these opens a sheet that shows what will move and the exact Git command;
+Enter runs it.
+
+- `p` pulls the current branch from its upstream (everywhere but Stashes, where `p`
+  pops). The sheet starts in the mode the branch is configured for
+  (`branch.<name>.rebase`, then `pull.rebase`, then `pull.ff = only`); Tab and Up/Down
+  pick merge, rebase or fast-forward only. Git's progress shows in the footer, and a
+  conflict stops in the operation banner (`C` continue, `S` skip, `X` abort).
+- `z` undoes the last commit, reset, pull, merge, rebase or branch switch, read from
+  HEAD's reflog; `Z` redoes what `z` undid. Undo uses `git reset --keep`, which refuses
+  rather than overwrite uncommitted changes.
+- In History, on the selected commit: `s` squashes it into the commit below, `f` fixes it
+  up into the commit below (keeping that message), `d` drops it, `e` stops a rebase there
+  so you can amend it, and `J`/`K` move it down or up. `W` rewords and `A` amends it with
+  the staged changes; on HEAD they open the usual reword and amend sheets. These run
+  `git rebase -i` with an `--autostash`; a range with a merge commit is refused.
+- In Tags, `P` pushes the selected tag (and only the tag) to the remote you choose.
+- On a commit (History, or the commit you opened): `y` opens a copy menu (SHA, short
+  SHA, subject, or the commit's URL on the forge; Enter copies it to the clipboard), and
+  `o` opens the commit's page on the forge in your browser.
+
+### Modes and the leader
+
+Dusty Git is modal like the editor, in the editor and as `dusty-git` (which reads the
+same config). A chip at the left of the footer shows the mode, with the words and
+colours of the editor's statusline (`ui.status_line.mode_labels`):
+
+- **NORMAL**: moving around and running actions.
+- **INSERT**: a text box has focus: the commit message, a comment, a pull request's
+  title and description, a review summary. Text boxes edit on the editor's own Vim
+  engine. A box opens in Insert mode; Escape goes to Normal mode, where `h j k l`,
+  `w b e`, `0 $`, `x`, `dd`, `D C Y`, `cw`, `ciw`, `cit`, `u`, `p`, `gi`, Visual `v`,
+  `gv` and the rest work as in a buffer, with registers carried from one box to the
+  next. `?` in Normal mode opens the keys sheet (in Insert mode it is a character). A
+  second Escape, or `q`, closes the box and keeps the draft. Ctrl-Enter submits from
+  either mode. A list
+  filter (`/`), the reader's find (`/`) and the `:` prompt are boxes too: they open
+  in Insert mode, Escape goes to Normal mode inside them and a second Escape closes
+  them (a filter clears, as Escape always did). Enter keeps the filter, finds or runs
+  the command from either mode, and ↑ ↓ still walk a filter's matches.
+- **VISUAL**: a line range in the diff (`V`), a range of files (`V` in Changes), or
+  `v` / `V` / `Ctrl-v` inside a box, where `gv` brings back the last selection.
+
+`?` lists these under **Vim**, read from the key tables: the keys that enter each
+mode are the editor's bundled bindings the boxes run, and the leader and its chords
+come from the shared table (so the `lazygit` preset shows `,` and Space there).
+
+The leader is the editor's (`input.keymaps.leader`, Space by default). After it,
+the editor's which-key box lists what finishes the chord; there is no timeout, and
+Escape or any other key cancels it. `<leader> e` hides the rail so the diff takes
+the whole width (a list taking focus shows it again); on the forge tabs it hides
+the list column.
+
+`ui.git.keys = "lazygit"` in `config.toml` (Settings → Dusty Git → Keys) switches to
+lazygit's default keys wherever Dusty Git has the same action, and `,` becomes the
+leader. Some examples:
+
+- Space stages a file, checks out a branch, applies a stash and detaches in the reflog.
+- `R` refreshes; on a branch it renames, and on a commit it rewords.
+- In Files, `s` stashes, Enter stages by lines and `e` opens the file.
+- `M` merges and `r` rebases a branch. `g` pops a stash, and `p` pulls there too.
+- On a commit, Ctrl-j and Ctrl-k move it down and up; Ctrl-z redoes what `z` undid.
+
+A key lazygit does not use keeps its Dusty Git meaning, so `u` still unstages. The
+footer, `?` and the tutor's lessons show the keys of the preset in force, panel by
+panel. The default is `"dusty"`.
+
+`<` and `>` move between the top tabs: Git, Pull requests, Issues, Actions and
+Notifications. The forge tabs work with GitHub, GitLab, Gitea and Forgejo and show
+the host and repository they read; [Forge tabs](#forge-tabs) covers signing in,
+read-only browsing, the cache and the keys. `/` filters
 issues and pull requests; `n` creates one and `c` comments. Use Tab to select
 visible controls and Enter to open their forms. `?` opens a page-specific key
 reference without losing your selection. Refresh/close hints remain visible in
@@ -256,7 +337,7 @@ Multiline descriptions and
 comment drafts survive cancellation and failed submissions. Metadata controls
 edit assignees, labels, projects, milestones, reviewers and subscriptions.
 
-Pull requests have Conversation, Commits, Checks and Files changed views (`H/L`).
+Pull requests have Overview, Commits, Checks, Files, Activity and Merge tabs.
 Select commits to inspect their highlighted patches; select changed lines to
 comment inline. Review, resolve conversations, checkout, create a worktree, or
 merge after review/check readiness. Merge confirmation binds to the displayed
@@ -282,16 +363,21 @@ without an extra scroll; the run identity stays in the pane heading. Empty lists
 cursor. Remote writes require explicit form submission.
 
 On a conflicted file, Enter opens a side-selection form; `o/t` choose ours/theirs.
-The replacement stays unstaged until Space. `C` confirms continuation of a resolved
+The replacement stays unstaged until `s`. `C` confirms continuation of a resolved
 merge, using the existing conflict checks. Opening a normal file in Dust preserves
 the Git screen; `Space g g` resumes it.
 
-Inside Dusty Git, `:tutor git` starts six real lessons: file browsing, staging,
-commit/push, worktrees, stash/restore, and conflict resolution. Both repository
-and bare remote are disposable local directories. Tutor worktrees stay inside
-that directory. `:tutor quit` or `q` restores your previous Git screen, including
-its selections and drafts; practice data is removed. Enter previews practice
-files inside Dusty Git, so the editor's buffers remain untouched.
+Inside Dusty Git, `:tutor git` starts the Git tutor: 48 hands-on lessons (panes,
+changes, staging, commits, history, branches, merge, rebase, reflog, stash,
+worktrees, submodules, tags and remotes, discard). Each lesson builds its own
+disposable repository and bare remote; a lesson ends when the repository or the
+screen shows you did it. `:tutor forge` starts the forge tutor (see
+[Forge tabs](#forge-tabs)). `:tutor next`, `:tutor prev`, `:tutor reset` and
+`:tutor N` move between lessons; `:tutor git N` or `:tutor forge N` starts at a
+lesson. Tutor worktrees stay inside the practice directory. `:tutor quit` or `q`
+restores your previous Git screen, including its selections and drafts; practice
+data is removed. Enter previews practice files inside Dusty Git, so the editor's
+buffers remain untouched.
 
 The embedded screen refuses writes to your workspace while it is untrusted or
 editor buffers are unsaved. The tutor is independent of that workspace.
@@ -321,6 +407,121 @@ The lazygit commands are ordinary terminal profiles in `[terminals.profiles]`. A
 arguments and `cwd` may use `{root}`, `{file}`, `{dir}` and `{line}`; for example
 `arguments = ["-c", "exec lazygit -f \"$1\"", "lazygit", "{file}"]` passes the path as a
 separate argument instead of splicing it into the shell string.
+
+### Forge tabs
+
+The Pull requests, Issues, Actions and Notifications tabs read the forge of the
+repository's remote. Dusty picks the remote from `DUSTY_FORGE_REMOTE`, then
+`[forge] remote` in `config.toml`, then the remote `gh` chose, then `upstream`,
+`github` and `origin`. github.com, `*.ghe.com`, gitlab.com, gitea.com, codeberg.org
+and next.forgejo.org are recognised by name; other hosts are covered under
+self-hosted forges below.
+
+#### Signing in
+
+Dusty never asks for a token. It uses the first sign-in it finds for the host:
+
+| Forge | Environment | Sign-in it reads |
+| --- | --- | --- |
+| GitHub | `DUSTY_FORGE_TOKEN`; `GH_TOKEN` or `GITHUB_TOKEN` for github.com and `*.ghe.com`; `GH_ENTERPRISE_TOKEN` or `GITHUB_ENTERPRISE_TOKEN` for other hosts | `gh auth token` (sign in with `gh auth login`) |
+| GitLab | `DUSTY_FORGE_TOKEN`; `GITLAB_TOKEN` | glab's `config.yml`, then `glab auth status --show-token` (sign in with `glab auth login`) |
+| Gitea, Forgejo | `DUSTY_FORGE_TOKEN`; `GITEA_SERVER_TOKEN` with `GITEA_SERVER_URL`; `FORGEJO_TOKEN`; `GITEA_TOKEN` | fj's `keys.json` (`fj -H HOST auth login`), then tea's `config.yml` (`tea login add`) |
+
+Some variables apply to one host only. `DUSTY_FORGE_TOKEN` applies to
+`DUSTY_FORGE_HOST`, or to every host when that is unset. `GITLAB_TOKEN` applies to
+`GITLAB_HOST` or `GL_HOST` when one is set. `GITEA_SERVER_TOKEN` needs
+`GITEA_SERVER_URL`, and `FORGEJO_TOKEN` and `GITEA_TOKEN` follow `GITEA_SERVER_URL`
+or `FORGEJO_URL` when one is set. glab's file is `$GLAB_CONFIG_DIR/config.yml`, else
+`$XDG_CONFIG_HOME/glab-cli/config.yml` (`~/.config` when unset); tea's is
+`$XDG_CONFIG_HOME/tea/config.yml`; fj's is `$XDG_DATA_HOME/forgejo-cli/keys.json`
+(`~/.local/share` when unset).
+
+With a token, Dusty talks to the forge's API directly after checking the token
+once. Without one it sends requests through the forge's CLI (`gh`, `glab` or `tea`)
+when that is installed. `DUSTY_FORGE_GH`, `DUSTY_FORGE_GLAB` and `DUSTY_FORGE_TEA`
+name the CLI to use instead of the one on `PATH`. `DUSTY_FORGE_TRANSPORT=http` uses
+only a token and `DUSTY_FORGE_TRANSPORT=cli` only the CLI. Tokens never appear in
+the screen, logs, notices or cache files.
+
+`a` on a list opens Accounts: the host, how Dusty reaches it and how to sign in.
+After you sign in, press `r` there to check again; Dusty forgets what it knew about
+your sign-ins and transports and tries again. A successful sign-in lookup is kept
+for five minutes otherwise.
+
+#### Browsing without signing in
+
+With no token and no CLI, Dusty reads public repositories anonymously. The list
+says `Anonymous · read-only` with the requests left before the forge's anonymous
+limit. Every write is refused before it is sent and says how to sign in (for
+example `Sign in to comment`). Notifications need a sign-in, so their tab is hidden.
+Set `DUSTY_FORGE_ANONYMOUS=0` to turn anonymous reads off: a host without a sign-in
+then shows a sign-in state instead.
+
+#### Self-hosted forges
+
+For a host Dusty does not know by name, it uses, in order: the `provider` you set
+for it, `DUSTY_FORGE_PROVIDER` (for `DUSTY_FORGE_HOST`, or any host when that is
+unset), what it found earlier, a CLI that holds a sign-in for the host, and finally
+the host's public version endpoint. To say it yourself:
+
+```toml
+[forge.hosts."git.example.com"]
+provider = "forgejo"            # github, gitlab, gitea or forgejo
+api_base = "https://git.example.com/api/v1"  # only when the API lives elsewhere
+login = "work"                  # the tea login to use for this host
+```
+
+For GitHub Enterprise Server use `GH_ENTERPRISE_TOKEN` or `gh auth login
+--hostname HOST`; with `GH_HOST` set to that host, the token also tells Dusty the
+host is GitHub. Likewise `GITLAB_TOKEN` with `GITLAB_HOST`, and
+`GITEA_SERVER_TOKEN` with `GITEA_SERVER_URL`, name their host's forge. What Dusty found out
+about a host is kept in `$XDG_STATE_HOME/dusty/forge/hosts.json`
+(`DUSTY_FORGE_STATE_DIR` changes the directory). The file never holds a token.
+
+#### Cache
+
+Answers are cached on disk in `$XDG_CACHE_HOME/dusty/forge` (`~/.cache/dusty/forge`
+when unset), shared by the editor and the standalone `dusty-git`. A cached list
+shows at once and is refreshed in the background; with the network down you still
+see the last answer. `DUSTY_FORGE_CACHE_DIR` moves the cache, `DUSTY_FORGE_CACHE=0`
+keeps it in memory only and `DUSTY_FORGE_CACHE_MIB` caps each host (default
+256 MiB, a quarter of that per repository). `dusty-git forge cache stats` shows its
+size and `dusty-git forge cache clear` empties it. `DUSTY_FORGE_OFFLINE=1` sends no
+requests at all.
+
+#### Keys
+
+On every forge tab: `<`/`>` previous and next top tab, `j/k` move, `Enter` open,
+`Esc` back to the list, `R` refresh, `?` all keys, `q` close.
+
+- Pull requests and Issues: `[`/`]` cycle the list's sections (Review, Mine,
+  Drafts and All for pull requests) and, in the reader, its tabs; `/` filter;
+  `S`/`D` save or delete a section; `v` saved views; `i` the cross-repository
+  inbox; `o` open in the browser; `n` create; `C` comment; `e` edit; `x`/`X`
+  close or reopen; `l` labels; `a` assignees on an open item, Accounts from the
+  list.
+- A pull request: `d` Files, `m` Merge (Enter on its Merge control, then
+  Ctrl-Enter), `r` review, `c` check out (or reply in the reader), `w` review in a
+  worktree.
+- Notifications: `[`/`]` sections, `m` mark read, `M` mark all read, `u`
+  unsubscribe, `Enter` open the pull request or issue, `r` refresh.
+- Actions: `[`/`]` All, Failing, Running, Mine; `Enter` or `Tab` open a run; `n`/`N`
+  next or previous error line; `f` the job's full log and back; `z` zoom the run
+  (`Esc` returns); `a` attempts; `/` filter runs or find in a log; `w` wrap; `r`
+  rerun; `x` cancel; `d` dispatch; `A` approve a waiting run; `Ctrl-s` save a log.
+
+Sheets submit with Ctrl-Enter.
+
+#### Forge tutor
+
+`:tutor forge` practises all of this on a made-up project: pull requests and their
+sections and filter, opening one (tabs, Files, a review), merging, issues
+(comment, close), notifications, Actions (run history, the failing step, `n`/`N`,
+`f`, `z`, rerun), and signing in, from anonymous read-only to a token. Each lesson
+waits for you to press the key it teaches. It runs against a practice forge on your
+computer (it needs `python3`), with a practice token: while it runs, Dusty ignores
+your tokens, CLI sign-ins, forge settings and cache, and nothing reaches a real
+forge. `:tutor quit` puts everything back.
 
 ### Custom terminal profiles
 

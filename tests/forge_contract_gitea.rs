@@ -147,10 +147,9 @@ impl Harness {
         self.directory.path().join("state.json")
     }
 
+    /// Under the server's lock, so its request-log save cannot overwrite the change.
     fn update(&self, change: impl FnOnce(&mut Value)) {
-        let mut state = forge_fake::state(&self.state_path());
-        change(&mut state);
-        std::fs::write(self.state_path(), state.to_string()).unwrap();
+        forge_fake::update(&self.state_path(), change);
     }
 
     fn requests(&self) -> Vec<Value> {
@@ -363,6 +362,23 @@ pub fn rows_and_terms(harness: &Harness) {
             Family::Forgejo => 1792,
         }
     );
+    // The list header's `Closed` side (synthesized lists, VERSIONS.md): closed issues, and
+    // closed pull requests without the merged one (that is `Merged`).
+    let closed = |kind| Read::List {
+        kind,
+        filter: Filter {
+            state: StateFilter::Closed,
+            query: String::new(),
+        },
+        page: Page::first(20),
+    };
+    let issues = expect!(harness.read(closed(ItemKind::Issue)).unwrap(), Payload::Rows);
+    assert_eq!(issues.items.len(), 3);
+    assert_eq!(issues.total, Some(3));
+    assert!(issues.items.iter().all(|row| row.lifecycle == Lifecycle::Closed));
+    let pulls = expect!(harness.read(closed(ItemKind::PullRequest)).unwrap(), Payload::Rows);
+    assert_eq!(pulls.items.len(), 2, "{:?}", pulls.items);
+    assert!(pulls.items.iter().all(|row| row.lifecycle == Lifecycle::Closed));
     harness.assert_transport();
 }
 
@@ -689,17 +705,19 @@ pub fn actions(harness: &Harness) {
         }
         Family::Forgejo => {
             harness.clear_requests();
-            // No workflow list on Forgejo: empty, and nothing asked.
+            // No workflow list on Forgejo: never asked for. The workflow directories are
+            // listed instead (§3.37's Workflows panel), Forgejo's own first; the recording
+            // has none of them, so the list is empty and the runs name the workflows.
             let workflows = expect!(harness.read(Read::Workflows).unwrap(), Payload::Workflows);
             assert!(workflows.is_empty());
-            assert!(
-                !harness
-                    .paths()
-                    .iter()
-                    .any(|path| path.contains("workflows")),
-                "{:?}",
-                harness.paths()
-            );
+            let paths = harness.paths();
+            assert!(!paths.iter().any(|path| path.contains("actions/workflows")), "{paths:?}");
+            let listed = paths
+                .iter()
+                .filter(|path| path.contains("/contents/"))
+                .map(|path| path.rsplit("/contents/").next().unwrap_or_default().to_owned())
+                .collect::<Vec<_>>();
+            assert_eq!(listed, [".forgejo/workflows", ".gitea/workflows", ".github/workflows"], "{paths:?}");
             let run = &runs.items[0];
             assert_eq!(run.id, ItemId::new("200481"));
             assert_eq!(run.number, 24108);
@@ -968,8 +986,12 @@ fn transports_agree(family: Family) {
         harness.assert_transport();
         (values, harness.logical())
     };
-    let (http, http_requests) = run(Via::Http);
-    let (tea, tea_requests) = run(Via::Tea);
+    // A pull request's parts are fetched in parallel (provider/parallel.rs), so the two
+    // transports send the same requests in whatever order the threads finish.
+    let (http, mut http_requests) = run(Via::Http);
+    let (tea, mut tea_requests) = run(Via::Tea);
+    http_requests.sort();
+    tea_requests.sort();
     assert_eq!(
         http, tea,
         "both transports decode to the same domain values"

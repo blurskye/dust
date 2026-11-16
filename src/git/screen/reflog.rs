@@ -27,7 +27,7 @@ impl GitScreen {
                 vec![Field::new("Name", String::new())],
                 "Keep HEAD, index and working files; do not check out",
             ),
-            KeyCode::Char(' ') => (
+            KeyCode::Char('o') => (
                 "Check out commit with detached HEAD?",
                 FormAction::CheckoutDetached(id.clone()),
                 Vec::new(),
@@ -53,7 +53,7 @@ impl GitScreen {
             ("Commit".to_owned(), id),
             (format!("Reflog event · {event}"), message),
             (
-                if matches!(key, KeyCode::Char(' ')) {
+                if matches!(key, KeyCode::Char('o')) {
                     "Effect · Git refuses conflicting edits; no auto-stash"
                 } else {
                     "Effect"
@@ -72,7 +72,7 @@ impl GitScreen {
         self.form = Some(Form {
             title: title.into(),
             action,
-            selected: if matches!(key, KeyCode::Char(' ')) {
+            selected: if matches!(key, KeyCode::Char('o')) {
                 fields.len()
             } else {
                 0
@@ -129,7 +129,7 @@ impl GitScreen {
         }
         let parent =
             crate::files::canonicalize(path.parent().ok_or("Choose a worktree parent directory")?)
-                .map_err(|error| format!("Worktree parent directory: {error}"))?;
+                .map_err(|error| format!("Couldn't open the worktree's parent folder{}", super::words::io_reason(&error)))?;
         if !parent.is_dir() {
             return Err("Choose an existing worktree parent directory".into());
         }

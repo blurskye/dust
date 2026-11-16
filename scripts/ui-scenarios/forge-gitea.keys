@@ -6,20 +6,25 @@
 #     scripts/ui-shot scripts/ui-scenarios/forge-gitea.keys \
 #     --binary scripts/ui-scenarios/forge-gitea-launch --cwd /tmp/orbit \
 #     --size 190x48 --size 120x36 --size 100x30 --out target/ui-shots/forge-gitea
-wait 1500
+until Changes
+wait 300
 # Git → Pull requests
 type >
-wait 3000
+wait 300
+until Showing
+gone Loading
 shot pull-requests
 key j j
 wait 300
 key enter
-wait 3000
+wait 300
+gone Loading
 shot pull-request
 # Checks from commit statuses
 type L
 type L
-wait 1500
+wait 300
+gone Loading
 shot pull-request-checks
 type H
 type H
@@ -28,19 +33,29 @@ key escape
 wait 300
 # → Issues
 type >
-wait 2500
+wait 300
+until Showing
+gone Loading
+# The list with its second issue selected, so the reader below differs from `issue`
+key j
+wait 800
 shot issues
+key k
+wait 300
 key enter
-wait 2000
+wait 300
+gone Loading
 shot issue
 key escape
 wait 300
 # → Actions
 type >
-wait 3000
+wait 300
+gone Loading
 shot actions
 # Run history (focus 2), newest first: run 24108, the failed scheduled test-multi-platform
 type 2
 key enter
-wait 2500
+wait 300
+gone Loading
 shot run

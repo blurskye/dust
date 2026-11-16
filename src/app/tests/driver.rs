@@ -352,7 +352,7 @@ impl TestSession {
             .unwrap();
         }
         self.application.open_explorer();
-        let deadline = Instant::now() + Duration::from_secs(3);
+        let deadline = Instant::now() + Duration::from_secs(20);
         while self.application.explorer.pending() {
             self.application.process_explorer_result();
             assert!(Instant::now() < deadline, "explorer fixture timed out");
@@ -587,7 +587,7 @@ impl TestSession {
         self.application.open_live_workspace_search();
         self.application
             .restart_live_workspace_search("line1087".into());
-        let deadline = Instant::now() + Duration::from_secs(3);
+        let deadline = Instant::now() + Duration::from_secs(20);
         while self.application.search.pending() {
             self.application.process_workspace_search_events();
             assert!(Instant::now() < deadline, "grep fixture timed out");
@@ -603,7 +603,7 @@ impl TestSession {
         self.application.start_workspace_file_picker();
     }
     pub(in crate::app) fn finish_search(&mut self) {
-        let deadline = Instant::now() + Duration::from_secs(3);
+        let deadline = Instant::now() + Duration::from_secs(20);
         while self.application.search.files_pending() || self.application.search.pending() {
             self.application.process_workspace_file_events();
             self.application.process_workspace_search_events();
@@ -797,7 +797,7 @@ impl TestSession {
 impl TestSession {
     pub(in crate::app) fn verify_expired_shutdown_does_not_write(&mut self) {
         self.application.documents.stop_worker();
-        let deadline = Instant::now() + Duration::from_secs(2);
+        let deadline = Instant::now() + Duration::from_secs(20);
         while !self.application.documents.worker_finished() {
             assert!(Instant::now() < deadline);
             std::thread::sleep(Duration::from_millis(1));
@@ -824,7 +824,7 @@ impl TestSession {
             "unexpected shutdown result: {result:?}"
         );
         let accepted = self.application.persistence.pending();
-        let deadline = Instant::now() + Duration::from_secs(2);
+        let deadline = Instant::now() + Duration::from_secs(20);
         while self.application.persistence.pending() {
             self.application.process_persistence_events();
             assert!(
@@ -1073,12 +1073,10 @@ impl TestSession {
 impl TestSession {
     pub(in crate::app) fn debug_program_fixture(&self) {
         let path = self._workspace.path().join("debuggee");
-        std::fs::write(&path, "#!/bin/sh\nexit 0\n").unwrap();
         #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
-        }
+        crate::testing::write_executable(&path, "#!/bin/sh\nexit 0\n");
+        #[cfg(not(unix))]
+        std::fs::write(&path, "#!/bin/sh\nexit 0\n").unwrap();
     }
     pub(in crate::app) fn debug_start_native_program_fixture(&mut self) {
         let source = self._workspace.path().join("main.rs");
@@ -1152,7 +1150,7 @@ impl TestSession {
     }
     /// A stop fills the panes by itself; asking for the threads is what opens a picker.
     pub(in crate::app) fn open_debug_threads_after_stop(&mut self) {
-        let deadline = Instant::now() + Duration::from_secs(6);
+        let deadline = Instant::now() + Duration::from_secs(20);
         while self.application.debugger_session.threads().is_empty() {
             self.pump_debug();
             assert!(

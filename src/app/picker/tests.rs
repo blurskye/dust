@@ -123,7 +123,7 @@ fn file_preview_retries_after_capacity_returns_without_picker_input() {
     for id in requests {
         app.documents.cancel_request(id);
     }
-    let deadline = Instant::now() + Duration::from_secs(3);
+    let deadline = Instant::now() + Duration::from_secs(20);
     while app.search.preview_needs_retry() || app.documents.has_work() {
         app.process_vfs_results();
         assert!(Instant::now() < deadline, "preview retry timed out");

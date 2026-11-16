@@ -1918,6 +1918,14 @@ mod tests {
     use crate::tools::RegistryWorker;
     use std::time::Duration;
     use std::time::Instant;
+    /// Real guests run here: the budget is the tests' own wait (`PLUGIN_TEST_TICKS`), not the
+    /// bundled 100 ms that one stall on a loaded runner outlasts.
+    fn limits() -> PluginLimits {
+        PluginLimits {
+            epoch_deadline_ticks: crate::app::tests::PLUGIN_TEST_TICKS,
+            ..PluginLimits::default()
+        }
+    }
     #[test]
     fn package_update_replaces_managed_plugin_and_commits_after_load() {
         use crate::plugins::PluginEvent;
@@ -1984,24 +1992,24 @@ mod tests {
                     plugin_manifest: root.path().join("plugin.toml"),
                     component: root.path().join("plugin.wasm"),
                     roots: vec![root.path().into()],
-                    limits: PluginLimits::default(),
+                    limits: limits(),
                     update,
                 })
                 .unwrap();
-            let deadline = Instant::now() + Duration::from_secs(10);
+            let deadline = Instant::now() + Duration::from_secs(30);
             let load = loop {
                 for update in
-                    owner.poll_packages(PluginLimits::default(), &Default::default(), false)
+                    owner.poll_packages(limits(), &Default::default(), false)
                 {
-                    assert!(
-                        !matches!(
-                            update,
-                            ExtensionUpdate::Conflict(_)
-                                | ExtensionUpdate::Error(_)
-                                | ExtensionUpdate::Failed { .. }
-                        ),
-                        "package preparation failed"
-                    );
+                    match update {
+                        ExtensionUpdate::Conflict(error) | ExtensionUpdate::Error(error) => {
+                            panic!("package preparation failed: {error}")
+                        }
+                        ExtensionUpdate::Failed { operation, error } => {
+                            panic!("package preparation failed: {operation}: {error}")
+                        }
+                        _ => {}
+                    }
                 }
                 let mut loaded = None;
                 for event in owner.manager.poll().unwrap() {
@@ -2045,7 +2053,7 @@ mod tests {
             );
             owner.commit_package("demo".into(), load, token).unwrap();
             while owner.pending_packages() != 0 {
-                owner.poll_packages(PluginLimits::default(), &Default::default(), false);
+                owner.poll_packages(limits(), &Default::default(), false);
                 assert!(Instant::now() < deadline);
                 thread::sleep(Duration::from_millis(2));
             }
@@ -2075,14 +2083,14 @@ mod tests {
                     plugin_manifest: root.path().join("plugin.toml"),
                     component: root.path().join("plugin.wasm"),
                     roots: vec![root.path().into()],
-                    limits: PluginLimits::default(),
+                    limits: limits(),
                     update: package_name == "demo",
                 })
                 .unwrap();
-            let deadline = Instant::now() + Duration::from_secs(10);
+            let deadline = Instant::now() + Duration::from_secs(30);
             loop {
                 let updates =
-                    owner.poll_packages(PluginLimits::default(), &Default::default(), false);
+                    owner.poll_packages(limits(), &Default::default(), false);
                 if updates.iter().any(|update| matches!(update, ExtensionUpdate::Failed { error, .. } if error.contains("belongs to package demo"))) {
                     break;
                 }
@@ -2104,10 +2112,10 @@ mod tests {
             PackageOperation::Remove("demo".into()),
         ] {
             owner.request_package(operation).unwrap();
-            let deadline = Instant::now() + Duration::from_secs(5);
+            let deadline = Instant::now() + Duration::from_secs(30);
             while owner.pending_packages() != 0 {
                 for update in
-                    owner.poll_packages(PluginLimits::default(), &Default::default(), true)
+                    owner.poll_packages(limits(), &Default::default(), true)
                 {
                     assert!(!matches!(
                         update,
@@ -2214,7 +2222,7 @@ mod tests {
             owner
                 .load_activations(
                     activation.clone(),
-                    &PluginLimits::default(),
+                    &limits(),
                     &Default::default(),
                     true
                 )
@@ -2232,7 +2240,7 @@ mod tests {
         );
         assert!(
             owner
-                .load_activations(activation.clone(), &PluginLimits::default(), &config, false)
+                .load_activations(activation.clone(), &limits(), &config, false)
                 .is_empty()
         );
         assert!(owner.load_id("other").is_none());
@@ -2241,7 +2249,7 @@ mod tests {
             owner
                 .load_activations(
                     activation.clone(),
-                    &PluginLimits::default(),
+                    &limits(),
                     &Default::default(),
                     false
                 )
@@ -2257,7 +2265,7 @@ mod tests {
         if let Some(update) = owner
             .load_activations(
                 activation,
-                &PluginLimits::default(),
+                &limits(),
                 &Default::default(),
                 false,
             )
@@ -2301,7 +2309,7 @@ mod tests {
                     std::fs::File::create(root.path().join("object-lock")).unwrap(),
                 ),
             )],
-            &PluginLimits::default(),
+            &limits(),
             &Default::default(),
             false,
         );
@@ -2370,7 +2378,7 @@ mod tests {
                 plugin_manifest: root.path().join("plugin.toml"),
                 component: root.path().join("plugin.wasm"),
                 roots: vec![root.path().into()],
-                limits: PluginLimits::default(),
+                limits: limits(),
                 update: true,
             }),
             Err(PackageError::Busy)
@@ -2392,7 +2400,7 @@ mod tests {
             registry,
         );
         owner.packages = PackageWorker::start(root.path().join("packages"), 1, 1024 * 1024, 1024);
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + Duration::from_secs(30);
         // One result fills the event queue, the next blocks its worker, and a third fills requests.
         while owner.packages.pending_count() < 3 {
             match owner.packages.request(PackageOperation::List) {
@@ -2416,7 +2424,7 @@ mod tests {
         assert!(owner.package_aborts.contains(&41));
         let mut aborted = 0;
         while owner.pending_packages() != 0 {
-            for update in owner.poll_packages(PluginLimits::default(), &Default::default(), false) {
+            for update in owner.poll_packages(limits(), &Default::default(), false) {
                 if let ExtensionUpdate::Failed { operation, error } = update {
                     assert_eq!(operation, "abort");
                     assert_eq!(error, PackageError::MissingPrepared.to_string());
@@ -2510,9 +2518,9 @@ mod tests {
         // Actual package worker/VFS failure: no previous lock exists in this owned root.
         owner.rollback_packages();
         assert!(owner.package_startup_rollback.is_some());
-        let deadline = Instant::now() + Duration::from_secs(2);
+        let deadline = Instant::now() + Duration::from_secs(30);
         loop {
-            if owner.poll_packages(PluginLimits::default(), &Default::default(), false).iter().any(|update| matches!(update, ExtensionUpdate::Failed { operation, .. } if operation == "rollback")) { break; }
+            if owner.poll_packages(limits(), &Default::default(), false).iter().any(|update| matches!(update, ExtensionUpdate::Failed { operation, .. } if operation == "rollback")) { break; }
             assert!(Instant::now() < deadline, "rollback terminal missing");
             std::thread::sleep(Duration::from_millis(2));
         }
@@ -2584,7 +2592,7 @@ mod tests {
             object: root.path().join("demo.wasm"),
         };
         owner.package_preparing.insert(41);
-        let updates = owner.load_prepared(41, prepared.clone(), &PluginLimits::default());
+        let updates = owner.load_prepared(41, prepared.clone(), &limits());
         assert!(
             updates
                 .iter()
@@ -2595,7 +2603,7 @@ mod tests {
         owner.cancel_pending_packages();
         assert!(
             owner
-                .load_prepared(42, prepared.clone(), &PluginLimits::default())
+                .load_prepared(42, prepared.clone(), &limits())
                 .is_empty()
         );
         assert_eq!(owner.manager.load_id("demo"), Some(PluginLoadId(1)));
@@ -2603,7 +2611,7 @@ mod tests {
             .package_managed_plugins
             .insert("demo".into(), PluginLoadId(1));
         owner.package_preparing.insert(43);
-        let updates = owner.load_prepared(43, prepared, &PluginLimits::default());
+        let updates = owner.load_prepared(43, prepared, &limits());
         assert!(
             updates
                 .iter()

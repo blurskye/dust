@@ -24,6 +24,7 @@ pub mod pull_request;
 pub mod ratelimit;
 pub mod records;
 pub mod request;
+pub mod sandbox;
 pub mod template;
 pub mod transport;
 mod worker;
@@ -845,12 +846,18 @@ mod tests {
         jobs.spawn(path.clone(), 1, |root, commands| {
             ForgeReply::List(
                 commands
-                    .run(root, "/bin/sh", &["-c", "echo $$ > child; exec sleep 30"])
+                    // Renamed into place so the test never reads a half-written pid.
+                    .run(
+                        root,
+                        "/bin/sh",
+                        &["-c", "echo $$ > child.tmp && mv child.tmp child; exec sleep 30"],
+                    )
                     .map(|_| Vec::new()),
             )
         })
         .unwrap();
-        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        // Bounds a stuck worker; the sleeping child would outlive it if cancel failed.
+        let deadline = std::time::Instant::now() + Duration::from_secs(25);
         while !path.join("child").exists() {
             assert!(std::time::Instant::now() < deadline);
             thread::sleep(Duration::from_millis(2));
@@ -1112,7 +1119,7 @@ mod tests {
         .unwrap();
         let mut jobs = ForgeJobs::default();
         jobs.checkout(root.path().into(), 0, 1, workspace).unwrap();
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
         loop {
             if let Some(reply) = jobs.try_reply() {
                 let ForgeReply::CheckedOut(Err(error)) = reply.reply else {

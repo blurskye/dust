@@ -148,7 +148,7 @@ impl GitScreen {
             if self.file_selection.active() {
                 "j/k extend · V finish"
             } else {
-                "Space toggles set"
+                "s stages · u unstages the set"
             },
         )
     }

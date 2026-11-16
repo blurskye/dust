@@ -50,6 +50,8 @@ const INDEX: &str = "index.json";
 const LOCK: &str = "index.lock";
 /// A `ttl` that never expires (diffs by sha, logs of finished jobs).
 pub const FOREVER: Duration = Duration::from_secs(u64::MAX / 4);
+/// How long a "not found" answer is shown from the cache before the forge is asked again.
+pub const MISSING_TTL: Duration = Duration::from_secs(10 * 60);
 
 pub fn now_ms() -> u64 {
     SystemTime::now()
@@ -287,6 +289,17 @@ impl CacheKey {
         }
     }
 
+    /// Where a read the forge answered "not found" is remembered (§7.1): a restart shows the
+    /// answer at once instead of `Loading…` until the forge says it again.
+    pub fn missing(&self) -> Self {
+        Self {
+            host: self.host.clone(),
+            repo: self.repo.clone(),
+            kind: "missing",
+            key: format!("{}|{}", self.kind, self.key),
+        }
+    }
+
     fn digest(&self) -> String {
         let hash = Sha256::digest(self.key.as_bytes());
         hash[..8].iter().map(|byte| format!("{byte:02x}")).collect()
@@ -473,6 +486,10 @@ impl Cache {
     /// fake or redirected API must never seed the real host's entries — and in unit tests.
     /// `[forge].cache_mib` arrives as `DUSTY_FORGE_CACHE_MIB` (repo cap = a quarter).
     pub fn shared() -> Option<Arc<Cache>> {
+        // The tutor's practice forge never writes the user's cache.
+        if crate::forge::sandbox::active() {
+            return None;
+        }
         static SHARED: OnceLock<Option<Arc<Cache>>> = OnceLock::new();
         SHARED
             .get_or_init(|| {
@@ -508,6 +525,7 @@ impl Cache {
     /// Read an entry. Every failure but "absent" unlinks the file and counts as corrupt.
     pub fn get<T: DeserializeOwned>(&self, key: &CacheKey) -> Option<Envelope<T>> {
         let path = key.file(&self.root);
+        slow_disk();
         let bytes = match std::fs::read(&path) {
             Ok(bytes) => bytes,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -581,6 +599,33 @@ impl Cache {
         fingerprint: Option<Fingerprint>,
     ) -> bool {
         let mut envelope = Envelope::new(key, data, ttl);
+        envelope.etag = etag;
+        envelope.fingerprint = fingerprint;
+        self.put(key, &mut envelope)
+    }
+
+    /// Store `data` from a fetch that started at `started` (Unix ms), unless the entry holds an
+    /// answer from a fetch that started later: the interactive and warm workers (and a batch
+    /// filling its items' entries) finish in any order, and the newest question wins.
+    pub fn store_since<T: Serialize>(
+        &self,
+        key: &CacheKey,
+        data: T,
+        ttl: Duration,
+        etag: Option<String>,
+        fingerprint: Option<Fingerprint>,
+        started: u64,
+    ) -> bool {
+        let newer = self
+            .index(&key.directory(&self.root))
+            .entries
+            .get(&key.relative())
+            .is_some_and(|entry| entry.fetched_at > started);
+        if newer {
+            return false;
+        }
+        let mut envelope = Envelope::new(key, data, ttl);
+        envelope.fetched_at = started;
         envelope.etag = etag;
         envelope.fingerprint = fingerprint;
         self.put(key, &mut envelope)
@@ -696,7 +741,9 @@ impl Cache {
 
     fn write_used(&self, pending: Touched) {
         for (directory, used) in pending {
-            self.with_index(&directory, |index| {
+            // Advisory, and possibly on the UI thread (a read's `last_used`): never waits for
+            // another writer's lock; while one holds it these stamps are skipped.
+            self.with_index_waiting(&directory, 0, |index| {
                 for (relative, at) in &used {
                     if let Some(entry) = index.entries.get_mut(relative) {
                         entry.last_used = entry.last_used.max(*at);
@@ -709,7 +756,11 @@ impl Cache {
     /// Re-read, change and atomically rewrite a directory's index under its lock; skipped
     /// when another process holds the lock (the index is advisory).
     fn with_index(&self, directory: &Path, change: impl FnOnce(&mut Index)) -> bool {
-        let Some(_lock) = IndexLock::try_acquire(directory, 25) else {
+        self.with_index_waiting(directory, 25, change)
+    }
+
+    fn with_index_waiting(&self, directory: &Path, wait_ms: u64, change: impl FnOnce(&mut Index)) -> bool {
+        let Some(_lock) = IndexLock::try_acquire(directory, wait_ms) else {
             return false;
         };
         let mut index = self.index(directory);
@@ -790,6 +841,22 @@ fn default_root() -> Option<PathBuf> {
 }
 
 /// `<file>.tmp.<pid>.<n>` then `rename`; never leaves the temporary behind.
+/// `DUSTY_FORGE_CACHE_READ_DELAY_MS`: every cache read first waits this long, as on a cold or
+/// busy disk (tests: keys must never wait for the disk).
+fn slow_disk() {
+    static DELAY: OnceLock<Option<Duration>> = OnceLock::new();
+    let delay = DELAY.get_or_init(|| {
+        std::env::var("DUSTY_FORGE_CACHE_READ_DELAY_MS")
+            .ok()
+            .and_then(|millis| millis.trim().parse::<u64>().ok())
+            .filter(|millis| *millis > 0)
+            .map(Duration::from_millis)
+    });
+    if let Some(delay) = delay {
+        std::thread::sleep(*delay);
+    }
+}
+
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> bool {
     let Some(parent) = path.parent() else {
         return false;
@@ -957,6 +1024,20 @@ mod tests {
     use crate::forge::request::Filter;
     use crate::forge::request::Page;
     use crate::forge::request::StateFilter;
+
+    #[test]
+    fn the_answer_to_the_later_question_wins_whichever_lands_first() {
+        let root = tempfile::tempdir().unwrap();
+        let cache = Cache::at(root.path());
+        let key = CacheKey::named("example.com", Some("a/b"), "item", "pr-1");
+        let ttl = Duration::from_secs(60);
+        assert!(cache.store_since(&key, "newer", ttl, None, None, 2_000));
+        // A slower fetch that started before it finishes after it: kept out.
+        assert!(!cache.store_since(&key, "older", ttl, None, None, 1_000));
+        assert_eq!(cache.get::<String>(&key).unwrap().data, "newer");
+        assert!(cache.store_since(&key, "newest", ttl, None, None, 3_000));
+        assert_eq!(cache.get::<String>(&key).unwrap().data, "newest");
+    }
 
     #[test]
     fn rfc3339_parses_to_unix_seconds() {

@@ -14,6 +14,23 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
+
+
+def own_remote(name, url):
+    """Point remote `name` at `url` without disturbing any other launch: each world has its own
+    remote (forge-forgejo, forge-gitea, …), so concurrent shots in the one orbit checkout never
+    rewrite the remote another run is reading. A busy config lock is waited out."""
+    for _ in range(50):
+        current = subprocess.run(["git", "remote", "get-url", name], capture_output=True, text=True)
+        if current.returncode == 0 and current.stdout.strip() == url:
+            return
+        verb = "set-url" if current.returncode == 0 else "add"
+        if subprocess.run(["git", "remote", verb, name, url], stderr=subprocess.DEVNULL).returncode == 0:
+            return
+        time.sleep(0.1)
+    sys.exit(f"could not point remote {name} at {url}")
+
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 FIXTURES = ROOT / "tests/fixtures/forge"
@@ -63,9 +80,8 @@ env.update(
     DUSTY_FORGE_STATE_DIR=str(work / "forge-state"),
 )
 if STATE == "unknown-provider":
-    subprocess.run(["git", "remote", "remove", "forge"], stderr=subprocess.DEVNULL)
-    subprocess.run(["git", "remote", "add", "forge", "https://git.unknown.example/orbit-dev/orbit.git"], check=True)
-    env["DUSTY_FORGE_REMOTE"] = "forge"
+    own_remote("forge-unknown", "https://git.unknown.example/orbit-dev/orbit.git")
+    env["DUSTY_FORGE_REMOTE"] = "forge-unknown"
 try:
     code = subprocess.call([BINARY, *sys.argv[1:]], env=env)
 finally:

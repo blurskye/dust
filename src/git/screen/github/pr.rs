@@ -1,9 +1,10 @@
-//! F-PRINBOX overview, commits, checks, activity and the merge gate (DESIGN.md §3.26, §3.27,
-//! §3.32) as reader rows built from typed records. The Files tab keeps the diff rows of
+//! F-PRINBOX: the pull request reader's tabs (DESIGN.md §3.26, §3.27, §3.32) as rows built
+//! from typed records: Conversation (`conversation.rs`, ending in the merge box here),
+//! Commits and Checks. The Files tab keeps the diff rows of
 //! `lines::files` (§3.28), painted on the shared diff surfaces.
 use super::super::shell::glyphs::{Glyph, glyph};
-use super::issue::{self, comment_header, link_row};
-use super::prose::{self, Rich, blank, field, heading, muted, role, rule, strong};
+use super::issue;
+use super::prose::{self, Rich, blank, field, heading, muted, role, strong};
 use super::lines::Line;
 use super::*;
 use crate::config::ExplorerIconMode;
@@ -11,14 +12,14 @@ use crate::forge::model::{CiState, Lifecycle, ReviewState};
 use crate::forge::records::{self, CheckCounts, DetailRecord, TimelineEntry};
 use crate::ui::GitRole;
 
-pub(super) const OVERVIEW: usize = 0;
+/// GitHub's four tabs (DESIGN.md §3.26): the Conversation holds what Overview, Activity and
+/// Merge used to (the timeline, the threads, the merge box at its end).
+pub(super) const CONVERSATION: usize = 0;
 pub(super) const COMMITS: usize = 1;
 pub(super) const CHECKS: usize = 2;
 pub(super) const FILES: usize = 3;
-pub(super) const ACTIVITY: usize = 4;
-pub(super) const MERGE: usize = 5;
-/// Tabs `H`/`L` and `[`/`]` cycle through; the merge gate opens with `m`.
-pub(super) const CYCLE: usize = 5;
+/// Tabs `H`/`L` and `[`/`]` cycle through; `m` goes to the merge box.
+pub(super) const CYCLE: usize = 4;
 
 pub(super) fn ci_mark(state: CiState, mode: ExplorerIconMode) -> (&'static str, &'static str, GitRole) {
     match state {
@@ -32,8 +33,8 @@ pub(super) fn ci_mark(state: CiState, mode: ExplorerIconMode) -> (&'static str, 
 
 pub(super) fn review_mark(state: ReviewState, mode: ExplorerIconMode) -> (&'static str, &'static str, GitRole) {
     match state {
-        ReviewState::Approved => (glyph(Glyph::CheckPassed, mode), "Approved", GitRole::Added),
-        ReviewState::ChangesRequested => (glyph(Glyph::CheckFailed, mode), "Changes requested", GitRole::Removed),
+        ReviewState::Approved => (glyph(Glyph::Approved, mode), "Approved", GitRole::Added),
+        ReviewState::ChangesRequested => (glyph(Glyph::ChangesRequested, mode), "Changes requested", GitRole::Removed),
         ReviewState::Requested => (glyph(Glyph::ReviewRequested, mode), "Review requested", GitRole::Muted),
         ReviewState::NotRequested => ("○", "Not requested", GitRole::Muted),
         ReviewState::Commented => (glyph(Glyph::Comment, mode), "Commented", GitRole::Muted),
@@ -99,20 +100,37 @@ fn timeline(value: &Value, record: &DetailRecord) -> Vec<TimelineEntry> {
     entries
 }
 
-pub(super) fn counts(workspace: &Workspace, id: u64, record: &DetailRecord) -> [Option<usize>; 5] {
-    let activity = workspace
+pub(super) fn counts(workspace: &Workspace, id: u64, record: &DetailRecord) -> [Option<usize>; 4] {
+    // Comments, reviews and review comments, as GitHub's Conversation tab counts them.
+    let conversation = workspace
         .value(&Key::Timeline(id))
-        .map(|value| timeline(value, record).len() + workspace.review_threads(id).len());
-    // Every tab counts once its data is here, 0 included (§3.27); before that, none.
+        .map(|value| super::conversation::count(workspace, id, &timeline(value, record)));
+    // Every tab counts once its data is here, zero included (`counted`, paint.rs).
     let loaded = workspace.value(&Key::Item(2, id)).is_some();
     [
-        None,
-        Some(record.commits.len()).filter(|_| loaded),
-        Some(record.checks.len()).filter(|_| loaded),
+        conversation,
+        // The commits listed, else the count the header's sentence states.
+        Some(record.commits.len()).filter(|n| *n > 0).or(Some(0).filter(|_| loaded)),
+        // The tab counts what it is named after (r12 gitlab-02): GitLab's `Pipelines` counts
+        // pipelines, not the jobs in them; `Checks` counts checks. A merge request's jobs come
+        // from its head pipeline, so jobs whose link names no pipeline count as that one.
+        Some(if workspace.terms().run_noun == "pipeline" {
+            record
+                .checks
+                .iter()
+                .map(|check| check.run)
+                .collect::<std::collections::BTreeSet<_>>()
+                .len()
+        } else {
+            record.checks.len()
+        })
+        .filter(|_| loaded),
+        // The overview's "N files changed" and this count come from the same place: the
+        // listed files, else the forge's changed-file total.
         Some(record.files.len())
-            .filter(|n| loaded || *n > 0)
-            .or(record.row.changed_files.map(|n| n as usize)),
-        activity,
+            .filter(|n| *n > 0)
+            .or(record.row.changed_files.map(|n| n as usize))
+            .or(Some(0).filter(|_| loaded)),
     ]
 }
 
@@ -128,7 +146,7 @@ pub(super) fn rows(workspace: &Workspace, width: usize, mode: ExplorerIconMode) 
         loading(workspace, &key, &mut rows);
         return rows;
     };
-    let record = DetailRecord::from_value(value);
+    let record = workspace.checked(DetailRecord::from_value(value));
     let now = records::now();
     if loaded.is_none() {
         if let Some(Err(error)) = workspace.cache.get(&key) {
@@ -138,19 +156,27 @@ pub(super) fn rows(workspace: &Workspace, width: usize, mode: ExplorerIconMode) 
         }
         rows.push(blank());
         // A list row that omitted the body says nothing about it: no "No description".
-        if workspace.pr_tab == OVERVIEW && !value["body"].is_null() {
-            prose::markdown(&mut rows, &record.body, width, "");
+        // Indented as the description card's body, so the text stays put when it loads.
+        if workspace.pr_tab == CONVERSATION && !value["body"].is_null() {
+            prose::markdown(&mut rows, &record.body, width, "  ");
         }
         return rows;
     }
     let item = loaded.expect("loaded");
+    // Every `+N −M` on the page counts the diff's hunks once it is here (R16 prs-02).
+    let record = super::files::diff_counted(workspace, id, &record);
     match workspace.pr_tab {
         COMMITS => commits(workspace, &record, &mut rows, width, now, mode),
-        CHECKS => checks(&record, &mut rows, workspace.ci_words().2, mode),
+        CHECKS => checks(workspace, id, &record, &mut rows, workspace.ci_words().2, width, mode),
         FILES => super::files::rows(workspace, id, item, &record, &mut rows, width, mode),
-        ACTIVITY => activity(workspace, id, &record, &mut rows, width, now, mode),
-        MERGE => merge(workspace, id, item, &record, &mut rows, mode),
-        _ => overview(workspace, id, item, &record, &mut rows, width, now, mode),
+        _ => {
+            let entries = workspace
+                .value(&Key::Timeline(id))
+                .map(|value| timeline(value, &record))
+                .unwrap_or_default();
+            super::conversation::pull(workspace, id, &record, entries, &mut rows, width, now, mode);
+            merge(workspace, id, item, &record, &mut rows, mode);
+        }
     }
     rows
 }
@@ -159,294 +185,15 @@ fn loading(workspace: &Workspace, key: &Key, rows: &mut Vec<Line>) -> bool {
     match workspace.cache.get(key) {
         Some(Ok(_)) => false,
         Some(Err(error)) => {
-            rows.push(Rich::new().push("✕ ", role(GitRole::Removed)).push(error, role(GitRole::Removed)).line());
-            rows.push(muted(&format!("R refresh · signed out? run {}", super::issue::sign_in(workspace.forge_kind()).0)));
+            let words = workspace.explain(error);
+            rows.push(Rich::new().push("✕ ", role(GitRole::Removed)).push(&words.headline, role(GitRole::Removed)).line());
+            rows.push(muted(&words.hint));
             true
         }
         None => {
             rows.push(muted("Loading…"));
             true
         }
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn overview(
-    workspace: &Workspace,
-    id: u64,
-    item: &Value,
-    record: &DetailRecord,
-    rows: &mut Vec<Line>,
-    width: usize,
-    now: i64,
-    mode: ExplorerIconMode,
-) {
-    let column = 14;
-    let label = |mark: Glyph, text: &str| field(&format!("{} {text}", glyph(mark, mode)), column);
-    // Reviewers: each reviewer's latest word, then open requests.
-    let reviewers = record.reviewers();
-    // Anonymous reads carry no review decision or check names: those rows are absent, not
-    // "No reviewers" (a signed-out reader cannot tell "none" from "not told").
-    let blind = workspace.read_only();
-    let mut row = label(Glyph::Person, "Reviewers");
-    if reviewers.is_empty() {
-        row = row.push("No reviewers", role(GitRole::Muted));
-    }
-    for (index, (login, state)) in reviewers.iter().enumerate() {
-        if index > 0 {
-            row = row.sep();
-        }
-        // `alex Requested` — the reviewer's own word, short.
-        let (mark, word, tone) = review_mark(*state, mode);
-        let word = match *state {
-            ReviewState::Requested => workspace.requested_words().1,
-            _ => word,
-        };
-        row = row
-            .push(login, role(GitRole::Author))
-            .plain(" ")
-            .push(&format!("{mark} {word}"), role(tone));
-    }
-    if !(blind && reviewers.is_empty()) {
-        rows.push(row.line());
-    }
-    let counts = record.check_counts();
-    let (mark, _, tone) = ci_mark(counts.state().unwrap_or(CiState::Unknown), mode);
-    let (_, ci_field, ci_noun) = workspace.ci_words();
-    let mut row = field(&format!("{mark} {ci_field}"), column)
-        .push(&checks_summary(&counts, ci_noun), role(if counts.total() == 0 { GitRole::Muted } else { tone }))
-        .line();
-    row.paint[0].1 = role(tone);
-    row.action = Some(Action::PrTab(CHECKS));
-    if !(blind && counts.total() == 0) {
-        rows.push(row);
-    }
-    // A chip carries a space of padding; it starts a column early so its text lines up.
-    let row = if record.row.labels.is_empty() {
-        label(Glyph::Label, "Labels").push("None yet", role(GitRole::Muted))
-    } else {
-        field(&format!("{} Labels", glyph(Glyph::Label, mode)), column - 1)
-            .labels(&prose::chips(&record.row.labels, record.row.lifecycle == Lifecycle::Draft))
-    };
-    let mut row = row.line();
-    row.action = Some(Action::Metadata(2, id, "labels"));
-    rows.push(row);
-    // Files are listed once, under the description (each opens the Files tab on it); a
-    // list without them yet keeps a summary row here instead.
-    let files = record.files.len().max(record.row.changed_files.unwrap_or(0) as usize);
-    let (additions, deletions) = (record.row.additions.unwrap_or(0), record.row.deletions.unwrap_or(0));
-    if record.files.is_empty() && files > 0 {
-        let mut row = label(Glyph::File, "Files")
-            .push(&format!("{files} file{} changed", if files == 1 { "" } else { "s" }), role(GitRole::Text))
-            .plain("  ")
-            .push(&format!("+{additions}"), role(GitRole::Added))
-            .plain(" ")
-            .push(&format!("−{deletions}"), role(GitRole::Removed))
-            .line();
-        row.action = Some(Action::PrTab(FILES));
-        rows.push(row);
-    }
-    if let Some(milestone) = &record.milestone {
-        rows.push(label(Glyph::Milestone, "Milestone").push(milestone, role(GitRole::Text)).line());
-    }
-    for (index, link) in record.links.iter().enumerate() {
-        let lead = if index == 0 {
-            format!("{} Closes", glyph(Glyph::Link, mode))
-        } else {
-            String::new()
-        };
-        let lead = Rich::new().push(&lead, role(GitRole::Muted)).to_column(column);
-        rows.push(link_row(workspace, link, false, lead, mode));
-    }
-    rows.push(rule(width.min(prose::MEASURE)));
-    prose::markdown(rows, &record.body, width, "");
-    if !record.files.is_empty() {
-        rows.push(blank());
-        let (added, removed) = record
-            .files
-            .iter()
-            .fold((0, 0), |(a, d), file| (a + file.additions, d + file.deletions));
-        rows.push(heading(
-            "Files",
-            &format!(
-                "{} changed · +{added} −{removed}",
-                record.files.len()
-            ),
-        ));
-        let path_width = record
-            .files
-            .iter()
-            .map(|file| unicode_width::UnicodeWidthStr::width(file.path.as_str()))
-            .max()
-            .unwrap_or(0)
-            .min(width.saturating_sub(18).max(12));
-        for file in &record.files {
-            let path = super::super::shell::chrome::ellipsize_start(&file.path, path_width);
-            let tone = match file.status {
-                'A' => GitRole::Added,
-                'D' => GitRole::Removed,
-                'R' => GitRole::Ref,
-                _ => GitRole::Modified,
-            };
-            let mut row = Rich::new()
-                .plain("  ")
-                .push(&format!("{} ", glyph(Glyph::File, mode)), role(tone))
-                .push(&path, role(GitRole::Link))
-                .to_column(path_width + 6)
-                .push(&format!("+{}", file.additions), role(GitRole::Added))
-                .plain(" ")
-                .push(&format!("−{}", file.deletions), role(GitRole::Removed))
-                .line();
-            row.action = Some(Action::SelectFile(id, file.path.clone()));
-            rows.push(row);
-        }
-    }
-    // The newest conversation, so the overview reads like the PR page.
-    rows.push(blank());
-    if let Some(value) = workspace.value(&Key::Timeline(id)) {
-        let entries = timeline(value, record)
-            .into_iter()
-            .filter(TimelineEntry::conversation)
-            .collect::<Vec<_>>();
-        rows.push(heading(
-            "Latest activity",
-            &{
-                let reviews = entries
-                    .iter()
-                    .filter(|entry| matches!(entry, TimelineEntry::Review { .. }))
-                    .count();
-                let comments = entries.len() - reviews;
-                let count = |n: usize, word: &str| match n {
-                    0 => String::new(),
-                    1 => format!("1 {word}"),
-                    n => format!("{n} {word}s"),
-                };
-                match (count(comments, "comment"), count(reviews, "review")) {
-                    (c, r) if c.is_empty() && r.is_empty() => "no comments yet".to_owned(),
-                    (c, r) if r.is_empty() => c,
-                    (c, r) if c.is_empty() => r,
-                    (c, r) => format!("{c} · {r}"),
-                }
-            },
-        ));
-        rows.push(blank());
-        for entry in entries.iter().rev().take(2).rev() {
-            conversation(rows, entry, width, now, mode);
-            rows.push(blank());
-        }
-    } else {
-        loading(workspace, &Key::Timeline(id), rows);
-    }
-    let action = |text: &str, key: &str, action: Action| {
-        let mut row = Rich::new()
-            .push("› ", role(GitRole::Focus))
-            .push(text, role(GitRole::Link))
-            .plain("  ")
-            .push(key, strong(GitRole::Focus))
-            .line();
-        row.action = Some(action);
-        row
-    };
-    next_step(workspace, id, item, record, rows, mode);
-    rows.push(blank());
-    rows.push(action("Review changes", "r", Action::Review(id)));
-    rows.push(action("Merge readiness", "m", Action::PrTab(MERGE)));
-    rows.push(action("Write a comment", "C", Action::Comment(2, id)));
-}
-
-/// §3.27: the overview ends on what the pull request is waiting for, so the pane answers
-/// "what now" without a trip to the Merge tab.
-fn next_step(
-    workspace: &Workspace,
-    id: u64,
-    item: &Value,
-    record: &DetailRecord,
-    rows: &mut Vec<Line>,
-    mode: ExplorerIconMode,
-) {
-    let (_, ci, noun) = workspace.ci_words();
-    let counts = record.check_counts();
-    let decision = item["reviewDecision"].as_str().unwrap_or("");
-    let threads = threads_state(workspace, id);
-    let pass = glyph(Glyph::CheckPassed, mode);
-    let fail = glyph(Glyph::CheckFailed, mode);
-    let wait = glyph(Glyph::CheckPending, mode);
-    let (mark, tone, title, detail): (&str, GitRole, String, String) = match record.row.lifecycle {
-        Lifecycle::Merged => (glyph(Glyph::PullMerged, mode), GitRole::Ref, "Merged".into(), "nothing left to do".into()),
-        Lifecycle::Closed | Lifecycle::ClosedNotPlanned => (fail, GitRole::Removed, "Closed".into(), "X reopens it".into()),
-        Lifecycle::Draft => (wait, GitRole::Muted, "Draft".into(), "mark it ready for review before merging".into()),
-        Lifecycle::Open if record.mergeable == "CONFLICTING" => {
-            (fail, GitRole::Removed, "Conflicts".into(), "resolve them before merging".into())
-        }
-        Lifecycle::Open if matches!(counts.state(), Some(CiState::Failed | CiState::Cancelled)) => (
-            fail,
-            GitRole::Removed,
-            format!("{ci} failing"),
-            format!("{} · the {ci} tab has the logs", counts.summary()),
-        ),
-        Lifecycle::Open if decision == "CHANGES_REQUESTED" => {
-            (fail, GitRole::Modified, "Changes requested".into(), "push fixes, then ask for another review".into())
-        }
-        Lifecycle::Open if decision == "REVIEW_REQUIRED" => {
-            (wait, GitRole::Modified, "Review required".into(), "r starts a review".into())
-        }
-        Lifecycle::Open if matches!(counts.state(), Some(CiState::Pending | CiState::ActionRequired)) => (
-            wait,
-            GitRole::Modified,
-            format!("{ci} running"),
-            counts.summary(),
-        ),
-        Lifecycle::Open if threads.is_some_and(|(open, _)| open > 0) => (
-            "○",
-            GitRole::Modified,
-            "Unresolved conversations".into(),
-            "resolve them in Activity".into(),
-        ),
-        Lifecycle::Open if record.merge_state == "CLEAN" => {
-            (pass, GitRole::Added, "Ready to merge".into(), "m opens the merge gate".into())
-        }
-        Lifecycle::Open if counts.total() == 0 => {
-            (wait, GitRole::Muted, format!("No {noun} reported"), "m shows what the merge needs".into())
-        }
-        Lifecycle::Open => (wait, GitRole::Muted, "Waiting on the forge".into(), "m shows what the merge needs".into()),
-    };
-    if rows.last().is_some_and(|row| !row.text.is_empty()) {
-        rows.push(blank());
-    }
-    rows.push(heading("Next step", ""));
-    let mut line = Rich::new()
-        .plain("  ")
-        .push(&format!("{mark} "), role(tone))
-        .push(&title, strong(tone));
-    if !detail.is_empty() {
-        line = line.sep().push(&detail, role(GitRole::Muted));
-    }
-    rows.push(line.line());
-}
-
-fn conversation(rows: &mut Vec<Line>, entry: &TimelineEntry, width: usize, now: i64, mode: ExplorerIconMode) {
-    match entry {
-        TimelineEntry::Comment(comment) => {
-            rows.push(comment_header(comment, now, mode));
-            prose::markdown(rows, &comment.body, width, "");
-        }
-        TimelineEntry::Review { review } => {
-            let (mark, word, tone) = review_mark(review.state, mode);
-            let mut header = Rich::new()
-                .push(&format!("{} ", glyph(Glyph::Person, mode)), role(GitRole::Muted))
-                .push(&review.author, strong(GitRole::Author))
-                .sep()
-                .push(&format!("{mark} {word}"), role(tone));
-            let when = records::ago(&review.submitted, now);
-            if !when.is_empty() {
-                header = header.sep().push(&when, role(GitRole::Muted));
-            }
-            rows.push(header.line());
-            if !review.body.trim().is_empty() {
-                prose::markdown(rows, &review.body, width, "");
-            }
-        }
-        TimelineEntry::Event { .. } => {}
     }
 }
 
@@ -462,44 +209,173 @@ fn commits(
         rows.push(muted("No commits reported."));
         return;
     }
+    let head_sha = record.commits.last().map(|commit| commit.sha.clone());
+    let ci = record.check_counts().state();
+    // Beside its list the tab shows a commit, the newest until another is picked, as Files
+    // changed shows its first file (grade14 GH-*-11); a Narrow reader lists them first.
+    let beside = super::files::outline_beside(workspace, width);
+    let open = workspace
+        .selected_commit
+        .as_ref()
+        .and_then(|sha| record.commits.iter().find(|commit| commit.sha == *sha))
+        .or_else(|| if beside { record.commits.last() } else { None });
+    // GitHub's Commits tab (§3.26): the full-width list grouped by day, each row its whole
+    // subject, author, age and sha. Beside it (any reader but a Narrow one) the open commit's
+    // diff follows below the list rather than a 25-cell rail cutting every subject (r15 PR-05).
+    let Some(commit) = open else {
+        commit_list(record, rows, width, now, mode, None);
+        commit_summary(record, rows, now);
+        return;
+    };
+    if beside {
+        commit_list(record, rows, width, now, mode, Some(&commit.sha));
+        rows.push(blank());
+    }
+    // One commit open: its diff, as GitHub's commit page. Alone in a Narrow reader, Enter on
+    // `‹ All commits` goes back to the list; beside it the list is there already.
+    if !beside {
+        let mut back = Rich::new()
+            .push("‹ ", role(GitRole::Focus))
+            .push("All commits", role(GitRole::Link))
+            .line();
+        back.action = Some(Action::Commit(commit.sha.clone()));
+        rows.push(back);
+        rows.push(blank());
+    }
+    let mut header = Rich::new()
+        .push(&format!(" {} ", glyph(Glyph::CommitHead, mode)), role(GitRole::Ref))
+        .push(&commit.headline, strong(GitRole::Text))
+        .line();
+    header.band = Some(crate::ui::GitSurface::FileBand);
+    rows.push(header);
+    let mut facts = Rich::new().plain("  ");
+    if !commit.author.is_empty() {
+        facts = facts.push(&commit.author, role(GitRole::Author)).plain(" ").push("committed", role(GitRole::Muted));
+    }
+    let when = fresh::relative(&commit.committed, now);
+    if !when.is_empty() {
+        facts = facts.plain(" ").push(&when, role(GitRole::Muted));
+    }
+    facts = facts.sep().push(&commit.sha.chars().take(7).collect::<String>(), role(GitRole::Hash));
+    if head_sha.as_deref() == Some(commit.sha.as_str())
+        && let Some(state) = ci
+    {
+        let (mark, word, tone) = ci_mark(state, mode);
+        facts = facts.sep().push(&format!("{mark} {word}"), role(tone));
+    }
+    rows.push(facts.line());
+    let sha = &commit.sha;
+    rows.push(blank());
+    let key = Key::Commit(sha.clone());
+    if !loading(workspace, &key, rows) {
+        commit_diff(workspace, &key, rows);
+    }
+}
+
+/// The Commits tab's list (§3.26): grouped by day, newest day last as the branch grew; each
+/// row its subject, author, age, sha and, on the head, the checks' mark. The `open` commit's
+/// subject is drawn in the focus colour while its diff shows below.
+fn commit_list(record: &DetailRecord, rows: &mut Vec<Line>, width: usize, now: i64, mode: ExplorerIconMode, open: Option<&str>) {
+    let head_sha = record.commits.last().map(|commit| commit.sha.as_str());
+    let ci = record.check_counts().state();
     let headline_width = width.saturating_sub(34).max(16);
+    let mut day = String::new();
     for commit in &record.commits {
-        let selected = workspace.selected_commit.as_deref() == Some(commit.sha.as_str());
+        let on = commit_day(&commit.committed, now);
+        if on != day {
+            if !day.is_empty() {
+                rows.push(blank());
+            }
+            let title = if on.is_empty() { "Commits".to_owned() } else { format!("Commits on {on}") };
+            rows.push(Rich::new().push(&format!("{} ", glyph(Glyph::ForgeCommit, mode)), role(GitRole::Muted)).push(&title, strong(GitRole::Muted)).line());
+            day = on;
+        }
+        let head = head_sha == Some(commit.sha.as_str());
+        let is_open = open == Some(commit.sha.as_str());
         let short = commit.sha.chars().take(7).collect::<String>();
         let headline = super::super::shell::chrome::ellipsize(&commit.headline, headline_width);
         let mut row = Rich::new()
-            .push(
-                &format!("{} ", glyph(if selected { Glyph::CommitHead } else { Glyph::Commit }, mode)),
-                role(if selected { GitRole::Focus } else { GitRole::Ref }),
-            )
-            .push(&short, role(GitRole::Hash))
-            .plain(" ")
-            .push(&headline, if selected { strong(GitRole::Text) } else { role(GitRole::Text) })
-            .to_column(headline_width + 12);
+            .push("  │ ", role(if is_open { GitRole::Focus } else { GitRole::Border }))
+            .push(&headline, if is_open { strong(GitRole::Focus) } else { role(GitRole::Text) })
+            .to_column(headline_width + 5);
         if !commit.author.is_empty() {
             row = row.push(&commit.author, role(GitRole::Author));
         }
-        let when = records::ago(&commit.committed, now);
+        let when = fresh::relative(&commit.committed, now);
         if !when.is_empty() {
-            row = row.sep().push(&when, role(GitRole::Muted));
+            // `author · age`, or the age alone when the forge names no author.
+            if !commit.author.is_empty() {
+                row = row.sep();
+            }
+            row = row.push(&when, role(GitRole::Muted));
         }
-        let mut row = row.line();
+        let row = row.plain("  ");
+        let row = match ci.filter(|_| head) {
+            Some(state) => {
+                let (mark, _, tone) = ci_mark(state, mode);
+                row.push(&format!("{mark} "), role(tone))
+            }
+            None => row.plain("  "),
+        };
+        let mut row = row.push(&short, role(GitRole::Hash)).line();
         row.action = Some(Action::Commit(commit.sha.clone()));
         rows.push(row);
     }
-    let Some(sha) = &workspace.selected_commit else {
-        // No diff picked yet: the range itself, from the data already here, so the lower
-        // half reads as a summary rather than a promise.
-        commit_summary(record, rows, now, mode);
-        return;
-    };
-    rows.push(blank());
-    let key = Key::Commit(sha.clone());
-    if loading(workspace, &key, rows) {
-        return;
-    }
-    let preview = super::super::preview::Preview::git(workspace.raw(&key).unwrap_or_default(), None);
+}
+
+/// An open commit's diff, as the Git screen's preview reads it: each file's header carries
+/// its mode change (`new file`), a blank row parts the files, and every changed line has the
+/// same `old new ±` gutter (grade14 GH-gitlab-02).
+fn commit_diff(workspace: &Workspace, key: &Key, rows: &mut Vec<Line>) {
+    let preview = super::super::preview::Preview::git(workspace.raw(key).unwrap_or_default(), None);
+    let number = preview.number_width();
+    let mut notes: Vec<String> = Vec::new();
+    let mut files = 0;
+    let mut raw = false;
     for source in preview.rows {
+        let header = source.style == crate::ui::Style::GitHeading;
+        if source.marker.is_none() && !header && !source.text.starts_with("@@") {
+            // A patch's own header lines (`new file mode 100644`, a rename): the file's row
+            // says them once.
+            let text = source.text.trim();
+            // A patch with no hunks (a binary file) comes whole, its `diff --git` included:
+            // its lines stay as they are, up to the next file's header.
+            raw |= text.starts_with("diff --git ");
+            if raw {
+                rows.extend(notes.drain(..).map(|note| muted(&note)));
+                rows.push(muted(text));
+                continue;
+            }
+            let note = if text.starts_with("new file mode") {
+                "new file".to_owned()
+            } else if text.starts_with("deleted file mode") {
+                "deleted".to_owned()
+            } else if let Some(from) = text.strip_prefix("rename from ") {
+                format!("renamed from {from}")
+            } else if text.is_empty() || text.starts_with("similarity index") || text.starts_with("rename to ") {
+                continue;
+            } else {
+                text.to_owned()
+            };
+            notes.push(note);
+            continue;
+        }
+        if header {
+            raw = false;
+            if files > 0 {
+                rows.push(blank());
+            }
+            files += 1;
+            let mut text = source.text.clone();
+            for note in notes.drain(..) {
+                text.push_str(" · ");
+                text.push_str(&note);
+            }
+            let mut row = Line::text(&text, source.style);
+            row.band = Some(crate::ui::GitSurface::FileBand);
+            rows.push(row);
+            continue;
+        }
         let mut row = Line::text(&source.text, source.style);
         if source.old.is_some() || source.new.is_some() {
             row.source = Some(find::Source::new(&source.text));
@@ -512,12 +388,42 @@ fn commits(
         row.spans = source.spans;
         if let Some(marker) = source.marker {
             row.gutter = format!(
-                "{:>4} {:>4} {marker}",
+                "{:>number$} {:>number$} {marker} ",
                 source.old.map(|n| n.to_string()).unwrap_or_default(),
                 source.new.map(|n| n.to_string()).unwrap_or_default()
             );
         }
         rows.push(row);
+    }
+    rows.extend(notes.iter().map(|note| muted(note)));
+}
+
+/// `Nov 14`, or `Nov 14, 2025` in another year than `now`'s: the day a commit was made.
+fn commit_day(stamp: &str, now: i64) -> String {
+    const MONTHS: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    let Some(date) = stamp.trim().get(..10) else {
+        return String::new();
+    };
+    let mut parts = date.split('-').map(|part| part.parse::<usize>().ok());
+    let (Some(Some(year)), Some(Some(month)), Some(Some(day))) = (parts.next(), parts.next(), parts.next()) else {
+        return String::new();
+    };
+    let Some(name) = month.checked_sub(1).and_then(|at| MONTHS.get(at)) else {
+        return String::new();
+    };
+    // Days since the epoch to a civil year (Howard Hinnant's algorithm), for `now`'s year.
+    let days = now.div_euclid(86_400);
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let this_year = yoe + era * 400 + i64::from(mp >= 10);
+    if year as i64 == this_year {
+        format!("{name} {day}")
+    } else {
+        format!("{name} {day}, {year}")
     }
 }
 
@@ -532,7 +438,7 @@ fn span_words(seconds: i64) -> String {
 }
 
 /// What the commit range holds: branches, authors, span, size and the head merge pins.
-fn commit_summary(record: &DetailRecord, rows: &mut Vec<Line>, now: i64, mode: ExplorerIconMode) {
+fn commit_summary(record: &DetailRecord, rows: &mut Vec<Line>, now: i64) {
     let column = 12;
     let mut authors: Vec<(&str, usize)> = Vec::new();
     for commit in &record.commits {
@@ -573,229 +479,208 @@ fn commit_summary(record: &DetailRecord, rows: &mut Vec<Line>, now: i64, mode: E
         let span = newest.0 - oldest.0;
         let mut row = field("Span", column);
         row = if span < 60 {
-            row.push(&format!("committed {}", records::ago(&newest.1.committed, now)), role(GitRole::Text))
+            row.push(&format!("committed {}", fresh::relative(&newest.1.committed, now)), role(GitRole::Text))
         } else {
             row.push(&format!("over {}", span_words(span)), role(GitRole::Text))
                 .sep()
-                .push(&format!("newest {}", records::ago(&newest.1.committed, now)), role(GitRole::Muted))
+                .push(&format!("newest {}", fresh::relative(&newest.1.committed, now)), role(GitRole::Muted))
         };
         rows.push(row.line());
     }
     if let (Some(add), Some(del)) = (record.row.additions, record.row.deletions) {
         let files = if record.files.is_empty() { record.row.changed_files.unwrap_or(0) as usize } else { record.files.len() };
-        let mut row = field("Changes", column)
-            .push(&format!("+{add}"), role(GitRole::Added))
-            .plain(" ")
-            .push(&format!("−{del}"), role(GitRole::Removed));
+        let mut row = field("Changes", column).diffstat(add, del);
         if files > 0 {
             row = row.push(&format!(" in {files} file{}", if files == 1 { "" } else { "s" }), role(GitRole::Muted));
         }
         rows.push(row.line());
     }
-    if let Some(head) = record.commits.last() {
-        let short = head.sha.chars().take(7).collect::<String>();
-        rows.push(
-            field("Head", column)
-                .push(&format!("{} ", glyph(Glyph::CommitHead, mode)), role(GitRole::Ref))
-                .push(&short, role(GitRole::Hash))
-                .plain(" ")
-                .push(&head.headline, role(GitRole::Text))
-                .line(),
-        );
-    }
     rows.push(blank());
     rows.push(muted("Enter on a commit previews its diff here"));
 }
 
-fn checks(record: &DetailRecord, rows: &mut Vec<Line>, noun: &str, mode: ExplorerIconMode) {
-    if record.checks.is_empty() {
-        rows.push(muted(&format!("No {noun} reported for this head.")));
-        return;
+/// Failing first, then running, passing, and skipped last (§3.29): the first screen of a
+/// long list answers "what broke", not "what was skipped".
+pub(super) fn check_rank(state: CiState) -> u8 {
+    match state {
+        CiState::Failed | CiState::Cancelled => 0,
+        CiState::Pending | CiState::ActionRequired => 1,
+        CiState::Passed => 2,
+        CiState::Unknown => 3,
+        CiState::Skipped => 4,
     }
-    let counts = record.check_counts();
-    let (mark, _, tone) = ci_mark(counts.state().unwrap_or(CiState::Unknown), mode);
-    rows.push(
-        Rich::new()
-            .push(&format!("{mark} "), role(tone))
-            .push(&checks_summary(&counts, noun), strong(tone))
-            .line(),
-    );
-    rows.push(blank());
-    let name_width = record
-        .checks
-        .iter()
-        .map(|check| unicode_width::UnicodeWidthStr::width(check.name.as_str()))
-        .max()
-        .unwrap_or(0)
-        .clamp(12, 40);
-    // Grouped by workflow (the GitHub web layout): the name heads its checks once.
-    let mut groups: Vec<(&str, Vec<&records::CheckRow>)> = Vec::new();
-    for check in &record.checks {
-        match groups.iter_mut().find(|(workflow, _)| *workflow == check.workflow.as_str()) {
-            Some((_, checks)) => checks.push(check),
-            None => groups.push((check.workflow.as_str(), vec![check])),
-        }
-    }
-    let grouped = groups.len() > 1 || groups.first().is_some_and(|(workflow, _)| !workflow.is_empty());
-    for (index, (workflow, checks)) in groups.iter().enumerate() {
-        if grouped {
-            if index > 0 {
-                rows.push(blank());
-            }
-            let mut group = CheckCounts::default();
-            for check in checks {
-                group.add(check.state);
-            }
-            let name = if workflow.is_empty() { "Other" } else { workflow };
-            rows.push(heading(name, &group.summary()));
-        }
-        for check in checks {
-            let (mark, _, tone) = ci_mark(check.state, mode);
-            let name = super::super::shell::chrome::ellipsize(&check.name, name_width);
-            let mut row = Rich::new()
-                .plain(if grouped { "  " } else { "" })
-                .push(&format!("{mark} "), role(tone))
-                .push(&name, role(GitRole::Text))
-                .to_column(name_width + 4 + if grouped { 2 } else { 0 })
-                .push(
-                    match check.word.as_str() {
-                        "success" => "passed",
-                        "failure" => "failed",
-                        "in progress" | "in_progress" | "queued" => "running",
-                        word => word,
-                    },
-                    role(tone),
-                )
-                .to_column(name_width + 16 + if grouped { 2 } else { 0 })
-                .push(&check.duration.map(records::duration).unwrap_or_default(), role(GitRole::Muted))
-                .to_column(name_width + 26 + if grouped { 2 } else { 0 });
-            if check.required {
-                row = row.push("required", role(GitRole::Modified)).plain("  ");
-            }
-            let mut action = None;
-            if let Some(run) = check.run {
-                row = row.push(&format!("{} logs", glyph(Glyph::Link, mode)), role(GitRole::Link));
-                action = Some(Action::Run(run));
-            }
-            let mut row = row.line();
-            row.action = action;
-            rows.push(row);
-        }
-    }
-    check_digest(record, rows, noun, mode);
 }
 
-/// Below the list: what needs a look first, and where the time went.
-fn check_digest(record: &DetailRecord, rows: &mut Vec<Line>, noun: &str, mode: ExplorerIconMode) {
-    let column = 12;
-    let failing = record
-        .checks
-        .iter()
-        .filter(|check| matches!(check.state, CiState::Failed | CiState::Cancelled))
-        .collect::<Vec<_>>();
-    let running = record
-        .checks
-        .iter()
-        .filter(|check| matches!(check.state, CiState::Pending | CiState::ActionRequired))
-        .count();
-    rows.push(blank());
-    if !failing.is_empty() {
-        rows.push(heading("Needs attention", &format!("{} failing", failing.len())));
-        for check in &failing {
-            let (mark, _, tone) = ci_mark(check.state, mode);
-            let mut row = Rich::new()
-                .plain("  ")
-                .push(&format!("{mark} "), role(tone))
-                .push(&check.name, strong(GitRole::Text));
-            if !check.workflow.is_empty() {
-                row = row.sep().push(&check.workflow, role(GitRole::Muted));
-            }
-            if let Some(seconds) = check.duration {
-                row = row.sep().push(&format!("failed after {}", records::duration(seconds)), role(GitRole::Removed));
-            }
-            let mut row = row.line();
-            row.action = check.run.map(Action::Run);
-            rows.push(row);
-        }
-        rows.push(blank());
+/// A duration worth showing: forges report `0` for skipped and never-started checks.
+pub(super) fn shown_duration(check: &records::CheckRow) -> Option<u64> {
+    check.duration.filter(|seconds| *seconds > 0)
+}
+
+/// `Run integration…r-latest)`: a long check name keeps both ends, since the end often
+/// tells otherwise-identical jobs apart; `tail` cells of it after the `…`.
+fn middle_at(text: &str, cells: usize, tail: usize) -> String {
+    use super::super::shell::chrome::{ellipsize, ellipsize_start};
+    let width = unicode_width::UnicodeWidthStr::width(text);
+    if width <= cells || cells < 9 {
+        return ellipsize(text, cells);
     }
-    let timed = record.checks.iter().filter_map(|check| check.duration.map(|seconds| (seconds, check))).collect::<Vec<_>>();
-    rows.push(heading("Timing", ""));
-    if let Some((longest, slowest)) = timed.iter().max_by_key(|(seconds, _)| *seconds) {
-        let total: u64 = timed.iter().map(|(seconds, _)| seconds).sum();
-        rows.push(
-            field("Slowest", column)
-                .push(&slowest.name, role(GitRole::Text))
-                .sep()
-                .push(&records::duration(*longest), role(GitRole::Modified))
-                .line(),
-        );
-        rows.push(
-            field("Compute", column)
-                .push(&records::duration(total), role(GitRole::Text))
-                .push(&format!(" across {} {noun}", timed.len()), role(GitRole::Muted))
-                .line(),
-        );
+    let tail = tail.clamp(1, cells - 2);
+    let head = cells - 1 - tail;
+    format!(
+        "{}…{}",
+        ellipsize(text, head + 1).trim_end_matches('…'),
+        ellipsize_start(text, tail + 1).trim_start_matches('…')
+    )
+}
+
+/// A name ending in `(param)` cut inside its parentheses, never across them, so no `)` is
+/// left without its `(` (r12 gitea-05): `Run integration tests with Docker (…-latest)`.
+fn paren_cut(text: &str, cells: usize) -> Option<String> {
+    use super::super::shell::chrome::{ellipsize, ellipsize_start};
+    use unicode_width::UnicodeWidthStr;
+    if text.width() <= cells || !text.ends_with(')') {
+        return None;
+    }
+    let open = text.rfind(" (")?;
+    let base = &text[..open];
+    let param = &text[open + 2..text.len() - 1];
+    let base_width = base.width();
+    if base.is_empty() || param.is_empty() {
+        return None;
+    }
+    if base_width + 6 <= cells {
+        let kept = ellipsize_start(param, cells - base_width - 3);
+        return Some(format!("{base} (…{})", kept.trim_start_matches('…')));
+    }
+    // Too long to keep the base whole (r13, 100 columns): cut the base at its end and keep
+    // the parameter's tail, which tells sibling jobs apart, still inside its own `( )`:
+    // `Run integration tests w… (…ker-stable)`.
+    let param_cells = (param.width() + 1).min(11);
+    let base_cells = cells.checked_sub(3 + param_cells).filter(|n| *n >= 6)?;
+    let kept = if param.width() + 1 <= param_cells {
+        param.to_owned()
     } else {
-        rows.push(field("Durations", column).push("not reported by the forge", role(GitRole::Muted)).line());
+        format!("…{}", ellipsize_start(param, param_cells).trim_start_matches('…'))
+    };
+    Some(format!("{} ({kept})", ellipsize(base, base_cells).trim_end()))
+}
+
+fn middle(text: &str, cells: usize) -> String {
+    paren_cut(text, cells).unwrap_or_else(|| middle_at(text, cells, cells.saturating_sub(1) / 3))
+}
+
+/// Names cut to `cells` that stay as distinct as they were (r9 R8-03): the cut slides along
+/// the name until no two different names read the same; failing that, each shows the part
+/// where it starts to differ from its neighbours.
+pub(super) fn distinct(names: &[&str], cells: usize) -> Vec<String> {
+    let unique = |shown: &[String]| {
+        (0..names.len()).all(|a| (a + 1..names.len()).all(|b| names[a] == names[b] || shown[a] != shown[b]))
+    };
+    // First the cut that keeps parentheses whole; the sliding cut only where that one
+    // would make two names read the same.
+    let whole = names.iter().map(|name| middle(name, cells)).collect::<Vec<_>>();
+    if unique(&whole) {
+        return whole;
     }
-    if running > 0 {
-        rows.push(
-            field("Running", column)
-                .push(&format!("{running} still going · R refreshes"), role(GitRole::Modified))
-                .line(),
-        );
+    let first = cells.saturating_sub(1) / 3;
+    let tails = (first..cells.saturating_sub(1)).chain((1..first).rev());
+    for tail in std::iter::once(first).chain(tails) {
+        let shown = names.iter().map(|name| middle_at(name, cells, tail)).collect::<Vec<_>>();
+        if unique(&shown) {
+            return shown;
+        }
     }
-    if record.checks.iter().any(|check| check.run.is_some()) {
-        rows.push(blank());
-        rows.push(muted(&format!("Enter on a {} opens its log in the run view", noun.trim_end_matches('s'))));
+    names
+        .iter()
+        .map(|name| {
+            let common = names
+                .iter()
+                .filter(|other| *other != name)
+                .map(|other| name.chars().zip(other.chars()).take_while(|(a, b)| a == b).count())
+                .max()
+                .unwrap_or(0);
+            let from = name.char_indices().nth(common.saturating_sub(cells / 3)).map_or(name.len(), |(at, _)| at);
+            if from == 0 {
+                middle(name, cells)
+            } else {
+                super::super::shell::chrome::ellipsize(&format!("…{}", &name[from..]), cells)
+            }
+        })
+        .collect()
+}
+
+/// A check's workflow and its own name: the forge's workflow, else the `workflow / ` that
+/// Gitea, Forgejo and GitHub's status contexts lead the name with.
+pub(super) fn check_parts(check: &records::CheckRow) -> (&str, &str) {
+    let name = check.name.as_str();
+    if !check.workflow.is_empty() {
+        let own = name.strip_prefix(check.workflow.as_str()).and_then(|rest| rest.strip_prefix(" / "));
+        return (check.workflow.as_str(), own.unwrap_or(name));
+    }
+    match name.split_once(" / ") {
+        Some((workflow, own)) if !workflow.is_empty() && !own.is_empty() => (workflow, own),
+        _ => ("", name),
     }
 }
 
-fn activity(
+/// The events CI runs on, as Gitea, Forgejo and GitHub status contexts end with them
+/// (`build (pull_request)`). A trailing `(docker-latest)` is a matrix value, not an event.
+const EVENTS: [&str; 14] = [
+    "pull_request",
+    "pull_request_target",
+    "pull_request_review",
+    "push",
+    "merge_group",
+    "workflow_dispatch",
+    "workflow_run",
+    "workflow_call",
+    "schedule",
+    "release",
+    "issue_comment",
+    "repository_dispatch",
+    "check_run",
+    "check_suite",
+];
+
+/// A check's own name and the event it ends with (r10 R9-03): the event goes in its
+/// group's heading, so the row keeps only the name.
+pub(super) fn split_event(own: &str) -> (&str, Option<&str>) {
+    if let Some(at) = own.rfind(" (").filter(|at| *at > 0 && own.ends_with(')')) {
+        let event = &own[at + 2..own.len() - 1];
+        if EVENTS.contains(&event) {
+            return (&own[..at], Some(event));
+        }
+    }
+    (own, None)
+}
+
+/// The key a folded group of skipped checks is opened under, in the reader's fold set.
+pub(super) fn skipped_key(workflow: &str, event: Option<&str>) -> String {
+    format!("\u{0}skipped\u{0}{workflow}\u{0}{}", event.unwrap_or(""))
+}
+
+/// The Checks tab (`checks.rs`): the job list beside the selected job's steps and log.
+fn checks(
     workspace: &Workspace,
     id: u64,
     record: &DetailRecord,
     rows: &mut Vec<Line>,
+    noun: &str,
     width: usize,
-    now: i64,
     mode: ExplorerIconMode,
 ) {
-    let opened = Rich::new()
-        .push(&format!("{} ", glyph(Glyph::Dot, mode)), role(GitRole::Added))
-        .push(&record.row.author, strong(GitRole::Author))
-        .plain(" ")
-        .push("opened this", role(GitRole::Muted));
-    let when = records::ago(&record.created, now);
-    rows.push(if when.is_empty() { opened.line() } else { opened.sep().push(&when, role(GitRole::Muted)).line() });
-    if !loading(workspace, &Key::Timeline(id), rows) {
-        for entry in timeline(workspace.value(&Key::Timeline(id)).expect("loaded"), record) {
-            rows.push(Rich::new().push("│", role(GitRole::Border)).line());
-            if let Some(row) = issue::event_row(workspace, &entry, now, mode) {
-                rows.push(row);
-            } else {
-                let start = rows.len();
-                conversation(rows, &entry, width.saturating_sub(2), now, mode);
-                for row in &mut rows[start + 1..] {
-                    row.gutter = format!("│ {}", row.gutter);
-                    row.gutter_style = role(GitRole::Border);
-                }
-            }
-        }
+    super::checks::rows(workspace, id, record, rows, noun, width, mode);
+}
+
+/// A check's state in the screen's own words: `failed`/`passed`, never the forge's raw
+/// `failure`/`success` (r11 GLCR-08), in the Checks list and the Merge tab alike.
+pub(super) fn state_word(word: &str) -> &str {
+    match word {
+        "success" => "passed",
+        "failure" => "failed",
+        "in progress" | "in_progress" | "queued" => "running",
+        word => word,
     }
-    rows.push(blank());
-    let threads = threads_state(workspace, id);
-    rows.push(heading(
-        "Review threads",
-        &match threads {
-            Some((0, 0)) => "none".to_owned(),
-            Some((0, total)) => format!("{total} resolved"),
-            Some((open, total)) => format!("{open} of {total} unresolved"),
-            None => String::new(),
-        },
-    ));
-    rows.push(blank());
-    super::files::thread_cards(workspace, id, rows, width, None);
 }
 
 fn merge(
@@ -818,31 +703,47 @@ fn merge(
         }
         rows.push(rich.line());
     };
-    rows.push(heading("Merge readiness", ""));
+    // The merge box ends the Conversation, as on GitHub: one card, its header the place `m`
+    // goes to.
+    let start = rows.len();
+    let mut header = Rich::new()
+        .push(&format!(" {} ", glyph(Glyph::PullRequest, mode)), role(GitRole::Muted))
+        .push(if record.row.lifecycle == Lifecycle::Merged { "Merged" } else { "Merge" }, strong(GitRole::Text))
+        .line();
+    header.band = Some(crate::ui::GitSurface::FileBand);
+    header.card = true;
+    header.merge_box = true;
+    rows.push(header);
+    let readiness = rows.len();
     rows.push(blank());
-    // Each gate that holds the merge back, with what clears it, for the card below.
-    let mut blockers: Vec<(String, String)> = Vec::new();
+    // Each gate that holds the merge back, with what clears it, for the card below, and the
+    // row its gate took above (r9 R8-07: a blocker is stated once, in the numbered list).
+    let mut blockers: Vec<(usize, String, String, Option<Action>)> = Vec::new();
     let base = if record.base.is_empty() { "the base branch" } else { record.base.as_str() };
     match record.row.lifecycle {
         Lifecycle::Merged => gate(rows, glyph(Glyph::PullMerged, mode), GitRole::Ref, "Merged", "nothing left to do"),
         Lifecycle::Closed | Lifecycle::ClosedNotPlanned => {
             gate(rows, fail, GitRole::Removed, "Closed", "reopen with X before merging");
-            blockers.push(("It is closed".into(), "X reopens it".into()));
+            blockers.push((rows.len() - 1, "It is closed".into(), "X reopens it".into(), None));
         }
         Lifecycle::Draft => {
             gate(rows, wait, GitRole::Muted, "Draft", "mark it ready for review first");
-            blockers.push(("It is a draft".into(), "mark it ready for review".into()));
+            blockers.push((rows.len() - 1, "It is a draft".into(), "mark it ready for review".into(), None));
         }
         Lifecycle::Open => {}
     }
     match record.mergeable.as_str() {
-        "MERGEABLE" => gate(rows, pass, GitRole::Added, "No conflicts", &format!("can merge into {base}")),
+        // A fact about conflicts only, never "can merge": other gates may still block it (r11).
+        "MERGEABLE" => gate(rows, pass, GitRole::Added, &format!("No conflicts with {base}"), ""),
         "CONFLICTING" => {
             gate(rows, fail, GitRole::Removed, "Conflicts", &format!("resolve conflicts with {base} first"));
-            blockers.push((format!("Conflicts with {base}"), format!("merge or rebase {base} into the branch")));
+            blockers.push((rows.len() - 1, format!("Conflicts with {base}"), format!("merge or rebase {base} into the branch"), None));
         }
-        _ => gate(rows, wait, GitRole::Muted, "Mergeability unknown", "the forge is still checking"),
+        // An unknown answer is not a gate: it would sit above `Merge unavailable` as a second
+        // headline (r11 GL-03). The chip below says the forge is still checking instead.
+        _ => {}
     }
+    let checking = !matches!(record.mergeable.as_str(), "MERGEABLE" | "CONFLICTING");
     let decision = item["reviewDecision"].as_str().unwrap_or("");
     let requested_changes = record
         .reviewers()
@@ -858,88 +759,150 @@ fn merge(
             } else {
                 format!("{} requested changes", requested_changes.join(", "))
             };
-            gate(rows, fail, GitRole::Modified, "Changes requested", &who);
-            blockers.push((
+            gate(rows, glyph(Glyph::ChangesRequested, mode), GitRole::Modified, "Changes requested", &who);
+            blockers.push((rows.len() - 1,
                 if who.is_empty() { "Changes were requested".into() } else { who },
                 "push fixes, then ask for another review".into(),
+                None,
             ));
         }
         "REVIEW_REQUIRED" => {
-            gate(rows, wait, GitRole::Modified, "Review required", "an approving review is needed");
-            blockers.push(("No approving review yet".into(), "request a reviewer from the Overview".into()));
+            // Asked already: the remedy is to wait on them, not to ask again (r11 prs-06).
+            let reviewers = record.reviewers();
+            let asked = reviewers
+                .iter()
+                .filter(|(_, state)| *state == ReviewState::Requested)
+                .map(|(login, _)| login.clone())
+                .collect::<Vec<_>>();
+            let approved = reviewers.iter().filter(|(_, state)| *state == ReviewState::Approved).count();
+            // An approval the timeline and sidebar show is counted, never denied (grade14
+            // GH-github-02): `1 of 2 approvals · waiting on sam`.
+            let what = match approved {
+                0 => "No approving review yet".to_owned(),
+                n if asked.is_empty() => format!("{n} approval{}, another is required", if n == 1 { "" } else { "s" }),
+                n => format!("{n} of {} approvals", n + asked.len()),
+            };
+            let detail = if approved == 0 { "an approving review is needed".to_owned() } else { what.clone() };
+            gate(rows, wait, GitRole::Modified, "Review required", &detail);
+            let fix = if asked.is_empty() {
+                "request a reviewer".to_owned()
+            } else {
+                format!("waiting on {}", asked.join(", "))
+            };
+            blockers.push((rows.len() - 1, what, fix, None));
         }
         _ => gate(rows, wait, GitRole::Muted, "No review decision", ""),
     }
     let counts = record.check_counts();
     let (_, ci, noun) = workspace.ci_words();
     match counts.state() {
-        Some(CiState::Passed) | Some(CiState::Skipped) => gate(rows, pass, GitRole::Added, &format!("{ci} passed"), &counts.summary()),
+        // `Checks passed`, not `Checks passed · 3 passed` (r11): only skips add a fact.
+        Some(CiState::Passed) | Some(CiState::Skipped) => {
+            let skipped = if counts.skipped > 0 { format!("{} skipped", counts.skipped) } else { String::new() };
+            gate(rows, pass, GitRole::Added, &format!("{ci} passed"), &skipped)
+        }
         Some(CiState::Failed) | Some(CiState::Cancelled) => {
             gate(rows, fail, GitRole::Removed, &format!("{ci} failed"), &counts.summary());
-            let failed = record
+            let failing = record
                 .checks
                 .iter()
                 .filter(|check| matches!(check.state, CiState::Failed | CiState::Cancelled))
-                .map(|check| check.name.as_str())
                 .collect::<Vec<_>>();
-            let named = match failed.as_slice() {
+            // The blocker is the one place a failing check is named; the Required table
+            // below leaves it out (r11 GL-02: never stated twice).
+            let required = failing.iter().any(|check| check.required);
+            let one = noun.strip_suffix('s').unwrap_or(noun);
+            let named = match failing.as_slice() {
                 [] => format!("{ci} failed"),
-                [one] => format!("{one} failed"),
-                [one, rest @ ..] => format!("{one} and {} more failed", rest.len()),
+                [check] if required => format!("Required {one} {} failed", check.name),
+                [check] => format!("{} failed", check.name),
+                [check, rest @ ..] => format!("{} and {} more failed", check.name, rest.len()),
             };
-            blockers.push((named, format!("open the {} tab for logs", workspace.ci_words().0)));
+            let (fix, action) = match failing.as_slice() {
+                [check] if check.run.is_some() => {
+                    (format!("Open logs {}", glyph(Glyph::Link, mode)), check.run.map(Action::Run))
+                }
+                _ => (format!("the {} tab has the logs", workspace.ci_words().0), None),
+            };
+            blockers.push((rows.len() - 1, named, fix, action));
         }
         Some(_) => {
             gate(rows, wait, GitRole::Modified, &format!("{ci} running"), &counts.summary());
-            blockers.push((format!("{ci} still running"), "wait, or R to refresh".into()));
+            blockers.push((rows.len() - 1, format!("{ci} still running"), "wait, or R to refresh".into(), None));
         }
-        None => gate(rows, wait, GitRole::Muted, &format!("No {noun} reported"), ""),
+        None => gate(rows, wait, GitRole::Muted, &super::checks::no_checks(record), ""),
     }
     let threads = threads_state(workspace, id);
     match threads {
         Some((0, _)) => gate(rows, pass, GitRole::Added, "Conversations resolved", ""),
         Some((open, _)) => {
             let what = format!("{open} unresolved conversation{}", if open == 1 { "" } else { "s" });
-            gate(rows, "○", GitRole::Modified, &what, "resolve them in Activity");
-            blockers.push((what, "resolve them in Activity".into()));
+            // Where the first one is, as data (`orbit/queue.py:14 · alex`); `n` is the
+            // footer's key, not a blocker's line (R16 prs-05).
+            let first = workspace
+                .value(&Key::Threads(id))
+                .map(records::threads)
+                .unwrap_or_default()
+                .into_iter()
+                .find(|thread| thread.resolved == Some(false));
+            let place = first.map_or_else(
+                || format!("on the {} tab", "Files changed"),
+                |thread| {
+                    let at = thread.line.map_or_else(|| thread.path.clone(), |line| format!("{}:{line}", thread.path));
+                    match thread.comments.first() {
+                        Some(comment) if !comment.author.is_empty() => format!("{at} · {}", comment.author),
+                        _ => at,
+                    }
+                },
+            );
+            let place = if open > 1 { format!("first at {place}") } else { place };
+            gate(rows, "◔", GitRole::Modified, &what, &place);
+            blockers.push((rows.len() - 1, what, place, None));
         }
         None => gate(rows, wait, GitRole::Muted, "Conversations loading", ""),
     }
+    // Every required check, failing ones included, from the same checks the blockers read
+    // (r12 gitlab-01: a list of the passing ones read as "all required passed").
     let required = record.checks.iter().filter(|check| check.required).collect::<Vec<_>>();
     if !required.is_empty() {
         rows.push(blank());
         rows.push(heading(&format!("Required {noun}"), ""));
+        // Names in one column, so each state sits under the last (no stray double space).
+        let column = required.iter().map(|check| unicode_width::UnicodeWidthStr::width(check.name.as_str())).max().unwrap_or(0) + 2;
         for check in required {
             let (mark, _, tone) = ci_mark(check.state, mode);
-            let mut row = Rich::new()
+            let row = Rich::new()
                 .plain("  ")
                 .push(&format!("{mark} "), role(tone))
                 .push(&check.name, role(GitRole::Text))
-                .plain("  ")
-                .push(&check.word, role(tone));
-            let mut action = None;
-            if let Some(run) = check.run {
-                row = row.plain("  ").push(&format!("Open logs {}", glyph(Glyph::Link, mode)), role(GitRole::Link));
-                action = Some(Action::Run(run));
-            }
+                .to_column(column + 4)
+                .push(state_word(&check.word), role(tone));
+            // Enter opens the run, as on the Checks tab; the footer names the key.
             let mut row = row.line();
-            row.action = action;
+            row.action = check.run.map(Action::Run);
             rows.push(row);
         }
     }
-    rows.push(blank());
     let ready = record.row.lifecycle == Lifecycle::Open
         && record.merge_state == "CLEAN"
         && !matches!(decision, "CHANGES_REQUESTED" | "REVIEW_REQUIRED")
         && threads.is_some_and(|(open, _)| open == 0);
+    if !ready {
+        for (at, ..) in blockers.iter().rev() {
+            rows.remove(*at);
+        }
+        // With every gate moved to the list below, the heading keeps one blank, not two
+        // (r12: GitLab's Merge tab opened on an empty double gap).
+        while rows.get(readiness).is_some_and(|row| row.text.is_empty())
+            && rows.get(readiness + 1).is_some_and(|row| row.text.is_empty())
+        {
+            rows.remove(readiness);
+        }
+    }
+    rows.push(blank());
     if ready {
         let mut row = Rich::new()
-            .chip("Enter Merge", strong(GitRole::OnFocus))
-            .plain("  ")
-            .push(
-                &format!("pinned to {}", record.head_sha.chars().take(7).collect::<String>()),
-                role(GitRole::Muted),
-            )
+            .chip("Merge pull request", strong(GitRole::OnFocus))
             .line();
         if let Some((range, style)) = row.paint.first_mut() {
             let _ = range;
@@ -952,20 +915,14 @@ fn merge(
         row.action = Some(Action::Merge(id, record.head_sha.clone()));
         rows.push(row);
     } else {
-        rows.push(
-            Rich::new()
-                .chip("Merge unavailable", role(GitRole::Muted))
-                .plain("  ")
-                .push(
-                    &match blockers.len() {
-                        0 => "the forge has not cleared it yet".to_owned(),
-                        1 => "1 gate blocks it".to_owned(),
-                        n => format!("{n} gates block it"),
-                    },
-                    role(GitRole::Muted),
-                )
-                .line(),
-        );
+        let mut row = Rich::new().chip("Merging is blocked", role(GitRole::Muted));
+        if blockers.is_empty() {
+            row = row.plain("  ").push(
+                if checking { "checking for conflicts…" } else { "not ready yet" },
+                role(GitRole::Muted),
+            );
+        }
+        rows.push(row.line());
         if let Some((range, style)) = rows.last_mut().and_then(|row| row.paint.first_mut()) {
             let _ = range;
             *style = crate::ui::Style::Git {
@@ -976,15 +933,17 @@ fn merge(
         }
         if !blockers.is_empty() {
             rows.push(blank());
-            rows.push(heading("What blocks it", ""));
-            for (index, (what, fix)) in blockers.iter().enumerate() {
+            for (index, (_, what, fix, action)) in blockers.iter().enumerate() {
                 rows.push(
                     Rich::new()
                         .push(&format!("  {}. ", index + 1), role(GitRole::Muted))
                         .push(what, strong(GitRole::Text))
                         .line(),
                 );
-                rows.push(Rich::new().plain("     ").push(&format!("→ {fix}"), role(GitRole::Muted)).line());
+                let tone = if action.is_some() { GitRole::Link } else { GitRole::Muted };
+                let mut row = Rich::new().plain("     ").push(&format!("→ {fix}"), role(tone)).line();
+                row.action = action.clone();
+                rows.push(row);
             }
         }
     }
@@ -992,34 +951,142 @@ fn merge(
     rows.push(blank());
     rows.push(heading("On merge", ""));
     let column = 12;
-    if !record.head.is_empty() {
-        rows.push(
-            field("Lands", column)
-                .push(&record.head, role(GitRole::Ref))
-                .push(" → ", role(GitRole::Muted))
-                .push(base, role(GitRole::Ref))
-                .line(),
-        );
+    // GitHub's method selector: Enter takes the next method this forge allows; nothing is
+    // written until the merge is confirmed in its sheet (grade14 GH-*-04).
+    let methods = workspace.merge_methods();
+    if record.row.lifecycle == Lifecycle::Open && !workspace.read_only() && !methods.is_empty() {
+        let mut row = field("Method", column)
+            .push(merge_method_words(workspace.merge_method()), role(GitRole::Text));
+        if methods.len() > 1 {
+            row = row.push(" ▾", role(GitRole::Muted));
+        }
+        let mut row = row.line();
+        row.action = (methods.len() > 1).then_some(Action::MergeMethod(id));
+        rows.push(row);
     }
+    // The branches are in the header (`main ← fix/backoff`); no `Lands` row repeats them
+    // (r11).
     let commits = record.commits.len();
     if commits > 0 {
         let mut row = field("Brings", column)
             .push(&format!("{commits} commit{}", if commits == 1 { "" } else { "s" }), role(GitRole::Text));
         if let (Some(add), Some(del)) = (record.row.additions, record.row.deletions) {
-            row = row
-                .sep()
-                .push(&format!("+{add}"), role(GitRole::Added))
-                .plain(" ")
-                .push(&format!("−{del}"), role(GitRole::Removed));
+            if add + del > 0 {
+                row = row.sep().diffstat(add, del);
+            }
         }
         rows.push(row.line());
     }
-    if !record.head_sha.is_empty() {
-        rows.push(
-            field("Pinned to", column)
-                .push(&record.head_sha.chars().take(7).collect::<String>(), role(GitRole::Hash))
-                .push(" · a newer push cancels the merge", role(GitRole::Muted))
-                .line(),
+    // The box's rows sit inside its card; its controls are stops for `j`/`k`.
+    for row in &mut rows[start + 1..] {
+        super::conversation::indent(row, "  ");
+        row.card = row.action.is_some();
+    }
+}
+
+/// GitHub's words for a merge method.
+fn merge_method_words(method: &str) -> &'static str {
+    match method {
+        "Merge" => "Create a merge commit",
+        "Rebase" => "Rebase and merge",
+        _ => "Squash and merge",
+    }
+}
+
+impl Workspace {
+    /// The merge methods this forge allows, as the merge sheet names them.
+    pub(super) fn merge_methods(&self) -> Vec<&'static str> {
+        use crate::forge::model::MergeMethod;
+        self.capabilities()
+            .merge_methods
+            .iter()
+            .filter_map(|method| match method {
+                MergeMethod::Squash => Some("Squash"),
+                MergeMethod::Merge => Some("Merge"),
+                MergeMethod::Rebase => Some("Rebase"),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The method a merge would use: the one chosen in the merge box, else squash where the
+    /// forge allows it, else its first.
+    pub(super) fn merge_method(&self) -> &'static str {
+        let methods = self.merge_methods();
+        self.merge_method
+            .filter(|chosen| methods.contains(chosen))
+            .or_else(|| methods.contains(&"Squash").then_some("Squash"))
+            .or_else(|| methods.first().copied())
+            .unwrap_or("Merge")
+    }
+
+    /// The merge box's `Method` row: the next allowed method, round to the first.
+    pub(super) fn cycle_merge_method(&mut self) {
+        let methods = self.merge_methods();
+        let current = self.merge_method();
+        let at = methods.iter().position(|method| *method == current).map_or(0, |at| (at + 1) % methods.len().max(1));
+        self.merge_method = methods.get(at).copied();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// r9 R8-03: no two check rows read the same when their names differ, at any width.
+    #[test]
+    fn check_names_stay_distinguishable_when_cut() {
+        let contexts = [
+            "checks / Build Forgejo Runner (pull_request)",
+            "checks / Build unsupported platforms (pull_request)",
+            "checks / orbit compatibility (orbit/orbit:latest) (pull_request)",
+            "checks / orbit compatibility (orbit/orbit:main-nightly) (pull_request)",
+            "checks / Run exec tests with Docker (docker-latest) (pull_request)",
+            "checks / Run integration tests with Docker (docker-latest) (pull_request)",
+            "checks / Run integration tests with Docker (docker-stable) (pull_request)",
+            "checks / Run integration tests with Podman (pull_request)",
+            "checks / validate pre-commit-hooks file (pull_request)",
+        ];
+        let checks = contexts
+            .iter()
+            .map(|name| records::CheckRow {
+                name: (*name).into(),
+                workflow: String::new(),
+                state: CiState::Passed,
+                word: "success".into(),
+                duration: None,
+                run: None,
+                job: None,
+                url: String::new(),
+                required: false,
+            })
+            .collect::<Vec<_>>();
+        let parts = checks.iter().map(check_parts).collect::<Vec<_>>();
+        assert!(parts.iter().all(|(workflow, _)| *workflow == "checks"), "{parts:?}");
+        let split = parts.iter().map(|(_, own)| split_event(own)).collect::<Vec<_>>();
+        assert!(split.iter().all(|(_, event)| *event == Some("pull_request")), "{split:?}");
+        assert_eq!(split_event("Run tests (docker-latest)"), ("Run tests (docker-latest)", None));
+        let own = split.iter().map(|(own, _)| *own).collect::<Vec<_>>();
+        for names in [own.clone(), contexts.to_vec()] {
+            for cells in 12..=60 {
+                let shown = distinct(&names, cells);
+                for (a, left) in shown.iter().enumerate() {
+                    assert!(unicode_width::UnicodeWidthStr::width(left.as_str()) <= cells, "{cells}: {left}");
+                    for (b, right) in shown.iter().enumerate().skip(a + 1) {
+                        assert!(names[a] == names[b] || left != right, "{cells}: {} and {} both read {left}", names[a], names[b]);
+                    }
+                }
+            }
+        }
+        // r13 gitea-05: a cut never leaves a `)` without its `(`, the base cut too when needed.
+        for cells in 20..=60 {
+            for shown in distinct(&own, cells) {
+                assert_eq!(shown.matches('(').count(), shown.matches(')').count(), "{cells}: {shown}");
+            }
+        }
+        assert_eq!(
+            middle("Run integration tests with Docker (docker-stable)", 38),
+            "Run integration tests w… (…ker-stable)"
         );
     }
 }

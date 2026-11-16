@@ -1152,7 +1152,15 @@ mod tests {
         plugins.activate_indexed("demo", load, checksum).unwrap();
         let event = next_event(&mut plugins);
         assert!(matches!(event, PluginEvent::Loaded { .. }), "{event:?}");
-        assert_eq!(other.gc(256).unwrap(), 1);
+        // Cleanup skips an object whose lock is still briefly held (a process spawned
+        // elsewhere in the suite can inherit the descriptor until it execs): retry, bounded.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut removed = other.gc(256).unwrap();
+        while object.exists() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(2));
+            removed += other.gc(256).unwrap();
+        }
+        assert_eq!(removed, 1);
         assert!(!object.exists());
     }
 

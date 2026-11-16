@@ -13,9 +13,10 @@ pub(super) fn step_lines<'a>(raw: &'a str, step: &Value) -> (Vec<&'a str>, bool)
             exact.push(text);
         } else if name == "UNKNOWN STEP" || name.is_empty() {
             let stamp = text.trim_start_matches('\u{feff}').get(..19);
-            if let (Some(stamp), Some(start), Some(end)) = (stamp, start, end)
+            // A step still running has no end yet: its lines run to the log's end.
+            if let (Some(stamp), Some(start)) = (stamp, start)
                 && stamp >= start
-                && stamp <= end
+                && end.is_none_or(|end| stamp <= end)
             {
                 by_time.push(text);
             }
@@ -49,7 +50,7 @@ pub(super) fn line_kind(line: &str) -> LineKind {
     }
 }
 
-fn payload(line: &str) -> &str {
+pub(super) fn payload(line: &str) -> &str {
     let line = line.trim_start_matches('\u{feff}');
     line.split_once(' ')
         .filter(|(stamp, _)| {

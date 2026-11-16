@@ -17,11 +17,11 @@ use std::time::Instant;
 
 use thiserror::Error;
 
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, serde::Serialize, serde::Deserialize)]
 pub struct GitStatusRequestId(pub u64);
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, serde::Serialize, serde::Deserialize)]
 pub struct GitRepositoryId(pub u64);
-#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, serde::Serialize, serde::Deserialize)]
 pub enum GitFileStatus {
     Untracked,
     Added,
@@ -44,7 +44,7 @@ pub enum GitChangeSource {
 }
 /// Which sources currently differ for one path. A false bit is not a claim that the source
 /// matches; it means the reader attributed no change to it.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd, serde::Serialize, serde::Deserialize)]
 pub struct GitChangeSources {
     pub staged: bool,
     pub unstaged: bool,
@@ -163,7 +163,7 @@ pub fn validate_unsaved_documents(
     }
     Ok(())
 }
-#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, serde::Serialize, serde::Deserialize)]
 pub struct GitStatusEntry {
     pub relative_path: PathBuf,
     /// Repository-relative source of a rename, including sources outside a nested scope.
@@ -199,7 +199,7 @@ impl GitStatusEntry {
         )
     }
 }
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct GitStatusSnapshot {
     pub request_id: GitStatusRequestId,
     pub root_revision: u64,
@@ -520,7 +520,10 @@ pub(super) fn status_command(
         .start(JobRequest {
             program,
             argv0: None,
-            arguments: ["-c", "core.fsmonitor=false", "-c", "color.ui=false"]
+            // The user's `core.fsmonitor` stays on: on a big worktree it spares `git diff` an
+            // lstat of every file. `diff.autoRefreshIndex` stays on too: without it a file
+            // whose stat data alone changed would list as modified.
+            arguments: ["-c", "color.ui=false"]
                 .into_iter()
                 .chain(arguments.iter().copied())
                 .map(Into::into)
@@ -738,9 +741,25 @@ pub(super) fn read_status(
             GitChangeSource::Unstaged,
         ),
     ];
+    // The three run at once (each walks the index or the worktree; none writes it): on a big
+    // repository the snapshot waits for the slowest instead of the sum.
+    let outputs = thread::scope(|scope| {
+        let workdir = workdir.as_path();
+        let running = commands
+            .iter()
+            .map(|(arguments, _)| {
+                let arguments = arguments.as_slice();
+                scope.spawn(move || status_command(workdir, arguments, p, started, cancel))
+            })
+            .collect::<Vec<_>>();
+        running
+            .into_iter()
+            .map(|command| command.join().unwrap_or_else(|_| Err(GitStatusError::Stopped)))
+            .collect::<Vec<_>>()
+    });
     let mut output_truncated = false;
-    for (arguments, source) in commands {
-        let (output, clipped) = status_command(&workdir, &arguments, p, started, cancel)?;
+    for ((arguments, source), output) in commands.into_iter().zip(outputs) {
+        let (output, clipped) = output?;
         output_truncated |= clipped;
         // The final split item is incomplete when output was bounded; never use it as a path.
         let mut fields = output
@@ -841,6 +860,50 @@ mod tests {
             maximum_path_bytes: 4096,
             deadline: Duration::from_secs(2),
         }
+    }
+
+    /// A user's fsmonitor hook is consulted (the status gets its speed-up), and a file whose
+    /// stat data alone changed is not listed.
+    #[test]
+    fn status_honours_the_users_fsmonitor() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let git = |arguments: &[&str]| {
+            let output = std::process::Command::new("git")
+                .current_dir(root)
+                .args(arguments)
+                .env("GIT_CONFIG_NOSYSTEM", "1")
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "git {arguments:?}: {}", String::from_utf8_lossy(&output.stderr));
+        };
+        git(&["init", "-q", "--template="]);
+        git(&["config", "user.name", "Status"]);
+        git(&["config", "user.email", "status@example.invalid"]);
+        git(&["config", "commit.gpgsign", "false"]);
+        // A protocol-2 hook that reports every path as possibly changed, and leaves a mark.
+        let outside = tempfile::tempdir().unwrap();
+        let hook = outside.path().join("fsmonitor-hook");
+        let marker = outside.path().join("hook-ran");
+        std::fs::write(&hook, format!("#!/bin/sh\ntouch '{}'\nprintf 'token\\0/\\0'\n", marker.display())).unwrap();
+        std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+        git(&["config", "core.fsmonitor", hook.to_str().unwrap()]);
+        // The index the user's own git wrote carries the fsmonitor token.
+        std::fs::write(root.join("tracked.txt"), "one\n").unwrap();
+        std::fs::write(root.join("edited.txt"), "one\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "-q", "-m", "fixture"]);
+        let _ = std::fs::remove_file(&marker);
+        // Stat-dirty but content-clean, and one real edit.
+        let file = root.join("tracked.txt");
+        let modified = std::fs::metadata(&file).unwrap().modified().unwrap() + Duration::from_secs(60);
+        std::fs::File::options().write(true).open(&file).unwrap().set_modified(modified).unwrap();
+        std::fs::write(root.join("edited.txt"), "two\n").unwrap();
+        let snapshot = read_status(GitStatusRequestId(1), &policy(root), &[], &AtomicBool::new(false)).unwrap();
+        let paths = snapshot.entries.iter().map(|entry| entry.relative_path.clone()).collect::<Vec<_>>();
+        assert_eq!(paths, [PathBuf::from("edited.txt")]);
+        assert!(marker.exists(), "the user's fsmonitor hook was not consulted");
     }
 
     #[test]

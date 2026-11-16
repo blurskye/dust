@@ -149,7 +149,23 @@ pub fn fetch_through(
         }
         None => (conditional, None),
     };
+    // GitLab numbers issues and merge requests apart and `Read::Timeline` names only the
+    // number: after a restart the kind comes from the disk, not a guess.
+    let gitlab = provider.kind() == crate::forge::provider::ProviderKind::GitLab;
+    if gitlab
+        && let (Read::Timeline(number), Some(cache)) = (read, &cache)
+    {
+        crate::forge::provider::gitlab::restore_kind(ctx, cache, *number);
+    }
+    let started = cache::now_ms();
     let result = crate::forge::inflight::read(provider, ctx, read, &conditional, cancel);
+    if gitlab
+        && result.is_ok()
+        && let (Read::Issue(number) | Read::PullRequest(number) | Read::Fingerprint(number), Some(cache)) =
+            (read, &cache)
+    {
+        crate::forge::provider::gitlab::keep_kind(ctx, cache, *number);
+    }
     let result = match (result, base) {
         (Ok(fetched), Some(base)) => Ok(crate::forge::incremental::merge(read, base, fetched)),
         (result, _) => result,
@@ -161,22 +177,24 @@ pub fn fetch_through(
                 etag,
                 fingerprint,
             } => {
-                cache.store(
+                cache.store_since(
                     &key,
                     value,
                     budget(ctx, read, value),
                     etag.clone(),
                     fingerprint.clone(),
+                    started,
                 );
                 // A batch also fills each item's own entry, so opening one of them after a
                 // prefetch is a cache hit.
                 for (read, value, fingerprint) in cache::items_of(value) {
-                    cache.store(
+                    cache.store_since(
                         &cache::CacheKey::new(ctx.host(), ctx.repo.as_ref(), &read),
                         &value,
                         budget(ctx, &read, &value),
                         None,
                         fingerprint,
+                        started,
                     );
                 }
             }
@@ -184,6 +202,22 @@ pub fn fetch_through(
                 cache.touch(&key);
             }
         }
+        let missing = key.missing();
+        if missing.file(cache.root()).exists() {
+            cache.remove(&missing);
+        }
+    }
+    // A durable "not found" (an expired log, a deleted run, an endpoint this forge lacks) is
+    // remembered too, so a restart paints it from the cache like any answer (§7.2).
+    if let (Err(error @ ForgeError::NotFound(_)), Some(cache)) = (&result, &cache) {
+        cache.store_since(
+            &key.missing(),
+            error.to_string(),
+            cache::MISSING_TTL,
+            None,
+            None,
+            started,
+        );
     }
     result
 }
@@ -286,8 +320,8 @@ pub(crate) fn write_through(
         }
     }
     written.map_err(|error| match error {
-        error if pushed => {
-            ForgeError::Failed(format!("Branch pushed, but PR creation failed: {error}"))
+        _ if pushed => {
+            ForgeError::Failed("Branch pushed, but the pull request wasn't created".into())
         }
         error => error,
     })
@@ -334,9 +368,32 @@ impl ForgeJobs {
         conditional: Conditional,
     ) -> Result<(), String> {
         let background = self.warming();
+        self.fetch_as(root, request_id, target, read, conditional, background, None)
+    }
+
+    /// `fetch`, as background work when nobody waits for the answer (a cached entry being
+    /// checked): its requests then yield to the ones somebody does wait for. `kind` is what
+    /// the asker knows the numbered item is (GitLab numbers issues and merge requests apart,
+    /// and `Read::Timeline` names only the number).
+    #[allow(clippy::too_many_arguments)]
+    pub fn fetch_as(
+        &mut self,
+        root: PathBuf,
+        request_id: u64,
+        target: ForgeTarget,
+        read: Read,
+        conditional: Conditional,
+        background: bool,
+        kind: Option<crate::forge::model::ItemKind>,
+    ) -> Result<(), String> {
         self.spawn(root, request_id, move |root, commands| {
             let result = connect(root, &target, commands.cancelled).and_then(|(provider, ctx)| {
                 ctx.set_background(background);
+                if let (Some(kind), Read::Timeline(number)) = (kind, &read)
+                    && provider.kind() == crate::forge::provider::ProviderKind::GitLab
+                {
+                    crate::forge::provider::gitlab::note_kind(&ctx, *number, kind);
+                }
                 fetch_through(
                     provider.as_ref(),
                     &ctx,

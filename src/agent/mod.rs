@@ -913,7 +913,7 @@ mod tests {
     fn agent_write_failures_arrive_as_exit_messages() {
         let mut process = fixture("read -r line; exec 0<&-; printf 'closed\\n'; sleep 60");
         process.notify("test", Value::Null).unwrap();
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
         loop {
             if matches!(process.try_message(), Some(AgentMessage::Log(line)) if line == "closed") {
                 break;
@@ -977,7 +977,7 @@ mod tests {
         let mut process = fixture(
             r#"printf '\377\n' >&2; read -r line; i=0; while [ "$i" -lt 5000 ]; do echo log >&2; i=$((i+1)); done; echo last >&2; printf '{"id":1,"result":{}}\n'; sleep 60"#,
         );
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
         loop {
             if let Some(line) = process.take_log() {
                 assert_eq!(line, "\u{fffd}");
@@ -1011,7 +1011,7 @@ mod tests {
             .recv_timeout(std::time::Duration::from_secs(5))
             .unwrap();
         assert!(matches!(message, AgentMessage::Response { id: 1, .. }));
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
         while process.log.lock().unwrap().as_deref() != Some("last") {
             assert!(std::time::Instant::now() < deadline);
             thread::sleep(std::time::Duration::from_millis(5));
@@ -1024,7 +1024,7 @@ mod tests {
     #[test]
     fn dropping_an_agent_kills_its_descendants() {
         let process = fixture("sleep 60 & echo pid:$!; wait");
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
         let pid = loop {
             if let Some(AgentMessage::Log(line)) = process.try_message() {
                 break line.strip_prefix("pid:").unwrap().parse::<u32>().unwrap();

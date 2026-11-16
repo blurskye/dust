@@ -101,10 +101,8 @@ pub(super) fn validate_filter(page: usize, query: &str, state: &str) -> Result<(
     }
     Ok(())
 }
-fn config_error(error: impl std::fmt::Display) -> String {
-    format!(
-        "Saved views: {error} — inspect/repair local Git config {CONFIG_KEY}; no preferences overwritten"
-    )
+fn config_error(_error: impl std::fmt::Display) -> String {
+    "Couldn't read saved views · your saved views are unchanged".into()
 }
 fn local_config(root: &Path) -> Result<git2::Config, String> {
     let repository = git2::Repository::open(root).map_err(config_error)?;
@@ -114,18 +112,18 @@ fn local_config(root: &Path) -> Result<git2::Config, String> {
         .open_level(git2::ConfigLevel::Local)
         .map_err(config_error)
 }
-/// §3.29: the Files tab's Unified/Split choice, kept beside the saved views in this
-/// repository's local Git config so the next session opens the same way.
-const SPLIT_KEY: &str = "dusty-git.forgeSplitDiff";
-pub(super) fn split_preference(root: &Path) -> bool {
+/// `toggle_sidebar` (`keymap.rs`): the forge screens' left column hidden, kept beside the
+/// saved views in this repository's local Git config so the next session opens the same way.
+const LIST_HIDDEN_KEY: &str = "dusty-git.hideList";
+pub(super) fn list_hidden_preference(root: &Path) -> bool {
     local_config(root)
         .ok()
-        .and_then(|config| config.get_bool(SPLIT_KEY).ok())
+        .and_then(|config| config.get_bool(LIST_HIDDEN_KEY).ok())
         .unwrap_or(false)
 }
-pub(super) fn set_split_preference(root: &Path, split: bool) {
+pub(super) fn set_list_hidden_preference(root: &Path, hidden: bool) {
     if let Ok(mut config) = local_config(root) {
-        let _ = config.set_bool(SPLIT_KEY, split);
+        let _ = config.set_bool(LIST_HIDDEN_KEY, hidden);
     }
 }
 fn parse(text: &str) -> Result<Vec<SavedView>, String> {
@@ -234,7 +232,7 @@ impl Workspace {
     fn check_view_scope(&self, scope: &Scope) -> Result<(), String> {
         if &self.view_scope()? != scope {
             return Err(
-                "The saved-view repository/page changed; reopen the view form (draft preserved)"
+                "This view changed · reopen the form · your draft is kept"
                     .into(),
             );
         }
@@ -507,7 +505,7 @@ mod tests {
         assert!(
             store(owner.path(), &scopes[0], &view.name, Some(view.clone()))
                 .unwrap_err()
-                .contains("inspect/repair")
+                .contains("Couldn't read saved views · your saved views are unchanged")
         );
         assert_eq!(local.get_string(CONFIG_KEY).unwrap(), "not valid JSON");
     }
@@ -640,7 +638,7 @@ mod tests {
         assert!(
             store(owner.path(), &scope, &view.name, None)
                 .unwrap_err()
-                .contains("inspect/repair")
+                .contains("Couldn't read saved views · your saved views are unchanged")
         );
         assert_eq!(
             std::fs::read(repo.commondir().join("config")).unwrap(),
@@ -654,7 +652,7 @@ mod tests {
         assert!(
             load(owner.path())
                 .unwrap_err()
-                .contains("multiple saved-view lists")
+                .contains("Couldn't read saved views · your saved views are unchanged")
         );
         let before = std::fs::read(repo.commondir().join("config")).unwrap();
         assert!(store(owner.path(), &scope, &view.name, Some(view.clone())).is_err());
@@ -665,7 +663,7 @@ mod tests {
         // A value which libgit2 cannot decode is not equivalent to a missing key.
         let unreadable = b"[dusty-git]\n\tgithubViews = \"\xff\"\n";
         std::fs::write(repo.commondir().join("config"), unreadable).unwrap();
-        assert!(load(owner.path()).unwrap_err().contains("inspect/repair"));
+        assert!(load(owner.path()).unwrap_err().contains("Couldn't read saved views · your saved views are unchanged"));
         assert!(store(owner.path(), &scope, &view.name, Some(view.clone())).is_err());
         assert_eq!(
             std::fs::read(repo.commondir().join("config")).unwrap(),
@@ -686,7 +684,7 @@ mod tests {
         let view =
             SavedView::new(&scope, "With spaces 日本語", "label:\"help wanted\"", "all").unwrap();
         let text = serde_json::to_string(&vec![view.clone(), view]).unwrap();
-        assert!(parse(&text).unwrap_err().contains("duplicate"));
+        assert!(parse(&text).unwrap_err().contains("Couldn't read saved views · your saved views are unchanged"));
         for text in ["null", "{}", "[] broken", "[{\"name\":\"incomplete\"}]"] {
             assert!(parse(text).is_err());
         }

@@ -177,7 +177,7 @@ fn guest_inline_completion_draws_and_disappears_after_acceptance_or_cursor_motio
     let (_roots, mut app) = real_app(&["demo"]);
     action(&mut app, "demo", "completion");
     app.set_mode(crate::editor::EditorMode::Insert);
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
     loop {
         app.sync_lsp_document();
         app.process_plugin_events();

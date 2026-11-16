@@ -80,8 +80,8 @@ struct Table {
     alignments: Vec<Alignment>,
 }
 
-#[derive(Clone, Copy, PartialEq)]
-enum Alignment {
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum Alignment {
     Default,
     Left,
     Center,
@@ -449,51 +449,15 @@ impl<'a> MarkdownMarks<'a> {
         right: usize,
         aligned: bool,
     ) -> String {
-        let line = self.part(10);
-        let indicator = self.glyphs.table_alignment.as_str();
-        let mut border = self.part(left).to_owned();
-        border
-            .push_str(&" ".repeat(table.borders[0] - text_width(self.part(left), self.ambiguous)));
-        for (column, width) in table.widths.iter().enumerate() {
-            if column > 0 {
-                border.push_str(self.part(cross));
-                border.push_str(
-                    &" ".repeat(table.borders[1] - text_width(self.part(cross), self.ambiguous)),
-                );
-            }
-            let alignment = if aligned {
-                table.alignments[column]
-            } else {
-                Alignment::Default
-            };
-            let (start, end) = match alignment {
-                Alignment::Default => (false, false),
-                Alignment::Left => (true, false),
-                Alignment::Center => (true, true),
-                Alignment::Right => (false, true),
-            };
-            let indicator_width = text_width(indicator, self.ambiguous);
-            let indicators = usize::from(start) + usize::from(end);
-            let room = width + 2;
-            let aligned = indicator_width * indicators <= room;
-            if start && aligned {
-                border.push_str(indicator);
-            }
-            let fill = room
-                - if aligned {
-                    indicator_width * indicators
-                } else {
-                    0
-                };
-            border.push_str(&table_fill(line, fill, self.ambiguous));
-            if end && aligned {
-                border.push_str(indicator);
-            }
-        }
-        border.push_str(self.part(right));
-        border
-            .push_str(&" ".repeat(table.borders[2] - text_width(self.part(right), self.ambiguous)));
-        border
+        table_border(
+            self.glyphs,
+            self.ambiguous,
+            &table.widths,
+            table.borders,
+            &table.alignments,
+            [left, cross, right],
+            aligned,
+        )
     }
 
     fn part(&self, index: usize) -> &str {
@@ -522,24 +486,30 @@ impl<'a> MarkdownMarks<'a> {
 
     /// A fence's language icon, found as the explorer finds a file's.
     fn language_icon(&self, range: ByteRange) -> Option<(&'static str, ExplorerIconColor)> {
-        let name = self.text.slice(range).ok()?.to_ascii_lowercase();
-        let extension = match name.as_str() {
-            "rust" => "rs",
-            "python" => "py",
-            "javascript" | "node" => "js",
-            "typescript" => "ts",
-            "bash" | "shell" | "zsh" | "console" => "sh",
-            "golang" => "go",
-            "ruby" => "rb",
-            "c++" => "cpp",
-            "markdown" => "md",
-            "kotlin" => "kt",
-            "haskell" => "hs",
-            "elixir" => "ex",
-            other => other,
-        };
-        crate::files::file_icon(&format!("x.{extension}")).map(|icon| (icon.glyph, icon.color))
+        fence_icon(&self.text.slice(range).ok()?)
     }
+}
+
+/// A code fence's language icon (` ```sh `), found as the explorer finds a file's; shared
+/// with the forge reader, which draws fenced code as the editor does.
+pub(crate) fn fence_icon(language: &str) -> Option<(&'static str, ExplorerIconColor)> {
+    let name = language.to_ascii_lowercase();
+    let extension = match name.as_str() {
+        "rust" => "rs",
+        "python" => "py",
+        "javascript" | "node" => "js",
+        "typescript" => "ts",
+        "bash" | "shell" | "zsh" | "console" => "sh",
+        "golang" => "go",
+        "ruby" => "rb",
+        "c++" => "cpp",
+        "markdown" => "md",
+        "kotlin" => "kt",
+        "haskell" => "hs",
+        "elixir" => "ex",
+        other => other,
+    };
+    crate::files::file_icon(&format!("x.{extension}")).map(|icon| (icon.glyph, icon.color))
 }
 
 /// The icon of the longest configured address part the link's address contains.
@@ -560,7 +530,7 @@ fn link_icon<'a>(
 }
 
 /// The syntax group an explorer icon colour is drawn with, so it follows the theme.
-fn icon_group(color: ExplorerIconColor) -> Highlight {
+pub(crate) fn icon_group(color: ExplorerIconColor) -> Highlight {
     match color {
         ExplorerIconColor::Azure | ExplorerIconColor::Blue => Highlight::FUNCTION,
         ExplorerIconColor::Cyan => Highlight::PROPERTY,
@@ -727,18 +697,7 @@ impl Table {
             .get(1)
             .into_iter()
             .flatten()
-            .map(|cell| {
-                let source = text.slice(*cell).unwrap_or_default();
-                match (
-                    source.starts_with(':'),
-                    source.len() > 1 && source.ends_with(':'),
-                ) {
-                    (true, true) => Alignment::Center,
-                    (true, false) => Alignment::Left,
-                    (false, true) => Alignment::Right,
-                    (false, false) => Alignment::Default,
-                }
-            })
+            .map(|cell| table_alignment(&text.slice(*cell).unwrap_or_default()))
             .collect::<Vec<_>>();
         let columns = rows.iter().map(Vec::len).max().unwrap_or(0);
         let mut widths = vec![1; columns];
@@ -747,13 +706,7 @@ impl Table {
                 widths[column] = widths[column].max(*width);
             }
         }
-        let borders = [[0, 3, 6, 9], [1, 4, 7, 9], [2, 5, 8, 9]].map(|parts| {
-            parts
-                .into_iter()
-                .map(|index| text_width(table_part(glyphs, index), ambiguous))
-                .max()
-                .unwrap_or(0)
-        });
+        let borders = table_borders(glyphs, ambiguous);
         // Each column draws its text between a border and a space on either side.
         let overhead =
             columns * 2 + borders[0] + borders[2] + columns.saturating_sub(1) * borders[1];
@@ -774,8 +727,88 @@ impl Table {
     }
 }
 
-fn table_part(glyphs: &MarkdownGlyphs, index: usize) -> &str {
+/// A border across a table from the pieces at `left`, `cross` and `right`, each column `widths`
+/// wide between a space on either side. The row under the header shows each column's alignment.
+pub(crate) fn table_border(
+    glyphs: &MarkdownGlyphs,
+    ambiguous: AmbiguousWidth,
+    widths: &[usize],
+    borders: [usize; 3],
+    alignments: &[Alignment],
+    [left, cross, right]: [usize; 3],
+    aligned: bool,
+) -> String {
+    let part = |index: usize| table_part(glyphs, index);
+    let line = part(10);
+    let indicator = glyphs.table_alignment.as_str();
+    let mut border = part(left).to_owned();
+    border.push_str(&" ".repeat(borders[0] - text_width(part(left), ambiguous)));
+    for (column, width) in widths.iter().enumerate() {
+        if column > 0 {
+            border.push_str(part(cross));
+            border.push_str(&" ".repeat(borders[1] - text_width(part(cross), ambiguous)));
+        }
+        let alignment = if aligned {
+            alignments[column]
+        } else {
+            Alignment::Default
+        };
+        let (start, end) = match alignment {
+            Alignment::Default => (false, false),
+            Alignment::Left => (true, false),
+            Alignment::Center => (true, true),
+            Alignment::Right => (false, true),
+        };
+        let indicator_width = text_width(indicator, ambiguous);
+        let indicators = usize::from(start) + usize::from(end);
+        let room = width + 2;
+        let aligned = indicator_width * indicators <= room;
+        if start && aligned {
+            border.push_str(indicator);
+        }
+        let fill = room
+            - if aligned {
+                indicator_width * indicators
+            } else {
+                0
+            };
+        border.push_str(&table_fill(line, fill, ambiguous));
+        if end && aligned {
+            border.push_str(indicator);
+        }
+    }
+    border.push_str(part(right));
+    border.push_str(&" ".repeat(borders[2] - text_width(part(right), ambiguous)));
+    border
+}
+
+pub(crate) fn table_part(glyphs: &MarkdownGlyphs, index: usize) -> &str {
     glyphs.table.get(index).map_or(TABLE[index], String::as_str)
+}
+
+/// A column's alignment from its cell in the row under the header: `:--`, `:-:` or `--:`.
+pub(crate) fn table_alignment(source: &str) -> Alignment {
+    let source = source.trim();
+    match (
+        source.starts_with(':'),
+        source.len() > 1 && source.ends_with(':'),
+    ) {
+        (true, true) => Alignment::Center,
+        (true, false) => Alignment::Left,
+        (false, true) => Alignment::Right,
+        (false, false) => Alignment::Default,
+    }
+}
+
+/// Display widths shared by the left, inner and right borders on every row.
+pub(crate) fn table_borders(glyphs: &MarkdownGlyphs, ambiguous: AmbiguousWidth) -> [usize; 3] {
+    [[0, 3, 6, 9], [1, 4, 7, 9], [2, 5, 8, 9]].map(|parts| {
+        parts
+            .into_iter()
+            .map(|index| text_width(table_part(glyphs, index), ambiguous))
+            .max()
+            .unwrap_or(0)
+    })
 }
 
 /// Repeat a border glyph without exceeding the allotted display cells.
@@ -793,7 +826,7 @@ fn table_fill(glyph: &str, cells: usize, ambiguous: AmbiguousWidth) -> String {
 
 /// Narrows columns to fit `room` cells together, the widest first, so narrow columns keep
 /// their text on one row.
-fn narrow(widths: &mut [usize], room: usize) {
+pub(crate) fn narrow(widths: &mut [usize], room: usize) {
     let capped = |cap: usize, widths: &[usize]| widths.iter().map(|width| (*width).min(cap)).sum();
     let mut cap = 1;
     let mut upper = widths.iter().copied().max().unwrap_or(1);
@@ -881,7 +914,7 @@ fn cell_width(
 /// A cell's text wrapped to `width`, at the last space that fits or, in a word longer than
 /// the column, where it reaches the edge: each drawn grapheme's row and column, and each row's
 /// width. The space a row breaks at is not drawn.
-fn wrap_cell(
+pub(crate) fn wrap_cell(
     graphemes: &[(ByteOffset, usize, bool)],
     width: usize,
 ) -> (Vec<(ByteOffset, usize, usize)>, Vec<usize>) {

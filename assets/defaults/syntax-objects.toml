@@ -32,3 +32,8 @@ comment_markers = [
   ["(*", "*)"], ["--[[", "]]"], ["///", ""], ["//!", ""], ["//", ""],
   ["--", ""], ["#", ""], [";", ""], ["%", ""],
 ]
+# Elements with an opening and a closing tag (HTML, Vue, XML, JSX); `it` is the text between
+# the first child (an opener) and the last (a closer).
+tags = ["element", "script_element", "style_element", "jsx_element"]
+tag_openers = ["start_tag", "STag", "jsx_opening_element"]
+tag_closers = ["end_tag", "ETag", "jsx_closing_element"]

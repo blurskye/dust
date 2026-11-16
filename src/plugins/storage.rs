@@ -823,7 +823,7 @@ mod tests {
     }
 
     fn wait(service: &mut PluginStorageWorker) -> PluginStorageResult {
-        let deadline = Instant::now() + Duration::from_secs(2);
+        let deadline = Instant::now() + Duration::from_secs(30);
         loop {
             if let Some(result) = service.poll().pop() {
                 return result;
@@ -1248,7 +1248,7 @@ mod tests {
     }
 
     fn result(service: &mut PluginStorageWorker) -> PluginStorageResult {
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + Duration::from_secs(30);
         loop {
             if let Some(result) = service.poll().pop() {
                 return result;

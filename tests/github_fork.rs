@@ -79,7 +79,6 @@ fn review(screen: &mut GitScreen) {
 #[test]
 fn fork_submission_reviews_exact_targets_and_recovers_after_push() {
     if std::env::var_os("DUST_FORK_CHILD").is_none() {
-        use std::os::unix::fs::PermissionsExt;
         let owner = tempfile::tempdir().unwrap();
         let root = owner.path().join("repo");
         std::fs::create_dir(&root).unwrap();
@@ -110,8 +109,7 @@ fn fork_submission_reviews_exact_targets_and_recovers_after_push() {
         let git_executable = dust::tools::discover_executable("git").unwrap();
         let wrapper = bin.join("git");
         // The real push writes only to our disposable bare repository; all other Git calls are real.
-        std::fs::write(&wrapper, "#!/usr/bin/env python3\nimport os,sys\na=sys.argv[1:]\nif a[:3]==['push','--','https://github.com/team/demo-fork.git']:\n a[2]=os.environ['DUST_FORK_BARE']\nos.execv(os.environ['DUST_REAL_GIT'],['git']+a)\n").unwrap();
-        std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o755)).unwrap();
+        forge_fake::write_executable(&wrapper, b"#!/usr/bin/env python3\nimport os,sys\na=sys.argv[1:]\nif a[:3]==['push','--','https://github.com/team/demo-fork.git']:\n a[2]=os.environ['DUST_FORK_BARE']\nos.execv(os.environ['DUST_REAL_GIT'],['git']+a)\n");
         std::fs::write(&state, serde_json::json!({"calls":[],"comments":[],"fail_create":1,"repo_info":{
             "team/demo-fork":{"full_name":"team/demo-fork","default_branch":"fork-default","fork":true,"parent":{"full_name":"team/demo","default_branch":"trunk"}}
         }}).to_string()).unwrap();
@@ -155,9 +153,19 @@ fn fork_submission_reviews_exact_targets_and_recovers_after_push() {
         form.contains("team/demo-fork") && form.contains("trunk") && form.contains("feature/fork"),
         "{form}"
     );
+    // A fork: both repositories show; the unpushed branch is pushed first unless unticked.
+    assert!(form.contains("Head repository") && form.contains("☑ Push to origin first"), "{form}");
+    // Each side of a fork names its owner.
+    assert!(form.contains("team/demo-fork:feature/fork → team/demo:trunk"), "{form}");
     paste(&mut screen, "A fork contribution");
     key(&mut screen, KeyCode::Tab, false);
     paste(&mut screen, "Preserve this résumé.\nAnd this second line.");
+    // Description → base repository, base branch, head repository, push, draft.
+    for _ in 0..5 {
+        key(&mut screen, KeyCode::Tab, false);
+    }
+    key(&mut screen, KeyCode::Char(' '), false);
+    assert!(view(&mut screen).contains("☑ Open as draft"), "{}", view(&mut screen));
     review(&mut screen);
     assert!(view(&mut screen).contains("github.com/team/demo : trunk"));
     assert!(view(&mut screen).contains("github.com/team/demo-fork : feature/fork"));
@@ -166,10 +174,6 @@ fn fork_submission_reviews_exact_targets_and_recovers_after_push() {
     assert_eq!(creates(), 0, "review is not submission");
     key(&mut screen, KeyCode::Escape, false);
     assert!(view(&mut screen).contains("Preserve this résumé."));
-    for _ in 0..6 {
-        key(&mut screen, KeyCode::Tab, false);
-    }
-    key(&mut screen, KeyCode::Down, false);
     review(&mut screen);
     assert!(view(&mut screen).contains("no force push"));
     // Reject a branch that moved after the explicit review.
@@ -186,8 +190,8 @@ fn fork_submission_reviews_exact_targets_and_recovers_after_push() {
         assert!(frame.cursor.is_some());
     }
     key(&mut screen, KeyCode::Enter, true);
-    wait(&mut screen, "Branch pushed, but PR creation failed");
-    assert!(view(&mut screen).contains("draft is preserved"));
+    wait(&mut screen, "Branch pushed, but the pull request wasn't created · your draft is kept");
+    assert!(view(&mut screen).contains("Branch pushed, but the pull request wasn't created · your draft is kept"));
     assert_eq!(
         git(bare, &["rev-parse", "refs/heads/feature/fork"]),
         git(root, &["rev-parse", "HEAD"])
@@ -196,10 +200,13 @@ fn fork_submission_reviews_exact_targets_and_recovers_after_push() {
     open(&mut screen);
     assert!(view(&mut screen).contains("A fork contribution"));
     assert!(view(&mut screen).contains("And this second line."));
-    for _ in 0..6 {
+    // Already pushed: untick the push and only retry the PR submission.
+    assert!(view(&mut screen).contains("☑ Push to origin first"), "{}", view(&mut screen));
+    for _ in 0..5 {
         key(&mut screen, KeyCode::Tab, false);
     }
-    key(&mut screen, KeyCode::Down, false); // Already pushed: only retry the PR submission.
+    key(&mut screen, KeyCode::Char(' '), false);
+    assert!(view(&mut screen).contains("☐ Push to origin first"), "{}", view(&mut screen));
     review(&mut screen);
     key(&mut screen, KeyCode::Enter, true);
     wait(&mut screen, "https://github.com/team/demo/pull/9");

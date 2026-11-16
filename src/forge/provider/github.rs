@@ -12,6 +12,7 @@ use super::Plan;
 use super::Provider;
 use super::ProviderKind;
 use super::RepoRef;
+use super::common::*;
 use crate::forge::capability::Capabilities;
 use crate::forge::capability::GITHUB_TERMS;
 use crate::forge::capability::Terms;
@@ -33,32 +34,55 @@ const PAGE: u32 = 100;
 /// Bounded fan-out for paginated detail reads (timeline, threads, files).
 const MAX_PAGES: usize = 30;
 
-const ROW_FIELDS: &str = "id number title body state url updatedAt author { login } \
+const ROW_FIELDS: &str = "id number title body state url createdAt updatedAt author { login } \
 labels(first: 20) { nodes { name color } } comments { totalCount } repository { nameWithOwner }";
 
 const PR_ROW_FIELDS: &str = "isDraft reviewDecision additions deletions changedFiles headRefName \
+closingIssuesReferences { totalCount } \
+latestOpinionatedReviews(first: 20) { nodes { state } } reviewRequests { totalCount } \
 commits(last: 1) { nodes { commit { statusCheckRollup { state contexts(first: 1) { \
 checkRunCountsByState { state count } statusContextCountsByState { state count } } } } } }";
 
-fn list_document(kind: ItemKind) -> String {
+/// The list read, and with `counted` the same query's other state counted alongside it
+/// (`other`, the list header's `Open · Closed` counts in one request).
+fn list_document(kind: ItemKind, counted: bool) -> String {
     let (name, fields) = match kind {
         ItemKind::Issue => (
             "IssueList",
-            format!("... on Issue {{ {ROW_FIELDS} stateReason }}"),
+            format!("... on Issue {{ {ROW_FIELDS} stateReason closedByPullRequestsReferences {{ totalCount }} }}"),
         ),
         ItemKind::PullRequest => (
             "PullRequestList",
             format!("... on PullRequest {{ {ROW_FIELDS} {PR_ROW_FIELDS} }}"),
         ),
     };
+    let (other_variable, other) = if counted {
+        (", $other: String!", " other: search(type: ISSUE, query: $other, first: 1) { issueCount }")
+    } else {
+        ("", "")
+    };
     format!(
-        "query {name}($q: String!, $first: Int!, $after: String) {{ search(type: ISSUE, query: $q, first: $first, after: $after) {{ issueCount pageInfo {{ hasNextPage endCursor }} nodes {{ __typename {fields} }} }} }}"
+        "query {name}($q: String!, $first: Int!, $after: String{other_variable}) {{ search(type: ISSUE, query: $q, first: $first, after: $after) {{ issueCount pageInfo {{ hasNextPage endCursor }} nodes {{ __typename {fields} }} }}{other} }}"
     )
+}
+
+/// The list in its other state (open ↔ closed), whose count the list header shows.
+fn other_state(filter: &Filter) -> Option<Filter> {
+    let state = match filter.state {
+        StateFilter::Open => StateFilter::Closed,
+        StateFilter::Closed | StateFilter::Merged => StateFilter::Open,
+        StateFilter::All => return None,
+    };
+    Some(Filter {
+        state,
+        query: filter.query.clone(),
+    })
 }
 
 const ISSUE_DOCUMENT: &str = "query IssueDetail($owner: String!, $name: String!, $number: Int!) { \
 repository(owner: $owner, name: $name) { issue(number: $number) { \
 id number title body state stateReason url createdAt updatedAt author { login } \
+reactionGroups { content users { totalCount } } \
 assignees(first: 50) { nodes { login } } labels(first: 50) { nodes { name color } } \
 milestone { number title dueOn state } projectItems(first: 20) { nodes { project { title } } } \
 viewerSubscription comments { totalCount } \
@@ -68,6 +92,7 @@ closedByPullRequestsReferences(first: 20, includeClosedPrs: true) { nodes { numb
 const PULL_REQUEST_DOCUMENT: &str = "query PullRequestDetail($owner: String!, $name: String!, $number: Int!) { \
 repository(owner: $owner, name: $name) { pullRequest(number: $number) { \
 id number title body state isDraft url createdAt updatedAt author { login } \
+reactionGroups { content users { totalCount } } \
 baseRefName headRefName headRefOid baseRefOid headRepository { nameWithOwner } \
 mergeable mergeStateStatus reviewDecision additions deletions changedFiles comments { totalCount } \
 assignees(first: 50) { nodes { login } } labels(first: 50) { nodes { name color } } \
@@ -90,8 +115,9 @@ files(first: 100, after: $after) { pageInfo { hasNextPage endCursor } nodes { pa
 const THREADS_DOCUMENT: &str = "query ReviewThreads($owner: String!, $name: String!, $number: Int!, $after: String) { \
 repository(owner: $owner, name: $name) { pullRequest(number: $number) { \
 reviewThreads(first: 100, after: $after) { pageInfo { hasNextPage endCursor } nodes { \
-id isResolved path line originalLine diffSide \
-comments(first: 100) { totalCount nodes { id author { login } body path line originalLine createdAt commit { oid } } } } } } } }";
+id isResolved path line originalLine startLine diffSide \
+comments(first: 100) { totalCount nodes { id author { login __typename } authorAssociation body path line originalLine \
+createdAt lastEditedAt diffHunk commit { oid } reactionGroups { content users { totalCount } } } } } } } } }";
 
 const FINGERPRINT_DOCUMENT: &str = "query PullRequestFingerprint($owner: String!, $name: String!, $number: Int!) { \
 repository(owner: $owner, name: $name) { pullRequest(number: $number) { \
@@ -115,21 +141,6 @@ unmarkFileAsViewed(input: { pullRequestId: $pullRequest, path: $path }) { pullRe
 const SUBSCRIPTION_DOCUMENT: &str = "mutation UpdateSubscription($subject: ID!, $state: SubscriptionState!) { \
 updateSubscription(input: { subscribableId: $subject, state: $state }) { subscribable { id } } }";
 
-fn text(value: &Value, key: &str) -> String {
-    value[key].as_str().unwrap_or_default().to_owned()
-}
-
-fn optional(value: &Value, key: &str) -> Option<String> {
-    value[key]
-        .as_str()
-        .filter(|text| !text.is_empty())
-        .map(str::to_owned)
-}
-
-fn count(value: &Value, key: &str) -> u64 {
-    value[key].as_u64().unwrap_or_default()
-}
-
 fn nodes(value: &Value) -> &[Value] {
     value["nodes"]
         .as_array()
@@ -137,16 +148,45 @@ fn nodes(value: &Value) -> &[Value] {
         .unwrap_or_default()
 }
 
-fn id_of(value: &Value, key: &str) -> ItemId {
-    match &value[key] {
-        Value::String(text) => ItemId::new(text),
-        Value::Number(number) => ItemId::new(number),
-        _ => ItemId::default(),
+fn user(value: &Value) -> User {
+    User {
+        bot: is_bot(value),
+        ..User::login(value["login"].as_str().unwrap_or_default())
     }
 }
 
-fn user(value: &Value) -> User {
-    User::login(value["login"].as_str().unwrap_or_default())
+/// REST's reaction rollup (`{"+1": 2, "heart": 1, "total_count": 3, …}`) or GraphQL's
+/// `reactionGroups`, as GitHub's REST names in GitHub's order, without the empty ones.
+fn reactions(value: &Value) -> Vec<Reaction> {
+    const NAMES: [(&str, &str); 8] = [
+        ("+1", "THUMBS_UP"),
+        ("-1", "THUMBS_DOWN"),
+        ("laugh", "LAUGH"),
+        ("hooray", "HOORAY"),
+        ("confused", "CONFUSED"),
+        ("heart", "HEART"),
+        ("rocket", "ROCKET"),
+        ("eyes", "EYES"),
+    ];
+    let groups = value["reactionGroups"].as_array();
+    NAMES
+        .iter()
+        .map(|(rest, graphql)| {
+            let count = match groups {
+                Some(groups) => groups
+                    .iter()
+                    .find(|group| group["content"] == *graphql)
+                    .and_then(|group| group["users"]["totalCount"].as_u64())
+                    .unwrap_or(0),
+                None => value["reactions"][*rest].as_u64().unwrap_or(0),
+            };
+            Reaction {
+                content: (*rest).to_owned(),
+                count,
+            }
+        })
+        .filter(|reaction| reaction.count > 0)
+        .collect()
 }
 
 fn labels(value: &Value) -> Vec<Label> {
@@ -159,14 +199,6 @@ fn labels(value: &Value) -> Vec<Label> {
             color: optional(label, "color"),
         })
         .collect()
-}
-
-fn timestamp(value: &Value, key: &str) -> Timestamp {
-    Timestamp::new(text(value, key))
-}
-
-fn optional_time(value: &Value, key: &str) -> Option<Timestamp> {
-    optional(value, key).map(Timestamp::new)
 }
 
 fn milestone(value: &Value) -> Option<Milestone> {
@@ -313,7 +345,30 @@ fn row(node: &Value, kind: ItemKind) -> ItemRow {
         draft: node["isDraft"].as_bool().unwrap_or(false),
         body_preview: node["body"].as_str().map(str::to_owned),
         head_branch: optional(node, "headRefName"),
+        review_tally: (kind == ItemKind::PullRequest && node.get("latestOpinionatedReviews").is_some())
+            .then(|| review_tally(node)),
+        created: Some(timestamp(node, "createdAt")).filter(|created| !created.is_empty()),
+        linked: node["closedByPullRequestsReferences"]["totalCount"]
+            .as_u64()
+            .or_else(|| node["closingIssuesReferences"]["totalCount"].as_u64()),
     }
+}
+
+/// `latestOpinionatedReviews` (each reviewer's latest approval or change request) and the
+/// open `reviewRequests`.
+fn review_tally(node: &Value) -> ReviewTally {
+    let mut tally = ReviewTally {
+        pending: count(&node["reviewRequests"], "totalCount"),
+        ..ReviewTally::default()
+    };
+    for review in nodes(&node["latestOpinionatedReviews"]) {
+        match review["state"].as_str().unwrap_or_default() {
+            "APPROVED" => tally.approved += 1,
+            "CHANGES_REQUESTED" => tally.changes_requested += 1,
+            _ => {}
+        }
+    }
+    tally
 }
 
 fn check(node: &Value) -> Check {
@@ -399,6 +454,7 @@ fn issue(node: &Value) -> Issue {
         },
         projects: projects(&node["projectItems"]),
         subscribed: subscribed(node),
+        reactions: reactions(node),
     }
 }
 
@@ -486,6 +542,7 @@ fn pull_request(node: &Value, files: Vec<ChangedFile>) -> PullRequest {
         },
         projects: projects(&node["projectItems"]),
         subscribed: subscribed(node),
+        reactions: reactions(node),
         row,
     }
 }
@@ -505,6 +562,9 @@ fn comment(node: &Value) -> Comment {
         system: false,
         pending: false,
         position,
+        association: optional(node, "authorAssociation"),
+        edited: optional_time(node, "lastEditedAt"),
+        reactions: reactions(node),
     }
 }
 
@@ -530,6 +590,10 @@ fn thread(node: &Value) -> ReviewThread {
             .first()
             .and_then(|comment| comment.position.as_ref()?.commit.clone()),
         total_comments: total.filter(|total| *total > comments.len() as u64),
+        diff_hunk: nodes(&node["comments"])
+            .first()
+            .and_then(|first| optional(first, "diffHunk")),
+        start_line: node["startLine"].as_u64(),
         comments,
     }
 }
@@ -564,6 +628,9 @@ fn timeline_event(event: &Value) -> TimelineEvent {
             system: false,
             pending: false,
             position: None,
+            association: optional(event, "author_association"),
+            edited: edited(event, "created_at", "updated_at"),
+            reactions: reactions(event),
         }),
         "reviewed" => TimelineEvent::Reviewed(Review {
             id: id_of(event, "node_id"),
@@ -588,7 +655,11 @@ fn timeline_event(event: &Value) -> TimelineEvent {
             assignee: text(&event["assignee"], "login"),
             by,
         },
-        "closed" => TimelineEvent::Closed { by },
+        // A closing commit or reason words the event ("closed this as not planned").
+        "closed" => match detail(event) {
+            detail if detail.is_empty() => TimelineEvent::Closed { by },
+            detail => TimelineEvent::Detailed { kind, detail, by },
+        },
         "reopened" => TimelineEvent::Reopened { by },
         "merged" => TimelineEvent::Merged {
             sha: text(event, "commit_id"),
@@ -603,11 +674,30 @@ fn timeline_event(event: &Value) -> TimelineEvent {
                 .into(),
             body: text(event, "message"),
             committed: by.at,
-            author: Some(by.actor).filter(|user| !user.login.is_empty()),
+            // REST names a commit's author by name and email, not login.
+            author: Some(by.actor)
+                .filter(|user| !user.login.is_empty())
+                .or_else(|| {
+                    optional(&event["author"], "name").map(|name| User {
+                        name: Some(name),
+                        ..User::default()
+                    })
+                }),
         }),
+        // REST sends the new head as `commit_id`; `before`/`after` are kept for older caches.
         "head_ref_force_pushed" => TimelineEvent::ForcePushed {
             from: text(event, "before"),
-            to: text(event, "after"),
+            to: optional(event, "after")
+                .or_else(|| optional(event, "commit_id"))
+                .unwrap_or_default(),
+            by,
+        },
+        "milestoned" => TimelineEvent::Milestoned {
+            milestone: text(&event["milestone"], "title"),
+            by,
+        },
+        "demilestoned" => TimelineEvent::Demilestoned {
+            milestone: text(&event["milestone"], "title"),
             by,
         },
         "cross-referenced" => {
@@ -635,8 +725,33 @@ fn timeline_event(event: &Value) -> TimelineEvent {
                 .unwrap_or_default(),
             by,
         },
-        _ => TimelineEvent::Other { kind, by },
+        _ => match detail(event) {
+            detail if detail.is_empty() => TimelineEvent::Other { kind, by },
+            detail => TimelineEvent::Detailed { kind, detail, by },
+        },
     }
+}
+
+/// The REST fields GitHub's timeline words an event from (`TimelineEvent::Detailed`).
+fn detail(event: &Value) -> std::collections::BTreeMap<String, String> {
+    const PATHS: [&str; 9] = [
+        "state_reason",
+        "commit_id",
+        "lock_reason",
+        "requested_reviewer.login",
+        "requested_team.name",
+        "project_card.column_name",
+        "deployment.environment",
+        "previous_ref_name",
+        "current_ref_name",
+    ];
+    PATHS
+        .iter()
+        .filter_map(|path| {
+            let value = path.split('.').fold(event, |value, key| &value[key]);
+            value.as_str().filter(|text| !text.is_empty()).map(|text| ((*path).to_owned(), text.to_owned()))
+        })
+        .collect()
 }
 
 fn workflow(value: &Value) -> Workflow {
@@ -668,13 +783,19 @@ fn run(value: &Value) -> Run {
         branch: text(value, "head_branch"),
         sha: text(value, "head_sha"),
         event: text(value, "event"),
-        created: timestamp(value, "created_at"),
-        duration: None,
+        // A re-run starts long after its run was created: `running 3m`, not `running 2d`.
+        created: optional_time(value, "run_started_at")
+            .or_else(|| optional_time(value, "created_at"))
+            .unwrap_or_default(),
+        duration: (value["status"] == "completed")
+            .then(|| span(value, "run_started_at", "updated_at"))
+            .flatten(),
         attempt: value["run_attempt"].as_u64().unwrap_or(1) as u32,
         attempts: value["run_attempt"].as_u64().unwrap_or(1) as u32,
         web_url: text(value, "html_url"),
         pr_number: value["pull_requests"][0]["number"].as_u64(),
         needs_approval: value["conclusion"] == "action_required",
+        actor: run_actor(value),
     }
 }
 
@@ -808,7 +929,9 @@ fn notification(value: &Value) -> Notification {
         id: id_of(value, "id"),
         title: text(subject, "title"),
         reason: match value["reason"].as_str().unwrap_or_default() {
-            "mention" | "team_mention" => NotifyReason::Mentioned,
+            "mention" => NotifyReason::Mentioned,
+            // GitHub's own "Team mentioned" filter keeps it apart from a mention of you.
+            "team_mention" => NotifyReason::Other("team_mention".into()),
             "review_requested" => NotifyReason::ReviewRequested,
             "assign" => NotifyReason::Assigned,
             "author" => NotifyReason::Author,
@@ -903,7 +1026,11 @@ fn graphql_data(body: Value) -> Result<Value, ForgeError> {
         let message = crate::forge::cli::redact(&first("message"));
         return Err(match first("type").as_str() {
             "NOT_FOUND" => ForgeError::NotFound(message),
-            "FORBIDDEN" | "INSUFFICIENT_SCOPES" => ForgeError::Forbidden(message),
+            "INSUFFICIENT_SCOPES" => ForgeError::Forbidden(
+                crate::forge::http::scopes_in(&message)
+                    .map_or(message, |scopes| format!("needs scope {scopes}")),
+            ),
+            "FORBIDDEN" => ForgeError::Forbidden(message),
             _ if errors.is_empty() => ForgeError::BadResponse("GraphQL returned no data".into()),
             _ => ForgeError::Failed(message),
         });
@@ -912,15 +1039,6 @@ fn graphql_data(body: Value) -> Result<Value, ForgeError> {
 }
 
 impl GitHub {
-    fn repo_path(ctx: &ForgeContext, tail: &str) -> Result<String, ForgeError> {
-        let repo = ctx.repo()?;
-        Ok(if tail.is_empty() {
-            format!("repos/{}/{}", repo.owner, repo.name)
-        } else {
-            format!("repos/{}/{}/{tail}", repo.owner, repo.name)
-        })
-    }
-
     fn graphql(
         ctx: &ForgeContext,
         document: &str,
@@ -991,11 +1109,13 @@ impl GitHub {
     fn rows(
         ctx: &ForgeContext,
         query: String,
+        other: Option<String>,
         kind: ItemKind,
         page: Page,
         cancel: &AtomicBool,
     ) -> Result<PageOf<ItemRow>, ForgeError> {
-        let document = list_document(kind);
+        let document = list_document(kind, other.is_some());
+        let mut other_total = None;
         let skip = (page.number.max(1) as usize - 1) * page.per_page as usize;
         let wanted = skip + page.per_page.max(1) as usize;
         let mut after: Option<String> = None;
@@ -1007,14 +1127,14 @@ impl GitHub {
                 return Err(ForgeError::Cancelled);
             }
             let first = (wanted - items.len()).min(PAGE as usize);
-            let data = Self::graphql(
-                ctx,
-                &document,
-                json!({ "q": query, "first": first, "after": after }),
-                cancel,
-            )?;
+            let mut variables = json!({ "q": query, "first": first, "after": after });
+            if let Some(other) = &other {
+                variables["other"] = other.clone().into();
+            }
+            let data = Self::graphql(ctx, &document, variables, cancel)?;
             let search = &data["search"];
             total = search["issueCount"].as_u64();
+            other_total = other_total.or(data["other"]["issueCount"].as_u64());
             items.extend(
                 nodes(search)
                     .iter()
@@ -1039,6 +1159,7 @@ impl GitHub {
             }),
             items,
             total,
+            other_total,
         })
     }
 
@@ -1080,35 +1201,7 @@ impl GitHub {
         first: ApiRequest,
         cancel: &AtomicBool,
     ) -> Result<Vec<Value>, ForgeError> {
-        let mut request = first;
-        let mut all = Vec::new();
-        for _ in 0..MAX_PAGES {
-            if cancel.load(Ordering::Acquire) {
-                return Err(ForgeError::Cancelled);
-            }
-            let response = ctx.ok(&request, cancel)?;
-            match response.json()? {
-                Value::Array(items) => all.extend(items),
-                other => all.push(other),
-            }
-            let Some(next) = response.next_link() else {
-                break;
-            };
-            request = ApiRequest {
-                target: Self::relative(ctx, &next),
-                query: Vec::new(),
-                ..request
-            };
-        }
-        Ok(all)
-    }
-
-    /// A `Link` URL as a path under the API base when it is one (passthrough needs paths).
-    fn relative(ctx: &ForgeContext, url: &str) -> Target {
-        match url.strip_prefix(&format!("{}/", ctx.endpoints.api_base)) {
-            Some(path) => Target::Rest(path.to_owned()),
-            None => Target::Absolute(url.to_owned()),
-        }
+        link_pages(ctx, first, MAX_PAGES, cancel)
     }
 
     fn text_read(
@@ -1120,7 +1213,7 @@ impl GitHub {
     }
 
     fn requests(ctx: &ForgeContext, read: &Read) -> Result<Vec<ApiRequest>, ForgeError> {
-        let rest = |tail: &str| Self::repo_path(ctx, tail).map(ApiRequest::get);
+        let rest = |tail: &str| repos_path(ctx, tail).map(ApiRequest::get);
         let graphql = |document: &str, number: u64| {
             Self::repo_variables(ctx, number)
                 .map(|variables| ApiRequest::graphql(document, variables))
@@ -1136,16 +1229,20 @@ impl GitHub {
                     .query("per_page", PAGE),
             ],
             Read::Collaborators => vec![rest("assignees")?.query("per_page", PAGE)],
-            Read::List { kind, filter, page } => vec![ApiRequest::graphql(
-                &list_document(*kind),
-                json!({
+            Read::List { kind, filter, page } => {
+                let other = other_state(filter);
+                let mut variables = json!({
                     "q": Self::search_query(ctx.repo.as_ref(), *kind, filter, "created-desc"),
                     "first": page.per_page.min(PAGE),
                     "after": Value::Null,
-                }),
-            )],
+                });
+                if let Some(other) = &other {
+                    variables["other"] = Self::search_query(ctx.repo.as_ref(), *kind, other, "created-desc").into();
+                }
+                vec![ApiRequest::graphql(&list_document(*kind, other.is_some()), variables)]
+            }
             Read::Search { kind, filter, page } => vec![ApiRequest::graphql(
-                &list_document(*kind),
+                &list_document(*kind, false),
                 json!({
                     "q": Self::search_query(None, *kind, filter, "updated-desc"),
                     "first": page.per_page.min(PAGE),
@@ -1351,7 +1448,7 @@ impl GitHub {
         cancel: &AtomicBool,
     ) -> Result<(), ForgeError> {
         let value = ctx.json(
-            &ApiRequest::get(Self::repo_path(ctx, &format!("actions/runs/{run}"))?),
+            &ApiRequest::get(repos_path(ctx, &format!("actions/runs/{run}"))?),
             cancel,
         )?;
         if value["conclusion"] != "action_required" {
@@ -1380,7 +1477,7 @@ impl GitHub {
             ctx,
             ApiRequest::new(
                 Method::Post,
-                Self::repo_path(ctx, &format!("actions/runs/{run}/approve"))?,
+                repos_path(ctx, &format!("actions/runs/{run}/approve"))?,
             ),
             cancel,
         )?;
@@ -1454,6 +1551,8 @@ impl GitHub {
             Read::List { kind, filter, page } => Payload::Rows(Self::rows(
                 ctx,
                 Self::search_query(ctx.repo.as_ref(), *kind, filter, "created-desc"),
+                other_state(filter)
+                    .map(|other| Self::search_query(ctx.repo.as_ref(), *kind, &other, "created-desc")),
                 *kind,
                 *page,
                 cancel,
@@ -1461,6 +1560,7 @@ impl GitHub {
             Read::Search { kind, filter, page } => Payload::Rows(Self::rows(
                 ctx,
                 Self::search_query(None, *kind, filter, "updated-desc"),
+                None,
                 *kind,
                 *page,
                 cancel,
@@ -1589,7 +1689,7 @@ impl GitHub {
                 if path.is_empty() {
                     return Err(ForgeError::BadResponse("workflow has no path".into()));
                 }
-                let mut request = Self::repo_path(ctx, &format!("contents/{path}"))
+                let mut request = repos_path(ctx, &format!("contents/{path}"))
                     .map(ApiRequest::get)?
                     .accept(Accept::Raw);
                 if let Some(reference) =
@@ -1617,6 +1717,7 @@ impl GitHub {
                         }),
                     items,
                     total,
+                    other_total: None,
                 })
             }
             Read::Run { attempt, .. } => {
@@ -1691,6 +1792,7 @@ impl GitHub {
                         .collect(),
                     next,
                     total: None,
+                    other_total: None,
                 })
             }
             // §3.7: read from the base ref locally, never through the API.
@@ -1710,7 +1812,7 @@ impl GitHub {
         if let Ok(number) = title.trim().parse::<u64>() {
             return Ok(number);
         }
-        let request = ApiRequest::get(Self::repo_path(ctx, "milestones")?)
+        let request = ApiRequest::get(repos_path(ctx, "milestones")?)
             .query("state", "all")
             .query("per_page", PAGE);
         Self::rest_pages(ctx, request, cancel)?
@@ -1726,6 +1828,57 @@ impl GitHub {
         cancel: &AtomicBool,
     ) -> Result<Value, ForgeError> {
         ctx.json(&request, cancel)
+    }
+
+    /// A suggested change committed the way GitHub's "Commit suggestion" does (DESIGN.md
+    /// §3.30a), through the contents API: the head branch's file is read, the suggested lines
+    /// replace the ones the suggestion was made on (checked first), and the file is written back
+    /// on that branch, pinned to the blob that was read.
+    fn commit_suggestion(
+        ctx: &ForgeContext,
+        number: u64,
+        suggestion: &Suggestion<'_>,
+        head: &str,
+        message: &str,
+        cancel: &AtomicBool,
+    ) -> Result<(), ForgeError> {
+        let pull = ctx.json(&ApiRequest::get(repos_path(ctx, &format!("pulls/{number}"))?), cancel)?;
+        let sha = text(&pull["head"], "sha");
+        if !head.is_empty() && sha != head {
+            return Err(ForgeError::Conflict(
+                "The pull request has new commits · refresh before committing this suggestion".into(),
+            ));
+        }
+        let branch = text(&pull["head"], "ref");
+        let repo = match pull["head"]["repo"]["full_name"].as_str() {
+            Some(name) => name.to_owned(),
+            None => {
+                let repo = ctx.repo()?;
+                format!("{}/{}", repo.owner, repo.name)
+            }
+        };
+        let contents = format!(
+            "repos/{repo}/contents/{}",
+            suggestion.path.split('/').map(path_segment).collect::<Vec<_>>().join("/")
+        );
+        let file = ctx.json(&ApiRequest::get(contents.clone()).query("ref", &branch), cancel)?;
+        let decoded = base64_decode(&text(&file, "content"))
+            .and_then(|bytes| String::from_utf8(bytes).ok())
+            .ok_or_else(|| ForgeError::Failed(format!("{} is not a text file", suggestion.path)))?;
+        let changed = suggestion.apply(&decoded).ok_or_else(|| {
+            ForgeError::Conflict(format!(
+                "Lines {}–{} of {} changed since the suggestion · refresh and look again",
+                suggestion.lines.0, suggestion.lines.1, suggestion.path
+            ))
+        })?;
+        let request = ApiRequest::new(Method::Put, contents).json(json!({
+            "message": message,
+            "content": base64_encode(changed.as_bytes()),
+            "sha": text(&file, "sha"),
+            "branch": branch,
+        }));
+        Self::send_write(ctx, request, cancel)?;
+        Ok(())
     }
 
     fn mutation(
@@ -1759,7 +1912,7 @@ impl GitHub {
         ctx: &ForgeContext,
         write: &Write,
     ) -> Result<Vec<ApiRequest>, ForgeError> {
-        let path = |tail: &str| Self::repo_path(ctx, tail);
+        let path = |tail: &str| repos_path(ctx, tail);
         let post = |tail: &str, body: Value| -> Result<ApiRequest, ForgeError> {
             Ok(ApiRequest::new(Method::Post, path(tail)?).json(body))
         };
@@ -1807,7 +1960,8 @@ impl GitHub {
                         Method::Post,
                         format!("repos/{}/pulls", request.base_repository),
                     )
-                    .json(payload),
+                    .json(payload)
+                    .body_file(),
                 ]
             }
             Write::Edit {
@@ -1963,11 +2117,18 @@ impl GitHub {
                     payload["comments"] = drafts
                         .iter()
                         .map(|draft| {
-                            json!({ "path": draft.path, "line": draft.line, "side": draft.side.as_github(), "body": draft.body })
+                            let mut comment = json!({ "path": draft.path, "line": draft.line, "side": draft.side.as_github(), "body": draft.body });
+                            // A multi-line comment: GitHub anchors the whole range.
+                            if let Some((start, _)) = draft.range() {
+                                comment["start_line"] = start.into();
+                                comment["start_side"] = draft.side.as_github().into();
+                            }
+                            comment
                         })
                         .collect();
                 }
-                vec![post(&format!("pulls/{number}/reviews"), payload)?]
+                // The review's text can be long: over CLI passthrough it travels in a file.
+                vec![post(&format!("pulls/{number}/reviews"), payload)?.body_file()]
             }
             Write::Merge {
                 number,
@@ -2043,6 +2204,7 @@ impl GitHub {
             )],
             Write::Reply { .. }
             | Write::Resolve { .. }
+            | Write::CommitSuggestion { .. }
             | Write::SetViewed { .. }
             | Write::Subscribe { .. } => Vec::new(),
             Write::Checkout { .. }
@@ -2060,19 +2222,6 @@ impl GitHub {
             ))],
         })
     }
-}
-
-/// One URL path segment (label names may hold spaces or slashes).
-fn path_segment(text: &str) -> String {
-    let mut escaped = String::new();
-    for byte in text.bytes() {
-        if byte.is_ascii_alphanumeric() || b"-_.~".contains(&byte) {
-            escaped.push(byte as char);
-        } else {
-            escaped.push_str(&format!("%{byte:02X}"));
-        }
-    }
-    escaped
 }
 
 impl Provider for GitHub {
@@ -2161,6 +2310,25 @@ impl Provider for GitHub {
                 )?;
                 return Ok(saved(if *resolved { "Resolved" } else { "Unresolved" }));
             }
+            Write::CommitSuggestion {
+                number,
+                path,
+                start,
+                end,
+                original,
+                replacement,
+                head,
+                message,
+            } => {
+                let suggestion = Suggestion {
+                    path,
+                    lines: (*start, *end),
+                    original,
+                    replacement,
+                };
+                Self::commit_suggestion(ctx, *number, &suggestion, head, message, cancel)?;
+                return Ok(saved("Suggestion committed"));
+            }
             Write::SetViewed {
                 node, path, viewed, ..
             } => {
@@ -2194,7 +2362,7 @@ impl Provider for GitHub {
                 name,
                 directory,
             } => {
-                let request = super::download(ApiRequest::get(Self::repo_path(
+                let request = super::download(ApiRequest::get(repos_path(
                     ctx,
                     &format!("actions/artifacts/{artifact}/zip"),
                 )?));
@@ -2214,7 +2382,7 @@ impl Provider for GitHub {
                 };
                 let request = ApiRequest::new(
                     Method::Patch,
-                    Self::repo_path(ctx, &format!("issues/{number}"))?,
+                    repos_path(ctx, &format!("issues/{number}"))?,
                 )
                 .json(json!({ "milestone": value }));
                 Self::send_write(ctx, request, cancel)?;
@@ -2241,6 +2409,76 @@ impl Provider for GitHub {
     }
 }
 
+/// A suggested change: lines `lines.0..=lines.1` of `path`, which read `original` (when known),
+/// become `replacement`.
+struct Suggestion<'a> {
+    path: &'a str,
+    lines: (u64, u64),
+    original: &'a [String],
+    replacement: &'a [String],
+}
+
+impl Suggestion<'_> {
+    /// `file` with the lines swapped, each new line ending as the last replaced one did;
+    /// `None` when the lines are out of range or no longer read as the suggestion saw them.
+    fn apply(&self, file: &str) -> Option<String> {
+        let (start, end) = self.lines;
+        let lines = file.split_inclusive('\n').collect::<Vec<_>>();
+        if start == 0 || start > end || end as usize > lines.len() {
+            return None;
+        }
+        let (start, end) = (start as usize - 1, end as usize);
+        let bare = |line: &str| line.trim_end_matches('\n').trim_end_matches('\r').to_owned();
+        if !self.original.is_empty() && lines[start..end].iter().map(|line| bare(line)).ne(self.original.iter().cloned()) {
+            return None;
+        }
+        let ending = |line: &str| line[bare(line).len()..].to_owned();
+        // The last line of the file keeps having (or not having) its newline; the others end
+        // as the file's lines there do.
+        let last = ending(lines[end - 1]);
+        let between = Some(ending(lines[start])).filter(|ending| !ending.is_empty()).unwrap_or_else(|| "\n".into());
+        let mut changed = lines[..start].concat();
+        for (index, line) in self.replacement.iter().enumerate() {
+            changed.push_str(line);
+            changed.push_str(if index + 1 == self.replacement.len() { &last } else { &between });
+        }
+        changed.push_str(&lines[end..].concat());
+        Some(changed)
+    }
+}
+
+const BASE64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+fn base64_encode(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let n = (u32::from(chunk[0]) << 16)
+            | (u32::from(*chunk.get(1).unwrap_or(&0)) << 8)
+            | u32::from(*chunk.get(2).unwrap_or(&0));
+        for (index, shift) in [18, 12, 6, 0].into_iter().enumerate() {
+            out.push(if index <= chunk.len() { BASE64[(n >> shift) as usize & 63] as char } else { '=' });
+        }
+    }
+    out
+}
+
+/// Standard base64, line breaks and padding allowed (the contents API wraps at 60 columns).
+fn base64_decode(text: &str) -> Option<Vec<u8>> {
+    let mut out = Vec::with_capacity(text.len() * 3 / 4);
+    let (mut buffer, mut bits) = (0u32, 0u32);
+    for byte in text.bytes().filter(|byte| !byte.is_ascii_whitespace() && *byte != b'=') {
+        let value = BASE64.iter().position(|known| *known == byte)? as u32;
+        buffer = (buffer << 6) | value;
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((buffer >> bits) as u8);
+            buffer &= (1 << bits) - 1;
+        }
+    }
+    Some(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2252,6 +2490,41 @@ mod tests {
             Endpoints::github(&HostKey::new("github.com")),
             RepoRef::parse("orbit/orbit"),
         )
+    }
+
+    #[test]
+    fn a_suggestion_replaces_its_lines_and_keeps_line_endings() {
+        let original = vec!["b".to_owned(), "c".to_owned()];
+        let replacement = vec!["B".to_owned(), "C".to_owned(), "D".to_owned()];
+        let suggestion = Suggestion {
+            path: "x.py",
+            lines: (2, 3),
+            original: &original,
+            replacement: &replacement,
+        };
+        assert_eq!(suggestion.apply("a\nb\nc\nd\n").as_deref(), Some("a\nB\nC\nD\nd\n"));
+        assert_eq!(suggestion.apply("a\r\nb\r\nc").as_deref(), Some("a\r\nB\r\nC\r\nD"));
+        // The lines moved on since the suggestion: nothing is committed.
+        assert_eq!(suggestion.apply("a\nb\nX\nd\n"), None);
+        assert_eq!(suggestion.apply("a\nb\n"), None);
+        // A suggestion with no lines deletes them.
+        let delete = Suggestion {
+            replacement: &[],
+            ..suggestion
+        };
+        assert_eq!(delete.apply("a\nb\nc\nd\n").as_deref(), Some("a\nd\n"));
+    }
+
+    #[test]
+    fn base64_round_trips_with_the_contents_apis_line_breaks() {
+        for text in ["", "a", "ab", "abc", "retry_delay(attempt) → 60\n"] {
+            let encoded = base64_encode(text.as_bytes());
+            assert_eq!(base64_decode(&encoded).as_deref(), Some(text.as_bytes()), "{encoded}");
+        }
+        assert_eq!(base64_encode(b"Man"), "TWFu");
+        assert_eq!(base64_encode(b"Ma"), "TWE=");
+        assert_eq!(base64_decode("TW\nFu\n").as_deref(), Some(&b"Man"[..]));
+        assert_eq!(base64_decode("T!=="), None);
     }
 
     #[test]

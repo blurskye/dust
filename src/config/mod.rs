@@ -75,6 +75,7 @@ pub use settings::ExplorerGlyphSet;
 pub use settings::ExplorerGlyphs;
 pub use settings::ExplorerIconMode;
 pub use settings::FinalNewlinePolicy;
+pub use settings::GitKeys;
 pub use settings::GitPlacement;
 pub use settings::GitSignsConfig;
 pub use settings::GitWindowConfig;

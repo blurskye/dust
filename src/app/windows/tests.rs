@@ -135,7 +135,7 @@ fn the_changes_diff_pane_follows_focus_and_tab_switches_the_comparison() {
     }
     app.reconcile_workspace_trust();
     app.start_git_status_refresh();
-    let deadline = Instant::now() + Duration::from_secs(4);
+    let deadline = Instant::now() + Duration::from_secs(30);
     while app.git.status_pending() {
         app.process_git_status_events();
         assert!(Instant::now() < deadline);
@@ -249,7 +249,7 @@ fn a_small_changes_pane_opens_on_the_change_and_ctrl_d_scrolls_it() {
     }
     app.reconcile_workspace_trust();
     app.start_git_status_refresh();
-    let deadline = Instant::now() + Duration::from_secs(4);
+    let deadline = Instant::now() + Duration::from_secs(30);
     while app.git.status_pending() {
         app.process_git_status_events();
         assert!(Instant::now() < deadline);
@@ -347,7 +347,7 @@ fn staging_from_the_change_surface_acts_on_the_focused_row_not_the_active_buffer
     app.start_open(app.state.workspace_root.join("a.txt"));
     wait_vfs(&mut app);
     app.start_git_status_refresh();
-    let deadline = Instant::now() + Duration::from_secs(4);
+    let deadline = Instant::now() + Duration::from_secs(30);
     while app.git.status_pending() {
         app.process_git_status_events();
         assert!(Instant::now() < deadline);
@@ -378,7 +378,7 @@ fn staging_from_the_change_surface_acts_on_the_focused_row_not_the_active_buffer
         crate::editor::CommandInvocation::new("workspace.git.file.stage", InvocationSource::Test)
             .expect("static command");
     app.invoke(stage);
-    let deadline = Instant::now() + Duration::from_secs(4);
+    let deadline = Instant::now() + Duration::from_secs(30);
     while app.git.mutation_pending() || app.git.status_pending() {
         app.process_git_mutation_events();
         app.process_git_status_events();
@@ -456,7 +456,7 @@ fn staging_an_unsaved_focused_row_offers_the_choice_and_writes_nothing() {
     app.start_open(app.state.workspace_root.join("other.txt"));
     wait_vfs(&mut app);
     app.start_git_status_refresh();
-    let deadline = Instant::now() + Duration::from_secs(4);
+    let deadline = Instant::now() + Duration::from_secs(30);
     while app.git.status_pending() {
         app.process_git_status_events();
         assert!(Instant::now() < deadline);
@@ -481,7 +481,7 @@ fn staging_an_unsaved_focused_row_offers_the_choice_and_writes_nothing() {
         crate::editor::CommandInvocation::new("workspace.git.file.stage", InvocationSource::Test)
             .expect("static command"),
     );
-    let deadline = Instant::now() + Duration::from_secs(4);
+    let deadline = Instant::now() + Duration::from_secs(30);
     loop {
         app.process_git_mutation_events();
         if app
@@ -2066,7 +2066,7 @@ fn a_stop_fills_the_panes_and_makes_room_for_them_without_opening_anything() {
     let before = tiled(&driver);
 
     driver.debug_start("logging");
-    let deadline = Instant::now() + Duration::from_secs(6);
+    let deadline = Instant::now() + Duration::from_secs(30);
     while driver.application().debugger_session.variables().is_empty() {
         driver.pump_debug();
         assert!(

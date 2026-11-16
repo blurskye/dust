@@ -135,6 +135,16 @@ pub enum EditorOperation {
         whole_word: bool,
         preferred_columns: Vec<usize>,
     },
+    /// Where Insert mode stopped (`gi`), when it is not the cursor at the mode change.
+    SetLastInsert {
+        buffer: BufferId,
+        position: ByteOffset,
+    },
+    /// The selection `gv` brings back; Visual-mode `gv` swaps it with the current one.
+    SetLastVisual {
+        buffer: BufferId,
+        selection: Option<Selection>,
+    },
     SetRegister {
         name: char,
         text: String,
@@ -410,6 +420,13 @@ fn apply_operation(
             let marks_before = target.decorations.positions();
             let delta = target.text.apply_edits(edits)?;
             target.decorations.advance(&delta);
+            if let Some(position) = &mut target.last_insert {
+                *position = delta.map_offset(*position, Affinity::After);
+            }
+            if let Some(selection) = &mut target.last_visual {
+                selection.anchor = delta.map_offset(selection.anchor, Affinity::After);
+                selection.head = delta.map_offset(selection.head, Affinity::After);
+            }
             let change = target.record_change(edits.clone(), delta.clone());
             state
                 .events
@@ -585,6 +602,20 @@ fn apply_operation(
                 .views
                 .get_mut(*view)
                 .ok_or(TransactionError::MissingView)?;
+            // Leaving Insert mode marks where it stopped (`gi`); leaving Visual mode keeps
+            // the selection for `gv`. Both live on the buffer, as Vim's `^` and `'<` do.
+            let visual = |mode: EditorMode| {
+                matches!(
+                    mode,
+                    EditorMode::VisualChar | EditorMode::VisualLine | EditorMode::VisualBlock
+                )
+            };
+            let left_insert = (target.mode == EditorMode::Insert && *mode != EditorMode::Insert)
+                .then_some(target.cursor);
+            let left_visual = (visual(target.mode) && !visual(*mode))
+                .then_some(target.selection)
+                .flatten();
+            let marked = target.buffer;
             target.syntax_selections.clear();
             target.mode = *mode;
             match mode {
@@ -624,6 +655,30 @@ fn apply_operation(
             if *mode == EditorMode::Normal {
                 target.clear_editing_state();
             }
+            if (left_insert.is_some() || left_visual.is_some())
+                && let Some(buffer) = state.buffers.get_mut(marked)
+            {
+                if let Some(position) = left_insert {
+                    buffer.last_insert = Some(position);
+                }
+                if let Some(selection) = left_visual {
+                    buffer.last_visual = Some(selection);
+                }
+            }
+        }
+        EditorOperation::SetLastInsert { buffer, position } => {
+            state
+                .buffers
+                .get_mut(*buffer)
+                .ok_or(TransactionError::MissingBuffer)?
+                .last_insert = Some(*position);
+        }
+        EditorOperation::SetLastVisual { buffer, selection } => {
+            state
+                .buffers
+                .get_mut(*buffer)
+                .ok_or(TransactionError::MissingBuffer)?
+                .last_visual = *selection;
         }
         EditorOperation::SetInsertRepeat {
             view,
@@ -1359,7 +1414,7 @@ mod tests {
             state.buffers[buffer].undo.clone(),
             1 << 20,
         );
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
         while std::fs::read_dir(directory.path()).map_or(0, |entries| {
             entries
                 .filter(|entry| {

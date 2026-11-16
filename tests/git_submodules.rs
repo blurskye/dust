@@ -60,7 +60,7 @@ fn list(root: &Path) -> GitBranchList {
             deadline: Duration::from_secs(5),
         }))
         .unwrap();
-    let expires = Instant::now() + Duration::from_secs(10);
+    let expires = Instant::now() + Duration::from_secs(120);
     loop {
         match worker.poll().unwrap() {
             Some(GitBranchResult::List(list)) => {

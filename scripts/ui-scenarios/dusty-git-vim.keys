@@ -1,0 +1,70 @@
+# Dusty Git's vim modes and the editor's leader (scripts/.vim-run.sh shots): the mode chip in
+# NORMAL, VISUAL (a line range in the reader) and INSERT (the commit message box), a Visual
+# selection inside the box, the which-key box after the leader, and the list filter and the
+# `:` prompt in NORMAL.
+until Changes
+wait 300
+shot normal
+key v
+wait 900
+key j j j j
+wait 300
+type V
+wait 300
+key j j
+wait 400
+shot visual
+key escape
+wait 300
+key 2
+wait 300
+key s
+wait 1200
+key c
+wait 700
+type Explain the modes
+wait 400
+shot insert
+key escape
+wait 200
+type 0wve
+wait 400
+shot box-visual
+key escape
+wait 200
+key escape
+wait 400
+key space
+wait 500
+shot leader
+key e
+wait 600
+shot rail-hidden
+key space e
+wait 400
+key 2
+wait 300
+type /
+wait 300
+type notes
+wait 400
+key escape
+wait 300
+type b
+wait 300
+shot filter-normal
+key escape
+wait 400
+type :
+wait 300
+type tutor git
+wait 300
+key escape
+wait 200
+type 0w
+wait 300
+shot command-normal
+key escape
+wait 200
+key escape
+wait 300

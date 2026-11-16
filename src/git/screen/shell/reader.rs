@@ -1,5 +1,6 @@
 //! The reader (pane 0): file and hunk bands, two-number gutters, full-width
 //! added/removed bands with syntax kept on top (DESIGN.md §3.1, §4.4).
+use super::super::conflicts;
 use super::chrome::{self, Span, bold, st};
 use super::glyphs::{Glyph, glyph};
 use super::layout::Rect;
@@ -71,12 +72,18 @@ pub(super) fn paint(app: &mut GitScreen, frame: &mut Frame, rect: Rect) {
             ));
         }
         2 => {
-            if let Some(commit) = &app.commit {
+            // The commit's hash and author live once, in the header block below; the
+            // title names the file shown (R15-06).
+            if let Some(file) = app.commit.as_ref().and_then(|commit| commit.files.get(commit.selected)) {
+                let (icon, group) = super::glyphs::file(&file.path, mode);
+                title.push((format!("{icon} "), syntax(group, pane_surface)));
+                title.push((file.path.display().to_string(), bold(GitRole::Text, pane_surface)));
+            } else if app.commit.is_some() {
                 title.push((
                     format!("{} ", glyph(Glyph::Commit, mode)),
                     st(GitRole::Hash, pane_surface),
                 ));
-                title.push((commit.id[..7].to_owned(), bold(GitRole::Hash, pane_surface)));
+                title.push(("Commit".into(), bold(GitRole::Text, pane_surface)));
             } else {
                 title.push(("Commit".into(), bold(GitRole::Text, pane_surface)));
             }
@@ -158,7 +165,8 @@ pub(super) fn paint(app: &mut GitScreen, frame: &mut Frame, rect: Rect) {
         let meta: Vec<Span> = vec![
             (commit.author.clone(), st(GitRole::Author, surface)),
             (" · ".into(), st(GitRole::Muted, surface)),
-            (commit.date.clone(), st(GitRole::Muted, surface)),
+            // The Git tab's one date grammar (`2h`, `Nov 12`), as History writes it.
+            (chrome::when(&commit.date, crate::forge::records::now()), st(GitRole::Muted, surface)),
             (
                 format!(" · {} file{}", commit.files.len(), if commit.files.len() == 1 { "" } else { "s" }),
                 st(GitRole::Muted, surface),
@@ -322,17 +330,15 @@ fn file_band(app: &GitScreen, grid: &mut CellGrid, row: &PreviewRow, rect: Rect,
         x = grid.put_text_clipped(x, rect.y, &format!("{icon} "), syntax(group, surface), rect.right());
     }
     let mut context = String::new();
+    // A file with edits in both layers: the band's stat is the shown layer's, the list's
+    // is both together, so the band names its layer (`unstaged +3 −1`).
+    let mut layer = "";
     if changes {
         let staged = app.preview_staged();
         context.push_str(if staged { " · Staged" } else { " · Unstaged" });
         context.push_str(&format!(" · {hunks} hunk{}", if hunks == 1 { "" } else { "s" }));
         if let Some(entry) = app.selected_row().and_then(|row| {
-            app.snapshot
-                .as_ref()?
-                .entries
-                .iter()
-                .find(|entry| entry.relative_path == row.value)
-                .cloned()
+            super::super::memo::entry(&app.snapshot.as_ref()?.entries, &row.value).cloned()
         }) && entry.sources.staged
             && entry.sources.unstaged
         {
@@ -341,18 +347,27 @@ fn file_band(app: &GitScreen, grid: &mut CellGrid, row: &PreviewRow, rect: Rect,
             } else {
                 " · Index has staged edits"
             });
+            layer = if staged { "staged " } else { "unstaged " };
         }
     }
     let (added, removed) = counts
         .split_once(' ')
         .map_or((String::new(), String::new()), |(a, r)| (a.to_owned(), r.to_owned()));
     let counts_width = chrome::width(&added) + chrome::width(&removed) + 2;
-    let right = rect.right().saturating_sub(counts_width);
+    // The layer word is a label for the stat; the context names the layer too, so on a
+    // narrow band the word gives way before the context is cut.
+    let fits = |layer: &str| {
+        let right = rect.right().saturating_sub(counts_width + chrome::width(layer));
+        x + chrome::width(&name) + chrome::width(&context) < right
+    };
+    let layer = if added.is_empty() || !fits(layer) { "" } else { layer };
+    let right = rect.right().saturating_sub(counts_width + chrome::width(layer));
     x = grid.put_text_clipped(x, rect.y, &chrome::ellipsize(&name, usize::from(right.saturating_sub(x + 1))), bold(GitRole::Text, surface), right);
     let room = usize::from(right.saturating_sub(x + 1));
     grid.put_text_clipped(x, rect.y, &chrome::ellipsize(&context, room), st(GitRole::Muted, surface), right);
     if !added.is_empty() {
-        let at = grid.put_text_clipped(right, rect.y, &added, st(GitRole::Added, surface), rect.right());
+        let at = grid.put_text_clipped(right, rect.y, layer, st(GitRole::Muted, surface), rect.right());
+        let at = grid.put_text_clipped(at, rect.y, &added, st(GitRole::Added, surface), rect.right());
         grid.put_text_clipped(at + 1, rect.y, &removed, st(GitRole::Removed, surface), rect.right());
     }
 }
@@ -421,13 +436,12 @@ impl Gutter {
             single: split || width < 70 || !patch,
         }
     }
-    /// Cells before the code, including the range edge column.
+    /// Cells before the code, including the range edge column: edge, numbers, ` │ `,
+    /// the `+`/`−` marker and a space. Every row of a reader has the same gutter, so code
+    /// starts in one column whether a row is context, added or removed.
     fn width(&self) -> u16 {
-        if self.single {
-            1 + self.number_width + 3
-        } else {
-            1 + self.number_width * 2 + 2 + 2 + 2
-        }
+        let numbers = if self.single { self.number_width } else { self.number_width * 2 + 1 };
+        if self.patch { 1 + numbers + 3 + 2 } else { 1 + numbers + 3 }
     }
 }
 
@@ -445,9 +459,14 @@ fn code_row(
     let row = &app.preview.rows[index];
     let in_range = range.is_some_and(|range| range.contains(&index)) && row.marker.is_some();
     let is_cursor = app.focus == 4 && app.preview_cursor == Some(index) && app.preview.patch;
+    // A conflicted file's sides (`conflicts.rs`): ours on the added band, theirs on the
+    // hunk band, the base and Git's marker lines on the pane.
+    let conflict = !app.preview.patch;
     let band = match row.marker {
         Some('+') => GitSurface::AddedBand,
         Some('-') => GitSurface::RemovedBand,
+        Some(conflicts::OURS) if conflict => GitSurface::AddedBand,
+        Some(conflicts::THEIRS) if conflict => GitSurface::HunkBand,
         _ => GitSurface::Pane,
     };
     let surface = if in_range || is_cursor {
@@ -462,6 +481,9 @@ fn code_row(
     let number_role = match row.marker {
         Some('+') => GitRole::Added,
         Some('-') => GitRole::Removed,
+        Some(conflicts::OURS) if conflict => GitRole::Added,
+        Some(conflicts::THEIRS) if conflict => GitRole::Focus,
+        Some(conflicts::MARKER_ROW) if conflict => GitRole::Conflict,
         _ => GitRole::Muted,
     };
     let width = usize::from(gutter.number_width);
@@ -474,14 +496,16 @@ fn code_row(
         format!("{:>width$}", number.map(|n| n.to_string()).unwrap_or_default())
     } else {
         format!(
-            "{:>width$}  {:>width$}",
+            "{:>width$} {:>width$}",
             row.old.map(|n| n.to_string()).unwrap_or_default(),
             row.new.map(|n| n.to_string()).unwrap_or_default(),
         )
     };
     let mut x = grid.put_text_clipped(rect.x + 1, rect.y, &numbers, st(number_role, surface), rect.right());
     if gutter.patch {
-        x = grid.put_text_clipped(x, rect.y, "  ", st(GitRole::Text, surface), rect.right());
+        // `old new │ ± code`: a rule ends the numbers on every row, and the marker column
+        // after it is blank on context rows, so the code axis is visible (r16 git-tab-04).
+        x = grid.put_text_clipped(x, rect.y, " │ ", st(GitRole::Border, surface), rect.right());
         let sign = match row.marker {
             Some('+') => "+",
             Some('-') => "−",
@@ -492,7 +516,12 @@ fn code_row(
     } else {
         x = grid.put_text_clipped(x, rect.y, " │ ", st(GitRole::Border, surface), rect.right());
     }
-    paint_code(app, grid, index, x, rect.y, rect.right(), pan, surface, st(GitRole::Text, surface))
+    let plain = match row.marker {
+        Some(conflicts::MARKER_ROW) if conflict => bold(GitRole::Conflict, surface),
+        Some(conflicts::BASE) if conflict => st(GitRole::Muted, surface),
+        _ => st(GitRole::Text, surface),
+    };
+    paint_code(app, grid, index, x, rect.y, rect.right(), pan, surface, plain)
 }
 
 /// Code with syntax spans on `surface`, search matches, panning marks; returns the

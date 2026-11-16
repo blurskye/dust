@@ -52,6 +52,7 @@ contract!(gitlab_http: super::gitlab::Harness::new(super::gitlab::Via::Http);
     unsupported_writes_send_nothing,
     read_only_navigation_makes_no_writes,
     nested_group_project_ids,
+    conversation_timelines,
 );
 
 contract!(gitlab_glab: super::gitlab::Harness::new(super::gitlab::Via::Glab);
@@ -76,6 +77,7 @@ contract!(gitlab_glab: super::gitlab::Harness::new(super::gitlab::Via::Glab);
     unsupported_writes_send_nothing,
     read_only_navigation_makes_no_writes,
     nested_group_project_ids,
+    conversation_timelines,
 );
 
 #[test]

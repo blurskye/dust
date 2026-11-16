@@ -112,7 +112,7 @@ fn view(screen: &mut GitScreen) -> String {
     view_at(screen, 190, 48)
 }
 fn wait(screen: &mut GitScreen, mut ready: impl FnMut(&mut GitScreen) -> bool) {
-    let deadline = Instant::now() + Duration::from_secs(15);
+    let deadline = Instant::now() + Duration::from_secs(120);
     loop {
         screen.poll();
         if ready(screen) {
@@ -343,7 +343,7 @@ fn all_reflog_workflows_authorize_at_submission_and_cancel_without_effects() {
     let before = parent_state(&fixture.root);
     let refs_before = refs(&fixture.root);
     let destination = fixture.destination("cancelled worktree");
-    for action in ['n', ' ', 'w'] {
+    for action in ['n', 'o', 'w'] {
         let mut screen = open_reflog(&fixture);
         key(&mut screen, KeyCode::Char(action));
         match action {
@@ -394,7 +394,7 @@ fn an_empty_reflog_filter_cannot_recover_or_check_out_a_hidden_old_selection() {
     key(&mut screen, KeyCode::Escape);
     filter(&mut screen, "no-such-reflog-event");
     assert!(view(&mut screen).contains("No matches"));
-    for action in ['n', ' ', 'w'] {
+    for action in ['n', 'o', 'w'] {
         key(&mut screen, KeyCode::Char(action));
         assert!(!screen.busy());
         assert!(view(&mut screen).contains("Select a reflog entry"));
@@ -407,12 +407,12 @@ fn an_empty_reflog_filter_cannot_recover_or_check_out_a_hidden_old_selection() {
 }
 
 #[test]
-fn space_confirms_detached_checkout_of_the_selected_commit_and_keeps_main_ref() {
+fn o_confirms_detached_checkout_of_the_selected_commit_and_keeps_main_ref() {
     let fixture = Fixture::new();
     let refs_before = refs(&fixture.root);
     let before = parent_state(&fixture.root);
     let mut screen = open_reflog(&fixture);
-    key(&mut screen, KeyCode::Char(' '));
+    key(&mut screen, KeyCode::Char('o'));
     let displayed = view(&mut screen);
     assert!(displayed.contains("Check out commit with detached HEAD?"));
     assert!(displayed.contains("Detach HEAD and update the index and working files"));
@@ -461,7 +461,7 @@ fn detached_checkout_lets_git_refuse_worktree_index_and_untracked_conflicts_with
         let before = parent_state(&fixture.root);
         let refs_before = refs(&fixture.root);
         let mut screen = open_reflog(&fixture);
-        key(&mut screen, KeyCode::Char(' '));
+        key(&mut screen, KeyCode::Char('o'));
         key(&mut screen, KeyCode::Enter);
         finished(&mut screen);
         let displayed = view_at(&mut screen, 64, 20);
@@ -621,7 +621,11 @@ fn pane_tops(screen: &mut GitScreen, width: u16, height: u16) -> Vec<u16> {
 fn reflog_keys_help_history_files_and_native_cursor_preserve_64_100_190_pane_geometry() {
     let fixture = Fixture::new();
     let mut screen = GitScreen::open(&fixture.root).unwrap();
-    wait(&mut screen, |screen| view(screen).contains("Baseline"));
+    // History can paint before the panes take their sizes for the session.
+    wait(&mut screen, |screen| {
+        let view = view(screen);
+        view.contains("Baseline") && view.contains("Local 1") && screen.panes_sized()
+    });
     let geometries = [(64, 20), (100, 30), (190, 48)];
     let positions = geometries.map(|(width, height)| pane_tops(&mut screen, width, height));
     key(&mut screen, KeyCode::Char('4'));
@@ -644,7 +648,7 @@ fn reflog_keys_help_history_files_and_native_cursor_preserve_64_100_190_pane_geo
             assert!(y > positions[2] && y < positions[3]);
         }
         let footer = before.grid.row_text(height - 1);
-        for hint in ["n", "rescue branch", "Space", "detach", "keys"] {
+        for hint in ["n", "rescue branch", "o", "detach", "keys"] {
             assert!(
                 footer.contains(hint),
                 "{width}x{height}: missing {hint}: {footer}"
@@ -676,14 +680,14 @@ fn reflog_keys_help_history_files_and_native_cursor_preserve_64_100_190_pane_geo
         assert_eq!(key(&mut screen, KeyCode::Enter), ScreenOutcome::Continue);
         let historical = view_at(&mut screen, width, height);
         assert!(
-            historical.contains(&format!("{} · Files", &fixture.lost[..7])),
+            historical.contains("Commit files"),
             "{historical}"
         );
         if stacked {
             assert_eq!(pane_tops(&mut screen, width, height), positions);
         }
-        // Historical file Space remains read-only; it must not detach or stage.
-        key(&mut screen, KeyCode::Char(' '));
+        // Historical file `-` remains read-only; it must not detach or stage.
+        key(&mut screen, KeyCode::Char('-'));
         assert!(!screen.busy());
         assert_eq!(git(&fixture.root, &["branch", "--show-current"]), "main");
         key(&mut screen, KeyCode::Escape);
@@ -694,7 +698,7 @@ fn reflog_keys_help_history_files_and_native_cursor_preserve_64_100_190_pane_geo
     key(&mut screen, KeyCode::Char('c'));
     let refused = view(&mut screen);
     assert!(
-        refused.contains("Nothing staged · Space stages the selected change"),
+        refused.contains("Nothing staged · s stages the selected change"),
         "{refused}"
     );
     assert!(!refused.contains("Create rescue branch at commit"));

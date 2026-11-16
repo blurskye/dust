@@ -95,6 +95,7 @@ impl HttpTransport {
             return Ok(());
         };
         let login = self.viewer(cancel)?;
+        crate::forge::credential::accepted(&self.endpoints.host);
         crate::forge::host_state::observe_account(&self.endpoints, &credential.source, login);
         Ok(())
     }
@@ -328,6 +329,59 @@ impl Transport for HttpTransport {
     }
 }
 
+/// The scopes a 403 says the token lacks, joined `repo, workflow`: GitHub's
+/// `X-Accepted-OAuth-Scopes` minus `X-OAuth-Scopes`, GitLab's `insufficient_scope` (body or
+/// `WWW-Authenticate`), Gitea/Forgejo's `required=[…]` / `required scope(s): […]`.
+pub fn missing_scopes(response: &ApiResponse, body: &serde_json::Value, message: &str) -> Option<String> {
+    let split = |text: &str| -> Vec<String> {
+        text.split([',', ' '])
+            .map(|scope| scope.trim().trim_matches(['\'', '"']))
+            .filter(|scope| !scope.is_empty())
+            .map(str::to_owned)
+            .collect()
+    };
+    let join = |scopes: Vec<String>| (!scopes.is_empty()).then(|| scopes.join(", "));
+    if let Some(accepted) = response.header("x-accepted-oauth-scopes") {
+        let held = split(response.header("x-oauth-scopes").unwrap_or_default());
+        let needed: Vec<String> = split(accepted)
+            .into_iter()
+            .filter(|scope| !held.contains(scope))
+            .collect();
+        if let Some(scopes) = join(needed) {
+            return Some(scopes);
+        }
+    }
+    let insufficient = body["error"].as_str() == Some("insufficient_scope")
+        || response
+            .header("www-authenticate")
+            .is_some_and(|value| value.contains("insufficient_scope"));
+    if insufficient {
+        let from_header = response.header("www-authenticate").and_then(|value| {
+            let at = value.find("scope=\"")? + "scope=\"".len();
+            value[at..].split('"').next().map(str::to_owned)
+        });
+        let scopes = body["scope"].as_str().map(str::to_owned).or(from_header);
+        return join(split(&scopes.unwrap_or_default()));
+    }
+    scopes_in(message)
+}
+
+/// `… required=[read:repository] …`, `required scope(s): [a, b]` or GraphQL's `… one of the
+/// following scopes: ['read:project']`: the bracketed list after the word that names it.
+pub fn scopes_in(message: &str) -> Option<String> {
+    let lower = message.to_ascii_lowercase();
+    let at = lower.find("required").or_else(|| lower.find("following scopes"))?;
+    let rest = &message[at..];
+    let open = rest.find('[')?;
+    let close = rest[open..].find(']')? + open;
+    let scopes: Vec<&str> = rest[open + 1..close]
+        .split(',')
+        .map(|scope| scope.trim().trim_matches(['\'', '"']))
+        .filter(|scope| !scope.is_empty())
+        .collect();
+    (!scopes.is_empty()).then(|| scopes.join(", "))
+}
+
 /// One error per response (§3.5); the copy shown to the user comes from `ForgeError`'s Display.
 pub fn classify(endpoints: &Endpoints, response: &ApiResponse) -> ForgeError {
     let body: serde_json::Value = serde_json::from_slice(&response.body).unwrap_or_default();
@@ -369,10 +423,58 @@ pub fn classify(endpoints: &Endpoints, response: &ApiResponse) -> ForgeError {
             host: endpoints.host.to_string(),
             hint: crate::forge::credential::login_hint(endpoints.kind, &endpoints.host),
         },
-        403 => ForgeError::Forbidden(message),
+        403 => ForgeError::Forbidden(match missing_scopes(response, &body, &message) {
+            Some(scopes) => format!("needs scope {scopes}"),
+            None => message,
+        }),
         404 | 410 => ForgeError::NotFound(message),
         405 | 409 | 422 => ForgeError::Conflict(message),
         500..=599 => ForgeError::Network(format!("{} {message}", response.status)),
         _ => ForgeError::Failed(format!("{} {message}", response.status)),
+    }
+}
+
+#[cfg(test)]
+mod scope_tests {
+    use super::*;
+
+    fn response(headers: &[(&str, &str)], body: &str) -> ApiResponse {
+        ApiResponse {
+            status: 403,
+            headers: headers.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
+            body: body.as_bytes().to_vec(),
+        }
+    }
+
+    fn scopes(response: &ApiResponse) -> Option<String> {
+        let body: serde_json::Value = serde_json::from_slice(&response.body).unwrap_or_default();
+        let message = body["message"].as_str().unwrap_or_default().to_owned();
+        missing_scopes(response, &body, &message)
+    }
+
+    #[test]
+    fn a_403_names_the_scopes_the_token_lacks() {
+        let github = response(
+            &[("x-oauth-scopes", "read:org"), ("x-accepted-oauth-scopes", "repo, workflow")],
+            r#"{"message":"Resource not accessible by personal access token"}"#,
+        );
+        assert_eq!(scopes(&github).as_deref(), Some("repo, workflow"));
+        let held = response(&[("x-oauth-scopes", "repo"), ("x-accepted-oauth-scopes", "repo")], "{}");
+        assert_eq!(scopes(&held), None);
+        let gitlab = response(
+            &[("www-authenticate", r#"Bearer realm="", error="insufficient_scope", scope="api""#)],
+            r#"{"error":"insufficient_scope","scope":"api read_api"}"#,
+        );
+        assert_eq!(scopes(&gitlab).as_deref(), Some("api, read_api"));
+        let gitea = response(
+            &[],
+            r#"{"message":"token does not have at least one of required scope(s), required=[read:repository], token scope=read:user"}"#,
+        );
+        assert_eq!(scopes(&gitea).as_deref(), Some("read:repository"));
+        assert_eq!(
+            scopes_in("The 'title' field requires one of the following scopes: ['read:project']").as_deref(),
+            Some("read:project")
+        );
+        assert_eq!(scopes(&response(&[], r#"{"message":"Must have admin rights"}"#)), None);
     }
 }

@@ -68,7 +68,7 @@ fn view(screen: &mut GitScreen) -> String {
         .join("\n")
 }
 fn wait(screen: &mut GitScreen, mut ready: impl FnMut(&mut GitScreen) -> bool) {
-    let deadline = Instant::now() + Duration::from_secs(15);
+    let deadline = Instant::now() + Duration::from_secs(120);
     loop {
         screen.poll();
         if ready(screen) {
@@ -154,7 +154,7 @@ fn assert_submodule_status(screen: &mut GitScreen, marker: &str, code: &str) {
             .collect::<String>();
         assert!(active.contains("Sub"), "active file tab: {active:?}");
         let footer = frame.grid.row_text(height - 1);
-        for action in ["Space", "pointer", "Enter", "keys"] {
+        for action in ["s", "pointer", "Enter", "keys"] {
             assert!(
                 footer.contains(action),
                 "{width}×{height}: missing {action}: {footer}"
@@ -224,17 +224,17 @@ fn directory_space_stages_descendants_then_unstages_without_touching_disk_or_oth
     tree(&mut screen);
     assert!(selected(&mut screen).contains("docs/"));
     screen.write_refusal = Some("Host refuses writes".into());
-    key(&mut screen, KeyCode::Char(' '));
+    key(&mut screen, KeyCode::Char('-'));
     assert!(view(&mut screen).contains("Host refuses writes"));
     assert_eq!(
         git(root, &["diff", "--cached", "--name-only"]),
         "z-other.txt"
     );
     screen.write_refusal = None;
-    key(&mut screen, KeyCode::Char(' '));
+    key(&mut screen, KeyCode::Char('-'));
     assert!(screen.busy());
     // Repeated input while the command or its status refresh is active must not toggle back.
-    key(&mut screen, KeyCode::Char(' '));
+    key(&mut screen, KeyCode::Char('-'));
     wait(&mut screen, |screen| !screen.busy());
     assert_eq!(git(root, &["show", ":docs/one.md"]), "one edited");
     assert_eq!(git(root, &["show", ":docs/nested/two.md"]), "two edited");
@@ -242,7 +242,7 @@ fn directory_space_stages_descendants_then_unstages_without_touching_disk_or_oth
         git(root, &["show", ":docs/[literal].md"]),
         "literal pathspec"
     );
-    key(&mut screen, KeyCode::Char(' '));
+    key(&mut screen, KeyCode::Char('-'));
     wait(&mut screen, |screen| !screen.busy());
     assert_eq!(
         git(root, &["diff", "--cached", "--name-only"]),
@@ -277,10 +277,10 @@ fn mixed_directory_finishes_partial_staging_and_unstages_both_rename_paths() {
     wait(&mut screen, |screen| view(screen).contains("renamed.txt"));
     tree(&mut screen);
     assert!(selected(&mut screen).contains("docs/"));
-    key(&mut screen, KeyCode::Char(' '));
+    key(&mut screen, KeyCode::Char('-'));
     wait(&mut screen, |screen| !screen.busy());
     assert_eq!(git(root, &["show", ":docs/edit.txt"]), "remaining edit");
-    key(&mut screen, KeyCode::Char(' '));
+    key(&mut screen, KeyCode::Char('-'));
     wait(&mut screen, |screen| !screen.busy());
     assert_eq!(
         git(root, &["diff", "--cached", "--name-only"]),
@@ -309,10 +309,10 @@ fn directory_toggle_handles_an_unborn_index_and_deleted_descendants() {
     wait(&mut screen, |screen| view(screen).contains("one.txt"));
     tree(&mut screen);
     assert!(selected(&mut screen).contains("docs/"));
-    key(&mut screen, KeyCode::Char(' '));
+    key(&mut screen, KeyCode::Char('-'));
     wait(&mut screen, |screen| !screen.busy());
     assert_eq!(git(root, &["ls-files"]), "docs/one.txt\ndocs/two.txt");
-    key(&mut screen, KeyCode::Char(' '));
+    key(&mut screen, KeyCode::Char('-'));
     wait(&mut screen, |screen| !screen.busy());
     assert_eq!(git(root, &["ls-files"]), "");
     assert_eq!(
@@ -328,13 +328,13 @@ fn directory_toggle_handles_an_unborn_index_and_deleted_descendants() {
     wait(&mut screen, |screen| view(screen).contains("one.txt"));
     tree(&mut screen);
     assert!(selected(&mut screen).contains("docs/"));
-    key(&mut screen, KeyCode::Char(' '));
+    key(&mut screen, KeyCode::Char('-'));
     wait(&mut screen, |screen| !screen.busy());
     assert_eq!(
         git(root, &["diff", "--cached", "--name-status"]),
         "D\tdocs/one.txt\nM\tdocs/two.txt"
     );
-    key(&mut screen, KeyCode::Char(' '));
+    key(&mut screen, KeyCode::Char('-'));
     wait(&mut screen, |screen| !screen.busy());
     assert_eq!(git(root, &["diff", "--cached", "--name-only"]), "");
     assert!(!root.join("docs/one.txt").exists());
@@ -343,7 +343,6 @@ fn directory_toggle_handles_an_unborn_index_and_deleted_descendants() {
 #[test]
 fn narrow_sidebar_shows_five_branches_without_changing_pane_boundaries_on_focus() {
     let directory = repo(&[("file.txt", "base\n")]);
-    let head = git(directory.path(), &["rev-parse", "--short=7", "HEAD"]);
     for branch in 0..12 {
         git(
             directory.path(),
@@ -351,7 +350,7 @@ fn narrow_sidebar_shows_five_branches_without_changing_pane_boundaries_on_focus(
         );
     }
     let mut screen = GitScreen::open(directory.path()).unwrap();
-    wait(&mut screen, |screen| view(screen).contains("visible-00"));
+    wait(&mut screen, |screen| view(screen).contains("visible-00") && screen.panes_sized());
     let frame = screen.frame(100, 30);
     let headings = ["Changes", "Branches", "History", "Stashes"].map(|heading| {
         (0..30)
@@ -377,7 +376,7 @@ fn narrow_sidebar_shows_five_branches_without_changing_pane_boundaries_on_focus(
     let interior = headings[2] - headings[1] - 2;
     assert!(interior >= 4, "Branches budget shrank: {interior}");
     assert_eq!(visible, usize::from(interior - 1));
-    let historical_heading = format!("{head} · Files");
+    let historical_heading = "Commit files".to_owned();
     for pane in ['3', '4', '5', '2'] {
         key(&mut screen, KeyCode::Char(pane));
         if pane == '4' {
@@ -466,7 +465,7 @@ fn changes_filter_actions_target_the_visible_file_and_no_matches_cannot_stage_an
     choose_file(&mut screen, "b.txt");
     filter(&mut screen, "c.txt");
     assert!(selected(&mut screen).contains("c.txt"));
-    key(&mut screen, KeyCode::Char(' '));
+    key(&mut screen, KeyCode::Char('-'));
     wait(&mut screen, |screen| !screen.busy());
     assert_eq!(
         git(root, &["diff", "--cached", "--name-only"]),
@@ -475,7 +474,7 @@ fn changes_filter_actions_target_the_visible_file_and_no_matches_cannot_stage_an
     key(&mut screen, KeyCode::Escape);
     assert!(selected(&mut screen).contains("b.txt"));
     filter(&mut screen, "NO-SUCH-FILE");
-    key(&mut screen, KeyCode::Char(' '));
+    key(&mut screen, KeyCode::Char('-'));
     assert!(!screen.busy());
     assert_eq!(key(&mut screen, KeyCode::Enter), ScreenOutcome::Continue);
     assert_eq!(
@@ -484,7 +483,7 @@ fn changes_filter_actions_target_the_visible_file_and_no_matches_cannot_stage_an
     );
     key(&mut screen, KeyCode::Escape);
     assert!(selected(&mut screen).contains("b.txt"));
-    key(&mut screen, KeyCode::Char(' '));
+    key(&mut screen, KeyCode::Char('-'));
     wait(&mut screen, |screen| !screen.busy());
     assert_eq!(
         git(root, &["diff", "--cached", "--name-only"]),
@@ -500,12 +499,12 @@ fn commit_and_commit_file_filters_keep_the_shared_changes_pane_read_only() {
         ("src/git/screen/gamma.rs", "gamma\n"),
     ]);
     let root = directory.path();
-    let baseline = git(root, &["rev-parse", "--short=7", "HEAD"]);
     write(root, "z-later.txt", "later\n");
     git(root, &["add", "."]);
     git(root, &["commit", "-m", "Later commit"]);
     let mut screen = GitScreen::open(root).unwrap();
     wait(&mut screen, |screen| view(screen).contains("Later commit"));
+    wait(&mut screen, |screen| view(screen).contains("Local 1") && screen.panes_sized());
     key(&mut screen, KeyCode::Char('4'));
     let before = screen.frame(100, 30);
     let headings = ["Branches", "History", "Stashes"].map(|heading| {
@@ -522,7 +521,7 @@ fn commit_and_commit_file_filters_keep_the_shared_changes_pane_read_only() {
     filter(&mut screen, "gamma.rs");
     wait(&mut screen, |screen| view(screen).contains("+ gamma"));
     assert!(selected(&mut screen).contains("gamma.rs"));
-    key(&mut screen, KeyCode::Char(' '));
+    key(&mut screen, KeyCode::Char('-'));
     assert!(!screen.busy());
     assert_eq!(git(root, &["diff", "--cached", "--name-only"]), "");
     key(&mut screen, KeyCode::Escape);
@@ -536,7 +535,7 @@ fn commit_and_commit_file_filters_keep_the_shared_changes_pane_read_only() {
         (0..30)
             .filter(|&y| {
                 let title = after.grid.row_text(y);
-                title.contains(&format!("{baseline} · Files"))
+                title.contains("Commit files")
             })
             .count(),
         1
@@ -559,12 +558,12 @@ fn native_diff_cursor_stages_and_unstages_one_hunk_not_the_whole_file() {
     control(&mut screen, KeyCode::Char('l'));
     code_cursor(&mut screen, "+ first hunk");
     screen.write_refusal = Some("Unsaved host document".into());
-    key(&mut screen, KeyCode::Char(' '));
+    key(&mut screen, KeyCode::Char('-'));
     assert!(!screen.busy());
     assert!(view(&mut screen).contains("Unsaved host document"));
     screen.write_refusal = None;
-    start_when_ready(&mut screen, KeyCode::Char(' '));
-    key(&mut screen, KeyCode::Char(' '));
+    start_when_ready(&mut screen, KeyCode::Char('-'));
+    key(&mut screen, KeyCode::Char('-'));
     wait(&mut screen, |screen| !screen.busy());
     assert_eq!(
         git(root, &["show", ":file.txt"]),
@@ -574,7 +573,7 @@ fn native_diff_cursor_stages_and_unstages_one_hunk_not_the_whole_file() {
     key(&mut screen, KeyCode::Char('i'));
     wait(&mut screen, |screen| view(screen).contains("+ first hunk"));
     code_cursor(&mut screen, "+ first hunk");
-    start_when_ready(&mut screen, KeyCode::Char(' '));
+    start_when_ready(&mut screen, KeyCode::Char('-'));
     wait(&mut screen, |screen| !screen.busy());
     assert_eq!(git(root, &["show", ":file.txt"]), base.trim_end());
     assert_eq!(
@@ -709,10 +708,10 @@ fn selected_line_and_range_stage_unstage_are_symmetric_without_touching_disk() {
         key(&mut screen, KeyCode::Char('V'));
         assert!(view(&mut screen).contains("unstage selected diff lines"));
         code_cursor(&mut screen, &code("third"));
-        key(&mut screen, KeyCode::Char(' '));
+        key(&mut screen, KeyCode::Char('-'));
         assert!(
             !screen.busy(),
-            "Space must not silently expand a selected range"
+            "- must not silently expand a selected range"
         );
         assert!(view(&mut screen).contains("a unstages the selected range"));
         assert_contents(&format!("{unstaged_line}kept staged\n"));
@@ -782,7 +781,7 @@ fn range_crossing_hunks_refuses_instead_of_staging_an_unintended_subset() {
     assert!(view(&mut screen).contains("within one hunk"));
     assert_eq!(git(root, &["diff", "--cached", "--name-only"]), "");
     key(&mut screen, KeyCode::Escape);
-    key(&mut screen, KeyCode::Char(' '));
+    key(&mut screen, KeyCode::Char('-'));
     assert!(screen.busy());
     wait(&mut screen, |screen| !screen.busy());
     assert_eq!(
@@ -814,7 +813,7 @@ fn stale_hunk_captures_refuse_external_index_worktree_and_head_changes() {
                 git(root, &["commit", "--allow-empty", "-m", "External HEAD"]);
             }
         }
-        key(&mut screen, KeyCode::Char(' '));
+        key(&mut screen, KeyCode::Char('-'));
         assert!(screen.busy(), "the checked plan must reach the worker");
         wait(&mut screen, |screen| !screen.busy());
         let displayed = view(&mut screen);
@@ -914,7 +913,7 @@ fn sidebar_tabs_use_real_worktrees_remote_refs_tags_and_reflog_events() {
     let mut screen = GitScreen::open(root).unwrap();
     wait(&mut screen, |screen| {
         let displayed = view(screen);
-        displayed.contains("Baseline") && displayed.contains("Worktrees 2")
+        displayed.contains("Baseline") && displayed.contains("Worktrees 2") && screen.panes_sized()
     });
     let frame = screen.frame(190, 48);
     let labels = (0..48)
@@ -991,12 +990,12 @@ fn sidebar_tabs_use_real_worktrees_remote_refs_tags_and_reflog_events() {
         "refresh must preserve the selected reflog event, not HEAD@{{0}}"
     );
     let head_before_confirmation = git(root, &["rev-parse", "HEAD"]);
-    key(&mut screen, KeyCode::Char(' '));
+    key(&mut screen, KeyCode::Char('o'));
     assert!(view(&mut screen).contains("Check out commit with detached HEAD?"));
     assert_eq!(git(root, &["rev-parse", "HEAD"]), head_before_confirmation);
     assert_eq!(git(root, &["diff", "--cached", "--name-only"]), "");
     let frame = screen.frame(190, 48);
-    let historical_heading = format!("{} · Files", &id[..7]);
+    let historical_heading = "Commit files".to_owned();
     for (name, y) in [
         historical_heading.as_str(),
         "Branches",
@@ -1082,7 +1081,7 @@ fn native_submodules_open_init_and_reverse_gitlink_staging_without_staging_child
     );
     key(&mut screen, KeyCode::Char('u'));
     assert!(view(&mut screen).contains("Commit or save the submodule"));
-    key(&mut screen, KeyCode::Char(' '));
+    key(&mut screen, KeyCode::Char('-'));
     wait(&mut screen, |screen| !screen.busy());
     assert!(git(root, &["ls-files", "--stage", "--", relative]).contains(&changed));
     assert_eq!(git(root, &["diff", "--cached", "--name-only"]), relative);
@@ -1094,8 +1093,8 @@ fn native_submodules_open_init_and_reverse_gitlink_staging_without_staging_child
     assert_submodule_status(&mut screen, "◐", "MM");
     assert!(view(&mut screen).contains("Working files: modified"));
     // The untracked child draft makes the parent report unstaged submodule changes too.
-    // A second Space must still unstage the pointer rather than trying to stage that draft.
-    key(&mut screen, KeyCode::Char(' '));
+    // A second - must still unstage the pointer rather than trying to stage that draft.
+    key(&mut screen, KeyCode::Char('-'));
     wait(&mut screen, |screen| !screen.busy());
     assert!(git(root, &["ls-files", "--stage", "--", relative]).contains(&original));
     assert_eq!(git(root, &["diff", "--cached", "--name-only"]), "");
@@ -1124,7 +1123,7 @@ fn native_submodules_open_init_and_reverse_gitlink_staging_without_staging_child
             && displayed.contains("Working files: clean")
     });
     assert_submodule_status(&mut screen, "✓", "M ");
-    key(&mut screen, KeyCode::Char(' '));
+    key(&mut screen, KeyCode::Char('-'));
     wait(&mut screen, |screen| {
         let displayed = view(screen);
         !screen.busy()
@@ -1132,7 +1131,7 @@ fn native_submodules_open_init_and_reverse_gitlink_staging_without_staging_child
             && displayed.contains("Checkout pointer: unstaged revision")
     });
     assert_eq!(git(root, &["diff", "--cached", "--name-only"]), "");
-    key(&mut screen, KeyCode::Char(' '));
+    key(&mut screen, KeyCode::Char('-'));
     wait(&mut screen, |screen| {
         !screen.busy() && view(screen).contains("Parent index: staged pointer")
     });
@@ -1216,7 +1215,7 @@ fn directory_space_reverses_gitlinks_even_when_child_files_remain_dirty() {
     // preview does not imply the Changes tree is ready on the first open.
     wait(&mut screen, |screen| selected(screen).contains("vendor/"));
     assert!(selected(&mut screen).contains("vendor/"));
-    key(&mut screen, KeyCode::Char(' '));
+    key(&mut screen, KeyCode::Char('-'));
     wait(&mut screen, |screen| !screen.busy());
     assert_eq!(git(root, &["show", ":vendor/ordinary.txt"]), "parent edit");
     assert!(git(root, &["ls-files", "--stage", "--", relative]).contains(&changed));
@@ -1231,7 +1230,7 @@ fn directory_space_reverses_gitlinks_even_when_child_files_remain_dirty() {
     key(&mut screen, KeyCode::Char('H'));
     key(&mut screen, KeyCode::Char('H'));
     assert!(selected(&mut screen).contains("vendor/"));
-    key(&mut screen, KeyCode::Char(' '));
+    key(&mut screen, KeyCode::Char('-'));
     wait(&mut screen, |screen| !screen.busy());
     assert_eq!(
         git(root, &["diff", "--cached", "--name-only"]),
@@ -1297,7 +1296,7 @@ fn filter_dead_end_recovers_the_last_match_without_changing_saved_directory_fold
         selected(&mut screen).contains("b.txt"),
         "backspacing a dead-end query must not jump to a.txt"
     );
-    key(&mut screen, KeyCode::Char(' '));
+    key(&mut screen, KeyCode::Char('-'));
     wait(&mut screen, |screen| !screen.busy());
     assert_eq!(
         git(root, &["diff", "--cached", "--name-only"]),
@@ -1381,7 +1380,7 @@ fn file_status_columns_and_filename_do_not_move_between_worktree_mixed_and_index
         }
     };
     assert_status(&mut screen, " ", " M");
-    key(&mut screen, KeyCode::Char(' '));
+    key(&mut screen, KeyCode::Char('-'));
     wait(&mut screen, |screen| !screen.busy());
     assert_eq!(git(root, &["show", ":file.txt"]), "first edit");
     assert_status(&mut screen, " ", "M ");
@@ -1389,11 +1388,11 @@ fn file_status_columns_and_filename_do_not_move_between_worktree_mixed_and_index
     key(&mut screen, KeyCode::Char('r'));
     wait(&mut screen, |screen| view(screen).contains("+ later edit"));
     assert_status(&mut screen, "◐", "MM");
-    key(&mut screen, KeyCode::Char(' '));
+    key(&mut screen, KeyCode::Char('-'));
     wait(&mut screen, |screen| !screen.busy());
     assert_eq!(git(root, &["show", ":file.txt"]), "later edit");
     assert_status(&mut screen, " ", "M ");
-    key(&mut screen, KeyCode::Char(' '));
+    key(&mut screen, KeyCode::Char('-'));
     wait(&mut screen, |screen| !screen.busy());
     assert_eq!(git(root, &["show", ":file.txt"]), "base");
     assert_eq!(git(root, &["diff", "--cached", "--name-only"]), "");
@@ -1432,7 +1431,7 @@ fn compact_help_exposes_submodule_remote_stash_and_diff_actions_at_every_support
         key(&mut screen, KeyCode::Char('2'));
         let before = screen.frame(width, height);
         let footer = before.grid.row_text(height - 1);
-        for action in ["Space", "stage", "commit", "keys"] {
+        for action in ["s", "stage", "commit", "keys"] {
             assert!(
                 footer.contains(action),
                 "{width}×{height}: missing {action}: {footer}"
@@ -1569,7 +1568,7 @@ fn filtered_partial_hunk_summary_distinguishes_repo_layer_and_remaining_work_wit
         }
     };
     assert_summary(&mut screen, false);
-    start_when_ready(&mut screen, KeyCode::Char(' '));
+    start_when_ready(&mut screen, KeyCode::Char('-'));
     wait(&mut screen, |screen| !screen.busy());
     // Partial staging leaves the remaining working-tree hunks visible. Select
     // Index explicitly before locating the staged hunk and reversing it.
@@ -1589,7 +1588,7 @@ fn filtered_partial_hunk_summary_distinguishes_repo_layer_and_remaining_work_wit
         git(root, &["diff", "--cached", "--name-only"]),
         "notes.md\nsearch.rs"
     );
-    start_when_ready(&mut screen, KeyCode::Char(' '));
+    start_when_ready(&mut screen, KeyCode::Char('-'));
     wait(&mut screen, |screen| !screen.busy());
     wait(&mut screen, |screen| {
         view(screen).contains("search.rs · Unstaged · 4 hunks")

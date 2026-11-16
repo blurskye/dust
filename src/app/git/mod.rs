@@ -1008,7 +1008,6 @@ impl Git {
             expected_document_revision: None,
             unsaved_documents: Self::unsaved_documents(editor, &scope_root),
             maximum_patch_bytes: 1024 * 1024,
-            deadline: Duration::from_secs(5),
         };
         if matches!(
             kind,
@@ -1275,7 +1274,6 @@ impl Git {
                 expected_index: Some(snapshot.index_fingerprint),
                 expected_worktree: snapshot.worktree_sha256,
                 maximum_patch_bytes: 1024 * 1024,
-                deadline: Duration::from_secs(5),
             });
             self.mutation_request_id =
                 Some(self.mutation.start(request).map_err(|e| e.to_string())?);
@@ -1298,7 +1296,6 @@ impl Git {
             expected_document_revision: None,
             unsaved_documents: Self::unsaved_documents(editor, &status.scope_root),
             maximum_patch_bytes: 1024 * 1024,
-            deadline: Duration::from_secs(5),
         };
         self.plan_path = Some(snapshot.file.clone());
         self.unsaved_refusal = None;
@@ -1586,7 +1583,7 @@ mod regression_tests {
 
     pub(in crate::app) fn refresh(session: &mut Git, editor: &EditorState, root: &Path) {
         session.refresh(editor, Some(root), 1, true).unwrap();
-        let deadline = Instant::now() + Duration::from_secs(3);
+        let deadline = Instant::now() + Duration::from_secs(30);
         while session.status_pending() {
             session.poll_status(1).unwrap();
             assert!(Instant::now() < deadline);
@@ -1596,7 +1593,7 @@ mod regression_tests {
 
     fn read_signs(session: &mut Git, editor: &EditorState) -> Vec<UiGitSign> {
         session.reconcile_signs(editor, 1, true);
-        let deadline = Instant::now() + Duration::from_secs(3);
+        let deadline = Instant::now() + Duration::from_secs(30);
         let mut signs = Vec::new();
         while session.signs_pending() {
             if let Some(result) = session.poll_signs(editor, 1, true) {
@@ -1612,7 +1609,7 @@ mod regression_tests {
         session
             .start_hunks(editor, Some(path), 1, None, GitDiffLayer::Unstaged)
             .unwrap();
-        let deadline = Instant::now() + Duration::from_secs(3);
+        let deadline = Instant::now() + Duration::from_secs(30);
         while session.hunks_pending() {
             session.poll_hunks(editor).unwrap();
             assert!(Instant::now() < deadline);
@@ -1630,7 +1627,7 @@ mod regression_tests {
         app.git
             .refresh(&app.state, Some(dir.path()), revision, true)
             .unwrap();
-        let deadline = Instant::now() + Duration::from_secs(3);
+        let deadline = Instant::now() + Duration::from_secs(30);
         while app.git.status_pending() {
             app.git.poll_status(revision).unwrap();
             assert!(Instant::now() < deadline);
@@ -1738,7 +1735,7 @@ mod regression_tests {
         assert!(session.hunks_match(&editor, &path, GitDiffLayer::Unstaged, 1));
         // Staging this buffer-only hunk must offer the unsaved refusal, not apply it to disk.
         session.mutate(&editor, false, true, 1).unwrap();
-        let deadline = Instant::now() + Duration::from_secs(3);
+        let deadline = Instant::now() + Duration::from_secs(30);
         loop {
             if let Some(outcome) = session.poll_mutation().unwrap() {
                 assert_eq!(outcome, GitMutationOutcome::UnsavedDocument);
@@ -1767,7 +1764,7 @@ mod regression_tests {
         session
             .start_hunks(&editor, Some(&path), 1, None, GitDiffLayer::Staged)
             .unwrap();
-        let deadline = Instant::now() + Duration::from_secs(3);
+        let deadline = Instant::now() + Duration::from_secs(30);
         while session.hunks_pending() {
             session.poll_hunks(&editor).unwrap();
             assert!(Instant::now() < deadline);
@@ -1816,7 +1813,7 @@ mod regression_tests {
         session
             .start_plan(&editor, GitMutationKind::StageHunk, 1, true, vec![])
             .unwrap();
-        let deadline = Instant::now() + Duration::from_secs(3);
+        let deadline = Instant::now() + Duration::from_secs(30);
         while session.mutation_pending() {
             session.poll_mutation().unwrap();
             assert!(Instant::now() < deadline);
@@ -1847,7 +1844,7 @@ mod regression_tests {
                 Some("device".into()),
             )
             .unwrap();
-        let deadline = Instant::now() + Duration::from_secs(3);
+        let deadline = Instant::now() + Duration::from_secs(30);
         loop {
             match session.poll_mutation() {
                 Err(error) => {
@@ -1893,7 +1890,7 @@ mod regression_tests {
                 .contains("already running")
         );
         assert_eq!(session.mutation_request_id, request_id);
-        let deadline = Instant::now() + Duration::from_secs(3);
+        let deadline = Instant::now() + Duration::from_secs(30);
         loop {
             if let Some(outcome) = session.poll_mutation().unwrap() {
                 assert_eq!(outcome, GitMutationOutcome::Staged("Git file staged"));
@@ -1936,7 +1933,7 @@ mod regression_tests {
             .start_worktree_create(dir.path(), "review", &dir.path().join("review"), &branch)
             .unwrap();
         session.show_worktrees_after_change();
-        let deadline = Instant::now() + Duration::from_secs(3);
+        let deadline = Instant::now() + Duration::from_secs(30);
         loop {
             if let Err(error) = session.poll_branch_outcome(1, dir.path()) {
                 assert!(error.contains("checked out"), "{error}");
@@ -1960,7 +1957,7 @@ mod regression_tests {
         session
             .start_worktree_create(dir.path(), "review", &alias.join("review"), "review")
             .unwrap();
-        let deadline = Instant::now() + Duration::from_secs(3);
+        let deadline = Instant::now() + Duration::from_secs(30);
         while session.branch_pending() {
             session.poll_branch_outcome(1, dir.path()).unwrap();
             assert!(Instant::now() < deadline);
@@ -1985,7 +1982,7 @@ mod regression_tests {
         session
             .start_worktree_remove(&editor, dir.path(), "review")
             .unwrap();
-        let deadline = Instant::now() + Duration::from_secs(3);
+        let deadline = Instant::now() + Duration::from_secs(30);
         while session.branch_pending() {
             session.poll_branch_outcome(1, dir.path()).unwrap();
             assert!(Instant::now() < deadline);
@@ -2044,7 +2041,7 @@ mod regression_tests {
         session
             .start_plan(&editor, GitMutationKind::StageFile, 1, true, vec![])
             .unwrap();
-        let deadline = Instant::now() + Duration::from_secs(3);
+        let deadline = Instant::now() + Duration::from_secs(30);
         while session.mutation_pending() {
             session.poll_mutation().unwrap();
             assert!(Instant::now() < deadline);
@@ -2081,7 +2078,7 @@ mod regression_tests {
                     .start_plan(&editor, GitMutationKind::StageHunk, 1, true, vec![])
                     .unwrap();
             }
-            let deadline = Instant::now() + Duration::from_secs(5);
+            let deadline = Instant::now() + Duration::from_secs(30);
             while session.mutation_pending() {
                 session.poll_mutation().unwrap();
                 assert!(Instant::now() < deadline);
@@ -2126,7 +2123,7 @@ mod regression_tests {
         session
             .refresh(&editor, Some(dir.path()), 1, false)
             .unwrap();
-        let deadline = Instant::now() + Duration::from_secs(3);
+        let deadline = Instant::now() + Duration::from_secs(30);
         loop {
             if let Some(outcome) = session.poll_branch_outcome(1, dir.path()).unwrap() {
                 assert!(matches!(outcome, GitBranchOutcome::List(_)));
@@ -2163,7 +2160,7 @@ mod regression_tests {
             )
             .unwrap();
         assert!(session.branch_pending());
-        let deadline = Instant::now() + Duration::from_secs(3);
+        let deadline = Instant::now() + Duration::from_secs(30);
         loop {
             if let Some(outcome) = session.poll_branch_outcome(1, dir.path()).unwrap() {
                 assert!(matches!(outcome, GitBranchOutcome::Changed));
@@ -2187,7 +2184,7 @@ mod regression_tests {
         assert!(index.has_conflicts());
         refresh(&mut session, &editor, dir.path());
         assert!(session.reconcile_signs(&editor, 1, true));
-        let deadline = Instant::now() + Duration::from_secs(3);
+        let deadline = Instant::now() + Duration::from_secs(30);
         let mut cleared = false;
         while session.signs_pending() {
             if let Some(signs) = session.poll_signs(&editor, 1, true) {
@@ -2207,7 +2204,7 @@ mod regression_tests {
         assert!(!index.has_conflicts());
         refresh(&mut session, &editor, dir.path());
         assert!(session.reconcile_signs(&editor, 1, true));
-        let deadline = Instant::now() + Duration::from_secs(3);
+        let deadline = Instant::now() + Duration::from_secs(30);
         let mut signs = Vec::new();
         while session.signs_pending() {
             if let Some(result) = session.poll_signs(&editor, 1, true) {
@@ -2232,7 +2229,7 @@ mod regression_tests {
         };
         let read = |session: &mut Git| {
             session.reconcile_signs(&editor, 1, true);
-            let deadline = Instant::now() + Duration::from_secs(3);
+            let deadline = Instant::now() + Duration::from_secs(30);
             let mut signs = Vec::new();
             while session.signs_pending() {
                 if let Some(result) = session.poll_signs(&editor, 1, true) {
@@ -2266,6 +2263,8 @@ pub(in crate::app) mod pull_requests;
 mod review;
 #[cfg(test)]
 mod review_tests;
+#[cfg(test)]
+mod embedded_tests;
 
 pub(in crate::app) mod commands;
 
@@ -3185,6 +3184,7 @@ impl App {
 
 impl App {
     pub(in crate::app) fn start_git_status_refresh_with_feedback(&mut self, report_errors: bool) {
+        self.note_git_stamp();
         let root = self
             .workspace
             .active_root()

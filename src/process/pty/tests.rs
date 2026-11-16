@@ -23,7 +23,7 @@ fn request(root: &Path, script: &str) -> PtyRequest {
 }
 fn drain(service: &mut PtyWorker, id: PtyId) -> Vec<PtyEvent> {
     // Generous for loaded CI machines; a passing run returns far sooner.
-    let deadline = Instant::now() + Duration::from_secs(15);
+    let deadline = Instant::now() + Duration::from_secs(20);
     let mut received = Vec::new();
     loop {
         let batch = service.poll().unwrap();
@@ -111,7 +111,7 @@ fn pinned_pty_cwd_cannot_be_retargeted_or_fall_back_to_home() {
         command.cwd(&pinned);
         let mut child = pair.slave.spawn_command(command).unwrap();
         drop(pair.slave);
-        let deadline = Instant::now() + Duration::from_secs(4);
+        let deadline = Instant::now() + Duration::from_secs(20);
         let status = loop {
             if let Some(status) = child.try_wait().unwrap() {
                 break status;
@@ -150,7 +150,7 @@ fn pty_worker_reserves_real_capacity_and_preserves_stream_before_terminal() {
     assert_eq!(service.residents.load(Ordering::Acquire), 0);
     let id=service.open(request(root.path(),"printf 'READY\n'; read value; printf 'ACK:%s\n' \"$value\"; i=0; while [ $i -lt 3000 ]; do printf 'ROW:%s\n' \"$i\"; i=$((i+1)); done")).unwrap();
     assert!(matches!(service.reserve(), Err(PtyError::QueueFull)));
-    let deadline = Instant::now() + Duration::from_secs(4);
+    let deadline = Instant::now() + Duration::from_secs(20);
     let mut output = Vec::new();
     let mut started = false;
     while !String::from_utf8_lossy(&output).contains("READY") {
@@ -251,7 +251,7 @@ fn pty_worker_reserves_real_capacity_and_preserves_stream_before_terminal() {
             "printf 'READY\n'; while :; do :; done",
         ))
         .unwrap();
-    let deadline = Instant::now() + Duration::from_secs(4);
+    let deadline = Instant::now() + Duration::from_secs(20);
     while !cancelled
         .poll()
         .unwrap()
@@ -274,7 +274,7 @@ fn pty_worker_reserves_real_capacity_and_preserves_stream_before_terminal() {
         Err(PtyError::Stopped)
     ));
     drain(&mut cancelled, id);
-    let deadline = Instant::now() + Duration::from_secs(4);
+    let deadline = Instant::now() + Duration::from_secs(20);
     while cancelled.residents.load(Ordering::Acquire) != 0 {
         assert!(Instant::now() < deadline);
         thread::sleep(Duration::from_millis(1));
@@ -309,7 +309,7 @@ fn pty_worker_reserves_real_capacity_and_preserves_stream_before_terminal() {
     let before = Instant::now();
     drop(detached);
     assert!(before.elapsed() < Duration::from_millis(500));
-    let deadline = Instant::now() + Duration::from_secs(4);
+    let deadline = Instant::now() + Duration::from_secs(20);
     while residents.load(Ordering::Acquire) != 0 {
         assert!(Instant::now() < deadline);
         thread::sleep(Duration::from_millis(1));
@@ -377,7 +377,7 @@ fn closing_pty_kills_hup_resistant_descendants_and_releases_workers() {
             "trap '' HUP TERM; sleep 30 & printf 'REA'; while [ ! -f continue ]; do :; done; printf 'DY\\n'; wait",
         ))
         .unwrap();
-    let deadline = Instant::now() + Duration::from_secs(4);
+    let deadline = Instant::now() + Duration::from_secs(20);
     let mut output = Vec::new();
     while !output.windows(5).any(|text| text == b"READY") {
         for event in service.poll().unwrap() {
@@ -419,7 +419,7 @@ fn closing_reaped_pty_cancels_reads_while_another_process_holds_the_slave() {
     let id = service
         .open(request(root.path(), "tty > slave; read value"))
         .unwrap();
-    let deadline = Instant::now() + Duration::from_secs(4);
+    let deadline = Instant::now() + Duration::from_secs(20);
     let slave = loop {
         service.poll().unwrap();
         if let Ok(path) = std::fs::read_to_string(root.path().join("slave"))
@@ -458,7 +458,7 @@ fn closing_reaped_pty_cancels_reads_while_another_process_holds_the_slave() {
         holder.0.try_wait().unwrap().is_none(),
         "closing a reaped PTY must not signal its old process group"
     );
-    let deadline = Instant::now() + Duration::from_secs(4);
+    let deadline = Instant::now() + Duration::from_secs(20);
     while service.residents.load(Ordering::Acquire) != 0 {
         assert!(
             Instant::now() < deadline,

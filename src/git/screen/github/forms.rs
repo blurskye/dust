@@ -32,6 +32,57 @@ fn heading(frame: &mut Frame, x: u16, right: u16, y: u16, text: &str, note: &str
     chrome::put_spans(&mut frame.grid, x, y, &spans, right);
 }
 
+/// A comment's first two wrapped lines from `x` (after `lead`, the author), the second cut
+/// with `…` when more follows (r15 prs-06); the row after the last one drawn.
+fn preview(frame: &mut Frame, x: u16, right: u16, mut y: u16, bottom: u16, body: &str, lead: &[Span]) -> u16 {
+    let lines = preview_lines(body, usize::from(right.saturating_sub(x)), chrome::spans_width(lead).into());
+    for (index, line) in lines.into_iter().enumerate() {
+        if y >= bottom {
+            break;
+        }
+        let mut spans: Vec<Span> = if index == 0 { lead.to_vec() } else { Vec::new() };
+        spans.push((line, st(GitRole::Text, PANE)));
+        chrome::put_spans(&mut frame.grid, x, y, &spans, right);
+        y += 1;
+    }
+    y
+}
+
+/// `body`'s words in at most two rows of `width` cells, the first `lead` cells shorter.
+fn preview_lines(body: &str, width: usize, lead: usize) -> Vec<String> {
+    let words = body.split_whitespace().collect::<Vec<_>>();
+    let mut rows: Vec<String> = vec![String::new()];
+    let mut rest = 0;
+    for (index, word) in words.iter().enumerate() {
+        let room = if rows.len() == 1 { width.saturating_sub(lead) } else { width };
+        let row = rows.last_mut().expect("a row");
+        let needed = if row.is_empty() { word.width() } else { row.width() + 1 + word.width() };
+        if needed <= room || row.is_empty() {
+            if !row.is_empty() {
+                row.push(' ');
+            }
+            row.push_str(word);
+        } else if rows.len() < 2 {
+            rows.push((*word).to_owned());
+        } else {
+            rest = index;
+            break;
+        }
+    }
+    if rest > 0 {
+        let last = rows.last_mut().expect("a row");
+        *last = chrome::ellipsize(&format!("{last} {}", words[rest]), width);
+    }
+    for (index, row) in rows.iter_mut().enumerate() {
+        let room = if index == 0 { width.saturating_sub(lead) } else { width };
+        if row.width() > room {
+            *row = chrome::ellipsize(row, room);
+        }
+    }
+    rows.retain(|row| !row.is_empty());
+    rows
+}
+
 /// `○ Comment  ○ Approve  ● Request changes`; `all` lists the options the forge knows of,
 /// the field's own choices are the ones it allows.
 fn radio(
@@ -42,7 +93,6 @@ fn radio(
     x: u16,
     y: u16,
     right: u16,
-    focused: bool,
 ) {
     let current = field.input.input.as_str();
     let mut at = x;
@@ -62,18 +112,14 @@ fn radio(
         .iter()
         .find(|(name, _)| !field.choices.iter().any(|choice| choice == name))
         .map(|(_, reason)| *reason);
-    let note = match (focused, reason) {
-        (_, Some(reason)) => reason.to_owned(),
-        (true, None) => "↑/↓ choose".to_owned(),
-        _ => String::new(),
-    };
+    // Only why a choice is missing: the footer says `↑/↓ choose` while the row has focus.
+    let note = reason.map(str::to_owned).unwrap_or_default();
     if !note.is_empty() && right > at + 4 {
         let note = chrome::ellipsize(&note, usize::from(right - at - 2));
         frame.grid.put_text_clipped(at + 1, y, &note, st(GitRole::Muted, PANE), right);
     }
-    if focused {
-        frame.cursor = Some((x + 1, y, crossterm::cursor::SetCursorStyle::SteadyBlock));
-    }
+    // No terminal caret on a choice: it sat on the chip's padding as a black block (r7
+    // N-14); the filled chip and the footer's `↑/↓ choose` already mark the focus.
 }
 
 fn label(frame: &mut Frame, x: u16, y: u16, right: u16, text: &str, focused: bool) -> u16 {
@@ -123,10 +169,17 @@ pub(super) fn paint(
                 format!("{} commit{}", record.commits.len(), if record.commits.len() == 1 { "" } else { "s" }),
                 st(GitRole::Muted, PANE),
             ));
-            if let (Some(add), Some(del)) = (record.row.additions, record.row.deletions) {
+            if let (Some(add), Some(del)) = (record.row.additions, record.row.deletions)
+                && add + del > 0
+            {
+                // A zero side is no fact (r11): `+13`, not `+13 −0`.
                 facts.push((" · ".into(), st(GitRole::Muted, PANE)));
-                facts.push((format!("+{add}"), st(GitRole::Added, PANE)));
-                facts.push((format!(" −{del}"), st(GitRole::Removed, PANE)));
+                if add > 0 {
+                    facts.push((format!("+{add}"), st(GitRole::Added, PANE)));
+                }
+                if del > 0 {
+                    facts.push((format!("{}−{del}", if add > 0 { " " } else { "" }), st(GitRole::Removed, PANE)));
+                }
             }
         }
     } else {
@@ -175,7 +228,6 @@ pub(super) fn paint(
                     x.saturating_sub(1),
                     y,
                     right,
-                    focused,
                 );
                 y += 1;
                 rule(frame, x, right, y);
@@ -195,19 +247,20 @@ pub(super) fn paint(
                         ("Delete it after the merge", GitChip::Removed, GitRole::Removed),
                     ]
                 };
-                let refusal = [("Rebase", "this forge does not rebase-merge"), ("Squash", "this forge does not squash")];
-                radio(frame, field, &options, &refusal, at, y, right, focused);
+                let refusal = [("Rebase", "Rebase and merge isn't available here"), ("Squash", "Squash and merge isn't available here")];
+                radio(frame, field, &options, &refusal, at, y, right);
                 y += 2;
             }
             "Summary" => {
                 heading(frame, x, right, y, "Summary", "Markdown");
                 y += 1;
-                let rows = (content_bottom.saturating_sub(y)).clamp(1, 6);
-                let rows = if workspace.review_threads(workspace.number()).is_empty() {
-                    rows
-                } else {
-                    rows.min(4)
-                };
+                // The optional summary takes four to six rows (r15 prs-06): the room is for the
+                // pending comments and threads below, what is re-read before Ctrl+Enter.
+                let room = content_bottom.saturating_sub(y);
+                let threads = workspace.review_threads(workspace.number()).len() as u16;
+                let drafts = workspace.inline_drafts.get(&workspace.number()).map_or(0, Vec::len) as u16;
+                let below = if threads > 0 { 3 + 4 * threads } else { 0 } + if drafts > 0 { 3 + 2 * drafts } else { 0 };
+                let rows = room.saturating_sub(below + 1).clamp(4, 6).min(room.max(1));
                 super::super::shell::sheet::input(frame, field, Rect::new(x + 1, y, right.saturating_sub(x + 1), rows), focused);
                 if field.input.input.is_empty() {
                     frame.grid.put_text_clipped(
@@ -236,41 +289,36 @@ pub(super) fn paint(
         {
             let sha: String = record.head_sha.chars().take(7).collect();
             let text = if sha.is_empty() {
-                "Refresh the pull request to pin the merge to its head".to_owned()
+                "Refresh the pull request before merging".to_owned()
             } else if caps.merge_pinned_head.allowed() {
-                format!("Merge is pinned to {sha} · head changes require a refreshed review")
+                format!("Merges {sha} · new commits pushed before then cancel it")
             } else {
-                format!("Head {sha} · this forge does not pin merges to a head")
+                "Merges the latest commit on the branch".to_owned()
             };
             frame.grid.put_text_clipped(x, y, &text, st(GitRole::Muted, PANE), right);
             y += 2;
         }
         let _ = y;
     } else {
-        // Inline drafts waiting for this review (§3.30): sent with it.
+        // Inline drafts waiting for this review (§3.30): included when it is submitted.
         let drafts = workspace.inline_drafts.get(&workspace.number()).map(Vec::as_slice).unwrap_or_default();
         if !drafts.is_empty() && y + 2 < content_bottom {
             rule(frame, x, right, y);
             y += 1;
-            heading(frame, x, right, y, &format!("Inline drafts ({})", drafts.len()), "sent with this review");
+            heading(frame, x, right, y, &format!("Pending comments ({})", drafts.len()), "included when you submit");
             y += 1;
             for (draft, _) in drafts {
                 if y + 1 >= content_bottom {
                     break;
                 }
-                let place = format!("{}:{}", draft.path, draft.line);
-                let body = draft.body.lines().next().unwrap_or_default();
+                let place = format!("{}:{}", draft.path, super::drafts::draft_lines(draft));
                 let spans: Vec<Span> = vec![
                     (format!("{} ", glyph(Glyph::Comment, mode)), st(GitRole::Modified, PANE)),
-                    (place.clone(), st(GitRole::Link, PANE)),
-                    ("  ".into(), st(GitRole::Text, PANE)),
-                    (
-                        chrome::ellipsize(body, usize::from(right.saturating_sub(x)).saturating_sub(place.width() + 4)),
-                        st(GitRole::Text, PANE),
-                    ),
+                    (place, st(GitRole::Link, PANE)),
                 ];
                 chrome::put_spans(&mut frame.grid, x, y, &spans, right);
                 y += 1;
+                y = preview(frame, x + 2, right, y, content_bottom, &draft.body, &[]);
             }
             y += 1;
         }
@@ -280,7 +328,7 @@ pub(super) fn paint(
             rule(frame, x, right, y);
             y += 1;
             let open = threads.iter().filter(|thread| thread["isResolved"].as_bool() == Some(false)).count();
-            heading(frame, x, right, y, &format!("Inline threads ({})", threads.len()), &format!("{open} open"));
+            heading(frame, x, right, y, "Review threads", &format!("{open} of {} unresolved", threads.len()));
             y += 1;
             for thread in threads {
                 if y + 1 >= content_bottom {
@@ -300,21 +348,18 @@ pub(super) fn paint(
                     (place, st(GitRole::Link, PANE)),
                     ("  ".into(), st(GitRole::Text, PANE)),
                 ];
+                // The words and colours the Activity tab and the diff use (r7 N-12).
                 spans.push(if resolved {
-                    (" Resolved ".into(), st(GitRole::Muted, GitSurface::Chip(GitChip::Muted)))
+                    ("● Resolved".into(), st(GitRole::Added, PANE))
                 } else {
-                    (" Open ".into(), st(GitRole::Modified, GitSurface::Chip(GitChip::Modified)))
+                    ("◔ Unresolved".into(), st(GitRole::Modified, PANE))
                 });
                 chrome::put_spans(&mut frame.grid, x, y, &spans, right);
                 y += 1;
-                let body = first["body"].as_str().unwrap_or_default().lines().next().unwrap_or_default();
+                let body = first["body"].as_str().unwrap_or_default();
                 let author = first["author"]["login"].as_str().unwrap_or("ghost");
-                let spans: Vec<Span> = vec![
-                    (format!("  {author} "), st(GitRole::Author, PANE)),
-                    (chrome::ellipsize(body, usize::from(right.saturating_sub(x)).saturating_sub(author.width() + 4)), st(GitRole::Text, PANE)),
-                ];
-                chrome::put_spans(&mut frame.grid, x, y, &spans, right);
-                y += 2;
+                y = preview(frame, x + 2, right, y, content_bottom, body, &[(format!("{author} "), st(GitRole::Author, PANE))]);
+                y += 1;
             }
         }
     }
@@ -331,22 +376,28 @@ pub(super) fn paint(
             _ => (" Comment ".to_owned(), GitChip::Focus, GitRole::Focus),
         }
     };
-    let mut at = frame.grid.put_text_clipped(x, y + 1, &chip, bold(role, GitSurface::Chip(hue)), right);
+    // A review's verdict is the radio row above, so the strip names only where it goes and
+    // what it carries (r11 prs-09); a merge's chip is its only statement of the method.
+    let mut at = if merge {
+        let at = frame.grid.put_text_clipped(x, y + 1, &chip, bold(role, GitSurface::Chip(hue)), right);
+        frame.grid.put_text_clipped(at, y + 1, " · ", st(GitRole::Border, PANE), right)
+    } else {
+        let _ = (chip, hue, role);
+        frame.grid.put_text_clipped(x + 1, y + 1, &format!("Submits to {}{}", workspace.sigil(true), workspace.number()), st(GitRole::Text, PANE), right)
+    };
     let detail = if merge {
         let delete = form.fields.iter().any(|field| field.input.input == "Delete it after the merge");
         if delete { "the source branch is deleted afterwards" } else { "the source branch stays" }.to_owned()
     } else {
-        let threads = workspace.review_threads(workspace.number()).len();
         let drafts = workspace.inline_drafts.get(&workspace.number()).map_or(0, Vec::len);
-        match (drafts, threads) {
-            (0, 0) => "no inline threads".to_owned(),
-            (0, 1) => "1 inline thread on this pull request".to_owned(),
-            (0, n) => format!("{n} inline threads on this pull request"),
-            (1, _) => "with 1 inline draft".to_owned(),
-            (n, _) => format!("with {n} inline drafts"),
-        }
+        // What the send carries; the threads above are already counted there.
+        let detail = match drafts {
+            0 => "summary only, no pending comments".to_owned(),
+            n => super::drafts::pending(n),
+        };
+        at = frame.grid.put_text_clipped(at, y + 1, " · ", st(GitRole::Border, PANE), right);
+        detail
     };
-    at = frame.grid.put_text_clipped(at, y + 1, " · ", st(GitRole::Border, PANE), right);
     frame.grid.put_text_clipped(at, y + 1, &detail, st(GitRole::Muted, PANE), right);
     if !notice.is_empty() {
         frame.grid.put_text_clipped(
@@ -358,4 +409,17 @@ pub(super) fn paint(
         );
     }
     // The send and Esc keys are in the footer (§3.30), once.
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn a_review_preview_wraps_to_two_rows_and_cuts_the_rest() {
+        let body = "This could be a named constant next to RETRY_LIMIT so the cap reads in one place";
+        let rows = super::preview_lines(body, 30, 5);
+        assert_eq!(rows.len(), 2, "{rows:?}");
+        assert!(rows[0].len() <= 25 && rows[0].starts_with("This could be"), "{rows:?}");
+        assert!(rows[1].ends_with('…'), "{rows:?}");
+        assert_eq!(super::preview_lines("Short note", 30, 5), vec!["Short note".to_owned()]);
+    }
 }

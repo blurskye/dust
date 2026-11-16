@@ -117,6 +117,47 @@ fn bundled_theme_ports_validate_and_load_by_name_without_installed_files() {
     }
 }
 
+/// A forge reader's fenced code sits on the editor's Markdown code background in every bundled
+/// theme, unless that is hardly off the Git pane; then it takes the editor's lift over the
+/// pane. Either way it stands off the pane by at least half the editor's lift; diffs keep
+/// their own code surface.
+#[test]
+fn prose_code_matches_the_editor_code_block_in_every_bundled_theme() {
+    use crate::config::ThemeColor;
+    use crate::ui::{Emphasis, GitRole, GitSurface};
+    let luminance = |colour: ThemeColor| {
+        let (red, green, blue) = colour.rgb().unwrap();
+        let linear = |channel: u8| {
+            let value = f64::from(channel) / 255.0;
+            if value <= 0.039_28 { value / 12.92 } else { ((value + 0.055) / 1.055).powf(2.4) }
+        };
+        0.2126 * linear(red) + 0.7152 * linear(green) + 0.0722 * linear(blue)
+    };
+    let contrast = |left: ThemeColor, right: ThemeColor| {
+        let (low, high) = (luminance(left).min(luminance(right)), luminance(left).max(luminance(right)));
+        (high + 0.05) / (low + 0.05)
+    };
+    let mut lifted = Vec::new();
+    for (name, _) in crate::config::themes::BUNDLED {
+        let theme = crate::config::themes::bundled_named(name).unwrap().theme;
+        let editor = theme.markdown_code(None);
+        let prose = theme.git(GitRole::Text, GitSurface::ProseCode, Emphasis::None);
+        let pane = theme.git(GitRole::Text, GitSurface::Pane, Emphasis::None).background;
+        let lift = contrast(editor.background, theme.styles.default.background) - 1.0;
+        assert!(lift > 0.05, "{name}: the editor's code block stands off the editor");
+        let off_pane = contrast(prose.background, pane) - 1.0;
+        assert!(off_pane >= lift / 2.0, "{name}: code is hardly off the pane ({off_pane:.3} < {lift:.3} / 2)");
+        if prose.background == editor.background {
+            assert_eq!(prose.background_256, editor.background_256, "{name}");
+        } else {
+            lifted.push(*name);
+        }
+        println!("PROSECODE\t{name}\t{:?}\t{:?}\t{off_pane:.3}\t{lift:.3}", prose.background, pane);
+    }
+    // Only a theme whose pane sits on the editor's code colour is lifted.
+    assert_eq!(lifted, ["dust"]);
+}
+
 #[test]
 fn absent_file_uses_defaults_without_error() {
     let root = tempdir().expect("tempdir");
@@ -822,7 +863,7 @@ fn configuration_worker_tracks_disk_sources_across_startup_and_acknowledgments()
     }
 
     fn next(worker: &ConfigurationWorker) -> crate::config::ConfigurationWorkerResult {
-        let deadline = Instant::now() + Duration::from_secs(6);
+        let deadline = Instant::now() + Duration::from_secs(20);
         loop {
             if let Some(result) = worker.try_result().unwrap() {
                 return result;

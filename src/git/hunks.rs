@@ -642,8 +642,34 @@ pub(super) fn read_hunks_owned(
     p: &GitHunkPolicy,
     cancel: &AtomicBool,
 ) -> Result<GitHunkSnapshot, GitHunkError> {
-    let started = Instant::now();
     validate_hunk_policy(p)?;
+    read_validated_hunks(request_id, p, cancel)
+}
+
+/// A mutation's own reading of the hunks it is about to change, and of what it left behind.
+/// The policy is validated as usual, but the read is bounded by the policy's size limits and
+/// by cancellation, not by the clock. Its deadline is for a preview, which a newer one replaces
+/// anyway; a mutation that already holds the index lock and has re-checked its captures would
+/// only turn a slow disk or a paused machine into a refused change, and the captures are
+/// checked again immediately before the write.
+pub(super) fn read_hunks_for_mutation(
+    p: &GitHunkPolicy,
+    cancel: &AtomicBool,
+) -> Result<GitHunkSnapshot, GitHunkError> {
+    validate_hunk_policy(p)?;
+    let unclocked = GitHunkPolicy {
+        deadline: Duration::MAX,
+        ..p.clone()
+    };
+    read_validated_hunks(GitHunkRequestId(0), &unclocked, cancel)
+}
+
+fn read_validated_hunks(
+    request_id: GitHunkRequestId,
+    p: &GitHunkPolicy,
+    cancel: &AtomicBool,
+) -> Result<GitHunkSnapshot, GitHunkError> {
+    let started = Instant::now();
     check_hunk_request(p, cancel, started)?;
     let (root, repo, workdir, repo_path) = open_hunk_repository(p)?;
     check_hunk_request(p, cancel, started)?;

@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 /// A displayed prose fragment retains its rendered, unwrapped logical line.
 /// Source and log rows use offset zero. Controls and identity rows have no source.
+#[derive(Clone)]
 pub(super) struct Source {
     pub text: Arc<str>,
     pub offset: usize,
@@ -40,7 +41,6 @@ pub(super) struct DetailFind {
     // It is not evidence that SourceSearch still has a selected occurrence.
     cursor: Option<(usize, usize)>,
     prompt: bool,
-    reveal_horizontal: Option<usize>,
 }
 impl DetailFind {
     fn sync(&mut self, identity: Identity, rows: &[lines::Line]) -> Option<usize> {
@@ -61,7 +61,6 @@ impl DetailFind {
             self.search = SourceSearch::default();
             self.cursor = None;
             self.prompt = false;
-            self.reveal_horizontal = None;
         } else if source.len() > self.source.len() {
             // Newly loaded discussion must not move a match or dismiss a query.
             self.search.append_lines(
@@ -113,36 +112,13 @@ impl DetailFind {
             })
     }
 
-    pub fn reveal_horizontal(&self) -> Option<usize> {
-        self.reveal_horizontal
-    }
-
-    pub fn set_reveal_horizontal(&mut self, horizontal: Option<usize>) {
-        self.reveal_horizontal = horizontal;
-    }
-
-    pub fn leave_match(&mut self) -> Option<usize> {
+    pub fn leave_match(&mut self) {
         self.search.leave_match();
         self.cursor = None;
-        self.reveal_horizontal.take()
     }
 
     pub fn prompt_active(&self) -> bool {
         self.prompt
-    }
-
-    pub fn status(&self, cursor: usize, width: u16) -> String {
-        let (position, count) = self.search.position(self.source_row(cursor));
-        let position = if count == 0 {
-            "No detail matches".into()
-        } else {
-            format!(
-                "{}/{count}",
-                position.map_or_else(|| "-".into(), |n| n.to_string())
-            )
-        };
-        let query = super::super::render::ellipsize(&self.search.query, usize::from(width / 3));
-        format!("Find /{query}/ · {position} · Esc clear · n/N")
     }
 
     /// The footer's find context: the query and where the cursor is among its matches.
@@ -233,7 +209,6 @@ impl Workspace {
             && let Some(found) = self.detail_find.search.current_match()
         {
             self.detail_find.cursor = Some((found.row, found.bytes.start));
-            self.detail_find.reveal_horizontal = None;
             let rows = std::mem::take(&mut self.detail_rows);
             self.sync_detail_find(&rows);
             self.detail_rows = rows;
@@ -318,20 +293,13 @@ mod tests {
     }
 
     #[test]
-    fn local_reveal_is_consumed_once_and_never_crosses_source_identity_or_a_new_match() {
+    fn leaving_a_match_never_crosses_source_identity() {
         let mut workspace = workspace();
-        workspace.detail_find.set_reveal_horizontal(Some(81));
-        assert_eq!(workspace.detail_find.leave_match(), Some(81));
-        assert_eq!(workspace.detail_find.leave_match(), None);
+        workspace.detail_find.leave_match();
         assert!(workspace.detail_find.cursor.is_none());
         workspace.step_detail_match(false, true);
-        workspace.detail_find.set_reveal_horizontal(Some(33));
-        workspace.step_detail_match(false, false);
-        assert_eq!(workspace.detail_find.reveal_horizontal(), None);
-        workspace.detail_find.set_reveal_horizontal(Some(99));
         workspace.host = "other.example.test".into();
         workspace.prepare_detail_find();
-        assert_eq!(workspace.detail_find.reveal_horizontal(), None);
         assert!(workspace.detail_find.cursor.is_none());
         assert!(!workspace.detail_find.search.active());
     }

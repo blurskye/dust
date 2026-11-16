@@ -70,6 +70,18 @@ pub(super) fn paint(app: &mut GitScreen, frame: &mut Frame, pane: usize, rect: R
     } else if pane == 0 && app.files_view == 0 && !app.changes_flat() && !app.all_files {
         count = format!("{count} · tree");
     }
+    // The working tree's total, as GitHub's `7 files changed, +21 −5`: `7 · +21 −5`.
+    if pane == 0 && app.files_view == 0 && !app.all_files {
+        let (added, removed) = app
+            .snapshot
+            .iter()
+            .flat_map(|snapshot| &snapshot.entries)
+            .filter_map(|entry| app.numstat.get(&entry.relative_path).copied().flatten())
+            .fold((0u32, 0u32), |(a, r), (x, y)| (a + x, r + y));
+        if added > 0 || removed > 0 {
+            count = format!("{count} · {}", diffstat(added, removed));
+        }
+    }
     if filtering {
         count = format!("/{query} · {}", rows.iter().filter(|row| !row.directory).count());
     }
@@ -80,23 +92,23 @@ pub(super) fn paint(app: &mut GitScreen, frame: &mut Frame, pane: usize, rect: R
         ),
         (title, bold(GitRole::Text, GitSurface::Pane)),
     ];
-    let collapsed = rect.h == 2;
     chrome::pane(&mut frame.grid, rect, &title_spans, &count, focused);
-    if collapsed {
-        if rows.is_empty() {
-            let text = [" Working tree clean ", " No references ", " No commits ", " No stashes "][pane];
-            let at = rect.x + 2;
-            frame.grid.put_text_clipped(
-                at,
-                rect.bottom() - 1,
-                text,
-                st(GitRole::Muted, GitSurface::Pane),
-                rect.right() - 1,
-            );
-        }
+    // An empty pane collapses to title, one body row and its bottom border (§2.5): its
+    // `No stashes` is body text below, never written on a border.
+    if rect.h <= 2 {
         return;
     }
     let inner = rect.inner();
+    if pane == 2 && app.history_in_reader() {
+        frame.grid.put_text_clipped(
+            inner.x + 1,
+            inner.y,
+            "Its log is in the reader →",
+            st(GitRole::Muted, GitSurface::Pane),
+            inner.right(),
+        );
+        return;
+    }
     let mut list = inner;
     let tabs = match pane {
         0 => {
@@ -145,11 +157,16 @@ pub(super) fn paint(app: &mut GitScreen, frame: &mut Frame, pane: usize, rect: R
                 .refs
                 .as_ref()
                 .map_or(0, |refs| refs.branches.iter().filter(|b| b.remote).count());
+            let locals = app
+                .refs
+                .as_ref()
+                .map_or(0, |refs| refs.branches.iter().filter(|b| !b.remote).count());
             Some((
                 fit_tabs(
                     &[
+                        // Counts on every tab or on none (r16 git-tab-11).
                         vec![
-                            "Local".to_owned(),
+                            format!("Local {locals}"),
                             format!("Remotes {remotes}"),
                             format!("Tags {}", app.tags.len()),
                         ],
@@ -376,13 +393,10 @@ fn change_row(
                 .iter()
                 .any(|path| path.starts_with(&row.value));
         // Aggregated `+n −m` and the staged marker of everything below this directory.
-        let below = app.snapshot.as_ref().map_or_else(Vec::new, |snapshot| {
-            snapshot
-                .entries
-                .iter()
-                .filter(|entry| entry.relative_path.starts_with(&row.value))
-                .collect::<Vec<_>>()
-        });
+        let below = app
+            .snapshot
+            .as_ref()
+            .map_or(&[][..], |snapshot| super::super::memo::below(&snapshot.entries, &row.value));
         let staged = below.iter().filter(|entry| entry.sources.staged).count();
         if marked {
             grid.set_cell(rect.x + 1, y, glyph(Glyph::Mark, mode), bold(GitRole::Focus, surface));
@@ -420,12 +434,10 @@ fn change_row(
         );
         return;
     }
-    let entry = app.snapshot.as_ref().and_then(|snapshot| {
-        snapshot
-            .entries
-            .iter()
-            .find(|entry| entry.relative_path == row.value)
-    });
+    let entry = app
+        .snapshot
+        .as_ref()
+        .and_then(|snapshot| super::super::memo::entry(&snapshot.entries, &row.value));
     let module = app
         .refs
         .as_ref()
@@ -680,7 +692,7 @@ fn history_row(
             .take(2)
             .collect::<String>()
             .to_uppercase();
-        let tail = format!("{initials} {}", short_date(&info.date));
+        let tail = format!("{initials} {}", chrome::when(&info.date, crate::forge::records::now()));
         let at = right.saturating_sub(chrome::width(&tail) + 1);
         if at > x + 14 {
             grid.put_text_clipped(at, y, &tail, st(GitRole::Muted, surface), right);
@@ -793,8 +805,8 @@ fn commit_files(app: &GitScreen, frame: &mut Frame, rect: Rect) {
             format!("{} ", glyph(Glyph::Commit, mode)),
             st(GitRole::Hash, GitSurface::Pane),
         ),
-        (commit.id.chars().take(7).collect(), bold(GitRole::Hash, GitSurface::Pane)),
-        (" · Files".into(), bold(GitRole::Text, GitSurface::Pane)),
+        // The hash lives once, in the reader's commit header (R15-06).
+        ("Commit files".into(), bold(GitRole::Text, GitSurface::Pane)),
         (
             if filtering && !commit.filter.active() { " /" } else { "" }.into(),
             st(GitRole::Focus, GitSurface::Pane),
@@ -864,7 +876,7 @@ fn commit_files(app: &GitScreen, frame: &mut Frame, rect: Rect) {
             );
             continue;
         }
-        let file = commit.files.iter().find(|file| file.path == row.value);
+        let file = commit.file(&row.value);
         let mut path_right = right;
         if let Some(file) = file {
             let spans: Vec<Span> = if file.added == "-" {
@@ -913,19 +925,6 @@ fn commit_files(app: &GitScreen, frame: &mut Frame, rect: Rect) {
     }
 }
 
-/// `2026-11-12` → `Nov 12`; anything else is shown as given.
-fn short_date(date: &str) -> String {
-    const MONTHS: [&str; 12] = [
-        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-    ];
-    let mut parts = date.split('-');
-    let (_, month, day) = (parts.next(), parts.next(), parts.next());
-    match (month.and_then(|m| m.parse::<usize>().ok()), day.and_then(|d| d.parse::<u8>().ok())) {
-        (Some(month @ 1..=12), Some(day)) => format!("{} {day:>2}", MONTHS[month - 1]),
-        _ => date.to_owned(),
-    }
-}
-
 /// The first label set whose ` a │ b │ c ` strip fits `room` cells, else the last.
 fn fit_tabs(variants: &[Vec<String>], room: u16) -> Vec<String> {
     let strip = |tabs: &Vec<String>| {
@@ -937,4 +936,13 @@ fn fit_tabs(variants: &[Vec<String>], room: u16) -> Vec<String> {
         .or(variants.last())
         .cloned()
         .unwrap_or_default()
+}
+
+/// `+21 −5`, without the side that is zero: `+3` for a pure addition.
+fn diffstat(added: u32, removed: u32) -> String {
+    match (added, removed) {
+        (_, 0) => format!("+{added}"),
+        (0, _) => format!("−{removed}"),
+        _ => format!("+{added} −{removed}"),
+    }
 }

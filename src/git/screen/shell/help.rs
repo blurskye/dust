@@ -10,11 +10,97 @@ const SURFACE: GitSurface = GitSurface::Sheet;
 const EDGE: GitSurface = GitSurface::Pane;
 
 type Group = (&'static str, Vec<(&'static str, &'static str)>);
+/// The rows every Git pane ends its Act group with (lazygit's `Pull` extra among them).
+const SYNC: [&str; 3] = ["Pull (confirm)", "Push (confirm)", "Undo · redo (confirm)"];
+/// A group as the sheet paints it: the Vim group's keys are read from the key tables.
+type Sheet = (&'static str, Vec<(String, String)>);
+
+/// The Vim group of a modal screen, read from the tables that bind the keys: the modes and
+/// the keys that enter them from the editor's bundled bindings (the ones a text box runs),
+/// the mode names from the editor's statusline settings, and the leader and its chords from
+/// the shared key table (`github/keymap.rs`).
+fn vim(app: &GitScreen) -> Option<Sheet> {
+    use super::super::github::keymap::TABLE;
+    use super::super::textbox::keys_for;
+    if !app.modal {
+        return None;
+    }
+    let [normal, insert, visual] = &app.mode_labels;
+    let joined = |mode: &str, commands: &[&str]| {
+        commands
+            .iter()
+            .flat_map(|command| keys_for(mode, command))
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    let mut rows = Vec::new();
+    let enter = joined("normal", &["mode.insert"]);
+    if !enter.is_empty() {
+        rows.push((enter, format!("{insert} · in a text box (opens in it)")));
+    }
+    let leave = joined("insert", &["input.cancel"]);
+    if !leave.is_empty() {
+        rows.push((leave, format!("{normal} · in a text box; again, or q, closes it")));
+    }
+    let select = joined(
+        "normal",
+        &["mode.visual_char", "mode.visual_line", "mode.visual_block", "mode.visual_reselect"],
+    );
+    if !select.is_empty() {
+        rows.push((select, format!("{visual} · select, in a text box only")));
+    }
+    let keys = app.github.key_table();
+    rows.push((keys.leader_name(), "Leader · which-key; Esc cancels".into()));
+    for (named, ..) in TABLE {
+        if let Some(chord) = keys.keys(*named) {
+            rows.push((chord, super::super::modal::chord_words(named.label())));
+        }
+    }
+    Some(("Vim", rows))
+}
+
+/// The Git tab's rows in the keys in force (`github/keymap.rs`): the lazygit preset shows
+/// its own key for each action, drops what it leaves out of this panel, and adds the keys
+/// that reach an action Dusty Git keeps elsewhere.
+fn in_force(app: &GitScreen, groups: &mut [Sheet]) {
+    let keys = app.github.key_table();
+    let panel = app.key_panel();
+    // The leader's chord row is already in the keys in force.
+    let chord = keys.keys(super::super::github::keymap::Named::ToggleSidebar);
+    for (title, rows) in groups.iter_mut() {
+        let operation = *title == "Operation";
+        *rows = std::mem::take(rows)
+            .into_iter()
+            .filter_map(|(key, what)| {
+                // The conflict keys' own lazygit keys: Space takes a side, `m` the menu.
+                if operation && matches!(key.as_str(), "Enter" | "M" | "b" | "e") {
+                    return Some((super::super::conflicts::operation_key(app, &key), what));
+                }
+                if chord.as_deref() == Some(key.as_str()) {
+                    return Some((key, what));
+                }
+                Some((keys.show(panel, &key)?, what))
+            })
+            .collect();
+    }
+    if let Some((_, rows)) = groups.first_mut() {
+        rows.extend(keys.extras(panel).into_iter().map(|(key, what)| (key, what.to_owned())));
+    }
+}
+
+fn owned(groups: Vec<Group>) -> Vec<Sheet> {
+    groups
+        .into_iter()
+        .map(|(title, rows)| {
+            (title, rows.into_iter().map(|(key, what)| (key.to_owned(), what.to_owned())).collect())
+        })
+        .collect()
+}
 
 /// DESIGN.md §5.7: the Pull requests and Issues tabs.
 fn forge(app: &GitScreen) -> (&'static str, Vec<Group>) {
     let pull = app.page == 2;
-    let navigate: Group = (
+    let mut navigate: Group = (
         "Navigate",
         vec![
             ("2 · 3", "List · reader"),
@@ -28,12 +114,29 @@ fn forge(app: &GitScreen) -> (&'static str, Vec<Group>) {
             ("C-n", "Load more"),
         ],
     );
+    // The shared key table's chord (`github/keymap.rs`): the list hides beside the reader.
+    let sidebar = match app.github.key_table().keys(super::super::github::keymap::Named::ToggleSidebar).as_deref() {
+        Some("Space e") => "Space e",
+        Some(", e") => ", e",
+        Some(_) => "Leader e",
+        None => "",
+    };
+    if !sidebar.is_empty() {
+        navigate.1.push((sidebar, "Hide · show the list"));
+    }
+    // The accounts popover (who is signed in, how to sign in or switch); signed out, the
+    // `Read-only` group below names it instead.
+    if !app.github.read_only() {
+        navigate.1.push(("@", "Accounts · how to sign in"));
+    }
     let filter: Group = (
         "Filter",
         vec![
             ("/", "Filter query"),
+            ("s", "Open · Closed"),
+            ("F", "Author · Label · Sort menus"),
             ("S · D", "Save · delete a section"),
-            ("v", "Saved views"),
+            ("v", "Saved views (list and reader)"),
             ("i", "Cross-repository inbox"),
             ("R", "Refresh"),
             ("o", "Open in the browser"),
@@ -48,7 +151,6 @@ fn forge(app: &GitScreen) -> (&'static str, Vec<Group>) {
                 ("w", "Review in a worktree"),
                 ("m", "Merge readiness"),
                 ("d", "Files"),
-                ("v", "Mark file viewed (Files)"),
                 ("C", "Comment"),
                 ("e", "Edit title and description"),
                 ("x · X", "Close · reopen"),
@@ -78,38 +180,74 @@ fn forge(app: &GitScreen) -> (&'static str, Vec<Group>) {
         act.1.retain(|(key, _)| READS.contains(key) && (pull || *key != "m"));
         groups.push((
             "Read-only",
-            vec![("a", "Accounts · how to sign in"), ("", "Writes say why when pressed")],
+            vec![("@", "Accounts · how to sign in"), ("", "Unavailable actions say why")],
         ));
     }
     let mut all = vec![navigate, act, filter];
+    if pull {
+        // The Files tab's own keys, as its footer offers them (r12 prs-06).
+        all.push((
+            "Files changed tab",
+            vec![
+                ("Enter", "Comment on the line"),
+                ("V", "Comment on a range"),
+                ("w", "Wrap · pan long lines"),
+                ("f", "Choose a file"),
+                ("v", "Mark the file viewed"),
+                ("e", "Open the line in the editor (and in Commits)"),
+            ],
+        ));
+        // The mark at a list row's end is its checks (r12 prs-05).
+        all.push((
+            "List marks",
+            vec![
+                (glyph(Glyph::CheckPassed, app.icon_mode), "Checks passed"),
+                (glyph(Glyph::CheckFailed, app.icon_mode), "Checks failed"),
+                (glyph(Glyph::CheckPending, app.icon_mode), "Checks running"),
+            ],
+        ));
+    }
     all.extend(groups);
     (if pull { "Pull requests" } else { "Issues" }, all)
 }
 
 /// DESIGN.md §3.37–§3.41: Actions (GitLab: Pipelines).
 fn actions(app: &GitScreen) -> (&'static str, Vec<Group>) {
-    let navigate: Group = (
+    // The shared key table's chord (`github/keymap.rs`), in the leader the session uses.
+    let sidebar = match app.github.key_table().keys(super::super::github::keymap::Named::ToggleSidebar).as_deref() {
+        Some("Space e") => "Space e",
+        Some(", e") => ", e",
+        Some(_) => "Leader e",
+        None => "",
+    };
+    let mut navigate: Group = (
         "Navigate",
         vec![
             ("j k", "Move"),
-            ("Enter · l", "Open run · drill in"),
-            ("Esc · h", "Back"),
-            ("Tab", "Next column"),
-            ("C-h/j/k/l", "Move focus"),
-            ("[ ]", "Jobs · Artifacts · Logs"),
+            ("1 2 3 · Tab", "Workflows · runs · run"),
+            ("h l", "Back · into the run"),
+            ("Enter", "Open · fold the job or step"),
+            ("Esc", "Back to the run history"),
+            ("[ ]", "All · Failing · Running · Mine"),
+            ("/", "Filter runs · find in the logs"),
+            ("F", "Narrow by workflow · branch · event"),
             ("< >", "Previous · next top tab"),
-            ("/", "Filter runs · find in a log"),
             ("R", "Refresh"),
         ],
     );
+    if !sidebar.is_empty() {
+        navigate.1.push((sidebar, "Hide · show the left column"));
+    }
+    navigate.1.push(("@", "Accounts · how to sign in"));
     let log: Group = (
         "Log",
         vec![
-            ("f", "Full job log · step log"),
+            ("f", "Full job log · steps"),
+            ("z", "Zoom the run · Esc returns"),
+            ("n N", "Next · previous error or match"),
             ("a", "Attempts"),
-            ("n N", "Next · previous match"),
-            ("h l", "Pan 8 columns"),
-            ("w", "Wrap"),
+            ("w", "Long lines wrap · run past the edge"),
+            ("H L", "Pan 8 columns, unwrapped"),
             ("Enter", "Open file:line"),
             ("C-s", "Save the log"),
         ],
@@ -117,11 +255,11 @@ fn actions(app: &GitScreen) -> (&'static str, Vec<Group>) {
     let act: Group = (
         "Act",
         vec![
-            ("r", "Rerun"),
+            ("r", "Re-run jobs"),
             ("x", "Cancel"),
-            ("d", "Dispatch"),
+            ("d", "Run workflow"),
             ("A", "Approve a waiting run"),
-            ("Enter", "Download artifact (Artifacts)"),
+            ("Enter · s", "An artifact's files · download it"),
         ],
     );
     (app.github.terms().actions_tab, vec![navigate, log, act])
@@ -151,14 +289,23 @@ fn context(app: &GitScreen) -> (&'static str, Vec<Group>) {
             ("Esc", "Back"),
         ],
     );
-    let view: Group = (
+    // The shared key table's chord (`github/keymap.rs`), in the leader the session uses.
+    let rail = match app.github.key_table().keys(super::super::github::keymap::Named::ToggleSidebar).as_deref() {
+        Some("Space e") => "Space e",
+        Some(", e") => ", e",
+        Some(_) => "Leader e",
+        None => "",
+    };
+    let mut view: Group = (
         "View",
         vec![
-            ("s", "Split · unified diff"),
+            ("|", "Split · unified diff"),
+            // Refresh ranks high: a compact sheet that runs out of rows keeps it.
+            ("r", "Refresh"),
             ("h l", "Fold tree · pan diff"),
             ("m", "Full commit message"),
-            ("r", "Refresh"),
             (":tutor git", "Practice in a disposable repo"),
+            (":tutor forge", "Practice the forge tabs"),
         ],
     );
     let operation: Option<Group> = app.operation_bar.is_some().then(|| {
@@ -169,6 +316,11 @@ fn context(app: &GitScreen) -> (&'static str, Vec<Group>) {
                 ("S", "Skip commit"),
                 ("X", "Abort"),
                 ("o t", "Take ours · theirs"),
+                // The reader on a conflicted file (`conflicts.rs`): per hunk.
+                ("b", "Take both"),
+                ("Enter", "Take the side under the cursor"),
+                ("e", "Edit at the conflict"),
+                ("M", "Continue · skip · abort menu"),
             ],
         )
     });
@@ -180,6 +332,9 @@ fn context(app: &GitScreen) -> (&'static str, Vec<Group>) {
                 vec![
                     ("Enter", "Open the file's diff"),
                     ("J K", "Next · previous file"),
+                    ("y", "Copy SHA · short SHA · subject · URL"),
+                    ("o", "Open the commit on the forge"),
+                    ("e", "Open the line in the editor"),
                     ("/", "Filter files"),
                     ("Esc", "Back to History"),
                 ],
@@ -192,12 +347,13 @@ fn context(app: &GitScreen) -> (&'static str, Vec<Group>) {
                 (
                     "Act",
                     vec![
-                        ("Space", "Stage · unstage hunk"),
+                        ("s u -", "Stage · unstage hunk · toggle"),
                         ("a", "Stage · unstage line or range"),
                         ("V", "Start · finish a range"),
                         ("d", "Discard hunk (confirm)"),
                         ("D", "Discard line (confirm)"),
                         ("c", "Commit staged"),
+                        ("e", "Open the line in the editor"),
                     ],
                 ),
             ),
@@ -207,21 +363,20 @@ fn context(app: &GitScreen) -> (&'static str, Vec<Group>) {
             ),
             0 if app.files_view == 2 => (
                 "Submodules",
-                ("Act", vec![("Space", "Toggle pointer"), ("u", "Init · update")]),
+                ("Act", vec![("- s", "Toggle pointer · stage it"), ("u", "Init · update")]),
             ),
             0 => (
                 "Changes",
                 (
                     "Act",
                     vec![
-                        ("Space", "Stage · unstage"),
+                        ("s u -", "Stage · unstage · toggle"),
                         ("a", "Stage all · unstage all"),
                         ("x", "Mark file"),
                         ("V", "Mark a range"),
                         ("d", "Discard (confirm)"),
                         ("D", "Discard marked (confirm)"),
                         ("c", "Commit staged"),
-                        ("P", "Push"),
                         ("A W F", "Amend · reword · fixup"),
                         ("t", "Flat · tree"),
                         ("F", "Changed · all files"),
@@ -231,11 +386,14 @@ fn context(app: &GitScreen) -> (&'static str, Vec<Group>) {
             ),
             1 if app.subview == 2 => (
                 "Remotes",
-                ("Act", vec![("f", "Fetch (confirm)"), ("Enter", "Show history")]),
+                ("Act", vec![("f", "Fetch (confirm)"), ("Enter", "Track as a local branch")]),
             ),
             1 if app.subview == 3 => (
                 "Tags",
-                ("Act", vec![("Enter", "Inspect tag"), ("d", "Delete local tag")]),
+                (
+                    "Act",
+                    vec![("Enter", "Inspect tag"), ("d", "Delete local tag"), ("P", "Push tag (confirm)")],
+                ),
             ),
             1 => (
                 "Branches",
@@ -246,6 +404,14 @@ fn context(app: &GitScreen) -> (&'static str, Vec<Group>) {
                         ("n", "New branch"),
                         ("m", "Merge into current"),
                         ("R", "Rebase current onto"),
+                        (
+                            "o",
+                            if app.github.terms().pr_singular.contains("merge") {
+                                "Its merge request, or open one"
+                            } else {
+                                "Its pull request, or open one"
+                            },
+                        ),
                         ("e", "Rename"),
                         ("u", "Set upstream"),
                         ("d", "Delete (confirm)"),
@@ -258,7 +424,7 @@ fn context(app: &GitScreen) -> (&'static str, Vec<Group>) {
                     "Act",
                     vec![
                         ("n", "Rescue branch here"),
-                        ("Space", "Checkout detached"),
+                        ("o", "Checkout detached"),
                         ("w", "Detached worktree"),
                         ("Enter", "Browse files"),
                     ],
@@ -270,9 +436,16 @@ fn context(app: &GitScreen) -> (&'static str, Vec<Group>) {
                     "Act",
                     vec![
                         ("Enter", "Commit files"),
-                        ("A", "Amend HEAD with staged"),
+                        ("A", "Amend with staged (confirm)"),
                         ("W", "Reword"),
-                        ("F", "Fixup staged into commit"),
+                        ("s", "Squash into the commit below"),
+                        ("f", "Fixup into the commit below"),
+                        ("d", "Drop (confirm)"),
+                        ("e", "Edit: stop the rebase here"),
+                        ("J K", "Move down · up"),
+                        ("F", "Commit staged as fixup!"),
+                        ("y", "Copy SHA · short SHA · subject · URL"),
+                        ("o", "Open the commit on the forge"),
                     ],
                 ),
             ),
@@ -290,6 +463,24 @@ fn context(app: &GitScreen) -> (&'static str, Vec<Group>) {
             ),
         }
     };
+    // A modal screen lists the shared chords in its Vim group.
+    if !rail.is_empty() && !app.modal {
+        view.1.insert(1, (rail, "Hide · show the rail"));
+    }
+    // Pull, push, undo and redo work from every pane (DESIGN.md §5.11); `p` pops in
+    // Stashes and `P` pushes the selected tag in Tags.
+    let stashes = app.focus == 3 && !app.commit_open;
+    let tags = app.focus == 1 && app.subview == 3;
+    // They close the pane's own Act rows rather than open a group of their own: a heading
+    // row would push View off the compact sheet.
+    let mut act = act;
+    if !stashes {
+        act.1.push(("p", SYNC[0]));
+    }
+    if !tags {
+        act.1.push(("P", SYNC[1]));
+    }
+    act.1.push(("z Z", SYNC[2]));
     let mut groups = vec![act];
     groups.extend(operation);
     groups.push(navigate);
@@ -299,6 +490,8 @@ fn context(app: &GitScreen) -> (&'static str, Vec<Group>) {
 
 /// The sheet border with its title and `Esc close`; returns the right and bottom edges.
 fn border(app: &GitScreen, frame: &mut Frame, rect: Rect, title: &str) -> (u16, u16) {
+    // Everything behind the sheet recedes, so no backdrop text reads as part of it.
+    chrome::scrim(&mut frame.grid, rect);
     // The border sits on the pane colour and the sheet fills only inside it, so the box
     // line is the overlay's edge: no half cell of backdrop shows past it.
     chrome::fill(&mut frame.grid, rect, st(GitRole::Text, EDGE));
@@ -341,9 +534,25 @@ fn border(app: &GitScreen, frame: &mut Frame, rect: Rect, title: &str) -> (u16, 
     (right, bottom)
 }
 
+/// The terminal caret moves into the sheet, on its first heading (r9 R8-10): left where
+/// it was, it blinks alone on the cleared screen behind.
+fn caret(frame: &mut Frame, x: u16, y: u16) {
+    if let Some((_, _, shape)) = frame.cursor {
+        frame.cursor = Some((x, y, shape));
+    }
+}
+
+/// From this many columns up the sheet is two columns at [`WIDE_SHEET`] cells, centred:
+/// a bigger terminal widens the margins, never shrinks the sheet (r16 git-tab-05).
+const WIDE_FROM: u16 = 120;
+/// The two-column sheet's width (DESIGN.md §3.43): two 53-cell columns, a gap, borders.
+const WIDE_SHEET: u16 = 112;
+
 /// Small terminals: every group stays, its keys flowed two or three to a row,
 /// each `key  what` unaligned so long keys do not starve short labels. The sheet
-/// grows over the top bar and footer before anything is cut.
+/// grows over the top bar and footer before anything is cut. `wide` (≥ [`WIDE_FROM`]
+/// columns) fixes two cells per row in a centred [`WIDE_SHEET`]-cell sheet.
+#[allow(clippy::too_many_arguments)]
 fn compact(
     app: &GitScreen,
     frame: &mut Frame,
@@ -351,18 +560,21 @@ fn compact(
     height: u16,
     body: Rect,
     title: &str,
-    groups: &[Group],
+    groups: &[Sheet],
+    wide: bool,
 ) {
     let cell = |key: &str, what: &str| chrome::width(key) + 2 + chrome::width(what);
+    let sheet_w = if wide { WIDE_SHEET.min(body.w) } else { body.w };
+    let body = Rect::new(body.x + (body.w - sheet_w) / 2, body.y, sheet_w, body.h);
     let inner_w = body.w.saturating_sub(4);
     // As many cells per row as keep most labels whole.
-    let mut per_row = 1u16;
-    for n in (1..=3u16).rev() {
+    let mut per_row = if wide { 2 } else { 1u16 };
+    for n in (1..=3u16).rev().filter(|_| !wide) {
         let cell_w = inner_w.saturating_sub(2 * (n - 1)) / n;
         let whole = groups
             .iter()
             .flat_map(|group| group.1.iter())
-            .filter(|(key, what)| cell(*key, *what) <= cell_w)
+            .filter(|(key, what)| cell(key, what) <= cell_w)
             .count();
         let total = groups.iter().map(|group| group.1.len()).sum::<usize>();
         if cell_w >= 24 && whole * 10 >= total * 8 {
@@ -371,7 +583,7 @@ fn compact(
         }
     }
     let cell_w = inner_w.saturating_sub(2 * (per_row - 1)) / per_row;
-    let rows_of = |group: &Group| 1 + (group.1.len() as u16).div_ceil(per_row);
+    let rows_of = |group: &Sheet| 1 + (group.1.len() as u16).div_ceil(per_row);
     let content: u16 = groups.iter().map(rows_of).sum();
     let gaps = groups.len().saturating_sub(1) as u16;
     // Borders plus content; gaps between groups only when there is room.
@@ -380,11 +592,14 @@ fn compact(
         (Rect::new(body.x, body.y + (body.h - h) / 2, body.w, h), true)
     } else if content + 2 <= body.h {
         (Rect::new(body.x, body.y, body.w, body.h), false)
+    } else if wide {
+        (Rect::new(body.x, 0, body.w, height), false)
     } else {
         (Rect::new(0, 0, width, height), false)
     };
     let (right, bottom) = border(app, frame, rect, title);
     let mut y = rect.y + 1 + u16::from(gap);
+    caret(frame, rect.x + 2, y);
     for group in groups {
         if y >= bottom {
             break;
@@ -413,6 +628,36 @@ fn compact(
     }
 }
 
+/// Every row the keys sheet lists for the screen's current context, as `(key, item)`; the
+/// item is `Scope · label`, its scope the pane for an `Act` group and the group otherwise
+/// (`Changes · Stage all · unstage all`, `Navigate · Move`). The tutor's coverage test reads
+/// it: each item names the lesson that teaches it.
+#[cfg(test)]
+pub(in crate::git::screen) fn rows(app: &GitScreen) -> Vec<(String, String)> {
+    let (title, groups) = context(app);
+    let mut groups = owned(groups);
+    if app.page == 0 {
+        in_force(app, &mut groups);
+    }
+    groups.extend(vim(app));
+    groups
+        .into_iter()
+        .flat_map(|(group, rows)| {
+            rows.into_iter().map(move |(key, what)| {
+                // Pull, push, undo and redo close every pane's Act rows: one item each.
+                let scope = if SYNC.contains(&what.as_str()) {
+                    "Sync"
+                } else if group == "Act" {
+                    title
+                } else {
+                    group
+                };
+                (key, format!("{scope} · {what}"))
+            })
+        })
+        .collect()
+}
+
 pub(in crate::git::screen) fn paint(app: &GitScreen, frame: &mut Frame, width: u16, height: u16) {
     let lay = super::layout::layout(width, height, app.operation_bar.is_some(), [false; 4]);
     let body = lay.body;
@@ -420,7 +665,20 @@ pub(in crate::git::screen) fn paint(app: &GitScreen, frame: &mut Frame, width: u
         return;
     }
     let (title, groups) = context(app);
-    let key_width = |group: &Group| {
+    let mut groups = owned(groups);
+    if app.page == 0 {
+        in_force(app, &mut groups);
+    }
+    // One meaning and one wording per key on a screen (r15 ISS-09): a chord the Vim group
+    // lists (the sidebar's `Space e`) is not named again, in other words, above it.
+    if let Some(vim) = vim(app) {
+        let chords = vim.1.iter().map(|(key, _)| key.clone()).collect::<Vec<_>>();
+        for (_, rows) in &mut groups {
+            rows.retain(|(key, _)| !chords.contains(key));
+        }
+        groups.push(vim);
+    }
+    let key_width = |group: &Sheet| {
         group
             .1
             .iter()
@@ -428,7 +686,7 @@ pub(in crate::git::screen) fn paint(app: &GitScreen, frame: &mut Frame, width: u
             .max()
             .unwrap_or(0)
     };
-    let column_width = |group: &Group| {
+    let column_width = |group: &Sheet| {
         key_width(group)
             + 2
             + group
@@ -438,11 +696,15 @@ pub(in crate::git::screen) fn paint(app: &GitScreen, frame: &mut Frame, width: u
                 .max()
                 .unwrap_or(0)
     };
+    if width >= WIDE_FROM {
+        compact(app, frame, width, height, body, title, &groups, true);
+        return;
+    }
     let w = body.w.saturating_sub(8).min(160);
     let inner_w = w.saturating_sub(4);
     // Flow groups into columns, top to bottom, as many columns as fit.
     let max_h = body.h.saturating_sub(4);
-    let mut columns: Vec<Vec<&Group>> = vec![Vec::new()];
+    let mut columns: Vec<Vec<&Sheet>> = vec![Vec::new()];
     let mut used = 0u16;
     let mut widths = vec![0u16];
     for group in &groups {
@@ -471,7 +733,7 @@ pub(in crate::git::screen) fn paint(app: &GitScreen, frame: &mut Frame, width: u
             column.iter().map(|group| group.1.len() as u16 + 2).sum::<u16>() <= max_h.saturating_sub(1)
         });
     if !fits {
-        compact(app, frame, width, height, body, title, &groups);
+        compact(app, frame, width, height, body, title, &groups, false);
         return;
     }
     let content_h = columns
@@ -485,6 +747,7 @@ pub(in crate::git::screen) fn paint(app: &GitScreen, frame: &mut Frame, width: u
     let rect = Rect::new(body.x + (body.w - w) / 2, body.y + (body.h.saturating_sub(h)) / 2, w, h);
     let (right, bottom) = border(app, frame, rect, title);
     let mut x = rect.x + 2;
+    caret(frame, x, rect.y + 2);
     for (column, column_w) in columns.iter().zip(&widths) {
         let mut y = rect.y + 2;
         for group in column {

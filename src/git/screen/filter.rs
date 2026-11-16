@@ -73,14 +73,14 @@ impl GitScreen {
             &self.filters[target]
         }
     }
-    fn list_filter_mut(&mut self, target: usize) -> &mut ListFilter {
+    pub(super) fn list_filter_mut(&mut self, target: usize) -> &mut ListFilter {
         if target == COMMIT_FILES {
             &mut self.commit.as_mut().expect("commit filter target").filter
         } else {
             &mut self.filters[target]
         }
     }
-    fn filter_rows(&self, target: usize) -> Vec<Row> {
+    fn filter_rows(&self, target: usize) -> memo::Rows {
         if target == COMMIT_FILES {
             self.commit.as_ref().expect("commit filter target").rows()
         } else {
@@ -110,7 +110,7 @@ impl GitScreen {
             self.offsets[Self::filter_pane(target)] = 0;
         }
     }
-    fn filter_identity(&self, target: usize) -> Option<PathBuf> {
+    pub(super) fn filter_identity(&self, target: usize) -> Option<PathBuf> {
         self.filter_rows(target)
             .get(self.filter_cursor(target))
             .map(|row| row.value.clone())
@@ -134,7 +134,7 @@ impl GitScreen {
             self.load_preview();
         }
     }
-    fn update_filter(&mut self, target: usize, previous: Option<PathBuf>) {
+    pub(super) fn update_filter(&mut self, target: usize, previous: Option<PathBuf>) {
         if target == 0 {
             self.clear_file_selection();
         }
@@ -175,58 +175,6 @@ impl GitScreen {
         filter.last_match = None;
         self.notice.clear();
     }
-    pub(super) fn render_filter(&self, frame: &mut Frame, width: u16, height: u16) {
-        use crossterm::cursor::SetCursorStyle;
-        use unicode_width::UnicodeWidthStr;
-        let Some(target) = self.filter_target() else {
-            return;
-        };
-        let filter = self.list_filter(target);
-        if (!filter.active() && !filter.editing) || (!filter.editing && !self.notice.is_empty()) {
-            return;
-        }
-        let y = height - 3;
-        for x in 1..width - 1 {
-            frame.grid.set_cell(x, y, " ", crate::ui::Style::Default);
-        }
-        let x =
-            frame
-                .grid
-                .put_text_clipped(1, y, "Filter / ", crate::ui::Style::GitControl, width - 1);
-        let available = usize::from(width.saturating_sub(x + 2)).max(1);
-        let input = &filter.input;
-        let mut start = 0;
-        while input.input[start..input.cursor].width() >= available {
-            start += input.input[start..input.cursor]
-                .graphemes(true)
-                .next()
-                .map_or(1, str::len);
-        }
-        frame.grid.put_text_clipped(
-            x,
-            y,
-            &render::ellipsize(&input.input[start..], available),
-            crate::ui::Style::Default,
-            width - 1,
-        );
-        if filter.editing {
-            let cursor = x + input.input[start..input.cursor].width() as u16;
-            frame.cursor = Some((cursor.min(width - 2), y, SetCursorStyle::SteadyBar));
-            render::footer(
-                frame,
-                width,
-                height,
-                &[
-                    ("Enter", "keep"),
-                    ("Esc", "clear"),
-                    ("↑/↓", "matches"),
-                    ("Ctrl+u", "clear"),
-                ],
-                true,
-            );
-        }
-    }
-
     pub(super) fn paste_filter(&mut self, text: &str) -> bool {
         let Some(target) = self.filter_target() else {
             return false;
@@ -242,7 +190,7 @@ impl GitScreen {
         self.update_filter(target, previous);
         true
     }
-    fn remember_filter_match(&mut self, target: usize) {
+    pub(super) fn remember_filter_match(&mut self, target: usize) {
         if let Some(row) = self
             .filter_rows(target)
             .get(self.filter_cursor(target))
@@ -278,6 +226,14 @@ impl GitScreen {
             self.notice.clear();
             return true;
         }
+        // A modal screen's query edits on the editor's engine (`modal.rs`); Esc in its
+        // Normal mode, or `q`, clears and closes the filter as Esc does here.
+        let escape = KeyEvent::plain(KeyCode::Escape);
+        let key = match self.modal_filter_key(target, key) {
+            super::modal::BoxKey::Handled(_) => return true,
+            super::modal::BoxKey::Close => &escape,
+            super::modal::BoxKey::Pass => key,
+        };
         if key.code == KeyCode::Escape {
             self.clear_filter(target);
             return true;

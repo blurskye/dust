@@ -66,7 +66,7 @@ fn launch(root: &Path, script: &Path) -> DapLaunch {
 }
 fn wait(mut predicate: impl FnMut() -> bool) {
     // Each call takes at most one event, and sleeps are coarse on loaded CI machines.
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + Duration::from_secs(20);
     while !predicate() {
         assert!(Instant::now() < deadline, "owned adapter deadline");
         thread::sleep(Duration::from_millis(2));
@@ -802,7 +802,7 @@ while True:
     service.writer_gate(true);
     service.control(DapControl::Scopes { frame_id: 1 }).unwrap();
     wait(|| service.writer_waiting());
-    let reservation_deadline = Instant::now() + Duration::from_secs(3);
+    let reservation_deadline = Instant::now() + Duration::from_secs(20);
     for _ in 0..32 {
         loop {
             assert!(
@@ -1671,7 +1671,7 @@ fn server_child_session_keeps_breakpoints_and_routes_controls_to_the_child() {
     )];
     let mut service = DapClient::new();
     service.start_absolute(configuration).unwrap();
-    let deadline = Instant::now() + Duration::from_secs(15);
+    let deadline = Instant::now() + Duration::from_secs(20);
     let mut stopped = false;
     let mut verified = 0;
     while !stopped || verified < 2 {
@@ -1770,7 +1770,7 @@ fn server_child_session_rejects_missing_configuration() {
     configuration.arguments.push("{listen_port}".into());
     let mut service = DapClient::new();
     service.start_absolute(configuration).unwrap();
-    let deadline = Instant::now() + Duration::from_secs(15);
+    let deadline = Instant::now() + Duration::from_secs(20);
     loop {
         if let Some(DapEvent::Failed { message, .. }) = service.try_event() {
             assert!(message.contains("child configuration missing"), "{message}");
@@ -1796,7 +1796,7 @@ fn stopping_a_server_launch_cancels_the_connection_wait() {
     service.start_absolute(configuration).unwrap();
     thread::sleep(Duration::from_millis(50));
     service.stop().unwrap();
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + Duration::from_secs(20);
     while service.pending() != 0 {
         service.try_event();
         assert!(

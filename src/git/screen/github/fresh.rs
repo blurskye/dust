@@ -6,6 +6,8 @@
 //! All of it is on only when the disk cache is (`forge::cache::Cache::shared`); without it the
 //! workspace behaves exactly as before: memory only, explicit refreshes, no warm worker.
 use super::*;
+use crate::forge::ForgeJobs;
+use crate::forge::records;
 use crate::forge::cache::{self, Cache, CacheKey};
 use crate::forge::merge;
 use crate::forge::model::Fingerprint;
@@ -19,6 +21,11 @@ use std::time::{Duration, Instant, SystemTime};
 const WARM_IDLE: Duration = Duration::from_millis(150);
 /// The cursor rests this long on a row before its neighbours' details are prefetched.
 const PREFETCH_REST: Duration = Duration::from_millis(120);
+/// How long one turn (a key, a poll) may wait for the disk in all (`load_disk_soon`).
+const DISK_BUDGET: Duration = Duration::from_millis(8);
+/// The cursor rests this long on a row before the forge is asked for its details: `j`/`k`
+/// through the list paint cached details and send nothing for the rows passed over.
+const DWELL: Duration = Duration::from_millis(150);
 /// Live search waits for typing to pause.
 const DEBOUNCE: Duration = Duration::from_millis(250);
 /// Visible entries are checked against their budget this often.
@@ -82,12 +89,29 @@ pub(super) struct Fresh {
     pub(super) flash: HashSet<String>,
     prefetched: HashSet<Key>,
     rest: (usize, usize, Instant),
+    /// The cursor moved to the row in `rest` from another row of the same list.
+    moving: bool,
+    /// `ensure` runs for a row the cursor is passing over: details are read from disk only.
+    pub(super) holding: bool,
+    /// The freshness chips last painted: their ages change with no reply to repaint them.
+    chips: Vec<Option<String>>,
     remote: Option<Option<(String, String)>>,
     pub(super) live: Option<Live>,
     pub(super) live_key: Option<Key>,
-    superseded: HashSet<Key>,
     /// Values replaced by an optimistic write, restored if the forge refuses it.
     undo: Vec<(Key, Option<Value>)>,
+    /// Gitea's and Forgejo's list check marks, asked for the rows on screen.
+    pub(super) rows: super::row_checks::Rows,
+    /// Disk reads for the rows the cursor passes over, off the UI thread.
+    disk: super::disk::Disk,
+    /// Until when this turn (a key, a poll) may wait for the disk (`load_disk_soon`).
+    pub(super) disk_until: Option<Instant>,
+    /// Keys the disk had nothing for, in scope `.0`: not read again each time `ensure`
+    /// asks (the badges ask on every key), until the forge answers them.
+    disk_absent: (u64, HashSet<Key>),
+    /// The warm-up's keys still being read from disk: queued for the forge once the disk says
+    /// whether it holds them, fresh.
+    warm_disk: Vec<Request>,
 }
 
 impl Fresh {
@@ -110,12 +134,30 @@ impl Fresh {
             flash: HashSet::new(),
             prefetched: HashSet::new(),
             rest: (0, usize::MAX, Instant::now()),
+            moving: false,
+            holding: false,
+            chips: Vec::new(),
             remote: None,
             live: None,
             live_key: None,
-            superseded: HashSet::new(),
             undo: Vec::new(),
+            rows: Default::default(),
+            disk: Default::default(),
+            disk_until: None,
+            disk_absent: Default::default(),
+            warm_disk: Vec::new(),
         }
+    }
+
+    /// A background read for the warm worker, ahead of the startup warm-up.
+    pub(super) fn push_warm(&mut self, request: Request) {
+        self.warm_queue.push_front(request);
+    }
+
+    /// Whether the warm worker holds (queued or running) a read whose key matches.
+    pub(super) fn warm_has(&self, matches: impl Fn(&Key) -> bool) -> bool {
+        self.warm_active.as_ref().is_some_and(|(request, _)| matches(&request.key))
+            || self.warm_queue.iter().any(|request| matches(&request.key))
     }
 
     pub(super) fn enabled(&self) -> bool {
@@ -150,6 +192,31 @@ fn kind_of(page: usize) -> ItemKind {
         ItemKind::Issue
     } else {
         ItemKind::PullRequest
+    }
+}
+
+/// A list's age column in one relative format from minutes to years (`3w ago`, `2mo ago`,
+/// `1y ago`), so a list never mixes `2d ago` with `Nov 6` and `Aug 20 2025`.
+pub(super) fn relative(stamp: &str, now: i64) -> String {
+    let Some(at) = records::epoch(stamp) else {
+        return String::new();
+    };
+    let seconds = (now - at).max(0);
+    let days = seconds / 86_400;
+    if seconds < 60 {
+        "just now".into()
+    } else if seconds < 3600 {
+        format!("{}m ago", seconds / 60)
+    } else if seconds < 86_400 {
+        format!("{}h ago", seconds / 3600)
+    } else if days < 14 {
+        format!("{days}d ago")
+    } else if days < 60 {
+        format!("{}w ago", days / 7)
+    } else if days < 365 {
+        format!("{}mo ago", days / 30)
+    } else {
+        format!("{}y ago", days / 365)
     }
 }
 
@@ -222,10 +289,6 @@ pub(super) fn matches(row: &Value, query: &str, state: &str) -> bool {
 }
 
 impl Workspace {
-    pub(super) fn fresh_enabled(&self) -> bool {
-        self.fresh.enabled()
-    }
-
     /// The cache entry a read lands in: the target's host and repository, or the remote's.
     fn cache_key(&mut self, op: &Op) -> Option<CacheKey> {
         let Op::Read(target, read) = op else {
@@ -246,26 +309,129 @@ impl Workspace {
         Some(CacheKey::for_read(&host, repo.as_deref(), read))
     }
 
-    /// Fill a memory miss from disk. Returns whether the key is now cached.
+    /// Fill a memory miss from disk within this turn's budget (`load_disk_soon`). Returns
+    /// whether the key is cached now: `false` while the disk is still being read, and the
+    /// key's handling runs again when it lands (`poll_disk`).
     pub(super) fn load_disk(&mut self, key: &Key, op: &Op) -> bool {
-        if !self.fresh.enabled() || self.cache.contains_key(key) {
+        self.load_disk_soon(key, op).unwrap_or(false)
+    }
+
+    /// Fill a memory miss from disk on this thread, however long the disk takes: a live
+    /// search, which asks the forge at once for whatever the disk lacks.
+    /// Returns whether the key is now cached.
+    pub(super) fn load_disk_now(&mut self, key: &Key, op: &Op) -> bool {
+        let Some((read, cache_key, cache)) = self.disk_entry(key, op) else {
             return self.cache.contains_key(key);
+        };
+        let found = super::disk::read(&cache, key, &cache_key);
+        self.apply_disk(key, &read, found)
+    }
+
+    /// `load_disk` on the disk worker: the entry is painted when it lands (`poll_disk`), and
+    /// the key's handling (`ensure`) runs again then. `None` while the disk is being read,
+    /// else whether the key is cached now.
+    pub(super) fn load_disk_later(&mut self, key: &Key, op: &Op) -> Option<bool> {
+        let Some((read, cache_key, cache)) = self.disk_entry(key, op) else {
+            return Some(self.cache.contains_key(key));
+        };
+        self.fresh.disk.load(&cache, key.clone(), read, cache_key, self.scope_epoch);
+        None
+    }
+
+    /// `load_disk` through the disk worker, waiting for it while this turn's budget
+    /// (`DISK_BUDGET`) lasts: a quick disk paints at once as a direct read would, and a slow
+    /// one never holds up a key (its entry paints when it lands, `poll_disk`). `None` while
+    /// the disk is still being read, else whether the key is cached now.
+    pub(super) fn load_disk_soon(&mut self, key: &Key, op: &Op) -> Option<bool> {
+        let Some((read, cache_key, cache)) = self.disk_entry(key, op) else {
+            return Some(self.cache.contains_key(key));
+        };
+        let epoch = self.scope_epoch;
+        self.fresh.disk.load(&cache, key.clone(), read.clone(), cache_key.clone(), epoch);
+        let until = *self.fresh.disk_until.get_or_insert_with(|| Instant::now() + DISK_BUDGET);
+        let loaded = self.fresh.disk.wait(key, until)?;
+        if loaded.epoch != epoch {
+            // An answer for the scope before: ask again for this one.
+            self.fresh.disk.load(&cache, key.clone(), read, cache_key, epoch);
+            return None;
+        }
+        Some(self.apply_disk(&loaded.key, &loaded.read, loaded.found))
+    }
+
+    /// Whether the disk is being read for `key`.
+    pub(super) fn disk_loading(&self, key: &Key) -> bool {
+        self.fresh.disk.loading.contains(key)
+    }
+
+    /// Entries the disk worker read; returns whether any was painted.
+    pub(super) fn poll_disk(&mut self) -> bool {
+        let mut painted = false;
+        let mut answered = false;
+        for loaded in self.fresh.disk.replies() {
+            answered = true;
+            if loaded.epoch != self.scope_epoch || self.cache.contains_key(&loaded.key) {
+                continue;
+            }
+            painted |= self.apply_disk(&loaded.key, &loaded.read, loaded.found);
+        }
+        // The rows' handling waited for the disk: the forge is asked now if it must be.
+        if painted || answered && !self.cursor_moving() {
+            self.ensure(false);
+        }
+        painted
+    }
+
+    /// What a disk read of `key` needs, when the memory misses it and the cache is on.
+    fn disk_entry(&mut self, key: &Key, op: &Op) -> Option<(Read, CacheKey, Arc<Cache>)> {
+        if !self.fresh.enabled() || self.cache.contains_key(key) {
+            return None;
+        }
+        if self.fresh.disk_absent.0 != self.scope_epoch {
+            self.fresh.disk_absent = (self.scope_epoch, HashSet::new());
+        }
+        if self.fresh.disk_absent.1.contains(key) {
+            return None;
         }
         let Op::Read(_, read) = op else {
-            return false;
+            return None;
         };
         if matches!(read, Read::Fingerprint(_)) {
-            return false;
+            return None;
         }
-        let Some(cache_key) = self.cache_key(op) else {
-            return false;
+        let cache_key = self.cache_key(op)?;
+        let cache = self.fresh.cache.clone()?;
+        Some((read.clone(), cache_key, cache))
+    }
+
+    /// Put what the disk held for `key` in memory. Returns whether the key is now cached.
+    fn apply_disk(&mut self, key: &Key, read: &Read, found: super::disk::Found) -> bool {
+        let envelope = match found {
+            super::disk::Found::Payload(envelope) => envelope,
+            super::disk::Found::Missing(envelope) => {
+                // A "not found" the forge gave last time, shown until it is asked again.
+                self.fresh.meta.insert(
+                    key.clone(),
+                    Meta {
+                        fetched: envelope.fetched(),
+                        checked: None,
+                        ttl: Duration::from_secs(envelope.ttl),
+                        etag: None,
+                        fingerprint: None,
+                        offline: false,
+                        verified: false,
+                    },
+                );
+                self.cache.insert(key.clone(), Err(envelope.data));
+                return true;
+            }
+            super::disk::Found::Nothing => {
+                if self.fresh.disk_absent.0 == self.scope_epoch {
+                    self.fresh.disk_absent.1.insert(key.clone());
+                }
+                return false;
+            }
         };
-        let Some(cache) = self.fresh.cache.clone() else {
-            return false;
-        };
-        let Some(envelope) = cache.get::<Payload>(&cache_key) else {
-            return false;
-        };
+        self.note_totals(key, &envelope.data);
         let (mut value, text) = crate::forge::legacy::encode(shape(key), &envelope.data);
         if let Key::Inbox(host, page, state, _) = key
             && inbox::validate_rows(&mut value, host, *page, state).is_err()
@@ -310,6 +476,12 @@ impl Workspace {
         let Some(meta) = self.fresh.meta.get(key) else {
             return false;
         };
+        // The last check failed (offline, rate limited, a server error): retry with backoff, a
+        // quarter of how old the shown data is, from 10 s up to 5 min (§3.46).
+        if meta.offline {
+            let wait = (meta.age() / 4).clamp(CONFIRM_AFTER, Duration::from_secs(300));
+            return meta.checked.is_none_or(|checked| checked.elapsed() >= wait);
+        }
         if let Some(checked) = meta.checked
             && checked.elapsed() < meta.ttl.clamp(CONFIRM_AFTER, Duration::from_secs(3600))
         {
@@ -380,11 +552,6 @@ impl Workspace {
         background: bool,
     ) {
         let implicit = self.fresh.implicit.remove(&request.key) || background;
-        if self.fresh.superseded.remove(&request.key) && fetched.is_err() {
-            // A live search the user typed past; its cancellation is not news.
-            self.ensure(false);
-            return;
-        }
         let read = match &request.op {
             Op::Read(_, read) => Some(read.clone()),
             Op::Write(..) => None,
@@ -439,6 +606,7 @@ impl Workspace {
             }
             Ok(Fetched::NotModified) => Err("Unexpected response · not modified".into()),
             Ok(Fetched::Payload { value, .. }) => {
+                self.note_totals(&request.key, &value);
                 let (mut value, text) = crate::forge::legacy::encode(shape(&request.key), &value);
                 match &request.key {
                     Key::Inbox(host, page, state, _) => {
@@ -498,7 +666,9 @@ impl Workspace {
                 } else if !matches!(request.key, Key::List(..) | Key::Inbox(..))
                     || matches!(self.page, 1 | 2) && request.key == self.list_key()
                 {
-                    self.notice = format!("Refresh failed: {error} — showing cached content");
+                    // In words, with how old what stays on screen is (§3.46).
+                    let age = self.fresh.meta.get(&request.key).map(Meta::age);
+                    self.notice = self.stale_notice(&error, age);
                     self.notice_error = true;
                 }
             }
@@ -514,6 +684,8 @@ impl Workspace {
                     }
                     self.cache.insert(request.key.clone(), Ok(reply));
                 }
+                // The worker wrote it to disk too.
+                self.fresh.disk_absent.1.remove(&request.key);
                 self.fresh.meta.insert(
                     request.key.clone(),
                     Meta {
@@ -615,18 +787,15 @@ impl Workspace {
         let meta = self.fresh.meta.get(key)?;
         let busy = self.pending(key) || self.fresh.warm_pending(key);
         let age = ago(meta.age());
+        // One string at every width (r11): a border too narrow for it drops the label whole
+        // rather than shortening `updated just now` to `now`.
+        if compact {
+            return None;
+        }
         Some(if meta.offline {
-            if compact {
-                "offline".into()
-            } else {
-                format!("cached {age} · offline")
-            }
-        } else if compact {
-            // A narrow border keeps the age alone: `now`, `5m`.
-            let age = age.trim_end_matches(" ago");
-            format!("{}{}", if age == "just now" { "now" } else { age }, if busy { " ⟳" } else { "" })
+            format!("updated {age} · {}", self.stale_word())
         } else if !meta.verified {
-            format!("cached {age}{}", if busy { " · ⟳" } else { "" })
+            format!("updated {age}{}", if busy { " · ⟳" } else { "" })
         } else {
             format!("updated {age}{}", if busy { " · ⟳" } else { "" })
         })
@@ -664,12 +833,32 @@ impl Workspace {
         }
     }
 
+    /// Whether `j`/`k` are moving the list cursor: it reached its row less than `DWELL` ago
+    /// from another row of the same list. Records where the cursor rests.
+    pub(super) fn cursor_moving(&mut self) -> bool {
+        if !self.fresh.enabled()
+            || !matches!(self.page, 1 | 2)
+            || self.inbox.enabled
+            || self.opened.is_some()
+        {
+            return false;
+        }
+        let selected = self.selected[self.page - 1];
+        let (page, row, _) = self.fresh.rest;
+        if (page, row) != (self.page, selected) {
+            // The row a page first shows is not a move.
+            self.fresh.moving = page == self.page && row != usize::MAX;
+            self.fresh.rest = (self.page, selected, Instant::now());
+        }
+        self.fresh.moving && self.fresh.rest.2.elapsed() < DWELL
+    }
+
     /// The warm worker, prefetching and the revalidation sweep; called from `poll`.
     pub(super) fn poll_fresh(&mut self) -> bool {
         if !self.fresh.enabled() {
             return false;
         }
-        let mut changed = false;
+        let mut changed = self.poll_disk();
         while let Some(event) = self.fresh.warm.try_reply() {
             if event.request_id != self.fresh.warm_next {
                 continue;
@@ -684,7 +873,9 @@ impl Workspace {
                 continue;
             };
             changed = true;
+            let key = request.key.clone();
             self.apply(request, result.map_err(|error| error.to_string()), true);
+            self.ask_again(&key);
         }
         changed |= self.poll_live();
         if self.repo.is_empty() {
@@ -718,50 +909,86 @@ impl Workspace {
             if self.inbox.enabled {
                 warm.clear();
             }
+            // Read by the disk worker within this poll's budget: a slow disk never holds up
+            // the first keys.
+            self.fresh.warm_disk.clear();
             for (key, op) in warm {
-                let cached = self.load_disk(&key, &op);
-                if !cached || self.needs_check(&key) {
-                    self.fresh.warm_queue.push_back(Request { key, op });
+                match self.load_disk_soon(&key, &op) {
+                    Some(cached) => {
+                        if !cached || self.needs_check(&key) {
+                            self.fresh.warm_queue.push_back(Request { key, op });
+                        }
+                    }
+                    None => self.fresh.warm_disk.push(Request { key, op }),
                 }
             }
             changed = true;
         }
+        if !self.fresh.warm_disk.is_empty() {
+            for request in std::mem::take(&mut self.fresh.warm_disk) {
+                if self.disk_loading(&request.key) {
+                    self.fresh.warm_disk.push(request);
+                } else if !self.cache.contains_key(&request.key) || self.needs_check(&request.key) {
+                    self.fresh.warm_queue.push_back(request);
+                }
+            }
+        }
+        // After the warm-up is queued (a new scope clears the queue): the list's check marks.
+        changed |= self.poll_row_checks();
         // Prefetch the neighbours of a resting cursor (§7.5).
         if matches!(self.page, 1 | 2) && !self.inbox.enabled && self.opened.is_none() {
             let at = self.page - 1;
             let selected = self.selected[at];
-            if (self.fresh.rest.0, self.fresh.rest.1) != (self.page, selected) {
-                self.fresh.rest = (self.page, selected, Instant::now());
-            } else if self.fresh.rest.2.elapsed() >= PREFETCH_REST {
+            if !self.cursor_moving() && self.fresh.moving {
+                // The cursor dwelt on its row: ask the forge for what it shows.
+                self.fresh.moving = false;
+                self.ensure(false);
+                changed = true;
+            }
+            if self.fresh.rest.2.elapsed() >= PREFETCH_REST {
                 let neighbours = [selected + 1, selected.wrapping_sub(1)]
                     .into_iter()
                     .filter_map(|index| self.items().get(index).map(|item| number(item, "number")))
                     .collect::<Vec<_>>();
                 for id in neighbours {
                     let key = Key::Item(self.page, id);
-                    if self.fresh.prefetched.contains(&key) || self.pending(&key) {
+                    if self.fresh.prefetched.contains(&key) || self.pending(&key) || self.disk_loading(&key) {
                         continue;
                     }
-                    self.fresh.prefetched.insert(key.clone());
                     let op = self.read(if self.page == 1 {
                         Read::Issue(id)
                     } else {
                         Read::PullRequest(id)
                     });
-                    changed |= self.load_disk(&key, &op);
+                    // A slow disk is not waited for past the poll's budget: asked again once
+                    // its answer has landed.
+                    let Some(cached) = self.load_disk_soon(&key, &op) else {
+                        continue;
+                    };
+                    self.fresh.prefetched.insert(key.clone());
+                    changed |= cached;
                     if !self.cache.contains_key(&key) || self.needs_check(&key) {
                         self.fresh.warm_queue.push_back(Request { key, op });
                     }
                 }
             }
         }
+        // The chips' ages (`updated just now` → `updated 1m ago`) repaint as they change.
+        let chips = [self.list_key(), Key::Item(self.page, self.number())]
+            .iter()
+            .map(|key| self.freshness_chip(key, false))
+            .collect::<Vec<_>>();
+        if chips != self.fresh.chips {
+            self.fresh.chips = chips;
+            changed = true;
+        }
         // Revalidate what is on screen as its budget runs out (and poll fingerprints).
-        let idle = self.active.is_none() && self.queue.is_empty();
+        let idle = self.active.idle() && self.queue.is_empty();
         if idle && self.fresh.sweep.elapsed() >= SWEEP {
             self.fresh.sweep = Instant::now();
             self.ensure(false);
         }
-        let idle = self.active.is_none() && self.queue.is_empty();
+        let idle = self.active.idle() && self.queue.is_empty();
         let since = if idle {
             *self.fresh.idle_since.get_or_insert_with(Instant::now)
         } else {
@@ -864,19 +1091,14 @@ impl Workspace {
             && previous != key
             && previous != self.list_key()
         {
-            if self
-                .active
-                .as_ref()
-                .is_some_and(|request| request.key == previous)
-            {
-                self.jobs.cancel();
-                self.fresh.superseded.insert(previous.clone());
-            }
+            // A live search the user typed past: its answer is dropped, not news.
+            self.active.cancel(&previous);
+            self.fresh.implicit.remove(&previous);
             self.queue.retain(|request| request.key != previous);
         }
         let op = self.list_read_at(page, &state, &query, LIST_BATCH);
         self.fresh.live_key = Some(key.clone());
-        let cached = self.load_disk(&key, &op);
+        let cached = self.load_disk_now(&key, &op);
         if (!cached || self.needs_check(&key)) && !self.pending(&key) {
             if cached {
                 self.fresh.implicit.insert(key.clone());
@@ -975,7 +1197,8 @@ impl Workspace {
             format!("From {host} · searching ⟳")
         } else {
             match self.cache.get(&key) {
-                Some(Ok(_)) if remote.is_empty() => format!("From {host} · no more"),
+                // Nothing new from the forge: no divider for an empty section.
+                Some(Ok(_)) if remote.is_empty() => String::new(),
                 Some(Ok(_)) => format!("From {host} · {} more", remote.len()),
                 Some(Err(_)) => format!("From {host} · offline"),
                 None => format!("From {host} · searching ⟳"),
@@ -1078,9 +1301,12 @@ impl Workspace {
             let Some(Ok(reply)) = self.cache.get_mut(&key) else {
                 continue;
             };
-            self.fresh.undo.push((key, Some(reply.value.clone())));
+            self.fresh.undo.push((key.clone(), Some(reply.value.clone())));
             edit(&mut reply.value);
             reply.text = reply.value.to_string();
+            // A read of it already on its way answers for the time before the write: dropped,
+            // so it cannot paint over the edit; the write's own refresh reads it again.
+            self.active.cancel(&key);
         }
     }
 

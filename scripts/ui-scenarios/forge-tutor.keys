@@ -1,0 +1,46 @@
+# The forge tutor (`:tutor forge`) on its practice forge.
+# Run with --binary target/debug/dusty-git --cwd a disposable Git repository; needs python3.
+until Changes
+wait 300
+type :tutor forge
+key enter
+wait 300
+until practice
+wait 300
+shot tutor-01-open-the-tab
+type >
+wait 300
+until Pull requests 5
+until Showing
+gone Loading
+shot tutor-02-sections
+type :tutor forge 28
+key enter
+wait 4000
+type r
+wait 1500
+shot tutor-28-review
+key escape
+wait 500
+type :tutor forge 42
+key enter
+wait 4000
+type ]
+wait 1500
+key enter
+wait 3500
+shot tutor-44-run
+type :tutor forge 73
+key enter
+wait 5000
+type @
+wait 2000
+shot tutor-73-accounts
+key escape
+wait 1500
+type C
+wait 2000
+shot tutor-75-after-refusal
+type :tutor quit
+key enter
+wait 800

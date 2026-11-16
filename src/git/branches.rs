@@ -15,7 +15,7 @@ use std::time::Instant;
 
 use thiserror::Error;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct GitBranchRequestId(pub u64);
 #[derive(Clone, Debug)]
 pub struct GitBranchListRequest {
@@ -48,7 +48,7 @@ pub enum GitBranchRequest {
         deadline: Duration,
     },
 }
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct GitBranchEntry {
     pub name: String,
     pub remote: bool,
@@ -61,7 +61,7 @@ pub struct GitBranchEntry {
     pub checked_out: Option<PathBuf>,
     pub head: bool,
 }
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct GitWorktreeEntry {
     pub name: String,
     pub path: PathBuf,
@@ -72,7 +72,7 @@ pub struct GitWorktreeEntry {
     pub locked: bool,
     pub main: bool,
 }
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct GitSubmoduleEntry {
     pub name: String,
     /// Relative to the repository workdir, not its Git directory.
@@ -85,7 +85,7 @@ pub struct GitSubmoduleEntry {
     /// The expected gitlink in the superproject index.
     pub index: Option<String>,
 }
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct GitBranchList {
     pub request_id: GitBranchRequestId,
     pub branches: Vec<GitBranchEntry>,

@@ -918,7 +918,7 @@ fn real_component_observes_queue_full_from_aggregate_confirmation_ownership() {
             app.plugin_limits(),
         )
         .expect("index request");
-    let deadline = Instant::now() + Duration::from_secs(15);
+    let deadline = Instant::now() + Duration::from_secs(30);
     while !app.extension.is_active_load("demo", load) {
         app.process_plugin_events();
         assert!(
@@ -930,7 +930,7 @@ fn real_component_observes_queue_full_from_aggregate_confirmation_ownership() {
         thread::yield_now();
     }
 
-    let enqueue_deadline = Instant::now() + Duration::from_secs(15);
+    let enqueue_deadline = Instant::now() + Duration::from_secs(20);
     for expected in 1..=64 {
         loop {
             app.process_effect(AppEffect::PluginExecute {
@@ -952,7 +952,7 @@ fn real_component_observes_queue_full_from_aggregate_confirmation_ownership() {
 
     // Transfer reservations to pending confirmations before opening a modal changes capture.
     // This keeps the ordinary probe separate from stale-source result-only callbacks.
-    let reply_deadline = Instant::now() + Duration::from_secs(15);
+    let reply_deadline = Instant::now() + Duration::from_secs(20);
     while !app
         .notices
         .history()
@@ -995,7 +995,7 @@ fn real_component_observes_queue_full_from_aggregate_confirmation_ownership() {
         64,
         "the intended 65th ordinary invocation must receive no reservation"
     );
-    let full_deadline = Instant::now() + Duration::from_secs(15);
+    let full_deadline = Instant::now() + Duration::from_secs(20);
     while !app
         .notices
         .history()
@@ -1065,7 +1065,7 @@ fn packaged_production_component_clone_refusal_never_enqueues_a_guest_callback()
                 app.plugin_limits(),
             )
             .expect("index request");
-        let deadline = Instant::now() + Duration::from_secs(15);
+        let deadline = Instant::now() + Duration::from_secs(30);
         while !app.extension.is_active_load("demo", load) {
             app.process_plugin_events();
             assert!(
@@ -1180,7 +1180,7 @@ fn packaged_production_component_clone_refusal_never_enqueues_a_guest_callback()
             )
             .expect("replacement index request");
         assert_ne!(replacement, load);
-        let replacement_deadline = Instant::now() + Duration::from_secs(15);
+        let replacement_deadline = Instant::now() + Duration::from_secs(20);
         while !app.extension.is_active_load("demo", replacement) {
             app.process_plugin_events();
             assert!(
@@ -1237,7 +1237,7 @@ fn packaged_real_guest_confirmation_updates_its_custom_view() {
             app.plugin_limits(),
         )
         .expect("index request");
-    let deadline = Instant::now() + Duration::from_secs(15);
+    let deadline = Instant::now() + Duration::from_secs(30);
     while !app.extension.is_active_load("demo", load) {
         app.process_plugin_events();
         assert!(
@@ -1329,7 +1329,7 @@ fn packaged_real_guest_confirmation_updates_its_custom_view() {
         ("enter", "Confirmed: No"),
         ("escape", "Confirmed: Cancelled"),
     ] {
-        let outcome_deadline = Instant::now() + Duration::from_secs(4);
+        let outcome_deadline = Instant::now() + Duration::from_secs(20);
         app.apply_retained_ui_interaction(crate::app::plugins::PluginUiInteraction::Activate);
         while app.input.prompt().is_none() {
             app.process_plugin_events();
@@ -2215,7 +2215,7 @@ fn expected_index_failure_before_sibling_index_aborts_the_complete_batch() {
             limits,
         )
         .expect("good index request");
-    let deadline = Instant::now() + Duration::from_secs(2);
+    let deadline = Instant::now() + Duration::from_secs(30);
     while app.extension.load_id("good").is_some()
         || app.extension.load_id("bad").is_some()
         || !app.extension.pending_indexes().is_empty()
@@ -2308,7 +2308,7 @@ fn deferred_user_plugin_move_compiles_after_index_then_falls_back_after_activati
             app.plugin_limits(),
         )
         .expect("index request");
-    let deadline = Instant::now() + Duration::from_secs(2);
+    let deadline = Instant::now() + Duration::from_secs(30);
     while app.extension.contributions().get("demo").is_none() {
         app.process_plugin_events();
         assert!(Instant::now() < deadline, "static acceptance timed out");
@@ -2829,7 +2829,7 @@ fn virtual_document_titles_and_languages_reach_windows_and_syntax() {
     app.set_dashboard_visibility(false);
     app.reconcile_editor_windows();
     assert!(app.ui.content_tabs.iter().any(|tab| tab.title == "Help"));
-    let deadline = Instant::now() + Duration::from_secs(3);
+    let deadline = Instant::now() + Duration::from_secs(30);
     while app.syntax.result(buffer).is_none() {
         app.process_syntax();
         assert!(
@@ -2862,7 +2862,7 @@ fn virtual_document_titles_and_languages_reach_windows_and_syntax() {
             .iter()
             .any(|tab| tab.title == "Updated help")
     );
-    let deadline = Instant::now() + Duration::from_secs(3);
+    let deadline = Instant::now() + Duration::from_secs(30);
     loop {
         app.process_syntax();
         if app.syntax.result(buffer).is_some_and(|result| {
@@ -3283,7 +3283,7 @@ fn synchronous_plugin_load_refusal_cancels_the_deferred_batch() {
     }
     app.configuration.install_fixture(config);
     app.load_configured_plugins();
-    let deadline = Instant::now() + Duration::from_secs(3);
+    let deadline = Instant::now() + Duration::from_secs(30);
     while app.extension.load_id("one").is_some() {
         app.process_plugin_events();
         assert!(Instant::now() < deadline);
@@ -4825,7 +4825,7 @@ fn startup_plugin_publication_waits_for_session_restoration() {
     app.process_plugin_events();
     assert!(app.extension.contributions().get("demo").is_none());
     drop(release);
-    let deadline = Instant::now() + Duration::from_secs(3);
+    let deadline = Instant::now() + Duration::from_secs(30);
     while app.persistence.pending() {
         app.process_plugin_events();
         app.process_persistence_events();

@@ -97,6 +97,10 @@ pub struct User {
     pub login: String,
     pub id: Option<ItemId>,
     pub name: Option<String>,
+    /// An app or bot account (`github-actions[bot]`, GitLab's project bots, Gitea's Actions
+    /// user) rather than a person.
+    #[serde(default)]
+    pub bot: bool,
 }
 
 impl User {
@@ -196,6 +200,26 @@ pub struct ItemRow {
     /// A pull request's source branch, when the list query carries it (the IDE picker, F7).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub head_branch: Option<String>,
+    /// Each reviewer's latest verdict and the requests still open, when the list query carries
+    /// them (GitHub), so a row reads `1 approval · 1 pending` rather than a bare decision.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub review_tally: Option<ReviewTally>,
+    /// When the item was opened, when the list carries it (`#13 opened 3h ago by maya`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created: Option<Timestamp>,
+    /// The pull requests that close an issue, or the issues a pull request closes, when the
+    /// list counts them (GitHub's linked-pull-request glyph on a list row).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub linked: Option<u64>,
+}
+
+/// A pull request's reviews counted the way GitHub's `reviewDecision` weighs them: each
+/// reviewer's latest approval or change request, and the requests nobody answered yet.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ReviewTally {
+    pub approved: u64,
+    pub changes_requested: u64,
+    pub pending: u64,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -323,6 +347,9 @@ pub struct PullRequest {
     /// GitHub Projects the item belongs to (kept where already shown, §4.2).
     pub projects: Vec<String>,
     pub subscribed: Option<bool>,
+    /// Reactions on the body itself, in GitHub's words (`+1`, `heart`…).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reactions: Vec<Reaction>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
@@ -343,6 +370,9 @@ pub struct Issue {
     pub closed_reason: Option<ClosedReason>,
     pub projects: Vec<String>,
     pub subscribed: Option<bool>,
+    /// Reactions on the body itself, in GitHub's words (`+1`, `heart`…).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reactions: Vec<Reaction>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Hash, Serialize, Deserialize)]
@@ -370,6 +400,14 @@ pub struct CommentPosition {
     pub commit: Option<String>,
 }
 
+/// One emoji reaction and how many people left it, in GitHub's words (`+1`, `-1`, `laugh`,
+/// `hooray`, `confused`, `heart`, `rocket`, `eyes`).
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct Reaction {
+    pub content: String,
+    pub count: u64,
+}
+
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Comment {
     pub id: ItemId,
@@ -379,6 +417,16 @@ pub struct Comment {
     pub system: bool,
     pub pending: bool,
     pub position: Option<CommentPosition>,
+    /// The author's relation to the repository (`OWNER`, `MEMBER`, `CONTRIBUTOR`, `NONE`…), where
+    /// the forge says (GitHub).
+    #[serde(default)]
+    pub association: Option<String>,
+    /// When the body was last edited, if it was.
+    #[serde(default)]
+    pub edited: Option<Timestamp>,
+    /// Reactions the forge sends with the comment (GitHub); empty elsewhere.
+    #[serde(default)]
+    pub reactions: Vec<Reaction>,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -395,6 +443,13 @@ pub struct ReviewThread {
     pub comments: Vec<Comment>,
     /// The thread's comment count when more than the loaded page exist (extension).
     pub total_comments: Option<u64>,
+    /// The diff lines the thread hangs on (`@@ … @@` and the lines up to its line), where the
+    /// forge sends them (GitHub, Gitea, Forgejo).
+    #[serde(default)]
+    pub diff_hunk: Option<String>,
+    /// The first line of a multi-line thread (GitHub's `startLine`); `None` for one line.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start_line: Option<u64>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -419,7 +474,12 @@ pub enum TimelineEvent {
     CrossReferenced { link: LinkRef, by: Actor },
     Renamed { from: String, to: String, by: Actor },
     ReviewRequested { reviewer: String, by: Actor },
+    Milestoned { milestone: String, by: Actor },
+    Demilestoned { milestone: String, by: Actor },
     Other { kind: String, by: Actor },
+    /// An event the page words from its details (`state_reason`, `lock_reason`,
+    /// `deployment.environment`…): REST field paths, dotted when nested, to their text.
+    Detailed { kind: String, detail: std::collections::BTreeMap<String, String>, by: Actor },
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -456,13 +516,18 @@ pub struct Run {
     pub sha: String,
     pub event: String,
     pub created: Timestamp,
-    #[serde(skip)]
+    /// Kept in the cache: an incremental refresh (GitLab's `updated_after`) merges into the
+    /// cached rows, which would otherwise lose every unchanged run's duration.
+    #[serde(default)]
     pub duration: Option<Duration>,
     pub attempt: u32,
     pub attempts: u32,
     pub web_url: String,
     pub pr_number: Option<u64>,
     pub needs_approval: bool,
+    /// Who started the run (login), when the forge says.
+    #[serde(default)]
+    pub actor: String,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]

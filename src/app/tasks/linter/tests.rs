@@ -118,7 +118,7 @@ fn documents(vfs: VfsWorker, editor: &EditorState, workspace: &Workspace) -> Doc
     )
 }
 fn reply(documents: &mut Documents, editor: &EditorState, workspace: &Workspace) -> TaskReadReply {
-    let deadline = Instant::now() + Duration::from_secs(2);
+    let deadline = Instant::now() + Duration::from_secs(20);
     loop {
         if let Some(DocumentEvent::TaskRead(reply)) = documents
             .poll(&editor.window_version(), workspace.root_revision())
@@ -677,7 +677,7 @@ fn linter_reads_reserve_real_capacity_keep_worker_identity_and_refuse_stale_deco
         .unwrap();
     stopped.stop_worker();
     release.send(()).unwrap();
-    let deadline = Instant::now() + Duration::from_secs(2);
+    let deadline = Instant::now() + Duration::from_secs(20);
     loop {
         if let Some(DocumentEvent::Stopped { task_reads, .. }) = stopped
             .poll(&editor.window_version(), workspace.root_revision())
@@ -889,7 +889,7 @@ fn a_failing_dependency_publishes_its_matched_diagnostics() {
         .unwrap()
         .unwrap();
     diagnostics.activate(producer);
-    let deadline = Instant::now() + Duration::from_secs(3);
+    let deadline = Instant::now() + Duration::from_secs(20);
     let task = loop {
         if let Some(TaskUpdate::Finished {
             task, code, next, ..

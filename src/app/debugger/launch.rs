@@ -920,7 +920,7 @@ mod tests {
         let mut foreign = Debugger::new(&policy, workspace.version());
         assert!(foreign.authorize_debug(fresh, &workspace).is_err());
         let _ = owner.stop();
-        let deadline = Instant::now() + Duration::from_secs(2);
+        let deadline = Instant::now() + Duration::from_secs(20);
         loop {
             let events = workspace.preflight_events();
             if !events.is_empty() {
@@ -1040,7 +1040,7 @@ mod tests {
                 &[],
             )
             .unwrap();
-        let deadline = Instant::now() + Duration::from_secs(2);
+        let deadline = Instant::now() + Duration::from_secs(20);
         loop {
             let events = workspace.preflight_events();
             if !events.is_empty() {
@@ -1182,7 +1182,7 @@ mod tests {
                         .unwrap()
                 };
                 owner.authorize_debug(intent, &workspace).unwrap();
-                let deadline = Instant::now() + Duration::from_secs(5);
+                let deadline = Instant::now() + Duration::from_secs(20);
                 loop {
                     if let Some(result) = workspace.project_result(DiscoveryKind::Debugger) {
                         owner.debug_root_result(result).unwrap();

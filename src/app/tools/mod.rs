@@ -964,7 +964,6 @@ mod tests {
     #[test]
     fn rustup_probes_use_project_directory_and_separate_cached_results() {
         use std::fs;
-        use std::os::unix::fs::PermissionsExt;
         use std::thread;
         use std::time::Instant;
         let root = tempfile::tempdir().unwrap();
@@ -974,8 +973,7 @@ mod tests {
         fs::create_dir(&two).unwrap();
         fs::write(two.join("available"), "").unwrap();
         let executable = root.path().join("rust-analyzer");
-        fs::write(&executable, "#!/bin/sh\nif [ -f available ]; then printf 'rust-analyzer project'; else exit 1; fi\n").unwrap();
-        fs::set_permissions(&executable, fs::Permissions::from_mode(0o700)).unwrap();
+        crate::testing::write_executable(&executable, "#!/bin/sh\nif [ -f available ]; then printf 'rust-analyzer project'; else exit 1; fi\n");
         let mut definition = crate::tools::bundled_tool_catalog()
             .into_iter()
             .find(|tool| tool.id == "rust-analyzer")
@@ -1006,13 +1004,11 @@ mod tests {
     #[test]
     fn full_probe_queue_retries_without_caching_queue_errors() {
         use std::fs;
-        use std::os::unix::fs::PermissionsExt;
         use std::thread;
         use std::time::Instant;
         let root = tempfile::tempdir().unwrap();
         let executable = root.path().join("probe");
-        fs::write(&executable, "#!/bin/sh\nif [ \"$1\" = block ]; then\n  printf started > started\n  while [ ! -f release ]; do sleep 0.01; done\nfi\nprintf 'server 1.2.3'\n").unwrap();
-        fs::set_permissions(&executable, fs::Permissions::from_mode(0o700)).unwrap();
+        crate::testing::write_executable(&executable, "#!/bin/sh\nif [ \"$1\" = block ]; then\n  printf started > started\n  while [ ! -f release ]; do sleep 0.01; done\nfi\nprintf 'server 1.2.3'\n");
         let mut definition = crate::tools::bundled_tool_catalog()
             .into_iter()
             .find(|tool| tool.id == "gopls")
@@ -1059,7 +1055,6 @@ mod tests {
     #[test]
     fn tool_probes_use_project_directory_and_separate_cached_results() {
         use std::fs;
-        use std::os::unix::fs::PermissionsExt;
         use std::thread;
         use std::time::Instant;
         let root = tempfile::tempdir().unwrap();
@@ -1069,8 +1064,7 @@ mod tests {
         fs::create_dir(&two).unwrap();
         fs::write(two.join("available"), "").unwrap();
         let executable = root.path().join("rust-analyzer");
-        fs::write(&executable, "#!/bin/sh\nif [ -f available ]; then printf 'rust-analyzer project'; else exit 1; fi\n").unwrap();
-        fs::set_permissions(&executable, fs::Permissions::from_mode(0o700)).unwrap();
+        crate::testing::write_executable(&executable, "#!/bin/sh\nif [ -f available ]; then printf 'rust-analyzer project'; else exit 1; fi\n");
         let mut tooling = Tools::new(Vec::new());
         for id in ["rust-analyzer", "gopls"] {
             let mut definition = crate::tools::bundled_tool_catalog()

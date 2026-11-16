@@ -188,7 +188,7 @@ fn gitlab_reads_its_variable_then_glab_config_then_glab_status() {
     assert_eq!(source(&state), Some(CredentialSource::GlabAuthStatus));
     assert_eq!(token(&state).as_deref(), Some(GLAB_TOKEN));
     match &state {
-        CredentialState::Present(credential) => assert_eq!(credential.user.as_deref(), Some("tester")),
+        CredentialState::Present(credential) => assert_eq!(credential.user.as_deref(), Some("rowan")),
         other => panic!("{other:?}"),
     }
 }
@@ -351,9 +351,7 @@ fn tea_passthrough_uses_the_login_and_missing_or_old_clis_are_states() {
     // A glab older than 1.40.
     let old = world.directory.path().join("old/glab");
     std::fs::create_dir_all(old.parent().unwrap()).unwrap();
-    std::fs::write(&old, format!("#!/bin/sh\nFAKE_GLAB_VERSION=1.20.0 exec {} \"$@\"\n", world.glab.display())).unwrap();
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(&old, std::fs::Permissions::from_mode(0o755)).unwrap();
+    forge_fake::write_executable(&old, format!("#!/bin/sh\nFAKE_GLAB_VERSION=1.20.0 exec {} \"$@\"\n", world.glab.display()).as_bytes());
     let outdated = ConnectOptions {
         glab: Some(old),
         ..world.options(Stores::default())

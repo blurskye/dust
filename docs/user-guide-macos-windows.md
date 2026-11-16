@@ -57,3 +57,33 @@ program such as LazyGit may not get mouse reporting or bracketed paste.
 
 macOS uses atomic exchange for checked saves and no-overwrite renames. Local IPC
 uses private Unix-domain sockets on both systems.
+
+## Dusty Git keys
+
+Dusty Git's modes, the leader, the staging keys (`s` stage, `u` unstage, `-` toggle)
+and the `ui.git.keys = "lazygit"` preset are the same on every system; see
+[Modes and the leader](user-guide-linux.md#modes-and-the-leader) in the Linux guide.
+
+## Dusty Git forge tabs
+
+Signing in, anonymous read-only browsing, self-hosted forges, the cache and the keys
+work as described under [Forge tabs](user-guide-linux.md#forge-tabs) in the Linux
+guide, with these differences in where Dusty looks for files:
+
+- On macOS, fj's `keys.json` is also read from
+  `~/Library/Application Support/forgejo-cli.forgejo-cli/` and
+  `~/Library/Application Support/Cyborus.forgejo-cli/`, and tea's `config.yml` from
+  `~/Library/Application Support/tea/` when there is none under `~/.config/tea/`.
+  The cache is `~/.cache/dusty/forge` and host records go to
+  `~/.local/state/dusty/forge/hosts.json` unless `XDG_CACHE_HOME`,
+  `XDG_STATE_HOME`, `DUSTY_FORGE_CACHE_DIR` or `DUSTY_FORGE_STATE_DIR` say
+  otherwise.
+- On Windows, Dusty finds the CLIs' sign-in files only through `HOME`,
+  `XDG_CONFIG_HOME`, `XDG_DATA_HOME` or `GLAB_CONFIG_DIR`, which Windows does not
+  set by default. Use a token variable, or let Dusty ask `gh auth token` or
+  `glab auth status`. Without `HOME` or `XDG_CACHE_HOME` the cache stays in memory
+  unless `DUSTY_FORGE_CACHE_DIR` names a folder; host records are kept only with
+  `XDG_STATE_HOME`, `HOME` or `DUSTY_FORGE_STATE_DIR`.
+
+The forge tutor (`:tutor forge`) needs `python3` or `python` on `PATH` for its
+practice forge.

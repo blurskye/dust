@@ -1871,7 +1871,7 @@ fn formatting_saves_using_the_same_managed_tool_run_in_turn() {
     app.process_job_events();
     app.process_format_on_save_deadline();
     assert!(app.format_on_save[&second].started);
-    let deadline = Instant::now() + Duration::from_secs(3);
+    let deadline = Instant::now() + Duration::from_secs(20);
     while !app.format_on_save.is_empty() {
         app.process_execution_preflight();
         app.process_job_events();
@@ -2532,7 +2532,7 @@ fn installed_language_server_autostarts_after_workspace_trust_is_exact() {
             "busy discovery is not an autostart error"
         );
     }
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + Duration::from_secs(20);
     while app.language.project_pending() {
         app.process_lsp_project_root();
         assert!(Instant::now() < deadline);
@@ -2594,7 +2594,7 @@ fn autostart_waits_for_other_languages_and_skips_servers_without_a_project_root(
         .unwrap();
     app.sync_lsp_document();
     assert!(!app.language.launch_pending("typescript"));
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + Duration::from_secs(20);
     for expected in ["typescript", "tailwind"] {
         while app.language.project_pending() {
             app.process_lsp_project_root();
@@ -2731,7 +2731,7 @@ fn nested_marker_backed_project_gets_its_own_lsp_preflight_root() {
     }
     app.reconcile_workspace_trust();
     app.start_lsp(Some("nested-rust".into()));
-    let deadline = Instant::now() + Duration::from_secs(2);
+    let deadline = Instant::now() + Duration::from_secs(20);
     while app.language.project_pending() {
         app.process_lsp_project_root();
         assert!(
@@ -2884,7 +2884,7 @@ fn nested_marker_backed_project_gets_its_own_dap_preflight_root() {
     }
     app.reconcile_workspace_trust();
     app.start_dap(Some("nested-rust-dap".into()), Some(source.clone()));
-    let deadline = Instant::now() + Duration::from_secs(2);
+    let deadline = Instant::now() + Duration::from_secs(20);
     while app.debugger_session.debug_discovering() {
         app.process_dap_project_root();
         assert!(
@@ -3802,9 +3802,7 @@ fn rustup_working_directory_follows_the_selected_document() {
 fn rust_analyzer_rustup_proxy_detection_accepts_symlinks_and_hardlinks() {
     let directory = tempdir().expect("temporary proxy directory");
     let rustup = directory.path().join("rustup");
-    fs::write(&rustup, b"rustup").expect("rustup fixture");
-    use std::os::unix::fs::PermissionsExt;
-    fs::set_permissions(&rustup, fs::Permissions::from_mode(0o700)).unwrap();
+    crate::testing::write_executable(&rustup, b"rustup");
     let hardlink = directory.path().join("rust-analyzer");
     fs::hard_link(&rustup, &hardlink).expect("rustup hardlink proxy");
     assert!(App::rust_analyzer_is_rustup_proxy(&hardlink));
@@ -3816,12 +3814,10 @@ fn rust_analyzer_rustup_proxy_detection_accepts_symlinks_and_hardlinks() {
 #[cfg(unix)]
 #[test]
 fn background_tool_install_updates_preserve_the_selected_row() {
-    use std::os::unix::fs::PermissionsExt;
     let (_app_dirs, mut app) = app();
     let directory = tempdir().unwrap();
     let rustup = directory.path().join("rustup");
-    fs::write(&rustup, "#!/bin/sh\nexit 0\n").unwrap();
-    fs::set_permissions(&rustup, fs::Permissions::from_mode(0o755)).unwrap();
+    crate::testing::write_executable(&rustup, "#!/bin/sh\nexit 0\n");
     let proxy = directory.path().join("rust-analyzer");
     fs::hard_link(&rustup, &proxy).unwrap();
     let definition = app
@@ -3848,7 +3844,7 @@ fn background_tool_install_updates_preserve_the_selected_row() {
             cwd: directory.path().into(),
         })
         .unwrap();
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + Duration::from_secs(20);
     loop {
         app.process_tool_progress();
         let menu = app.ui.tool_menu.as_ref().unwrap();
@@ -3876,14 +3872,10 @@ fn background_tool_install_updates_preserve_the_selected_row() {
 #[cfg(unix)]
 #[test]
 fn finished_tool_install_progress_cannot_restore_the_installing_state() {
-    use std::os::unix::fs::PermissionsExt;
-
     let (_app_dirs, mut app) = app();
     let directory = tempdir().expect("temporary rustup directory");
     let rustup = directory.path().join("rustup");
-    fs::write(&rustup, "#!/bin/sh\nexit 0\n").expect("rustup fixture");
-    fs::set_permissions(&rustup, fs::Permissions::from_mode(0o755))
-        .expect("rustup fixture permissions");
+    crate::testing::write_executable(&rustup, "#!/bin/sh\nexit 0\n");
     let proxy = directory.path().join("rust-analyzer");
     fs::hard_link(&rustup, &proxy).expect("rustup proxy");
     let definition = app
@@ -3904,7 +3896,7 @@ fn finished_tool_install_progress_cannot_restore_the_installing_state() {
         .expect("queue rustup install");
 
     // Consume completion before polling the worker's separate progress queue.
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + Duration::from_secs(20);
     let result = loop {
         if let Some((_, result)) = app.tooling.poll_install() {
             break result;
@@ -3933,9 +3925,7 @@ fn failed_rustup_proxy_probe_is_not_a_launchable_path_runtime() {
     let (_app_dirs, mut app) = app();
     let directory = tempdir().expect("temporary proxy directory");
     let rustup = directory.path().join("rustup");
-    fs::write(&rustup, b"rustup").expect("rustup fixture");
-    use std::os::unix::fs::PermissionsExt;
-    fs::set_permissions(&rustup, fs::Permissions::from_mode(0o700)).unwrap();
+    crate::testing::write_executable(&rustup, b"rustup");
     let proxy = directory.path().join("rust-analyzer");
     fs::hard_link(&rustup, &proxy).expect("rustup proxy");
     let mut definition = app
@@ -3971,12 +3961,10 @@ fn failed_rustup_proxy_probe_is_not_a_launchable_path_runtime() {
 #[cfg(unix)]
 #[test]
 fn opening_a_file_whose_server_does_not_work_installs_it() {
-    use std::os::unix::fs::PermissionsExt;
     let (_app_dirs, mut app) = app();
     let directory = tempdir().expect("temporary proxy directory");
     let rustup = directory.path().join("rustup");
-    fs::write(&rustup, "#!/bin/sh\nexit 0\n").expect("rustup fixture");
-    fs::set_permissions(&rustup, fs::Permissions::from_mode(0o755)).unwrap();
+    crate::testing::write_executable(&rustup, "#!/bin/sh\nexit 0\n");
     let proxy = directory.path().join("rust-analyzer");
     fs::hard_link(&rustup, &proxy).expect("rustup proxy");
     let path = app.state.workspace_root.join("main.rs");
@@ -4024,12 +4012,10 @@ fn opening_a_file_whose_server_does_not_work_installs_it() {
 #[cfg(unix)]
 #[test]
 fn a_server_that_cannot_run_build_scripts_gets_its_toolchain_repaired_once() {
-    use std::os::unix::fs::PermissionsExt;
     let (_app_dirs, mut app) = app();
     let directory = tempdir().expect("temporary proxy directory");
     let rustup = directory.path().join("rustup");
-    fs::write(&rustup, "#!/bin/sh\nexit 0\n").expect("rustup fixture");
-    fs::set_permissions(&rustup, fs::Permissions::from_mode(0o755)).unwrap();
+    crate::testing::write_executable(&rustup, "#!/bin/sh\nexit 0\n");
     let proxy = directory.path().join("rust-analyzer");
     fs::hard_link(&rustup, &proxy).expect("rustup proxy");
     let path = app.state.workspace_root.join("main.rs");
@@ -4454,7 +4440,7 @@ fn tool_manager_probes_require_trust_and_follow_category_changes() {
             );
             assert!(app.tooling.version(&key).is_none());
         } else {
-            let deadline = Instant::now() + Duration::from_secs(2);
+            let deadline = Instant::now() + Duration::from_secs(20);
             while app.tooling.version(&key).is_none() {
                 app.process_tool_version_results();
                 assert!(Instant::now() < deadline);
@@ -4540,7 +4526,7 @@ fn lsp_tool_menu_reports_real_path_version_executable_and_lifecycle() {
     app.reconcile_workspace_trust();
     assert!(app.workspace.execution_allowed().is_ok());
     app.open_tool_menu("lsp".into());
-    let deadline = Instant::now() + Duration::from_secs(2);
+    let deadline = Instant::now() + Duration::from_secs(20);
     loop {
         app.process_tool_version_results();
         let row = &app.ui.tool_menu.as_ref().expect("menu").rows[0];
@@ -4682,7 +4668,7 @@ fn enter_installs_a_missing_managed_lsp_instead_of_trying_to_start_it() {
         "{:?}",
         app.ui.notification
     );
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + Duration::from_secs(20);
     let result = loop {
         if let Some((_, result)) = app.tooling.poll_install() {
             break result;

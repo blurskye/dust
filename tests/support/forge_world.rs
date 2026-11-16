@@ -174,9 +174,7 @@ impl World {
     }
 
     pub fn update(&self, change: impl FnOnce(&mut Value)) {
-        let mut state = self.state();
-        change(&mut state);
-        std::fs::write(self.state_path(), state.to_string()).unwrap();
+        forge_fake::update(&self.state_path(), change);
     }
 
     pub fn requests(&self) -> Vec<Value> {

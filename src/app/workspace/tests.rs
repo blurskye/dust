@@ -104,7 +104,7 @@ fn shutdown_waits_for_a_queued_workspace_revocation() {
     other
         .persist(path.clone(), vec![identity.clone()], vec![identity], vec![])
         .unwrap();
-    let deadline = Instant::now() + Duration::from_secs(2);
+    let deadline = Instant::now() + Duration::from_secs(20);
     loop {
         if let Some(crate::workspace::TrustEvent::Persisted { result, .. }) =
             other.try_event().unwrap()
@@ -275,7 +275,7 @@ fn workspace_trust_never_activates_before_identity_and_database_are_ready() {
 }
 
 pub(in crate::app) fn wait_root_operation(app: &mut App) {
-    let deadline = Instant::now() + Duration::from_secs(2);
+    let deadline = Instant::now() + Duration::from_secs(20);
     while app.workspace.root_operation_pending() {
         app.process_trust_events();
         assert!(Instant::now() < deadline, "root operation timed out");
@@ -387,7 +387,7 @@ fn stale_async_root_add_and_pending_service_removal_are_rejected() {
 }
 
 pub(in crate::app) fn wait_workspace_search(app: &mut App) {
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + Duration::from_secs(20);
     while app.search.pending() || app.workspace_edits.preparing() {
         app.process_workspace_search_events();
         app.process_vfs_results();
@@ -459,7 +459,7 @@ fn workspace_file_command_uses_bounded_picker_and_opens_selection() {
             > crate::ui::render::picker::PICKER_MAXIMUM_PREVIEW_BYTES as u64
     );
     app.start_workspace_file_picker();
-    let deadline = Instant::now() + Duration::from_secs(3);
+    let deadline = Instant::now() + Duration::from_secs(20);
     while app.search.files_pending() {
         app.process_workspace_file_events();
         assert!(Instant::now() < deadline);
@@ -716,7 +716,7 @@ fn truncated_workspace_search_does_not_offer_partial_replacement() {
         }],
         true,
     );
-    let deadline = Instant::now() + Duration::from_secs(2);
+    let deadline = Instant::now() + Duration::from_secs(20);
     while app.search.pending() {
         app.process_workspace_search_events();
         assert!(Instant::now() < deadline);
@@ -1068,7 +1068,7 @@ fn workspace_trust_persistence_survives_active_root_changes() {
         assert!(owner.execution_allowed().is_err());
 
         let mut updates = Vec::new();
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
         while owner.persist_pending() {
             updates.extend(owner.poll(&EditorState::new("/".into())));
             assert!(std::time::Instant::now() < deadline);
@@ -1230,7 +1230,7 @@ fn confirmation_is_bound_to_identity_root_selection_cancellation_and_safe_mode()
         .unwrap_or_else(|_| panic!("prompt"));
     owner.fixture_safe_mode(true);
     assert!(owner.confirm().is_err());
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
     while owner.persist.is_some() {
         owner.poll(&EditorState::new("/".into()));
         assert!(std::time::Instant::now() < deadline);

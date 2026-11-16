@@ -147,7 +147,7 @@ if args and args[0] == "api":
                 print("GitHub rejected the thread reply", file=sys.stderr)
                 sys.exit(1)
             thread = values["thread"]
-            comment = {"author": {"login": "tester"}, "body": values["body"], "path": "example.rs", "line": 1, "originalLine": 1}
+            comment = {"author": {"login": "rowan"}, "body": values["body"], "path": "example.rs", "line": 1, "originalLine": 1}
             state.setdefault("thread_replies", {}).setdefault(thread, []).append(comment)
             state.setdefault("reply_targets", []).append({"host": flag("--hostname"), "repository": values["owner"] + "/" + values["name"], "thread": thread, "body": values["body"]})
             emit({"data": {"addPullRequestReviewThreadReply": {"comment": {"id": "REPLY_NODE_1"}}}})
@@ -184,13 +184,13 @@ if args and args[0] == "api":
         emit('diff --git a/example.rs b/example.rs\n--- a/example.rs\n+++ b/example.rs\n@@ -1 +1 @@\n-fn before() {}\n+fn after() {}\n')
     if "timeline" in path:
         events = [{"event": "labeled", "actor": {"login": "alice"}, "label": {"name": "bug"}, "created_at": "2026-11-08"}]
-        events.extend({"event": "commented", "user": {"login": "tester"}, "body": body, "created_at": "2026-11-08"} for body in state["comments"])
+        events.extend({"event": "commented", "user": {"login": "rowan"}, "body": body, "created_at": "2026-11-08"} for body in state["comments"])
         emit([events])
     if "actions/workflows" in path:
         emit({"workflows": [{"id": 31, "name": "Native CI", "path": ".github/workflows/native.yml", "state": "active"}]})
     if "/pulls/9/comments" in path:
         values = dict(arg.split("=", 1) for arg in args if "=" in arg)
-        state.setdefault("inline_comments", []).append({"author": {"login": "tester"}, "body": values["body"], "path": values["path"], "line": int(values["line"]), "originalLine": int(values["line"]), "diffSide": values["side"], "commit": {"oid": values["commit_id"]}})
+        state.setdefault("inline_comments", []).append({"author": {"login": "rowan"}, "body": values["body"], "path": values["path"], "line": int(values["line"]), "originalLine": int(values["line"]), "diffSide": values["side"], "commit": {"oid": values["commit_id"]}})
         emit({"id": 1, "node_id": "COMMENT_NODE_1", "body": values["body"]})
 if args[:2] in (["issue", "comment"], ["pr", "comment"]):
     if state.get("fail_comments", 0):

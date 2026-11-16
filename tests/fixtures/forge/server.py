@@ -29,13 +29,16 @@ F2 additions (discovery and credentials): GitLab `/{host}/api/v4/...` and Gitea/
 `PRIVATE-TOKEN` auth and the extra accepted tokens of `state["tokens"]`; the unauthenticated
 version probes (`api/v1/version`, `api/forgejo/v1/version`, `api/v4/version`, `api/v3/meta`)
 answered from `state["probes"][host][path] = {status, body}` (404 otherwise), before any auth
-check; `GET user` on those APIs answers `state["viewer"]` (default `tester`); anything else on them
+check; `GET user` on those APIs answers `state["viewer"]` (default `rowan`); anything else on them
 comes from `state["answers"]["METHOD path"] = {status, body, headers}` or is 404.
 """
 import argparse
+import base64
+import fcntl
 import hashlib
 import json
 import os
+import socket
 import pathlib
 import re
 import sys
@@ -48,9 +51,40 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import world_gitlab  # noqa: E402  (F5: `--world gitlab`)
 import world_gitea  # noqa: E402  (F4: `--world gitea|forgejo`)
 import world_actions  # noqa: E402  (F6: `--world actions`)
+import world_conversation  # noqa: E402  (`state["conversation"]`: a real-looking PR and issue)
 
 FAKE_TOKEN = "ghp_fixture0123456789abcdefABCDEF0123"
-LOCK = threading.Lock()
+
+
+def blob_sha(text):
+    """Git's blob id for `text`, as the contents API names a file's version."""
+    data = text.encode()
+    return hashlib.sha1(b"blob %d\0" % len(data) + data).hexdigest()
+
+
+class StateLock:
+    """Who may read-modify-write the state file: one handler thread here at a time, and tests
+    that rewrite it through `forge_fake::write_state`, which take the same advisory lock on
+    `<state>.lock`. Without it a test's rewrite landing while a request is answered was lost."""
+
+    def __init__(self):
+        self.thread = threading.Lock()
+        self.file = None
+
+    def __enter__(self):
+        self.thread.acquire()
+        self.file = open(ARGS.state + ".lock", "a")
+        fcntl.flock(self.file, fcntl.LOCK_EX)
+        return self
+
+    def __exit__(self, *_):
+        fcntl.flock(self.file, fcntl.LOCK_UN)
+        self.file.close()
+        self.file = None
+        self.thread.release()
+
+
+LOCK = StateLock()
 # Concurrent API requests being answered, and the most ever seen (`GET /_fake/stats`).
 FLIGHT = {"now": 0, "max": 0}
 FLIGHT_LOCK = threading.Lock()
@@ -90,25 +124,74 @@ def fail_graphql(message, kind=None):
 # --------------------------------------------------------------------------- state
 
 
-def load_state():
-    path = pathlib.Path(ARGS.state)
+# The text `load_state` last read, so `save_state` can tell that a test rewrote the file meanwhile.
+LOADED = {"text": None}
+
+
+def read_state_text(path):
+    """The whole state text. A test's plain `std::fs::write` truncates before it writes, so an
+    empty or unparseable read is a rewrite in progress: read again once it is whole."""
     deadline = time.monotonic() + 3
     while True:
+        exists = path.exists()
         try:
-            text = path.read_text() if path.exists() else ""
-            return json.loads(text) if text.strip() else {}
+            text = path.read_text() if exists else ""
+            if text.strip():
+                json.loads(text)
+                return text
+            if not exists or time.monotonic() > deadline:
+                return text
         except (json.JSONDecodeError, UnicodeDecodeError):
-            # A test rewrote the file non-atomically; read again once it is whole.
             if time.monotonic() > deadline:
                 raise
-            time.sleep(0.01)
+        time.sleep(0.01)
+
+
+def load_state():
+    text = read_state_text(pathlib.Path(ARGS.state))
+    LOADED["text"] = text
+    return json.loads(text) if text.strip() else {}
+
+
+def merge_state(base, ours, theirs):
+    """A three-way merge by top-level key of this server's changes since `base` (`ours`) into a
+    test's rewrite (`theirs`). Where both changed a key the test's rewrite wins, except that the
+    request log only ever gains the requests logged since."""
+    missing = object()
+    merged = dict(theirs)
+    for key in set(base) | set(ours):
+        was, mine, its = base.get(key, missing), ours.get(key, missing), theirs.get(key, missing)
+        if mine == was:
+            continue
+        if key == "requests":
+            seen = was if isinstance(was, list) else []
+            logged = mine[len(seen):] if isinstance(mine, list) else []
+            merged[key] = (its if isinstance(its, list) else []) + logged
+        elif its == was:
+            if mine is missing:
+                merged.pop(key, None)
+            else:
+                merged[key] = mine
+    return merged
 
 
 def save_state(state):
     path = pathlib.Path(ARGS.state)
     temporary = path.with_name(path.name + ".server-tmp")
-    temporary.write_text(json.dumps(state))
+    while True:
+        text = json.dumps(state)
+        temporary.write_text(text)
+        current = read_state_text(path)
+        loaded = LOADED["text"]
+        if loaded is None or current == loaded or not current.strip():
+            break
+        # A test rewrote the file without the lock while this request was answered: keep its
+        # rewrite, apply this request's changes on top, and check again.
+        base = json.loads(loaded) if loaded.strip() else {}
+        state = merge_state(base, state, json.loads(current))
+        LOADED["text"] = current
     temporary.replace(path)
+    LOADED["text"] = text
 
 
 # --------------------------------------------------------------------------- requests
@@ -311,11 +394,21 @@ def gql_item(entry, kind, host, repo, detail):
                     changedFiles=entry.get("changedFiles", len(files)))
         if not detail:
             node["headRefName"] = entry.get("headRefName", "")
+            # Each reviewer's latest approval or change request, and the requests still open.
+            latest = {}
+            for review in entry.get("reviews", []):
+                if review.get("state") in ("APPROVED", "CHANGES_REQUESTED"):
+                    latest[(review.get("author") or {}).get("login", "")] = review["state"]
+            node["latestOpinionatedReviews"] = {"nodes": [{"state": state} for state in latest.values()]}
+            node["reviewRequests"] = {"totalCount": len(entry.get("reviewRequests", []))}
             node["commits"] = {"nodes": [{"commit": {"statusCheckRollup": None if not checks else {
                 "state": rollup_state(checks),
                 "contexts": {"checkRunCountsByState": counts(checks, False),
                              "statusContextCountsByState": counts(checks, True)}}}}]}
     if not detail:
+        # The linked pull requests (an issue) or closing issues (a pull request) a list row counts.
+        links = "closedByPullRequestsReferences" if kind == "issue" else "closingIssuesReferences"
+        node[links] = {"totalCount": len(entry.get(links, []))}
         return node
     milestone = entry.get("milestone")
     node.update(assignees={"nodes": entry.get("assignees", [])},
@@ -360,7 +453,9 @@ def rest_run(run, host, repo):
             "head_branch": run.get("headBranch", ""), "head_sha": run.get("headSha", ""),
             "event": run.get("event", ""), "created_at": run.get("createdAt", "2026-11-08T10:00:00Z"),
             "run_attempt": run.get("attempt", 1),
-            "html_url": f"https://{host}/{repo}/actions/runs/{run['databaseId']}", "pull_requests": []}
+            "html_url": f"https://{host}/{repo}/actions/runs/{run['databaseId']}", "pull_requests": [],
+            # Who started it, when the world says (r16 notif-actions-11): rows and the run line name them.
+            **({"triggering_actor": {"login": run["actor"]}} if run.get("actor") else {})}
 
 
 def rest_job(job, run, host, repo):
@@ -428,6 +523,9 @@ class Legacy:
     """`tests/fixtures/github_cli.py`'s world, answered as REST + GraphQL."""
 
     def __init__(self, state, request):
+        if state.get("conversation") and not state.get("conversation_seeded"):
+            world_conversation.github(state)
+            state["conversation_seeded"] = True
         self.state, self.request = state, request
         self.host = request.host
         self.item = {"id": "NODE_7", "number": 7, "title": "Preserve keyboard drafts",
@@ -460,6 +558,20 @@ class Legacy:
                         {"databaseId": 43, "name": "test (windows)", "status": "completed", "conclusion": "success",
                          "steps": []}]}
         self.run = json.loads(json.dumps(state.get("run", run)))
+        # A world with several runs (`runs`) answers each by its id; `run` stays the fallback
+        # for every other id, as a world with one run expects.
+        self.runs = {entry["databaseId"]: entry for entry in json.loads(json.dumps(state.get("runs", [])))}
+        self.workflows = state.get("workflows", WORKFLOWS)
+
+    def run_by_id(self, run_id):
+        return self.runs.get(run_id, self.run)
+
+    def all_runs(self):
+        if not self.runs:
+            return [self.run]
+        runs = dict(self.runs)
+        runs.setdefault(self.run["databaseId"], self.run)
+        return sorted(runs.values(), key=lambda entry: entry.get("createdAt", ""), reverse=True)
 
     def repo(self):
         return self.request.repo or self.state.get("repository", "example/demo")
@@ -479,10 +591,11 @@ class Legacy:
             self.run.update(status="in_progress", conclusion="")
             if len(self.run.get("jobs", [])) > 1:
                 self.run["jobs"][1].update(status="in_progress", conclusion="")
-        for job in self.run.get("jobs", []):
-            for step in job.get("steps", []):
-                step.setdefault("startedAt", "2026-11-08T10:00:00Z")
-                step.setdefault("completedAt", "2026-11-08T10:00:01Z")
+        for entry in [self.run, *self.runs.values()]:
+            for job in entry.get("jobs", []):
+                for step in job.get("steps", []):
+                    step.setdefault("startedAt", "2026-11-08T10:00:00Z")
+                    step.setdefault("completedAt", "2026-11-08T10:00:01Z")
 
     # ---- GraphQL
 
@@ -506,7 +619,7 @@ class Legacy:
                 elif name == "draft" and value:
                     keep = lambda entry: bool(entry.get("isDraft")) == (value == "true")
                 elif name in ("review-requested", "author") and value:
-                    who = self.state.get("viewer", "tester") if value == "@me" else value
+                    who = self.state.get("viewer", "rowan") if value == "@me" else value
                     if name == "author":
                         keep = lambda entry, who=who: (entry.get("author") or {}).get("login") == who
                     else:
@@ -516,6 +629,19 @@ class Legacy:
                 else:
                     keep = lambda entry: word.lower() in str(entry.get("title", "")).lower()
                 entries = [entry for entry in entries if keep(entry) != negate]
+        if self.state.get("sort_search", self.state.get("filter_terms")):
+            # Screenshot worlds (filter_terms, or sort_search): order rows as GitHub's search
+            # does, by the `sort:` term, else its default (created-desc in a repository,
+            # updated-desc across them).
+            order = next((term[5:] for term in terms.split() if term.startswith("sort:")),
+                         "created-desc" if scoped else "updated-desc")
+            field, _, direction = order.partition("-")
+            key = {"created": lambda entry: entry.get("createdAt", ""),
+                   "updated": lambda entry: entry.get("updatedAt") or entry.get("createdAt", ""),
+                   "comments": lambda entry: len(entry.get("comments") or [])
+                   if isinstance(entry.get("comments"), list) else entry.get("comments") or 0}.get(field)
+            if key:
+                entries = sorted(entries, key=key, reverse=direction != "asc")
         omitted = self.state.get("list_omit_fields", [])
         return [{key: value for key, value in entry.items() if key not in omitted} for entry in entries]
 
@@ -537,9 +663,15 @@ class Legacy:
             for entry in page:
                 remember_kind(self.state, self.host, repo or self.repo(), entry["number"], kind)
             nodes = [gql_item(entry, kind, self.host, repo or self.repo(), False) for entry in page]
-            return {"data": {"search": {"issueCount": len(rows), "nodes": nodes,
-                                        "pageInfo": {"hasNextPage": more,
-                                                     "endCursor": str(offset + first) if more else None}}}}
+            data = {"search": {"issueCount": len(rows), "nodes": nodes,
+                               "pageInfo": {"hasNextPage": more,
+                                            "endCursor": str(offset + first) if more else None}}}
+            if variables.get("other"):
+                # The list header's other state, counted in the same request.
+                other_repo, other_kind, other_state, other_terms = parse_search(variables["other"])
+                data["other"] = {"issueCount": len(self.search(other_kind, other_state, other_terms,
+                                                               other_repo is not None))}
+            return {"data": data}
         if operation in ("IssueDetail", "PullRequestDetail", "PullRequestFingerprint"):
             kind = "issue" if operation == "IssueDetail" else "pr"
             number = int(variables["number"])
@@ -548,6 +680,11 @@ class Legacy:
                 if self.state.get("fail_item_views", 0):
                     self.state["fail_item_views"] -= 1
                     fail_graphql("Fixture refresh refused")
+            if self.state.get("strict_numbers") and not any(entry["number"] == number
+                                                            for entry in self.entries(kind)):
+                # GitHub's answer for a number that is not this kind of item (deep links probe).
+                noun = "Issue" if kind == "issue" else "PullRequest"
+                fail_graphql(f"Could not resolve to a {noun} with the number of {number}.", "NOT_FOUND")
             node = gql_item(self.find(kind, number), kind, self.host, self.repo(), True)
             if operation == "PullRequestFingerprint":
                 node["commits"] = {"nodes": [{"commit": {"statusCheckRollup": (node["latest"]["nodes"][0]["commit"]
@@ -570,7 +707,7 @@ class Legacy:
                 self.state["fail_reply"] -= 1
                 fail_graphql("GitHub rejected the thread reply")
             thread = variables["thread"]
-            comment = {"author": {"login": "tester"}, "body": variables["body"], "path": "example.rs", "line": 1,
+            comment = {"author": {"login": "rowan"}, "body": variables["body"], "path": "example.rs", "line": 1,
                        "originalLine": 1}
             self.state.setdefault("thread_replies", {}).setdefault(thread, []).append(comment)
             source = next((key for key, threads in self.state.get("review_threads", {}).items()
@@ -620,6 +757,9 @@ class Legacy:
                               dict({"id": f"{thread['id']}_COMMENT_{index}", "createdAt": "2026-11-08T10:00:00Z",
                                     "commit": {"oid": "a" * 40}}, **comment)
                               for index, comment in enumerate(thread["comments"]["nodes"])]}})
+            # A multi-line thread's first line (GitHub's `startLine`, DESIGN.md §3.30a).
+            if thread.get("startLine"):
+                nodes[-1]["startLine"] = thread["startLine"]
         # Two pages exercise the provider's connection paging, including an empty last page.
         second = variables.get("after") == "next"
         page = nodes[1:] if second else nodes[:1]
@@ -632,7 +772,7 @@ class Legacy:
         request, state = self.request, self.state
         method, tail = request.method, request.tail
         if request.rest == "user":
-            return 200, {"login": "tester", "id": 1}
+            return 200, {"login": "rowan", "id": 1}
         if request.rest.startswith("notifications"):
             # A world may hold an inbox (`notifications`, GitHub thread objects); none is empty.
             return (200, state.get("notifications", [])) if method == "GET" else (205, None)
@@ -766,7 +906,7 @@ class Legacy:
         if tail == "labels":
             return 200, [{"name": "bug", "color": "d73a4a"}, {"name": "native", "color": "0e8a16"}]
         if tail == "assignees":
-            return 200, [{"login": "bob"}, {"login": "tester"}]
+            return 200, [{"login": "bob"}, {"login": "rowan"}]
         if tail == "milestones":
             return 200, state.get("milestones", [{"number": 1, "title": "v1", "state": "open"}])
         match = re.fullmatch(r"issues/(\d+)/timeline", tail)
@@ -780,53 +920,70 @@ class Legacy:
         if match:
             events = [{"event": "labeled", "actor": {"login": "alice"}, "label": {"name": "bug"},
                        "created_at": "2026-11-08"}]
-            events.extend({"event": "commented", "user": {"login": "tester"}, "body": body, "created_at": "2026-11-08",
+            events.extend({"event": "commented", "user": {"login": "rowan"}, "body": body, "created_at": "2026-11-08",
                            "node_id": f"COMMENT_{index}"} for index, body in enumerate(state.get("comments", [])))
             return 200, events
         match = re.fullmatch(r"pulls/(\d+)", tail)
         if match and self.request.wants_diff():
             number = match.group(1)
             return 200, state.get("diffs", {}).get(number, state.get("diff", DEFAULT_DIFF))
+        if match:
+            # The head a suggestion is committed to (DESIGN.md §3.30a).
+            return 200, self.rest_item(self.find("pr", int(match.group(1))), "pr", repo)
         if tail == "pulls":
             return 200, []
+        match = re.fullmatch(r"contents/(.+)", tail)
+        if match and match.group(1) in state.get("contents", {}):
+            # A file at the head branch (`state["contents"]`: path → text), as the contents API
+            # sends it: base64 in 60-column lines and the blob's sha.
+            text = state["contents"][match.group(1)]
+            encoded = base64.b64encode(text.encode()).decode()
+            return 200, {"type": "file", "path": match.group(1), "sha": blob_sha(text), "encoding": "base64",
+                         "content": "\n".join(encoded[at:at + 60] for at in range(0, len(encoded), 60)) + "\n"}
         match = re.fullmatch(r"commits/([0-9a-f]+)", tail)
         if match:
             if state.get("fail_commit_views", 0):
                 state["fail_commit_views"] -= 1
                 fail_rest(502, "Fixture commit refresh refused")
-            return 200, COMMIT_DIFF
+            return 200, state.get("commit_diffs", {}).get(match.group(1), COMMIT_DIFF)
         if tail == "actions/workflows":
-            return 200, {"total_count": len(WORKFLOWS), "workflows": WORKFLOWS}
+            return 200, {"total_count": len(self.workflows), "workflows": self.workflows}
         match = re.fullmatch(r"actions/workflows/(\d+)", tail)
         if match:
-            workflow = next((flow for flow in WORKFLOWS if flow["id"] == int(match.group(1))), None)
+            workflow = next((flow for flow in self.workflows if flow["id"] == int(match.group(1))), None)
             if workflow is None:
                 fail_rest(404, "Not Found")
             return 200, workflow
         if tail.startswith("contents/.github/workflows/"):
             return 200, WORKFLOW_YAML
-        if re.fullmatch(r"actions/(workflows/\d+/)?runs", tail):
+        match = re.fullmatch(r"actions/(?:workflows/(\d+)/)?runs", tail)
+        if match:
             self.refresh_run(False)
-            return 200, {"total_count": 1, "workflow_runs": [rest_run(self.run, self.host, repo)]}
+            runs = self.all_runs()
+            if match.group(1) and self.runs:
+                runs = [entry for entry in runs if entry.get("workflowDatabaseId") == int(match.group(1))]
+            return 200, {"total_count": len(runs), "workflow_runs": [rest_run(entry, self.host, repo) for entry in runs]}
         match = re.fullmatch(r"actions/runs/(\d+)(?:/attempts/(\d+))?(/jobs)?", tail)
         if match:
             self.refresh_run(match.group(3) is None)
+            run = self.run_by_id(int(match.group(1)))
             if match.group(2):
-                self.run["attempt"] = int(match.group(2))
+                run["attempt"] = int(match.group(2))
             if match.group(3):
-                jobs = [rest_job(job, self.run, self.host, repo) for job in self.run.get("jobs", [])]
+                jobs = [rest_job(job, run, self.host, repo) for job in run.get("jobs", [])]
                 return 200, {"total_count": len(jobs), "jobs": jobs}
-            return 200, rest_run(self.run, self.host, repo)
+            return 200, rest_run(run, self.host, repo)
         match = re.fullmatch(r"actions/jobs/(\d+)/logs", tail)
         if match:
             return 200, strip_gh_columns(state.get("logs", {}).get(match.group(1), state.get("log", DEFAULT_LOG)))
         match = re.fullmatch(r"actions/jobs/(\d+)", tail)
         if match:
             self.refresh_run(False)
-            job = next((job for job in self.run.get("jobs", []) if job["databaseId"] == int(match.group(1))), None)
-            if job is None:
+            found = next(((job, entry) for entry in self.all_runs() for job in entry.get("jobs", [])
+                          if job["databaseId"] == int(match.group(1))), None)
+            if found is None:
                 fail_rest(404, "Not Found")
-            return 200, rest_job(job, self.run, self.host, repo)
+            return 200, rest_job(found[0], found[1], self.host, repo)
         if re.fullmatch(r"actions/runs/\d+/artifacts", tail):
             return 200, {"total_count": 0, "artifacts": []}
         fail_rest(404, "Unexpected fixture read: " + tail)
@@ -859,7 +1016,7 @@ class Legacy:
         match = re.fullmatch(r"pulls/(\d+)/comments", tail)
         if match and method == "POST":
             state.setdefault("inline_comments", []).append(
-                {"author": {"login": "tester"}, "body": body.get("body", ""), "path": body.get("path", ""),
+                {"author": {"login": "rowan"}, "body": body.get("body", ""), "path": body.get("path", ""),
                  "line": int(body.get("line") or 0), "originalLine": int(body.get("line") or 0),
                  "diffSide": body.get("side", "RIGHT"), "commit": {"oid": body.get("commit_id", "")}})
             return 201, {"id": 1, "node_id": "COMMENT_NODE_1", "body": body.get("body", "")}
@@ -867,6 +1024,16 @@ class Legacy:
             return 200, {"id": 1, "state": body.get("event", "COMMENTED")}
         if re.fullmatch(r"pulls/\d+/merge", tail):
             return 200, {"merged": True, "sha": body.get("sha", ""), "message": "Pull Request successfully merged"}
+        match = re.fullmatch(r"contents/(.+)", tail)
+        if match and method == "PUT":
+            # A committed suggestion: the file is replaced when the blob it was read at is current.
+            files = state.setdefault("contents", {})
+            path = match.group(1)
+            if path not in files or body.get("sha") != blob_sha(files[path]):
+                fail_rest(409, f"{path} does not match {body.get('sha')}")
+            files[path] = base64.b64decode(body.get("content", "")).decode()
+            return 200, {"content": {"path": path, "sha": blob_sha(files[path])},
+                         "commit": {"sha": "c" * 40, "message": body.get("message", "")}}
         if re.fullmatch(r"actions/workflows/\d+/dispatches", tail):
             return 204, None
         if re.fullmatch(r"actions/runs/\d+/(rerun|rerun-failed-jobs|cancel|approve)|actions/jobs/\d+/rerun", tail):
@@ -967,7 +1134,7 @@ class Inbox:
         self.check_host()
         request, state = self.request, self.state
         if request.rest == "user":
-            return 200, {"login": "tester", "id": 1}
+            return 200, {"login": "rowan", "id": 1}
         repo, tail = request.repo, request.tail
         if tail is None:
             fail_rest(404, "Not Found")
@@ -1211,6 +1378,9 @@ def gate_for(state, entry, repo):
             return gate
         if "contains" in gate and any(gate["contains"] in arg for arg in call):
             return gate
+        # Any world: the request path ends with this (`/actions/runs`, `/pipelines`).
+        if "path" in gate and str(entry.get("path") or "").endswith(gate["path"]):
+            return gate
     return None
 
 
@@ -1235,6 +1405,9 @@ def matching_fault(state, request):
         if rule.get("operation") and rule["operation"] != request.operation:
             continue
         if rule.get("path") and rule["path"] not in (request.rest or ""):
+            continue
+        # `query`: a substring of the decoded query string (`created_by=nobody`).
+        if rule.get("query") and rule["query"] not in urllib.parse.unquote(request.query_string or ""):
             continue
         rule["times"] = rule.get("times", 1) - 1
         return rule
@@ -1367,7 +1540,7 @@ def answer(state, request):
             raise Reply(reply.status, reply.body, reply.headers)
     if request.api != "github":
         if request.method == "GET" and request.rest == "user":
-            viewer = state.get("viewer", "tester")
+            viewer = state.get("viewer", "rowan")
             return 200, {"id": 1, "login": viewer, "username": viewer}
         hit = state.get("answers", {}).get(f"{request.method} {request.rest}")
         if not hit:
@@ -1426,6 +1599,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.fake()
             if self.path.startswith("/_blob/"):
                 return self.blob()
+            if self.offline():
+                return
             request = Request(self)
             with LOCK:
                 state = load_state()
@@ -1486,11 +1661,32 @@ class Handler(BaseHTTPRequestHandler):
                     headers.update(anonymous_headers(state, request, status))
                     save_state(state)
             delay = state.get("delay_ms", 0)
+            # `slow_paths`: {"fragment": ms} slows only the requests whose path holds it.
+            for fragment, millis in (state.get("slow_paths") or {}).items():
+                if fragment in self.path:
+                    delay = max(delay, millis)
             if delay:
                 time.sleep(delay / 1000)
             self.respond(status, body, headers)
         except Exception as error:  # a fixture bug must show up in the test, not hang it
             self.respond(500, {"message": "fixture server error: " + repr(error)})
+
+    def offline(self):
+        """`state["offline"]`: the network is gone. Every API connection drops without an answer
+        (a reset, as a dead link or a failed lookup reaches the client); `offline_refused` counts
+        them."""
+        with LOCK:
+            state = load_state()
+            if not state.get("offline"):
+                return False
+            state["offline_refused"] = state.get("offline_refused", 0) + 1
+            save_state(state)
+        self.close_connection = True
+        try:
+            self.connection.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
+        return True
 
     def fake(self):
         """Side channel for the fake gh: `auth token`, porcelain commands."""
@@ -1521,7 +1717,7 @@ class Handler(BaseHTTPRequestHandler):
                                               "stderr": f"no oauth token found for {host}\n"})
                 token = FAKE_TOKEN if value == "token" else value
                 return self.respond(200, {"code": 0, "stdout": token + "\n", "stderr": "",
-                                          "user": state.get("viewer", "tester")})
+                                          "user": state.get("viewer", "rowan")})
             entry["path"] = "porcelain"
             entry["call"] = argv
             state.setdefault("requests", []).append(entry)

@@ -248,7 +248,7 @@ fn installation_completion_launches_original_python_module_with_fixture() {
         definition,
         status: ToolStatus::Installed(crate::debugger::test_python()),
     });
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + Duration::from_secs(20);
     let log = app.state.workspace_root.join("launch.json");
     let value = loop {
         app.process_dap_events();

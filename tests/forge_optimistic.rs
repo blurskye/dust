@@ -8,7 +8,8 @@ mod forge_fake;
 mod forge_screen;
 use forge_screen::*;
 
-const SENDING: &str = "you · commented · sending…";
+// The Conversation card (§3.26): `☺ you commented · sending…` until the forge answers.
+const SENDING: &str = "you commented · sending…";
 
 #[test]
 fn a_refused_comment_rolls_back_and_a_confirmed_one_stays() {
@@ -39,13 +40,13 @@ fn a_refused_comment_rolls_back_and_a_confirmed_one_stays() {
     );
     assert!(sent.contains("First optimistic comment"), "{sent}");
     release("first");
-    wait(&mut screen, "GitHub rejected the comment");
+    wait(&mut screen, "GitHub rejected the comment · your draft is kept");
     let refused = view(&mut screen);
     assert!(
         !refused.contains(SENDING),
         "the refused comment is rolled back:\n{refused}"
     );
-    assert!(refused.contains("your draft is preserved"), "{refused}");
+    assert!(refused.contains("GitHub rejected the comment · your draft is kept"), "{refused}");
 
     key(&mut screen, KeyCode::Char('c'));
     key(&mut screen, KeyCode::End);

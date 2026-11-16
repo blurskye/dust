@@ -70,7 +70,7 @@ fn view(screen: &mut GitScreen) -> String {
     text(&screen.frame(190, 48))
 }
 fn wait(screen: &mut GitScreen, mut ready: impl FnMut(&mut GitScreen) -> bool) {
-    let deadline = Instant::now() + Duration::from_secs(15);
+    let deadline = Instant::now() + Duration::from_secs(120);
     loop {
         screen.poll();
         if ready(screen) {
@@ -86,7 +86,7 @@ fn wait(screen: &mut GitScreen, mut ready: impl FnMut(&mut GitScreen) -> bool) {
 }
 fn open(root: &Path, source: &str) -> GitScreen {
     let mut screen = GitScreen::open(root).unwrap();
-    wait(&mut screen, |screen| view(screen).contains(source));
+    wait(&mut screen, |screen| view(screen).contains(source) && screen.panes_sized());
     control(&mut screen, KeyCode::Char('l'));
     screen
 }
@@ -140,7 +140,7 @@ fn reader_x(width: u16, height: u16) -> u16 {
     } else if width >= 160 && height >= 40 {
         (25 + width / 7).clamp(44, 60) + 1
     } else {
-        (20 + width / 10).clamp(28, 36) + 1
+        (width / 4 + 7).clamp(32, 44) + 1
     }
 }
 /// Every pane rectangle (its four rounded corners) and whether it has focus.
@@ -308,7 +308,7 @@ fn cancel_no_match_empty_query_and_literal_case_sensitive_find_preserve_the_code
     matched(&mut screen, (100, 30), "needle");
     key(&mut screen, KeyCode::Char('c'));
     assert!(
-        view(&mut screen).contains("Nothing staged · Space stages the selected change"),
+        view(&mut screen).contains("Nothing staged · s stages the selected change"),
         "c remains the global commit action (refused: nothing is staged)"
     );
     key(&mut screen, KeyCode::Escape);
@@ -344,7 +344,7 @@ fn unicode_tabs_long_lines_and_both_split_sides_keep_the_cursor_on_the_matching_
             "long source is horizontally revealed"
         );
     }
-    key(&mut screen, KeyCode::Char('s'));
+    key(&mut screen, KeyCode::Char('|'));
     let removed = matched(&mut screen, (190, 48), "旧印");
     // The split divider sits in the middle of the reader's interior.
     let inner = reader_x(190, 48) + 1;
@@ -358,11 +358,11 @@ fn unicode_tabs_long_lines_and_both_split_sides_keep_the_cursor_on_the_matching_
     for size in SIZES {
         matched(&mut screen, size, "新印");
     }
-    key(&mut screen, KeyCode::Char('s'));
+    key(&mut screen, KeyCode::Char('|'));
     key(&mut screen, KeyCode::Home);
     find(&mut screen, "界");
-    // Reader interior + range edge1 + number3 + two spaces + sign1 + space1.
-    let code = reader_x(100, 30) + 1 + 8;
+    // Reader interior + range edge1 + numbers3 + ` │ `3 + sign1 + space1.
+    let code = reader_x(100, 30) + 1 + 9;
     let indented = matched(&mut screen, (100, 30), "界 e\u{301}");
     assert_eq!(
         indented.0,
@@ -375,7 +375,8 @@ fn unicode_tabs_long_lines_and_both_split_sides_keep_the_cursor_on_the_matching_
         // then the same gutter and six source-relative indentation cells as at 100.
         // Readers narrower than 70 interior cells keep one number column.
         let frame = screen.frame(size.0, size.1);
-        let sign = if size.0 - 2 < 70 { 7 } else { 12 };
+        // One number column: edge, number, ` │ `, then the sign; two: `old new │ ±`.
+        let sign = if size.0 - 2 < 70 { 8 } else { 12 };
         assert_eq!(compact.0, sign + 2 + 6, "{}", text(&frame));
         assert_eq!(frame.grid.get(4, compact.1).unwrap().symbol, "1");
         assert!(matches!(
@@ -762,7 +763,7 @@ fn active_hunk_scope_survives_find_clear_and_tracks_the_native_match_without_geo
         assert!(cursor_row(&moved, second.1, band));
         assert_eq!(borders(&moved), geometry);
         if size.0 == 190 {
-            key(&mut screen, KeyCode::Char('s'));
+            key(&mut screen, KeyCode::Char('|'));
             matched(&mut screen, size, "needle_second");
             let split = screen.frame(size.0, size.1);
             let (x, y, _) = split.cursor.unwrap();

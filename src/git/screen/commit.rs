@@ -32,13 +32,19 @@ impl RefLogEntry {
             .collect()
     }
     pub fn preview(entries: &[Self]) -> Preview {
+        Self::preview_at(entries, crate::forge::records::now())
+    }
+    /// [`Self::preview`] with dates written as of `now` (Unix seconds), in the Git tab's one
+    /// date grammar (`shell::chrome::when`).
+    pub fn preview_at(entries: &[Self], now: i64) -> Preview {
         let mut preview = Preview::default();
         for entry in entries {
             let subject: Preview =
                 format!("{}  {}", &entry.id.to_string()[..7], entry.subject).into();
             preview.rows.extend(subject.rows);
             if let Some((author, date)) = &entry.attribution {
-                let mut metadata: Preview = format!("{author} · {date}").into();
+                let mut metadata: Preview =
+                    format!("{author} · {}", super::shell::chrome::when(date, now)).into();
                 for row in &mut metadata.rows {
                     row.style = Style::Muted;
                 }
@@ -108,6 +114,8 @@ pub(super) struct Commit {
     pub(super) cursor: usize,
     pub(super) filter: filter::ListFilter,
     collapsed: BTreeSet<PathBuf>,
+    /// `rows()`, which a 2,000-file commit would otherwise rebuild on every key and paint.
+    rows_memo: memo::CommitMemo,
 }
 fn compact_decorations(text: &str, selected_ref: Option<&str>) -> String {
     let mut names = text
@@ -214,6 +222,7 @@ impl Commit {
             cursor: 0,
             filter: filter::ListFilter::default(),
             collapsed: BTreeSet::new(),
+            rows_memo: memo::CommitMemo::default(),
         }
     }
     pub fn parse(text: &str, selected_ref: Option<&str>) -> Option<Self> {
@@ -245,24 +254,31 @@ impl Commit {
             cursor: 0,
             filter: filter::ListFilter::default(),
             collapsed: BTreeSet::new(),
+            rows_memo: memo::CommitMemo::default(),
         };
         commit.next_file(0);
         Some(commit)
     }
-    pub(super) fn rows(&self) -> Vec<Row> {
-        self.filter.tree(
-            self.files
-                .iter()
-                .map(|file| (file.path.clone(), String::new()))
-                .collect(),
-            &self.collapsed,
-        )
+    /// `path`'s entry in `files`.
+    pub(super) fn file(&self, path: &Path) -> Option<&ChangedFile> {
+        self.files.get(self.rows_memo.position(&self.files, path)?)
+    }
+    pub(super) fn rows(&self) -> memo::Rows {
+        self.rows_memo.get(&self.filter, &self.collapsed, || {
+            self.filter.tree(
+                self.files
+                    .iter()
+                    .map(|file| (file.path.clone(), String::new()))
+                    .collect(),
+                &self.collapsed,
+            )
+        })
     }
     pub(super) fn select_row(&mut self) -> bool {
         let Some(row) = self.rows().get(self.cursor).cloned() else {
             return false;
         };
-        let Some(index) = self.files.iter().position(|file| file.path == row.value) else {
+        let Some(index) = self.rows_memo.position(&self.files, &row.value) else {
             return false;
         };
         let changed = self.selected != index;
@@ -337,7 +353,8 @@ impl GitScreen {
                 "show".into(),
                 "--no-ext-diff".into(),
                 "--no-textconv".into(),
-                "--format=%H%x00%an%x00%as%x00%D%x00%B%x00".into(),
+                // Strict ISO with the hour, so the reader can say `2h` (`chrome::when`).
+                "--format=%H%x00%an%x00%aI%x00%D%x00%B%x00".into(),
                 "--decorate=short".into(),
                 "--decorate-refs=HEAD".into(),
                 "--decorate-refs=refs/heads/*".into(),
@@ -426,8 +443,12 @@ impl GitScreen {
                     self.focus = 4;
                 }
             }
+            // `e` in the commit reader: the line in the editor, as in the worktree reader.
+            KeyCode::Char('e') if self.focus == 4 && !key.modifiers.control && !key.modifiers.alt => {
+                self.outcome = self.open_line();
+            }
             KeyCode::Char('c') if !key.modifiers.control && !key.modifiers.alt => self.commit_form(),
-            KeyCode::Char('s') => {
+            KeyCode::Char('|') => {
                 self.split_diff = !self.split_diff;
                 self.preview_offset = 0;
                 if self.preview.cursor_byte.is_none() {
@@ -535,159 +556,14 @@ pub(super) fn message(frame: &mut Frame, app: &mut GitScreen, width: u16, height
     frame.cursor = Some((x + 2, y + 1, SetCursorStyle::SteadyBlock));
 }
 
-pub(super) fn files(frame: &mut Frame, app: &GitScreen, left: u16, top: u16, height: u16) {
-    let Some(commit) = &app.commit else { return };
-    let focused = app.focus == 0;
-    super::render::section(
-        &mut frame.grid,
-        0,
-        top,
-        left,
-        height,
-        &format!(
-            "Changes · {}{}",
-            &commit.id[..7],
-            if commit.filter.active() || commit.filter.editing {
-                " /"
-            } else {
-                ""
-            }
-        ),
-        focused,
-    );
-    let count = if commit.filter.active() {
-        format!(
-            "{}/{}",
-            commit.rows().iter().filter(|row| !row.directory).count(),
-            commit.files.len()
-        )
-    } else {
-        commit.files.len().to_string()
-    };
-    frame.grid.put_text_clipped(
-        left - 2 - count.len() as u16,
-        top,
-        &count,
-        super::render::surface(focused, Some(crate::config::Highlight::COMMENT)),
-        left - 1,
-    );
-    let rows = commit.rows();
-    let visible = usize::from(height.saturating_sub(2)).max(1);
-    let offset = commit.cursor.saturating_sub(visible - 1);
-    for (index, row) in rows.iter().enumerate().skip(offset).take(visible) {
-        let y = top + 1 + (index - offset) as u16;
-        let selected = index == commit.cursor;
-        let style = if selected {
-            if focused {
-                Style::GitSelected(None)
-            } else {
-                Style::GitInactiveSelection(None)
-            }
-        } else {
-            super::render::surface(
-                focused,
-                row.directory.then_some(crate::config::Highlight::COMMENT),
-            )
-        };
-        if selected {
-            for x in 1..left - 1 {
-                frame.grid.set_cell(x, y, " ", style);
-            }
-            frame.grid.set_cell(
-                0,
-                y,
-                "▎",
-                if focused {
-                    Style::Accent
-                } else {
-                    Style::Border
-                },
-            );
-        }
-        let file = commit.files.iter().find(|file| file.path == row.value);
-        let stats_width = file
-            .map(|file| {
-                if file.added == "-" {
-                    6
-                } else {
-                    file.added.len() + file.removed.len() + 4
-                }
-            })
-            .unwrap_or(0) as u16;
-        let stats_x = (left - 2).saturating_sub(stats_width).max(10);
-        frame.grid.put_text_clipped(
-            2,
-            y,
-            &super::render::ellipsize(&row.label, usize::from(stats_x.saturating_sub(3))),
-            style,
-            stats_x,
-        );
-        let detail = |added| Style::GitDetail {
-            added,
-            selection: selected.then_some(focused),
-            focused,
-        };
-        if let Some(file) = file {
-            if file.added == "-" {
-                frame
-                    .grid
-                    .put_text_clipped(stats_x, y, "binary", detail(None), left - 2);
-            } else {
-                let x = frame.grid.put_text_clipped(
-                    stats_x,
-                    y,
-                    &format!("+{} ", file.added),
-                    detail(Some(true)),
-                    left - 2,
-                );
-                frame.grid.put_text_clipped(
-                    x,
-                    y,
-                    &format!("−{}", file.removed),
-                    detail(Some(false)),
-                    left - 2,
-                );
-            }
-        }
-        if selected && focused {
-            frame.cursor = Some((
-                1 + row.indent.min(usize::from(left - 3)) as u16,
-                y,
-                SetCursorStyle::SteadyBar,
-            ));
-        }
-    }
-    if rows.is_empty() {
-        frame.grid.put_text_clipped(
-            2,
-            top + 1,
-            if commit.filter.active() {
-                "No matching files"
-            } else if commit.message == "Loading commit…" {
-                "Loading commit…"
-            } else {
-                "No changed files"
-            },
-            super::render::surface(focused, Some(crate::config::Highlight::COMMENT)),
-            left - 2,
-        );
-        if focused {
-            frame.cursor = Some((2, top + 1, SetCursorStyle::SteadyBlock));
-        }
-    }
-    super::render::viewport(
-        frame,
-        left - 2,
-        top + height - 1,
-        offset,
-        visible,
-        rows.len(),
-    );
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A fixed clock, so dates read the same in any year.
+    pub(super) fn now() -> i64 {
+        crate::forge::records::epoch("2026-11-16T12:00:00Z").unwrap()
+    }
 
     #[test]
     fn decorations_prioritize_actual_head_then_selected_ref_and_bound_other_tips() {
@@ -734,6 +610,7 @@ mod tests {
 #[cfg(test)]
 mod ref_log_tests {
     use super::*;
+    use super::tests::now;
 
     #[test]
     fn ref_log_rejects_bad_optional_metadata_without_losing_literal_subjects() {
@@ -754,7 +631,7 @@ mod ref_log_tests {
             ));
             assert_eq!(entries.len(), 1);
             assert!(entries[0].attribution.is_none());
-            let preview = RefLogEntry::preview(&entries);
+            let preview = RefLogEntry::preview_at(&entries, now());
             assert_eq!(preview.rows.len(), 1);
             assert_eq!(
                 preview.rows[0].text,
@@ -775,7 +652,7 @@ mod ref_log_tests {
             .collect::<Vec<_>>()
             .join("\n");
         let entries = RefLogEntry::parse(&input);
-        let preview = RefLogEntry::preview(&entries);
+        let preview = RefLogEntry::preview_at(&entries, now());
         assert_eq!(preview.rows.len(), 80);
         for (i, entry) in entries.iter().enumerate() {
             assert_eq!(
@@ -784,11 +661,11 @@ mod ref_log_tests {
             );
             assert_eq!(
                 preview.rows[2 * i + 1].text,
-                format!("Author {i} · 2026-11-12")
+                format!("Author {i} · Nov 12")
             );
             assert_eq!(preview.rows[2 * i + 1].style, Style::Muted);
         }
-        assert!(preview.same_content(&RefLogEntry::preview(&entries)));
+        assert!(preview.same_content(&RefLogEntry::preview_at(&entries, now())));
         assert!(!preview.patch && preview.cursor_byte.is_none() && preview.split.is_empty());
     }
 
@@ -799,15 +676,15 @@ mod ref_log_tests {
             "1234567890123456789012345678901234567890\0Older Author\x002025-06-08\0Second subject\n",
         ));
         assert_eq!(entries.len(), 2);
-        let preview = RefLogEntry::preview(&entries);
+        let preview = RefLogEntry::preview_at(&entries, now());
         assert_eq!(
             preview.rows[0].text,
             "0123456  Subject (HEAD -> main, other/ref)"
         );
-        assert_eq!(preview.rows[1].text, "First Author · 2026-11-12");
+        assert_eq!(preview.rows[1].text, "First Author · Nov 12");
         assert_eq!(preview.rows[1].style, Style::Muted);
         assert_eq!(preview.rows[2].text, "1234567  Second subject");
-        assert_eq!(preview.rows[3].text, "Older Author · 2025-06-08");
+        assert_eq!(preview.rows[3].text, "Older Author · Jun 8, 2025");
         assert_eq!(preview.rows[3].style, Style::Muted);
         assert_eq!(preview.rows.len(), 4);
         assert!(
@@ -816,7 +693,7 @@ mod ref_log_tests {
                 .iter()
                 .all(|row| row.path.is_none() && row.marker.is_none())
         );
-        assert!(preview.same_content(&RefLogEntry::preview(&entries)));
+        assert!(preview.same_content(&RefLogEntry::preview_at(&entries, now())));
         assert!(!preview.patch);
         assert!(RefLogEntry::parse("not-an-oid\0subject").is_empty());
     }

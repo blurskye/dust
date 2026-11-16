@@ -149,13 +149,14 @@ impl GitOperationBar {
             .collect::<Vec<_>>();
         let mut actions = Vec::new();
         if blockers.is_empty() {
-            if matches!(operation.as_str(), "merge" | "rebase") {
+            if continues(&operation) {
                 actions.push(GitOperationAction::Continue);
             }
         } else {
             actions.push(GitOperationAction::Resolve);
         }
-        if operation == "rebase" {
+        // Git skips a replayed commit; a merge has no commit to skip.
+        if skips(&operation) {
             actions.push(GitOperationAction::Skip);
         }
         actions.push(GitOperationAction::Abort);
@@ -173,7 +174,29 @@ impl GitOperationBar {
     }
 }
 
+/// Whether Git can continue `operation` once nothing is conflicted.
+#[must_use]
+pub fn continues(operation: &str) -> bool {
+    matches!(operation, "merge" | "rebase" | "cherry-pick" | "revert")
+}
+
+/// Whether Git can skip the commit `operation` is applying: every replay, never a merge.
+#[must_use]
+pub fn skips(operation: &str) -> bool {
+    matches!(operation, "rebase" | "cherry-pick" | "revert")
+}
+
 /// Read the paused operation and every conflicted path from the repository, on demand.
+/// `read_conflict_state` for a repository whose status lists no conflicted path: the operation
+/// in progress only, without loading the index (tens of milliseconds on a big repository).
+pub fn read_operation_state(repository: &Path) -> Result<GitConflictState, GitConflictError> {
+    let repo = git2::Repository::open(repository).map_err(|_| GitConflictError::NotRepository)?;
+    Ok(GitConflictState {
+        operation: operation_name(repo.state()),
+        conflicts: Vec::new(),
+    })
+}
+
 pub fn read_conflict_state(repository: &Path) -> Result<GitConflictState, GitConflictError> {
     let repo = git2::Repository::open(repository).map_err(|_| GitConflictError::NotRepository)?;
     let operation = operation_name(repo.state());
@@ -462,7 +485,7 @@ pub fn continue_operation(
     let repo = git2::Repository::open(repository).map_err(|_| GitRecoveryRefusal::NotRepository)?;
     let operation =
         operation_name(repo.state()).ok_or(GitRecoveryRefusal::NotPaused("continue"))?;
-    if !matches!(operation.as_str(), "merge" | "rebase") {
+    if !continues(&operation) {
         return Err(GitRecoveryRefusal::Backend(format!(
             "continuing {operation} is not supported"
         )));
@@ -470,6 +493,18 @@ pub fn continue_operation(
     let remaining = conflict_count(&repo)?;
     if remaining > 0 {
         return Err(GitRecoveryRefusal::ConflictsRemain(remaining));
+    }
+    if matches!(operation.as_str(), "cherry-pick" | "revert") {
+        // Git commits the whole index: unrelated staged changes would ride along.
+        let start = pick_start(&repo).ok_or(GitRecoveryRefusal::NoRecordedStart)?;
+        let touched = operation_touched_paths(&repo, start, &operation, None)?;
+        let risky = risky_changes(&repo, &touched, true)?;
+        if !risky.is_empty() {
+            return Err(GitRecoveryRefusal::WouldDiscard(risky.join(", ")));
+        }
+        let before = replay_position(&repo);
+        let result = run_operation_git(&repo, &[&operation, "--continue"]);
+        return replay_outcome(repository, operation, before, result);
     }
     if operation == "rebase" {
         let (original, current) = rebase_info(&repo)?;
@@ -570,16 +605,7 @@ pub fn abort_operation(repository: &Path) -> Result<GitRecoveryOutcome, GitRecov
     };
     let recorded = match operation.as_str() {
         "merge" => repo.refname_to_id("ORIG_HEAD").ok(),
-        "cherry-pick" | "revert" => {
-            // Single picks/reverts leave HEAD at their starting commit. Sequences record it.
-            if repo.path().join("sequencer").exists() {
-                std::fs::read_to_string(repo.path().join("sequencer/head"))
-                    .ok()
-                    .and_then(|head| git2::Oid::from_str(head.trim()).ok())
-            } else {
-                repo.head().ok().and_then(|head| head.target())
-            }
-        }
+        "cherry-pick" | "revert" => pick_start(&repo),
         "rebase" => rebase.as_ref().map(|(original, _)| *original),
         _ => {
             return Err(GitRecoveryRefusal::Backend(format!(
@@ -645,6 +671,18 @@ pub fn abort_operation(repository: &Path) -> Result<GitRecoveryOutcome, GitRecov
     })
 }
 
+/// Where a cherry-pick or revert started. Single picks and reverts leave HEAD at their
+/// starting commit; sequences record it.
+fn pick_start(repo: &git2::Repository) -> Option<git2::Oid> {
+    if repo.path().join("sequencer").exists() {
+        std::fs::read_to_string(repo.path().join("sequencer/head"))
+            .ok()
+            .and_then(|head| git2::Oid::from_str(head.trim()).ok())
+    } else {
+        repo.head().ok().and_then(|head| head.target())
+    }
+}
+
 /// Read-only snapshot of unrelated paths that prevent a rebase action.
 /// Submission always recomputes these checks before invoking Git.
 pub(super) fn rebase_action_blockers(
@@ -660,37 +698,55 @@ pub(super) fn rebase_action_blockers(
     risky_changes(&repo, &touched, action == GitOperationAction::Continue)
 }
 
-/// Drop the current rebase commit, never unrelated changes.
+/// Drop the commit a rebase, cherry-pick or revert is applying, never unrelated changes.
 pub fn skip_operation(repository: &Path) -> Result<GitRecoveryOutcome, GitRecoveryRefusal> {
     let repo = git2::Repository::open(repository).map_err(|_| GitRecoveryRefusal::NotRepository)?;
     let operation = operation_name(repo.state()).ok_or(GitRecoveryRefusal::NotPaused("skip"))?;
-    if operation != "rebase" {
+    if !skips(&operation) {
         return Err(GitRecoveryRefusal::Backend(format!(
             "skipping {operation} is not supported"
         )));
     }
-    let (original, current) = rebase_info(&repo)?;
-    let touched = operation_touched_paths(&repo, original, &operation, current)?;
+    let (start, current) = if operation == "rebase" {
+        rebase_info(&repo)?
+    } else {
+        (pick_start(&repo).ok_or(GitRecoveryRefusal::NoRecordedStart)?, None)
+    };
+    let touched = operation_touched_paths(&repo, start, &operation, current)?;
     let risky = risky_changes(&repo, &touched, false)?;
     if !risky.is_empty() {
         return Err(GitRecoveryRefusal::WouldDiscard(risky.join(", ")));
     }
     let before = replay_position(&repo);
-    let result = run_operation_git(&repo, &["rebase", "--skip"]);
+    let result = run_operation_git(&repo, &[&operation, "--skip"]);
     replay_outcome(repository, operation, before, result)
 }
 
-/// The replayed commit and step a rebase is paused at, to tell whether Git moved on.
+/// Stage one resolved path with Git itself (`git add`), as `s` would.
+pub(super) fn stage_resolved(repository: &Path, path: &Path) -> Result<(), GitRecoveryRefusal> {
+    let repo = git2::Repository::open(repository).map_err(|_| GitRecoveryRefusal::NotRepository)?;
+    let path = path
+        .to_str()
+        .ok_or_else(|| GitRecoveryRefusal::Backend("the path is not UTF-8; stage it with s".into()))?;
+    run_operation_git(&repo, &["--literal-pathspecs", "add", "--", path])
+}
+
+/// The replayed commit and step a rebase (or the commit a cherry-pick or revert) is paused
+/// at, to tell whether Git moved on.
 fn replay_position(repo: &git2::Repository) -> (Option<git2::Oid>, Option<(usize, usize)>) {
-    (
-        rebase_info(repo).ok().and_then(|(_, current)| current),
-        rebase_progress(repo),
-    )
+    match operation_name(repo.state()).as_deref() {
+        Some("cherry-pick") => (repo.refname_to_id("CHERRY_PICK_HEAD").ok(), None),
+        Some("revert") => (repo.refname_to_id("REVERT_HEAD").ok(), None),
+        _ => (
+            rebase_info(repo).ok().and_then(|(_, current)| current),
+            rebase_progress(repo),
+        ),
+    }
 }
 
 /// `(step, total)` from the rebase's own bookkeeping: `msgnum`/`end` for the merge backend,
 /// `next`/`last` for the apply backend.
-fn rebase_progress(repo: &git2::Repository) -> Option<(usize, usize)> {
+pub(super) fn rebase_progress(repo: &git2::Repository) -> Option<(usize, usize)> {
     let read = |path: PathBuf| -> Option<usize> {
         std::fs::read_to_string(path).ok()?.trim().parse().ok()
     };

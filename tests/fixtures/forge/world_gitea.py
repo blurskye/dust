@@ -103,11 +103,36 @@ def listed_items(base, entries, owner_repo):
     return items
 
 
+def listed_runs(base, entries, owner_repo):
+    """Every workflow run the recorded `actions/runs` pages of `owner_repo` hold, by id."""
+    runs = {}
+    for key, found in entries.items():
+        if key.split(" ", 1)[1].split("?", 1)[0] != f"/repos/{owner_repo}/actions/runs":
+            continue
+        for entry in found:
+            if entry.get("status") != 200 or not entry.get("body"):
+                continue
+            body = json.loads((base / "bodies" / entry["body"]).read_bytes())
+            for item in body.get("workflow_runs", []) if isinstance(body, dict) else []:
+                runs.setdefault(item.get("id"), item)
+    return runs
+
+
 def listed_reply(base, entries, rest):
     """Items the recordings list but never opened: their detail is the listed object and
     their sub-resources (comments, timeline, reviews, files, commits) are empty, so a
     screenshot of any listed row shows real data instead of a 404. Unlisted numbers and
     every other path still 404."""
+    run = re.fullmatch(r"repos/([^/]+/[^/]+)/actions/runs/(\d+)(/jobs|/artifacts)?", rest)
+    if run:
+        # A listed run nobody opened: its detail is the listed object; it lists no jobs or
+        # artifacts (true of the skipped ones, and an honest blank for the rest).
+        item = listed_runs(base, entries, run.group(1)).get(int(run.group(2)))
+        if item is None:
+            return
+        if run.group(3):
+            raise Reply(200, b"[]", {"Content-Type": "application/json"})
+        raise Reply(200, json.dumps(item).encode(), {"Content-Type": "application/json"})
     match = re.fullmatch(r"repos/([^/]+/[^/]+)/(pulls|issues)/(\d+)(/[a-z_/]+)?", rest)
     commit = re.fullmatch(r"repos/([^/]+/[^/]+)/commits/([0-9a-f]{7,40})/(status|statuses)", rest)
     json_headers = {"Content-Type": "application/json"}
@@ -115,6 +140,10 @@ def listed_reply(base, entries, rest):
         items = listed_items(base, entries, match.group(1))
         item = items.get(int(match.group(3)))
         if item is None:
+            return
+        # Issues and pull requests share numbers; `pulls/<an issue>` is a 404 on the forge
+        # (a deep link's `#n` probes it).
+        if match.group(2) == "pulls" and "head" not in item and not item.get("pull_request"):
             return
         if match.group(4):
             raise Reply(200, b"[]", json_headers)
@@ -129,6 +158,44 @@ def listed_reply(base, entries, rest):
 
 
 def answer(state, request, world):
+    if state.get("actions_seed") == "design":
+        import world_actions
+        designed = world_actions.gitea_answer(state, request, world)
+        if designed is not None:
+            return designed
+    if state.get("conversation"):
+        conversation(state, request, world)
+    recorded(state, request, world)
+
+
+def conversation(state, request, world):
+    """`state["conversation"]`: world_conversation's pull request and issue, built on a
+    recorded pull request and issue of the same repository so every field the forge sends is
+    there."""
+    import world_conversation
+    base, data, entries = load(directory_for(state, world))
+    owner_repo = data.get("repo", "orbit/orbit")
+    items = listed_items(base, entries, owner_repo).values()
+    templates = {"pull": next((item for item in items if "head" in item), None),
+                 "issue": next((item for item in items if "head" not in item and not item.get("pull_request")), None)}
+    if None in templates.values():
+        return
+
+    def recorded_reply():
+        try:
+            recorded(state, request, world)
+        except Reply as reply:
+            body = reply.body if isinstance(reply.body, bytes) else json.dumps(reply.body).encode()
+            return reply.status, body, reply.headers
+        return 404, b"", {}
+
+    found = world_conversation.gitea_answer(state, request, world, data.get("host", request.host), owner_repo,
+                                            templates, recorded_reply)
+    if found is not None:
+        raise Reply(*found)
+
+
+def recorded(state, request, world):
     answers = state.get("answers", {})
     query = dict(request.query)
     for key in (key_for(request, query), f"{request.method} {request.rest}"):

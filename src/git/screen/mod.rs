@@ -1,8 +1,10 @@
 //! The shared native Git application. Hosts own terminal lifecycle and opening files/workspaces.
 mod commit;
+mod conflicts;
 mod filter;
 mod github;
 mod jobs;
+mod memo;
 mod preview;
 mod reflog;
 mod refs;
@@ -13,8 +15,15 @@ mod selection;
 mod shell;
 mod sidebar;
 mod staging;
+mod modal;
+mod ops;
+mod textbox;
+pub use modal::InputMode;
 mod tree;
 mod tutor;
+mod warm;
+mod words;
+pub use warm::enable as enable_warm_cache;
 
 use super::*;
 use crate::editor::input::{KeyCode, KeyEvent};
@@ -35,8 +44,17 @@ pub enum ScreenOutcome {
     Continue,
     Close,
     OpenFile(PathBuf),
+    /// Open this file at this line (1-based) in the editor: `e` on a diff line (§5.3).
+    OpenFileAt(PathBuf, usize),
     OpenRepository(PathBuf),
+    /// Put this text on the system clipboard (`y` on a commit).
+    Copy(String),
 }
+
+/// History's first read, in commits (lazygit's is also 300).
+const HISTORY_PAGE: usize = 300;
+/// History's `git log` format (`shell::parse_history` reads it).
+const HISTORY_FORMAT: &str = "--format=%H%x09%P%x09%an%x09%ad%x09%D%x09%s";
 
 #[derive(Clone)]
 struct Row {
@@ -76,6 +94,10 @@ enum FormAction {
     Command,
     SourceSearch,
     Conflict(PathBuf),
+    /// `M` (lazygit's `m`) while an operation is paused: continue, skip or abort it.
+    OperationMenu,
+    /// Pull, undo, redo, a history rewrite or a tag push (`ops.rs`).
+    Run(Box<ops::Op>),
     Operation {
         action: GitOperationAction,
         operation: String,
@@ -284,6 +306,13 @@ struct Field {
     choices: Vec<String>,
     custom_choices: bool,
     read_only: bool,
+    /// A modal screen's text box: the visual selection (byte range) to paint.
+    highlight: Option<std::ops::Range<usize>>,
+    /// A modal screen's text box is in Normal or Visual mode: a block cursor.
+    block_cursor: bool,
+    /// A multi-line box's first shown line, kept between frames so the box scrolls only as
+    /// far as the cursor needs (`sheet::viewport`).
+    top: std::cell::Cell<usize>,
 }
 impl Field {
     fn new(label: &str, value: String) -> Self {
@@ -298,6 +327,9 @@ impl Field {
             choices: Vec::new(),
             custom_choices: false,
             read_only: false,
+            highlight: None,
+            block_cursor: false,
+            top: std::cell::Cell::new(0),
         }
     }
 }
@@ -330,11 +362,18 @@ pub struct GitScreen {
     hunk_head: Option<GitHeadExpectation>,
     hunk_error: Option<String>,
     jobs: Jobs,
-    history: Vec<(String, String)>,
+    /// Shared with `rows_memo`, which knows it by its address.
+    history: memo::History,
     /// Parents, author, date and decorations for each `history` row, same order.
     history_info: Vec<shell::HistoryInfo>,
     history_graph: Vec<shell::graph::GraphRow>,
     history_loading: bool,
+    /// How many commits History reads (`HISTORY_PAGE` at first, more as the cursor nears
+    /// the end, all of them on `End`), and whether the last read stopped at that limit.
+    history_limit: usize,
+    history_more: bool,
+    /// `End` asked for the whole log: the cursor goes to its last row when it lands.
+    history_to_end: bool,
     /// `+added −removed` per changed path; `None` for binary files.
     numstat: std::collections::HashMap<PathBuf, Option<(u32, u32)>>,
     /// Index against HEAD, for the commit sheet.
@@ -369,6 +408,8 @@ pub struct GitScreen {
     preview: Preview,
     preview_args: Option<Vec<OsString>>,
     ref_preview_target: Option<String>,
+    /// The reader shows `ref_preview_target`'s log (it has arrived, not `Loading…`).
+    ref_log_ready: bool,
     ref_preview: Option<RefPreviewContext>,
     commit: Option<commit::Commit>,
     commit_open: bool,
@@ -384,12 +425,22 @@ pub struct GitScreen {
     message_visible: usize,
     staged: bool,
     all_files: bool,
-    files: BTreeSet<PathBuf>,
+    files: memo::Files,
+    /// `rows(pane)` for Changes and History, kept until what they are built from changes.
+    rows_memo: memo::RowsMemo,
+    /// A big status waiting for its Changes rows (`memo::changes_rows_later`): the status
+    /// without its entries, the view the rows are for, and the thread building them.
+    status_rows: Option<(GitStatusSnapshot, u64, memo::RowsLater)>,
+    /// History's first lines for the warm cache (`warm.rs`), and what was last written there.
+    warm_history: String,
+    warm_saved: Option<u64>,
     tutor: Option<tutor::Session>,
     branch: String,
     /// Display-only context; never use the recorded rebase branch as the actual HEAD.
     head_label: String,
     paused_replay: Option<PausedReplay>,
+    /// The paused operation's sides and conflict hunk counts (`conflicts.rs`).
+    conflict: Option<conflicts::Context>,
     notice: String,
     form: Option<Form>,
     help: bool,
@@ -400,6 +451,29 @@ pub struct GitScreen {
     refreshing_after_write: bool,
     /// The embedded host updates this before every input event.
     pub write_refusal: Option<String>,
+    /// Vim-style modes (`modal.rs`): on when the editor is modal, as Dust's editor is.
+    modal: bool,
+    /// The focused text box on the editor's Vim engine, while a form is open (`textbox.rs`).
+    text_box: Option<textbox::TextBox>,
+    /// Yanks and deletes carried from one text box to the next.
+    box_registers: crate::editor::RegisterStore,
+    /// The status chip's words, from the editor's `ui.status_line.mode_labels`.
+    mode_labels: [String; 3],
+    /// `<leader> e` hid the rail: the reader takes the Git tab's whole width.
+    rail_hidden: bool,
+    /// The rail's content counts (`shell::rail_rows`), taken once status and refs first
+    /// arrive: panes are sized by content at open and never move after (DESIGN.md §2.5).
+    rail_rows: Option<[u16; 4]>,
+    /// The first rail frame painted before those counts were known (`shell::rail_rows`).
+    rail_unsized: Option<std::time::Instant>,
+    /// A modal screen's commit message closed with Esc or `q`: the next `c` starts from it.
+    commit_draft: Option<(String, String)>,
+    /// `s` (stage only) or `u` (unstage only) for the staging key being handled; `-` toggles.
+    stage_intent: Option<bool>,
+    /// The confirmed pull, undo, rewrite or tag push still running (`ops.rs`).
+    running: Option<ops::Running>,
+    /// What the event in hand asks of the host besides drawing (a clipboard copy).
+    outcome: Option<ScreenOutcome>,
 }
 
 impl GitScreen {
@@ -442,10 +516,13 @@ impl GitScreen {
             hunk_head: None,
             hunk_error: None,
             jobs: Jobs::default(),
-            history: Vec::new(),
+            history: Default::default(),
             history_info: Vec::new(),
             history_graph: Vec::new(),
             history_loading: false,
+            history_limit: HISTORY_PAGE,
+            history_more: false,
+            history_to_end: false,
             numstat: std::collections::HashMap::new(),
             staged_numstat: std::collections::HashMap::new(),
             staged_patch: String::new(),
@@ -474,6 +551,7 @@ impl GitScreen {
             preview: Preview::default(),
             preview_args: None,
             ref_preview_target: None,
+            ref_log_ready: false,
             ref_preview: None,
             commit: None,
             commit_open: false,
@@ -489,11 +567,16 @@ impl GitScreen {
             message_visible: 0,
             staged: false,
             all_files: false,
-            files: BTreeSet::new(),
+            files: Default::default(),
+            rows_memo: Default::default(),
+            status_rows: None,
+            warm_history: String::new(),
+            warm_saved: None,
             tutor: None,
             branch: String::new(),
             head_label: String::new(),
             paused_replay: None,
+            conflict: None,
             notice: String::new(),
             form: None,
             help: false,
@@ -503,7 +586,20 @@ impl GitScreen {
             refs_loading: false,
             refreshing_after_write: false,
             write_refusal: None,
+            modal: false,
+            text_box: None,
+            box_registers: crate::editor::RegisterStore::default(),
+            mode_labels: ["NORMAL".into(), "INSERT".into(), "VISUAL".into()],
+            rail_hidden: false,
+            rail_rows: None,
+            rail_unsized: None,
+            commit_draft: None,
+            stage_intent: None,
+            running: None,
+            outcome: None,
         };
+        // The last status, History and branches paint at once; git's answers replace them.
+        screen.load_warm(&repo);
         screen.refresh()?;
         Ok(screen)
     }
@@ -512,6 +608,12 @@ impl GitScreen {
     }
     pub fn set_icon_mode(&mut self, mode: crate::config::ExplorerIconMode) {
         self.icon_mode = mode;
+    }
+    /// The forge screens' shared key table (`github/keymap.rs`): the editor's leader
+    /// (`input.keymaps.leader`) and a preset (`dusty` or `lazygit`).
+    pub fn set_key_preset(&mut self, leader: &str, preset: &str) {
+        use github::keymap::{Keys, Preset};
+        self.github.set_keys(Keys::new(leader, Preset::from_name(preset)));
     }
     /// A deep link: start on a top tab (`git`, `prs`/`mrs`, `issues`, `actions`) and, on
     /// Pull requests or Issues, open item `item` in the reader once the repository resolves.
@@ -533,8 +635,18 @@ impl GitScreen {
             self.github.open_link(page, item);
         }
     }
+    /// The rail's panes have their sizes for the session (`shell::rail_rows`): a
+    /// readiness wait for tests that compare pane positions. Sizes are taken while a frame
+    /// paints, so a wait on this must paint too.
+    pub fn panes_sized(&self) -> bool {
+        self.rail_rows.is_some()
+    }
     pub fn busy(&self) -> bool {
         self.busy || self.refreshing_after_write || self.github.writing()
+    }
+    /// No forge read is queued or in flight (a readiness wait for tests and scripts).
+    pub fn forge_quiet(&self) -> bool {
+        self.github.quiet()
     }
     /// What this checkout stands on, exactly as the screen must say it: the
     /// paused replay's recorded branch, a detach, or the plain branch name.
@@ -558,50 +670,23 @@ impl GitScreen {
             _ => 6,
         }
     }
-    fn rows(&self, pane: usize) -> Vec<Row> {
+    /// The rows of rail pane `pane`, built afresh; `rows` keeps them (`memo.rs`).
+    fn build_rows(&self, pane: usize) -> Vec<Row> {
         let plain = Row::plain;
         let filter = &self.filters[self.slot(pane)];
         let rows = match pane {
             0 if self.files_view == 1 => self.worktree_rows(),
             0 if self.files_view == 2 => self.submodule_rows(),
-            0 => {
-                if self.changes_collapsed && !filter.active() {
-                    return Vec::new();
-                }
-                if let Some(snapshot) = &self.snapshot {
-                    let mut paths = snapshot
-                        .entries
-                        .iter()
-                        .map(|entry| {
-                            let marker = match (entry.sources.staged, entry.sources.unstaged) {
-                                (true, false) => '✓',
-                                (true, true) => '◐',
-                                _ => ' ',
-                            };
-                            (
-                                entry.relative_path.clone(),
-                                format!("{marker} {:<2}", entry.change_code().trim()),
-                            )
-                        })
-                        .collect::<std::collections::BTreeMap<_, _>>();
-                    if self.all_files {
-                        for path in &self.files {
-                            paths.entry(path.clone()).or_insert("    ".into());
-                        }
-                    }
-                    if self.changes_flat() {
-                        paths
-                            .into_keys()
-                            .filter(|path| !filter.active() || filter.matches(&path.to_string_lossy()))
-                            .map(|path| Row::plain(path.display().to_string(), path))
-                            .collect()
-                    } else {
-                        filter.tree(paths, &self.collapsed)
-                    }
-                } else {
-                    Vec::new()
-                }
-            }
+            0 => self.snapshot.as_ref().map_or_else(Vec::new, |snapshot| {
+                memo::changes_rows(
+                    &snapshot.entries,
+                    self.all_files.then_some(&*self.files),
+                    self.changes_tree,
+                    self.changes_collapsed,
+                    filter,
+                    &self.collapsed,
+                )
+            }),
             1 => match self.subview {
                 0 => self
                     .refs
@@ -665,11 +750,7 @@ impl GitScreen {
     fn preview_staged(&self) -> bool {
         self.selected_row()
             .and_then(|row| {
-                self.snapshot
-                    .as_ref()?
-                    .entries
-                    .iter()
-                    .find(|entry| entry.relative_path == row.value)
+                memo::entry(&self.snapshot.as_ref()?.entries, &row.value)
             })
             .is_some_and(|entry| entry.sources.staged && (self.staged || !entry.sources.unstaged))
     }
@@ -709,15 +790,24 @@ impl GitScreen {
             self.list_files()?;
         }
         self.refresh_head_context();
+        // A refresh reads again only as much history as the cursor has reached.
+        if !self.history_to_end {
+            self.history_limit = self
+                .history_limit
+                .min((self.selected[5] + HISTORY_PAGE).next_power_of_two().max(HISTORY_PAGE));
+        }
         self.reload_history()?;
         if self.history_view == 1 {
             self.reload_reflog()?;
         }
+        // Before the first commit every change is against nothing: the index's diff.
+        let numstat = if self.unborn() {
+            vec!["diff", "--numstat", "--no-renames", "--"]
+        } else {
+            vec!["diff", "--numstat", "--no-renames", "HEAD", "--"]
+        };
         for (request, args) in [
-            (
-                Request::Numstat,
-                vec!["diff", "--numstat", "--no-renames", "HEAD", "--"],
-            ),
+            (Request::Numstat, numstat),
             (
                 Request::StagedNumstat,
                 vec!["diff", "--cached", "--numstat", "--no-renames", "--"],
@@ -769,6 +859,49 @@ impl GitScreen {
                 .unwrap_or_default();
         }
     }
+    /// History's commits and their graph.
+    fn set_history(&mut self, history: Vec<(String, String)>, info: Vec<shell::HistoryInfo>) {
+        self.history_graph = shell::graph::rows(
+            &info
+                .iter()
+                .zip(&history)
+                .map(|(info, (id, _))| (id.as_str(), info.parents.iter().map(String::as_str).collect()))
+                .collect::<Vec<_>>(),
+        );
+        self.history = std::sync::Arc::new(history);
+        self.history_info = info;
+    }
+    /// Shows a status git gave, with its Changes rows when they were built on a thread.
+    fn install_status(&mut self, snapshot: GitStatusSnapshot, rows: Option<Vec<Row>>) {
+        self.snapshot = Some(snapshot);
+        if let Some(rows) = rows {
+            self.seed_rows(0, rows);
+        }
+        self.refresh_head_context();
+        // The index is loaded only when the status lists a conflict.
+        let conflicted = self.snapshot.as_ref().is_some_and(|snapshot| {
+            snapshot.truncated || snapshot.entries.iter().any(|entry| entry.status == GitFileStatus::Conflicted)
+        });
+        let state = if conflicted {
+            read_conflict_state(&self.root)
+        } else {
+            crate::git::read_operation_state(&self.root)
+        };
+        self.operation_bar = match state {
+            Ok(state) => GitOperationBar::of(&state),
+            Err(_) => {
+                self.notice = "Couldn't read the merge or rebase in progress".into();
+                None
+            }
+        };
+        self.refresh_conflicts();
+        self.reconcile_file_selection();
+        self.count_untracked();
+        self.refreshing = false;
+        if !self.refs_loading {
+            self.refreshing_after_write = false;
+        }
+    }
     /// Poll existing bounded workers; returns whether the screen needs repainting.
     pub fn poll(&mut self) -> bool {
         let selections = (0..4)
@@ -779,6 +912,10 @@ impl GitScreen {
             })
             .collect::<Vec<_>>();
         let github_changed = self.github.poll();
+        // A deep link's `#n` that turned out to be an issue moves the tab.
+        if let Some(page) = self.github.take_link_page() {
+            self.page = page;
+        }
         if self.form.is_none()
             && let Some(form) = self.github.take_form()
         {
@@ -787,25 +924,22 @@ impl GitScreen {
         let mut changed = false;
         let mut reload_preview = false;
         let history_was_loading = self.history_loading;
+        // A big status's Changes rows are built on a thread; the status shows with them.
+        let mut arrived = None;
         match self.status.poll() {
             Ok(Some(snapshot)) => {
-                self.snapshot = Some(snapshot.clone());
-                self.refresh_head_context();
-                self.operation_bar = match read_conflict_state(&self.root) {
-                    Ok(state) => GitOperationBar::of(&state),
-                    Err(error) => {
-                        self.notice = format!("Cannot read Git operation: {error}");
-                        None
-                    }
-                };
-                self.reconcile_file_selection();
-                self.count_untracked();
-                self.refreshing = false;
-                if !self.refs_loading {
-                    self.refreshing_after_write = false;
+                let mut snapshot = snapshot.clone();
+                let same = self.snapshot.as_ref().is_some_and(|old| {
+                    old.revision == snapshot.revision && old.entries.len() == snapshot.entries.len()
+                });
+                if !same && self.files_view == 0 && snapshot.entries.len() >= memo::ROWS_LATER {
+                    let view = self.changes_view();
+                    let building = self.changes_rows_later(std::mem::take(&mut snapshot.entries));
+                    self.status_rows = Some((snapshot, view, building));
+                } else {
+                    self.status_rows = None;
+                    arrived = Some((snapshot, None));
                 }
-                reload_preview = self.last_list == 0;
-                changed = true;
             }
             Err(e) => {
                 self.notice = e.to_string();
@@ -816,6 +950,26 @@ impl GitScreen {
                 changed = true;
             }
             _ => {}
+        }
+        if self.status_rows.as_ref().is_some_and(|(_, _, building)| building.is_finished())
+            && let Some((mut snapshot, view, building)) = self.status_rows.take()
+        {
+            match building.join() {
+                Ok((entries, rows)) => {
+                    snapshot.entries = entries;
+                    arrived = Some((snapshot, (view == self.changes_view()).then_some(rows)));
+                }
+                Err(_) => {
+                    self.notice = "Cannot list the changes".into();
+                    self.refreshing = false;
+                    changed = true;
+                }
+            }
+        }
+        if let Some((snapshot, rows)) = arrived {
+            self.install_status(snapshot, rows);
+            reload_preview = self.last_list == 0;
+            changed = true;
         }
         match self.branches.poll() {
             Ok(Some(GitBranchResult::List(list))) => {
@@ -892,6 +1046,7 @@ impl GitScreen {
             }
             _ => {}
         }
+        changed |= self.op_progress();
         changed |= self.poll_rewrite();
         for (request, result) in self.jobs.poll() {
             changed = true;
@@ -907,6 +1062,7 @@ impl GitScreen {
                             let repository = git2::Repository::open(&self.root).ok()?;
                             RefPreviewContext::capture(&repository, reference, entry.id)
                         });
+                        self.ref_log_ready = true;
                         commit::RefLogEntry::preview(&entries)
                     } else {
                         Preview::git(&text, path.as_deref())
@@ -945,6 +1101,11 @@ impl GitScreen {
                     }
                 }
                 (Request::Write, result) => {
+                    // A sheet with a second command (an amend's autosquash) runs it now.
+                    if self.next_op_step(&result) {
+                        continue;
+                    }
+                    let finished = self.finish_op(&result);
                     self.receipt = result.as_ref().ok().and_then(|text| commit_receipt(text));
                     self.finish_reflog_form(result.is_ok());
                     self.busy = false;
@@ -955,6 +1116,9 @@ impl GitScreen {
                         Ok(text) => text.trim().into(),
                         Err(error) => error.replace(['\r', '\n'], " "),
                     };
+                    if let Some(notice) = finished {
+                        self.notice = notice;
+                    }
                     // A stopped merge can still have updated the index and working files.
                     let result = self.refresh();
                     self.refreshing_after_write = result.is_ok();
@@ -963,15 +1127,14 @@ impl GitScreen {
                 (Request::History, Ok(text)) => {
                     self.history_loading = false;
                     let (history, info) = shell::parse_history(&text);
-                    self.history_graph = shell::graph::rows(
-                        &info
-                            .iter()
-                            .zip(&history)
-                            .map(|(info, (id, _))| (id.as_str(), info.parents.iter().map(String::as_str).collect()))
-                            .collect::<Vec<_>>(),
-                    );
-                    self.history = history;
-                    self.history_info = info;
+                    self.history_more = self.history_limit != usize::MAX && history.len() >= self.history_limit;
+                    if std::mem::take(&mut self.history_to_end) && self.history_view == 0 {
+                        self.selected[5] = history.len().saturating_sub(1);
+                    }
+                    if self.history_target.is_none() {
+                        self.warm_history = warm::history_head(&text);
+                    }
+                    self.set_history(history, info);
                     reload_preview |= self.last_list == 2 && self.history_view == 0;
                 }
                 (Request::Reflog, Ok(text)) => {
@@ -1006,7 +1169,7 @@ impl GitScreen {
                     reload_preview |= self.last_list == 3;
                 }
                 (Request::Files, Ok(text)) => {
-                    self.files = text.split_terminator('\0').map(PathBuf::from).collect();
+                    self.files = std::sync::Arc::new(text.split_terminator('\0').map(PathBuf::from).collect());
                     reload_preview |= self.last_list == 0 && self.all_files;
                 }
                 (Request::Tags, Ok(text)) => {
@@ -1024,7 +1187,7 @@ impl GitScreen {
                         .is_some_and(|_| git_head_id(&self.root).ok() == Some(None)) =>
                 {
                     self.history_loading = false;
-                    self.history.clear();
+                    self.history = Default::default();
                 }
                 (Request::History, Err(error)) => {
                     self.history_loading = false;
@@ -1048,9 +1211,14 @@ impl GitScreen {
             self.clamp();
         }
         if reload_preview {
+            // Rows that arrived after Branches took focus pin History to the selected branch,
+            // as moving onto it would (select_history does nothing elsewhere or if unchanged).
+            self.select_history();
             self.load_preview();
         }
-        let tutor_changed = if changed { self.advance_tutor() } else { false };
+        self.save_warm();
+        // Forge lessons end on forge state too (a page, a reader tab, a confirmed write).
+        let tutor_changed = if changed || github_changed { self.advance_tutor() } else { false };
         self.restore_rewrite_diagnostic();
         changed || github_changed || tutor_changed
     }
@@ -1067,6 +1235,7 @@ impl GitScreen {
     }
     fn load_git_preview(&mut self, args: Vec<OsString>) {
         if self.preview_args.as_ref() != Some(&args) {
+            self.ref_log_ready = false;
             self.preview = "Loading…".into();
             self.preview_cursor = None;
             self.preview_anchor = None;
@@ -1114,6 +1283,8 @@ impl GitScreen {
                     "No history matches · / edit filter · Esc clear"
                 } else if self.history_view == 1 {
                     "No reflog entries"
+                } else if self.unborn() {
+                    "No commits yet · c to make the first commit"
                 } else {
                     "No commits yet"
                 }
@@ -1175,7 +1346,7 @@ impl GitScreen {
             self.preview_args = None;
             self.preview_cursor = None;
             self.preview = format!(
-                "{}\n\nSpace toggles marked files if any; otherwise changed descendants.\nA mixed set is staged; a fully staged set is unstaged.\nEnter expands or collapses this directory.",
+                "{}\n\ns stages and u unstages the marked files if any, otherwise the changed descendants.\n- toggles: a mixed set is staged; a fully staged set is unstaged.\nEnter expands or collapses this directory.",
                 row.value.display()
             )
             .into();
@@ -1195,7 +1366,7 @@ impl GitScreen {
                 let entry = self
                     .snapshot
                     .as_ref()
-                    .and_then(|s| s.entries.iter().find(|e| e.relative_path == row.value));
+                    .and_then(|s| memo::entry(&s.entries, &row.value));
                 let untracked = entry.is_some_and(|e| e.status == GitFileStatus::Untracked);
                 if self.all_files
                     || (untracked
@@ -1214,7 +1385,12 @@ impl GitScreen {
                             use std::io::Read;
                             let mut text = String::new();
                             let _ = file.take(128 * 1024).read_to_string(&mut text);
-                            self.update_preview(Preview::source(&row.value, &text));
+                            let mut preview = Preview::source(&row.value, &text);
+                            let first = conflicts::decorate(&mut preview, &text, self.conflict.as_ref());
+                            self.update_preview(preview);
+                            if self.preview_cursor.is_none() && first.is_some() {
+                                self.preview_cursor = first;
+                            }
                         }
                         Err(e) => self.preview = e.to_string().into(),
                     }
@@ -1264,29 +1440,90 @@ impl GitScreen {
         };
         self.load_git_preview(args);
     }
+    /// HEAD names a branch with no commit yet (`git init`, or an orphan branch): an empty
+    /// repository is a normal state, so nothing asks Git about HEAD's commit.
+    /// `e` in the reader: the line under the cursor in the editor (DESIGN.md §5.3). The
+    /// tutor's practice files stay in the tutor: it only says where.
+    pub(super) fn open_line(&mut self) -> Option<ScreenOutcome> {
+        self.normalize_preview_cursor();
+        match self.preview_cursor.and_then(|cursor| self.preview.location(cursor)) {
+            Some((path, line)) if self.tutor.is_some() => {
+                self.notice = tutor::editor_notice(&path.display().to_string(), line as usize);
+                None
+            }
+            Some((path, line)) => Some(ScreenOutcome::OpenFileAt(self.root.join(path), line as usize)),
+            None => {
+                self.notice = "No file line under the cursor".into();
+                None
+            }
+        }
+    }
+
+    fn unborn(&self) -> bool {
+        git2::Repository::open(&self.root)
+            .is_ok_and(|repository| matches!(repository.head(), Err(error) if error.code() == git2::ErrorCode::UnbornBranch))
+    }
+    /// Whether the repository has a local branch at all (an orphan HEAD can sit beside some).
+    fn any_branch(&self) -> bool {
+        git2::Repository::open(&self.root).is_ok_and(|repository| {
+            repository
+                .branches(Some(git2::BranchType::Local))
+                .is_ok_and(|mut branches| branches.next().is_some())
+        })
+    }
     fn reload_history(&mut self) -> Result<(), String> {
         let (root, reference) = self
             .history_target
             .clone()
             .unwrap_or_else(|| (self.root.clone(), "HEAD".into()));
+        // No commits yet: an empty History, not `fatal: bad revision 'HEAD'`.
+        let unborn = reference == "HEAD" && root == self.root && self.unborn();
+        if unborn && !self.any_branch() {
+            self.history = Default::default();
+            self.history_info.clear();
+            self.history_graph.clear();
+            self.history_loading = false;
+            return Ok(());
+        }
         let result = self.jobs.start(
             &root,
             Request::History,
             vec![
                 "log".into(),
-                "-300".into(),
+                format!("--max-count={}", self.history_limit.min(i32::MAX as usize)).into(),
                 "--date-order".into(),
                 "--date=short".into(),
-                "--format=%H%x09%P%x09%an%x09%ad%x09%D%x09%s".into(),
+                HISTORY_FORMAT.into(),
             ]
             .into_iter()
             // `--branches` is an option, so it must come before `--end-of-options`.
             .chain((reference == "HEAD").then(|| "--branches".into()))
-            .chain(["--end-of-options".into(), reference.clone(), "--".into()])
+            .chain(["--end-of-options".into()])
+            .chain((!unborn).then(|| reference.clone()))
+            .chain(["--".into()])
             .collect(),
         );
         self.history_loading = result.is_ok();
         result
+    }
+    /// While Branches is browsed and the reader shows the log of the ref History follows,
+    /// History's rows give way to a pointer at the reader, so one ref's log is never listed
+    /// twice on a screen (lazygit's one log per ref). The pane keeps its rectangle.
+    pub(super) fn history_in_reader(&self) -> bool {
+        self.focus == 1
+            && self.last_list == 1
+            && self.history_view == 0
+            && self.ref_log_ready
+            && self.ref_preview_target.as_deref().is_some_and(|reference| self.history_lists(reference))
+    }
+    /// History lists `reference` (`refs/heads/feature`): it follows the browsed branch.
+    fn history_lists(&self, reference: &str) -> bool {
+        self.history_target.as_ref().is_some_and(|(root, target)| {
+            *root == self.root
+                && ["refs/heads/", "refs/remotes/", "refs/tags/"]
+                    .iter()
+                    .any(|prefix| reference.strip_prefix(prefix).map(std::ffi::OsStr::new) == Some(target.as_os_str()))
+        })
     }
     fn select_history(&mut self) {
         let Some(row) = self.selected_row() else {
@@ -1307,6 +1544,8 @@ impl GitScreen {
         }
         self.history_target = Some(target);
         self.selected[5] = 0;
+        self.history_limit = HISTORY_PAGE;
+        self.history_to_end = false;
         let result = self.reload_history();
         self.report(result);
     }
@@ -1384,7 +1623,18 @@ impl GitScreen {
             .iter()
             .find(|entry| entry.relative_path == row.value)
             .ok_or("Select a changed file")?;
-        let unstage = entry.sources.staged && !entry.sources.unstaged;
+        // `s` only stages and `u` only unstages; `-` (and lazygit's Space) toggles.
+        let unstage = match self.stage_intent {
+            Some(false) if entry.sources.staged => true,
+            Some(false) => {
+                return Err(format!("Nothing staged in {} · s stages it", row.value.display()));
+            }
+            Some(true) if entry.sources.staged && !entry.sources.unstaged => {
+                return Err(format!("{} is already staged · u unstages it", row.value.display()));
+            }
+            Some(true) => false,
+            None => entry.sources.staged && !entry.sources.unstaged,
+        };
         let kind = if unstage {
             GitMutationKind::UnstageFile
         } else {
@@ -1422,7 +1672,6 @@ impl GitScreen {
                 expected_document_revision: None,
                 unsaved_documents: Vec::new(),
                 maximum_patch_bytes: 1024 * 1024,
-                deadline: Duration::from_secs(5),
             }))
             .map_err(|e| e.to_string())?;
         self.busy = true;
@@ -1435,7 +1684,7 @@ impl GitScreen {
             .as_ref()
             .is_some_and(|snapshot| snapshot.entries.iter().any(|entry| entry.sources.staged));
         if !staged {
-            self.notice = "Nothing staged · Space stages the selected change".into();
+            self.notice = "Nothing staged · s stages the selected change".into();
             return;
         }
         self.commit_options = [false; 3];
@@ -1444,9 +1693,16 @@ impl GitScreen {
             FormAction::Commit,
             vec![("Subject", String::new()), ("Body", String::new())],
         );
+        let draft = self.commit_draft.take();
         if let Some(form) = &mut self.form {
             form.fields[1].required = false;
             form.fields[1].multiline = true;
+            if let Some((subject, body)) = draft {
+                for (field, text) in form.fields.iter_mut().zip([subject, body]) {
+                    field.input.cursor = text.len();
+                    field.input.input = text;
+                }
+            }
         }
     }
     /// Amending starts from HEAD's message when the sheet is still empty.
@@ -1516,10 +1772,10 @@ impl GitScreen {
             let read = |name: &str| -> Result<Vec<u8>, String> {
                 let mut bytes = Vec::new();
                 std::fs::File::open(directory.join(name))
-                    .map_err(|error| format!("Cannot read rebase {name}: {error}"))?
+                    .map_err(|_| "Couldn't read the rebase in progress".to_string())?
                     .take(4097)
                     .read_to_end(&mut bytes)
-                    .map_err(|error| format!("Cannot read rebase {name}: {error}"))?;
+                    .map_err(|_| "Couldn't read the rebase in progress".to_string())?;
                 if bytes.is_empty() || bytes.len() > 4096 {
                     return Err(format!("Invalid rebase {name} metadata"));
                 }
@@ -1543,6 +1799,8 @@ impl GitScreen {
             return Err(
                 if action == GitOperationAction::Continue && !bar.blockers.is_empty() {
                     "Resolve and stage the remaining conflicts before continuing".into()
+                } else if action == GitOperationAction::Skip && bar.operation == "merge" {
+                    "Git has no skip for a merge; X aborts it".into()
                 } else {
                     format!("{} for {} is not supported", action.name(), bar.operation)
                 },
@@ -1576,6 +1834,13 @@ impl GitScreen {
                 let start = if let Some(identity) = &rebase_identity {
                     git2::Oid::from_str(String::from_utf8_lossy(&identity.original).trim())
                         .map_err(|error| error.to_string())?
+                } else if matches!(bar.operation.as_str(), "cherry-pick" | "revert") {
+                    // A pick or revert starts where the sequencer recorded, or at HEAD.
+                    std::fs::read_to_string(repository.path().join("sequencer").join("head"))
+                        .ok()
+                        .and_then(|text| git2::Oid::from_str(text.trim()).ok())
+                        .or_else(|| repository.head().ok()?.target())
+                        .ok_or("Cannot read HEAD")?
                 } else {
                     repository
                         .refname_to_id("ORIG_HEAD")
@@ -1598,10 +1863,14 @@ impl GitScreen {
                 )
             }
             GitOperationAction::Skip => (
-                "Skip current rebase commit?".into(),
+                format!("Skip current {} commit?", bar.operation),
                 vec![(
                     "Drop commit",
-                    describe(*incoming.first().ok_or("No current rebase commit")?),
+                    describe(
+                        *incoming
+                            .first()
+                            .ok_or_else(|| format!("No current {} commit", bar.operation))?,
+                    ),
                 )],
             ),
             GitOperationAction::Continue => (
@@ -1667,6 +1936,7 @@ impl GitScreen {
         let form = self.form.as_ref().ok_or("No open form")?;
         if !matches!(&form.action, FormAction::Command | FormAction::SourceSearch)
             && !matches!(&form.action, FormAction::Github(action) if !action.writes())
+            && !matches!(&form.action, FormAction::Run(op) if !op.writes())
         {
             self.allow_write()?;
         }
@@ -1807,6 +2077,15 @@ impl GitScreen {
             }
             FormAction::Reference(action) => self.submit_reference(action.clone(), &values)?,
             FormAction::Confirm(args) => self.write(args.clone())?,
+            FormAction::Run(op) => {
+                let reads = !op.writes();
+                self.submit_op(op.as_ref().clone(), &values)?;
+                // A copy is done at once: close the sheet and keep its `Copied …` notice.
+                if reads {
+                    self.form = None;
+                    return Ok(());
+                }
+            }
             FormAction::Discard(request) => {
                 // allow_write above rechecks the host and post-write readiness.
                 // Submit the dialog's immutable capture, never the current row.
@@ -1824,6 +2103,8 @@ impl GitScreen {
                 self.discard_files(&plan)?;
             }
             FormAction::Github(github::Action::CreatePullRequest) => {
+                // The sheet shows only the fields this branch needs; review reads them all.
+                let values = self.github.pr_values(&form.fields);
                 self.form = Some(self.github.review_pr(values)?);
                 self.notice.clear();
                 return Ok(());
@@ -1832,6 +2113,11 @@ impl GitScreen {
             FormAction::Command => {
                 self.tutor_command(values[0].trim())?;
                 return Ok(());
+            }
+            FormAction::OperationMenu => {
+                let action = conflicts::menu_action(&values[0]).ok_or("Choose an action")?;
+                self.form = None;
+                return self.operation_form(action);
             }
             FormAction::Conflict(path) => {
                 let choice = GitConflictChoice::parse(&values[0]).ok_or("Choose ours or theirs")?;
@@ -1882,6 +2168,7 @@ impl GitScreen {
                 self.operation_bar = read_conflict_state(&self.root)
                     .ok()
                     .and_then(|state| GitOperationBar::of(&state));
+                self.refresh_conflicts();
                 // A replay that moved on and stopped on the next conflict did what was
                 // confirmed: close the sheet and say where it stopped, without an error.
                 self.receipt = outcome
@@ -1906,6 +2193,14 @@ impl GitScreen {
         if self.reflog_submitting {
             return Ok(());
         }
+        // A modal screen's text box takes its keys first (`modal.rs`); `q` or Esc in its
+        // Normal mode closes the form as Esc does here.
+        let escape = KeyEvent::plain(KeyCode::Escape);
+        let key = match self.modal_form_key(key) {
+            modal::BoxKey::Handled(result) => return result,
+            modal::BoxKey::Close => &escape,
+            modal::BoxKey::Pass => key,
+        };
         if key.code == KeyCode::Escape {
             if self.form.as_ref().is_some_and(|form| {
                 matches!(
@@ -1931,11 +2226,32 @@ impl GitScreen {
         if key.code == KeyCode::Enter
             && (key.modifiers.control
                 || self.form.as_ref().is_some_and(|form| {
-                    matches!(form.action, FormAction::Command | FormAction::SourceSearch)
+                    matches!(
+                        form.action,
+                        FormAction::Command | FormAction::SourceSearch | FormAction::OperationMenu
+                    ) && form.selected <= form.fields.len()
+                })
+                || self.form.as_ref().is_some_and(|form| {
+                    matches!(&form.action, FormAction::Run(op) if !op.writes())
                         && form.selected <= form.fields.len()
                 }))
         {
             return self.submit();
+        }
+        // The copy menu is a list: j and k move through it as Down and Up do.
+        if let Some(form) = self.form.as_ref()
+            && matches!(&form.action, FormAction::Run(op) if !op.writes())
+            && form.selected < form.fields.len()
+            && let KeyCode::Char(letter) = key.code
+            && !key.modifiers.control
+            && !key.modifiers.alt
+        {
+            let code = match letter {
+                'j' => KeyCode::Down,
+                'k' => KeyCode::Up,
+                _ => return Ok(()),
+            };
+            return self.form_key(&KeyEvent::plain(code));
         }
         if key.modifiers.alt
             && let KeyCode::Char(letter @ ('s' | 'a' | 'n')) = key.code
@@ -2001,13 +2317,21 @@ impl GitScreen {
         {
             return Ok(());
         }
-        if !field.choices.is_empty() && matches!(key.code, KeyCode::Up | KeyCode::Down) {
+        if shell::sheet::toggle_key(field, &key.code) {
+            return Ok(());
+        }
+        // A closed choice's options sit in a row: ←/→ move along it as ↑/↓ do.
+        let closed = !field.choices.is_empty() && !field.custom_choices;
+        if !field.choices.is_empty()
+            && (matches!(key.code, KeyCode::Up | KeyCode::Down)
+                || (closed && matches!(key.code, KeyCode::Left | KeyCode::Right)))
+        {
             let index = field
                 .choices
                 .iter()
                 .position(|value| value == &field.input.input)
                 .unwrap_or(0);
-            let index = if key.code == KeyCode::Up {
+            let index = if matches!(key.code, KeyCode::Up | KeyCode::Left) {
                 (index + field.choices.len() - 1) % field.choices.len()
             } else {
                 (index + 1) % field.choices.len()
@@ -2079,9 +2403,13 @@ impl GitScreen {
     }
     pub fn event(&mut self, event: UiEvent) -> ScreenOutcome {
         let outcome = self.handle_event(event);
+        self.sync_text_box();
         // After every input, including keys a sheet, filter or overlay consumed early.
         self.advance_tutor();
-        outcome
+        match self.outcome.take() {
+            Some(asked) if outcome == ScreenOutcome::Continue => asked,
+            _ => outcome,
+        }
     }
     fn handle_event(&mut self, event: UiEvent) -> ScreenOutcome {
         let previous = (self.last_list, self.subview, self.selected, self.staged);
@@ -2115,6 +2443,11 @@ impl GitScreen {
                     }
                     return ScreenOutcome::Continue;
                 }
+                // The Git tab's chords from the shared key table (`modal.rs`): the leader and
+                // what follows it, and the lazygit preset's Space.
+                let Some(key) = self.git_chord(key) else {
+                    return ScreenOutcome::Continue;
+                };
                 if self.form.is_none() && self.file_selection_key(&key) {
                     return ScreenOutcome::Continue;
                 }
@@ -2135,6 +2468,9 @@ impl GitScreen {
                 if self.form.is_some() {
                     let result = self.form_key(&key);
                     self.report(result);
+                    return ScreenOutcome::Continue;
+                }
+                if self.ops_key(&key) {
                     return ScreenOutcome::Continue;
                 }
                 if self.rewrite_key(&key) {
@@ -2168,6 +2504,9 @@ impl GitScreen {
                     // discard here too rather than silently ignoring it there.
                     let result = self.discard_diff(key.code == KeyCode::Char('D'));
                     self.report(result);
+                    return ScreenOutcome::Continue;
+                }
+                if self.conflict_key(&key) {
                     return ScreenOutcome::Continue;
                 }
                 if self.page == 0
@@ -2219,7 +2558,7 @@ impl GitScreen {
                     && !self.busy()
                 {
                     let forward = matches!(key.code, KeyCode::Char(']' | '>'));
-                    if self.tutor.is_some() {
+                    if self.tutor.as_ref().is_some_and(|tutor| !tutor.forge_pages()) {
                         self.notice = "Use :tutor quit before opening GitHub pages".into();
                         return ScreenOutcome::Continue;
                     }
@@ -2290,6 +2629,12 @@ impl GitScreen {
                                 return ScreenOutcome::Close;
                             }
                         }
+                        // `e` opens the reader's line in the editor (DESIGN.md §5.3).
+                        KeyCode::Char('e') if self.focus == 4 => {
+                            if let Some(open) = self.open_line() {
+                                return open;
+                            }
+                        }
                         KeyCode::Char('0') => self.focus = 4,
                         KeyCode::Char(c @ '2'..='5') => self.focus = (c as u8 - b'2') as usize,
                         KeyCode::Char('1') => {
@@ -2314,7 +2659,7 @@ impl GitScreen {
                         KeyCode::End if self.focus == 4 => self.preview_edge(true),
                         KeyCode::Home => self.move_selection(isize::MIN),
                         KeyCode::End => self.move_selection(isize::MAX),
-                        KeyCode::Char('s') if self.focus == 4 => {
+                        KeyCode::Char('|') if self.focus == 4 => {
                             self.split_diff = !self.split_diff;
                             self.preview_offset = 0;
                             if self.preview.cursor_byte.is_none() {
@@ -2325,9 +2670,11 @@ impl GitScreen {
                                 self.notice.clear();
                             }
                         }
-                        KeyCode::Char(' ' | 'a' | 'V')
+                        // fugitive's and magit's keys: `s` stages, `u` unstages, `-` toggles.
+                        KeyCode::Char('s' | 'u' | '-' | 'a' | 'V')
                             if self.focus == 4 && self.last_list == 0 =>
                         {
+                            self.stage_intent = modal::stage_intent(&key.code);
                             let result = if self.jobs.preview_loading() {
                                 Err(DIFF_REFRESHING.into())
                             } else if key.code == KeyCode::Char('V') {
@@ -2335,6 +2682,7 @@ impl GitScreen {
                             } else {
                                 self.stage_diff(key.code == KeyCode::Char('a'))
                             };
+                            self.stage_intent = None;
                             self.report(result);
                         }
                         KeyCode::Left | KeyCode::Char('h') if self.focus == 4 => {
@@ -2470,8 +2818,14 @@ impl GitScreen {
                             self.staged = !self.staged;
                             self.all_files = false;
                         }
-                        KeyCode::Char(' ') if self.last_list == 0 => {
+                        // On Submodules `u` stays init · update; `-` unstages a pointer there.
+                        KeyCode::Char('s' | 'u' | '-')
+                            if self.last_list == 0
+                                && !(self.files_view == 2 && key.code == KeyCode::Char('u')) =>
+                        {
+                            self.stage_intent = modal::stage_intent(&key.code);
                             let result = self.stage();
+                            self.stage_intent = None;
                             self.report(result);
                         }
                         KeyCode::Char('o' | 't') if self.last_list == 0 && self.files_view == 0 => {
@@ -2489,7 +2843,7 @@ impl GitScreen {
                             }
                         }
                         KeyCode::Char('c') => self.commit_form(),
-                        KeyCode::Char('n' | ' ' | 'w')
+                        KeyCode::Char('n' | 'o' | 'w')
                             if self.focus == 2 && self.history_view == 1 && !key.modifiers.alt =>
                         {
                             self.reflog_form(&key.code);
@@ -2514,6 +2868,10 @@ impl GitScreen {
                                     || self.subview == 3 && key.code == KeyCode::Char('d')) =>
                         {
                             let result = self.reference_form(&key.code);
+                            self.report(result);
+                        }
+                        KeyCode::Char('o') if self.focus == 1 && self.subview == 0 => {
+                            let result = self.branch_pull_request();
                             self.report(result);
                         }
                         KeyCode::Char('n') if self.focus == 1 && self.subview == 0 => self.form(
@@ -2679,20 +3037,46 @@ impl GitScreen {
             if self.focus == 0 && self.file_selection_context() {
                 self.extend_file_range();
             }
+            if self.focus == 2 && self.history_view == 0 {
+                self.more_history(delta == isize::MAX);
+            }
         }
     }
+    /// History reads `HISTORY_PAGE` commits, then four times as many each time the cursor
+    /// comes within a third of a page of the end, and the whole log on `End`. Each read
+    /// starts over from the tip (Git's walk with a commit-graph is cheap; the parse is ours).
+    fn more_history(&mut self, to_end: bool) {
+        if !self.history_more || self.history_limit == usize::MAX {
+            return;
+        }
+        if !to_end && (self.history_loading || self.selected[5] + HISTORY_PAGE / 3 < self.history.len()) {
+            return;
+        }
+        self.history_limit = if to_end { usize::MAX } else { self.history_limit.saturating_mul(4) };
+        self.history_to_end = to_end;
+        let result = self.reload_history();
+        self.report(result);
+    }
     fn save_form_draft(&mut self) {
+        if self.modal
+            && let Some(form) = &self.form
+            && matches!(form.action, FormAction::Commit)
+            && form.fields.len() >= 2
+        {
+            let (subject, body) = (&form.fields[0].input.input, &form.fields[1].input.input);
+            self.commit_draft = (!subject.is_empty() || !body.is_empty())
+                .then(|| (subject.clone(), body.clone()));
+        }
         if let Some(form) = &self.form
             && let FormAction::Github(action) = &form.action
             && !matches!(action, github::Action::ConfirmPullRequest(_))
         {
-            self.github.save_draft(
-                action,
-                form.fields
-                    .iter()
-                    .map(|field| field.input.input.clone())
-                    .collect(),
-            );
+            let values = if matches!(action, github::Action::CreatePullRequest) {
+                self.github.pr_values(&form.fields)
+            } else {
+                form.fields.iter().map(|field| field.input.input.clone()).collect()
+            };
+            self.github.save_draft(action, values);
         }
     }
     /// A key for the forge tabs; `open:<path>` from Actions opens a file named in a log.
@@ -2704,10 +3088,32 @@ impl GitScreen {
             Ok(Some(form)) => self.form = Some(form),
             Ok(None) => {}
             Err(error) if error == "close" && !self.busy() => {
+                // In a forge lesson `q` leaves the tutor, as it does on the Git page.
+                if self.tutor.is_some() {
+                    let result = self.stop_tutor();
+                    self.report(result);
+                    return ScreenOutcome::Continue;
+                }
                 return ScreenOutcome::Close;
+            }
+            Err(error) if error.starts_with("open:") && self.tutor.is_some() => {
+                self.notice = tutor::editor_notice(&error["open:".len()..], 1);
             }
             Err(error) if error.starts_with("open:") => {
                 return ScreenOutcome::OpenFile(PathBuf::from(&error["open:".len()..]));
+            }
+            // `open-at:LINE:PATH`: a reader line, PATH relative to the repository.
+            Err(error) if error.starts_with("open-at:") => {
+                if let Some((line, path)) = error["open-at:".len()..].split_once(':')
+                    && let Ok(line) = line.parse::<usize>()
+                {
+                    if self.tutor.is_some() {
+                        self.notice = tutor::editor_notice(path, line.max(1));
+                        return ScreenOutcome::Continue;
+                    }
+                    return ScreenOutcome::OpenFileAt(self.root.join(path), line.max(1));
+                }
+                self.notice = error;
             }
             Err(error) => self.notice = error,
         }
@@ -2715,8 +3121,16 @@ impl GitScreen {
     }
     pub fn frame(&mut self, width: u16, height: u16) -> Frame {
         self.restore_rewrite_diagnostic();
+        // A modal screen's footers leave the mode chip its columns (`modal.rs`).
+        shell::chrome::set_footer_inset(self.mode_chip_width(width));
         let mut frame = if self.page == 0 {
             shell::frame(self, width, height)
+        } else if let Some(banner) = self.tutor.as_ref().and_then(|tutor| tutor.banner(height)) {
+            // A forge lesson keeps its banner above the footer, as on the Git page.
+            let inner = github::frame(self, width, height - tutor::BANNER_ROWS);
+            let mut banner = banner;
+            banner.instruction = tutor::keyed(&banner.instruction, self.github.key_table());
+            tutor::with_banner(inner, banner, width, height)
         } else {
             github::frame(self, width, height)
         };
@@ -2743,6 +3157,14 @@ impl GitScreen {
                 },
             );
         }
+        shell::chrome::set_footer_inset(0);
+        // The forge pages say a pressed leader's chords in their footer lane (`Space …  e
+        // sidebar · Esc cancel`); a box over the panes there only repeated it and drew over
+        // their borders (r15 notif-actions-08). The Git page keeps the which-key box.
+        if !matches!(self.page, 1..=4) {
+            self.paint_leader_hints(&mut frame);
+        }
+        self.paint_mode_chip(&mut frame);
         frame
     }
 
@@ -2776,7 +3198,14 @@ impl GitScreen {
     }
 
     /// Place the shared surface over the host's frame without hiding the editor around it.
+    /// A float's surroundings recede, as behind a sheet: the editor keeps its text in the
+    /// border colour, so its status line never reads as a second live footer.
     pub fn compose(background: &mut Frame, rect: crate::windows::WindowRect, foreground: &Frame) {
+        let whole = shell::layout::Rect::new(0, 0, background.grid.width(), background.grid.height());
+        let keep = shell::layout::Rect::new(rect.x, rect.y, rect.width, rect.height);
+        if keep != whole {
+            shell::chrome::scrim_within(&mut background.grid, keep, whole);
+        }
         for y in 0..rect.height {
             for x in 0..rect.width {
                 if let Some(cell) = foreground.grid.get(x, y)

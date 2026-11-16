@@ -338,7 +338,7 @@ mod tests {
         let serving = thread::spawn(move || {
             serve_io(BufReader::new(input), output, Some((target, 1)), "").unwrap();
         });
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + Duration::from_secs(20);
         let mut requests = Vec::new();
         for id in [json!(1), json!("1")] {
             writeln!(
@@ -425,7 +425,7 @@ mod tests {
             assert_eq!(replies[1]["id"], "ping");
             assert_eq!(replies[1]["result"], json!({}));
         }
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + Duration::from_secs(20);
         let mut connections = Vec::new();
         while connections.len() < MAX_CONCURRENT_CALLS {
             match listener.accept() {

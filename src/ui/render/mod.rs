@@ -58,7 +58,7 @@ mod agent;
 mod decorations;
 pub(crate) mod editor;
 
-mod markdown;
+pub(crate) mod markdown;
 
 mod settings;
 

@@ -2,7 +2,7 @@
 
 One project, `orbit/team/orbit` (a nested group, id 6329679), with merge requests, issues,
 discussions, approvals, pipelines and To-dos, answering the REST v4 and GraphQL calls the GitLab
-provider makes. Shapes follow the recorded bodies in `gitlab/bodies/`. Writes change the world,
+provider makes. Shapes follow what gitlab.com answered when recorded (VERSIONS.md). Writes change the world,
 so a test can read its own write back. `state["gitlab"]` holds the world once seeded; a test may
 seed it itself. REST lists page with `x-next-page` / `x-total` like GitLab.
 """
@@ -10,6 +10,7 @@ import copy
 import json
 import io
 import re
+import time
 import urllib.parse
 import zipfile
 
@@ -20,7 +21,7 @@ HEAD = "c92ad11000000000000000000000000000000000"
 BASE = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
 USERS = {
-    "tester": {"id": 1, "username": "tester", "name": "Test User"},
+    "rowan": {"id": 1, "username": "rowan", "name": "Rowan Reyes"},
     "maya": {"id": 1001, "username": "maya", "name": "Maya Ito"},
     "alex": {"id": 1002, "username": "alex", "name": "Alex Kim"},
     "sam": {"id": 1003, "username": "sam", "name": "Sam Rao"},
@@ -53,6 +54,18 @@ TRACE = ("\x1b[0KRunning with gitlab-runner 18.5.0\n"
          "test result: FAILED. 11 passed; 1 failed\n"
          "\x1b[0Ksection_end:1763100300:step_script\r\x1b[0K\n"
          "\x1b[31;1mERROR: Job failed: exit code 101\x1b[0;m\n")
+
+
+def running_trace():
+    """Job 20's trace so far: `$ cargo test` opened under a minute after the job started and has
+    not ended, so the step reads `running 3m` on the server clock."""
+    begun = int(now()) - 3 * 60 - 50
+    return ("\x1b[0KRunning with gitlab-runner 18.5.0\n"
+            f"\x1b[0Ksection_start:{begun}:prepare_script\r\x1b[0KPreparing environment\n"
+            "Running on runner-1 via fake...\n"
+            f"\x1b[0Ksection_end:{begun + 4}:prepare_script\r\x1b[0K\n"
+            f"\x1b[0Ksection_start:{begun + 4}:step_script\r\x1b[0K\x1b[32;1m$ cargo test\x1b[0;m\n"
+            "running 12 tests\n")
 
 
 # F6: job 44's artifact archive (`jobs/44/artifacts`, `jobs/44/artifacts/<path>`).
@@ -121,6 +134,21 @@ def issue(iid, title, author, state, updated, **extra):
     return item
 
 
+# A test that compares two servers' answers (`gitlab_transports_agree`) pins the clock with
+# `state["clock"]` (epoch seconds), so both date their running work and writes alike.
+CLOCK = [None]
+
+
+def now():
+    return CLOCK[0] if CLOCK[0] is not None else time.time()
+
+
+def stamp(seconds_ago=0):
+    """The server clock, `seconds_ago` back: running work and fresh writes are dated from it, so
+    a running job reads `running 3m`, not `running 55h`, however long after the fixture was written."""
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now() - seconds_ago))
+
+
 def pipeline(pipeline_id, iid, ref, status, sha, source, created, jobs):
     return {"id": pipeline_id, "iid": iid, "project_id": PROJECT_ID, "sha": sha, "ref": ref,
             "status": status, "source": source, "created_at": created, "updated_at": created,
@@ -151,8 +179,9 @@ def seed():
                   job(45, "deploy", "deploy", "manual", allow_failure=True)]),
         pipeline(90, 206, "main", "success", BASE, "push", "2026-11-13T18:20:00Z",
                  [job(30, "test", "test", "success"), job(31, "build", "build", "success")]),
-        pipeline(89, 205, "topic-11", "running", "11" + HEAD[2:], "push", "2026-11-13T16:00:00Z",
-                 [job(20, "test", "test", "running"), job(21, "build", "build", "created")]),
+        pipeline(89, 205, "topic-11", "running", "11" + HEAD[2:], "push", stamp(4 * 60),
+                 [job(20, "test", "test", "running", started=stamp(3 * 60 + 50)),
+                  job(21, "build", "build", "created")]),
     ]
     requests = [
         merge_request(
@@ -207,13 +236,13 @@ def seed():
         {"id": 9001, "action_name": "review_requested", "target_type": "MergeRequest", "target_iid": 13,
          "author": "maya", "state": "pending", "created_at": "2026-11-14T05:00:40Z", "body": "Retry flaky artifact uploads"},
         {"id": 9002, "action_name": "mentioned", "target_type": "Issue", "target_iid": 14,
-         "author": "sam", "state": "pending", "created_at": "2026-11-14T04:00:00Z", "body": "@tester can you look?"},
+         "author": "sam", "state": "pending", "created_at": "2026-11-14T04:00:00Z", "body": "@rowan can you look?"},
         {"id": 9003, "action_name": "build_failed", "target_type": "MergeRequest", "target_iid": 13,
          "author": "maya", "state": "done", "created_at": "2026-11-14T05:02:00Z", "body": "Pipeline failed"},
     ]
     return {"merge_requests": requests, "issues": issues, "pipelines": pipelines, "todos": todos,
             "next_id": 10000, "graphql_mutations": ["mergeRequestRequestChanges", "mergeRequestAccept"],
-            "draft_notes": True}
+            "draft_notes": True, "traces": {"20": running_trace()}}
 
 
 class Reply(Exception):
@@ -230,7 +259,9 @@ def fail(status, message):
 
 
 def public(item, hidden=("approved_by", "reviewer_states", "diffs", "commits", "discussions", "notes",
-                         "closes", "drafts", "closed_by", "approvals_required", "jobs")):
+                         "closes", "drafts", "closed_by", "approvals_required", "jobs",
+                         "resource_label_events", "resource_milestone_events", "resource_state_events",
+                         "award_emoji")):
     return {key: value for key, value in item.items() if key not in hidden}
 
 
@@ -444,7 +475,7 @@ def anonymous_project(world, operation, variables):
                                                "title": m["title"], "dueDate": m["due_date"], "state": m["state"]}
                                               for m in MILESTONES], variables)}
     if operation == "AnonymousMembers":
-        return {"projectMembers": gql_connection([{"user": gql_user(name)} for name in ("maya", "alex", "sam", "tester")],
+        return {"projectMembers": gql_connection([{"user": gql_user(name)} for name in ("maya", "alex", "sam", "rowan")],
                                                  variables)}
     if operation == "AnonymousJob":
         job_id = int(str(variables.get("id", "")).rsplit("/", 1)[-1])
@@ -474,10 +505,19 @@ def anonymous_project(world, operation, variables):
 
 
 def answer(state, request):
+    CLOCK[0] = state.get("clock")
     world = state.get("gitlab")
     if world is None:
         world = state["gitlab"] = seed()
-    viewer = state.get("viewer", "tester")
+        if state.get("actions_seed") == "design":
+            import world_actions
+            world["pipelines"], world["traces"] = world_actions.gitlab_world()
+            world["schedules"] = world_actions.GITLAB_SCHEDULES
+    if state.get("conversation"):
+        import sys
+        import world_conversation
+        world_conversation.gitlab(state, world, sys.modules[__name__])
+    viewer = state.get("viewer", "rowan")
     if request.graphql:
         return 200, graphql(world, request, viewer)
     return rest(world, request, viewer)
@@ -487,7 +527,7 @@ def rest(world, request, viewer):
     method, query, body = request.method, request.query, request.json or {}
     path = request.rest.split("?", 1)[0]
     if method == "GET" and path == "user":
-        return 200, user(viewer if viewer in USERS else "tester")
+        return 200, user(viewer if viewer in USERS else "rowan")
     if method == "GET" and path == "users":
         name = query.get("username", "")
         return 200, [user(name)] if name in USERS else []
@@ -526,21 +566,21 @@ def project_route(world, method, tail, query, body, viewer):
         chosen = [m for m in MILESTONES if not query.get("title") or m["title"] == query["title"]]
         page(chosen, query)
     if tail == "members/all":
-        page([user(name) for name in ("maya", "alex", "sam", "tester")], query)
+        page([user(name) for name in ("maya", "alex", "sam", "rowan")], query)
     if tail in ("merge_requests", "issues") and method == "GET":
         items = mrs if tail == "merge_requests" else issues
         page([public(i) for i in sorted_items(items) if matches(i, query, viewer)], query)
     if tail == "issues" and method == "POST":
         world["next_id"] += 1
-        created = issue(max(i["iid"] for i in issues + mrs) + 1, body.get("title", ""), viewer if viewer in USERS else "tester",
-                        "opened", "2026-11-14T06:00:00Z", description=body.get("description", ""),
+        created = issue(max(i["iid"] for i in issues + mrs) + 1, body.get("title", ""), viewer if viewer in USERS else "rowan",
+                        "opened", stamp(), description=body.get("description", ""),
                         labels=[l for l in (body.get("labels") or "").split(",") if l],
                         assignees=ids_to_users(body.get("assignee_ids") or []))
         issues.append(created)
         return 201, public(created)
     if tail == "merge_requests" and method == "POST":
         created = merge_request(max(i["iid"] for i in issues + mrs) + 1, body.get("title", ""),
-                                viewer if viewer in USERS else "tester", "opened", "2026-11-14T06:00:00Z",
+                                viewer if viewer in USERS else "rowan", "opened", stamp(),
                                 description=body.get("description", ""), source_branch=body.get("source_branch"),
                                 target_branch=body.get("target_branch"),
                                 draft=body.get("title", "").lower().startswith("draft:"))
@@ -581,10 +621,16 @@ def project_route(world, method, tail, query, body, viewer):
         if query.get("order_by") == "updated_at":
             chosen = sorted(chosen, key=lambda p: p["updated_at"], reverse=True)
         page([public(p) for p in chosen], query)
+    if tail == "pipeline_schedules" and method == "GET":
+        page(world.get("schedules", []), query)
+    match = re.fullmatch(r"pipeline_schedules/(\d+)/pipelines", tail)
+    if match and method == "GET":
+        chosen = [p for p in world["pipelines"] if p.get("schedule_id") == int(match.group(1))]
+        page([public(p) for p in chosen], query)
     if tail == "pipeline" and method == "POST":
         world["next_id"] += 1
         created = pipeline(world["next_id"], 300 + len(world["pipelines"]), body.get("ref", "main"), "created",
-                           BASE, "api", "2026-11-14T06:00:00Z", [job(world["next_id"] * 10, "test", "test", "created")])
+                           BASE, "api", stamp(), [job(world["next_id"] * 10, "test", "test", "created")])
         world["pipelines"].insert(0, created)
         return 201, public(created)
     match = re.fullmatch(r"jobs/(\d+)(?:/(.*))?", tail)
@@ -596,23 +642,29 @@ def project_route(world, method, tail, query, body, viewer):
         if rest == "":
             return 200, found
         if rest == "trace":
-            return 200, TRACE
+            traces = world.get("traces", {})
+            return 200, traces.get(str(job_id), traces.get(job_id, TRACE))
+        # The designed Actions world's jobs upload its archives; F6's job 44 uploads this file's.
+        import world_actions
+        designed = world_actions.GITLAB_ARCHIVES.get(job_id)
+        members = world_actions.DESIGN_FILES.get(designed, {}) if designed else ARTIFACT_FILES
         if rest == "artifacts" and method == "GET":
             if not found.get("artifacts_file"):
                 fail(404, "404 Not Found")
-            raise Reply(200, artifact_zip(), {"Content-Type": "application/zip",
-                                              "Content-Disposition": 'attachment; filename="artifacts.zip"'})
+            archive = world_actions.artifact_zip(designed) if designed else artifact_zip()
+            raise Reply(200, archive, {"Content-Type": "application/zip",
+                                       "Content-Disposition": 'attachment; filename="artifacts.zip"'})
         if rest.startswith("artifacts/") and method == "GET":
             wanted = urllib.parse.unquote(rest[len("artifacts/"):])
-            if not found.get("artifacts_file") or wanted not in ARTIFACT_FILES:
+            if not found.get("artifacts_file") or wanted not in members:
                 fail(404, "404 File Not Found")
-            raise Reply(200, ARTIFACT_FILES[wanted], {"Content-Type": "application/octet-stream"})
+            raise Reply(200, members[wanted], {"Content-Type": "application/octet-stream"})
         if rest == "retry" and method == "POST":
             found["status"] = "pending"
             return 201, found
     match = re.fullmatch(r"repository/commits/([^/]+)/diff", tail)
     if match:
-        page(DIFF_13, query)
+        page(world.get("commit_diffs", {}).get(match.group(1), DIFF_13), query)
     if tail == "repository/files/.gitlab-ci.yml/raw":
         return 200, "stages: [test, build, deploy]\ntest:\n  stage: test\n  script: cargo test\n"
     fail(404, "404 Not Found")
@@ -638,7 +690,7 @@ def edit(item, body):
         item["reviewers"] = ids_to_users(body["reviewer_ids"])
     if "milestone_id" in body:
         item["milestone"] = next((m for m in MILESTONES if m["id"] == body["milestone_id"]), None)
-    item["updated_at"] = "2026-11-14T06:00:00Z"
+    item["updated_at"] = stamp()
 
 
 def item_route(world, kind, item, method, rest, query, body, viewer):
@@ -652,8 +704,8 @@ def item_route(world, kind, item, method, rest, query, body, viewer):
     if rest == "notes":
         if method == "POST":
             world["next_id"] += 1
-            created = note(world["next_id"], viewer if viewer in USERS else "tester", body.get("body", ""),
-                           "2026-11-14T06:00:00Z")
+            created = note(world["next_id"], viewer if viewer in USERS else "rowan", body.get("body", ""),
+                           stamp())
             item["notes"].append(created)
             item["user_notes_count"] += 1
             return 201, created
@@ -667,6 +719,10 @@ def item_route(world, kind, item, method, rest, query, body, viewer):
             return 304, None
         item["subscribed"] = wanted
         return 201, public(item)
+    if rest in ("resource_label_events", "resource_milestone_events", "resource_state_events") and method == "GET":
+        page(item.get(rest, []), query)
+    if rest == "award_emoji" and method == "GET":
+        page(item.get("award_emoji", []), query)
     if not is_mr:
         if rest == "closed_by":
             return 200, [public(find(world["merge_requests"], "iid", n)) for n in item["closed_by"]]
@@ -688,8 +744,8 @@ def item_route(world, kind, item, method, rest, query, body, viewer):
             world["next_id"] += 1
             pos = body.get("position")
             created = {"id": f"d{world['next_id']}", "individual_note": pos is None, "notes": [
-                note(world["next_id"], viewer if viewer in USERS else "tester", body.get("body", ""),
-                     "2026-11-14T06:00:00Z", kind="DiffNote" if pos else None, position=pos, resolvable=bool(pos))]}
+                note(world["next_id"], viewer if viewer in USERS else "rowan", body.get("body", ""),
+                     stamp(), kind="DiffNote" if pos else None, position=pos, resolvable=bool(pos))]}
             item["discussions"].append(created)
             return 201, created
         page(item["discussions"], query)
@@ -699,8 +755,8 @@ def item_route(world, kind, item, method, rest, query, body, viewer):
         if match.group(2) and method == "POST":
             world["next_id"] += 1
             first = discussion["notes"][0]
-            created = note(world["next_id"], viewer if viewer in USERS else "tester", body.get("body", ""),
-                           "2026-11-14T06:00:00Z", kind=first.get("type"), position=first.get("position"),
+            created = note(world["next_id"], viewer if viewer in USERS else "rowan", body.get("body", ""),
+                           stamp(), kind=first.get("type"), position=first.get("position"),
                            resolvable=first.get("resolvable", False))
             discussion["notes"].append(created)
             return 201, created
@@ -719,8 +775,8 @@ def item_route(world, kind, item, method, rest, query, body, viewer):
         for draft in item["drafts"]:
             world["next_id"] += 1
             pos = draft.get("position")
-            created = note(world["next_id"], viewer if viewer in USERS else "tester", draft["note"],
-                           "2026-11-14T06:00:00Z", kind="DiffNote" if pos else None, position=pos,
+            created = note(world["next_id"], viewer if viewer in USERS else "rowan", draft["note"],
+                           stamp(), kind="DiffNote" if pos else None, position=pos,
                            resolvable=bool(pos))
             if pos:
                 item["discussions"].append({"id": f"d{world['next_id']}", "individual_note": False, "notes": [created]})
@@ -750,7 +806,7 @@ def item_route(world, kind, item, method, rest, query, body, viewer):
             item["merge_when_pipeline_succeeds"] = True
             return 200, mr_detail(world, item)
         item["state"] = "merged"
-        item["updated_at"] = "2026-11-14T06:00:00Z"
+        item["updated_at"] = stamp()
         item["squash"] = bool(body.get("squash"))
         return 200, mr_detail(world, item)
     fail(404, "404 Not Found")

@@ -67,7 +67,7 @@ def auth_status(argv):
                       f"Run `glab auth login --hostname {host}`\n")
     token = reply["stdout"].strip()
     shown = token if "--show-token" in argv else "**************************"
-    user = reply.get("user", "tester")
+    user = reply.get("user", "rowan")
     finish(0, "", f"{host}\n"
                   f"  ✓ Logged in to {host} as {user} (/fake/glab-cli/config.yml)\n"
                   f"  ✓ Git operations for {host} configured to use ssh protocol.\n"
@@ -86,7 +86,9 @@ def api(argv):
         if word in ("-H", "--header") and index + 1 < len(argv):
             key, _, value = argv[index + 1].partition(":")
             headers[key.strip()] = value.strip()
-    body = sys.stdin.buffer.read() if flag(argv, "--input") == "-" else None
+    source = flag(argv, "--input")
+    # `--input -` reads stdin; `--input FILE` a file (authored text, like `--body-file`).
+    body = sys.stdin.buffer.read() if source == "-" else (open(source, "rb").read() if source else None)
     quoted = urllib.parse.quote(host, safe=":")
     if endpoint == "graphql":
         url = f"{SERVER}/{quoted}/api/graphql"

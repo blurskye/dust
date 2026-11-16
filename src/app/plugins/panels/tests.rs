@@ -9,6 +9,16 @@ use crate::plugins::PluginPresenterKind;
 use crate::plugins::PluginPrivateCellPolicy;
 use crate::windows::ContentLifecycle;
 
+/// The default epoch budget gives activation 100 ms of wall-clock time, which an unoptimized
+/// test build can outlast on a loaded machine. These tests are not about that budget
+/// (plugins::host_tests covers it), so activation gets ten seconds.
+fn activation_limits() -> crate::plugins::PluginLimits {
+    crate::plugins::PluginLimits {
+        epoch_deadline_ticks: 1000,
+        ..Default::default()
+    }
+}
+
 fn index(owner: &str, plugin_load: u64) -> PluginContributionIndex {
     PluginContributionIndex {
         capabilities: Default::default(),
@@ -648,7 +658,7 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
         store.path(),
         &path,
         manifest.clone(),
-        &crate::plugins::PluginLimits::default(),
+        &activation_limits(),
     )
     .expect("production component load");
     assert_eq!(
@@ -903,7 +913,8 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
                 execution.storage_requests.into_iter().next().unwrap(),
             )
             .expect("storage worker request");
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        // A bound for a stuck worker, not a speed requirement.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
         storage_results = loop {
             let results = storage.poll();
             if !results.is_empty() {
@@ -1092,7 +1103,7 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
         store.path(),
         &path,
         manifest.clone(),
-        &crate::plugins::PluginLimits::default(),
+        &activation_limits(),
     )
     .expect("trap runtime");
     let trapped = crate::plugins::execute_component(
@@ -1161,9 +1172,12 @@ fn real_component_drives_the_retained_window_protocol_without_wasi() {
         store.path(),
         &path,
         manifest.clone(),
-        &crate::plugins::PluginLimits::default(),
+        &activation_limits(),
     )
     .expect("deadline runtime");
+    // Only activation gets the long budget: `spin` must still meet the default deadline.
+    deadline_outcome.runtime.limits.epoch_deadline_ticks =
+        crate::plugins::PluginLimits::default().epoch_deadline_ticks;
     let interrupted = crate::plugins::execute_component(
         crate::plugins::PluginExecutionRequest {
             call: Default::default(),

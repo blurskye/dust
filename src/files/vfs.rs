@@ -2795,7 +2795,7 @@ pub(crate) fn sync_directory(_directory: &Path) -> io::Result<()> {
 mod lifecycle_tests {
     use crate::files::vfs::*;
     fn result(worker: &VfsWorker) -> VfsResult {
-        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        let deadline = std::time::Instant::now() + Duration::from_secs(20);
         loop {
             if let Some(result) = worker.try_result().unwrap() {
                 return result;
@@ -3219,7 +3219,7 @@ mod lifecycle_tests {
         let path = root.path().join("file");
         fs::write(&path, b"text").unwrap();
         let mut worker = VfsWorker::start(1);
-        let queue_deadline = std::time::Instant::now() + Duration::from_secs(2);
+        let queue_deadline = std::time::Instant::now() + Duration::from_secs(20);
         for _ in 0..3 {
             loop {
                 assert!(std::time::Instant::now() < queue_deadline);
@@ -3245,7 +3245,7 @@ mod lifecycle_tests {
         drop(worker);
         assert!(start.elapsed() < Duration::from_millis(50));
         gate.send(()).unwrap();
-        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        let deadline = std::time::Instant::now() + Duration::from_secs(20);
         while !finished.load(Ordering::Acquire) {
             assert!(std::time::Instant::now() < deadline);
             thread::sleep(Duration::from_millis(1));

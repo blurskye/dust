@@ -117,7 +117,13 @@ impl Harness {
         );
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("state.json");
-        std::fs::write(&path, json!({ "glab_auth": { "*": "token" } }).to_string()).unwrap();
+        // A pinned clock: the world dates its running pipeline and every write from it, so
+        // two harnesses started seconds apart answer alike (`gitlab_transports_agree`).
+        std::fs::write(
+            &path,
+            json!({ "glab_auth": { "*": "token" }, "clock": 1_794_787_200 }).to_string(),
+        )
+        .unwrap();
         let server = ForgeServer::start(&path, "gitlab");
         let glab = server.install_glab(&directory.path().join("bin"));
         let endpoints = detect::endpoints_for(
@@ -281,8 +287,10 @@ impl Harness {
                         "{words:?}"
                     );
                     if !request["body"].is_null() || request["path"] == "graphql" {
+                        // stdin, or a private file for authored text (`body_file`).
                         assert!(
-                            words.windows(2).any(|pair| pair == ["--input", "-"]),
+                            words.windows(2).any(|pair| pair[0] == "--input"
+                                && (pair[1] == "-" || pair[1].contains("dusty-forge-body-"))),
                             "{words:?}"
                         );
                     }
@@ -1108,12 +1116,14 @@ fn drafts() -> Vec<InlineDraft> {
             line: 12,
             side: Side::Right,
             body: "Name the count".into(),
+            start_line: None,
         },
         InlineDraft {
             path: "ci/retry.rs".into(),
             line: 2,
             side: Side::Right,
             body: "Back off?".into(),
+            start_line: None,
         },
     ]
 }
@@ -1161,7 +1171,7 @@ pub fn review_batches_drafts_then_approves(harness: &Harness) {
     assert!(
         pull.reviews
             .iter()
-            .any(|review| review.author.login == "tester" && review.state == ReviewState::Approved)
+            .any(|review| review.author.login == "rowan" && review.state == ReviewState::Approved)
     );
     let threads = some(
         harness.read(Read::Threads(13)).unwrap(),
@@ -1406,17 +1416,18 @@ pub fn pipelines(harness: &Harness) {
             .iter()
             .map(|run| run.id.0.as_str())
             .collect::<Vec<_>>(),
-        ["91", "90", "89"]
+        // Newest update first: the running pipeline started minutes ago.
+        ["89", "91", "90"]
     );
     assert_eq!(runs.total, Some(3));
-    let failed = &runs.items[0];
+    let failed = &runs.items[1];
     assert_eq!(failed.conclusion, Some(CiState::Failed));
     assert_eq!(failed.conclusion_raw.as_deref(), Some("failure"));
     assert_eq!(failed.pr_number, Some(13));
     assert_eq!(failed.status, RunStatus::Completed);
     assert_eq!(failed.number, 207);
-    assert_eq!(runs.items[2].status, RunStatus::InProgress);
-    assert_eq!(runs.items[2].conclusion, None);
+    assert_eq!(runs.items[0].status, RunStatus::InProgress);
+    assert_eq!(runs.items[0].conclusion, None);
     let main = some(
         harness
             .read(Read::Runs {
@@ -1448,7 +1459,8 @@ pub fn pipelines(harness: &Harness) {
             .iter()
             .map(|workflow| (workflow.id.0.as_str(), workflow.name.as_str()))
             .collect::<Vec<_>>(),
-        [("merge_request_event", "Merge request"), ("push", "Push")]
+        // In the order the newest pipelines name them: the running push pipeline first.
+        [("push", "Push"), ("merge_request_event", "Merge request")]
     );
     assert!(
         workflows
@@ -1755,7 +1767,7 @@ pub fn read_only_navigation_makes_no_writes(harness: &Harness) {
             _ => None,
         },
     );
-    assert_eq!(viewer.login, "tester");
+    assert_eq!(viewer.login, "rowan");
     let labels = some(
         harness.read(Read::Labels).unwrap(),
         |payload| match payload {
@@ -1933,5 +1945,145 @@ pub fn transports_agree() {
         assert_eq!(left, right);
     }
     assert_eq!(http_seen.len(), glab_seen.len());
-    assert_eq!(http_requests, glab_requests);
+    assert_eq!(unordered_reads(http_requests), unordered_reads(glab_requests));
+}
+
+/// The ledger with each run of consecutive GETs sorted: one read sends its independent parts at
+/// once (FORGE.md §7), so they arrive in any order; writes and the reads between them keep theirs.
+fn unordered_reads(mut requests: Vec<String>) -> Vec<String> {
+    let mut start = 0;
+    while start < requests.len() {
+        let end = (start..requests.len())
+            .find(|&at| !requests[at].starts_with("\"GET\""))
+            .unwrap_or(requests.len());
+        requests[start..end].sort();
+        start = end + 1;
+    }
+    requests
+}
+
+// ------------------------------------------------------------------------------ conversation
+
+/// `state["conversation"]` (world_conversation.py): merge request !15 and issue #16 read the
+/// way the reader does, notes and resource events merged into one timeline in time order.
+pub fn conversation_timelines(harness: &Harness) {
+    harness.update(|state| state["conversation"] = json!(true));
+    let timeline = |number: u64| {
+        some(
+            harness.read(Read::Timeline(number)).unwrap(),
+            |payload| match payload {
+                Payload::Timeline(timeline) => Some(timeline),
+                _ => None,
+            },
+        )
+    };
+    let when = |event: &TimelineEvent| match event {
+        TimelineEvent::Commented(comment) => comment.created.0.clone(),
+        TimelineEvent::Reviewed(review) => review.submitted.0.clone(),
+        TimelineEvent::Committed(commit) => commit.committed.0.clone(),
+        TimelineEvent::Labeled { by, .. }
+        | TimelineEvent::Assigned { by, .. }
+        | TimelineEvent::ReviewRequested { by, .. }
+        | TimelineEvent::Milestoned { by, .. }
+        | TimelineEvent::CrossReferenced { by, .. }
+        | TimelineEvent::Other { by, .. } => by.at.0.clone(),
+        other => panic!("unexpected event {other:?}"),
+    };
+
+    let merge_request = timeline(15);
+    let kinds = |events: &[TimelineEvent], pick: fn(&TimelineEvent) -> Option<String>| {
+        events.iter().filter_map(pick).collect::<Vec<_>>()
+    };
+    assert_eq!(
+        kinds(&merge_request, |event| match event {
+            TimelineEvent::Labeled { label, .. } => Some(label.clone()),
+            _ => None,
+        }),
+        ["bug", "priority::high"]
+    );
+    assert_eq!(
+        kinds(&merge_request, |event| match event {
+            TimelineEvent::ReviewRequested { reviewer, .. } => Some(reviewer.clone()),
+            TimelineEvent::Assigned { assignee, .. } => Some(format!("assigned {assignee}")),
+            TimelineEvent::Milestoned { milestone, .. } => Some(format!("milestone {milestone}")),
+            TimelineEvent::Committed(commit) => Some(format!("commit {}", commit.headline)),
+            TimelineEvent::Reviewed(review) => Some(format!("{:?}", review.state)),
+            _ => None,
+        }),
+        [
+            "alex",
+            "sam",
+            "assigned maya",
+            "milestone v1.4",
+            "ChangesRequested",
+            "commit Name the exponent cap and clamp negative attempts",
+            "Approved",
+        ]
+    );
+    let bots = merge_request
+        .iter()
+        .filter_map(|event| match event {
+            TimelineEvent::Commented(comment) if comment.author.bot => Some(comment.author.login.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(bots, ["project_6329679_bot_7c2e1d", "coderabbit-bot"]);
+    assert!(merge_request.iter().any(|event| matches!(
+        event,
+        TimelineEvent::Commented(comment) if comment.edited.is_some() && comment.author.login == "nina"
+    )));
+    // Inline notes belong to threads, not the timeline.
+    assert!(!merge_request.iter().any(|event| matches!(
+        event,
+        TimelineEvent::Commented(comment) if comment.body.contains("magic number")
+    )));
+    let stamps = merge_request.iter().map(when).collect::<Vec<_>>();
+    assert!(stamps.windows(2).all(|pair| pair[0] <= pair[1]), "{stamps:?}");
+
+    let threads = some(
+        harness.read(Read::Threads(15)).unwrap(),
+        |payload| match payload {
+            Payload::Threads(threads) => Some(threads),
+            _ => None,
+        },
+    );
+    assert_eq!(
+        threads
+            .iter()
+            .map(|thread| (thread.path.as_deref(), thread.line, thread.resolved, thread.comments.len()))
+            .collect::<Vec<_>>(),
+        [
+            (Some("orbit/queue.py"), Some(14), Some(true), 3),
+            (Some("tests/test_queue.py"), Some(5), Some(false), 1),
+        ]
+    );
+
+    harness.read(Read::Issue(16)).unwrap();
+    let issue = timeline(16);
+    let said = issue
+        .iter()
+        .filter_map(|event| match event {
+            TimelineEvent::Commented(comment) => Some(comment),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(said.len(), 6);
+    assert!(said.iter().any(|comment| comment.author.bot));
+    assert!(issue.iter().any(|event| matches!(
+        event,
+        TimelineEvent::CrossReferenced { link, .. } if link.number == 15 && link.kind == Some(ItemKind::PullRequest)
+    )));
+    assert!(issue.iter().any(|event| matches!(event, TimelineEvent::Assigned { assignee, .. } if assignee == "maya")));
+    assert!(issue.iter().any(|event| matches!(event, TimelineEvent::Labeled { .. })));
+    for read in ["merge_requests/15", "issues/16"] {
+        for path in ["notes", "resource_label_events", "resource_milestone_events"] {
+            assert!(
+                harness
+                    .requests()
+                    .iter()
+                    .any(|request| request["path"] == format!("{PROJECT}/{read}/{path}")),
+                "{read}/{path} was not read"
+            );
+        }
+    }
 }

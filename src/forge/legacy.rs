@@ -109,6 +109,8 @@ pub const RUN_LIST_FIELDS: &[&str] = &[
     "createdAt",
     "attempt",
     "workflowDatabaseId",
+    "number",
+    "url",
 ];
 pub const RUN_VIEW_FIELDS: &[&str] = &[
     "databaseId",
@@ -122,6 +124,8 @@ pub const RUN_VIEW_FIELDS: &[&str] = &[
     "attempt",
     "jobs",
     "workflowDatabaseId",
+    "number",
+    "url",
 ];
 pub const REPOSITORY_FIELDS: &[&str] = &["nameWithOwner", "url", "defaultBranchRef"];
 
@@ -218,6 +222,8 @@ pub fn encode(shape: Shape, payload: &Payload) -> (Value, String) {
                 "name": workflow.name,
                 "path": workflow.path,
                 "state": workflow.state,
+                // Known only where the forge says (GitLab's sources); else read with `d`.
+                "dispatchable": workflow.dispatchable,
             })).collect::<Vec<_>>(),
         }),
         (_, Payload::Runs(runs)) => Value::Array(runs.items.iter().map(run_row).collect()),
@@ -282,7 +288,37 @@ pub fn workflow_id(id: &ItemId) -> ItemId {
 }
 
 fn author(user: &User) -> Value {
+    if user.bot {
+        // REST says `type`, GraphQL `__typename`; one value serves both shapes.
+        return json!({ "login": user.login, "type": "Bot", "__typename": "Bot" });
+    }
     json!({ "login": user.login })
+}
+
+/// REST's reaction rollup on a comment (`{"+1": 2, "heart": 1, "total_count": 3}`).
+fn reaction_rollup(reactions: &[Reaction]) -> Value {
+    let mut value = serde_json::Map::new();
+    for reaction in reactions {
+        value.insert(reaction.content.clone(), reaction.count.into());
+    }
+    value.insert(
+        "total_count".into(),
+        reactions.iter().map(|reaction| reaction.count).sum::<u64>().into(),
+    );
+    Value::Object(value)
+}
+
+/// GraphQL's `reactionGroups` for a review comment.
+fn reaction_groups(reactions: &[Reaction]) -> Value {
+    let word = |content: &str| match content {
+        "+1" => "THUMBS_UP".to_owned(),
+        "-1" => "THUMBS_DOWN".to_owned(),
+        other => other.to_ascii_uppercase(),
+    };
+    reactions
+        .iter()
+        .map(|reaction| json!({ "content": word(&reaction.content), "users": { "totalCount": reaction.count } }))
+        .collect()
 }
 
 fn state(lifecycle: Lifecycle) -> &'static str {
@@ -374,6 +410,22 @@ fn row_extension(row: &ItemRow) -> Value {
     if let Some(ci) = row.ci {
         extension.insert("ci".into(), ci_word(ci).into());
     }
+    if let Some(created) = &row.created {
+        extension.insert("created".into(), created.as_str().into());
+    }
+    if let Some(linked) = row.linked {
+        extension.insert("linked".into(), linked.into());
+    }
+    if let Some(tally) = row.review_tally {
+        extension.insert(
+            "reviews".into(),
+            json!({
+                "approved": tally.approved,
+                "changesRequested": tally.changes_requested,
+                "pending": tally.pending,
+            }),
+        );
+    }
     Value::Object(extension)
 }
 
@@ -432,6 +484,18 @@ fn link(link: &LinkRef) -> Value {
 }
 
 fn issue_view(issue: &Issue) -> Value {
+    with_reactions(issue_fields(issue), &issue.reactions)
+}
+
+/// The item's REST reaction rollup, where it has reactions.
+fn with_reactions(mut value: Value, reactions: &[Reaction]) -> Value {
+    if !reactions.is_empty() {
+        value["reactions"] = reaction_rollup(reactions);
+    }
+    value
+}
+
+fn issue_fields(issue: &Issue) -> Value {
     json!({
         "id": issue.row.id.0,
         "number": issue.row.number,
@@ -486,10 +550,28 @@ fn check(check: &Check) -> Value {
         "detailsUrl": check.details_url.clone().unwrap_or_default(),
         "startedAt": check.started.as_ref().map(Timestamp::as_str).unwrap_or_default(),
         "completedAt": check.completed.as_ref().map(Timestamp::as_str).unwrap_or_default(),
+        // The run as the API reads it, where the link names it otherwise: Gitea's status
+        // links its run by its index in the repository (`…/actions/runs/6`), not its id.
+        "dustyRun": api_run(check),
     })
 }
 
+/// The id the API reads the check's run by, when its link names an Actions run.
+fn api_run(check: &Check) -> Value {
+    let linked = check.details_url.as_deref().is_some_and(|url| url.contains("/actions/runs/"));
+    check
+        .run_link
+        .as_ref()
+        .filter(|_| linked)
+        .and_then(|link| link.run.0.parse::<u64>().ok())
+        .map_or(Value::Null, Value::from)
+}
+
 fn pull_request_view(pull: &PullRequest) -> Value {
+    with_reactions(pull_request_fields(pull), &pull.reactions)
+}
+
+fn pull_request_fields(pull: &PullRequest) -> Value {
     let row = &pull.row;
     json!({
         "id": row.id.0,
@@ -570,6 +652,15 @@ fn timeline_event(timeline: &TimelineEvent) -> Value {
             value.insert("body".into(), comment.body.clone().into());
             value.insert("created_at".into(), comment.created.as_str().into());
             value.insert("node_id".into(), comment.id.0.clone().into());
+            if let Some(association) = &comment.association {
+                value.insert("author_association".into(), association.clone().into());
+            }
+            if let Some(edited) = &comment.edited {
+                value.insert("updated_at".into(), edited.as_str().into());
+            }
+            if !comment.reactions.is_empty() {
+                value.insert("reactions".into(), reaction_rollup(&comment.reactions));
+            }
             value
         }
         TimelineEvent::Reviewed(review) => {
@@ -618,7 +709,12 @@ fn timeline_event(timeline: &TimelineEvent) -> Value {
             value.insert("sha".into(), commit.sha.clone().into());
             value.insert("message".into(), commit.body.clone().into());
             if let Some(user) = &commit.author {
-                value.insert("author".into(), author(user));
+                let mut who = author(user);
+                // REST's commit author is a name (no login) when the forge has no account for it.
+                if let Some(name) = &user.name {
+                    who["name"] = name.clone().into();
+                }
+                value.insert("author".into(), who);
             }
             value.insert("created_at".into(), commit.committed.as_str().into());
             value
@@ -653,13 +749,38 @@ fn timeline_event(timeline: &TimelineEvent) -> Value {
             value.insert("requested_reviewer".into(), json!({ "login": reviewer }));
             value
         }
+        TimelineEvent::Milestoned { milestone, by } | TimelineEvent::Demilestoned { milestone, by } => {
+            let kind = if matches!(timeline, TimelineEvent::Milestoned { .. }) {
+                "milestoned"
+            } else {
+                "demilestoned"
+            };
+            let mut value = event(kind, by);
+            value.insert("milestone".into(), json!({ "title": milestone }));
+            value
+        }
         TimelineEvent::Other { kind, by } => event(kind, by),
+        TimelineEvent::Detailed { kind, detail, by } => {
+            let mut value = event(kind, by);
+            for (path, text) in detail {
+                match path.split_once('.') {
+                    Some((outer, inner)) => {
+                        let nested = value.entry(outer).or_insert_with(|| json!({}));
+                        nested[inner] = text.clone().into();
+                    }
+                    None => {
+                        value.insert(path.clone(), text.clone().into());
+                    }
+                }
+            }
+            value
+        }
     };
     Value::Object(value)
 }
 
 fn thread(thread: &ReviewThread) -> Value {
-    json!({
+    let mut value = json!({
         "id": thread.id.0,
         "isResolved": thread.resolved,
         "path": thread.path,
@@ -670,7 +791,7 @@ fn thread(thread: &ReviewThread) -> Value {
             "totalCount": thread.total_comments.unwrap_or(thread.comments.len() as u64),
             "nodes": thread.comments.iter().map(|comment| {
                 let position = comment.position.clone().unwrap_or_default();
-                json!({
+                let mut node = json!({
                     "id": comment.id.0,
                     "createdAt": comment.created.as_str(),
                     "author": author(&comment.author),
@@ -679,10 +800,29 @@ fn thread(thread: &ReviewThread) -> Value {
                     "line": position.line,
                     "originalLine": position.original_line,
                     "commit": { "oid": position.commit.unwrap_or_default() },
-                })
+                });
+                // GitHub repeats the hunk on every comment of a thread.
+                if let Some(hunk) = &thread.diff_hunk {
+                    node["diffHunk"] = hunk.clone().into();
+                }
+                if let Some(association) = &comment.association {
+                    node["authorAssociation"] = association.clone().into();
+                }
+                if let Some(edited) = &comment.edited {
+                    node["lastEditedAt"] = edited.as_str().into();
+                }
+                if !comment.reactions.is_empty() {
+                    node["reactionGroups"] = reaction_groups(&comment.reactions);
+                }
+                node
             }).collect::<Vec<_>>(),
         },
-    })
+    });
+    // A multi-line thread's first line (GitHub's `startLine`); one-line threads leave it out.
+    if let Some(start) = thread.start_line {
+        value["startLine"] = start.into();
+    }
+    value
 }
 
 fn status_word(status: RunStatus) -> &'static str {
@@ -724,18 +864,29 @@ fn run_fields(run: &Run) -> serde_json::Map<String, Value> {
             .map(|workflow| workflow_number(&workflow.id))
             .unwrap_or(Value::from(0)),
     );
-    // Actions table and sheets (§3.37): run number, duration, PR, approval and attempts.
     value.insert("number".into(), run.number.into());
+    value.insert("url".into(), run.web_url.clone().into());
+    value.insert("dusty".into(), run_extension(run));
+    value
+}
+
+/// What the Actions table and sheets (§3.37) need that gh's run fields never carried: the
+/// duration, the pull request, approval, who started it and how many attempts there are. One
+/// key, as for items (`row_extension`), so the gh field-set parity stays exact.
+fn run_extension(run: &Run) -> Value {
+    let mut extension = serde_json::Map::new();
     if let Some(duration) = run.duration {
-        value.insert("durationSeconds".into(), duration.as_secs().into());
+        extension.insert("durationSeconds".into(), duration.as_secs().into());
     }
     if let Some(pr) = run.pr_number {
-        value.insert("prNumber".into(), pr.into());
+        extension.insert("prNumber".into(), pr.into());
     }
-    value.insert("needsApproval".into(), run.needs_approval.into());
-    value.insert("attempts".into(), run.attempts.into());
-    value.insert("url".into(), run.web_url.clone().into());
-    value
+    extension.insert("needsApproval".into(), run.needs_approval.into());
+    if !run.actor.is_empty() {
+        extension.insert("actor".into(), run.actor.clone().into());
+    }
+    extension.insert("attempts".into(), run.attempts.into());
+    Value::Object(extension)
 }
 
 fn run_row(run: &Run) -> Value {

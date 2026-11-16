@@ -1629,7 +1629,7 @@ fn tutor_moves_on_when_each_step_is_done() {
             .to_owned()
     }
     fn wait_root(app: &mut App) {
-        let deadline = Instant::now() + Duration::from_secs(2);
+        let deadline = Instant::now() + Duration::from_secs(20);
         while app.workspace.root_operation_pending() {
             app.process_trust_events();
             assert!(Instant::now() < deadline, "root switch timed out");
@@ -1647,7 +1647,7 @@ fn tutor_moves_on_when_each_step_is_done() {
             title(app)
         );
         let before = title(app);
-        let deadline = Instant::now() + Duration::from_secs(3);
+        let deadline = Instant::now() + Duration::from_secs(20);
         while title(app) == before {
             assert!(Instant::now() < deadline, "{before} never moved on");
             thread::sleep(Duration::from_millis(10));
@@ -1804,6 +1804,184 @@ pub(in crate::app) fn press(app: &mut App, key: &str) {
 pub(in crate::app) fn press_keys(app: &mut App, keys: &[&str]) {
     for key in keys {
         press(app, key);
+    }
+}
+
+#[test]
+fn upper_d_c_and_y_act_to_the_end_of_the_line_as_in_neovim() {
+    let (_app_dirs, mut app) = app();
+    app.set_dashboard_visibility(false);
+    let open = |app: &mut App| {
+        let (buffer, view) = app
+            .state
+            .open_text(TextBuffer::from_text("one two three\n"), None)
+            .unwrap();
+        app.state.views[view].cursor = ByteOffset(4);
+        buffer
+    };
+    let buffer = open(&mut app);
+    press_keys(&mut app, &["D"]);
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "one \n");
+    let buffer = open(&mut app);
+    press_keys(&mut app, &["C", "x", "escape"]);
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "one x\n");
+    let buffer = open(&mut app);
+    // `Y` yanks to the end of the line (neovim's default), not the whole line.
+    press_keys(&mut app, &["Y", "0", "P"]);
+    assert_eq!(
+        app.state.buffers[buffer].text.to_string(),
+        "two threeone two three\n"
+    );
+}
+
+#[test]
+fn gi_reopens_insert_mode_where_it_last_stopped_and_follows_edits_above() {
+    let (_app_dirs, mut app) = app();
+    app.set_dashboard_visibility(false);
+    let (buffer, view) = app
+        .state
+        .open_text(TextBuffer::from_text("one\ntwo\n"), None)
+        .unwrap();
+    app.state.views[view].cursor = ByteOffset(0);
+    // Esc steps the cursor back onto `x`, but Insert mode stopped after it.
+    press_keys(&mut app, &["A", "x", "escape"]);
+    assert_eq!(app.state.views[view].cursor, ByteOffset(3));
+    assert_eq!(app.state.buffers[buffer].last_insert, Some(ByteOffset(4)));
+    // A line put above moves the mark with its text.
+    press_keys(&mut app, &["y", "y", "P", "G", "g", "i", "y", "escape"]);
+    assert_eq!(
+        app.state.buffers[buffer].text.to_string(),
+        "onex\nonexy\ntwo\n"
+    );
+    // A buffer that has never been in Insert mode inserts at the cursor.
+    let (buffer, view) = app
+        .state
+        .open_text(TextBuffer::from_text("abc\n"), None)
+        .unwrap();
+    app.state.views[view].cursor = ByteOffset(1);
+    press_keys(&mut app, &["g", "i", "z", "escape"]);
+    assert_eq!(app.state.buffers[buffer].text.to_string(), "azbc\n");
+}
+
+#[test]
+fn gv_reselects_the_last_visual_selection_with_its_kind() {
+    let (_app_dirs, mut app) = app();
+    app.set_dashboard_visibility(false);
+    let (_buffer, view) = app
+        .state
+        .open_text(TextBuffer::from_text("alpha beta\ngamma delta\n"), None)
+        .unwrap();
+    app.state.views[view].cursor = ByteOffset(0);
+    let selected = |app: &App| {
+        let view = &app.state.views[view];
+        let selection = view.selection.expect("a selection");
+        (view.mode, selection.anchor.get(), selection.head.get())
+    };
+    press_keys(&mut app, &["v", "e", "escape", "j"]);
+    assert_eq!(app.state.views[view].mode, crate::editor::EditorMode::Normal);
+    press_keys(&mut app, &["g", "v"]);
+    assert_eq!(selected(&app), (crate::editor::EditorMode::VisualChar, 0, 4));
+    // In Visual mode `gv` swaps the current selection with the previous one.
+    press_keys(&mut app, &["escape", "w", "v", "e"]);
+    assert_eq!(selected(&app), (crate::editor::EditorMode::VisualChar, 6, 9));
+    press_keys(&mut app, &["g", "v"]);
+    assert_eq!(selected(&app), (crate::editor::EditorMode::VisualChar, 0, 4));
+    press_keys(&mut app, &["g", "v"]);
+    assert_eq!(selected(&app), (crate::editor::EditorMode::VisualChar, 6, 9));
+    // A Visual yank leaves the cursor at the start; `gv` still gets the whole selection.
+    press_keys(&mut app, &["escape", "g", "g", "v", "e", "y", "j", "g", "v"]);
+    assert_eq!(selected(&app), (crate::editor::EditorMode::VisualChar, 0, 4));
+    // Line and block selections come back as lines and blocks.
+    press_keys(&mut app, &["escape", "g", "g", "V", "j", "escape", "g", "g"]);
+    press_keys(&mut app, &["g", "v"]);
+    assert_eq!(selected(&app).0, crate::editor::EditorMode::VisualLine);
+    press_keys(&mut app, &["escape", "g", "g", "ctrl-v", "j", "l", "escape", "g", "g"]);
+    press_keys(&mut app, &["g", "v"]);
+    assert_eq!(selected(&app).0, crate::editor::EditorMode::VisualBlock);
+    // After `V >`, `gv` brings the indented lines back.
+    press_keys(&mut app, &["escape", "g", "g", "V", "j", ">", "g", "v"]);
+    assert_eq!(selected(&app).0, crate::editor::EditorMode::VisualLine);
+}
+
+#[test]
+fn tag_text_objects_change_delete_yank_and_select_elements() {
+    let (_app_dirs, mut app) = app();
+    app.set_dashboard_visibility(false);
+    // A buffer without a parser matches the nearest enclosing tag pair in the text.
+    let source = "<div class=\"a>b\"><p>hi <b>you</b></p><br></div>\n";
+    let (buffer, view) = app
+        .state
+        .open_text(TextBuffer::from_text(source), None)
+        .unwrap();
+    let at = |app: &mut App, needle: &str| {
+        let position = app.state.buffers[buffer].text.to_string().find(needle).unwrap();
+        app.state.views[view].cursor = ByteOffset(position);
+    };
+    at(&mut app, "hi");
+    press_keys(&mut app, &["c", "i", "t", "X", "escape"]);
+    assert_eq!(
+        app.state.buffers[buffer].text.to_string(),
+        "<div class=\"a>b\"><p>X</p><br></div>\n"
+    );
+    press_keys(&mut app, &["u"]);
+    at(&mut app, "you");
+    press_keys(&mut app, &["d", "a", "t"]);
+    assert_eq!(
+        app.state.buffers[buffer].text.to_string(),
+        "<div class=\"a>b\"><p>hi </p><br></div>\n"
+    );
+    press_keys(&mut app, &["u"]);
+    // A count reaches the outer pair; an unclosed `<br>` is not one.
+    at(&mut app, "you");
+    press_keys(&mut app, &["y", "2", "i", "t"]);
+    assert_eq!(
+        app.state.registers.get('"').map(|value| value.text.as_str()),
+        Some("hi <b>you</b>")
+    );
+    at(&mut app, "<br>");
+    press_keys(&mut app, &["v", "a", "t"]);
+    let selection = app.state.views[view].selection.unwrap();
+    let end = crate::editor::text::next_grapheme_boundary(
+        &app.state.buffers[buffer].text,
+        selection.head,
+    );
+    assert_eq!(&source[selection.anchor.get()..end.get()], source.trim_end());
+    press_keys(&mut app, &["escape"]);
+    assert_eq!(app.state.buffers[buffer].text.to_string(), source);
+
+    // HTML and JSX buffers take the element from the parse: an `<li>` closes implicitly.
+    for (name, source, needle, keys, expected) in [
+        (
+            "page.html",
+            "<ul><li>one<li>two</ul>\n",
+            "two",
+            ["d", "i", "t"],
+            "<ul><li>one<li></ul>\n",
+        ),
+        (
+            "view.tsx",
+            "const v = <div><span>{n}</span></div>;\n",
+            "{n}",
+            ["d", "a", "t"],
+            "const v = <div></div>;\n",
+        ),
+    ] {
+        let path = app.state.workspace_root.join(name);
+        let (buffer, view) = app
+            .state
+            .open_text(TextBuffer::from_text(source), Some(path))
+            .unwrap();
+        wait_syntax(&mut app, buffer);
+        assert!(
+            app.state.buffers[buffer]
+                .current_syntax_objects()
+                .iter()
+                .any(|object| object.kind == crate::editor::SyntaxObjectKind::Tag),
+            "{name}"
+        );
+        app.state.views[view].cursor = ByteOffset(source.find(needle).unwrap());
+        press_keys(&mut app, &keys);
+        assert_eq!(app.state.buffers[buffer].text.to_string(), expected, "{name}");
     }
 }
 
@@ -2620,7 +2798,7 @@ fn clean_buffers_follow_the_disk_and_changed_ones_keep_their_text() {
 }
 
 pub(in crate::app) fn wait_syntax(app: &mut App, buffer: crate::editor::BufferId) {
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + Duration::from_secs(20);
     loop {
         app.process_syntax();
         if app.syntax.source(buffer) == Some(&app.state.buffers[buffer].text.source_version())

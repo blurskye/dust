@@ -734,6 +734,8 @@ struct GitColours {
     conflict: ThemeColor,
     border: ThemeColor,
     lanes: Vec<ThemeColor>,
+    /// The editor's Markdown code background (`markdown_code`).
+    prose_code: ThemeColor,
 }
 
 impl ThemeConfig {
@@ -744,12 +746,14 @@ impl ThemeConfig {
     fn resolve_git_colours(&self) -> GitColours {
         let styles = &self.styles;
         let base = styles.default.background;
-        let dark = luminance(base).is_none_or(|value| value < 0.4);
+        // Dust's own theme gets the designed palette (as does a theme without truecolour, which
+        // has nothing to blend); every other theme, dark or light, derives the roles from its
+        // own styles, so Gruvbox reads as Gruvbox and a pale background never meets a
+        // dark-theme pane.
+        let designed_palette = self.name == "dust" || luminance(base).is_none();
         let hex = |r, g, b| ThemeColor::Rgb(r, g, b);
-        // Dark themes get the designed palette; light themes derive from their own styles
-        // so a pale background never meets a dark-theme pane.
         let pick = |configured: Option<ThemeColor>, designed: ThemeColor, derived: ThemeColor| {
-            configured.unwrap_or(if dark { designed } else { derived })
+            configured.unwrap_or(if designed_palette { designed } else { derived })
         };
         let palette = &self.git;
         let near = |percent| blend(styles.default.foreground, base, percent).unwrap_or(base);
@@ -813,6 +817,8 @@ impl ThemeConfig {
                 .clone()
                 .filter(|lanes| !lanes.is_empty())
                 .unwrap_or_else(|| vec![reference, focus, added, modified, removed]),
+            prose_code: prose_code(styles.default.foreground, base, pane)
+                .unwrap_or_else(|| blend(canvas, pane, 75).unwrap_or(canvas)),
         }
     }
 
@@ -865,6 +871,7 @@ impl ThemeConfig {
             }
             GitSurface::ChipActive => colours.focus,
             GitSurface::Code => blend(colours.canvas, colours.pane, 75).unwrap_or(colours.canvas),
+            GitSurface::ProseCode => colours.prose_code,
             GitSurface::Label(red, green, blue) => over(ThemeColor::Rgb(red, green, blue), 24),
             GitSurface::Chip(chip) => {
                 let hue = match chip {
@@ -889,13 +896,31 @@ impl ThemeConfig {
         let mut foreground = Self::git_role_colour(colours, role);
         let background = Self::git_surface_colour(colours, surface);
         if surface == GitSurface::ChipActive {
-            foreground = colours.pane;
+            // Text on the filled focus chip: the pane colour, or the text colour where the
+            // theme's accent is too pale for it.
+            foreground = if contrast(colours.pane, background) >= contrast(colours.text, background) {
+                colours.pane
+            } else {
+                colours.text
+            };
+        }
+        match role {
+            // A forge label's own colour, made readable on the chip it is drawn on.
+            GitRole::Label(red, green, blue) => {
+                foreground = legible(readable(ThemeColor::Rgb(red, green, blue), colours.text, background), background, 4.5);
+            }
+            // Lines and graph lanes are not text.
+            GitRole::Border | GitRole::Lane(_) => {}
+            // Any other text keeps at least 3:1 on its surface in every theme (a pale
+            // theme's tinted chip or band never washes its words out).
+            _ => foreground = legible(mix_until(foreground, colours.text, background, 3.0), background, 3.0),
         }
         let attributes = match emphasis {
             Emphasis::None => Vec::new(),
             Emphasis::Bold => vec![ThemeAttribute::Bold],
             Emphasis::Dim => vec![ThemeAttribute::Dim],
             Emphasis::Strike => vec![ThemeAttribute::Strikethrough],
+            Emphasis::Underline => vec![ThemeAttribute::Underlined],
         };
         let mut style = ThemeStyle {
             foreground,
@@ -977,6 +1002,38 @@ fn readable(colour: ThemeColor, text: ThemeColor, background: ThemeColor) -> The
     text
 }
 
+/// WCAG contrast between two colours; 21 (the most) when either is not RGB, so a
+/// palette-indexed theme is left as it is.
+fn contrast(left: ThemeColor, right: ThemeColor) -> f64 {
+    let (Some(left), Some(right)) = (luminance(left), luminance(right)) else {
+        return 21.0;
+    };
+    let (light, dark) = if left > right { (left, right) } else { (right, left) };
+    (light + 0.05) / (dark + 0.05)
+}
+
+/// `colour` mixed towards `text` until it has `minimum` contrast on `background`.
+fn mix_until(colour: ThemeColor, text: ThemeColor, background: ThemeColor, minimum: f64) -> ThemeColor {
+    if contrast(colour, background) >= minimum {
+        return colour;
+    }
+    (10..=100)
+        .step_by(10)
+        .filter_map(|percent| blend(text, colour, percent))
+        .find(|mixed| contrast(*mixed, background) >= minimum)
+        .unwrap_or(text)
+}
+
+/// `colour`, or black or white text (whichever reads better) when even the theme's text
+/// colour falls short of `minimum` on `background`.
+fn legible(colour: ThemeColor, background: ThemeColor, minimum: f64) -> ThemeColor {
+    if contrast(colour, background) >= minimum {
+        return colour;
+    }
+    let (black, white) = (ThemeColor::Rgb(0, 0, 0), ThemeColor::Rgb(255, 255, 255));
+    if contrast(black, background) >= contrast(white, background) { black } else { white }
+}
+
 // sRGB relative luminance, as defined by WCAG's contrast calculation.
 fn luminance(colour: ThemeColor) -> Option<f64> {
     let (red, green, blue) = colour.rgb()?;
@@ -992,6 +1049,21 @@ fn luminance(colour: ThemeColor) -> Option<f64> {
 }
 
 /// `percent` of `colour` over `background`, when both are RGB.
+/// Code in a forge reader's Markdown on `pane`: the editor's own code fill (`markdown_code`,
+/// `text` 8% over `editor`), so a fence reads as it does in the editor. Where that fill
+/// hardly differs from the pane (under half the lift it has over the editor's background,
+/// by WCAG contrast; Dust's designed pane sits right on it), the same 8% lift is taken over
+/// the pane instead: the same look relative to what the code sits on.
+fn prose_code(text: ThemeColor, editor: ThemeColor, pane: ThemeColor) -> Option<ThemeColor> {
+    let code = blend(text, editor, 8)?;
+    let lift = contrast(code, editor) - 1.0;
+    if contrast(code, pane) - 1.0 >= lift / 2.0 {
+        Some(code)
+    } else {
+        blend(text, pane, 8)
+    }
+}
+
 fn blend(colour: ThemeColor, background: ThemeColor, percent: u16) -> Option<ThemeColor> {
     let (ThemeColor::Rgb(red, green, blue), ThemeColor::Rgb(under_red, under_green, under_blue)) =
         (colour, background)

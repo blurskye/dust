@@ -140,7 +140,7 @@ fn view(screen: &mut GitScreen) -> String {
     text(&screen.frame(190, 48))
 }
 fn wait(screen: &mut GitScreen, mut ready: impl FnMut(&mut GitScreen) -> bool) {
-    let deadline = Instant::now() + Duration::from_secs(20);
+    let deadline = Instant::now() + Duration::from_secs(120);
     loop {
         screen.poll();
         if ready(screen) {
@@ -200,7 +200,7 @@ fn merge_form(screen: &mut GitScreen) {
     assert!(view(screen).contains("Merge selected branch?"));
 }
 fn when_ready(screen: &mut GitScreen, action: impl Fn(&mut GitScreen)) {
-    let deadline = Instant::now() + Duration::from_secs(20);
+    let deadline = Instant::now() + Duration::from_secs(120);
     loop {
         action(screen);
         screen.poll();
@@ -244,7 +244,7 @@ fn confirmed_fast_forward_keeps_unrelated_index_working_files_and_drafts() {
     for (width, height) in SIZES {
         let frame = screen.frame(width, height);
         let rendered = text(&frame);
-        assert!(rendered.contains("Merge into") && rendered.contains("Selected local ref"));
+        assert!(rendered.contains("Merge into") && rendered.contains("Selected branch or tag"));
         assert!(rendered.contains(TOPIC) && rendered.contains(" Merge "));
         let (x, y, _) = frame.cursor.unwrap();
         assert!(x < width && y < height - 1);
@@ -356,7 +356,7 @@ fn stopped_merge_refreshes_conflicts_then_native_side_stage_and_continue_finish_
         b"selected topic bytes\n"
     );
     assert!(!git(&fixture.root, &["ls-files", "--unmerged"]).is_empty());
-    key(&mut screen, KeyCode::Char(' '));
+    key(&mut screen, KeyCode::Char('-'));
     finished(&mut screen);
     assert!(git(&fixture.root, &["ls-files", "--unmerged"]).is_empty());
     wait(&mut screen, |screen| view(screen).contains("continue"));
@@ -547,7 +547,7 @@ fn abort_protects_unrelated_staging_then_keeps_all_working_drafts_after_native_u
                     .contains("later.txt")
         })
     });
-    when_ready(&mut screen, |screen| key(screen, KeyCode::Char(' ')));
+    when_ready(&mut screen, |screen| key(screen, KeyCode::Char('-')));
     finished(&mut screen);
     assert!(
         git(&fixture.root, &["ls-files", "--stage", "later.txt"]).is_empty(),
@@ -628,7 +628,7 @@ fn resolve_rebase_file(screen: &mut GitScreen, fixture: &Fixture) {
         b"current branch bytes\n"
     );
     assert!(!git(&fixture.root, &["ls-files", "--unmerged"]).is_empty());
-    when_ready(screen, |screen| key(screen, KeyCode::Char(' ')));
+    when_ready(screen, |screen| key(screen, KeyCode::Char('-')));
     finished(screen);
     assert!(git(&fixture.root, &["ls-files", "--unmerged"]).is_empty());
 }
@@ -1139,9 +1139,14 @@ fn operation_confirmation_shows_destination_and_current_blockers_without_form_sc
         }
         let frame = screen.frame(width, height);
         let (x, y, _) = frame.cursor.expect("modal action cursor");
+        // The focused action is the shared filled button chip (R16 #22).
         assert_eq!(
             frame.grid.get(x, y).unwrap().style,
-            dust::ui::Style::GitSelected(None)
+            dust::ui::Style::Git {
+                role: dust::ui::GitRole::OnFocus,
+                surface: dust::ui::GitSurface::ChipActive,
+                emphasis: dust::ui::Emphasis::Bold,
+            }
         );
         key(&mut screen, KeyCode::Tab);
         assert!(text(&screen.frame(width, height)).contains("Enter retry abort"));

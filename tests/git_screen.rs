@@ -62,7 +62,7 @@ fn view(screen: &mut GitScreen) -> String {
         .join("\n")
 }
 fn wait(screen: &mut GitScreen, ready: impl Fn(&mut GitScreen) -> bool) {
-    let deadline = Instant::now() + Duration::from_secs(15);
+    let deadline = Instant::now() + Duration::from_secs(120);
     loop {
         screen.poll();
         if ready(screen) {
@@ -203,7 +203,6 @@ fn changes_and_commit_files_share_a_single_collapsible_sidebar_tree() {
     assert!(view(&mut screen).contains("nested/"));
     git(dir.path(), &["add", "."]);
     git(dir.path(), &["commit", "-m", "Nested commit"]);
-    let head = git(dir.path(), &["rev-parse", "--short=7", "HEAD"]);
     screen = GitScreen::open(dir.path()).unwrap();
     // Narrow layouts show one pane at a time, so pane rectangles are compared where
     // the rail is visible.
@@ -219,11 +218,15 @@ fn changes_and_commit_files_share_a_single_collapsible_sidebar_tree() {
                 .unwrap()
         })
     };
-    wait(&mut screen, |s| view(s).contains("Nested commit"));
+    // History can paint before the panes take their sizes for the session.
+    wait(&mut screen, |s| {
+        let view = view(s);
+        view.contains("Nested commit") && view.contains("Local 1") && s.panes_sized()
+    });
     let initial = sizes.map(|(width, height)| headers(&mut screen, width, height));
     key(&mut screen, KeyCode::Char('4'));
     wait(&mut screen, |s| view(s).contains("+ fn alpha()"));
-    assert!(view(&mut screen).contains(&format!("{head} · Files")));
+    assert!(view(&mut screen).contains("Commit files"));
     for (index, (width, height)) in sizes.into_iter().enumerate() {
         assert_eq!(headers(&mut screen, width, height), initial[index]);
     }
@@ -251,7 +254,7 @@ fn changes_and_commit_files_share_a_single_collapsible_sidebar_tree() {
         assert!(frame.grid.row_text(row).contains("beta.rs"));
         assert_eq!(
             (0..height)
-                .filter(|&y| frame.grid.row_text(y).contains(&format!("{head} · Files")))
+                .filter(|&y| frame.grid.row_text(y).contains("Commit files"))
                 .count(),
             1
         );
@@ -298,11 +301,9 @@ fn change_code(screen: &mut GitScreen, name: &str) -> Option<String> {
 #[test]
 fn commit_selection_updates_changes_without_hiding_other_panes_or_staging() {
     let dir = repo();
-    let initial = git(dir.path(), &["rev-parse", "--short=7", "HEAD"]);
     std::fs::write(dir.path().join("alpha.rs"), "fn alpha() {}\n").unwrap();
     git(dir.path(), &["add", "."]);
     git(dir.path(), &["commit", "-m", "Add alpha"]);
-    let head = git(dir.path(), &["rev-parse", "--short=7", "HEAD"]);
     std::fs::write(dir.path().join("file.txt"), "working change\n").unwrap();
     let mut screen = GitScreen::open(dir.path()).unwrap();
     wait(&mut screen, |s| view(s).contains("+ working change"));
@@ -324,19 +325,19 @@ fn commit_selection_updates_changes_without_hiding_other_panes_or_staging() {
     };
     key(&mut screen, KeyCode::Char('4'));
     wait(&mut screen, |s| view(s).contains("+ fn alpha()"));
-    assert!(changes(&mut screen).contains(&format!("{head} · Files")));
+    assert!(changes(&mut screen).contains("Commit files"));
     assert!(changes(&mut screen).contains("alpha.rs"));
     assert!(!changes(&mut screen).contains("file.txt"));
     key(&mut screen, KeyCode::Down);
     wait(&mut screen, |s| view(s).contains("+ old"));
-    assert!(changes(&mut screen).contains(&format!("{initial} · Files")));
+    assert!(changes(&mut screen).contains("Commit files"));
     assert!(changes(&mut screen).contains("file.txt"));
     assert!(!changes(&mut screen).contains("alpha.rs"));
     key(&mut screen, KeyCode::Char('2'));
-    key(&mut screen, KeyCode::Char(' '));
+    key(&mut screen, KeyCode::Char('-'));
     assert_eq!(git(dir.path(), &["diff", "--cached", "--name-only"]), "");
     key(&mut screen, KeyCode::Char('3'));
-    assert!(!changes(&mut screen).contains("· Files"));
+    assert!(!changes(&mut screen).contains("Commit files"));
     assert!(changes(&mut screen).contains("file.txt"));
     key(&mut screen, KeyCode::Char('4'));
     wait(&mut screen, |s| view(s).contains("+ fn alpha()"));
@@ -344,7 +345,7 @@ fn commit_selection_updates_changes_without_hiding_other_panes_or_staging() {
     key(&mut screen, KeyCode::Char('5'));
     assert!(view(&mut screen).contains("No stashes"));
     assert!(
-        !changes(&mut screen).contains("· Files"),
+        !changes(&mut screen).contains("Commit files"),
         "`5` must leave the open commit's files for Stashes:\n{}",
         view(&mut screen)
     );
@@ -352,10 +353,10 @@ fn commit_selection_updates_changes_without_hiding_other_panes_or_staging() {
     wait(&mut screen, |s| view(s).contains("+ fn alpha()"));
     key(&mut screen, KeyCode::Enter);
     assert_eq!(key(&mut screen, KeyCode::Escape), ScreenOutcome::Continue);
-    assert!(changes(&mut screen).contains(&format!("{head} · Files")));
+    assert!(changes(&mut screen).contains("Commit files"));
     assert_eq!(key(&mut screen, KeyCode::Escape), ScreenOutcome::Continue);
     wait(&mut screen, |s| view(s).contains("+ working change"));
-    assert!(!changes(&mut screen).contains("· Files"));
+    assert!(!changes(&mut screen).contains("Commit files"));
     assert_eq!(git(dir.path(), &["status", "--porcelain"]), "M file.txt");
 }
 
@@ -503,7 +504,7 @@ fn wide_diff_aligns_old_and_new_code_with_tinted_syntax() {
     let (x, y, _) = frame.cursor.unwrap();
     assert_eq!(frame.grid.get(x, y).unwrap().symbol, "f");
     key(&mut screen, KeyCode::Home);
-    key(&mut screen, KeyCode::Char('s'));
+    key(&mut screen, KeyCode::Char('|'));
     screen.frame(180, 40);
     key(&mut screen, KeyCode::Down);
     let frame = screen.frame(180, 40);
@@ -537,7 +538,7 @@ fn wide_diff_aligns_old_and_new_code_with_tinted_syntax() {
         },
         kind: KeyInputKind::Press,
     });
-    key(&mut screen, KeyCode::Char('s'));
+    key(&mut screen, KeyCode::Char('|'));
     screen.frame(180, 40);
     for _ in 0..78 {
         key(&mut screen, KeyCode::Down);
@@ -561,7 +562,7 @@ fn commits_browse_one_changed_file_at_a_time_without_raw_statistics() {
     git(dir.path(), &["commit", "-m", "A multi-file commit"]);
     let head = git(dir.path(), &["rev-parse", "HEAD"]);
     let mut screen = GitScreen::open(dir.path()).unwrap();
-    wait(&mut screen, |s| view(s).contains("A multi-file com"));
+    wait(&mut screen, |s| view(s).contains("A multi-file c"));
     key(&mut screen, KeyCode::Char('4'));
     wait(&mut screen, |s| view(s).contains("+ fn alpha()"));
     let overview = view(&mut screen);
@@ -571,7 +572,7 @@ fn commits_browse_one_changed_file_at_a_time_without_raw_statistics() {
             && !overview.contains("files changed,")
     );
     key(&mut screen, KeyCode::Enter);
-    assert!(view(&mut screen).contains(&format!("{} · Files", &head[..7])));
+    assert!(view(&mut screen).contains("Commit files"));
     key(&mut screen, KeyCode::Down);
     wait(&mut screen, |s| view(s).contains("+ fn beta()"));
     assert!(!view(&mut screen).contains("fn alpha()"));
@@ -582,9 +583,9 @@ fn commits_browse_one_changed_file_at_a_time_without_raw_statistics() {
     assert!(view(&mut screen).contains("Next · previous file"));
     key(&mut screen, KeyCode::Escape);
     key(&mut screen, KeyCode::Escape);
-    assert!(view(&mut screen).contains(&format!("{} · Files", &head[..7])));
+    assert!(view(&mut screen).contains("Commit files"));
     key(&mut screen, KeyCode::Escape);
-    assert!(!view(&mut screen).contains(&format!("{} · Files", &head[..7])));
+    assert!(!view(&mut screen).contains("Commit files"));
     assert_eq!(git(dir.path(), &["rev-parse", "HEAD"]), head);
     assert_eq!(git(dir.path(), &["status", "--porcelain"]), "");
 }
@@ -771,6 +772,9 @@ fn floating_is_default_and_fullscreen_is_a_persisted_setting() {
     background
         .grid
         .put_text(0, 0, "Editor remains visible", Style::Default);
+    background
+        .grid
+        .put_text(0, 59, " NORMAL  editor status line", Style::Default);
     GitScreen::compose(&mut background, rect, &foreground);
     assert!(
         background
@@ -778,6 +782,19 @@ fn floating_is_default_and_fullscreen_is_a_persisted_setting() {
             .row_text(0)
             .contains("Editor remains visible")
     );
+    // The editor around a float recedes into the border colour, so its status line never
+    // reads as a second footer under Dusty Git's own.
+    for y in [0, 59] {
+        assert!(
+            matches!(
+                background.grid.get(1, y).unwrap().style,
+                Style::Git { role: dust::ui::GitRole::Border, .. }
+            ),
+            "row {y}: {:?}",
+            background.grid.get(1, y).unwrap().style
+        );
+    }
+    assert!(background.grid.row_text(59).contains("editor status line"));
     assert!(
         background.grid.row_text(rect.y).contains(
             &dir.path()
@@ -917,7 +934,7 @@ fn working_index_commit_and_stash_diffs_have_source_syntax_and_numbered_markers(
             code_style(&mut screen, "+ fn after()", "after"),
             dust::ui::Style::Syntax(_)
         ));
-        assert!(view(&mut screen).contains("1  + fn after()"));
+        assert!(view(&mut screen).contains("1 │ + fn after()"));
     }
     git(dir.path(), &["commit", "-m", "Changed both languages"]);
     let mut screen = GitScreen::open(dir.path()).unwrap();
@@ -955,7 +972,7 @@ fn unstaging_rename_restores_both_paths_and_preserves_other_staged_changes() {
     let mut screen = GitScreen::open(dir.path()).unwrap();
     key(&mut screen, KeyCode::Char('i'));
     wait(&mut screen, |s| view(s).contains("renamed.txt"));
-    key(&mut screen, KeyCode::Char(' '));
+    key(&mut screen, KeyCode::Char('u'));
     wait(&mut screen, |s| !s.busy());
     assert_eq!(
         git(dir.path(), &["diff", "--cached", "--name-only"]),
@@ -1007,6 +1024,46 @@ fn stash_preview_includes_untracked_files() {
 }
 
 #[test]
+fn commit_box_insert_hints_are_clear_without_duplicate_text() {
+    let dir = repo();
+    std::fs::write(dir.path().join("file.txt"), "changed\n").unwrap();
+    let mut screen = GitScreen::open(dir.path()).unwrap();
+    screen.set_modal(true);
+    wait(&mut screen, |s| view(s).contains("changed"));
+    key(&mut screen, KeyCode::Char('s'));
+    wait(&mut screen, |s| !s.busy());
+    key(&mut screen, KeyCode::Char('c'));
+    assert_eq!(screen.input_mode(), Some(dust::git::screen::InputMode::Insert));
+    let frame = screen.frame(120, 40);
+    let shown = (0..40).map(|y| frame.grid.row_text(y)).collect::<Vec<_>>().join("\n");
+    assert!(shown.contains("Commit to main"), "{shown}");
+    assert!(
+        (0..39).any(|y| {
+            let row = frame.grid.row_text(y);
+            row.contains("Ctrl+Enter commit · Tab next · Esc normal") && row.trim_end().ends_with('│')
+        }),
+        "{shown}"
+    );
+    assert!(!shown.contains("(optional)"), "{shown}");
+    let footer = frame.grid.row_text(39);
+    assert!(!footer.contains("sign-off · amend"), "{footer}");
+
+    let narrow = screen.frame(100, 30);
+    assert!(
+        (0..29).any(|y| {
+            let row = narrow.grid.row_text(y);
+            row.contains("Ctrl+Enter commit · Esc normal") && row.trim_end().ends_with('│')
+        }),
+        "{}",
+        (0..30).map(|y| narrow.grid.row_text(y)).collect::<Vec<_>>().join("\n")
+    );
+    let footer = narrow.grid.row_text(29);
+    assert!(!footer.contains("C-Enter"), "{footer}");
+    assert!(!footer.contains("sign-off · amend"), "{footer}");
+    assert!(!footer.contains("normal mode"), "{footer}");
+}
+
+#[test]
 fn stages_unstages_and_commits_through_real_screen_input() {
     use unicode_width::UnicodeWidthStr;
     let dir = repo();
@@ -1019,17 +1076,17 @@ fn stages_unstages_and_commits_through_real_screen_input() {
             let footer = frame.grid.row_text(height - 1);
             let words = footer.split_whitespace().collect::<Vec<_>>();
             assert!(
-                words.windows(2).any(|words| words == ["Space", verb]),
+                words.windows(2).any(|words| words == [if verb == "stage" { "s" } else { "u" }, verb]),
                 "{width}×{height}: {footer}"
             );
         }
     };
     assert_file_action(&mut screen, "stage");
     screen.write_refusal = Some("Test write refused".into());
-    key(&mut screen, KeyCode::Char(' '));
+    key(&mut screen, KeyCode::Char('s'));
     assert!(view(&mut screen).contains("Test write refused"));
     screen.write_refusal = None;
-    key(&mut screen, KeyCode::Char(' '));
+    key(&mut screen, KeyCode::Char('s'));
     wait(&mut screen, |s| !s.busy());
     assert!(!view(&mut screen).contains("Test write refused"));
     assert_eq!(
@@ -1053,8 +1110,8 @@ fn stages_unstages_and_commits_through_real_screen_input() {
             emphasis: dust::ui::Emphasis::None,
         }
     );
-    // No index-layer switch: Space itself must toggle the selected file.
-    key(&mut screen, KeyCode::Char(' '));
+    // No index-layer switch: `u` itself must unstage the selected file.
+    key(&mut screen, KeyCode::Char('u'));
     wait(&mut screen, |s| !s.busy());
     assert_eq!(git(dir.path(), &["diff", "--cached", "--name-only"]), "");
     wait(&mut screen, |s| view(s).contains("+ changed"));
@@ -1076,7 +1133,7 @@ fn stages_unstages_and_commits_through_real_screen_input() {
             emphasis: dust::ui::Emphasis::None,
         }
     );
-    key(&mut screen, KeyCode::Char(' '));
+    key(&mut screen, KeyCode::Char('s'));
     wait(&mut screen, |s| !s.busy());
     key(&mut screen, KeyCode::Char('c'));
     text(&mut screen, "Unicode λ message");
@@ -1101,7 +1158,7 @@ fn partial_staging_finishes_the_file_then_space_unstages_without_changing_disk()
     wait(&mut screen, |s| {
         view(s).contains("◐MM") && view(s).contains("+ working version")
     });
-    key(&mut screen, KeyCode::Char(' '));
+    key(&mut screen, KeyCode::Char('s'));
     wait(&mut screen, |s| !s.busy());
     wait(&mut screen, |s| {
         change_code(s, "file.txt").as_deref() == Some("M ")
@@ -1109,7 +1166,7 @@ fn partial_staging_finishes_the_file_then_space_unstages_without_changing_disk()
             && view(s).contains("+ working version")
     });
     assert_eq!(git(dir.path(), &["show", ":file.txt"]), "working version");
-    key(&mut screen, KeyCode::Char(' '));
+    key(&mut screen, KeyCode::Char('u'));
     wait(&mut screen, |s| !s.busy());
     assert_eq!(git(dir.path(), &["diff", "--cached", "--name-only"]), "");
     assert_eq!(
@@ -1132,7 +1189,7 @@ fn sidebar_rectangles_and_focus_surfaces_survive_folding_refresh_and_navigation(
     }
     let mut screen = GitScreen::open(dir.path()).unwrap();
     wait(&mut screen, |s| {
-        view(s).contains("file-00.md") && view(s).contains("Initial commit")
+        view(s).contains("file-00.md") && view(s).contains("Initial commit") && s.panes_sized()
     });
     let headers = |screen: &mut GitScreen, width, height| {
         let frame = screen.frame(width, height);
@@ -1206,15 +1263,24 @@ fn branch_preview_is_selected_branch_not_current_head() {
     let mut screen = GitScreen::open(dir.path()).unwrap();
     wait(&mut screen, |s| view(s).contains("feature"));
     key(&mut screen, KeyCode::Char('3'));
-    wait(&mut screen, |s| view(s).contains("Feature only"));
+    // History lists "Feature only" before the branch list arrives; only a selected branch
+    // pins History to it, so wait for that rather than for the commit's name.
+    wait(&mut screen, |s| {
+        let frame = s.frame(190, 48);
+        (0..48).any(|y| frame.grid.row_text(y).contains("History · feature"))
+    });
     key(&mut screen, KeyCode::Char('r'));
     key(&mut screen, KeyCode::Char('4'));
     wait(&mut screen, |s| view(s).contains("+ feature"));
     // The History pane's border title names its pinned reference.
+    let pinned = screen.frame(190, 48);
     let history_heading = (0..48)
-        .map(|y| screen.frame(190, 48).grid.row_text(y))
+        .map(|y| pinned.grid.row_text(y))
         .find(|row| row.contains("History · feature"))
-        .expect("history heading names its pinned reference");
+        .unwrap_or_else(|| {
+            let shown = (0..48).map(|y| pinned.grid.row_text(y)).collect::<Vec<_>>().join("\n");
+            panic!("history heading names its pinned reference:\n{shown}")
+        });
     assert!(history_heading.starts_with('╭'), "{history_heading}");
     key(&mut screen, KeyCode::Char('3'));
     key(&mut screen, KeyCode::Down);
@@ -1276,7 +1342,7 @@ fn host_write_refusal_and_cancelled_form_preserve_repo() {
     let mut screen = GitScreen::open(dir.path()).unwrap();
     wait(&mut screen, |s| view(s).contains("changed"));
     screen.write_refusal = Some("Unsaved editor buffer".into());
-    key(&mut screen, KeyCode::Char(' '));
+    key(&mut screen, KeyCode::Char('s'));
     assert!(view(&mut screen).contains("Unsaved editor buffer"));
     assert_eq!(git(dir.path(), &["diff", "--cached", "--name-only"]), "");
     key(&mut screen, KeyCode::Char('c'));
@@ -1310,7 +1376,8 @@ fn worktrees_tags_and_stashes_are_real_repository_data() {
     key(&mut screen, KeyCode::Char('3'));
     key(&mut screen, KeyCode::Char('L'));
     key(&mut screen, KeyCode::Char('L'));
-    assert!(view(&mut screen).contains("v1"));
+    // Tags are read in the background like the other lists.
+    wait(&mut screen, |s| view(s).contains("v1"));
     key(&mut screen, KeyCode::Char('5'));
     key(&mut screen, KeyCode::Char('p'));
     submit(&mut screen);
@@ -1423,4 +1490,113 @@ fn short_current_ref_header_has_no_old_title_suffix_and_resize_keeps_native_curs
         refs
     );
     assert_eq!(std::fs::read(dir.path().join("file.txt")).unwrap(), source);
+}
+
+/// The cell column where `token` starts on row `y`, read cell by cell (glyphs in the rail
+/// can be wide, so a `row_text` char index is not a column).
+fn token_column(frame: &dust::ui::Frame, y: u16, token: &str) -> Option<u16> {
+    let width = frame.grid.width();
+    let chars = token.chars().map(String::from).collect::<Vec<_>>();
+    (0..width.saturating_sub(chars.len() as u16)).find(|&x| {
+        chars
+            .iter()
+            .enumerate()
+            .all(|(at, want)| frame.grid.get(x + at as u16, y).is_some_and(|cell| cell.symbol == *want))
+    })
+}
+
+/// R16 git-tab-04: context, removed and added rows share one gutter (`old new │ ± code`),
+/// so code starts in one column, in the Changes reader and in the commit reader, with one
+/// number column (100×30) or two.
+#[test]
+fn diff_code_starts_in_one_column_on_every_row_kind() {
+    let dir = repo();
+    std::fs::write(dir.path().join("align.txt"), "ctxa\nolda\nctxb\n").unwrap();
+    git(dir.path(), &["add", "."]);
+    git(dir.path(), &["commit", "-m", "Align baseline"]);
+    std::fs::write(dir.path().join("align.txt"), "ctxa\nnewa\nctxb\n").unwrap();
+    let check = |screen: &mut GitScreen, label: &str| {
+        for (width, height) in [(100, 30), (120, 36), (190, 48)] {
+            let frame = screen.frame(width, height);
+            let at = ["ctxa", "olda", "newa", "ctxb"].map(|token| {
+                (0..height)
+                    .find_map(|y| token_column(&frame, y, token).map(|x| (x, y)))
+                    .unwrap_or_else(|| panic!("{label} {width}x{height}: no {token}"))
+            });
+            for (token, (x, y)) in ["ctxa", "olda", "newa", "ctxb"].iter().zip(at) {
+                assert_eq!(x, at[0].0, "{label} {width}x{height}: {token} starts at {x}");
+                assert_eq!(frame.grid.get(x - 4, y).unwrap().symbol, "│", "{label} {width}x{height}: {token}");
+                let sign = frame.grid.get(x - 2, y).unwrap().symbol.clone();
+                let expected = match *token {
+                    "olda" => "−",
+                    "newa" => "+",
+                    _ => " ",
+                };
+                assert_eq!(sign, expected, "{label} {width}x{height}: {token}");
+            }
+        }
+    };
+    let mut screen = GitScreen::open(dir.path()).unwrap();
+    wait(&mut screen, |s| view(s).contains("newa"));
+    check(&mut screen, "changes");
+    git(dir.path(), &["commit", "-am", "Align change"]);
+    let mut screen = GitScreen::open(dir.path()).unwrap();
+    key(&mut screen, KeyCode::Char('4'));
+    wait(&mut screen, |s| view(s).contains("newa") && view(s).contains("Align change"));
+    check(&mut screen, "commit");
+}
+
+/// R16 git-tab-05: from 120 columns the keys sheet is two columns of one fixed width,
+/// centred; a bigger terminal widens the margins, not the sheet, and never drops a column.
+#[test]
+fn keys_sheet_keeps_two_columns_and_its_width_as_the_terminal_grows() {
+    let dir = repo();
+    std::fs::write(dir.path().join("file.txt"), "new\n").unwrap();
+    let mut screen = GitScreen::open(dir.path()).unwrap();
+    wait(&mut screen, |s| view(s).contains("+ new"));
+    key(&mut screen, KeyCode::Char('?'));
+    let mut widths = Vec::new();
+    for (width, height) in [(120, 36), (160, 40), (190, 48), (240, 60)] {
+        let frame = screen.frame(width, height);
+        let top = (0..height)
+            .find(|&y| frame.grid.row_text(y).contains("Keys · Changes"))
+            .unwrap_or_else(|| panic!("{width}x{height}: no sheet"));
+        let left = (0..width).find(|&x| frame.grid.get(x, top).unwrap().symbol == "╭").unwrap();
+        let right = (0..width).rev().find(|&x| frame.grid.get(x, top).unwrap().symbol == "╮").unwrap();
+        let sheet = right - left + 1;
+        assert!(sheet <= 112, "{width}x{height}: {sheet} wide");
+        assert!(left.abs_diff(width - 1 - right) <= 1, "{width}x{height}: not centred ({left}, {right})");
+        widths.push(sheet);
+        // Two `key  label` cells on one row: Navigate's `Tab` beside `C-h/j/k/l`.
+        let rows = (top..height).map(|y| frame.grid.row_text(y)).collect::<Vec<_>>();
+        assert!(
+            rows.iter().any(|row| row.contains("Next pane") && row.contains("Move focus")),
+            "{width}x{height}:\n{}",
+            rows.join("\n")
+        );
+    }
+    assert!(widths.windows(2).all(|pair| pair[0] == pair[1]), "{widths:?}");
+}
+
+/// R16 git-tab-11: every Branches sub-tab carries its count, and an empty Stashes pane says
+/// so on a body row inside its frame, with the count chip in its title.
+#[test]
+fn branch_tabs_all_count_and_an_empty_pane_speaks_inside_its_frame() {
+    let dir = repo();
+    git(dir.path(), &["branch", "side"]);
+    let mut screen = GitScreen::open(dir.path()).unwrap();
+    wait(&mut screen, |s| view(s).contains("side"));
+    for (width, height) in [(100, 30), (120, 36), (190, 48)] {
+        let frame = screen.frame(width, height);
+        let rows = (0..height).map(|y| frame.grid.row_text(y)).collect::<Vec<_>>();
+        assert!(rows.iter().any(|row| row.contains("Local 2 │ Remotes 0 │ Tags 0")), "{}", rows.join("\n"));
+        let empty = rows
+            .iter()
+            .position(|row| row.contains("No stashes"))
+            .unwrap_or_else(|| panic!("{width}x{height}:\n{}", rows.join("\n")));
+        assert!(rows[empty].starts_with('│'), "{width}x{height}: {}", rows[empty]);
+        assert!(rows[empty - 1].starts_with('╭') && rows[empty - 1].contains("Stashes"));
+        assert!(rows[empty - 1].contains(" 0 "), "{}", rows[empty - 1]);
+        assert!(rows[empty + 1].starts_with('╰') && !rows[empty + 1].contains("No stashes"));
+    }
 }

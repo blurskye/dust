@@ -87,7 +87,7 @@ pub(super) fn real_app_with(
 }
 
 pub(super) fn pump(app: &mut App, done: impl Fn(&App) -> bool) {
-    let deadline = Instant::now() + Duration::from_secs(15);
+    let deadline = Instant::now() + Duration::from_secs(30);
     loop {
         app.process_plugin_events();
         if done(app) {

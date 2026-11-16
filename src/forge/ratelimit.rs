@@ -158,11 +158,6 @@ impl Quota {
         })
     }
 
-    /// Below the 10 % reserve that only interactive requests may spend.
-    pub fn in_reserve(&self) -> bool {
-        self.in_reserve_of(RESERVE_DIVISOR)
-    }
-
     /// Below `1/divisor` of the quota.
     pub fn in_reserve_of(&self, divisor: u64) -> bool {
         match (self.limit, self.remaining) {

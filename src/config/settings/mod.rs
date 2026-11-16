@@ -36,6 +36,7 @@ pub use ui::ExplorerConfig;
 pub use ui::ExplorerGlyphSet;
 pub use ui::ExplorerGlyphs;
 pub use ui::ExplorerIconMode;
+pub use ui::GitKeys;
 pub use ui::GitPlacement;
 pub use ui::GitWindowConfig;
 pub use ui::KeyHintConfig;

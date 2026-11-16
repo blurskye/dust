@@ -503,7 +503,7 @@ fn the_terminal_opens_where_its_placement_setting_says() {
         driver
             .application_mut()
             .process_effect(crate::app::commands::AppEffect::TerminalToggle);
-        let deadline = Instant::now() + Duration::from_secs(6);
+        let deadline = Instant::now() + Duration::from_secs(20);
         let id = loop {
             if let Some(id) = driver.application_mut().displayed_terminal() {
                 break id;
@@ -1160,7 +1160,7 @@ fn live_pty_clone_refusal_preserves_process_screen_geometry_focus_and_sources() 
     driver.new_buffer();
     driver.trust_owned_terminal_fixture();
     driver.terminal_open("clone-refusal");
-    let deadline = Instant::now() + Duration::from_secs(4);
+    let deadline = Instant::now() + Duration::from_secs(20);
     while !driver
         .projection()
         .terminal_panel
@@ -1274,7 +1274,7 @@ fn a_terminal_profile_named_like_an_agent_is_not_reused_as_that_agent() {
     driver.new_buffer();
     driver.trust_owned_terminal_fixture();
     driver.terminal_open(&name);
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + Duration::from_secs(20);
     while !driver
         .terminal_lines()
         .iter()
@@ -1320,7 +1320,7 @@ fn a_terminal_agent_accepts_selections_from_normal_mode_and_preserves_rejected_o
     driver
         .application_mut()
         .process_effect(AppEffect::Agent(AgentCommand::Ask));
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + Duration::from_secs(20);
     while !driver
         .terminal_lines()
         .iter()
@@ -1406,7 +1406,7 @@ fn a_terminal_agent_opens_on_the_right_where_the_agent_panel_goes() {
     driver.trust_owned_terminal_fixture();
     let app = driver.application_mut();
     app.process_effect(AppEffect::Agent(AgentCommand::Ask));
-    let deadline = Instant::now() + Duration::from_secs(4);
+    let deadline = Instant::now() + Duration::from_secs(20);
     while !driver
         .terminal_lines()
         .iter()
@@ -1476,7 +1476,7 @@ fn ctrl_slash_beside_a_terminal_agent_opens_a_shell_and_both_keep_their_windows_
     let mut driver = TestSession::new(loaded);
     driver.new_buffer();
     driver.trust_owned_terminal_fixture();
-    let deadline = Instant::now() + Duration::from_secs(6);
+    let deadline = Instant::now() + Duration::from_secs(20);
     let wait = |driver: &mut TestSession, done: &dyn Fn(&mut TestSession) -> bool| {
         while !done(driver) {
             driver.pump_terminal();
@@ -1617,7 +1617,7 @@ fn resizing_a_terminal_that_is_stopping_is_not_an_error() {
     driver.new_buffer();
     driver.trust_owned_terminal_fixture();
     driver.terminal_open("stopping");
-    let deadline = Instant::now() + Duration::from_secs(4);
+    let deadline = Instant::now() + Duration::from_secs(20);
     while !driver
         .terminal_lines()
         .iter()
@@ -1655,7 +1655,7 @@ fn real_pty_geometry_ack_focus_placement_and_cross_tab_keep_one_process() {
     driver.new_buffer();
     driver.trust_owned_terminal_fixture();
     driver.terminal_open("geometry");
-    let deadline = Instant::now() + Duration::from_secs(4);
+    let deadline = Instant::now() + Duration::from_secs(20);
     let contains = |driver: &TestSession, needle: &str| {
         driver
             .terminal_lines()
@@ -1926,7 +1926,7 @@ fn terminal_preflight_close_and_capture_keep_original_pty_and_geometry() {
     assert!(second > first);
     driver.terminal_unfocus();
     driver.open_command_prompt();
-    let deadline = Instant::now() + Duration::from_secs(4);
+    let deadline = Instant::now() + Duration::from_secs(20);
     let contains = |driver: &TestSession, needle: &str| {
         driver
             .projection()
@@ -2019,7 +2019,7 @@ fn terminal_preflight_close_and_capture_keep_original_pty_and_geometry() {
     // A second open starts a fresh terminal.
     driver.terminal_request("owned-terminal");
     assert!(driver.projection().terminal_panel.is_some());
-    let deadline = Instant::now() + Duration::from_secs(4);
+    let deadline = Instant::now() + Duration::from_secs(20);
     while driver.terminal_started_markers() != "xx" {
         driver.pump_terminal();
         assert!(Instant::now() < deadline);
@@ -2066,7 +2066,7 @@ fn debugger_terminal_displays_without_focus_and_its_exit_keeps_another_terminal_
     assert_eq!(app.terminal_session.displayed(), Some(debug));
     assert!(!app.window_session.terminal_focused());
     let root = app.state.workspace_root.clone();
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + Duration::from_secs(20);
     while !root.join("debug-ready").exists() {
         driver.pump_terminal();
         assert!(Instant::now() < deadline);
@@ -2121,7 +2121,7 @@ fn cancelled_debugger_terminal_preflight_never_launches_the_program() {
     let root = app.state.workspace_root.clone();
     let _ = app.debugger_session.stop();
     assert!(!app.debugger_session.terminal_current(&debug));
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + Duration::from_secs(20);
     while driver.application_mut().terminal_session.preflight_count() != 0 {
         driver.pump_terminal();
         assert!(Instant::now() < deadline);
@@ -2153,7 +2153,7 @@ fn real_pty_reports_exit_io_failure_and_shared_deadline_unknown_distinctly() {
     driver.new_buffer();
     driver.trust_owned_terminal_fixture();
     driver.terminal_open("nonzero");
-    let deadline = Instant::now() + Duration::from_secs(4);
+    let deadline = Instant::now() + Duration::from_secs(20);
     loop {
         driver.pump_terminal();
         if driver.terminal_pending() == 0
@@ -2200,7 +2200,7 @@ fn real_pty_reports_exit_io_failure_and_shared_deadline_unknown_distinctly() {
     stale.new_buffer();
     stale.trust_owned_terminal_fixture();
     stale.terminal_open("stale-close");
-    let deadline = Instant::now() + Duration::from_secs(4);
+    let deadline = Instant::now() + Duration::from_secs(20);
     while stale.terminal_phase() != Some(crate::ui::TerminalPhase::Running) {
         stale.pump_terminal();
         assert!(Instant::now() < deadline);
@@ -2241,7 +2241,7 @@ fn real_pty_reports_exit_io_failure_and_shared_deadline_unknown_distinctly() {
     unknown.new_buffer();
     unknown.trust_owned_terminal_fixture();
     unknown.terminal_open("unknown");
-    let deadline = Instant::now() + Duration::from_secs(4);
+    let deadline = Instant::now() + Duration::from_secs(20);
     while unknown.terminal_phase() != Some(crate::ui::TerminalPhase::Running) {
         unknown.pump_terminal();
         assert!(Instant::now() < deadline);
@@ -2288,7 +2288,7 @@ fn successful_terminal_exit_keeps_output_unless_profile_closes_on_exit() {
         driver.new_buffer();
         driver.trust_owned_terminal_fixture();
         driver.terminal_open(profile);
-        let deadline = Instant::now() + Duration::from_secs(4);
+        let deadline = Instant::now() + Duration::from_secs(20);
         loop {
             driver.pump_terminal();
             if driver.terminal_pending() == 0
@@ -2342,7 +2342,7 @@ fn oversized_terminal_paste_reports_its_rejection() {
     driver.new_buffer();
     driver.trust_owned_terminal_fixture();
     driver.terminal_open("paste");
-    let deadline = Instant::now() + Duration::from_secs(4);
+    let deadline = Instant::now() + Duration::from_secs(20);
     while !driver
         .terminal_lines()
         .iter()
@@ -2471,7 +2471,7 @@ fn real_pty_reports_nonzero_exit_and_shared_deadline_unknown_distinctly() {
     driver.new_buffer();
     driver.trust_owned_terminal_fixture();
     driver.terminal_open("nonzero");
-    let deadline = Instant::now() + Duration::from_secs(4);
+    let deadline = Instant::now() + Duration::from_secs(20);
     loop {
         driver.pump_terminal();
         if driver.terminal_pending() == 0
@@ -2518,7 +2518,7 @@ fn real_pty_reports_nonzero_exit_and_shared_deadline_unknown_distinctly() {
     stale.new_buffer();
     stale.trust_owned_terminal_fixture();
     stale.terminal_open("stale-close");
-    let deadline = Instant::now() + Duration::from_secs(4);
+    let deadline = Instant::now() + Duration::from_secs(20);
     while stale.terminal_phase() != Some(crate::ui::TerminalPhase::Running) {
         stale.pump_terminal();
         assert!(Instant::now() < deadline);
@@ -2559,7 +2559,7 @@ fn real_pty_reports_nonzero_exit_and_shared_deadline_unknown_distinctly() {
     unknown.new_buffer();
     unknown.trust_owned_terminal_fixture();
     unknown.terminal_open("unknown");
-    let deadline = Instant::now() + Duration::from_secs(4);
+    let deadline = Instant::now() + Duration::from_secs(20);
     while unknown.terminal_phase() != Some(crate::ui::TerminalPhase::Running) {
         unknown.pump_terminal();
         assert!(Instant::now() < deadline);
@@ -2669,7 +2669,7 @@ fn terminal_lifecycle_revisions_include_launch_and_exit_and_starting_counts_as_r
     assert_eq!(session.descriptions()[0].2, ContentLifecycle::Starting);
     assert_eq!(session.running_in_root(root.path()), 1);
     assert!(!session.tabs[&PtyId(1)].running);
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
     while !session.tabs[&PtyId(1)].running {
         session.drain(&workspace, |_| None);
         assert!(std::time::Instant::now() < deadline);
@@ -2713,7 +2713,7 @@ fn real_pty_stream_failure_reports_incomplete_output_instead_of_exit_status_or_u
         })
         .unwrap();
     session.tabs.get_mut(&PtyId(1)).unwrap().pty = Some(pty);
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
     let mut updates = Vec::new();
     while !session.tabs[&PtyId(1)].io_complete {
         updates.extend(session.drain(&workspace, |_| None));

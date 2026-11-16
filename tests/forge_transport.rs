@@ -392,8 +392,10 @@ fn assert_requests_went(world: &World, via: Via) {
                     "{words:?}"
                 );
                 if request["method"] != "GET" {
+                    // stdin, or a private file for authored text (`ApiRequest::body_file`).
                     assert!(
-                        words.windows(2).any(|pair| pair == ["--input", "-"]),
+                        words.windows(2).any(|pair| pair[0] == "--input"
+                            && (pair[1] == "-" || pair[1].contains("dusty-forge-body-"))),
                         "{words:?}"
                     );
                 }

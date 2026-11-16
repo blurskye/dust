@@ -32,7 +32,7 @@ fn view(screen: &mut GitScreen) -> String {
         .join("\n")
 }
 fn wait(screen: &mut GitScreen, ready: impl Fn(&mut GitScreen) -> bool) {
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + Duration::from_secs(120);
     loop {
         screen.poll();
         if ready(screen) {

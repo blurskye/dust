@@ -43,6 +43,10 @@ pub struct Buffer {
         BufferRevision,
         std::sync::Arc<Vec<crate::editor::SyntaxObject>>,
     )>,
+    /// Where Insert mode last stopped, for `gi`; it follows later edits.
+    pub last_insert: Option<ByteOffset>,
+    /// The last Visual selection and its kind, for `gv`; it follows later edits.
+    pub last_visual: Option<crate::editor::state::view::Selection>,
 }
 
 impl Buffer {
@@ -95,6 +99,8 @@ impl Buffer {
             persisted_bytes,
             new_file: false,
             syntax_objects: None,
+            last_insert: None,
+            last_visual: None,
         }
     }
 

@@ -2,7 +2,8 @@
 # a "From github.com" divider. Prime the cache first (forge-cached.keys, phase prime), then:
 #   FORGE_CACHED_PHASE=search scripts/ui-shot scripts/ui-scenarios/forge-search.keys \
 #     --binary scripts/ui-scenarios/forge-cached-launch --cwd /tmp/orbit --out target/ui-shots/forge-search
-wait 1500
+until Changes
+wait 300
 # Git → Pull requests → Issues
 type >
 wait 100

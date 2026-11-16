@@ -18,6 +18,7 @@ use std::sync::Mutex;
 use std::sync::OnceLock;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicU64;
+use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
@@ -27,6 +28,8 @@ type Shared = Result<Fetched, ForgeError>;
 struct Slot {
     result: Mutex<Option<Shared>>,
     ready: Condvar,
+    /// Callers waiting on this fetch instead of sending their own.
+    followers: AtomicUsize,
 }
 
 fn flights() -> &'static Mutex<HashMap<String, Arc<Slot>>> {
@@ -54,6 +57,16 @@ fn key(ctx: &ForgeContext, read: &Read, cond: &Conditional) -> String {
     )
 }
 
+/// How many callers are waiting on the fetch of this read that is on its way now (0 when
+/// none is). Unlike `joined`, which counts the whole process, it sees one flight only.
+pub fn followers(ctx: &ForgeContext, read: &Read, cond: &Conditional) -> usize {
+    flights()
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .get(&key(ctx, read, cond))
+        .map_or(0, |slot| slot.followers.load(Ordering::Acquire))
+}
+
 /// `provider.read`, shared with any identical read already on its way.
 pub fn read(
     provider: &dyn Provider,
@@ -66,7 +79,10 @@ pub fn read(
     let (slot, leader) = {
         let mut flights = flights().lock().unwrap_or_else(|error| error.into_inner());
         match flights.get(&key) {
-            Some(slot) => (slot.clone(), false),
+            Some(slot) => {
+                slot.followers.fetch_add(1, Ordering::AcqRel);
+                (slot.clone(), false)
+            }
             None => {
                 let slot = Arc::new(Slot::default());
                 flights.insert(key.clone(), slot.clone());

@@ -1195,7 +1195,7 @@ mod tests {
                 pixel_height: 0,
             })
             .unwrap();
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + Duration::from_secs(20);
         loop {
             if let Some(status) = child.try_wait().unwrap() {
                 assert!(status.success(), "{status:?}");

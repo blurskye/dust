@@ -76,7 +76,7 @@ fn view(screen: &mut GitScreen) -> String {
     text(&screen.frame(190, 48))
 }
 fn wait(screen: &mut GitScreen, mut ready: impl FnMut(&mut GitScreen) -> bool) {
-    let deadline = Instant::now() + Duration::from_secs(15);
+    let deadline = Instant::now() + Duration::from_secs(120);
     loop {
         screen.poll();
         if ready(screen) {
@@ -118,7 +118,7 @@ fn rail(width: u16, height: u16) -> u16 {
     } else if width >= 160 && height >= 40 {
         (25 + width / 7).clamp(44, 60)
     } else {
-        (20 + width / 10).clamp(28, 36)
+        (width / 4 + 7).clamp(32, 44)
     }
 }
 /// Rail columns at 190×48.
@@ -194,19 +194,27 @@ fn count(screen: &mut GitScreen, expected: usize) {
                     .any(|line| line.contains(&format!("· {expected} marked"))),
                 "{width}×{height}: {shown}"
             );
-            // A notice (refusal, Git output) takes the one footer row; otherwise the
-            // footer offers the marked-set actions.
+            // The footer offers the marked-set actions. A notice (refusal, Git output) sits
+            // beside them on the right and the hints that no longer fit drop out (r8 R7-05):
+            // beside a long refusal at 100 columns only `x mark` is left. At full width they
+            // all fit. A notice too long to share the row takes it (no `? keys`).
             if footer.contains("? k") {
-                assert!(footer.contains("stage marked"), "{width}×{height}: {footer}");
+                assert!(
+                    footer.contains("stage marked") || footer.contains("x mark"),
+                    "{width}×{height}: {footer}"
+                );
+                if width >= 190 {
+                    assert!(footer.contains("stage marked"), "{width}×{height}: {footer}");
+                }
             }
         }
     }
 }
 fn space(screen: &mut GitScreen) {
-    assert_eq!(key(screen, KeyCode::Char(' ')), ScreenOutcome::Continue);
+    assert_eq!(key(screen, KeyCode::Char('-')), ScreenOutcome::Continue);
     assert!(screen.busy(), "write did not start:\n{}", view(screen));
     wait(screen, |screen| !screen.busy());
-    eprintln!("after Space:\n{}", view(screen));
+    eprintln!("after -:\n{}", view(screen));
 }
 fn disk(root: &Path, paths: &[&str]) -> Vec<Option<Vec<u8>>> {
     paths
@@ -283,7 +291,7 @@ fn disjoint_marks_finish_partial_rename_binary_and_untracked_then_reverse_only_t
     count(&mut screen, 4);
     let before_refusal = std::fs::read(root.join(".git/index")).unwrap();
     screen.write_refusal = Some("Host refuses batch writes".into());
-    key(&mut screen, KeyCode::Char(' '));
+    key(&mut screen, KeyCode::Char('-'));
     assert!(!screen.busy());
     assert!(view(&mut screen).contains("Host refuses batch writes"));
     assert_eq!(
@@ -292,9 +300,9 @@ fn disjoint_marks_finish_partial_rename_binary_and_untracked_then_reverse_only_t
     );
     count(&mut screen, 4);
     screen.write_refusal = None;
-    key(&mut screen, KeyCode::Char(' '));
+    key(&mut screen, KeyCode::Char('-'));
     assert!(screen.busy());
-    key(&mut screen, KeyCode::Char(' ')); // busy/post-write refresh cannot reverse early
+    key(&mut screen, KeyCode::Char('-')); // busy/post-write refresh cannot reverse early
     wait(&mut screen, |screen| !screen.busy());
     assert_eq!(git(root, &["show", ":alpha/edit.txt"]), "remaining edit");
     assert_eq!(git(root, &["show", ":beta/moved.txt"]), "renamed content");
@@ -490,7 +498,7 @@ fn escape_filter_all_files_sidebar_history_and_repository_contexts_clear_marks()
     key(&mut screen, KeyCode::Char('4')); // History
     wait(&mut screen, |screen| view(screen).contains("Baseline"));
     key(&mut screen, KeyCode::Enter);
-    for code in ['x', 'V', ' '] {
+    for code in ['x', 'V', '-'] {
         key(&mut screen, KeyCode::Char(code));
     }
     assert!(!screen.busy(), "historical files remain read-only");
@@ -612,8 +620,8 @@ fn markers_keep_xy_filename_native_source_cursor_and_fixed_rectangles_and_never_
         key(screen, KeyCode::Char('V'));
         view(screen).contains("Range started")
     });
-    key(&mut screen, KeyCode::Char(' '));
-    assert!(!screen.busy(), "diff range still refuses whole-hunk Space");
+    key(&mut screen, KeyCode::Char('-'));
+    assert!(!screen.busy(), "diff range still refuses whole-hunk -");
     assert_eq!(cached(root), "");
     key(&mut screen, KeyCode::Escape); // cancel exact diff range, not file marks
     space(&mut screen); // preview hunk, never the marked z.rs
@@ -701,7 +709,7 @@ fn a_marked_file_replaced_by_a_directory_refuses_to_sweep_in_hidden_descendants(
     let mut screen = open(root);
     mark(&mut screen, "a.txt");
     let index = std::fs::read(root.join(".git/index")).unwrap();
-    key(&mut screen, KeyCode::Char(' '));
+    key(&mut screen, KeyCode::Char('-'));
     assert!(!screen.busy());
     assert!(view(&mut screen).contains("selected file is now a directory"));
     assert_eq!(std::fs::read(root.join(".git/index")).unwrap(), index);

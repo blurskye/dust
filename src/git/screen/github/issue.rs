@@ -1,14 +1,13 @@
-//! F-ISSUES / F-ISSUEDISC reader rows (DESIGN.md §3.33, §3.34): the Overview metadata table
-//! and body, the Discussion comment cards and the Activity rail, built from typed records.
+//! F-ISSUES / F-ISSUEDISC reader rows (DESIGN.md §3.33, §3.34): one Conversation page as on
+//! GitHub (`conversation.rs`), and the helpers it shares with pull requests: link rows, the
+//! one-line events, the unavailable banner.
 use super::super::shell::glyphs::{Glyph, glyph};
-use super::prose::{self, Rich, blank, field, heading, muted, role, rule, strong};
+use super::prose::{self, Rich, blank, muted, role, strong};
 use super::lines::Line;
 use super::*;
 use crate::config::ExplorerIconMode;
-use crate::forge::records::{self, CommentRecord, DetailRecord, LinkRecord, TimelineEntry};
+use crate::forge::records::{self, DetailRecord, LinkRecord, TimelineEntry};
 use crate::ui::{GitRole, GitSurface};
-
-pub(super) const TABS: [&str; 3] = ["Overview", "Discussion", "Activity"];
 
 /// Opens a linked issue or pull request in place (or in its own repository from the inbox).
 pub(super) fn link_action(workspace: &Workspace, link: &LinkRecord, page: usize) -> Option<Action> {
@@ -19,49 +18,25 @@ pub(super) fn link_action(workspace: &Workspace, link: &LinkRecord, page: usize)
     Some(Action::OpenItem(page, link.number))
 }
 
-/// `⎇ #11 Recover queued tasks after worker reconnect` as a link row.
-pub(super) fn link_row(
-    workspace: &Workspace,
-    link: &LinkRecord,
-    pull: bool,
-    lead: Rich,
-    mode: ExplorerIconMode,
-) -> Line {
-    let page = if pull { 2 } else { 1 };
-    let mark = glyph(if pull { Glyph::PullRequest } else { Glyph::Issue }, mode);
-    let mut rich = lead.push(&format!("{mark} "), role(GitRole::Ref));
-    if !link.repo.is_empty() && !link.repo.eq_ignore_ascii_case(&workspace.repo) {
-        rich = rich.push(&format!("{} ", link.repo), role(GitRole::Muted));
-    }
-    let mut row = rich
-        .push(&format!("{}{} ", workspace.sigil(pull), link.number), role(GitRole::Link))
-        .push(&link.title, role(GitRole::Link))
-        .line();
-    row.action = link_action(workspace, link, page);
-    row
-}
-
 /// A detail read that failed: what is shown instead, why, and how to fix it (§3.45).
 pub(super) fn unavailable(workspace: &Workspace, rows: &mut Vec<Line>, error: &str, refresh: &str) {
     // A banner above the body (§3.45): the failure and the way out on a tinted band, then
     // the list's description underneath, untouched.
+    // In words with one key (§3.46): the reason, then its hint; `R` retries everywhere.
+    let _ = refresh;
+    let words = workspace.explain(error);
     let mut head = Rich::new()
         .plain(" ")
         .push("✕ ", strong(GitRole::Removed))
         .push("Details unavailable", strong(GitRole::Removed))
         .sep()
-        .push(error, role(GitRole::Text))
+        .push(&words.headline, role(GitRole::Text))
         .line();
     head.band = Some(GitSurface::ReceiptErr);
     rows.push(head);
-    let (command, token) = sign_in(workspace.forge_kind());
     let mut hint = Rich::new()
         .plain("   ")
-        .push(refresh, strong(GitRole::Focus))
-        .push(" retry · signed out? run ", role(GitRole::Text))
-        .push(command, strong(GitRole::Text))
-        .push(" or set ", role(GitRole::Text))
-        .push(token, strong(GitRole::Text))
+        .push(&words.hint, role(GitRole::Text))
         .push(" · below: the list's description", role(GitRole::Muted))
         .line();
     hint.band = Some(GitSurface::ReceiptErr);
@@ -79,28 +54,13 @@ pub(super) fn sign_in(kind: Option<crate::forge::provider::ProviderKind>) -> (&'
     }
 }
 
-/// `󰀄 alex · 2h ago` over a comment.
-pub(super) fn comment_header(comment: &CommentRecord, now: i64, mode: ExplorerIconMode) -> Line {
-    let mut rich = Rich::new()
-        .push(&format!("{} ", glyph(Glyph::Person, mode)), role(GitRole::Muted))
-        .push(&comment.author, strong(GitRole::Author));
-    if comment.pending {
-        rich = rich.sep().push("commented", role(GitRole::Muted)).sep().push("sending…", role(GitRole::Modified));
-    } else {
-        let when = records::ago(&comment.created, now);
-        if !when.is_empty() {
-            rich = rich.sep().push(&when, role(GitRole::Muted));
-        }
-    }
-    rich.line()
-}
-
 fn loading_or_error(workspace: &Workspace, key: &Key, rows: &mut Vec<Line>) -> bool {
     match workspace.cache.get(key) {
         Some(Ok(_)) => false,
         Some(Err(error)) => {
-            rows.push(Rich::new().push("✕ ", role(GitRole::Removed)).push(error, role(GitRole::Removed)).line());
-            rows.push(muted(&format!("r refresh · signed out? run {}", sign_in(workspace.forge_kind()).0)));
+            let words = workspace.explain(error);
+            rows.push(Rich::new().push("✕ ", role(GitRole::Removed)).push(&words.headline, role(GitRole::Removed)).line());
+            rows.push(muted(&words.hint));
             true
         }
         None => {
@@ -126,18 +86,6 @@ pub(super) fn discussion_count(workspace: &Workspace, id: u64, record: &DetailRe
     loaded.max(record.row.comments)
 }
 
-/// `None` until the timeline is read.
-pub(super) fn activity_count(workspace: &Workspace, id: u64) -> Option<usize> {
-    workspace.value(&Key::Timeline(id))?;
-    Some(entries(workspace, id).iter().filter(|entry| !entry.conversation()).count())
-}
-
-fn comment_rows(rows: &mut Vec<Line>, comment: &CommentRecord, width: usize, now: i64, mode: ExplorerIconMode) {
-    rows.push(comment_header(comment, now, mode));
-    prose::markdown(rows, &comment.body, width, "");
-}
-
-/// The rows below the reader's pinned header.
 pub(super) fn rows(workspace: &Workspace, width: usize, mode: ExplorerIconMode) -> Vec<Line> {
     let id = workspace.number();
     let mut rows = Vec::new();
@@ -150,200 +98,68 @@ pub(super) fn rows(workspace: &Workspace, width: usize, mode: ExplorerIconMode) 
         loading_or_error(workspace, &key, &mut rows);
         return rows;
     };
-    let record = DetailRecord::from_value(value);
-    let now = records::now();
-    let column = 12;
-    match workspace.issue_tab {
-        1 => discussion(workspace, id, &mut rows, width, now, mode),
-        2 => activity(workspace, id, &record, &mut rows, now, mode),
-        _ => {
-            if loaded.is_none() {
-                if let Some(Err(error)) = workspace.cache.get(&key) {
-                    unavailable(workspace, &mut rows, error, "r");
-                } else {
-                    rows.push(muted("Loading details…"));
-                }
-                rows.push(blank());
-            } else {
-                // A chip's padding space starts a column early so its text lines up.
-                let labels = if record.row.labels.is_empty() {
-                    field("Labels", column).push("None yet", role(GitRole::Muted))
-                } else {
-                    field("Labels", column - 1).labels(&record.row.labels)
-                };
-                let mut labels = labels.line();
-                labels.action = Some(Action::Metadata(1, id, "labels"));
-                rows.push(labels);
-                let mut assignee = field("Assignee", column);
-                assignee = if record.assignees.is_empty() {
-                    assignee.push("No one", role(GitRole::Muted))
-                } else {
-                    let mut rich = assignee;
-                    for (index, login) in record.assignees.iter().enumerate() {
-                        if index > 0 {
-                            rich = rich.push(", ", role(GitRole::Muted));
-                        }
-                        rich = rich.push(login, role(GitRole::Author));
-                    }
-                    rich
-                };
-                let mut assignee = assignee.line();
-                assignee.action = Some(Action::Metadata(1, id, "assignees"));
-                rows.push(assignee);
-                if let Some(milestone) = &record.milestone {
-                    let mut row = field("Milestone", column)
-                        .push(&format!("{} ", glyph(Glyph::Milestone, mode)), role(GitRole::Tag))
-                        .push(milestone, role(GitRole::Text))
-                        .line();
-                    row.action = Some(Action::Metadata(1, id, "milestone"));
-                    rows.push(row);
-                }
-                if record.links.is_empty() && workspace.capabilities().linked_issues.allowed() {
-                    let github = matches!(
-                        workspace.forge_kind(),
-                        None | Some(crate::forge::provider::ProviderKind::GitHub)
-                    );
-                    let mut row = field("Linked PR", column).push("None", role(GitRole::Muted));
-                    if github {
-                        // GitHub can make the branch for an issue; the checkout stays put.
-                        row = row.plain("  ").push("› ", role(GitRole::Focus)).push("Create linked branch", role(GitRole::Link));
-                    }
-                    let mut row = row.line();
-                    if github {
-                        row.action = Some(Action::Develop(id));
-                    }
-                    rows.push(row);
-                }
-                for (index, link) in record.links.iter().enumerate() {
-                    let lead = field(if index == 0 { "Linked PR" } else { "" }, column);
-                    rows.push(link_row(workspace, link, true, lead, mode));
-                }
-                if !record.links.is_empty()
-                    && matches!(workspace.forge_kind(), None | Some(crate::forge::provider::ProviderKind::GitHub))
-                {
-                    let mut row = field("", column)
-                        .push("› ", role(GitRole::Focus))
-                        .push("Create linked branch", role(GitRole::Link))
-                        .line();
-                    row.action = Some(Action::Develop(id));
-                    rows.push(row);
-                }
-                rows.push(rule(width.min(prose::MEASURE)));
-            }
-            // A list row that omitted the body says nothing about it: no "No description".
-            if loaded.is_some() || !value["body"].is_null() {
-                prose::markdown(&mut rows, &record.body, width, "");
-            }
-            if loaded.is_none() {
-                return rows;
-            }
-            // The newest comments, so the overview is never a dead end.
-            let entries = entries(workspace, id);
-            let comments = entries
-                .iter()
-                .filter_map(|entry| match entry {
-                    TimelineEntry::Comment(comment) => Some(comment),
-                    _ => None,
-                })
-                .collect::<Vec<_>>();
-            rows.push(blank());
-            if workspace.value(&Key::Timeline(id)).is_none() {
-                loading_or_error(workspace, &Key::Timeline(id), &mut rows);
-                return rows;
-            }
-            let total = discussion_count(workspace, id, &record);
-            rows.push(heading(
-                "Latest activity",
-                &match total {
-                    0 => "no comments yet".to_owned(),
-                    1 => "1 comment".to_owned(),
-                    n => format!("{n} comments"),
-                },
-            ));
-            rows.push(blank());
-            for comment in comments.iter().rev().take(2).rev() {
-                comment_rows(&mut rows, comment, width, now, mode);
-                rows.push(blank());
-            }
-            let mut more = Rich::new()
-                .push("› ", role(GitRole::Focus))
-                .push(if comments.len() > 2 { "Read the whole discussion" } else { "Open the discussion" }, role(GitRole::Link))
-                .line();
-            more.action = Some(Action::PrTab(1));
-            rows.push(more);
-            let mut reply = Rich::new()
-                .push("› ", role(GitRole::Focus))
-                .push("Write a comment", role(GitRole::Link))
-                .plain("  ")
-                .push("C", strong(GitRole::Focus))
-                .line();
-            reply.action = Some(Action::Comment(1, id));
-            rows.push(reply);
-            // The issue's own next step: close it, or reopen it.
-            let open = record.row.lifecycle == crate::forge::model::Lifecycle::Open;
-            let mut state = Rich::new()
-                .push("› ", role(GitRole::Focus))
-                .push(if open { "Close the issue" } else { "Reopen the issue" }, role(GitRole::Link))
-                .plain("  ")
-                .push(if open { "x" } else { "X" }, strong(GitRole::Focus))
-                .line();
-            state.action = Some(Action::State(1, id, open));
-            rows.push(state);
-        }
+    let mut record = DetailRecord::from_value(value);
+    if loaded.is_none()
+        && let Some(Err(error)) = workspace.cache.get(&key)
+    {
+        unavailable(workspace, &mut rows, error, "r");
+        rows.push(blank());
     }
+    // A list row that omitted the body says nothing about it: no "No description".
+    let unknown_body = loaded.is_none() && value["body"].is_null();
+    if unknown_body {
+        record.body.clear();
+    }
+    super::conversation::issue(workspace, id, &record, loaded.is_some(), !unknown_body, &mut rows, width, records::now(), mode);
     rows
 }
 
-fn discussion(workspace: &Workspace, id: u64, rows: &mut Vec<Line>, width: usize, now: i64, mode: ExplorerIconMode) {
-    if loading_or_error(workspace, &Key::Timeline(id), rows) {
-        return;
-    }
-    let entries = entries(workspace, id);
-    let mut first = true;
-    for entry in &entries {
-        match entry {
-            TimelineEntry::Comment(comment) => {
-                if !first {
-                    rows.push(rule(width.min(prose::MEASURE)));
-                }
-                first = false;
-                comment_rows(rows, comment, width, now, mode);
-            }
-            TimelineEntry::Event { link: Some((link, pull)), .. } => {
-                if !first {
-                    rows.push(rule(width.min(prose::MEASURE)));
-                }
-                first = false;
-                rows.push(link_row(workspace, link, *pull, Rich::new().push(if *pull { "PR " } else { "" }, role(GitRole::Muted)), mode));
-            }
-            _ => {}
-        }
-    }
-    if first {
-        rows.push(muted("No comments yet."));
-    }
-    rows.push(blank());
-    let mut reply = Rich::new()
-        .push("› ", role(GitRole::Focus))
-        .push("Write a comment", role(GitRole::Link))
-        .plain("  ")
-        .push("C", strong(GitRole::Focus))
-        .line();
-    reply.action = Some(Action::Comment(1, id));
-    rows.push(reply);
+/// One event on the Conversation rail: `● alex added [bug] · 1h ago`.
+/// One timeline event in `width` cells. Its age is reserved first, at the row's end; a long
+/// linked title is cut to what is left, so no event loses its time (r11 ISS-04).
+pub(super) fn event_row(workspace: &Workspace, entry: &TimelineEntry, now: i64, width: usize, mode: ExplorerIconMode) -> Option<Vec<Line>> {
+    events_row(workspace, &[entry], now, width, mode)
 }
 
-/// One event on the Activity rail: `● alex added [bug] · 1h ago`.
-pub(super) fn event_row(workspace: &Workspace, entry: &TimelineEntry, now: i64, mode: ExplorerIconMode) -> Option<Line> {
-    let TimelineEntry::Event {
+/// Whether `next` reads as one line with `previous` (GitHub's grouping): the same actor doing
+/// the same labelling, assigning or review request, at the same shown age.
+pub(super) fn joins(previous: &TimelineEntry, next: &TimelineEntry, now: i64) -> bool {
+    let (
+        TimelineEntry::Event { actor: a, kind: ka, at: ta, link: None, .. },
+        TimelineEntry::Event { actor: b, kind: kb, at: tb, link: None, .. },
+    ) = (previous, next)
+    else {
+        return false;
+    };
+    a == b
+        && ka == kb
+        && matches!(ka.as_str(), "labeled" | "unlabeled" | "assigned" | "unassigned" | "review_requested")
+        && fresh::relative(ta, now) == fresh::relative(tb, now)
+}
+
+/// `a`, `a and b`, `a, b and c`.
+fn and_list(names: &[&str]) -> String {
+    match names {
+        [] => String::new(),
+        [one] => (*one).to_owned(),
+        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+    }
+}
+
+/// Events that [`joins`] made one, on one line, in GitHub's words: `● maya added the [bug]
+/// label`, `● maya added [bug] [priority: high] labels`, `● maya requested review from alex
+/// and sam`, `● maya self-assigned this`.
+/// The event's row, and a second row under it when a link target does not fit beside its
+/// words.
+pub(super) fn events_row(workspace: &Workspace, entries: &[&TimelineEntry], now: i64, width: usize, mode: ExplorerIconMode) -> Option<Vec<Line>> {
+    let Some(TimelineEntry::Event {
         actor,
         verb,
-        object,
-        label,
         link,
         at,
         kind,
-    } = entry
+        ..
+    }) = entries.first().copied()
     else {
         return None;
     };
@@ -355,102 +171,219 @@ pub(super) fn event_row(workspace: &Workspace, entry: &TimelineEntry, now: i64, 
         "assigned" | "unassigned" | "review_requested" => GitRole::Author,
         _ => GitRole::Muted,
     };
+    let labels = entries
+        .iter()
+        .filter_map(|entry| match entry {
+            TimelineEntry::Event { label: Some(label), .. } => Some(label),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let objects = entries
+        .iter()
+        .filter_map(|entry| match entry {
+            TimelineEntry::Event { label: None, object: Some(object), .. } if !object.is_empty() => Some(object.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let wording = wording(workspace, kind, verb, actor, &objects, labels.len());
+    let link = link.clone().or(wording.link);
     let mut rich = Rich::new()
         .push(&format!("{} ", glyph(Glyph::Dot, mode)), role(tone))
         .push(actor, strong(GitRole::Author))
         .plain(" ")
-        .push(verb, role(GitRole::Muted));
-    if let Some(label) = label {
-        rich = rich.plain(" ").chip(&label.name, prose::label_style(label));
-    } else if let Some(object) = object.as_ref().filter(|object| !object.is_empty()) {
-        rich = rich.plain(" ").push(object, role(if kind == "merged" || kind.contains("commit") { GitRole::Hash } else { GitRole::Text }));
+        .push(&wording.verb, role(GitRole::Muted));
+    // What follows the verb: its labels or objects, then the suffix (`into main`, `label`).
+    let mut tail: Vec<(String, crate::ui::Style)> = Vec::new();
+    if !labels.is_empty() {
+        for label in labels {
+            tail.push((format!(" {} ", label.name), prose::label_style(label)));
+        }
+    } else if !objects.is_empty() && wording.objects {
+        let role_of = if kind == "merged" || kind.contains("commit") || kind == "referenced" || kind == "closed" {
+            GitRole::Hash
+        } else {
+            GitRole::Text
+        };
+        tail.push((and_list(&objects), role(role_of)));
+    }
+    if let Some(suffix) = &wording.suffix {
+        tail.push((suffix.clone(), role(GitRole::Muted)));
+    }
+    let when = fresh::relative(at, now);
+    let reserved = if when.is_empty() { 0 } else { unicode_width::UnicodeWidthStr::width(when.as_str()) + 3 };
+    let tail_width: usize = tail.iter().map(|(text, _)| 1 + unicode_width::UnicodeWidthStr::width(text.as_str())).sum();
+    // A sentence too long for the row (`force-pushed the feature/native branch from 1a2b3c4
+    // to 5d6e7f8`, `locked as off-topic and limited conversation to collaborators`) wraps at
+    // its words onto rows under the actor, the age ending the last.
+    if link.is_none() && rich.width() + tail_width + reserved > width {
+        let head = Rich::new()
+            .push(&format!("{} ", glyph(Glyph::Dot, mode)), role(tone))
+            .push(actor, strong(GitRole::Author));
+        let words = wording.verb.split(' ').map(|word| (word.to_owned(), role(GitRole::Muted)));
+        let tokens = words.chain(tail.iter().cloned()).collect::<Vec<_>>();
+        let mut rows = Vec::new();
+        let mut current = head;
+        let mut fresh = false;
+        for (index, (text, style)) in tokens.iter().enumerate() {
+            let last = index + 1 == tokens.len();
+            let need = 1 + unicode_width::UnicodeWidthStr::width(text.as_str()) + if last { reserved } else { 0 };
+            if !fresh && current.width() + need > width {
+                rows.push(std::mem::replace(&mut current, Rich::new().plain("  ")).line());
+                fresh = true;
+            }
+            current = if fresh { current.push(text, *style) } else { current.plain(" ").push(text, *style) };
+            fresh = false;
+        }
+        if !when.is_empty() {
+            current = current.sep().push(&when, role(GitRole::Muted));
+        }
+        rows.push(current.line());
+        return Some(rows);
+    }
+    for (text, style) in &tail {
+        rich = rich.plain(" ").push(text, *style);
     }
     let mut action = None;
-    if let Some((link, pull)) = link {
+    let mut below = None;
+    if let Some((link, pull)) = &link {
         let mark = glyph(if *pull { Glyph::PullRequest } else { Glyph::Issue }, mode);
-        rich = rich
-            .plain(" ")
-            .push(&format!("{mark} {}{} {}", workspace.sigil(*pull), link.number, link.title), role(GitRole::Link));
-        action = link_action(workspace, link, if *pull { 2 } else { 1 });
+        let text = format!("{mark} {}{} {}", workspace.sigil(*pull), link.number, link.title);
+        let room = width.saturating_sub(rich.width() + 1 + reserved);
+        let link_action = link_action(workspace, link, if *pull { 2 } else { 1 });
+        if room >= unicode_width::UnicodeWidthStr::width(text.as_str()).min(24) {
+            rich = rich
+                .plain(" ")
+                .push(&super::super::shell::chrome::ellipsize(&text, room), role(GitRole::Link));
+            action = link_action;
+        } else {
+            // GitHub's long link sentences (`…may be closed by this pull request:`) leave no
+            // room for the target: it reads on the row below, under the verb, with the age.
+            let mut next = Rich::new()
+                .plain("  ")
+                .push(&super::super::shell::chrome::ellipsize(&text, width.saturating_sub(2 + reserved).max(8)), role(GitRole::Link));
+            if !when.is_empty() {
+                next = next.sep().push(&when, role(GitRole::Muted));
+            }
+            let mut next = next.line();
+            next.action = link_action;
+            below = Some(next);
+        }
     }
-    let when = records::ago(at, now);
-    if !when.is_empty() {
+    if !when.is_empty() && below.is_none() {
         rich = rich.sep().push(&when, role(GitRole::Muted));
     }
     let mut row = rich.line();
     row.action = action;
-    Some(row)
+    Some(std::iter::once(row).chain(below).collect())
 }
 
-fn activity(
-    workspace: &Workspace,
-    id: u64,
-    record: &DetailRecord,
-    rows: &mut Vec<Line>,
-    now: i64,
-    mode: ExplorerIconMode,
-) {
-    let opened = Rich::new()
-        .push(&format!("{} ", glyph(Glyph::Dot, mode)), role(GitRole::Added))
-        .push(&record.row.author, strong(GitRole::Author))
-        .plain(" ")
-        .push("opened this", role(GitRole::Muted));
-    let when = records::ago(&record.created, now);
-    rows.push(if when.is_empty() { opened.line() } else { opened.sep().push(&when, role(GitRole::Muted)).line() });
-    if loading_or_error(workspace, &Key::Timeline(id), rows) {
-        return;
-    }
-    let mut comments = 0;
-    for entry in entries(workspace, id) {
-        if let TimelineEntry::Comment(_) = entry {
-            comments += 1;
-            continue;
+/// An event's words on this page.
+struct Wording {
+    verb: String,
+    /// Whether the event's objects (a sha, a login) follow the verb.
+    objects: bool,
+    /// Words after the objects or labels: `into main`, `label`.
+    suffix: Option<String>,
+    /// The item a link event points at, when the event itself does not say (REST's
+    /// `connected` carries no target; the page's Development links do).
+    link: Option<(LinkRecord, bool)>,
+}
+
+/// GitHub's wording for an event (DESIGN.md §3.26): what the record says, with what only the
+/// page knows, whether it is a pull request or an issue, its branches and its links.
+fn wording(workspace: &Workspace, kind: &str, verb: &str, actor: &str, objects: &[&str], labels: usize) -> Wording {
+    // The page's own record, read only for the events that need it.
+    let pull = workspace.page == 2;
+    let record = || workspace.item().map(DetailRecord::from_value);
+    let head = || record().map(|record| record.head).unwrap_or_default();
+    let mut wording = Wording { verb: verb.to_owned(), objects: true, suffix: None, link: None };
+    let branch = |name: &str, fallback: &str| if name.is_empty() { fallback.to_owned() } else { format!("the {name} branch") };
+    match kind {
+        // "maya linked an issue that may be closed by this pull request: #1 Queue stalls…"
+        "connected" | "disconnected" => {
+            let target = if pull { "an issue" } else { "a pull request" };
+            wording.verb = match (kind, pull) {
+                ("connected", true) => "linked an issue that may be closed by this pull request".to_owned(),
+                ("connected", false) => "linked a pull request that will close this issue".to_owned(),
+                _ => format!("removed a link to {target}"),
+            };
+            let links = record().map(|record| record.links).unwrap_or_default();
+            if let [only] = links.as_slice() {
+                wording.verb.push(':');
+                wording.link = Some((only.clone(), !pull));
+            }
         }
-        if let Some(row) = event_row(workspace, &entry, now, mode) {
-            rows.push(Rich::new().push("│", role(GitRole::Border)).line());
-            rows.push(row);
+        "labeled" | "unlabeled" => {
+            let added = kind == "labeled";
+            wording.verb = match (added, labels) {
+                (true, 1) => "added the",
+                (false, 1) => "removed the",
+                (true, _) => "added",
+                (false, _) => "removed",
+            }
+            .to_owned();
+            wording.suffix = Some(if labels == 1 { "label" } else { "labels" }.to_owned());
         }
+        "unassigned" if objects == [actor] => {
+            wording.verb = "removed their assignment".to_owned();
+            wording.objects = false;
+        }
+        "assigned" if objects == [actor] => {
+            wording.verb = "self-assigned this".to_owned();
+            wording.objects = false;
+        }
+        "merged" => {
+            let base = record().map(|record| record.base).unwrap_or_default();
+            if !base.is_empty() {
+                wording.suffix = Some(format!("into {base}"));
+            }
+        }
+        "head_ref_force_pushed" => wording.verb = format!("force-pushed {}", branch(&head(), "the head branch")),
+        "head_ref_deleted" | "delete branch" => wording.verb = format!("deleted {}", branch(&head(), "the head branch")),
+        "head_ref_restored" => wording.verb = format!("restored {}", branch(&head(), "the head branch")),
+        "referenced" => {
+            wording.verb = format!("added a commit that referenced this {}", if pull { "pull request" } else { "issue" });
+        }
+        _ => {}
     }
-    if comments > 0 {
-        rows.push(Rich::new().push("│", role(GitRole::Border)).line());
-        let mut row = Rich::new()
-            .push(&format!("{} ", glyph(Glyph::Comment, mode)), role(GitRole::Muted))
-            .push(&format!("{comments} comment{} in Discussion", if comments == 1 { "" } else { "s" }), role(GitRole::Link))
-            .line();
-        row.action = Some(Action::PrTab(1));
-        rows.push(row);
-    }
+    wording
 }
 
 /// X-EMPTY for a list with nothing in it: what the view is and what to do next.
-pub(super) fn empty(workspace: &Workspace, width: usize) -> Vec<Line> {
+pub(super) fn empty(workspace: &Workspace, _width: usize) -> Vec<Line> {
     let mut rows = Vec::new();
     let what = if workspace.page == 1 { "issues" } else { workspace.terms().pr_plural };
     let what = what.to_lowercase();
     if workspace.inbox.enabled {
-        rows.push(Rich::new().push("No indexed matches", strong(GitRole::Text)).line());
+        rows.push(Rich::new().push("No matches", strong(GitRole::Text)).line());
         rows.push(blank());
-        rows.push(muted("/ filter · [ ] sections · r reload"));
+        rows.push(muted("/ filter · r reload"));
         return rows;
     }
-    rows.push(Rich::new().push(&format!("No {what} match this view"), strong(GitRole::Text)).line());
+    // One line of cause and one action (r15 ISS-03). A typed filter or the closed state
+    // offers the way back first, as GitHub's "Clear current search query, filters, and sorts".
+    let filtered = workspace.filtered();
+    rows.push(
+        Rich::new()
+            .push(&if filtered { format!("No {what} match this filter") } else { format!("No {what} match this view") }, strong(GitRole::Text))
+            .line(),
+    );
     rows.push(blank());
-    for line in crate::ui::render::wrap_plain_text(
-        "Your repository is connected. Change the filter with / or switch sections with [ and ].",
-        width.clamp(10, prose::MEASURE),
-        crate::config::AmbiguousWidth::Narrow,
-    ) {
-        rows.push(muted(&line));
+    if filtered {
+        let mut clear = Rich::new()
+            .push("› ", role(GitRole::Focus))
+            .push("Clear the filter", role(GitRole::Link))
+            .push(&format!(" · every open {}", what), role(GitRole::Muted))
+            .line();
+        clear.action = Some(Action::ClearFilter);
+        rows.push(clear);
     }
-    rows.push(blank());
     let mut create = Rich::new()
         .push("› ", role(GitRole::Focus))
         .push(
             if workspace.page == 1 { "New issue".to_owned() } else { format!("New {}", workspace.terms().pr_singular.to_lowercase()) }.as_str(),
             role(GitRole::Link),
         )
-        .plain("  ")
-        .push("n", strong(GitRole::Focus))
         .line();
     create.action = Some(if workspace.page == 1 { Action::CreateIssue } else { Action::CreatePullRequest });
     rows.push(create);

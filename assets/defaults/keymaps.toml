@@ -354,6 +354,58 @@ keys = "S"
 command = "edit.operator"
 arguments = { operator = "change", motion = "line", linewise = true }
 [[keymap]]
+id = "builtin.editor.normal.edit-operator.upper-d"
+context = "editor"
+mode = "normal"
+keys = "D"
+command = "edit.operator"
+arguments = { operator = "delete", motion = "line_end", linewise = false }
+[[keymap]]
+id = "builtin.editor.normal.edit-operator.upper-c"
+context = "editor"
+mode = "normal"
+keys = "C"
+command = "edit.operator"
+arguments = { operator = "change", motion = "line_end", linewise = false }
+[[keymap]]
+id = "builtin.editor.normal.edit-operator.upper-y"
+context = "editor"
+mode = "normal"
+keys = "Y"
+command = "edit.operator"
+arguments = { operator = "yank", motion = "line_end", linewise = false }
+[[keymap]]
+id = "builtin.editor.normal.mode-insert.g-i"
+context = "editor"
+mode = "normal"
+keys = "g i"
+command = "mode.insert"
+arguments = { placement = "last_insert" }
+[[keymap]]
+id = "builtin.editor.normal.mode-visual-reselect.g-v"
+context = "editor"
+mode = "normal"
+keys = "g v"
+command = "mode.visual_reselect"
+[[keymap]]
+id = "builtin.editor.visual-char.mode-visual-reselect.g-v"
+context = "editor"
+mode = "visual_char"
+keys = "g v"
+command = "mode.visual_reselect"
+[[keymap]]
+id = "builtin.editor.visual-line.mode-visual-reselect.g-v"
+context = "editor"
+mode = "visual_line"
+keys = "g v"
+command = "mode.visual_reselect"
+[[keymap]]
+id = "builtin.editor.visual-block.mode-visual-reselect.g-v"
+context = "editor"
+mode = "visual_block"
+keys = "g v"
+command = "mode.visual_reselect"
+[[keymap]]
 id = "builtin.editor.normal.input-replace-begin.r"
 context = "editor"
 mode = "normal"
@@ -1277,6 +1329,20 @@ keys = "a `"
 command = "input.motion"
 arguments = { motion = "a_backtick", linewise = false }
 [[keymap]]
+id = "builtin.editor.operator-pending.input-motion.i-t"
+context = "editor"
+mode = "operator_pending"
+keys = "i t"
+command = "input.motion"
+arguments = { motion = "inner_tag", linewise = false }
+[[keymap]]
+id = "builtin.editor.operator-pending.input-motion.a-t"
+context = "editor"
+mode = "operator_pending"
+keys = "a t"
+command = "input.motion"
+arguments = { motion = "a_tag", linewise = false }
+[[keymap]]
 id = "builtin.editor.visual-char.input-motion.i-w"
 context = "editor"
 mode = "visual_char"
@@ -1500,6 +1566,20 @@ mode = "visual_char"
 keys = "a `"
 command = "input.motion"
 arguments = { motion = "a_backtick", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.i-t"
+context = "editor"
+mode = "visual_char"
+keys = "i t"
+command = "input.motion"
+arguments = { motion = "inner_tag", linewise = false }
+[[keymap]]
+id = "builtin.editor.visual-char.input-motion.a-t"
+context = "editor"
+mode = "visual_char"
+keys = "a t"
+command = "input.motion"
+arguments = { motion = "a_tag", linewise = false }
 [[keymap]]
 id = "builtin.editor.operator-pending.input-motion.i-f"
 context = "editor"

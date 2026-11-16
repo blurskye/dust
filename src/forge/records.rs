@@ -5,7 +5,7 @@
 //! freshness, optimistic-write and inbox machinery edit those values in place. The painters
 //! never read that JSON; they read these records, built from it in one place.
 
-use crate::forge::model::{CiState, Lifecycle, ReviewState};
+use crate::forge::model::{CiState, Lifecycle, ReviewState, ReviewTally};
 use serde_json::Value;
 
 fn text<'a>(value: &'a Value, key: &str) -> &'a str {
@@ -302,6 +302,12 @@ pub struct ItemRecord {
     /// Closed on the forge since the cached list; kept in place until the list is left.
     pub gone: bool,
     pub body: String,
+    /// Each reviewer's latest verdict and the open requests, when the list carried them.
+    pub tally: Option<ReviewTally>,
+    /// When the item was opened; empty when the list did not say.
+    pub created: String,
+    /// Linked pull requests (an issue) or closing issues (a pull request); 0 when unknown.
+    pub linked: u64,
 }
 
 impl ItemRecord {
@@ -344,12 +350,68 @@ impl ItemRecord {
             changed_files: value["changedFiles"].as_u64(),
             gone: value.get("dustyGone").is_some(),
             body: text(value, "body").to_owned(),
+            tally: extension["reviews"].is_object().then(|| ReviewTally {
+                approved: extension["reviews"]["approved"].as_u64().unwrap_or(0),
+                changes_requested: extension["reviews"]["changesRequested"].as_u64().unwrap_or(0),
+                pending: extension["reviews"]["pending"].as_u64().unwrap_or(0),
+            }),
+            created: extension["created"]
+                .as_str()
+                .or_else(|| value["createdAt"].as_str())
+                .unwrap_or("")
+                .to_owned(),
+            linked: extension["linked"]
+                .as_u64()
+                .or_else(|| value["closedByPullRequestsReferences"].as_array().map(|links| links.len() as u64))
+                .or_else(|| value["closingIssuesReferences"].as_array().map(|links| links.len() as u64))
+                .unwrap_or(0),
         }
     }
 
     pub fn ci(&self) -> Option<CiState> {
         self.checks.state()
     }
+
+    /// The row's review fact: its state, and the words when the counts say more than the
+    /// state's own word. `tally` is the list's, else one counted from the opened item.
+    pub fn review_fact(&self, tally: Option<ReviewTally>) -> Option<(ReviewState, Option<String>)> {
+        let decision = self.review.filter(|review| *review != ReviewState::NotRequested);
+        let Some(tally) = self.tally.or(tally) else {
+            return decision.map(|state| (state, None));
+        };
+        // No decision and nobody asked: the repository requires no review, and the row
+        // keeps its room for the state chip (GitHub lists nothing there either).
+        if decision.is_none() && tally.pending == 0 {
+            return None;
+        }
+        if decision == Some(ReviewState::ChangesRequested) || tally.changes_requested > 0 {
+            return Some((ReviewState::ChangesRequested, None));
+        }
+        if decision == Some(ReviewState::Approved) && tally.pending == 0 {
+            return Some((ReviewState::Approved, None));
+        }
+        if tally.approved == 0 {
+            return decision.map(|state| (state, None));
+        }
+        let approvals = format!("{} approval{}", tally.approved, if tally.approved == 1 { "" } else { "s" });
+        let words = if tally.pending == 0 { approvals } else { format!("{approvals} · {} pending", tally.pending) };
+        Some((ReviewState::Approved, Some(words)))
+    }
+}
+
+/// A pull request's tally from its opened detail: each reviewer's latest verdict, and the
+/// requests still open (`DetailRecord::reviewers`).
+pub fn tally_of(reviewers: &[(String, ReviewState)]) -> ReviewTally {
+    let mut tally = ReviewTally::default();
+    for (_, state) in reviewers {
+        match state {
+            ReviewState::Approved => tally.approved += 1,
+            ReviewState::ChangesRequested => tally.changes_requested += 1,
+            ReviewState::Requested => tally.pending += 1,
+            _ => {}
+        }
+    }
+    tally
 }
 
 // ---------------------------------------------------------------------------------- detail
@@ -423,7 +485,7 @@ impl CheckRow {
             state: ci_state(word),
             word: word.to_ascii_lowercase().replace('_', " "),
             duration,
-            run: id_after("/runs/"),
+            run: check["dustyRun"].as_u64().or_else(|| id_after("/runs/")),
             job: id_after("/job/"),
             url,
         }
@@ -499,6 +561,8 @@ pub struct DetailRecord {
     pub checks: Vec<CheckRow>,
     pub files: Vec<FileRow>,
     pub commits: Vec<CommitRow>,
+    /// Reactions on the body, `(content, count)` in GitHub's words.
+    pub reactions: Vec<(String, u64)>,
 }
 
 impl DetailRecord {
@@ -549,6 +613,7 @@ impl DetailRecord {
             links(value, "closedByPullRequestsReferences")
         };
         Self {
+            reactions: reactions(value),
             id: text(value, "id").to_owned(),
             body: text(value, "body").to_owned(),
             created: text(value, "createdAt").to_owned(),
@@ -661,6 +726,55 @@ pub struct CommentRecord {
     pub created: String,
     /// An optimistic comment the forge has not confirmed yet.
     pub pending: bool,
+    /// The author's relation to the repository (`OWNER`, `MEMBER`, `CONTRIBUTOR`…), where the
+    /// forge says.
+    pub association: String,
+    /// The body was edited after it was posted.
+    pub edited: bool,
+    /// `(content, count)` in GitHub's words (`+1`, `heart`…), where the forge sends them.
+    pub reactions: Vec<(String, u64)>,
+    /// The comment's own page, where the forge says.
+    pub url: String,
+}
+
+/// GitHub's REST reaction rollup (`{"+1": 2, "heart": 1, "total_count": 3}`) or GraphQL
+/// `reactionGroups`, as `(content, count)` pairs with a count.
+pub fn reactions(value: &Value) -> Vec<(String, u64)> {
+    const KINDS: [&str; 8] = ["+1", "-1", "laugh", "hooray", "confused", "heart", "rocket", "eyes"];
+    if let Some(groups) = value["reactionGroups"].as_array() {
+        return groups
+            .iter()
+            .filter_map(|group| {
+                let content = text(group, "content").to_ascii_lowercase();
+                let content = match content.as_str() {
+                    "thumbs_up" => "+1".to_owned(),
+                    "thumbs_down" => "-1".to_owned(),
+                    _ => content,
+                };
+                let count = group["users"]["totalCount"].as_u64().or_else(|| group["count"].as_u64())?;
+                (count > 0).then_some((content, count))
+            })
+            .collect();
+    }
+    let rollup = &value["reactions"];
+    KINDS
+        .iter()
+        .filter_map(|kind| rollup[*kind].as_u64().filter(|n| *n > 0).map(|n| ((*kind).to_owned(), n)))
+        .collect()
+}
+
+/// A REST comment's (`author_association`, `updated_at` after `created_at`) or a GraphQL
+/// node's (`authorAssociation`, `lastEditedAt`) association and edited mark.
+fn comment_extras(value: &Value) -> (String, bool) {
+    let association = value["author_association"]
+        .as_str()
+        .or_else(|| value["authorAssociation"].as_str())
+        .unwrap_or("")
+        .to_owned();
+    let created = value["created_at"].as_str().or_else(|| value["createdAt"].as_str()).unwrap_or("");
+    let edited = value["lastEditedAt"].as_str().is_some_and(|at| !at.is_empty())
+        || value["updated_at"].as_str().is_some_and(|at| !at.is_empty() && !created.is_empty() && at > created);
+    (association, edited)
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -708,13 +822,20 @@ pub fn timeline(value: &Value) -> Vec<TimelineEntry> {
         let at = text(event, "created_at").to_owned();
         let actor = login(event);
         let entry = match kind {
-            "commented" => TimelineEntry::Comment(CommentRecord {
-                id: text(event, "node_id").to_owned(),
-                author: actor,
-                body: text(event, "body").to_owned(),
-                created: at,
-                pending: event["dustyPending"].as_bool() == Some(true),
-            }),
+            "commented" => {
+                let (association, edited) = comment_extras(event);
+                TimelineEntry::Comment(CommentRecord {
+                    id: text(event, "node_id").to_owned(),
+                    author: actor,
+                    body: text(event, "body").to_owned(),
+                    created: at,
+                    pending: event["dustyPending"].as_bool() == Some(true),
+                    association,
+                    edited,
+                    reactions: reactions(event),
+                    url: text(event, "html_url").to_owned(),
+                })
+            }
             "reviewed" => {
                 let state = review_state(text(event, "state"));
                 let body = text(event, "body");
@@ -757,7 +878,23 @@ pub fn timeline(value: &Value) -> Vec<TimelineEntry> {
                         object = Some(text(&event["assignee"], "login").to_owned());
                         "unassigned".into()
                     }
-                    "closed" => "closed this".into(),
+                    // GitHub's wording (DESIGN.md §3.26): "closed this as not planned", "closed
+                    // this in 1a2b3c4" when a commit closed it.
+                    "closed" => {
+                        let sha = text(event, "commit_id");
+                        if !sha.is_empty() {
+                            object = Some(sha.chars().take(7).collect());
+                            "closed this in".into()
+                        } else {
+                            match text(event, "state_reason") {
+                                "completed" => "closed this as completed",
+                                "not_planned" => "closed this as not planned",
+                                "duplicate" => "closed this as a duplicate",
+                                _ => "closed this",
+                            }
+                            .into()
+                        }
+                    }
                     "reopened" => "reopened this".into(),
                     "merged" => {
                         let sha = text(event, "commit_id");
@@ -770,11 +907,11 @@ pub fn timeline(value: &Value) -> Vec<TimelineEntry> {
                         "pushed".into()
                     }
                     "head_ref_force_pushed" => {
-                        object = Some(format!(
-                            "{} → {}",
-                            text(event, "before").chars().take(7).collect::<String>(),
-                            text(event, "after").chars().take(7).collect::<String>()
-                        ));
+                        let before = text(event, "before").chars().take(7).collect::<String>();
+                        let after = text(event, "after").chars().take(7).collect::<String>();
+                        // "force-pushed the fix/backoff branch from 1a2b3c4 to 5d6e7f8"; GitHub's
+                        // REST timeline names only the new head (`commit_id`).
+                        object = Some(if before.is_empty() { format!("to {after}") } else { format!("from {before} to {after}") });
                         "force-pushed".into()
                     }
                     "cross-referenced" => {
@@ -798,12 +935,75 @@ pub fn timeline(value: &Value) -> Vec<TimelineEntry> {
                             text(&event["rename"], "from"),
                             text(&event["rename"], "to")
                         ));
-                        "renamed".into()
+                        "changed the title".into()
                     }
-                    "review_requested" => {
-                        object = Some(text(&event["requested_reviewer"], "login").to_owned());
-                        "requested review from".into()
+                    "review_requested" | "review_request_removed" => {
+                        let reviewer = &event["requested_reviewer"];
+                        let team = text(&event["requested_team"], "name");
+                        object = Some(if reviewer.is_object() { text(reviewer, "login") } else { team }.to_owned());
+                        (if kind == "review_requested" {
+                            "requested review from"
+                        } else {
+                            "removed the request for review from"
+                        })
+                        .into()
                     }
+                    "review_dismissed" | "dismiss review" => "dismissed a review".into(),
+                    "ready_for_review" => "marked this pull request as ready for review".into(),
+                    "convert_to_draft" => "marked this pull request as draft".into(),
+                    // "locked as off-topic and limited conversation to collaborators".
+                    "locked" | "lock" => match text(event, "lock_reason") {
+                        "" => "locked and limited conversation to collaborators".into(),
+                        reason => format!("locked as {} and limited conversation to collaborators", reason.replace('_', " ")),
+                    },
+                    "unlocked" | "unlock" => "unlocked this conversation".into(),
+                    "pinned" | "pin" => "pinned this issue".into(),
+                    "unpinned" | "unpin" => "unpinned this issue".into(),
+                    "base_ref_changed" | "change target branch" => {
+                        let (from, to) = (text(event, "previous_ref_name"), text(event, "current_ref_name"));
+                        if !from.is_empty() && !to.is_empty() {
+                            object = Some(format!("from {from} to {to}"));
+                        }
+                        "changed the base branch".into()
+                    }
+                    "deployed" => {
+                        let environment = text(&event["deployment"], "environment");
+                        if environment.is_empty() { "deployed this".into() } else { format!("deployed to {environment}") }
+                    }
+                    "marked_as_duplicate" => "marked this as a duplicate".into(),
+                    "unmarked_as_duplicate" => "marked this as not a duplicate".into(),
+                    "transferred" => "transferred this issue".into(),
+                    "converted_to_discussion" => "converted this issue into a discussion".into(),
+                    "auto_merge_enabled" => "enabled auto-merge".into(),
+                    "auto_merge_disabled" => "disabled auto-merge".into(),
+                    "comment_deleted" => "deleted a comment".into(),
+                    "added_to_project" | "added_to_project_v2" => "added this to a project".into(),
+                    "removed_from_project" | "removed_from_project_v2" => "removed this from a project".into(),
+                    "moved_columns_in_project" => {
+                        let column = text(&event["project_card"], "column_name");
+                        object = (!column.is_empty()).then(|| column.to_owned());
+                        "moved this to".into()
+                    }
+                    // Kept in the record for the page to word: the target and the branch
+                    // names are the page's own (issue::events_row).
+                    "referenced" => {
+                        let sha = text(event, "commit_id");
+                        object = (!sha.is_empty()).then(|| sha.chars().take(7).collect());
+                        "referenced".into()
+                    }
+                    "head_ref_deleted" | "delete branch" => "deleted the head branch".into(),
+                    "head_ref_restored" => "restored the head branch".into(),
+                    // REST lists these; GitHub's page never shows them.
+                    "mentioned" | "subscribed" | "unsubscribed" | "user_blocked" => continue,
+                    // GitHub's wording: "added this to the v1.4 milestone".
+                    "milestoned" | "demilestoned" => {
+                        let title = text(&event["milestone"], "title");
+                        object = (!title.is_empty()).then(|| format!("{title} milestone"));
+                        (if kind == "milestoned" { "added this to the" } else { "removed this from the" }).into()
+                    }
+                    // The page words these with their target (issue::events_row).
+                    "connected" => "linked".into(),
+                    "disconnected" => "removed a link".into(),
                     "" => continue,
                     other => other.replace('_', " "),
                 };
@@ -838,6 +1038,10 @@ pub struct ThreadCard {
     pub commit: String,
     pub comments: Vec<CommentRecord>,
     pub total: u64,
+    /// The diff lines the thread hangs on (`@@ … @@` and the lines up to its line).
+    pub hunk: String,
+    /// The first line of a multi-line thread (GitHub's `startLine`).
+    pub start_line: Option<u64>,
 }
 
 impl ThreadCard {
@@ -888,17 +1092,26 @@ pub fn threads(value: &Value) -> Vec<ThreadCard> {
                 commit: text(&first["commit"], "oid").to_owned(),
                 comments: nodes
                     .iter()
-                    .map(|comment| CommentRecord {
-                        id: text(comment, "id").to_owned(),
-                        author: login(comment),
-                        body: text(comment, "body").to_owned(),
-                        created: text(comment, "createdAt").to_owned(),
-                        pending: false,
+                    .map(|comment| {
+                        let (association, edited) = comment_extras(comment);
+                        CommentRecord {
+                            id: text(comment, "id").to_owned(),
+                            author: login(comment),
+                            body: text(comment, "body").to_owned(),
+                            created: text(comment, "createdAt").to_owned(),
+                            pending: false,
+                            association,
+                            edited,
+                            reactions: reactions(comment),
+                            url: text(comment, "url").to_owned(),
+                        }
                     })
                     .collect(),
                 total: thread["comments"]["totalCount"]
                     .as_u64()
                     .unwrap_or(nodes.len() as u64),
+                hunk: text(&first, "diffHunk").to_owned(),
+                start_line: thread["startLine"].as_u64(),
             }
         })
         .collect()
@@ -964,6 +1177,46 @@ mod tests {
         assert_eq!(record.labels[0].rgb, Some([0xfb, 0xca, 0x04]));
         assert_eq!(record.labels[1].rgb, None);
         assert!(!record.gone);
+    }
+
+    #[test]
+    fn a_row_counts_approvals_against_open_requests_like_review_decision() {
+        let row = |decision: &str, reviews: Value| {
+            ItemRecord::from_row(&json!({"number": 13, "reviewDecision": decision, "dusty": {"reviews": reviews}}))
+        };
+        let fact = |record: ItemRecord| record.review_fact(None).map(|(state, words)| (state, words.unwrap_or_default()));
+        // alex approved, sam is still asked: not "Review requested".
+        assert_eq!(
+            fact(row("REVIEW_REQUIRED", json!({"approved": 1, "changesRequested": 0, "pending": 1}))),
+            Some((ReviewState::Approved, "1 approval · 1 pending".into()))
+        );
+        assert_eq!(
+            fact(row("REVIEW_REQUIRED", json!({"approved": 2, "changesRequested": 0, "pending": 0}))),
+            Some((ReviewState::Approved, "2 approvals".into()))
+        );
+        // A change request outweighs approvals; nothing yet stays the decision's word.
+        assert_eq!(
+            fact(row("REVIEW_REQUIRED", json!({"approved": 1, "changesRequested": 1, "pending": 0}))),
+            Some((ReviewState::ChangesRequested, String::new()))
+        );
+        // No review required and none asked: no fact, as before.
+        assert_eq!(fact(row("", json!({"approved": 1, "changesRequested": 0, "pending": 0}))), None);
+        assert_eq!(
+            fact(row("REVIEW_REQUIRED", json!({"approved": 0, "changesRequested": 0, "pending": 2}))),
+            Some((ReviewState::Requested, String::new()))
+        );
+        assert_eq!(
+            fact(row("APPROVED", json!({"approved": 1, "changesRequested": 0, "pending": 0}))),
+            Some((ReviewState::Approved, String::new()))
+        );
+        // A forge whose list knows only the requests (Gitea) counts from the opened item.
+        let gitea = ItemRecord::from_row(&json!({"number": 1412, "dusty": {"reviewRequested": true}}));
+        let opened = tally_of(&[("alex".into(), ReviewState::Approved), ("sam".into(), ReviewState::Requested)]);
+        assert_eq!(
+            gitea.review_fact(Some(opened)),
+            Some((ReviewState::Approved, Some("1 approval · 1 pending".into())))
+        );
+        assert_eq!(gitea.review_fact(None), Some((ReviewState::Requested, None)));
     }
 
     #[test]
@@ -1088,6 +1341,65 @@ mod tests {
             if link.number == 11)
         );
         assert!(matches!(&entries[3], TimelineEntry::Comment(comment) if comment.pending));
+    }
+
+    /// GitHub's timeline phrasing, event by event (DESIGN.md §3.26).
+    #[test]
+    fn timeline_events_read_in_githubs_words() {
+        let event = |kind: &str, extra: Value| {
+            let mut value = json!({"event": kind, "actor": {"login": "maya"}, "created_at": "2026-11-08"});
+            for (key, field) in extra.as_object().cloned().unwrap_or_default() {
+                value[key] = field;
+            }
+            value
+        };
+        let cases = [
+            (event("renamed", json!({"rename": {"from": "Clamp backoff", "to": "Clamp exponential backoff"}})),
+             "changed the title", Some("Clamp backoff → Clamp exponential backoff")),
+            (event("base_ref_changed", json!({"previous_ref_name": "main", "current_ref_name": "release"})),
+             "changed the base branch", Some("from main to release")),
+            (event("ready_for_review", json!({})), "marked this pull request as ready for review", None),
+            (event("convert_to_draft", json!({})), "marked this pull request as draft", None),
+            (event("locked", json!({"lock_reason": "off-topic"})),
+             "locked as off-topic and limited conversation to collaborators", None),
+            (event("locked", json!({"lock_reason": "too heated"})),
+             "locked as too heated and limited conversation to collaborators", None),
+            (event("locked", json!({})), "locked and limited conversation to collaborators", None),
+            (event("unlocked", json!({})), "unlocked this conversation", None),
+            (event("pinned", json!({})), "pinned this issue", None),
+            (event("unpinned", json!({})), "unpinned this issue", None),
+            (event("deployed", json!({"deployment": {"environment": "production"}})), "deployed to production", None),
+            (event("closed", json!({"state_reason": "not_planned"})), "closed this as not planned", None),
+            (event("closed", json!({"state_reason": "completed"})), "closed this as completed", None),
+            (event("closed", json!({"commit_id": "5d6e7f8a9b"})), "closed this in", Some("5d6e7f8")),
+            (event("closed", json!({})), "closed this", None),
+            (event("reopened", json!({})), "reopened this", None),
+            (event("merged", json!({"commit_id": "1a2b3c4d5e"})), "merged commit", Some("1a2b3c4")),
+            (event("head_ref_force_pushed", json!({"before": "1a2b3c4d", "after": "5d6e7f8a"})),
+             "force-pushed", Some("from 1a2b3c4 to 5d6e7f8")),
+            (event("review_requested", json!({"requested_reviewer": {"login": "alex"}})), "requested review from", Some("alex")),
+            (event("review_request_removed", json!({"requested_reviewer": {"login": "alex"}})),
+             "removed the request for review from", Some("alex")),
+            (event("milestoned", json!({"milestone": {"title": "v1.4"}})), "added this to the", Some("v1.4 milestone")),
+            (event("demilestoned", json!({"milestone": {"title": "v1.4"}})), "removed this from the", Some("v1.4 milestone")),
+            (event("marked_as_duplicate", json!({})), "marked this as a duplicate", None),
+            (event("unmarked_as_duplicate", json!({})), "marked this as not a duplicate", None),
+            (event("auto_merge_enabled", json!({})), "enabled auto-merge", None),
+            (event("auto_merge_disabled", json!({})), "disabled auto-merge", None),
+            (event("moved_columns_in_project", json!({"project_card": {"column_name": "Done"}})), "moved this to", Some("Done")),
+            (event("lock", json!({})), "locked and limited conversation to collaborators", None),
+        ];
+        for (value, verb, object) in cases {
+            let entries = timeline(&json!([[value.clone()]]));
+            let [TimelineEntry::Event { verb: read, object: read_object, .. }] = entries.as_slice() else {
+                panic!("{value}: {entries:?}");
+            };
+            assert_eq!((read.as_str(), read_object.as_deref()), (verb, object), "{value}");
+        }
+        // REST lists these; GitHub's page never shows them.
+        for kind in ["mentioned", "subscribed", "unsubscribed"] {
+            assert!(timeline(&json!([[event(kind, json!({}))]])).is_empty(), "{kind}");
+        }
     }
 
     #[test]

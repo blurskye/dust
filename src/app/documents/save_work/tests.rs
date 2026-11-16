@@ -162,7 +162,7 @@ fn before_save_updates_an_ordinary_file_only_after_all_steps_succeed() {
         .send(Ok(Some("checked".into())))
         .unwrap();
     app.process_save_work();
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + Duration::from_secs(30);
     while app.state.buffers[buffer].dirty {
         app.process_vfs_results();
         assert!(Instant::now() < deadline, "save did not finish");

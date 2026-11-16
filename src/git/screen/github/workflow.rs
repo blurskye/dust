@@ -1,4 +1,4 @@
-//! Read workflow-dispatch fields and declared job dependencies with Dust's YAML grammar.
+//! Read workflow-dispatch fields with Dust's YAML grammar.
 use tree_sitter::Node;
 
 pub(super) struct Input {
@@ -10,7 +10,6 @@ pub(super) struct Input {
 pub(super) struct Definition {
     pub dispatch: bool,
     pub inputs: Vec<Input>,
-    pub dependencies: Vec<(String, Vec<String>)>,
 }
 impl Definition {
     pub fn parse(source: &str) -> Result<Self, String> {
@@ -74,27 +73,7 @@ impl Definition {
                 });
             }
         }
-        let mut dependencies = Vec::new();
-        if let Some(jobs) = entry(root, "jobs", source) {
-            for (name, job) in mapping(jobs, source) {
-                let needs = entry(job, "needs", source)
-                    .map(|node| {
-                        let nodes = sequence(node);
-                        if nodes.is_empty() {
-                            vec![text(node, source)]
-                        } else {
-                            nodes.iter().map(|node| text(*node, source)).collect()
-                        }
-                    })
-                    .unwrap_or_default();
-                dependencies.push((name, needs));
-            }
-        }
-        Ok(Self {
-            dispatch,
-            inputs,
-            dependencies,
-        })
+        Ok(Self { dispatch, inputs })
     }
 }
 fn unwrap(mut node: Node<'_>) -> Node<'_> {

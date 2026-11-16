@@ -114,12 +114,170 @@ impl Workspace {
         {
             return Some(index);
         }
-        sections.iter().position(|section| {
-            section.saved.is_none()
-                && section.query == self.queries[at]
-                && section.state == self.states[at]
+        // A built-in section is its query; the Open/Closed toggle (`s`) keeps it selected,
+        // as GitHub's filters keep through `is:open` and `is:closed`.
+        sections.iter().position(|section| section.saved.is_none() && section.query == self.queries[at])
+    }
+
+    /// The search box's query (GitHub's `is:pr is:open review-requested:@me`): the kind,
+    /// the state unless it is every state, then the section's or typed query.
+    pub(super) fn search_query(&self) -> String {
+        let at = self.page.saturating_sub(1).min(1);
+        let mut terms = vec![if self.page == 2 { "is:pr" } else { "is:issue" }.to_owned()];
+        match self.states[at].as_str() {
+            "all" => {}
+            state => terms.push(format!("is:{state}")),
+        }
+        let query = self.queries[at].trim();
+        if !query.is_empty() {
+            terms.push(query.to_owned());
+        }
+        terms.join(" ")
+    }
+
+    /// How many items the shown query has in `state` (`open`, `closed`), once that list was
+    /// read; `100+` when the list stopped at its limit.
+    pub(super) fn state_count(&self, state: &str) -> Option<String> {
+        let at = self.page.saturating_sub(1).min(1);
+        let key = self.section_key(state, &self.queries[at]);
+        let total = self.list_totals.get(&key).copied();
+        let Some(rows) = self.value(&key).and_then(Value::as_array) else {
+            // Not read yet: what the other state's read counted (GitHub), else lazy.
+            return total.map(|total| total.to_string());
+        };
+        let count = rows.iter().filter(|row| row["dustyGone"].is_null()).count();
+        let more = self.list_limits.get(&key).is_some_and(|limit| rows.len() >= *limit);
+        // A whole list counts its own rows; a list cut at its limit takes the forge's total.
+        Some(match total.filter(|total| more && *total > count as u64) {
+            Some(total) => total.to_string(),
+            None => format!("{count}{}", if more { "+" } else { "" }),
         })
     }
+
+    /// Remember what the forge counted for a list read: its own total, and the other
+    /// state's (open ↔ closed) where the forge counted it in the same request.
+    pub(super) fn note_totals(&mut self, key: &Key, payload: &crate::forge::request::Payload) {
+        let (Key::List(page, state, query), crate::forge::request::Payload::Rows(rows)) = (key, payload) else {
+            return;
+        };
+        match rows.total {
+            Some(total) => self.list_totals.insert(key.clone(), total),
+            None => self.list_totals.remove(key),
+        };
+        let other = match state.as_str() {
+            "open" => "closed",
+            "closed" | "merged" => "open",
+            _ => return,
+        };
+        let other = Key::List(*page, other.into(), query.clone());
+        match rows.other_total {
+            Some(total) => self.list_totals.insert(other, total),
+            // Only a read that counted can say; an older count stays until it is read.
+            None => None,
+        };
+    }
+
+    /// The filter menus whose qualifier the query uses (`author`, `label`, …, `sort`).
+    pub(super) fn facets_in_use(&self) -> Vec<&'static str> {
+        let at = self.page.saturating_sub(1).min(1);
+        super::paint::FACETS
+            .iter()
+            .map(|(_, qualifier)| *qualifier)
+            .filter(|qualifier| {
+                self.queries[at].split_whitespace().any(|term| facet_of(term) == Some(*qualifier))
+            })
+            .collect()
+    }
+
+    /// `s`: the Open/Closed toggle. The section (or saved view) stays; only the state turns.
+    pub(super) fn toggle_state(&mut self) -> Result<(), String> {
+        let at = self.page.saturating_sub(1).min(1);
+        // GitLab's merge requests step Open → Merged → Closed (R16 gitlab-05).
+        let gitlab = self.page == 2 && self.terms().pr_singular.contains("merge");
+        let state = match self.states[at].as_str() {
+            "open" if gitlab => "merged",
+            "merged" if gitlab => "closed",
+            "open" => "closed",
+            _ => "open",
+        };
+        let view = self.active_views[at].clone();
+        self.apply_view(self.queries[at].clone(), state.into(), view)
+    }
+
+    /// `F`: the filter menus as one sheet, a field per menu (`Author`, `Label`, `Projects`,
+    /// `Milestones`, `Assignee`, `Sort`), each offering what the list holds and taking any
+    /// typed value.
+    pub(super) fn facets_form(&self) -> Form {
+        let at = self.page.saturating_sub(1).min(1);
+        let query = &self.queries[at];
+        let rows = self.items();
+        let mut authors = std::collections::BTreeSet::new();
+        let mut labels = std::collections::BTreeSet::new();
+        for row in &rows {
+            let author = login(row);
+            if !author.is_empty() {
+                authors.insert(author.to_owned());
+            }
+            for label in array(row, "labels") {
+                labels.insert(string(label, "name").to_owned());
+            }
+        }
+        let quoted = |value: &str| if value.contains(' ') { format!("\"{value}\"") } else { value.to_owned() };
+        let mut fields = Vec::new();
+        for (name, qualifier) in super::paint::FACETS {
+            let mut choices: Vec<String> = vec![ANY.into()];
+            match qualifier {
+                "author" => {
+                    choices.push("@me".into());
+                    choices.extend(authors.iter().cloned());
+                }
+                "label" => {
+                    choices.push(NONE.into());
+                    choices.extend(labels.iter().map(|label| quoted(label)));
+                }
+                "assignee" => choices.extend([NONE.into(), "@me".into()]),
+                "project" | "milestone" => choices.push(NONE.into()),
+                _ => {
+                    choices = SORTS.iter().map(|(words, _)| (*words).to_owned()).collect();
+                }
+            }
+            let current = facet_value(query, qualifier).unwrap_or_else(|| choices[0].clone());
+            let mut field = super::actions::field(name, &current, false, false);
+            field.choices = choices;
+            field.custom_choices = true;
+            fields.push(field);
+        }
+        self.form(if self.page == 2 { "Filter pull requests" } else { "Filter issues" }, Action::Facets, fields)
+    }
+
+    /// The query with each menu's qualifier replaced by the sheet's answer.
+    pub(super) fn apply_facets(&mut self, values: &[String]) -> Result<(), String> {
+        let at = self.page.saturating_sub(1).min(1);
+        let mut terms: Vec<String> = self.queries[at]
+            .split_whitespace()
+            .filter(|term| facet_of(term).is_none())
+            .map(str::to_owned)
+            .collect();
+        for ((_, qualifier), value) in super::paint::FACETS.iter().zip(values) {
+            let value = value.trim();
+            if value.is_empty() || value == ANY {
+                continue;
+            }
+            terms.push(match (*qualifier, value) {
+                ("sort", words) => match SORTS.iter().find(|(name, _)| *name == words) {
+                    Some((_, "")) => continue,
+                    Some((_, order)) => format!("sort:{order}"),
+                    None => format!("sort:{words}"),
+                },
+                (qualifier, NONE) => format!("no:{qualifier}"),
+                (qualifier, value) if value.contains(' ') && !value.starts_with('"') => format!("{qualifier}:\"{value}\""),
+                (qualifier, value) => format!("{qualifier}:{value}"),
+            });
+        }
+        let state = self.states[at].clone();
+        self.apply_view(terms.join(" "), state, None)
+    }
+
 
     fn section_key(&self, state: &str, query: &str) -> Key {
         if self.inbox.enabled {
@@ -184,12 +342,43 @@ impl Workspace {
         if !self.locally_countable(&section.query) {
             return None;
         }
-        let all = self.list_rows_for("open", "")?;
+        let all = self.list_rows_for(&section.state, "")?;
         Some(
             all.iter()
                 .filter(|row| row["dustyGone"].is_null() && fresh::matches(row, &section.query, &section.state))
                 .count(),
         )
+    }
+
+    /// Every section's count, or none (r11): a row never mixes counted and bare tabs, and
+    /// what it shows never depends on which section is selected or was visited. The
+    /// repository budget is one list read per visit, so where a section needs its own
+    /// read (`@me`) the row is names only; the inbox reads them all behind the list.
+    /// The counts follow the Open/Closed toggle, which keeps the section selected; a typed
+    /// query no section claims leaves the row names only (R16 issues-05: never `All 10`
+    /// over `0 Closed`).
+    pub(super) fn section_counts(&self, sections: &[Section]) -> Vec<Option<usize>> {
+        if self.active_section(sections).is_none() {
+            return vec![None; sections.len()];
+        }
+        let state = &self.states[self.page.saturating_sub(1).min(1)];
+        let sections = sections
+            .iter()
+            .map(|section| Section {
+                name: section.name.clone(),
+                query: section.query.clone(),
+                state: if section.saved.is_none() { state.clone() } else { section.state.clone() },
+                saved: section.saved.clone(),
+            })
+            .collect::<Vec<_>>();
+        let sections = sections.as_slice();
+        let all_known = (self.inbox.enabled
+            || sections.iter().all(|section| self.locally_countable(&section.query)))
+            && sections.iter().all(|section| self.section_count(section).is_some());
+        sections
+            .iter()
+            .map(|section| if all_known { self.section_count(section) } else { None })
+            .collect()
     }
 
     /// The count on the top bar's tab: open items in the repository, when known.
@@ -274,9 +463,9 @@ impl Workspace {
             Action::Inline { .. } => reason(caps.inline_comment),
             Action::Reply { .. } | Action::Comment(..) => reason(caps.reply_in_thread),
             Action::Resolve(..) => reason(caps.resolve_thread),
+            Action::CommitSuggestion(..) => reason(caps.writes),
             Action::Merge(..) => reason(caps.merge_pinned_head),
             Action::Viewed(..) => reason(caps.viewed_files),
-            Action::Subscription(..) => reason(caps.subscribe),
             Action::Edit(..) | Action::State(..) | Action::Metadata(..) => Some("Sign in to edit"),
             Action::CreateIssue => Some("Sign in to open issues"),
             Action::CreatePullRequest | Action::ConfirmPullRequest(_) => reason(caps.draft_pr),
@@ -302,4 +491,49 @@ impl Workspace {
         let section = sections.into_iter().nth(next).expect("section in range");
         self.apply_view(section.query, section.state, section.saved)
     }
+}
+
+/// A filter menu's answer that removes its qualifier.
+const ANY: &str = "Any";
+/// A filter menu's answer for `no:label`, `no:assignee`, `no:milestone`, `no:project`.
+const NONE: &str = "None";
+/// GitHub's sort menu, as words and `sort:` orders (the first is the forge's default).
+pub(super) const SORTS: [(&str, &str); 6] = [
+    ("Newest", ""),
+    ("Oldest", "created-asc"),
+    ("Most commented", "comments-desc"),
+    ("Least commented", "comments-asc"),
+    ("Recently updated", "updated-desc"),
+    ("Least recently updated", "updated-asc"),
+];
+
+/// Which filter menu a query term belongs to (`label:bug`, `-label:bug`, `no:label` → `label`).
+fn facet_of(term: &str) -> Option<&'static str> {
+    let term = term.strip_prefix('-').unwrap_or(term);
+    let (name, value) = term.split_once(':')?;
+    let name = if name == "no" { value } else { name };
+    super::paint::FACETS
+        .iter()
+        .map(|(_, qualifier)| *qualifier)
+        .find(|qualifier| *qualifier == name || (*qualifier == "project" && name == "projects"))
+}
+
+/// A menu's current answer in a query: its value, `None` for `no:…`, the sort's words.
+fn facet_value(query: &str, qualifier: &str) -> Option<String> {
+    for term in query.split_whitespace() {
+        if term.starts_with('-') || facet_of(term) != Some(qualifier) {
+            continue;
+        }
+        let (name, value) = term.split_once(':')?;
+        if name == "no" {
+            return Some(NONE.into());
+        }
+        if qualifier == "sort" {
+            return Some(
+                SORTS.iter().find(|(_, order)| *order == value).map_or(value.to_owned(), |(words, _)| (*words).to_owned()),
+            );
+        }
+        return Some(value.to_owned());
+    }
+    None
 }

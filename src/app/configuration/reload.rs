@@ -101,6 +101,12 @@ impl App {
         self.cancel_workspace_resources("configuration changed");
         self.discard_stale_plugin_edits();
         self.input.reconfigure();
+        // Dusty Git follows the editor's leader, key preset, mode labels and icons as they
+        // change, open or behind a buffer; its colours come from the theme at each draw.
+        if let Some(screen) = &mut self.git_screen {
+            screen.set_icon_mode(self.configuration.settings().ui.explorer.icon_mode);
+            screen.configure_input(self.configuration.settings());
+        }
         self.terminal_session
             .configure(&self.configuration.settings().terminals);
         self.restore_input_focus();

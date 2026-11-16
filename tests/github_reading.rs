@@ -102,6 +102,9 @@ fn fixture_child(name: &str) -> bool {
         .configure(&mut Command::new(std::env::current_exe().unwrap()))
         .args(["--exact", name, "--nocapture"])
         .env("DUST_GITHUB_READING_CHILD", "1")
+        // `wait_timeline` takes the timeline's request as the sign that the item read before
+        // it finished: true of the screen's one-lane mode, which these tests pin.
+        .env("DUSTY_FORGE_LANES", "1")
         .env("DUST_GITHUB_FIXTURE", &state)
         .env("DUST_GITHUB_ROOT", &root)
         .env(
@@ -200,8 +203,8 @@ fn logical_markdown_distinguishes_prose_from_independently_wide_literal_rows() {
 }
 
 #[test]
-fn issue_prose_measure_is_bounded_but_code_table_and_diagram_pan_natively() {
-    if fixture_child("issue_prose_measure_is_bounded_but_code_table_and_diagram_pan_natively") {
+fn issue_prose_measure_is_bounded_code_and_diagram_pan_and_tables_wrap() {
+    if fixture_child("issue_prose_measure_is_bounded_code_and_diagram_pan_and_tables_wrap") {
         return;
     }
     let prose = (0..70)
@@ -228,7 +231,10 @@ fn issue_prose_measure_is_bounded_but_code_table_and_diagram_pan_natively() {
                 .filter_map(|x| frame.grid.get(x, y))
                 .map(|cell| cell.symbol.as_str())
                 .collect::<String>();
-            row.contains("word").then_some(row.trim_end().to_owned())
+            // The Conversation's sidebar sits beside the body past a wide gap; the prose is
+            // what comes before it.
+            let prose = row.trim().split("  ").next().unwrap_or_default();
+            prose.contains("word").then(|| prose.to_owned())
         })
         .collect::<Vec<_>>();
     assert!(
@@ -242,7 +248,25 @@ fn issue_prose_measure_is_bounded_but_code_table_and_diagram_pan_natively() {
         prose.split_whitespace().collect::<Vec<_>>(),
         "display reflow must retain every word in order"
     );
-    for end in ["CODE_END", "TABLE_END", "DIAGRAM_END"] {
+    // A table wider than the pane wraps its cells inside their columns, boxed in as the editor
+    // draws it, keeping every character, rather than panning.
+    for (width, height) in [(190, 65), (64, 60)] {
+        let frame = screen.frame(width, height);
+        let rows = text(&frame);
+        let cells = rows
+            .lines()
+            // The cell between its column's borders, apart from a sidebar or the pane's border.
+            .flat_map(|row| row.split('│').map(str::trim).collect::<Vec<_>>())
+            .filter(|cell| !cell.is_empty() && cell.chars().all(|c| c == 't' || "TABLE_END".contains(c)))
+            .collect::<Vec<_>>();
+        assert!(cells.len() > 1, "the long cell wraps:\n{rows}");
+        assert_eq!(cells.concat(), format!("{}TABLE_END", "t".repeat(180)), "{rows}");
+        assert!(
+            rows.lines().filter(|row| row.contains(" │ t")).all(|row| !row.contains('›')),
+            "a wrapped table does not pan:\n{rows}"
+        );
+    }
+    for end in ["CODE_END", "DIAGRAM_END"] {
         find(&mut screen, end);
         let frame = screen.frame(64, 30);
         assert!(cursor_tail(&frame).starts_with(end), "{}", text(&frame));
@@ -320,8 +344,8 @@ fn pending_list_prose_is_quiet_without_enabling_loaded_controls_or_hiding_errors
             assert!(failed.contains(body) && failed.contains("Details unavailable"));
             assert!(!failed.contains("Loading details") && !failed.contains("Actions & metadata"));
         } else {
-            // Loaded details show the overview's metadata and activity summary.
-            wait(&mut screen, |shown| shown.contains("Latest activity"));
+            // Loaded details show the Conversation's sidebar and its comment box.
+            wait(&mut screen, |shown| shown.contains("Add a comment"));
             let loaded = view(&mut screen);
             assert!(
                 !loaded.contains("Loading details") && !loaded.contains("showing list description")
@@ -450,7 +474,7 @@ fn refreshing_loaded_issue_keeps_real_body_and_readiness_after_a_failed_refresh(
     let mut screen = open(json!({"calls":[],"comments":[],"issues":[{
         "number":7,"title":"Loaded readiness","body":"The loaded body remains authoritative."
     }]}));
-    wait(&mut screen, |shown| shown.contains("Latest activity"));
+    wait(&mut screen, |shown| shown.contains("Add a comment"));
     wait_timeline(&mut screen, 7);
     let mut state: Value = serde_json::from_slice(&std::fs::read(state_path()).unwrap()).unwrap();
     state["fail_item_views"] = json!(1);
@@ -473,7 +497,7 @@ fn refreshing_loaded_issue_keeps_real_body_and_readiness_after_a_failed_refresh(
         "{pending}"
     );
     assert!(
-        pending.contains("Latest activity") && !pending.contains("showing the list description")
+        pending.contains("Add a comment") && !pending.contains("showing the list description")
     );
     key(&mut screen, KeyCode::Char('e'));
     assert!(
@@ -483,7 +507,7 @@ fn refreshing_loaded_issue_keeps_real_body_and_readiness_after_a_failed_refresh(
     key(&mut screen, KeyCode::Escape);
     release("loaded-refresh");
     wait(&mut screen, |shown| {
-        shown.contains("showing cached content")
+        shown.contains("Fixture refresh refused · showing ")
     });
     let failed = view(&mut screen);
     assert!(

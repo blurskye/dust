@@ -8,6 +8,9 @@ use std::time::Duration;
 mod forge_fake;
 #[path = "support/forge_screen.rs"]
 mod forge_screen;
+#[path = "support/records.rs"]
+mod records;
+use records::lists;
 use forge_screen::*;
 
 fn issue(id: u64, title: &str) -> serde_json::Value {
@@ -22,10 +25,14 @@ fn prime(ready: &str) {
 }
 
 fn list_rows(screen: &mut dust::git::screen::GitScreen) -> Vec<String> {
-    view(screen)
+    // Each record's title row with its `#N opened …` row.
+    let lines = view(screen)
         .lines()
         .map(|line| line.chars().take(47).collect::<String>())
-        .filter(|line| line.contains("Navigation issue"))
+        .collect::<Vec<_>>();
+    (0..lines.len())
+        .filter(|&y| lines[y].contains("Navigation issue"))
+        .map(|y| format!("{} {}", lines[y], lines.get(y + 1).map_or("", String::as_str)))
         .collect()
 }
 
@@ -41,6 +48,8 @@ fn the_cursor_survives_a_background_merge() {
     age_cache(3600);
     // Since the last session: two issues were opened, one renamed and one closed.
     update_state(|state| {
+        // Held until the cursor is on #6: the merge lands under a moved cursor.
+        state["read_gates"] = serde_json::json!([{"prefix": ["issue", "list"], "name": "merge-list"}]);
         state["issues"] = serde_json::json!([
             issue(10, "Navigation issue 10"),
             issue(9, "Navigation issue 9"),
@@ -54,26 +63,27 @@ fn the_cursor_survives_a_background_merge() {
     });
     let mut screen = open();
     goto(&mut screen, 0, 1);
-    screen.poll();
+    // The disk answers within a poll or a few: a busy machine can need more than one.
+    wait_for(&mut screen, "the cached issues", |frame| lists(frame, 2, "Navigation issue 2"));
     let cached = view(&mut screen);
-    assert!(cached.contains("#2 Navigation issue 2"), "{cached}");
     assert!(!cached.contains("Navigation issue 10"), "{cached}");
-    assert!(cached.contains("cached 1h ago"), "{cached}");
+    assert!(cached.contains("updated 1h ago"), "{cached}");
     key(&mut screen, KeyCode::Char('j'));
     key(&mut screen, KeyCode::Char('j'));
-    assert!(cursor_row(&mut screen).contains("#6 Navigation issue 6"));
-    wait(&mut screen, "#10 Navigation issue 10");
+    assert!(lists(&cursor_record(&mut screen), 6, "Navigation issue 6"));
+    release("merge-list");
+    wait_for(&mut screen, "#10", |frame| lists(frame, 10, "Navigation issue 10"));
     wait(&mut screen, "updated just now");
     assert!(
-        cursor_row(&mut screen).contains("#6 Navigation issue 6"),
+        lists(&cursor_record(&mut screen), 6, "Navigation issue 6"),
         "the cursor stays on its item:\n{}",
         view(&mut screen)
     );
     let rows = list_rows(&mut screen);
     let text = view(&mut screen);
-    assert!(text.contains("#5 Navigation issue 5 renamed"), "{text}");
+    assert!(lists(&text, 5, "Navigation issue 5 renamed"), "{text}");
     // The closed issue stays where it was, marked, until the list is left or refreshed.
-    assert!(text.contains("#2 Navigation issue 2"), "{text}");
+    assert!(lists(&text, 2, "Navigation issue 2"), "{text}");
     assert!(text.contains("closed · "), "{text}");
     let position = |needle: &str| rows.iter().position(|row| row.contains(needle)).unwrap();
     assert!(position("#4 ") < position("#2 ") && position("#2 ") < position("#1 "));
@@ -81,9 +91,9 @@ fn the_cursor_survives_a_background_merge() {
     // An explicit refresh shows exactly what the forge has.
     key(&mut screen, KeyCode::Char('r'));
     wait_for(&mut screen, "#2 gone after refresh", |frame| {
-        !frame.contains("#2 Navigation issue 2") && frame.contains("#10 Navigation issue 10")
+        !lists(frame, 2, "Navigation issue 2") && lists(frame, 10, "Navigation issue 10")
     });
-    assert!(cursor_row(&mut screen).contains("#6 Navigation issue 6"));
+    assert!(lists(&cursor_record(&mut screen), 6, "Navigation issue 6"));
 }
 
 #[test]
@@ -112,13 +122,18 @@ fn not_modified_changes_no_data() {
         serde_json::from_str(&std::fs::read_to_string(&repo).unwrap()).unwrap();
     let mut screen = open();
     goto(&mut screen, 0, 1);
-    screen.poll();
+    wait_for(&mut screen, "the cached issues", |frame| lists(frame, 1, "Navigation issue 1"));
     let before = list_rows(&mut screen);
     assert!(!before.is_empty());
     wait_for(&mut screen, "a 304 for the repository", |_| {
         state()["not_modified"].as_u64().unwrap_or(0) >= 1
     });
-    wait(&mut screen, "updated just now");
+    // The 304 renews the saved entry; the screen's age text can belong to another pane.
+    wait_for(&mut screen, "the repository entry renewed", |_| {
+        let saved: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&repo).unwrap()).unwrap();
+        saved["fetched_at"].as_u64() > aged["fetched_at"].as_u64()
+    });
     assert_eq!(before, list_rows(&mut screen));
     let renewed: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&repo).unwrap()).unwrap();

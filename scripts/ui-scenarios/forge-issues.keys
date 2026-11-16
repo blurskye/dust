@@ -3,42 +3,57 @@
 #   DUSTY_GIT_BINARY=$PWD/target/debug/dusty-git scripts/ui-shot scripts/ui-scenarios/forge-issues.keys \
 #     --binary scripts/ui-scenarios/forge-orbit-launch --cwd /tmp/orbit --out target/ui-shots/forge-issues \
 #     --size 190x48 --size 120x36 --size 100x30
-wait 1500
+until Changes
+wait 300
 # Git → Pull requests → Issues
 type >
 wait 100
 type >
-wait 900
+wait 300
+until Showing
+gone Loading
 shot issues-list
 # #1 is the last row; open it in the reader
 key end
 wait 700
 key enter
-wait 700
+wait 300
+gone Loading
 shot issue-overview
 type ]
-wait 500
+wait 300
+gone Loading
 shot issue-discussion
 type ]
-wait 500
+wait 300
+gone Loading
 shot issue-activity
 type C
 wait 300
 type Confirmed on main as well.
-wait 200
+# Typing at 190 columns takes longer to paint; wait for the whole sentence.
+wait 1200
 shot issue-reply
+# Esc leaves the box's INSERT for NORMAL; a second Esc keeps the draft and closes it.
+key escape
+wait 100
 key escape
 wait 200
 type 2
 wait 200
 type ]
-wait 600
-shot issues-section
+wait 300
+gone Loading
+# The second section: Bugs
+shot issues-bugs
 type /
 wait 200
 type queue
 wait 600
 shot issues-filter
+# Esc to NORMAL, then Esc again clears the filter.
+key escape
+wait 100
 key escape
 wait 300
 type x

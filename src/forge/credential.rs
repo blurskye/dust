@@ -163,7 +163,7 @@ impl Env {
     /// A set, non-blank variable, trimmed.
     pub fn get(&self, name: &str) -> Option<String> {
         let value = match &self.vars {
-            None => std::env::var(name).ok(),
+            None => crate::forge::sandbox::var(name),
             Some(vars) => vars.get(name).cloned(),
         }?;
         let value = value.trim();
@@ -306,8 +306,35 @@ pub fn resolve(
     state
 }
 
+/// The forge refused the token (401): forget it, and remember that one was refused so the
+/// screens can say "expired or revoked" instead of "not signed in".
 pub fn evict(endpoints: &Endpoints, options: &ConnectOptions) {
     cache().evict(endpoints, options);
+    refused_hosts()
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .insert(endpoints.host.to_string());
+}
+
+fn refused_hosts() -> &'static Mutex<std::collections::BTreeSet<String>> {
+    static REFUSED: OnceLock<Mutex<std::collections::BTreeSet<String>>> = OnceLock::new();
+    REFUSED.get_or_init(Default::default)
+}
+
+/// A token for `host` was refused this session and none has been accepted since.
+pub fn refused(host: &str) -> bool {
+    refused_hosts()
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .contains(host)
+}
+
+/// A token for `host` was accepted (`GET /user` answered).
+pub fn accepted(host: &HostKey) {
+    refused_hosts()
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .remove(&host.to_string());
 }
 
 /// `r` in the accounts popover: forget every cached credential.

@@ -28,7 +28,7 @@ impl GitScreen {
         self.stage_paths(&paths)
     }
 
-    /// Directory and marked-file Space share one exact-path staging operation.
+    /// Directory and marked-file staging (`s`, `u`, `-`) share one exact-path staging operation.
     pub(super) fn stage_paths(&mut self, selection: &BTreeSet<PathBuf>) -> Result<(), String> {
         self.allow_write()?;
         let snapshot = self.snapshot.as_ref().ok_or("Status is loading")?;
@@ -41,14 +41,24 @@ impl GitScreen {
             return Err("The marked files changed; refresh and select them again".into());
         }
         // A mixed selection stages its remaining parent-repository edits. Dirty child
-        // files are not such edits: once a gitlink matches its checkout, Space reverses
+        // files are not such edits: once a gitlink matches its checkout, `-` reverses
         // its staging just as it does in Changes and the Submodules tab.
         let fully_staged = |entry: &GitStatusEntry| {
             entry.sources.staged
                 && (!entry.sources.unstaged
                     || self.submodule_pointer_matches_index(&entry.relative_path))
         };
-        let unstage = entries.iter().all(|entry| fully_staged(entry));
+        let all_staged = entries.iter().all(|entry| fully_staged(entry));
+        // `s` stages what is left and `u` unstages what is staged; `-` toggles the set.
+        let unstage = match self.stage_intent {
+            Some(true) if all_staged => return Err("Already staged · u unstages them".into()),
+            Some(true) => false,
+            Some(false) if !entries.iter().any(|entry| entry.sources.staged) => {
+                return Err("Nothing staged here · s stages them".into());
+            }
+            Some(false) => true,
+            None => all_staged,
+        };
         let repository = git2::Repository::open(&self.root).map_err(|error| error.to_string())?;
         let index = repository.index().map_err(|error| error.to_string())?;
         let mut paths = BTreeSet::new();
@@ -134,7 +144,7 @@ impl GitScreen {
             GitFileStatus::Untracked | GitFileStatus::Conflicted
         ) {
             self.hunk_error =
-                Some("Use sidebar Space for untracked files or resolved conflicts".into());
+                Some("Use s in the sidebar for untracked files or resolved conflicts".into());
             return;
         }
         if entry
@@ -143,7 +153,7 @@ impl GitScreen {
             .is_some_and(|old| old != &row.value)
         {
             self.hunk_error =
-                Some("Use sidebar Space to stage or unstage both rename paths".into());
+                Some("Use s or u in the sidebar to stage or unstage both rename paths".into());
             return;
         }
         let policy = GitHunkPolicy {
@@ -197,7 +207,7 @@ impl GitScreen {
         let snapshot = self
             .hunk_snapshot
             .as_ref()
-            .ok_or("Hunks are loading; use sidebar Space for a whole file")?;
+            .ok_or("Hunks are loading; use s in the sidebar for a whole file")?;
         if self
             .selected_row()
             .is_none_or(|row| row.value != snapshot.file)
@@ -221,7 +231,7 @@ impl GitScreen {
 
     pub(super) fn start_line_range(&mut self) -> Result<(), String> {
         if self.preview_split {
-            return Err("Use s for unified view before selecting an exact diff-line range".into());
+            return Err("Use | for unified view before selecting an exact diff-line range".into());
         }
         if self.preview_anchor.take().is_some() {
             self.notice.clear();
@@ -250,7 +260,7 @@ impl GitScreen {
             let (anchor_hunk, anchor_line) = self
                 .preview
                 .captured_line(anchor, snapshot)
-                .ok_or("The range anchor is stale; Esc cancels it")?;
+                .ok_or("The selected lines changed · Esc cancel")?;
             if anchor_hunk != hunk_index {
                 return Err("Select a line range within one hunk; no changes were made".into());
             }
@@ -272,10 +282,20 @@ impl GitScreen {
         self.allow_write()?;
         let (snapshot, hunk_index, line_index) = self.diff_selection()?;
         let unstage = snapshot.layer == GitDiffLayer::Staged;
+        match self.stage_intent {
+            Some(true) if unstage => {
+                return Err("This diff is staged · u unstages a hunk, ] shows the working tree".into());
+            }
+            Some(false) if !unstage => {
+                return Err("This diff is not staged · ] shows the staged diff, where u unstages".into());
+            }
+            _ => {}
+        }
         let action = if unstage { "unstage" } else { "stage" };
         if !lines && self.preview_anchor.is_some() {
             return Err(format!(
-                "a {action}s the selected range; Esc cancels it before Space {action}s a whole hunk"
+                "a {action}s the selected range; Esc cancels it before {} {action}s a whole hunk",
+                if unstage { "u" } else { "s" }
             ));
         }
         let selected_lines = if lines {
@@ -294,18 +314,17 @@ impl GitScreen {
             policy: self
                 .hunk_policy
                 .clone()
-                .ok_or("Hunk policy is unavailable")?,
+                .ok_or("Can't stage this hunk · r refresh")?,
             hunk_snapshot_revision: snapshot.revision,
             hunk_id: Some(hunk.id),
             selected: Some(hunk),
             selected_lines,
             expected_index: Some(snapshot.index_fingerprint),
             expected_worktree: snapshot.worktree_sha256,
-            expected_head: self.hunk_head.ok_or("The hunk has no captured HEAD")?,
+            expected_head: self.hunk_head.ok_or("Can't stage this hunk · r refresh")?,
             expected_document_revision: None,
             unsaved_documents: Vec::new(),
             maximum_patch_bytes: 1024 * 1024,
-            deadline: Duration::from_secs(5),
         };
         self.mutation
             .start(GitMutationRequest::Plan(plan))
@@ -361,7 +380,7 @@ impl GitScreen {
             policy: self
                 .hunk_policy
                 .clone()
-                .ok_or("Hunk policy is unavailable")?,
+                .ok_or("Can't stage this hunk · r refresh")?,
             hunk_snapshot_revision: snapshot.revision,
             hunk_id: hunk.id,
             selected: hunk,
@@ -369,7 +388,6 @@ impl GitScreen {
             expected_index: Some(snapshot.index_fingerprint),
             expected_worktree: snapshot.worktree_sha256,
             maximum_patch_bytes: 1024 * 1024,
-            deadline: Duration::from_secs(5),
         };
         let fields = [
             ("File", request.policy.file.display().to_string()),
@@ -433,7 +451,7 @@ fn disk_identity(path: &Path) -> Result<DiskIdentity, String> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             return Ok(DiskIdentity::Missing);
         }
-        Err(error) => return Err(format!("Cannot read {}: {error}", path.display())),
+        Err(error) => return Err(format!("Couldn't read {}{}", path.display(), super::words::io_reason(&error))),
     };
     let kind = metadata.file_type();
     Ok(if kind.is_symlink() {
@@ -532,11 +550,11 @@ fn apply_file_discard(root: &Path, plan: &FileDiscard) -> Result<(), String> {
         }
         repository
             .checkout_index(Some(&mut index), Some(&mut checkout))
-            .map_err(|error| format!("Discard failed: {}", error.message()))?;
+            .map_err(|error| format!("Couldn't discard changes{}", super::words::git_reason(error.message())))?;
     }
     for target in plan.targets.iter().filter(|target| target.index.is_none()) {
         std::fs::remove_file(root.join(&target.path))
-            .map_err(|error| format!("Cannot delete {}: {error}", target.path.display()))?;
+            .map_err(|error| format!("Couldn't delete {}{}", target.path.display(), super::words::io_reason(&error)))?;
     }
     Ok(())
 }
@@ -626,7 +644,7 @@ impl GitScreen {
         if targets.is_empty() {
             return Err(match kept.as_slice() {
                 [path] => format!(
-                    "{} has only staged changes; nothing in the worktree to discard (Space unstages)",
+                    "{} has only staged changes; nothing in the worktree to discard (u unstages)",
                     path.display()
                 ),
                 _ => "The marked files have only staged changes; nothing in the worktree to discard"

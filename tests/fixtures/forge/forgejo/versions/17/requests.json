@@ -297,20 +297,6 @@
       "part": "status"
     },
     {
-      "key": "GET /api/v1/repos/orbit/orbit/statuses/00e904b87815eed672ae56afe6fcac095a725828",
-      "read": "PullRequest",
-      "method": "GET",
-      "status": 200,
-      "headers": {
-        "content-type": "application/json;charset=utf-8",
-        "link": "<https://code.forgejo.org/api/v1/repos/orbit/orbit/statuses/00e904b87815eed672ae56afe6fcac095a725828?page=2>; rel=\"next\",<https://code.forgejo.org/api/v1/repos/orbit/orbit/statuses/00e904b87815eed672ae56afe6fcac095a725828?page=2>; rel=\"last\"",
-        "x-total-count": "45"
-      },
-      "body": "pull-request-6.json",
-      "synthesized": false,
-      "part": "statuses"
-    },
-    {
       "key": "GET /api/v1/repos/orbit/orbit/issues/1784/timeline",
       "read": "Timeline",
       "method": "GET",
@@ -395,19 +381,6 @@
       "synthesized": false
     },
     {
-      "key": "GET /api/v1/repos/orbit/orbit/issues/1792/comments",
-      "read": "Issue",
-      "method": "GET",
-      "status": 200,
-      "headers": {
-        "content-type": "application/json;charset=utf-8",
-        "x-total-count": "1"
-      },
-      "body": "issue-2.json",
-      "synthesized": false,
-      "part": "comments"
-    },
-    {
       "key": "GET /api/v1/repos/orbit/orbit/issues/1792/timeline",
       "read": "Timeline",
       "method": "GET",
@@ -466,17 +439,6 @@
       "body": "runs-2.json",
       "synthesized": false,
       "part": "tasks"
-    },
-    {
-      "key": "GET /api/v1/repos/orbit/orbit/actions/runs?page=2",
-      "read": "Runs",
-      "method": "GET",
-      "status": 200,
-      "headers": {
-        "content-type": "application/json;charset=utf-8"
-      },
-      "body": "runs-3.json",
-      "synthesized": false
     },
     {
       "key": "GET /api/v1/repos/orbit/orbit/actions/runs/200481",
@@ -779,6 +741,35 @@
       "body": null,
       "synthesized": true,
       "doc": "https://code.forgejo.org/api/swagger#/notification/notifyReadThread"
+    },
+    {
+      "key": "GET /api/v1/repos/orbit/orbit/issues?page=1&state=closed&type=issues",
+      "read": "List",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json;charset=utf-8",
+        "x-total-count": "3"
+      },
+      "body": "list-issues-closed.json",
+      "synthesized": true,
+      "doc": "https://gitea.com/api/swagger#/issue/issueListIssues",
+      "kind": "issues"
+    },
+    {
+      "key": "GET /api/v1/repos/orbit/orbit/pulls?page=1&state=closed",
+      "read": "List",
+      "method": "GET",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json;charset=utf-8",
+        "x-total-count": "3"
+      },
+      "body": "list-pulls-closed.json",
+      "synthesized": true,
+      "doc": "https://gitea.com/api/swagger#/repository/repoListPullRequests",
+      "kind": "pulls",
+      "part": "pulls"
     }
   ]
 }

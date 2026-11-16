@@ -6,44 +6,72 @@
 #     scripts/ui-shot scripts/ui-scenarios/forge-gitlab.keys \
 #     --binary scripts/ui-scenarios/forge-gitlab-launch --cwd /tmp/orbit \
 #     --size 190x48 --size 120x36 --size 100x30 --out target/ui-shots/forge-gitlab
-wait 1500
+until Changes
+wait 300
 # Git → Merge requests
 type >
-wait 3000
-shot merge-requests
-key enter
-wait 2500
-shot merge-request
-# Activity (the tab before Overview): discussions and threads as cards
-type H
-wait 1500
-shot merge-request-activity
-# Files: the diff with its threads inline
-type H
-wait 1500
-shot merge-request-files
-type L
-type L
 wait 300
+until Merge requests
+until Showing
+gone Loading
+shot merge-requests
+# The reader, focused and scrolled to its end: the next step and its keys. (At 120 and 190
+# the list already shows !13's overview, so a shot right after Enter would repeat it.)
+key enter
+wait 300
+gone Loading
+key end
+wait 400
+shot merge-request-next-step
+key home
+wait 200
+# Reader tabs: Conversation │ Commits │ Pipelines │ Files changed. The Conversation tab ends
+# with the merge readiness, which merge-request-next-step already shows.
+# Files changed: the diff with its threads inline
+type ]
+type ]
+type ]
+wait 300
+gone Loading
+shot merge-request-files
+# Back to Conversation (wraps past Files changed): the discussions and threads as cards
+type ]
+wait 300
+gone Loading
+shot merge-request-activity
+key home
+wait 200
 key escape
 wait 300
 # !10: approved by alex, pipeline passed
 key j j
 key enter
-wait 2500
+wait 300
+gone Loading
 shot merge-request-approved
 key escape
 wait 300
 # → Issues
 type >
-wait 2500
+wait 300
+until Showing
+gone Loading
 shot issues
 # → Pipelines
 type >
-wait 2500
+wait 300
+gone Loading
 shot pipelines
 # Run history (focus 2), newest first: !13's failed merge request pipeline
 type 2
 key enter
-wait 2000
+wait 300
+gone Loading
 shot pipeline
+# → To-dos (R16 gitlab-10): GitLab's to-do list is the Notifications page in GitLab's words
+key escape
+wait 300
+type >
+wait 300
+gone Loading
+shot todos

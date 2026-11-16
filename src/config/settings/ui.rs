@@ -346,12 +346,33 @@ pub enum GitPlacement {
     Fullscreen,
 }
 
+/// Dusty Git's key habits: its own (`s` stages, `u` unstages, `-` toggles, the editor's
+/// leader starts chords), or lazygit's where Dusty Git has the action (`,` is the leader).
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GitKeys {
+    #[default]
+    Dusty,
+    Lazygit,
+}
+
+impl GitKeys {
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Dusty => "dusty",
+            Self::Lazygit => "lazygit",
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct GitWindowConfig {
     pub placement: GitPlacement,
     pub width_percent: u16,
     pub height_percent: u16,
+    pub keys: GitKeys,
 }
 impl Default for GitWindowConfig {
     fn default() -> Self {
@@ -359,6 +380,7 @@ impl Default for GitWindowConfig {
             placement: GitPlacement::Float,
             width_percent: 85,
             height_percent: 85,
+            keys: GitKeys::Dusty,
         }
     }
 }

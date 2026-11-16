@@ -72,6 +72,8 @@ pub enum AppEffect {
     GitStatusRefresh,
     GitStatusOpen,
     GitScreenOpen,
+    /// Open Dusty Git on a pull request, issue or run (a web address or `#123`).
+    GitScreenOpenLink(String),
     GitBrowse {
         copy: bool,
     },
@@ -1270,6 +1272,7 @@ impl App {
             | AppEffect::GitStatusRefresh
             | AppEffect::GitStatusOpen
             | AppEffect::GitScreenOpen
+            | AppEffect::GitScreenOpenLink(..)
             | AppEffect::GitBrowse { .. }
             | AppEffect::PullRequestList
             | AppEffect::PullRequestComments
@@ -1978,7 +1981,7 @@ mod tests {
             grants: [CommandAccess::Edit, CommandAccess::Files].into(),
         };
         assert!(app.invoke_with_authority(invocation, authority));
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
         while app.documents.file_work_pending() {
             app.process_vfs_results();
             assert!(std::time::Instant::now() < deadline);

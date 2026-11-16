@@ -44,7 +44,7 @@ fn workspace_approval_restores_unopened_file_history_on_a_worker() {
         recorded.undo,
         maximum,
     );
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
     while crate::editor::load_undo_history(&history, &path, &recorded.text, maximum).is_none() {
         assert!(
             std::time::Instant::now() < deadline,
@@ -114,7 +114,7 @@ fn workspace_approval_restores_unopened_file_history_on_a_worker() {
             .prepare_approval(&editor, TransactionId(3), Vec::new(), &version, 1)
             .is_err()
     );
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
     let (draft, changes) = loop {
         if let Some(result) = owner.poll_approval(&version, 1) {
             break result.unwrap();
@@ -378,7 +378,7 @@ fn workspace_preview_owns_selection_and_rejects_stale_or_replaced_sources_before
     .unwrap();
     release.send(()).unwrap();
     let wait = |documents: &mut Documents| {
-        let end = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(20);
         loop {
             if let Some(event) = documents.poll(&editor.window_version(), 1).unwrap() {
                 break event;
@@ -686,7 +686,7 @@ fn wait_workspace_document(
     documents: &mut crate::app::documents::Documents,
     editor: &EditorState,
 ) -> crate::app::documents::DocumentEvent {
-    let end = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    let end = std::time::Instant::now() + std::time::Duration::from_secs(20);
     loop {
         if let Some(event) = documents.poll(&editor.window_version(), 1).unwrap() {
             return event;

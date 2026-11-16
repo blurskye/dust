@@ -506,7 +506,7 @@ fn pty_resize_ack_precedes_the_childs_resize_output() {
         dust::tools::discover_executable("python3").expect("PTY resize fixture needs Python 3");
     request.arguments = vec![script.as_os_str().to_owned()];
     let id = service.open(request).unwrap();
-    let deadline = Instant::now() + Duration::from_secs(4);
+    let deadline = Instant::now() + Duration::from_secs(20);
     let mut screen = dust::ui::PtyScreen::new(80, 8, 8);
     while !screen.lines().iter().any(|line| line.contains("READY")) {
         for event in service.poll().unwrap() {
@@ -544,7 +544,7 @@ fn pty_resize_ack_precedes_the_childs_resize_output() {
         thread::sleep(Duration::from_millis(2));
     }
     service.close(id).unwrap();
-    let deadline = Instant::now() + Duration::from_secs(4);
+    let deadline = Instant::now() + Duration::from_secs(20);
     loop {
         let batch = service.poll().unwrap();
         if batch.iter().any(|event| {

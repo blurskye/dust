@@ -498,6 +498,7 @@ impl App {
             reload_stamps: std::collections::HashMap::new(),
             next_disk_check: None,
             git_stamp: None,
+            git_stamp_dirs: None,
             replace_query: None,
             substitute_confirm: None,
             session_load_requested: false,

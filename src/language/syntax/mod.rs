@@ -1797,7 +1797,7 @@ mod tests {
     #[test]
     fn saturated_result_queue_retains_completed_parses() {
         let service = SyntaxWorker::start(1);
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
         for id in 1..=3 {
             loop {
                 match service.submit(

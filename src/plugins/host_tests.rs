@@ -176,12 +176,14 @@ fn completed_component_execution_cancels_its_epoch_timer() {
     ] {
         plugin.commands.insert(command.into(), declaration.clone());
     }
+    // Activation gets room for a stalled runner; the command's own 1 s timer is the subject.
     let limits = PluginLimits {
-        epoch_deadline_ticks: 100,
+        epoch_deadline_ticks: 1000,
         ..Default::default()
     };
     let mut outcome =
         crate::plugins::index::load_component(root.path(), &object, plugin, &limits).unwrap();
+    outcome.runtime.limits.epoch_deadline_ticks = 100;
     let mut invocation = empty_execution_request();
     invocation.command = "confirmationprobe".into();
     crate::plugins::index::execute_component(invocation, &mut outcome.runtime).unwrap();
@@ -601,7 +603,13 @@ fn static_manifest_command_ids_fit_the_command_registry() {
 
 #[test]
 fn candidate_activation_validates_the_manifest_before_loading() {
-    let limits = PluginLimits::default();
+    // Activation runs under the epoch deadline (100 ms by default), and compiling and
+    // instantiating the guest can take longer than that on a loaded machine. This test is
+    // about manifest checks, not the deadline.
+    let limits = PluginLimits {
+        epoch_deadline_ticks: 1000,
+        ..PluginLimits::default()
+    };
     let loaded = retained_runtime(&limits, false).unwrap().loaded;
     let root = tempfile::tempdir().unwrap();
     let path = root.path().join("guest.wasm");
@@ -795,7 +803,7 @@ fn index_worker_does_not_touch_component_and_requires_host_acceptance() {
         manager.activate_indexed("demo", load, "0".repeat(64)),
         Err(PluginError::IndexNotAccepted)
     ));
-    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
     let index = loop {
         let events = manager.poll().expect("poll");
         if let Some(index) = events.into_iter().find_map(|event| match event {
@@ -818,7 +826,7 @@ fn index_worker_does_not_touch_component_and_requires_host_acceptance() {
     manager
         .activate_indexed("demo", load, index.checksum)
         .expect("accept index");
-    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
     loop {
         let events = manager.poll().expect("poll activation");
         if events.into_iter().any(|event| {
@@ -849,7 +857,7 @@ fn execution_before_activation_removes_the_workers_indexed_candidate() {
             PluginLimits::default(),
         )
         .unwrap();
-    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
     loop {
         if manager
             .poll()
@@ -1829,7 +1837,12 @@ fn component_activation_checks_counts_and_strings_before_copying() {
         }
         constant(0, &mut body); // result pointer
         body.push(0x0b);
-        let error = retained_runtime_with_activation(&PluginLimits::default(), Some(&body))
+        // A generous deadline, so a slow machine can only fail this on the size check.
+        let limits = PluginLimits {
+            epoch_deadline_ticks: 1000,
+            ..PluginLimits::default()
+        };
+        let error = retained_runtime_with_activation(&limits, Some(&body))
             .err()
             .expect("oversized activation must fail");
         assert!(matches!(error, PluginError::Activation(_)), "{error}");
@@ -1939,12 +1952,14 @@ fn component_activation_and_each_command_have_their_own_deadline() {
         .err()
         .expect("activation must time out");
     assert!(error.to_string().contains("interrupt"), "{error}");
+    // Activation gets room for a stalled runner; each command's 1 s budget is the subject.
     let limits = PluginLimits {
         fuel: u64::MAX,
-        epoch_deadline_ticks: 100,
+        epoch_deadline_ticks: 1000,
         ..Default::default()
     };
     let mut runtime = retained_runtime(&limits, false).unwrap().runtime;
+    runtime.limits.epoch_deadline_ticks = 100;
     let mut request = empty_execution_request();
     request.command = "events".into();
     crate::plugins::index::execute_component(request, &mut runtime).unwrap();
@@ -2205,7 +2220,7 @@ fn manager_accepts_a_component_inside_a_symlinked_store() {
             PluginLimits::default(),
         )
         .unwrap();
-    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
     loop {
         let events = manager.poll().unwrap();
         if events

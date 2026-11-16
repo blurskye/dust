@@ -86,7 +86,7 @@ impl Styled {
 /// What starts a line: indentation, a bullet or a quote bar, and its style.
 pub type Prefix<'a> = (&'a str, Option<Highlight>);
 
-type Segment = (String, Option<Highlight>);
+pub(crate) type Segment = (String, Option<Highlight>);
 
 /// Append `source` rendered for a column `width` cells wide.
 pub fn render(out: &mut Styled, source: &str, width: usize) {
@@ -268,7 +268,7 @@ fn is_rule(line: &str) -> bool {
     count >= 3
 }
 
-fn is_table_separator(line: &str) -> bool {
+pub(crate) fn is_table_separator(line: &str) -> bool {
     let line = line.trim();
     line.starts_with('|')
         && line.contains('-')
@@ -367,7 +367,7 @@ fn code_block(out: &mut Styled, info: &str, body: &[&str], width: Option<usize>,
     }
 }
 
-fn table_cells(row: &str) -> Vec<&str> {
+pub(crate) fn table_cells(row: &str) -> Vec<&str> {
     let row = row.trim();
     let row = row.strip_prefix('|').unwrap_or(row);
     let mut cells = Vec::new();
@@ -471,7 +471,7 @@ fn segments_width(out: &Styled, segments: &[Segment]) -> usize {
 
 /// Inline Markdown as styled runs: code spans, bold, italic, links and escapes. Text
 /// outside any of them gets `base`.
-fn inline(text: &str, base: Option<Highlight>) -> Vec<Segment> {
+pub(crate) fn inline(text: &str, base: Option<Highlight>) -> Vec<Segment> {
     inline_at_depth(text, base, 0)
 }
 

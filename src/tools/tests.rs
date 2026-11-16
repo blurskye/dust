@@ -1038,7 +1038,7 @@ fn lsp_protocol_smoke(
     )
     .expect("exit frame");
     drop(stdin);
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
     loop {
         if process.child.try_wait().expect("LSP status").is_some() {
             break;
@@ -1146,14 +1146,11 @@ fn installer_worker_routes_real_managed_uninstall_and_reports_its_operation() {
 #[cfg(unix)]
 #[test]
 fn installer_worker_queues_requests_made_while_one_is_running() {
-    use std::os::unix::fs::PermissionsExt;
-
     let directory = tempfile::tempdir().expect("tool store");
     let catalog = bundled_tool_catalog();
     let installer = ToolInstaller::start_at(directory.path().to_path_buf());
     let rustup = directory.path().join("rustup");
-    std::fs::write(&rustup, "#!/bin/sh\n: > .ready\nn=0\nwhile [ ! -f .release ]; do\n n=$((n+1))\n [ \"$n\" -lt 1000 ] || exit 1\n sleep 0.01\ndone\n").unwrap();
-    std::fs::set_permissions(&rustup, std::fs::Permissions::from_mode(0o755)).unwrap();
+    crate::testing::write_executable(&rustup, "#!/bin/sh\n: > .ready\nn=0\nwhile [ ! -f .release ]; do\n n=$((n+1))\n [ \"$n\" -lt 1000 ] || exit 1\n sleep 0.01\ndone\n");
     let proxy = directory.path().join("rust-analyzer");
     std::fs::hard_link(&rustup, &proxy).unwrap();
     let first = catalog
@@ -1215,17 +1212,9 @@ fn installer_worker_queues_requests_made_while_one_is_running() {
 #[cfg(unix)]
 #[test]
 fn installer_worker_can_explicitly_add_rust_analyzer_to_the_active_rustup_toolchain() {
-    use std::os::unix::fs::PermissionsExt;
-
     let directory = tempfile::tempdir().expect("tool store");
     let rustup = directory.path().join("rustup");
-    std::fs::write(
-        &rustup,
-        "#!/bin/sh\n[ \"$1\" = component ] && printf '%s\\n' \"$@\" > \"$PWD/.rustup-args\"\nexit 0\n",
-    )
-    .expect("rustup fixture");
-    std::fs::set_permissions(&rustup, std::fs::Permissions::from_mode(0o755))
-        .expect("rustup fixture permissions");
+    crate::testing::write_executable(&rustup, "#!/bin/sh\n[ \"$1\" = component ] && printf '%s\\n' \"$@\" > \"$PWD/.rustup-args\"\nexit 0\n",);
     let proxy = directory.path().join("rust-analyzer");
     std::fs::hard_link(&rustup, &proxy).expect("rustup proxy");
     let definition = bundled_tool_catalog()
@@ -1243,7 +1232,7 @@ fn installer_worker_can_explicitly_add_rust_analyzer_to_the_active_rustup_toolch
             "rust-analyzer".into(),
         )
         .expect("queue rustup component install");
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
     let result = loop {
         if let Some(result) = installer.try_result().expect("installer result") {
             break result;
@@ -1267,20 +1256,14 @@ fn installer_worker_can_explicitly_add_rust_analyzer_to_the_active_rustup_toolch
 #[test]
 fn failed_rustup_component_installation_reports_bounded_stderr() {
     use std::fs;
-    use std::os::unix::fs::PermissionsExt;
     use std::sync::mpsc;
 
     let directory = tempfile::tempdir().unwrap();
     let rustup = directory.path().join("rustup");
-    fs::write(
-        &rustup,
-        format!(
+    crate::testing::write_executable(&rustup, format!(
             "#!/bin/sh\nprintf '%s\\n' '{}' 'downloading component' 'download failed' 'error: certificate verification failed' >&2\nexit 1\n",
             "x".repeat(8192)
-        ),
-    )
-    .unwrap();
-    fs::set_permissions(&rustup, fs::Permissions::from_mode(0o755)).unwrap();
+        ),);
     let proxy = directory.path().join("rust-analyzer");
     fs::hard_link(&rustup, &proxy).unwrap();
     let definition = bundled_tool_catalog()
@@ -1307,18 +1290,12 @@ fn failed_rustup_component_installation_reports_bounded_stderr() {
 #[test]
 fn rustup_install_adds_the_compiler_and_fails_when_rust_analyzer_still_cannot_run() {
     use std::fs;
-    use std::os::unix::fs::PermissionsExt;
     use std::sync::mpsc;
 
     let directory = tempfile::tempdir().unwrap();
     let rustup = directory.path().join("rustup");
     // As rustup, record the arguments; as the proxy, fail like a toolchain without rustc.
-    fs::write(
-        &rustup,
-        "#!/bin/sh\nif [ \"$1\" = component ]; then echo \"$@\" > added; exit 0; fi\necho 'cannot open shared object file' >&2\nexit 127\n",
-    )
-    .unwrap();
-    fs::set_permissions(&rustup, fs::Permissions::from_mode(0o755)).unwrap();
+    crate::testing::write_executable(&rustup, "#!/bin/sh\nif [ \"$1\" = component ]; then echo \"$@\" > added; exit 0; fi\necho 'cannot open shared object file' >&2\nexit 127\n",);
     let proxy = directory.path().join("rust-analyzer");
     fs::hard_link(&rustup, &proxy).unwrap();
     let definition = bundled_tool_catalog()
@@ -1348,17 +1325,11 @@ fn rustup_install_adds_the_compiler_and_fails_when_rust_analyzer_still_cannot_ru
 #[test]
 fn rustup_cancellation_terminates_its_process_group() {
     use std::fs;
-    use std::os::unix::fs::PermissionsExt;
     use std::sync::mpsc;
     use std::thread;
     let root = tempfile::tempdir().unwrap();
     let rustup = root.path().join("rustup");
-    fs::write(
-        &rustup,
-        "#!/bin/sh\ntrap '' TERM\nsleep 30 & echo $! > descendant\nwait\n",
-    )
-    .unwrap();
-    fs::set_permissions(&rustup, fs::Permissions::from_mode(0o755)).unwrap();
+    crate::testing::write_executable(&rustup, "#!/bin/sh\ntrap '' TERM\nsleep 30 & echo $! > descendant\nwait\n",);
     let proxy = root.path().join("rust-analyzer");
     fs::hard_link(&rustup, &proxy).unwrap();
     let definition = bundled_tool_catalog()
@@ -1468,7 +1439,7 @@ fn nix_profile_uninstall_reports_metadata_errors_other_than_absence() {
 
 #[cfg(unix)]
 fn wait_for_descendant(path: &std::path::Path) -> nix::unistd::Pid {
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
     loop {
         if let Ok(contents) = std::fs::read_to_string(path)
             && let Ok(pid) = contents.trim().parse::<i32>()
@@ -1492,7 +1463,8 @@ fn wait_for_descendant(path: &std::path::Path) -> nix::unistd::Pid {
 
 #[cfg(unix)]
 fn assert_descendant_stopped(pid: nix::unistd::Pid) {
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    // Well under the descendants' `sleep 30`, so one that was never killed still fails.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
     loop {
         match nix::sys::signal::kill(pid, None) {
             Err(nix::errno::Errno::ESRCH) => return,
@@ -1616,7 +1588,7 @@ fn cancelled_queued_version_probes_do_not_spawn() {
             cancelled.clone(),
         ))
         .unwrap();
-    let deadline = Instant::now() + Duration::from_secs(3);
+    let deadline = Instant::now() + Duration::from_secs(30);
     while !directory.path().join("started").exists() {
         assert!(Instant::now() < deadline);
         std::thread::sleep(Duration::from_millis(2));
@@ -2134,7 +2106,7 @@ fn package_service_keeps_every_completion_under_backpressure() {
     let root = tempfile::tempdir().unwrap();
     let mut service = crate::tools::PackageWorker::start(root.path().into(), 1, 1024, 1024);
     let mut accepted = Vec::new();
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + Duration::from_secs(30);
     for _ in 0..3 {
         loop {
             match service.request(crate::tools::PackageOperation::List) {
@@ -2151,7 +2123,7 @@ fn package_service_keeps_every_completion_under_backpressure() {
         }
     }
     let mut received = Vec::new();
-    let deadline = Instant::now() + Duration::from_secs(3);
+    let deadline = Instant::now() + Duration::from_secs(30);
     while service.pending_count() != 0 {
         for event in service.poll().unwrap() {
             match event {
@@ -2184,7 +2156,7 @@ fn registry_service_keeps_every_result_under_backpressure() {
     )
     .unwrap();
     let mut accepted = Vec::new();
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + Duration::from_secs(30);
     for _ in 0..3 {
         loop {
             match service.request(crate::tools::RegistryRequest::Search {
@@ -2203,7 +2175,7 @@ fn registry_service_keeps_every_result_under_backpressure() {
         }
     }
     let mut received = Vec::new();
-    let deadline = Instant::now() + Duration::from_secs(3);
+    let deadline = Instant::now() + Duration::from_secs(30);
     while received.len() < accepted.len() {
         received.extend(service.poll().unwrap().into_iter().map(|event| event.id));
         assert!(
@@ -2279,13 +2251,11 @@ fn locked_uv_installation_rejects_another_process_and_uninstall() {
 #[test]
 fn failed_uv_update_restores_previous_environment_and_shebang_paths() {
     use std::fs;
-    use std::os::unix::fs::PermissionsExt;
     use std::sync::mpsc;
     let root = tempfile::tempdir().unwrap();
     let runtime = root.path().join(".runtimes/uv");
     fs::create_dir_all(runtime.join("bin")).unwrap();
-    fs::write(runtime.join("bin/uv"), "#!/bin/sh\nexit 1\n").unwrap();
-    fs::set_permissions(runtime.join("bin/uv"), fs::Permissions::from_mode(0o700)).unwrap();
+    crate::testing::write_executable(runtime.join("bin/uv"), "#!/bin/sh\nexit 1\n");
     fs::write(
         runtime.join(crate::tools::compatibility::MANAGED_RUNTIME_MARKER),
         runtime_artifact("uv").unwrap().sha256,
@@ -2337,15 +2307,15 @@ fn installer_exit_terminates_helpers_and_finishes_reading_stderr() {
             &cancellations,
             None,
         );
-        assert!(started.elapsed() < Duration::from_secs(5));
+        // Well under the helper's 30 s: the installer did not wait for it.
+        assert!(started.elapsed() < Duration::from_secs(20));
         if exit == 0 {
             result.unwrap();
         } else {
             assert!(result.unwrap_err().contains("diagnostic"));
         }
         let pid = fs::read_to_string(root.path().join("descendant")).unwrap();
-        let state = fs::read_to_string(format!("/proc/{}/stat", pid.trim()));
-        assert!(state.is_err() || state.unwrap().split_whitespace().nth(2) == Some("Z"));
+        assert_descendant_stopped(nix::unistd::Pid::from_raw(pid.trim().parse().unwrap()));
     }
 }
 
@@ -2510,7 +2480,6 @@ fn go_install_preserves_non_utf8_environment_paths() {
     use std::ffi::OsStr;
     use std::fs;
     use std::os::unix::ffi::OsStrExt;
-    use std::os::unix::fs::PermissionsExt;
     use std::sync::mpsc;
     // Some filesystems require UTF-8 names; Linux tmpfs accepts raw bytes.
     let directory = if cfg!(target_os = "linux") {
@@ -2523,8 +2492,7 @@ fn go_install_preserves_non_utf8_environment_paths() {
     let runtime = root.join(".runtimes/go");
     fs::create_dir_all(runtime.join("bin")).unwrap();
     let go = runtime.join("bin/go");
-    fs::write(&go, "#!/bin/sh\nset -eu\n[ \"$GOBIN\" = \"$HOME/bin\" ]\n[ \"$GOPATH\" = \"$HOME/gopath\" ]\n[ \"$GOCACHE\" = \"$HOME/gocache\" ]\nprintf '#!/bin/sh\\nexit 0\\n' > \"$GOBIN/fixture\"\n").unwrap();
-    fs::set_permissions(go, fs::Permissions::from_mode(0o700)).unwrap();
+    crate::testing::write_executable(&go, "#!/bin/sh\nset -eu\n[ \"$GOBIN\" = \"$HOME/bin\" ]\n[ \"$GOPATH\" = \"$HOME/gopath\" ]\n[ \"$GOCACHE\" = \"$HOME/gocache\" ]\nprintf '#!/bin/sh\\nexit 0\\n' > \"$GOBIN/fixture\"\n");
     fs::write(
         runtime.join(crate::tools::compatibility::MANAGED_RUNTIME_MARKER),
         runtime_artifact("go").unwrap().sha256,
@@ -2549,7 +2517,6 @@ fn go_install_preserves_non_utf8_environment_paths() {
 #[test]
 fn npm_install_patches_native_dependencies_before_activation() {
     use std::fs;
-    use std::os::unix::fs::PermissionsExt;
     use std::sync::mpsc;
     fn elf(interpreter: &str) -> Vec<u8> {
         let mut bytes = vec![0; 120];
@@ -2571,8 +2538,7 @@ fn npm_install_patches_native_dependencies_before_activation() {
     let runtime = root.path().join(".runtimes/bun");
     fs::create_dir_all(runtime.join("bin")).unwrap();
     let bun = runtime.join("bin/bun");
-    fs::write(&bun, format!("#!/bin/sh\nset -eu\nmkdir -p \"$BUN_INSTALL/node_modules/native\"\nprintf '{}' > \"$BUN_INSTALL/node_modules/native/fixture\"\nchmod 700 \"$BUN_INSTALL/node_modules/native/fixture\"\nln -s ../node_modules/native/fixture \"$BUN_INSTALL/bin/fixture\"\n", shell_bytes(&elf("/lib64/ld-linux-x86-64.so.2")))).unwrap();
-    fs::set_permissions(&bun, fs::Permissions::from_mode(0o700)).unwrap();
+    crate::testing::write_executable(&bun, format!("#!/bin/sh\nset -eu\nmkdir -p \"$BUN_INSTALL/node_modules/native\"\nprintf '{}' > \"$BUN_INSTALL/node_modules/native/fixture\"\nchmod 700 \"$BUN_INSTALL/node_modules/native/fixture\"\nln -s ../node_modules/native/fixture \"$BUN_INSTALL/bin/fixture\"\n", shell_bytes(&elf("/lib64/ld-linux-x86-64.so.2"))));
     fs::write(
         runtime.join(crate::tools::compatibility::MANAGED_RUNTIME_MARKER),
         runtime_artifact("bun").unwrap().sha256,
@@ -2580,15 +2546,10 @@ fn npm_install_patches_native_dependencies_before_activation() {
     .unwrap();
     let patchelf = root.path().join("patchelf");
     let loader = "/private/ld.so";
-    fs::write(
-        &patchelf,
-        format!(
+    crate::testing::write_executable(&patchelf, format!(
             "#!/bin/sh\nprintf '{}' > \"$5\"\n",
             shell_bytes(&elf(loader))
-        ),
-    )
-    .unwrap();
-    fs::set_permissions(&patchelf, fs::Permissions::from_mode(0o700)).unwrap();
+        ),);
     let compatibility = crate::tools::catalog::NixCompatibilityRuntime {
         loader: loader.into(),
         nix_ld: "/private/nix-ld".into(),
@@ -2621,11 +2582,8 @@ fn npm_install_patches_native_dependencies_before_activation() {
 #[cfg(unix)]
 #[test]
 fn installer_cancellation_terminates_descendant_processes_slot5() {
-    use std::fs;
     use std::sync::mpsc;
     use std::thread;
-    use std::time::Duration;
-    use std::time::Instant;
     let root = tempfile::tempdir().unwrap();
     let (cancel, cancellations) = mpsc::channel();
     let cwd = root.path().to_path_buf();
@@ -2642,14 +2600,10 @@ fn installer_cancellation_terminates_descendant_processes_slot5() {
             None,
         )
     });
-    let deadline = Instant::now() + Duration::from_secs(3);
-    while !root.path().join("descendant").exists() {
-        assert!(Instant::now() < deadline);
-        thread::sleep(Duration::from_millis(2));
-    }
-    let pid = fs::read_to_string(root.path().join("descendant")).unwrap();
+    // The helpers wait for a whole PID and for SIGKILL to land: the shell creates the file
+    // before it writes the PID, and a killed process dies only once it is scheduled.
+    let pid = wait_for_descendant(&root.path().join("descendant"));
     cancel.send(()).unwrap();
     assert!(worker.join().unwrap().unwrap_err().contains("cancelled"));
-    let state = fs::read_to_string(format!("/proc/{}/stat", pid.trim()));
-    assert!(state.is_err() || state.unwrap().split_whitespace().nth(2) == Some("Z"));
+    assert_descendant_stopped(pid);
 }

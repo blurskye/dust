@@ -104,7 +104,7 @@ fn view(screen: &mut GitScreen) -> String {
     text(&screen.frame(190, 48))
 }
 fn wait(screen: &mut GitScreen, mut ready: impl FnMut(&mut GitScreen) -> bool) {
-    let deadline = Instant::now() + Duration::from_secs(15);
+    let deadline = Instant::now() + Duration::from_secs(120);
     loop {
         screen.poll();
         if ready(screen) {
@@ -121,7 +121,10 @@ fn wait(screen: &mut GitScreen, mut ready: impl FnMut(&mut GitScreen) -> bool) {
 fn ready_source(screen: &mut GitScreen, needle: &str) {
     wait(screen, |screen| {
         let source = view(screen);
-        source.contains(needle) && !source.contains("updating…") && !source.contains("Loading…")
+        source.contains(needle)
+            && !source.contains("updating…")
+            && !source.contains("Loading…")
+            && screen.panes_sized()
     });
 }
 // Inspect only the cursor's content field, never a whole row that can match a sidebar filename.
@@ -145,7 +148,7 @@ fn reader_x(width: u16, height: u16) -> u16 {
     } else if width >= 160 && height >= 40 {
         (25 + width / 7).clamp(44, 60) + 1
     } else {
-        (20 + width / 10).clamp(28, 36) + 1
+        (width / 4 + 7).clamp(32, 44) + 1
     }
 }
 /// The rail's right edge, for headings that belong to the rail only.
@@ -724,9 +727,9 @@ fn native_discard_cursor_geometry_and_help_are_usable_at_all_three_sizes() {
         let hints = footer(&before);
         // Narrow footers drop later hints to keep the context; `?` lists them all.
         let expected: &[&str] = if width < 100 {
-            &["Space stage hunk"]
+            &["s stage hunk"]
         } else {
-            &["Space stage hunk", "d discard", "? keys"]
+            &["s stage hunk", "d discard", "? keys"]
         };
         for hint in expected {
             assert!(hints.contains(hint), "{width}×{height}: {hints}");

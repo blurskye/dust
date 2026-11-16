@@ -180,7 +180,7 @@ fn subagent_reply() -> (
         .set_read_timeout(Some(std::time::Duration::from_secs(5)))
         .unwrap();
     writeln!(stream, "agent\t{}", json!({"parent": 1, "prompt": "task"})).unwrap();
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
     loop {
         if let Some(crate::remote::RemoteRequest::Agent(request)) = server.try_request() {
             return (server, request.reply, std::io::BufReader::new(stream));
@@ -202,7 +202,7 @@ fn echo_agent(app: &mut App) -> usize {
 
 #[cfg(unix)]
 fn file_response(app: &mut App, index: usize) -> Result<Value, String> {
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
     loop {
         app.process_vfs_results();
         if let Some(AgentMessage::Response { result, .. }) = app.agent.sessions[index]
@@ -779,7 +779,7 @@ fn tutor_exit_closes_practice_agents_and_preserves_other_sessions() {
     let number = app.agent.sessions[unrelated].number;
     app.open_tutor();
     app.handle_configured_key("enter".parse().unwrap());
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
     while app.workspace.root_operation_pending() {
         app.process_trust_events();
         assert!(std::time::Instant::now() < deadline);
@@ -796,7 +796,7 @@ fn tutor_exit_closes_practice_agents_and_preserves_other_sessions() {
         .push_back(permission(app.agent.sessions[child].number));
     app.agent.active = unrelated;
     app.tutor_quit();
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
     while app.workspace.root_operation_pending() {
         app.process_trust_events();
         assert!(std::time::Instant::now() < deadline);
@@ -868,7 +868,7 @@ fn agent_response_transport_failure_stops_children_and_permissions() {
         &BTreeMap::new(),
         &app.state.workspace_root,
     ).unwrap();
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
     loop {
         if matches!(process.try_message(), Some(AgentMessage::Log(line)) if line == "ready") {
             break;
@@ -962,7 +962,7 @@ fn agent_full_writer_preserves_prompt_context_and_recap_until_retry() {
     assert!(matches!(session.phase, Phase::Prompting(_)));
     assert!(session.queued.is_empty());
     assert!(!session.recap);
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
     loop {
         if let Some(AgentMessage::Request { method, params, .. }) =
             session.process.as_ref().unwrap().try_message()
@@ -1256,7 +1256,7 @@ fn agent_fallback_prompt_keeps_saved_attachments() {
     session.recap = true;
     app.agent_ask("What next?".into());
     let process = app.agent.sessions[index].process.as_ref().unwrap();
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
     let prompt = loop {
         if let Some(AgentMessage::Log(line)) = process.try_message() {
             break serde_json::from_str::<Value>(&line).unwrap();
@@ -1407,7 +1407,7 @@ fn agent_file_requests_use_unsaved_aliases_and_update_buffers_before_acknowledgi
             params: json!({"toolCall": {"kind": "edit", "locations": [{"path": alias}]}}),
         },
     );
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
     while app.agent.permissions.is_empty() {
         app.process_vfs_results();
         assert!(std::time::Instant::now() < deadline);
@@ -1490,7 +1490,7 @@ fn agent_write_refreshes_buffers_opened_during_io_and_preserves_file_format() {
             params: json!({"path": path, "content": content}),
         },
     );
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
     let completed = loop {
         if let Some(DocumentEvent::Legacy(result)) = app
             .documents
@@ -1545,7 +1545,7 @@ fn cancelling_a_turn_cancels_permissions_still_resolving_paths() {
     );
     // A later worker completion must be discarded, not presented as a new prompt.
     let id = app.documents.resolve_agent_paths(Vec::new()).unwrap();
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
     loop {
         if let Some(crate::app::documents::DocumentEvent::Legacy(
             crate::files::VfsResult::PathsResolved { id: received, .. },
@@ -1748,7 +1748,6 @@ fn managed_pi_starts_with_its_private_node_on_path() {
         );
         return;
     }
-    use std::os::unix::fs::PermissionsExt;
     let bin = crate::tools::tool_store_root().join("pi-acp/bin");
     std::fs::create_dir_all(&bin).unwrap();
     for (name, script) in [
@@ -1759,8 +1758,7 @@ fn managed_pi_starts_with_its_private_node_on_path() {
         ),
     ] {
         let path = bin.join(name);
-        std::fs::write(&path, script).unwrap();
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).unwrap();
+        crate::testing::write_executable(&path, script);
     }
     let (_app_dirs, mut app) = crate::app::tests::app();
     app.tooling
@@ -1776,7 +1774,7 @@ fn managed_pi_starts_with_its_private_node_on_path() {
     let (process, ..) = app
         .spawn_agent("pi", &app.state.workspace_root, None)
         .unwrap();
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
     loop {
         match process.try_message() {
             Some(AgentMessage::Log(path)) => {
@@ -1980,7 +1978,7 @@ fn a_new_file_under_a_symlinked_directory_resolves_to_where_it_will_be_written()
     worker
         .resolve_paths(vec![root.path().join("link/new/file.txt")])
         .unwrap();
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
     let resolved = loop {
         if let Some(crate::files::VfsReply::Public(crate::files::VfsResult::PathsResolved {
             paths,

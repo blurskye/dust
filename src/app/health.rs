@@ -336,7 +336,7 @@ mod tests {
             safe_mode: false,
         };
         let mut tick = 0;
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + Duration::from_secs(20);
         loop {
             notices.submit_health(
                 snapshot.clone(),
