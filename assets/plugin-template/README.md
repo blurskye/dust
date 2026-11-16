@@ -15,7 +15,7 @@ cargo build --locked --release --target wasm32-unknown-unknown
 
 ## Pack
 
-Use the packer in a Dust 0.3.0 source checkout. Set `DUST_SOURCE` to its absolute
+Use the packer in a Dust 0.3.1 source checkout. Set `DUST_SOURCE` to its absolute
 path, then run from this plugin directory in the host development shell:
 
 ```sh

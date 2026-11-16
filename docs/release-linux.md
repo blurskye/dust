@@ -1,6 +1,6 @@
 # Linux release
 
-The current release version is **0.3.0**. Package versions come from `Cargo.toml`;
+The current release version is **0.3.1**. Package versions come from `Cargo.toml`;
 keep its entry in `Cargo.lock` and the AppStream release in
 `packaging/dev.blurskye.Dust.metainfo.xml` in sync when releasing.
 
@@ -26,7 +26,7 @@ while the AppImage and the Flatpak hold the editor only (Dusty Git is `Space g g
 | `dust-X.Y.Z-x86_64-linux.AppImage` | `chmod +x dust-X.Y.Z-x86_64-linux.AppImage && ./dust-X.Y.Z-x86_64-linux.AppImage` |
 | `dust-X.Y.Z-x86_64.flatpak` | `flatpak install --user ./dust-X.Y.Z-x86_64.flatpak`, then `flatpak run dev.blurskye.Dust`; `flatpak run --command=dusty-git dev.blurskye.Dust` opens Dusty Git |
 
-Replace `X.Y.Z` with `0.3.0` for this release. Run Dust from a terminal and ensure
+Replace `X.Y.Z` with `0.3.1` for this release. Run Dust from a terminal and ensure
 `~/.local/bin` is on `PATH` when installing the bare binary there.
 
 The deb, rpm and pacman packages are named `dust-editor` because distributions already

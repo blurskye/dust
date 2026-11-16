@@ -32,10 +32,10 @@ Download a binary or package from [releases](https://github.com/blurskye/dust/re
 
 ```sh
 mkdir -p ~/.local/bin
-install -m 0755 dust-0.3.0-x86_64-linux ~/.local/bin/dust
+install -m 0755 dust-0.3.1-x86_64-linux ~/.local/bin/dust
 ```
 
-The `.tar.zst` archive and the packages also install `dusty-git`, and `dusty-git-0.3.0-x86_64-linux` is the bare binary. Ensure `~/.local/bin` is on your `PATH`. Debian, RPM, pacman, AppImage and Flatpak instructions and checksum verification are in the [Linux release guide](docs/release-linux.md). Distribution packages are named `dust-editor` to distinguish this editor from the disk-usage tool that also installs a `dust` executable.
+The `.tar.zst` archive and the packages also install `dusty-git`, and `dusty-git-0.3.1-x86_64-linux` is the bare binary. Ensure `~/.local/bin` is on your `PATH`. Debian, RPM, pacman, AppImage and Flatpak instructions and checksum verification are in the [Linux release guide](docs/release-linux.md). Distribution packages are named `dust-editor` to distinguish this editor from the disk-usage tool that also installs a `dust` executable.
 
 To build from source, use the pinned Rust toolchain plus a C compiler, `pkg-config`, OpenSSL and zlib development files, or enter the Nix development shell:
 
@@ -49,10 +49,10 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for tests and plugin-fixture builds.
 
 ## Install on macOS
 
-Download `dust-0.3.0-aarch64-macos.tar.gz` for Apple Silicon or `dust-0.3.0-x86_64-macos.tar.gz` for Intel from [releases](https://github.com/blurskye/dust/releases). Check the archive's SHA-256 against its entry in `SHA256SUMS`, then extract and install it:
+Download `dust-0.3.1-aarch64-macos.tar.gz` for Apple Silicon or `dust-0.3.1-x86_64-macos.tar.gz` for Intel from [releases](https://github.com/blurskye/dust/releases). Check the archive's SHA-256 against its entry in `SHA256SUMS`, then extract and install it:
 
 ```sh
-tar -xzf dust-0.3.0-aarch64-macos.tar.gz
+tar -xzf dust-0.3.1-aarch64-macos.tar.gz
 mkdir -p ~/.local/bin
 install -m 0755 dust dusty-git ~/.local/bin/
 ```
@@ -67,11 +67,11 @@ See the [macOS and Windows guide](docs/user-guide-macos-windows.md) for configur
 
 ## Install on Windows
 
-Download `dust-0.3.0-x86_64-windows.zip` from [releases](https://github.com/blurskye/dust/releases) and check its SHA-256 against its entry in `SHA256SUMS`. In PowerShell:
+Download `dust-0.3.1-x86_64-windows.zip` from [releases](https://github.com/blurskye/dust/releases) and check its SHA-256 against its entry in `SHA256SUMS`. In PowerShell:
 
 ```powershell
-Get-FileHash dust-0.3.0-x86_64-windows.zip
-Expand-Archive dust-0.3.0-x86_64-windows.zip -DestinationPath "$env:LOCALAPPDATA\Programs\Dust"
+Get-FileHash dust-0.3.1-x86_64-windows.zip
+Expand-Archive dust-0.3.1-x86_64-windows.zip -DestinationPath "$env:LOCALAPPDATA\Programs\Dust"
 ```
 
 Add `%LOCALAPPDATA%\Programs\Dust` to your user `PATH` and run `dust` (or `dusty-git`) in Windows Terminal. The binary is not Authenticode signed, so SmartScreen may ask before the first run. The [macOS and Windows guide](docs/user-guide-macos-windows.md) covers configuration paths, shells and what differs on Windows.

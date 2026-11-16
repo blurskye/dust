@@ -1,7 +1,7 @@
 # Dust Component Plugin SDK 0.4
 
 The production contract is [`wit/dust-plugin.wit`](../wit/dust-plugin.wit),
-package **`dust:plugin@0.4.0`**, world `editor-plugin`, shipped with Dust 0.3.0.
+package **`dust:plugin@0.4.0`**, world `editor-plugin`, shipped with Dust 0.3.1.
 Build plugins against this WIT; the plugin ABI version is separate from the editor
 release version. Plugins are Wasm Components, not native libraries, WASI programs,
 or subprocesses.
