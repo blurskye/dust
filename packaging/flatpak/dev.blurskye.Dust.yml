@@ -3,7 +3,7 @@
 # `flatpak-spawn --host` reaches host programs.
 id: dev.blurskye.Dust
 runtime: org.freedesktop.Platform
-runtime-version: '24.08'
+runtime-version: '26.08'
 sdk: org.freedesktop.Sdk
 command: dust
 finish-args:
@@ -15,6 +15,7 @@ modules:
     buildsystem: simple
     build-commands:
       - install -Dm 0755 dust /app/bin/dust
+      - install -Dm 0755 dusty-git /app/bin/dusty-git
       - install -Dm 0644 dev.blurskye.Dust.desktop /app/share/applications/dev.blurskye.Dust.desktop
       - install -Dm 0644 dev.blurskye.Dust.svg /app/share/icons/hicolor/scalable/apps/dev.blurskye.Dust.svg
       - install -Dm 0644 dev.blurskye.Dust.metainfo.xml /app/share/metainfo/dev.blurskye.Dust.metainfo.xml
@@ -22,6 +23,8 @@ modules:
     sources:
       - type: file
         path: ../../target/package-stage/dust/dust
+      - type: file
+        path: ../../target/package-stage/dust/dusty-git
       - type: file
         path: ../dev.blurskye.Dust.desktop
       - type: file

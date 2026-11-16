@@ -34,7 +34,7 @@ comes from `state["answers"]["METHOD path"] = {status, body, headers}` or is 404
 """
 import argparse
 import base64
-import fcntl
+import socketserver
 import hashlib
 import json
 import os
@@ -47,10 +47,15 @@ import time
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+try:
+    import fcntl
+except ImportError:  # Windows: only this process touches the state there (the tutor).
+    fcntl = None
+
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-import world_gitlab  # noqa: E402  (F5: `--world gitlab`)
-import world_gitea  # noqa: E402  (F4: `--world gitea|forgejo`)
-import world_actions  # noqa: E402  (F6: `--world actions`)
+import world_gitlab  # noqa: E402  (`--world gitlab`)
+import world_gitea  # noqa: E402  (`--world gitea|forgejo`)
+import world_actions  # noqa: E402  (`--world actions`)
 import world_conversation  # noqa: E402  (`state["conversation"]`: a real-looking PR and issue)
 
 FAKE_TOKEN = "ghp_fixture0123456789abcdefABCDEF0123"
@@ -74,11 +79,13 @@ class StateLock:
     def __enter__(self):
         self.thread.acquire()
         self.file = open(ARGS.state + ".lock", "a")
-        fcntl.flock(self.file, fcntl.LOCK_EX)
+        if fcntl:
+            fcntl.flock(self.file, fcntl.LOCK_EX)
         return self
 
     def __exit__(self, *_):
-        fcntl.flock(self.file, fcntl.LOCK_UN)
+        if fcntl:
+            fcntl.flock(self.file, fcntl.LOCK_UN)
         self.file.close()
         self.file = None
         self.thread.release()
@@ -454,7 +461,7 @@ def rest_run(run, host, repo):
             "event": run.get("event", ""), "created_at": run.get("createdAt", "2026-11-08T10:00:00Z"),
             "run_attempt": run.get("attempt", 1),
             "html_url": f"https://{host}/{repo}/actions/runs/{run['databaseId']}", "pull_requests": [],
-            # Who started it, when the world says (r16 notif-actions-11): rows and the run line name them.
+            # Who started it, when the world says: rows and the run line name them.
             **({"triggering_actor": {"login": run["actor"]}} if run.get("actor") else {})}
 
 
@@ -1754,6 +1761,15 @@ class Handler(BaseHTTPRequestHandler):
     do_GET = do_POST = do_PATCH = do_PUT = do_DELETE = handle_any
 
 
+class Server(ThreadingHTTPServer):
+    """Binds without `HTTPServer`'s `socket.getfqdn` reverse lookup, which takes
+    seconds on some macOS hosts."""
+
+    def server_bind(self):
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = self.server_address[:2]
+
+
 def main():
     global ARGS
     parser = argparse.ArgumentParser()
@@ -1763,7 +1779,7 @@ def main():
     ARGS = parser.parse_args()
     if ARGS.fixtures:
         load_recorded(ARGS.fixtures)
-    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    server = Server(("127.0.0.1", 0), Handler)
     server.daemon_threads = True
     print(server.server_address[1], flush=True)
     sys.stdout.close()

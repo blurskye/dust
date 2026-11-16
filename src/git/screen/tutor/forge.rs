@@ -133,6 +133,8 @@ impl Server {
         std::fs::write(dir.join("run.py"), RUNNER).map_err(text)?;
         let state = dir.join("state.json");
         std::fs::write(&state, self::world(world).to_string()).map_err(text)?;
+        // Python's own words when the server stops before it listens.
+        let log = std::fs::File::create(dir.join("server.log")).map_err(text)?;
         let mut missing = String::new();
         for python in ["python3", "python"] {
             let mut command = Command::new(python);
@@ -146,7 +148,7 @@ impl Server {
                 .env_clear()
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
-                .stderr(Stdio::null());
+                .stderr(log.try_clone().map_err(text)?);
             for name in ["PATH", "SYSTEMROOT", "TEMP", "TMP", "LANG"] {
                 if let Some(value) = std::env::var_os(name) {
                     command.env(name, value);
@@ -175,7 +177,7 @@ impl Server {
             let _ = send.send(line);
         });
         let port = receive
-            .recv_timeout(Duration::from_secs(10))
+            .recv_timeout(Duration::from_secs(30))
             .ok()
             .and_then(|line| line.trim().parse::<u16>().ok());
         match port {
@@ -188,7 +190,13 @@ impl Server {
             None => {
                 let _ = child.kill();
                 let _ = child.wait();
-                Err("The practice forge did not start (is Python 3 installed?)".into())
+                let log = std::fs::read_to_string(dir.join("server.log")).unwrap_or_default();
+                Err(
+                    match log.lines().rev().find(|line| !line.trim().is_empty()) {
+                        Some(line) => format!("The practice forge did not start: {}", line.trim()),
+                        None => "The practice forge did not start".into(),
+                    },
+                )
             }
         }
     }

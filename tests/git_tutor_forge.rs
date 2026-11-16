@@ -84,7 +84,8 @@ fn view(screen: &mut GitScreen) -> String {
     rendered(&screen.frame(WIDTH, HEIGHT))
 }
 fn wait(screen: &mut GitScreen, what: &str, mut ready: impl FnMut(&mut GitScreen) -> bool) {
-    let deadline = Instant::now() + Duration::from_secs(30);
+    // Every lesson starts its own practice forge; a loaded CI runner needs the slack.
+    let deadline = Instant::now() + Duration::from_secs(60);
     loop {
         screen.poll();
         if ready(screen) {

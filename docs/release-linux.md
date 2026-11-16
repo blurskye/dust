@@ -24,7 +24,7 @@ while the AppImage and the Flatpak hold the editor only (Dusty Git is `Space g g
 | `dust-editor-X.Y.Z-1.x86_64.rpm` | `sudo dnf install ./dust-editor-X.Y.Z-1.x86_64.rpm` |
 | `dust-editor-X.Y.Z-1-x86_64.pkg.tar.zst` | `sudo pacman -U dust-editor-X.Y.Z-1-x86_64.pkg.tar.zst` |
 | `dust-X.Y.Z-x86_64-linux.AppImage` | `chmod +x dust-X.Y.Z-x86_64-linux.AppImage && ./dust-X.Y.Z-x86_64-linux.AppImage` |
-| `dust-X.Y.Z-x86_64.flatpak` | `flatpak install --user ./dust-X.Y.Z-x86_64.flatpak`, then `flatpak run dev.blurskye.Dust` |
+| `dust-X.Y.Z-x86_64.flatpak` | `flatpak install --user ./dust-X.Y.Z-x86_64.flatpak`, then `flatpak run dev.blurskye.Dust`; `flatpak run --command=dusty-git dev.blurskye.Dust` opens Dusty Git |
 
 Replace `X.Y.Z` with `0.3.0` for this release. Run Dust from a terminal and ensure
 `~/.local/bin` is on `PATH` when installing the bare binary there.

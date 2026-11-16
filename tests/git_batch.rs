@@ -751,16 +751,14 @@ fn marked_unborn_paths_reverse_without_removing_working_files_or_unmarked_entrie
     count(&mut screen, 2);
 }
 
-#[cfg(unix)]
+// macOS file names must be UTF-8, so the name this test needs cannot exist there.
+#[cfg(target_os = "linux")]
 #[test]
 fn marked_paths_use_literal_nul_input_without_round_tripping_non_utf8_names() {
     use std::ffi::OsString;
     use std::os::unix::ffi::OsStringExt;
     // Some /tmp filesystems reject native bytes; Linux tmpfs supports them.
-    #[cfg(target_os = "linux")]
     let owner = tempfile::tempdir_in("/dev/shm").unwrap();
-    #[cfg(not(target_os = "linux"))]
-    let owner = tempfile::tempdir().unwrap();
     let owner = initialize_repo(owner, &[("l.txt", "neighbour base\n")]);
     let root = owner.path();
     let raw = OsString::from_vec(b"b-\xff.txt".to_vec());

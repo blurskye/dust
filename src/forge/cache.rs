@@ -995,7 +995,8 @@ fn looks_like_kind(path: &Path) -> bool {
     })
 }
 
-/// A non-blocking `flock` on `<dir>/index.lock`, retried for at most `wait_ms`.
+/// A non-blocking exclusive lock on `<dir>/index.lock` (`flock` on Unix, `LockFileEx` on
+/// Windows), retried for at most `wait_ms`.
 struct IndexLock(#[allow(dead_code)] std::fs::File);
 
 impl IndexLock {
@@ -1009,7 +1010,7 @@ impl IndexLock {
             .ok()?;
         let deadline = Instant::now() + Duration::from_millis(wait_ms);
         loop {
-            match rustix::fs::flock(&file, rustix::fs::FlockOperation::NonBlockingLockExclusive) {
+            match file.try_lock() {
                 Ok(()) => return Some(Self(file)),
                 Err(_) if Instant::now() < deadline => {
                     std::thread::sleep(Duration::from_millis(1));
