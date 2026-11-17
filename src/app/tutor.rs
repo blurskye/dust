@@ -2327,7 +2327,14 @@ mod tests {
                     text.starts_with("debug adapter ") && text.contains(" failed: ")
                 });
             if !app.tutor.completed.contains(&index) && adapter_died {
-                eprintln!("{what}: the debug adapter died; trying the step again");
+                let console = app
+                    .debugger_session
+                    .console()
+                    .map(|entry| entry.text.clone())
+                    .collect::<Vec<_>>();
+                eprintln!(
+                    "{what}: the debug adapter died; trying the step again. Its console: {console:?}"
+                );
                 press(&mut app, &keys, &leader);
                 let deadline = Instant::now() + Duration::from_secs(8);
                 while !app.tutor.completed.contains(&index) && Instant::now() < deadline {

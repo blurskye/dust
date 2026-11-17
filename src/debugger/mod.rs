@@ -1307,10 +1307,17 @@ fn run_adapter(
                                 adapter: adapter.clone(),
                             })
                             .ok();
-                    } else if let Ok(Some(code)) = crate::process::child_exit_status(child) {
+                    } else {
                         // Gone with the program still to run or debug: how it exited is all
-                        // there is to say when it printed nothing.
-                        events.fail(adapter_exit_message(code));
+                        // there is to say when it printed nothing. Its output can close a moment
+                        // before the process is reaped.
+                        let code = adapter_exited_within(child, ADAPTER_OUTPUT_GRACE)
+                            .then(|| crate::process::child_exit_status(child).ok().flatten())
+                            .flatten();
+                        events.fail(code.map_or_else(
+                            || "it closed its output and stopped answering".into(),
+                            adapter_exit_message,
+                        ));
                     }
                     stopping = true;
                 }
