@@ -18,6 +18,8 @@ arguments = ["log"]
 [terminals.profiles.git_blame_line]
 program = "git"
 arguments = ["--no-pager", "log", "--color=always", "-n", "3", "-u", "-L", "{line},+1:{file}"]
+# No pager here: the output stays until q closes it, as less does elsewhere.
+close_on_exit = false
 
 [terminals.profiles.gh_pr_view]
 program = "gh"

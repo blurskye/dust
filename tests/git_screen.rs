@@ -1085,19 +1085,20 @@ fn commit_box_insert_hints_are_clear_without_duplicate_text() {
     let footer = frame.grid.row_text(39);
     assert!(!footer.contains("sign-off · amend"), "{footer}");
 
-    let narrow = screen.frame(100, 30);
+    // The sheet covers the whole body, so only a narrow screen drops `Tab next`.
+    let narrow = screen.frame(70, 24);
     assert!(
-        (0..29).any(|y| {
+        (0..23).any(|y| {
             let row = narrow.grid.row_text(y);
             row.contains("Ctrl+Enter commit · Esc normal") && row.trim_end().ends_with('│')
         }),
         "{}",
-        (0..30)
+        (0..24)
             .map(|y| narrow.grid.row_text(y))
             .collect::<Vec<_>>()
             .join("\n")
     );
-    let footer = narrow.grid.row_text(29);
+    let footer = narrow.grid.row_text(23);
     assert!(!footer.contains("C-Enter"), "{footer}");
     assert!(!footer.contains("sign-off · amend"), "{footer}");
     assert!(!footer.contains("normal mode"), "{footer}");

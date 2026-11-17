@@ -930,18 +930,10 @@ fn status_line(app: &GitScreen, form: &Form) -> Option<(String, bool)> {
     (!line.is_empty()).then(|| (line.to_owned(), super::looks_like_error(line)))
 }
 
+/// The whole body: the sheet lists what is staged itself, so the panes behind it would only
+/// repeat it, and the staged diff reads best with the room.
 fn commit_rect(lay: &Layout) -> Rect {
-    let area = if lay.reader.w >= 60 {
-        lay.reader
-    } else {
-        lay.body
-    };
-    Rect::new(
-        area.x + 1,
-        area.y + 1,
-        area.w.saturating_sub(2),
-        area.h.saturating_sub(2).min(32).max(12.min(area.h)),
-    )
+    lay.body
 }
 
 fn commit_left(inner: Rect) -> Rect {
@@ -960,8 +952,7 @@ pub(in crate::git::screen) fn commit_keys_beside_toggles(screen: Rect) -> bool {
     commit_left(frame_inner(commit_rect(&lay))).w >= COMMIT_TOGGLE_KEYS_WIDTH
 }
 
-/// G-COMMIT: subject and body on the left, what is staged on the right; covers the
-/// reader so the Changes pane stays in view.
+/// G-COMMIT: subject and body on the left, what is staged on the right, over the whole body.
 fn commit(app: &GitScreen, frame: &mut Frame, form: &Form, lay: &Layout) {
     let rect = commit_rect(lay);
     let branch = app.head_label().to_owned();

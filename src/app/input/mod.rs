@@ -2687,8 +2687,40 @@ impl App {
                 ));
             return;
         }
-        let context = self.active_input_context();
+        let mut context = self.active_input_context();
+        if context == "terminal" {
+            if self.typed_past_an_ended_terminal(&key) {
+                return;
+            }
+            context = self.active_input_context();
+        }
         self.handle_key_in_context(&context, key);
+    }
+
+    /// A terminal whose program ended reads like a pager: `q` or `enter` closes it, and any
+    /// other plain key goes back to the editor, as if the terminal were never focused. `esc`
+    /// keeps its meaning (twice gives Normal mode, to scroll and copy what the program printed),
+    /// and Ctrl and Alt keys keep their terminal bindings, such as moving to another window.
+    fn typed_past_an_ended_terminal(&mut self, key: &KeyEvent) -> bool {
+        use crate::editor::input::KeyCode;
+        let Some(id) = self.keyboard_terminal() else {
+            return false;
+        };
+        if !self.terminal_session.ended(id)
+            || key.modifiers.control
+            || key.modifiers.alt
+            || key.code == KeyCode::Escape
+            || key.terminal_mouse().is_some()
+        {
+            return false;
+        }
+        if matches!(key.code, KeyCode::Char('q') | KeyCode::Enter) {
+            self.close_terminal(id);
+            return true;
+        }
+        self.set_terminal_focus(false);
+        self.sync_terminal_panel();
+        false
     }
 }
 

@@ -302,8 +302,7 @@ pub(super) fn paint(app: &mut GitScreen, frame: &mut Frame, pane: usize, rect: R
                 let label = row.label.trim_start();
                 // A remote row reads `origin · 3 branches`; its URL lives in the reader.
                 if app.subview == 2
-                    && let Some((name, url)) = label.split_once("  ")
-                    && (url.contains("://") || url.contains('@') || url.contains('/'))
+                    && let Some(name) = remote_name(label)
                 {
                     let prefix = format!("{name}/");
                     let branches = app.refs.as_ref().map_or(0, |refs| {
@@ -1074,5 +1073,34 @@ fn diffstat(added: u32, removed: u32) -> String {
         (_, 0) => format!("+{added}"),
         (0, _) => format!("−{removed}"),
         _ => format!("+{added} −{removed}"),
+    }
+}
+
+/// The name of a Remotes row, which reads `name  url`: a URL, an scp-style address or a local
+/// path, Windows ones (`D:\repos\origin`) too.
+fn remote_name(label: &str) -> Option<&str> {
+    label
+        .split_once("  ")
+        .filter(|(_, url)| url.contains("://") || url.contains(['@', '/', '\\']))
+        .map(|(name, _)| name)
+}
+
+#[cfg(test)]
+mod remote_row_tests {
+    #[test]
+    fn a_remote_row_is_named_whatever_its_url_looks_like() {
+        for url in [
+            "https://example.com/team/app.git",
+            "git@example.com:team/app.git",
+            "/srv/git/app.git",
+            "D:\\a\\_temp\\practice\\origin.git",
+        ] {
+            assert_eq!(
+                super::remote_name(&format!("origin  {url}")),
+                Some("origin"),
+                "{url}"
+            );
+        }
+        assert_eq!(super::remote_name("origin"), None);
     }
 }

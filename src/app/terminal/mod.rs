@@ -304,6 +304,18 @@ impl Terminals {
         rows.sort_by_key(|(key, _, _)| key.id.0);
         rows
     }
+    /// The program is gone: nothing typed reaches it any more.
+    pub(in crate::app) fn ended(&self, id: PtyId) -> bool {
+        self.tabs
+            .get(&id)
+            .is_some_and(|tab| !tab.running && (tab.exited || tab.io_complete))
+    }
+    /// The program exited and all it printed is on screen.
+    pub(in crate::app) fn finished(&self, id: PtyId) -> bool {
+        self.tabs
+            .get(&id)
+            .is_some_and(|tab| tab.exited && tab.io_complete)
+    }
     pub(in crate::app) fn mode(&self, id: PtyId) -> Option<TerminalPanelMode> {
         self.tabs.get(&id).map(|t| t.mode)
     }
@@ -1839,12 +1851,21 @@ impl App {
                         self.show_error(error);
                     }
                 }
-                // Nothing is left to type to: keys go back to where they came from, and the
-                // pane stays open to read what the program printed.
+                // Nothing is left to type to; keys go back to the source. Other terminals keep
+                // the focus, to read what the program printed and close it like a pager.
                 TerminalUpdate::Exited(id, _)
-                    if self.window_session.focused_terminal() == Some(id.0) =>
+                    if self.debug_terminal == Some(id)
+                        && self.window_session.focused_terminal() == Some(id.0) =>
                 {
                     self.set_terminal_focus(false);
+                }
+                // Once the program and its output are both done and the pane stays (a pane that
+                // closes on exit is already gone), say how to close it.
+                TerminalUpdate::Exited(id, _) | TerminalUpdate::IoComplete(id)
+                    if self.window_session.focused_terminal() == Some(id.0)
+                        && self.terminal_session.finished(id) =>
+                {
+                    self.notify_message("The program exited · q closes the terminal".into(), false);
                 }
                 TerminalUpdate::Exited(_, _) | TerminalUpdate::IoComplete(_) => {}
                 TerminalUpdate::StopUnknown(id, message) => {

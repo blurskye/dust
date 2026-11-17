@@ -2126,6 +2126,25 @@ mod tests {
     }
 
     /// One pass of the main loop's background work, then the tutor's tick.
+    /// Presses a step's keys; a `<wait>` lets the app work for a moment, as a person reads.
+    fn press(app: &mut App, keys: &str, leader: &str) {
+        for key in key_script(keys, leader) {
+            let Some(key) = key else {
+                let until = Instant::now() + Duration::from_millis(1500);
+                while Instant::now() < until {
+                    pump(app);
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                continue;
+            };
+            app.handle_event(crate::ui::UiEvent::Key {
+                key,
+                kind: crate::ui::KeyInputKind::Press,
+            });
+            pump(app);
+        }
+    }
+
     fn pump(app: &mut App) {
         app.queue_startup_reads();
         app.process_vfs_results();
@@ -2245,21 +2264,7 @@ mod tests {
                 && step.cursor.is_none()
                 && step.staged.is_none()
                 && step.clean.is_none();
-            for key in key_script(&keys, &leader) {
-                let Some(key) = key else {
-                    let until = Instant::now() + Duration::from_millis(1500);
-                    while Instant::now() < until {
-                        pump(&mut app);
-                        std::thread::sleep(Duration::from_millis(5));
-                    }
-                    continue;
-                };
-                app.handle_event(crate::ui::UiEvent::Key {
-                    key,
-                    kind: crate::ui::KeyInputKind::Press,
-                });
-                pump(&mut app);
-            }
+            press(&mut app, &keys, &leader);
             if read_only {
                 // A step with nothing to check is read and left with :TutorNext, and leaving
                 // the last one moves back out of the practice project in the background
@@ -2313,6 +2318,22 @@ mod tests {
             while !app.tutor.completed.contains(&index) && Instant::now() < deadline {
                 std::thread::sleep(Duration::from_millis(5));
                 pump(&mut app);
+            }
+            // A debug adapter that dies on its own (lldb-dap on a Windows runner, now and then,
+            // with nothing on stderr) is not the lesson's doing: the step is tried once more, as
+            // a person would press F5 again.
+            let adapter_died =
+                app.notices.history().rev().take(6).any(|(_, text)| {
+                    text.starts_with("debug adapter ") && text.contains(" failed: ")
+                });
+            if !app.tutor.completed.contains(&index) && adapter_died {
+                eprintln!("{what}: the debug adapter died; trying the step again");
+                press(&mut app, &keys, &leader);
+                let deadline = Instant::now() + Duration::from_secs(8);
+                while !app.tutor.completed.contains(&index) && Instant::now() < deadline {
+                    std::thread::sleep(Duration::from_millis(5));
+                    pump(&mut app);
+                }
             }
             if !app.tutor.completed.contains(&index) {
                 failures.push(format!(
