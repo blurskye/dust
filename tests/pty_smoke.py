@@ -1498,7 +1498,7 @@ arguments = { force = false }
         remapped = terminal_screen(snapshots[1])
         assert pathlib.Path(directory).as_posix() in remapped
         assert re.search(r"\bz +quit\b", remapped), remapped
-        assert not re.search(r"\bq +quit\b", remapped)
+        assert not re.search(r"(?<!, )\bq +quit\b", remapped)
         assert_restored(output)
 
         code, output, snapshots = run(
@@ -1511,8 +1511,8 @@ arguments = { force = false }
         )
         assert code == 0
         clean_screen = terminal_screen(snapshots[0])
-        assert re.search(r"\bQuit +q *$", clean_screen, re.M), clean_screen
-        assert not re.search(r"\bQuit +z *$", clean_screen, re.M)
+        assert re.search(r"(?<!, )\bq +quit\b", clean_screen), clean_screen
+        assert not re.search(r"\bz +quit\b", clean_screen)
         assert_restored(output)
 
     with tempfile.TemporaryDirectory() as directory:
@@ -1551,8 +1551,8 @@ arguments = { force = false }
         )
         assert code == 0
         leader_screen = terminal_screen(snapshots[0])
-        assert re.search(r"\bQuit +, q *$", leader_screen, re.M), leader_screen
-        assert not re.search(r"\bQuit +q *$", leader_screen, re.M)
+        assert re.search(r", q +quit\b", leader_screen), leader_screen
+        assert not re.search(r"(?<!, )\bq +quit\b", leader_screen)
         assert pathlib.Path(directory).as_posix() in terminal_screen(snapshots[1])
         assert_restored(output)
 
@@ -1566,8 +1566,8 @@ arguments = { force = false }
         )
         assert code == 0
         clean_leader_screen = terminal_screen(snapshots[0])
-        assert re.search(r"\bQuit +q *$", clean_leader_screen, re.M), clean_leader_screen
-        assert not re.search(r"\bQuit +, q *$", clean_leader_screen, re.M)
+        assert re.search(r"(?<!, )\bq +quit\b", clean_leader_screen), clean_leader_screen
+        assert not re.search(r", q +quit\b", clean_leader_screen)
         assert_restored(output)
 
     with tempfile.TemporaryDirectory() as directory:

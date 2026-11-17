@@ -659,7 +659,8 @@ impl Screen<'_> {
         self.put(path_x, y, &path, tone(Style::Muted, selected), path_right);
     }
 
-    /// How many columns of actions fit in `width`, at most three.
+    /// How many columns of actions fit in `width`, at most three. Columns are `KEY_GAP` apart;
+    /// the last needs no gap after it.
     fn start_columns(&self, width: u16) -> u16 {
         let ui = self.ui;
         let actions = &ui.dashboard_actions;
@@ -672,7 +673,7 @@ impl Screen<'_> {
                 .unwrap_or(0)
             + KEY_GAP;
         let count = u16::try_from(actions.len()).unwrap_or(u16::MAX);
-        (width.saturating_sub(4) / item.max(1))
+        ((width.saturating_sub(4) + KEY_GAP) / item.max(1))
             .clamp(1, 3)
             .min(count.max(1))
     }

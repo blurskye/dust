@@ -589,6 +589,22 @@ fn user_actions_without_keys_or_with_icons_line_up_their_labels() {
 }
 
 #[test]
+fn a_leader_key_keeps_two_columns_so_every_action_shows() {
+    let mut ui = UiState {
+        dashboard_actions: bundled_actions(),
+        ..UiState::default()
+    };
+    ui.dashboard_actions.last_mut().unwrap().key = Some(", q".into());
+    let (_, rows) = draw(&ui, 100, 30);
+    let row = rows.iter().find(|row| row.contains("find file")).unwrap();
+    assert!(row.contains("find text"), "{row}");
+    assert!(
+        rows.iter().any(|row| row.contains(", q  quit")),
+        "{rows:#?}"
+    );
+}
+
+#[test]
 fn a_long_branch_name_gives_way_to_the_project_name_and_path() {
     let mut ui = workspace_ui();
     ui.dashboard_workspace.projects[0].branch = Some("worktree-agent-a87150a942f7389cd".into());
