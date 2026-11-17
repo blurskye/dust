@@ -312,8 +312,8 @@ pub(super) fn lessons(language: Language) -> Result<Vec<Step>, String> {
 /// file so the git lessons have something to show.
 fn create_practice_project(
     language: Language,
-) -> Result<tempfile::TempDir, Box<dyn std::error::Error>> {
-    let folder = tempfile::Builder::new().prefix("dust-tutor-").tempdir()?;
+) -> Result<crate::files::TempTree, Box<dyn std::error::Error>> {
+    let folder = crate::files::TempTree::new("dust-tutor-")?;
     for (name, text) in language.practice_files() {
         let path = folder.path().join(name);
         if let Some(parent) = path.parent() {
@@ -402,7 +402,7 @@ enum Stage {
 
 /// The practice project while the tutor uses it. Dropping it deletes the folder.
 struct Practice {
-    _folder: tempfile::TempDir,
+    _folder: crate::files::TempTree,
     root: PathBuf,
     /// The user's project and layout, put back when the tutor ends.
     home: PathBuf,
@@ -2262,10 +2262,17 @@ mod tests {
             }
             if read_only {
                 // A step with nothing to check is read and left with :TutorNext, and leaving
-                // the last one moves back out of the practice project in the background.
-                let deadline = Instant::now() + Duration::from_secs(5);
+                // the last one moves back out of the practice project in the background
+                // (slow on a Windows runner), or asks first while its terminals run.
+                let deadline = Instant::now() + Duration::from_secs(60);
+                let asked = |app: &App| {
+                    app.notices
+                        .history()
+                        .any(|(_, text)| text.contains(":TutorQuit"))
+                };
                 while app.tutor.practice.is_some()
                     && app.tutor.current == Some(index)
+                    && !(index + 1 == count && asked(&app))
                     && Instant::now() < deadline
                 {
                     std::thread::sleep(Duration::from_millis(5));

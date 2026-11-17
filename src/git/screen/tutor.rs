@@ -18,7 +18,6 @@ use crate::ui::{CellGrid, Emphasis, GitRole, GitSurface, Style};
 use forge::{Forge, Token, World};
 use git2::{Oid, Repository, RepositoryState};
 use std::process::{Command, Stdio};
-use tempfile::TempDir;
 
 mod conflicts;
 mod forge;
@@ -1629,7 +1628,7 @@ fn build(
         Ok((fixture, mark, screen))
     });
     if built.is_err() {
-        let _ = std::fs::remove_dir_all(&dir);
+        let _ = crate::files::remove_tree(&dir);
     }
     built
 }
@@ -1781,7 +1780,7 @@ pub(super) fn keyed(text: &str, keys: github::keymap::Keys) -> String {
 }
 
 pub(super) struct Session {
-    directory: TempDir,
+    directory: crate::files::TempTree,
     track: Track,
     /// The screen is modal: the vim-mode lessons are part of the track.
     vim: bool,
@@ -1946,10 +1945,7 @@ impl GitScreen {
         if track == Track::Forge && sandbox::active() {
             return Err("The forge tutor is already running in another Git screen".into());
         }
-        let directory = tempfile::Builder::new()
-            .prefix("dusty-git-tutor-")
-            .tempdir()
-            .map_err(text)?;
+        let directory = crate::files::TempTree::new("dusty-git-tutor-").map_err(text)?;
         let base = crate::files::canonicalize(directory.path()).map_err(text)?;
         // From here on a forge lesson may have entered the sandbox; the guard leaves it
         // whether or not the first lesson builds.
@@ -2030,7 +2026,7 @@ impl GitScreen {
                 drop(std::mem::replace(self, next));
                 // The finished lesson's practice forge, repositories (and worktrees) go with it.
                 previous.server = None;
-                let _ = std::fs::remove_dir_all(&previous.dir);
+                let _ = crate::files::remove_tree(&previous.dir);
                 Ok(())
             }
             Err(error) => {
@@ -2161,7 +2157,7 @@ mod coverage {
     /// commit, a paused operation, Pull requests, Issues and Actions, with the default keys,
     /// the vim modes and the lazygit preset.
     fn sheets() -> Vec<(String, String, String)> {
-        let dir = TempDir::new().unwrap();
+        let dir = tempfile::TempDir::new().unwrap();
         let fixture = Fixture::new(&dir.path().join("coverage")).unwrap();
         let mut out = Vec::new();
         for preset in ["default", "vim", "lazygit"] {

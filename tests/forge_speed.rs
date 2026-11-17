@@ -372,19 +372,23 @@ fn cached_paint_does_not_wait_on_the_network() {
         "`j` waited {:?}",
         start.elapsed()
     );
-    // Another tab paints from the cache too, behind the list refresh still in flight.
+    // Another tab paints from the cache too, behind the list refresh still in flight. The
+    // selected issue's conversation is a background read the disk answers a poll or two
+    // later; the forge would take 5 s.
     let start = Instant::now();
     screen.open_target("issues", None);
     screen.poll();
     let issues = view(&mut screen);
     assert!(
-        start.elapsed() < Duration::from_millis(500),
-        "the Issues tab waited {:?}",
+        start.elapsed() < Duration::from_millis(500) && has_row(&issues),
+        "the Issues tab waited {:?}:\n{issues}",
         start.elapsed()
     );
+    let painted = first(&mut screen, start, "the cached issue", has_row);
+    let issues = view(&mut screen);
     assert!(
-        has_row(&issues) && !loading(&issues),
-        "the Issues tab paints from the cache:\n{issues}"
+        painted < Duration::from_millis(1500),
+        "the Issues tab paints from the cache, not the forge ({painted:?}):\n{issues}"
     );
 }
 

@@ -128,7 +128,7 @@ mod tests {
     /// Every lesson starts stopped on a real conflict, in the operation it names.
     #[test]
     fn each_lesson_starts_on_its_conflict() {
-        let dir = TempDir::new().unwrap();
+        let dir = tempfile::TempDir::new().unwrap();
         for (index, lesson) in CHAPTER.lessons.iter().enumerate() {
             let fixture = Fixture::new(&dir.path().join(index.to_string())).unwrap();
             (lesson.setup)(&fixture).unwrap();

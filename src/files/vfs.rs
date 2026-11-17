@@ -2256,6 +2256,60 @@ pub fn canonicalize(path: impl AsRef<Path>) -> io::Result<PathBuf> {
     Ok(path)
 }
 
+/// Deletes a folder and everything under it. Windows refuses to delete read-only files and
+/// Git writes its objects read-only, so a refusal there makes the files writable and tries
+/// once more.
+pub fn remove_tree(path: &Path) -> io::Result<()> {
+    match fs::remove_dir_all(path) {
+        #[cfg(windows)]
+        Err(error) if error.kind() == io::ErrorKind::PermissionDenied => {
+            make_writable(path);
+            fs::remove_dir_all(path)
+        }
+        result => result,
+    }
+}
+
+#[cfg(windows)]
+fn make_writable(path: &Path) {
+    let Ok(metadata) = fs::symlink_metadata(path) else {
+        return;
+    };
+    if metadata.is_dir() && !metadata.file_type().is_symlink() {
+        for entry in fs::read_dir(path).into_iter().flatten().flatten() {
+            make_writable(&entry.path());
+        }
+    }
+    let mut permissions = metadata.permissions();
+    if permissions.readonly() {
+        permissions.set_readonly(false);
+        let _ = fs::set_permissions(path, permissions);
+    }
+}
+
+/// A temporary folder deleted, read-only files included, when it is dropped.
+pub struct TempTree(Option<tempfile::TempDir>);
+
+impl TempTree {
+    pub fn new(prefix: &str) -> io::Result<Self> {
+        tempfile::Builder::new()
+            .prefix(prefix)
+            .tempdir()
+            .map(|dir| Self(Some(dir)))
+    }
+    pub fn path(&self) -> &Path {
+        self.0.as_ref().map_or(Path::new(""), |dir| dir.path())
+    }
+}
+
+impl Drop for TempTree {
+    fn drop(&mut self) {
+        if let Some(dir) = self.0.take() {
+            let _ = remove_tree(&dir.keep());
+        }
+    }
+}
+
 /// `\\?\C:\dir` as `C:\dir` and `\\?\UNC\server\share` as `\\server\share`, when the
 /// result is short enough for the ordinary Windows path limit.
 #[cfg(windows)]

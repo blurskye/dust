@@ -448,6 +448,18 @@ impl IndexWrite {
                 .into_temp_path();
         if path.exists() {
             std::fs::copy(&path, &temporary).map_err(|_| GitMutationError::Backend)?;
+            // Git trusts an entry's cached size and time only when the entry is older than
+            // the index file. A copy stamped now would hide a file rewritten in the same tick
+            // at the same size, and applying to it would fail as a checkout conflict.
+            std::fs::metadata(&path)
+                .and_then(|metadata| metadata.modified())
+                .and_then(|modified| {
+                    std::fs::OpenOptions::new()
+                        .write(true)
+                        .open(&temporary)?
+                        .set_modified(modified)
+                })
+                .map_err(|_| GitMutationError::Backend)?;
         } else {
             std::fs::remove_file(&temporary).map_err(|_| GitMutationError::Backend)?;
         }

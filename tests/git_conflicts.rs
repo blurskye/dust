@@ -721,7 +721,13 @@ const BOX: &[&str] = &[
 
 /// R16 #1: an overlay's box is opaque (no glyph of the panes behind it shows inside) and
 /// the panes recede to the border colour around it, their text kept, never blanked.
-fn occludes(screen: &mut GitScreen, plain: &dust::ui::Frame, width: u16, height: u16, title: &str) {
+fn occludes(
+    screen: &mut GitScreen,
+    plain: &dust::ui::Frame,
+    width: u16,
+    height: u16,
+    title: &str,
+) -> Result<(), String> {
     use dust::ui::{GitRole, GitSurface, Style};
     let frame = screen.frame(width, height);
     let shown = (0..height)
@@ -748,10 +754,11 @@ fn occludes(screen: &mut GitScreen, plain: &dust::ui::Frame, width: u16, height:
                 continue;
             }
             let after = frame.grid.get(x, y).unwrap();
-            assert_eq!(
-                after.symbol, before.symbol,
-                "the pane at ({x},{y}) is blanked at {width}x{height}:\n{shown}"
-            );
+            if after.symbol != before.symbol {
+                return Err(format!(
+                    "the pane at ({x},{y}) is blanked at {width}x{height}:\n{shown}"
+                ));
+            }
             assert!(
                 matches!(
                     after.style,
@@ -771,6 +778,32 @@ fn occludes(screen: &mut GitScreen, plain: &dust::ui::Frame, width: u16, height:
         dimmed > 0,
         "no pane border behind `{title}` at {width}x{height}:\n{shown}"
     );
+    Ok(())
+}
+
+fn text(frame: &dust::ui::Frame, height: u16) -> Vec<String> {
+    (0..height).map(|y| frame.grid.row_text(y)).collect()
+}
+
+/// Opens a sheet with `open` and checks it against the frame just before. Panes that
+/// changed underneath (a preview landing late on a loaded machine) are not the sheet's
+/// doing, so the check runs again on the settled screen.
+fn sheet_occludes(screen: &mut GitScreen, width: u16, height: u16, open: char, title: &str) {
+    for attempt in 1..=3 {
+        settle(screen);
+        let plain = screen.frame(width, height);
+        key(screen, KeyCode::Char(open));
+        shows(screen, title);
+        let checked = occludes(screen, &plain, width, height, title);
+        key(screen, KeyCode::Escape);
+        settle(screen);
+        let changed = text(&screen.frame(width, height), height) != text(&plain, height);
+        match checked {
+            Ok(()) => return,
+            Err(_) if changed && attempt < 3 => continue,
+            Err(error) => panic!("{error}"),
+        }
+    }
 }
 
 #[test]
@@ -780,20 +813,8 @@ fn a_sheet_hides_the_panes_under_it_and_dims_the_rest() {
     wait(&mut screen, |s| banner(s).contains('⟳'));
     settle(&mut screen);
     for (width, height) in [(120, 36), (190, 48)] {
-        // Each sheet is compared with the frame just before it opened: a preview that lands
-        // late (a loaded machine) changes the panes, never what a sheet does to them.
-        let plain = screen.frame(width, height);
         // The `:` prompt (a generic sheet) and the abort confirmation (the operation dialog).
-        key(&mut screen, KeyCode::Char(':'));
-        shows(&mut screen, "Command");
-        occludes(&mut screen, &plain, width, height, "Command");
-        key(&mut screen, KeyCode::Escape);
-        settle(&mut screen);
-        let plain = screen.frame(width, height);
-        key(&mut screen, KeyCode::Char('X'));
-        shows(&mut screen, "Abort merge?");
-        occludes(&mut screen, &plain, width, height, "Abort merge?");
-        key(&mut screen, KeyCode::Escape);
-        settle(&mut screen);
+        sheet_occludes(&mut screen, width, height, ':', "Command");
+        sheet_occludes(&mut screen, width, height, 'X', "Abort merge?");
     }
 }
