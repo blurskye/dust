@@ -70,12 +70,18 @@ jobs:
       - uses: actions/download-artifact@v4
         with: { name: stage, path: target/package-stage/dust }
       - run: chmod +x target/package-stage/dust/dust target/package-stage/dust/dusty-git
-      - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
-        with:
-          manifest-path: packaging/flatpak/dev.blurskye.Dust.yml
-          bundle: dust-${{ needs.packages.outputs.version }}-x86_64.flatpak
-          upload-artifact: false
-          cache: false
+      # The image already has the 26.08 Platform and Sdk. Building against them, without
+      # --install-deps-from, skips updating the Sdk from Flathub, which fails inside this
+      # container's overlay filesystem ("Invalid cross-device link") whenever Flathub has
+      # a newer Sdk build than the image.
+      - name: Build the Flatpak bundle
+        env: { VERSION: '${{ needs.packages.outputs.version }}' }
+        run: |
+          flatpak info org.freedesktop.Sdk//26.08
+          flatpak-builder --repo=repo --disable-rofiles-fuse --force-clean \
+            --default-branch=master build packaging/flatpak/dev.blurskye.Dust.yml
+          flatpak build-bundle repo "dust-$VERSION-x86_64.flatpak" \
+            --runtime-repo=https://flathub.org/repo/flathub.flatpakrepo dev.blurskye.Dust master
       - uses: actions/upload-artifact@v4
         with: { name: dist-flatpak, path: '*.flatpak', if-no-files-found: error }
 
