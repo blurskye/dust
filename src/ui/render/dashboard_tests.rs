@@ -241,19 +241,19 @@ fn bundled_actions() -> Vec<DashboardAction> {
 
 fn workspace_ui() -> UiState {
     let file = |label: &str, project: Option<&str>, age: &str| DashboardFile {
-        path: Path::new("/work/tally").join(label),
+        path: PathBuf::from(format!("/work/tally/{label}")),
         label: label.into(),
         project: project.map(Into::into),
         age: age.into(),
     };
     let change = |label: &str, code, lines| DashboardChange {
-        path: Path::new("/work/tally").join(label),
+        path: PathBuf::from(format!("/work/tally/{label}")),
         label: label.into(),
         code,
         lines,
     };
     let project = |name: &str, branch: &str| DashboardProject {
-        path: Path::new("/work").join(name),
+        path: PathBuf::from(format!("/work/{name}")),
         name: name.into(),
         branch: Some(branch.into()),
     };

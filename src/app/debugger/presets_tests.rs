@@ -79,7 +79,8 @@ fn installed_lldb_is_preferred_to_downloading_codelldb() {
     adapter(
         &mut app,
         "lldb-dap",
-        ToolStatus::Installed("/fixture/lldb-dap".into()),
+        // A real program, so Windows can check that it loads.
+        ToolStatus::Installed(std::env::current_exe().unwrap()),
     );
     assert!(
         app.detected_debug_presets()

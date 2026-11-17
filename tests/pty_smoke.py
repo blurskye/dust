@@ -1497,8 +1497,8 @@ arguments = { force = false }
         assert code == 0
         remapped = terminal_screen(snapshots[1])
         assert pathlib.Path(directory).as_posix() in remapped
-        assert re.search(r"\bQuit +z *$", remapped, re.M), remapped
-        assert not re.search(r"\bQuit +q *$", remapped, re.M)
+        assert re.search(r"\bz +quit\b", remapped), remapped
+        assert not re.search(r"\bq +quit\b", remapped)
         assert_restored(output)
 
         code, output, snapshots = run(

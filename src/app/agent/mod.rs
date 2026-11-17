@@ -3525,10 +3525,12 @@ fn tool_summary(out: &mut Styled, calls: &[&ToolCall], root: &Path, width: usize
 /// call with only its tool's name, such as `write`; the file or command it names then says
 /// what it did.
 fn tool_title(call: &ToolCall, root: &Path) -> String {
+    let shown = root.display();
     let title = call
         .title
         .trim()
-        .replace(&format!("{}/", root.display()), "");
+        .replace(&format!("{shown}/"), "")
+        .replace(&format!("{shown}{}", std::path::MAIN_SEPARATOR), "");
     let bare = title
         .chars()
         .all(|character| character.is_alphanumeric() || matches!(character, '_' | '-'));

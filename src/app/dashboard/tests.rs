@@ -54,7 +54,7 @@ fn the_dashboard_lists_recent_files_with_their_projects_and_this_workspace_first
     wait_trust(&mut app);
     let first = app.state.workspace_root.clone();
     let second = tempfile::tempdir().unwrap();
-    let second_path = second.path().canonicalize().unwrap();
+    let second_path = crate::files::canonicalize(second.path()).unwrap();
     app.switch_workspace_root(second_path.clone());
     wait_root_operation(&mut app);
     wait_trust(&mut app);
@@ -69,7 +69,9 @@ fn the_dashboard_lists_recent_files_with_their_projects_and_this_workspace_first
         .unwrap()
         .as_secs();
     let elsewhere = tempfile::tempdir().unwrap();
-    let elsewhere = elsewhere.path().canonicalize().unwrap().join("x.rs");
+    let elsewhere = crate::files::canonicalize(elsewhere.path())
+        .unwrap()
+        .join("x.rs");
     std::fs::create_dir_all(second_path.join("src")).unwrap();
     for (path, minutes_ago) in [
         (first.join("old.rs"), 3 * 60),
