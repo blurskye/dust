@@ -1053,7 +1053,7 @@ fn run(
             check_request(cancel, expires)?;
             // Keep the administrative data if deletion fails, so the checkout remains registered.
             if path.exists() {
-                std::fs::remove_dir_all(&path).map_err(backend)?;
+                remove_checkout(&path).map_err(backend)?;
             }
             let mut options = git2::WorktreePruneOptions::new();
             options.valid(true);
@@ -1185,5 +1185,82 @@ mod exclude_tests {
                 "{name}"
             );
         }
+    }
+}
+
+/// Deletes a worktree's checkout, its `.git` link last, so a deletion that fails part way
+/// leaves a worktree Git still recognises rather than a folder that is no longer a repository.
+/// Windows refuses to delete a file another process has open, such as a file watcher or a Git
+/// process that was still reading the checkout, and those usually let go within moments, so a
+/// failed deletion is tried again a few times.
+fn remove_checkout(path: &Path) -> std::io::Result<()> {
+    let mut attempt = 0;
+    loop {
+        match remove_checkout_once(path) {
+            Ok(()) => return Ok(()),
+            Err(error) if attempt >= 4 => return Err(error),
+            Err(_) => {
+                std::thread::sleep(Duration::from_millis(100 << attempt));
+                attempt += 1;
+            }
+        }
+    }
+}
+
+fn remove_checkout_once(path: &Path) -> std::io::Result<()> {
+    if !path.exists() {
+        return Ok(());
+    }
+    let link = path.join(".git");
+    for entry in std::fs::read_dir(path)? {
+        let entry = entry?;
+        let entry_path = entry.path();
+        if entry_path == link {
+            continue;
+        }
+        remove_entry(&entry_path, entry.file_type()?)?;
+    }
+    if let Ok(metadata) = link.symlink_metadata() {
+        remove_entry(&link, metadata.file_type())?;
+    }
+    std::fs::remove_dir(path)
+}
+
+/// Removes a file, a symbolic link (including a Windows directory link) or a directory tree.
+fn remove_entry(path: &Path, kind: std::fs::FileType) -> std::io::Result<()> {
+    if kind.is_dir() {
+        std::fs::remove_dir_all(path)
+    } else {
+        std::fs::remove_file(path).or_else(|error| std::fs::remove_dir(path).map_err(|_| error))
+    }
+}
+
+#[cfg(all(test, unix))]
+mod checkout_removal_tests {
+    use super::remove_checkout;
+    use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn a_checkout_that_cannot_be_fully_deleted_keeps_its_git_link() {
+        let dir = tempfile::tempdir().unwrap();
+        let checkout = dir.path().join("review");
+        let locked = checkout.join("locked");
+        std::fs::create_dir_all(&locked).unwrap();
+        std::fs::write(checkout.join(".git"), "gitdir: elsewhere\n").unwrap();
+        std::fs::write(checkout.join("a.txt"), "a\n").unwrap();
+        std::fs::write(locked.join("held.txt"), "held\n").unwrap();
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o555)).unwrap();
+
+        let result = remove_checkout(&checkout);
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
+        // Permissions do not stop root; there is nothing to hold the deletion then.
+        if result.is_err() {
+            assert!(
+                checkout.join(".git").is_file(),
+                "the link survives a failed deletion"
+            );
+            remove_checkout(&checkout).unwrap();
+        }
+        assert!(!checkout.exists());
     }
 }
