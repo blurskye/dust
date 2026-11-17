@@ -1839,10 +1839,10 @@ impl App {
                         self.show_error(error);
                     }
                 }
-                // Nothing is left to type to; keys go back to the source.
+                // Nothing is left to type to: keys go back to where they came from, and the
+                // pane stays open to read what the program printed.
                 TerminalUpdate::Exited(id, _)
-                    if self.debug_terminal == Some(id)
-                        && self.window_session.focused_terminal() == Some(id.0) =>
+                    if self.window_session.focused_terminal() == Some(id.0) =>
                 {
                     self.set_terminal_focus(false);
                 }

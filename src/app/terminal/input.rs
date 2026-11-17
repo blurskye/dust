@@ -63,6 +63,11 @@ impl Terminals {
         let Some(bytes) = bytes else {
             return Ok(false);
         };
+        // Checked only once there are bytes to send: a focus change with reporting off sends
+        // nothing and needs no live program.
+        if tab.exited || tab.io_complete {
+            return Err("The program in this terminal has exited".into());
+        }
         let pty = tab.pty.ok_or("terminal has not started")?;
         let reservation = self.service.reserve_input(pty).map_err(|e| e.to_string())?;
         reservation.submit(bytes).map_err(|e| e.to_string())?;

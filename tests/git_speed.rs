@@ -377,12 +377,13 @@ fn a_big_repository_stays_fast() {
     let dir = tempfile::tempdir().unwrap();
     build(dir.path(), &CI);
     let times = audit(dir.path(), &CI);
-    // Bounds for a busy shared builder, several times what the tab takes.
+    // Bounds for a busy shared builder or hosted runner (macOS ones measured 63 ms for a
+    // Branches key), several times what the tab takes on a quiet machine.
     for (label, bound) in [
         ("open: first paint (changes and history)", 3_000),
-        ("Changes j: key to paint (median of 20)", 50),
-        ("History j: key to paint (median of 20)", 50),
-        ("Branches j: key to paint (median of 20)", 50),
+        ("Changes j: key to paint (median of 20)", 100),
+        ("History j: key to paint (median of 20)", 100),
+        ("Branches j: key to paint (median of 20)", 100),
         ("refresh after touching a file: count painted", 3_000),
     ] {
         let time = times.get(label);

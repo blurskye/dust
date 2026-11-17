@@ -2257,17 +2257,29 @@ pub fn canonicalize(path: impl AsRef<Path>) -> io::Result<PathBuf> {
 }
 
 /// Deletes a folder and everything under it. Windows refuses to delete read-only files and
-/// Git writes its objects read-only, so a refusal there makes the files writable and tries
-/// once more.
+/// Git writes its objects read-only, so a refusal there makes the files writable first.
+///
+/// On Windows a handle another thread is still closing (a file watcher, a Git object read)
+/// also refuses the delete, so it is retried for up to a second.
 pub fn remove_tree(path: &Path) -> io::Result<()> {
-    match fs::remove_dir_all(path) {
-        #[cfg(windows)]
-        Err(error) if error.kind() == io::ErrorKind::PermissionDenied => {
-            make_writable(path);
-            fs::remove_dir_all(path)
+    #[cfg(windows)]
+    {
+        let mut attempt = 0;
+        loop {
+            match fs::remove_dir_all(path) {
+                Err(error) if error.kind() != io::ErrorKind::NotFound && attempt < 20 => {
+                    if error.kind() == io::ErrorKind::PermissionDenied {
+                        make_writable(path);
+                    }
+                    attempt += 1;
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                }
+                result => return result,
+            }
         }
-        result => result,
     }
+    #[cfg(not(windows))]
+    fs::remove_dir_all(path)
 }
 
 #[cfg(windows)]
@@ -2282,6 +2294,8 @@ fn make_writable(path: &Path) {
     }
     let mut permissions = metadata.permissions();
     if permissions.readonly() {
+        // Windows only: this clears the read-only attribute, nothing like Unix's world-writable.
+        #[allow(clippy::permissions_set_readonly_false)]
         permissions.set_readonly(false);
         let _ = fs::set_permissions(path, permissions);
     }

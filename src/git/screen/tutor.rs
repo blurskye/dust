@@ -1797,6 +1797,8 @@ pub(super) struct Session {
     mark: Option<Oid>,
     seen: u32,
     failed: bool,
+    /// The lesson was done while the screen was busy: it ends on the first idle poll.
+    waiting: bool,
     /// The lesson just finished, shown as a check mark on the banner's title row.
     completed: Option<&'static str>,
 }
@@ -1969,6 +1971,7 @@ impl GitScreen {
             mark,
             seen: 0,
             failed: false,
+            waiting: false,
             completed: None,
         });
         Ok(())
@@ -1999,6 +2002,7 @@ impl GitScreen {
         let session = self.tutor.as_mut().ok_or(NOT_RUNNING)?;
         let (track, vim) = (session.track, session.vim);
         session.seen = 0;
+        session.waiting = false;
         session.completed = None;
         let next_lesson = track.lesson(index, vim);
         let continues = next_lesson.is_none_or(|(_, lesson)| carried && lesson.carry);
@@ -2036,6 +2040,10 @@ impl GitScreen {
             }
         }
     }
+    /// A lesson done while the screen was busy, to end on the next poll.
+    pub(super) fn tutor_waiting(&self) -> bool {
+        self.tutor.as_ref().is_some_and(|session| session.waiting)
+    }
     /// Checks the current lesson against the real state; moves on when it is done.
     /// What the learner did is recorded on every input, busy or not: a key pressed while a
     /// read is in flight still counts. The lesson only ends once the screen is idle.
@@ -2059,7 +2067,9 @@ impl GitScreen {
                 forge: session.fixture.server.as_ref(),
             }),
             _ => false,
-        } && !busy;
+        };
+        session.waiting = done && busy;
+        let done = done && !busy;
         let next = session.lesson + 1;
         self.tutor = Some(session);
         if let Some((_, lesson)) = lesson.filter(|_| done) {

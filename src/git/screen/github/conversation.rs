@@ -112,7 +112,7 @@ fn hidden_items(
 /// `┆ 140 hidden items · Load more…`, as GitHub folds a long conversation.
 fn hidden_row(number: u64, hidden: usize) -> Line {
     let mut row = Rich::new()
-        .push("  ┆ ", role(GitRole::Border))
+        .push(" ┆  ", role(GitRole::Border))
         .push(format!("{hidden} hidden items"), strong(GitRole::Text))
         .sep()
         .push("Load more…", role(GitRole::Link))
@@ -208,9 +208,9 @@ fn header_line(rich: Rich, fold: Option<(u64, String)>, web: &str) -> Line {
     row
 }
 
-/// The thin rail between cards.
+/// The thin rail between cards, in the column of the cards' icons and the events' dots.
 fn rail() -> Line {
-    Rich::new().push("  │", role(GitRole::Border)).line()
+    Rich::new().push(" │", role(GitRole::Border)).line()
 }
 
 /// Markdown with GitHub's `<details>` sections folded (Enter on `▸ summary` opens one) and a
@@ -933,7 +933,7 @@ pub(super) fn pull(
                     .unwrap_or_default();
                 let count = commits.len();
                 let mut rich = Rich::new()
-                    .push("  ●", role(GitRole::Ref))
+                    .push(" ●", role(GitRole::Ref))
                     .plain(" ")
                     .push(actor, strong(GitRole::Author))
                     .plain(" ")
@@ -960,7 +960,7 @@ pub(super) fn pull(
                 for commit in commits {
                     let short = commit.sha.chars().take(7).collect::<String>();
                     let mut rich = Rich::new()
-                        .push("  │   ", role(GitRole::Border))
+                        .push(" │    ", role(GitRole::Border))
                         .push(
                             format!("{} ", glyph(Glyph::ForgeCommit, mode)),
                             role(GitRole::Ref),
@@ -993,10 +993,10 @@ pub(super) fn pull(
             Item::Events(events) => {
                 let events = events.iter().collect::<Vec<_>>();
                 if let Some(event) =
-                    super::issue::events_row(workspace, &events, now, width.saturating_sub(2), mode)
+                    super::issue::events_row(workspace, &events, now, width.saturating_sub(1), mode)
                 {
                     for mut row in event {
-                        indent(&mut row, "  ");
+                        indent(&mut row, " ");
                         row.card = row.action.is_some();
                         rows.push(row);
                     }
@@ -1004,10 +1004,10 @@ pub(super) fn pull(
             }
             Item::Entry(entry @ TimelineEntry::Event { .. }) => {
                 if let Some(event) =
-                    super::issue::event_row(workspace, entry, now, width.saturating_sub(2), mode)
+                    super::issue::event_row(workspace, entry, now, width.saturating_sub(1), mode)
                 {
                     for mut row in event {
-                        indent(&mut row, "  ");
+                        indent(&mut row, " ");
                         row.card = row.action.is_some();
                         rows.push(row);
                     }
@@ -1262,10 +1262,10 @@ pub(super) fn issue(
             }
             TimelineEntry::Event { .. } => {
                 if let Some(event) =
-                    super::issue::events_row(workspace, &group, now, width.saturating_sub(2), mode)
+                    super::issue::events_row(workspace, &group, now, width.saturating_sub(1), mode)
                 {
                     for mut row in event {
-                        indent(&mut row, "  ");
+                        indent(&mut row, " ");
                         row.card = row.action.is_some();
                         rows.push(row);
                     }

@@ -1237,7 +1237,7 @@ impl GitScreen {
         }
         self.save_warm();
         // Forge lessons end on forge state too (a page, a reader tab, a confirmed write).
-        let tutor_changed = if changed || github_changed {
+        let tutor_changed = if changed || github_changed || self.tutor_waiting() {
             self.advance_tutor()
         } else {
             false

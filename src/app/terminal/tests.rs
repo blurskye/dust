@@ -2316,6 +2316,12 @@ fn successful_terminal_exit_keeps_output_unless_profile_closes_on_exit() {
                     .iter()
                     .any(|line| line.contains("finished-output"))
             );
+            // Nothing is left to type to: the keys go back to the editor.
+            assert_eq!(
+                driver.application_mut().window_session.focused_terminal(),
+                None,
+                "{profile}"
+            );
         }
     }
 }
@@ -2925,7 +2931,7 @@ fn disabled_focus_reports_do_not_require_a_live_terminal() {
         .feed_bytes(b"\x1b[?1004h");
     assert_eq!(
         session.send(id, TerminalInput::Focus(true), &workspace),
-        Err("terminal has not started".into())
+        Err("The program in this terminal has exited".into())
     );
     assert!(
         session
