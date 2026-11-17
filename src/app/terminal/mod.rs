@@ -211,10 +211,12 @@ impl Terminals {
     pub(in crate::app) fn resolve(&self, key: &TerminalKey) -> Option<PtyId> {
         (Arc::ptr_eq(&key.owner, &self.owner) && self.contains(key.id)).then_some(key.id)
     }
+    /// A program that has exited has nothing left to stop, even while the rest of its output is
+    /// still on the way (a while, under Windows ConPTY), so closing it doesn't ask.
     pub(in crate::app) fn requires_close_confirmation(&self, id: PtyId) -> bool {
-        self.tabs
-            .get(&id)
-            .is_some_and(|terminal| terminal.running || terminal.pty.is_some())
+        self.tabs.get(&id).is_some_and(|terminal| {
+            terminal.running || (terminal.pty.is_some() && !terminal.exited)
+        })
     }
     pub(in crate::app) fn begin_close(&mut self, id: PtyId) -> bool {
         let Some(key) = self.key_for(id) else {

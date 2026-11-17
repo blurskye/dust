@@ -389,6 +389,21 @@ fn frame_body_length(frame: &[u8]) -> usize {
         .find_map(|line| line.strip_prefix("Content-Length:")?.trim().parse().ok())
         .unwrap_or(0)
 }
+/// An adapter that ended the session by exiting. Windows reports a crash as an NTSTATUS
+/// (0xc0000005 is an access violation), which reads in hexadecimal.
+fn adapter_exit_message(code: Option<i32>) -> String {
+    match code {
+        Some(0) => "it exited unexpectedly".into(),
+        Some(code) if cfg!(windows) && code < 0 => {
+            format!(
+                "it exited unexpectedly with status {:#010x}",
+                code.cast_unsigned()
+            )
+        }
+        Some(code) => format!("it exited unexpectedly with status {code}"),
+        None => "it was stopped by a signal".into(),
+    }
+}
 fn adapter_has_exited(adapter: &mut std::process::Child) -> bool {
     matches!(crate::process::child_exit_status(adapter), Ok(Some(_)))
 }
@@ -1292,6 +1307,10 @@ fn run_adapter(
                                 adapter: adapter.clone(),
                             })
                             .ok();
+                    } else if let Ok(Some(code)) = crate::process::child_exit_status(child) {
+                        // Gone with the program still to run or debug: how it exited is all
+                        // there is to say when it printed nothing.
+                        events.fail(adapter_exit_message(code));
                     }
                     stopping = true;
                 }
@@ -1661,6 +1680,23 @@ mod tests {
     use crate::debugger::sanitize_output;
     use serde_json::json;
     use std::collections::BTreeMap;
+
+    #[test]
+    fn an_adapter_that_exits_mid_session_says_how() {
+        use crate::debugger::adapter_exit_message;
+        assert_eq!(adapter_exit_message(Some(0)), "it exited unexpectedly");
+        assert_eq!(
+            adapter_exit_message(Some(3)),
+            "it exited unexpectedly with status 3"
+        );
+        assert_eq!(adapter_exit_message(None), "it was stopped by a signal");
+        let crash = adapter_exit_message(Some(-1_073_741_819));
+        if cfg!(windows) {
+            assert_eq!(crash, "it exited unexpectedly with status 0xc0000005");
+        } else {
+            assert_eq!(crash, "it exited unexpectedly with status -1073741819");
+        }
+    }
 
     #[test]
     fn adapter_output_is_bounded_and_terminal_sanitized() {

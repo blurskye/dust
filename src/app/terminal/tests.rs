@@ -2704,6 +2704,32 @@ fn terminal_lifecycle_revisions_include_launch_and_exit_and_starting_counts_as_r
     assert_eq!(session.running_in_root(root.path()), 0);
 }
 
+/// Under Windows ConPTY the exit comes well before the end of the output; `q` on a program that
+/// has exited closes it then too, instead of asking whether to stop what is no longer running.
+#[cfg(unix)]
+#[test]
+fn an_exited_terminal_still_draining_output_closes_without_asking() {
+    let (root, workspace, mut session) = fixture();
+    launch_shell(root.path(), &workspace, &mut session);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    while !session.tabs[&PtyId(1)].running {
+        session.drain(&workspace, |_| None);
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    assert!(session.requires_close_confirmation(PtyId(1)));
+    let tab = session.tabs.get_mut(&PtyId(1)).unwrap();
+    tab.running = false;
+    assert!(tab.pty.is_some());
+    assert!(
+        session.requires_close_confirmation(PtyId(1)),
+        "not known to have exited"
+    );
+    session.tabs.get_mut(&PtyId(1)).unwrap().exited = true;
+    assert!(session.ended(PtyId(1)));
+    assert!(!session.requires_close_confirmation(PtyId(1)));
+}
+
 #[cfg(unix)]
 #[test]
 fn real_pty_stream_failure_reports_incomplete_output_instead_of_exit_status_or_unknown() {
