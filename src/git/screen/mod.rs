@@ -411,8 +411,9 @@ pub struct GitScreen {
     preview: Preview,
     preview_args: Option<Vec<OsString>>,
     ref_preview_target: Option<String>,
-    /// The reader shows `ref_preview_target`'s log (it has arrived, not `Loading…`).
-    ref_log_ready: bool,
+    /// `ref_preview_target`'s log as it arrived, one entry per reader row (the reader paints
+    /// them as History does); read only while that target is set.
+    ref_log: Vec<commit::RefLogEntry>,
     ref_preview: Option<RefPreviewContext>,
     commit: Option<commit::Commit>,
     commit_open: bool,
@@ -554,7 +555,7 @@ impl GitScreen {
             preview: Preview::default(),
             preview_args: None,
             ref_preview_target: None,
-            ref_log_ready: false,
+            ref_log: Vec::new(),
             ref_preview: None,
             commit: None,
             commit_open: false,
@@ -1078,8 +1079,9 @@ impl GitScreen {
                             let repository = git2::Repository::open(&self.root).ok()?;
                             RefPreviewContext::capture(&repository, reference, entry.id)
                         });
-                        self.ref_log_ready = true;
-                        commit::RefLogEntry::preview(&entries)
+                        let preview = commit::RefLogEntry::preview(&entries);
+                        self.ref_log = entries;
+                        preview
                     } else {
                         Preview::git(&text, path.as_deref())
                     };
@@ -1258,7 +1260,7 @@ impl GitScreen {
     }
     fn load_git_preview(&mut self, args: Vec<OsString>) {
         if self.preview_args.as_ref() != Some(&args) {
-            self.ref_log_ready = false;
+            self.ref_log.clear();
             self.preview = "Loading…".into();
             self.preview_cursor = None;
             self.preview_anchor = None;
@@ -1535,31 +1537,6 @@ impl GitScreen {
         );
         self.history_loading = result.is_ok();
         result
-    }
-    /// While Branches is browsed and the reader shows the log of the ref History follows,
-    /// History's rows give way to a pointer at the reader, so one ref's log is never listed
-    /// twice on a screen (lazygit's one log per ref). The pane keeps its rectangle.
-    pub(super) fn history_in_reader(&self) -> bool {
-        self.focus == 1
-            && self.last_list == 1
-            && self.history_view == 0
-            && self.ref_log_ready
-            && self
-                .ref_preview_target
-                .as_deref()
-                .is_some_and(|reference| self.history_lists(reference))
-    }
-    /// History lists `reference` (`refs/heads/feature`): it follows the browsed branch.
-    fn history_lists(&self, reference: &str) -> bool {
-        self.history_target.as_ref().is_some_and(|(root, target)| {
-            *root == self.root
-                && ["refs/heads/", "refs/remotes/", "refs/tags/"]
-                    .iter()
-                    .any(|prefix| {
-                        reference.strip_prefix(prefix).map(std::ffi::OsStr::new)
-                            == Some(target.as_os_str())
-                    })
-        })
     }
     fn select_history(&mut self) {
         let Some(row) = self.selected_row() else {
@@ -3206,6 +3183,9 @@ impl GitScreen {
         self.notice.clear();
         let result = self.github.event(key, self.write_refusal.as_deref());
         self.page = self.github.current_page();
+        if let Some(text) = self.github.copied.take() {
+            return ScreenOutcome::Copy(text);
+        }
         match result {
             Ok(Some(form)) => self.form = Some(form),
             Ok(None) => {}

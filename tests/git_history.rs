@@ -486,7 +486,7 @@ fn the_lazygit_preset_runs_the_new_operations_on_lazygits_keys() {
 // Round 15 of the Git tab's review.
 
 #[test]
-fn a_browsed_branch_lists_its_log_once_in_the_reader_and_history_gives_way() {
+fn a_browsed_branch_lists_its_log_in_the_reader_and_history_follows_it() {
     let dir = repo(&["alpha"]);
     let root = dir.path();
     git(root, &["switch", "-q", "-c", "feature"]);
@@ -507,11 +507,12 @@ fn a_browsed_branch_lists_its_log_once_in_the_reader_and_history_gives_way() {
     key(&mut screen, KeyCode::Down);
     key(&mut screen, KeyCode::Up);
     shows(&mut screen, "History · feature");
-    shows(&mut screen, "Its log is in the reader");
+    // History keeps listing the branch it follows; the reader shows the same commits, one row
+    // each, with their refs.
+    wait(&mut screen, |s| view(s).matches("Feature tip").count() == 2);
     let browsing = view(&mut screen);
-    // The reader is the branch's one log; History keeps its title and count.
-    assert_eq!(browsing.matches("Feature base").count(), 1, "{browsing}");
-    assert_eq!(browsing.matches("Feature tip").count(), 1, "{browsing}");
+    assert_eq!(browsing.matches("Feature base").count(), 2, "{browsing}");
+    assert!(!browsing.contains("Its log is in the reader"), "{browsing}");
     // The panes keep their rectangles: browsing folds nothing.
     let after = screen.frame(120, 36).grid;
     let corners = |grid: &dust::ui::CellGrid| {
@@ -520,10 +521,9 @@ fn a_browsed_branch_lists_its_log_once_in_the_reader_and_history_gives_way() {
             .collect::<Vec<_>>()
     };
     assert_eq!(corners(&before), corners(&after));
-    // History lists the log again when it takes focus.
+    // History takes focus on the same commits.
     key(&mut screen, KeyCode::Char('4'));
     shows(&mut screen, "Feature base");
-    assert!(!view(&mut screen).contains("Its log is in the reader"));
 }
 
 #[test]

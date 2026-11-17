@@ -226,7 +226,7 @@ impl Workspace {
         let gutter = depth + digits + 1;
         // One cell spare at the edge, as the reader keeps for its own marks.
         let text_room = room.saturating_sub(gutter + 1).max(8);
-        for (index, line) in lines.into_iter().enumerate().skip(skip) {
+        for (index, line) in lines.iter().enumerate().skip(skip) {
             // The unwrapped line, so the reader's find and its cursor keep to it by identity.
             let logical: std::sync::Arc<str> = std::sync::Arc::from(line.text.as_str());
             let base = |at: usize| -> Style {

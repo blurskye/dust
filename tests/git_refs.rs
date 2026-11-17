@@ -973,26 +973,31 @@ fn branch_log_attributes_each_commit_without_reflow_or_repository_changes() {
         let rows = with_reader(&mut screen, width, |screen| {
             preview_at(screen, width, height)
         });
-        for (id, subject, metadata) in [
+        // One row per commit, as in History: the author and date share it when the whole
+        // subject fits beside them, and a narrower reader keeps the subject instead.
+        let tip_row = rows
+            .iter()
+            .position(|line| line.contains(&tip[..7]))
+            .unwrap();
+        assert!(rows[tip_row + 1].contains(&older[..7]), "{width}: {rows:?}");
+        for (row, subject, metadata) in [
             (
-                &tip,
+                &rows[tip_row],
                 "New literal subject (HEAD -> fake)",
                 "Generated Recovery QA · Nov 12",
             ),
-            (&older, "Older literal subject 中文", "Older Author · Jun 8"),
+            (
+                &rows[tip_row + 1],
+                "Older literal subject 中文",
+                "Older Author · Jun 8",
+            ),
         ] {
-            let row = rows
-                .iter()
-                .position(|line| line.contains(&id[..7]))
-                .unwrap();
             if width >= 100 {
-                assert!(rows[row].contains(subject), "{}", rows[row]);
+                assert!(row.contains(subject), "{row}");
             }
-            assert!(
-                rows[row + 1].contains(metadata),
-                "{width}: {}",
-                rows[row + 1]
-            );
+            if width >= 190 {
+                assert!(row.contains(metadata), "{width}: {row}");
+            }
         }
     }
     control(&mut screen, KeyCode::Char('l'));
@@ -1000,19 +1005,19 @@ fn branch_log_attributes_each_commit_without_reflow_or_repository_changes() {
     let (x, y, _) = frame.cursor.unwrap();
     assert!(frame.grid.row_text(y).contains(&tip[..7]));
     key(&mut screen, KeyCode::Char('j'));
-    let metadata_frame = screen.frame(190, 48);
-    let (_, metadata_y, _) = metadata_frame.cursor.unwrap();
-    assert_eq!(metadata_y, y + 1);
+    let older_frame = screen.frame(190, 48);
+    let (_, older_y, _) = older_frame.cursor.unwrap();
+    assert_eq!(older_y, y + 1);
     assert!(
-        metadata_frame
+        older_frame
             .grid
-            .row_text(metadata_y)
-            .contains("Generated Recovery QA · Nov 12")
+            .row_text(older_y)
+            .contains("Older Author · Jun 8")
     );
     for (width, height) in [(64, 20), (100, 30), (190, 48)] {
         screen.frame(width, height);
     }
-    assert_eq!(screen.frame(190, 48).cursor, metadata_frame.cursor);
+    assert_eq!(screen.frame(190, 48).cursor, older_frame.cursor);
     key(&mut screen, KeyCode::Char('k'));
     assert_eq!(
         screen.frame(190, 48).cursor,

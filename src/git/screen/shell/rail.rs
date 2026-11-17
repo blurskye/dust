@@ -102,16 +102,6 @@ pub(super) fn paint(app: &mut GitScreen, frame: &mut Frame, pane: usize, rect: R
         return;
     }
     let inner = rect.inner();
-    if pane == 2 && app.history_in_reader() {
-        frame.grid.put_text_clipped(
-            inner.x + 1,
-            inner.y,
-            "Its log is in the reader →",
-            st(GitRole::Muted, GitSurface::Pane),
-            inner.right(),
-        );
-        return;
-    }
     let mut list = inner;
     let tabs = match pane {
         0 => {
@@ -753,31 +743,7 @@ fn history_row(
     );
     x += 1;
     // Ref chips, decided before the age column: a branch tip matters more than a date.
-    let chips = info.map_or_else(Vec::new, |info| {
-        info.refs
-            .iter()
-            .filter_map(|reference| {
-                Some(if let Some(tag) = reference.strip_prefix("tag: ") {
-                    (format!("{} {tag}", glyph(Glyph::Tag, mode)), GitChip::Tag)
-                } else if let Some(branch) = reference.strip_prefix("HEAD -> ") {
-                    (branch.to_owned(), GitChip::Ref)
-                } else if reference == "HEAD" {
-                    return None;
-                } else if reference.contains('/')
-                    && app.remotes.iter().any(|remote| {
-                        remote
-                            .split_whitespace()
-                            .next()
-                            .is_some_and(|name| reference.starts_with(&format!("{name}/")))
-                    })
-                {
-                    (reference.clone(), GitChip::RemoteRef)
-                } else {
-                    (reference.clone(), GitChip::Ref)
-                })
-            })
-            .collect::<Vec<_>>()
-    });
+    let chips = info.map_or_else(Vec::new, |info| ref_chips(app, &info.refs));
     // Wide rails get `AK Nov 12` on the right, muted, like the design's age column.
     let mut right = right;
     if rect.w >= 46
@@ -820,6 +786,34 @@ fn history_row(
         },
         right.saturating_sub(1),
     );
+}
+
+/// `%D`'s names as History's chips: tags, branches, and remote branches in their own hue.
+/// HEAD alone is the node's glyph, not a chip.
+fn ref_chips(app: &GitScreen, refs: &[String]) -> Vec<(String, GitChip)> {
+    let mode = app.icon_mode;
+    refs.iter()
+        .filter_map(|reference| {
+            Some(if let Some(tag) = reference.strip_prefix("tag: ") {
+                (format!("{} {tag}", glyph(Glyph::Tag, mode)), GitChip::Tag)
+            } else if let Some(branch) = reference.strip_prefix("HEAD -> ") {
+                (branch.to_owned(), GitChip::Ref)
+            } else if reference == "HEAD" {
+                return None;
+            } else if reference.contains('/')
+                && app.remotes.iter().any(|remote| {
+                    remote
+                        .split_whitespace()
+                        .next()
+                        .is_some_and(|name| reference.starts_with(&format!("{name}/")))
+                })
+            {
+                (reference.clone(), GitChip::RemoteRef)
+            } else {
+                (reference.clone(), GitChip::Ref)
+            })
+        })
+        .collect()
 }
 
 fn stash_row(

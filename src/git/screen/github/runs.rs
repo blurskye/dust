@@ -109,6 +109,10 @@ pub(super) struct View {
     /// The finished job the open rerun sheet offers alone (`This job (lint)`): the one under
     /// the run cursor when `r` was pressed.
     pub(super) rerun_job: Option<u64>,
+    /// Log bodies by what they were read from (`Workspace::log_body`).
+    log_memo: std::sync::Mutex<std::collections::HashMap<u64, Body>>,
+    /// `v`/`V`: the log line a selection started on; the cursor is its other end.
+    visual: Option<Node>,
 }
 
 // ------------------------------------------------------------------------------- states
@@ -292,6 +296,17 @@ struct LogLine {
     colours: Vec<(Range<usize>, logs::Sgr)>,
     tone: Tone,
     link: Option<(Range<usize>, String, u32)>,
+    /// Where it last wrapped (`LogLine::parts`): a long log is laid out once per width, not on
+    /// every frame and key.
+    wrapped: std::sync::Mutex<Option<Wrapped>>,
+}
+
+/// One layout of a log line: the width and find query it was made for, and its parts.
+struct Wrapped {
+    room: usize,
+    whole: bool,
+    finding: String,
+    parts: Vec<Range<usize>>,
 }
 
 impl LogLine {
@@ -352,6 +367,7 @@ impl LogLine {
             colours,
             tone,
             link,
+            wrapped: std::sync::Mutex::default(),
         })
     }
 
@@ -361,7 +377,40 @@ impl LogLine {
             colours: Vec::new(),
             tone: Tone::Quiet,
             link: None,
+            wrapped: std::sync::Mutex::default(),
         }
+    }
+
+    /// The line's rows in `room` columns, wrapped (`wrap`) or on one row. `whole` lets a test
+    /// or summary line give up part of itself to stay on one row; `finding` keeps its matches
+    /// whole.
+    fn parts(&self, room: usize, wrap: bool, whole: bool, finding: &str) -> Vec<Range<usize>> {
+        if !wrap || ruler(&self.text) {
+            return std::iter::once(0..self.text.len()).collect();
+        }
+        let mut memo = self
+            .wrapped
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(memo) = memo.as_ref()
+            && memo.room == room
+            && memo.whole == whole
+            && memo.finding == finding
+        {
+            return memo.parts.clone();
+        }
+        // Not while finding: a match in the part left out would not show.
+        let parts = match one_row(&self.text, room).filter(|_| whole) {
+            Some(range) => vec![range],
+            None => wrap_points_keeping(&self.text, room.max(4), &matches(&self.text, finding)),
+        };
+        *memo = Some(Wrapped {
+            room,
+            whole,
+            finding: finding.to_owned(),
+            parts: parts.clone(),
+        });
+        parts
     }
 }
 
@@ -637,11 +686,12 @@ struct StepRow {
     section: Option<Range<usize>>,
 }
 
+#[derive(Clone)]
 enum Body {
     /// The lines, numbered from 1, of which the first `skip` are not shown (a running step
     /// shows its tail).
     Lines {
-        lines: Vec<LogLine>,
+        lines: std::sync::Arc<Vec<std::sync::Arc<LogLine>>>,
         skip: usize,
     },
     Message(String, GitRole),
@@ -657,7 +707,7 @@ struct Row {
     left: Vec<Span>,
     right: Vec<Span>,
     /// A log line: its number and text.
-    log: Option<(usize, LogLine)>,
+    log: Option<(usize, std::sync::Arc<LogLine>)>,
 }
 
 impl Row {
@@ -1114,7 +1164,52 @@ impl Workspace {
 
     /// A job's log rows: one step's slice, or the whole job.
     #[allow(clippy::unnecessary_unwrap)] // `full` and the step are checked together
+    /// [`Self::read_log_body`], read once per log arrival and step: the run tree is built on
+    /// every key and frame, and a long log must not be parsed on each.
     fn log_body(&self, job: &Value, step: Option<&StepRow>, full: bool) -> Body {
+        use std::hash::{Hash, Hasher};
+        let id = number(job, "databaseId");
+        let Some(Ok(reply)) = self.cache.get(&Key::Log(id)) else {
+            return self.read_log_body(job, step, full);
+        };
+        let raw = reply.text.as_bytes();
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        (id, full, format!("{:?}", State::of(job))).hash(&mut hasher);
+        (
+            raw.as_ptr() as usize,
+            raw.len(),
+            &raw[raw.len().saturating_sub(256)..],
+        )
+            .hash(&mut hasher);
+        if let Some(step) = step {
+            let value = step.value.as_ref().map(ToString::to_string);
+            (
+                step.number,
+                format!("{:?}", step.state),
+                value,
+                step.section.clone(),
+            )
+                .hash(&mut hasher);
+        }
+        let key = hasher.finish();
+        let mut memo = self
+            .actions
+            .log_memo
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(body) = memo.get(&key) {
+            return body.clone();
+        }
+        let body = self.read_log_body(job, step, full);
+        // Bounded: the logs opened lately.
+        if memo.len() >= 64 {
+            memo.clear();
+        }
+        memo.insert(key, body.clone());
+        body
+    }
+
+    fn read_log_body(&self, job: &Value, step: Option<&StepRow>, full: bool) -> Body {
         let id = number(job, "databaseId");
         let running = State::of(job) == State::Running;
         match State::of(job) {
@@ -1174,10 +1269,7 @@ impl Workspace {
         if raw == crate::forge::provider::gitea::NEVER_RAN {
             return Body::Message(raw.to_owned(), GitRole::Muted);
         }
-        let payloads: Vec<&str> = if full || step.is_none() {
-            raw.lines().map(|line| logs::unpack(line).1).collect()
-        } else {
-            let step = step.expect("checked");
+        let payloads: Vec<&str> = if let Some(step) = step.filter(|_| !full) {
             if let Some(value) = &step.value {
                 // A slice by time (GitHub's job log names no steps) is as good as the stamps.
                 let (lines, _) = logs::step_lines(raw, value);
@@ -1210,6 +1302,8 @@ impl Workspace {
                 }
                 lines
             }
+        } else {
+            raw.lines().map(|line| logs::unpack(line).1).collect()
         };
         let lines = log_lines(&payloads, !full);
         if lines.is_empty() {
@@ -1234,7 +1328,10 @@ impl Workspace {
         } else {
             0
         };
-        Body::Lines { lines, skip }
+        Body::Lines {
+            lines: std::sync::Arc::new(lines.into_iter().map(std::sync::Arc::new).collect()),
+            skip,
+        }
     }
 
     fn push_log(&self, rows: &mut Vec<Row>, job: &Value, step: Option<&StepRow>, depth: u16) {
@@ -1247,9 +1344,9 @@ impl Workspace {
                 vec![(text, st(role, PANE))],
             )),
             Body::Lines { lines, skip } => {
-                for (index, line) in lines.into_iter().enumerate().skip(skip) {
+                for (index, line) in lines.iter().enumerate().skip(skip) {
                     let mut row = Row::new(Node::Line(id, at, index), depth, Vec::new());
-                    row.log = Some((index + 1, line));
+                    row.log = Some((index + 1, std::sync::Arc::clone(line)));
                     rows.push(row);
                 }
             }
@@ -2145,6 +2242,11 @@ impl Workspace {
             || self.notifications_typing()
     }
 
+    /// A run's log lines are selected (`v`): the mode chip reads VISUAL.
+    pub(in crate::git::screen) fn actions_selecting(&self) -> bool {
+        self.page == 3 && self.actions.visual.is_some()
+    }
+
     /// `[`/`]` switch the run history's sections rather than the top tabs.
     pub(in crate::git::screen) fn actions_brackets(&self) -> bool {
         self.page == 3
@@ -2506,6 +2608,13 @@ impl Workspace {
         Ok(None)
     }
 
+    /// The rows a `v` selection spans: from where it started to the cursor, either way.
+    fn visual_range(&self, rows: &[Row], cursor: usize) -> Option<std::ops::RangeInclusive<usize>> {
+        let anchor = self.actions.visual.as_ref()?;
+        let start = rows.iter().position(|row| row.node == *anchor)?;
+        Some(start.min(cursor)..=start.max(cursor))
+    }
+
     fn run_key(
         &mut self,
         key: &KeyEvent,
@@ -2568,6 +2677,41 @@ impl Workspace {
                 }
             }
             return Ok(None);
+        }
+        // `v`/`V` select log lines from the cursor; `y` copies them, or the cursor's line.
+        match key.code {
+            KeyCode::Char('v' | 'V') => {
+                self.actions.visual = if self.actions.visual.is_some() {
+                    None
+                } else {
+                    let node = rows.get(at).filter(|row| row.log.is_some());
+                    Some(node.ok_or("Select a log line first")?.node.clone())
+                };
+                return Ok(None);
+            }
+            KeyCode::Escape if self.actions.visual.is_some() => {
+                self.actions.visual = None;
+                return Ok(None);
+            }
+            KeyCode::Char('y') => {
+                let range = self.visual_range(&rows, at).unwrap_or(at..=at);
+                let lines = rows[range]
+                    .iter()
+                    .filter_map(|row| row.log.as_ref())
+                    .map(|(_, line)| line.text.as_str())
+                    .collect::<Vec<_>>();
+                if lines.is_empty() {
+                    return Err("Select a log line to copy".into());
+                }
+                self.notice = match lines.len() {
+                    1 => "Copied the line".into(),
+                    count => format!("Copied {count} lines"),
+                };
+                self.copied = Some(lines.join("\n"));
+                self.actions.visual = None;
+                return Ok(None);
+            }
+            _ => {}
         }
         match key.code {
             KeyCode::Escape => {
@@ -2671,6 +2815,7 @@ impl Workspace {
         // opened: no way back.
         self.return_to = None;
         self.notify.back = false;
+        self.actions.visual = None;
         self.actions.right = false;
         self.actions.workflows = false;
         self.actions.open = false;
@@ -4218,14 +4363,7 @@ fn paint_tree(
         let Some((_, line)) = &row.log else {
             return vec![0..0];
         };
-        if !wrap || ruler(&line.text) {
-            return vec![0..line.text.len()];
-        }
-        // Not while finding: a match in the part left out would not show.
-        if let Some(range) = one_row(&line.text, room(row)).filter(|_| whole) {
-            return vec![range];
-        }
-        wrap_points_keeping(&line.text, room(row).max(4), &matches(&line.text, &finding))
+        line.parts(room(row), wrap, whole, &finding)
     };
     let heights = rows.iter().map(|row| chunks(row).len()).collect::<Vec<_>>();
     let total: usize = heights.iter().sum();
@@ -4322,6 +4460,7 @@ fn paint_tree(
                 .position(|part| part.contains(&range.start))
         })
         .unwrap_or(0);
+    let selection = ws.visual_range(rows, cursor);
     let mut visual = 0usize;
     for (index, row) in rows.iter().enumerate() {
         let parts = chunks(row);
@@ -4329,7 +4468,7 @@ fn paint_tree(
             visual += parts.len();
             continue;
         }
-        let selected = index == cursor;
+        let selected = index == cursor || selection.as_ref().is_some_and(|r| r.contains(&index));
         let surface = if selected {
             if focused {
                 GitSurface::Cursor
@@ -4355,8 +4494,8 @@ fn paint_tree(
                     Rect::new(area.x, y, area.w, 1),
                     st(GitRole::Text, surface),
                 );
-                if focused && part == cursor_part && !ws.actions.find.editing {
-                    frame.cursor = Some((area.x, y, SetCursorStyle::SteadyBar));
+                if index == cursor && focused && part == cursor_part && !ws.actions.find.editing {
+                    frame.cursor = Some((area.x, y, SetCursorStyle::SteadyBlock));
                 }
             }
             let Some((number, line)) = &row.log else {
@@ -4517,8 +4656,8 @@ fn paint_tree(
                     st(GitRole::Muted, surface),
                 );
             }
-            if selected && part == cursor_part && focused && !ws.actions.find.editing {
-                frame.cursor = Some((x_text, y, SetCursorStyle::SteadyBar));
+            if index == cursor && part == cursor_part && focused && !ws.actions.find.editing {
+                frame.cursor = Some((x_text, y, SetCursorStyle::SteadyBlock));
             }
         }
         if visual >= scroll + height {
@@ -4671,6 +4810,8 @@ fn footer(app: &GitScreen, frame: &mut Frame, rect: Rect) {
         }
         hints.extend([("d", "dispatch"), ("o", "browser")]);
         hints
+    } else if view.visual.is_some() {
+        vec![("j k", "extend"), ("y", "copy"), ("Esc", "cancel")]
     } else if view.attempts {
         vec![("Enter", "show attempt"), ("j k", "move"), ("Esc", "close")]
     } else if view.find.active() {
@@ -4701,7 +4842,9 @@ fn footer(app: &GitScreen, frame: &mut Frame, rect: Rect) {
             Some(row) if row.fold == Some(true) => hints.push((1, "Enter", "fold")),
             Some(row) if row.fold == Some(false) => hints.push((1, "Enter", "unfold")),
             // A log line folds its step.
-            Some(row) if matches!(row.node, Node::Line(..)) => hints.push((1, "Enter", "fold")),
+            Some(row) if matches!(row.node, Node::Line(..)) => {
+                hints.extend([(1, "Enter", "fold"), (9, "v", "select")]);
+            }
             _ => {}
         }
         let full = row
@@ -5527,6 +5670,66 @@ mod tests {
             workspace.actions.cursor,
             Some(Node::Line(602, 2, _))
         ));
+    }
+
+    #[test]
+    fn v_selects_log_lines_and_y_copies_them() {
+        let key = KeyEvent::plain;
+        let mut workspace = workspace();
+        workspace.jump_error(true).unwrap();
+        let rows = workspace.tree(KEYS);
+        let at = workspace.cursor_index(&rows);
+        let text = |index: usize| rows[index].log.as_ref().map(|(_, line)| line.text.clone());
+        let error = text(at).unwrap();
+        // The rows from the one above the error to the error, log lines only.
+        let spanned = (at - 1..=at).filter_map(text).collect::<Vec<_>>();
+        workspace.run_key(&key(KeyCode::Char('v')), None).unwrap();
+        assert!(workspace.actions.visual.is_some());
+        workspace.run_key(&key(KeyCode::Char('k')), None).unwrap();
+        workspace.run_key(&key(KeyCode::Char('y')), None).unwrap();
+        assert_eq!(workspace.copied.take(), Some(spanned.join("\n")));
+        assert!(workspace.notice.starts_with("Copied"));
+        assert!(workspace.actions.visual.is_none());
+        // Without a selection `y` copies the cursor's line; Esc ends a selection first.
+        workspace.run_key(&key(KeyCode::Char('j')), None).unwrap();
+        workspace.run_key(&key(KeyCode::Char('y')), None).unwrap();
+        assert_eq!(workspace.copied.take(), Some(error));
+        assert_eq!(workspace.notice, "Copied the line");
+        workspace.run_key(&key(KeyCode::Char('V')), None).unwrap();
+        workspace.run_key(&key(KeyCode::Escape), None).unwrap();
+        assert!(workspace.actions.visual.is_none());
+    }
+
+    #[test]
+    fn a_log_is_parsed_once_and_laid_out_once_per_width() {
+        let workspace = workspace();
+        let lines = |rows: &[Row]| {
+            rows.iter()
+                .filter_map(|row| {
+                    row.log
+                        .as_ref()
+                        .map(|(_, line)| std::sync::Arc::clone(line))
+                })
+                .collect::<Vec<_>>()
+        };
+        let (before, after) = (lines(&workspace.tree(KEYS)), lines(&workspace.tree(KEYS)));
+        assert!(!before.is_empty());
+        assert!(
+            before
+                .iter()
+                .zip(&after)
+                .all(|(a, b)| std::sync::Arc::ptr_eq(a, b))
+        );
+        let line = &before[0];
+        assert_eq!(line.parts(6, true, true, ""), line.parts(6, true, true, ""));
+        assert!(
+            line.wrapped
+                .lock()
+                .unwrap()
+                .as_ref()
+                .is_some_and(|memo| memo.room == 6)
+        );
+        assert_eq!(line.parts(6, false, true, "").len(), 1);
     }
 
     #[test]

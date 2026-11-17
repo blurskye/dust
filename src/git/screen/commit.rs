@@ -5,10 +5,11 @@ use crossterm::cursor::SetCursorStyle;
 
 /// Generated log rows prepared once on arrival, with per-commit attribution.
 /// Resizing never changes this projection or the native cursor offsets.
+#[derive(Clone)]
 pub(super) struct RefLogEntry {
     pub id: git2::Oid,
     pub subject: String,
-    attribution: Option<(String, String)>,
+    pub attribution: Option<(String, String)>,
 }
 impl RefLogEntry {
     pub fn parse(text: &str) -> Vec<Self> {
@@ -31,25 +32,13 @@ impl RefLogEntry {
             })
             .collect()
     }
+    /// One row per commit, `hash  subject`, which find and the cursor read; the reader paints
+    /// it as History does, with its author and date (`shell::reader`).
     pub fn preview(entries: &[Self]) -> Preview {
-        Self::preview_at(entries, crate::forge::records::now())
-    }
-    /// [`Self::preview`] with dates written as of `now` (Unix seconds), in the Git tab's one
-    /// date grammar (`shell::chrome::when`).
-    pub fn preview_at(entries: &[Self], now: i64) -> Preview {
         let mut preview = Preview::default();
         for entry in entries {
-            let subject: Preview =
-                format!("{}  {}", &entry.id.to_string()[..7], entry.subject).into();
-            preview.rows.extend(subject.rows);
-            if let Some((author, date)) = &entry.attribution {
-                let mut metadata: Preview =
-                    format!("{author} · {}", super::shell::chrome::when(date, now)).into();
-                for row in &mut metadata.rows {
-                    row.style = Style::Muted;
-                }
-                preview.rows.extend(metadata.rows);
-            }
+            let row: Preview = format!("{}  {}", &entry.id.to_string()[..7], entry.subject).into();
+            preview.rows.extend(row.rows.into_iter().take(1));
         }
         preview
     }
@@ -564,11 +553,6 @@ pub(super) fn message(frame: &mut Frame, app: &mut GitScreen, width: u16, height
 mod tests {
     use super::*;
 
-    /// A fixed clock, so dates read the same in any year.
-    pub(super) fn now() -> i64 {
-        crate::forge::records::epoch("2026-11-16T12:00:00Z").unwrap()
-    }
-
     #[test]
     fn decorations_prioritize_actual_head_then_selected_ref_and_bound_other_tips() {
         assert_eq!(
@@ -613,7 +597,6 @@ mod tests {
 
 #[cfg(test)]
 mod ref_log_tests {
-    use super::tests::now;
     use super::*;
 
     #[test]
@@ -635,7 +618,7 @@ mod ref_log_tests {
             ));
             assert_eq!(entries.len(), 1);
             assert!(entries[0].attribution.is_none());
-            let preview = RefLogEntry::preview_at(&entries, now());
+            let preview = RefLogEntry::preview(&entries);
             assert_eq!(preview.rows.len(), 1);
             assert_eq!(
                 preview.rows[0].text,
@@ -650,23 +633,25 @@ mod ref_log_tests {
     }
 
     #[test]
-    fn forty_ref_entries_keep_every_subject_and_its_own_metadata_in_fixed_order() {
+    fn forty_ref_entries_keep_one_row_each_with_their_own_metadata_in_fixed_order() {
         let input = (0..40)
             .map(|i| format!("{i:040x}\0Author {i}\x002026-11-12\0Subject {i} 中文"))
             .collect::<Vec<_>>()
             .join("\n");
         let entries = RefLogEntry::parse(&input);
-        let preview = RefLogEntry::preview_at(&entries, now());
-        assert_eq!(preview.rows.len(), 80);
+        let preview = RefLogEntry::preview(&entries);
+        assert_eq!(preview.rows.len(), 40);
         for (i, entry) in entries.iter().enumerate() {
             assert_eq!(
-                preview.rows[2 * i].text,
+                preview.rows[i].text,
                 format!("{}  Subject {i} 中文", &entry.id.to_string()[..7])
             );
-            assert_eq!(preview.rows[2 * i + 1].text, format!("Author {i} · Nov 12"));
-            assert_eq!(preview.rows[2 * i + 1].style, Style::Muted);
+            assert_eq!(
+                entry.attribution,
+                Some((format!("Author {i}"), "2026-11-12".into()))
+            );
         }
-        assert!(preview.same_content(&RefLogEntry::preview_at(&entries, now())));
+        assert!(preview.same_content(&RefLogEntry::preview(&entries)));
         assert!(!preview.patch && preview.cursor_byte.is_none() && preview.split.is_empty());
     }
 
@@ -677,24 +662,23 @@ mod ref_log_tests {
             "1234567890123456789012345678901234567890\0Older Author\x002025-06-08\0Second subject\n",
         ));
         assert_eq!(entries.len(), 2);
-        let preview = RefLogEntry::preview_at(&entries, now());
+        assert_eq!(
+            entries[1].attribution,
+            Some(("Older Author".into(), "2025-06-08".into()))
+        );
+        let preview = RefLogEntry::preview(&entries);
         assert_eq!(
             preview.rows[0].text,
             "0123456  Subject (HEAD -> main, other/ref)"
         );
-        assert_eq!(preview.rows[1].text, "First Author · Nov 12");
-        assert_eq!(preview.rows[1].style, Style::Muted);
-        assert_eq!(preview.rows[2].text, "1234567  Second subject");
-        assert_eq!(preview.rows[3].text, "Older Author · Jun 8, 2025");
-        assert_eq!(preview.rows[3].style, Style::Muted);
-        assert_eq!(preview.rows.len(), 4);
+        assert_eq!(preview.rows[1].text, "1234567  Second subject");
+        assert_eq!(preview.rows.len(), 2);
         assert!(
             preview
                 .rows
                 .iter()
                 .all(|row| row.path.is_none() && row.marker.is_none())
         );
-        assert!(preview.same_content(&RefLogEntry::preview_at(&entries, now())));
         assert!(!preview.patch);
         assert!(RefLogEntry::parse("not-an-oid\0subject").is_empty());
     }

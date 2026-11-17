@@ -156,7 +156,9 @@ impl GitScreen {
         if self.github.actions_typing() {
             return Some(InputMode::Insert);
         }
-        if self.page == 0 && (self.preview_anchor.is_some() || self.file_selection.active()) {
+        if self.page == 0 && (self.preview_anchor.is_some() || self.file_selection.active())
+            || self.github.actions_selecting()
+        {
             return Some(InputMode::Visual);
         }
         Some(InputMode::Normal)

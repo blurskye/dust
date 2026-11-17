@@ -358,7 +358,11 @@ pub(super) fn paint(app: &mut GitScreen, frame: &mut Frame, rect: Rect) {
         for (line, index) in indices.into_iter().enumerate() {
             let y = body.y + line as u16;
             let row_rect = Rect::new(body.x, y, body.w, 1);
-            let cursor_x = if app.preview.rows[index].marker.is_some()
+            let cursor_x = if let Some(entry) = app.ref_log.get(index).filter(|_| {
+                app.ref_preview_target.is_some() && app.ref_log.len() == app.preview.rows.len()
+            }) {
+                ref_log_row(app, &mut frame.grid, index, entry, row_rect)
+            } else if app.preview.rows[index].marker.is_some()
                 || app.preview.rows[index].new.is_some()
             {
                 code_row(
@@ -519,6 +523,50 @@ fn file_band(
             rect.right(),
         );
     }
+}
+
+/// A branch's commit as History draws it: the hash in its hue, the subject, and the author
+/// and date at the right when the whole subject fits beside them (the subject comes first).
+/// The ref's relation to HEAD is the pane's heading, so rows name no refs. The row's text is
+/// `hash  subject`, so find and the cursor still work.
+fn ref_log_row(
+    app: &GitScreen,
+    grid: &mut CellGrid,
+    index: usize,
+    entry: &super::super::commit::RefLogEntry,
+    rect: Rect,
+) -> u16 {
+    let surface = GitSurface::Pane;
+    let right = rect.right();
+    let text = &app.preview.rows[index].text;
+    let end = (rect.x + 1).saturating_add(chrome::width(text));
+    if let Some((author, date)) = &entry.attribution {
+        let tail = format!(
+            "{author} · {}",
+            chrome::when(date, crate::forge::records::now())
+        );
+        let at = right.saturating_sub(chrome::width(&tail) + 1);
+        if at >= end + 3 {
+            grid.put_text_clipped(at, rect.y, &tail, st(GitRole::Muted, surface), right);
+        }
+    }
+    let cursor_x = paint_code(
+        app,
+        grid,
+        index,
+        rect.x + 1,
+        rect.y,
+        right,
+        0,
+        surface,
+        st(GitRole::Text, surface),
+    );
+    // The hash in History's hue, unless find has marked it.
+    if app.preview.search.row_matches(index).is_empty() {
+        let hash = &text[..text.len().min(7)];
+        grid.put_text_clipped(rect.x + 1, rect.y, hash, st(GitRole::Hash, surface), right);
+    }
+    cursor_x
 }
 
 /// Rows without code: file bands, hunk bands and messages.

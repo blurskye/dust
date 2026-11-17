@@ -198,6 +198,8 @@ pub(super) struct Workspace {
     /// A reader just opened reads: no row is highlighted until a movement key or a
     /// control key asks for the cursor.
     reading: bool,
+    /// Text a key copied (`y` on a run's log): the screen hands it to the clipboard.
+    pub(super) copied: Option<String>,
     detail_rows: Vec<lines::Line>,
     detail_find: find::DetailFind,
     reading_position: lines::ReadingPosition,
@@ -293,6 +295,7 @@ impl Workspace {
             reveal_merge: false,
             reveal_top: false,
             reading: false,
+            copied: None,
             detail_rows: Vec::new(),
             detail_find: find::DetailFind::default(),
             reading_position: lines::ReadingPosition::default(),
