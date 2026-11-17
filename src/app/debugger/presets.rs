@@ -91,7 +91,9 @@ fn select_adapter(preset: &Preset, tools: &[ToolEntry]) -> String {
         .iter()
         .find(|id| {
             tools.iter().any(|entry| {
-                entry.definition.id == **id && matches!(entry.status, ToolStatus::Installed(_))
+                entry.definition.id == **id
+                    && matches!(&entry.status, ToolStatus::Installed(path)
+                        if crate::debugger::adapter_starts(path))
             })
         })
         .unwrap_or(&preset.adapters[0])

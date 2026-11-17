@@ -1226,11 +1226,14 @@ impl App {
                     .languages
                     .iter()
                     .any(|name| name == language.id())
-                && (matches!(entry.status, crate::tools::ToolStatus::Installed(_))
-                    || self
+                && match &entry.status {
+                    crate::tools::ToolStatus::Installed(path) => Some(path.clone()),
+                    _ => self
                         .tooling
                         .path_executable(&entry.definition.executable)
-                        .is_some())
+                        .map(|(path, _)| path),
+                }
+                .is_some_and(|path| crate::debugger::adapter_starts(&path))
         })
     }
 

@@ -389,11 +389,76 @@ fn frame_body_length(frame: &[u8]) -> usize {
         .find_map(|line| line.strip_prefix("Content-Length:")?.trim().parse().ok())
         .unwrap_or(0)
 }
+/// Windows statuses for a program that could not be loaded at all: a DLL not found
+/// (0xc0000135), a DLL missing a function it needs (0xc0000139), a DLL for another CPU
+/// (0xc000007b) or one that failed to start (0xc0000142).
+#[cfg_attr(not(windows), allow(dead_code))]
+const WINDOWS_LOAD_FAILURES: [u32; 4] = [0xc000_0135, 0xc000_0139, 0xc000_007b, 0xc000_0142];
+
+/// Whether a debug adapter found on PATH can start here. LLVM's lldb-dap for Windows needs the
+/// Python it was built against, and without it Windows refuses to load it, silently: it is
+/// asked for its version once, and passed over when it can't even do that.
+#[must_use]
+pub(crate) fn adapter_starts(executable: &Path) -> bool {
+    #[cfg(windows)]
+    {
+        use std::sync::{Mutex, OnceLock};
+        static CHECKED: OnceLock<Mutex<HashMap<PathBuf, bool>>> = OnceLock::new();
+        let checked = CHECKED.get_or_init(Mutex::default);
+        if let Some(starts) = checked
+            .lock()
+            .ok()
+            .and_then(|seen| seen.get(executable).copied())
+        {
+            return starts;
+        }
+        let starts = match Command::new(executable)
+            .arg("--version")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+        {
+            Err(_) => false,
+            Ok(mut child) => {
+                if adapter_exited_within(&mut child, Duration::from_secs(5)) {
+                    child
+                        .wait()
+                        .ok()
+                        .and_then(|status| status.code())
+                        .is_none_or(|code| !WINDOWS_LOAD_FAILURES.contains(&code.cast_unsigned()))
+                } else {
+                    // Still running: it loaded, which is all this asks.
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    true
+                }
+            }
+        };
+        if let Ok(mut seen) = checked.lock() {
+            seen.insert(executable.to_path_buf(), starts);
+        }
+        starts
+    }
+    #[cfg(not(windows))]
+    {
+        // Elsewhere the loader says what is missing on stderr, which the failure shows.
+        let _ = executable;
+        true
+    }
+}
+
 /// An adapter that ended the session by exiting. Windows reports a crash as an NTSTATUS
 /// (0xc0000005 is an access violation), which reads in hexadecimal.
 fn adapter_exit_message(code: Option<i32>) -> String {
     match code {
         Some(0) => "it exited unexpectedly".into(),
+        Some(code) if cfg!(windows) && WINDOWS_LOAD_FAILURES.contains(&code.cast_unsigned()) => {
+            format!(
+                "Windows could not load it or a DLL it needs (status {:#010x})",
+                code.cast_unsigned()
+            )
+        }
         Some(code) if cfg!(windows) && code < 0 => {
             format!(
                 "it exited unexpectedly with status {:#010x}",
@@ -1697,12 +1762,30 @@ mod tests {
             "it exited unexpectedly with status 3"
         );
         assert_eq!(adapter_exit_message(None), "it was stopped by a signal");
+        if cfg!(windows) {
+            assert_eq!(
+                adapter_exit_message(Some(0xc000_0135_u32.cast_signed())),
+                "Windows could not load it or a DLL it needs (status 0xc0000135)"
+            );
+        }
         let crash = adapter_exit_message(Some(-1_073_741_819));
         if cfg!(windows) {
             assert_eq!(crash, "it exited unexpectedly with status 0xc0000005");
         } else {
             assert_eq!(crash, "it exited unexpectedly with status -1073741819");
         }
+    }
+
+    /// An adapter that can't be run is passed over; one that runs (and rejects `--version` as
+    /// a test binary does) is used.
+    #[cfg(windows)]
+    #[test]
+    fn an_adapter_that_cannot_start_is_passed_over() {
+        let missing = std::env::temp_dir().join("dust-no-such-adapter.exe");
+        assert!(!crate::debugger::adapter_starts(&missing));
+        assert!(crate::debugger::adapter_starts(
+            &std::env::current_exe().unwrap()
+        ));
     }
 
     #[test]
