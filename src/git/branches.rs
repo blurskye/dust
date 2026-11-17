@@ -1064,6 +1064,53 @@ fn run(
     }
 }
 
+/// Deletes a worktree's checkout, its `.git` link last, so a deletion that fails part way
+/// leaves a worktree Git still recognises rather than a folder that is no longer a repository.
+/// Windows refuses to delete a file another process has open, such as a file watcher or a Git
+/// process that was still reading the checkout, and those usually let go within moments, so a
+/// failed deletion is tried again a few times.
+fn remove_checkout(path: &Path) -> std::io::Result<()> {
+    let mut attempt = 0;
+    loop {
+        match remove_checkout_once(path) {
+            Ok(()) => return Ok(()),
+            Err(error) if attempt >= 4 => return Err(error),
+            Err(_) => {
+                std::thread::sleep(Duration::from_millis(100 << attempt));
+                attempt += 1;
+            }
+        }
+    }
+}
+
+fn remove_checkout_once(path: &Path) -> std::io::Result<()> {
+    if !path.exists() {
+        return Ok(());
+    }
+    let link = path.join(".git");
+    for entry in std::fs::read_dir(path)? {
+        let entry = entry?;
+        let entry_path = entry.path();
+        if entry_path == link {
+            continue;
+        }
+        remove_entry(&entry_path, entry.file_type()?)?;
+    }
+    if let Ok(metadata) = link.symlink_metadata() {
+        remove_entry(&link, metadata.file_type())?;
+    }
+    std::fs::remove_dir(path)
+}
+
+/// Removes a file, a symbolic link (including a Windows directory link) or a directory tree.
+fn remove_entry(path: &Path, kind: std::fs::FileType) -> std::io::Result<()> {
+    if kind.is_dir() {
+        std::fs::remove_dir_all(path)
+    } else {
+        std::fs::remove_file(path).or_else(|error| std::fs::remove_dir(path).map_err(|_| error))
+    }
+}
+
 #[cfg(test)]
 mod exclude_tests {
     use crate::git::branches::*;
@@ -1185,53 +1232,6 @@ mod exclude_tests {
                 "{name}"
             );
         }
-    }
-}
-
-/// Deletes a worktree's checkout, its `.git` link last, so a deletion that fails part way
-/// leaves a worktree Git still recognises rather than a folder that is no longer a repository.
-/// Windows refuses to delete a file another process has open, such as a file watcher or a Git
-/// process that was still reading the checkout, and those usually let go within moments, so a
-/// failed deletion is tried again a few times.
-fn remove_checkout(path: &Path) -> std::io::Result<()> {
-    let mut attempt = 0;
-    loop {
-        match remove_checkout_once(path) {
-            Ok(()) => return Ok(()),
-            Err(error) if attempt >= 4 => return Err(error),
-            Err(_) => {
-                std::thread::sleep(Duration::from_millis(100 << attempt));
-                attempt += 1;
-            }
-        }
-    }
-}
-
-fn remove_checkout_once(path: &Path) -> std::io::Result<()> {
-    if !path.exists() {
-        return Ok(());
-    }
-    let link = path.join(".git");
-    for entry in std::fs::read_dir(path)? {
-        let entry = entry?;
-        let entry_path = entry.path();
-        if entry_path == link {
-            continue;
-        }
-        remove_entry(&entry_path, entry.file_type()?)?;
-    }
-    if let Ok(metadata) = link.symlink_metadata() {
-        remove_entry(&link, metadata.file_type())?;
-    }
-    std::fs::remove_dir(path)
-}
-
-/// Removes a file, a symbolic link (including a Windows directory link) or a directory tree.
-fn remove_entry(path: &Path, kind: std::fs::FileType) -> std::io::Result<()> {
-    if kind.is_dir() {
-        std::fs::remove_dir_all(path)
-    } else {
-        std::fs::remove_file(path).or_else(|error| std::fs::remove_dir(path).map_err(|_| error))
     }
 }
 
