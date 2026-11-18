@@ -40,7 +40,7 @@ signature:
 ```sh
 sha256sum -c --ignore-missing SHA256SUMS
 cosign verify-blob --bundle SHA256SUMS.sigstore.json \
-  --certificate-identity-regexp 'https://github.com/blurskye/dust/' \
+  --certificate-identity-regexp '^https://github.com/(dustyhq|blurskye)/dust/' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com SHA256SUMS
 ```
 

@@ -11,7 +11,7 @@ priority: optional
 maintainer: blurskye <blurskye@proton.me>
 description: Terminal IDE with Vim keys, language servers, debugging, git and coding agents.
 vendor: blurskye
-homepage: https://github.com/blurskye/dust
+homepage: https://github.com/dustyhq/dust
 license: GPL-3.0-or-later
 recommends:
   - git

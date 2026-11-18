@@ -7,7 +7,7 @@
 //! again from the cache and revalidated (`--refresh`, a 304 where the forge sends ETags).
 //!
 //! Hosts and repositories (override with the environment):
-//! - github.com `DUSTY_LIVE_GITHUB_REPO` (default `blurskye/dust`), through the local `gh` login;
+//! - github.com `DUSTY_LIVE_GITHUB_REPO` (default `dustyhq/dust`), through the local `gh` login;
 //! - github.com anonymously, `DUSTY_LIVE_GITHUB_PUBLIC_REPO` (default `cli/cli`): REST only, about
 //!   25 of the address's 60 requests an hour;
 //! - gitlab.com `DUSTY_LIVE_GITLAB_REPO` (default `gitlab-org/gitlab-runner`);
@@ -410,7 +410,7 @@ fn github_com_through_gh() {
     }
     let live = Live::new(Host {
         host: "github.com",
-        repo: repo("DUSTY_LIVE_GITHUB_REPO", "blurskye/dust"),
+        repo: repo("DUSTY_LIVE_GITHUB_REPO", "dustyhq/dust"),
         logins: true,
     });
     let failed = live.smoke();

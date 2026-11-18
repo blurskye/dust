@@ -13,8 +13,8 @@
     </p>
   </description>
   <launchable type="desktop-id">dev.blurskye.Dust.desktop</launchable>
-  <url type="homepage">https://github.com/blurskye/dust</url>
-  <url type="bugtracker">https://github.com/blurskye/dust/issues</url>
+  <url type="homepage">https://github.com/dustyhq/dust</url>
+  <url type="bugtracker">https://github.com/dustyhq/dust/issues</url>
   <provides>
     <binary>dust</binary>
   </provides>

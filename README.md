@@ -28,7 +28,7 @@ Staging and committing in Dusty Git, then a pull request's conversation, commits
 
 ## Install on Linux
 
-Download a binary or package from [releases](https://github.com/blurskye/dust/releases). For the static x86_64 binary:
+Download a binary or package from [releases](https://github.com/dustyhq/dust/releases). For the static x86_64 binary:
 
 ```sh
 mkdir -p ~/.local/bin
@@ -49,7 +49,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for tests and plugin-fixture builds.
 
 ## Install on macOS
 
-Download `dust-0.3.1-aarch64-macos.tar.gz` for Apple Silicon or `dust-0.3.1-x86_64-macos.tar.gz` for Intel from [releases](https://github.com/blurskye/dust/releases). Check the archive's SHA-256 against its entry in `SHA256SUMS`, then extract and install it:
+Download `dust-0.3.1-aarch64-macos.tar.gz` for Apple Silicon or `dust-0.3.1-x86_64-macos.tar.gz` for Intel from [releases](https://github.com/dustyhq/dust/releases). Check the archive's SHA-256 against its entry in `SHA256SUMS`, then extract and install it:
 
 ```sh
 tar -xzf dust-0.3.1-aarch64-macos.tar.gz
@@ -67,7 +67,7 @@ See the [macOS and Windows guide](docs/user-guide-macos-windows.md) for configur
 
 ## Install on Windows
 
-Download `dust-0.3.1-x86_64-windows.zip` from [releases](https://github.com/blurskye/dust/releases) and check its SHA-256 against its entry in `SHA256SUMS`. In PowerShell:
+Download `dust-0.3.1-x86_64-windows.zip` from [releases](https://github.com/dustyhq/dust/releases) and check its SHA-256 against its entry in `SHA256SUMS`. In PowerShell:
 
 ```powershell
 Get-FileHash dust-0.3.1-x86_64-windows.zip
