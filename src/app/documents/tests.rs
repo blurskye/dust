@@ -1920,7 +1920,13 @@ fn staging_a_row_moves_it_to_the_staged_section_of_the_open_list() {
     while !labels(&app).iter().any(|label| label == "Staged 1") {
         app.process_git_mutation_events();
         app.process_git_status_events();
-        assert!(Instant::now() < deadline, "{:?}", labels(&app));
+        // The notice says why a stage was refused, such as a stale index.
+        assert!(
+            Instant::now() < deadline,
+            "{:?}, notice {:?}",
+            labels(&app),
+            app.ui.notification
+        );
         thread::yield_now()
     }
     assert!(

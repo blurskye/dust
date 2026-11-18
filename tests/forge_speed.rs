@@ -568,8 +568,11 @@ fn a_restored_gitlab_issue_reads_an_issues_timeline() {
 /// rows' details still paint from the cache when their reads land.
 #[test]
 fn keys_never_wait_on_a_slow_disk_cache() {
-    // Handling is under 1 ms; the bound leaves room for a busy builder, far below one read.
-    const BOUND: Duration = Duration::from_millis(50);
+    // Every cache read takes a second. Handling a key is under 1 ms; the bound leaves room
+    // for a busy CI runner (macOS ones have taken 75 ms) and stays far below one read, so a
+    // key that waited for the disk still fails.
+    const READ_DELAY_MS: u64 = 1000;
+    const BOUND: Duration = Duration::from_millis(READ_DELAY_MS * 2 / 5);
     if let Some((forge, repo)) = child() {
         let mut screen = GitScreen::open(&repo).unwrap();
         screen.open_target("prs", None);
@@ -592,6 +595,7 @@ fn keys_never_wait_on_a_slow_disk_cache() {
         }
         return;
     }
+    let delay = READ_DELAY_MS.to_string();
     for forge in [Forge::Gitea, Forge::Forgejo] {
         let world = World::new(forge);
         let test = "keys_never_wait_on_a_slow_disk_cache";
@@ -602,7 +606,7 @@ fn keys_never_wait_on_a_slow_disk_cache() {
             test,
             &world,
             forge,
-            &[("DUSTY_FORGE_CACHE_READ_DELAY_MS", "250")],
+            &[("DUSTY_FORGE_CACHE_READ_DELAY_MS", delay.as_str())],
         );
     }
 }
