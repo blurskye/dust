@@ -5,9 +5,18 @@ contains the editing model, application, protocol clients, workers and renderer.
 `src/main.rs` parses command-line options, handles noninteractive commands, loads
 configuration and starts the application. `src/lib.rs` lists the modules.
 
+## Crates
+
+The repository is one Cargo workspace. Plain `cargo` commands at the root cover every crate.
+
+| Crate | Path | Contents |
+|---|---|---|
+| `dusty-core` | `crates/dusty-core/` | `editor/`, `windows/`, `files/`, `process/`, `workspace/`, `persistence/`, `telemetry/` and `clock.rs`, the layers everything else builds on. Nothing in it depends on the rest of Dusty. Its `test-support` feature exposes the clone counters and gated workers that other crates' tests use. |
+| `dusty` | repository root | The editor and Dusty Git. Its library re-exports the core modules, so `crate::files` and `dusty::files` paths are unchanged. |
+
 ## Code owners
 
-Paths in this table are under `src/`.
+Paths in this table are under `src/`, except the `dusty-core` modules, which are under `crates/dusty-core/src/`.
 
 | Module | Owns |
 |---|---|

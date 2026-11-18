@@ -1,15 +1,30 @@
 [package]
 name = "dusty"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "A terminal IDE with Vim keys, language servers, debugging, git and coding agents"
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+default-run = "dusty"
+
+[workspace]
+members = ["crates/*"]
+# Plain cargo commands at the root cover every crate.
+default-members = [".", "crates/*"]
+resolver = "3"
+
+[workspace.package]
 version = "0.4.0"
 edition = "2024"
 license = "GPL-3.0-or-later"
-description = "A terminal IDE with Vim keys, language servers, debugging, git and coding agents"
 repository = "https://github.com/dustyhq/dusty"
 homepage = "https://github.com/dustyhq/dusty"
 rust-version = "1.89"
-default-run = "dusty"
 
-[dependencies]
+[workspace.dependencies]
+dusty-core = { path = "crates/dusty-core", version = "0.4.0" }
 # The terminal emulator behind Alacritty and Zed, so programs in Dusty's terminals behave as in a
 # real one; Dusty keeps its own PTY processes and only feeds it their output.
 alacritty_terminal = { version = "0.26.0", default-features = false }
@@ -81,29 +96,106 @@ unicode-segmentation = "1.12.0"
 unicode-width = "0.2.0"
 zip = { version = "2.4.2", default-features = false, features = ["deflate"] }
 zstd = "=0.13.3"
-
-[target.'cfg(unix)'.dependencies]
 nix = { version = "0.30.1", features = ["signal", "process", "fs", "poll", "event"] }
 # Atomic exchange and no-clobber renames on Linux (including musl) and macOS.
 rustix = { version = "1.1.4", features = ["fs", "process"] }
-
-[target.'cfg(windows)'.dependencies]
 # Native AF_UNIX sockets (Windows 10 and later) for the remote socket, with std's API.
 uds_windows = "1.2.1"
 # Safe file identity (volume serial and file index); already used by same-file.
 winapi-util = "0.1.11"
+
+[dependencies]
+dusty-core.workspace = true
+alacritty_terminal.workspace = true
+clap.workspace = true
+crossterm.workspace = true
+fancy-regex.workspace = true
+flate2.workspace = true
+globset.workspace = true
+git2.workspace = true
+ignore.workspace = true
+portable-pty.workspace = true
+regex.workspace = true
+reqwest.workspace = true
+ropey.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+slotmap.workspace = true
+tempfile.workspace = true
+tar.workspace = true
+thiserror.workspace = true
+tree-sitter.workspace = true
+tree-sitter-rust.workspace = true
+tree-sitter-typescript.workspace = true
+tree-sitter-javascript.workspace = true
+tree-sitter-go.workspace = true
+tree-sitter-json.workspace = true
+tree-sitter-toml-ng.workspace = true
+tree-sitter-md-025.workspace = true
+tree-sitter-bash.workspace = true
+tree-sitter-c.workspace = true
+tree-sitter-cpp.workspace = true
+tree-sitter-c-sharp.workspace = true
+tree-sitter-css.workspace = true
+tree-sitter-html.workspace = true
+tree-sitter-python.workspace = true
+tree-sitter-yaml.workspace = true
+tree-sitter-lua.workspace = true
+tree-sitter-nix.workspace = true
+tree-sitter-java.workspace = true
+tree-sitter-ruby.workspace = true
+tree-sitter-php.workspace = true
+tree-sitter-zig.workspace = true
+tree-sitter-haskell.workspace = true
+tree-sitter-elixir.workspace = true
+tree-sitter-ocaml.workspace = true
+tree-sitter-scala.workspace = true
+tree-sitter-swift.workspace = true
+tree-sitter-kotlin-sg.workspace = true
+tree-sitter-dart.workspace = true
+tree-sitter-make.workspace = true
+tree-sitter-cmake.workspace = true
+tree-sitter-xml.workspace = true
+tree-sitter-diff.workspace = true
+tree-sitter-ini.workspace = true
+tree-sitter-proto.workspace = true
+tree-sitter-sequel.workspace = true
+tree-sitter-erlang.workspace = true
+tree-sitter-r.workspace = true
+tree-sitter-julia.workspace = true
+tree-sitter-vue-next.workspace = true
+wasmtime.workspace = true
+toml.workspace = true
+toml_edit.workspace = true
+unicode-segmentation.workspace = true
+unicode-width.workspace = true
+zip.workspace = true
+zstd.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+nix.workspace = true
+rustix.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+uds_windows.workspace = true
+winapi-util.workspace = true
 
 [features]
 # Builds OpenSSL and libgit2 into the binary, for the static release build.
 static = ["git2/vendored-openssl", "git2/vendored-libgit2"]
 
 [dev-dependencies]
+dusty-core = { workspace = true, features = ["test-support"] }
 wit-component = "=0.226.0"
 
-[lints.rust]
+[lints]
+workspace = true
+
+[workspace.lints.rust]
 unsafe_code = "forbid"
 
-[lints.clippy]
+[workspace.lints.clippy]
 all = "warn"
 
 # Debug builds and tests compile plugins with Cranelift, which is many times slower unoptimized.

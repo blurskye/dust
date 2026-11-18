@@ -656,6 +656,7 @@ dependencies = [
  "alacritty_terminal",
  "clap",
  "crossterm",
+ "dusty-core",
  "fancy-regex",
  "flate2",
  "git2",
@@ -724,6 +725,30 @@ dependencies = [
  "wit-component",
  "zip",
  "zstd",
+]
+
+[[package]]
+name = "dusty-core"
+version = "0.4.0"
+dependencies = [
+ "git2",
+ "globset",
+ "ignore",
+ "nix 0.30.1",
+ "portable-pty",
+ "regex",
+ "ropey",
+ "rustix 1.1.4",
+ "serde",
+ "serde_json",
+ "sha2",
+ "slotmap",
+ "tempfile",
+ "thiserror 2.0.19",
+ "toml",
+ "unicode-segmentation",
+ "unicode-width",
+ "winapi-util",
 ]
 
 [[package]]
