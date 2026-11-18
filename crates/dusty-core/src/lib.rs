@@ -10,6 +10,8 @@ pub mod clock;
 pub mod editor;
 /// Bounded filesystem effects, checked atomic persistence, and recovery journals.
 pub mod files;
+/// Configuration and state directories.
+pub mod paths;
 /// Versioned bounded session, navigation, and history persistence.
 pub mod persistence;
 /// Bounded process supervision and protocol framing shared by built-in features.

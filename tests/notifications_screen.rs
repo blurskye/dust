@@ -70,12 +70,12 @@ fn mutation_names() -> Vec<String> {
     }
     let mut names = Vec::new();
     walk(
-        &Path::new(env!("CARGO_MANIFEST_DIR")).join("src/forge"),
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("crates/dusty-forge/src"),
         &mut names,
     );
     assert!(
         !names.is_empty(),
-        "no GraphQL mutations found under src/forge"
+        "no GraphQL mutations found under crates/dusty-forge/src"
     );
     names
 }

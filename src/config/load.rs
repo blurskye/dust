@@ -2,7 +2,6 @@
 
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
-use std::env;
 use std::fs;
 use std::hash::Hash;
 use std::hash::Hasher;
@@ -35,70 +34,7 @@ use crate::config::migrate_config_source;
 use crate::config::settings::ThemeConfig;
 use crate::config::themes::ThemeRead;
 
-pub fn user_state_directory() -> PathBuf {
-    if let Some(root) = env::var_os("DUSTY_STATE_HOME") {
-        return PathBuf::from(root);
-    }
-    #[cfg(target_os = "windows")]
-    {
-        env::var_os("LOCALAPPDATA")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join("Dusty")
-    }
-    #[cfg(target_os = "macos")]
-    {
-        env::var_os("XDG_STATE_HOME")
-            .map(|root| PathBuf::from(root).join("dusty"))
-            .or_else(|| {
-                env::var_os("HOME")
-                    .map(|home| PathBuf::from(home).join("Library/Application Support/Dusty"))
-            })
-            .unwrap_or_else(|| PathBuf::from("dusty"))
-    }
-    #[cfg(all(unix, not(target_os = "macos")))]
-    {
-        env::var_os("XDG_STATE_HOME")
-            .map(PathBuf::from)
-            .or_else(|| env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/state")))
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join("dusty")
-    }
-}
-
-#[must_use]
-pub fn user_config_path() -> PathBuf {
-    if let Some(root) = env::var_os("DUSTY_CONFIG_HOME") {
-        return PathBuf::from(root).join("config.toml");
-    }
-    #[cfg(target_os = "windows")]
-    {
-        env::var_os("APPDATA")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join("Dusty")
-            .join("config.toml")
-    }
-    #[cfg(target_os = "macos")]
-    {
-        env::var_os("XDG_CONFIG_HOME")
-            .map(|root| PathBuf::from(root).join("dusty"))
-            .or_else(|| {
-                env::var_os("HOME")
-                    .map(|home| PathBuf::from(home).join("Library/Application Support/Dusty"))
-            })
-            .unwrap_or_else(|| PathBuf::from("dusty"))
-            .join("config.toml")
-    }
-    #[cfg(all(unix, not(target_os = "macos")))]
-    {
-        env::var_os("XDG_CONFIG_HOME")
-            .map(PathBuf::from)
-            .or_else(|| env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join("dusty/config.toml")
-    }
-}
+pub use dusty_core::paths::{user_config_path, user_state_directory};
 
 #[must_use]
 pub fn user_keymaps_path() -> PathBuf {

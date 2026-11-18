@@ -1,0 +1,35 @@
+[package]
+name = "dusty-forge"
+description = "GitHub, GitLab, Gitea and Forgejo providers behind one model, and the worker Dusty and Dusty Git send forge requests through"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+
+[features]
+# Test helpers (canned worker replies) for the crates that build on this one.
+test-support = []
+
+[dependencies]
+dusty-core.workspace = true
+clap.workspace = true
+flate2.workspace = true
+git2.workspace = true
+regex.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tempfile.workspace = true
+toml.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+nix.workspace = true
+
+[dev-dependencies]
+dusty-core = { workspace = true, features = ["test-support"] }
+
+[lints]
+workspace = true

@@ -12,11 +12,12 @@ The repository is one Cargo workspace. Plain `cargo` commands at the root cover 
 | Crate | Path | Contents |
 |---|---|---|
 | `dusty-core` | `crates/dusty-core/` | `editor/`, `windows/`, `files/`, `process/`, `workspace/`, `persistence/`, `telemetry/` and `clock.rs`, the layers everything else builds on. Nothing in it depends on the rest of Dusty. Its `test-support` feature exposes the clone counters and gated workers that other crates' tests use. |
-| `dusty` | repository root | The editor and Dusty Git. Its library re-exports the core modules, so `crate::files` and `dusty::files` paths are unchanged. |
+| `dusty-forge` | `crates/dusty-forge/` | `forge/`: the GitHub, GitLab, Gitea and Forgejo providers and the worker that runs their requests. It depends only on `dusty-core`. Its `test-support` feature lets tests hand the worker canned replies. |
+| `dusty` | repository root | The editor and Dusty Git. Its library re-exports the core modules and `dusty_forge` as `forge`, so `crate::files` and `crate::forge` paths are unchanged. |
 
 ## Code owners
 
-Paths in this table are under `src/`, except the `dusty-core` modules, which are under `crates/dusty-core/src/`.
+Paths in this table are under `src/`, except the `dusty-core` modules, which are under `crates/dusty-core/src/`, and `forge/`, which is `crates/dusty-forge/src/`.
 
 | Module | Owns |
 |---|---|
@@ -28,7 +29,7 @@ Paths in this table are under `src/`, except the `dusty-core` modules, which are
 | `config/` | Typed settings, TOML loading and validation, keymap declarations, theme palettes and highlight groups, configuration/state paths. |
 | `workspace/` | Workspace roots and trust records, diagnostic storage, picker data and fuzzy matching, workspace-edit proposals. |
 | `git/` | Repository status, hunks, signs, mutations, branches, conflicts and worktrees. |
-| `forge/` | Pull requests and review comments through the `gh` and `tea` CLIs. |
+| `forge/` | Forge providers (GitHub, GitLab, Gitea, Forgejo) for pull requests, issues, reviews, checks and releases, and `ForgeJobs`, the cancellable worker that runs them. |
 | `language/` | Filetype identification, Tree-sitter parsing and queries, LSP transport, sessions, protocol messages, snippets and paths. |
 | `debugger/` | DAP transport and sessions, requests, events and reverse requests. `connection.rs` owns pipe/loopback connections, including server adapter child sessions. |
 | `agent/` | ACP clients, conversation history and the MCP subagent endpoint. |

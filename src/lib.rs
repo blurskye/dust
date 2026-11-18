@@ -16,8 +16,8 @@ pub mod app;
 pub mod config;
 /// Built-in Debug Adapter Protocol transport and session control.
 pub mod debugger;
-/// Pull requests through the GitHub, Gitea and Forgejo CLIs.
-pub mod forge;
+/// Forge providers and the forge worker, from the `dusty-forge` crate.
+pub use dusty_forge as forge;
 /// Language identification, syntax execution, and built-in Language Server Protocol support.
 pub mod language;
 /// Bounded asynchronous WebAssembly Component Model extension ownership.
